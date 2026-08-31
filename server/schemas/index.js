@@ -568,6 +568,23 @@ export const giniflowSearchQuerySchema = z.object({
     .optional(),
 });
 
+// Vitals are clinical numbers: reject anything outside a physiologically
+// plausible range rather than storing a typo that a doctor may later act on.
+export const giniflowVitalsSchema = z.object({
+  weight: z.number().min(1).max(400).nullish(),
+  height: z.number().min(30).max(260).nullish(),
+  bpSys: z.number().int().min(50).max(300).nullish(),
+  bpDia: z.number().int().min(20).max(200).nullish(),
+  pulse: z.number().int().min(20).max(250).nullish(),
+  spo2: z.number().int().min(50).max(100).nullish(),
+  temp: z.number().min(90).max(115).nullish(),
+  source: z.enum(["manual", "voice"]).default("manual"),
+});
+
+export const giniflowPaymentSchema = z.object({
+  method: z.enum(["paid", "insurance_claim"]).default("paid"),
+});
+
 export const giniflowSlaUpdateSchema = z.object({
   budgets: z
     .array(

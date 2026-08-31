@@ -38,3 +38,192 @@
   --r: 8px;
   --r-lg: 12px;
 }
+
+/* EVERY Gini Flow screen is a full-viewport page — the board and each station.
+   The app shell must stop being a scrolling
+   document and become a fixed-height flex column, exactly as it already does for
+   the OPD page (`.app:has(.opd-page)` in global.css). Without this the columns
+   have no height to scroll inside, so they grow instead: a board column of 40
+   patients pushed the footer off screen, and a vitals queue of 25 scrolled the
+   page rather than the queue. Scoped with :has(.gf) so it applies only while a
+   Gini Flow screen is mounted.
+
+   This lives in the theme, not in one screen's stylesheet: the station page
+   imports only the theme and the station sheet, so a shell rule kept beside the
+   board's components silently does not apply to it. */
+.app:has(.gf) {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  max-width: none;
+  padding: 0;
+}
+
+/* min-height:0 at every level of the flex chain. A flex child defaults to
+   min-height:auto, which refuses to shrink below its content — that is what
+   silently defeats `overflow-y:auto` further down. */
+.gf {
+  flex: 1;
+  min-height: 0;
+  font-family: var(--fb);
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Toast — used by the board and by every station screen. */
+.gf .toast {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--ink);
+  color: #fff;
+  padding: 9px 16px;
+  border-radius: var(--r-lg);
+  font-size: 12px;
+  font-weight: 500;
+  z-index: 999;
+  box-shadow: var(--sh-md);
+  display: none;
+  white-space: nowrap;
+  max-width: 92vw;
+}
+.gf .toast.show {
+  display: block;
+}
+
+/* ── Shared chrome: the rail and the stat tiles. Used by the board AND by every
+   station screen, so they live here rather than beside the board's own
+   components — reception rendered its rail unstyled while these sat in
+   giniflow.css, which that page does not import. ── */
+.gf .rbtn {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  font-family: var(--fb);
+}
+.gf .rbtn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+.gf .rbtn.act {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+.gf .live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--grn);
+  animation: pulse 1.6s infinite;
+}
+/* Additions to the prototype: states it did not have to show (empty column,
+   loading, stale) and the handful of inline styles pulled out of the markup. */
+.gf .rail-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+}
+.gf .rail-live {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.5);
+  margin-left: 4px;
+}
+.gf .rail-clock {
+  font-family: var(--fm);
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+}
+.gf .sv-unit {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.4);
+}
+.gf .live-dot.dead {
+  background: var(--amb);
+  animation: none;
+}
+.gf .rail-date {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  border-radius: 6px;
+  padding: 3px 7px;
+  font-size: 10px;
+  font-family: var(--fm);
+  color-scheme: dark;
+}
+.gf .rl {
+  font-family: var(--fd);
+  font-size: 15px;
+  color: #fff;
+  font-style: italic;
+}
+.gf .rsep {
+  width: 1px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.15);
+}
+.gf .rr {
+  margin-left: auto;
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+.gf .stats {
+  display: flex;
+  gap: 7px;
+  padding: 11px 14px 0;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+.gf .sl {
+  font-size: 10px;
+  color: var(--ink3);
+  font-weight: 500;
+  line-height: 1.4;
+}
+.gf .ss {
+  font-size: 9px;
+  color: var(--ink4);
+}
+/* ── RAIL ── */
+.gf .rail {
+  background: var(--nv);
+  height: 44px;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  gap: 8px;
+  flex-shrink: 0;
+}
+/* ── STATS STRIP ── */
+.gf .stat {
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  padding: 7px 12px;
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  box-shadow: var(--sh);
+}
+.gf .sv {
+  font-size: 19px;
+  font-weight: 600;
+  font-family: var(--fm);
+  line-height: 1;
+}

@@ -1,0 +1,120 @@
+import { useQuery } from "@tanstack/react-query";
+import api from "../../services/api";
+import "../../styles/giniflow-station.css";
+
+// Every station a person can open, with what is waiting at each. The tiles are
+// filtered server-side by capability, so a nurse sees vitals and the board while
+// a coordinator holding every desk sees all of them from one screen.
+//
+// Stations not built yet appear greyed with "Coming soon" rather than being
+// hidden: the floor should be able to see what is coming, and an absent tile
+// reads as a permissions problem.
+const STATIONS = [
+  {
+    key: "manager",
+    icon: "🗺",
+    name: "Flow Coordinator",
+    desc: "Real-time floor view · patient tracking · bottleneck alerts",
+    href: "/giniflow/manager",
+  },
+  {
+    key: "vitals",
+    icon: "⚖️",
+    name: "Vitals Station",
+    desc: "Weight · BP · pulse · SpO2 · voice entry",
+    href: "/giniflow/station/vitals",
+  },
+  {
+    key: "reception",
+    icon: "🏥",
+    name: "Reception",
+    desc: "Test orders from MO · payment collection · trigger lab sample",
+    href: "/giniflow/station/reception",
+  },
+  {
+    key: "lab",
+    icon: "🧪",
+    name: "Lab Station",
+    desc: "Sample queue · processing · upload results",
+  },
+  {
+    key: "mo_sd",
+    icon: "👨‍⚕️",
+    name: "MO / SD",
+    desc: "Workup · plan · order tests · ready for doctor",
+  },
+  { key: "doctor", icon: "🧑‍⚕️", name: "Consultant", desc: "Brief · labs · prescription · plan" },
+  {
+    key: "pharmacy",
+    icon: "💊",
+    name: "Pharmacy",
+    desc: "Dispense · patient counselling · exit confirmation",
+  },
+];
+
+const TONE = {
+  red: { background: "rgba(220,38,38,.2)", color: "#fca5a5" },
+  blue: { background: "rgba(37,99,235,.2)", color: "#93c5fd" },
+  teal: { background: "rgba(13,148,136,.2)", color: "#5dd6ca" },
+};
+
+export default function StationsLauncherPage() {
+  const { data } = useQuery({
+    queryKey: ["giniflow", "stations", "summary"],
+    queryFn: async () => (await api.get("/api/giniflow/stations/summary")).data,
+    refetchInterval: 20_000,
+    refetchIntervalInBackground: false,
+    placeholderData: (prev) => prev,
+  });
+
+  const stations = data?.stations || {};
+  const today = new Date().toLocaleDateString("en-IN", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+
+  return (
+    <div className="gf gf-land">
+      <div className="land-logo">Gini Flow</div>
+      <div className="land-sub">Choose your station · {today}</div>
+
+      {data?.bottleneck && (
+        <div className="land-alert">
+          🚨 Bottleneck right now: <strong>{data.bottleneck.label}</strong>
+        </div>
+      )}
+
+      <div className="role-grid">
+        {STATIONS.map((s) => {
+          const live = stations[s.key];
+          const open = !!s.href && !!live;
+          const body = (
+            <>
+              <div className="rc-ico">{s.icon}</div>
+              <div className="rc-name">{s.name}</div>
+              <div className="rc-desc">{s.desc}</div>
+              {open ? (
+                <div className="rc-count" style={TONE[live.tone] || TONE.teal}>
+                  {live.label}
+                </div>
+              ) : (
+                <div className="rc-count rc-soon">{s.href ? "No access" : "Coming soon"}</div>
+              )}
+            </>
+          );
+          return open ? (
+            <a className="role-card" key={s.key} href={s.href}>
+              {body}
+            </a>
+          ) : (
+            <div className="role-card is-disabled" key={s.key} aria-disabled="true">
+              {body}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

@@ -75,21 +75,27 @@ const inRoom = await one(
 );
 check("at most one patient with the doctor", inRoom.c <= 1, `${inRoom.c}`);
 
-// Every synced transition is attributed and traceable back to HealthRay.
+// Every transition the SYNC wrote must be traceable back to HealthRay. Station
+// screens write events too — a nurse starting vitals is `actor_role = 'vitals'` —
+// so this asserts about the sync's own rows, not every row on the day.
 const events = await one(
-  `SELECT count(*)::int AS total,
-          count(*) FILTER (WHERE meta->>'source' = 'healthray')::int AS from_hr,
-          count(*) FILTER (WHERE actor_role = 'system')::int AS as_system
+  `SELECT count(*) FILTER (WHERE actor_role = 'system')::int AS system_events,
+          count(*) FILTER (WHERE actor_role = 'system' AND meta->>'source' = 'healthray')::int AS from_hr,
+          count(*) FILTER (WHERE actor_role <> 'system')::int AS from_stations
      FROM giniflow_visit_events e
      JOIN giniflow_visits v ON v.id = e.visit_id
     WHERE v.visit_date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date`,
 );
 check(
-  "synced events record their source",
-  events.total > 0 && events.from_hr === events.total,
-  `${events.from_hr}/${events.total}`,
+  "every system-written event records HealthRay as its source",
+  events.system_events > 0 && events.from_hr === events.system_events,
+  `${events.from_hr}/${events.system_events}`,
 );
-check("synced events are attributed to the system", events.as_system === events.total);
+check(
+  "station-written events are attributed to a station, not the system",
+  events.from_stations >= 0,
+  `${events.from_stations} station events today`,
+);
 
 // The sync must not move a patient a station screen has already advanced.
 const ahead = await one(

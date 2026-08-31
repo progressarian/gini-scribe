@@ -125,7 +125,12 @@ export const PAGE_CAPABILITIES = {
   "/flow/reports": CAP.FLOW_REPORTS,
   // Gini Flow. Its own capability, not FLOW_*, so the two boards can be granted
   // independently while both run. See docs/gini-flow/00-OVERVIEW.md §2.4.
+  // The launcher shows only the stations a role can open, so viewing the board
+  // is enough to reach it.
+  "/giniflow/stations": CAP.GINIFLOW_VIEW,
   "/giniflow/manager": CAP.GINIFLOW_VIEW,
+  "/giniflow/station/vitals": CAP.GINIFLOW_STATION_VITALS,
+  "/giniflow/station/reception": CAP.GINIFLOW_STATION_RECEPTION,
   "/flow/admin": CAP.ADMIN,
 };
 

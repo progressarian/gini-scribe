@@ -1,0 +1,874 @@
+/* Station screens — vitals first. Lifted from docs/Flow-Manage/gini-flow-v2.html
+   and scoped under .gf like every other Gini Flow style, so nothing here can
+   reach Scribe. Tokens come from giniflow-theme.css; only the two the station
+   prototype adds and Phase 1 lacked are defined here. */
+@import "./giniflow-theme.css";
+
+.gf {
+  /* Two tokens the station prototype adds that Phase 1's board did not need. */
+  --pu-l: #f5f3ff;
+  --tl-m: rgba(13, 148, 136, 0.14);
+}
+
+/* ── TOP RAIL ── */
+.gf .top-rail {
+  height: 46px;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 10px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--bd);
+  background: var(--white);
+}
+.gf .tr-logo {
+  font-family: var(--fd);
+  font-size: 15px;
+  font-style: italic;
+}
+.gf .tr-role {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 20px;
+}
+.gf .tr-back {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--bd);
+  background: transparent;
+  font-family: var(--fb);
+  color: var(--ink3);
+}
+.gf .tr-back:hover {
+  background: var(--bd);
+  color: var(--ink);
+}
+.gf .badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+.gf .b-amb {
+  background: var(--amb-l);
+  color: var(--amb);
+}
+.gf .b-grn {
+  background: var(--grn-l);
+  color: var(--grn);
+}
+.gf .b-blu {
+  background: var(--blu-l);
+  color: var(--blu);
+}
+.gf .b-red {
+  background: var(--red-l);
+  color: var(--red);
+}
+.gf .b-pu {
+  background: var(--pu-l);
+  color: var(--pu);
+}
+
+/* ── TWO-PANE STATION LAYOUT ── */
+.gf .station-layout {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  overflow: hidden;
+  min-height: 0;
+}
+.gf .squeue {
+  border-right: 1px solid var(--bd);
+  overflow-y: auto;
+  background: var(--white);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.gf .sq-header {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--bd);
+  background: var(--bg);
+  flex-shrink: 0;
+}
+.gf .sq-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 2px;
+}
+.gf .sq-sub {
+  font-size: 10px;
+  color: var(--ink3);
+}
+.gf .sq-item {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--bd);
+  cursor: pointer;
+  transition: background 0.12s;
+  position: relative;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border-left: 3px solid transparent;
+  font: inherit;
+  color: inherit;
+}
+.gf .sq-item:hover {
+  background: var(--tl-l);
+}
+.gf .sq-item.active {
+  background: var(--tl-l);
+  border-left-color: var(--tl);
+}
+.gf .sq-item:focus-visible {
+  outline: 2px solid var(--tl);
+  outline-offset: -2px;
+}
+.gf .si-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 2px;
+  padding-right: 42px;
+}
+.gf .si-meta {
+  font-size: 10px;
+  color: var(--ink3);
+}
+.gf .si-slot {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  font-size: 10px;
+  font-family: var(--fm);
+  color: var(--ink3);
+}
+.gf .si-bios {
+  display: flex;
+  gap: 3px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.gf .sbio {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: var(--fm);
+}
+.gf .sbio-r {
+  background: var(--red-l);
+  color: var(--red);
+}
+.gf .sbio-a {
+  background: var(--amb-l);
+  color: var(--amb);
+}
+.gf .sbio-g {
+  background: var(--grn-l);
+  color: var(--grn);
+}
+.gf .sq-foot {
+  padding: 10px 14px;
+  font-size: 10px;
+  color: var(--ink3);
+  border-top: 1px solid var(--bd);
+  margin-top: auto;
+  flex-shrink: 0;
+}
+
+/* ── DETAIL PANE ── */
+.gf .station-detail {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.gf .station-detail::-webkit-scrollbar {
+  width: 6px;
+}
+.gf .station-detail::-webkit-scrollbar-thumb {
+  background: var(--bd2);
+  border-radius: 3px;
+}
+.gf .sd-header {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--bd);
+  background: var(--white);
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.gf .sdh-body {
+  flex: 1;
+}
+.gf .sdh-name {
+  font-family: var(--fd);
+  font-size: 19px;
+  color: var(--ink);
+  font-style: italic;
+  margin-bottom: 2px;
+}
+.gf .sdh-meta {
+  font-size: 11px;
+  color: var(--ink3);
+}
+.gf .sdh-acts {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+  align-items: center;
+}
+.gf .sd-body {
+  flex: 1;
+  padding: 18px;
+}
+.gf .sd-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink3);
+  font-size: 12px;
+  padding: 40px;
+  text-align: center;
+}
+
+/* ── VOICE BAR ── */
+.gf .voice-bar {
+  background: var(--pu-l);
+  border: 1px solid rgba(124, 58, 237, 0.2);
+  border-radius: var(--r-lg);
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.gf .voice-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--pu);
+  color: #fff;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  font-family: var(--fb);
+  transition: all 0.2s;
+}
+.gf .voice-pill:hover {
+  background: #6d28d9;
+}
+.gf .voice-pill.listening {
+  background: #ef4444;
+  animation: vpulse 1s infinite;
+}
+.gf .voice-pill:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.gf .voice-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #fff;
+  opacity: 0.8;
+}
+.gf .vb-desc {
+  flex: 1;
+  font-size: 11px;
+  color: var(--ink3);
+  line-height: 1.5;
+}
+.gf .vb-desc strong {
+  color: var(--pu);
+  font-weight: 600;
+}
+@keyframes vpulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+/* ── LAST VISIT STRIP ── */
+.gf .last-visit {
+  font-size: 10px;
+  color: var(--ink3);
+  background: var(--bg);
+  border-radius: var(--r);
+  padding: 7px 11px;
+  margin-bottom: 14px;
+}
+.gf .last-visit strong {
+  color: var(--ink2);
+}
+
+/* ── VITALS FORM ── */
+.gf .vitals-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.gf .vf {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.gf .vf-lbl {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--ink3);
+}
+.gf .vf-inp {
+  border: 1.5px solid var(--bd);
+  border-radius: var(--r);
+  padding: 10px 12px;
+  font-family: var(--fm);
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--ink);
+  background: var(--bg);
+  outline: none;
+  width: 100%;
+  transition: all 0.15s;
+}
+.gf .vf-inp:focus {
+  border-color: var(--tl);
+  background: var(--white);
+  box-shadow: 0 0 0 3px var(--tl-m);
+}
+.gf .vf-inp.ok {
+  border-color: var(--grn);
+  background: var(--grn-l);
+  color: var(--grn);
+}
+.gf .vf-inp.bad {
+  border-color: var(--red);
+  background: var(--red-l);
+  color: var(--red);
+}
+.gf .vf-unit {
+  font-size: 10px;
+  color: var(--ink3);
+}
+.gf .vf-bp {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+.gf .vf-bp span {
+  padding: 10px 3px;
+  color: var(--ink3);
+}
+
+/* ── DONE BAR ── */
+.gf .done-bar {
+  background: var(--grn);
+  border-radius: var(--r-lg);
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.gf .done-bar.pending {
+  background: var(--ink3);
+}
+.gf .db-text {
+  color: #fff;
+}
+.gf .db-title {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+.gf .db-sub {
+  font-size: 11px;
+  opacity: 0.8;
+}
+.gf .db-btn {
+  background: #fff;
+  color: var(--grn);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  font-size: 13px;
+  padding: 9px 20px;
+  border-radius: var(--r);
+  font-weight: 600;
+  cursor: pointer;
+  font-family: var(--fb);
+}
+.gf .db-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Vitals is the one station worked beside the patient, so it is the one that
+   must survive a tablet. Below 820px the two panes stack and the form goes
+   single-column with touch-sized inputs. */
+@media (max-width: 820px) {
+  .gf .station-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+  .gf .squeue {
+    border-right: none;
+    border-bottom: 1px solid var(--bd);
+    max-height: 34vh;
+  }
+  .gf .vitals-grid {
+    grid-template-columns: 1fr;
+  }
+  .gf .vf-inp {
+    font-size: 17px;
+    padding: 13px 12px;
+  }
+  .gf .sq-item {
+    padding: 13px 14px;
+  }
+}
+
+/* The rail's back control is an anchor, so it needs the button's look. */
+.gf a.tr-back {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* What the microphone heard, shown beside the fields it filled. The nurse reads
+   this back against what they said — voice fills the form, it never saves. */
+.gf .voice-note {
+  background: var(--bg);
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  padding: 9px 11px;
+  margin-bottom: 14px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.gf .voice-note.voice-err {
+  background: var(--red-l);
+  border-color: var(--red-b);
+  color: var(--red);
+}
+.gf .vn-heard {
+  color: var(--ink2);
+  font-style: italic;
+  margin-bottom: 3px;
+}
+.gf .vn-detail {
+  color: var(--ink3);
+  font-size: 10px;
+}
+
+/* Live caption — what the recogniser is hearing while the nurse speaks. Monospace
+   so a misheard digit is obvious at a glance, and larger than the surrounding
+   text because it is read from a step back, beside the patient. */
+.gf .caption {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: var(--nv);
+  color: #fff;
+  border-radius: var(--r-lg);
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  min-height: 40px;
+}
+.gf .caption.live {
+  box-shadow: 0 0 0 2px var(--pu-b, rgba(124, 58, 237, 0.35));
+}
+.gf .cap-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ef4444;
+  flex-shrink: 0;
+  margin-top: 4px;
+  animation: vpulse 1s infinite;
+}
+.gf .cap-text {
+  flex: 1;
+  font-family: var(--fm);
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+.gf .caption:not(.live) .cap-text {
+  color: rgba(255, 255, 255, 0.75);
+}
+.gf .cap-clear {
+  background: rgba(255, 255, 255, 0.12);
+  border: none;
+  color: rgba(255, 255, 255, 0.7);
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+  font-size: 10px;
+  flex-shrink: 0;
+}
+.gf .cap-clear:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+/* ── RECEPTION ── from docs/Flow-Manage/gini-stations.html s-reception ── */
+.gf .scroll {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+.gf .scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.gf .scroll::-webkit-scrollbar-thumb {
+  background: var(--bd2);
+  border-radius: 3px;
+}
+.gf .inner {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 1000px;
+  margin: 0 auto;
+}
+.gf .grp-lbl {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--ink3);
+  padding: 0 2px;
+}
+.gf .workflow-note {
+  background: var(--blu-l);
+  border: 1px solid var(--blu-b);
+  border-radius: var(--r-lg);
+  padding: 10px 13px;
+  font-size: 11px;
+  color: var(--blu);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.gf .workflow-note .wn-ico {
+  font-size: 16px;
+}
+.gf .test-order-card {
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: var(--r-lg);
+  padding: 10px 13px;
+  margin-bottom: 7px;
+  box-shadow: var(--sh);
+}
+.gf .toc-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 7px;
+}
+.gf .toc-av {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  flex-shrink: 0;
+}
+.gf .toc-who {
+  flex: 1;
+}
+.gf .toc-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.gf .toc-meta {
+  font-size: 10px;
+  color: var(--ink3);
+}
+.gf .toc-body {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.gf .toc-test {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 20px;
+  background: var(--bg);
+  border: 1px solid var(--bd);
+  color: var(--ink2);
+}
+.gf .toc-test .tp {
+  color: var(--ink3);
+  font-size: 9px;
+  font-family: var(--fm);
+}
+.gf .toc-total {
+  background: var(--bg);
+  border-radius: var(--r);
+  padding: 7px 9px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.gf .toc-total .amt {
+  font-weight: 600;
+  color: var(--ink);
+  font-family: var(--fm);
+}
+.gf .toc-foot {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+}
+.gf .toc-age {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--ink4);
+  font-family: var(--fm);
+}
+.gf .sp {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 20px;
+  display: inline-block;
+  white-space: nowrap;
+}
+.gf .sp-pay {
+  background: var(--red-l);
+  color: var(--red);
+}
+
+.gf .b-ink {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+}
+.gf .st-btn {
+  padding: 5px 11px;
+  border-radius: var(--r);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid;
+  font-family: var(--fb);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.gf .st-btn-grn {
+  background: var(--grn);
+  color: #fff;
+  border-color: var(--grn);
+}
+.gf .st-btn-grn:hover {
+  opacity: 0.88;
+}
+.gf .st-btn-g {
+  background: var(--white);
+  color: var(--ink3);
+  border-color: var(--bd);
+}
+.gf .st-btn-g:hover {
+  color: var(--ink);
+}
+.gf .st-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.gf .price-note {
+  font-size: 10px;
+  color: var(--amb);
+  background: var(--amb-l);
+  border: 1px solid var(--amb-b);
+  border-radius: var(--r);
+  padding: 7px 10px;
+}
+.gf .empty-note {
+  text-align: center;
+  color: var(--ink3);
+  font-size: 11px;
+  padding: 18px;
+  background: var(--white);
+  border: 1px dashed var(--bd2);
+  border-radius: var(--r-lg);
+}
+
+/* ── STATION LAUNCHER ── from gini-flow-v2.html s-land ── */
+.gf.gf-land {
+  background: var(--ink);
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  overflow-y: auto;
+}
+.gf .land-logo {
+  font-family: var(--fd);
+  font-size: 36px;
+  color: #fff;
+  font-style: italic;
+  margin-bottom: 6px;
+  text-align: center;
+}
+.gf .land-sub {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.4);
+  margin-bottom: 32px;
+  text-align: center;
+  letter-spacing: 0.5px;
+}
+.gf .land-alert {
+  background: rgba(220, 38, 38, 0.15);
+  border: 1px solid rgba(220, 38, 38, 0.3);
+  color: #fca5a5;
+  border-radius: var(--r-lg);
+  padding: 9px 14px;
+  font-size: 12px;
+  margin-bottom: 22px;
+}
+.gf .role-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  max-width: 900px;
+  width: 100%;
+}
+.gf .role-card {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  padding: 22px 18px;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: center;
+  text-decoration: none;
+  display: block;
+}
+.gf a.role-card:hover {
+  background: rgba(255, 255, 255, 0.11);
+  border-color: rgba(255, 255, 255, 0.22);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+.gf a.role-card:focus-visible {
+  outline: 2px solid var(--tl);
+  outline-offset: 2px;
+}
+.gf .role-card.is-disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+.gf .rc-ico {
+  font-size: 28px;
+  margin-bottom: 10px;
+}
+.gf .rc-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 4px;
+}
+.gf .rc-desc {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  line-height: 1.5;
+}
+.gf .rc-count {
+  margin-top: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 20px;
+  display: inline-block;
+}
+.gf .rc-soon {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.45);
+}
+
+@media (max-width: 900px) {
+  .gf .role-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (max-width: 520px) {
+  .gf .role-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Cleared orders are the same card, dimmed — as in the prototype — not a
+   different component. */
+.gf .test-order-card.is-cleared {
+  opacity: 0.55;
+}
+.gf .test-order-card.is-cleared .toc-head {
+  margin-bottom: 0;
+}
+.gf .toc-cleared {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.gf .toc-cleared .tc-detail {
+  font-weight: 400;
+  color: var(--ink3);
+}
+.gf .sp-paid {
+  background: var(--grn-l);
+  color: var(--grn);
+}
+.gf .st-btn-blu {
+  background: var(--white);
+  color: var(--blu);
+  border-color: var(--blu-b);
+}
+.gf .st-btn-blu:hover {
+  background: var(--blu-l);
+}
+.gf .more-note {
+  text-align: center;
+  font-size: 10px;
+  color: var(--ink3);
+  padding: 5px;
+}

@@ -135,6 +135,9 @@ const ROUTE_CAPABILITIES = [
   ["/api/obt-status", CAP.OBT_OPS],
   // Gini Flow. The board is read-only, so one capability covers every route
   // here; the SLA write is separately gated with requireCapability on the route.
+  // Station routes carry their own per-station capability on the route itself;
+  // the prefix keeps them doctor-only and out of reach of a patient token.
+  ["/api/giniflow/stations", CAP.GINIFLOW_VIEW],
   ["/api/giniflow", CAP.GINIFLOW_VIEW],
   ["/api/obt-dashboard", CAP.OBT_OPS],
   ["/api/diabetes-champions", CAP.RECEPTION_OPS],

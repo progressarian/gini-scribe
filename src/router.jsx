@@ -92,6 +92,9 @@ const MedicineCollectionPage = lazyWithRetry(() => import("./pages/MedicineColle
 const FlowCheckinPage = lazyWithRetry(() => import("./pages/flow/FlowCheckinPage"));
 const FlowCoordinatorPage = lazyWithRetry(() => import("./pages/flow/FlowCoordinatorPage"));
 const GiniFlowManagerPage = lazyWithRetry(() => import("./pages/giniflow/FlowManagerPage"));
+const GiniFlowStationsPage = lazyWithRetry(() => import("./pages/giniflow/StationsLauncherPage"));
+const GiniFlowVitalsPage = lazyWithRetry(() => import("./pages/giniflow/VitalsStationPage"));
+const GiniFlowReceptionPage = lazyWithRetry(() => import("./pages/giniflow/ReceptionStationPage"));
 const FlowMyPatientsPage = lazyWithRetry(() => import("./pages/flow/FlowMyPatientsPage"));
 const FlowConsultantsPage = lazyWithRetry(() => import("./pages/flow/FlowConsultantsPage"));
 const FlowStationPage = lazyWithRetry(() => import("./pages/flow/FlowStationPage"));
@@ -214,7 +217,10 @@ const router = createBrowserRouter([
               { path: "/flow/checkin", element: lazyEl(FlowCheckinPage) },
               { path: "/flow/coordinator", element: lazyEl(FlowCoordinatorPage) },
               // Gini Flow — the replacement floor board (docs/gini-flow/).
+              { path: "/giniflow/stations", element: lazyEl(GiniFlowStationsPage) },
               { path: "/giniflow/manager", element: lazyEl(GiniFlowManagerPage) },
+              { path: "/giniflow/station/vitals", element: lazyEl(GiniFlowVitalsPage) },
+              { path: "/giniflow/station/reception", element: lazyEl(GiniFlowReceptionPage) },
               { path: "/flow/my-patients", element: lazyEl(FlowMyPatientsPage) },
               { path: "/flow/consultants", element: lazyEl(FlowConsultantsPage) },
               { path: "/flow/station", element: lazyEl(FlowStationPage) },

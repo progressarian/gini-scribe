@@ -99,6 +99,117 @@ try {
   check("no raw 'undefined' leaked into the markup", !html.includes(">undefined<"));
   if (payload.bottleneck) check("bottleneck banner renders", html.includes("Bottleneck:"));
 
+  // The vitals station renders its own tree — queue, form, done bar.
+  const { default: VitalsStationPage } = await vite.ssrLoadModule(
+    "/src/pages/giniflow/VitalsStationPage.jsx",
+  );
+  const vitalsClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const { getVitalsQueue } = await import("../server/services/giniflow/vitalsStation.js");
+  const vq = await getVitalsQueue(date);
+  vitalsClient.setQueryData(["giniflow", "vitals", "queue", "today"], { date, ...vq });
+  if (vq.queue[0]) {
+    const { getVitalsPatient } = await import("../server/services/giniflow/vitalsStation.js");
+    vitalsClient.setQueryData(
+      ["giniflow", "vitals", "patient", vq.queue[0].visitId],
+      await getVitalsPatient(vq.queue[0].visitId),
+    );
+  }
+  const vitalsHtml = renderToString(
+    createElement(
+      MemoryRouter,
+      null,
+      createElement(
+        QueryClientProvider,
+        { client: vitalsClient },
+        createElement(VitalsStationPage),
+      ),
+    ),
+  );
+  check(
+    "vitals station renders without throwing",
+    vitalsHtml.length > 0,
+    `${vitalsHtml.length} chars`,
+  );
+  check("vitals rail renders", vitalsHtml.includes("Vitals Station"));
+  check("vitals queue renders", vitalsHtml.includes("Vitals queue"));
+  check(
+    "the seven fields render",
+    [
+      "Weight (kg)",
+      "Height (cm)",
+      "Blood pressure",
+      "Pulse (bpm)",
+      "SpO2 (%)",
+      "Temperature",
+    ].every((f) => vitalsHtml.includes(f)),
+  );
+  check("the done bar renders", vitalsHtml.includes("db-title"));
+  check("no raw 'undefined' in the vitals markup", !vitalsHtml.includes(">undefined<"));
+
+  // The launcher: every station tile, gated per role.
+  const { default: StationsLauncherPage } = await vite.ssrLoadModule(
+    "/src/pages/giniflow/StationsLauncherPage.jsx",
+  );
+  const { getStationSummary } = await import("../server/services/giniflow/stationSummary.js");
+  const summary = await getStationSummary(date);
+  const landClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  landClient.setQueryData(["giniflow", "stations", "summary"], {
+    date,
+    stations: { manager: summary.manager, vitals: summary.vitals, reception: summary.reception },
+    bottleneck: summary.bottleneck,
+  });
+  const landHtml = renderToString(
+    createElement(
+      MemoryRouter,
+      null,
+      createElement(
+        QueryClientProvider,
+        { client: landClient },
+        createElement(StationsLauncherPage),
+      ),
+    ),
+  );
+  check("launcher renders without throwing", landHtml.length > 0, `${landHtml.length} chars`);
+  check(
+    "launcher shows every station tile",
+    ["Flow Coordinator", "Vitals Station", "Reception", "Lab Station", "MO / SD", "Pharmacy"].every(
+      (n) => landHtml.includes(n),
+    ),
+  );
+  check(
+    "built stations link, unbuilt ones do not",
+    landHtml.includes('href="/giniflow/station/vitals"') && landHtml.includes("Coming soon"),
+  );
+  check("live counts render on the tiles", landHtml.includes("in queue"));
+  check("no raw 'undefined' in the launcher markup", !landHtml.includes(">undefined<"));
+
+  // Reception renders its own tree.
+  const { default: ReceptionStationPage } = await vite.ssrLoadModule(
+    "/src/pages/giniflow/ReceptionStationPage.jsx",
+  );
+  const recClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const { getPaymentQueue } = await import("../server/services/giniflow/receptionStation.js");
+  recClient.setQueryData(["giniflow", "reception", "queue", "today"], {
+    date,
+    ...(await getPaymentQueue(date)),
+  });
+  const recHtml = renderToString(
+    createElement(
+      MemoryRouter,
+      null,
+      createElement(
+        QueryClientProvider,
+        { client: recClient },
+        createElement(ReceptionStationPage),
+      ),
+    ),
+  );
+  check("reception renders without throwing", recHtml.length > 0, `${recHtml.length} chars`);
+  check("reception counters render", recHtml.includes("Payment pending"));
+  check("the workflow banner renders", recHtml.includes("triggers lab sample collection"));
+  check("the placeholder-price warning is shown", recHtml.includes("not the hospital"));
+  check("no raw 'undefined' in the reception markup", !recHtml.includes(">undefined<"));
+
   // The timeline is a separate tree with its own live helpers; render it too.
   const target = day.cards.find((c) => !c.finished);
   if (target) {
