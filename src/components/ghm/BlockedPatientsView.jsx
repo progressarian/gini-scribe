@@ -105,7 +105,9 @@ export default function BlockedPatientsView() {
           <table className="tbl">
             <thead>
               <tr>
-                <th className="tc" style={{ width: 52 }}>Sr No</th>
+                <th className="tc" style={{ width: 52 }}>
+                  Sr No
+                </th>
                 <th style={{ minWidth: 170 }}>Patient</th>
                 <th style={{ width: 110 }}>File No</th>
                 <th style={{ width: 130 }}>Phone</th>

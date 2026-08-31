@@ -89,7 +89,7 @@ const DOCTOR_ONLY_PREFIXES = [
   "/api/reasoning",
   "/api/dose-change-requests",
   "/api/refills",
-  "/api/flow", 
+  "/api/flow",
 ];
 
 const ROUTE_CAPABILITIES = [

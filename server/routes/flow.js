@@ -440,6 +440,25 @@ async function applyOutsideTest(client, visitId, outside) {
   );
 }
 
+// Serializes concurrent callers contending for the same stationBusy() answer.
+// Without this, two /start (or two auto-advance) calls racing to fill the same
+// free desk can both read "not busy" before either commits — e.g. auto-advance
+// firing for two different patients into the same idle lab tech at nearly the
+// same instant, landing two steps 'in_progress' at one desk. Keyed identically
+// to stationBusy's own grouping (staff > actor > role-wide) so the lock only
+// ever contends with a call that would have hit the same busy check; it's an
+// xact-scoped lock, so it releases automatically at this request's COMMIT or
+// ROLLBACK — the second caller then sees the first's committed row.
+async function lockStation(client, role, staffId, actorId = null) {
+  if (!role || role === WAITING_ROLE) return;
+  const key = staffId
+    ? `station:${role}:staff:${staffId}`
+    : actorId != null
+      ? `station:${role}:actor:${actorId}`
+      : `station:${role}`;
+  await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [key]);
+}
+
 async function stationBusy(client, role, staffId, actorId = null, exceptVisitId = null) {
   if (!role || role === WAITING_ROLE) return false;
   const params = [role];
@@ -1139,7 +1158,8 @@ router.post("/flow/checkin", async (req, res) => {
   } catch (e) {
     await client.query("ROLLBACK").catch(() => {});
     // A concurrent check-in that lost the race against the one-per-patient/day
-    // unique index (idx_flow_visits_one_per_patient_day) surfaces as 23505.
+    // unique index (uq_flow_visits_patient_active_day) or the one-visit-per-
+    // appointment index (uq_flow_visits_appointment_active) surfaces as 23505.
     // Treat it as a duplicate — point back to the surviving row — not a 500.
     if (e.code === "23505") {
       const { patient_id: pid, patient_db_id: pdb = null, patient_name: pname } = req.body || {};
@@ -1290,6 +1310,7 @@ router.post("/flow/visits/:id/advance", async (req, res) => {
         : next.step_catalog_id === "rx_explain"
           ? await rxExplainBlocked(client, visitId)
           : null;
+      await lockStation(client, next.assigned_role, next.assigned_staff_id);
       const busy =
         labWait || (await stationBusy(client, next.assigned_role, next.assigned_staff_id));
       const nextStatus = busy ? "ready" : "in_progress";
@@ -2407,6 +2428,9 @@ router.post("/flow/steps/:stepId/start", async (req, res) => {
     }
     // Background lab work is neither at a desk nor with the patient, so neither
     // the station nor the one-place rule applies to starting it.
+    if (!step.is_background) {
+      await lockStation(client, step.assigned_role, step.assigned_staff_id, req.doctor?.doctor_id);
+    }
     if (
       !step.is_background &&
       (await stationBusy(

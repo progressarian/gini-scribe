@@ -282,7 +282,8 @@ export default function FindPage() {
               onChange={(e) => {
                 const digits = toEntryDigits(e.target.value);
                 setQuickBookPatient({ ...quickBookPatient, phone: digits });
-                if (!digits || isValidMobile(digits)) setBookErrors((p) => ({ ...p, phone: false }));
+                if (!digits || isValidMobile(digits))
+                  setBookErrors((p) => ({ ...p, phone: false }));
               }}
               inputMode="numeric"
               autoComplete="tel"

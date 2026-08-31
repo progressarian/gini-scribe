@@ -314,12 +314,30 @@ export const STATION_ROLE_CAPABILITY = {
   report_desk: CAPABILITIES.FLOW_STATION_REPORTS,
 };
 
-// Can this role work a step assigned to `assignedRole`? Steps whose role has no
-// station desk (waiting areas, sd/chief/billing) stay unrestricted — they are
-// advanced from the floor or the clinical screens, not from a station queue.
+// sd/chief and billing have no station queue — they're worked from the
+// clinical screens (/consultant, /flow/my-patients) or the floor — but a step
+// assigned to them still needs a real check in canWorkStationRole below, or
+// any authenticated role could start/complete someone else's consultation or
+// billing step by calling the API directly. SD/Chief is always a consultant
+// or admin (never an MO); billing is worked from the floor, i.e. a coordinator.
+// Kept separate from STATION_ROLE_CAPABILITY (rather than adding to it) because
+// ownsStationRole must keep failing closed here — journey editing on these
+// steps stays FLOW_COORDINATOR-only, never granted by holding the desk.
+const DESKLESS_ROLE_CAPABILITY = {
+  sd: CAPABILITIES.FLOW_MY_PATIENTS,
+  chief: CAPABILITIES.FLOW_MY_PATIENTS,
+  billing: CAPABILITIES.FLOW_COORDINATOR,
+};
+
+// Can this role work a step assigned to `assignedRole`? True waiting-area
+// steps (assigned_role 'flow_coordinator', never a doctors.role) stay
+// unrestricted — nobody is ever "called in" to a wait step.
 export function canWorkStationRole(role, assignedRole) {
   const cap = STATION_ROLE_CAPABILITY[assignedRole];
-  return cap ? hasCapability(role, cap) : true;
+  if (cap) return hasCapability(role, cap);
+  const desklessCap = DESKLESS_ROLE_CAPABILITY[assignedRole];
+  if (desklessCap) return hasCapability(role, desklessCap);
+  return true;
 }
 
 // Stricter form, for editing a journey rather than working a step: the role must
