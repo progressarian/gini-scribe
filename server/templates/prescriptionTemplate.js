@@ -357,10 +357,39 @@ function buildPrescriptionHtml(data = {}) {
   const latestCon = consultations?.[0]?.con_data || {};
   const followUp = pickNextVisit([latestCon.follow_up, appt_plan?.follow_up]) || {};
   const _notEmpty = (arr) => (Array.isArray(arr) && arr.length > 0 ? arr : null);
+  // The doctor adds tests in two different places — "Order Labs" on /assess
+  // (investigations_to_order) and "Tests for Next Appointment" on the /visit
+  // plan (follow_up.tests_to_bring) — and older rows spell the same thing two
+  // more ways. Taking the first non-empty one meant whichever screen was used
+  // second printed nothing, so every consultation-side list is merged instead,
+  // deduped on the test name. The appointment stays a FALLBACK rather than
+  // another merge source: HealthRay names the same test differently ("FBG" vs
+  // "Fasting Blood Glucose"), which no name match would collapse, so merging it
+  // would print the same test twice.
+  const testName = (t) => (typeof t === "string" ? t : t?.name || t?.test || "");
+  const mergeTests = (...lists) => {
+    const seen = new Set();
+    const out = [];
+    for (const list of lists) {
+      if (!Array.isArray(list)) continue;
+      for (const t of list) {
+        const key = testName(t).trim().toLowerCase();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        out.push(t);
+      }
+    }
+    return out;
+  };
   const tests =
-    _notEmpty(latestCon.investigations_to_order) ||
-    _notEmpty(latestCon.investigations_ordered) ||
-    _notEmpty(latestCon.tests_ordered) ||
+    _notEmpty(
+      mergeTests(
+        latestCon.investigations_to_order,
+        latestCon.investigations_ordered,
+        latestCon.tests_ordered,
+        latestCon.follow_up?.tests_to_bring,
+      ),
+    ) ||
     _notEmpty(appt_plan?.investigations_to_order) ||
     [];
   // FOLLOW UP WITH — free-text patient instructions for the next visit
@@ -368,9 +397,9 @@ function buildPrescriptionHtml(data = {}) {
   // extraction or set inline on /visit. Printed as a dedicated section so the
   // patient leaves the clinic with these instructions on paper.
   const followUpWith =
-    typeof latestCon.follow_up_with === "string" && latestCon.follow_up_with.trim()
-      ? latestCon.follow_up_with.trim()
-      : "";
+    [latestCon.follow_up_with, appt_plan?.follow_up_with]
+      .map((v) => (typeof v === "string" ? v.trim() : ""))
+      .find(Boolean) || "";
   // Prefer the explicit visit summary the client passes in (current doctor's
   // summary or visit-level synopsis) over anything found on the consultation
   // record. Falls back to summary.summary so old callers still work.
@@ -1047,8 +1076,13 @@ function buildPrescriptionHtml(data = {}) {
     : "";
 
   // ── Footer next-visit text
-  const nextVisitText = followUp.date
-    ? `📅 Next visit: ${fmtDateLong(followUp.date)}${labTests.length > 0 ? " · Come with all reports above" : ""}`
+  // pickNextVisit falls back to the most recent PAST follow-up when nothing
+  // upcoming is on file, which printed a next visit dated before the visit
+  // itself on the patient's own copy. A date that has already passed is not a
+  // next visit — say it is unscheduled instead of naming a wrong day.
+  const nextVisitDate = followUp.date && followUp.date >= today ? followUp.date : "";
+  const nextVisitText = nextVisitDate
+    ? `📅 Next visit: ${fmtDateLong(nextVisitDate)}${labTests.length > 0 ? " · Come with all reports above" : ""}`
     : "📅 Next visit: To be scheduled";
 
   return `<!DOCTYPE html>

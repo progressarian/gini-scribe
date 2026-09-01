@@ -95,6 +95,7 @@ const GiniFlowManagerPage = lazyWithRetry(() => import("./pages/giniflow/FlowMan
 const GiniFlowStationsPage = lazyWithRetry(() => import("./pages/giniflow/StationsLauncherPage"));
 const GiniFlowVitalsPage = lazyWithRetry(() => import("./pages/giniflow/VitalsStationPage"));
 const GiniFlowReceptionPage = lazyWithRetry(() => import("./pages/giniflow/ReceptionStationPage"));
+const GiniFlowLabPage = lazyWithRetry(() => import("./pages/giniflow/LabStationPage"));
 const FlowMyPatientsPage = lazyWithRetry(() => import("./pages/flow/FlowMyPatientsPage"));
 const FlowConsultantsPage = lazyWithRetry(() => import("./pages/flow/FlowConsultantsPage"));
 const FlowStationPage = lazyWithRetry(() => import("./pages/flow/FlowStationPage"));
@@ -221,6 +222,7 @@ const router = createBrowserRouter([
               { path: "/giniflow/manager", element: lazyEl(GiniFlowManagerPage) },
               { path: "/giniflow/station/vitals", element: lazyEl(GiniFlowVitalsPage) },
               { path: "/giniflow/station/reception", element: lazyEl(GiniFlowReceptionPage) },
+              { path: "/giniflow/station/lab", element: lazyEl(GiniFlowLabPage) },
               { path: "/flow/my-patients", element: lazyEl(FlowMyPatientsPage) },
               { path: "/flow/consultants", element: lazyEl(FlowConsultantsPage) },
               { path: "/flow/station", element: lazyEl(FlowStationPage) },

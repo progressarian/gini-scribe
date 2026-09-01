@@ -57,7 +57,14 @@
   height: 100vh;
   overflow: hidden;
   max-width: none;
+  /* The shell's header cancels the page gutter with negative margins
+     (`margin: calc(-1 * var(--pad-y)) calc(-1 * var(--pad-x))` in App.css), so
+     removing the padding without zeroing the variables pulls the header up and
+     left, off the top of the screen. Zero both together. */
+  --pad-x: 0px;
+  --pad-y: 0px;
   padding: 0;
+  box-sizing: border-box;
 }
 
 /* min-height:0 at every level of the flex chain. A flex child defaults to

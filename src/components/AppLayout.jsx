@@ -163,6 +163,8 @@ const NAV_ITEMS = [
   },
   // Gini Flow. Runs alongside the old Flow Floor board until parity is signed
   // off, then that one and its FLOW_* keys are deleted (docs/gini-flow/).
+  // One way in: the launcher lists every station this role can open, with live
+  // counts. A tab per station duplicates it and grows with each station built.
   {
     path: "/giniflow/stations",
     label: "🧭 GF Stations",
@@ -173,18 +175,6 @@ const NAV_ITEMS = [
     path: "/giniflow/manager",
     label: "🕐 Gini Flow",
     cap: C["/giniflow/manager"],
-    show: () => true,
-  },
-  {
-    path: "/giniflow/station/vitals",
-    label: "⚖️ GF Vitals",
-    cap: C["/giniflow/station/vitals"],
-    show: () => true,
-  },
-  {
-    path: "/giniflow/station/reception",
-    label: "🏥 GF Reception",
-    cap: C["/giniflow/station/reception"],
     show: () => true,
   },
   // One tab for all six station desks — the page's own switcher is the

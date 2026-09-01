@@ -20,6 +20,11 @@ const FIELDS = [
     pattern: /(\d{2,3})\s*(?:over|by|slash|\/|-)\s*(\d{2,3})/i,
     pair: true,
   },
+  // Said as two separate readings — "systolic 179 diastolic 79" — which is how
+  // a nurse reading off a monitor usually says it. Listed after the paired form
+  // so "blood pressure 148 over 94" is still taken as one phrase.
+  { key: "bpSys", words: ["systolic", "systolic blood pressure", "upper"], pattern: /(\d{2,3})/ },
+  { key: "bpDia", words: ["diastolic", "diastolic blood pressure", "lower"], pattern: /(\d{2,3})/ },
   { key: "weight", words: ["weight", "wait", "vajan"], pattern: /(\d{1,3}(?:[.,]\d)?)/ },
   { key: "height", words: ["height", "heights"], pattern: /(\d{2,3}(?:[.,]\d)?)/ },
   { key: "pulse", words: ["pulse", "heart rate", "heartrate"], pattern: /(\d{2,3})/ },
@@ -67,6 +72,8 @@ const normalise = (text) =>
     .replace(/\s+/g, " ")
     .trim();
 
+export const ALL_FIELDS = ["weight", "height", "bpSys", "bpDia", "pulse", "spo2", "temp"];
+
 export function parseSpokenVitals(transcript) {
   const text = normalise(transcript);
   const values = {};
@@ -83,9 +90,15 @@ export function parseSpokenVitals(transcript) {
       // Only look at what follows the keyword, and stop before the next field's
       // keyword so "pulse 82, spo2 98" cannot read 98 as the pulse.
       const after = text.slice(at + word.length);
+      // Where this field's number is. Another field's keyword only ends the
+      // window if it comes AFTER that number — otherwise "systolic blood
+      // pressure 179" stops at "blood pressure" and reads nothing, and
+      // "pulse 82 spo2 98" would still wrongly take 98 as the pulse.
+      const firstDigit = after.search(/\d/);
       const nextKeyword = FIELDS.flatMap((f) => (f === field ? [] : f.words))
+        .filter((w) => !w.includes(word) && !word.includes(w))
         .map((w) => after.indexOf(w))
-        .filter((i) => i > 0)
+        .filter((i) => i > 0 && (firstDigit === -1 || i > firstDigit))
         .sort((a, b) => a - b)[0];
       const window = nextKeyword === undefined ? after : after.slice(0, nextKeyword);
 
@@ -115,7 +128,93 @@ export function parseSpokenVitals(transcript) {
     }
   }
 
-  return { values, filled, rejected, transcript: String(transcript || "").trim() };
+  // A bare pair with no keyword — "148 by 94" — is unambiguous enough to read as
+  // a blood pressure, but only if nothing has already claimed those numbers and
+  // both halves are plausible.
+  if (values.bpSys === undefined && values.bpDia === undefined) {
+    const bare = text.match(/(?:^|\s)(\d{2,3})\s*(?:over|by|slash|\/)\s*(\d{2,3})(?:\s|$)/);
+    if (bare) {
+      const sys = toNumber(bare[1]);
+      const dia = toNumber(bare[2]);
+      if (inBounds("bpSys", sys) && inBounds("bpDia", dia) && sys > dia) {
+        values.bpSys = sys;
+        values.bpDia = dia;
+        filled.push("bpSys", "bpDia");
+      }
+    }
+  }
+
+  // What the nurse still has to supply. Naming the gap is the difference between
+  // "filled weight" and "didn't catch pulse — say it or type it".
+  const heard = new Set(filled);
+  const missing = ALL_FIELDS.filter((f) => !heard.has(f));
+
+  return {
+    values,
+    filled,
+    missing,
+    rejected,
+    transcript: String(transcript || "").trim(),
+  };
 }
 
 export const SPOKEN_EXAMPLE = "Weight 72 kilos, BP 148 over 94, pulse 82, SpO2 98";
+
+// ── Change against the last visit ────────────────────────────────────────────
+// A reading can be physiologically plausible and still wrong: 179/79 is a valid
+// blood pressure, but against a last visit of 126/78 it is either a real
+// deterioration or a mis-heard number, and both deserve a second cuff reading
+// before the patient moves on. Thresholds are deliberately wide — this is a
+// "look again" prompt, not a clinical alert, and one that fires constantly gets
+// ignored.
+const CHANGE_LIMITS = {
+  bpSys: { delta: 25, label: "BP", unit: "mmHg" },
+  bpDia: { delta: 18, label: "BP", unit: "mmHg" },
+  weight: { delta: 4, label: "weight", unit: "kg" },
+  pulse: { delta: 30, label: "pulse", unit: "bpm" },
+  spo2: { delta: 5, label: "SpO2", unit: "%", fallOnly: true },
+  temp: { delta: 3, label: "temperature", unit: "°F" },
+};
+
+const LAST_VISIT_KEY = {
+  bpSys: "bp_sys",
+  bpDia: "bp_dia",
+  weight: "weight",
+  pulse: "pulse",
+  spo2: "spo2",
+  temp: "temp",
+};
+
+// Returns one entry per field whose change since the last visit is large enough
+// to be worth rechecking. `lastVisit` is a row from the vitals history.
+export function flagLargeChanges(values, lastVisit) {
+  if (!lastVisit) return [];
+  const flags = new Map();
+
+  for (const [field, limit] of Object.entries(CHANGE_LIMITS)) {
+    const now = values[field];
+    const before = lastVisit[LAST_VISIT_KEY[field]];
+    if (now === null || now === undefined || now === "" || before === null || before === undefined)
+      continue;
+
+    const change = Number(now) - Number(before);
+    if (limit.fallOnly && change >= 0) continue;
+    if (Math.abs(change) < limit.delta) continue;
+
+    // BP is one reading with two numbers: flag it once, on whichever half moved.
+    const key = limit.label;
+    const existing = flags.get(key);
+    if (existing && Math.abs(existing.change) >= Math.abs(change)) continue;
+
+    flags.set(key, {
+      field,
+      label: limit.label,
+      was: Number(before),
+      now: Number(now),
+      change,
+      unit: limit.unit,
+    });
+  }
+
+  return [...flags.values()];
+}

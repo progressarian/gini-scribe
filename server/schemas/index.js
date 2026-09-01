@@ -582,7 +582,18 @@ export const giniflowVitalsSchema = z.object({
 });
 
 export const giniflowPaymentSchema = z.object({
-  method: z.enum(["paid", "insurance_claim"]).default("paid"),
+  method: z.enum(["paid", "insurance_claim", "claim_approved"]).default("paid"),
+});
+
+export const giniflowSampleSchema = z.object({
+  to: z.enum(["paid", "sample_collected", "processing", "results_ready", "uploaded"]),
+  reportUrl: z.string().url().max(2000).nullish(),
+});
+
+export const giniflowReportSchema = z.object({
+  base64: z.string().min(1),
+  fileName: z.string().max(200).optional(),
+  mediaType: z.string().max(120).optional(),
 });
 
 export const giniflowSlaUpdateSchema = z.object({

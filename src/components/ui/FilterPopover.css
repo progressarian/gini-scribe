@@ -42,10 +42,15 @@
   font-weight: 700;
 }
 
+/* Anchored to the button's LEFT edge, opening rightwards. Right-anchoring put
+   the panel's 340px to the LEFT of the button, and every consumer's Filters
+   button sits at the start of its controls row — so once the row shrank (the
+   GHM search collapses to an icon) the button moved left and the panel hung off
+   the edge of the window, at any width. */
 .fpop {
   position: absolute;
   top: calc(100% + 8px);
-  right: 0;
+  left: 0;
   z-index: 300;
   width: 340px;
   max-width: calc(100vw - 24px);
@@ -166,4 +171,29 @@
 
 .fpop__apply:hover {
   background: #1d4ed8;
+}
+
+/* Tall filter sets (the GHM sheet has five) outgrow a short viewport, and the
+   footer holding Apply is the part that disappears. */
+.fpop {
+  max-height: min(78vh, 620px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Anchored to the button's right edge, the panel opens leftwards: on a narrow
+   screen a button sitting near the left puts most of those 340px past the edge
+   of the viewport, where max-width cannot rescue it and an ancestor's overflow
+   clips what is left. Below the breakpoint it drops out of the flow and pins
+   itself to the viewport, so it is reachable wherever the button lands. */
+@media (max-width: 700px) {
+  .fpop {
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    right: 12px;
+    width: auto;
+    max-width: none;
+    max-height: calc(100dvh - 24px);
+  }
 }

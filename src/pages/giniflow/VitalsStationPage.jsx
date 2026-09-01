@@ -6,7 +6,7 @@ import {
   useStartVitals,
 } from "../../queries/hooks/useGiniflowVitals";
 import { useVoiceVitals } from "../../hooks/useVoiceVitals";
-import { SPOKEN_EXAMPLE } from "../../../shared/giniflowVitalsSpeech";
+import { SPOKEN_EXAMPLE, flagLargeChanges } from "../../../shared/giniflowVitalsSpeech";
 import "../../styles/giniflow-station.css";
 
 const CATEGORY_BADGE = {
@@ -41,7 +41,17 @@ const FIELD_LABEL = {
   temp: "temperature",
 };
 
-const FILLED_LABEL = (fields) => [...new Set(fields.map((f) => FIELD_LABEL[f] || f))].join(", ");
+// "weight and BP", not "weight, bpSys, bpDia" — and never a bare list ending in
+// a comma.
+const nameList = (fields) => {
+  const names = [...new Set(fields.map((f) => FIELD_LABEL[f] || f))];
+  if (names.length <= 1) return names[0] || "";
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+};
+
+// Height rarely changes and temperature is not always taken, so neither is
+// treated as a gap worth chasing out loud.
+const EXPECTED_SPOKEN = ["weight", "bpSys", "bpDia", "pulse", "spo2"];
 
 const num = (v) => (v === "" || v === null || v === undefined ? null : Number(v));
 
@@ -66,6 +76,7 @@ export default function VitalsStationPage() {
   const [form, setForm] = useState(EMPTY);
   const [toast, setToast] = useState("");
   const [spokeAnything, setSpokeAnything] = useState(false);
+  const [rechecked, setRechecked] = useState(false);
   const toastTimer = useRef(null);
 
   const { data: queueData, isLoading } = useVitalsQueue();
@@ -98,6 +109,7 @@ export default function VitalsStationPage() {
         : { ...EMPTY, height: patient.lastVisit?.height ?? "" },
     );
     setSpokeAnything(false);
+    setRechecked(false);
   }, [patient?.visitId, patient?.recorded, patient?.lastVisit?.height]);
 
   const showToast = (msg) => {
@@ -139,9 +151,23 @@ export default function VitalsStationPage() {
 
   const selectedId = activeVisitId;
 
+  // What voice heard but the form still lacks — recomputed from the form, so
+  // typing a missing value makes the prompt disappear.
+  const stillMissing = voice.result
+    ? EXPECTED_SPOKEN.filter((f) => form[f] === "" || form[f] === null || form[f] === undefined)
+    : [];
+
+  // A reading can be plausible and still wrong. Flag anything that has moved a
+  // long way since the last visit and make the nurse acknowledge it.
+  const changeFlags = flagLargeChanges(
+    Object.fromEntries(Object.entries(form).map(([k, v]) => [k, v === "" ? null : Number(v)])),
+    last,
+  );
+
   const invalid = Object.keys(BOUNDS).filter((f) => form[f] !== "" && outOfRange(f, form[f]));
   const anyEntered = Object.values(form).some((v) => v !== "");
-  const canSave = anyEntered && invalid.length === 0 && !saveVitals.isPending;
+  const needsRecheck = changeFlags.length > 0 && !rechecked;
+  const canSave = anyEntered && invalid.length === 0 && !needsRecheck && !saveVitals.isPending;
 
   const pick = (visitId) => {
     setSelected(visitId);
@@ -303,14 +329,29 @@ export default function VitalsStationPage() {
                 {voice.result && (
                   <div className="voice-note">
                     <div className="vn-detail">
-                      {voice.result.filled.length
-                        ? `Filled ${FILLED_LABEL(voice.result.filled)} — check each one against what you said.`
-                        : "No readings recognised — type them instead."}
-                      {voice.result.rejected.length
-                        ? ` Ignored ${voice.result.rejected
+                      {voice.result.filled.length ? (
+                        <>
+                          Filled <strong>{nameList(voice.result.filled)}</strong>.
+                        </>
+                      ) : (
+                        "No readings recognised — type them instead."
+                      )}{" "}
+                      {stillMissing.length > 0 && (
+                        <>
+                          Didn’t catch <strong>{nameList(stillMissing)}</strong> — say it or type
+                          it.
+                        </>
+                      )}
+                      {voice.result.rejected.length > 0 && (
+                        <>
+                          {" "}
+                          Ignored{" "}
+                          {voice.result.rejected
                             .map((r) => `${r.field} "${r.heard}"`)
-                            .join(", ")} as a mishearing.`
-                        : ""}
+                            .join(", ")}{" "}
+                          as a mishearing.
+                        </>
+                      )}
                     </div>
                   </div>
                 )}
@@ -420,19 +461,56 @@ export default function VitalsStationPage() {
                   </div>
                 </div>
 
+                {changeFlags.length > 0 && (
+                  <div className={`recheck${rechecked ? " done" : ""}`}>
+                    <div className="rc-body">
+                      <div className="rc-title">
+                        ⚠ Large change — recheck {nameList(changeFlags.map((f) => f.field))}
+                      </div>
+                      <div className="rc-detail">
+                        {changeFlags.map((f) => (
+                          <span key={f.field}>
+                            {f.label} was{" "}
+                            {f.field === "bpSys" || f.field === "bpDia"
+                              ? `${last?.bp_sys}/${last?.bp_dia}`
+                              : `${f.was}${f.unit}`}{" "}
+                            last visit, now{" "}
+                            {f.field === "bpSys" || f.field === "bpDia"
+                              ? `${form.bpSys || "—"}/${form.bpDia || "—"}`
+                              : `${f.now}${f.unit}`}
+                            .{" "}
+                          </span>
+                        ))}
+                        Take it again before moving the patient on.
+                      </div>
+                    </div>
+                    <button
+                      className="rc-btn"
+                      onClick={() => setRechecked((r) => !r)}
+                      aria-pressed={rechecked}
+                    >
+                      {rechecked ? "✓ Rechecked" : "I rechecked it"}
+                    </button>
+                  </div>
+                )}
+
                 <div className={`done-bar${canSave ? "" : " pending"}`}>
                   <div className="db-text">
                     <div className="db-title">
                       {invalid.length
                         ? "⚠ Check the highlighted readings"
-                        : anyEntered
-                          ? "✓ Vitals done"
-                          : "Enter the readings"}
+                        : needsRecheck
+                          ? "⚠ Recheck before saving"
+                          : anyEntered
+                            ? "✓ Vitals done"
+                            : "Enter the readings"}
                     </div>
                     <div className="db-sub">
                       {invalid.length
                         ? "A value is outside the plausible range — correct it before saving"
-                        : "Patient moves to the MO queue automatically"}
+                        : needsRecheck
+                          ? "Confirm you have taken the reading again"
+                          : "Patient moves to the MO queue automatically"}
                     </div>
                   </div>
                   <button className="db-btn" disabled={!canSave} onClick={submit}>

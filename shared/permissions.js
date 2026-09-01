@@ -97,6 +97,7 @@ export const CAPABILITIES = {
   GINIFLOW_SLA_ADMIN: "GINIFLOW_SLA_ADMIN", // edit the Gini Flow time budgets
   GINIFLOW_STATION_VITALS: "GINIFLOW_STATION_VITALS", // record vitals at the Gini Flow station
   GINIFLOW_STATION_RECEPTION: "GINIFLOW_STATION_RECEPTION", // clear lab payments
+  GINIFLOW_STATION_LAB: "GINIFLOW_STATION_LAB", // collect samples, upload results
   OBT_OPS: "OBT_OPS", // OBT outbound call team: tomorrow's appointment call list (/api/obt-status)
 };
 
@@ -183,6 +184,7 @@ export const ROLE_CAPABILITIES = {
     C.FLOW_STATION_LAB,
     C.FLOW_FLOOR_VIEW,
     C.GINIFLOW_VIEW,
+    C.GINIFLOW_STATION_LAB,
   ],
   [ROLES.TECH]: [
     C.PATIENT_READ,
@@ -192,6 +194,7 @@ export const ROLE_CAPABILITIES = {
     C.FLOW_STATION,
     C.FLOW_STATION_LAB,
     C.FLOW_FLOOR_VIEW,
+    C.GINIFLOW_STATION_LAB,
   ],
   [ROLES.RECEPTION]: [
     C.PATIENT_READ,
@@ -233,6 +236,7 @@ export const ROLE_CAPABILITIES = {
     C.GINIFLOW_SLA_ADMIN,
     C.GINIFLOW_STATION_VITALS,
     C.GINIFLOW_STATION_RECEPTION,
+    C.GINIFLOW_STATION_LAB,
   ],
   [ROLES.PHARMACY]: [
     C.PATIENT_READ,

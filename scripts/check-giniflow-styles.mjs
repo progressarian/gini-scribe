@@ -15,13 +15,30 @@ const THEME = "src/styles/giniflow-theme.css";
 const BOARD = "src/styles/giniflow.css";
 const STATION = "src/styles/giniflow-station.css";
 
-// What each page imports, in load order.
-const PAGES = {
-  "src/pages/giniflow/FlowManagerPage.jsx": [THEME, BOARD],
-  "src/pages/giniflow/VitalsStationPage.jsx": [THEME, STATION],
-  "src/pages/giniflow/ReceptionStationPage.jsx": [THEME, STATION],
-  "src/pages/giniflow/StationsLauncherPage.jsx": [THEME, STATION],
+// Discovered, not listed: a new station page must not be able to slip past this
+// check simply because nobody remembered to add it here. The sheets each page
+// imports are read from the file itself.
+const PAGE_DIR = "src/pages/giniflow";
+const SHEET_BY_IMPORT = {
+  "giniflow.css": BOARD,
+  "giniflow-station.css": STATION,
+  "giniflow-theme.css": THEME,
 };
+
+const PAGES = Object.fromEntries(
+  fs
+    .readdirSync(PAGE_DIR)
+    .filter((f) => f.endsWith(".jsx"))
+    .map((f) => {
+      const file = `${PAGE_DIR}/${f}`;
+      const src = read(file);
+      const sheets = [THEME];
+      for (const [name, sheet] of Object.entries(SHEET_BY_IMPORT)) {
+        if (src.includes(name) && !sheets.includes(sheet)) sheets.push(sheet);
+      }
+      return [file, sheets];
+    }),
+);
 
 // Class names that come from the app shell or are set by React, not by us.
 const IGNORE = new Set(["gf", "show", "active", "open", "listening", "live", "pending", "hot"]);

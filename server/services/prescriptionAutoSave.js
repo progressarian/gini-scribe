@@ -306,7 +306,8 @@ export async function buildVisitPayloadFromDb(pid, { appointmentId } = {}) {
     // page reads, used as fallback when consultation/healthray follow-up
     // lacks a date.
     pool.query(
-      `SELECT biomarkers, healthray_follow_up FROM appointments
+      `SELECT biomarkers, healthray_follow_up, healthray_investigations, follow_up_with
+         FROM appointments
           WHERE patient_id=$1 AND biomarkers ? 'followup'
           ORDER BY appointment_date DESC NULLS LAST, id DESC
           LIMIT 1`,
@@ -360,6 +361,9 @@ export async function buildVisitPayloadFromDb(pid, { appointmentId } = {}) {
 
   const fuRow = followupApptR.rows[0] || null;
   const fuBio = fuRow?.biomarkers || {};
+  const fuInvestigations = (fuRow?.healthray_investigations || []).map((t) =>
+    typeof t === "string" ? { name: t, urgency: "routine" } : t,
+  );
   const withDate = (fu) => (fu && fu.date ? fu : null);
   const followUpDate =
     withDate(fuRow?.healthray_follow_up) ||
@@ -387,7 +391,19 @@ export async function buildVisitPayloadFromDb(pid, { appointmentId } = {}) {
     labHistory,
     consultations: consultationsR.rows,
     goals: goalsR.rows,
-    appt_plan: followUpDate ? { follow_up: followUpDate } : null,
+    // The saved PDF is built here rather than from the /visit payload, so the
+    // next visit's tests and preparation instructions have to be carried
+    // across too — passing only the date printed a prescription with no
+    // "bring these reports" grid and no "follow up with" box, while the same
+    // patient's on-screen preview showed both.
+    appt_plan:
+      followUpDate || fuInvestigations.length > 0 || fuRow?.follow_up_with
+        ? {
+            follow_up: followUpDate,
+            investigations_to_order: fuInvestigations,
+            follow_up_with: fuRow?.follow_up_with || fuRow?.healthray_follow_up?.notes || null,
+          }
+        : null,
     visitSummaryText: (() => {
       const raw = appt?.post_visit_summary;
       if (!raw) return undefined;

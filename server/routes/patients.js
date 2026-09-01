@@ -307,7 +307,8 @@ router.get("/patients/:id", async (req, res) => {
       ),
       pool.query("SELECT * FROM goals WHERE patient_id=$1 ORDER BY status, created_at DESC", [id]),
       pool.query(
-        `SELECT healthray_investigations, healthray_follow_up, compliance, biomarkers
+        `SELECT healthray_investigations, healthray_follow_up, compliance, biomarkers,
+                follow_up_with
            FROM appointments WHERE patient_id=$1 AND healthray_clinical_notes IS NOT NULL
            ORDER BY appointment_date DESC LIMIT 1`,
         [id],
@@ -413,12 +414,17 @@ router.get("/patients/:id", async (req, res) => {
       diagnoses: sortDiagnoses(diagnoses.rows),
       documents: allDocs,
       goals: goals.rows,
+      // The prescription falls back to this plan when the consultation row
+      // carries no tests of its own, so it has to be built whenever the
+      // appointment holds ANY of them — gating it on a follow-up date alone
+      // left patients with five tests on file and none on their printed Rx.
       appt_plan:
         apptPlan || followUpDate
           ? {
               investigations_to_order: (apptPlan?.healthray_investigations || []).map((t) =>
                 typeof t === "string" ? { name: t, urgency: "routine" } : t,
               ),
+              follow_up_with: apptPlan?.follow_up_with || null,
               follow_up: followUpDate,
               diet_lifestyle: [
                 apptCompliance.diet,

@@ -155,7 +155,12 @@ try {
   const landClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   landClient.setQueryData(["giniflow", "stations", "summary"], {
     date,
-    stations: { manager: summary.manager, vitals: summary.vitals, reception: summary.reception },
+    stations: {
+      manager: summary.manager,
+      vitals: summary.vitals,
+      reception: summary.reception,
+      lab: summary.lab,
+    },
     bottleneck: summary.bottleneck,
   });
   const landHtml = renderToString(
@@ -177,9 +182,16 @@ try {
     ),
   );
   check(
-    "built stations link, unbuilt ones do not",
-    landHtml.includes('href="/giniflow/station/vitals"') && landHtml.includes("Coming soon"),
+    "every built station links from the launcher",
+    [
+      "/giniflow/manager",
+      "/giniflow/station/vitals",
+      "/giniflow/station/reception",
+      "/giniflow/station/lab",
+    ].every((h) => landHtml.includes(`href="${h}"`)),
+    "a station whose tile is not linked is unreachable",
   );
+  check("unbuilt stations stay marked coming soon", landHtml.includes("Coming soon"));
   check("live counts render on the tiles", landHtml.includes("in queue"));
   check("no raw 'undefined' in the launcher markup", !landHtml.includes(">undefined<"));
 
@@ -209,6 +221,33 @@ try {
   check("the workflow banner renders", recHtml.includes("triggers lab sample collection"));
   check("the placeholder-price warning is shown", recHtml.includes("not the hospital"));
   check("no raw 'undefined' in the reception markup", !recHtml.includes(">undefined<"));
+
+  // Lab renders its own tree.
+  const { default: LabStationPage } = await vite.ssrLoadModule(
+    "/src/pages/giniflow/LabStationPage.jsx",
+  );
+  const labClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const { getLabQueue } = await import("../server/services/giniflow/labStation.js");
+  labClient.setQueryData(["giniflow", "lab", "queue", "today"], {
+    date,
+    ...(await getLabQueue(date)),
+  });
+  const labHtml = renderToString(
+    createElement(
+      MemoryRouter,
+      null,
+      createElement(QueryClientProvider, { client: labClient }, createElement(LabStationPage)),
+    ),
+  );
+  check("lab renders without throwing", labHtml.length > 0, `${labHtml.length} chars`);
+  check(
+    "lab's five buckets render",
+    ["Sample pending", "Collecting", "Processing", "Ready to upload", "Uploaded"].every((s) =>
+      labHtml.includes(s),
+    ),
+  );
+  check("the upload-notifies-MO banner renders", labHtml.includes("Results ready"));
+  check("no raw 'undefined' in the lab markup", !labHtml.includes(">undefined<"));
 
   // The timeline is a separate tree with its own live helpers; render it too.
   const target = day.cards.find((c) => !c.finished);

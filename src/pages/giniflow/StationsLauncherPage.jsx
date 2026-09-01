@@ -36,6 +36,7 @@ const STATIONS = [
     icon: "🧪",
     name: "Lab Station",
     desc: "Sample queue · processing · upload results",
+    href: "/giniflow/station/lab",
   },
   {
     key: "mo_sd",

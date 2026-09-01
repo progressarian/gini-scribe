@@ -3,7 +3,7 @@
 // case here, as does every mishearing that must NOT become a reading.
 //
 //   npm run smoke:giniflow-speech
-import { parseSpokenVitals } from "../../shared/giniflowVitalsSpeech.js";
+import { parseSpokenVitals, flagLargeChanges } from "../../shared/giniflowVitalsSpeech.js";
 
 let failures = 0;
 const check = (label, ok, detail = "") => {
@@ -60,6 +60,63 @@ check(
   "the transcript is returned for review",
   parseSpokenVitals("pulse 82").transcript === "pulse 82",
 );
+
+// ── Systolic and diastolic said separately ──────────────────────────────────
+// How a nurse reading a monitor actually speaks, and the phrasing that shipped
+// broken: "weight 80 systolic blood pressure 179 diastolic 79" filled only weight.
+check(
+  "the reported transcript now parses whole",
+  same(parse("weight 80 systolic blood pressure 179 diastolic 79"), {
+    bpSys: 179,
+    bpDia: 79,
+    weight: 80,
+  }),
+);
+check(
+  "bare systolic/diastolic",
+  same(parse("systolic 179 diastolic 79"), { bpSys: 179, bpDia: 79 }),
+);
+check("upper and lower as synonyms", same(parse("upper 148 lower 94"), { bpSys: 148, bpDia: 94 }));
+check("a bare pair reads as BP", same(parse("148 by 94"), { bpSys: 148, bpDia: 94 }));
+check(
+  "a reversed bare pair is not read as BP",
+  Object.keys(parse("94 by 148")).length === 0,
+  "diastolic cannot exceed systolic",
+);
+check(
+  "everything in one breath",
+  Object.keys(parse("weight 80 systolic 179 diastolic 79 pulse 88 spo2 97 temperature 98.4"))
+    .length === 6,
+);
+
+// ── What was NOT heard has to be nameable ───────────────────────────────────
+const partial = parseSpokenVitals("weight 80 systolic 179 diastolic 79");
+check(
+  "missing fields are reported",
+  partial.missing.includes("pulse") && partial.missing.includes("spo2"),
+);
+check("heard fields are not reported missing", !partial.missing.includes("weight"));
+
+// ── Large change against the last visit ─────────────────────────────────────
+const LAST = { bp_sys: 126, bp_dia: 78, weight: 77.2, pulse: 80, spo2: 98, temp: 98.4 };
+const flagged = flagLargeChanges({ bpSys: 179, bpDia: 79 }, LAST);
+check("179/79 against 126/78 is flagged", flagged.length === 1 && flagged[0].label === "BP");
+check(
+  "a small BP change is not flagged",
+  flagLargeChanges({ bpSys: 132, bpDia: 80 }, LAST).length === 0,
+);
+check(
+  "BP is flagged once, not twice",
+  flagLargeChanges({ bpSys: 179, bpDia: 110 }, LAST).length === 1,
+);
+check("a big weight change is flagged", flagLargeChanges({ weight: 82 }, LAST).length === 1);
+check("a fall in SpO2 is flagged", flagLargeChanges({ spo2: 92 }, LAST).length === 1);
+check("a rise in SpO2 is not", flagLargeChanges({ spo2: 100 }, LAST).length === 0);
+check(
+  "nothing is flagged without a last visit",
+  flagLargeChanges({ bpSys: 179 }, null).length === 0,
+);
+check("nothing is flagged for an empty form", flagLargeChanges({ bpSys: null }, LAST).length === 0);
 
 console.log(failures ? `\n${failures} FAILED\n` : "\nall checks passed\n");
 process.exit(failures ? 1 : 0);

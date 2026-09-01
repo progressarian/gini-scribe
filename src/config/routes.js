@@ -131,6 +131,7 @@ export const PAGE_CAPABILITIES = {
   "/giniflow/manager": CAP.GINIFLOW_VIEW,
   "/giniflow/station/vitals": CAP.GINIFLOW_STATION_VITALS,
   "/giniflow/station/reception": CAP.GINIFLOW_STATION_RECEPTION,
+  "/giniflow/station/lab": CAP.GINIFLOW_STATION_LAB,
   "/flow/admin": CAP.ADMIN,
 };
 

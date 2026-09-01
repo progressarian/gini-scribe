@@ -32,7 +32,14 @@ const ORDER_SELECT = `
        ORDER BY occurred_at DESC LIMIT 1
     ) paid_ev ON TRUE
    WHERE v.visit_date = $1::date
-     AND NOT COALESCE(p.is_blocked, FALSE)`;
+     AND NOT COALESCE(p.is_blocked, FALSE)
+     -- Brief §2.3 trigger 2: only tests ordered FOR TODAY reach reception. A test
+     -- ordered today for the next visit is not money to collect today, and
+     -- showing it would have reception chasing payment for a sample nobody is
+     -- taking.
+     AND o.urgency = 'today'
+     -- A patient who never arrived or has gone home is not at the counter.
+     AND v.current_status NOT IN ('no_show', 'cancelled')`;
 
 const shape = (r) => ({
   orderId: r.id,
@@ -47,9 +54,9 @@ const shape = (r) => ({
   paymentStatus: r.payment_status,
   sampleStatus: r.sample_status,
   tests: r.tests || [],
-  // The total is summed from the order's own lines, not from the catalogue: the
-  // patient is charged what they were quoted, whatever the catalogue says now.
-  total: (r.tests || []).reduce((sum, t) => sum + Number(t.price || 0), 0),
+  // The amount the order itself recorded — what the patient was quoted. Falls
+  // back to summing the lines for orders created before amount_total was written.
+  total: Number(r.amount_total) || (r.tests || []).reduce((s, t) => s + Number(t.price || 0), 0),
   orderedAt: r.created_at ? new Date(r.created_at).toISOString() : null,
   paidAt: r.paid_at ? new Date(r.paid_at).toISOString() : null,
 });
@@ -58,7 +65,9 @@ export async function getPaymentQueue(visitDate, db = pool) {
   const { rows } = await db.query(`${ORDER_SELECT} ORDER BY o.created_at`, [visitDate]);
   const orders = rows.map(shape);
 
-  const pending = orders.filter((o) => o.paymentStatus === "pending");
+  // A submitted claim still needs someone to chase the approval, so it stays on
+  // reception's list rather than disappearing into "cleared".
+  const pending = orders.filter((o) => ["pending", "insurance_claim"].includes(o.paymentStatus));
   // Paid, but the lab has not taken the sample yet — reception's own "did my
   // clearing actually reach the lab" check.
   const awaitingSample = orders.filter(
@@ -89,11 +98,20 @@ export async function getPaymentQueue(visitDate, db = pool) {
 
 // Clearing an order is what lets the lab collect. One transaction: the status,
 // and the event that records who cleared it and how.
+// `insurance_claim` records that a claim was SUBMITTED — it does not open the
+// lab gate. `claim_approved` does. Brief §2.2: "Lab cannot collect a sample until
+// paid (or claim approved)."
+export const SETTLED_METHODS = ["paid", "insurance_claim", "claim_approved"];
+
+// What counts as cleared for the lab.
+export const opensLabGate = (paymentStatus) => ["paid", "claim_approved"].includes(paymentStatus);
+
 export async function clearPayment(orderId, { method = "paid", actorId = null }, db = pool) {
-  if (!["paid", "insurance_claim"].includes(method)) {
-    throw Object.assign(new Error("Payment must be settled as paid or insurance_claim"), {
-      status: 400,
-    });
+  if (!SETTLED_METHODS.includes(method)) {
+    throw Object.assign(
+      new Error("Payment must be settled as paid, insurance_claim or claim_approved"),
+      { status: 400 },
+    );
   }
 
   const client = await db.connect();
@@ -105,18 +123,24 @@ export async function clearPayment(orderId, { method = "paid", actorId = null },
     );
     if (!rows.length) throw Object.assign(new Error("Order not found"), { status: 404 });
 
-    // Already settled: don't write a second payment event. A double-tap at a
-    // busy counter must not read later as the patient having paid twice.
-    if (rows[0].payment_status !== "pending") {
+    // A double-tap at a busy counter must not read later as paying twice. But a
+    // submitted claim CAN legitimately move on to approved, so that one is not a
+    // repeat.
+    const current = rows[0].payment_status;
+    const isApprovingAClaim = current === "insurance_claim" && method === "claim_approved";
+    if (current !== "pending" && !isApprovingAClaim) {
       await client.query("COMMIT");
-      return { orderId, paymentStatus: rows[0].payment_status, alreadySettled: true };
+      return { orderId, paymentStatus: current, alreadySettled: true };
     }
 
     await client.query(
       `UPDATE giniflow_lab_orders
           SET payment_status = $2,
-              sample_status = CASE WHEN sample_status IN ('ordered', 'payment_pending')
-                                   THEN 'paid' ELSE sample_status END,
+              -- Only an approved settlement opens the sample task.
+              sample_status = CASE
+                WHEN $2 IN ('paid', 'claim_approved')
+                 AND sample_status IN ('ordered', 'payment_pending') THEN 'paid'
+                ELSE sample_status END,
               updated_at = NOW()
         WHERE id = $1`,
       [orderId, method],
@@ -128,11 +152,15 @@ export async function clearPayment(orderId, { method = "paid", actorId = null },
     );
     // The lab's queue reads sample_status, so the sample task appearing there is
     // the same write — trigger 3 in the brief, not a second job that can fail.
-    await client.query(
-      `INSERT INTO giniflow_lab_order_events (lab_order_id, track, status, actor_role, actor_id)
-       VALUES ($1, 'sample', 'paid', 'reception', $2)`,
-      [orderId, actorId],
-    );
+    // A submitted-but-unapproved claim writes no sample event: there is nothing
+    // for the lab to do yet.
+    if (opensLabGate(method)) {
+      await client.query(
+        `INSERT INTO giniflow_lab_order_events (lab_order_id, track, status, actor_role, actor_id)
+         VALUES ($1, 'sample', 'paid', 'reception', $2)`,
+        [orderId, actorId],
+      );
+    }
 
     await client.query("COMMIT");
     return { orderId, paymentStatus: method, alreadySettled: false };

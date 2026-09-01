@@ -28,7 +28,8 @@
     "smoke:giniflow-sync": "node scripts/smoke-giniflow-sync.mjs",
     "smoke:giniflow-vitals": "node scripts/smoke-giniflow-vitals.mjs",
     "smoke:giniflow-speech": "node scripts/smoke-giniflow-speech.mjs",
-    "smoke:giniflow-reception": "node scripts/smoke-giniflow-reception.mjs"
+    "smoke:giniflow-reception": "node scripts/smoke-giniflow-reception.mjs",
+    "smoke:giniflow-lab": "node scripts/smoke-giniflow-lab.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.101.1",

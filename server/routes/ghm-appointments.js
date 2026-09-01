@@ -693,6 +693,20 @@ const SUMMARY_BUCKETS = {
   rescheduled: (a, cs) => `${cs} = 'rescheduled'`,
   follow_up: (a) => `(${a}.visit_type IS NOT NULL AND LOWER(${a}.visit_type) NOT LIKE 'new%')`,
   home_collection: (a) => `${a}.home_collection`,
+  // "Booked" means the patient HAS an appointment on this date — the sheet
+  // booking itself counts, not only the ones a caller marked by hand. Keying it
+  // on booking_status alone put 55 of 2 Sep's 59 confirmed appointments in the
+  // "Not Booked" bucket, so the callers' worklist was mostly people already
+  // coming. `d` is the SQL placeholder holding the date, which differs between
+  // the day list ($1) and the lookup branch.
+  // COALESCE on both sides on purpose: booking_status is NULL on most rows and
+  // appointment_date can be NULL, and in SQL `NOT (false OR NULL)` is NULL —
+  // which silently put those rows in NEITHER bucket, so the two pills stopped
+  // summing to the day's total.
+  booked: (a, cs, d) =>
+    `(COALESCE(${a}.appointment_date = ${d}, FALSE) OR COALESCE(${a}.booking_status, '') = 'booked')`,
+  not_booked: (a, cs, d) =>
+    `(NOT COALESCE(${a}.appointment_date = ${d}, FALSE) AND COALESCE(${a}.booking_status, '') <> 'booked')`,
   ...Object.fromEntries(
     CATEGORY_VALUES.map((v) => [`cat_${v}`, (a) => `${a}.patient_category = '${v}'`]),
   ),
@@ -701,15 +715,15 @@ const SUMMARY_BUCKETS = {
 // "Total" is the cleared state, not a bucket, so it filters nothing.
 const summaryBucket = (v) => (Object.hasOwn(SUMMARY_BUCKETS, String(v)) ? String(v) : null);
 
-const bucketWhere = (name, a, callStat = null) =>
-  SUMMARY_BUCKETS[name](a, callStat || `${a}.call_status`);
+const bucketWhere = (name, a, callStat = null, dateParam = "$1") =>
+  SUMMARY_BUCKETS[name](a, callStat || `${a}.call_status`, dateParam);
 
-const summaryCols = (a, callStat = null) => {
+const summaryCols = (a, callStat = null, dateParam = "$1") => {
   const cs = callStat || `${a}.call_status`;
   return `
   COUNT(*)::int AS total,
   ${Object.entries(SUMMARY_BUCKETS)
-    .map(([name, cond]) => `COUNT(*) FILTER (WHERE ${cond(a, cs)})::int AS ${name}`)
+    .map(([name, cond]) => `COUNT(*) FILTER (WHERE ${cond(a, cs, dateParam)})::int AS ${name}`)
     .join(",\n  ")}`;
 };
 
@@ -837,10 +851,11 @@ router.get("/ghm-appointments", async (req, res) => {
       const [countR, dataR] = await Promise.all([
         pool.query(
           `WITH ${upcomingCte}
-           SELECT ${summaryCols("z")} FROM (
+           SELECT ${summaryCols("z", null, `$${dIdx}`)} FROM (
              SELECT DISTINCT ON (COALESCE(a.file_no, a.id::text))
                     ${callStatusToday("a")} AS call_status,
-                    a.show_no_show, a.visit_type, a.home_collection, a.patient_category
+                    a.show_no_show, a.visit_type, a.home_collection, a.patient_category,
+                    a.appointment_date, a.booking_status
              FROM appointments a
              LEFT JOIN upcoming u ON u.file_no = a.file_no
              ${searchWhere}
@@ -857,13 +872,18 @@ router.get("/ghm-appointments", async (req, res) => {
                       a.call_status AS call_status_any,
                       ${callStatusToday("a")} AS call_status,
                       FALSE AS via_preferred,
+                      -- Lookup has no single date to compare against, so a
+                      -- patient counts as booked when the row it picked is an
+                      -- appointment still ahead of them.
+                      (COALESCE(a.appointment_date >= $${dIdx}, FALSE)
+                       OR COALESCE(a.booking_status, '') = 'booked') AS is_booked,
                       u.next_date AS follow_up_date
                ${joins}
                LEFT JOIN upcoming u ON u.file_no = a.file_no
                ${searchWhere}
                ${pickUpcoming}
              ) t
-             ${bucket ? `WHERE ${bucketWhere(bucket, "t")}` : ""}
+             ${bucket ? `WHERE ${bucketWhere(bucket, "t", null, `$${dIdx}`)}` : ""}
              -- file_no + id tiebreakers give a TOTAL order so OFFSET paging is
              -- stable — many patients share an identical name, and ordering by name
              -- alone lets rows repeat or be skipped across pages.
@@ -946,6 +966,9 @@ router.get("/ghm-appointments", async (req, res) => {
                 a.call_status AS call_status_any,
                 ${callStatusToday("a")} AS call_status,
                 (a.preferred_date = $1 AND a.appointment_date <> $1) AS via_preferred,
+                -- The row IS an appointment on this date, so the patient is
+                -- booked whether or not anyone ticked the dropdown.
+                (a.appointment_date = $1 OR a.booking_status = 'booked') AS is_booked,
                 ${upcomingBookingElsewhere("a")} AS booked_on,
                 -- Follow-up date shown for THIS visit:
                 --   1. the visit's OWN effective follow-up date (column, synced

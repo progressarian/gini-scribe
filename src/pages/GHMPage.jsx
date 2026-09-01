@@ -425,6 +425,8 @@ const APPT_PILLS = [
   { bucket: "pending_show", key: "pending_show", label: "Pending", color: "gray" },
   { bucket: "follow_up", key: "follow_up", label: "Follow-up", color: "amber" },
   { bucket: "home_collection", key: "home_collection", label: "Home Collection", color: "purple" },
+  { bucket: "booked", key: "booked", label: "Booked", color: "green" },
+  { bucket: "not_booked", key: "not_booked", label: "Not Booked", color: "red" },
 ];
 
 const CALL_PILLS = [
@@ -2301,9 +2303,13 @@ export default function GHMPage() {
   const showCalledBy = true;
   const showCallDate = true;
   const showFollowUpDate = true;
-  // Lookup spans every date, so each row needs to say which visit it is showing.
-  // The other tabs are pinned to one date and would just repeat it 50 times.
-  const showApptDate = view === "lookup";
+  // Which visit each row is showing. Lookup spans every date, and the Tomorrow
+  // and Follow-up tabs mix two kinds of row — an appointment booked on the
+  // date, and an older visit whose follow-up falls due on it — which look
+  // identical without this column: the follow-up rows carry their own (older)
+  // visit date, so a date matching the tab means "booked that day". Only the
+  // Today tab is one kind of row throughout, where it would repeat 50 times.
+  const showApptDate = view !== "by_date";
   // Where the patient is in the day — the same states the OPD board shows.
   // Only once the day has arrived: on a future date nobody has checked in yet,
   // so every row would read "Pending".
@@ -2678,7 +2684,15 @@ export default function GHMPage() {
                       <th style={{ minWidth: 120, whiteSpace: "nowrap" }}>Called By</th>
                     )}
                     {showCallDate && <th style={{ minWidth: 110 }}>Call Date</th>}
-                    {showFollowUpDate && <th style={{ width: 130 }}>Follow-up Date</th>}
+                    {showFollowUpDate && (
+                      <th style={{ width: 130 }}>
+                        {/* Lookup fills this column with the patient's next
+                            upcoming date of ANY kind — a booking counts — so
+                            calling it "Follow-up Date" there reads as a
+                            clinical follow-up the patient may not have. */}
+                        {view === "lookup" ? "Next Visit" : "Follow-up Date"}
+                      </th>
+                    )}
                     <th style={{ width: 180 }}>Preferred Doctor</th>
                     <th style={{ width: 150 }}>Preferred Date</th>
                     <th style={{ width: 195 }}>Preferred Time</th>
@@ -2797,9 +2811,8 @@ export default function GHMPage() {
                                     Booked {prettyDate(row.booked_on)}
                                   </span>
                                 )}
-                                {row.booking_status === "booked" && !row.booked_on && (
-                                  <span className="booked-tag">Booked</span>
-                                )}
+                                {(row.is_booked || row.booking_status === "booked") &&
+                                  !row.booked_on && <span className="booked-tag">Booked</span>}
                                 {row.booking_status === "cancelled" && (
                                   <span className="cancel-tag">Cancelled</span>
                                 )}
