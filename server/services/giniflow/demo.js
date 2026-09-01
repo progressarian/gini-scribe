@@ -1,4 +1,6 @@
 import pool from "../../config/db.js";
+import { syncAppointmentsToFlow } from "./appointmentSync.js";
+import { autoCategoriseDay } from "./triage.js";
 
 // Reproduces the floor in docs/gini-flow-manager.html: 18 booked, 14 in the
 // building, 8 done, a hot "Waiting — doctor" column, 2 blocked, 3 on the lab track.
@@ -314,6 +316,569 @@ const ACTOR_FOR = {
   exited: "pharmacy",
 };
 
+// ── Tomorrow, for the triage board ─────────────────────────────────────────
+// The floor journeys above are TODAY: they build the board and every station
+// queue. The triage board works the day BEFORE the day, off `appointments` —
+// biomarkers, the confirmation call, the patient's own pre-visit note — and the
+// seeder wrote none of those, so that one screen was the only station with
+// nothing to show.
+//
+// One profile per column the engine can produce, plus the two the coordinator
+// most needs to see: a patient with no numbers at all (the call list) and one
+// whose diagnosis triggers a routing suggestion.
+//
+// [key, current HbA1c, previous HbA1c, extra markers, call status, extras]
+const TRIAGE_PROFILES = [
+  [
+    "t_crisis",
+    11.4,
+    9.1,
+    { fg: 196, ldl: 158, tg: 227, uacr: 42, egfr: 84 },
+    "called",
+    {
+      symptoms: ["numbness in feet", "blurred vision 1 week"],
+      note: "Doctor se poochna tha — kya insulin lena padega?",
+      compliance: 44,
+    },
+  ],
+  ["t_jump", 8.4, 6.6, { fg: 168, ldl: 121 }, "pending", { compliance: 58 }],
+  [
+    "t_rising",
+    7.9,
+    7.2,
+    { fg: 141, ldl: 96, tg: 165, uacr: 18, egfr: 92 },
+    "not_picked",
+    {
+      lifestyle: true,
+      compliance: 71,
+    },
+  ],
+  ["t_resched", 7.6, 7.1, { fg: 138, tg: 172 }, "rescheduled", {}],
+  [
+    "t_better",
+    8.1,
+    9.4,
+    { fg: 129, ldl: 88, tg: 140, uacr: 12, egfr: 97 },
+    "called",
+    {
+      compliance: 86,
+    },
+  ],
+  ["t_better2", 7.4, 8.2, { fg: 124, ldl: 91 }, "no_call_needed", { compliance: 92 }],
+  [
+    "t_green",
+    6.4,
+    6.5,
+    { fg: 98, ldl: 82, tg: 118, uacr: 8, egfr: 103 },
+    "called",
+    {
+      compliance: 95,
+    },
+  ],
+  [
+    "t_green2",
+    6.1,
+    6.3,
+    { fg: 94, ldl: 79, tg: 110, uacr: 6, egfr: 108 },
+    "called",
+    {
+      compliance: 88,
+    },
+  ],
+  ["t_none", null, 7.8, {}, "wrong_number", {}],
+  ["t_none2", null, null, {}, "pending", { symptoms: ["swelling in feet"] }],
+];
+
+// The diagnosis that makes the routing suggestion appear on one card. Written
+// against a demo patient only — never a real one.
+const TRIAGE_DIAGNOSIS = { profile: "t_crisis", label: "Diabetic foot ulcer (right great toe)" };
+
+const adherenceFor = (pct) =>
+  pct >= 90 ? "always" : pct >= 70 ? "mostly" : pct >= 50 ? "sometimes" : "missed";
+
+// A visit's worth of appointment rows for the triage day: the previous visit
+// that "rising" and "improving" are measured against, and the booking itself.
+async function seedTriageDay(client, patientIds, triageDate) {
+  const { rows: prev } = await client.query(
+    `SELECT ($1::date - INTERVAL '3 months')::date::text AS d`,
+    [triageDate],
+  );
+  const previousDate = prev[0].d;
+  const lifestyleFileNos = [];
+  let created = 0;
+
+  for (const [i, [key, cur, before, extra, callStatus, opts]] of TRIAGE_PROFILES.entries()) {
+    const patientId = patientIds[i];
+    if (!patientId) continue;
+    const { rows: who } = await client.query(`SELECT name, file_no FROM patients WHERE id = $1`, [
+      patientId,
+    ]);
+    const { name, file_no: fileNo } = who[0];
+
+    // The previous visit the engine measures "rising" and "improving" against.
+    if (before !== null) {
+      await client.query(
+        `INSERT INTO appointments (patient_id, patient_name, file_no, appointment_date, status,
+                                   visit_type, biomarkers)
+         VALUES ($1, $2, $3, $4::date, 'completed', 'OPD', $5::jsonb)`,
+        [patientId, name, fileNo, previousDate, JSON.stringify({ hba1c: before })],
+      );
+    }
+
+    // The booking itself. `appointments` has no is_demo column, so these rows
+    // are scoped the way every other demo write is — to the ZZDEMO_ patients,
+    // which is what cleanDemoDay deletes by.
+    // Both shapes the column actually holds, alternating — the patient app's
+    // ARRAY of per-medicine adherence, and the summary OBJECT carrying a pct.
+    // A demo that only ever wrote one of them would leave the other reader
+    // untested on screen.
+    const compliance = opts.compliance ?? null;
+    const items = [
+      {
+        medication: "Metformin 1000mg",
+        schedule: "twice daily",
+        adherence: adherenceFor(compliance ?? 0),
+      },
+      {
+        medication: "Glimepiride 2mg",
+        schedule: "once daily",
+        adherence: adherenceFor(compliance ?? 0),
+      },
+    ];
+    const preVisitCompliance =
+      compliance === null ? null : JSON.stringify(i % 2 ? items : { pct: compliance, items });
+
+    await client.query(
+      `INSERT INTO appointments (patient_id, patient_name, file_no, appointment_date, status,
+                                 visit_type, time_slot, call_status, call_date, biomarkers,
+                                 pre_visit_symptoms, pre_visit_notes, pre_visit_compliance,
+                                 pre_visit_compliance_at)
+       VALUES ($1, $2, $3, $4::date, 'scheduled', 'OPD', $5, $6, $7::date, $8::jsonb,
+               $9::text[], $10, $11::jsonb, $12::timestamptz)`,
+      [
+        patientId,
+        name,
+        fileNo,
+        triageDate,
+        `${9 + Math.floor(i / 2)}:${i % 2 ? "30" : "00"} AM`,
+        callStatus,
+        callStatus === "pending" ? null : previousDate,
+        JSON.stringify(cur === null ? extra : { hba1c: cur, ...extra }),
+        opts.symptoms || null,
+        opts.note || null,
+        preVisitCompliance,
+        preVisitCompliance === null ? null : new Date().toISOString(),
+      ],
+    );
+    created++;
+    if (opts.lifestyle) lifestyleFileNos.push(fileNo);
+
+    if (TRIAGE_DIAGNOSIS.profile === key) {
+      await client.query(
+        `INSERT INTO diagnoses (patient_id, diagnosis_id, label, category, is_active)
+         VALUES ($1, 'diabetic_foot_ulcer', $2, 'secondary', TRUE)
+         ON CONFLICT DO NOTHING`,
+        [patientId, TRIAGE_DIAGNOSIS.label],
+      );
+    }
+  }
+  return { created, triageDate, previousDate, lifestyleFileNos };
+}
+
+// ── The consultation, for the consultant station ───────────────────────────
+// The floor journeys give every station a QUEUE. The consult screen behind that
+// queue reads the patient's CHART — biomarkers on the appointment, the lab
+// table, diagnoses, medications, the MO's plan and their proposals — and the
+// seeder wrote none of it, so opening a demo patient gave a screen of "nothing
+// recorded" boxes: no key numbers, no labs, an empty prescription, no diagnoses.
+//
+// Each profile is keyed on the journey's own category, so what the consultant
+// reads agrees with the colour the board gave the card. A `no_reports` patient
+// deliberately gets nothing — that is what the category means, and inventing
+// numbers for them would make the one honest empty state impossible to see.
+const CONSULT_PROFILES = {
+  worse_out_of_range: {
+    current: {
+      hba1c: 10.9,
+      fg: 196,
+      ppbs: 284,
+      ldl: 158,
+      hdl: 34,
+      tg: 227,
+      tc: 212,
+      uacr: 42,
+      egfr: 84,
+      creatinine: 1.12,
+      tsh: 3.2,
+      vitd: 18,
+      hb: 12.4,
+    },
+    trail: [
+      { months: 4, b: { hba1c: 9.4, fg: 172, ldl: 141, tg: 198, uacr: 31, egfr: 88 } },
+      { months: 8, b: { hba1c: 8.8, fg: 158, ldl: 132, tg: 176, uacr: 22, egfr: 91 } },
+      { months: 12, b: { hba1c: 8.1, fg: 149, ldl: 128, tg: 165, uacr: 14, egfr: 94 } },
+    ],
+    vitals: { weight: 88.4, height: 168, bmi: 31.3, bp_sys: 148, bp_dia: 92, pulse: 84, spo2: 97 },
+    compliance: 44,
+    symptoms: ["numbness in both feet", "blurred vision 1 week", "getting up twice at night"],
+    note: "Doctor se poochna tha — kya insulin lena padega?",
+    diagnoses: [
+      ["dm2", "Type 2 DM", "Uncontrolled", "primary", "HbA1c 10.9%", "8.1→9.4→10.9", 2011],
+      ["htn", "Hypertension", "Uncontrolled", "comorbidity", "BP 148/92", "138→144→148", 2015],
+      [
+        "ckd",
+        "Diabetic nephropathy (early)",
+        "New",
+        "complication",
+        "UACR 42 mg/g",
+        "14→31→42",
+        2026,
+      ],
+      [
+        "dyslipidemia",
+        "Dyslipidaemia",
+        "Uncontrolled",
+        "comorbidity",
+        "LDL 158",
+        "128→141→158",
+        2016,
+      ],
+    ],
+    meds: [
+      [
+        "Glycomet GP2",
+        "Metformin 1000mg + Glimepiride 2mg",
+        "1-0-1",
+        "BD",
+        "diabetes",
+        "Before meals",
+      ],
+      ["Jardiance 10", "Empagliflozin 10mg", "1-0-0", "OD", "diabetes", "Before breakfast"],
+      ["Telma 40", "Telmisartan 40mg", "0-0-1", "OD", "bp", "At bedtime"],
+      ["Atchol 20", "Atorvastatin 20mg", "0-0-1", "OD", "lipids", "At bedtime"],
+    ],
+    external: ["Pregabalin 75", "Pregabalin 75mg", "0-0-1", "Dr. Sethi (Neuro)"],
+    plan:
+      "HbA1c 10.9 on maximal orals — up from 9.4 in June. Reports compliance ~44%, missing the evening dose most days. " +
+      "UACR now 42 (was 14 a year ago) with eGFR still 84 — early nephropathy. BP 148/92 at the chair, second reading same. " +
+      "Suggest basal insulin discussion and pushing the statin; foot exam done, sensation reduced bilaterally.",
+    proposals: [
+      ["Atchol 20", "20mg", "40mg", "LDL 158, well above target on 20mg", "changed"],
+      ["Lantus", null, "10 units at bedtime", "HbA1c 10.9 on maximal orals", "new"],
+    ],
+  },
+  worse_in_range: {
+    current: {
+      hba1c: 7.9,
+      fg: 141,
+      ppbs: 198,
+      ldl: 96,
+      hdl: 42,
+      tg: 165,
+      tc: 171,
+      uacr: 18,
+      egfr: 92,
+      creatinine: 0.94,
+      tsh: 2.4,
+      vitd: 24,
+      hb: 13.1,
+    },
+    trail: [
+      { months: 3, b: { hba1c: 7.2, fg: 128, ldl: 92, tg: 148, uacr: 12, egfr: 94 } },
+      { months: 7, b: { hba1c: 7.0, fg: 124, ldl: 88, tg: 140, uacr: 9, egfr: 96 } },
+    ],
+    vitals: { weight: 74.2, height: 163, bmi: 27.9, bp_sys: 132, bp_dia: 84, pulse: 78, spo2: 98 },
+    compliance: 71,
+    symptoms: ["tired by evening"],
+    note: "Weight badh raha hai — diet chart mil sakta hai?",
+    diagnoses: [
+      ["dm2", "Type 2 DM", "Uncontrolled", "primary", "HbA1c 7.9%", "7.0→7.2→7.9", 2018],
+      ["obesity", "Overweight", "Uncontrolled", "comorbidity", "BMI 27.9", "26.4→27.1→27.9", 2020],
+    ],
+    meds: [
+      ["Glycomet 1000", "Metformin 1000mg", "1-0-1", "BD", "diabetes", "After meals"],
+      [
+        "Istamet 50/500",
+        "Sitagliptin 50mg + Metformin 500mg",
+        "1-0-0",
+        "OD",
+        "diabetes",
+        "After breakfast",
+      ],
+    ],
+    external: null,
+    plan:
+      "HbA1c drifted 7.2 → 7.9 over three months. Compliance reported ~71% — skipping the evening metformin. " +
+      "Weight up 2.4kg since the last visit; says the walking stopped after Diwali. Numbers otherwise in range, " +
+      "renal and lipids fine. Suggest reinforcing the evening dose before adding anything.",
+    proposals: [
+      [
+        "Glycomet 1000",
+        "1000mg BD",
+        "1000mg BD + evening reminder",
+        "compliance, not dose",
+        "continued",
+      ],
+    ],
+  },
+  getting_better: {
+    current: {
+      hba1c: 8.1,
+      fg: 129,
+      ppbs: 176,
+      ldl: 88,
+      hdl: 46,
+      tg: 140,
+      tc: 162,
+      uacr: 12,
+      egfr: 97,
+      creatinine: 0.88,
+      tsh: 2.1,
+      vitd: 31,
+      hb: 13.4,
+    },
+    trail: [
+      { months: 3, b: { hba1c: 9.4, fg: 168, ldl: 118, tg: 186, uacr: 19, egfr: 95 } },
+      { months: 7, b: { hba1c: 10.2, fg: 184, ldl: 134, tg: 210, uacr: 24, egfr: 93 } },
+    ],
+    vitals: { weight: 68.9, height: 160, bmi: 26.9, bp_sys: 126, bp_dia: 80, pulse: 74, spo2: 99 },
+    compliance: 86,
+    symptoms: [],
+    note: "Sugar ab theek lag raha hai — dawai kam ho sakti hai?",
+    diagnoses: [
+      ["dm2", "Type 2 DM", "Controlled", "primary", "HbA1c 8.1%", "10.2→9.4→8.1", 2019],
+      ["dyslipidemia", "Dyslipidaemia", "Controlled", "comorbidity", "LDL 88", "134→118→88", 2019],
+    ],
+    meds: [
+      [
+        "Glycomet GP1",
+        "Metformin 500mg + Glimepiride 1mg",
+        "1-0-1",
+        "BD",
+        "diabetes",
+        "Before meals",
+      ],
+      ["Atchol 10", "Atorvastatin 10mg", "0-0-1", "OD", "lipids", "At bedtime"],
+    ],
+    external: null,
+    plan:
+      "Good trajectory — 10.2 → 9.4 → 8.1 across three visits, compliance 86% and walking daily. " +
+      "LDL down to 88 on 10mg. Still above the 7.0 target so not for de-escalation yet; asked about reducing " +
+      "medicines, explained why we hold for one more cycle.",
+    proposals: [],
+  },
+  in_control: {
+    current: {
+      hba1c: 6.4,
+      fg: 98,
+      ppbs: 132,
+      ldl: 82,
+      hdl: 51,
+      tg: 118,
+      tc: 156,
+      uacr: 8,
+      egfr: 103,
+      creatinine: 0.79,
+      tsh: 1.8,
+      vitd: 36,
+      hb: 13.9,
+    },
+    trail: [
+      { months: 4, b: { hba1c: 6.5, fg: 101, ldl: 86, tg: 124, uacr: 7, egfr: 102 } },
+      { months: 8, b: { hba1c: 6.6, fg: 104, ldl: 90, tg: 130, uacr: 9, egfr: 101 } },
+    ],
+    vitals: { weight: 64.1, height: 165, bmi: 23.5, bp_sys: 118, bp_dia: 76, pulse: 70, spo2: 99 },
+    compliance: 95,
+    symptoms: [],
+    note: null,
+    diagnoses: [["dm2", "Type 2 DM", "Controlled", "primary", "HbA1c 6.4%", "6.6→6.5→6.4", 2021]],
+    meds: [["Glycomet 500", "Metformin 500mg", "1-0-1", "BD", "diabetes", "After meals"]],
+    external: null,
+    plan:
+      "Everything at target and steady for a year — HbA1c 6.6 → 6.5 → 6.4, renal and lipids clean, " +
+      "compliance 95%. Green category: no change proposed, six-month recall.",
+    proposals: [],
+  },
+};
+
+// The lab table the Labs & graphs tabs read. Panel names match the groups the
+// screen sorts into, so every tab has rows rather than four empty ones.
+const LAB_ROWS = [
+  ["hba1c", "HbA1c", "%", "4.0-5.6", "Diabetes"],
+  ["fg", "FBS", "mg/dL", "70-100", "Diabetes"],
+  ["ppbs", "PPBS", "mg/dL", "<140", "Diabetes"],
+  ["tc", "Total Cholesterol", "mg/dL", "<200", "Lipid Profile"],
+  ["ldl", "LDL", "mg/dL", "<100", "Lipid Profile"],
+  ["hdl", "HDL", "mg/dL", ">40", "Lipid Profile"],
+  ["tg", "Triglycerides", "mg/dL", "<150", "Lipid Profile"],
+  ["creatinine", "Creatinine", "mg/dL", "0.6-1.2", "KFT"],
+  ["egfr", "eGFR", "mL/min", ">60", "KFT"],
+  ["uacr", "UACR", "mg/g", "<30", "KFT"],
+  ["tsh", "TSH", "µIU/mL", "0.4-4.0", "Thyroid"],
+  ["vitd", "Vitamin D", "ng/mL", "30-100", "Vitamins"],
+  ["hb", "Hemoglobin", "g/dL", "12-16", "CBC"],
+];
+
+const flagFor = (key, value) => {
+  const t = {
+    hba1c: 5.6,
+    fg: 100,
+    ppbs: 140,
+    tc: 200,
+    ldl: 100,
+    tg: 150,
+    creatinine: 1.2,
+    uacr: 30,
+  };
+  const low = { hdl: 40, egfr: 60, vitd: 30, hb: 12 };
+  if (t[key] !== undefined) return value > t[key] ? "H" : null;
+  if (low[key] !== undefined) return value < low[key] ? "L" : null;
+  return null;
+};
+
+// Everything the consult screen reads, for one demo visit.
+async function seedConsultFor(
+  client,
+  { visitId, patientId, patientName, fileNo, category, sdId, chiefId, visitDate },
+) {
+  const profile = CONSULT_PROFILES[category];
+  if (!profile) return 0;
+
+  const dateAt = async (monthsAgo) =>
+    (
+      await client.query(`SELECT ($1::date - ($2 || ' months')::interval)::date::text AS d`, [
+        visitDate,
+        monthsAgo,
+      ])
+    ).rows[0].d;
+
+  // The history the deltas and the trend graphs are drawn from.
+  for (const step of profile.trail) {
+    await client.query(
+      `INSERT INTO appointments (patient_id, patient_name, file_no, appointment_date, status,
+                                 visit_type, biomarkers)
+       VALUES ($1, $2, $3, $4::date, 'completed', 'OPD', $5::jsonb)`,
+      [patientId, patientName, fileNo, await dateAt(step.months), JSON.stringify(step.b)],
+    );
+  }
+
+  // Today's appointment — where the consult screen reads "today's numbers" and
+  // the compliance percentage from. The visit is pointed at it, which is the
+  // join `getConsult` makes.
+  const { rows: appt } = await client.query(
+    `INSERT INTO appointments (patient_id, patient_name, file_no, appointment_date, status,
+                               visit_type, biomarkers, pre_visit_compliance, pre_visit_compliance_at,
+                               pre_visit_symptoms, pre_visit_notes)
+     VALUES ($1, $2, $3, $4::date, 'checkedin', 'OPD', $5::jsonb, $6::jsonb, NOW(), $7::text[], $8)
+     RETURNING id`,
+    [
+      patientId,
+      patientName,
+      fileNo,
+      visitDate,
+      JSON.stringify(profile.current),
+      JSON.stringify({ pct: profile.compliance }),
+      profile.symptoms?.length ? profile.symptoms : null,
+      profile.note,
+    ],
+  );
+  await client.query(`UPDATE giniflow_visits SET appointment_id = $2 WHERE id = $1`, [
+    visitId,
+    appt[0].id,
+  ]);
+
+  // The chart's lab table, on two dates so a graph has a line rather than a dot.
+  const previous = profile.trail[0]?.b || {};
+  for (const [when, blob] of [
+    [visitDate, profile.current],
+    [await dateAt(profile.trail[0]?.months ?? 4), previous],
+  ]) {
+    for (const [key, testName, unit, ref, panel] of LAB_ROWS) {
+      const value = blob[key];
+      if (value === undefined) continue;
+      await client.query(
+        `INSERT INTO lab_results (patient_id, test_date, panel_name, test_name, canonical_name,
+                                  result, unit, ref_range, flag, source)
+         VALUES ($1, $2::date, $3, $4, $5, $6, $7, $8, $9, 'report_extract')
+         ON CONFLICT DO NOTHING`,
+        [patientId, when, panel, testName, testName, value, unit, ref, flagFor(key, value)],
+      );
+    }
+    await client.query(
+      `INSERT INTO documents (patient_id, doc_type, title, doc_date, source)
+       VALUES ($1, 'lab_report', $2, $3::date, 'upload_demo')`,
+      [patientId, `Lab report — ${when}`, when],
+    );
+  }
+
+  for (const [i, [id, label, status, cat, keyValue, trend, since]] of profile.diagnoses.entries()) {
+    await client.query(
+      `INSERT INTO diagnoses (patient_id, diagnosis_id, label, status, category, key_value, trend,
+                              since_year, sort_order, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, TRUE)`,
+      [patientId, id, label, status, cat, keyValue, trend, since, i],
+    );
+  }
+
+  for (const [i, [name, composition, dose, frequency, group, timing]] of profile.meds.entries()) {
+    await client.query(
+      `INSERT INTO medications (patient_id, name, composition, dose, frequency, timing, med_group,
+                                route, form, sort_order, is_active, started_date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'Oral', 'Tablet', $8, TRUE, $9::date)`,
+      [patientId, name, composition, dose, frequency, timing, group, i, await dateAt(6)],
+    );
+  }
+  if (profile.external) {
+    const [name, composition, dose, doctor] = profile.external;
+    await client.query(
+      `INSERT INTO medications (patient_id, name, composition, dose, frequency, med_group,
+                                external_doctor, route, form, is_active, started_date)
+       VALUES ($1, $2, $3, $4, 'OD', 'external', $5, 'Oral', 'Tablet', TRUE, $6::date)`,
+      [patientId, name, composition, dose, doctor, await dateAt(3)],
+    );
+  }
+
+  // Vitals taken at the chair an hour ago — what the consult header's BP and
+  // weight come from, and what tops up today's numbers.
+  await client.query(
+    `INSERT INTO giniflow_vitals (visit_id, patient_id, weight, height, bmi, bp_sys, bp_dia,
+                                  pulse, spo2, source, recorded_by, recorded_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'manual', $10, NOW() - INTERVAL '55 minutes')`,
+    [
+      visitId,
+      patientId,
+      profile.vitals.weight,
+      profile.vitals.height,
+      profile.vitals.bmi,
+      profile.vitals.bp_sys,
+      profile.vitals.bp_dia,
+      profile.vitals.pulse,
+      profile.vitals.spo2,
+      sdId,
+    ],
+  );
+
+  // The MO's workup note and their proposals — the first section the consultant
+  // reads, and the one the screen opens on.
+  await client.query(
+    `INSERT INTO giniflow_sd_notes (visit_id, plan, source, authored_by)
+     VALUES ($1, $2, 'typed', $3)
+     ON CONFLICT (visit_id) DO UPDATE SET plan = EXCLUDED.plan, updated_at = NOW()`,
+    [visitId, profile.plan, sdId],
+  );
+
+  for (const [name, from, to, reason, changeType] of profile.proposals) {
+    await client.query(
+      `INSERT INTO giniflow_rx_proposals (visit_id, medicine_name, from_dose, to_dose, reason,
+                                          change_type, proposed_by, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'proposed')`,
+      [visitId, name, from, to, reason, changeType, sdId],
+    );
+  }
+
+  return 1;
+}
+
 const DEMO_MARKER = "giniflow-demo";
 
 // GF-03: the seeder used to pick real patients (`SELECT id FROM patients ORDER BY
@@ -346,7 +911,49 @@ const DEMO_NAMES = [
   "Demo Rajesh Bansal",
   "Demo Kiran Bala",
   "Demo Surinder Pal",
+  // Tomorrow's triage list is a different set of people from today's floor, so
+  // the roster has to be long enough for both — a wrapped name would put the
+  // same person on two days with two different clinical stories.
+  "Demo Paramjit Singh",
+  "Demo Veena Sharma",
+  "Demo Karan Malhotra",
+  "Demo Simran Kaur",
+  "Demo Vikram Chopra",
+  "Demo Anita Mehra",
+  "Demo Harbans Lal",
+  "Demo Pooja Aggarwal",
+  "Demo Tarun Sethi",
+  "Demo Meena Kumari",
+  "Demo Jagdish Rai",
 ];
+
+// Sex follows the NAME, not the row's parity — which is what it used to do, so
+// every other demo card read "Demo Sunita Devi · 52M". On a screen built to be
+// shown to clinicians that is the first thing anyone notices.
+const FEMALE_MARKERS = [
+  "kaur",
+  "devi",
+  "rani",
+  "bala",
+  "kumari",
+  "promila",
+  "isha",
+  "veena",
+  "anita",
+  "pooja",
+  "simran",
+  "meena",
+  "manjit",
+  "jasbir",
+  "kamla",
+  "neelam",
+  "sunita",
+  "harpreet",
+  "kiran",
+];
+
+const sexForName = (name) =>
+  FEMALE_MARKERS.some((m) => name.toLowerCase().includes(m)) ? "Female" : "Male";
 
 async function ensureDemoPatients(client, count) {
   const ids = [];
@@ -357,7 +964,12 @@ async function ensureDemoPatients(client, count) {
        VALUES ($1, $2, $3, $4, NULL)
        ON CONFLICT (file_no) DO UPDATE SET name = EXCLUDED.name
        RETURNING id`,
-      [DEMO_NAMES[i % DEMO_NAMES.length], fileNo, 40 + ((i * 3) % 35), i % 2 ? "Female" : "Male"],
+      [
+        DEMO_NAMES[i % DEMO_NAMES.length],
+        fileNo,
+        40 + ((i * 3) % 35),
+        sexForName(DEMO_NAMES[i % DEMO_NAMES.length]),
+      ],
     );
     ids.push(rows[0].id);
   }
@@ -405,7 +1017,14 @@ export async function seedDemoDay({ db = pool, date = null } = {}) {
       doneJourney(91, 70),
     ];
 
-    const patientIds = await ensureDemoPatients(client, journeys.length);
+    // Today's floor and tomorrow's triage list are DIFFERENT people, as they are
+    // on a real day. Sharing them meant one patient carried two clinical stories
+    // — the consult trail said HbA1c 7.2 → 7.9 while the triage row said 8.2 for
+    // the same week — and whichever appointment sorted latest silently became
+    // the "previous reading" the consult screen measured today against.
+    const patientIds = await ensureDemoPatients(client, journeys.length + TRIAGE_PROFILES.length);
+    const floorPatientIds = patientIds.slice(0, journeys.length);
+    const triagePatientIds = patientIds.slice(journeys.length);
     const doctors = await pickDoctors(client);
     const now = Date.now();
     const at = (minsAgo) => new Date(now - minsAgo * MINUTE).toISOString();
@@ -415,7 +1034,7 @@ export async function seedDemoDay({ db = pool, date = null } = {}) {
     // enough for the connection to be dropped mid-way.
     const visitRows = journeys.map((journey, i) => ({
       journey,
-      patientId: patientIds[i],
+      patientId: floorPatientIds[i],
       finalStatus: journey.steps[journey.steps.length - 1][0],
       appointmentTime: `${String(8 + (i % 4)).padStart(2, "0")}:${String((i * 7) % 60).padStart(2, "0")}`,
     }));
@@ -478,6 +1097,34 @@ export async function seedDemoDay({ db = pool, date = null } = {}) {
       ],
     );
 
+    // The chart behind each card: biomarkers on the appointment, the lab table,
+    // diagnoses, medications, vitals, the MO's note and their proposals. Without
+    // it every consult screen opened on a wall of "nothing recorded" boxes.
+    const { rows: floorDay } = await client.query(
+      `SELECT COALESCE($1::date, (NOW() AT TIME ZONE 'Asia/Kolkata')::date)::text AS d`,
+      [date],
+    );
+    const floorDate = floorDay[0].d;
+
+    let consults = 0;
+    for (const row of visitRows) {
+      const visitId = idByPatient.get(row.patientId);
+      if (!visitId) continue;
+      const { rows: who } = await client.query(`SELECT name, file_no FROM patients WHERE id = $1`, [
+        row.patientId,
+      ]);
+      consults += await seedConsultFor(client, {
+        visitId,
+        patientId: row.patientId,
+        patientName: who[0].name,
+        fileNo: who[0].file_no,
+        category: row.journey.category,
+        sdId: doctors.sd,
+        chiefId: doctors.chief,
+        visitDate: floorDate,
+      });
+    }
+
     let labOrders = 0;
     for (const order of LAB_ORDERS) {
       const visitId = byKey[order.journey];
@@ -518,7 +1165,33 @@ export async function seedDemoDay({ db = pool, date = null } = {}) {
       labOrders++;
     }
 
+    // Tomorrow, for the triage board. Written inside the same transaction as the
+    // floor, so a demo day is all-or-nothing.
+    const { rows: nextDay } = await client.query(
+      `SELECT (COALESCE($1::date, (NOW() AT TIME ZONE 'Asia/Kolkata')::date) + 1)::date::text AS d`,
+      [date],
+    );
+    const triage = await seedTriageDay(client, triagePatientIds, nextDay[0].d);
+
     await client.query("COMMIT");
+
+    // The triage day's VISIT rows are built the same way the board builds them
+    // on open — through the appointment sync, not by hand — so the seeder can
+    // never produce a shape the real path would not (18-TRIAGE-BOARD-PLAN §3.2b).
+    await syncAppointmentsToFlow({ date: triage.triageDate, db });
+    const categorised = await autoCategoriseDay(triage.triageDate, { db });
+
+    // `lifestyle_flagged` lives on the visit, which only exists once the sync
+    // above has run — so it is stamped here rather than with the appointment.
+    if (triage.lifestyleFileNos.length) {
+      await db.query(
+        `UPDATE giniflow_visits v SET lifestyle_flagged = TRUE
+           FROM patients p
+          WHERE p.id = v.patient_id AND v.visit_date = $1::date AND p.file_no = ANY($2::text[])`,
+        [triage.triageDate, triage.lifestyleFileNos],
+      );
+    }
+
     const skipped = visitRows
       .filter((r) => !idByPatient.get(r.patientId))
       .map((r) => r.journey.key);
@@ -526,6 +1199,12 @@ export async function seedDemoDay({ db = pool, date = null } = {}) {
       visits: Object.keys(byKey).length,
       events: events.length,
       labOrders,
+      consults,
+      triage: {
+        date: triage.triageDate,
+        appointments: triage.created,
+        categorised: categorised.updated,
+      },
       skipped,
       ...(skipped.length
         ? {
@@ -548,7 +1227,61 @@ export async function cleanDemoDay(db = pool) {
   const client = await db.connect();
   try {
     await client.query("BEGIN");
-    const { rowCount } = await client.query(`DELETE FROM giniflow_visits WHERE is_demo`);
+    // Scoped by the demo file-number prefix, so a real patient can never be
+    // caught by any of the deletes below.
+    const demoPatients = await client.query(
+      `SELECT id FROM patients WHERE file_no LIKE $1 || '%'`,
+      [DEMO_FILE_PREFIX],
+    );
+    const demoIds = demoPatients.rows.map((r) => r.id);
+
+    // `is_demo` alone is no longer enough: reception's walk-in check-in creates
+    // an ordinary visit, so a smoke run leaves one behind that is not flagged —
+    // and the patient delete below then fails on its foreign key, which leaves
+    // demo people sitting in production.
+    const { rowCount } = await client.query(
+      `DELETE FROM giniflow_visits WHERE is_demo OR patient_id = ANY($1::int[])`,
+      [demoIds],
+    );
+
+    // A finalized demo consult writes into the CHART — `consultations` and
+    // `medications` — because that is the point: the consultant station has one
+    // prescription history and does not keep a demo copy of it. Those rows
+    // reference the demo patient, so deleting the patient fails on the foreign
+    // key, and a failed clean leaves demo people sitting in production.
+    //
+    if (demoIds.length) {
+      // The pharmacy station marks a collection row per medicine, and those
+      // reference both the patient and the medication — so they have to go
+      // first, or the medications delete below fails on the foreign key and the
+      // clean leaves demo people sitting in production.
+      await client.query(`DELETE FROM medicine_collections WHERE patient_id = ANY($1::int[])`, [
+        demoIds,
+      ]);
+      await client.query(`DELETE FROM medications WHERE patient_id = ANY($1::int[])`, [demoIds]);
+      await client.query(`DELETE FROM vitals WHERE patient_id = ANY($1::int[])`, [demoIds]);
+      await client.query(`DELETE FROM diagnoses WHERE patient_id = ANY($1::int[])`, [demoIds]);
+      await client.query(`DELETE FROM lab_results WHERE patient_id = ANY($1::int[])`, [demoIds]);
+      // The consult seed writes a report document per lab date, and documents
+      // reference the patient — so they go with them or the patient delete
+      // fails on the foreign key and demo people stay in production.
+      await client.query(`DELETE FROM documents WHERE patient_id = ANY($1::int[])`, [demoIds]);
+      await client.query(`DELETE FROM consultations WHERE patient_id = ANY($1::int[])`, [demoIds]);
+    }
+
+    // The triage day's appointments. They carry no is_demo flag — the column
+    // does not exist — so they are scoped to the demo patients, and they have to
+    // go AFTER the visits above, which reference them.
+    if (demoIds.length) {
+      await client.query(`DELETE FROM appointments WHERE patient_id = ANY($1::int[])`, [demoIds]);
+    }
+
+    // Reception's walk-in check-in writes the hospital's own booking record, so
+    // a smoke run leaves one behind unless it is cleaned with the patient.
+    await client.query(`DELETE FROM walkin_bookings WHERE file_no LIKE $1 || '%'`, [
+      DEMO_FILE_PREFIX,
+    ]);
+
     const patients = await client.query(`DELETE FROM patients WHERE file_no LIKE $1 || '%'`, [
       DEMO_FILE_PREFIX,
     ]);

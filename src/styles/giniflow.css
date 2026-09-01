@@ -21,12 +21,6 @@
 .gf .col-body:hover::-webkit-scrollbar-thumb {
   background: var(--ink4);
 }
-.gf *,
-.gf *::before,
-.gf *::after {
-  box-sizing: border-box;
-}
-
 @keyframes pulse {
   0%,
   100% {
@@ -415,93 +409,9 @@
   gap: 7px;
   flex-shrink: 0;
 }
-.gf .btn {
-  padding: 7px 13px;
-  border-radius: var(--r);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  border: 1px solid;
-  font-family: var(--fb);
-}
-.gf .btn-tl {
-  background: var(--tl);
-  color: #fff;
-  border-color: var(--tl);
-}
-.btn-tl:hover {
-  opacity: 0.88;
-}
-.gf .btn-g {
-  background: var(--white);
-  color: var(--ink3);
-  border-color: var(--bd);
-}
 
 /* ── TIMELINE MODAL ── */
-.gf .tmodal {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  z-index: 300;
-  display: none;
-  align-items: center;
-  justify-content: center;
-}
-.gf .tmodal.open {
-  display: flex;
-}
-.gf .tbox {
-  background: var(--white);
-  border-radius: var(--r-lg);
-  width: 520px;
-  max-height: 86vh;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.gf .tb-hd {
-  background: var(--nv);
-  padding: 13px 17px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-}
-.gf .tb-name {
-  font-family: var(--fd);
-  font-size: 17px;
-  color: #fff;
-  font-style: italic;
-}
-.gf .tb-meta {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.45);
-  margin-top: 2px;
-}
-.gf .tb-cls {
-  margin-left: auto;
-  background: rgba(255, 255, 255, 0.1);
-  border: none;
-  border-radius: 50%;
-  width: 26px;
-  height: 26px;
-  cursor: pointer;
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.7);
-}
-.gf .tb-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 15px 17px;
-}
-.gf .tb-body::-webkit-scrollbar {
-  width: 4px;
-}
-.gf .tb-body::-webkit-scrollbar-thumb {
-  background: var(--bd2);
-}
+
 /* Timeline */
 .gf .tstep {
   display: flex;
@@ -619,14 +529,6 @@
 .gf .ts-blocked {
   color: var(--red);
   font-weight: 600;
-}
-.gf-loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  color: var(--ink3);
-  font-size: 13px;
 }
 /* The card is a real button; strip the browser's chrome without losing focus. */
 .gf .pc {
@@ -903,3 +805,248 @@
   border-color: var(--tl);
   background: rgba(255, 255, 255, 0.16);
 }
+
+/* ── PRIORITY + DRAG-AND-DROP ────────────────────────────────────────────────
+   The card is now a container: the whole body is still one button that opens
+   the timeline, with the ⋮ menu sitting above it in the corner. */
+.gf .pc {
+  position: relative;
+  padding: 0;
+}
+.gf .pc-open {
+  display: block;
+  width: 100%;
+  padding: 8px 9px;
+  background: none;
+  border: 0;
+  border-radius: var(--r);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.gf .pc-open:focus-visible {
+  outline: 2px solid var(--tl);
+  outline-offset: -2px;
+}
+.gf .pc-menu-btn {
+  position: absolute;
+  top: 4px;
+  right: 3px;
+  width: 18px;
+  height: 18px;
+  line-height: 1;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  color: var(--ink4);
+  font-size: 13px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+/* Always reachable by keyboard; revealed on hover so eight columns of cards are
+   not eight columns of ⋮ from across the room. */
+.gf .pc:hover .pc-menu-btn,
+.gf .pc-menu-btn:focus-visible {
+  opacity: 1;
+}
+.gf .pc-menu-btn:hover {
+  background: var(--bg2, #eef1f5);
+  color: var(--ink);
+}
+.gf .pc-open .pc-top {
+  padding-right: 16px;
+}
+
+/* Priority: a chip on the card and a matching left edge, so an urgent patient
+   is findable from the doorway as well as readable up close (GF-16 — the colour
+   is never the only signal, the chip says the word). */
+.gf .pc-pri {
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.gf .pc-pri.pri-urgent {
+  color: var(--red);
+  background: #fdeceb;
+}
+.gf .pc-pri.pri-high {
+  color: #b45309;
+  background: #fef3e2;
+}
+.gf .pc.pri-urgent {
+  border-left: 3px solid var(--red);
+}
+.gf .pc.pri-high {
+  border-left: 3px solid var(--amb);
+}
+/* The manual queue number, shown only on cards that were actually placed by
+   hand — otherwise every card would carry a number that means nothing. */
+.gf .pc-pos {
+  font-family: var(--fm);
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--tl);
+  margin-left: auto;
+}
+
+.gf .pc.dragging {
+  opacity: 0.4;
+  border-style: dashed;
+}
+.gf .pc[draggable="true"] {
+  cursor: grab;
+}
+.gf .pc[draggable="true"]:active {
+  cursor: grabbing;
+}
+/* A column that will accept the card being dragged, and the one under the
+   pointer right now. Every other column stays flat, so the legal destinations
+   are visible before the drop rather than discovered by it. */
+.gf .col.drop-ok {
+  border-color: var(--tl);
+  background: #eef7f6;
+}
+.gf .col.drop-active {
+  box-shadow: inset 0 0 0 2px var(--tl);
+}
+.gf .col.drop-ok .col-empty {
+  color: var(--tl);
+  font-weight: 600;
+}
+.gf .drop-line {
+  height: 2px;
+  border-radius: 2px;
+  background: var(--tl);
+  flex-shrink: 0;
+}
+
+/* ── CARD MENU ── the keyboard (and precise-click) equivalent of a drag. */
+.gf .pc-menu {
+  position: absolute;
+  top: 22px;
+  right: 4px;
+  z-index: 30;
+  width: 168px;
+  padding: 4px;
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  box-shadow: var(--sh-md);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.gf .pcm-hd {
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--ink4);
+  padding: 5px 6px 2px;
+}
+.gf .pcm-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 6px;
+  background: none;
+  border: 0;
+  border-radius: 5px;
+  font: inherit;
+  font-size: 10px;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.gf .pcm-item:hover:not(:disabled) {
+  background: #eef1f5;
+}
+.gf .pcm-item:disabled {
+  color: var(--ink4);
+  cursor: default;
+}
+.gf .pcm-item.on {
+  background: rgba(13, 148, 136, 0.1);
+  color: var(--tl);
+  font-weight: 700;
+}
+.gf .pri-dot {
+  width: 12px;
+  text-align: center;
+}
+.gf .pri-dot.pri-urgent {
+  color: var(--red);
+}
+.gf .pri-dot.pri-high {
+  color: var(--amb);
+}
+.gf .pri-dot.pri-normal {
+  color: var(--ink4);
+}
+
+/* While a card is in the air, the columns that cannot take it step back — a drag
+   may cross exactly one column, so the single legal destination should be
+   obvious before the drop rather than discovered by it (BQ-02). */
+.gf .board.dragging .col:not(.drop-ok) {
+  opacity: 0.5;
+}
+
+/* The optional "why" behind a raised priority, asked the way a block's reason is
+   (GF-18) but never insisted on. */
+.gf .pcm-item.pending {
+  background: rgba(13, 148, 136, 0.1);
+}
+.gf .pcm-reason {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 5px 6px 6px;
+}
+.gf .pcm-reason label {
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--ink4);
+}
+.gf .pcm-reason input {
+  width: 100%;
+  padding: 4px 6px;
+  font: inherit;
+  font-size: 10px;
+  color: var(--ink);
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: 5px;
+}
+.gf .pcm-reason input:focus-visible {
+  outline: 2px solid var(--tl);
+  outline-offset: -1px;
+}
+.gf .pcm-apply {
+  padding: 4px 6px;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--tl);
+  border: 0;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.gf .pcm-note {
+  font-size: 9px;
+  color: var(--ink4);
+  padding: 2px 6px 5px;
+}
+
+/* Sending a patient to Done ends their visit on the board, and an append-only
+   log has no way back — so it asks first (BQ-03). */

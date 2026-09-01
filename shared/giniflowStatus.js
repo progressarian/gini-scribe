@@ -62,7 +62,30 @@ export const CATEGORIES = [
   "no_reports",
 ];
 
-export const ACTOR_ROLES = ["reception", "vitals", "mo_sd", "doctor", "lab", "pharmacy", "system"];
+export const ACTOR_ROLES = [
+  "reception",
+  "vitals",
+  "mo_sd",
+  "doctor",
+  "lab",
+  "pharmacy",
+  // The floor manager moving a card on the board is a real actor, not the
+  // system: an event they caused must be attributable to them in the log.
+  "coordinator",
+  "system",
+];
+
+// Urgent and high are exceptions a manager declares; normal is everyone else,
+// so it is the column default and never needs setting.
+export const PRIORITIES = ["urgent", "high", "normal"];
+
+export const PRIORITY_LABEL = { urgent: "Urgent", high: "High", normal: "Normal" };
+
+export const PRIORITY_ICON = { urgent: "❗", high: "⬆", normal: "" };
+
+const PRIORITY_RANK = { urgent: 0, high: 1, normal: 2 };
+
+export const priorityRank = (priority) => PRIORITY_RANK[priority] ?? 2;
 
 export const STATUS_LABEL = {
   booked: "Booked",
@@ -227,3 +250,165 @@ export const canTransition = (from, to, resumeFrom = null) => {
   const jump = chainIndex(to) - chainIndex(from);
   return jump > 0 && jump <= MAX_FORWARD_JUMP;
 };
+
+// Where a card lands when it is dropped on a column. Each is the column's ENTRY
+// status — the queue, not the room, wherever the column has both — so a drop
+// means "this patient has arrived at this station", which is the only thing the
+// person dragging the card can actually know.
+//
+// The lab is not a drop target: it is a parallel track keyed on an order, not a
+// point in the chain, and a card sitting in it is also somewhere on the main
+// board.
+//
+// `done` writes `dispensed`, NOT `exited` (BQ-03). Dropping straight to exited
+// skipped the pharmacy entirely, so pharmacy time was never measured for that
+// visit — and it is the last status in the chain, which under append-only rules
+// means the mis-drop can never be corrected. `dispensed` is the step the drop
+// actually describes: the medicines were handed over. `exited` is left to the
+// HealthRay sync, which is authoritative for a visit being finished.
+export const COLUMN_ENTRY_STATUS = {
+  checked_in: "checked_in",
+  vitals: "with_vitals",
+  sd: "sd_pending",
+  wait_doctor: "ready_for_doctor",
+  doctor: "with_doctor",
+  pharmacy: "pharmacy_pending",
+  lab: null,
+  done: "dispensed",
+};
+
+// The columns that hold a point in the chain, left to right. The lab track is
+// absent because it is parallel to this list rather than a place in it.
+export const ORDERED_COLUMNS = [
+  "checked_in",
+  "vitals",
+  "sd",
+  "wait_doctor",
+  "doctor",
+  "pharmacy",
+  "done",
+];
+
+export const nextColumn = (key) => {
+  const i = ORDERED_COLUMNS.indexOf(key);
+  return i === -1 ? null : (ORDERED_COLUMNS[i + 1] ?? null);
+};
+
+// A drag may cross exactly one column. Note this is a rule about COLUMNS, not
+// about chain distance (BQ-02): the SD column holds three statuses and pharmacy
+// two, so a card is usually not sitting at its column's entry status, and
+// measuring the drag in chain steps rejected the ordinary case — vitals_done to
+// the doctor queue is three steps but one column. Adjacency is the rule the
+// person dragging the card can actually see, and it bounds the skip to a single
+// station however far apart the two entry statuses happen to be.
+export const canDropInColumn = (card, columnKey) => {
+  const to = COLUMN_ENTRY_STATUS[columnKey];
+  if (!to || !card || card.column === columnKey) return false;
+  if (nextColumn(card.column) !== columnKey) return false;
+  // A block is a documented decision, cleared with a reason at the station that
+  // set it. Letting a drag clear it silently would let an undocumented gesture
+  // undo a documented one (BQ-05).
+  if (isExceptionStatus(card.status)) return false;
+  return isChainStatus(card.status) && chainIndex(to) > chainIndex(card.status);
+};
+
+// The single ordering rule for a column, applied by the board service and again
+// by the client after an optimistic drag so the two can never disagree:
+//
+//   1. a manual position, set by dragging a card inside its column
+//   2. priority — urgent, then high, then normal
+//   3. longest waiting first, which is what the board did before any of this
+//
+// Cards with a manual position sort above those without: dragging one patient to
+// the top must not silently reshuffle the rest of the column around them.
+export const compareQueue = (a, b) => {
+  const ap = a.queuePosition ?? null;
+  const bp = b.queuePosition ?? null;
+  if (ap !== null && bp !== null && ap !== bp) return ap - bp;
+  if (ap !== null && bp === null) return -1;
+  if (ap === null && bp !== null) return 1;
+  const byPriority = priorityRank(a.priority) - priorityRank(b.priority);
+  if (byPriority !== 0) return byPriority;
+  return (b.statusMinutes ?? 0) - (a.statusMinutes ?? 0);
+};
+
+// ── Triage (docs/gini-flow/18-TRIAGE-BOARD-PLAN.md) ──────────────────────────
+// The five buckets above, with the words and the mark each one is rendered
+// with. The board, the consultant and the MO station each kept a private copy
+// of these labels; the triage board is the screen that WRITES the category, so
+// its vocabulary is defined here beside the values rather than a sixth time.
+//
+// `lead` is the operational consequence of the bucket — who works the patient —
+// which is the column heading the coordinator actually reads.
+export const CATEGORY_META = {
+  worse_out_of_range: {
+    icon: "🔴",
+    label: "Getting worse — out of range",
+    short: "Worse — out of range",
+    lead: "Chief consultant leads",
+    tone: "red",
+  },
+  worse_in_range: {
+    icon: "🟠",
+    label: "Getting worse — in range",
+    short: "Worse — in range",
+    lead: "SD leads · chief validates",
+    tone: "amb",
+  },
+  getting_better: {
+    icon: "🟡",
+    label: "Getting better",
+    short: "Getting better",
+    lead: "SD closes · chief async",
+    tone: "byet",
+  },
+  in_control: {
+    icon: "✅",
+    label: "In control",
+    short: "In control",
+    lead: "SD closes independently",
+    tone: "grn",
+  },
+  no_reports: {
+    icon: "🔵",
+    label: "No reports",
+    short: "No reports",
+    lead: "Chase reports · send phlebotomist",
+    tone: "pu",
+  },
+};
+
+export const isCategory = (value) => Object.hasOwn(CATEGORY_META, String(value));
+
+// Who last wrote `category`. The day's auto sweep may only overwrite its own
+// work, so a coordinator's judgement survives the next report landing.
+export const CATEGORY_SOURCES = ["auto", "coordinator"];
+
+// The day's readiness, in the order the prototype's pipeline bar renders it.
+// Every step is also a filter — the key is both the count returned by the API
+// and the `filter` it accepts, so a step's number and the patients it opens
+// cannot drift apart.
+export const TRIAGE_PIPELINE = [
+  { key: "total", label: "Total", sub: "Appointments this day", tone: "dim" },
+  {
+    key: "lab_reports_in",
+    label: "Lab reports in",
+    sub: "From the lab · auto-synced",
+    tone: "warn",
+  },
+  {
+    key: "reports_uploaded",
+    label: "Reports uploaded",
+    sub: "By patient or coordinator",
+    tone: "dim",
+  },
+  { key: "data_complete", label: "Data complete", sub: "Can be categorised", tone: "ok" },
+  { key: "categorised", label: "Categorised", sub: "Sorted into a column", tone: "ok" },
+  { key: "assigned", label: "Assigned", sub: "Has a doctor or SD", tone: "ok" },
+  { key: "checked_in", label: "Checked in", sub: "Already in the building", tone: "dim" },
+  { key: "no_show_cancel", label: "No-show / cancel", sub: "Not coming", tone: "crit" },
+];
+
+export const TRIAGE_FILTERS = TRIAGE_PIPELINE.map((s) => s.key);
+
+export const isTriageFilter = (value) => TRIAGE_FILTERS.includes(String(value));

@@ -137,6 +137,10 @@ const ROUTE_CAPABILITIES = [
   // here; the SLA write is separately gated with requireCapability on the route.
   // Station routes carry their own per-station capability on the route itself;
   // the prefix keeps them doctor-only and out of reach of a patient token.
+  // The triage board writes the clinical category and the day's assignments, so
+  // it is narrower than the read-only board prefix below it. Listed FIRST —
+  // these prefixes match in order, and /api/giniflow would otherwise swallow it.
+  ["/api/giniflow/triage", CAP.GINIFLOW_TRIAGE],
   ["/api/giniflow/stations", CAP.GINIFLOW_VIEW],
   ["/api/giniflow", CAP.GINIFLOW_VIEW],
   ["/api/obt-dashboard", CAP.OBT_OPS],

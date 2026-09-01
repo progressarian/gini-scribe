@@ -11,6 +11,13 @@ import "../../styles/giniflow-station.css";
 // reads as a permissions problem.
 const STATIONS = [
   {
+    key: "triage",
+    icon: "🗂",
+    name: "Triage",
+    desc: "Tomorrow's list · reports in · categorise · assign",
+    href: "/giniflow/triage",
+  },
+  {
     key: "manager",
     icon: "🗺",
     name: "Flow Coordinator",
@@ -43,13 +50,21 @@ const STATIONS = [
     icon: "👨‍⚕️",
     name: "MO / SD",
     desc: "Workup · plan · order tests · ready for doctor",
+    href: "/giniflow/station/mo",
   },
-  { key: "doctor", icon: "🧑‍⚕️", name: "Consultant", desc: "Brief · labs · prescription · plan" },
+  {
+    key: "doctor",
+    icon: "🧑‍⚕️",
+    name: "Consultant",
+    desc: "Brief · labs · prescription · plan",
+    href: "/giniflow/station/doctor",
+  },
   {
     key: "pharmacy",
     icon: "💊",
     name: "Pharmacy",
     desc: "Dispense · patient counselling · exit confirmation",
+    href: "/giniflow/station/pharmacy",
   },
 ];
 

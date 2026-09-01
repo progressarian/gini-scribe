@@ -1,5 +1,6 @@
 import pool from "../../config/db.js";
 import { getSlaConfig, getDayBoard, getBottleneck } from "./board.js";
+import { getTriageSummary } from "./triage.js";
 
 // The counts on the launcher tiles. One query set for the whole floor, so the
 // landing screen costs the same whether a coordinator holds one station or all
@@ -28,7 +29,18 @@ export async function getStationSummary(visitDate, db = pool) {
     [visitDate],
   );
 
+  // Triage works TOMORROW, not the day the rest of these count, so it gets its
+  // own read rather than a slice of the board above.
+  const triage = await getTriageSummary(db);
+
   return {
+    triage: {
+      count: triage.uncategorised,
+      label: triage.total
+        ? `${triage.uncategorised} of ${triage.total} to sort`
+        : "tomorrow not booked yet",
+      tone: triage.uncategorised ? "red" : "teal",
+    },
     manager: {
       count: atRisk,
       label: atRisk === 1 ? "1 at risk" : `${atRisk} at risk`,
@@ -49,6 +61,7 @@ export async function getStationSummary(visitDate, db = pool) {
       label: `${lab[0].to_collect} to collect · ${lab[0].to_upload} to upload`,
       tone: "teal",
     },
+    mo_sd: { count: col("sd"), label: `${col("sd")} in workup`, tone: "blue" },
     doctor: { count: col("wait_doctor"), label: `${col("wait_doctor")} waiting`, tone: "red" },
     pharmacy: { count: col("pharmacy"), label: `${col("pharmacy")} ready`, tone: "teal" },
     bottleneck: bottleneck ? { station: bottleneck.station, label: bottleneck.label } : null,

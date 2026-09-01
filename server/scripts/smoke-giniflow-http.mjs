@@ -125,6 +125,59 @@ try {
     console.log("  -- no nurse account on this database; skipping the 403 path");
   }
 
+  // Reception's arrivals tab. The literal paths share a prefix with
+  // `/reception/:orderId/clear`, so the first thing asserted over HTTP is that
+  // they are still reachable at all — the consultant station shipped exactly
+  // this bug once, with a literal path swallowed by a parameterised one.
+  const desk = await tokenFor(["reception"]);
+  check(
+    "arrivals rejects an unauthenticated request",
+    (await call("/api/giniflow/stations/reception/arrivals")).status === 401,
+  );
+  if (desk) {
+    const arrivals = await call("/api/giniflow/stations/reception/arrivals", desk.token);
+    const body = arrivals.status === 200 ? await arrivals.json() : null;
+    check(
+      "arrivals is not swallowed by the parameterised payment route",
+      arrivals.status === 200 && Array.isArray(body?.expected),
+      `${arrivals.status}`,
+    );
+    check(
+      "it returns the three groups the desk works",
+      ["expected", "onFloor", "notComing"].every((k) => Array.isArray(body?.[k])),
+    );
+    const walkInSearch = await call(
+      "/api/giniflow/stations/reception/walk-in/search?q=singh",
+      desk.token,
+    );
+    check("the walk-in search is reachable", walkInSearch.status === 200, `${walkInSearch.status}`);
+    const shortWalkIn = await call(
+      "/api/giniflow/stations/reception/walk-in/search?q=a",
+      desk.token,
+    );
+    check("a one-character walk-in search is rejected", shortWalkIn.status === 400);
+    const noReason = await call(
+      "/api/giniflow/stations/reception/00000000-0000-0000-0000-000000000000/cancel",
+      desk.token,
+      { method: "POST", body: JSON.stringify({ reason: "" }) },
+    );
+    check(
+      "cancelling without a reason is rejected with 400",
+      noReason.status === 400,
+      `${noReason.status}`,
+    );
+  } else {
+    console.log("  -- no reception account on this database; skipping the arrivals paths");
+  }
+  if (nurse) {
+    const denied = await call("/api/giniflow/stations/reception/arrivals", nurse.token);
+    check(
+      "a role without the reception capability is refused",
+      denied.status === 403,
+      `${denied.status}`,
+    );
+  }
+
   // The demo endpoints must refuse on a host without the flag, admin or not.
   if (manager && process.env.GINIFLOW_ALLOW_DEMO !== "1") {
     const seed = await call("/api/giniflow/demo/seed", manager.token, { method: "POST" });

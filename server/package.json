@@ -29,7 +29,13 @@
     "smoke:giniflow-vitals": "node scripts/smoke-giniflow-vitals.mjs",
     "smoke:giniflow-speech": "node scripts/smoke-giniflow-speech.mjs",
     "smoke:giniflow-reception": "node scripts/smoke-giniflow-reception.mjs",
-    "smoke:giniflow-lab": "node scripts/smoke-giniflow-lab.mjs"
+    "smoke:giniflow-lab": "node scripts/smoke-giniflow-lab.mjs",
+    "smoke:giniflow-queue": "node scripts/smoke-giniflow-queue.mjs",
+    "smoke:giniflow-doctor": "node scripts/smoke-giniflow-doctor.mjs",
+    "smoke:giniflow-mo": "node scripts/smoke-giniflow-mo.mjs",
+    "smoke:giniflow-live": "node scripts/smoke-giniflow-live.mjs",
+    "smoke:giniflow-pharmacy": "node scripts/smoke-giniflow-pharmacy.mjs",
+    "smoke:giniflow-triage": "node scripts/smoke-giniflow-triage.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.101.1",

@@ -13,6 +13,8 @@ import {
   saveVitals,
   startVitals,
 } from "../services/giniflow/vitalsStation.js";
+import { setPriority } from "../services/giniflow/queue.js";
+import { advanceStatus } from "../services/giniflow/statusEngine.js";
 
 let failures = 0;
 const check = (label, ok, detail = "") => {
@@ -30,6 +32,7 @@ await cleanDemoDay();
 await seedDemoDay({ date: TEST_DAY });
 
 const { queue, doneToday } = await getVitalsQueue(TEST_DAY);
+const target0 = queue[0]?.visitId;
 check("queue returns waiting patients", queue.length > 0, `${queue.length}`);
 check("first patient is marked Now", queue[0]?.slot === "Now", queue[0]?.slot);
 check(
@@ -42,6 +45,77 @@ check(
   "queue carries what the card needs",
   ["name", "fileNo", "age", "visitNumber", "status"].every((k) => k in queue[0]),
 );
+
+// ── 11-VITALS-QUEUE-PLAN.md ─────────────────────────────────────────────────
+check(
+  "every row carries the wait the station acts on",
+  queue.every(
+    (q) => "waitMinutes" in q && "waitColour" in q && "statusSince" in q && "checkedInAt" in q,
+  ),
+);
+check(
+  "the wait is coloured against a budget, like the board",
+  ["g", "green", "amber", "a", "red", "r", "neutral"].includes(queue[0].waitColour),
+  queue[0].waitColour,
+);
+
+// Priority is the VIP mark — there is no separate flag, and borrowing
+// flow_visits.is_vip would reconnect the retired module.
+const behind = queue[queue.length - 1];
+check("a patient at the back of the queue to promote", !!behind && behind.visitId !== target0);
+if (behind) {
+  await setPriority(behind.visitId, "urgent", "chest pain", null);
+  const promoted = await getVitalsQueue(TEST_DAY);
+  // Whoever is already on the chair is not pulled off it, and the demo day can
+  // seed more than one of them — so the urgent patient rises to the top of the
+  // waiting queue, which is the first row after the station's own.
+  const atStation = promoted.queue.filter((q) => q.status === "with_vitals").length;
+  const position = promoted.queue.findIndex((q) => q.visitId === behind.visitId);
+  check(
+    "an urgent patient rises to the top of the queue",
+    position === atStation,
+    `position ${position} of ${promoted.queue.length}, ${atStation} already at the station`,
+  );
+  check(
+    "the reason travels with them",
+    promoted.queue[position]?.priorityReason === "chest pain",
+    promoted.queue[position]?.priorityReason,
+  );
+  check(
+    "the patient at the station still reads Now",
+    atStation === 0 || promoted.queue[0].slot === "Now",
+  );
+  await setPriority(behind.visitId, "normal", null, null);
+}
+
+// A held patient is in the building and cannot be called. Before this they
+// vanished from the station entirely.
+const holdMe = queue[queue.length - 1];
+if (holdMe) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await advanceStatus(client, {
+      visitId: holdMe.visitId,
+      toStatus: "blocked_reports",
+      actorRole: "reception",
+      blockedReason: "Lab payment pending",
+    });
+    await client.query("COMMIT");
+  } finally {
+    client.release();
+  }
+  const withHold = await getVitalsQueue(TEST_DAY);
+  check(
+    "a held patient leaves the callable queue",
+    !withHold.queue.some((q) => q.visitId === holdMe.visitId),
+  );
+  check(
+    "a held patient is listed separately, with the reason",
+    withHold.held.find((h) => h.visitId === holdMe.visitId)?.blockedReason ===
+      "Lab payment pending",
+  );
+}
 
 const target = queue[0].visitId;
 const patient = await getVitalsPatient(target);
@@ -72,6 +146,23 @@ check(
   "saving advances to vitals_done",
   after.current_status === "vitals_done",
   after.current_status,
+);
+
+const doneList = await getVitalsQueue(TEST_DAY);
+check("the done count rose", doneList.doneToday === 1, `${doneList.doneToday}`);
+check(
+  "the done list names the patient, not just a number",
+  doneList.done[0]?.visitId === target && !!doneList.done[0]?.name,
+);
+check("the done row shows the reading", doneList.done[0]?.bp === "148/94", doneList.done[0]?.bp);
+check(
+  "the done row shows where the patient has got to",
+  !!doneList.done[0]?.nowAt,
+  doneList.done[0]?.nowAt,
+);
+check(
+  "a done patient is out of the callable queue",
+  !doneList.queue.some((q) => q.visitId === target),
 );
 
 const ev = await one(

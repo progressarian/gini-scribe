@@ -7,6 +7,9 @@ import {
   giniflowDateQuerySchema,
   giniflowSearchQuerySchema,
   giniflowSlaUpdateSchema,
+  giniflowPrioritySchema,
+  giniflowReorderSchema,
+  giniflowMoveSchema,
 } from "../schemas/index.js";
 import { CAPABILITIES as CAP } from "../../shared/permissions.js";
 import { getStationTimes } from "../services/giniflow/statusEngine.js";
@@ -19,9 +22,50 @@ import {
   getStationAverages,
   searchDayVisits,
 } from "../services/giniflow/board.js";
+import { setPriority, reorderColumn, moveToColumn } from "../services/giniflow/queue.js";
 import { seedDemoDay, cleanDemoDay, demoAllowed } from "../services/giniflow/demo.js";
+import { addClient, removeClient, hubStatus } from "../services/giniflow/eventHub.js";
 
 const router = Router();
+
+// Live updates for the board and the stations (docs/gini-flow/12-REALTIME-PLAN.md).
+//
+// Server-Sent Events rather than a socket to Supabase Realtime: this way the
+// connection is authenticated by our own middleware — `EventSource` cannot set
+// headers, which is exactly what the `?token=` form in middleware/auth.js is
+// for — and no anon key reaches the browser. The frames carry a signal, never a
+// patient row; the screen refetches through the API it is already signed in to.
+router.get("/giniflow/events", requireCapability(CAP.GINIFLOW_VIEW), async (req, res) => {
+  try {
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || "") ? req.query.date : null;
+
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      // `no-transform` is what stops the compression middleware buffering the
+      // stream; `X-Accel-Buffering` is the same instruction to nginx. Without
+      // them nothing arrives until the connection closes.
+      "Cache-Control": "no-cache, no-transform",
+      "X-Accel-Buffering": "no",
+      Connection: "keep-alive",
+    });
+
+    const client = addClient(res, {
+      date,
+      lastEventId: req.headers["last-event-id"] || req.query.lastEventId || null,
+    });
+    if (!client) {
+      res.write(`event: full\ndata: {"reason":"too many open screens"}\n\n`);
+      return res.end();
+    }
+    req.on("close", () => removeClient(client));
+  } catch (e) {
+    handleError(res, e, "Gini Flow live events");
+  }
+});
+
+router.get("/giniflow/events/status", requireCapability(CAP.GINIFLOW_VIEW), (req, res) => {
+  res.json(hubStatus());
+});
 
 // "Today" is the IST day. The server runs UTC, so CURRENT_DATE would show
 // yesterday's board to anyone on the floor before 05:30 IST.
@@ -146,6 +190,74 @@ router.get("/giniflow/day-report", validateQuery(giniflowDateQuerySchema), async
     handleError(res, e, "Gini Flow day report");
   }
 });
+
+// ── Queue management ────────────────────────────────────────────────────────
+// Three ways the floor manager rearranges the board, all behind one capability.
+// An illegal move is the manager's mistake, not a server fault, so it answers
+// 409 with the reason the chain gave rather than a 500.
+
+const queueError = (res, e, label) => {
+  if (
+    /^(Illegal transition|Unknown |No such visit|Column |Move one station|Cannot move)/.test(
+      e.message || "",
+    )
+  ) {
+    return res.status(409).json({ error: e.message });
+  }
+  return handleError(res, e, label);
+};
+
+router.patch(
+  "/giniflow/visits/:id/priority",
+  requireCapability(CAP.GINIFLOW_MANAGE_QUEUE),
+  validate(giniflowPrioritySchema),
+  async (req, res) => {
+    try {
+      res.json(
+        await setPriority(
+          req.params.id,
+          req.body.priority,
+          req.body.reason,
+          req.doctor?.doctor_id ?? null,
+        ),
+      );
+    } catch (e) {
+      queueError(res, e, "Gini Flow set priority");
+    }
+  },
+);
+
+// Dropping a card on another column. The same transition a station screen makes,
+// logged against the manager who made it.
+router.post(
+  "/giniflow/visits/:id/move",
+  requireCapability(CAP.GINIFLOW_MANAGE_QUEUE),
+  validate(giniflowMoveSchema),
+  async (req, res) => {
+    try {
+      res.json(await moveToColumn(req.params.id, req.body.column, req.doctor?.doctor_id ?? null));
+    } catch (e) {
+      queueError(res, e, "Gini Flow move visit");
+    }
+  },
+);
+
+// Dragging a card within its column. The body carries the column's whole order,
+// not one card's new index, so the result does not depend on the board the
+// client happened to be looking at.
+router.patch(
+  "/giniflow/columns/:key/order",
+  requireCapability(CAP.GINIFLOW_MANAGE_QUEUE),
+  validate(giniflowReorderSchema),
+  async (req, res) => {
+    try {
+      const date = await resolveDate(req.body.date);
+      res.json(await reorderColumn(req.params.key, req.body.visitIds, date));
+    } catch (e) {
+      queueError(res, e, "Gini Flow reorder column");
+    }
+  },
+);
 
 // A destructive endpoint on the live host needs more than a role check: an admin
 // misclick would otherwise write fabricated visits into production.

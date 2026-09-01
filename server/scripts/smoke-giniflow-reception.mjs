@@ -13,7 +13,15 @@ import {
   getPaymentQueue,
   clearPayment,
   getTestCatalog,
+  getArrivals,
+  markArrived,
+  markNoShow,
+  markCancelled,
+  undoArrival,
+  searchWalkInPatients,
+  checkInWalkIn,
 } from "../services/giniflow/receptionStation.js";
+import { syncAppointmentsToFlow } from "../services/giniflow/appointmentSync.js";
 
 let failures = 0;
 const check = (label, ok, detail = "") => {
@@ -112,6 +120,244 @@ const missing = await clearPayment("00000000-0000-0000-0000-000000000000", { met
   .then(() => false)
   .catch(() => true);
 check("an unknown order is rejected", missing);
+
+// ── Arrivals: the front door ────────────────────────────────────────────────
+// The half of brief §4.2 that lets a real patient onto the floor when HealthRay
+// cannot say so. Everything below writes through advanceStatus, so what these
+// assertions really check is the LOG: the desk's actions have to be as readable
+// a week later as the sync's are.
+const demoPatient = async (suffix, name) =>
+  (
+    await one(
+      `INSERT INTO patients (name, file_no, age, sex, phone)
+       VALUES ($2, $1, 52, 'Male', $3)
+       ON CONFLICT (file_no) DO UPDATE SET name = EXCLUDED.name
+       RETURNING id`,
+      [`ZZDEMO_${suffix}`, name, `99999${suffix}`],
+    )
+  ).id;
+
+const bookedPatient = await demoPatient("900", "Demo Walkin Expected");
+const bookedVisit = await one(
+  `INSERT INTO giniflow_visits (patient_id, visit_date, appointment_time, current_status, is_demo)
+   VALUES ($1, $2::date, '09:30', 'booked', TRUE)
+   ON CONFLICT (patient_id, visit_date) DO UPDATE SET current_status = 'booked'
+   RETURNING id`,
+  [bookedPatient, TEST_DAY],
+);
+
+const arrivals = await getArrivals(TEST_DAY);
+check(
+  "arrivals splits the day into three groups",
+  ["expected", "onFloor", "notComing"].every((k) => Array.isArray(arrivals[k])),
+);
+check(
+  "a booked patient is Expected",
+  arrivals.expected.some((a) => a.visitId === bookedVisit.id),
+  `${arrivals.expected.length} expected`,
+);
+check(
+  "the demo floor shows up as on the floor",
+  arrivals.onFloor.length > 0,
+  `${arrivals.onFloor.length}`,
+);
+check(
+  "an expected row carries the slot and how late they are",
+  arrivals.expected[0]?.slot != null && arrivals.expected[0]?.minutesLate != null,
+);
+check(
+  "counts describe the whole day, not the filtered view",
+  arrivals.counts.expected === arrivals.expected.length,
+);
+
+const searched = await getArrivals(TEST_DAY, "Demo Walkin Expected");
+check(
+  "search is applied server-side",
+  searched.expected.length === 1 && searched.expected[0].visitId === bookedVisit.id,
+  `${searched.expected.length} hit(s)`,
+);
+check(
+  "but the day's counts do not move with it",
+  searched.counts.expected === arrivals.counts.expected,
+);
+
+const eventsFor = async (visitId) =>
+  (
+    await pool.query(
+      `SELECT status, actor_role FROM giniflow_visit_events
+        WHERE visit_id = $1 ORDER BY occurred_at, id`,
+      [visitId],
+    )
+  ).rows;
+
+const arrived = await markArrived(bookedVisit.id);
+check("Arrived checks the patient in", arrived.status === "checked_in");
+const arrivedEvents = await eventsFor(bookedVisit.id);
+check(
+  "the arrival is logged as reception's own action",
+  arrivedEvents.length === 1 &&
+    arrivedEvents[0].status === "checked_in" &&
+    arrivedEvents[0].actor_role === "reception",
+  JSON.stringify(arrivedEvents),
+);
+
+// A double-tap at a busy counter must not read as two arrivals.
+const arrivedAgain = await markArrived(bookedVisit.id);
+check("a second Arrived is a no-op", arrivedAgain.unchanged === true);
+check("and writes no second event", (await eventsFor(bookedVisit.id)).length === 1);
+
+// §5.1 — the guard that makes manual check-in safe at all. HealthRay still calls
+// this patient `scheduled`; the sync must leave them where reception put them.
+const appt = await one(
+  `INSERT INTO appointments (patient_id, appointment_date, status, created_at)
+   VALUES ($1, $2::date, 'scheduled', NOW()) RETURNING id`,
+  [bookedPatient, TEST_DAY],
+);
+await syncAppointmentsToFlow({ date: TEST_DAY });
+const afterSync = await one(`SELECT current_status FROM giniflow_visits WHERE id = $1`, [
+  bookedVisit.id,
+]);
+check(
+  "the HealthRay sync does not undo a manual check-in",
+  afterSync.current_status === "checked_in",
+  afterSync.current_status,
+);
+check("and writes no event of its own", (await eventsFor(bookedVisit.id)).length === 1);
+// Dropped as soon as it has done its job: `appointments` is the hospital's own
+// table and cleanDemoDay does not touch it, so a row left here would block the
+// demo patient's own removal on the next run.
+await pool.query(`DELETE FROM appointments WHERE id = $1`, [appt.id]);
+
+// A no-show who turns up is re-checked-in, not un-no-showed: undo returns them
+// to booked and the desk presses Arrived again. Every hop forward, none back.
+const absent = await demoPatient("901", "Demo Absent Patient");
+const absentVisit = await one(
+  `INSERT INTO giniflow_visits (patient_id, visit_date, appointment_time, current_status, is_demo)
+   VALUES ($1, $2::date, '10:00', 'booked', TRUE)
+   ON CONFLICT (patient_id, visit_date) DO UPDATE SET current_status = 'booked'
+   RETURNING id`,
+  [absent, TEST_DAY],
+);
+check("no-show marks the patient absent", (await markNoShow(absentVisit.id)).status === "no_show");
+const notComing = await getArrivals(TEST_DAY);
+check(
+  "and they move to Not coming",
+  notComing.notComing.some((a) => a.visitId === absentVisit.id),
+);
+check(
+  "undo puts them back on the expected list",
+  (await undoArrival(absentVisit.id)).status === "booked",
+);
+check(
+  "and Arrived then works normally",
+  (await markArrived(absentVisit.id)).status === "checked_in",
+);
+const hops = (await eventsFor(absentVisit.id)).map((e) => e.status);
+check(
+  "every hop is logged and none is an edit",
+  JSON.stringify(hops) === JSON.stringify(["no_show", "booked", "checked_in"]),
+  hops.join(" → "),
+);
+check(
+  "undoing a patient who is not absent is refused",
+  await undoArrival(absentVisit.id)
+    .then(() => false)
+    .catch(() => true),
+);
+
+// A cancellation another station will see has to say why.
+const cancelled = await demoPatient("902", "Demo Cancelled Patient");
+const cancelledVisit = await one(
+  `INSERT INTO giniflow_visits (patient_id, visit_date, appointment_time, current_status, is_demo)
+   VALUES ($1, $2::date, '10:30', 'booked', TRUE)
+   ON CONFLICT (patient_id, visit_date) DO UPDATE SET current_status = 'booked'
+   RETURNING id`,
+  [cancelled, TEST_DAY],
+);
+check(
+  "cancelling without a reason is refused",
+  await markCancelled(cancelledVisit.id, "  ")
+    .then(() => false)
+    .catch(() => true),
+);
+await markCancelled(cancelledVisit.id, "Patient rescheduled to Friday");
+const cancelEvent = await one(
+  `SELECT status, actor_role, meta FROM giniflow_visit_events
+    WHERE visit_id = $1 ORDER BY occurred_at DESC LIMIT 1`,
+  [cancelledVisit.id],
+);
+check(
+  "the reason is carried in the event, not lost",
+  cancelEvent.status === "cancelled" &&
+    cancelEvent.meta?.reason === "Patient rescheduled to Friday",
+  JSON.stringify(cancelEvent.meta),
+);
+
+// Marking someone absent whom a station has already seen is refused: the
+// building has contradicted the claim.
+const onFloorVisit = notComing.onFloor[0];
+check(
+  "a patient already on the floor cannot be marked absent",
+  await markNoShow(onFloorVisit.visitId)
+    .then(() => false)
+    .catch(() => true),
+  onFloorVisit.statusLabel,
+);
+
+// ── Walk-in ────────────────────────────────────────────────────────────────
+const walkIn = await demoPatient("903", "Demo True Walkin");
+const found = await searchWalkInPatients(TEST_DAY, "Demo True Walkin", "reception");
+check(
+  "a walk-in patient is findable by name",
+  found.some((p) => p.patientId === walkIn),
+);
+check(
+  "and is not already on the day's list",
+  found.find((p) => p.patientId === walkIn)?.visitId == null,
+);
+
+const checkedIn = await checkInWalkIn({ patientId: walkIn, visitDate: TEST_DAY });
+check("a walk-in is checked in in one action", checkedIn.status === "checked_in");
+const walkInVisits = await one(
+  `SELECT count(*)::int AS c FROM giniflow_visits WHERE patient_id = $1 AND visit_date = $2::date`,
+  [walkIn, TEST_DAY],
+);
+check("exactly one visit is created", walkInVisits.c === 1, `${walkInVisits.c}`);
+check(
+  "it reuses the hospital's own walk-in booking record",
+  !!checkedIn.walkinBookingId &&
+    !!(await one(`SELECT id FROM walkin_bookings WHERE id = $1`, [checkedIn.walkinBookingId])),
+);
+check(
+  "checking the same walk-in in twice changes nothing",
+  (await checkInWalkIn({ patientId: walkIn, visitDate: TEST_DAY })).unchanged === true,
+);
+
+// §5.4 — the blocklist is the reason this goes through the walk-in path at all.
+await pool.query(`UPDATE patients SET is_blocked = TRUE WHERE id = $1`, [walkIn]);
+const blockedSearch = await searchWalkInPatients(TEST_DAY, "Demo True Walkin", "reception");
+check(
+  "a blocked patient is shown with their block, not hidden",
+  blockedSearch.find((p) => p.patientId === walkIn)?.isBlocked === true,
+);
+const blockedPatient = await demoPatient("904", "Demo Blocked Walkin");
+await pool.query(`UPDATE patients SET is_blocked = TRUE WHERE id = $1`, [blockedPatient]);
+const refused = await checkInWalkIn({
+  patientId: blockedPatient,
+  visitDate: TEST_DAY,
+  role: "reception",
+})
+  .then(() => false)
+  .catch((e) => e.status === 409);
+check("a blocked patient cannot be checked in", refused);
+const noVisit = await one(`SELECT count(*)::int AS c FROM giniflow_visits WHERE patient_id = $1`, [
+  blockedPatient,
+]);
+check("and no visit row is left behind for them", noVisit.c === 0, `${noVisit.c}`);
+check(
+  "a blocked patient stays off the arrivals board entirely",
+  !(await getArrivals(TEST_DAY)).onFloor.some((a) => a.patientId === walkIn),
+);
 
 await cleanDemoDay();
 const after = await one(

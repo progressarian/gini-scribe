@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLabQueue, useAdvanceSample, useUploadReport } from "../../queries/hooks/useGiniflowLab";
+import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
+import LiveBadge from "../../components/giniflow/LiveBadge";
 import "../../styles/giniflow-station.css";
 
 const AVATAR_COLOURS = ["#374151", "#1e3a5f", "#14532d", "#7c2d12", "#7f1d1d", "#b45309"];
@@ -344,6 +346,7 @@ export default function LabStationPage() {
   const [toast, setToast] = useState("");
   const toastTimer = useRef(null);
   const { data, isLoading } = useLabQueue();
+  const live = useGiniflowLive({ date: data?.date });
   const advance = useAdvanceSample();
   const upload = useUploadReport();
   const [openOrderId, setOpenOrderId] = useState(null);
@@ -415,6 +418,7 @@ export default function LabStationPage() {
           })}
         </span>
         <div className="rr">
+          <LiveBadge live={live} className="tr-live" />
           <a className="rbtn" href="/giniflow/stations">
             ← Stations
           </a>

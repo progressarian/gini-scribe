@@ -158,7 +158,7 @@ export function useActiveCalls(appointmentIds) {
 
 export function useCallClaim() {
   const queryClient = useQueryClient();
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["ghm", "active-calls"] });
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: qk.ghm.any.activeCalls });
   const claim = useMutation({
     mutationFn: async (appointmentId) => {
       const { data } = await api.post(`/api/ghm-appointments/${appointmentId}/calling`);
@@ -260,13 +260,17 @@ export function useDoctorConflicts(date, enabled = true) {
   });
 }
 
-function useGhmMutation(mutationFn, options = {}) {
+// `keys` is the set of query prefixes this write actually changes — nothing
+// else is touched, and only mounted queries refetch. The doctor and CC-agent
+// lists are deliberately never in it: no appointment edit changes them.
+function useGhmMutation(mutationFn, keys, options = {}) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn,
     ...options,
     onSettled: (...args) => {
-      queryClient.invalidateQueries({ queryKey: qk.ghm.all });
+      for (const queryKey of keys)
+        queryClient.invalidateQueries({ queryKey, refetchType: "active" });
       options.onSettled?.(...args);
     },
   });
@@ -293,8 +297,13 @@ export function usePatchAppointment(listKey, applyOptimistic) {
       if (message) window.alert(message);
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: qk.ghm.all, refetchType: "none" });
-      queryClient.invalidateQueries({ queryKey: ["ghm", "category-counts"] });
+      // The optimistic cell is already correct, so the list is only marked
+      // stale — it refetches on the next focus, not under the edit.
+      queryClient.invalidateQueries({ queryKey: qk.ghm.any.list, refetchType: "none" });
+      queryClient.invalidateQueries({
+        queryKey: qk.ghm.any.categoryCounts,
+        refetchType: "active",
+      });
     },
   });
 }
@@ -302,45 +311,71 @@ export function usePatchAppointment(listKey, applyOptimistic) {
 // Patient details corrected after the booking — several fields land together,
 // and the server writes them to the appointment and the patient master both.
 export function useUpdateAppointmentPatient() {
-  return useGhmMutation(async ({ id, ...fields }) => {
-    const { data } = await api.patch(`/api/ghm-appointments/${id}`, fields);
-    return data;
-  });
+  return useGhmMutation(
+    async ({ id, ...fields }) => {
+      const { data } = await api.patch(`/api/ghm-appointments/${id}`, fields);
+      return data;
+    },
+    [qk.ghm.any.list, qk.ghm.any.categoryCounts, qk.ghm.any.slotCounts, qk.ghm.any.changes],
+  );
 }
 
 export function useCreateAppointment() {
-  return useGhmMutation(async (form) => {
-    const { data } = await api.post("/api/ghm-appointments", form);
-    return data;
-  });
+  return useGhmMutation(
+    async (form) => {
+      const { data } = await api.post("/api/ghm-appointments", form);
+      return data;
+    },
+    [
+      qk.ghm.any.list,
+      qk.ghm.any.slotCounts,
+      qk.ghm.any.categoryCounts,
+      qk.ghm.any.availability,
+      qk.ghm.any.conflicts,
+    ],
+  );
 }
 
+// The attempt is mirrored onto the appointment's call columns and clears the
+// "calling now" claim, so the day list and the claim flag move with it.
 export function useLogCallAttempt() {
-  return useGhmMutation(async (body) => {
-    const { data } = await api.post("/api/call-attempts", body);
-    return data;
-  });
+  return useGhmMutation(
+    async (body) => {
+      const { data } = await api.post("/api/call-attempts", body);
+      return data;
+    },
+    [qk.ghm.any.attemptCounts, qk.ghm.any.callAttempts, qk.ghm.any.activeCalls, qk.ghm.any.list],
+  );
 }
 
 export function useDeleteCallAttempt() {
-  return useGhmMutation(async (id) => {
-    const { data } = await api.delete(`/api/call-attempts/${id}`);
-    return data;
-  });
+  return useGhmMutation(
+    async (id) => {
+      const { data } = await api.delete(`/api/call-attempts/${id}`);
+      return data;
+    },
+    [qk.ghm.any.attemptCounts, qk.ghm.any.callAttempts, qk.ghm.any.list],
+  );
 }
 
 export function useDeleteAppointmentChange() {
-  return useGhmMutation(async (id) => {
-    const { data } = await api.delete(`/api/appointment-changes/${id}`);
-    return data;
-  });
+  return useGhmMutation(
+    async (id) => {
+      const { data } = await api.delete(`/api/appointment-changes/${id}`);
+      return data;
+    },
+    [qk.ghm.any.changes],
+  );
 }
 
 export function useReassignAppointment() {
-  return useGhmMutation(async ({ appointmentId, body }) => {
-    const { data } = await api.put(`/api/appointments/${appointmentId}/reassign`, body);
-    return data;
-  });
+  return useGhmMutation(
+    async ({ appointmentId, body }) => {
+      const { data } = await api.put(`/api/appointments/${appointmentId}/reassign`, body);
+      return data;
+    },
+    [qk.ghm.any.list, qk.ghm.any.conflicts, qk.ghm.any.changes],
+  );
 }
 
 // One request for the whole list: `export=1` tells the API to ignore paging and

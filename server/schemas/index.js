@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CATEGORIES, TRIAGE_FILTERS } from "../../shared/giniflowStatus.js";
 
 // Canonical patient-facing "when to take" vocabulary. Must stay in sync
 // with src/config/medicationTimings.js and the Postgres when_to_take_pill
@@ -585,6 +586,24 @@ export const giniflowPaymentSchema = z.object({
   method: z.enum(["paid", "insurance_claim", "claim_approved"]).default("paid"),
 });
 
+// Reception's arrivals tab: the same day + optional search shape the board's
+// own search uses, so a receptionist's query behaves identically on both screens.
+export const giniflowArrivalsQuerySchema = giniflowDateQuerySchema.extend({
+  q: z.string().trim().max(60).optional(),
+});
+
+// Cancelling is visible to every other station, so it has to say why — the same
+// rule blocking a visit has.
+export const giniflowCancelSchema = z.object({
+  reason: z.string().trim().min(2, "a cancellation needs a reason").max(200),
+});
+
+export const giniflowWalkInSchema = z.object({
+  patientId: z.coerce.number().int().positive(),
+  appointmentId: z.coerce.number().int().positive().nullish(),
+  force: z.boolean().optional(),
+});
+
 export const giniflowSampleSchema = z.object({
   to: z.enum(["paid", "sample_collected", "processing", "results_ready", "uploaded"]),
   reportUrl: z.string().url().max(2000).nullish(),
@@ -594,6 +613,29 @@ export const giniflowReportSchema = z.object({
   base64: z.string().min(1),
   fileName: z.string().max(200).optional(),
   mediaType: z.string().max(120).optional(),
+});
+
+export const giniflowPlanSchema = z.object({
+  plan: z.string().max(20000),
+  source: z.enum(["typed", "voice"]).default("typed"),
+});
+
+export const giniflowProposalSchema = z.object({
+  medicineName: z.string().min(1).max(200),
+  fromDose: z.string().max(100).nullish(),
+  toDose: z.string().max(100).nullish(),
+  reason: z.string().max(500).nullish(),
+  changeType: z.enum(["continued", "changed", "new", "stopped", "paused"]).default("changed"),
+});
+
+// The MO queue also searches, and the search runs in Postgres — see QUEUE_SQL.
+export const giniflowMoQueueQuerySchema = giniflowDateQuerySchema.extend({
+  q: z.string().trim().max(60).optional(),
+});
+
+export const giniflowOrderTestsSchema = z.object({
+  urgency: z.enum(["today", "tomorrow", "next_visit"]),
+  tests: z.array(z.string().min(1).max(120)).min(1).max(40),
 });
 
 export const giniflowSlaUpdateSchema = z.object({
@@ -606,3 +648,218 @@ export const giniflowSlaUpdateSchema = z.object({
     )
     .min(1),
 });
+
+// The reason is optional, unlike a block's (GF-18): an urgent patient is often
+// self-evident at the desk, and a required sentence would only produce empty
+// ones. It is dropped when the priority returns to normal.
+export const giniflowPrioritySchema = z.object({
+  priority: z.enum(["urgent", "high", "normal"]),
+  reason: z.string().trim().max(200).nullish(),
+});
+
+// The column's full order, top to bottom. A cap keeps a malformed client from
+// sending an unbounded array into the UNNEST — no real column holds 200 people.
+export const giniflowReorderSchema = z.object({
+  visitIds: z.array(z.string().uuid()).min(1).max(200),
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD")
+    .optional(),
+});
+
+// The lab track is not a point in the chain, so it is not a drop target. The
+// service checks column adjacency on top of this: the enum says which columns
+// exist, not which of them this patient may be moved to.
+export const giniflowMoveSchema = z.object({
+  column: z.enum(["checked_in", "vitals", "sd", "wait_doctor", "doctor", "pharmacy", "done"]),
+});
+
+// ── Gini Flow · consultant station (docs/gini-flow/13-CONSULTANT-STATION-PLAN.md)
+export const giniflowDoctorQueueQuerySchema = z.object({
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD")
+    .optional(),
+  // "mine" is the signed-in consultant's own patients; "all" is every
+  // consultant's, for the day one clinician covers another's list.
+  scope: z.enum(["mine", "all"]).optional(),
+  q: z.string().trim().max(60).optional(),
+});
+
+// Goals are structured rather than prose: they are what the NEXT visit's
+// in-control / worse classifier measures against, so they must be readable by a
+// machine as well as by the patient.
+export const giniflowCarePlanSchema = z.object({
+  treatment: z.string().max(4000).nullish(),
+  lifestyle: z.string().max(4000).nullish(),
+  internalNote: z.string().max(4000).nullish(),
+  nextVisitDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD")
+    .nullish(),
+  nextVisitInterval: z.string().max(40).nullish(),
+  goals: z
+    .array(
+      z.object({
+        test: z.string().min(1).max(60),
+        target: z.string().min(1).max(40),
+        unit: z.string().max(20).optional(),
+      }),
+    )
+    .max(12)
+    .optional(),
+  source: z.enum(["typed", "voice"]).optional(),
+});
+
+// A rejection needs a reason for the same reason a block does (GF-18): the MO
+// who proposed the change has to be able to see why it was turned down.
+export const giniflowProposalDecisionSchema = z
+  .object({
+    status: z.enum(["approved", "adjusted", "rejected"]),
+    adjustedDose: z.string().max(80).nullish(),
+    note: z.string().max(300).nullish(),
+  })
+  .refine((v) => v.status !== "rejected" || (v.note && v.note.trim()), {
+    message: "Rejecting a proposal needs a reason",
+    path: ["note"],
+  })
+  .refine((v) => v.status !== "adjusted" || (v.adjustedDose && v.adjustedDose.trim()), {
+    message: "Adjusting a proposal needs the dose you want instead",
+    path: ["adjustedDose"],
+  });
+
+// ── Gini Flow · consultant prescription (14-CONSULTANT-PRESCRIPTION-PLAN.md) ──
+const TIMING_CATEGORY = z.enum([
+  "before_breakfast",
+  "with_breakfast",
+  "after_breakfast",
+  "before_lunch",
+  "with_lunch",
+  "after_lunch",
+  "evening",
+  "before_dinner",
+  "with_dinner",
+  "after_dinner",
+  "bedtime",
+  "with_meals",
+  "sos",
+  "weekly",
+  "fortnightly",
+]);
+
+const CLOCK_TIME = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "time must be HH:MM");
+
+export const giniflowRxItemSchema = z.object({
+  medicineName: z.string().trim().min(1).max(200),
+  sourceMedicationId: z.number().int().positive().nullish(),
+  pharmacyMatch: z.string().max(200).nullish(),
+  composition: z.string().max(300).nullish(),
+  dose: z.string().max(100).nullish(),
+  previousDose: z.string().max(100).nullish(),
+  frequency: z.string().max(60).nullish(),
+  timing: z.string().max(100).nullish(),
+  timingCategory: TIMING_CATEGORY.nullish(),
+  timeOfDay: CLOCK_TIME.nullish(),
+  route: z.string().max(40).nullish(),
+  form: z.string().max(60).nullish(),
+  duration: z.string().max(60).nullish(),
+  reason: z.string().max(300).nullish(),
+  patientInstruction: z.string().max(400).nullish(),
+  drugClass: z.string().max(100).nullish(),
+  changeType: z.enum(["continued", "changed", "new", "stopped", "paused"]).optional(),
+});
+
+export const giniflowRxItemPatchSchema = giniflowRxItemSchema.partial();
+
+export const giniflowRxPauseSchema = z.object({
+  weeks: z.number().int().min(1).max(52),
+});
+
+// Stopping a medicine is a clinical decision the pharmacy and the patient both
+// see; it carries its reason for the same reason a block does (GF-18).
+export const giniflowRxStopSchema = z.object({
+  reason: z.string().trim().min(1, "Stopping a medicine needs a reason").max(300),
+});
+
+export const giniflowMedSearchQuerySchema = z.object({
+  q: z.string().trim().min(2, "search needs at least 2 characters").max(80),
+});
+
+// The prescriber is required: an external medicine with no doctor behind it
+// cannot be interaction-checked by a human later, and "someone prescribed this"
+// is not a record.
+export const giniflowExternalMedSchema = z.object({
+  medicineName: z.string().trim().min(1).max(200),
+  composition: z.string().max(300).nullish(),
+  dose: z.string().max(100).nullish(),
+  frequency: z.string().max(60).nullish(),
+  timing: z.string().max(100).nullish(),
+  timingCategory: TIMING_CATEGORY.nullish(),
+  timeOfDay: CLOCK_TIME.nullish(),
+  prescriberName: z.string().trim().min(1).max(120),
+  prescriberSpecialty: z.string().max(120).nullish(),
+  prescriberHospital: z.string().max(160).nullish(),
+  sinceDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD")
+    .nullish(),
+  interactionFlag: z.string().max(300).nullish(),
+});
+
+// ── Pharmacy station (docs/gini-flow/16-PHARMACY-STATION-PLAN.md §8) ────────
+// `not_given` carries the reason the not-collected report is built on, so it is
+// required here rather than checked only at the counter.
+export const giniflowDispenseSchema = z
+  .object({
+    status: z.enum(["given", "not_given", "partial"]).default("given"),
+    reason: z.string().trim().max(300).nullish(),
+    qtyNote: z.string().trim().max(120).nullish(),
+  })
+  .refine((v) => v.status !== "not_given" || !!v.reason, {
+    message: "Say why the medicine was not given",
+    path: ["reason"],
+  });
+
+// Ending a visit is irreversible under append-only rules, so the screen has to
+// say so out loud — the same shape the board's Done drop uses (BQ-03).
+export const giniflowDispenseAllSchema = z
+  .object({ confirm: z.boolean() })
+  .refine((v) => v.confirm === true, {
+    message: "Confirm before ending the visit",
+    path: ["confirm"],
+  });
+
+// Finalize is irreversible under append-only rules, so it is never a bare POST.
+export const giniflowFinalizeSchema = z.object({
+  confirm: z.literal(true, { errorMap: () => ({ message: "Finalize must be confirmed" }) }),
+});
+
+// ── Gini Flow · triage board (docs/gini-flow/18-TRIAGE-BOARD-PLAN.md §9) ─────
+// The pipeline step names are the filter values: the bar's counts and the rows
+// a step opens come from one registry, so a step's number and its list cannot
+// drift apart.
+export const giniflowTriageQuerySchema = z.object({
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD")
+    .optional(),
+  filter: z.enum(TRIAGE_FILTERS).optional(),
+  // A display filter for one doctor's morning list — it never changes an
+  // assignment.
+  doctorId: z.coerce.number().int().positive().optional(),
+  q: z.string().trim().max(60).optional(),
+});
+
+// Both writes in one body, because the coordinator makes both in one gesture.
+// `category: null` is meaningful rather than absent: it hands the row back to
+// the auto engine, which is the only way to undo an override.
+export const giniflowTriagePatchSchema = z
+  .object({
+    category: z.enum(CATEGORIES).nullable().optional(),
+    assignedSdId: z.coerce.number().int().positive().nullable().optional(),
+    assignedDoctorId: z.coerce.number().int().positive().nullable().optional(),
+  })
+  .refine(
+    (v) => "category" in v || "assignedSdId" in v || "assignedDoctorId" in v,
+    "Nothing to change",
+  );

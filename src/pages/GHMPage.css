@@ -95,11 +95,6 @@
   }
 }
 
-.tbl-wrap--busy {
-  opacity: 0.55;
-  pointer-events: none;
-}
-
 .ghm__title h1 {
   font-size: 20px;
   font-weight: 700;
@@ -1151,63 +1146,91 @@ a.pcell__ph:hover {
 }
 
 /* Prefill note inside modal */
-.pickpt {
-  background: #fffbeb;
-  border: 1px solid #fcd34d;
-  border-radius: 7px;
-  padding: 10px 12px;
-  margin-bottom: 14px;
+/* Suggestion panel hanging under the File No / Mobile field that found the
+   charts. Absolute so it overlays the fields below instead of shoving the whole
+   grid down every time the desk types a number. */
+.fld--sugg {
+  position: relative;
 }
 
-.pickpt__hdr {
+.sugg {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  margin-top: 4px;
+  background: #fff;
+  border: 1px solid #d1d9e0;
+  border-radius: 7px;
+  box-shadow: 0 8px 20px -6px rgba(15, 23, 42, 0.28);
+  overflow: hidden;
+}
+
+.sugg__hdr {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #92400e;
-  margin-bottom: 8px;
+  padding: 5px 9px;
+  background: #f7f9fc;
+  border-bottom: 1px solid #e8edf3;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: #6b7a90;
 }
 
-.pickpt__list {
+.sugg__x {
+  display: flex;
+  padding: 2px;
+  border: none;
+  background: none;
+  color: #94a3b8;
+  cursor: pointer;
+}
+
+.sugg__x:hover {
+  color: #475569;
+}
+
+.sugg__list {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 4px;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 2px;
+  max-height: 216px;
+  overflow-y: auto;
 }
 
-.pickpt__opt {
+.sugg__opt {
   width: 100%;
   display: flex;
   flex-direction: column;
   gap: 1px;
-  padding: 6px 10px;
+  padding: 6px 8px;
   text-align: left;
-  background: #fff;
-  border: 1px solid #fde68a;
-  border-radius: 6px;
+  background: none;
+  border: none;
+  border-radius: 5px;
   cursor: pointer;
   font-family: inherit;
 }
 
-.pickpt__opt:hover {
-  border-color: #f59e0b;
-  background: #fffdf5;
+.sugg__opt:hover {
+  background: #eff6ff;
 }
 
-.pickpt__opt--new {
-  border-style: dashed;
-}
-
-.pickpt__name {
-  font-size: 12px;
+.sugg__name {
+  font-size: 12.5px;
   font-weight: 600;
   color: #1a2332;
 }
 
-.pickpt__meta {
+.sugg__meta {
   font-size: 11px;
   color: #6b7a90;
 }

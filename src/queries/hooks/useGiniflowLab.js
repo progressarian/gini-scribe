@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "../../services/api";
+import { pollInterval } from "./giniflowPolling";
 
 export function useLabQueue(date) {
   return useQuery({
     queryKey: ["giniflow", "lab", "queue", date || "today"],
     queryFn: async () =>
       (await api.get("/api/giniflow/stations/lab/queue", { params: date ? { date } : {} })).data,
-    refetchInterval: 15_000,
+    refetchInterval: pollInterval,
     refetchIntervalInBackground: false,
     placeholderData: (prev) => prev,
   });

@@ -14,26 +14,19 @@ import { validate } from "../middleware/validate.js";
 import { requireCapability } from "../middleware/auth.js";
 import { CAPABILITIES } from "../../shared/permissions.js";
 import { collectionMarkSchema, collectionBulkSchema } from "../schemas/index.js";
+// The upsert itself lives in the service so the Gini Flow pharmacy station and
+// this page cannot drift into two dispensing records. The journey stamp below
+// stays here: it belongs to the OLD flow module, and Gini Flow must not fire it
+// (docs/gini-flow/16-PHARMACY-STATION-PLAN.md §11 q4).
+import {
+  appointmentFor,
+  markCollection,
+  markCollections,
+  today,
+} from "../services/medication/collection.js";
 
 const router = Router();
 const canMark = requireCapability(CAPABILITIES.MED_COLLECTION);
-const today = () => new Date().toISOString().split("T")[0];
-
-// Best-effort appointment for a patient on a date (med.appointment_id is
-// unreliable, so we look it up from appointments instead). A patient can hold
-// several rows for one date (a lab-only registration beside a consultation, or
-// a cancelled booking that was rebooked), so pick exactly one and never a
-// cancelled row — matching the worklist's choice above.
-async function appointmentFor(client, patientId, date) {
-  const r = await client.query(
-    `SELECT id FROM appointments
-      WHERE patient_id=$1 AND appointment_date=$2::date
-      ORDER BY (LOWER(COALESCE(status, '')) = 'cancelled'), created_at DESC
-      LIMIT 1`,
-    [patientId, date],
-  );
-  return r.rows[0]?.id || null;
-}
 
 // Roll-up status from line counts.
 function rollup({ total, given, not_given, partial, pending }) {
@@ -156,32 +149,23 @@ router.post(
       const patientId = med.rows[0].patient_id;
       const apptId = req.body.appointment_id || (await appointmentFor(client, patientId, date));
 
-      const r = await client.query(
-        `INSERT INTO medicine_collections
-           (medication_id, patient_id, appointment_id, collected_date, status, reason, qty_note, marked_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-         ON CONFLICT (medication_id, collected_date)
-         DO UPDATE SET status=EXCLUDED.status, reason=EXCLUDED.reason,
-                       qty_note=EXCLUDED.qty_note, marked_by=EXCLUDED.marked_by, updated_at=NOW()
-         RETURNING *`,
-        [
-          medicationId,
-          patientId,
-          apptId,
-          date,
-          status,
-          reason || null,
-          qty_note || null,
-          req.doctor?.doctor_name || null,
-        ],
-      );
+      const row = await markCollection(client, {
+        medicationId,
+        patientId,
+        appointmentId: apptId,
+        date,
+        status,
+        reason,
+        qtyNote: qty_note,
+        markedBy: req.doctor?.doctor_name || null,
+      });
       let journey = "skipped";
       try {
         journey = await stampRxJourney(client, patientId, apptId, date, req.doctor?.doctor_name);
       } catch (je) {
         console.warn("rx journey stamp failed:", je.message);
       }
-      res.status(201).json({ ...r.rows[0], journey });
+      res.status(201).json({ ...row, journey });
     } catch (e) {
       handleError(res, e, "Mark collection");
     } finally {
@@ -204,26 +188,13 @@ router.post(
       const markedBy = req.doctor?.doctor_name || null;
 
       await client.query("BEGIN");
-      for (const it of req.body.items) {
-        await client.query(
-          `INSERT INTO medicine_collections
-             (medication_id, patient_id, appointment_id, collected_date, status, reason, qty_note, marked_by)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-           ON CONFLICT (medication_id, collected_date)
-           DO UPDATE SET status=EXCLUDED.status, reason=EXCLUDED.reason,
-                         qty_note=EXCLUDED.qty_note, marked_by=EXCLUDED.marked_by, updated_at=NOW()`,
-          [
-            it.medication_id,
-            patientId,
-            apptId,
-            date,
-            it.status,
-            it.reason || null,
-            it.qty_note || null,
-            markedBy,
-          ],
-        );
-      }
+      await markCollections(client, {
+        patientId,
+        appointmentId: apptId,
+        date,
+        items: req.body.items,
+        markedBy,
+      });
       let journey = "skipped";
       try {
         journey = await stampRxJourney(client, patientId, apptId, date, markedBy);

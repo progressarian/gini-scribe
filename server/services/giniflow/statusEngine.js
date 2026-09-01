@@ -52,10 +52,26 @@ export async function advanceStatus(
   if (!current.rows.length) throw new Error(`No such visit: ${visitId}`);
 
   const fromStatus = current.rows[0].current_status;
-  // `allowSkip` exists for one caller: the HealthRay sync, which observes a
-  // patient at a later point in the chain without knowing how they got there.
-  // A station screen must never set it — a human skipping steps is a mis-tap,
-  // whereas an external system genuinely cannot report what it does not track.
+  // `allowSkip` says: the caller knows the patient is HERE, and does not claim
+  // to know every step they took to arrive. That is the real rule (CS-12) — an
+  // earlier comment here said "never a station screen", which four callers now
+  // contradict. What is actually forbidden is a station skipping steps it could
+  // have observed: each caller below is bounded so it cannot.
+  //
+  //   1. the HealthRay sync — observes a patient at a later point in the chain
+  //      without knowing how they got there;
+  //   2. a floor manager's drag on the board — crosses one COLUMN, a distance
+  //      the chain cannot express because the SD column alone holds three
+  //      statuses. queue.moveToColumn bounds it to a single adjacent column
+  //      first, so the skip never exceeds one station (BQ-02);
+  //   3. the vitals station and the consultant — a walk-in, or a patient the
+  //      floor moved by hand, is physically at the station whatever the board
+  //      believes. Both write their OWN station's status, which is the bound:
+  //      neither can advance a patient past itself.
+  //
+  // The rail on every screen is drawn from the events, not from the current
+  // status, so a skipped step stays visibly un-ticked rather than being filled
+  // in retrospectively.
   const skipping =
     allowSkip && isChainStatus(fromStatus) && isChainStatus(toStatus)
       ? chainIndex(toStatus) > chainIndex(fromStatus)
@@ -67,9 +83,16 @@ export async function advanceStatus(
     );
   }
 
+  // clock_timestamp(), NOT now(). `now()` is the TRANSACTION timestamp: it is
+  // frozen for the whole transaction, so two events written in one — Finalize
+  // writes doctor_done and pharmacy_pending together — land on the identical
+  // occurred_at. Every ordering in this module then falls through to `id`, a
+  // random uuid, and the patient's timeline shows the two steps in whichever
+  // order the uuids happened to sort. clock_timestamp() advances mid-transaction,
+  // so consecutive events keep the order they were written in.
   const event = await client.query(
     `INSERT INTO giniflow_visit_events (visit_id, status, actor_role, actor_id, occurred_at, meta)
-     VALUES ($1, $2, $3, $4, COALESCE($5::timestamptz, NOW()), $6)
+     VALUES ($1, $2, $3, $4, COALESCE($5::timestamptz, clock_timestamp()), $6)
      RETURNING id, status, actor_role, actor_id, occurred_at, meta`,
     [visitId, toStatus, actorRole, actorId, occurredAt, meta],
   );
@@ -81,12 +104,46 @@ export async function advanceStatus(
         SET current_status = $2,
             resume_status  = CASE WHEN $2 = 'blocked_reports' THEN $3 ELSE NULL END,
             blocked_reason = CASE WHEN $2 = 'blocked_reports' THEN $4 ELSE NULL END,
+            -- A manual queue position means "call this one next AT THIS
+            -- STATION". Once the patient has moved on it describes a queue they
+            -- are no longer in, so it is dropped and they rejoin the next column
+            -- on priority and waiting time. Priority is a property of the
+            -- patient and deliberately survives.
+            queue_position = NULL,
+            queue_column   = NULL,
             updated_at     = NOW()
       WHERE id = $1`,
     [visitId, toStatus, fromStatus, blockedReason],
   );
 
   return { from: fromStatus, ...event.rows[0] };
+}
+
+// Returning a patient to the queue they were called from — a consultant who
+// steps out, an MO who hands a patient back. The chain has no backward step, so
+// this is NOT a transition: it is recorded as a new event (the log only ever
+// grows) and the denormalised status is corrected to match.
+//
+// It lives here so the rule "current_status is written in one place" stays true
+// (CS-09), and so a release clears the manual queue position exactly as
+// advanceStatus does — a position belongs to the queue it was set in.
+export async function returnToQueue(
+  client,
+  { visitId, toStatus, actorRole = "system", actorId = null, meta = {} },
+) {
+  const event = await client.query(
+    `INSERT INTO giniflow_visit_events (visit_id, status, actor_role, actor_id, meta)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id, status, actor_role, occurred_at, meta`,
+    [visitId, toStatus, actorRole, actorId, { ...meta, released: true }],
+  );
+  await client.query(
+    `UPDATE giniflow_visits
+        SET current_status = $2, queue_position = NULL, queue_column = NULL, updated_at = NOW()
+      WHERE id = $1`,
+    [visitId, toStatus],
+  );
+  return event.rows[0];
 }
 
 // The one place durations are computed. Card timers, the timeline modal and the

@@ -3,6 +3,8 @@ import { toLocal10 } from "../../../shared/phone.js";
 import {
   BOARD_COLUMNS,
   OFF_BOARD_STATUSES,
+  compareQueue,
+  columnForStatus,
   STATUS_LABEL,
   slaKeyForStatus,
 } from "../../../shared/giniflowStatus.js";
@@ -37,6 +39,11 @@ const BOARD_SQL = `
          v.results_status,
          v.category,
          v.blocked_reason,
+         v.resume_status,
+         v.priority,
+         v.priority_reason,
+         v.queue_position,
+         v.queue_column,
          v.appointment_time::text                  AS appointment_time,
          p.name                                    AS patient_name,
          p.file_no,
@@ -175,6 +182,21 @@ export async function getDayBoard(visitDate, slaConfig, now = new Date(), db = p
       category: row.category,
       resultsStatus: row.results_status,
       blockedReason: row.blocked_reason,
+      // Carried to the card so the client can tell, before a drag starts, which
+      // columns this patient may legally be dropped on.
+      resumeStatus: row.resume_status,
+      priority: row.priority,
+      priorityReason: row.priority_reason,
+      // A manual position belongs to the queue it was set in. advanceStatus
+      // clears it on every move, but a status written by any other path — the
+      // demo seeder, a backfill, a manual UPDATE — would otherwise leave a
+      // position behind that pins the patient to the top of a column they have
+      // already left (BQ-06). Trusting the stored column rather than the
+      // clearing makes that impossible by construction.
+      queuePosition:
+        row.queue_column && row.queue_column === columnForStatus(row.current_status)
+          ? row.queue_position
+          : null,
       subtitle: subtitleFor(row),
       hint: hintFor(row),
       hintIcon: hintIconFor(row),
@@ -230,7 +252,14 @@ export async function getDayBoard(visitDate, slaConfig, now = new Date(), db = p
       count: items.length,
       avgMinutes: avg,
       hot: col.key !== "done" && !!budget && timed.length > 0 && avg > budget,
-      cards: items,
+      // Sorted here rather than only in the component so every consumer of the
+      // board — the day report, a future station screen — sees the same queue
+      // the floor manager arranged.
+      // The lab track is timed on its own clock against the lab_total budget, so
+      // compareQueue's last tiebreak — statusMinutes — would order it by how long
+      // the patient has been waiting somewhere else entirely (BQ-04). It keeps
+      // the SQL's ordering, as Done does.
+      cards: col.key === "done" || col.key === "lab" ? items : [...items].sort(compareQueue),
     };
   });
 

@@ -129,9 +129,16 @@ export const PAGE_CAPABILITIES = {
   // is enough to reach it.
   "/giniflow/stations": CAP.GINIFLOW_VIEW,
   "/giniflow/manager": CAP.GINIFLOW_VIEW,
+  // The pre-OPD triage board writes the clinical category, so it is narrower
+  // than the read-only board above: coordinator and admin.
+  "/giniflow/triage": CAP.GINIFLOW_TRIAGE,
   "/giniflow/station/vitals": CAP.GINIFLOW_STATION_VITALS,
   "/giniflow/station/reception": CAP.GINIFLOW_STATION_RECEPTION,
   "/giniflow/station/lab": CAP.GINIFLOW_STATION_LAB,
+  "/giniflow/station/mo": CAP.GINIFLOW_STATION_MO,
+  // capForPath prefix-matches, so this key also covers /giniflow/station/doctor/<visitId>.
+  "/giniflow/station/doctor": CAP.GINIFLOW_STATION_DOCTOR,
+  "/giniflow/station/pharmacy": CAP.GINIFLOW_STATION_PHARMACY,
   "/flow/admin": CAP.ADMIN,
 };
 

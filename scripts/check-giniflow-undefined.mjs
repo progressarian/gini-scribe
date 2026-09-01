@@ -64,6 +64,8 @@ const GLOBALS = new Set([
   "localStorage",
   "sessionStorage",
   "MediaRecorder",
+  "EventSource",
+  "URLSearchParams",
   "Blob",
   "FileReader",
   "SpeechRecognition",

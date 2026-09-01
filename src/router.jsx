@@ -93,9 +93,14 @@ const FlowCheckinPage = lazyWithRetry(() => import("./pages/flow/FlowCheckinPage
 const FlowCoordinatorPage = lazyWithRetry(() => import("./pages/flow/FlowCoordinatorPage"));
 const GiniFlowManagerPage = lazyWithRetry(() => import("./pages/giniflow/FlowManagerPage"));
 const GiniFlowStationsPage = lazyWithRetry(() => import("./pages/giniflow/StationsLauncherPage"));
+const GiniFlowTriagePage = lazyWithRetry(() => import("./pages/giniflow/TriageBoardPage"));
 const GiniFlowVitalsPage = lazyWithRetry(() => import("./pages/giniflow/VitalsStationPage"));
 const GiniFlowReceptionPage = lazyWithRetry(() => import("./pages/giniflow/ReceptionStationPage"));
 const GiniFlowLabPage = lazyWithRetry(() => import("./pages/giniflow/LabStationPage"));
+const GiniFlowMoPage = lazyWithRetry(() => import("./pages/giniflow/MoStationPage"));
+const GiniFlowDoctorPage = lazyWithRetry(() => import("./pages/giniflow/DoctorStationPage"));
+const GiniFlowConsultPage = lazyWithRetry(() => import("./pages/giniflow/DoctorConsultPage"));
+const GiniFlowPharmacyPage = lazyWithRetry(() => import("./pages/giniflow/PharmacyStationPage"));
 const FlowMyPatientsPage = lazyWithRetry(() => import("./pages/flow/FlowMyPatientsPage"));
 const FlowConsultantsPage = lazyWithRetry(() => import("./pages/flow/FlowConsultantsPage"));
 const FlowStationPage = lazyWithRetry(() => import("./pages/flow/FlowStationPage"));
@@ -220,9 +225,17 @@ const router = createBrowserRouter([
               // Gini Flow — the replacement floor board (docs/gini-flow/).
               { path: "/giniflow/stations", element: lazyEl(GiniFlowStationsPage) },
               { path: "/giniflow/manager", element: lazyEl(GiniFlowManagerPage) },
+              { path: "/giniflow/triage", element: lazyEl(GiniFlowTriagePage) },
               { path: "/giniflow/station/vitals", element: lazyEl(GiniFlowVitalsPage) },
               { path: "/giniflow/station/reception", element: lazyEl(GiniFlowReceptionPage) },
               { path: "/giniflow/station/lab", element: lazyEl(GiniFlowLabPage) },
+              { path: "/giniflow/station/mo", element: lazyEl(GiniFlowMoPage) },
+              { path: "/giniflow/station/doctor", element: lazyEl(GiniFlowDoctorPage) },
+              {
+                path: "/giniflow/station/doctor/:visitId",
+                element: lazyEl(GiniFlowConsultPage),
+              },
+              { path: "/giniflow/station/pharmacy", element: lazyEl(GiniFlowPharmacyPage) },
               { path: "/flow/my-patients", element: lazyEl(FlowMyPatientsPage) },
               { path: "/flow/consultants", element: lazyEl(FlowConsultantsPage) },
               { path: "/flow/station", element: lazyEl(FlowStationPage) },

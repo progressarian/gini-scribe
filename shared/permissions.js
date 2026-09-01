@@ -95,9 +95,17 @@ export const CAPABILITIES = {
   // every FLOW_* key without touching these.
   GINIFLOW_VIEW: "GINIFLOW_VIEW", // read the Gini Flow manager board
   GINIFLOW_SLA_ADMIN: "GINIFLOW_SLA_ADMIN", // edit the Gini Flow time budgets
+  GINIFLOW_MANAGE_QUEUE: "GINIFLOW_MANAGE_QUEUE", // reorder, prioritise and move patients on the board
   GINIFLOW_STATION_VITALS: "GINIFLOW_STATION_VITALS", // record vitals at the Gini Flow station
   GINIFLOW_STATION_RECEPTION: "GINIFLOW_STATION_RECEPTION", // clear lab payments
   GINIFLOW_STATION_LAB: "GINIFLOW_STATION_LAB", // collect samples, upload results
+  GINIFLOW_STATION_DOCTOR: "GINIFLOW_STATION_DOCTOR", // the consultant's queue and consult screen
+  GINIFLOW_STATION_MO: "GINIFLOW_STATION_MO", // MO/SD workup, order tests, hand over
+  GINIFLOW_STATION_PHARMACY: "GINIFLOW_STATION_PHARMACY", // dispense, counsel, close the visit
+  // The pre-OPD triage board: categorise tomorrow's list, assign it, chase the
+  // missing reports. Coordinator and admin only — reception works the desk and
+  // the payment queue, and the categorisation here is a clinical judgement.
+  GINIFLOW_TRIAGE: "GINIFLOW_TRIAGE",
   OBT_OPS: "OBT_OPS", // OBT outbound call team: tomorrow's appointment call list (/api/obt-status)
 };
 
@@ -137,6 +145,8 @@ export const ROLE_CAPABILITIES = {
     C.FLOW_MY_PATIENTS,
     C.FLOW_REPORTS,
     C.GINIFLOW_VIEW,
+    C.GINIFLOW_STATION_MO,
+    C.GINIFLOW_STATION_DOCTOR,
   ],
   [ROLES.MO]: [
     C.PATIENT_READ,
@@ -154,6 +164,7 @@ export const ROLE_CAPABILITIES = {
     C.FLOW_FLOOR_VIEW,
     C.GINIFLOW_VIEW,
     C.GINIFLOW_STATION_VITALS,
+    C.GINIFLOW_STATION_MO,
   ],
   // No REFILLS: working the refill queue is a prescribing decision, so nurses
   // don't approve them. They can still see a patient's refill history in the
@@ -211,6 +222,9 @@ export const ROLE_CAPABILITIES = {
     C.FLOW_STATION_VITALS,
     C.OBT_OPS,
     C.GINIFLOW_VIEW,
+    // No GINIFLOW_MANAGE_QUEUE: rearranging the floor is the coordinator's job.
+    // The payment desk clearing a lab bill has no reason to be able to move any
+    // patient to any station, and no plan asked for it (BQ-10).
     C.GINIFLOW_STATION_RECEPTION,
   ],
   // Coordinators run GHM ops/calling and need Genie Chats with patients.
@@ -234,9 +248,12 @@ export const ROLE_CAPABILITIES = {
     C.OBT_OPS,
     C.GINIFLOW_VIEW,
     C.GINIFLOW_SLA_ADMIN,
+    C.GINIFLOW_MANAGE_QUEUE,
     C.GINIFLOW_STATION_VITALS,
     C.GINIFLOW_STATION_RECEPTION,
     C.GINIFLOW_STATION_LAB,
+    C.GINIFLOW_STATION_MO,
+    C.GINIFLOW_TRIAGE,
   ],
   [ROLES.PHARMACY]: [
     C.PATIENT_READ,
@@ -249,6 +266,9 @@ export const ROLE_CAPABILITIES = {
     C.FLOW_STATION_PHARM,
     C.FLOW_FLOOR_VIEW,
     C.GINIFLOW_VIEW,
+    // The last desk on the floor: dispensing, counselling and the exit that ends
+    // the visit. Pharmacy and admin only — nobody else closes a patient's day.
+    C.GINIFLOW_STATION_PHARMACY,
   ],
   // OBT outbound call team. The ONLY role without PATIENT_CHART: they phone
   // patients to confirm tomorrow's appointment, which needs identity and phone

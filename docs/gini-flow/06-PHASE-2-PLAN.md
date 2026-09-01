@@ -118,6 +118,10 @@ redundant:
 
 - **Reception check-in** — HealthRay already reports `checkedin`. Reception's real Phase 2 job is
   **payments**, not arrival marking. Keep an arrival button for walk-ins and corrections.
+  > ⚠️ **Not delivered.** Payments shipped; the arrival button never did, and nothing in the repo
+  > writes `checked_in`, `no_show` or `cancelled` outside the HealthRay sync — so a walk-in with no
+  > HealthRay slot cannot enter the flow at all, and a no-show cannot be cleared. Finished in
+  > `17-RECEPTION-CHECKIN-PLAN.md`.
 - **Lab "Upload report"** — results already arrive via `labSync`. The lab screen should _confirm_
   and attribute an upload, not be the only path by which results appear.
 
@@ -184,7 +188,7 @@ listed so the capability model and the launcher are designed once rather than fo
 | **MO / SD**           | `mo`, `consultant`     | `GINIFLOW_STATION_MO`                    | **none — Task 2.0**                             | ready for doctor, order tests, close (green only), propose Rx change | `ready_for_doctor` / `doctor_done`, `giniflow_lab_orders`, `giniflow_rx_proposals` |
 | **Lab**               | `lab`, `tech`          | `GINIFLOW_STATION_LAB`                   | `gini-stations.html` `s-lab`                    | sample collected, processing, results done, upload                   | `sample_status`, lab order events, `results_status`                                |
 | Doctor _(Phase 3)_    | `consultant`           | `GINIFLOW_DOCTOR`                        | `gini-doctor-v3` + `gini-doctor-final`          | consult, finalize                                                    | prescriptions, `doctor_done`                                                       |
-| Pharmacy _(Phase 4)_  | `pharmacy`             | `GINIFLOW_STATION_PHARM`                 | `gini-flow-v2.html` `s-rx` + `s-pharmacy` queue | dispense per medicine, substitute, all dispensed                     | `dispensed` → `exited`                                                             |
+| Pharmacy _(Phase 4)_  | `pharmacy`             | `GINIFLOW_STATION_PHARMACY`                 | `gini-flow-v2.html` `s-rx` + `s-pharmacy` queue | dispense per medicine, substitute, all dispensed                     | `dispensed` → `exited`                                                             |
 | Referrals _(Phase 4)_ | `coordinator`          | `GINIFLOW_REFERRALS`                     | `gini-stations.html` `s-referrals`              | create referral, letter, track                                       | `giniflow_referrals`                                                               |
 | Flow Manager          | `coordinator`, `admin` | `GINIFLOW_VIEW` (+ `GINIFLOW_SLA_ADMIN`) | `gini-flow-manager.html`                        | read, edit budgets                                                   | `giniflow_sla_config`                                                              |
 
@@ -265,6 +269,7 @@ total**, and two actions — **✓ Payment received — notify lab**, and **Insu
   sample task appears on the lab screen (trigger 3).
 - Insurance → `insurance_claim`, same downstream effect.
 - Arrival marking stays available for walk-ins (0.4), but is not the main job.
+  **Not built — see `17-RECEPTION-CHECKIN-PLAN.md`.**
 - **Needs a price source.** The mockup shows real prices (HbA1c ₹250, Lipid ₹350). Decide:
   a `giniflow_test_catalog` table, or read from the existing lab/billing data. **Open question.**
 
@@ -366,7 +371,7 @@ populate it, or render "Allergies not recorded — ask the patient" until it is.
 New per-station capabilities so the coordinator can be granted some desks and not others — the
 model this repo already uses (`FLOW_STATION_*`):
 `GINIFLOW_STATION_VITALS`, `GINIFLOW_STATION_MO`, `GINIFLOW_STATION_LAB`,
-`GINIFLOW_STATION_RECEPTION`, `GINIFLOW_TRIAGE` — plus `GINIFLOW_STATION_PHARM`,
+`GINIFLOW_STATION_RECEPTION`, `GINIFLOW_TRIAGE` — plus `GINIFLOW_STATION_PHARMACY`,
 `GINIFLOW_REFERRALS` and `GINIFLOW_DOCTOR` declared now (unused until Phases 3–4) so the launcher
 and the matrix are designed once. See the **Stations by role** table. Register in `shared/permissions.js`,
 `src/config/routes.js`, `src/router.jsx` and the nav in the same change (enforcement is on).

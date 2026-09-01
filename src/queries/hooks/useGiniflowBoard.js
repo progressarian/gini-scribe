@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import api from "../../services/api";
+import { pollInterval } from "./giniflowPolling";
 
 // The board polls; the second-by-second timers are computed client-side from
 // each card's timestamps against server time, so a 10s refetch still reads as
@@ -9,7 +10,7 @@ export function useGiniflowBoard(date) {
     queryKey: ["giniflow", "board", date || "today"],
     queryFn: async () =>
       (await api.get("/api/giniflow/board", { params: date ? { date } : {} })).data,
-    refetchInterval: 10_000,
+    refetchInterval: pollInterval,
     refetchIntervalInBackground: false,
     // A 401 means the session expired overnight; retrying it every 10s only
     // hides the fact that someone has to log in again.

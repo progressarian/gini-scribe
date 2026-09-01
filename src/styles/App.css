@@ -8,11 +8,21 @@
     sans-serif;
   max-width: none;
   margin: 0 auto;
-  /* Page gutter as variables so the header can break out of it (full-width,
-     flush-top) by exactly cancelling these, and stay in sync at every
-     breakpoint where the gutter changes. */
-  --pad-x: 32px;
-  --pad-y: 24px;
+  /* Two layers, because they are not the same thing.
+
+     --gutter-* is the shell's measurement, responsive at every breakpoint
+     below. --pad-* is the gutter the PAGE currently uses, and a full-bleed
+     page (the OPD board, every Gini Flow screen) zeroes it.
+
+     The header breaks out of --pad-* and re-pads from --gutter-*, so its
+     content lines up with the page on a normal screen and keeps the same inset
+     on a full-bleed one. Padding it from --pad-* instead put the logo and the
+     Logout button hard against the window edges on the Gini Flow pages, which
+     is the only place the chrome bar looked different from everywhere else. */
+  --gutter-x: 32px;
+  --gutter-y: 24px;
+  --pad-x: var(--gutter-x);
+  --pad-y: var(--gutter-y);
   padding: var(--pad-y) var(--pad-x);
   background: #fff;
   min-height: 100vh;
@@ -29,12 +39,15 @@
      standard app-shell chrome bar. Inner horizontal padding re-aligns the
      header content with the page content below. */
   margin: calc(-1 * var(--pad-y)) calc(-1 * var(--pad-x)) 14px;
-  padding: 10px var(--pad-x);
+  padding: 10px var(--gutter-x);
   background: #ffffff;
   border-bottom: 1px solid #e8edf3;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
   flex-wrap: nowrap;
   min-width: 0;
+  /* The full-bleed pages make .app a 100vh flex column, where the bar is a
+     flex item and would otherwise be squashed by a tall page below it. */
+  flex-shrink: 0;
 }
 
 .header__brand {
@@ -1136,8 +1149,8 @@
 /* ---- Tablet / small laptop (≤1024px) ---- */
 @media (max-width: 1024px) {
   .app {
-    --pad-x: 24px;
-    --pad-y: 20px;
+    --gutter-x: 24px;
+    --gutter-y: 20px;
   }
   .header {
     gap: 7px;
@@ -1158,8 +1171,8 @@
 /* ---- Tablet portrait (≤900px) ---- */
 @media (max-width: 900px) {
   .app {
-    --pad-x: 18px;
-    --pad-y: 16px;
+    --gutter-x: 18px;
+    --gutter-y: 16px;
   }
   .header {
     gap: 6px;
@@ -1193,8 +1206,8 @@
 /* ---- Large phone (≤600px) ---- */
 @media (max-width: 600px) {
   .app {
-    --pad-x: 12px;
-    --pad-y: 12px;
+    --gutter-x: 12px;
+    --gutter-y: 12px;
   }
   .header {
     gap: 5px;
@@ -1240,8 +1253,8 @@
 /* ---- Small phone (≤400px) ---- */
 @media (max-width: 400px) {
   .app {
-    --pad-x: 10px;
-    --pad-y: 10px;
+    --gutter-x: 10px;
+    --gutter-y: 10px;
   }
   /* Keep the logo as the brand; drop the wordmark + patient file-no to free
      width for the action buttons. */

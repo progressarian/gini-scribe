@@ -1,4 +1,14 @@
 import pool from "../../config/db.js";
+import {
+  STATUS_LABEL,
+  chainIndex,
+  isChainStatus,
+  isExceptionStatus,
+} from "../../../shared/giniflowStatus.js";
+import { advanceStatus, IST_TODAY } from "./statusEngine.js";
+import { searchDayVisits } from "./board.js";
+import { blockDetail } from "../patientBlockView.js";
+import { createWalkinBooking } from "../walkinBooking.js";
 
 // Reception: the payment desk between the MO ordering tests and the lab
 // collecting a sample.
@@ -178,4 +188,360 @@ export async function getTestCatalog(db = pool) {
       WHERE is_active ORDER BY test_name`,
   );
   return rows.map((r) => ({ name: r.test_name, price: Number(r.price), source: r.source }));
+}
+
+// ── Arrivals — the front door ────────────────────────────────────────────────
+// The other half of brief §4.2. HealthRay reports `checkedin` and the sync
+// carries it, so this is not the main way a patient reaches the floor — it is
+// the way they reach it when HealthRay cannot say so: a walk-in with no slot, a
+// sync that is lagging or whose auth has died, a no-show nobody can clear.
+//
+// Every write here goes through `advanceStatus`, so a manual arrival is one
+// append-only event with `actor_role = 'reception'` and is indistinguishable in
+// the log from any other step. Nothing writes `current_status` directly.
+//
+// The sync cannot undo this: `appointmentSync` skips any visit already at or
+// past the status HealthRay reports, so a patient checked in here whom HealthRay
+// still calls `scheduled` is left alone.
+
+const EXPECTED_STATUSES = ["booked", "confirmed"];
+const NOT_COMING_STATUSES = ["no_show", "cancelled"];
+
+// Marking someone absent is only truthful while the desk is the last thing that
+// happened to them. Once a station has seen the patient, the building itself has
+// contradicted the claim — so the exception is refused there rather than
+// recorded as a fact the timeline knows to be false.
+const ABSENTABLE_STATUSES = [...EXPECTED_STATUSES, "checked_in"];
+
+const ARRIVAL_SELECT = `
+  SELECT v.id, v.patient_id, v.current_status, v.appointment_time::text AS appointment_time,
+         v.priority, v.blocked_reason,
+         (v.visit_date + COALESCE(v.appointment_time, '00:00'::time))
+           AT TIME ZONE 'Asia/Kolkata' AS slot_at,
+         p.name, p.file_no, p.age, p.sex, p.phone,
+         checkin_ev.occurred_at AS checked_in_at,
+         last_ev.occurred_at    AS status_since
+    FROM giniflow_visits v
+    JOIN patients p ON p.id = v.patient_id
+    LEFT JOIN LATERAL (
+      SELECT occurred_at FROM giniflow_visit_events e
+       WHERE e.visit_id = v.id AND e.status = 'checked_in'
+       ORDER BY occurred_at LIMIT 1
+    ) checkin_ev ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT occurred_at FROM giniflow_visit_events e
+       WHERE e.visit_id = v.id ORDER BY occurred_at DESC, id DESC LIMIT 1
+    ) last_ev ON TRUE
+   WHERE v.visit_date = $1::date
+     AND NOT COALESCE(p.is_blocked, FALSE)
+   ORDER BY v.appointment_time NULLS LAST, p.name`;
+
+const minutesBetween = (from, now) =>
+  from ? Math.round((now.getTime() - new Date(from).getTime()) / 60000) : null;
+
+const shapeArrival = (r, now) => ({
+  visitId: r.id,
+  patientId: r.patient_id,
+  name: r.name,
+  fileNo: r.file_no,
+  age: r.age,
+  sex: r.sex,
+  phone: r.phone,
+  priority: r.priority || "normal",
+  status: r.current_status,
+  statusLabel: STATUS_LABEL[r.current_status] || r.current_status,
+  slot: (r.appointment_time || "").slice(0, 5) || null,
+  // Positive means past their slot. The desk phones the patient 40 minutes late,
+  // not the one whose appointment is an hour away, so the sign matters.
+  minutesLate: r.appointment_time ? minutesBetween(r.slot_at, now) : null,
+  checkedInAt: r.checked_in_at ? new Date(r.checked_in_at).toISOString() : null,
+  statusSince: r.status_since ? new Date(r.status_since).toISOString() : null,
+  sinceMinutes: minutesBetween(r.status_since, now),
+  blockedReason: r.blocked_reason || null,
+});
+
+export async function getArrivals(visitDate, q = "", now = new Date(), db = pool) {
+  const { rows } = await db.query(ARRIVAL_SELECT, [visitDate]);
+
+  // Server-side, and the board's own search rather than a second implementation:
+  // it already normalises phone numbers the way the rest of the repo does, and a
+  // receptionist works from the person in front of them, not by scanning 80 rows.
+  let visible = rows;
+  const query = String(q || "").trim();
+  if (query.length >= 2) {
+    const hits = new Set((await searchDayVisits(visitDate, query, db)).map((r) => r.visitId));
+    visible = rows.filter((r) => hits.has(r.id));
+  }
+
+  const arrivals = visible.map((r) => shapeArrival(r, now));
+
+  return {
+    expected: arrivals.filter((a) => EXPECTED_STATUSES.includes(a.status)),
+    onFloor: arrivals.filter(
+      (a) => !EXPECTED_STATUSES.includes(a.status) && !NOT_COMING_STATUSES.includes(a.status),
+    ),
+    notComing: arrivals.filter((a) => NOT_COMING_STATUSES.includes(a.status)),
+    // The unfiltered day, so a search does not make the tab's own count move.
+    counts: rows.reduce(
+      (acc, r) => {
+        const key = EXPECTED_STATUSES.includes(r.current_status)
+          ? "expected"
+          : NOT_COMING_STATUSES.includes(r.current_status)
+            ? "notComing"
+            : "onFloor";
+        acc[key]++;
+        return acc;
+      },
+      { expected: 0, onFloor: 0, notComing: 0 },
+    ),
+    query,
+  };
+}
+
+// One transaction, one event. Every one of these returns `{ visitId, status,
+// unchanged }` so a double-tap at a busy counter reads the same as a first tap.
+async function transition(visitId, toStatus, { actorId, meta = {}, guard }, db = pool) {
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query(
+      `SELECT current_status FROM giniflow_visits WHERE id = $1 FOR UPDATE`,
+      [visitId],
+    );
+    if (!rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
+
+    const from = rows[0].current_status;
+    const refusal = guard?.(from);
+    if (refusal) throw Object.assign(new Error(refusal), { status: 409 });
+    if (from === toStatus) {
+      await client.query("COMMIT");
+      return { visitId, status: from, unchanged: true };
+    }
+
+    await advanceStatus(client, {
+      visitId,
+      toStatus,
+      actorRole: "reception",
+      actorId,
+      meta,
+    });
+    await client.query("COMMIT");
+    return { visitId, status: toStatus, unchanged: false };
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+export function markArrived(visitId, actorId = null, db = pool) {
+  return transition(
+    visitId,
+    "checked_in",
+    {
+      actorId,
+      guard: (from) =>
+        isChainStatus(from) && chainIndex(from) > chainIndex("checked_in")
+          ? `${STATUS_LABEL[from] || from} — this patient is already past reception`
+          : null,
+    },
+    db,
+  );
+}
+
+export function markNoShow(visitId, actorId = null, db = pool) {
+  return transition(
+    visitId,
+    "no_show",
+    {
+      actorId,
+      guard: (from) =>
+        ABSENTABLE_STATUSES.includes(from)
+          ? null
+          : `${STATUS_LABEL[from] || from} — this patient is already on the floor`,
+    },
+    db,
+  );
+}
+
+export async function markCancelled(visitId, reason, actorId = null, db = pool) {
+  // An action another station will see has to say why — the same rule blocking a
+  // visit has (GF-18) and stopping a medicine has.
+  const note = String(reason || "").trim();
+  if (!note) throw Object.assign(new Error("Cancelling needs a reason"), { status: 400 });
+  return transition(
+    visitId,
+    "cancelled",
+    {
+      actorId,
+      meta: { reason: note },
+      guard: (from) =>
+        ABSENTABLE_STATUSES.includes(from)
+          ? null
+          : `${STATUS_LABEL[from] || from} — this patient is already on the floor`,
+    },
+    db,
+  );
+}
+
+// Undo is a normal forward transition, not an edit: `booked` is where the day
+// started, and pressing Arrived from there is the ordinary path. A no-show who
+// turns up is re-checked-in, not un-no-showed.
+export function undoArrival(visitId, actorId = null, db = pool) {
+  return transition(
+    visitId,
+    "booked",
+    {
+      actorId,
+      guard: (from) =>
+        isExceptionStatus(from) ? null : `${STATUS_LABEL[from] || from} — there is nothing to undo`,
+    },
+    db,
+  );
+}
+
+// Who the desk can put on the floor. Scoped to a search, capped, and it reports
+// a blocked patient rather than hiding them: reception needs to know the person
+// in front of them is blocked, and §5.4 says show that instead of an Arrived
+// button. The block reason itself is redacted for the role by blockDetail.
+export async function searchWalkInPatients(visitDate, q, role, db = pool) {
+  const raw = String(q || "").trim();
+  if (raw.length < 2) return [];
+
+  const digits = raw.replace(/\D/g, "");
+  const { rows } = await db.query(
+    `SELECT p.id, p.is_blocked, p.blocked_reason_code, p.name, p.file_no, p.age, p.sex, p.phone,
+            v.id AS visit_id, v.current_status,
+            a.id AS appointment_id
+       FROM patients p
+       LEFT JOIN giniflow_visits v ON v.patient_id = p.id AND v.visit_date = $1::date
+       LEFT JOIN LATERAL (
+         SELECT id FROM appointments
+          WHERE patient_id = p.id AND appointment_date = $1::date
+          ORDER BY id DESC LIMIT 1
+       ) a ON TRUE
+      WHERE p.name ILIKE $2
+         OR p.file_no ILIKE $2
+         OR ($3::text IS NOT NULL AND regexp_replace(COALESCE(p.phone, ''), '\\D', '', 'g') LIKE $3)
+         OR (
+           $3::text IS NOT NULL
+           AND EXISTS (
+             SELECT 1 FROM unnest(COALESCE(p.alt_phone, ARRAY[]::text[])) AS alt
+              WHERE regexp_replace(alt, '\\D', '', 'g') LIKE $3
+           )
+         )
+      ORDER BY p.name
+      LIMIT 20`,
+    [visitDate, `%${raw}%`, digits ? `%${digits}%` : null],
+  );
+
+  return rows.map((r) => ({
+    patientId: r.id,
+    name: r.name,
+    fileNo: r.file_no,
+    age: r.age,
+    sex: r.sex,
+    phone: r.phone,
+    appointmentId: r.appointment_id,
+    visitId: r.visit_id,
+    status: r.current_status,
+    statusLabel: r.current_status ? STATUS_LABEL[r.current_status] || r.current_status : null,
+    isBlocked: !!r.is_blocked,
+    block: r.is_blocked ? blockDetail(r, role) : null,
+  }));
+}
+
+// A walk-in in one action: the booking record the hospital already keeps, the
+// visit, and the arrival.
+//
+// It goes through createWalkinBooking rather than inserting a visit directly, so
+// the blocklist decides first. A giniflow_visits row must never exist for a
+// patient the blocklist refuses — that is the whole point of the list.
+export async function checkInWalkIn(
+  { patientId, appointmentId = null, visitDate = null, force = false, role = null, actor = null },
+  actorId = null,
+  db = pool,
+) {
+  const { rows: patientRows } = await db.query(
+    `SELECT p.id, p.name, p.file_no, p.phone,
+            (SELECT MAX(visit_date)::text FROM consultations c WHERE c.patient_id = p.id) AS last_visit
+       FROM patients p WHERE p.id = $1`,
+    [patientId],
+  );
+  const patient = patientRows[0];
+  if (!patient) throw Object.assign(new Error("Patient not found"), { status: 404 });
+
+  // `visitDate` exists so the smoke suite can put a walk-in on a day of its own.
+  // Today belongs to real patients; a test that checks one in there collides
+  // with them and leaves a person on the live board.
+  const day = visitDate || (await db.query(`SELECT ${IST_TODAY}::text AS d`)).rows[0].d;
+  const slot = new Date().toLocaleTimeString("en-IN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Kolkata",
+  });
+
+  const { blocked, booking } = await createWalkinBooking(
+    {
+      patient_id: patient.id,
+      walkin_date: day,
+      time_slot: slot,
+      file_no: patient.file_no,
+      patient_name: patient.name,
+      contact_number: patient.phone,
+      visit_type: patient.last_visit ? "Follow-up" : "New",
+      agent_name: actor?.name || null,
+      reason_for_booking: "Walk-in checked in at reception",
+      last_visit_date: patient.last_visit,
+    },
+    { force, role, actor },
+    db,
+  );
+  if (blocked) throw Object.assign(new Error("Patient is blocked"), { status: 409, blocked });
+
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    // One visit per patient per day is a database constraint, so this upserts
+    // rather than inserts: a patient HealthRay already placed on the day keeps
+    // their existing visit and simply gets checked in.
+    const { rows } = await client.query(
+      `INSERT INTO giniflow_visits (patient_id, visit_date, appointment_id, current_status)
+       VALUES ($1, $2::date, $3, 'booked')
+       ON CONFLICT (patient_id, visit_date) DO UPDATE
+         SET appointment_id = COALESCE(giniflow_visits.appointment_id, EXCLUDED.appointment_id),
+             updated_at = NOW()
+       RETURNING id, current_status`,
+      [patient.id, day, appointmentId],
+    );
+    const { id: visitId, current_status: from } = rows[0];
+
+    const alreadyThere =
+      from === "checked_in" || (isChainStatus(from) && chainIndex(from) > chainIndex("checked_in"));
+    if (!alreadyThere) {
+      await advanceStatus(client, {
+        visitId,
+        toStatus: "checked_in",
+        actorRole: "reception",
+        actorId,
+        meta: { walkIn: true, walkinBookingId: booking?.id ?? null },
+      });
+    }
+    await client.query("COMMIT");
+    return {
+      visitId,
+      patientId: patient.id,
+      name: patient.name,
+      status: alreadyThere ? from : "checked_in",
+      unchanged: alreadyThere,
+      walkinBookingId: booking?.id ?? null,
+    };
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
 }

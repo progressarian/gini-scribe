@@ -26,6 +26,7 @@ import { getLoginCooldownMs } from "../healthray/client.js";
 import { BATCH_ENABLED, processBatchQueue } from "../batch/batchQueue.js";
 import { BATCH_HANDLERS } from "../batch/handlers.js";
 import { syncAppointmentsToFlow } from "../giniflow/appointmentSync.js";
+import { autoCategoriseDay } from "../giniflow/triage.js";
 
 // ── Sync intervals ─────────────────────────────────────────────────────────
 const RECOVERY_INTERVAL_MS = 15 * 60 * 1000;
@@ -67,6 +68,16 @@ const STATUS_LOOP_MAX_BREAK_MS = 45 * 1000;
 // 30s keeps the floor board within one HealthRay poll of the truth.
 const GINIFLOW_LOOP_BREAK_MS = Number(process.env.GINIFLOW_SYNC_BREAK_MS) || 30 * 1000;
 const GINIFLOW_WATCHDOG_MS = 5 * 60 * 1000;
+// The triage board works TOMORROW, whose visit rows nothing was building: the
+// sync was only ever called for today (18-TRIAGE-BOARD-PLAN.md §3.2b). This
+// loop pre-builds the next day and re-runs the categorisation sweep over both,
+// so a report landing at 6pm re-colours tomorrow's board without anyone
+// pressing anything — and the coordinator does not pay for the day's first
+// build on their first page load.
+//
+// Deliberately slow: tomorrow's list changes on the scale of phone calls, not
+// seconds, and a whole-day sweep is not something to run every 30s.
+const TRIAGE_LOOP_BREAK_MS = Number(process.env.GINIFLOW_TRIAGE_BREAK_MS) || 5 * 60 * 1000;
 
 const LAB_LOOP_MIN_BREAK_MS = Number(process.env.LAB_LOOP_MIN_BREAK_MS) || 120 * 1000;
 const LAB_LOOP_MAX_BREAK_MS = Number(process.env.LAB_LOOP_MAX_BREAK_MS) || 180 * 1000;
@@ -258,6 +269,43 @@ function scheduleNextGiniflowSync(delayMs) {
   }, delayMs);
 }
 
+let triageLoopRunning = false;
+let triageLoopTimeoutId = null;
+
+const istDay = (offsetDays = 0) => {
+  const ist = new Date(Date.now() + 5.5 * 3600 * 1000 + offsetDays * 86400 * 1000);
+  return ist.toISOString().slice(0, 10);
+};
+
+function scheduleNextTriagePrep(delayMs) {
+  if (!triageLoopRunning) return;
+  triageLoopTimeoutId = setTimeout(async () => {
+    triageLoopTimeoutId = null;
+    if (!triageLoopRunning) return;
+    const tomorrow = istDay(1);
+    try {
+      const built = await withWatchdog(
+        syncAppointmentsToFlow({ date: tomorrow }),
+        GINIFLOW_WATCHDOG_MS,
+        "Gini Flow tomorrow pre-build",
+      );
+      const swept = [];
+      for (const day of [istDay(0), tomorrow]) {
+        swept.push(await autoCategoriseDay(day));
+      }
+      const updated = swept.reduce((n, s) => n + s.updated, 0);
+      if (built?.created || updated) {
+        console.log(
+          `[Cron] Gini Flow triage: ${built?.created ?? 0} visits pre-built for ${tomorrow}, ${updated} categorised`,
+        );
+      }
+    } catch (e) {
+      console.error("[Cron] Gini Flow triage prep failed:", e.message);
+    }
+    scheduleNextTriagePrep(TRIAGE_LOOP_BREAK_MS);
+  }, delayMs);
+}
+
 let recoveryIntervalId = null;
 let dailyBackfillIntervalId = null;
 let stuckStatusIntervalId = null;
@@ -321,6 +369,11 @@ export function startCronJobs() {
     scheduleNextGiniflowSync(5_000);
     console.log(
       `[Cron] Gini Flow appointment sync every ${Math.round(GINIFLOW_LOOP_BREAK_MS / 1000)}s`,
+    );
+    triageLoopRunning = true;
+    scheduleNextTriagePrep(20_000);
+    console.log(
+      `[Cron] Gini Flow triage prep (tomorrow + categorisation) every ${Math.round(TRIAGE_LOOP_BREAK_MS / 60000)}m`,
     );
   }
 
@@ -499,6 +552,11 @@ export function stopCronJobs() {
   if (giniflowLoopTimeoutId) {
     clearTimeout(giniflowLoopTimeoutId);
     giniflowLoopTimeoutId = null;
+  }
+  triageLoopRunning = false;
+  if (triageLoopTimeoutId) {
+    clearTimeout(triageLoopTimeoutId);
+    triageLoopTimeoutId = null;
   }
   if (healthrayLoopRunning || healthrayLoopTimeoutId) {
     healthrayLoopRunning = false;

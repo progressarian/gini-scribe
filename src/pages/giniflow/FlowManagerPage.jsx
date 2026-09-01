@@ -1,14 +1,33 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../../services/api";
 import useAuthStore from "../../stores/authStore";
 import { hasCapability, CAPABILITIES as CAP } from "../../../shared/permissions";
-import { CHAIN, STATUS_LABEL, STATUS_TO_SLA_KEY } from "../../../shared/giniflowStatus";
+import {
+  CHAIN,
+  STATUS_LABEL,
+  STATUS_TO_SLA_KEY,
+  BOARD_COLUMNS,
+  ORDERED_COLUMNS,
+  nextColumn,
+  PRIORITIES,
+  PRIORITY_LABEL,
+  PRIORITY_ICON,
+  canDropInColumn,
+  compareQueue,
+} from "../../../shared/giniflowStatus";
 import {
   useGiniflowBoard,
   useGiniflowSearch,
   useGiniflowTimeline,
 } from "../../queries/hooks/useGiniflowBoard";
+import {
+  useGiniflowSetPriority,
+  useGiniflowReorder,
+  useGiniflowMove,
+} from "../../queries/hooks/useGiniflowQueue";
+import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
+import LiveBadge from "../../components/giniflow/LiveBadge";
 import "../../styles/giniflow.css";
 
 // Each category needs its own mark: 🟡 for both "worse in range" and "getting
@@ -126,7 +145,133 @@ function useTick(intervalMs = 1000) {
   return now;
 }
 
-function PatientCard({ card, offsetMs, now, onOpen, flagged }) {
+const COLUMN_NAME = Object.fromEntries(BOARD_COLUMNS.map((c) => [c.key, c.name]));
+
+// Where this card may legally be dragged. Computed from the same chain rule the
+// server enforces, so an impossible drop is never offered rather than being
+// offered and then refused (GF-16: never show an action that cannot work).
+const dropTargetsFor = (card) => ORDERED_COLUMNS.filter((key) => canDropInColumn(card, key));
+
+// Why this card has nowhere to go, in the words of the thing that stopped it.
+// A drop target that greys out with no explanation is the worst of the options
+// the review left open (BQ-02).
+const noMoveReason = (card) => {
+  if (card.blockedReason) return "Blocked — clear it at the station first";
+  if (card.finished) return "This visit is finished";
+  if (!nextColumn(card.column)) return "Last column — nothing after this";
+  return null;
+};
+
+// Dragging is a mouse gesture and the floor board is also driven from a keyboard,
+// so every drag has a menu equivalent: priority, a nudge up or down inside the
+// column, and the same forward move a drop would make.
+function CardMenu({ card, canMoveUp, canMoveDown, onPriority, onNudge, onMove, onClose }) {
+  const ref = useRef(null);
+  const [pending, setPending] = useState(null);
+  const [reason, setReason] = useState(card.priorityReason || "");
+  useDismissable(true, onClose, ref);
+  const targets = dropTargetsFor(card);
+  const blocked = noMoveReason(card);
+
+  // Raising a priority asks why, the way blocking does (GF-18) — but does not
+  // insist: an urgent patient is often self-evident at the desk, and a required
+  // sentence would only produce empty ones. Returning to normal needs no reason
+  // and applies straight away.
+  const choose = (p) => (p === "normal" ? onPriority(p, null) : setPending(p));
+
+  return (
+    <div className="pc-menu" ref={ref} role="menu">
+      <div className="pcm-hd">Priority</div>
+      {PRIORITIES.map((p) => (
+        <button
+          key={p}
+          type="button"
+          role="menuitemradio"
+          aria-checked={card.priority === p}
+          className={`pcm-item${card.priority === p ? " on" : ""}${pending === p ? " pending" : ""}`}
+          onClick={() => choose(p)}
+        >
+          <span className={`pri-dot pri-${p}`} aria-hidden="true">
+            {PRIORITY_ICON[p] || "·"}
+          </span>
+          {PRIORITY_LABEL[p]}
+        </button>
+      ))}
+      {pending && (
+        <div className="pcm-reason">
+          <label htmlFor={`why-${card.id}`}>Why? (optional)</label>
+          <input
+            id={`why-${card.id}`}
+            type="text"
+            maxLength={200}
+            value={reason}
+            autoFocus
+            placeholder="e.g. chest pain, elderly, travelling far"
+            onChange={(e) => setReason(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && onPriority(pending, reason.trim() || null)}
+          />
+          <button
+            type="button"
+            className="pcm-apply"
+            onClick={() => onPriority(pending, reason.trim() || null)}
+          >
+            Set {PRIORITY_LABEL[pending]}
+          </button>
+        </div>
+      )}
+      <div className="pcm-hd">Order in this column</div>
+      <button
+        type="button"
+        role="menuitem"
+        className="pcm-item"
+        disabled={!canMoveUp}
+        onClick={() => onNudge(-1)}
+      >
+        ↑ Move up
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        className="pcm-item"
+        disabled={!canMoveDown}
+        onClick={() => onNudge(1)}
+      >
+        ↓ Move down
+      </button>
+      <div className="pcm-hd">Send to</div>
+      {targets.length === 0 && <div className="pcm-note">{blocked || "Nowhere from here"}</div>}
+      {targets.map((key) => (
+        <button
+          key={key}
+          type="button"
+          role="menuitem"
+          className="pcm-item"
+          onClick={() => onMove(key)}
+        >
+          → {COLUMN_NAME[key]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function PatientCard({
+  card,
+  offsetMs,
+  now,
+  onOpen,
+  flagged,
+  canManage,
+  dragging,
+  onDragStart,
+  onDragEnd,
+  canMoveUp,
+  canMoveDown,
+  onPriority,
+  onNudge,
+  onMove,
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
   const isLab = !!card.lab && card.column === "lab";
   const anchor = isLab ? card.lab.since : card.statusSince;
   const live = minutesSince(anchor, now - offsetMs);
@@ -139,57 +284,195 @@ function PatientCard({ card, offsetMs, now, onOpen, flagged }) {
   // Derived live rather than taken from the poll, so the red styling and the
   // number it describes can never disagree.
   const totalOver = !!card.totalBudget && totalMinutes !== null && totalMinutes > card.totalBudget;
+  // The lab track is keyed on a lab order rather than on a point in the chain,
+  // and a finished visit has no next station — neither can be dragged anywhere.
+  const draggable = canManage && !isLab && !card.finished;
+  const act =
+    (fn) =>
+    (...args) => {
+      setMenuOpen(false);
+      fn(...args);
+    };
 
   return (
-    <button
-      type="button"
-      className={`pc${flagged ? " flagged" : ""}`}
-      onClick={() => onOpen(card)}
+    <div
+      className={`pc${flagged ? " flagged" : ""}${dragging ? " dragging" : ""}${
+        card.priority && card.priority !== "normal" ? ` pri-${card.priority}` : ""
+      }`}
+      data-card-id={card.id}
+      draggable={draggable}
+      onDragStart={(e) => {
+        // Text/plain as well, so a card dragged into a text field or another
+        // window degrades to the patient's name rather than to nothing.
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", card.name);
+        onDragStart(card);
+      }}
+      onDragEnd={onDragEnd}
       style={card.finished ? { opacity: 0.6 } : undefined}
     >
-      <div className="pc-top">
-        <div className="pc-av" style={{ background: avatarColour(card.patientId) }}>
-          {initials(card.name)}
+      <button type="button" className="pc-open" onClick={() => onOpen(card)}>
+        <div className="pc-top">
+          <div className="pc-av" style={{ background: avatarColour(card.patientId) }}>
+            {initials(card.name)}
+          </div>
+          <div className="pc-name">{card.name}</div>
+          {card.priority && card.priority !== "normal" && (
+            <span
+              className={`pc-pri pri-${card.priority}`}
+              title={`${PRIORITY_LABEL[card.priority]} priority${
+                card.priorityReason ? ` — ${card.priorityReason}` : ""
+              }`}
+            >
+              {PRIORITY_ICON[card.priority]} {PRIORITY_LABEL[card.priority]}
+            </span>
+          )}
+          <div className="pc-cat" title={CATEGORY_DOT[card.category]?.label || "Uncategorised"}>
+            {CATEGORY_DOT[card.category]?.icon || ""}
+          </div>
         </div>
-        <div className="pc-name">{card.name}</div>
-        <div className="pc-cat" title={CATEGORY_DOT[card.category]?.label || "Uncategorised"}>
-          {CATEGORY_DOT[card.category]?.icon || ""}
+        <div className="pc-id">
+          {card.age}
+          {(card.sex || "")[0] || ""} · {card.fileNo || "—"} · Visit {card.visitNumber ?? "—"}
         </div>
-      </div>
-      <div className="pc-id">
-        {card.age}
-        {(card.sex || "")[0] || ""} · {card.fileNo || "—"} · Visit {card.visitNumber ?? "—"}
-      </div>
-      <div className="pc-mid">{isLab ? card.lab.subtitle : card.subtitle}</div>
-      <div className="pc-bot">
-        <span className={`tmr ${colourClass(colour)}`}>⏱ {minutes ?? 0}m</span>
-        {!isLab && totalMinutes !== null && (
-          <span className={`tot${totalOver ? " over" : ""}`}>{totalMinutes}m total</span>
+        <div className="pc-mid">{isLab ? card.lab.subtitle : card.subtitle}</div>
+        <div className="pc-bot">
+          <span className={`tmr ${colourClass(colour)}`}>⏱ {minutes ?? 0}m</span>
+          {!isLab && totalMinutes !== null && (
+            <span className={`tot${totalOver ? " over" : ""}`}>{totalMinutes}m total</span>
+          )}
+          {!isLab && card.queuePosition != null && (
+            <span className="pc-pos" title="Manually placed in this queue">
+              #{card.queuePosition}
+            </span>
+          )}
+        </div>
+        {isLab && <div className="pc-parallel">Lab track · also on the main board</div>}
+        {!isLab && card.blockedReason && (
+          <div className="wait4 blocked">
+            <span className="w-ico">🚫</span> {card.blockedReason}
+          </div>
         )}
-      </div>
-      {isLab && <div className="pc-parallel">Lab track · also on the main board</div>}
-      {!isLab && card.blockedReason && (
-        <div className="wait4 blocked">
-          <span className="w-ico">🚫</span> {card.blockedReason}
-        </div>
+        {isLab && card.lab.hint && (
+          <div className={`wait4${card.lab.blocking ? " blocked" : ""}`}>
+            <span className="w-ico">{card.lab.hintIcon}</span> {card.lab.hint}
+          </div>
+        )}
+        {!isLab && !card.blockedReason && card.hint && (
+          <div className="wait4">
+            <span className="w-ico">{card.hintIcon}</span> {card.hint}
+          </div>
+        )}
+      </button>
+      {canManage && !isLab && (
+        <button
+          type="button"
+          className="pc-menu-btn"
+          data-gf-toggle
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          aria-label={`Priority and position for ${card.name}`}
+          onClick={() => setMenuOpen((v) => !v)}
+        >
+          ⋮
+        </button>
       )}
-      {isLab && card.lab.hint && (
-        <div className={`wait4${card.lab.blocking ? " blocked" : ""}`}>
-          <span className="w-ico">{card.lab.hintIcon}</span> {card.lab.hint}
-        </div>
+      {menuOpen && (
+        <CardMenu
+          card={card}
+          canMoveUp={canMoveUp}
+          canMoveDown={canMoveDown}
+          onPriority={act(onPriority)}
+          onNudge={act(onNudge)}
+          onMove={act(onMove)}
+          onClose={() => setMenuOpen(false)}
+        />
       )}
-      {!isLab && !card.blockedReason && card.hint && (
-        <div className="wait4">
-          <span className="w-ico">{card.hintIcon}</span> {card.hint}
-        </div>
-      )}
-    </button>
+    </div>
   );
 }
 
-function Column({ column, offsetMs, now, onOpen, flaggedId }) {
+// Columns the manager can rearrange by hand. The lab track is ordered by its own
+// timers rather than by the chain, and "Done today" is a record of what already
+// happened — neither has a queue to arrange.
+const ORDERABLE = (key) => key !== "lab" && key !== "done";
+
+function Column({
+  column,
+  offsetMs,
+  now,
+  onOpen,
+  canManage,
+  drag,
+  onDragStart,
+  onDragEnd,
+  onReorder,
+  onMove,
+  onPriority,
+}) {
+  const bodyRef = useRef(null);
+  const [dropIndex, setDropIndex] = useState(null);
+  const cards = useMemo(
+    () => (ORDERABLE(column.key) ? [...column.cards].sort(compareQueue) : column.cards),
+    [column.cards, column.key],
+  );
+  const sameColumn = drag?.column === column.key;
+  const accepts =
+    canManage && !!drag && (sameColumn ? ORDERABLE(column.key) : canDropInColumn(drag, column.key));
+
+  // Which gap the card would land in, measured against the rendered cards rather
+  // than tracked per card: one handler on the column body stays correct while the
+  // list re-sorts underneath the pointer.
+  const gapAt = (clientY) => {
+    const els = [...(bodyRef.current?.querySelectorAll("[data-card-id]") || [])];
+    const i = els.findIndex((el) => {
+      const box = el.getBoundingClientRect();
+      return clientY < box.top + box.height / 2;
+    });
+    return i === -1 ? els.length : i;
+  };
+
+  const handleDragOver = (e) => {
+    if (!accepts) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDropIndex(sameColumn ? gapAt(e.clientY) : cards.length);
+  };
+
+  const handleDrop = (e) => {
+    if (!accepts) return;
+    e.preventDefault();
+    const gap = dropIndex ?? cards.length;
+    setDropIndex(null);
+    if (!sameColumn) return onMove(drag.id, column.key, drag.name);
+    const from = cards.findIndex((c) => c.id === drag.id);
+    const to = gap > from ? gap - 1 : gap;
+    if (from === -1 || from === to) return;
+    const ids = cards.map((c) => c.id);
+    ids.splice(to, 0, ids.splice(from, 1)[0]);
+    onReorder(column.key, ids);
+  };
+
+  const nudge = (card, delta) => {
+    const ids = cards.map((c) => c.id);
+    const from = ids.indexOf(card.id);
+    const to = from + delta;
+    if (from === -1 || to < 0 || to >= ids.length) return;
+    ids.splice(to, 0, ids.splice(from, 1)[0]);
+    onReorder(column.key, ids);
+  };
+
   return (
-    <div className={`col${column.hot ? " hot" : ""}`}>
+    <div
+      className={`col${column.hot ? " hot" : ""}${accepts ? " drop-ok" : ""}${
+        accepts && dropIndex !== null ? " drop-active" : ""
+      }`}
+      onDragOver={handleDragOver}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget)) setDropIndex(null);
+      }}
+      onDrop={handleDrop}
+    >
       <div className="col-hd">
         <span>{column.icon}</span>
         <span className="col-name" style={column.hot ? { color: "var(--red)" } : undefined}>
@@ -208,21 +491,29 @@ function Column({ column, offsetMs, now, onOpen, flaggedId }) {
           {column.hot ? ` · avg now ${column.avgMinutes}m ⚠` : ""}
         </div>
       )}
-      <div className="col-body">
-        {column.cards.length === 0 && <div className="col-empty">—</div>}
-        {[...column.cards]
-          .sort((a, b) =>
-            column.key === "done" ? 0 : (b.statusMinutes ?? 0) - (a.statusMinutes ?? 0),
-          )
-          .map((card) => (
+      <div className="col-body" ref={bodyRef}>
+        {cards.length === 0 && <div className="col-empty">{accepts ? "Drop here" : "—"}</div>}
+        {cards.map((card, i) => (
+          <Fragment key={`${column.key}-${card.id}`}>
+            {accepts && sameColumn && dropIndex === i && <div className="drop-line" />}
             <PatientCard
-              key={`${column.key}-${card.id}`}
               card={{ ...card, column: column.key }}
               offsetMs={offsetMs}
               now={now}
               onOpen={onOpen}
+              canManage={canManage}
+              dragging={drag?.id === card.id}
+              onDragStart={onDragStart}
+              onDragEnd={onDragEnd}
+              canMoveUp={ORDERABLE(column.key) && i > 0}
+              canMoveDown={ORDERABLE(column.key) && i < cards.length - 1}
+              onPriority={(priority, reason) => onPriority(card.id, priority, reason)}
+              onNudge={(delta) => nudge(card, delta)}
+              onMove={(key) => onMove(card.id, key, card.name)}
             />
-          ))}
+          </Fragment>
+        ))}
+        {accepts && sameColumn && dropIndex === cards.length && <div className="drop-line" />}
       </div>
     </div>
   );
@@ -465,6 +756,7 @@ function StatTile({ value, unit, label, sub, colour, dark, filterKey, activeFilt
 export default function FlowManagerPage() {
   const role = useAuthStore((s) => s.currentDoctor?.role);
   const canEditSla = hasCapability(role, CAP.GINIFLOW_SLA_ADMIN);
+  const canManageQueue = hasCapability(role, CAP.GINIFLOW_MANAGE_QUEUE);
   const queryClient = useQueryClient();
   const now = useTick();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -475,6 +767,8 @@ export default function FlowManagerPage() {
   const [date, setDate] = useState(null);
   const [search, setSearch] = useState("");
   const [toast, setToast] = useState("");
+  const [drag, setDrag] = useState(null);
+  const [pendingMove, setPendingMove] = useState(null);
   const toastTimer = useRef(null);
 
   const perfRef = useRef(null);
@@ -484,6 +778,9 @@ export default function FlowManagerPage() {
   const { data: searchData, isFetching: searching } = useGiniflowSearch(debouncedSearch, date);
   const { data, isLoading, isError, error, dataUpdatedAt } = useGiniflowBoard(date);
   const expired = error?.response?.status === 401;
+  const setPriorityMutation = useGiniflowSetPriority(date);
+  const reorderMutation = useGiniflowReorder(date);
+  const moveMutation = useGiniflowMove(date, data?.slaConfig || []);
 
   // A display left open overnight would keep asking for yesterday. When the IST
   // date rolls over, drop back to "today" and refetch (GF: day rollover).
@@ -491,6 +788,10 @@ export default function FlowManagerPage() {
   useEffect(() => {
     if (!date) queryClient.invalidateQueries({ queryKey: ["giniflow", "board"] });
   }, [istDay, date, queryClient]);
+
+  // One connection for the whole board: the server says a visit moved, the
+  // queries it affects refetch through the API (12-REALTIME-PLAN.md).
+  const live = useGiniflowLive({ date: date || istDay });
 
   // The wall display's own clock may drift; every timer is measured against the
   // server's, so the offset between the two is applied to each tick.
@@ -519,6 +820,50 @@ export default function FlowManagerPage() {
     setToast(msg);
     clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(""), 3000);
+  };
+
+  // A rejected rearrangement is the manager's mis-drop, not a fault: say what the
+  // floor can do about it instead of echoing the chain's internal status names.
+  const queueError = (e) => {
+    const message = e?.response?.data?.error || "";
+    if (e?.response?.status === 403)
+      return showToast("Your role cannot rearrange the floor board.");
+    if (message.startsWith("Illegal transition"))
+      return showToast("Move one station at a time — a patient cannot skip a station.");
+    return showToast(message || "That move was not accepted — the board is unchanged.");
+  };
+
+  const onPriority = (visitId, priority, reason) =>
+    setPriorityMutation.mutate({ visitId, priority, reason }, { onError: queueError });
+
+  const onReorder = (columnKey, visitIds) =>
+    reorderMutation.mutate(
+      { columnKey, visitIds },
+      {
+        onError: queueError,
+        // A reorder that silently drops the cards that moved on mid-drag would
+        // tell the manager the board did what they asked when it did not (BQ-08).
+        onSuccess: (r) =>
+          r?.ignored?.length &&
+          showToast(
+            `${r.ignored.length} patient${r.ignored.length === 1 ? " had" : "s had"} already moved on — the rest were reordered`,
+          ),
+      },
+    );
+
+  const runMove = (visitId, column) => {
+    setDrag(null);
+    moveMutation.mutate({ visitId, column }, { onError: queueError });
+  };
+
+  // Done is the one drop that ends a visit on the board. Under append-only rules
+  // a correction can only be a further forward event, and there are none left —
+  // so a mis-drop on a touch wall display would be permanent. It asks first
+  // (BQ-03); every other column applies straight away.
+  const onMove = (visitId, column, name) => {
+    if (column !== "done") return runMove(visitId, column);
+    setDrag(null);
+    setPendingMove({ visitId, column, name });
   };
 
   const saveSla = useMutation({
@@ -584,6 +929,11 @@ export default function FlowManagerPage() {
         })
       : columns;
   const filteredCount = filter || searchIds ? shownColumns.reduce((sum, c) => sum + c.count, 0) : 0;
+  // A reorder sends the column's whole order, so it can only be done against the
+  // whole column. Dragging a filtered column would write positions for the cards
+  // that happen to be visible and leave everyone else unplaced beneath them.
+  const hiding = !!filter || searchActive;
+  const canRearrange = canManageQueue && !hiding && !date;
 
   return (
     <div className={`gf${stale ? " stale" : ""}`} ref={rootRef}>
@@ -591,11 +941,14 @@ export default function FlowManagerPage() {
         <div className="rl">Gini Flow</div>
         <div className="rsep" />
         <span className="rail-title">Flow Manager</span>
-        <span className="rail-live">
-          <span className="live-dot" />{" "}
-          {stale
-            ? "Reconnecting…"
-            : `Live · ${new Date().toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" })}`}
+        <LiveBadge live={live} stale={stale} />
+        <span className="rail-date-label">
+          {new Date().toLocaleDateString("en-IN", {
+            weekday: "short",
+            day: "numeric",
+            month: "short",
+            year: "numeric",
+          })}
         </span>
         <div className="rr">
           <input
@@ -625,21 +978,14 @@ export default function FlowManagerPage() {
           <button className="rbtn" data-gf-toggle onClick={() => setDrawerOpen(true)}>
             ⚙ Time budgets
           </button>
-          {/* The prototype's own button only names the stations — it does not
-              navigate, and there is nothing to navigate to yet. It must not link
-              into the old /flow/* pages: that would reconnect the two systems in
-              the UI (GF-13). */}
-          <button
-            className="rbtn"
-            onClick={() =>
-              showToast(
-                "Station screens — Reception · Vitals · MO/SD · Doctor · Lab · Pharmacy — not built yet",
-                4000,
-              )
-            }
-          >
-            Switch role
-          </button>
+          {/* The launcher, which is where the station screens are chosen from.
+              A plain link, matching every station's own way back: it survives
+              without JS and keeps the rail free of a router dependency. Still
+              never the old /flow/* pages — linking those would reconnect the two
+              systems in the UI (GF-13). */}
+          <a className="rbtn" href="/giniflow/stations">
+            ← Stations
+          </a>
           <span className="rail-clock">
             {new Date(now).toLocaleTimeString("en-IN", {
               hour: "2-digit",
@@ -729,6 +1075,7 @@ export default function FlowManagerPage() {
                 {searchActive && (searchData?.results?.length || 0) > filteredCount
                   ? ` — ${searchData.results.length - filteredCount} more matched but have left the floor`
                   : ""}
+                {canManageQueue ? " · rearranging is off while the board is filtered" : ""}
               </>
             )}
           </span>
@@ -778,7 +1125,7 @@ export default function FlowManagerPage() {
       </div>
 
       <div className="board-wrap">
-        <div className="board">
+        <div className={`board${drag ? " dragging" : ""}`}>
           {shownColumns.map((column) => (
             <Column
               key={column.key}
@@ -786,6 +1133,21 @@ export default function FlowManagerPage() {
               offsetMs={offsetMs}
               now={now}
               onOpen={(c) => setOpenVisit(c.id)}
+              canManage={canRearrange}
+              drag={drag}
+              onDragStart={(card) =>
+                setDrag({
+                  id: card.id,
+                  name: card.name,
+                  column: card.column,
+                  status: card.status,
+                  resumeStatus: card.resumeStatus,
+                })
+              }
+              onDragEnd={() => setDrag(null)}
+              onReorder={onReorder}
+              onMove={onMove}
+              onPriority={onPriority}
             />
           ))}
         </div>
@@ -870,6 +1232,42 @@ export default function FlowManagerPage() {
               <span>
                 {report.stats.withinSlaPct ?? "—"}% of {report.stats.slaTransitions} transitions
               </span>
+            </div>
+          </div>
+        </div>
+      )}
+      {pendingMove && (
+        <div
+          className="tmodal open"
+          onClick={(e) => e.target === e.currentTarget && setPendingMove(null)}
+        >
+          <div className="tbox confirm" role="alertdialog" aria-label="Confirm end of visit">
+            <div className="tb-hd">
+              <div>
+                <div className="tb-name">Send {pendingMove.name} to Done?</div>
+                <div className="tb-meta">Records the medicines as dispensed</div>
+              </div>
+            </div>
+            <div className="tb-body">
+              <p className="cf-warn">
+                This ends {pendingMove.name}&apos;s journey on the board. Gini Flow&apos;s log only
+                moves forward, so it cannot be undone from here.
+              </p>
+              <div className="cf-actions">
+                <button className="btn btn-g" onClick={() => setPendingMove(null)}>
+                  Cancel
+                </button>
+                <button
+                  className="btn btn-tl"
+                  autoFocus
+                  onClick={() => {
+                    runMove(pendingMove.visitId, pendingMove.column);
+                    setPendingMove(null);
+                  }}
+                >
+                  Yes — dispensed, done
+                </button>
+              </div>
             </div>
           </div>
         </div>

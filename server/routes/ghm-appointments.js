@@ -2,7 +2,12 @@ import { Router } from "express";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
 import { resolveDoctorIdByName, checkBookingAvailability } from "../services/bookingGuard.js";
-import { checkPatientBlocked, blockedResponse, blockActor } from "../services/patientBlockGuard.js";
+import {
+  checkPatientBlocked,
+  blockedResponse,
+  blockActor,
+  resolvePatientId,
+} from "../services/patientBlockGuard.js";
 import {
   ownFu,
   dayWindowWhere,
@@ -1070,11 +1075,20 @@ router.post("/ghm-appointments", async (req, res) => {
     let resolved_file_no = file_no || null;
     const cleanAddress = String(address || "").trim() || null;
 
+    // "Someone else on this number" — the desk has stated this booking is for a
+    // person with no chart yet, so the phone must NOT resolve to one. A number
+    // belongs to a whole family, and without this the fallback below silently
+    // re-attaches the visit to whichever relative it finds first, putting one
+    // sibling's consultation, labs and prescriptions on the other's record. An
+    // explicit File No still wins: that names a chart on purpose.
+    const forceNewPatient =
+      !file_no && ["1", "true", "yes"].includes(String(req.body.new_patient ?? "").toLowerCase());
+
     if (file_no) {
       const pr = await pool.query("SELECT id FROM patients WHERE file_no=$1 LIMIT 1", [file_no]);
       patient_id = pr.rows[0]?.id || null;
     }
-    if (!patient_id && phone) {
+    if (!patient_id && phone && !forceNewPatient) {
       const pr = await pool.query(
         "SELECT id, file_no FROM patients WHERE phone=$1 OR $1 = ANY(alt_phone) LIMIT 1",
         [phone],
@@ -1087,8 +1101,18 @@ router.post("/ghm-appointments", async (req, res) => {
     // Blocklist. Sits between identity resolution and chart creation so a
     // blocked patient is never laundered into a fresh chart, and so the
     // demographics UPDATE below never runs for a refused booking.
+    //
+    // "Someone else on this number" is exactly the laundering route that
+    // sentence warns about, so it is still checked against the chart the phone
+    // points at. A relative of a blocked patient is therefore refused too —
+    // deliberately, since nothing here can tell them apart from the blocked
+    // patient re-booking under another name — and an admin overrides with
+    // force, the same as any other refusal.
+    const blockCheckId =
+      patient_id ||
+      (forceNewPatient && phone ? await resolvePatientId({ fileNo: null, phone }) : null);
     const blockedPatient = await checkPatientBlocked({
-      patientId: patient_id,
+      patientId: blockCheckId,
       force: req.body.force,
       role: req.doctor?.role,
       actor: blockActor(req),

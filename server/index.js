@@ -57,7 +57,9 @@ import doctorScheduleRoutes from "./routes/doctorSchedule.js";
 import medicineCollectionRoutes from "./routes/medicineCollection.js";
 import flowRoutes from "./routes/flow.js";
 import giniflowRoutes from "./routes/giniflow.js";
+import { startEventTailer } from "./services/giniflow/eventTailer.js";
 import giniflowStationRoutes from "./routes/giniflowStations.js";
+import giniflowTriageRoutes from "./routes/giniflowTriage.js";
 import { startCronJobs } from "./services/cron/index.js";
 import { startSheetsCron } from "./services/cron/sheetsSync.js";
 import { startTodaysShowCron } from "./services/cron/todaysShowSync.js";
@@ -178,6 +180,7 @@ app.use("/api", medicineCollectionRoutes);
 app.use("/api", flowRoutes);
 app.use("/api", giniflowRoutes);
 app.use("/api", giniflowStationRoutes);
+app.use("/api", giniflowTriageRoutes);
 
 // Serve frontend
 const distPath = path.join(__dirname, "..", "dist");
@@ -197,6 +200,14 @@ app.listen(PORT, () => {
       "⚠️  Genie sync: DISABLED — set GENIE_SUPABASE_URL and GENIE_SUPABASE_SERVICE_KEY in .env to enable Track data sync",
     );
   }
+  // Gini Flow live updates. The tailer belongs in the API process, not the
+  // worker: it feeds the screens this process is holding connections for, and
+  // reading the append-only event tables is how it hears about the worker's
+  // HealthRay sync without the two processes talking (12-REALTIME-PLAN.md).
+  startEventTailer()
+    .then((r) => console.log(`✅ Gini Flow live updates: tailing from`, r.watermarks))
+    .catch((e) => console.warn("⚠️  Gini Flow live updates disabled:", e.message));
+
   if (RUN_CRON_IN_API) {
     console.log("⚠️  RUN_CRON_IN_API=1 — running cron jobs inside API process");
     startCronJobs();

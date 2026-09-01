@@ -32,8 +32,49 @@
   padding: 3px 9px;
   border-radius: 20px;
 }
-.gf .tr-back {
+/* The rail's right-hand group. It was an inline `style` blob repeated on four
+   station pages, which meant the layout could not be adjusted from a media
+   query at all — inline styles win — so the rail overflowed on a narrow screen
+   however the stylesheet was written. */
+.gf .rail-right {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* So its children may actually shrink inside the rail's flex row. */
+  min-width: 0;
+}
+
+/* The board's `.rail-search` is white-on-translucent-white for its navy rail;
+   this rail is white, so the same class needs its own rule here rather than
+   being shared. Without it the input was browser-default on every station. */
+.gf .rail-search {
+  width: 190px;
+  min-width: 0;
+  padding: 4px 9px;
+  font-family: var(--fb);
+  font-size: 11px;
+  color: var(--ink);
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: 6px;
+}
+.gf .rail-search::placeholder {
+  color: var(--ink4);
+}
+.gf .rail-search:focus-visible {
+  outline: 2px solid var(--blu);
+  outline-offset: -1px;
+}
+
+/* A plain control, positioned by whatever holds it. It used to carry
+   `margin-left: auto` itself, which was invisible on the stations — there it
+   sits inside `.rail-right`, which is content-width, so there is no free space
+   for the margin to claim — but wrong on the consult rail, where "← Patients"
+   is the FIRST child of the rail and the auto margin shoved it and everything
+   after it into the middle, leaving the rail's left edge empty. Right-alignment
+   belongs to `.rail-right`, which already does it. */
+.gf .tr-back {
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
@@ -43,10 +84,21 @@
   background: transparent;
   font-family: var(--fb);
   color: var(--ink3);
+  /* Rendered as an <a> on the stations and as a <button> in the consult view,
+     so it has to look identical either way. */
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .gf .tr-back:hover {
   background: var(--bd);
   color: var(--ink);
+}
+.gf .tr-back:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 .gf .badge {
   font-size: 10px;
@@ -545,12 +597,19 @@
   background: var(--bd2);
   border-radius: 3px;
 }
+/* The column every station pane lives in — lab, reception and pharmacy all have
+   the same shape: day counts, a workflow note, then a queue.
+   It was 1000px, which left ~460px of empty gutter each side on a 1920 monitor.
+   A day-long worklist is not a reading column: rows of `patient · detail ·
+   actions` keep going where a paragraph or a form would stop. Still capped, so a
+   patient's name and their buttons never end up a metre apart on an ultrawide. */
 .gf .inner {
   padding: 14px;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-width: 1000px;
+  width: 100%;
+  max-width: 1480px;
   margin: 0 auto;
 }
 .gf .grp-lbl {
@@ -737,13 +796,20 @@
 .gf.gf-land {
   background: var(--ink);
   align-items: center;
+  /* Centred flex content that outgrows its container overflows BOTH ways, and
+     the half above the top edge cannot be scrolled to — which hid the logo, the
+     date and the bottleneck alert as soon as the cards were taller than the
+     screen. `safe` centres only while there is room and falls back to the start
+     edge when there is not. The plain value stays first as the fallback for
+     engines that do not know the keyword. */
   justify-content: center;
-  padding: 40px 20px;
+  justify-content: safe center;
+  padding: clamp(20px, 5vh, 40px) clamp(14px, 4vw, 20px);
   overflow-y: auto;
 }
 .gf .land-logo {
   font-family: var(--fd);
-  font-size: 36px;
+  font-size: clamp(26px, 6vw, 36px);
   color: #fff;
   font-style: italic;
   margin-bottom: 6px;
@@ -752,7 +818,7 @@
 .gf .land-sub {
   font-size: 13px;
   color: rgba(255, 255, 255, 0.4);
-  margin-bottom: 32px;
+  margin-bottom: clamp(16px, 4vh, 32px);
   text-align: center;
   letter-spacing: 0.5px;
 }
@@ -763,11 +829,15 @@
   border-radius: var(--r-lg);
   padding: 9px 14px;
   font-size: 12px;
-  margin-bottom: 22px;
+  margin-bottom: clamp(14px, 3vh, 22px);
+  text-align: center;
+  max-width: 100%;
 }
 .gf .role-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  /* Reflows continuously rather than at three fixed breakpoints: seven tiles
+     look wrong at exactly four columns on a tablet held either way. */
+  grid-template-columns: repeat(auto-fit, minmax(195px, 1fr));
   gap: 12px;
   max-width: 900px;
   width: 100%;
@@ -776,7 +846,7 @@
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 16px;
-  padding: 22px 18px;
+  padding: clamp(14px, 2.5vh, 22px) 18px;
   cursor: pointer;
   transition: all 0.2s;
   text-align: center;
@@ -825,14 +895,29 @@
   color: rgba(255, 255, 255, 0.45);
 }
 
-@media (max-width: 900px) {
-  .gf .role-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-@media (max-width: 520px) {
+/* Below the smallest tile width the grid is one column anyway; this only stops
+   a 195px minimum forcing a horizontal scroll on a narrow phone. */
+@media (max-width: 400px) {
   .gf .role-grid {
     grid-template-columns: 1fr;
+  }
+}
+/* A tablet in landscape has height, not room to breathe: tighten the vertical
+   rhythm so all seven tiles and the alert fit without scrolling at all. */
+@media (max-height: 620px) {
+  .gf .land-logo {
+    font-size: 24px;
+    margin-bottom: 2px;
+  }
+  .gf .land-sub {
+    margin-bottom: 12px;
+  }
+  .gf .rc-ico {
+    font-size: 22px;
+    margin-bottom: 6px;
+  }
+  .gf .rc-desc {
+    display: none;
   }
 }
 
@@ -1229,4 +1314,3589 @@
 .gf .btn-full {
   width: 100%;
   justify-content: center;
+}
+
+/* ── MO / SD STATION ── queue from gini-doctor-v3 s-list, brief from
+   gini-doctor-final s-overview, tests panel from s-tests ── */
+.gf .sq-group {
+  padding: 8px 14px 4px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--ink3);
+  background: var(--bg);
+  border-bottom: 1px solid var(--bd);
+}
+.gf .si-foot {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+.gf .si-reports {
+  font-size: 9px;
+  font-weight: 600;
+}
+.gf .si-reports-g {
+  color: var(--grn);
+}
+.gf .si-reports-a {
+  color: var(--amb);
+}
+.gf .si-reports-n {
+  color: var(--ink4);
+}
+.gf .si-compliance {
+  font-size: 9px;
+  color: var(--ink4);
+  font-family: var(--fm);
+}
+
+/* The allergy strip the addendum asks for on every screen. There is no allergy
+   field in the database, so it states that rather than rendering "None
+   recorded", which would read as a check somebody performed. */
+.gf .allergy-strip {
+  border-radius: var(--r);
+  padding: 9px 12px;
+  margin-bottom: 14px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--red-l);
+  border: 1px solid var(--red-b);
+  color: var(--red);
+}
+.gf .allergy-strip.unknown {
+  background: var(--amb-l);
+  border-color: var(--amb-b);
+  color: var(--amb);
+}
+
+.gf .mo-vitals {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--ink3);
+}
+.gf .mo-vitals strong {
+  color: var(--ink);
+  font-family: var(--fm);
+}
+.gf .mo-bios {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.gf .mo-bio {
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  padding: 7px 11px;
+  min-width: 78px;
+}
+.gf .mb-val {
+  font-family: var(--fm);
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.1;
+}
+.gf .mb-unit {
+  font-size: 10px;
+  color: var(--ink3);
+  margin-left: 1px;
+}
+.gf .mb-lbl {
+  font-size: 9px;
+  color: var(--ink3);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-top: 2px;
+}
+
+.gf .mo-plan {
+  width: 100%;
+  border: 1.5px solid var(--bd);
+  border-radius: var(--r);
+  padding: 10px 12px;
+  font-family: var(--fb);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink);
+  background: var(--white);
+  outline: none;
+  resize: vertical;
+}
+.gf .mo-plan:focus {
+  border-color: var(--tl);
+  box-shadow: 0 0 0 3px var(--tl-m);
+}
+
+.gf .mo-urgency {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.gf .urg-btn {
+  padding: 6px 11px;
+  border-radius: 20px;
+  border: 1px solid var(--bd);
+  background: var(--white);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink3);
+  cursor: pointer;
+  font-family: var(--fb);
+}
+.gf .urg-btn.on {
+  background: var(--tl);
+  border-color: var(--tl);
+  color: #fff;
+}
+
+.gf .mo-panels {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 7px;
+  margin-bottom: 10px;
+}
+.gf .panel-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 11px;
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  background: var(--white);
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--fb);
+}
+.gf .panel-btn.on {
+  border-color: var(--tl);
+  background: var(--tl-l);
+}
+.gf .pb-icon {
+  font-size: 15px;
+}
+.gf .pb-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.gf .pb-count {
+  font-size: 9px;
+  color: var(--ink3);
+}
+
+.gf .mo-tests {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.gf .test-chip {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 4px 9px;
+  border-radius: 20px;
+  background: var(--white);
+  border: 1px solid var(--bd);
+  color: var(--ink2);
+  cursor: pointer;
+  font-family: var(--fb);
+}
+.gf .test-chip.on {
+  background: var(--tl);
+  border-color: var(--tl);
+  color: #fff;
+}
+.gf .tc-price {
+  font-family: var(--fm);
+  font-size: 9px;
+  opacity: 0.7;
+}
+
+.gf .mo-order-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--nv);
+  color: #fff;
+  border-radius: var(--r);
+  padding: 9px 12px;
+  font-size: 11px;
+  margin-top: 4px;
+}
+.gf .mo-order-bar strong {
+  font-family: var(--fm);
+}
+
+/* The action bar stays out of the scrolling body: handing a patient over is the
+   point of the screen and must not be scrolled past. */
+.gf .mo-actions {
+  flex-shrink: 0;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 12px 18px;
+  border-top: 1px solid var(--bd);
+  background: var(--white);
+}
+.gf .mo-close-note {
+  font-size: 10px;
+  color: var(--ink4);
+}
+.gf .station-detail.mo-detail {
+  overflow: hidden;
+}
+.gf .station-detail.mo-detail .sd-body {
+  overflow-y: auto;
+  min-height: 0;
+}
+/* A queue row an MO cannot claim yet — visible so the floor is legible, but not
+   openable, because claiming from those statuses would skip the vitals station. */
+.gf .sq-item.is-readonly {
+  opacity: 0.55;
+  cursor: default;
+}
+.gf .sq-item.is-readonly:hover {
+  background: transparent;
+}
+
+/* ── VITALS QUEUE: wait, priority, held, done (11-VITALS-QUEUE-PLAN.md) ────── */
+
+/* The wait is what the station can act on, so it reads before the biomarkers. */
+.gf .si-wait {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+}
+.gf .si-tmr {
+  font-family: var(--fm);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+.gf .si-tmr-g {
+  background: var(--grn-l);
+  color: var(--grn);
+}
+.gf .si-tmr-a {
+  background: var(--amb-l);
+  color: var(--amb);
+}
+.gf .si-tmr-r {
+  background: var(--red-l);
+  color: var(--red);
+}
+.gf .si-tmr-neutral {
+  background: var(--bg2, #eef1f5);
+  color: var(--ink3);
+}
+.gf .si-since {
+  font-size: 9px;
+  color: var(--ink4);
+}
+
+/* Priority is the VIP mark — there is no separate flag in Gini Flow. The word
+   is on the chip, so the colour is never the only signal. */
+.gf .si-pri {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+  margin-left: 6px;
+  white-space: nowrap;
+}
+.gf .si-pri.pri-urgent {
+  background: var(--red-l);
+  color: var(--red);
+}
+.gf .si-pri.pri-high {
+  background: var(--amb-l);
+  color: #b45309;
+}
+.gf .sq-item.pri-urgent {
+  border-left: 3px solid var(--red);
+}
+.gf .sq-item.pri-high {
+  border-left: 3px solid var(--amb);
+}
+.gf .si-reason {
+  font-size: 10px;
+  color: var(--ink3);
+  margin-top: 4px;
+  line-height: 1.35;
+}
+
+/* Held and done are separate lists under the queue, each with its own heading —
+   a nurse must never mistake a held patient for the next one to call. */
+.gf .sq-group {
+  margin-top: 14px;
+  border-top: 1px solid var(--bd);
+  padding-top: 10px;
+}
+.gf .sq-gh {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--ink4);
+  padding: 0 2px 6px;
+}
+.gf .sq-held {
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  border: 1px dashed var(--bd2);
+  border-radius: var(--r);
+  background: transparent;
+  opacity: 0.75;
+}
+.gf .sq-done {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  padding: 7px 10px;
+  margin-bottom: 5px;
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  cursor: pointer;
+}
+.gf .sq-done:hover,
+.gf .sq-done.active {
+  border-color: var(--grn);
+}
+.gf .sq-done:focus-visible {
+  outline: 2px solid var(--blu);
+  outline-offset: 1px;
+}
+.gf .si-nowat {
+  font-size: 9px;
+  color: var(--grn);
+  margin-top: 3px;
+}
+
+/* ── MO / SD: brief pane, rail, proposals, trend (10-MO-SD-STATION-REVIEW.md) ─ */
+
+/* The five stops of the journey, on every queue row and on the open patient, so
+   how far down the floor somebody already is never has to be worked out. */
+.gf .mo-rail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+  font-size: 9px;
+  letter-spacing: 0.2px;
+}
+.gf .mr-stop {
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--bd);
+  color: var(--ink4);
+  background: var(--white);
+  white-space: nowrap;
+}
+.gf .mr-done {
+  color: var(--grn);
+  border-color: var(--grn-b);
+  background: var(--grn-l);
+}
+.gf .mr-now {
+  color: var(--blu);
+  border-color: var(--blu-b);
+  background: var(--blu-l);
+  font-weight: 600;
+}
+
+.gf .sdh-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--nv);
+  color: var(--white);
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.gf .st-btn-ghost {
+  background: var(--white);
+  color: var(--ink2);
+  border: 1px solid var(--bd2);
+}
+.gf .st-btn-ghost:hover {
+  background: var(--bg);
+}
+
+/* A biomarker tile is a button — the trend was always going to be an addition,
+   not a rebuild (plan §2.4 item 4). */
+.gf button.mo-bio {
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.gf button.mo-bio:hover {
+  border-color: var(--bd2);
+}
+.gf .mo-bio.on {
+  border-color: var(--blu);
+  box-shadow: 0 0 0 2px var(--blu-b);
+}
+.gf .mo-bio-a {
+  background: var(--amb-l);
+  border-color: var(--amb-b);
+}
+.gf .mo-bio-r {
+  background: var(--red-l);
+  border-color: var(--red-b);
+}
+.gf .mb-prev {
+  font-size: 9px;
+  color: var(--ink3);
+  margin-top: 3px;
+  font-family: var(--fm);
+}
+.gf .mo-trend {
+  margin-top: 10px;
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  padding: 6px 4px 2px;
+  background: var(--white);
+}
+
+.gf .mo-concern-line {
+  font-size: 11px;
+  color: var(--ink2);
+  margin-bottom: 8px;
+  font-family: var(--fm);
+}
+.gf .mo-concerns {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.gf .mo-concerns li {
+  font-size: 12px;
+  color: var(--ink2);
+  border-left: 3px solid var(--bd2);
+  padding: 4px 0 4px 8px;
+}
+.gf .mo-concerns li.mc-a {
+  border-left-color: var(--amb);
+}
+.gf .mo-concerns li.mc-r {
+  border-left-color: var(--red);
+}
+.gf .mo-concern-note {
+  font-size: 12px;
+  color: var(--ink2);
+  background: var(--bg);
+  border-radius: var(--r);
+  padding: 7px 9px;
+  margin-bottom: 8px;
+  white-space: pre-wrap;
+}
+/* Where a concern came from, because an MO treats a number from a report and a
+   sentence from the patient differently. */
+.gf .mc-src {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--ink4);
+}
+
+.gf .mo-dx {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.gf .dx-chip {
+  font-size: 11px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--bd);
+  background: var(--white);
+  color: var(--ink2);
+}
+.gf .dx-chip.bad {
+  border-color: var(--red-b);
+  background: var(--red-l);
+  color: var(--red);
+}
+.gf .mo-meds {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--ink2);
+}
+.gf .mo-meds strong {
+  color: var(--ink);
+}
+
+.gf .mo-dictate {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.gf .mo-proposals {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.gf .mo-proposals li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--ink2);
+  background: var(--pu-l);
+  border: 1px solid var(--pu-b);
+  border-radius: var(--r);
+  padding: 6px 9px;
+}
+.gf .prop-x {
+  border: none;
+  background: transparent;
+  color: var(--ink4);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px 4px;
+}
+.gf .prop-x:hover {
+  color: var(--red);
+}
+.gf .mo-prop-form {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.gf .mo-prop-form input {
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  padding: 7px 9px;
+  font-family: var(--fb);
+  font-size: 12px;
+  width: 108px;
+  min-width: 0;
+}
+.gf .mo-prop-form .prop-reason {
+  flex: 1;
+  min-width: 140px;
+  width: auto;
+}
+.gf .mo-prop-form input:focus {
+  outline: none;
+  border-color: var(--blu);
+}
+
+/* Already ordered and not yet collected: the server refuses a repeat, so the
+   chip says so before it is tapped rather than after. */
+.gf .test-chip.ordered {
+  opacity: 0.55;
+  cursor: default;
+  background: var(--bg);
+}
+
+.gf .confirm-box {
+  /* The overlay it shares with the lab pane pins its child bottom-right; auto
+     margins beat flex alignment, so the confirm sits centred instead. */
+  margin: auto;
+  background: var(--white);
+  border-radius: 14px;
+  padding: 20px;
+  width: min(420px, calc(100vw - 40px));
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.22);
+}
+.gf .cb-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 7px;
+}
+.gf .cb-body {
+  font-size: 12px;
+  color: var(--ink3);
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+.gf .cb-acts {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* The group header carries its own count, and stays sticky so the group a row
+   belongs to is readable however far the queue is scrolled. */
+.gf .sq-group {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.gf .sqg-label {
+  flex: 1;
+  min-width: 0;
+}
+.gf .sqg-count {
+  font-family: var(--fm);
+  font-size: 10px;
+  color: var(--ink4);
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+/* Searching in Postgres rather than the browser: the whole day is reachable,
+   and a phone number the client never receives is still findable. */
+.gf .sq-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 9px;
+}
+.gf .sq-search input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  background: var(--white);
+  padding: 7px 10px;
+  font-family: var(--fb);
+  font-size: 12px;
+  color: var(--ink);
+}
+.gf .sq-search input:focus {
+  outline: none;
+  border-color: var(--blu);
+  box-shadow: 0 0 0 2px var(--blu-b);
+}
+.gf .sqs-count {
+  font-family: var(--fm);
+  font-size: 10px;
+  color: var(--ink3);
+  white-space: nowrap;
+}
+
+/* A patient in a group the MO is not working reads as one line: the name and the
+   file number, which is all that is needed to find somebody. The full card is
+   one tap away, so nothing is lost — only the twenty cards of scrolling between
+   the MO and their own queue. */
+.gf .sq-item.is-collapsed {
+  display: block;
+  padding: 0;
+  cursor: default;
+}
+/* The peek row is the hit target, so the whole container must not light up. */
+.gf .sq-item.is-collapsed:hover {
+  background: transparent;
+}
+/* A full card pins the wait to its top-right corner. Here that corner belongs to
+   the name and file number, so the wait comes back into the flow. */
+.gf .sq-item.is-collapsed .si-slot {
+  position: static;
+  display: block;
+  margin-bottom: 4px;
+}
+.gf .sq-peek {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 34px;
+  padding: 8px 14px;
+  border: none;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.gf .sq-peek:hover {
+  background: var(--bg);
+}
+.gf .sqp-caret {
+  font-size: 9px;
+  color: var(--ink4);
+  width: 8px;
+  flex-shrink: 0;
+}
+.gf .sqp-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gf .sqp-file {
+  font-family: var(--fm);
+  font-size: 10px;
+  color: var(--ink4);
+  flex-shrink: 0;
+}
+.gf .sq-peek-body {
+  padding: 0 14px 12px 30px;
+}
+.gf .sq-peek-open {
+  margin-top: 10px;
+}
+.gf .sq-peek-note {
+  margin-top: 8px;
+  font-size: 10px;
+  color: var(--ink4);
+}
+
+/* Every group opens as full cards. This shortens the groups an MO is not
+   working — it is an option, not the default, because a queue that hides things
+   on its own is a queue an MO stops trusting. */
+.gf .sq-compact {
+  margin-top: 8px;
+  border: 1px solid var(--bd);
+  border-radius: 999px;
+  background: var(--white);
+  color: var(--ink3);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.gf .sq-compact:hover {
+  border-color: var(--bd2);
+  color: var(--ink2);
+}
+.gf .sq-compact.on {
+  background: var(--tl-l);
+  border-color: var(--tl-b);
+  color: var(--tl);
+}
+
+/* Whose queue this is and for which day. A station tablet is shared, so the
+   name signed in has to be readable without opening a menu (plan §2.1). */
+.gf .tr-who {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.55);
+  padding-left: 10px;
+  margin-left: 4px;
+  border-left: 1px solid rgba(255, 255, 255, 0.15);
+  white-space: nowrap;
+}
+.gf .b-tl {
+  background: var(--tl-l);
+  color: var(--tl);
+  border: 1px solid var(--tl-b);
+}
+
+/* A vital is read as a change, so what it changed from sits beside it. */
+.gf .mo-delta {
+  font-family: var(--fm);
+  font-size: 9px;
+  font-style: normal;
+  color: var(--ink4);
+  margin-left: 5px;
+}
+
+/* The chip carries the reason an MO would pick the test, not only its price. */
+.gf .test-chip {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  text-align: left;
+  padding: 5px 10px;
+  border-radius: 10px;
+}
+.gf .tc-name {
+  font-size: 11px;
+}
+.gf .tc-sub {
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--ink4);
+}
+.gf .test-chip.on .tc-sub {
+  color: inherit;
+  opacity: 0.75;
+}
+
+/* The live badge in a station rail. Same contract as the board's: the state is
+   named in words, never implied by the colour of a dot alone. */
+.gf .tr-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.55);
+  white-space: nowrap;
+}
+.gf .tr-live.is-stale {
+  color: var(--amb);
+  font-weight: 600;
+}
+
+/* ══ CONSULTANT STATION ═══════════════════════════════════════════════════════
+   docs/gini-flow/13-CONSULTANT-STATION-PLAN.md — the queue (gini-doctor-v3) and
+   the consult (gini-doctor-final). */
+
+.gf .scope-toggle {
+  display: flex;
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+.gf .scope-toggle button {
+  padding: 5px 10px;
+  font: inherit;
+  font-size: 11px;
+  background: var(--white);
+  border: 0;
+  color: var(--ink3);
+  cursor: pointer;
+}
+.gf .scope-toggle button.on {
+  background: var(--blu);
+  color: #fff;
+  font-weight: 700;
+}
+
+/* ── Day counts ── the order is the priority: what is in the room, what is
+   ready, what is finished, what is stuck. */
+.gf .dstats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+  padding: 12px 16px 0;
+}
+.gf .dstat {
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: var(--r-lg);
+  padding: 10px 12px;
+}
+.gf .ds-val {
+  font-family: var(--fm);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.1;
+}
+.gf .ds-lab {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink2, var(--ink));
+  margin-top: 2px;
+}
+.gf .ds-sub {
+  font-size: 9px;
+  color: var(--ink4);
+}
+.gf .ds-red .ds-val {
+  color: var(--red);
+}
+.gf .ds-grn .ds-val {
+  color: var(--grn);
+}
+.gf .ds-blu .ds-val {
+  color: var(--blu);
+}
+
+/* ── The queue ── */
+.gf .dlist {
+  padding: 12px 16px 40px;
+}
+.gf .dgroup {
+  margin-bottom: 18px;
+}
+.gf .dg-head {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0 0 8px;
+}
+/* The heading is the control: a real button inside the h2, so the section keeps
+   its heading semantics and still announces whether it is open. */
+.gf .dg-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 2px;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: var(--r);
+  cursor: pointer;
+}
+.gf .dg-toggle:hover {
+  background: var(--bg2, #f6f7f9);
+}
+.gf .dg-toggle:focus-visible {
+  outline: 2px solid var(--blu);
+  outline-offset: 1px;
+}
+.gf .dg-chev {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--ink4);
+  transition: transform 0.12s;
+}
+.gf .dg-chev.open {
+  transform: rotate(90deg);
+}
+.gf .dg-sub {
+  font-weight: 400;
+  color: var(--ink4);
+}
+.gf .dg-count {
+  margin-left: auto;
+  font-family: var(--fm);
+  font-size: 11px;
+  color: var(--ink3);
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: 10px;
+  padding: 0 8px;
+}
+
+.gf .dcard {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: var(--r-lg);
+  padding: 10px 12px;
+  margin-bottom: 7px;
+  cursor: pointer;
+  transition: border-color 0.12s;
+}
+.gf .dcard:hover {
+  border-color: var(--blu);
+}
+.gf .dcard:focus-visible {
+  outline: 2px solid var(--blu);
+  outline-offset: 1px;
+}
+.gf .dcard.pri-urgent {
+  border-left: 3px solid var(--red);
+}
+.gf .dcard.pri-high {
+  border-left: 3px solid var(--amb);
+}
+.gf .dc-time {
+  font-family: var(--fm);
+  font-size: 11px;
+  color: var(--ink4);
+  width: 42px;
+  flex-shrink: 0;
+  padding-top: 3px;
+}
+.gf .dc-av {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--nv, #1e3a5f);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.gf .dc-main {
+  flex: 1;
+  min-width: 0;
+}
+.gf .dc-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.gf .dc-visit {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--ink4);
+}
+.gf .dc-meta {
+  font-size: 10px;
+  color: var(--ink4);
+  margin-top: 1px;
+}
+
+/* The journey rail — what makes this a flow screen rather than a list. */
+.gf .dc-rail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 6px 0 5px;
+  font-size: 9px;
+}
+.gf .dr-step {
+  color: var(--ink4);
+}
+.gf .dr-done {
+  color: var(--grn);
+  font-weight: 600;
+}
+.gf .dr-current {
+  color: var(--blu);
+  font-weight: 700;
+  background: var(--blu-l);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.gf .dr-sep {
+  color: var(--bd2);
+  margin-right: 4px;
+}
+
+.gf .dc-bottom {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.gf .dc-res {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--bg2, #eef1f5);
+  color: var(--ink3);
+}
+.gf .dc-res-ready {
+  background: var(--grn-l);
+  color: var(--grn);
+}
+.gf .dc-res-missing {
+  background: var(--red-l);
+  color: var(--red);
+}
+.gf .dc-res-awaiting,
+.gf .dc-res-partial {
+  background: var(--amb-l);
+  color: #b45309;
+}
+.gf .dc-num {
+  font-family: var(--fm);
+  font-size: 10px;
+  color: var(--ink3);
+}
+.gf .dc-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  flex-shrink: 0;
+}
+.gf .dc-state {
+  font-size: 9px;
+  color: var(--ink4);
+}
+
+/* ── Consult shell ── */
+.gf .tr-pt {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+  margin-left: 4px;
+  /* Without this a long patient name refuses to shrink and shoves the Draft /
+     Finalized badge and the Step out button off the rail. */
+  min-width: 0;
+}
+.gf .tr-pt strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gf .tr-pt span {
+  font-size: 9px;
+  color: var(--ink4);
+}
+.gf .chead {
+  padding: 12px 16px 0;
+}
+.gf .ch-line {
+  font-size: 12px;
+  color: var(--ink2, var(--ink));
+}
+.gf .ch-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
+.gf .cht {
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  padding: 7px 10px;
+  display: flex;
+  flex-direction: column;
+}
+.gf .cht span {
+  font-size: 9px;
+  color: var(--ink4);
+}
+.gf .cht strong {
+  font-family: var(--fm);
+  font-size: 13px;
+  color: var(--ink);
+}
+.gf .ch-sum {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 11px;
+  padding-bottom: 10px;
+}
+.gf .chs.g {
+  color: var(--grn);
+}
+.gf .chs.r {
+  color: var(--red);
+}
+.gf .chs.a {
+  color: #b45309;
+}
+.gf .ch-blocked {
+  font-size: 11px;
+  color: var(--red);
+  padding-bottom: 8px;
+}
+
+.gf .cnav {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 8px 16px;
+  background: var(--bg, #f6f7f9);
+  border-bottom: 1px solid var(--bd);
+}
+.gf .cnav button {
+  white-space: nowrap;
+  padding: 5px 10px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  color: var(--ink3);
+  cursor: pointer;
+}
+.gf .cnav button:hover {
+  border-color: var(--blu);
+  color: var(--blu);
+}
+
+.gf .cbody {
+  padding: 12px 16px 60px;
+}
+.gf .csec {
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: var(--r-lg);
+  padding: 14px 16px;
+  margin-bottom: 12px;
+}
+.gf .csec.pending {
+  border-style: dashed;
+  opacity: 0.8;
+}
+.gf .cs-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.gf .cs-head h2 {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0;
+}
+.gf .cs-head h3 {
+  font-size: 12px;
+  font-weight: 700;
+  margin: 14px 0 0;
+}
+.gf .cs-sub {
+  font-size: 10px;
+  color: var(--ink4);
+}
+
+/* ── Concerns: three sources, never merged ── */
+.gf .mo-plan {
+  background: var(--blu-l);
+  border-radius: var(--r);
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+.gf .mo-plan p {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.gf .cn-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 10px;
+}
+.gf .cn-block {
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  padding: 8px 10px;
+}
+.gf .cn-head {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--ink3);
+  margin-bottom: 5px;
+}
+.gf .cn-row {
+  display: flex;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 1.45;
+  margin-bottom: 4px;
+}
+.gf .cn-ico {
+  flex-shrink: 0;
+}
+.gf .cn-empty {
+  font-size: 10px;
+  color: var(--ink4);
+  padding: 4px 0;
+}
+
+/* ── Key-number tiles ── */
+.gf .ktiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+.gf .ktile {
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.gf .ktile:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.gf .ktile:hover:not(:disabled) {
+  border-color: var(--blu);
+}
+.gf .kt-bad {
+  border-left: 3px solid var(--red);
+}
+.gf .kt-warn {
+  border-left: 3px solid var(--amb);
+}
+.gf .kt-good {
+  border-left: 3px solid var(--grn);
+}
+.gf .kt-val {
+  font-family: var(--fm);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.gf .kt-unit {
+  font-size: 10px;
+  color: var(--ink4);
+  margin-left: 3px;
+}
+.gf .kt-lab {
+  font-size: 11px;
+  font-weight: 600;
+}
+.gf .kt-delta {
+  font-size: 9px;
+  color: var(--ink4);
+}
+
+.gf .dx-group {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--ink4);
+  margin: 8px 0 4px;
+}
+.gf .dx-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.gf .dx {
+  font-size: 11px;
+  background: var(--bg2, #eef1f5);
+  border-radius: var(--r);
+  padding: 4px 8px;
+}
+.gf .dx em {
+  font-family: var(--fm);
+  font-style: normal;
+  font-size: 9px;
+  color: var(--ink4);
+  margin-left: 5px;
+}
+
+/* ── Labs ── */
+.gf .ltabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 8px;
+}
+.gf .ltabs button {
+  font: inherit;
+  font-size: 10px;
+  padding: 4px 9px;
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  color: var(--ink3);
+  cursor: pointer;
+}
+.gf .ltabs button.on {
+  background: var(--blu);
+  border-color: var(--blu);
+  color: #fff;
+  font-weight: 700;
+}
+.gf .ltable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.gf .ltable th {
+  text-align: left;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--ink4);
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--bd);
+}
+.gf .ltable td {
+  padding: 5px 6px;
+  border-bottom: 1px solid var(--bd);
+}
+.gf .lt-ref {
+  color: var(--ink4);
+  font-size: 10px;
+}
+.gf .lab-hi {
+  color: var(--red);
+  font-weight: 700;
+}
+.gf .lab-lo {
+  color: var(--blu);
+  font-weight: 700;
+}
+.gf .lt-graph {
+  font: inherit;
+  font-size: 10px;
+  background: none;
+  border: 0;
+  color: var(--blu);
+  cursor: pointer;
+}
+.gf .lreports {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.gf .lrep {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  text-decoration: none;
+  color: inherit;
+}
+.gf .lrep:hover {
+  border-color: var(--blu);
+}
+.gf .lr-t {
+  display: flex;
+  flex-direction: column;
+  font-size: 11px;
+}
+.gf .lr-t em {
+  font-style: normal;
+  font-size: 9px;
+  color: var(--ink4);
+}
+.gf .lr-go {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--blu);
+}
+
+/* ── MO proposals ── */
+.gf .prop {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  padding: 8px 10px;
+  margin-bottom: 6px;
+}
+.gf .prop.decided {
+  opacity: 0.65;
+}
+.gf .prop-main {
+  flex: 1;
+  font-size: 12px;
+}
+.gf .prop-dose {
+  font-family: var(--fm);
+  font-size: 11px;
+  color: var(--ink3);
+  margin-left: 8px;
+}
+.gf .prop-state {
+  font-size: 9px;
+  font-weight: 700;
+  margin-left: 8px;
+}
+.gf .prop-proposed {
+  color: var(--blu);
+}
+.gf .prop-approved {
+  color: var(--grn);
+}
+.gf .prop-adjusted {
+  color: #b45309;
+}
+.gf .prop-rejected {
+  color: var(--red);
+}
+.gf .prop-why,
+.gf .prop-by {
+  font-size: 10px;
+  color: var(--ink4);
+  margin-top: 2px;
+}
+.gf .prop-acts,
+.gf .prop-form {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+.gf .btn-sm {
+  font: inherit;
+  font-size: 10px;
+  padding: 4px 9px;
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  color: var(--ink3);
+  cursor: pointer;
+}
+.gf .btn-sm.on {
+  background: var(--blu);
+  border-color: var(--blu);
+  color: #fff;
+  font-weight: 700;
+}
+
+/* ── Care plan ── */
+.gf .cp-lab {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--ink3);
+  margin: 10px 0 4px;
+}
+.gf .cp-lab em {
+  font-style: normal;
+  font-weight: 400;
+  color: var(--ink4);
+}
+.gf .cp-text,
+.gf .cp-inp {
+  width: 100%;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  padding: 7px 9px;
+}
+.gf .cp-text:focus-visible,
+.gf .cp-inp:focus-visible {
+  outline: 2px solid var(--blu);
+  outline-offset: -1px;
+}
+.gf .cp-row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+.gf .cp-chips {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.gf .cp-chips button {
+  font: inherit;
+  font-size: 10px;
+  padding: 4px 9px;
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  cursor: pointer;
+}
+.gf .cp-chips button.on {
+  background: var(--blu);
+  border-color: var(--blu);
+  color: #fff;
+  font-weight: 700;
+}
+.gf .cp-goals {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.gf .cp-goal {
+  display: grid;
+  grid-template-columns: 2fr 1fr 80px;
+  gap: 6px;
+}
+
+/* ── Trend ── the graph behind a key-number tile.
+   The SVG scales from its viewBox, so the only job here is to let it use the
+   full width of the modal body and stay legible when that is a phone. */
+.gf .trend-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  /* Below this the line is a squiggle and the date labels collide, so the body
+     scrolls sideways rather than compressing it into something unreadable. */
+  min-width: 320px;
+}
+.gf .trend-wrap {
+  overflow-x: auto;
+  margin: 0 -4px;
+  padding: 0 4px;
+}
+.gf .trend-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 10px;
+  color: var(--ink4);
+  margin-top: 8px;
+}
+.gf .trend-meta strong {
+  font-family: var(--fm);
+  color: var(--ink);
+}
+.gf .tr-line {
+  fill: none;
+  stroke: var(--blu);
+  stroke-width: 2;
+}
+.gf .tr-dot {
+  fill: var(--blu);
+}
+.gf .tr-axis {
+  stroke: var(--bd);
+  stroke-width: 1;
+}
+.gf .tr-tick {
+  font-size: 9px;
+  fill: var(--ink4);
+}
+
+/* ── Prescription, tests, medicine card, finalize (Part 2) ─────────────────── */
+.gf .rx-row,
+.gf .rx-ext {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  margin-bottom: 6px;
+}
+.gf .rx-gone {
+  opacity: 0.55;
+  text-decoration-color: var(--red);
+}
+.gf .rx-num {
+  font-family: var(--fm);
+  font-size: 11px;
+  color: var(--ink4);
+  width: 18px;
+  flex-shrink: 0;
+}
+.gf .rx-main {
+  flex: 1;
+  min-width: 0;
+}
+.gf .rx-name {
+  font-size: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.gf .rx-sub {
+  font-size: 10px;
+  color: var(--ink3);
+}
+.gf .rx-meta {
+  font-family: var(--fm);
+  font-size: 10px;
+  color: var(--ink4);
+  margin-top: 2px;
+}
+.gf .rx-chip {
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.gf .ch-new {
+  background: var(--grn-l);
+  color: var(--grn);
+}
+.gf .ch-changed {
+  background: var(--amb-l);
+  color: #b45309;
+}
+.gf .ch-paused {
+  background: var(--bg2, #eef1f5);
+  color: var(--ink3);
+}
+.gf .ch-stopped {
+  background: var(--red-l);
+  color: var(--red);
+}
+
+/* Stock: three states and a fourth for "unknown", which must never look like
+   "in stock". */
+.gf .rx-stock {
+  font-size: 10px;
+  font-family: var(--fm);
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.gf .rx-ok {
+  color: var(--grn);
+}
+.gf .rx-low {
+  color: #b45309;
+}
+.gf .rx-out {
+  color: var(--red);
+}
+.gf .rx-unknown {
+  color: var(--ink4);
+}
+.gf .rx-rowacts {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.gf .rx-edit,
+.gf .rx-add,
+.gf .rx-alts,
+.gf .rx-seed {
+  margin-top: 8px;
+  padding: 9px 10px;
+  background: var(--bg2, #f6f7f9);
+  border-radius: var(--r);
+}
+.gf .rx-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+}
+.gf .rx-grid label,
+.gf .rx-wide {
+  display: flex;
+  flex-direction: column;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--ink4);
+  gap: 3px;
+}
+.gf .rx-wide {
+  margin-top: 8px;
+}
+.gf .rx-acts,
+.gf .rx-stop {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  margin-top: 9px;
+  flex-wrap: wrap;
+}
+.gf .rx-addbtn {
+  margin-top: 4px;
+}
+.gf .rx-results {
+  max-height: 220px;
+  overflow-y: auto;
+  margin-top: 6px;
+}
+.gf .rx-result {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: 11px;
+  padding: 6px 8px;
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  margin-bottom: 4px;
+  cursor: pointer;
+}
+.gf .rx-result:hover {
+  border-color: var(--blu);
+}
+.gf .rx-result em {
+  font-style: normal;
+  font-size: 9px;
+  color: var(--ink4);
+  flex: 1;
+}
+.gf .rx-alt {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: 11px;
+  padding: 5px 8px;
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  margin-bottom: 4px;
+  cursor: pointer;
+}
+.gf .rx-alt em {
+  font-style: normal;
+  font-size: 9px;
+  color: var(--ink4);
+  margin-left: 6px;
+}
+.gf .rx-inter {
+  font-size: 9px;
+  color: var(--ink4);
+  max-width: 200px;
+  text-align: right;
+}
+.gf .rx-inter.flagged {
+  color: var(--red);
+  font-weight: 600;
+}
+
+/* ── Tests ── */
+.gf .tst-existing {
+  font-size: 10px;
+  color: var(--ink3);
+  background: var(--bg2, #f6f7f9);
+  border-radius: var(--r);
+  padding: 7px 9px;
+  margin-bottom: 8px;
+}
+.gf .tst-panels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 7px;
+  margin-bottom: 10px;
+}
+.gf .tst-panel {
+  text-align: left;
+  font: inherit;
+  padding: 8px 10px;
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.gf .tst-panel.on {
+  border-color: var(--blu);
+  background: var(--blu-l);
+}
+.gf .tst-panel strong {
+  font-size: 11px;
+}
+.gf .tst-panel em {
+  font-style: normal;
+  font-size: 9px;
+  color: var(--ink4);
+}
+.gf .tst-panel span {
+  font-size: 9px;
+  color: var(--ink3);
+}
+.gf .tst-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.gf .tst-chip {
+  font: inherit;
+  font-size: 10px;
+  padding: 4px 9px;
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: 20px;
+  cursor: pointer;
+}
+.gf .tst-chip.on {
+  background: var(--blu);
+  border-color: var(--blu);
+  color: #fff;
+  font-weight: 700;
+}
+.gf .tst-chip.done {
+  border-style: dashed;
+  color: var(--grn);
+}
+.gf .tst-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  background: var(--blu-l);
+  border-radius: var(--r);
+  font-size: 11px;
+}
+
+/* ── Medicine card ── */
+.gf .mc-slot {
+  display: flex;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--bd);
+}
+.gf .mc-when {
+  width: 150px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+.gf .mc-when strong {
+  font-size: 11px;
+}
+.gf .mc-when em {
+  font-family: var(--fm);
+  font-style: normal;
+  font-size: 10px;
+  color: var(--ink4);
+}
+.gf .mc-meds {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.gf .mc-med {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  padding: 4px 8px;
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+}
+/* External medicines render dashed — shown for reference, not dispensed. */
+.gf .mc-ext {
+  border-style: dashed;
+  background: transparent;
+}
+.gf .mc-name {
+  font-weight: 700;
+}
+.gf .mc-dose,
+.gf .mc-freq {
+  font-family: var(--fm);
+  font-size: 10px;
+  color: var(--ink3);
+}
+.gf .mc-tag {
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.gf .mc-new {
+  background: var(--grn-l);
+  color: var(--grn);
+}
+.gf .mc-chg {
+  background: var(--amb-l);
+  color: #b45309;
+}
+.gf .mc-extt {
+  background: var(--bg2, #eef1f5);
+  color: var(--ink3);
+  text-transform: none;
+}
+.gf .mc-out {
+  background: var(--red-l);
+  color: var(--red);
+}
+.gf .mc-low {
+  background: var(--amb-l);
+  color: #b45309;
+}
+
+/* ── Finalize ── */
+.gf .fin-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--nv, #1e3a5f);
+  border-radius: var(--r-lg);
+  color: #fff;
+  margin-top: 12px;
+}
+.gf .fin-bar strong {
+  display: block;
+  font-size: 13px;
+}
+.gf .fin-bar span {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.7);
+}
+.gf .btn-fin {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 9px 18px;
+  background: var(--grn);
+  color: #fff;
+  border: 0;
+  border-radius: var(--r);
+  cursor: pointer;
+}
+.gf .fin-list {
+  margin: 0 0 14px;
+  padding-left: 18px;
+  font-size: 11px;
+  line-height: 1.7;
+}
+.gf .fin-warn {
+  color: var(--red);
+}
+.gf .fin-done {
+  padding: 12px 14px;
+  background: var(--grn-l);
+  color: var(--grn);
+  border-radius: var(--r-lg);
+  font-size: 11px;
+  margin-top: 12px;
+}
+
+/* ── Scroll containers ──────────────────────────────────────────────────────
+   `.gf` is height:100vh / overflow:hidden with min-height:0 down the flex chain
+   (giniflow-theme.css), so every station screen has to name its own scrolling
+   region — otherwise its content is simply clipped and the page cannot scroll at
+   all. The vitals station does this with .squeue / .station-detail; the
+   consultant's two screens do it here, mirroring the prototype's #bodyScroll. */
+.gf .dstats,
+.gf .top-rail {
+  flex-shrink: 0;
+}
+.gf .dlist,
+.gf .cscroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.gf .dlist::-webkit-scrollbar,
+.gf .cscroll::-webkit-scrollbar {
+  width: 8px;
+}
+.gf .dlist::-webkit-scrollbar-thumb,
+.gf .cscroll::-webkit-scrollbar-thumb {
+  background: var(--bd2);
+  border-radius: 4px;
+}
+.gf .dlist:hover::-webkit-scrollbar-thumb,
+.gf .cscroll:hover::-webkit-scrollbar-thumb {
+  background: var(--ink4);
+}
+/* The section nav sticks to the top of the scroll region, not the viewport —
+   it is inside the scroller, which is what makes `position: sticky` work here. */
+.gf .cscroll .cnav {
+  top: 0;
+}
+
+/* ── Reading width ──────────────────────────────────────────────────────────
+   `.app:has(.gf)` zeroes the app's gutter for every Gini Flow screen, which is
+   right for the board (a wall display) and for the vitals station (a two-pane
+   desk) — both want full bleed. The consultant's screens are documents: a
+   consult stretched across a 2560px monitor puts a form row and a line of
+   clinical text end to end, which is unreadable.
+
+   So the shell stays full-bleed — the top rail still spans the window and the
+   scroll container is still the full width, which keeps the scrollbar on the
+   window edge where it belongs — and only the CONTENT is constrained. */
+.gf .chead,
+.gf .cnav,
+.gf .cbody,
+.gf .dgroup,
+.gf .dstats {
+  width: 100%;
+  /* Same 1480px the station panes use. One number across the whole module:
+     these are cards, rows and tables rather than prose, so the narrower reading
+     column a paragraph would want does not apply. */
+  max-width: 1480px;
+  margin-left: auto;
+  margin-right: auto;
+}
+/* The queue's own bottom gap, kept after the shared margin rule above resets it. */
+.gf .dgroup {
+  margin-bottom: 18px;
+}
+.gf .fin-gap {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink3);
+}
+
+/* `hidden` loses to any explicit `display` in a stylesheet, and `.dsplit` is a
+   grid — so without this the collapsed pipeline would stay on screen while
+   telling a screen reader it was closed. Scoped to .gf so it cannot reach the
+   rest of Scribe. */
+.gf [hidden] {
+  display: none !important;
+}
+
+/* ── The pipeline's two columns ──────────────────────────────────────────────
+   "In pipeline" answers two different questions and so it is two columns: who
+   is coming to ME, and who is on the floor waiting for somebody else. The second
+   is what explains an empty doctor queue beside a full waiting room, and names
+   the consultant to ask about it. */
+.gf .dsplit {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  align-items: start;
+}
+.gf .dcol {
+  min-width: 0;
+}
+/* The other-consultant column is context, not a worklist: recessed so the eye
+   goes to your own patients first. */
+.gf .dcol-others {
+  background: var(--bg2, #f6f7f9);
+  border: 1px solid var(--bd);
+  border-radius: var(--r-lg);
+  padding: 8px 10px;
+}
+.gf .dcol-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink3);
+  margin: 0 0 8px;
+}
+.gf .dcol-head .dg-count {
+  margin-left: 0;
+}
+.gf .dsub {
+  margin-bottom: 10px;
+}
+.gf .dsub-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--ink4);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin: 0 0 5px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid var(--bd);
+}
+/* Another consultant's patient is readable but not actionable-looking — opening
+   one is reading ahead, and it must not invite a claim. */
+.gf .dcol-others .dcard {
+  background: var(--white);
+  opacity: 0.9;
+}
+
+/* ══ CONSULTANT — RESPONSIVE ══════════════════════════════════════════════════
+   Both consultant screens were built at desk width and had no breakpoints. A
+   consultant reads this on a laptop at the desk and on a tablet between rooms,
+   so the queue has to survive roughly half the width it was drawn at. */
+
+/* The results table cannot usefully narrow — five columns of numbers — so it
+   scrolls inside its own box instead of pushing the whole page sideways. */
+.gf .ltablewrap {
+  overflow-x: auto;
+  margin: 0 -2px;
+  padding: 0 2px;
+}
+.gf .ltable {
+  min-width: 460px;
+}
+
+@media (max-width: 1100px) {
+  /* Two columns of patient cards below this is two columns of nothing: the card
+     needs its width for the journey rail. */
+  .gf .dsplit {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  /* The rail holds a search box, a two-way toggle and a link. Let it wrap
+     rather than pushing the Board link off the edge. */
+  .gf .top-rail {
+    height: auto;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    row-gap: 6px;
+  }
+  .gf .rail-right {
+    /* Full width on its own line once the rail has wrapped, so the search box
+       and the toggle are not fighting the logo for room. */
+    width: 100%;
+    margin-left: 0;
+    flex-wrap: wrap;
+  }
+  .gf .rail-search {
+    flex: 1;
+    width: auto;
+    min-width: 140px;
+  }
+  /* The consult rail: back button and role chip stay on the first line, the
+     patient takes the second, the state badges the third. Nothing is dropped —
+     who the patient is and whether the visit is finalized both matter. */
+  .gf .tr-pt {
+    order: 3;
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+  .gf .tr-pt strong {
+    font-size: 13px;
+  }
+  .gf .dstats {
+    grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
+    padding: 10px 12px 0;
+  }
+  .gf .ds-val {
+    font-size: 19px;
+  }
+  .gf .dlist,
+  .gf .cbody,
+  .gf .chead {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  .gf .ch-tiles {
+    grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  }
+  /* Each row of the prescription editor gets its own line rather than three
+     cramped columns. */
+  .gf .rx-grid {
+    grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  /* The card becomes two rows: identity, then the timer under it. The journey
+     rail is the part that genuinely does not fit, so it scrolls sideways within
+     the card — five stations compressed into 300px is unreadable. */
+  .gf .dcard {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .gf .dc-time {
+    width: auto;
+    padding-top: 0;
+    order: 1;
+  }
+  .gf .dc-av {
+    order: 0;
+  }
+  .gf .dc-main {
+    order: 3;
+    flex-basis: 100%;
+  }
+  .gf .dc-right {
+    order: 2;
+    margin-left: auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+  }
+  .gf .dc-rail {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+  .gf .dc-rail .dr-step {
+    white-space: nowrap;
+  }
+
+  /* Consult: the header line and the summary stack instead of truncating. */
+  .gf .ch-sum {
+    flex-direction: column;
+    gap: 3px;
+  }
+  .gf .cn-grid {
+    grid-template-columns: 1fr;
+  }
+  .gf .ktiles {
+    grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  }
+  .gf .kt-val {
+    font-size: 17px;
+  }
+
+  /* A prescription row: name and stock on one line, controls under them. */
+  .gf .rx-row,
+  .gf .rx-ext {
+    flex-wrap: wrap;
+  }
+  .gf .rx-main {
+    flex-basis: calc(100% - 28px);
+  }
+  .gf .rx-rowacts,
+  .gf .rx-stock {
+    margin-left: auto;
+  }
+  .gf .rx-inter {
+    max-width: none;
+    text-align: left;
+    flex-basis: 100%;
+  }
+  .gf .cp-goal {
+    grid-template-columns: 1fr 1fr;
+  }
+  .gf .cp-row {
+    gap: 10px;
+  }
+  /* The medicine card's time column moves above its medicines. */
+  .gf .mc-slot {
+    flex-direction: column;
+    gap: 4px;
+  }
+  .gf .mc-when {
+    width: auto;
+    flex-direction: row;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .gf .fin-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .gf .btn-fin {
+    width: 100%;
+  }
+  .gf .tst-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .gf .tr-role {
+    font-size: 10px;
+    padding: 2px 7px;
+  }
+  .gf .top-rail {
+    gap: 6px;
+  }
+}
+
+/* ══ PHARMACY STATION ══ from docs/Flow-Manage/gini-stations.html
+   `#s-pharmacy` (the queue) and `#pharmPane` (the detail slide-over).
+   docs/gini-flow/16-PHARMACY-STATION-PLAN.md §4–7.
+
+   The queue reuses the lab's `.pt-card`; everything below is either the pill
+   the prototype adds (`sp-disp`), the pane's medicine rows, or the responsive
+   behaviour those rows need — the counter reads this on a tablet at the hatch
+   as often as on the desk machine. */
+
+/* The prototype's green rail button, used by "Mark all dispensed". */
+.gf .rbtn.grn {
+  background: var(--grn);
+  border-color: var(--grn);
+  color: #fff;
+}
+.gf .rbtn.grn:hover {
+  background: var(--grn);
+  opacity: 0.88;
+  color: #fff;
+}
+.gf .rbtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.gf .sp-disp {
+  background: var(--pu-l);
+  color: var(--pu);
+}
+
+/* The queue card is clickable, so it must look and behave like a control. */
+.gf .ph-pt {
+  cursor: pointer;
+}
+.gf .ph-pt:hover {
+  border-color: var(--pu);
+}
+.gf .ph-pt:focus-visible {
+  outline: 2px solid var(--pu);
+  outline-offset: 2px;
+}
+.gf .ph-pt.pri-urgent {
+  border-left: 3px solid var(--red);
+}
+.gf .ph-pt.pri-high {
+  border-left: 3px solid var(--amb);
+}
+/* Approaching the 10-minute pharmacy budget, then past it. */
+.gf .pc-time.near {
+  color: var(--amb);
+}
+.gf .ph-note-strip {
+  background: var(--pu-l);
+  border-color: var(--pu-b);
+  color: var(--pu);
+}
+
+/* ── The pane ── the prototype's 620px slide-over ── */
+.gf .detail-pane.ph-pane {
+  width: 660px;
+}
+
+/* ── Counselling note — Hindi first, then English ── */
+.gf .ph-note {
+  background: var(--tl-l);
+  border: 1px solid var(--tl-b);
+}
+.gf .ph-note-title {
+  color: var(--tl);
+}
+.gf .ph-hindi {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.75;
+  color: var(--ink);
+}
+.gf .ph-english {
+  margin: 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--tl-b);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--ink2);
+}
+.gf .ph-changes {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.gf .ph-changes li {
+  font-size: 10px;
+  color: var(--ink2);
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: 20px;
+  padding: 2px 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.gf .ph-chg-tag {
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--ink3);
+}
+.gf .ph-chg-new .ph-chg-tag {
+  color: var(--grn);
+}
+.gf .ph-chg-changed .ph-chg-tag {
+  color: var(--amb);
+}
+.gf .ph-chg-stopped .ph-chg-tag {
+  color: var(--red);
+}
+.gf .ph-note-foot {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.gf .ph-sent {
+  font-size: 10px;
+  color: var(--grn);
+  font-weight: 600;
+}
+/* A card that was logged rather than sent. Never a green tick — the counter has
+   to know the patient did not receive it (PH-01). */
+.gf .ph-unsent {
+  font-size: 10px;
+  color: var(--amb);
+  font-weight: 600;
+  flex-basis: 100%;
+  line-height: 1.5;
+}
+
+/* ── Stock warnings — absent entirely while the inventory is empty ── */
+.gf .ph-stock {
+  background: var(--amb-l);
+  border: 1px solid var(--amb-b);
+}
+.gf .ph-stock-title {
+  color: var(--amb);
+}
+.gf .ph-stock-line {
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--amb);
+}
+
+/* ── The medicine card with dispense controls ── */
+.gf .ph-cardsec {
+  background: var(--white);
+  border: 1px solid var(--bd);
+}
+.gf .ph-tally {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 10px;
+  color: var(--ink3);
+  margin-bottom: 8px;
+}
+.gf .ph-tally-g {
+  color: var(--grn);
+  font-weight: 700;
+}
+.gf .ph-tally-r {
+  color: var(--red);
+  font-weight: 700;
+}
+.gf .ph-slot {
+  align-items: flex-start;
+  padding: 9px 0;
+}
+.gf .ph-slot:last-child {
+  border-bottom: none;
+}
+
+/* One medicine row. Wider than the consultant's chip because this is the row
+   read out to the patient: what it is for, how to take it, who prescribed it. */
+.gf .mc-med.ph-med {
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px 10px;
+  flex-wrap: nowrap;
+  border-radius: var(--r-lg);
+}
+.gf .ph-med.is-done {
+  background: var(--grn-l);
+  border-color: var(--grn-b);
+}
+.gf .ph-med.is-refused {
+  background: var(--amb-l);
+  border-color: var(--amb-b);
+}
+.gf .ph-med.is-out {
+  background: var(--red-l);
+  border-color: var(--red-b);
+  border-style: dashed;
+}
+.gf .mm-ico {
+  font-size: 15px;
+  line-height: 1.3;
+  flex-shrink: 0;
+}
+.gf .mm-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.gf .mm-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.gf .ph-med.is-out .mm-name {
+  color: var(--red);
+}
+.gf .mm-dose {
+  font-family: var(--fm);
+  font-size: 10px;
+  color: var(--ink3);
+}
+.gf .mm-for {
+  font-size: 10px;
+  color: var(--ink2);
+}
+.gf .mm-instr {
+  font-size: 11px;
+  color: var(--ink2);
+  line-height: 1.5;
+}
+.gf .mm-was {
+  color: var(--amb);
+}
+.gf .mm-dr {
+  font-size: 9px;
+  color: var(--ink4);
+  margin-top: 2px;
+}
+.gf .mm-dr.gini {
+  color: var(--tl);
+}
+.gf .mm-warn {
+  font-size: 10px;
+  font-weight: 600;
+  margin-top: 3px;
+}
+.gf .mm-warn-out {
+  color: var(--red);
+}
+.gf .mm-warn-low {
+  color: var(--amb);
+}
+.gf .mm-refused {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--amb);
+  margin-top: 3px;
+}
+.gf .mm-new-tag,
+.gf .mm-chg-tag,
+.gf .mm-ext-tag {
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.gf .mm-new-tag {
+  background: var(--grn-l);
+  color: var(--grn);
+}
+.gf .mm-chg-tag {
+  background: var(--amb-l);
+  color: #b45309;
+}
+.gf .mm-ext-tag {
+  background: #eef1f5;
+  color: var(--ink3);
+}
+
+.gf .mm-r {
+  flex-shrink: 0;
+  width: 138px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  text-align: right;
+}
+.gf .mm-stock {
+  font-family: var(--fm);
+  font-size: 10px;
+  color: var(--grn);
+}
+.gf .mm-stock.low {
+  color: var(--amb);
+}
+.gf .mm-stock.out {
+  color: var(--red);
+}
+.gf .mm-qty {
+  font-size: 9px;
+  color: var(--ink4);
+  line-height: 1.4;
+}
+.gf .dispense-btn {
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 6px 10px;
+  border-radius: var(--r);
+  border: 1px solid var(--tl);
+  background: var(--tl);
+  color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.gf .dispense-btn:hover {
+  opacity: 0.88;
+}
+.gf .dispense-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.gf .dispense-btn.db-done {
+  background: var(--grn);
+  border-color: var(--grn);
+}
+.gf .ph-refuse {
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 4px 9px;
+  border-radius: var(--r);
+  border: 1px solid var(--bd);
+  background: var(--white);
+  color: var(--ink3);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.gf .ph-refuse:hover {
+  border-color: var(--amb);
+  color: var(--amb);
+}
+.gf .ph-refuse.on {
+  border-color: var(--amb);
+  color: var(--amb);
+  background: var(--amb-l);
+}
+.gf .ph-refuse:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Why it was not given. Required — the not-collected report is built on it. */
+.gf .mm-reason {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: stretch;
+  text-align: left;
+}
+.gf .mm-reason-chip {
+  font: inherit;
+  font-size: 10px;
+  padding: 4px 8px;
+  border-radius: var(--r);
+  border: 1px solid var(--bd);
+  background: var(--white);
+  color: var(--ink2);
+  cursor: pointer;
+  text-align: left;
+}
+.gf .mm-reason-chip:hover {
+  border-color: var(--amb);
+  color: var(--amb);
+}
+.gf .mm-reason-input {
+  font: inherit;
+  font-size: 10px;
+  padding: 5px 8px;
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  width: 100%;
+  background: var(--white);
+  color: var(--ink);
+}
+.gf .mm-reason-input:focus {
+  outline: none;
+  border-color: var(--amb);
+}
+
+/* ══ PHARMACY — RESPONSIVE ══
+   The pane is a slide-over at desk width and the whole screen on a tablet held
+   at the hatch; the medicine row's control column moves under the medicine
+   rather than squeezing the instruction that has to be read out loud. */
+@media (max-width: 760px) {
+  .gf .detail-pane.ph-pane {
+    width: 100vw;
+  }
+  .gf .mc-med.ph-med {
+    flex-wrap: wrap;
+  }
+  .gf .mm-body {
+    flex-basis: calc(100% - 28px);
+  }
+  .gf .mm-r {
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    text-align: left;
+  }
+  .gf .mm-reason {
+    flex-basis: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .gf .mm-reason-input {
+    width: auto;
+    flex: 1;
+    min-width: 130px;
+  }
+  .gf .ph-slot {
+    flex-direction: column;
+    gap: 5px;
+  }
+  .gf .ph-slot .mc-when {
+    width: auto;
+    flex-direction: row;
+    align-items: baseline;
+    gap: 8px;
+  }
+}
+
+@media (max-width: 560px) {
+  /* The queue card: identity first, the timer and the pill under it, so the
+     medicine names keep a full line to themselves. */
+  .gf .ph-pt {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .gf .ph-pt .pc-body {
+    flex-basis: calc(100% - 45px);
+  }
+  .gf .ph-pt .pc-r {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    justify-content: flex-end;
+  }
+  .gf .dp-acts {
+    flex-wrap: wrap;
+  }
+  .gf .ph-hindi {
+    font-size: 12px;
+  }
+}
+
+/* ══ RECEPTION — ARRIVALS ═════════════════════════════════════════════════════
+   The one screen in Gini Flow with no prototype behind it (17-RECEPTION-CHECKIN
+   -PLAN §3), so it borrows rather than invents: the queue row's proportions come
+   from `.sq-item`, the card chrome from the board. Nothing here is new visual
+   language — a desk that already reads the payment queue should not have to
+   learn a second one. */
+
+/* `.stats` carries its own 11px/14px padding for the screens that put it
+   directly under the rail. Inside `.inner`, which pads by 14px already, that
+   made the tiles sit inset from every card below them. */
+.gf .inner > .stats {
+  padding: 0;
+}
+.gf .grp-lbl-sp {
+  margin-bottom: 7px;
+}
+.gf .toc-ins {
+  font-size: 10px;
+  color: var(--ink3);
+}
+.gf .sv-red {
+  color: var(--red);
+}
+.gf .sv-amb {
+  color: var(--amb);
+}
+.gf .sv-grn {
+  color: var(--grn);
+}
+.gf .sv-tl {
+  color: var(--tl);
+}
+.gf .sv-ink {
+  color: var(--ink3);
+}
+
+/* ── The two halves of the desk ── */
+.gf .st-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.gf .st-tab {
+  font-family: var(--fb);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 14px;
+  border-radius: var(--r);
+  border: 1px solid var(--bd);
+  background: var(--white);
+  color: var(--ink3);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.gf .st-tab:hover {
+  color: var(--ink);
+}
+.gf .st-tab.on {
+  background: var(--nv);
+  border-color: var(--nv);
+  color: #fff;
+}
+.gf .st-tab-n {
+  font-family: var(--fm);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 20px;
+  background: var(--bg);
+  color: var(--ink3);
+}
+.gf .st-tab.on .st-tab-n {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+.gf .ar-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* `.sq-search` is the vitals queue's search row and carries a top margin meant
+   for sitting under a header. Here it is one half of a control strip. */
+.gf .ar-controls .sq-search {
+  flex: 1;
+  min-width: 0;
+  margin-top: 0;
+}
+
+/* ── One expected patient ── */
+/* The row wraps rather than squeezing: a name, an age, a file number and a
+   phone number is the identity the desk reads out loud, and it must not be
+   compressed to a column of two-word lines to make room for three buttons. When
+   the actions no longer fit beside it they take a line of their own. */
+.gf .ar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 11px;
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: var(--r-lg);
+  padding: 9px 12px;
+  margin-bottom: 6px;
+  box-shadow: var(--sh);
+}
+.gf .ar-slot {
+  font-family: var(--fm);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink2);
+  width: 44px;
+  flex-shrink: 0;
+}
+.gf .ar-who {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.gf .ar-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.gf .ar-meta {
+  font-size: 10px;
+  color: var(--ink3);
+  font-family: var(--fm);
+  overflow-wrap: anywhere;
+}
+.gf .ar-note {
+  font-size: 10px;
+  color: var(--amb);
+  margin-top: 2px;
+}
+.gf .ar-acts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+/* The cancel reason takes the width the buttons had, so the input is typeable
+   rather than squeezed into whatever the row's actions left over. */
+.gf .ar-acts-wide {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Lateness is the one number on this row the desk acts on, so it is read before
+   the buttons and turns up the longer it runs. */
+.gf .ar-late {
+  font-family: var(--fm);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 20px;
+  background: var(--bg);
+  color: var(--ink3);
+  white-space: nowrap;
+}
+.gf .ar-late-a {
+  background: var(--amb-l);
+  color: var(--amb);
+}
+.gf .ar-late-r {
+  background: var(--red-l);
+  color: var(--red);
+}
+.gf .ar-where {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 20px;
+  background: var(--blu-l);
+  color: var(--blu);
+  white-space: nowrap;
+}
+.gf .ar-since {
+  font-family: var(--fm);
+  font-size: 10px;
+  color: var(--ink4);
+  white-space: nowrap;
+}
+
+/* A cancellation says why before it writes, so the reason replaces the row's
+   buttons rather than opening a dialog over them. */
+.gf .ar-reason {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  flex-wrap: wrap;
+}
+.gf .ar-reason-input {
+  flex: 1;
+  min-width: 140px;
+  border: 1px solid var(--bd2);
+  border-radius: var(--r);
+  padding: 6px 9px;
+  font-family: var(--fb);
+  font-size: 11px;
+  color: var(--ink);
+  background: var(--white);
+}
+.gf .ar-reason-input:focus {
+  outline: none;
+  border-color: var(--blu);
+  box-shadow: 0 0 0 2px var(--blu-b);
+}
+
+/* ── Walk-in ── */
+.gf .wi-panel {
+  background: var(--blu-l);
+  border: 1px solid var(--blu-b);
+  border-radius: var(--r-lg);
+  padding: 11px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gf .wi-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--ink);
+}
+.gf .wi-panel .sq-search {
+  margin-top: 0;
+}
+.gf .wi-note {
+  font-size: 10px;
+  color: var(--blu);
+  line-height: 1.5;
+}
+.gf .wi-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  padding: 8px 11px;
+}
+.gf .wi-blocked {
+  font-size: 10px;
+  color: var(--red);
+  margin-top: 3px;
+}
+
+/* Reception works standing at a counter, often on a small screen turned to face
+   a patient. Below 720px the row's actions drop under the name rather than
+   squeezing the identity line, and the slot moves into the name row so nothing
+   is left in a 44px column of its own. */
+@media (max-width: 720px) {
+  .gf .ar-row,
+  .gf .wi-row {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .gf .ar-slot {
+    width: auto;
+    order: -1;
+  }
+  .gf .ar-who {
+    flex-basis: calc(100% - 60px);
+  }
+  .gf .ar-acts {
+    flex-basis: 100%;
+    justify-content: flex-start;
+  }
+  .gf .wi-row .ar-acts {
+    flex-basis: 100%;
+  }
+  .gf .ar-controls {
+    flex-wrap: wrap;
+  }
+  .gf .ar-controls .sq-search {
+    flex-basis: 100%;
+  }
+  .gf .st-tab {
+    flex: 1;
+    justify-content: center;
+  }
+}
+
+/* Touch targets, and stat tiles that share the row evenly instead of wrapping
+   one tile onto a line of its own. */
+@media (max-width: 480px) {
+  .gf .inner > .stats .stat {
+    flex: 1 1 100%;
+  }
+  .gf .ar-acts .st-btn,
+  .gf .wi-row .st-btn {
+    flex: 1;
+    justify-content: center;
+    padding: 9px 11px;
+  }
+  .gf .ar-reason-input {
+    flex-basis: 100%;
+  }
+}
+
+/* ── Arrivals: worklist beside reference ─────────────────────────────────────
+   Expected on the left is what the desk works — greet them, chase them, mark
+   them. On the floor on the right is what the desk is asked about. Stacked, the
+   worklist (5 rows) was pushed off screen by the reference list (86). Side by
+   side it stays put while the long one scrolls. */
+.gf .ar-split {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: 14px;
+  align-items: start;
+}
+.gf .ar-col {
+  min-width: 0;
+}
+/* The floor list is long and is reference rather than a worklist, so it scrolls
+   in its own box instead of setting the height of the whole page. */
+.gf .ar-col-floor {
+  max-height: 62vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.gf .ar-col-floor::-webkit-scrollbar {
+  width: 6px;
+}
+.gf .ar-col-floor::-webkit-scrollbar-thumb {
+  background: var(--bd2);
+  border-radius: 3px;
+}
+/* The group label stays put while its list moves under it. */
+.gf .ar-col-floor .grp-lbl {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg, #f6f7f9);
+}
+
+@media (max-width: 1000px) {
+  /* Below this, two columns of patient rows leaves neither enough width for a
+     name, a phone number and three buttons. */
+  .gf .ar-split {
+    grid-template-columns: 1fr;
+  }
+  .gf .ar-col-floor {
+    max-height: none;
+    overflow: visible;
+  }
+}
+
+/* ══ CONSULT — the prototype's table, voice bar and card legend ═══════════════
+   gini-doctor-final.html `s-rx` `s-tests` `s-medcard`, and
+   docs/gini-flow/14-CONSULTANT-PRESCRIPTION-PLAN.md §4b for the microphone. */
+
+/* The teaching bar above the medicines table. Its examples are the content —
+   it is the only place the phrasing is written down. */
+.gf .vbar {
+  background: var(--pu-l);
+  border: 1px solid var(--pu-b);
+  border-radius: var(--r);
+  padding: 8px 11px;
+  margin-bottom: 9px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.gf .vbar-t {
+  flex: 1;
+  min-width: 200px;
+  font-size: 11px;
+  color: var(--ink3);
+  line-height: 1.5;
+}
+.gf .vbar-t em {
+  color: var(--pu);
+  font-style: italic;
+}
+/* The prototype's smaller pill, for a section header rather than a bar. */
+.gf .voice-pill.vp-sm {
+  font-size: 10px;
+  padding: 4px 9px;
+}
+
+/* A section header's right-hand group: Last updated · Stopped meds · 🎤. */
+.gf .cs-head-r {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* The medicines table. Dose and timing are columns a consultant reads down,
+   not clauses in a sentence they read across. */
+.gf .rx-thead,
+.gf .rx-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 2.4fr) 84px 108px minmax(0, 1fr) 118px auto;
+  gap: 10px;
+  align-items: start;
+}
+.gf .rx-thead {
+  padding: 6px 10px;
+  border-bottom: 2px solid var(--bd);
+  background: var(--bg);
+  border-radius: var(--r) var(--r) 0 0;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--ink3);
+}
+.gf .rx-thead .rx-col-stock {
+  color: var(--tl);
+}
+.gf .rx-col-dose,
+.gf .rx-col-timing {
+  font-size: 11px;
+  color: var(--ink2);
+}
+.gf .rx-col-timing em {
+  display: block;
+  font-family: var(--fm);
+  font-size: 9px;
+  font-style: normal;
+  color: var(--ink4);
+}
+.gf .rx-for {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--ink2);
+  border: 1px solid var(--bd);
+}
+/* A row changed or added this visit is tinted, as the prototype tints it —
+   the two rows a consultant must re-read before finalizing. */
+.gf .rx-row.rx-isnew {
+  background: rgba(22, 163, 74, 0.04);
+}
+.gf .rx-row.rx-ischanged {
+  background: rgba(217, 119, 6, 0.04);
+}
+.gf .rx-search-row {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.gf .rx-search-row .cp-inp {
+  flex: 1;
+  min-width: 180px;
+}
+
+/* Tests: the gloss is printed, not hidden in a tooltip a tablet cannot show. */
+.gf .tst-chip {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  text-align: left;
+}
+.gf .tst-name {
+  font-size: 11px;
+  font-weight: 600;
+}
+.gf .tst-gloss {
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--ink4);
+}
+.gf .tst-chip.on .tst-gloss {
+  color: inherit;
+  opacity: 0.75;
+}
+.gf .tst-heard {
+  font-size: 11px;
+  color: var(--pu);
+  background: var(--pu-l);
+  border: 1px solid var(--pu-b);
+  border-radius: var(--r);
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* The Ext legend gets its own strip: it is the one thing on the card a patient
+   could misread as "dispensed by Gini". */
+.gf .mc-legend {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-top: 1px solid var(--bd);
+  padding: 9px 2px 0;
+  margin-top: 8px;
+  font-size: 10px;
+  color: var(--ink3);
+}
+.gf .mc-legend-ico {
+  font-size: 12px;
+}
+
+@media (max-width: 860px) {
+  /* Below this the seven columns stop being scannable and become a squeeze;
+     the row goes back to stacking, which is what the build had. */
+  .gf .rx-thead {
+    display: none;
+  }
+  .gf .rx-row {
+    display: flex;
+    flex-wrap: wrap;
+  }
+}
+
+/* ══ CONSULT — the prototype's table, and the microphone ══════════════════════
+   gini-doctor-final.html `s-rx` / `s-tests` / `s-medcard`, reconciled with what
+   was built. Plan: docs/gini-flow/14-CONSULTANT-PRESCRIPTION-PLAN.md §4b. */
+
+/* The right-hand group of a section header — "Last updated", "Stopped meds",
+   the mic. The prototype puts these opposite the title, not under it. */
+.gf .cs-head-r {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* The voice bar above the medicines table. Its content IS the examples: this is
+   the only place the phrasing is written down, so it is not decoration. */
+.gf .vbar {
+  background: var(--pu-l);
+  border: 1px solid var(--pu-b);
+  border-radius: var(--r);
+  padding: 8px 11px;
+  margin-bottom: 9px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.gf .vbar-t {
+  flex: 1;
+  min-width: 200px;
+  font-size: 11px;
+  color: var(--ink3);
+  line-height: 1.5;
+}
+.gf .vbar-t em {
+  color: var(--pu);
+  font-style: italic;
+}
+/* The prototype's smaller pill, used in section headers. */
+.gf .voice-pill.vp-sm {
+  font-size: 10px;
+  padding: 4px 9px;
+}
+
+/* ── Prescription: seven columns, as the prototype has them ── */
+.gf .rx-thead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px 5px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--ink3);
+  border-bottom: 2px solid var(--bd);
+  margin-bottom: 6px;
+}
+.gf .rx-thead .rx-main {
+  flex: 1;
+}
+.gf .rx-col-dose,
+.gf .rx-col-timing,
+.gf .rx-col-for,
+.gf .rx-col-stock,
+.gf .rx-col-acts {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--ink2);
+}
+.gf .rx-col-dose {
+  width: 92px;
+  font-family: var(--fm);
+}
+.gf .rx-col-timing {
+  width: 108px;
+}
+.gf .rx-col-timing em {
+  display: block;
+  font-family: var(--fm);
+  font-size: 9px;
+  color: var(--ink4);
+  font-style: normal;
+}
+.gf .rx-col-for {
+  width: 112px;
+}
+.gf .rx-col-stock {
+  width: 136px;
+}
+.gf .rx-col-acts {
+  width: 108px;
+}
+.gf .rx-for {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--ink2);
+  line-height: 1.4;
+}
+/* A row changed this visit is the thing a consultant re-reads before
+   finalizing, so the prototype tints it rather than relying on the chip. */
+.gf .rx-row.rx-isnew {
+  background: rgba(22, 163, 74, 0.04);
+  border-color: var(--grn-b);
+}
+.gf .rx-row.rx-ischanged {
+  background: rgba(217, 119, 6, 0.04);
+  border-color: var(--amb-b);
+}
+.gf .rx-search-row {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+}
+.gf .rx-search-row .cp-inp {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Tests: the gloss is printed, not hidden in a tooltip ── */
+.gf .tst-chip {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  text-align: left;
+}
+.gf .tst-name {
+  font-size: 11px;
+  font-weight: 600;
+}
+.gf .tst-gloss {
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--ink4);
+}
+.gf .tst-chip.on .tst-gloss {
+  color: inherit;
+  opacity: 0.75;
+}
+.gf .tst-heard {
+  font-size: 11px;
+  color: var(--pu);
+  background: var(--pu-l);
+  border: 1px solid var(--pu-b);
+  border-radius: var(--r);
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── Medicine card: the Ext legend gets its own strip ── */
+.gf .mc-legend {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-top: 1px solid var(--bd);
+  padding: 9px 4px 0;
+  margin-top: 8px;
+  font-size: 10px;
+  color: var(--ink3);
+}
+.gf .mc-legend-ico {
+  font-size: 13px;
+}
+
+/* Below the width the seven columns need, the row goes back to stacked — a
+   consultant on a tablet reads one medicine at a time rather than a table
+   scrolled sideways. */
+@media (max-width: 980px) {
+  .gf .rx-thead {
+    display: none;
+  }
+  .gf .rx-row {
+    flex-wrap: wrap;
+  }
+  .gf .rx-col-dose,
+  .gf .rx-col-timing,
+  .gf .rx-col-for {
+    width: auto;
+  }
+  .gf .rx-col-dose::before {
+    content: "Dose: ";
+    color: var(--ink4);
+  }
+  .gf .rx-col-timing::before {
+    content: "Timing: ";
+    color: var(--ink4);
+  }
 }

@@ -4,9 +4,13 @@ import {
   useVitalsPatient,
   useSaveVitals,
   useStartVitals,
+  useReleaseVitals,
 } from "../../queries/hooks/useGiniflowVitals";
 import { useVoiceVitals } from "../../hooks/useVoiceVitals";
 import { SPOKEN_EXAMPLE, flagLargeChanges } from "../../../shared/giniflowVitalsSpeech";
+import { useTick, minutesSince, budgetColour } from "../../lib/giniflowTime";
+import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
+import LiveBadge from "../../components/giniflow/LiveBadge";
 import "../../styles/giniflow-station.css";
 
 const CATEGORY_BADGE = {
@@ -62,6 +66,11 @@ const outOfRange = (field, value) => {
   return n < lo || n > hi;
 };
 
+const PRIORITY_CHIP = {
+  urgent: { cls: "pri-urgent", label: "❗ Urgent" },
+  high: { cls: "pri-high", label: "⬆ High" },
+};
+
 const clock = (iso) =>
   iso
     ? new Date(iso).toLocaleTimeString("en-IN", {
@@ -79,15 +88,23 @@ export default function VitalsStationPage() {
   const [rechecked, setRechecked] = useState(false);
   const toastTimer = useRef(null);
 
+  const now = useTick();
   const { data: queueData, isLoading } = useVitalsQueue();
+  const live = useGiniflowLive({ date: queueData?.date });
   const saveVitals = useSaveVitals();
   const startVitals = useStartVitals();
+  const releaseVitals = useReleaseVitals();
 
   const queue = queueData?.queue || [];
-
+  const held = queueData?.held || [];
+  const done = queueData?.done || [];
   // Derived, not set in an effect: the screen opens on whoever is at the station
   // with no click and no flash of the empty state.
   const activeVisitId = selected ?? queue[0]?.visitId ?? null;
+  // A patient reopened from the done list has already left the station, and
+  // saveVitals will store the correction without moving them. The bar must say
+  // that rather than promising to send them on again.
+  const correcting = !!activeVisitId && !queue.some((q) => q.visitId === activeVisitId);
   const { data: patient } = useVitalsPatient(activeVisitId);
 
   // A different patient means a fresh form — never carry one patient's numbers
@@ -169,9 +186,32 @@ export default function VitalsStationPage() {
   const needsRecheck = changeFlags.length > 0 && !rechecked;
   const canSave = anyEntered && invalid.length === 0 && !needsRecheck && !saveVitals.isPending;
 
+  // Claiming the station only makes sense for someone still in the queue.
+  // Tapping a patient in the done list opens their reading for correction — it
+  // must not walk them back to "at vitals" from wherever they have got to.
   const pick = (visitId) => {
-    setSelected(visitId);
-    startVitals.mutate(visitId);
+    if (!queue.some((q) => q.visitId === visitId)) {
+      setSelected(visitId);
+      return;
+    }
+    // Selection follows the claim rather than leading it: when the station is
+    // already holding someone the claim is refused, and the panel must stay on
+    // the patient in the chair instead of opening a form for one who is not.
+    startVitals.mutate(visitId, {
+      onSuccess: () => setSelected(visitId),
+      onError: (e) => showToast(e?.response?.data?.error || "Could not start this patient"),
+    });
+  };
+
+  const sendBackToQueue = () => {
+    const name = patient?.name?.split(" ")[0] || "Patient";
+    releaseVitals.mutate(selectedId, {
+      onSuccess: () => {
+        setSelected(null);
+        showToast(`${name} sent back to the queue`);
+      },
+      onError: (e) => showToast(e?.response?.data?.error || "Could not send them back"),
+    });
   };
 
   const submit = () => {
@@ -209,12 +249,13 @@ export default function VitalsStationPage() {
         <div className="tr-role" style={{ background: "var(--blu-l)", color: "var(--blu)" }}>
           ⚖️ Vitals Station
         </div>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+        <div className="rail-right">
           <span className="badge b-blu">{queue.length} in queue</span>
           <span className="badge b-grn">{queueData?.doneToday ?? 0} done today</span>
           {/* A real link, not a router push: this is navigation to another page,
               it works without JS, and it keeps the station screen free of a
               router dependency. */}
+          <LiveBadge live={live} className="tr-live" />
           <a className="tr-back" href="/giniflow/manager">
             ← Board
           </a>
@@ -231,32 +272,95 @@ export default function VitalsStationPage() {
           {!isLoading && queue.length === 0 && (
             <div className="sq-foot">Nobody waiting for vitals right now.</div>
           )}
-          {queue.map((q) => (
-            <button
-              type="button"
-              key={q.visitId}
-              className={`sq-item${q.visitId === activeVisitId ? " active" : ""}`}
-              onClick={() => pick(q.visitId)}
-            >
-              <div className="si-slot">{q.slot}</div>
-              <div className="si-name">{q.name}</div>
-              <div className="si-meta">
-                {q.age}
-                {(q.sex || "")[0] || ""} · {q.fileNo} · Visit {q.visitNumber}
-                {CATEGORY_BADGE[q.category] ? ` · ${CATEGORY_BADGE[q.category].label}` : ""}
-              </div>
-              {q.bios?.length > 0 && (
-                <div className="si-bios">
-                  {q.bios.map((b) => (
-                    <span key={b.label} className={`sbio sbio-${b.tone}`}>
-                      {b.label}
-                    </span>
-                  ))}
+          {queue.map((q) => {
+            const waited = minutesSince(q.statusSince, now) ?? q.waitMinutes ?? 0;
+            const tone = budgetColour(waited, q.waitBudget);
+            const chip = PRIORITY_CHIP[q.priority];
+            return (
+              <button
+                type="button"
+                key={q.visitId}
+                className={`sq-item${q.visitId === activeVisitId ? " active" : ""}${
+                  chip ? ` ${chip.cls}` : ""
+                }`}
+                onClick={() => pick(q.visitId)}
+              >
+                <div className="si-slot">{q.slot}</div>
+                <div className="si-name">
+                  {q.name}
+                  {chip && <span className={`si-pri ${chip.cls}`}>{chip.label}</span>}
                 </div>
-              )}
-            </button>
-          ))}
-          <div className="sq-foot">✓ Done today: {queueData?.doneToday ?? 0} patients</div>
+                <div className="si-meta">
+                  {q.age}
+                  {(q.sex || "")[0] || ""} · {q.fileNo} · Visit {q.visitNumber}
+                  {CATEGORY_BADGE[q.category] ? ` · ${CATEGORY_BADGE[q.category].label}` : ""}
+                </div>
+                {/* The wait is what the station can act on, so it reads before
+                    the biomarkers, and the words say which clock it is: time at
+                    the station once they have sat down, time queueing until then. */}
+                <div className="si-wait">
+                  <span className={`si-tmr si-tmr-${tone}`}>
+                    ⏱ {waited}m {q.status === "with_vitals" ? "at station" : "waiting"}
+                  </span>
+                  {q.checkedInAt && (
+                    <span className="si-since">in since {clock(q.checkedInAt)}</span>
+                  )}
+                </div>
+                {q.priorityReason && <div className="si-reason">❗ {q.priorityReason}</div>}
+                {q.bios?.length > 0 && (
+                  <div className="si-bios">
+                    {q.bios.map((b) => (
+                      <span key={b.label} className={`sbio sbio-${b.tone}`}>
+                        {b.label}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </button>
+            );
+          })}
+
+          {/* Held patients are in the building and cannot be called. Leaving them
+              off the screen entirely meant the station did not know they existed,
+              and would go looking for someone reception had already stopped. */}
+          {held.length > 0 && (
+            <div className="sq-group">
+              <div className="sq-gh">Held — not ready ({held.length})</div>
+              {held.map((h) => (
+                <div className="sq-held" key={h.visitId}>
+                  <div className="si-name">{h.name}</div>
+                  <div className="si-meta">
+                    {h.age}
+                    {(h.sex || "")[0] || ""} · {h.fileNo}
+                  </div>
+                  <div className="si-reason">🚫 {h.blockedReason || "On hold"}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Done means this step: vitals recorded. Tapping one reopens the
+              reading — saveVitals saves a correction without walking the patient
+              back through the chain, so this needs no new write path. */}
+          <div className="sq-group">
+            <div className="sq-gh">✓ Done today ({queueData?.doneToday ?? 0})</div>
+            {done.length === 0 && <div className="sq-foot">Nobody done yet.</div>}
+            {done.map((d) => (
+              <button
+                type="button"
+                key={`${d.visitId}-${d.recordedAt}`}
+                className={`sq-done${d.visitId === activeVisitId ? " active" : ""}`}
+                onClick={() => pick(d.visitId)}
+              >
+                <div className="si-name">{d.name}</div>
+                <div className="si-meta">
+                  {clock(d.recordedAt)} · {d.bp ? `BP ${d.bp}` : "BP —"}
+                  {d.weight ? ` · ${d.weight} kg` : ""}
+                </div>
+                <div className="si-nowat">now: {d.nowAt}</div>
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="station-detail">
@@ -276,6 +380,19 @@ export default function VitalsStationPage() {
                 </div>
                 <div className="sdh-acts">
                   {badge && <span className={`badge ${badge.cls}`}>{badge.label}</span>}
+                  {/* The chair holds one patient, so there has to be a way to
+                      give it up without recording a reading — the patient who
+                      got up, or the wrong row tapped. */}
+                  {!correcting && (
+                    <button
+                      type="button"
+                      className="tr-back"
+                      onClick={sendBackToQueue}
+                      disabled={releaseVitals.isPending}
+                    >
+                      {releaseVitals.isPending ? "Sending…" : "← Back to queue"}
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -502,7 +619,9 @@ export default function VitalsStationPage() {
                         : needsRecheck
                           ? "⚠ Recheck before saving"
                           : anyEntered
-                            ? "✓ Vitals done"
+                            ? correcting
+                              ? "Correcting a recorded reading"
+                              : "✓ Vitals done"
                             : "Enter the readings"}
                     </div>
                     <div className="db-sub">
@@ -510,11 +629,13 @@ export default function VitalsStationPage() {
                         ? "A value is outside the plausible range — correct it before saving"
                         : needsRecheck
                           ? "Confirm you have taken the reading again"
-                          : "Patient moves to the MO queue automatically"}
+                          : correcting
+                            ? "Already recorded — saving updates the reading, the patient stays where they are"
+                            : "Patient moves to the MO queue automatically"}
                     </div>
                   </div>
                   <button className="db-btn" disabled={!canSave} onClick={submit}>
-                    {saveVitals.isPending ? "Saving…" : "Done →"}
+                    {saveVitals.isPending ? "Saving…" : correcting ? "Save correction" : "Done →"}
                   </button>
                 </div>
               </div>

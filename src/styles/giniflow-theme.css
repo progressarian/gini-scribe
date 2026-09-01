@@ -60,10 +60,26 @@
   /* The shell's header cancels the page gutter with negative margins
      (`margin: calc(-1 * var(--pad-y)) calc(-1 * var(--pad-x))` in App.css), so
      removing the padding without zeroing the variables pulls the header up and
-     left, off the top of the screen. Zero both together. */
+     left, off the top of the screen. Zero both together.
+
+     --pad-* only: the header pads its own content from --gutter-*, which stays
+     at the shell's responsive value, so going full bleed here does not strip
+     the chrome bar's inset and leave this page's header looking unlike every
+     other one. */
   --pad-x: 0px;
   --pad-y: 0px;
   padding: 0;
+  box-sizing: border-box;
+}
+
+/* The border-box reset for the whole module. It sat in `giniflow.css` — the
+   BOARD's sheet — which no station page imports, so every station rendered with
+   content-box: `.inner` is width:100% plus 14px of padding, which overflowed its
+   scroller by 28px and pushed the right-hand edge of every wide row off screen.
+   Both sheets @import this file, so neither can lose it. */
+.gf *,
+.gf *::before,
+.gf *::after {
   box-sizing: border-box;
 }
 
@@ -119,6 +135,12 @@
   background: transparent;
   color: rgba(255, 255, 255, 0.7);
   font-family: var(--fb);
+  /* The rail carries both real buttons and the link back to the launcher, and
+     they have to be the same control to look like one group. */
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+  white-space: nowrap;
 }
 .gf .rbtn:hover {
   background: rgba(255, 255, 255, 0.1);
@@ -162,6 +184,13 @@
 .gf .live-dot.dead {
   background: var(--amb);
   animation: none;
+}
+/* The date sits beside the live badge rather than inside it: one says what day
+   the board is showing, the other whether it is current. Conflating them made a
+   stale board still read "Live". */
+.gf .rail-date-label {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
 }
 .gf .rail-date {
   background: rgba(255, 255, 255, 0.1);
@@ -233,4 +262,135 @@
   font-weight: 600;
   font-family: var(--fm);
   line-height: 1;
+}
+
+/* ══ SHARED OVERLAY ═══════════════════════════════════════════════════════════
+   The modal shell and its buttons live HERE, not in one screen's stylesheet.
+
+   They were in `giniflow.css` — the board's sheet — which the station screens do
+   not import, so the consultant's trend graph and Finalize dialog rendered with
+   no styling at all: a full-bleed white block with no backdrop, no header and no
+   scroll. This file's own shell comment warns about exactly this, and the modal
+   fell into it anyway. Both sheets @import the theme, so putting shared
+   components here means neither can lose them. */
+.gf .tmodal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 300;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  /* Never let the box touch the screen edge on a phone. */
+  padding: 16px;
+  box-sizing: border-box;
+}
+.gf .tmodal.open {
+  display: flex;
+}
+.gf .tbox {
+  background: var(--white);
+  border-radius: var(--r-lg);
+  /* Was a fixed 520px, which overflowed every phone. */
+  width: min(560px, 100%);
+  max-height: min(86vh, 100%);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.gf .tbox.confirm {
+  width: min(420px, 100%);
+}
+.gf .tb-hd {
+  background: var(--nv);
+  padding: 13px 17px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.gf .tb-name {
+  font-family: var(--fd);
+  font-size: 17px;
+  color: #fff;
+  font-style: italic;
+}
+.gf .tb-meta {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.45);
+  margin-top: 2px;
+}
+.gf .tb-cls {
+  margin-left: auto;
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  border-radius: 50%;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  cursor: pointer;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+}
+.gf .tb-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 15px 17px;
+}
+.gf .tb-body::-webkit-scrollbar {
+  width: 4px;
+}
+.gf .tb-body::-webkit-scrollbar-thumb {
+  background: var(--bd2);
+}
+.gf .cf-warn {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink2, var(--ink));
+  margin: 0 0 12px;
+}
+.gf .cf-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.gf .btn {
+  padding: 7px 13px;
+  border-radius: var(--r);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid;
+  font-family: var(--fb);
+}
+.gf .btn-tl {
+  background: var(--tl);
+  color: #fff;
+  border-color: var(--tl);
+}
+.gf .btn-tl:hover {
+  opacity: 0.88;
+}
+.gf .btn-g {
+  background: var(--white);
+  color: var(--ink3);
+  border-color: var(--bd);
+}
+
+/* The loading / unavailable state every Gini Flow screen falls back to. In the
+   theme for the same reason the modal is: it was board-only, so the consultant's
+   "Opening the consult…" and "Consult unavailable." rendered as bare unstyled
+   text in the corner of a blank page. */
+.gf-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 24px;
+  text-align: center;
+  color: var(--ink3);
+  font-size: 13px;
 }

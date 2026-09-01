@@ -26,7 +26,6 @@ import {
   Star,
   Sunrise,
   Trash2,
-  Users,
   X,
   RotateCcw,
 } from "lucide-react";
@@ -676,15 +675,72 @@ function AltPhoneFields({ list, onChange }) {
   );
 }
 
+// Everything that tells two family members apart, under their name.
+const describeCandidate = (p) =>
+  [
+    p.file_no,
+    canonSex(p.sex),
+    p.age != null ? `${p.age} yrs` : null,
+    p.last_visit ? `last visit ${prettyDate(String(p.last_visit).slice(0, 10))}` : null,
+    p.visit_count ? `${p.visit_count} visits` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+// Charts the File No or the phone turned up, offered under the field that found
+// them. Nothing is copied into the form until one is clicked — a number belongs
+// to a whole family, so a match is a suggestion, not an answer, and filling
+// silently is what booked one sibling's visit onto another's chart.
+function MatchSuggestions({ items, onPick, onDismiss }) {
+  if (!items.length) return null;
+  return (
+    <div className="sugg">
+      <div className="sugg__hdr">
+        <span>
+          {items.length === 1 ? "1 patient found" : `${items.length} patients found`} — click to use
+        </span>
+        <button
+          type="button"
+          className="sugg__x"
+          onClick={onDismiss}
+          aria-label="Dismiss suggestions"
+        >
+          <X size={12} aria-hidden="true" />
+        </button>
+      </div>
+      <ul className="sugg__list">
+        {items.map((p) => (
+          <li key={p.id}>
+            <button type="button" className="sugg__opt" onClick={() => onPick(p)}>
+              <span className="sugg__name">{p.name || "Unnamed"}</span>
+              <span className="sugg__meta">{describeCandidate(p)}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 // Shared DOB / Age / Gender trio — the New Appointment form and the Edit
 // Patient form capture exactly the same three facts.
+//
+// Date of birth and age are alternatives, not a pair: most patients give an
+// age ("I'm 43") and cannot recall a date. Either box on its own is enough. A
+// date of birth fills the age in and keeps it in step, and typing an age
+// clears the date — the server derives age from the date whenever one is set,
+// so a leftover date would silently overwrite the age just typed.
 function DemographicFields({ dob, age, sex, onChange }) {
   const derived = ageFromDob(dob);
+  const setAge = (value) => {
+    if (dob) onChange("dob", "");
+    onChange("age", value.replace(/\D/g, "").slice(0, 3));
+  };
   return (
     <>
       <label className="fld">
         <span>
-          Date of Birth <em className="fld__opt">(optional)</em>
+          Date of Birth <em className="fld__opt">(optional — or just give the age)</em>
         </span>
         <input
           type="date"
@@ -694,15 +750,19 @@ function DemographicFields({ dob, age, sex, onChange }) {
         />
       </label>
       <label className="fld">
-        <span>Age {dob && <em className="fld__opt">— from date of birth</em>}</span>
+        <span>
+          Age{" "}
+          <em className="fld__opt">
+            {dob ? "— from date of birth" : "(optional — years is enough)"}
+          </em>
+        </span>
         <input
           type="number"
           min="0"
           max="120"
           inputMode="numeric"
-          value={dob ? derived : age}
-          readOnly={!!dob}
-          onChange={(e) => onChange("age", e.target.value.replace(/\D/g, "").slice(0, 3))}
+          value={dob ? (derived ?? "") : age}
+          onChange={(e) => setAge(e.target.value)}
           placeholder="Years"
         />
       </label>
@@ -759,27 +819,6 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
   }, [form.file_no]);
 
   const { data: lookedUpPatient, isFetching: lookingUp } = usePatientByFileNo(fileNoQuery);
-  const filledFromRef = useRef("");
-
-  useEffect(() => {
-    if (!lookedUpPatient) return;
-    const key = String(lookedUpPatient.file_no || "");
-    if (filledFromRef.current === key) return;
-    filledFromRef.current = key;
-    setForm((f) => ({
-      ...f,
-      patient_name: lookedUpPatient.name || f.patient_name,
-      phone: String(lookedUpPatient.phone || f.phone || "")
-        .replace(/\D/g, "")
-        .slice(0, 10),
-      alt_phone: f.alt_phone.some(Boolean) ? f.alt_phone : toAltList(lookedUpPatient.alt_phone),
-      dob: f.dob || toDateInput(lookedUpPatient.dob),
-      age: f.age || (lookedUpPatient.age != null ? String(lookedUpPatient.age) : ""),
-      sex: f.sex || canonSex(lookedUpPatient.sex),
-      address: lookedUpPatient.address || f.address,
-      visit_type: f.visit_type === "New" ? "Follow Up" : f.visit_type,
-    }));
-  }, [lookedUpPatient]);
 
   const [phoneQuery, setPhoneQuery] = useState("");
   useEffect(() => {
@@ -787,20 +826,28 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
     return () => clearTimeout(t);
   }, [form.phone]);
 
-  // A number can belong to several charts — families share one line. One match
-  // fills the form as before; several must be chosen between, because guessing
-  // books the appointment onto a sibling's chart. Booking a second person on a
-  // known number is the same flow: "Someone else on this number".
   const { data: phoneMatches, isFetching: lookingUpPhone } = usePatientsByPhone(phoneQuery);
   const matches = useMemo(() => safeArr(phoneMatches), [phoneMatches]);
-  const [pickedPhonePatient, setPickedPhonePatient] = useState(null);
-  const filledFromPhoneRef = useRef("");
+
+  const [picked, setPicked] = useState(null);
+  // Suggestions are per-field and each can be waved away on its own. Dismissing
+  // is not an answer either way — it just closes the list.
+  const [hideFileSugg, setHideFileSugg] = useState(false);
+  const [hidePhoneSugg, setHidePhoneSugg] = useState(false);
+  useEffect(() => setHideFileSugg(false), [fileNoQuery]);
+  useEffect(() => setHidePhoneSugg(false), [phoneQuery]);
+
+  const fileSuggestions = !picked && !hideFileSugg && lookedUpPatient ? [lookedUpPatient] : [];
+  const phoneSuggestions = !picked && !hidePhoneSugg ? matches : [];
 
   const fillFromPatient = useCallback((p) => {
     setForm((f) => ({
       ...f,
       patient_name: p.name || f.patient_name,
       file_no: String(p.file_no || ""),
+      phone: String(p.phone || f.phone || "")
+        .replace(/\D/g, "")
+        .slice(0, 10),
       address: p.address || f.address,
       alt_phone: f.alt_phone.some(Boolean) ? f.alt_phone : toAltList(p.alt_phone),
       dob: toDateInput(p.dob) || f.dob,
@@ -810,45 +857,34 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
     }));
   }, []);
 
-  useEffect(() => {
-    if (matches.length !== 1) return;
-    const only = matches[0];
-    const key = String(only.id || only.file_no || "");
-    if (filledFromPhoneRef.current === key) return;
-    filledFromPhoneRef.current = key;
-    setPickedPhonePatient(only);
-    setForm((f) => ({
-      ...f,
-      patient_name: f.patient_name.trim() || only.name || "",
-      file_no: f.file_no.trim() || String(only.file_no || ""),
-      address: f.address.trim() || only.address || "",
-      alt_phone: f.alt_phone.some(Boolean) ? f.alt_phone : toAltList(only.alt_phone),
-      dob: f.dob || toDateInput(only.dob),
-      age: f.age || (only.age != null ? String(only.age) : ""),
-      sex: f.sex || canonSex(only.sex),
-      visit_type: f.visit_type === "New" ? "Follow Up" : f.visit_type,
-    }));
-  }, [matches]);
+  // The choice is cleared by the desk editing File No or Mobile — see the two
+  // inputs below. It is deliberately not driven off the lookup results:
+  // choosing a patient writes their own File No and phone into the form, and
+  // those land before the debounced queries catch up, so a results-driven reset
+  // would race and throw the answer away as soon as it was given.
 
-  // A new number, or one the desk edited, clears the earlier choice so the
-  // chooser comes back instead of leaving a stale chart selected.
+  // "Book Next Appointment" opens from a row, so whose chart it is was settled
+  // before the form opened and suggesting it back would be noise.
+  const prefilledFileNo = String(prefill?.file_no || "")
+    .trim()
+    .toLowerCase();
   useEffect(() => {
-    setPickedPhonePatient(null);
-    filledFromPhoneRef.current = "";
-  }, [phoneQuery]);
+    if (!prefilledFileNo || !lookedUpPatient) return;
+    if (String(lookedUpPatient.file_no || "").toLowerCase() !== prefilledFileNo) return;
+    setPicked((prev) => prev || lookedUpPatient);
+  }, [lookedUpPatient, prefilledFileNo]);
 
-  const chooseSharedPatient = (p) => {
-    setPickedPhonePatient(p || { id: "new" });
-    if (p) fillFromPatient(p);
-    else
-      setForm((f) => ({
-        ...f,
-        file_no: "",
-        visit_type: "New",
-      }));
+  const choosePatient = (p) => {
+    setPicked(p);
+    fillFromPatient(p);
   };
 
-  const needsPhoneChoice = matches.length > 1 && !pickedPhonePatient;
+  // Nobody was picked and no File No names a chart, so this is somebody new.
+  // The API is told so explicitly, because its own fallback resolves a bare
+  // phone to whichever relative holds it — which is how one sibling's visit
+  // ended up on another's record. Ignoring the suggestions therefore costs a
+  // duplicate chart at worst, never a merged one.
+  const bookingIsNewPatient = !picked && !form.file_no.trim();
 
   const { data: availData } = useDayAvailability(form.doctor_name, form.appointment_date);
   const availSlots = availData ?? null;
@@ -864,8 +900,12 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
     });
   }, [availSlots]);
 
-  // Phone: keep digits only, cap at 10
-  const setPhone = (v) => set("phone", v.replace(/\D/g, "").slice(0, 10));
+  // Phone: keep digits only, cap at 10. A different number is a different
+  // family, so whoever was picked off the old one no longer applies.
+  const setPhone = (v) => {
+    setPicked(null);
+    set("phone", v.replace(/\D/g, "").slice(0, 10));
+  };
 
   const save = async (allowDuplicate = false) => {
     const name = form.patient_name.trim();
@@ -888,19 +928,17 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
       return setErr("Mobile number is required for a new patient");
     if (form.file_no && !/^[A-Za-z0-9_-]+$/.test(form.file_no.trim()))
       return setErr("File No can only contain letters, numbers, _ and -");
-    // Several charts share this number and nobody has said which — booking now
-    // would attach the visit to whichever one happened to sort first.
-    if (needsPhoneChoice)
-      return setErr("This number belongs to more than one patient — pick who this is for");
     if (form.dob && form.dob > todayStr()) return setErr("Date of birth cannot be in the future");
     if (!form.dob && form.age && +form.age > 120) return setErr("Age must be between 0 and 120");
 
     setErr("");
     setDup(null);
     try {
-      const created = await createMutation.mutateAsync(
-        allowDuplicate ? { ...form, allow_duplicate: true } : form,
-      );
+      const created = await createMutation.mutateAsync({
+        ...form,
+        new_patient: bookingIsNewPatient,
+        ...(allowDuplicate ? { allow_duplicate: true } : null),
+      });
       setBooked({
         patient_name: form.patient_name.trim(),
         file_no: created?.file_no || form.file_no.trim(),
@@ -998,52 +1036,6 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
               Patient details auto-filled. Just pick the date, slot &amp; doctor.
             </div>
           )}
-          {needsPhoneChoice && (
-            <div className="pickpt">
-              <div className="pickpt__hdr">
-                <Users size={14} aria-hidden="true" />
-                {matches.length} patients share this number — who is this appointment for?
-              </div>
-              <ul className="pickpt__list">
-                {matches.map((p) => (
-                  <li key={p.id}>
-                    <button
-                      type="button"
-                      className="pickpt__opt"
-                      onClick={() => chooseSharedPatient(p)}
-                    >
-                      <span className="pickpt__name">{p.name}</span>
-                      <span className="pickpt__meta">
-                        {[
-                          p.file_no,
-                          canonSex(p.sex),
-                          p.age != null ? `${p.age} yrs` : null,
-                          p.last_visit
-                            ? `last visit ${prettyDate(String(p.last_visit).slice(0, 10))}`
-                            : null,
-                          p.visit_count ? `${p.visit_count} visits` : null,
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-                <li>
-                  <button
-                    type="button"
-                    className="pickpt__opt pickpt__opt--new"
-                    onClick={() => chooseSharedPatient(null)}
-                  >
-                    <span className="pickpt__name">Someone else on this number</span>
-                    <span className="pickpt__meta">
-                      Creates a new patient record with its own File No
-                    </span>
-                  </button>
-                </li>
-              </ul>
-            </div>
-          )}
 
           <div className="fgrid">
             <label className="fld fld--wide">
@@ -1055,41 +1047,45 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
                 autoFocus
               />
             </label>
-            <label className="fld">
+            <div className="fld fld--sugg">
               <span>
                 File No <em className="fld__opt">(blank = new patient)</em>
                 {lookingUp && <em className="fld__opt"> — searching…</em>}
-                {!lookingUp && lookedUpPatient && (
-                  <em className="fld__ok"> — {lookedUpPatient.name} found</em>
-                )}
-                {!lookingUp && fileNoQuery.length >= 3 && !lookedUpPatient && (
+                {!lookingUp && picked && <em className="fld__ok"> — using {picked.name}</em>}
+                {!lookingUp && !picked && fileNoQuery.length >= 3 && !lookedUpPatient && (
                   <em className="fld__warn"> — no match</em>
                 )}
               </span>
               <input
+                aria-label="File No"
                 value={form.file_no}
-                onChange={(e) => set("file_no", e.target.value)}
+                onChange={(e) => {
+                  // Typing a File No is the desk pointing at a chart itself, so
+                  // it supersedes whatever was picked from the list.
+                  setPicked(null);
+                  set("file_no", e.target.value);
+                }}
                 placeholder="Leave blank for new patient"
               />
-            </label>
-            <label className="fld">
+              <MatchSuggestions
+                items={fileSuggestions}
+                onPick={choosePatient}
+                onDismiss={() => setHideFileSugg(true)}
+              />
+            </div>
+            <div className="fld fld--sugg">
               <span>
                 Mobile{" "}
                 {form.phone && form.phone.length !== 10 && (
                   <em className="fld__warn">{form.phone.length}/10</em>
                 )}
                 {lookingUpPhone && <em className="fld__opt"> — searching…</em>}
-                {!lookingUpPhone && matches.length === 1 && (
-                  <em className="fld__ok"> — {matches[0].name} found</em>
-                )}
-                {!lookingUpPhone && matches.length > 1 && (
-                  <em className="fld__warn"> — {matches.length} patients on this number</em>
-                )}
-                {!lookingUpPhone && phoneQuery.length === 10 && matches.length === 0 && (
+                {!lookingUpPhone && !picked && phoneQuery.length === 10 && !matches.length && (
                   <em className="fld__warn"> — no match</em>
                 )}
               </span>
               <input
+                aria-label="Mobile"
                 type="tel"
                 inputMode="numeric"
                 maxLength={10}
@@ -1097,7 +1093,12 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
                 onChange={(e) => setPhone(e.target.value)}
                 placeholder="10-digit number"
               />
-            </label>
+              <MatchSuggestions
+                items={phoneSuggestions}
+                onPick={choosePatient}
+                onDismiss={() => setHidePhoneSugg(true)}
+              />
+            </div>
             <AltPhoneFields list={form.alt_phone} onChange={(next) => set("alt_phone", next)} />
             <DemographicFields
               dob={form.dob}
@@ -2178,16 +2179,12 @@ export default function GHMPage() {
       }),
     [categoryCounts],
   );
-  // Any request still in flight while rows are already on screen — a refetch on
-  // focus, a stale-time refresh or the per-page batches catching up. The rows
-  // shown are the previous answer until it lands, so the header says so.
-  const refreshing =
-    !listQuery.isPending &&
-    (listQuery.isFetching ||
-      biomarkerQuery.isFetching ||
-      lastMoQuery.isFetching ||
-      slotCountQuery.isFetching ||
-      attemptQuery.isFetching);
+  // The list itself is being refetched while rows are already on screen — a
+  // refetch on focus or a stale-time refresh. The rows shown are the previous
+  // answer until it lands, so the header says so. The per-row batches
+  // (biomarkers, last MO, slot counts, attempt counts) are decorations that
+  // fill in on their own; they must not make the whole sheet look busy.
+  const refreshing = !listQuery.isPending && listQuery.isFetching;
 
   const exportMutation = useExportPages(buildQuery, EXPORT_PAGE_SIZE);
   const exporting = exportMutation.isPending;
@@ -2655,7 +2652,7 @@ export default function GHMPage() {
 
           {/* ── Table ── */}
           {showRows && (
-            <div className={`tbl-wrap ${busy ? "tbl-wrap--busy" : ""}`}>
+            <div className="tbl-wrap">
               <table className={`tbl ${compact ? "tbl--compact" : ""}`}>
                 <thead>
                   <tr>

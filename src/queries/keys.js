@@ -75,6 +75,21 @@ export const qk = {
     conflicts: (date) => ["ghm", "conflicts", date],
     patientByFileNo: (fileNo) => ["ghm", "patient-by-file-no", fileNo || null],
     patientByPhone: (phone) => ["ghm", "patient-by-phone", phone || null],
+    // Invalidation prefixes: one name covers every page / id batch / date under
+    // it. A mutation names only the queries its write actually changed —
+    // invalidating `all` refetched a dozen queries, the expensive day list
+    // among them, and froze the sheet on every edit.
+    any: {
+      list: ["ghm", "list"],
+      slotCounts: ["ghm", "slot-counts"],
+      categoryCounts: ["ghm", "category-counts"],
+      attemptCounts: ["ghm", "attempt-counts"],
+      activeCalls: ["ghm", "active-calls"],
+      callAttempts: ["ghm", "call-attempts"],
+      changes: ["ghm", "changes"],
+      availability: ["ghm", "availability"],
+      conflicts: ["ghm", "conflicts"],
+    },
   },
   analytics: {
     all: ["analytics"],

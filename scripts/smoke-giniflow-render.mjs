@@ -33,6 +33,8 @@ globalThis.document = {
 };
 
 process.env.GINIFLOW_ALLOW_DEMO = "1";
+// Far enough in the past that the demo rows can never collide with a real day.
+const MO_DEMO_DAY = "2019-01-07";
 await import("../server/loadEnv.js");
 const { default: pool } = await import("../server/config/db.js");
 const board = await import("../server/services/giniflow/board.js");
@@ -92,9 +94,11 @@ try {
   check("the identity line renders", html.includes("pc-id"));
   check("timers render", html.includes("tmr"));
   check("footer strip renders", html.includes("pf-name"));
+  // "Switch role" became the "← Stations" link to the launcher, deliberately —
+  // the rail's way out is the same one every station uses.
   check(
-    "rail carries all four controls",
-    ["Day report", "Time budgets", "Switch role"].every((t) => html.includes(t)),
+    "rail carries its controls",
+    ["Day report", "Time budgets", "← Stations"].every((t) => html.includes(t)),
   );
   check("no raw 'undefined' leaked into the markup", !html.includes(">undefined<"));
   if (payload.bottleneck) check("bottleneck banner renders", html.includes("Bottleneck:"));
@@ -191,19 +195,35 @@ try {
     ].every((h) => landHtml.includes(`href="${h}"`)),
     "a station whose tile is not linked is unreachable",
   );
-  check("unbuilt stations stay marked coming soon", landHtml.includes("Coming soon"));
+  // Not "some station is unbuilt" — that assertion aged out the moment the last
+  // station shipped. The rule is what matters: a tile is either a link to a
+  // working station, or it says why it is not.
+  const tiles = landHtml.match(/class="role-card[^"]*"/g) || [];
+  const openTiles = (landHtml.match(/<a class="role-card"/g) || []).length;
+  const shut = tiles.length - openTiles;
+  const excuses =
+    (landHtml.match(/Coming soon/g) || []).length + (landHtml.match(/No access/g) || []).length;
+  check(
+    "every tile is either a working link or says why it is not",
+    shut === excuses,
+    `${openTiles} open, ${shut} closed, ${excuses} explained`,
+  );
   check("live counts render on the tiles", landHtml.includes("in queue"));
   check("no raw 'undefined' in the launcher markup", !landHtml.includes(">undefined<"));
 
-  // Reception renders its own tree.
-  const { default: ReceptionStationPage } = await vite.ssrLoadModule(
+  // Reception renders its own tree — two tabs, only one of them mounted at a
+  // time, so the payments half is rendered on its own as well.
+  const { default: ReceptionStationPage, PaymentsTab } = await vite.ssrLoadModule(
     "/src/pages/giniflow/ReceptionStationPage.jsx",
   );
   const recClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const { getPaymentQueue } = await import("../server/services/giniflow/receptionStation.js");
-  recClient.setQueryData(["giniflow", "reception", "queue", "today"], {
+  const { getPaymentQueue, getArrivals } =
+    await import("../server/services/giniflow/receptionStation.js");
+  const payments = { date, ...(await getPaymentQueue(date)) };
+  recClient.setQueryData(["giniflow", "reception", "queue", "today"], payments);
+  recClient.setQueryData(["giniflow", "reception", "arrivals", "today", ""], {
     date,
-    ...(await getPaymentQueue(date)),
+    ...(await getArrivals(date)),
   });
   const recHtml = renderToString(
     createElement(
@@ -217,10 +237,101 @@ try {
     ),
   );
   check("reception renders without throwing", recHtml.length > 0, `${recHtml.length} chars`);
-  check("reception counters render", recHtml.includes("Payment pending"));
-  check("the workflow banner renders", recHtml.includes("triggers lab sample collection"));
-  check("the placeholder-price warning is shown", recHtml.includes("not the hospital"));
+  check(
+    "both halves of the desk are reachable",
+    ["Arrivals", "Payments"].every((t) => recHtml.includes(t)),
+  );
+  check(
+    "the three arrival groups render",
+    ["Expected", "On the floor"].every((g) => recHtml.includes(g)),
+  );
+  check("arrival counters render", recHtml.includes("booked, not here yet"));
+  check(
+    "the screen says a manual arrival is not written back to HealthRay",
+    recHtml.includes("not written back"),
+  );
   check("no raw 'undefined' in the reception markup", !recHtml.includes(">undefined<"));
+
+  const payHtml = renderToString(
+    createElement(
+      QueryClientProvider,
+      { client: recClient },
+      createElement(PaymentsTab, {
+        data: payments,
+        isLoading: false,
+        onClear: () => {},
+        pending: false,
+      }),
+    ),
+  );
+  check("the payment queue still renders", payHtml.includes("Payment pending"));
+  check("the workflow banner renders", payHtml.includes("triggers lab sample collection"));
+  check("the placeholder-price warning is shown", payHtml.includes("not the hospital"));
+  check("no raw 'undefined' in the payments markup", !payHtml.includes(">undefined<"));
+
+  // MO/SD renders its own tree — queue, brief, plan, tests panel, action bar.
+  const { default: MoStationPage } = await vite.ssrLoadModule(
+    "/src/pages/giniflow/MoStationPage.jsx",
+  );
+  const moClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const { getMoQueue, getMoPatient, getTestPanels } =
+    await import("../server/services/giniflow/moStation.js");
+  // The brief only renders for a patient the page auto-selects, and on a real
+  // morning every patient can still be at vitals — so this renders the demo day
+  // rather than whatever the floor happens to be doing. Its date is far in the
+  // past, so nothing here touches today's board.
+  const { seedDemoDay, cleanDemoDay } = await import("../server/services/giniflow/demo.js");
+  await cleanDemoDay();
+  await seedDemoDay({ date: MO_DEMO_DAY });
+  // The queue belongs to the logged-in SD, so render it as the SD the demo day
+  // assigned its patients to — with nobody logged in, every assigned patient
+  // correctly reads as somebody else's.
+  const { rows: demoSd } = await pool.query(
+    `SELECT assigned_sd_id FROM giniflow_visits
+      WHERE visit_date = $1::date AND assigned_sd_id IS NOT NULL LIMIT 1`,
+    [MO_DEMO_DAY],
+  );
+  const moQueue = await getMoQueue(MO_DEMO_DAY, demoSd[0]?.assigned_sd_id ?? null);
+  // The queue key carries the search term — the MO queue searches server-side.
+  moClient.setQueryData(["giniflow", "mo", "queue", "today", ""], {
+    date: MO_DEMO_DAY,
+    ...moQueue,
+  });
+  moClient.setQueryData(["giniflow", "mo", "test-panels"], await getTestPanels());
+  const firstMo = moQueue.withMe[0] || moQueue.waitingForMe[0];
+  check("the demo day gives the MO somebody to open", !!firstMo);
+  if (firstMo) {
+    moClient.setQueryData(
+      ["giniflow", "mo", "patient", firstMo.visitId],
+      await getMoPatient(firstMo.visitId),
+    );
+  }
+  const moHtml = renderToString(
+    createElement(
+      MemoryRouter,
+      null,
+      createElement(QueryClientProvider, { client: moClient }, createElement(MoStationPage)),
+    ),
+  );
+  check("MO station renders without throwing", moHtml.length > 0, `${moHtml.length} chars`);
+  check("MO rail renders", moHtml.includes("MO / SD Station"));
+  check(
+    "the allergy strip states the truth, not 'none recorded'",
+    moHtml.includes("not recorded anywhere"),
+  );
+  check("the tests panel renders its urgency choices", moHtml.includes("Today → lab now"));
+  check(
+    "the wait is coloured against a budget, like the board",
+    /si-tmr si-tmr-[gar]/.test(moHtml),
+    (moHtml.match(/si-tmr si-tmr-(\w+)/) || [])[1],
+  );
+  check(
+    "every group opens as full cards, nothing collapsed by default",
+    !moHtml.includes("sq-peek"),
+    "compacting is the MO's choice, not the screen's",
+  );
+  check("and the compact switch is offered", moHtml.includes("Compact the rest"));
+  check("no raw 'undefined' in the MO markup", !moHtml.includes(">undefined<"));
 
   // Lab renders its own tree.
   const { default: LabStationPage } = await vite.ssrLoadModule(
@@ -258,6 +369,8 @@ try {
 } catch (e) {
   check(`render threw: ${e.message}`, false);
 } finally {
+  const { cleanDemoDay } = await import("../server/services/giniflow/demo.js");
+  await cleanDemoDay();
   await vite.close();
   await pool.end();
   console.log(failures ? `\n${failures} FAILED\n` : "\nall checks passed\n");
