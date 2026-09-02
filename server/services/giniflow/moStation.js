@@ -2,6 +2,7 @@ import pool from "../../config/db.js";
 import { advanceStatus, budgetColour } from "./statusEngine.js";
 import { getSlaConfig, budgetMap } from "./board.js";
 import { slaKeyForStatus } from "../../../shared/giniflowStatus.js";
+import { todaysVitals, previousVitals } from "./visitVitals.js";
 
 // The MO / SD station — where the queue forms.
 //
@@ -228,6 +229,7 @@ export async function getMoQueue(visitDate, sdId = null, q = null, now = new Dat
 export async function getMoPatient(visitId, db = pool) {
   const { rows } = await db.query(
     `SELECT v.id, v.current_status, v.results_status, v.category, v.patient_id,
+            v.visit_date::text AS visit_date,
             v.assigned_sd_id, v.blocked_reason,
             p.name, p.file_no, p.age, p.sex, p.notes,
             a.biomarkers, a.compliance, a.pre_visit_compliance,
@@ -255,27 +257,19 @@ export async function getMoPatient(visitId, db = pool) {
   // Five reads that do not depend on each other. Run together: an MO tapping
   // through a queue pays one round trip per patient, not six.
   const [
-    { rows: vitals },
-    { rows: lastVitals },
+    vitals,
+    lastVitals,
     { rows: history },
     { rows: notes },
     { rows: proposals },
     { rows: orders },
   ] = await Promise.all([
-    // The reading the vitals station just took, and the one before it — the MO
-    // is reading a change, not a number.
-    db.query(
-      `SELECT weight, height, bmi, bp_sys, bp_dia, pulse, spo2, temp, recorded_at
-           FROM giniflow_vitals WHERE visit_id = $1 ORDER BY recorded_at DESC LIMIT 1`,
-      [visitId],
-    ),
-    db.query(
-      `SELECT weight, bp_sys, bp_dia, pulse, spo2, recorded_at
-           FROM vitals WHERE patient_id = $1
-            AND recorded_at::date < (NOW() AT TIME ZONE 'Asia/Kolkata')::date
-          ORDER BY recorded_at DESC LIMIT 1`,
-      [v.patient_id],
-    ),
+    // Today's reading and the one before it — the MO is reading a change, not a
+    // number. Through the shared reader, because the reading may be in either
+    // table: a patient whose nurse worked on HealthRay's screen has one, and
+    // that reading is what advanced them to this desk.
+    todaysVitals(visitId, { patientId: v.patient_id, visitDate: v.visit_date }, db),
+    previousVitals(v.patient_id, v.visit_date, db),
     // The same markers from the visits before this one, newest first — a tile
     // shows a change, and a change needs the reading it changed from.
     db.query(
@@ -325,8 +319,8 @@ export async function getMoPatient(visitId, db = pool) {
     // empty list so the screen can say "not recorded" instead of "none".
     allergies: null,
     // No phase column exists either (plan §3b.1). Omitted rather than guessed.
-    vitals: vitals[0] || null,
-    lastVitals: lastVitals[0] || null,
+    vitals,
+    lastVitals,
     biomarkers: v.biomarkers || null,
     // Oldest first, so a sparkline reads left to right.
     biomarkerHistory: history
@@ -418,10 +412,32 @@ export async function startWorkup(visitId, actorId = null, db = pool) {
   try {
     await client.query("BEGIN");
     const { rows } = await client.query(
-      `SELECT current_status, assigned_sd_id FROM giniflow_visits WHERE id = $1 FOR UPDATE`,
+      `SELECT v.current_status, v.assigned_sd_id,
+              (SELECT COALESCE(d.short_name, d.name) FROM doctors d
+                WHERE d.id = v.assigned_sd_id) AS assigned_sd_name
+         FROM giniflow_visits v WHERE v.id = $1 FOR UPDATE`,
       [visitId],
     );
     if (!rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
+
+    // One patient, one desk. This used to be a deliberate no-op — a second MO
+    // opening the card kept the first as owner and was let through — but the
+    // patient is physically at one desk, and two MOs working the same visit
+    // meant two sets of test orders and medicine proposals against it. The
+    // second is now refused; releaseWorkup is how the first hands over.
+    if (
+      actorId &&
+      rows[0].current_status === "with_sd" &&
+      rows[0].assigned_sd_id &&
+      rows[0].assigned_sd_id !== actorId
+    ) {
+      throw Object.assign(
+        new Error(
+          `This patient is already with ${rows[0].assigned_sd_name || "another MO"} — they cannot be in two places at once`,
+        ),
+        { status: 409 },
+      );
+    }
 
     // Only from the two statuses that mean "vitals are done, this patient is
     // mine to work up". Claiming from checked_in would skip the vitals station
@@ -443,8 +459,8 @@ export async function startWorkup(visitId, actorId = null, db = pool) {
         { status: 409 },
       );
     }
-    // First MO to open an unassigned patient takes them. Whoever already holds
-    // them keeps them — a second MO opening the card is a no-op, not a steal.
+    // First MO to open an unassigned patient takes them; anyone else has been
+    // refused above, so reaching here means it is theirs or nobody's.
     if (!rows[0].assigned_sd_id && actorId) {
       await client.query(`UPDATE giniflow_visits SET assigned_sd_id = $2 WHERE id = $1`, [
         visitId,

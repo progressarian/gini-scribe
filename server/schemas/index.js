@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CATEGORIES, TRIAGE_FILTERS } from "../../shared/giniflowStatus.js";
+import { SPECIALTY_VALUES, URGENCY_VALUES } from "../../shared/giniflowReferrals.js";
 
 // Canonical patient-facing "when to take" vocabulary. Must stay in sync
 // with src/config/medicationTimings.js and the Postgres when_to_take_pill
@@ -620,6 +621,13 @@ export const giniflowPlanSchema = z.object({
   source: z.enum(["typed", "voice"]).default("typed"),
 });
 
+// Reading the MO's own plan back to point at the test chips and the suggestion
+// form. Nothing is written, so the body is just the text on screen — which may
+// be ahead of what autosave has stored.
+export const giniflowPlanExtractSchema = z.object({
+  plan: z.string().min(1).max(20000),
+});
+
 export const giniflowProposalSchema = z.object({
   medicineName: z.string().min(1).max(200),
   fromDose: z.string().max(100).nullish(),
@@ -833,6 +841,60 @@ export const giniflowDispenseAllSchema = z
 export const giniflowFinalizeSchema = z.object({
   confirm: z.literal(true, { errorMap: () => ({ message: "Finalize must be confirmed" }) }),
 });
+
+// ── Gini Flow · referrals (docs/gini-flow/19-REFERRALS-STATION-PLAN.md §4.2) ─
+// The prototype's create form has no <form>, no name/id attributes, no required
+// and no validation at all. Patient, specialty and reason are the three a letter
+// cannot be written without, so they are the three this refuses to do without.
+export const giniflowReferralQuerySchema = giniflowDateQuerySchema.extend({
+  q: z.string().trim().max(60).optional(),
+});
+
+export const giniflowReferralSchema = z.object({
+  visitId: z.string().uuid("Pick a patient from today's floor"),
+  specialty: z.enum(SPECIALTY_VALUES),
+  toDoctor: z.string().trim().max(120).nullish(),
+  // The prototype omits this and then draws a "Send to doctor" button (§4.1).
+  toDoctorPhone: z.string().trim().max(20).nullish(),
+  hospital: z.string().trim().max(160).nullish(),
+  urgency: z.enum(URGENCY_VALUES).default("routine"),
+  reason: z.string().trim().min(3, "A referral needs a reason").max(4000),
+  investigations: z.string().trim().max(1000).nullish(),
+});
+
+// The consultant's chip sends the specialty alone — the station fills in the
+// doctor, hospital and phone later.
+export const giniflowReferralChipSchema = z.object({
+  specialty: z.enum(SPECIALTY_VALUES),
+  urgency: z.enum(URGENCY_VALUES).default("routine"),
+  reason: z.string().trim().max(4000).nullish(),
+});
+
+export const giniflowReferralLetterSchema = z.object({
+  force: z.boolean().optional(),
+});
+
+export const giniflowReferralSendSchema = z.object({
+  to: z.enum(["patient", "doctor"]).default("patient"),
+  force: z.boolean().optional(),
+});
+
+export const giniflowReferralAppointmentSchema = z.object({
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD")
+    .refine((d) => !Number.isNaN(Date.parse(d)), "date is not a real date"),
+  note: z.string().trim().max(500).nullish(),
+});
+
+// Closing the loop is the one irreversible action here, so it says so out loud —
+// the same shape dispense-all and finalize use.
+export const giniflowReferralCompleteSchema = z
+  .object({ confirm: z.boolean() })
+  .refine((v) => v.confirm === true, {
+    message: "Confirm before closing this referral",
+    path: ["confirm"],
+  });
 
 // ── Gini Flow · triage board (docs/gini-flow/18-TRIAGE-BOARD-PLAN.md §9) ─────
 // The pipeline step names are the filter values: the bar's counts and the rows

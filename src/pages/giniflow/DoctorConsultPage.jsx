@@ -216,6 +216,8 @@ export default function DoctorConsultPage() {
           <MedCardSection visitId={visitId} onToast={showToast} />
           <CarePlanSection
             consult={consult}
+            visitId={visitId}
+            onToast={showToast}
             onSave={onSavePlan}
             saving={saveCarePlan.isPending}
             readOnly={readOnly}

@@ -148,6 +148,66 @@ check(
   `${before.visits}→${after.visits}, ${before.events}→${after.events}`,
 );
 
+// ── HealthRay's vitals, which its appointment status cannot express ─────────
+// The nurses take vitals on HealthRay's own screen and it has no appointment
+// status meaning "vitals done", so a patient whose BP was measured stayed
+// `checked_in` here — sitting in the vitals queue with the readings already on
+// file. Eleven of thirty-eight, the day this was written.
+const vitalsCase = await one(
+  `SELECT v.id AS visit_id, v.current_status
+     FROM giniflow_visits v
+    WHERE v.visit_date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date
+      AND v.current_status = ANY($1)
+      AND NOT EXISTS (SELECT 1 FROM giniflow_vitals g WHERE g.visit_id = v.id)
+      AND EXISTS (
+        SELECT 1 FROM vitals hv WHERE hv.patient_id = v.patient_id
+          AND (hv.recorded_at AT TIME ZONE 'Asia/Kolkata')::date =
+              (NOW() AT TIME ZONE 'Asia/Kolkata')::date)
+    LIMIT 1`,
+  [["checked_in", "vitals_pending", "with_vitals"]],
+);
+if (vitalsCase) {
+  const moved = await syncAppointmentsToFlow();
+  const after = await one(`SELECT current_status FROM giniflow_visits WHERE id = $1`, [
+    vitalsCase.visit_id,
+  ]);
+  check(
+    "a patient HealthRay took vitals for stops waiting in the vitals queue",
+    after.current_status === "vitals_done",
+    `${vitalsCase.current_status} -> ${after.current_status}`,
+  );
+  check(
+    "and the sync counts what it observed",
+    moved.vitalsObserved >= 1,
+    `${moved.vitalsObserved}`,
+  );
+  const ev = await one(
+    `SELECT actor_role, meta FROM giniflow_visit_events
+      WHERE visit_id = $1 AND meta->>'observed' = 'vitals' ORDER BY occurred_at DESC LIMIT 1`,
+    [vitalsCase.visit_id],
+  );
+  check(
+    "the event says where it came from, not that a nurse pressed Done",
+    ev?.actor_role === "system" && ev?.meta?.source === "healthray",
+    JSON.stringify(ev?.meta),
+  );
+}
+
+// Whether or not there was a case to move, this must hold: observing the same
+// vitals twice would write a second event and a second journey step.
+const twice = await syncAppointmentsToFlow();
+check(
+  "observing the same vitals again moves nobody",
+  twice.vitalsObserved === 0,
+  `${twice.vitalsObserved} on the second pass`,
+);
+const vitalsDupes = await one(
+  `SELECT count(*)::int AS c FROM (
+     SELECT visit_id FROM giniflow_visit_events
+      WHERE meta->>'observed' = 'vitals' GROUP BY 1 HAVING count(*) > 1) t`,
+);
+check("no visit carries two observed-vitals events", vitalsDupes.c === 0, `${vitalsDupes.c}`);
+
 console.log(failures ? `\n${failures} FAILED\n` : "\nall checks passed\n");
 await pool.end();
 process.exit(failures ? 1 : 0);

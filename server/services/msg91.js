@@ -201,3 +201,66 @@ export async function sendMedicineCard(phone, vars = {}) {
   }
   return { ok: true };
 }
+
+// The referral letter on WhatsApp (docs/gini-flow/19-REFERRALS-STATION-PLAN.md §8).
+//
+// MSG91, not WATI, for the reason 16 §3.1 gave: two vendors would mean two WABA
+// numbers, two template approval queues and two sets of credentials for one
+// hospital.
+//
+// The letter travels as a LINK, not an attachment. Every sender in this file is
+// `content_type: "template"` with positional text body variables; there is no
+// `type: "document"` component anywhere in this repo, so `letter_link` follows
+// sendFlowCheckin's own `visit_link` precedent (19 §3.1).
+//
+//   MSG91_WA_REFERRAL_TEMPLATE_NAME — approved Utility-category template with 5
+//   body variables in this order: {{1}} patient_name, {{2}} specialty,
+//   {{3}} doctor_name, {{4}} hospital, {{5}} letter_link. Language falls back to
+//   MSG91_WA_TEMPLATE_LANG.
+//
+// Meta approval takes days. Until it lands this logs and returns { dev: true },
+// exactly as its three siblings do — and `sendLetter` refuses to stamp
+// `letter_sent_at` on that result, so the real send still happens later.
+export async function sendReferralLetter(phone, vars = {}) {
+  const template = process.env.MSG91_WA_REFERRAL_TEMPLATE_NAME || "";
+  if (IS_DEV || !MSG91_AUTH_KEY || !template || !MSG91_WA_INTEGRATED_NUMBER || !phone) {
+    console.log(`[DEV] Referral letter WhatsApp → ${phone || "(no phone)"}:`, vars);
+    return { ok: true, dev: true };
+  }
+
+  const to = String(phone).replace(/^\+/, "");
+  const order = ["patient_name", "specialty", "doctor_name", "hospital", "letter_link"];
+  const components = {};
+  order.forEach((k, i) => {
+    components[`body_${i + 1}`] = { type: "text", value: String(vars[k] ?? "") };
+  });
+
+  const res = await fetch(
+    "https://control.msg91.com/api/v5/whatsapp/whatsapp-outbound-message/bulk/",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", authkey: MSG91_AUTH_KEY },
+      body: JSON.stringify({
+        integrated_number: MSG91_WA_INTEGRATED_NUMBER,
+        content_type: "template",
+        payload: {
+          messaging_product: "whatsapp",
+          type: "template",
+          template: {
+            name: template,
+            language: { code: MSG91_WA_TEMPLATE_LANG, policy: "deterministic" },
+            to_and_components: [{ to: [to], components }],
+          },
+        },
+      }),
+      // The desk waits for this one — it is a button press, not a background
+      // fan-out — so a vendor that never replies must not hold the request open.
+      signal: AbortSignal.timeout(10_000),
+    },
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`MSG91 referral WhatsApp send failed (${res.status}): ${text.slice(0, 200)}`);
+  }
+  return { ok: true };
+}

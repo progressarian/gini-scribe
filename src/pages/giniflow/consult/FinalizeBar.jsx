@@ -66,6 +66,15 @@ export default function FinalizeBar({ visitId, onDone, onToast }) {
                       {preview.tests === 1 ? "" : "s"} to lab and reception
                     </li>
                   )}
+                  {/* Named, not counted — "Ophthalmology referral" is
+                      actionable, "1 referral" is not (19 §6). The letters are
+                      written after the commit, so a slow render can never
+                      strand the patient before pharmacy. */}
+                  {preview.referrals?.map((r) => (
+                    <li key={r.id}>
+                      ↗ {r.label} — letter {r.hasLetter ? "already generated" : "generated now"}
+                    </li>
+                  ))}
                   {preview.outOfStock.length > 0 && (
                     <li className="fin-warn">
                       ⚠ Out of stock: {preview.outOfStock.join(", ")} — the pharmacy will be warned

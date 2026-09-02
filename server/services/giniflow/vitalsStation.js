@@ -11,10 +11,10 @@ import {
 // The vitals station: who is waiting, what was recorded last time, and the save
 // that moves the patient on.
 //
-// Queue order: the patient at the station is "Now", the one after is "Next", the
-// rest show their appointment time. Within that, the board's ordering rule
-// applies — priority first, then a manual position, then longest waiting — so
-// the station calls patients in the order the floor manager arranged.
+// The screen is four groups, in the order the station reads them: who is being
+// seen right now, who can be called next, who has had their vitals taken and
+// moved on, and who has finished the whole day and left. Several staff work
+// this station at once, so the first group is a group and not a single "Now".
 
 const QUEUE_STATUSES = ["checked_in", "vitals_pending", "with_vitals"];
 
@@ -72,15 +72,51 @@ const QUEUE_SQL = `
 // Vitals recorded today, newest first. The count alone told the nurse how many
 // patients they had seen but gave them no way back to one — and a mistyped
 // weight is only correctable if you can find the patient again.
+// Done is a fact about the patient, not about which screen typed it: a visit
+// past vitals is done whether this station recorded the reading or HealthRay
+// did. The reading is shown when we hold it and named as HealthRay's when we do
+// not — never invented.
+const DONE_STATUSES = [
+  "vitals_done",
+  "sd_pending",
+  "with_sd",
+  "ready_for_doctor",
+  "with_doctor",
+  "doctor_done",
+  "pharmacy_pending",
+  "dispensed",
+  "exited",
+];
+
 const DONE_SQL = `
-  SELECT gv.id, gv.recorded_at, gv.weight, gv.bp_sys, gv.bp_dia, gv.source,
+  SELECT gv.id, gv.source,
+         COALESCE(gv.recorded_at, hv.recorded_at, done_ev.occurred_at) AS recorded_at,
+         COALESCE(gv.weight, hv.weight)   AS weight,
+         COALESCE(gv.bp_sys, hv.bp_sys)   AS bp_sys,
+         COALESCE(gv.bp_dia, hv.bp_dia)   AS bp_dia,
+         (gv.id IS NULL) AS from_healthray,
          v.id AS visit_id, v.current_status,
          p.name, p.file_no, p.age, p.sex
-    FROM giniflow_vitals gv
-    JOIN giniflow_visits v ON v.id = gv.visit_id
+    FROM giniflow_visits v
     JOIN patients p ON p.id = v.patient_id
+    LEFT JOIN LATERAL (
+      SELECT * FROM giniflow_vitals g
+       WHERE g.visit_id = v.id ORDER BY g.recorded_at DESC LIMIT 1
+    ) gv ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT weight, bp_sys, bp_dia, recorded_at FROM vitals
+       WHERE patient_id = v.patient_id
+         AND (recorded_at AT TIME ZONE 'Asia/Kolkata')::date = $1::date
+       ORDER BY recorded_at DESC LIMIT 1
+    ) hv ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT occurred_at FROM giniflow_visit_events e
+       WHERE e.visit_id = v.id AND e.status = 'vitals_done'
+       ORDER BY occurred_at DESC LIMIT 1
+    ) done_ev ON TRUE
    WHERE v.visit_date = $1::date
-   ORDER BY gv.recorded_at DESC`;
+     AND (gv.id IS NOT NULL OR v.current_status = ANY($2))
+   ORDER BY recorded_at DESC NULLS LAST`;
 
 export async function getVitalsQueue(visitDate, now = new Date(), db = pool) {
   const budgets = budgetMap(await getSlaConfig(db));
@@ -88,10 +124,10 @@ export async function getVitalsQueue(visitDate, now = new Date(), db = pool) {
   const [{ rows }, { rows: heldRows }, { rows: doneRows }] = await Promise.all([
     db.query(QUEUE_SQL, [visitDate, QUEUE_STATUSES]),
     db.query(QUEUE_SQL, [visitDate, HELD_STATUSES]),
-    db.query(DONE_SQL, [visitDate]),
+    db.query(DONE_SQL, [visitDate, DONE_STATUSES]),
   ]);
 
-  const waiting = (r) => {
+  const waitFields = (r) => {
     const minutes = minutesSince(r.status_since, now);
     const budget = budgets[slaKeyForStatus(r.current_status)] ?? null;
     return {
@@ -126,15 +162,13 @@ export async function getVitalsQueue(visitDate, now = new Date(), db = pool) {
         : null,
     checkedInAt: r.checked_in_at ? new Date(r.checked_in_at).toISOString() : null,
     bios: bioChips(r.biomarkers),
-    ...waiting(r),
+    ...waitFields(r),
   });
 
-  // Exactly one patient is "Now": whoever is physically at the station. If
-  // nobody has been started yet, that is the head of the queue. Two "Now" rows
-  // would tell the nurse two people are in front of them.
-  //
-  // Everyone behind them is ordered by the board's rule, so an urgent patient
-  // rises to the top of the queue rather than sitting in appointment order.
+  // Anyone at the station sorts above the queue, and within each of those the
+  // board's rule applies — priority first, then a manual position, then longest
+  // waiting — so the station calls patients in the order the floor manager
+  // arranged rather than in appointment order.
   const ordered = rows
     .map(base)
     .map((r) => ({ ...r, statusMinutes: r.waitMinutes }))
@@ -143,27 +177,51 @@ export async function getVitalsQueue(visitDate, now = new Date(), db = pool) {
       return atStation(a) - atStation(b) || compareQueue(a, b);
     });
 
+  // Several people work this station at once, so "at the station" is a group,
+  // not a single "Now" row — the old label claimed one patient was in the chair
+  // when three colleagues each had one. The station is read top to bottom as
+  // four questions: who is being seen, who can be called, who has passed
+  // through, and who has gone home.
+  const atStation = ordered
+    .filter((r) => r.status === "with_vitals")
+    .map((r) => ({ ...r, slot: (r.appointmentTime || "").slice(0, 5) || "—" }));
+  const waiting = ordered
+    .filter((r) => r.status !== "with_vitals")
+    .map((r, i) => ({
+      ...r,
+      slot: i === 0 ? "Next" : (r.appointmentTime || "").slice(0, 5) || "—",
+    }));
+
+  const doneMapped = doneRows.map((r) => ({
+    visitId: r.visit_id,
+    name: r.name,
+    fileNo: r.file_no,
+    age: r.age,
+    sex: r.sex,
+    recordedAt: r.recorded_at ? new Date(r.recorded_at).toISOString() : null,
+    weight: r.weight,
+    bp: r.bp_sys && r.bp_dia ? `${r.bp_sys}/${r.bp_dia}` : null,
+    // HealthRay stores most of its vitals as a date with no clock time, so a
+    // row that came from there says so rather than implying this station took
+    // it at a minute it cannot know.
+    source: r.from_healthray ? "healthray" : r.source,
+    status: r.current_status,
+    // Where the patient has got to since — the queue visibly moving is what
+    // tells the nurse their work landed.
+    nowAt: STATUS_LABEL[r.current_status] || r.current_status,
+  }));
+
   return {
     doneToday: doneRows.length,
-    queue: ordered.map((r, i) => ({
-      ...r,
-      slot: i === 0 ? "Now" : i === 1 ? "Next" : (r.appointmentTime || "").slice(0, 5) || "—",
-    })),
+    atStation,
+    waiting,
     held: heldRows.map(base),
-    done: doneRows.map((r) => ({
-      visitId: r.visit_id,
-      name: r.name,
-      fileNo: r.file_no,
-      age: r.age,
-      sex: r.sex,
-      recordedAt: new Date(r.recorded_at).toISOString(),
-      weight: r.weight,
-      bp: r.bp_sys && r.bp_dia ? `${r.bp_sys}/${r.bp_dia}` : null,
-      source: r.source,
-      // Where the patient has got to since — the queue visibly moving is what
-      // tells the nurse their work landed.
-      nowAt: STATUS_LABEL[r.current_status] || r.current_status,
-    })),
+    // Vitals taken and the patient has moved on, but the day is not finished:
+    // still somewhere on the floor. Tapping one reopens the reading, because a
+    // mistyped weight is only correctable if the patient can be found again.
+    moved: doneMapped.filter((d) => d.status !== "exited"),
+    // Every step done and out of the building.
+    exited: doneMapped.filter((d) => d.status === "exited"),
   };
 }
 
@@ -261,6 +319,17 @@ export async function saveVitals(
     );
     if (!visit.rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
 
+    // A save with nothing in it recorded a row of nulls and moved the patient to
+    // `vitals_done` — the board showed vitals complete, the MO's brief showed
+    // "Vitals just taken" with nothing under it, and the vitals budget measured
+    // a station that took no reading. All three vitals rows on record are this.
+    if (
+      [weight, height, bpSys, bpDia, pulse, spo2, temp].every((v) => v === null || v === undefined)
+    )
+      throw Object.assign(new Error("Enter at least one reading before marking vitals done"), {
+        status: 400,
+      });
+
     const bmi = bmiOf(weight, height);
     const saved = await client.query(
       `INSERT INTO giniflow_vitals
@@ -357,6 +426,30 @@ export async function startVitals(visitId, actorId = null, db = pool) {
         throw Object.assign(
           new Error(
             `${busy[0].name} is already at your station — finish them, or send them back to the queue first`,
+          ),
+          { status: 409 },
+        );
+      }
+    }
+
+    // And one patient, one station: a patient standing at a colleague's desk
+    // cannot also be at yours. Without this the second nurse to tap the row
+    // simply opened the form — the status was already `with_vitals`, so nothing
+    // moved and nothing complained — and two people recorded a reading for the
+    // same patient, the later save silently overwriting the earlier.
+    if (rows[0].current_status === "with_vitals" && actorId) {
+      const { rows: held } = await client.query(
+        `SELECT ${VITALS_HOLDER_SQL} AS holder_id,
+                (SELECT COALESCE(d.short_name, d.name) FROM doctors d
+                  WHERE d.id = ${VITALS_HOLDER_SQL}) AS staff
+           FROM giniflow_visits v WHERE v.id = $1`,
+        [visitId],
+      );
+      const holderId = held[0]?.holder_id ?? null;
+      if (holderId && holderId !== actorId) {
+        throw Object.assign(
+          new Error(
+            `This patient is already at ${held[0].staff || "another station"} — they cannot be in two places at once`,
           ),
           { status: 409 },
         );

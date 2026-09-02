@@ -53,6 +53,14 @@ const useMoAction = (fn) => {
 export const useStartWorkup = () =>
   useMoAction(async (visitId) => (await api.post(`${base}/${visitId}/start`)).data);
 
+// Deliberately NOT a useMoAction: this writes nothing, so there is nothing to
+// invalidate. It hands back a proposal the MO confirms.
+export const useExtractPlan = () =>
+  useMutation({
+    mutationFn: async ({ visitId, plan }) =>
+      (await api.post(`${base}/${visitId}/extract-plan`, { plan })).data,
+  });
+
 export const useOrderTests = () =>
   useMoAction(
     async ({ visitId, urgency, tests }) =>

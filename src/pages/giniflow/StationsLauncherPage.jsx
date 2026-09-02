@@ -66,6 +66,13 @@ const STATIONS = [
     desc: "Dispense · patient counselling · exit confirmation",
     href: "/giniflow/station/pharmacy",
   },
+  {
+    key: "referrals",
+    icon: "↗",
+    name: "Referrals",
+    desc: "Today's external referrals · generate referral letters · track specialist follow-up",
+    href: "/giniflow/station/referrals",
+  },
 ];
 
 const TONE = {

@@ -6,6 +6,7 @@
 import { createRequire } from "module";
 import crypto from "crypto";
 import { buildPrescriptionHtml } from "../templates/prescriptionTemplate.js";
+import { buildReferralLetterHtml } from "../templates/referralLetterTemplate.js";
 
 const require = createRequire(import.meta.url);
 
@@ -63,19 +64,30 @@ async function getBrowser() {
   return browser;
 }
 
-export async function generatePrescriptionPdf(data) {
-  const html = buildPrescriptionHtml(data);
+// The rendering half, without the prescription's own template — the warm
+// browser is the expensive part and there is now more than one thing to print.
+export async function renderHtmlToPdf(html, { margin } = {}) {
   const browser = await getBrowser();
   const page = await browser.newPage();
   try {
     await page.setContent(html, { waitUntil: "networkidle0", timeout: 30000 });
-    const pdf = await page.pdf({
+    return await page.pdf({
       format: "A4",
       printBackground: true,
-      margin: { top: "12mm", bottom: "12mm", left: "12mm", right: "12mm" },
+      margin: margin || { top: "12mm", bottom: "12mm", left: "12mm", right: "12mm" },
     });
-    return pdf;
   } finally {
     await page.close();
   }
+}
+
+export async function generatePrescriptionPdf(data) {
+  return renderHtmlToPdf(buildPrescriptionHtml(data));
+}
+
+// The referral letter (19 §7.1). Same warm browser, deliberately — a second
+// Chromium for a one-page letter would double the memory the API holds all day
+// for a render that costs the same as the prescription's.
+export async function generateReferralLetterPdf(data) {
+  return renderHtmlToPdf(buildReferralLetterHtml(data));
 }

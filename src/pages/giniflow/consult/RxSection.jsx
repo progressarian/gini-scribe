@@ -224,10 +224,10 @@ function RowEditor({ item, onSave, onCancel, onPause, onStop }) {
           </button>
           {/* Pause and stop are different clinical acts: a pause keeps the
               medicine and a resume date, a stop ends it. */}
-          <button type="button" className="btn-sm" onClick={() => onPause(2)}>
+          <button type="button" className="btn-sm ep-pause" onClick={() => onPause(2)}>
             Pause 2 weeks
           </button>
-          <button type="button" className="btn-sm" onClick={() => setStopping(true)}>
+          <button type="button" className="btn-sm ep-stop" onClick={() => setStopping(true)}>
             Stop
           </button>
         </div>
@@ -484,114 +484,120 @@ export default function RxSection({ visitId, readOnly, onToast }) {
       {items.map((item, i) => {
         const chip = CHANGE_CHIP[item.change_type];
         return (
-          <div
-            className={`rx-row${item.change_type === "stopped" ? " rx-gone" : ""}${
-              item.change_type === "new" ? " rx-isnew" : ""
-            }${item.change_type === "changed" ? " rx-ischanged" : ""}`}
-            key={item.id}
-          >
-            <div className="rx-num">{i + 1}.</div>
-            <div className="rx-main">
-              <div className="rx-name">
-                {item.medicine_name}
-                {chip && <span className={`rx-chip ${chip.cls}`}>{chip.label}</span>}
-              </div>
-              {/* composition · why — the column a consultant scans. */}
-              <div className="rx-sub">{item.composition || "—"}</div>
-              {(item.previous_dose || item.stop_reason) && (
-                <div className="rx-meta">
-                  {item.previous_dose ? `was ${item.previous_dose}` : ""}
-                  {item.previous_dose && item.stop_reason ? " · " : ""}
-                  {item.stop_reason || ""}
+          <div className="rx-item" key={item.id}>
+            <div
+              className={`rx-row${item.change_type === "stopped" ? " rx-gone" : ""}${
+                item.change_type === "new" ? " rx-isnew" : ""
+              }${item.change_type === "changed" ? " rx-ischanged" : ""}`}
+            >
+              <div className="rx-num">{i + 1}.</div>
+              <div className="rx-main">
+                <div className="rx-name">
+                  {item.medicine_name}
+                  {chip && <span className={`rx-chip ${chip.cls}`}>{chip.label}</span>}
                 </div>
-              )}
-              {editing === item.id && !readOnly && (
-                <RowEditor
-                  item={item}
-                  onSave={(patch) => {
-                    update.mutate({ itemId: item.id, ...patch }, { onError: fail });
-                    setEditing(null);
-                  }}
-                  onCancel={() => setEditing(null)}
-                  onPause={(weeks) => {
-                    pause.mutate({ itemId: item.id, weeks }, { onError: fail });
-                    setEditing(null);
-                  }}
-                  onStop={(reason) => {
-                    stop.mutate({ itemId: item.id, reason }, { onError: fail });
-                    setEditing(null);
-                  }}
-                />
-              )}
-              {alternativesFor === item.id && (
-                <AlternativesPanel
-                  name={item.pharmacy_match || item.medicine_name}
-                  onClose={() => setAlternativesFor(null)}
-                  onPick={(alt) => {
-                    add.mutate(
-                      {
-                        medicineName: alt.name,
-                        dose: item.dose,
-                        frequency: item.frequency,
-                        timingCategory: item.timing_category,
-                        reason: item.reason,
-                        changeType: "new",
-                      },
-                      { onError: fail },
-                    );
-                    stop.mutate(
-                      { itemId: item.id, reason: `Out of stock — replaced by ${alt.name}` },
-                      { onError: fail },
-                    );
-                    setAlternativesFor(null);
-                  }}
-                />
-              )}
-            </div>
-            {/* Dose and timing are columns now, as the prototype has them: a
-                consultant compares them down the list, not across a sentence. */}
-            <div className="rx-col-dose">
-              {[item.dose, item.frequency].filter(Boolean).join(" ") || "—"}
-            </div>
-            <div className="rx-col-timing">
-              {TIMING_LABEL[item.timing_category] || "not set"}
-              {item.time_of_day && <em>{item.time_of_day.slice(0, 5)}</em>}
-            </div>
-            <div className="rx-col-for">
-              {item.reason ? <span className="rx-for">{item.reason}</span> : "—"}
-            </div>
-            <StockCell stock={item.stock} onAlternatives={() => setAlternativesFor(item.id)} />
-            {!readOnly && (
-              <div className="rx-rowacts">
-                <button
-                  type="button"
-                  className="btn-sm"
-                  onClick={() => setEditing(editing === item.id ? null : item.id)}
-                >
-                  {editing === item.id ? "Close" : "Edit"}
-                </button>
-                {/* A medicine the consultant added by mistake is removed; one the
-                    patient is actually taking is stopped, with a reason. */}
-                {item.change_type === "new" ? (
-                  <button
-                    type="button"
-                    className="btn-sm"
-                    onClick={() => remove.mutate(item.id, { onError: fail })}
-                  >
-                    Remove
-                  </button>
-                ) : (
-                  item.change_type !== "stopped" && (
-                    <button
-                      type="button"
-                      className="btn-sm"
-                      onClick={() => pause.mutate({ itemId: item.id, weeks: 2 }, { onError: fail })}
-                    >
-                      Pause
-                    </button>
-                  )
+                {/* composition · why — the column a consultant scans. */}
+                <div className="rx-sub">{item.composition || "—"}</div>
+                {(item.previous_dose || item.stop_reason) && (
+                  <div className="rx-meta">
+                    {item.previous_dose ? `was ${item.previous_dose}` : ""}
+                    {item.previous_dose && item.stop_reason ? " · " : ""}
+                    {item.stop_reason || ""}
+                  </div>
                 )}
               </div>
+              {/* Dose and timing are columns now, as the prototype has them: a
+                consultant compares them down the list, not across a sentence. */}
+              <div className="rx-col-dose">
+                {[item.dose, item.frequency].filter(Boolean).join(" ") || "—"}
+              </div>
+              <div className="rx-col-timing">
+                {TIMING_LABEL[item.timing_category] || "not set"}
+                {item.time_of_day && <em>{item.time_of_day.slice(0, 5)}</em>}
+              </div>
+              <div className="rx-col-for">
+                {item.reason ? <span className="rx-for">{item.reason}</span> : "—"}
+              </div>
+              <StockCell stock={item.stock} onAlternatives={() => setAlternativesFor(item.id)} />
+              {!readOnly && (
+                <div className="rx-rowacts">
+                  <button
+                    type="button"
+                    className="ra-btn ra-edit"
+                    onClick={() => setEditing(editing === item.id ? null : item.id)}
+                  >
+                    {editing === item.id ? "Close" : "Edit"}
+                  </button>
+                  {/* A medicine the consultant added by mistake is removed; one the
+                    patient is actually taking is stopped, with a reason. */}
+                  {item.change_type === "new" ? (
+                    <button
+                      type="button"
+                      className="ra-btn ra-stop"
+                      onClick={() => remove.mutate(item.id, { onError: fail })}
+                    >
+                      Remove
+                    </button>
+                  ) : (
+                    item.change_type !== "stopped" && (
+                      <button
+                        type="button"
+                        className="ra-btn ra-pause"
+                        onClick={() =>
+                          pause.mutate({ itemId: item.id, weeks: 2 }, { onError: fail })
+                        }
+                      >
+                        Pause
+                      </button>
+                    )
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Full width, beneath the row — a six-field form does not belong in
+                one seventh of a table row. */}
+            {editing === item.id && !readOnly && (
+              <RowEditor
+                item={item}
+                onSave={(patch) => {
+                  update.mutate({ itemId: item.id, ...patch }, { onError: fail });
+                  setEditing(null);
+                }}
+                onCancel={() => setEditing(null)}
+                onPause={(weeks) => {
+                  pause.mutate({ itemId: item.id, weeks }, { onError: fail });
+                  setEditing(null);
+                }}
+                onStop={(reason) => {
+                  stop.mutate({ itemId: item.id, reason }, { onError: fail });
+                  setEditing(null);
+                }}
+              />
+            )}
+            {alternativesFor === item.id && (
+              <AlternativesPanel
+                name={item.pharmacy_match || item.medicine_name}
+                onClose={() => setAlternativesFor(null)}
+                onPick={(alt) => {
+                  add.mutate(
+                    {
+                      medicineName: alt.name,
+                      dose: item.dose,
+                      frequency: item.frequency,
+                      timingCategory: item.timing_category,
+                      reason: item.reason,
+                      changeType: "new",
+                    },
+                    { onError: fail },
+                  );
+                  stop.mutate(
+                    { itemId: item.id, reason: `Out of stock — replaced by ${alt.name}` },
+                    { onError: fail },
+                  );
+                  setAlternativesFor(null);
+                }}
+              />
             )}
           </div>
         );

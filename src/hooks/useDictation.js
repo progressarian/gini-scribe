@@ -32,6 +32,12 @@ export function useDictation({ onTranscript } = {}) {
   const chunksRef = useRef([]);
   const streamRef = useRef(null);
   const finalRef = useRef("");
+  // What the PERSON asked for, as opposed to what the recogniser is doing.
+  // Chrome ends a `continuous` session by itself after a pause, and without
+  // this the button silently flipped back to "start" while the user thought
+  // they were still dictating — so their next click restarted it instead of
+  // stopping it, and it took two clicks to stop.
+  const wantRef = useRef(false);
   const captionRef = useRef("");
   const onTranscriptRef = useRef(onTranscript);
   onTranscriptRef.current = onTranscript;
@@ -47,6 +53,9 @@ export function useDictation({ onTranscript } = {}) {
   };
 
   const startLive = useCallback(() => {
+    // Never two recognisers at once: the second would overwrite the first's ref
+    // and leave it running with nothing able to stop it.
+    if (recognitionRef.current) return;
     const recognition = new SpeechRecognition();
     recognition.lang = "en-IN";
     recognition.continuous = true;
@@ -65,16 +74,29 @@ export function useDictation({ onTranscript } = {}) {
       setCaption(captionRef.current);
     };
     recognition.onerror = (e) => {
+      // A pause in dictation is not a failure. Chrome raises `no-speech` when
+      // somebody stops to think, and reporting that as an error — then dropping
+      // out of listening — is what made the control feel broken.
+      if (e.error === "no-speech" || e.error === "aborted") return;
+      wantRef.current = false;
       setError(
         e.error === "not-allowed"
           ? "Microphone permission was refused."
-          : e.error === "no-speech"
-            ? "Nothing was heard."
-            : "Speech recognition failed — type it instead.",
+          : "Speech recognition failed — type it instead.",
       );
-      setListening(false);
     };
     recognition.onend = () => {
+      // Still wanted: Chrome ended the session on its own, so start another and
+      // keep the transcript accumulating. The person has not pressed Stop.
+      if (wantRef.current) {
+        try {
+          recognition.start();
+          return;
+        } catch {
+          /* fall through and end honestly rather than pretend to listen */
+        }
+      }
+      recognitionRef.current = null;
       setListening(false);
       publish(finalRef.current || captionRef.current);
     };
@@ -123,13 +145,18 @@ export function useDictation({ onTranscript } = {}) {
     setError("");
     setCaption("");
     captionRef.current = "";
+    wantRef.current = true;
     return SpeechRecognition ? startLive() : startBatch();
   }, [startLive, startBatch]);
 
   const stop = useCallback(() => {
+    // Recorded first, so `onend` knows this was deliberate and does not restart.
+    wantRef.current = false;
     if (recognitionRef.current) {
+      // `onend` clears the ref and publishes; the state is set here too so the
+      // button responds to the click rather than to the recogniser's callback.
+      setListening(false);
       recognitionRef.current.stop();
-      recognitionRef.current = null;
       return;
     }
     setListening(false);
@@ -142,6 +169,7 @@ export function useDictation({ onTranscript } = {}) {
   // A station screen is left open all day; never leave the microphone live.
   useEffect(
     () => () => {
+      wantRef.current = false;
       recognitionRef.current?.abort?.();
       recorderRef.current?.state === "recording" && recorderRef.current.stop();
       stopTracks();

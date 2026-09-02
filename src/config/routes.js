@@ -139,6 +139,7 @@ export const PAGE_CAPABILITIES = {
   // capForPath prefix-matches, so this key also covers /giniflow/station/doctor/<visitId>.
   "/giniflow/station/doctor": CAP.GINIFLOW_STATION_DOCTOR,
   "/giniflow/station/pharmacy": CAP.GINIFLOW_STATION_PHARMACY,
+  "/giniflow/station/referrals": CAP.GINIFLOW_REFERRALS,
   "/flow/admin": CAP.ADMIN,
 };
 

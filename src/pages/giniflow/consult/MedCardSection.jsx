@@ -1,3 +1,5 @@
+import { useState } from "react";
+import api from "../../../services/api";
 import { useMedicineCard } from "../../../queries/hooks/useGiniflowPrescription";
 
 // Medicine card — gini-doctor-final.html `s-medcard`.
@@ -7,8 +9,45 @@ import { useMedicineCard } from "../../../queries/hooks/useGiniflowPrescription"
 // pharmacy's, the printed one and the patient's MHG card — four implementations
 // of a dosing schedule would be four chances to tell a patient the wrong time.
 
+// The prototype colours each pill by therapeutic group — BP amber, lipids
+// purple, diabetes blue. `medications.med_group` carries that, and it is
+// populated on 6 rows out of 124,000, so colouring by it would be a guess
+// dressed as information. These are the three things the card actually knows,
+// and they are the three a patient needs to see: whose medicine it is, whether
+// it changed today, and whether the pharmacy has it.
+const pillClass = (m) => {
+  if (m.external) return "mcp-ext";
+  if (m.changeType === "new") return "mcp-s";
+  if (m.changeType === "changed") return "mcp-b";
+  if (m.stock?.out) return "mcp-out";
+  return "mcp-p";
+};
+
 export default function MedCardSection({ visitId, onToast }) {
   const { data, isLoading } = useMedicineCard(visitId);
+  const [printing, setPrinting] = useState(false);
+
+  // Rendered on the server from the same `buildCard` this screen uses, so the
+  // printed card and the screen cannot disagree about when to take a medicine.
+  // Fetched through the authenticated client and opened as a blob — a PDF URL
+  // carrying a token would put the session in the browser's history.
+  const print = async () => {
+    setPrinting(true);
+    try {
+      const res = await api.get(`/api/giniflow/stations/doctor/${visitId}/medicine-card.pdf`, {
+        responseType: "blob",
+      });
+      const url = URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
+      const win = window.open(url, "_blank", "noopener");
+      if (!win) onToast?.("Allow pop-ups to open the printable card.");
+      // Revoked late: too early and the new tab has nothing to load.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch {
+      onToast?.("Could not build the printable card.");
+    } finally {
+      setPrinting(false);
+    }
+  };
 
   return (
     <section className="csec" id="s-medcard">
@@ -23,10 +62,10 @@ export default function MedCardSection({ visitId, onToast }) {
           <button
             type="button"
             className="btn-sm"
-            disabled={!data?.groups?.length}
-            onClick={() => window.print()}
+            disabled={!data?.groups?.length || printing}
+            onClick={print}
           >
-            Print
+            {printing ? "Building…" : "Print"}
           </button>
           {/* Sending the card is a message to a patient, so it is not wired to a
               silent click: the card reaches them through the MHG sync that
@@ -51,32 +90,36 @@ export default function MedCardSection({ visitId, onToast }) {
         </div>
       )}
 
-      {(data?.groups || []).map((g) => (
-        <div className="mc-slot" key={g.key}>
-          <div className="mc-when">
-            <strong>{g.label}</strong>
-            {g.timeLabel && <em>{g.timeLabel}</em>}
-          </div>
-          <div className="mc-meds">
-            {g.medicines.map((m) => (
-              <div className={`mc-med${m.external ? " mc-ext" : ""}`} key={m.medicationId}>
-                <span className="mc-name">{m.name}</span>
-                {m.dose && <span className="mc-dose">{m.dose}</span>}
-                {m.frequency && <span className="mc-freq">{m.frequency}</span>}
-                {m.changeType === "new" && <span className="mc-tag mc-new">NEW</span>}
-                {m.changeType === "changed" && (
-                  <span className="mc-tag mc-chg">
-                    {m.previousDose && m.dose ? `↑ ${m.previousDose}→${m.dose}` : "CHANGED"}
-                  </span>
-                )}
-                {m.external && <span className="mc-tag mc-extt">Ext · {m.prescriber}</span>}
-                {m.stock?.out && <span className="mc-tag mc-out">out of stock</span>}
-                {m.stock?.low && !m.stock.out && <span className="mc-tag mc-low">low stock</span>}
+      {(data?.groups || []).length > 0 && (
+        <div className="med-card">
+          {(data?.groups || []).map((g) => (
+            <div className="mc-row" key={g.key}>
+              <div className="mc-time">
+                <div className="mc-tl">{g.label}</div>
+                {g.timeLabel && <div className="mc-ts">{g.timeLabel}</div>}
               </div>
-            ))}
-          </div>
+              <div className="mc-pills">
+                {g.medicines.map((m) => (
+                  <div className={`mc-pill ${pillClass(m)}`} key={m.medicationId}>
+                    {m.name}
+                    {m.external && <span className="ptag ptag-ext">Ext · {m.prescriber}</span>}
+                    {m.changeType === "new" && <span className="ptag ptag-new">NEW</span>}
+                    {m.changeType === "changed" && (
+                      <span className="ptag ptag-ch">
+                        {m.previousDose && m.dose ? `↑${m.dose}` : "CHANGED"}
+                      </span>
+                    )}
+                    <span className="pnote">
+                      {[m.dose, m.frequency].filter(Boolean).join(" · ")}
+                      {m.stock?.out ? " · ✗ out of stock" : m.stock?.low ? " · ⚠ low stock" : ""}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
-      ))}
+      )}
 
       {data?.counts?.unslotted > 0 && (
         <div className="cn-empty">

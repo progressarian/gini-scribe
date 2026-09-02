@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from "react";
+import { VoiceButton } from "../../../components/giniflow/VoiceInput";
+import ReferralChips from "./ReferralChips";
 
 // Care plan — gini-doctor-final.html care-plan block.
 //
-// Four parts: treatment this visit, diet & lifestyle, next visit, and goals.
+// Five parts: treatment this visit, diet & lifestyle, referrals, next visit and
+// goals. Referrals were the missing quarter — the prototype's care plan says
+// "treatment · diet · tests · referrals · next visit" (19 §5).
 // Goals are structured rather than prose because they are what the NEXT visit's
 // in-control / worse classifier measures against (plan §8).
 //
@@ -13,14 +17,17 @@ const INTERVALS = ["2 weeks", "1 month", "~3 months", "6 months", "1 year"];
 
 const emptyGoal = () => ({ test: "", target: "", unit: "" });
 
-export default function CarePlanSection({ consult, onSave, saving, readOnly }) {
+export default function CarePlanSection({ consult, visitId, onSave, saving, readOnly, onToast }) {
+  // getConsult always sends an object, never null — but a blank consult screen
+  // mid-clinic is a bad way to find out that changed.
+  const saved = consult.carePlan || {};
   const [plan, setPlan] = useState(() => ({
-    treatment: consult.carePlan.treatment || "",
-    lifestyle: consult.carePlan.lifestyle || "",
-    internalNote: consult.carePlan.internal_note || consult.carePlan.internalNote || "",
-    nextVisitDate: consult.carePlan.next_visit_date || "",
-    nextVisitInterval: consult.carePlan.next_visit_interval || "",
-    goals: consult.carePlan.goals?.length ? consult.carePlan.goals : [emptyGoal()],
+    treatment: saved.treatment || "",
+    lifestyle: saved.lifestyle || "",
+    internalNote: saved.internal_note || saved.internalNote || "",
+    nextVisitDate: saved.next_visit_date || "",
+    nextVisitInterval: saved.next_visit_interval || "",
+    goals: saved.goals?.length ? saved.goals : [emptyGoal()],
   }));
   const [savedAt, setSavedAt] = useState(null);
   const dirty = useRef(false);
@@ -62,9 +69,24 @@ export default function CarePlanSection({ consult, onSave, saving, readOnly }) {
       <div className="cs-head">
         <h2>📝 Care plan</h2>
         <span className="cs-sub">
-          treatment · diet · lifestyle · next visit
+          treatment · diet · referrals · next visit
           {saving ? " · saving…" : savedAt ? " · saved" : ""}
         </span>
+        {!readOnly && (
+          <div className="cs-head-r">
+            <VoiceButton
+              small
+              label="🎤 Dictate"
+              title="Dictate the treatment plan"
+              onText={(text) =>
+                setPlan((prev) => ({
+                  ...prev,
+                  treatment: prev.treatment ? `${prev.treatment.trim()} ${text}` : text,
+                }))
+              }
+            />
+          </div>
+        )}
       </div>
 
       <label className="cp-lab" htmlFor="cp-treat">
@@ -92,6 +114,8 @@ export default function CarePlanSection({ consult, onSave, saving, readOnly }) {
         placeholder="What the patient should change before the next visit"
         onChange={set("lifestyle")}
       />
+
+      <ReferralChips visitId={visitId} readOnly={readOnly} onToast={onToast} />
 
       <div className="cp-row">
         <div>

@@ -2,6 +2,7 @@ import pool from "../../config/db.js";
 import { advanceStatus } from "./statusEngine.js";
 import { markMedicationVisitStatus } from "../medication/visitStatus.js";
 import { savePrescriptionForVisit, buildVisitPayloadFromDb } from "../prescriptionAutoSave.js";
+import { referralsForVisit, generateLetter } from "./referralsStation.js";
 
 // Finalize — brief §2.3 trigger 4, docs/gini-flow/14-CONSULTANT-PRESCRIPTION-PLAN.md §6.
 //
@@ -252,6 +253,30 @@ export async function finalizeConsult(visitId, actorId = null, db = pool) {
     // idempotent and re-runnable.
     markMedicationVisitStatus(patientId).catch(() => {});
 
+    // The referral letters (19 §6). Here, beside the prescription PDF, and never
+    // inside the transaction: a Puppeteer render is exactly the "can fail
+    // slowly" this block exists for. Each generation is idempotent — it skips a
+    // referral that already has a letter_file_url — so a retry is always safe,
+    // and a letter that failed to render can be regenerated from the station
+    // with one button.
+    //
+    // A referral is NOT a reason to block Finalize. A consultation that refused
+    // to finalize because a PDF timed out would strand the patient before
+    // pharmacy.
+    referralsForVisit(visitId)
+      .then((referrals) =>
+        Promise.all(
+          referrals
+            .filter((r) => !r.letterUrl)
+            .map((r) =>
+              generateLetter(r.id).catch((e) =>
+                console.warn("[giniflow finalize] referral letter failed:", r.id, e?.message),
+              ),
+            ),
+        ),
+      )
+      .catch((e) => console.warn("[giniflow finalize] referral letters failed:", e?.message));
+
     // CS-03. Without this a consultation finalized through Gini Flow produced no
     // prescription PDF at all, while the same consultation finalized through
     // Scribe's wizard did — so the patient left with nothing to show and nothing
@@ -312,6 +337,10 @@ export async function finalizePreview(visitId, db = pool) {
       WHERE visit_id = $1 AND status = 'proposed'`,
     [visitId],
   );
+  // Named, not counted: "Ophthalmology referral" is actionable, "1 referral" is
+  // not — and the prototype's Finalize panel says the specialty out loud.
+  const referrals = await referralsForVisit(visitId, db);
+
   const { rows: outOfStock } = await db.query(
     `SELECT i.medicine_name FROM giniflow_rx_items r
        JOIN pharmacy_inventory i
@@ -327,5 +356,12 @@ export async function finalizePreview(visitId, db = pool) {
     testsByUrgency: orders,
     undecidedProposals: pending[0].n,
     outOfStock: outOfStock.map((r) => r.medicine_name),
+    referrals: referrals.map((r) => ({
+      id: r.id,
+      icon: r.icon,
+      specialty: r.specialty,
+      label: `${r.icon} ${r.specialtyLabel} referral`,
+      hasLetter: !!r.letterUrl,
+    })),
   };
 }

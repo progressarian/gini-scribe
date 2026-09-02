@@ -66,6 +66,8 @@ const GLOBALS = new Set([
   "MediaRecorder",
   "EventSource",
   "URLSearchParams",
+  "encodeURIComponent",
+  "decodeURIComponent",
   "Blob",
   "FileReader",
   "SpeechRecognition",

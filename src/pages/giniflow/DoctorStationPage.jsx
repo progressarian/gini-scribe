@@ -24,6 +24,16 @@ const PRIORITY_CHIP = {
 
 const GROUPS = [
   { key: "withMe", icon: "🟢", title: "With me now", sub: "in visit" },
+  // A colleague's patient who is in a room right now. Only ever populated on
+  // the All scope, and only because "With me now" must mean *me* — an admin
+  // with no patients was being shown one as theirs.
+  {
+    key: "withOtherDoctor",
+    icon: "👥",
+    title: "In consultation elsewhere",
+    sub: "another doctor's room",
+    readOnly: true,
+  },
   { key: "resultsReady", icon: "⏳", title: "Results ready", sub: "waiting for me" },
   { key: "pipeline", icon: "🔵", title: "In pipeline", sub: "not ready yet" },
   { key: "done", icon: "✅", title: "Done today", sub: "" },
@@ -282,6 +292,9 @@ export default function DoctorStationPage() {
         {GROUPS.map((g) => {
           const list = groups[g.key] || [];
           if (!list.length && g.key === "done") return null;
+          // Only ever populated on the All scope, so an empty heading on "My
+          // patients" would be a permanent piece of furniture saying nothing.
+          if (!list.length && g.key === "withOtherDoctor") return null;
 
           // The pipeline answers two different questions, so it is two columns:
           // who is coming to ME, and who is on the floor waiting for somebody
@@ -331,23 +344,43 @@ export default function DoctorStationPage() {
                         Nobody on the floor is assigned to another consultant.
                       </div>
                     )}
-                    {pipelineOthers.map((doc) => (
-                      <div className="dsub" key={doc.doctorId}>
-                        <h4 className="dsub-head">
-                          🧑‍⚕️ {doc.doctorName}
-                          <span className="dg-count">{doc.cards.length}</span>
-                        </h4>
-                        {doc.cards.map((card) => (
-                          <QueueCard
-                            key={card.visitId}
-                            card={card}
-                            now={now}
-                            group="otherConsultant"
-                            onOpen={(c) => navigate(`/giniflow/station/doctor/${c.visitId}`)}
-                          />
-                        ))}
-                      </div>
-                    ))}
+                    {pipelineOthers.map((doc) => {
+                      const key = `other:${doc.doctorId}`;
+                      const openDoc = !collapsed.has(key);
+                      return (
+                        <div className="dsub" key={doc.doctorId}>
+                          <h4 className="dsub-head">
+                            <button
+                              type="button"
+                              className="dsub-toggle"
+                              aria-expanded={openDoc}
+                              aria-controls={`dsub-${doc.doctorId}`}
+                              onClick={() => toggleGroup(key)}
+                            >
+                              <span
+                                className={`dg-chev${openDoc ? " open" : ""}`}
+                                aria-hidden="true"
+                              >
+                                ▸
+                              </span>
+                              🧑‍⚕️ {doc.doctorName}
+                              <span className="dg-count">{doc.cards.length}</span>
+                            </button>
+                          </h4>
+                          <div id={`dsub-${doc.doctorId}`} hidden={!openDoc}>
+                            {doc.cards.map((card) => (
+                              <QueueCard
+                                key={card.visitId}
+                                card={card}
+                                now={now}
+                                group="otherConsultant"
+                                onOpen={(c) => navigate(`/giniflow/station/doctor/${c.visitId}`)}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               </section>

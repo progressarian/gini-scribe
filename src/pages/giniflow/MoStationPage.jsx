@@ -6,6 +6,7 @@ import {
   useMoPatient,
   useTestPanels,
   useStartWorkup,
+  useExtractPlan,
   useSavePlan,
   useOrderTests,
   useReadyForDoctor,
@@ -115,28 +116,50 @@ const CATEGORY = {
 
 // Five groups, because "waiting on results" and "no reports at all" need
 // different actions from the MO — the second is the only one they can unblock.
-// Every group shows the whole card by default — nothing is hidden until the MO
-// asks for it. `collapsible` marks the groups the Compact switch shortens to one
-// line per patient: the pipeline, another SD's patients, and the ones already
-// passed on. They are the context groups, and on a full day the pipeline alone
-// is twenty full cards between the MO and their own queue.
+// Every group opens as full cards and every group collapses, the same way the
+// vitals station's do — an MO on a full day shuts the pipeline to see their own
+// queue, and nothing is hidden unless they ask for it.
 const GROUPS = [
-  { key: "withMe", label: "🟢 With me now" },
-  { key: "waitingForMe", label: "⏳ Waiting for me" },
-  { key: "awaitingResults", label: "🔵 Waiting on results" },
-  { key: "missingReports", label: "🔴 Missing reports — can't proceed" },
+  { key: "withMe", icon: "🟢", title: "With me now" },
+  { key: "waitingForMe", icon: "⏳", title: "Waiting for me" },
+  { key: "awaitingResults", icon: "🔵", title: "Waiting on results" },
+  { key: "missingReports", icon: "🔴", title: "Missing reports", sub: "can't proceed" },
   // Read-only: an MO cannot claim these, because claiming from a pre-vitals
   // status would skip the vitals station, and another SD's patient is theirs.
   // Shown rather than hidden so the floor stays legible.
   {
     key: "inPipeline",
-    label: "🔵 In pipeline — vitals not done yet",
+    icon: "🔵",
+    title: "In pipeline",
+    sub: "vitals not done yet",
     readOnly: true,
-    collapsible: true,
   },
-  { key: "withOtherSd", label: "👥 With another SD", readOnly: true, collapsible: true },
-  { key: "done", label: "✅ Passed on / closed", collapsible: true },
+  { key: "withOtherSd", icon: "👥", title: "With another SD", readOnly: true },
+  { key: "done", icon: "✅", title: "Passed on / closed" },
 ];
+
+// Same control the vitals station uses: the button IS the heading, so it keeps
+// heading semantics and states whether the section is open.
+function GroupHead({ icon, title, sub, count, open, onToggle, id }) {
+  return (
+    <h2 className="sq-gh">
+      <button
+        type="button"
+        className="sq-toggle"
+        aria-expanded={open}
+        aria-controls={id}
+        onClick={onToggle}
+      >
+        <span className={`sq-chev${open ? " open" : ""}`} aria-hidden="true">
+          ▸
+        </span>
+        <span aria-hidden="true">{icon}</span> {title}
+        {sub && <span className="sq-ghsub">— {sub}</span>}
+        <span className="sq-count">{count}</span>
+      </button>
+    </h2>
+  );
+}
 
 // Lab-track statuses that mean the sample has not been taken yet — the server
 // refuses a repeat of any test still sitting in one of them.
@@ -274,58 +297,7 @@ function RowDetail({ card, now }) {
   );
 }
 
-// A row in a group the MO is not working reads as one line — the name and the
-// file number, which is all that is needed to find somebody. Tapping it opens
-// the same card the working groups show in full.
-function CollapsedRow({ card, active, onOpen, onTakeOver, readOnly, now }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className={`sq-item is-collapsed${active ? " active" : ""}${open ? " is-open" : ""}`}>
-      <button
-        type="button"
-        className="sq-peek"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <span className="sqp-caret">{open ? "▾" : "▸"}</span>
-        <span className="sqp-name">{card.name}</span>
-        <span className="sqp-file">{card.fileNo || "no file no."}</span>
-      </button>
-      {open && (
-        <div className="sq-peek-body">
-          <div className="si-slot">{card.slot}</div>
-          <RowDetail card={card} now={now} />
-          {!readOnly && CLAIMABLE.includes(card.status) ? (
-            <button className="st-btn st-btn-tl sq-peek-open" onClick={() => onOpen(card.visitId)}>
-              Start the workup →
-            </button>
-          ) : card.assignedSdId && CLAIMABLE.includes(card.status) ? (
-            <button className="st-btn st-btn-ghost sq-peek-open" onClick={() => onTakeOver(card)}>
-              Take over from {card.sdName || "the other SD"}
-            </button>
-          ) : (
-            <div className="sq-peek-note">
-              {readOnly ? "Not yours to work up yet" : "Already past your desk"}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function QueueRow({ card, active, onOpen, onTakeOver, readOnly, collapsed, now }) {
-  if (collapsed)
-    return (
-      <CollapsedRow
-        card={card}
-        active={active}
-        onOpen={onOpen}
-        onTakeOver={onTakeOver}
-        readOnly={readOnly}
-        now={now}
-      />
-    );
+function QueueRow({ card, active, onOpen, readOnly, now }) {
   return (
     <button
       type="button"
@@ -381,6 +353,48 @@ function ConfirmDialog({ open, title, body, confirmLabel, tone = "grn", onConfir
 
 const EMPTY_PROPOSAL = { medicineName: "", fromDose: "", toDose: "", reason: "" };
 
+// Does the plan ask for a test the MO never actually ordered?
+//
+// An MO can write "order HbA1c and TSH today", never tap the chips, and hand
+// over. The consultant then reads a plan saying those tests were ordered while
+// no lab order exists — reception sees no payment to collect and the lab sees no
+// sample, so the tests simply do not happen. `readyForDoctor` only checks that a
+// plan exists, not that it matches what was ordered.
+//
+// Matched against the catalogue rather than against loose verbs, so the
+// vocabulary is exact. No AI call — the names are already on screen.
+const ORDER_INTENT =
+  /(\border\b|\bre-?check\b|\brepeat\b|\bsend for\b|\brequest\b|\barrange\b|\bask for\b|\bbook\b)/i;
+
+// Escaped, because catalogue names carry "-" and "/" — hs-CRP, Urine R/M. The
+// boundaries are groups rather than lookbehind: this runs on whatever tablet the
+// desk has, and lookbehind is the one thing older Safari lacks.
+const namePattern = (name) =>
+  new RegExp(`(^|[^a-z0-9])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`, "i");
+
+const mentionsUnordered = (plan, catalogue) => {
+  const text = String(plan || "");
+  if (!text.trim() || !catalogue) return [];
+
+  // A panel is never discussed as a result — "kidney panel" in a plan is a
+  // request — so naming one is intent on its own.
+  const panels = (catalogue.panels || [])
+    .map((p) => p.label)
+    .filter((label) => label && namePattern(label).test(text));
+
+  // A bare test name is NOT. An MO's note is mostly about results already in:
+  // "HbA1c 5.8, all in control" names a test and asks for nothing, and firing on
+  // that would train the desk to click through the box without reading it. So a
+  // test only counts alongside a word that asks for something.
+  const tests = ORDER_INTENT.test(text)
+    ? (catalogue.tests || [])
+        .map((t) => t.name)
+        .filter((name) => name && namePattern(name).test(text))
+    : [];
+
+  return [...new Set([...panels, ...tests])];
+};
+
 export default function MoStationPage() {
   const [selected, setSelected] = useState(null);
   const [plan, setPlan] = useState("");
@@ -390,8 +404,12 @@ export default function MoStationPage() {
   const [toast, setToast] = useState("");
   const [openMarker, setOpenMarker] = useState(null);
   const [draft, setDraft] = useState(EMPTY_PROPOSAL);
+  // What the last read of the plan found, shown until the MO acts on it or
+  // edits the plan again. Held here rather than applied silently: the point of
+  // this feature is that the MO sees what was understood.
+  const [extracted, setExtracted] = useState(null);
   const [confirm, setConfirm] = useState(null);
-  const [compact, setCompact] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => new Set());
   const [search, setSearch] = useState("");
   const [term, setTerm] = useState("");
   const toastTimer = useRef(null);
@@ -434,6 +452,14 @@ export default function MoStationPage() {
   const addProposal = useAddProposal();
   const withdrawProposal = useWithdrawProposal();
 
+  const toggleGroup = (key) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
   const showToast = (msg) => {
     setToast(msg);
     clearTimeout(toastTimer.current);
@@ -449,6 +475,7 @@ export default function MoStationPage() {
     setUrgency("today");
     setOpenMarker(null);
     setDraft(EMPTY_PROPOSAL);
+    setExtracted(null);
   }, [patient?.visitId]);
 
   // Autosave: an MO interrupted mid-workup should find what they typed.
@@ -471,6 +498,50 @@ export default function MoStationPage() {
   const onPlanChange = (value) => {
     setPlan(value);
     queueSave(value, "typed");
+    // What was read no longer describes what is written.
+    setExtracted(null);
+  };
+
+  const extractPlan = useExtractPlan();
+
+  const readPlan = () => {
+    extractPlan.mutate(
+      { visitId: activeId, plan },
+      {
+        onSuccess: (data) => {
+          setExtracted(data);
+          const found =
+            (data.tests?.length || 0) +
+            (data.proposals?.length || 0) +
+            (data.unmatched?.length || 0);
+          if (!found) showToast("Nothing to order or suggest in that plan");
+        },
+        onError: (e) => showToast(e?.response?.data?.error || "Could not read the plan"),
+      },
+    );
+  };
+
+  // Applying is one deliberate act, and it only ever ADDS: an MO who ticked a
+  // chip by hand before pressing the button does not lose it.
+  const applyExtracted = () => {
+    if (!extracted) return;
+    if (extracted.tests?.length) {
+      setPicked((prev) => [...new Set([...prev, ...extracted.tests])]);
+    }
+    if (extracted.urgency) setUrgency(extracted.urgency);
+    // Only the first suggestion: the form holds one, and silently dropping the
+    // rest would be worse than leaving them on screen to be added by hand.
+    const first = extracted.proposals?.[0];
+    if (first) {
+      setDraft({
+        medicineName: first.medicineName,
+        fromDose: first.fromDose,
+        toDose: first.toDose,
+        reason: first.reason,
+      });
+    }
+    setExtracted(null);
+    showToast("✓ Filled in below — check it before you send");
   };
 
   // Dictation appends rather than replaces: an MO speaks one finding, types the
@@ -502,8 +573,11 @@ export default function MoStationPage() {
     // Save whatever is in the textarea before the patient changes.
     flushPlan();
     setPinned(false);
-    setSelected(visitId);
+    // Selection follows the claim rather than leading it: a patient already at
+    // another MO's desk is refused, and the panel must not open their plan and
+    // proposals anyway. Take over is the deliberate way in.
     start.mutate(visitId, {
+      onSuccess: () => setSelected(visitId),
       onError: (e) => showToast(e?.response?.data?.error || "Could not open this patient"),
     });
   };
@@ -535,7 +609,7 @@ export default function MoStationPage() {
       },
     );
 
-  const handOver = () =>
+  const sendToDoctor = () =>
     ready.mutate(activeId, {
       onSuccess: () => {
         showToast(`✓ ${patient.name} is ready for the doctor`);
@@ -543,6 +617,27 @@ export default function MoStationPage() {
       },
       onError: (e) => showToast(e?.response?.data?.error || "Could not hand over"),
     });
+
+  const handOver = () => {
+    // Only when NOTHING was ordered for this visit — neither ticked now nor
+    // ordered earlier in the session. An MO who ordered one test and wrote about
+    // another has made a judgement, and second-guessing it would train them to
+    // click through the box without reading it.
+    const named =
+      picked.length || patient?.orders?.length ? [] : mentionsUnordered(plan, catalogue);
+    if (!named.length) return sendToDoctor();
+    setConfirm({
+      key: "unordered-tests",
+      title: "Hand over without ordering those tests?",
+      body: `Your plan mentions ${named.slice(0, 4).join(", ")}${named.length > 4 ? " and others" : ""}, but no tests are selected. The doctor will read the plan; reception and the lab will see nothing to do.`,
+      confirmLabel: "Hand over anyway",
+      tone: "tl",
+      onConfirm: () => {
+        setConfirm(null);
+        sendToDoctor();
+      },
+    });
+  };
 
   // The server refuses a write to somebody else's patient, so the screen offers
   // the one action that makes it yours — and says whose it was.
@@ -660,15 +755,6 @@ export default function MoStationPage() {
           <div className="sq-header">
             <div className="sq-title">My patients</div>
             <div className="sq-sub">Tap a patient to start the workup</div>
-            <button
-              type="button"
-              className={`sq-compact${compact ? " on" : ""}`}
-              aria-pressed={compact}
-              onClick={() => setCompact((v) => !v)}
-              title="Shorten the pipeline, another SD's patients, and the ones passed on to one line each"
-            >
-              {compact ? "▾ Show full cards" : "▸ Compact the rest"}
-            </button>
             <div className="sq-search">
               <input
                 type="search"
@@ -688,24 +774,34 @@ export default function MoStationPage() {
           {GROUPS.map((g) => {
             const rows = queue?.[g.key] || [];
             if (!rows.length) return null;
+            // A search opens whatever it matched: a hit inside a shut group
+            // would read as no result.
+            const open = searching || !collapsed.has(g.key);
+            const id = `sq-group-${g.key}`;
             return (
-              <div key={g.key}>
-                <div className="sq-group">
-                  <span className="sqg-label">{g.label}</span>
-                  <span className="sqg-count">{rows.length}</span>
+              <div className="sq-sect" key={g.key}>
+                <GroupHead
+                  icon={g.icon}
+                  title={g.title}
+                  sub={g.sub}
+                  count={rows.length}
+                  open={open}
+                  onToggle={() => toggleGroup(g.key)}
+                  id={id}
+                />
+                <div id={id} hidden={!open}>
+                  {rows.map((card) => (
+                    <QueueRow
+                      key={card.visitId}
+                      card={card}
+                      active={card.visitId === activeId}
+                      onOpen={openPatient}
+                      onTakeOver={askTakeOver}
+                      readOnly={g.readOnly}
+                      now={now}
+                    />
+                  ))}
                 </div>
-                {rows.map((card) => (
-                  <QueueRow
-                    key={card.visitId}
-                    card={card}
-                    active={card.visitId === activeId}
-                    onOpen={openPatient}
-                    onTakeOver={askTakeOver}
-                    readOnly={g.readOnly}
-                    collapsed={compact && g.collapsible}
-                    now={now}
-                  />
-                ))}
               </div>
             );
           })}
@@ -771,7 +867,19 @@ export default function MoStationPage() {
 
                 {patient.vitals ? (
                   <div className="dp-sec">
-                    <div className="dp-sec-title">Vitals just taken</div>
+                    {/* Where the reading came from, because there are two
+                        places it can be: the Gini Flow vitals station, or
+                        HealthRay's own screen, which is where most of the floor
+                        still works. Saying "just taken" about a HealthRay
+                        reading would credit a station that never saw them. */}
+                    <div className="dp-sec-title">
+                      {patient.vitals.readingSource === "healthray"
+                        ? "Vitals — from HealthRay"
+                        : "Vitals just taken"}
+                      {clock(patient.vitals.recorded_at) && (
+                        <span className="mo-vsrc"> · {clock(patient.vitals.recorded_at)}</span>
+                      )}
+                    </div>
                     <div className="mo-vitals">
                       {VITAL_ROWS.filter((r) => r.of(patient.vitals) != null).map((r) => {
                         const change = deltaText(patient.vitals, patient.lastVitals, r);
@@ -801,7 +909,12 @@ export default function MoStationPage() {
                 ) : (
                   <div className="dp-sec">
                     <div className="dp-sec-title">Vitals</div>
-                    <div className="dp-hint">Not taken yet at the vitals station.</div>
+                    {/* Both places have been looked in — the station's table and
+                        HealthRay's — so this can say "no reading", not merely
+                        "not taken here". */}
+                    <div className="dp-hint">
+                      No reading on file for today, at this station or on HealthRay.
+                    </div>
                   </div>
                 )}
 
@@ -970,6 +1083,79 @@ export default function MoStationPage() {
                   {dictation.error && (
                     <div className="voice-note voice-err">⚠ {dictation.error}</div>
                   )}
+
+                  {/* Reads back what the MO wrote and points at the two panels
+                      below — it never adds a test the plan did not name. The
+                      result is shown, not applied: the MO sees what was
+                      understood and can drop any of it. */}
+                  <div className="mo-extract">
+                    <button
+                      type="button"
+                      className="st-btn st-btn-g"
+                      onClick={readPlan}
+                      disabled={!plan.trim() || extractPlan.isPending}
+                    >
+                      {extractPlan.isPending
+                        ? "Reading…"
+                        : "✨ Pull tests & suggestions from my plan"}
+                    </button>
+                  </div>
+
+                  {extracted && (
+                    <div className="mo-xtr">
+                      <div className="mo-xtr-head">From your plan — nothing is saved yet</div>
+                      {extracted.tests?.length > 0 && (
+                        <div className="mo-xtr-row">
+                          <span className="mo-xtr-lbl">Tests</span>
+                          <span className="mo-xtr-vals">{extracted.tests.join(" · ")}</span>
+                        </div>
+                      )}
+                      {extracted.urgency && (
+                        <div className="mo-xtr-row">
+                          <span className="mo-xtr-lbl">When</span>
+                          <span className="mo-xtr-vals">
+                            {URGENCY.find((u) => u.key === extracted.urgency)?.label ||
+                              extracted.urgency}
+                          </span>
+                        </div>
+                      )}
+                      {extracted.proposals?.map((pr, i) => (
+                        <div className="mo-xtr-row" key={`${pr.medicineName}-${i}`}>
+                          <span className="mo-xtr-lbl">{i === 0 ? "Suggest" : ""}</span>
+                          <span className="mo-xtr-vals">
+                            {pr.medicineName}
+                            {pr.fromDose || pr.toDose
+                              ? ` — ${pr.fromDose || "?"} → ${pr.toDose || "?"}`
+                              : ""}
+                            {pr.reason ? ` · ${pr.reason}` : ""}
+                            {i > 0 && <em className="mo-xtr-note"> (add this one by hand)</em>}
+                          </span>
+                        </div>
+                      ))}
+                      {/* Named, not silently dropped: a test the catalogue does
+                          not stock is something the MO has to do something
+                          about, and hiding it would look like it was ordered. */}
+                      {extracted.unmatched?.length > 0 && (
+                        <div className="mo-xtr-row mo-xtr-warn">
+                          <span className="mo-xtr-lbl">Not in the catalogue</span>
+                          <span className="mo-xtr-vals">{extracted.unmatched.join(" · ")}</span>
+                        </div>
+                      )}
+                      <div className="mo-xtr-acts">
+                        <button type="button" className="st-btn st-btn-tl" onClick={applyExtracted}>
+                          Fill these in
+                        </button>
+                        <button
+                          type="button"
+                          className="st-btn st-btn-g"
+                          onClick={() => setExtracted(null)}
+                        >
+                          Discard
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="dp-hint">
                     Autosaves as you type. The doctor cannot take this patient without a plan.
                   </div>

@@ -1194,4 +1194,7 @@ function buildPrescriptionHtml(data = {}) {
 </html>`;
 }
 
-export { buildPrescriptionHtml };
+// The letterhead is shared, not copied: the referral letter (19 §7.1) prints the
+// same `.rx-header` markup off the same CSS, so a letter and the prescription in
+// the same envelope cannot look like they came from two hospitals.
+export { buildPrescriptionHtml, escape as escapeHtml, CSS as LETTERHEAD_CSS };

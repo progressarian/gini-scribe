@@ -2,6 +2,7 @@ import pool from "../../config/db.js";
 import { advanceStatus, budgetColour, returnToQueue } from "./statusEngine.js";
 import { getSlaConfig, budgetMap } from "./board.js";
 import { slaKeyForStatus, STATUS_LABEL } from "../../../shared/giniflowStatus.js";
+import { todaysVitals, previousVitals } from "./visitVitals.js";
 import { buildBrief } from "./consultBrief.js";
 
 // The consultant's station — the queue that forms in front of Dr. Bhansali, and
@@ -58,11 +59,25 @@ const minutesSince = (from, now) =>
 // Four groups (plan §4.2). A patient whose reports have not arrived stays in
 // "pipeline" however long they have waited — calling them in is exactly the
 // wasted consultation this system exists to prevent.
-const groupOf = (row) => {
-  if (row.current_status === "with_doctor") return "withMe";
+//
+// But "waiting on results" and "has no tests" are not the same thing, and
+// reading `results_status` alone conflated them: `none` means *no lab work
+// exists for this visit*, not *the results have not come back*. Every patient
+// handed over on a day when nobody ordered a test was filed under "not ready
+// yet — can't proceed", which is the opposite of true. The question is whether
+// anything is actually outstanding, so that is what this asks.
+const waitingOnLab = (row) =>
+  row.results_status === "partial" || (row.results_status !== "ready" && row.open_orders > 0);
+
+//
+// Ownership is part of the answer, not a filter applied afterwards. "With me
+// now" has to mean *me*: a patient in a colleague's room is real and worth
+// seeing on the All scope, but under its own heading.
+const groupOf = (row, isMine) => {
+  if (row.current_status === "with_doctor") return isMine ? "withMe" : "withOtherDoctor";
   if (DONE_STATUSES.includes(row.current_status)) return "done";
-  if (row.current_status === "ready_for_doctor" && row.results_status === "ready") {
-    return "resultsReady";
+  if (row.current_status === "ready_for_doctor" && !waitingOnLab(row)) {
+    return isMine ? "resultsReady" : "pipeline";
   }
   return "pipeline";
 };
@@ -82,7 +97,7 @@ const QUEUE_SQL = `
          v.priority, v.priority_reason, v.assigned_doctor_id, v.assigned_sd_id,
          v.appointment_time::text AS appointment_time,
          p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
-         doc.short_name AS doctor_name,
+         COALESCE(doc.short_name, doc.name) AS doctor_name,
          sd.short_name  AS sd_name,
          seq.visit_number,
          a.biomarkers,
@@ -95,7 +110,15 @@ const QUEUE_SQL = `
          -- HealthRay sync jumped forward does not show phantom completed steps.
          (SELECT array_agg(DISTINCT e.status) FROM giniflow_visit_events e
            WHERE e.visit_id = v.id) AS reached,
-         (SELECT max(gv.recorded_at) FROM giniflow_vitals gv WHERE gv.visit_id = v.id) AS vitals_at,
+         -- Either table, for the reason visitVitals.js gives: a nurse working on
+         -- HealthRay's screen writes the older one, and that reading is what
+         -- moved the patient here.
+         COALESCE(
+           (SELECT max(gv.recorded_at) FROM giniflow_vitals gv WHERE gv.visit_id = v.id),
+           (SELECT max(tv.recorded_at) FROM vitals tv
+             WHERE tv.patient_id = v.patient_id
+               AND (tv.recorded_at AT TIME ZONE 'Asia/Kolkata')::date = v.visit_date)
+         ) AS vitals_at,
          ($3::text IS NULL
           OR p.name ILIKE '%' || $3 || '%'
           OR p.file_no ILIKE '%' || $3 || '%') AS matches
@@ -188,7 +211,7 @@ export async function getDoctorQueue(
   const mine = (r) => !r.assigned_doctor_id || !doctorId || r.assigned_doctor_id === doctorId;
   const inScope = (r) => scope === "all" || mine(r);
 
-  const groups = { withMe: [], resultsReady: [], pipeline: [], done: [] };
+  const groups = { withMe: [], withOtherDoctor: [], resultsReady: [], pipeline: [], done: [] };
   // Patients in the pipeline who belong to ANOTHER consultant, kept by consultant
   // rather than dropped. Without this the queue answered "who is coming to me"
   // but not "who is on the floor at all" — and a consultant covering a colleague,
@@ -198,6 +221,7 @@ export async function getDoctorQueue(
   const othersPipeline = new Map();
   const counters = {
     withMe: 0,
+    withOtherDoctor: 0,
     resultsReady: 0,
     pipeline: 0,
     done: 0,
@@ -211,7 +235,7 @@ export async function getDoctorQueue(
 
   for (const row of rows) {
     const isMine = mine(row);
-    const group = groupOf(row);
+    const group = groupOf(row, isMine);
     // Another consultant's patient who has not reached anyone yet: shown in the
     // second column of the pipeline, whatever the scope toggle says, because
     // that column is exactly the question "who is waiting for someone else".
@@ -220,7 +244,9 @@ export async function getDoctorQueue(
     counters.total++;
 
     if (!belongsToOther) counters[group]++;
-    if (!DONE_STATUSES.includes(row.current_status) && row.results_status !== "ready") {
+    // Same distinction: this counts patients the lab is still holding up, not
+    // every patient who happens to have no tests today.
+    if (!DONE_STATUSES.includes(row.current_status) && waitingOnLab(row)) {
       counters.missingResults++;
     }
 
@@ -316,7 +342,7 @@ export async function getConsult(visitId, db = pool) {
             v.blocked_reason, v.priority, v.priority_reason,
             v.assigned_doctor_id, v.assigned_sd_id, v.visit_date::text AS visit_date,
             p.name, p.file_no, p.age, p.sex, p.notes,
-            doc.short_name AS doctor_name,
+            COALESCE(doc.short_name, doc.name) AS doctor_name,
             sd.short_name  AS sd_name,
             seq.visit_number,
             a.biomarkers, a.compliance, a.pre_visit_compliance,
@@ -348,8 +374,8 @@ export async function getConsult(visitId, db = pool) {
 
   const [
     { rows: history },
-    { rows: vitals },
-    { rows: lastVitals },
+    vitals,
+    lastVitals,
     { rows: sdNote },
     { rows: proposals },
     { rows: orders },
@@ -368,18 +394,11 @@ export async function getConsult(visitId, db = pool) {
         ORDER BY appointment_date DESC LIMIT 8`,
       [v.patient_id, visitId],
     ),
-    db.query(
-      `SELECT weight, height, bmi, bp_sys, bp_dia, pulse, spo2, temp, recorded_at
-         FROM giniflow_vitals WHERE visit_id = $1 ORDER BY recorded_at DESC LIMIT 1`,
-      [visitId],
-    ),
-    db.query(
-      `SELECT weight, height, bp_sys, bp_dia, pulse, spo2, recorded_at
-         FROM vitals WHERE patient_id = $1
-          AND recorded_at::date < (NOW() AT TIME ZONE 'Asia/Kolkata')::date
-        ORDER BY recorded_at DESC LIMIT 1`,
-      [v.patient_id],
-    ),
+    // Either table may hold today's reading — see visitVitals.js. Reading only
+    // `giniflow_vitals` told the consultant a patient had no vitals when the
+    // reading that moved them to this queue was sitting in the older one.
+    todaysVitals(visitId, { patientId: v.patient_id, visitDate: v.visit_date }, db),
+    previousVitals(v.patient_id, v.visit_date, db),
     db.query(
       `SELECT n.plan, n.source, n.updated_at, d.short_name AS author
          FROM giniflow_sd_notes n
@@ -447,11 +466,11 @@ export async function getConsult(visitId, db = pool) {
   // Today's numbers are the appointment's biomarkers, topped up with the vitals
   // the station took an hour ago — a BP recorded at the chair is today's BP.
   const current = { ...(v.biomarkers || {}) };
-  if (vitals[0]) {
-    if (vitals[0].bp_sys != null) current.sbp = vitals[0].bp_sys;
-    if (vitals[0].bp_dia != null) current.dbp = vitals[0].bp_dia;
-    if (vitals[0].weight != null) current.weight = vitals[0].weight;
-    if (vitals[0].bmi != null) current.bmi = vitals[0].bmi;
+  if (vitals) {
+    if (vitals.bp_sys != null) current.sbp = vitals.bp_sys;
+    if (vitals.bp_dia != null) current.dbp = vitals.bp_dia;
+    if (vitals.weight != null) current.weight = vitals.weight;
+    if (vitals.bmi != null) current.bmi = vitals.bmi;
   }
   const previous = history[0]?.biomarkers || null;
   const brief = buildBrief(current, previous);
@@ -497,8 +516,8 @@ export async function getConsult(visitId, db = pool) {
     diagnoses,
     labs,
     reports,
-    vitals: vitals[0] || null,
-    lastVitals: lastVitals[0] || null,
+    vitals,
+    lastVitals,
     biomarkerHistory: history
       .map((h) => ({ date: h.appointment_date, biomarkers: h.biomarkers }))
       .reverse(),
@@ -536,10 +555,32 @@ export async function startConsult(visitId, actorId = null, db = pool) {
   try {
     await client.query("BEGIN");
     const { rows } = await client.query(
-      `SELECT v.current_status, v.visit_date FROM giniflow_visits v WHERE v.id = $1 FOR UPDATE`,
+      `SELECT v.current_status, v.visit_date, v.assigned_doctor_id,
+              (SELECT COALESCE(d.short_name, d.name) FROM doctors d
+                WHERE d.id = v.assigned_doctor_id) AS assigned_doctor_name
+         FROM giniflow_visits v WHERE v.id = $1 FOR UPDATE`,
       [visitId],
     );
     if (!rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
+
+    // One patient, one room. The COALESCE below keeps the first consultant as
+    // the owner, but on its own it let a second one open the consult anyway —
+    // the status was already `with_doctor`, so nothing advanced and nothing
+    // objected — and two people wrote a care plan and a prescription against
+    // the same visit.
+    if (
+      actorId &&
+      rows[0].current_status === "with_doctor" &&
+      rows[0].assigned_doctor_id &&
+      rows[0].assigned_doctor_id !== actorId
+    ) {
+      throw Object.assign(
+        new Error(
+          `This patient is already in ${rows[0].assigned_doctor_name || "another consultant"}'s room — they cannot be in two places at once`,
+        ),
+        { status: 409 },
+      );
+    }
 
     if (actorId) {
       const { rows: busy } = await client.query(

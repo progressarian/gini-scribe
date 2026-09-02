@@ -100,9 +100,59 @@ check(
     .flat()
     .every((c) => c.journey?.length === 5),
 );
+// The rule is "nothing outstanding", not "results_status = ready". A patient
+// nobody ordered a test for has nothing to wait for, and filing them under
+// "can't proceed" hid three ready patients on a real morning (P_181569).
 check(
-  "a patient without results is never in the working queue",
-  queue.groups.resultsReady.every((c) => c.results.status === "ready"),
+  "a patient the lab is still holding up is never in the working queue",
+  queue.groups.resultsReady.every((c) => !["awaiting", "partial"].includes(c.results.status)),
+  queue.groups.resultsReady.map((c) => c.results.status).join(", ") || "empty",
+);
+check(
+  "a patient with no tests ordered counts as ready, not as missing results",
+  queue.groups.pipeline.every((c) => c.status !== "ready_for_doctor"),
+  "nothing handed over should sit in the pipeline",
+);
+// "With me now" has to mean *me*. groupOf was status-only, so on the All scope
+// every occupied room read as the viewer's own — an admin with no patients was
+// shown one in their room (P_181574, in Dr. Beant Kaur's).
+const consultants = (
+  await pool.query(
+    `SELECT id FROM doctors WHERE role = 'consultant' AND COALESCE(is_active, TRUE) ORDER BY id LIMIT 2`,
+  )
+).rows.map((r) => r.id);
+const [docA, docB] = consultants;
+const inRoom = (await getDoctorQueue(TEST_DAY, { scope: "all" })).groups.withMe[0];
+if (inRoom && docA && docB) {
+  await pool.query(`UPDATE giniflow_visits SET assigned_doctor_id = $2 WHERE id = $1`, [
+    inRoom.visitId,
+    docA,
+  ]);
+  const owner = await getDoctorQueue(TEST_DAY, { doctorId: docA, scope: "all" });
+  const other = await getDoctorQueue(TEST_DAY, { doctorId: docB, scope: "all" });
+  check(
+    "the doctor whose room it is sees the patient under 'with me'",
+    owner.groups.withMe.some((c) => c.visitId === inRoom.visitId),
+  );
+  check(
+    "another doctor on the All scope never sees them as their own",
+    !other.groups.withMe.some((c) => c.visitId === inRoom.visitId),
+    "an admin with no patients was told one was in their room",
+  );
+  check(
+    "they are shown instead as in consultation elsewhere, with the name",
+    other.groups.withOtherDoctor.some((c) => c.visitId === inRoom.visitId && !!c.doctorName),
+    other.groups.withOtherDoctor[0]?.doctorName,
+  );
+}
+
+check(
+  "the missing-results count means the lab, not the absence of an order",
+  queue.counts.missingResults ===
+    Object.values(queue.groups)
+      .flat()
+      .filter((c) => ["awaiting", "partial"].includes(c.results.status)).length,
+  `${queue.counts.missingResults}`,
 );
 
 // The rail is read from the event log, so a step nothing recorded is not ticked.
@@ -290,6 +340,7 @@ check("a patient to prescribe for", !!rxPatient, rxPatient?.name);
 if (rxPatient) {
   const doctorId = (await one(`SELECT id FROM doctors ORDER BY id LIMIT 1`))?.id ?? null;
   const visitId = rxPatient.visitId;
+  const WROTE = ["Fenofibrate 145mg", "Atchol 20mg", "Montair 10mg", "Lipaglyn 4mg"];
 
   const added = await rx.addItem(visitId, {
     medicineName: "Fenofibrate 145mg",
@@ -342,13 +393,21 @@ if (rxPatient) {
 
   let draft = await rx.getDraft(visitId);
   check("the draft holds every row", draft.items.length === 4, `${draft.items.length}`);
+  // The rule is that the draft does not touch the chart — not that the patient
+  // arrived with an empty one. Measured as a delta so a returning patient's
+  // history cannot decide whether this passes.
+  const chartBefore = (
+    await one(`SELECT count(*)::int AS n FROM medications WHERE patient_id = $1`, [draft.patientId])
+  ).n;
   check(
     "nothing has reached the chart yet",
     (
-      await one(`SELECT count(*)::int AS n FROM medications WHERE patient_id = $1`, [
-        draft.patientId,
-      ])
+      await one(
+        `SELECT count(*)::int AS n FROM medications WHERE patient_id = $1 AND name = ANY($2)`,
+        [draft.patientId, WROTE],
+      )
     ).n === 0,
+    `chart holds ${chartBefore} unrelated rows`,
   );
 
   // The draft is a real table, so an interrupted consultation survives.
@@ -378,10 +437,12 @@ if (rxPatient) {
   const result = await finalizeConsult(visitId, doctorId);
   check("finalize reports what it did", result.finalized && result.medicines === 2);
 
+  // Only the rows this consult wrote: the patient's existing chart is not what
+  // finalize was asked to get right.
   const meds = await pool.query(
     `SELECT name, dose, change_type, is_active, timing_category, time_of_day::text AS t
-       FROM medications WHERE patient_id = $1 ORDER BY name`,
-    [draft.patientId],
+       FROM medications WHERE patient_id = $1 AND name = ANY($2) ORDER BY name`,
+    [draft.patientId, WROTE],
   );
   check("the prescription reached the chart", meds.rows.length >= 2, `${meds.rows.length} rows`);
   check(
@@ -470,7 +531,11 @@ if (rxPatient) {
       `SELECT count(*)::int AS n FROM medications WHERE patient_id = $1 AND UPPER(COALESCE(pharmacy_match, name)) = 'MONTAIR'`,
       [pid],
     );
-    check("the patient has both an active and an inactive row for it", before.n === 2, `${before.n}`);
+    check(
+      "the patient has both an active and an inactive row for it",
+      before.n === 2,
+      `${before.n}`,
+    );
 
     await startConsult(repeatVisit.visitId, doctorId);
     const stopRow = await rx.addItem(repeatVisit.visitId, {
@@ -486,7 +551,11 @@ if (rxPatient) {
     } catch (e) {
       crashed = e.message;
     }
-    check("stopping a medicine stopped before does not abort the consultation", !crashed, crashed || "");
+    check(
+      "stopping a medicine stopped before does not abort the consultation",
+      !crashed,
+      crashed || "",
+    );
 
     const after = await pool.query(
       `SELECT is_active, stop_reason FROM medications

@@ -25,6 +25,9 @@ const INVALIDATES = {
     ["giniflow", "reception"],
     ["giniflow", "lab"],
     ["giniflow", "pharmacy"],
+    // No eventTailer stream of its own: referrals write no event table, and a
+    // visit moving is the only thing that changes this list from outside (19 §10).
+    ["giniflow", "referrals"],
   ],
   lab_order: [
     ["giniflow", "reception"],

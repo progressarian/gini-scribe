@@ -29,6 +29,19 @@ export async function getStationSummary(visitDate, db = pool) {
     [visitDate],
   );
 
+  // Referrals are parallel to the chain, so they are not a board column and the
+  // count cannot come from `col()`. "Open" is every referral raised today whose
+  // loop is not closed — a referral has no SLA, so this is a workload, not a
+  // warning (19 §2).
+  const { rows: referrals } = await db.query(
+    `SELECT count(*)::int AS today,
+            count(*) FILTER (WHERE r.status <> 'completed')::int AS open
+       FROM giniflow_referrals r
+       JOIN giniflow_visits v ON v.id = r.visit_id
+      WHERE v.visit_date = $1::date`,
+    [visitDate],
+  );
+
   // Triage works TOMORROW, not the day the rest of these count, so it gets its
   // own read rather than a slice of the board above.
   const triage = await getTriageSummary(db);
@@ -64,6 +77,11 @@ export async function getStationSummary(visitDate, db = pool) {
     mo_sd: { count: col("sd"), label: `${col("sd")} in workup`, tone: "blue" },
     doctor: { count: col("wait_doctor"), label: `${col("wait_doctor")} waiting`, tone: "red" },
     pharmacy: { count: col("pharmacy"), label: `${col("pharmacy")} ready`, tone: "teal" },
+    referrals: {
+      count: referrals[0].open,
+      label: referrals[0].today ? `${referrals[0].today} today` : "none today",
+      tone: referrals[0].open ? "blue" : "teal",
+    },
     bottleneck: bottleneck ? { station: bottleneck.station, label: bottleneck.label } : null,
   };
 }

@@ -22,6 +22,7 @@ import {
   giniflowReportSchema,
   giniflowOrderTestsSchema,
   giniflowPlanSchema,
+  giniflowPlanExtractSchema,
   giniflowProposalSchema,
   giniflowSampleSchema,
   giniflowVitalsSchema,
@@ -31,6 +32,13 @@ import {
   giniflowCancelSchema,
   giniflowWalkInSchema,
   giniflowSearchQuerySchema,
+  giniflowReferralQuerySchema,
+  giniflowReferralSchema,
+  giniflowReferralChipSchema,
+  giniflowReferralLetterSchema,
+  giniflowReferralSendSchema,
+  giniflowReferralAppointmentSchema,
+  giniflowReferralCompleteSchema,
 } from "../schemas/index.js";
 import {
   getVitalsQueue,
@@ -52,6 +60,20 @@ import {
   checkInWalkIn,
 } from "../services/giniflow/receptionStation.js";
 import { getLabQueue, advanceSample, uploadReport } from "../services/giniflow/labStation.js";
+import {
+  getReferrals,
+  searchReferralPatients,
+  createReferral,
+  removeReferral,
+  renderLetter,
+  storedLetterUrl,
+  generateLetter,
+  sendLetter,
+  bookAppointment,
+  completeReferral,
+  referralsForVisit,
+} from "../services/giniflow/referralsStation.js";
+import { extractPlan } from "../services/giniflow/planExtract.js";
 import {
   getMoQueue,
   getMoPatient,
@@ -96,6 +118,7 @@ import {
   dispenseAll,
   sendCardToPatient,
 } from "../services/giniflow/pharmacyStation.js";
+import { generateMedicineCardPdf } from "../services/giniflow/medicineCardPdf.js";
 import { getStationSummary } from "../services/giniflow/stationSummary.js";
 import { hasCapability } from "../../shared/permissions.js";
 
@@ -428,6 +451,19 @@ router.post(
   },
 );
 
+// The card, printed. Server-side because window.print() prints the whole
+// consultation screen, and what the patient carries home is the schedule alone.
+router.get("/giniflow/stations/doctor/:visitId/medicine-card.pdf", doctorGate, async (req, res) => {
+  try {
+    const { pdf, fileName } = await generateMedicineCardPdf(req.params.visitId);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${fileName}"`);
+    res.send(Buffer.from(pdf));
+  } catch (e) {
+    handleError(res, e, "Gini Flow medicine card PDF");
+  }
+});
+
 router.get("/giniflow/stations/doctor/:visitId/medicine-card", doctorGate, async (req, res) => {
   try {
     const draft = await getDraft(req.params.visitId);
@@ -470,6 +506,7 @@ const STATION_CAPS = {
   doctor: CAP.GINIFLOW_STATION_DOCTOR,
   pharmacy: CAP.GINIFLOW_STATION_PHARMACY,
   triage: CAP.GINIFLOW_TRIAGE,
+  referrals: CAP.GINIFLOW_REFERRALS,
 };
 
 router.get(
@@ -745,6 +782,26 @@ router.post("/giniflow/stations/mo/:visitId/start", moGate, async (req, res) => 
   }
 });
 
+// Reads the plan back and points at the controls below it: the test chips, the
+// urgency, and the suggestion form. Writes NOTHING — the MO confirms what
+// lights up, and that is what makes an AI read safe on this screen.
+router.post(
+  "/giniflow/stations/mo/:visitId/extract-plan",
+  moGate,
+  validate(giniflowPlanExtractSchema),
+  async (req, res) => {
+    try {
+      res.json(await extractPlan(req.params.visitId, req.body.plan));
+    } catch (e) {
+      // A refusal the MO can act on — "write the plan first", "AI is not
+      // configured" — carries its reason; only a real fault is a 500.
+      e?.status && e.status < 500
+        ? res.status(e.status).json({ error: e.message })
+        : handleError(res, e, "Gini Flow MO plan extract");
+    }
+  },
+);
+
 router.put(
   "/giniflow/stations/mo/:visitId/plan",
   moGate,
@@ -933,5 +990,193 @@ router.post("/giniflow/stations/pharmacy/:visitId/send-card", pharmacyGate, asyn
     pharmacyError(res, e, "Gini Flow send medicine card");
   }
 });
+
+// ── Referrals ───────────────────────────────────────────────────────────────
+// docs/gini-flow/19-REFERRALS-STATION-PLAN.md §9. The one place a patient leaves
+// the Gini floor and goes somewhere else — a tracker, not a form, because the
+// question a referral asks stays open until the specialist answers it.
+//
+// Nothing here moves `current_status`: a referral is parallel to the chain, and
+// the visit continues to pharmacy and exit exactly as it would have.
+const referralsGate = requireCapability(CAP.GINIFLOW_REFERRALS);
+
+// RF-03. The chips are not the desk. A consultant decides a referral from the
+// Care plan and must be able to write one, but the coordinator's desk — every
+// patient's referrals for the day, the specialist appointments, closing the loop
+// — is not theirs, and 19 §9 never said it was. So the three VISIT-scoped
+// endpoints the chips use take either capability, and everything else stays on
+// GINIFLOW_REFERRALS alone.
+const referralChipGate = requireCapability([CAP.GINIFLOW_REFERRALS, CAP.GINIFLOW_STATION_DOCTOR]);
+
+// A refusal the desk can act on — "no phone number for Dr. Gupta", "a letter has
+// been generated for this referral" — is a 409 carrying the sentence, never a 500.
+const referralsError = (res, e, label) =>
+  e?.status && e.status < 500
+    ? res.status(e.status).json({ error: e.message })
+    : handleError(res, e, label);
+
+router.get(
+  "/giniflow/referrals",
+  referralsGate,
+  validateQuery(giniflowReferralQuerySchema),
+  async (req, res) => {
+    try {
+      const date = await resolveDate(req.query.date);
+      const data = await getReferrals(date, { q: req.query.q ?? null });
+      res.json({ date, ...data, serverTime: new Date().toISOString() });
+    } catch (e) {
+      referralsError(res, e, "Gini Flow referrals");
+    }
+  },
+);
+
+// The create form's Patient field is a picker, not free text: a referral with no
+// patient_id is a letter nobody can find again (§4.2).
+router.get(
+  "/giniflow/referrals/patients",
+  referralsGate,
+  validateQuery(giniflowSearchQuerySchema),
+  async (req, res) => {
+    try {
+      const date = await resolveDate(req.query.date);
+      res.json({ date, patients: await searchReferralPatients(date, req.query.q) });
+    } catch (e) {
+      referralsError(res, e, "Gini Flow referral patient search");
+    }
+  },
+);
+
+// What the consultant's chips read — which specialties this visit has already
+// been referred to, so a selected chip and a Finalize panel cannot disagree.
+router.get("/giniflow/referrals/visit/:visitId", referralChipGate, async (req, res) => {
+  try {
+    res.json({ referrals: await referralsForVisit(req.params.visitId) });
+  } catch (e) {
+    referralsError(res, e, "Gini Flow visit referrals");
+  }
+});
+
+router.post(
+  "/giniflow/referrals",
+  referralsGate,
+  validate(giniflowReferralSchema),
+  async (req, res) => {
+    try {
+      res.json(
+        await createReferral(req.body.visitId, {
+          ...req.body,
+          actorId: req.doctor?.doctor_id ?? null,
+        }),
+      );
+    } catch (e) {
+      referralsError(res, e, "Gini Flow create referral");
+    }
+  },
+);
+
+// The consultant's chip — specialty alone, the station fills in the rest (§5).
+router.post(
+  "/giniflow/referrals/visit/:visitId",
+  referralChipGate,
+  validate(giniflowReferralChipSchema),
+  async (req, res) => {
+    try {
+      res.json(
+        await createReferral(req.params.visitId, {
+          ...req.body,
+          source: "chip",
+          actorId: req.doctor?.doctor_id ?? null,
+        }),
+      );
+    } catch (e) {
+      referralsError(res, e, "Gini Flow referral chip");
+    }
+  },
+);
+
+// Deselecting a chip. Refused with a 409 once a letter exists behind the row.
+router.delete("/giniflow/referrals/:id", referralChipGate, async (req, res) => {
+  try {
+    res.json(await removeReferral(req.params.id));
+  } catch (e) {
+    referralsError(res, e, "Gini Flow remove referral");
+  }
+});
+
+// The letter, inline (§7.2, RF-05).
+//
+// The STORED file is authoritative when one exists: it is the letter the
+// specialist was actually sent, and rendering fresh on every view would both
+// cost a Puppeteer run per click and let the bytes on screen drift from the
+// bytes on WhatsApp — the medicines are read live, so a letter viewed a week
+// later would silently list a different prescription. A row with no stored file
+// renders on demand, which is what makes the route work before Finalize has run.
+router.get("/giniflow/referrals/:id/letter.pdf", referralsGate, async (req, res) => {
+  try {
+    const stored = await storedLetterUrl(req.params.id);
+    if (stored) return res.redirect(stored);
+    const { pdf, referral } = await renderLetter(req.params.id);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="Referral_${String(referral.name || "patient").replace(/[^a-zA-Z0-9._-]/g, "_")}_${referral.specialty}.pdf"`,
+    );
+    res.send(pdf);
+  } catch (e) {
+    referralsError(res, e, "Gini Flow referral letter");
+  }
+});
+
+router.post(
+  "/giniflow/referrals/:id/letter",
+  referralsGate,
+  validate(giniflowReferralLetterSchema),
+  async (req, res) => {
+    try {
+      res.json(await generateLetter(req.params.id, { force: !!req.body.force }));
+    } catch (e) {
+      referralsError(res, e, "Gini Flow generate referral letter");
+    }
+  },
+);
+
+router.post(
+  "/giniflow/referrals/:id/send",
+  referralsGate,
+  validate(giniflowReferralSendSchema),
+  async (req, res) => {
+    try {
+      res.json(await sendLetter(req.params.id, { to: req.body.to, force: !!req.body.force }));
+    } catch (e) {
+      referralsError(res, e, "Gini Flow send referral letter");
+    }
+  },
+);
+
+router.post(
+  "/giniflow/referrals/:id/appointment",
+  referralsGate,
+  validate(giniflowReferralAppointmentSchema),
+  async (req, res) => {
+    try {
+      res.json(await bookAppointment(req.params.id, { date: req.body.date, note: req.body.note }));
+    } catch (e) {
+      referralsError(res, e, "Gini Flow book referral appointment");
+    }
+  },
+);
+
+router.post(
+  "/giniflow/referrals/:id/complete",
+  referralsGate,
+  validate(giniflowReferralCompleteSchema),
+  async (req, res) => {
+    try {
+      res.json(await completeReferral(req.params.id));
+    } catch (e) {
+      referralsError(res, e, "Gini Flow complete referral");
+    }
+  },
+);
 
 export default router;

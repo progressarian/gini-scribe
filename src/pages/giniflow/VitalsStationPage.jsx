@@ -80,13 +80,125 @@ const clock = (iso) =>
       })
     : null;
 
+// The screen top to bottom, in the order the station reads it. Several staff
+// work this station at once, so "at the station" is a group rather than a
+// single "Now" row — each colleague has their own patient in front of them.
+const SECTIONS = [
+  { key: "atStation", icon: "🟢", title: "At the station", sub: "being seen now" },
+  { key: "waiting", icon: "⏳", title: "Waiting", sub: "ready to call" },
+  { key: "held", icon: "🚫", title: "Held", sub: "cannot be called" },
+  { key: "moved", icon: "➡️", title: "Vitals done", sub: "still on the floor", done: true },
+  { key: "exited", icon: "✅", title: "Finished and left", sub: "", done: true },
+];
+
+// A group heading that opens and closes its own section. A real button inside
+// the heading, so it keeps heading semantics for a screen reader and states
+// whether the section is open.
+function GroupHead({ icon, title, sub, count, open, onToggle, id }) {
+  return (
+    <h2 className="sq-gh">
+      <button
+        type="button"
+        className="sq-toggle"
+        aria-expanded={open}
+        aria-controls={id}
+        onClick={onToggle}
+      >
+        <span className={`sq-chev${open ? " open" : ""}`} aria-hidden="true">
+          ▸
+        </span>
+        <span aria-hidden="true">{icon}</span> {title}
+        {sub && <span className="sq-ghsub">— {sub}</span>}
+        <span className="sq-count">{count}</span>
+      </button>
+    </h2>
+  );
+}
+
+// A patient the station can act on: at the station, or waiting to be called.
+function QueueRow({ q, active, now, onPick }) {
+  const waited = minutesSince(q.statusSince, now) ?? q.waitMinutes ?? 0;
+  const tone = budgetColour(waited, q.waitBudget);
+  const chip = PRIORITY_CHIP[q.priority];
+  return (
+    <button
+      type="button"
+      className={`sq-item${active ? " active" : ""}${chip ? ` ${chip.cls}` : ""}`}
+      onClick={() => onPick(q.visitId)}
+    >
+      <div className="si-slot">{q.slot}</div>
+      <div className="si-name">
+        {q.name}
+        {chip && <span className={`si-pri ${chip.cls}`}>{chip.label}</span>}
+      </div>
+      <div className="si-meta">
+        {q.age}
+        {(q.sex || "")[0] || ""} · {q.fileNo} · Visit {q.visitNumber}
+        {CATEGORY_BADGE[q.category] ? ` · ${CATEGORY_BADGE[q.category].label}` : ""}
+      </div>
+      {/* The wait is what the station can act on, so it reads before the
+          biomarkers, and the words say which clock it is: time at the station
+          once they have sat down, time queueing until then. */}
+      <div className="si-wait">
+        <span className={`si-tmr si-tmr-${tone}`}>
+          ⏱ {waited}m {q.status === "with_vitals" ? "at station" : "waiting"}
+        </span>
+        {q.checkedInAt && <span className="si-since">in since {clock(q.checkedInAt)}</span>}
+      </div>
+      {q.priorityReason && <div className="si-reason">❗ {q.priorityReason}</div>}
+      {q.bios?.length > 0 && (
+        <div className="si-bios">
+          {q.bios.map((b) => (
+            <span key={b.label} className={`sbio sbio-${b.tone}`}>
+              {b.label}
+            </span>
+          ))}
+        </div>
+      )}
+    </button>
+  );
+}
+
+// A patient whose vitals are recorded. Tapping reopens the reading — saveVitals
+// stores a correction without walking them back through the chain, so this
+// needs no new write path.
+function DoneRow({ d, active, onPick }) {
+  return (
+    <button
+      type="button"
+      className={`sq-done${active ? " active" : ""}`}
+      onClick={() => onPick(d.visitId)}
+    >
+      <div className="si-name">{d.name}</div>
+      <div className="si-meta">
+        {clock(d.recordedAt)} · {d.bp ? `BP ${d.bp}` : "BP —"}
+        {d.weight ? ` · ${d.weight} kg` : ""}
+      </div>
+      <div className="si-nowat">now: {d.nowAt}</div>
+    </button>
+  );
+}
+
 export default function VitalsStationPage() {
   const [selected, setSelected] = useState(null);
   const [form, setForm] = useState(EMPTY);
   const [toast, setToast] = useState("");
   const [spokeAnything, setSpokeAnything] = useState(false);
   const [rechecked, setRechecked] = useState(false);
+  const [search, setSearch] = useState("");
+  // The two history groups start closed: they are a record of work already
+  // done, and on a full day they are the longest lists on the screen. The two
+  // groups the station acts on must not sit below fifty rows of history.
+  const [collapsed, setCollapsed] = useState(() => new Set(["moved", "exited"]));
   const toastTimer = useRef(null);
+
+  const toggleGroup = (key) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   const now = useTick();
   const { data: queueData, isLoading } = useVitalsQueue();
@@ -95,9 +207,26 @@ export default function VitalsStationPage() {
   const startVitals = useStartVitals();
   const releaseVitals = useReleaseVitals();
 
-  const queue = queueData?.queue || [];
-  const held = queueData?.held || [];
-  const done = queueData?.done || [];
+  // Filtered client-side: the whole day is already in this response, so the
+  // search is instant and costs no round trip. The server filters the
+  // consultant's queue instead only because that one pages.
+  const term = search.trim().toLowerCase();
+  const matches = (r) =>
+    !term ||
+    (r.name || "").toLowerCase().includes(term) ||
+    (r.fileNo || "").toLowerCase().includes(term);
+
+  const atStation = (queueData?.atStation || []).filter(matches);
+  const waitingList = (queueData?.waiting || []).filter(matches);
+  const held = (queueData?.held || []).filter(matches);
+  const moved = (queueData?.moved || []).filter(matches);
+  const exited = (queueData?.exited || []).filter(matches);
+  // Everyone the station can still claim. Searching must not change who can be
+  // claimed, so this reads the unfiltered response.
+  const queue = [...(queueData?.atStation || []), ...(queueData?.waiting || [])];
+  const totalShown =
+    atStation.length + waitingList.length + held.length + moved.length + exited.length;
+
   // Derived, not set in an effect: the screen opens on whoever is at the station
   // with no click and no flash of the empty state.
   const activeVisitId = selected ?? queue[0]?.visitId ?? null;
@@ -267,100 +396,81 @@ export default function VitalsStationPage() {
           <div className="sq-header">
             <div className="sq-title">Vitals queue</div>
             <div className="sq-sub">Tap patient to start</div>
+            <input
+              className="sq-search"
+              type="search"
+              value={search}
+              placeholder="Search name or file no…"
+              aria-label="Search today's patients"
+              onChange={(e) => setSearch(e.target.value)}
+            />
           </div>
-          {isLoading && <div className="sq-foot">Loading…</div>}
-          {!isLoading && queue.length === 0 && (
-            <div className="sq-foot">Nobody waiting for vitals right now.</div>
-          )}
-          {queue.map((q) => {
-            const waited = minutesSince(q.statusSince, now) ?? q.waitMinutes ?? 0;
-            const tone = budgetColour(waited, q.waitBudget);
-            const chip = PRIORITY_CHIP[q.priority];
-            return (
-              <button
-                type="button"
-                key={q.visitId}
-                className={`sq-item${q.visitId === activeVisitId ? " active" : ""}${
-                  chip ? ` ${chip.cls}` : ""
-                }`}
-                onClick={() => pick(q.visitId)}
-              >
-                <div className="si-slot">{q.slot}</div>
-                <div className="si-name">
-                  {q.name}
-                  {chip && <span className={`si-pri ${chip.cls}`}>{chip.label}</span>}
-                </div>
-                <div className="si-meta">
-                  {q.age}
-                  {(q.sex || "")[0] || ""} · {q.fileNo} · Visit {q.visitNumber}
-                  {CATEGORY_BADGE[q.category] ? ` · ${CATEGORY_BADGE[q.category].label}` : ""}
-                </div>
-                {/* The wait is what the station can act on, so it reads before
-                    the biomarkers, and the words say which clock it is: time at
-                    the station once they have sat down, time queueing until then. */}
-                <div className="si-wait">
-                  <span className={`si-tmr si-tmr-${tone}`}>
-                    ⏱ {waited}m {q.status === "with_vitals" ? "at station" : "waiting"}
-                  </span>
-                  {q.checkedInAt && (
-                    <span className="si-since">in since {clock(q.checkedInAt)}</span>
-                  )}
-                </div>
-                {q.priorityReason && <div className="si-reason">❗ {q.priorityReason}</div>}
-                {q.bios?.length > 0 && (
-                  <div className="si-bios">
-                    {q.bios.map((b) => (
-                      <span key={b.label} className={`sbio sbio-${b.tone}`}>
-                        {b.label}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </button>
-            );
-          })}
 
-          {/* Held patients are in the building and cannot be called. Leaving them
-              off the screen entirely meant the station did not know they existed,
-              and would go looking for someone reception had already stopped. */}
-          {held.length > 0 && (
-            <div className="sq-group">
-              <div className="sq-gh">Held — not ready ({held.length})</div>
-              {held.map((h) => (
-                <div className="sq-held" key={h.visitId}>
-                  <div className="si-name">{h.name}</div>
-                  <div className="si-meta">
-                    {h.age}
-                    {(h.sex || "")[0] || ""} · {h.fileNo}
-                  </div>
-                  <div className="si-reason">🚫 {h.blockedReason || "On hold"}</div>
-                </div>
-              ))}
+          {isLoading && <div className="sq-foot">Loading…</div>}
+          {!isLoading && totalShown === 0 && (
+            <div className="sq-foot">
+              {term ? `Nobody matches “${search.trim()}”.` : "Nobody at this station today."}
             </div>
           )}
 
-          {/* Done means this step: vitals recorded. Tapping one reopens the
-              reading — saveVitals saves a correction without walking the patient
-              back through the chain, so this needs no new write path. */}
-          <div className="sq-group">
-            <div className="sq-gh">✓ Done today ({queueData?.doneToday ?? 0})</div>
-            {done.length === 0 && <div className="sq-foot">Nobody done yet.</div>}
-            {done.map((d) => (
-              <button
-                type="button"
-                key={`${d.visitId}-${d.recordedAt}`}
-                className={`sq-done${d.visitId === activeVisitId ? " active" : ""}`}
-                onClick={() => pick(d.visitId)}
-              >
-                <div className="si-name">{d.name}</div>
-                <div className="si-meta">
-                  {clock(d.recordedAt)} · {d.bp ? `BP ${d.bp}` : "BP —"}
-                  {d.weight ? ` · ${d.weight} kg` : ""}
+          {SECTIONS.map((g) => {
+            const rows = {
+              atStation,
+              waiting: waitingList,
+              held,
+              moved,
+              exited,
+            }[g.key];
+            if (!rows.length) return null;
+            // A search that matches inside a closed group would hide its own
+            // results, so searching opens every group that has a hit.
+            const open = !!term || !collapsed.has(g.key);
+            const id = `sq-group-${g.key}`;
+            return (
+              <div className="sq-sect" key={g.key}>
+                <GroupHead
+                  icon={g.icon}
+                  title={g.title}
+                  sub={g.sub}
+                  count={rows.length}
+                  open={open}
+                  onToggle={() => toggleGroup(g.key)}
+                  id={id}
+                />
+                <div id={id} hidden={!open}>
+                  {g.key === "held"
+                    ? rows.map((h) => (
+                        <div className="sq-held" key={h.visitId}>
+                          <div className="si-name">{h.name}</div>
+                          <div className="si-meta">
+                            {h.age}
+                            {(h.sex || "")[0] || ""} · {h.fileNo}
+                          </div>
+                          <div className="si-reason">🚫 {h.blockedReason || "On hold"}</div>
+                        </div>
+                      ))
+                    : g.done
+                      ? rows.map((d) => (
+                          <DoneRow
+                            key={`${d.visitId}-${d.recordedAt}`}
+                            d={d}
+                            active={d.visitId === activeVisitId}
+                            onPick={pick}
+                          />
+                        ))
+                      : rows.map((q) => (
+                          <QueueRow
+                            key={q.visitId}
+                            q={q}
+                            now={now}
+                            active={q.visitId === activeVisitId}
+                            onPick={pick}
+                          />
+                        ))}
                 </div>
-                <div className="si-nowat">now: {d.nowAt}</div>
-              </button>
-            ))}
-          </div>
+              </div>
+            );
+          })}
         </div>
 
         <div className="station-detail">

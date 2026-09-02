@@ -111,11 +111,14 @@ try {
   const { getVitalsQueue } = await import("../server/services/giniflow/vitalsStation.js");
   const vq = await getVitalsQueue(date);
   vitalsClient.setQueryData(["giniflow", "vitals", "queue", "today"], { date, ...vq });
-  if (vq.queue[0]) {
+  // The queue is grouped now — at the station, waiting, held — rather than one
+  // flat list. Whoever the station would work next is the one to prime.
+  const nextUp = (vq.atStation || [])[0] || (vq.waiting || [])[0] || (vq.queue || [])[0];
+  if (nextUp) {
     const { getVitalsPatient } = await import("../server/services/giniflow/vitalsStation.js");
     vitalsClient.setQueryData(
-      ["giniflow", "vitals", "patient", vq.queue[0].visitId],
-      await getVitalsPatient(vq.queue[0].visitId),
+      ["giniflow", "vitals", "patient", nextUp.visitId],
+      await getVitalsPatient(nextUp.visitId),
     );
   }
   const vitalsHtml = renderToString(
@@ -325,12 +328,17 @@ try {
     /si-tmr si-tmr-[gar]/.test(moHtml),
     (moHtml.match(/si-tmr si-tmr-(\w+)/) || [])[1],
   );
+  // The compact switch is gone; groups collapse instead, the same control the
+  // vitals station uses.
   check(
-    "every group opens as full cards, nothing collapsed by default",
-    !moHtml.includes("sq-peek"),
-    "compacting is the MO's choice, not the screen's",
+    "every group opens by default",
+    !moHtml.includes('hidden=""'),
+    "nothing is hidden until the MO asks",
   );
-  check("and the compact switch is offered", moHtml.includes("Compact the rest"));
+  check(
+    "and each group can be collapsed",
+    moHtml.includes("sq-toggle") && moHtml.includes("aria-expanded"),
+  );
   check("no raw 'undefined' in the MO markup", !moHtml.includes(">undefined<"));
 
   // Lab renders its own tree.

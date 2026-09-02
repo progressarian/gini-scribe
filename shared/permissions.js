@@ -106,6 +106,11 @@ export const CAPABILITIES = {
   // missing reports. Coordinator and admin only — reception works the desk and
   // the payment queue, and the categorisation here is a clinical judgement.
   GINIFLOW_TRIAGE: "GINIFLOW_TRIAGE",
+  // External referrals: the letter out and the specialist follow-up
+  // (docs/gini-flow/19-REFERRALS-STATION-PLAN.md §9). Coordinator and admin own
+  // the tracking; the consultant is here because the referral is DECIDED in the
+  // Care plan's chips, so they must be able to write one.
+  GINIFLOW_REFERRALS: "GINIFLOW_REFERRALS",
   OBT_OPS: "OBT_OPS", // OBT outbound call team: tomorrow's appointment call list (/api/obt-status)
 };
 
@@ -147,6 +152,13 @@ export const ROLE_CAPABILITIES = {
     C.GINIFLOW_VIEW,
     C.GINIFLOW_STATION_MO,
     C.GINIFLOW_STATION_DOCTOR,
+    // NOT GINIFLOW_REFERRALS. The consultant DECIDES referrals, from the Care
+    // plan's chips, and the visit-scoped chip endpoints accept
+    // GINIFLOW_STATION_DOCTOR for exactly that. The desk itself — every
+    // patient's referrals for the day, booking specialist appointments, closing
+    // loops — is the coordinator's, which is what 19 §9 describes. Granting the
+    // capability outright would also have opened /giniflow/station/referrals,
+    // because src/config/routes.js gates that page on the same key.
   ],
   [ROLES.MO]: [
     C.PATIENT_READ,
@@ -254,6 +266,7 @@ export const ROLE_CAPABILITIES = {
     C.GINIFLOW_STATION_LAB,
     C.GINIFLOW_STATION_MO,
     C.GINIFLOW_TRIAGE,
+    C.GINIFLOW_REFERRALS,
   ],
   [ROLES.PHARMACY]: [
     C.PATIENT_READ,
