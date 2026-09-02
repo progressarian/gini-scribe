@@ -11,6 +11,7 @@ import LiveBadge from "../../components/giniflow/LiveBadge";
 import CounsellingNote from "./pharmacy/CounsellingNote";
 import DispenseCard from "./pharmacy/DispenseCard";
 import "../../styles/giniflow-station.css";
+import StationNotice from "../../components/giniflow/StationNotice";
 
 // The pharmacy station — gini-stations.html `#s-pharmacy` + `#pharmPane`.
 //
@@ -294,6 +295,22 @@ function PharmacyPane({ visitId, onClose, onToast }) {
               </div>
             )}
 
+            {/* A closed visit nobody marked at the counter.
+                
+                This is not a bug and not an empty state: it is what the floor
+                actually does. The HealthRay sync closes the visit when the
+                hospital's own system says the patient left, so `exited` arrives
+                without a single medicine having been pressed here — and every
+                row then reads "Not marked", correctly and unhelpfully. The note
+                says which of the two happened. */}
+            {data?.finished && totals.given === 0 && totals.notGiven === 0 && (
+              <div className="dp-sec ph-unmarked">
+                Closed without anything being marked at the counter — the visit was ended by the
+                HealthRay sync, not from this screen. Nothing records what {data.name} was actually
+                handed, so every medicine below shows <strong>Not marked</strong>.
+              </div>
+            )}
+
             {data && (
               <CounsellingNote
                 note={data.counselling}
@@ -330,7 +347,12 @@ function PharmacyPane({ visitId, onClose, onToast }) {
                   )}
                   {totals.external > 0 && <span>{totals.external} external</span>}
                 </div>
-                <DispenseCard card={data.card} onDispense={onDispense} busy={busy} />
+                <DispenseCard
+                  card={data.card}
+                  onDispense={onDispense}
+                  busy={busy}
+                  closed={data.finished}
+                />
               </div>
             )}
           </div>
@@ -340,9 +362,17 @@ function PharmacyPane({ visitId, onClose, onToast }) {
   );
 }
 
+// How many closed visits the column shows before it has to be asked. The
+// counter works forward, so the last few are the ones anybody scrolls to.
+const DISPENSED_PREVIEW = 5;
+
 export default function PharmacyStationPage() {
   const [toast, setToast] = useState("");
   const [openVisitId, setOpenVisitId] = useState(null);
+  // Dispensed is a day's worth of closed visits — 55 by the afternoon. The
+  // column opens on the last few, because the counter works forward; the rest
+  // are one press away rather than unreachable.
+  const [showAllDispensed, setShowAllDispensed] = useState(false);
   const toastTimer = useRef(null);
   const now = useTick();
 
@@ -372,6 +402,7 @@ export default function PharmacyStationPage() {
 
   return (
     <div className="gf">
+      <StationNotice station="pharmacy" />
       <div className="rail">
         <div className="rl">Pharmacy Station</div>
         <div className="rsep" />
@@ -436,50 +467,84 @@ export default function PharmacyStationPage() {
 
           {isLoading && <div className="empty-note">Loading…</div>}
 
-          {!isLoading && toDispense.length > 0 && (
-            <div>
-              <div className="grp-lbl" style={{ marginBottom: 7 }}>
-                💊 To dispense — prescription finalized by doctor
-              </div>
-              <div className="pt-list">
-                {toDispense.map((card) => (
-                  <QueueCard
-                    key={card.visitId}
-                    card={card}
-                    now={now}
-                    onOpen={(c) => setOpenVisitId(c.visitId)}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {!isLoading && dispensed.length > 0 && (
-            <div>
-              <div className="grp-lbl" style={{ marginBottom: 7 }}>
-                ✅ Dispensed today
-              </div>
-              <div className="pt-list">
-                {dispensed.slice(0, 3).map((card) => (
-                  <QueueCard
-                    key={card.visitId}
-                    card={card}
-                    now={now}
-                    done
-                    onOpen={(c) => setOpenVisitId(c.visitId)}
-                  />
-                ))}
-                {dispensed.length > 3 && (
-                  <div className="more-note">+ {dispensed.length - 3} more dispensed today</div>
+          {/* The heading stays even with nothing under it.
+              
+              It used to be inside `toDispense.length > 0`, so on a day with 55
+              dispensed and none waiting the whole section vanished — no heading,
+              no note, just the Dispensed list where the queue should be. That
+              reads as a broken screen rather than a clear counter, and the
+              difference matters: one means wait, the other means nothing is
+              coming. */}
+          {/* Waiting on the left, done on the right.
+              
+              Two questions, and they are asked at different moments: "who is at
+              my counter" is the whole job, and "what did we hand out today" is a
+              lookup. Stacked, the second pushed the first off a full day's
+              screen. Same `.dsplit` the doctor station uses — one layout, not a
+              second one that drifts. */}
+          {!isLoading && (
+            <div className="dsplit">
+              <div className="dcol">
+                <div className="grp-lbl" style={{ marginBottom: 7 }}>
+                  💊 To dispense — prescription finalized by doctor
+                </div>
+                {toDispense.length ? (
+                  <div className="pt-list">
+                    {toDispense.map((card) => (
+                      <QueueCard
+                        key={card.visitId}
+                        card={card}
+                        now={now}
+                        onOpen={(c) => setOpenVisitId(c.visitId)}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="empty-note">
+                    {dispensed.length
+                      ? "Queue clear — nobody is waiting at the counter. A patient appears here the moment a consultant finalizes their prescription."
+                      : "Nobody waiting yet. A patient appears here the moment a consultant finalizes their prescription."}
+                  </div>
                 )}
               </div>
-            </div>
-          )}
 
-          {!isLoading && !toDispense.length && !dispensed.length && (
-            <div className="empty-note">
-              Nobody at the counter yet. Patients appear here the moment a consultant finalizes
-              their prescription.
+              {/* Recessed: a record, not a worklist, so the eye goes left. */}
+              <div className="dcol dcol-done">
+                <div className="grp-lbl" style={{ marginBottom: 7 }}>
+                  ✅ Dispensed today
+                </div>
+                {dispensed.length ? (
+                  <div className="pt-list">
+                    {(showAllDispensed ? dispensed : dispensed.slice(0, DISPENSED_PREVIEW)).map(
+                      (card) => (
+                        <QueueCard
+                          key={card.visitId}
+                          card={card}
+                          now={now}
+                          done
+                          onOpen={(c) => setOpenVisitId(c.visitId)}
+                        />
+                      ),
+                    )}
+                    {/* Was a plain "+ 52 more dispensed today" line, which named
+                        the other 52 and then gave nobody a way to reach them. */}
+                    {dispensed.length > DISPENSED_PREVIEW && (
+                      <button
+                        type="button"
+                        className="more-note more-btn"
+                        aria-expanded={showAllDispensed}
+                        onClick={() => setShowAllDispensed((v) => !v)}
+                      >
+                        {showAllDispensed
+                          ? `Show fewer — ${dispensed.length} dispensed today`
+                          : `+ ${dispensed.length - DISPENSED_PREVIEW} more dispensed today — show all`}
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="empty-note">Nothing dispensed yet today.</div>
+                )}
+              </div>
             </div>
           )}
         </div>

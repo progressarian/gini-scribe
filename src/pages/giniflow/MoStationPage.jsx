@@ -22,6 +22,7 @@ import { useTick, minutesSince, budgetColour } from "../../lib/giniflowTime";
 import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
 import LiveBadge from "../../components/giniflow/LiveBadge";
 import "../../styles/giniflow-station.css";
+import StationNotice from "../../components/giniflow/StationNotice";
 
 const initials = (name = "") =>
   name
@@ -723,6 +724,7 @@ export default function MoStationPage() {
 
   return (
     <div className="gf">
+      <StationNotice station="mo" />
       <div className="top-rail">
         <div className="tr-logo">Gini Flow</div>
         <div className="tr-role" style={{ background: "var(--tl-l)", color: "var(--tl)" }}>

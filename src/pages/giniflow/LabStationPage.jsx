@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useLabQueue, useAdvanceSample, useUploadReport } from "../../queries/hooks/useGiniflowLab";
+import {
+  useLabQueue,
+  useAdvanceSample,
+  useUploadReport,
+  reportHref,
+} from "../../queries/hooks/useGiniflowLab";
 import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
 import LiveBadge from "../../components/giniflow/LiveBadge";
 import "../../styles/giniflow-station.css";
+import StationNotice from "../../components/giniflow/StationNotice";
 
 const AVATAR_COLOURS = ["#374151", "#1e3a5f", "#14532d", "#7c2d12", "#7f1d1d", "#b45309"];
 
@@ -327,7 +333,7 @@ function LabDetailPane({ order, group, onClose, onAdvance, onUpload, busy }) {
                 <div className="dp-sec-title">Report</div>
                 <a
                   className="st-btn st-btn-g"
-                  href={order.reportUrl}
+                  href={reportHref(order.orderId)}
                   target="_blank"
                   rel="noreferrer"
                 >
@@ -342,6 +348,9 @@ function LabDetailPane({ order, group, onClose, onAdvance, onUpload, busy }) {
   );
 }
 
+// How many of the day's finished uploads the column shows before it is asked.
+const UPLOADED_PREVIEW = 5;
+
 export default function LabStationPage() {
   const [toast, setToast] = useState("");
   const toastTimer = useRef(null);
@@ -350,6 +359,7 @@ export default function LabStationPage() {
   const advance = useAdvanceSample();
   const upload = useUploadReport();
   const [openOrderId, setOpenOrderId] = useState(null);
+  const [showAllUploaded, setShowAllUploaded] = useState(false);
 
   const counts = {
     pending: data?.pending?.length ?? 0,
@@ -405,6 +415,7 @@ export default function LabStationPage() {
 
   return (
     <div className="gf">
+      <StationNotice station="lab" />
       <div className="rail">
         <div className="rl">Lab Station</div>
         <div className="rsep" />
@@ -468,7 +479,10 @@ export default function LabStationPage() {
                     {group.label}
                   </div>
                   <div className="pt-list">
-                    {(group.key === "uploaded" ? orders.slice(0, 3) : orders).map((order) => (
+                    {(group.key === "uploaded" && !showAllUploaded
+                      ? orders.slice(0, UPLOADED_PREVIEW)
+                      : orders
+                    ).map((order) => (
                       <LabCard
                         key={order.orderId}
                         order={order}
@@ -479,8 +493,17 @@ export default function LabStationPage() {
                         busy={advance.isPending || upload.isPending}
                       />
                     ))}
-                    {group.key === "uploaded" && orders.length > 3 && (
-                      <div className="more-note">+ {orders.length - 3} more uploaded today</div>
+                    {group.key === "uploaded" && orders.length > UPLOADED_PREVIEW && (
+                      <button
+                        type="button"
+                        className="more-note more-btn"
+                        aria-expanded={showAllUploaded}
+                        onClick={() => setShowAllUploaded((v) => !v)}
+                      >
+                        {showAllUploaded
+                          ? `Show fewer — ${orders.length} uploaded today`
+                          : `+ ${orders.length - UPLOADED_PREVIEW} more uploaded today — show all`}
+                      </button>
                     )}
                   </div>
                 </div>

@@ -1,6 +1,6 @@
 import pool from "../../config/db.js";
 import { advanceStatus, budgetColour } from "./statusEngine.js";
-import { getSlaConfig, budgetMap } from "./board.js";
+import { getSlaConfig, budgetLookup } from "./board.js";
 import { slaKeyForStatus } from "../../../shared/giniflowStatus.js";
 import { todaysVitals, previousVitals } from "./visitVitals.js";
 
@@ -140,7 +140,7 @@ export async function getMoQueue(visitDate, sdId = null, q = null, now = new Dat
     db.query(QUEUE_SQL, [visitDate, QUEUE_STATUSES, term, digits]),
     getSlaConfig(db),
   ]);
-  const budgets = budgetMap(sla);
+  const budgetFor = budgetLookup(sla);
 
   const groups = {
     withMe: [],
@@ -180,10 +180,10 @@ export async function getMoQueue(visitDate, sdId = null, q = null, now = new Dat
       // client recomputes the minutes every second; the budget and the colour
       // come from here, where the SLA config lives.
       waitMinutes: waitMinutes(r, now),
-      waitBudget: budgets[slaKeyForStatus(r.current_status)] ?? null,
+      waitBudget: budgetFor(slaKeyForStatus(r.current_status), r.category),
       waitColour: budgetColour(
         waitMinutes(r, now) ?? 0,
-        budgets[slaKeyForStatus(r.current_status)] ?? null,
+        budgetFor(slaKeyForStatus(r.current_status), r.category),
       ),
       bios: bioChips(r.biomarkers),
       reports: reportsLine(r.results_status, !!r.biomarkers),

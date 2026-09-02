@@ -95,6 +95,22 @@ export const useCompleteReferral = () =>
     async (id) => (await api.post(`${base}/${id}/complete`, { confirm: true })).data,
   );
 
+// The return leg (brief §4.7): what the specialist said, and the medicines they
+// started. Invalidates the medicine card too — the whole point is that the new
+// drugs become visible to whoever prescribes next.
+export const useRecordResponse = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, note, medicines, complete }) =>
+      (await api.post(`${base}/${id}/response`, { note, medicines, complete })).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "referrals"] });
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "medcard"] });
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "prescription"] });
+    },
+  });
+};
+
 // The letter opens in a new tab, so it must carry the token itself — the same
 // `?token=` self-authenticating URL shape image and PDF links already use.
 export const letterHref = (id) =>

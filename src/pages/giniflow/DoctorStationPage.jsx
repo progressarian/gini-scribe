@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useDoctorQueue, useStartConsult } from "../../queries/hooks/useGiniflowDoctor";
 import "../../styles/giniflow-station.css";
+import StationNotice from "../../components/giniflow/StationNotice";
 
 // The consultant's day list — gini-doctor-v3.html.
 //
@@ -225,6 +226,7 @@ export default function DoctorStationPage() {
 
   return (
     <div className="gf">
+      <StationNotice station="doctor" />
       <div className="top-rail">
         <div className="tr-logo">Gini Flow</div>
         <div className="tr-role" style={{ background: "var(--blu-l)", color: "var(--blu)" }}>

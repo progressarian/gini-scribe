@@ -369,9 +369,68 @@
 .gf .sla-row {
   display: flex;
   align-items: center;
+  /* Wraps so the per-category panel below can claim a full row of its own
+     rather than squeezing in beside the station's own input. */
+  flex-wrap: wrap;
   gap: 10px;
   padding: 9px 0;
   border-bottom: 1px solid var(--bd);
+}
+.gf .sla-row > div:first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Per-category budgets (brief §3 category_overrides) ── */
+.gf .sla-cat-toggle {
+  border: 1px dashed var(--bd2);
+  border-radius: 20px;
+  background: none;
+  font-family: var(--fb);
+  font-size: 9.5px;
+  font-weight: 600;
+  color: var(--ink3);
+  padding: 3px 9px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.gf .sla-cat-toggle:hover:not(:disabled) {
+  border-style: solid;
+  border-color: var(--tl);
+  color: var(--tl);
+}
+.gf .sla-cat-toggle:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.gf .sla-cats {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  background: var(--bg);
+  border-radius: var(--r);
+  padding: 9px 10px;
+  margin-top: 2px;
+}
+.gf .sla-cat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.gf .sla-cat > span:first-child {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--ink2);
+}
+.gf .sla-cat .sla-inp {
+  width: 58px;
+}
+.gf .sla-cat-hint {
+  font-size: 9.5px;
+  color: var(--ink3);
+  margin-top: 2px;
 }
 .gf .sla-name {
   flex: 1;

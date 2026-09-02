@@ -1,4 +1,5 @@
 import { Router } from "express";
+import jwt from "jsonwebtoken";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
 import { requireCapability } from "../middleware/auth.js";
@@ -10,8 +11,10 @@ import {
   giniflowPrioritySchema,
   giniflowReorderSchema,
   giniflowMoveSchema,
+  giniflowNoticeSchema,
 } from "../schemas/index.js";
 import { CAPABILITIES as CAP } from "../../shared/permissions.js";
+import { publishNotice, realtimeStatus } from "../services/giniflow/realtimeBus.js";
 import { getStationTimes } from "../services/giniflow/statusEngine.js";
 import {
   getSlaConfig,
@@ -64,8 +67,89 @@ router.get("/giniflow/events", requireCapability(CAP.GINIFLOW_VIEW), async (req,
 });
 
 router.get("/giniflow/events/status", requireCapability(CAP.GINIFLOW_VIEW), (req, res) => {
-  res.json(hubStatus());
+  res.json({ ...hubStatus(), realtime: realtimeStatus() });
 });
+
+// ── Supabase Realtime ───────────────────────────────────────────────────────
+// docs/gini-flow/21-SUPABASE-REALTIME-PLAN.md §4.3.
+//
+// Scribe's auth is its own JWT system, not Supabase Auth. Realtime accepts any
+// token signed with the project's JWT secret, so the server mints a second,
+// much narrower one rather than the app adopting Supabase Auth wholesale.
+//
+// One hour and no refresh token, deliberately: the browser has to come back
+// here, where the capability is re-checked against a live `auth_sessions` row.
+// A long-lived token would outlive a revoked login, which is the failure this
+// shape exists to prevent.
+const REALTIME_TOKEN_TTL_S = 3600;
+
+router.get("/giniflow/realtime-token", requireCapability(CAP.GINIFLOW_VIEW), async (req, res) => {
+  try {
+    const secret = process.env.SUPABASE_JWT_SECRET;
+    const url = process.env.SUPABASE_URL;
+    const anonKey = process.env.SUPABASE_ANON_KEY;
+    // Not an error: Realtime is additive while SSE still carries every event,
+    // so an unconfigured server tells the client to stay on SSE rather than
+    // failing a screen that works.
+    if (!secret || !url || !anonKey) return res.json({ enabled: false });
+
+    // The days this token may listen to. Today and tomorrow covers every screen
+    // — the stations show today, triage shows either — and naming them means a
+    // token cannot be replayed against an arbitrary date.
+    const { rows } = await pool.query(
+      `SELECT (NOW() AT TIME ZONE 'Asia/Kolkata')::date::text AS today,
+              ((NOW() AT TIME ZONE 'Asia/Kolkata')::date + 1)::text AS tomorrow,
+              ((NOW() AT TIME ZONE 'Asia/Kolkata')::date - 1)::text AS yesterday`,
+    );
+    const days = [rows[0].yesterday, rows[0].today, rows[0].tomorrow];
+
+    const token = jwt.sign(
+      {
+        role: "authenticated",
+        sub: String(req.doctor?.doctor_id ?? "giniflow"),
+        giniflow_rt: "v1",
+        giniflow_days: days,
+      },
+      secret,
+      { expiresIn: REALTIME_TOKEN_TTL_S },
+    );
+    res.json({ enabled: true, token, url, anonKey, days, expiresIn: REALTIME_TOKEN_TTL_S });
+  } catch (e) {
+    handleError(res, e, "Gini Flow realtime token");
+  }
+});
+
+// The coordinator telling a station it is the bottleneck — the one message no
+// table change implies, and the reason this transport exists (§3).
+router.post(
+  "/giniflow/notify",
+  requireCapability(CAP.GINIFLOW_MANAGE_QUEUE),
+  validate(giniflowNoticeSchema),
+  async (req, res) => {
+    try {
+      const from =
+        (req.doctor?.short_name || req.doctor?.doctor_name || "").trim() || "Coordinator";
+      const sent = [];
+      let reachable = false;
+      for (const station of req.body.stations) {
+        const r = await publishNotice(station, {
+          text: req.body.text,
+          from,
+          at: new Date().toISOString(),
+        });
+        if (r.published) sent.push(station);
+        if (r.reachable) reachable = true;
+      }
+      // `reachable` is the honest half. Publishing succeeds whenever the service
+      // key is set, but until the browser half is configured no station screen
+      // can subscribe — so "sent" would be true and "heard" false. A coordinator
+      // who believes a desk was told stops walking over to tell them (RT-04).
+      res.json({ sent, delivered: sent.length, requested: req.body.stations.length, reachable });
+    } catch (e) {
+      handleError(res, e, "Gini Flow notify");
+    }
+  },
+);
 
 // "Today" is the IST day. The server runs UTC, so CURRENT_DATE would show
 // yesterday's board to anyone on the floor before 05:30 IST.
@@ -114,8 +198,14 @@ router.get("/giniflow/visits/:id/timeline", async (req, res) => {
     );
     if (!visit.rows.length) return res.status(404).json({ error: "Visit not found" });
 
+    // Per-category budgets: a timeline judged against the base budget would
+    // mark a red-category patient's consultation over budget while the board
+    // beside it — which now resolves per category — shows the same step green.
     const sla = await getSlaConfig();
-    const steps = await getStationTimes(pool, req.params.id, budgetMap(sla));
+    const steps = await getStationTimes(pool, req.params.id, budgetMap(sla), new Date(), {
+      slaConfig: sla,
+      category: visit.rows[0].category,
+    });
     res.json({ visit: visit.rows[0], steps, serverTime: new Date().toISOString() });
   } catch (e) {
     handleError(res, e, "Gini Flow timeline");
@@ -151,11 +241,23 @@ router.patch(
     try {
       await client.query("BEGIN");
       for (const b of budgets) {
+        // `categoryOverrides` is optional and COALESCEd, so a client that sends
+        // only budgets — the shape this endpoint had before Phase 4 — leaves
+        // existing overrides alone rather than wiping them. An explicit `{}`
+        // clears them, which is how the drawer removes one.
         await client.query(
           `UPDATE giniflow_sla_config
-              SET budget_minutes = $2, updated_at = NOW(), updated_by = $3
+              SET budget_minutes    = $2,
+                  category_overrides = COALESCE($4::jsonb, category_overrides),
+                  updated_at = NOW(),
+                  updated_by = $3
             WHERE station = $1`,
-          [b.station, b.budgetMinutes, req.doctor?.short_name || req.doctor?.doctor_name || null],
+          [
+            b.station,
+            b.budgetMinutes,
+            req.doctor?.short_name || req.doctor?.doctor_name || null,
+            b.categoryOverrides === undefined ? null : JSON.stringify(b.categoryOverrides),
+          ],
         );
       }
       await client.query("COMMIT");

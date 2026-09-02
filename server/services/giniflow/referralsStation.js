@@ -1,13 +1,17 @@
 import pool from "../../config/db.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config/storage.js";
 import { buildCard } from "./medicineCard.js";
+import { todaysVitals, previousVitals } from "./visitVitals.js";
 import { generateReferralLetterPdf } from "../prescriptionHtmlPdf.js";
 import { sendReferralLetter } from "../msg91.js";
+import { addExternal } from "./prescription.js";
 import {
   isValidSpecialty,
   specialtyLabel,
   specialtyIcon,
   urgencyMeta,
+  urgencyTargetHours,
+  referralNo,
   referralStatusMeta,
   URGENCY_RANK,
   URGENCY_VALUES,
@@ -34,11 +38,13 @@ const PAST_WINDOW_DAYS = 30;
 const SELECT_SQL = `
   SELECT r.id, r.visit_id, r.patient_id, r.to_doctor, r.to_doctor_phone, r.specialty,
          r.hospital, r.urgency, r.reason, r.investigations,
+         r.presenting_complaint, r.requested_action, r.allergy_status, r.allergy_note,
          r.letter_file_url, r.letter_generated_at, r.letter_sent_at, r.sent_to,
          r.appointment_date::text AS appointment_date, r.appointment_note,
-         r.status, r.created_at,
+         r.status, r.created_at, r.ref_no,
+         r.response_note, r.response_at, r.response_by,
          v.visit_date::text AS visit_date,
-         p.name, p.file_no, p.age, p.sex, p.phone,
+         p.name, p.file_no, p.age, p.sex, p.phone, p.dob::text AS dob,
          COALESCE(ref.short_name, ref.name) AS referred_by,
          COALESCE(doc.short_name, doc.name, sd.short_name, sd.name) AS visit_doctor
     FROM giniflow_referrals r
@@ -62,6 +68,7 @@ const shape = (row) => {
     age: row.age,
     sex: row.sex,
     phone: row.phone,
+    dob: row.dob,
     toDoctor: row.to_doctor,
     toDoctorPhone: row.to_doctor_phone,
     specialty: row.specialty,
@@ -71,6 +78,8 @@ const shape = (row) => {
     urgency: row.urgency,
     urgencyLabel: urgency.short,
     urgencyTone: urgency.tone,
+    // The window the label promises, as a number a report can group by.
+    targetHours: urgencyTargetHours(row.urgency),
     reason: row.reason,
     investigations: row.investigations,
     letterUrl: row.letter_file_url,
@@ -79,6 +88,11 @@ const shape = (row) => {
     sentTo: row.sent_to,
     appointmentDate: row.appointment_date,
     appointmentNote: row.appointment_note,
+    responseNote: row.response_note,
+    responseAt: iso(row.response_at),
+    responseBy: row.response_by,
+    refNo: row.ref_no,
+    referralNo: referralNo(row.ref_no, row.created_at),
     status: row.status,
     statusLabel: status.label,
     statusTone: status.tone,
@@ -93,6 +107,10 @@ const shape = (row) => {
     // the return leg is deferred (19 §12.3), and a button that toasts and does
     // nothing is worse than an absent one on a screen a coordinator trusts.
     canRemove: row.status === "created" && !row.letter_file_url,
+    // The reply can be recorded at any point after the referral was raised —
+    // a specialist who saw the patient the same afternoon should not have to
+    // wait for somebody to press "Book appointment" first.
+    canRecordResponse: true,
     canSendToDoctor: !!row.to_doctor_phone,
     canSendToPatient: !!row.phone,
   };
@@ -210,7 +228,11 @@ export async function createReferral(visitId, fields = {}, db = pool) {
     toDoctorPhone = null,
     hospital = null,
     urgency = "routine",
+    presentingComplaint = null,
     reason = null,
+    requestedAction = null,
+    allergyStatus = "not_known",
+    allergyNote = null,
     investigations = null,
     actorId = null,
     source = "desk",
@@ -231,8 +253,9 @@ export async function createReferral(visitId, fields = {}, db = pool) {
     const { rows } = await client.query(
       `INSERT INTO giniflow_referrals
          (visit_id, patient_id, to_doctor, to_doctor_phone, specialty, hospital,
-          urgency, reason, investigations, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+          urgency, reason, investigations, created_by,
+          presenting_complaint, requested_action, allergy_status, allergy_note)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        ON CONFLICT (visit_id, specialty) DO UPDATE SET
          to_doctor       = COALESCE(EXCLUDED.to_doctor, giniflow_referrals.to_doctor),
          to_doctor_phone = COALESCE(EXCLUDED.to_doctor_phone, giniflow_referrals.to_doctor_phone),
@@ -240,6 +263,12 @@ export async function createReferral(visitId, fields = {}, db = pool) {
          urgency         = EXCLUDED.urgency,
          reason          = COALESCE(EXCLUDED.reason, giniflow_referrals.reason),
          investigations  = COALESCE(EXCLUDED.investigations, giniflow_referrals.investigations),
+         presenting_complaint = COALESCE(EXCLUDED.presenting_complaint,
+                                         giniflow_referrals.presenting_complaint),
+         requested_action     = COALESCE(EXCLUDED.requested_action,
+                                         giniflow_referrals.requested_action),
+         allergy_status       = EXCLUDED.allergy_status,
+         allergy_note         = COALESCE(EXCLUDED.allergy_note, giniflow_referrals.allergy_note),
          updated_at      = NOW()
        WHERE giniflow_referrals.status = 'created'
          AND giniflow_referrals.letter_file_url IS NULL
@@ -255,6 +284,10 @@ export async function createReferral(visitId, fields = {}, db = pool) {
         reason,
         investigations,
         actorId,
+        presentingComplaint,
+        requestedAction,
+        allergyStatus,
+        allergyStatus === "known" ? allergyNote : null,
       ],
     );
     // No row back means the conflict target existed and the guard refused it.
@@ -338,14 +371,90 @@ export async function buildLetterData(referralId, db = pool) {
   const row = await loadReferral(referralId, db);
   if (!row) throw bad("Referral not found", 404);
 
+  // WHO REFERRED, not who clicked.
+  //
+  // This used to prefer `created_by`, so a referral raised by a coordinator or
+  // an admin signed the letter with their name and their `specialty` — a real
+  // letter went out reading "Gurjot · Admin & Strategy". A specialist has to
+  // know which clinician is asking and who to reply to, and "Admin & Strategy"
+  // is neither. The consultant on the visit is the referrer; the person who
+  // typed it is recorded separately, which is also the better audit trail.
   const { rows: doctor } = await db.query(
-    `SELECT COALESCE(d.name, d.short_name) AS name, d.specialty, d.license_no
+    `SELECT COALESCE(d.name, d.short_name) AS name, d.specialty, d.license_no, d.phone,
+            COALESCE(c.short_name, c.name)  AS created_by_name
        FROM giniflow_referrals r
        LEFT JOIN giniflow_visits v ON v.id = r.visit_id
-       LEFT JOIN doctors d ON d.id = COALESCE(r.created_by, v.assigned_doctor_id, v.assigned_sd_id)
+       LEFT JOIN doctors d ON d.id = COALESCE(v.assigned_doctor_id, v.assigned_sd_id, r.created_by)
+       LEFT JOIN doctors c ON c.id = r.created_by
       WHERE r.id = $1`,
     [referralId],
   );
+
+  // Everything below is read from what the chart ALREADY holds. Nothing here
+  // invents a clinical fact to fill a section — an empty section is honest and
+  // a fabricated one is dangerous.
+  const { rows: history } = await db.query(
+    `SELECT label, since_year FROM diagnoses
+      WHERE patient_id = $1 AND COALESCE(is_active, TRUE)
+      ORDER BY category = 'primary' DESC, since_year NULLS LAST, label`,
+    [row.patient_id],
+  );
+
+  // The reading behind the referral: this visit's if the station took one,
+  // otherwise the most recent on the chart. Read through the shared helper, so
+  // a reading taken on HealthRay is not invisible here either.
+  const vitals =
+    (await todaysVitals(
+      row.visit_id,
+      { patientId: row.patient_id, visitDate: row.visit_date },
+      db,
+    )) || (await previousVitals(row.patient_id, row.visit_date, db));
+
+  // Current against previous, with the date, so a trend reads at a glance
+  // rather than as two numbers in a sentence.
+  // Current against the last DIFFERENT reading, per marker.
+  //
+  // Not "the two most recent appointments": a booking carries the last known
+  // biomarkers forward, so today's row and the visit that produced it hold the
+  // same number — and the letter printed 10.7 against 10.7 and called it a
+  // trend. It also printed an empty "current" for a marker today's row happened
+  // not to carry.
+  //
+  // So each marker is walked back independently until the value actually
+  // changes. That is what a clinician means by "previous", and it is the
+  // difference between a trend and a typo.
+  const { rows: marks } = await db.query(
+    `SELECT DISTINCT ON (appointment_date) appointment_date::text AS date, biomarkers
+       FROM appointments
+      WHERE patient_id = $1
+        AND biomarkers IS NOT NULL AND biomarkers <> '{}'::jsonb
+        AND appointment_date <= COALESCE($2::date, (NOW() AT TIME ZONE 'Asia/Kolkata')::date)
+      ORDER BY appointment_date DESC, id DESC
+      LIMIT 12`,
+    [row.patient_id, row.visit_date || null],
+  );
+  const MARKERS = [
+    ["hba1c", "HbA1c", "%"],
+    ["creatinine", "Creatinine", "mg/dL"],
+    ["fg", "FBS", ""],
+    ["weight", "Weight", "kg"],
+  ];
+  const trend = MARKERS.map(([key, label, unit]) => {
+    const seen = marks
+      .map((m) => ({ date: m.date, value: m.biomarkers?.[key] }))
+      .filter((x) => x.value !== null && x.value !== undefined);
+    if (!seen.length) return null;
+    const current = seen[0];
+    const previous = seen.find((x) => String(x.value) !== String(current.value)) || null;
+    return {
+      label,
+      unit,
+      current: current.value,
+      currentDate: current.date,
+      previous: previous?.value ?? null,
+      previousDate: previous?.date ?? null,
+    };
+  }).filter(Boolean);
 
   // One medicine history, read the same way the card and the prescription read
   // it. The specialist needs to know what the patient is already on before they
@@ -357,11 +466,16 @@ export async function buildLetterData(referralId, db = pool) {
     row,
     data: {
       referral: {
+        // Printed so the receiving clinic can quote it back. The UUID is the
+        // key; this is the number a human can say out loud.
+        referralNo: referralNo(row.ref_no, row.created_at),
         specialty: row.specialty,
         urgency: row.urgency,
         toDoctor: row.to_doctor,
         hospital: row.hospital,
+        presentingComplaint: row.presenting_complaint,
         reason: row.reason,
+        requestedAction: row.requested_action,
         investigations: row.investigations,
         createdAt: row.created_at,
       },
@@ -369,6 +483,10 @@ export async function buildLetterData(referralId, db = pool) {
         name: row.name,
         age: row.age,
         sex: row.sex,
+        // Age alone cannot identify a patient at the receiving end — two 68M
+        // Singhs is not a hypothetical here. DOB is printed when the chart has
+        // one, and simply omitted when it does not.
+        dob: row.dob,
         fileNo: row.file_no,
         phone: row.phone,
       },
@@ -376,7 +494,41 @@ export async function buildLetterData(referralId, db = pool) {
         name: doctor[0]?.name || "Gini Advanced Care Hospital",
         qualification: doctor[0]?.specialty || null,
         registration: doctor[0]?.license_no ? `Reg. ${doctor[0].license_no}` : null,
+        // Who the specialist calls back. The letterhead carries the hospital
+        // switchboard, which is not the same thing as reaching the clinician
+        // who asked the question.
+        phone: doctor[0]?.phone || null,
+        // Shown only when somebody other than the referring clinician typed it.
+        preparedBy:
+          doctor[0]?.created_by_name && doctor[0].created_by_name !== doctor[0].name
+            ? doctor[0].created_by_name
+            : null,
       },
+      history: history.map((h) => ({
+        label: h.label,
+        since: h.since_year || null,
+      })),
+      // Asked at referral time, because there is no allergy field on the chart
+      // and this is the moment somebody else is about to prescribe. Three
+      // states, never blank: "none known" reaches a specialist only because a
+      // human said so, and "nobody asked" is sayable rather than implied by an
+      // empty box.
+      allergies: {
+        status: row.allergy_status || "not_known",
+        note: row.allergy_note || null,
+      },
+      findings: vitals
+        ? {
+            bp: vitals.bp_sys && vitals.bp_dia ? `${vitals.bp_sys}/${vitals.bp_dia}` : null,
+            pulse: vitals.pulse ?? null,
+            spo2: vitals.spo2 ?? null,
+            temp: vitals.temp ?? null,
+            weight: vitals.weight ?? null,
+            bmi: vitals.bmi ?? null,
+            takenAt: vitals.recorded_at || null,
+          }
+        : null,
+      trend,
       medicines: card.groups.flatMap((g) => g.medicines),
     },
   };
@@ -391,6 +543,46 @@ export async function storedLetterUrl(referralId, db = pool) {
   ]);
   if (!rows.length) throw bad("Referral not found", 404);
   return rows[0].letter_file_url || null;
+}
+
+// Just the fields the download filename needs, when the bytes came from storage
+// and there is nothing to render.
+export async function loadReferralHeader(referralId, db = pool) {
+  const row = await loadReferral(referralId, db);
+  if (!row) throw bad("Referral not found", 404);
+  return { name: row.name, specialty: row.specialty };
+}
+
+// The stored letter's BYTES, fetched with the service key.
+//
+// Not a redirect to the stored URL, which is what this used to do and why the
+// button 404'd: `patient-files` is a PRIVATE bucket, so the
+// `/object/public/<bucket>/...` form Supabase hands you resolves to
+// "Bucket not found". The bucket cannot be made public either — it holds every
+// patient's prescriptions and lab reports.
+//
+// So the letter is proxied, exactly as `GET /documents/:id/stream` already
+// proxies a prescription: the server reads it with the key it has and streams
+// it to a caller the auth middleware has already checked. No CORS, no expiry,
+// no public object.
+export async function fetchStoredLetter(referralId, db = pool) {
+  const url = await storedLetterUrl(referralId, db);
+  if (!url || !SUPABASE_URL || !SUPABASE_SERVICE_KEY) return null;
+
+  // Accepts either shape, because rows written before this fix hold the public
+  // form: .../object/public/<bucket>/<path> and .../object/<bucket>/<path>.
+  const marker = `/storage/v1/object/`;
+  const at = url.indexOf(marker);
+  if (at < 0) return null;
+  const objectPath = url.slice(at + marker.length).replace(/^public\//, "");
+
+  const resp = await fetch(`${SUPABASE_URL}/storage/v1/object/${objectPath}`, {
+    headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` },
+  });
+  // A missing object is not an error the desk can act on — the route renders a
+  // fresh letter instead, which is always possible.
+  if (!resp.ok) return null;
+  return Buffer.from(await resp.arrayBuffer());
 }
 
 // The render, on its own, for the inline PDF route (§7.2). No database write —
@@ -522,6 +714,85 @@ export async function bookAppointment(referralId, { date, note = null } = {}, db
 
 // Seen, and the loop is closed. The one irreversible action on this screen, so
 // the route asks for `{ confirm: true }` the way every other one here does.
+// The return leg — brief §4.7, 19 §12.3.
+//
+// A referral used to be write-only: the letter went out and the row's story
+// ended. What the specialist said came back on paper and stayed there, which
+// means Gini's own prescriber could not see the medicines the specialist had
+// just started. That is the interaction check failing silently, not a filing
+// problem.
+//
+// The medicines do NOT live on the referral. They go to `medications` with
+// `external_doctor`, through the same addExternal() the consult screen uses, so
+// they reach the medicine card, the pharmacy's dispense list and the referral
+// letter's "Current medicines" the same way every other external medicine does.
+//
+// One transaction: a reply recorded without its medicines would tell the desk
+// the loop was closed while the prescriber still could not see the new drugs.
+export async function recordResponse(
+  referralId,
+  { note = null, medicines = [], complete = true, actorName = null },
+  db = pool,
+) {
+  const text = String(note || "").trim();
+  if (!text && !medicines.length) {
+    throw bad("Write what the specialist said, or add the medicines they started", 400);
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query(
+      `SELECT id, patient_id, to_doctor, specialty, hospital, status
+         FROM giniflow_referrals WHERE id = $1 FOR UPDATE`,
+      [referralId],
+    );
+    if (!rows.length) throw bad("Referral not found", 404);
+    const referral = rows[0];
+
+    const added = [];
+    for (const med of medicines) {
+      const name = String(med.medicineName || "").trim();
+      if (!name) continue;
+      added.push(
+        await addExternal(
+          referral.patient_id,
+          {
+            ...med,
+            medicineName: name,
+            // Attributed to the specialist, not to whoever typed it in. The
+            // medicine card prints this line, and "Prescribed by: coordinator"
+            // would be false on a clinical document.
+            prescriberName: referral.to_doctor || specialtyLabel(referral.specialty),
+            prescriberSpecialty: specialtyLabel(referral.specialty),
+            prescriberHospital: referral.hospital,
+          },
+          client,
+        ),
+      );
+    }
+
+    await client.query(
+      `UPDATE giniflow_referrals
+          SET response_note = COALESCE(NULLIF($2, ''), response_note),
+              response_at   = NOW(),
+              response_by   = $3,
+              status        = CASE WHEN $4 THEN 'completed' ELSE status END,
+              updated_at    = NOW()
+        WHERE id = $1`,
+      [referralId, text, actorName, complete],
+    );
+
+    await client.query("COMMIT");
+    return { ...shape(await loadReferral(referralId, db)), medicinesAdded: added };
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 export async function completeReferral(referralId, db = pool) {
   const client = await db.connect();
   try {

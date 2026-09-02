@@ -6,6 +6,7 @@ import {
   useSendLetter,
   useBookReferralAppointment,
   useCompleteReferral,
+  useRecordResponse,
 } from "../../queries/hooks/useGiniflowReferrals";
 import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
 import LiveBadge from "../../components/giniflow/LiveBadge";
@@ -26,9 +27,37 @@ import "../../styles/giniflow-station.css";
 // hard-coded strings, an empty note in each group, and a search — a referral
 // list is looked at to answer "what happened to Mr Sandhu", which is a search.
 
+// A group heading that opens and closes its own list. A real button inside the
+// heading, so it keeps heading semantics for a screen reader and states whether
+// the section is open — same shape as the vitals queue's GroupHead, and it
+// reuses that chevron and count.
+function GroupHead({ title, sub, count, open, onToggle, id }) {
+  return (
+    <h2 className="sq-gh">
+      <button
+        type="button"
+        className="sq-toggle"
+        aria-expanded={open}
+        aria-controls={id}
+        onClick={onToggle}
+      >
+        <span className={`sq-chev${open ? " open" : ""}`} aria-hidden="true">
+          ▸
+        </span>
+        {title}
+        {sub && <span className="sq-ghsub">— {sub}</span>}
+        <span className="sq-count">{count}</span>
+      </button>
+    </h2>
+  );
+}
+
 export default function ReferralsStationPage() {
   const [search, setSearch] = useState("");
   const [formOpen, setFormOpen] = useState(false);
+  // Today open, the last 30 days closed. The station is worked forward: past
+  // referrals are what you go looking for, and they are twenty rows deep.
+  const [groups, setGroups] = useState({ today: true, past: false });
   const [toast, setToast] = useState("");
   const toastTimer = useRef(null);
 
@@ -43,9 +72,15 @@ export default function ReferralsStationPage() {
   const send = useSendLetter();
   const book = useBookReferralAppointment();
   const complete = useCompleteReferral();
+  const respond = useRecordResponse();
 
   const busy =
-    create.isPending || remove.isPending || send.isPending || book.isPending || complete.isPending;
+    create.isPending ||
+    remove.isPending ||
+    send.isPending ||
+    book.isPending ||
+    complete.isPending ||
+    respond.isPending;
 
   const showToast = (msg) => {
     setToast(msg);
@@ -90,6 +125,23 @@ export default function ReferralsStationPage() {
         { id: r.id, date: opts.date, note: opts.note },
         {
           onSuccess: () => showToast(`📅 Appointment recorded for ${r.name}`),
+          onError: fail,
+        },
+      );
+    }
+
+    if (action === "response") {
+      return respond.mutate(
+        { id: r.id, note: opts.note, medicines: opts.medicines, complete: true },
+        {
+          onSuccess: (res) => {
+            const n = res.medicinesAdded?.length || 0;
+            showToast(
+              n
+                ? `✓ Reply recorded — ${n} medicine${n === 1 ? "" : "s"} added to ${r.name}'s chart as external`
+                : `✓ Reply recorded — ${r.specialtyLabel} referral closed`,
+            );
+          },
           onError: fail,
         },
       );
@@ -163,33 +215,50 @@ export default function ReferralsStationPage() {
           {!isLoading && (
             <>
               <div className="ref-group">
-                <div className="grp-lbl">Today&apos;s referrals — {today.length}</div>
-                {today.length ? (
-                  today.map((r) => (
-                    <ReferralCard key={r.id} referral={r} busy={busy} onAction={onAction} />
-                  ))
-                ) : (
-                  <div className="empty-note">
-                    {query
-                      ? "No referral today matches that search."
-                      : "No referrals today. A consultant raises one from the Care plan's referral chips, or start one with “+ New referral”."}
-                  </div>
-                )}
+                <GroupHead
+                  id="ref-today"
+                  title="Today's referrals"
+                  count={today.length}
+                  open={groups.today}
+                  onToggle={() => setGroups((g) => ({ ...g, today: !g.today }))}
+                />
+                <div id="ref-today" className="ref-list" hidden={!groups.today}>
+                  {today.length ? (
+                    today.map((r) => (
+                      <ReferralCard key={r.id} referral={r} busy={busy} onAction={onAction} />
+                    ))
+                  ) : (
+                    <div className="empty-note">
+                      {query
+                        ? "No referral today matches that search."
+                        : "No referrals today. A consultant raises one from the Care plan's referral chips, or start one with “+ New referral”."}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="ref-group">
-                <div className="grp-lbl">Past referrals — last 30 days</div>
-                {past.length ? (
-                  past.map((r) => (
-                    <ReferralCard key={r.id} referral={r} past busy={busy} onAction={onAction} />
-                  ))
-                ) : (
-                  <div className="empty-note">
-                    {query
-                      ? "Nothing in the last 30 days matches that search."
-                      : "No referrals in the last 30 days."}
-                  </div>
-                )}
+                <GroupHead
+                  id="ref-past"
+                  title="Past referrals"
+                  sub="last 30 days"
+                  count={past.length}
+                  open={groups.past || !!query}
+                  onToggle={() => setGroups((g) => ({ ...g, past: !g.past }))}
+                />
+                <div id="ref-past" className="ref-list" hidden={!groups.past && !query}>
+                  {past.length ? (
+                    past.map((r) => (
+                      <ReferralCard key={r.id} referral={r} past busy={busy} onAction={onAction} />
+                    ))
+                  ) : (
+                    <div className="empty-note">
+                      {query
+                        ? "Nothing in the last 30 days matches that search."
+                        : "No referrals in the last 30 days."}
+                    </div>
+                  )}
+                </div>
               </div>
             </>
           )}

@@ -12,6 +12,7 @@ import { useTick, minutesSince, budgetColour } from "../../lib/giniflowTime";
 import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
 import LiveBadge from "../../components/giniflow/LiveBadge";
 import "../../styles/giniflow-station.css";
+import StationNotice from "../../components/giniflow/StationNotice";
 
 const CATEGORY_BADGE = {
   worse_out_of_range: { cls: "b-red", label: "🔴 Red" },
@@ -373,6 +374,7 @@ export default function VitalsStationPage() {
 
   return (
     <div className="gf">
+      <StationNotice station="vitals" />
       <div className="top-rail">
         <div className="tr-logo">Gini Flow</div>
         <div className="tr-role" style={{ background: "var(--blu-l)", color: "var(--blu)" }}>

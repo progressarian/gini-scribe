@@ -16,7 +16,8 @@ import { specialtyLabel, specialtyIcon, urgencyMeta } from "../../shared/giniflo
 
 const LETTER_CSS = `
 .rl-body{padding:20px 22px}
-.rl-date{font-family:var(--fm);font-size:11px;color:var(--ink3);margin-bottom:14px}
+.rl-date{font-family:var(--fm);font-size:11px;color:var(--ink3);margin-bottom:14px;display:flex;justify-content:space-between;gap:12px;align-items:baseline}
+.rl-ref{font-weight:500;color:var(--ink2)}
 .rl-to-lbl{font-size:9.5px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px}
 .rl-to-name{font-size:15px;font-weight:700;color:var(--nv)}
 .rl-to-meta{font-size:11.5px;color:var(--ink2);margin-top:2px}
@@ -28,6 +29,14 @@ const LETTER_CSS = `
 .rl-sec-title{font-size:9.5px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;padding-bottom:3px;border-bottom:1px solid var(--bd)}
 .rl-text{font-size:12px;color:var(--ink2);line-height:1.65;white-space:pre-wrap}
 .rl-inv{display:flex;flex-wrap:wrap;gap:5px}
+.rl-list{margin:0;padding-left:16px;font-size:12px;color:var(--ink2);line-height:1.7}
+.rl-list em{color:var(--ink3);font-style:normal}
+.rl-unknown{color:var(--amb)}
+.rl-tbl{width:100%;border-collapse:collapse;font-size:11.5px}
+.rl-tbl th{text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:.4px;color:var(--ink3);font-weight:700;padding:0 8px 4px 0;border-bottom:1px solid var(--bd)}
+.rl-tbl td{padding:4px 8px 4px 0;border-bottom:1px solid var(--bg);color:var(--ink2);font-family:var(--fm)}
+.rl-tbl td em{font-style:normal;color:var(--ink3);font-size:10px}
+.rl-sign-prep{font-size:10px;color:var(--ink3);margin-top:3px}
 .rl-inv span{font-family:var(--fm);font-size:10.5px;font-weight:500;color:var(--ink2);background:var(--bg);border:1px solid var(--bd);border-radius:20px;padding:2px 9px}
 .rl-med{display:flex;gap:10px;align-items:baseline;padding:5px 0;border-bottom:1px solid var(--bd)}
 .rl-med:last-child{border-bottom:none}
@@ -47,6 +56,25 @@ const LETTER_CSS = `
 `;
 
 const HOSPITAL_PHONE = "+91 81463 20100";
+
+const fmtDateTime = (value) =>
+  new Date(value || Date.now()).toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Kolkata",
+  });
+
+// DOB prints as a date, never as a locale string with a weekday — a receiving
+// clinic matches it character by character against their own record.
+const fmtDob = (value) => {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString("en-GB", { timeZone: "Asia/Kolkata" });
+};
 
 const fmtDate = (value) =>
   new Date(value || Date.now()).toLocaleDateString("en-IN", {
@@ -69,6 +97,7 @@ const splitInvestigations = (raw) =>
 const patientLine = (patient = {}) =>
   [
     patient.age ? `${patient.age}${(patient.sex || "").slice(0, 1).toUpperCase()}` : null,
+    fmtDob(patient.dob) ? `DOB ${fmtDob(patient.dob)}` : null,
     patient.fileNo || patient.file_no,
     patient.phone,
   ]
@@ -76,7 +105,39 @@ const patientLine = (patient = {}) =>
     .join(" · ");
 
 export function buildReferralLetterHtml(data = {}) {
-  const { referral = {}, patient = {}, doctor = {}, medicines = [] } = data;
+  const {
+    referral = {},
+    patient = {},
+    doctor = {},
+    medicines = [],
+    history = [],
+    allergies = null,
+    findings = null,
+    trend = [],
+  } = data;
+
+  // Three states, and each says something different to a prescriber. "Not asked"
+  // must never render as an empty line, because an empty allergy field on a
+  // letter reads as "none".
+  const allergyText =
+    allergies?.status === "known" && allergies.note
+      ? { label: allergies.note, unknown: false }
+      : allergies?.status === "none_known"
+        ? { label: "None known — asked at referral", unknown: false }
+        : { label: "NOT ASKED — please check with the patient before prescribing", unknown: true };
+
+  // Only what the chart actually holds. A findings row for a value nobody
+  // measured would be a fabricated observation on a clinical document.
+  const findingRows = !findings
+    ? []
+    : [
+        findings.bp ? `BP ${findings.bp} mmHg` : null,
+        findings.pulse ? `Pulse ${findings.pulse}` : null,
+        findings.spo2 ? `SpO₂ ${findings.spo2}%` : null,
+        findings.temp ? `Temp ${findings.temp}` : null,
+        findings.weight ? `Weight ${findings.weight} kg` : null,
+        findings.bmi ? `BMI ${findings.bmi}` : null,
+      ].filter(Boolean);
 
   const specialty = specialtyLabel(referral.specialty);
   const urgency = urgencyMeta(referral.urgency);
@@ -130,7 +191,14 @@ export function buildReferralLetterHtml(data = {}) {
   </div>
 
   <div class="rl-body">
-    <div class="rl-date">${escape(fmtDate(referral.createdAt))}</div>
+    <div class="rl-date">
+      <span>${escape(fmtDate(referral.createdAt))}</span>
+      ${
+        referral.referralNo
+          ? `<span class="rl-ref">Ref ${escape(referral.referralNo)} &middot; raised ${escape(fmtDateTime(referral.createdAt))}</span>`
+          : ""
+      }
+    </div>
 
     <div class="rl-to">
       <div class="rl-to-lbl">Referral to</div>
@@ -148,15 +216,74 @@ export function buildReferralLetterHtml(data = {}) {
       </div>
     </div>
 
+    ${
+      String(referral.presentingComplaint || "").trim()
+        ? `<div class="rl-sec">
+      <div class="rl-sec-title">Presenting complaint</div>
+      <div class="rl-text">${escape(referral.presentingComplaint.trim())}</div>
+    </div>`
+        : ""
+    }
+
     <div class="rl-sec">
       <div class="rl-sec-title">Reason for referral</div>
       <div class="rl-text">${escape(referral.reason || "").trim() || "—"}</div>
     </div>
 
     ${
+      history.length
+        ? `<div class="rl-sec">
+      <div class="rl-sec-title">Relevant medical history</div>
+      <ul class="rl-list">${history
+        .map(
+          (h) =>
+            `<li>${escape(h.label)}${h.since ? ` <em>— since ${escape(String(h.since))}</em>` : ""}</li>`,
+        )
+        .join("")}</ul>
+    </div>`
+        : ""
+    }
+
+    <!-- Allergies is printed EVEN WHEN EMPTY, and says what is true.
+         No allergy field exists in this database, so the honest line is "not
+         recorded" — printing "NKDA" would tell a specialist that somebody
+         checked, and prescribing against that is exactly the harm this section
+         exists to prevent. -->
+    <div class="rl-sec">
+      <div class="rl-sec-title">Allergies</div>
+      <div class="rl-text${allergyText.unknown ? " rl-unknown" : ""}">${escape(allergyText.label)}</div>
+    </div>
+
+    ${
+      findingRows.length
+        ? `<div class="rl-sec">
+      <div class="rl-sec-title">Clinical findings${findings.takenAt ? ` · ${escape(fmtDate(findings.takenAt))}` : ""}</div>
+      <div class="rl-inv">${findingRows.map((f) => `<span>${escape(f)}</span>`).join("")}</div>
+    </div>`
+        : ""
+    }
+
+    ${
+      trend.length
+        ? `<div class="rl-sec">
+      <div class="rl-sec-title">Key numbers</div>
+      <table class="rl-tbl">
+        <tr><th>Investigation</th><th>Current</th><th>Previous</th></tr>
+        ${trend
+          .map(
+            (t) =>
+              `<tr><td>${escape(t.label)}</td><td><strong>${escape(String(t.current ?? "—"))}${t.current != null && t.unit ? ` ${escape(t.unit)}` : ""}</strong>${t.currentDate ? `<em> · ${escape(fmtDate(t.currentDate))}</em>` : ""}</td><td>${t.previous == null ? "—" : `${escape(String(t.previous))}${t.previousDate ? `<em> · ${escape(fmtDate(t.previousDate))}</em>` : ""}`}</td></tr>`,
+          )
+          .join("")}
+      </table>
+    </div>`
+        : ""
+    }
+
+    ${
       investigations.length
         ? `<div class="rl-sec">
-      <div class="rl-sec-title">Key investigations shared</div>
+      <div class="rl-sec-title">Key investigations to share</div>
       <div class="rl-inv">${investigations.map((i) => `<span>${escape(i)}</span>`).join("")}</div>
     </div>`
         : ""
@@ -170,14 +297,31 @@ export function buildReferralLetterHtml(data = {}) {
       ${medsHtml}
     </div>
 
+    ${
+      String(referral.requestedAction || "").trim()
+        ? `<div class="rl-sec">
+      <div class="rl-sec-title">Requested specialist action</div>
+      <div class="rl-text">${escape(referral.requestedAction.trim())}</div>
+    </div>`
+        : ""
+    }
+
     <div class="rl-sign">
       <div>
         <div class="rl-sign-name">${escape(doctor.name || "Doctor")}</div>
         <div class="rl-sign-cred">${credLines || "Gini Advanced Care Hospital"}</div>
+        <div class="rl-sign-cred">${doctor.phone ? `${escape(doctor.phone)} &middot; ` : ""}${HOSPITAL_PHONE}</div>
+        ${
+          doctor.preparedBy
+            ? `<div class="rl-sign-prep">Letter prepared by ${escape(doctor.preparedBy)}</div>`
+            : ""
+        }
       </div>
       <div class="rl-reply">
         Please reply with your assessment and any medicine changes to
-        <strong>${HOSPITAL_PHONE}</strong> so the patient's record here stays complete.
+        <strong>${doctor.phone ? escape(doctor.phone) : HOSPITAL_PHONE}</strong>${
+          referral.referralNo ? `, quoting <strong>${escape(referral.referralNo)}</strong>,` : ""
+        } so the patient's record here stays complete.
       </div>
     </div>
   </div>

@@ -1,5 +1,6 @@
 import pool from "../../config/db.js";
 import { publish } from "./eventHub.js";
+import { publishEvents } from "./realtimeBus.js";
 
 // Everything that happens on the Gini Flow floor is already written to an
 // append-only table: `advanceStatus` writes every status move, the lab order
@@ -52,6 +53,20 @@ const STREAMS = [
            WHERE g.seq > $1 ORDER BY g.seq LIMIT ${BATCH}`,
     map: (r) => ({ kind: "vitals", visitId: r.visit_id, date: r.date }),
   },
+  // The coordinator categorising or assigning. Its own table rather than
+  // giniflow_visit_events, because those are journey steps and the station
+  // timers are measured from them — see the migration
+  // 2026-09-02_giniflow_triage_events.sql. The bulk auto-categorise pass writes
+  // nothing here on purpose: it runs on every board load and would be a
+  // heartbeat, not news.
+  {
+    kind: "triage",
+    sql: `SELECT e.seq, e.visit_id, e.action, v.visit_date::text AS date
+            FROM giniflow_triage_events e
+            JOIN giniflow_visits v ON v.id = e.visit_id
+           WHERE e.seq > $1 ORDER BY e.seq LIMIT ${BATCH}`,
+    map: (r) => ({ kind: "triage", visitId: r.visit_id, status: r.action, date: r.date }),
+  },
 ];
 
 let timer = null;
@@ -64,7 +79,8 @@ async function primeWatermarks(db) {
   const { rows } = await db.query(
     `SELECT COALESCE((SELECT max(seq) FROM giniflow_visit_events), 0)     AS visit,
             COALESCE((SELECT max(seq) FROM giniflow_lab_order_events), 0) AS lab_order,
-            COALESCE((SELECT max(seq) FROM giniflow_vitals), 0)           AS vitals`,
+            COALESCE((SELECT max(seq) FROM giniflow_vitals), 0)           AS vitals,
+            COALESCE((SELECT max(seq) FROM giniflow_triage_events), 0)    AS triage`,
   );
   for (const s of STREAMS) watermarks.set(s.kind, Number(rows[0][s.kind]));
 }
@@ -77,7 +93,15 @@ async function tick(db) {
       const from = watermarks.get(stream.kind) ?? 0;
       const { rows } = await db.query(stream.sql, [from]);
       if (!rows.length) continue;
-      for (const row of rows) publish(stream.map(row));
+      const envelopes = rows.map(stream.map);
+      for (const ev of envelopes) publish(ev);
+      // The same envelopes, on Supabase Realtime. Published from HERE and not
+      // from the write sites, which is a deliberate departure from
+      // 21-SUPABASE-REALTIME-PLAN.md §4.4(a) — see §4.4.1 there. In short: the
+      // tailer only ever sees committed rows, it is one call site instead of
+      // ten, and it already hears the worker's HealthRay sync, which write-site
+      // publishing in the API process would miss entirely.
+      publishEvents(envelopes);
       watermarks.set(stream.kind, Number(rows[rows.length - 1].seq));
     }
   } catch (e) {

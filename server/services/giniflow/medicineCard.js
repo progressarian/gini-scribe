@@ -1,4 +1,10 @@
 import pool from "../../config/db.js";
+import {
+  MED_SLOTS,
+  SLOT_ORDER,
+  UNSLOTTED,
+  WHEN_TO_TAKE_SLOT,
+} from "../../../shared/giniflowMedTiming.js";
 
 // The medicine card — gini-doctor-final.html `s-medcard`.
 //
@@ -10,33 +16,31 @@ import pool from "../../config/db.js";
 // implementations of a dosing schedule is four chances to tell a patient the
 // wrong time, so there is one — this.
 
-// Render order of the day. `sos`, `weekly` and `fortnightly` sit at the end
-// because they are not part of the daily rhythm.
-const SLOTS = [
-  { key: "before_breakfast", label: "🍳 Before breakfast" },
-  { key: "with_breakfast", label: "🥘 With breakfast" },
-  { key: "after_breakfast", label: "🍽 After breakfast" },
-  { key: "before_lunch", label: "🍛 Before lunch" },
-  { key: "with_lunch", label: "🥘 With lunch" },
-  { key: "after_lunch", label: "🍽 After lunch" },
-  { key: "evening", label: "🌇 Evening" },
-  { key: "before_dinner", label: "🍲 Before dinner" },
-  { key: "with_dinner", label: "🥘 With dinner" },
-  { key: "after_dinner", label: "🍽 After dinner" },
-  { key: "bedtime", label: "🌙 At bedtime" },
-  { key: "with_meals", label: "🍽 With meals" },
-  { key: "weekly", label: "📅 Weekly" },
-  { key: "fortnightly", label: "📅 Fortnightly" },
-  { key: "sos", label: "🔔 As needed" },
-];
-
-const SLOT_ORDER = new Map(SLOTS.map((s, i) => [s.key, i]));
-
-// A medicine with no timing_category still has to appear somewhere: dropping it
-// would hide a dose the patient is taking. It goes in "Timing not set", which
-// reads as the instruction it is — incomplete — rather than being silently
-// filed under breakfast.
-const UNSLOTTED = { key: "unslotted", label: "⏰ Timing not set" };
+// A medicine taken twice a day carries two values, and it stays ONE row: the
+// pharmacy dispenses a medicine once, and splitting it would put the same
+// medicationId under two dispense buttons. It is filed at the EARLIEST of its
+// slots, which is where a patient meets it first in the day; the row still
+// prints every value it has, and the frequency (BD, TDS) says how many doses
+// follow.
+const slotFor = (entry) => {
+  if (SLOT_ORDER.has(entry.timingCategory)) return entry.timingCategory;
+  const values = Array.isArray(entry.whenToTake)
+    ? entry.whenToTake
+    : entry.whenToTake
+      ? [entry.whenToTake]
+      : [];
+  const slots = values
+    .map((v) =>
+      WHEN_TO_TAKE_SLOT.get(
+        String(v || "")
+          .trim()
+          .toLowerCase(),
+      ),
+    )
+    .filter((k) => SLOT_ORDER.has(k));
+  if (!slots.length) return UNSLOTTED.key;
+  return slots.sort((a, b) => SLOT_ORDER.get(a) - SLOT_ORDER.get(b))[0];
+};
 
 const timeLabel = (t) => {
   if (!t) return null;
@@ -50,6 +54,7 @@ export async function buildCard(patientId, db = pool) {
   const { rows } = await db.query(
     `SELECT m.id, m.name, m.composition, m.dose, m.previous_dose, m.frequency, m.timing,
             m.timing_category, m.time_of_day::text AS time_of_day, m.external_doctor,
+            m.external_specialty, m.external_hospital, m.external_condition, m.interaction_flag,
             m.clinical_note, m.instructions, m.change_type, m.is_new, m.when_to_take,
             m.form, m.route, m.for_diagnosis, m.med_group,
             i.stock_qty, i.reorder_level, i.alternatives
@@ -84,6 +89,15 @@ export async function buildCard(patientId, db = pool) {
     // for reference — the Gini pharmacy does not dispense them.
     external: !!m.external_doctor,
     prescriber: m.external_doctor,
+    // The context the brief asked for and the card had no way to show: a
+    // specialist's name alone does not tell a pharmacist which specialist, from
+    // where, or what for.
+    prescriberSpecialty: m.external_specialty,
+    prescriberHospital: m.external_hospital,
+    condition: m.external_condition,
+    // A checked interaction, written by a human. Rendered as a warning, never
+    // inferred — the card must not imply a pair was checked when it was not.
+    interactionFlag: m.interaction_flag,
     note: m.clinical_note,
     changeType: m.change_type || (m.is_new ? "new" : null),
     whenToTake: m.when_to_take || null,
@@ -100,12 +114,12 @@ export async function buildCard(patientId, db = pool) {
 
   const bySlot = new Map();
   for (const entry of entries) {
-    const key = SLOT_ORDER.has(entry.timingCategory) ? entry.timingCategory : UNSLOTTED.key;
+    const key = slotFor(entry);
     if (!bySlot.has(key)) bySlot.set(key, []);
     bySlot.get(key).push(entry);
   }
 
-  const groups = [...SLOTS, UNSLOTTED]
+  const groups = [...MED_SLOTS, UNSLOTTED]
     .filter((slot) => bySlot.has(slot.key))
     .map((slot) => {
       const meds = bySlot

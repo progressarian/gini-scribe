@@ -10,6 +10,7 @@ import {
 import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
 import LiveBadge from "../../components/giniflow/LiveBadge";
 import "../../styles/giniflow-station.css";
+import StationNotice from "../../components/giniflow/StationNotice";
 
 const AVATAR_COLOURS = ["#374151", "#1e3a5f", "#14532d", "#7c2d12", "#7f1d1d", "#b45309"];
 
@@ -117,11 +118,15 @@ function OrderCard({ order, onClear, pending }) {
   );
 }
 
+// How many of the day's cleared orders the tab shows before it is asked.
+const CLEARED_PREVIEW = 8;
+
 // Exported so the render smoke can execute the payments branch too — only one
 // tab is mounted at a time, and the tab that is not showing still has to render.
 export function PaymentsTab({ data, isLoading, onClear, pending }) {
   const queue = data?.pending || [];
   const cleared = data?.cleared || [];
+  const [showAllCleared, setShowAllCleared] = useState(false);
 
   return (
     <>
@@ -157,7 +162,7 @@ export function PaymentsTab({ data, isLoading, onClear, pending }) {
       {cleared.length > 0 && (
         <div>
           <div className="grp-lbl grp-lbl-sp">✅ Cleared today — lab notified</div>
-          {cleared.slice(0, 8).map((o) => (
+          {(showAllCleared ? cleared : cleared.slice(0, CLEARED_PREVIEW)).map((o) => (
             <div className="test-order-card is-cleared" key={o.orderId}>
               <div className="toc-head">
                 <div className="toc-cleared">
@@ -173,8 +178,17 @@ export function PaymentsTab({ data, isLoading, onClear, pending }) {
               </div>
             </div>
           ))}
-          {cleared.length > 8 && (
-            <div className="more-note">+ {cleared.length - 8} more cleared today</div>
+          {cleared.length > CLEARED_PREVIEW && (
+            <button
+              type="button"
+              className="more-note more-btn"
+              aria-expanded={showAllCleared}
+              onClick={() => setShowAllCleared((v) => !v)}
+            >
+              {showAllCleared
+                ? `Show fewer — ${cleared.length} cleared today`
+                : `+ ${cleared.length - CLEARED_PREVIEW} more cleared today — show all`}
+            </button>
           )}
         </div>
       )}
@@ -519,6 +533,7 @@ export default function ReceptionStationPage() {
 
   return (
     <div className="gf">
+      <StationNotice station="reception" />
       <div className="rail">
         <div className="rl">Reception</div>
         <div className="rsep" />

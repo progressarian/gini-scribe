@@ -34,6 +34,7 @@ import {
   giniflowSearchQuerySchema,
   giniflowReferralQuerySchema,
   giniflowReferralSchema,
+  giniflowReferralResponseSchema,
   giniflowReferralChipSchema,
   giniflowReferralLetterSchema,
   giniflowReferralSendSchema,
@@ -59,18 +60,25 @@ import {
   searchWalkInPatients,
   checkInWalkIn,
 } from "../services/giniflow/receptionStation.js";
-import { getLabQueue, advanceSample, uploadReport } from "../services/giniflow/labStation.js";
+import {
+  getLabQueue,
+  advanceSample,
+  uploadReport,
+  fetchStoredReport,
+} from "../services/giniflow/labStation.js";
 import {
   getReferrals,
   searchReferralPatients,
   createReferral,
   removeReferral,
   renderLetter,
-  storedLetterUrl,
+  fetchStoredLetter,
+  loadReferralHeader,
   generateLetter,
   sendLetter,
   bookAppointment,
   completeReferral,
+  recordResponse,
   referralsForVisit,
 } from "../services/giniflow/referralsStation.js";
 import { extractPlan } from "../services/giniflow/planExtract.js";
@@ -738,6 +746,30 @@ router.post(
   },
 );
 
+// The uploaded report, inline.
+//
+// Proxied, never redirected: `patient-files` is a PRIVATE bucket, so the public
+// URL Supabase composes 404s with "Bucket not found" — which is exactly what
+// "View uploaded report" used to do. The bucket cannot be made public; it holds
+// every patient's prescriptions and lab reports.
+//
+// Readable by anyone who can see the patient's labs, not just the lab: the MO
+// and the consultant are the whole reason the upload notifies anybody.
+router.get(
+  "/giniflow/stations/lab/:orderId/report.file",
+  requireCapability(CAP.GINIFLOW_VIEW),
+  async (req, res) => {
+    try {
+      const { bytes, contentType, fileName } = await fetchStoredReport(req.params.orderId);
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Content-Disposition", `inline; filename="${fileName}"`);
+      res.send(bytes);
+    } catch (e) {
+      handleError(res, e, "Gini Flow lab report");
+    }
+  },
+);
+
 // ── MO / SD ─────────────────────────────────────────────────────────────────
 const moGate = requireCapability(CAP.GINIFLOW_STATION_MO);
 
@@ -1103,6 +1135,30 @@ router.delete("/giniflow/referrals/:id", referralChipGate, async (req, res) => {
   }
 });
 
+// The specialist's reply, and the medicines they started (brief §4.7, 19 §12.3).
+//
+// One call, not two: a reply saved without its medicines would tell the desk the
+// loop was closed while Gini's prescriber still could not see the new drugs.
+router.post(
+  "/giniflow/referrals/:id/response",
+  referralsGate,
+  validate(giniflowReferralResponseSchema),
+  async (req, res) => {
+    try {
+      res.json(
+        await recordResponse(req.params.id, {
+          note: req.body.note ?? null,
+          medicines: req.body.medicines || [],
+          complete: req.body.complete !== false,
+          actorName: req.doctor?.short_name || req.doctor?.doctor_name || null,
+        }),
+      );
+    } catch (e) {
+      referralsError(res, e, "Gini Flow referral response");
+    }
+  },
+);
+
 // The letter, inline (§7.2, RF-05).
 //
 // The STORED file is authoritative when one exists: it is the letter the
@@ -1113,9 +1169,14 @@ router.delete("/giniflow/referrals/:id", referralChipGate, async (req, res) => {
 // renders on demand, which is what makes the route work before Finalize has run.
 router.get("/giniflow/referrals/:id/letter.pdf", referralsGate, async (req, res) => {
   try {
-    const stored = await storedLetterUrl(req.params.id);
-    if (stored) return res.redirect(stored);
-    const { pdf, referral } = await renderLetter(req.params.id);
+    // Proxied, never redirected: the storage bucket is private, so the public
+    // URL Supabase composes 404s with "Bucket not found". Serve the stored
+    // bytes when they are there and re-render when they are not — the letter
+    // must open either way.
+    const stored = await fetchStoredLetter(req.params.id);
+    const { pdf, referral } = stored
+      ? { pdf: stored, referral: await loadReferralHeader(req.params.id) }
+      : await renderLetter(req.params.id);
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader(
       "Content-Disposition",

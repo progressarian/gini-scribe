@@ -148,7 +148,21 @@ export async function returnToQueue(
 
 // The one place durations are computed. Card timers, the timeline modal and the
 // station averages all read from here so they can never disagree.
-export async function getStationTimes(db, visitId, slaConfig, now = new Date()) {
+export async function getStationTimes(
+  db,
+  visitId,
+  slaConfig,
+  now = new Date(),
+  { slaConfig: slaRows = null, category = null } = {},
+) {
+  // `slaConfig` here is the flat station→minutes map every existing caller
+  // passes. When the caller also knows whose timeline this is, it passes the
+  // rows and the category so per-category overrides apply (brief §3, Phase 4).
+  const overrideFor = (station) => {
+    if (!slaRows || !category) return null;
+    const v = slaRows.find((r) => r.station === station)?.categoryOverrides?.[category];
+    return Number.isFinite(v) && v > 0 ? v : null;
+  };
   const { rows } = await db.query(
     `SELECT status, actor_role, occurred_at, meta
        FROM giniflow_visit_events
@@ -171,7 +185,8 @@ export async function getStationTimes(db, visitId, slaConfig, now = new Date()) 
       minutes: minutesBetween(enteredAt, leftAt || now),
       isCurrent: !next,
       isWait: isWaitStatus(row.status),
-      budgetMinutes: slaConfig[slaKeyForStatus(row.status)] ?? null,
+      budgetMinutes:
+        overrideFor(slaKeyForStatus(row.status)) ?? slaConfig[slaKeyForStatus(row.status)] ?? null,
     };
   });
 

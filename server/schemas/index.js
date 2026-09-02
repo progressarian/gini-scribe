@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CATEGORIES, TRIAGE_FILTERS } from "../../shared/giniflowStatus.js";
+import { MED_SLOT_KEYS } from "../../shared/giniflowMedTiming.js";
 import { SPECIALTY_VALUES, URGENCY_VALUES } from "../../shared/giniflowReferrals.js";
 
 // Canonical patient-facing "when to take" vocabulary. Must stay in sync
@@ -624,6 +625,14 @@ export const giniflowPlanSchema = z.object({
 // Reading the MO's own plan back to point at the test chips and the suggestion
 // form. Nothing is written, so the body is just the text on screen — which may
 // be ahead of what autosave has stored.
+// A notice the coordinator sends to a station. Free text, because "you are the
+// bottleneck" is a sentence and not a status — but capped, since it lands in a
+// banner on a wall display.
+export const giniflowNoticeSchema = z.object({
+  stations: z.array(z.string().min(1).max(40)).min(1).max(10),
+  text: z.string().min(1).max(280),
+});
+
 export const giniflowPlanExtractSchema = z.object({
   plan: z.string().min(1).max(20000),
 });
@@ -646,12 +655,43 @@ export const giniflowOrderTestsSchema = z.object({
   tests: z.array(z.string().min(1).max(120)).min(1).max(40),
 });
 
+// The specialist's reply (brief §4.7). `medicines` is the return leg: what the
+// specialist started, written to `medications` as external.
+export const giniflowReferralResponseSchema = z.object({
+  note: z.string().max(4000).nullish(),
+  complete: z.boolean().optional(),
+  medicines: z
+    .array(
+      z.object({
+        medicineName: z.string().min(1).max(200),
+        dose: z.string().max(100).nullish(),
+        frequency: z.string().max(60).nullish(),
+        // Validated against the card's own slot keys: a medicine filed under a
+        // slot the card does not draw would silently vanish into "Timing not
+        // set" — the exact failure this vocabulary was shared to prevent.
+        timingCategory: z.enum(MED_SLOT_KEYS).nullish(),
+        timing: z.string().max(120).nullish(),
+      }),
+    )
+    .max(20)
+    .optional(),
+});
+
 export const giniflowSlaUpdateSchema = z.object({
   budgets: z
     .array(
       z.object({
         station: z.string().min(1),
         budgetMinutes: z.number().int().positive().max(600),
+        // Per-category budgets (brief §3, Phase 4). Keys are validated against
+        // the shared category vocabulary rather than left open: a typo would
+        // store a budget nothing ever reads, which is worse than a refusal.
+        // partialRecord, not record: z.record over an enum in Zod 4 demands
+        // EVERY key, so overriding one category would have required sending all
+        // five. Overriding one is the normal case.
+        categoryOverrides: z
+          .partialRecord(z.enum(CATEGORIES), z.number().int().positive().max(600))
+          .nullish(),
       }),
     )
     .min(1),
@@ -811,6 +851,8 @@ export const giniflowExternalMedSchema = z.object({
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD")
     .nullish(),
+  // What the outside prescriber is treating with it, in the patient's words.
+  condition: z.string().max(200).nullish(),
   interactionFlag: z.string().max(300).nullish(),
 });
 
@@ -855,10 +897,25 @@ export const giniflowReferralSchema = z.object({
   specialty: z.enum(SPECIALTY_VALUES),
   toDoctor: z.string().trim().max(120).nullish(),
   // The prototype omits this and then draws a "Send to doctor" button (§4.1).
-  toDoctorPhone: z.string().trim().max(20).nullish(),
+  // Validated, because this number is what that button dials: an unchecked
+  // string reached MSG91 and failed there, long after the desk had moved on.
+  toDoctorPhone: z
+    .string()
+    .trim()
+    .transform((v) => (v ? v.replace(/\D/g, "") : v))
+    .refine((v) => !v || v.length === 10, "The specialist's number must be 10 digits")
+    .nullish(),
   hospital: z.string().trim().max(160).nullish(),
   urgency: z.enum(URGENCY_VALUES).default("routine"),
+  // Three prompts, not one. One box asking for everything produced prose with
+  // no shape, which is how unrelated text reached a letter unnoticed.
+  presentingComplaint: z.string().trim().max(2000).nullish(),
   reason: z.string().trim().min(3, "A referral needs a reason").max(4000),
+  requestedAction: z.string().trim().max(2000).nullish(),
+  // Never absent. A blank allergy field on a clinical document reads as "none"
+  // to whoever receives it, so "nobody asked" has to be sayable.
+  allergyStatus: z.enum(["none_known", "not_known", "known"]).default("not_known"),
+  allergyNote: z.string().trim().max(300).nullish(),
   investigations: z.string().trim().max(1000).nullish(),
 });
 

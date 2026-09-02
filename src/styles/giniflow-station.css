@@ -972,6 +972,25 @@
   color: var(--ink3);
   padding: 5px;
 }
+/* The same line, as the control it always read like.
+   It used to say "+ 52 more dispensed today" and then give nobody a way to
+   reach the 52 — a coordinator looking up what a patient was handed this
+   morning could see the count and not the row. */
+.gf .more-btn {
+  display: block;
+  width: 100%;
+  border: 1px dashed var(--bd2);
+  border-radius: var(--r);
+  background: none;
+  font-family: var(--fb);
+  font-weight: 600;
+  cursor: pointer;
+}
+.gf .more-btn:hover {
+  color: var(--ink2);
+  border-color: var(--ink4);
+  background: var(--bg);
+}
 
 /* Recheck prompt — a reading that moved a long way since the last visit. Sits
    between the fields and Done, and Done stays disabled until it is acknowledged:
@@ -3467,6 +3486,16 @@
 .gf .dcol {
   min-width: 0;
 }
+/* Done is a record, not a worklist — same reasoning as .dcol-others below, and
+   the same treatment: recessed, so on a 55-dispensed afternoon the eye still
+   lands on the empty queue that is the actual job. */
+.gf .dcol-done {
+  background: var(--bg2, #f6f7f9);
+  border: 1px solid var(--bd);
+  border-radius: var(--r-lg);
+  padding: 10px 11px;
+}
+
 /* The other-consultant column is context, not a worklist: recessed so the eye
    goes to your own patients first. */
 .gf .dcol-others {
@@ -3987,6 +4016,13 @@
 .gf .mm-warn-low {
   color: var(--amb);
 }
+/* "For hypertension" under an outside prescriber's name — what the medicine is
+   being taken for, which is the question a pharmacist asks next. */
+.gf .mm-ext-for {
+  font-size: 9.5px;
+  color: var(--ink3);
+  margin-top: 1px;
+}
 .gf .mm-refused {
   font-size: 10px;
   font-weight: 600;
@@ -4040,6 +4076,33 @@
   font-size: 9px;
   color: var(--ink4);
   line-height: 1.4;
+}
+/* What was recorded, on a visit that is closed. A label rather than a disabled
+   button: a greyed-out "Dispense" invites the press that the server will refuse,
+   and this row is now a record, not a control. */
+/* Said once at the top of a closed card, so "Not marked" on eight rows is an
+   answer rather than eight questions. */
+.gf .ph-unmarked {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--amb);
+  background: var(--amb-l);
+  border: 1px solid var(--amb-b);
+  border-radius: var(--r);
+  padding: 9px 11px;
+}
+
+.gf .mm-final {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--ink3);
+  white-space: nowrap;
+}
+.gf .mm-final.is-done {
+  color: var(--grn);
+}
+.gf .mm-final.is-refused {
+  color: var(--red);
 }
 .gf .dispense-btn {
   font: inherit;
@@ -5320,6 +5383,13 @@
   flex-direction: column;
   gap: 7px;
 }
+/* The collapsible half of a group. `hidden` does the hiding, so the heading
+   button's aria-expanded and what is actually on screen cannot disagree. */
+.gf .ref-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
 
 /* ── The card ── */
 .gf .ref-card {
@@ -5408,7 +5478,130 @@
   margin-bottom: 8px;
   border-left: 3px solid var(--tl);
   line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
+/* Opened, a 2,000-character reason still must not make the card taller than the
+   screen — that is what hid the "+ New referral" form above the fold and made
+   the rail button look dead. So it scrolls, but only once it has been asked
+   for: a scrollbar nobody requested hides text nobody knows is there. */
+.gf .ref-card .rc-reason.open {
+  max-height: 260px;
+  overflow-y: auto;
+}
+.gf .ref-card .rc-more {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: var(--fb);
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--tl);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.gf .ref-card .rc-more:hover {
+  text-decoration: underline;
+}
+/* What the specialist sent back. Green-edged against the reason's teal: one is
+   the question we asked, the other is the answer. */
+.gf .ref-card .rc-reply {
+  font-size: 11px;
+  color: var(--ink2);
+  background: var(--grn-l);
+  border: 1px solid var(--grn-b);
+  border-left: 3px solid var(--grn);
+  border-radius: var(--r);
+  padding: 7px 9px;
+  margin-bottom: 8px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.gf .ref-card .rc-reply-by {
+  font-size: 9.5px;
+  color: var(--ink3);
+  margin-top: 3px;
+}
+
+/* The reply form. Inline like the booking box, and for the same reason: it
+   records a sentence somebody was told, not a workflow. */
+.gf .ref-card .rc-reply-form {
+  background: var(--bg);
+  border: 1px dashed var(--bd2);
+  border-radius: var(--r);
+  padding: 10px;
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.gf .ref-card .rc-rf-note {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.gf .ref-card .rc-rf-note span,
+.gf .ref-card .rc-rf-lbl {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--ink3);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.gf .ref-card .rc-reply-form textarea,
+.gf .ref-card .rc-reply-form input,
+.gf .ref-card .rc-reply-form select {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  padding: 6px 9px;
+  font-family: var(--fb);
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--white);
+  outline: none;
+}
+.gf .ref-card .rc-reply-form textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+.gf .ref-card .rc-reply-form textarea:focus,
+.gf .ref-card .rc-reply-form input:focus,
+.gf .ref-card .rc-reply-form select:focus {
+  border-color: var(--tl);
+}
+.gf .ref-card .rc-rf-meds {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.gf .ref-card .rc-rf-med {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1.4fr;
+  gap: 5px;
+}
+.gf .ref-card .rc-rf-add {
+  align-self: flex-start;
+  border: 1px dashed var(--bd2);
+  border-radius: 20px;
+  background: none;
+  font-family: var(--fb);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--ink3);
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.gf .ref-card .rc-rf-add:hover {
+  border-style: solid;
+  border-color: var(--tl);
+  color: var(--tl);
+}
+
 .gf .ref-card .rc-appt {
   font-size: 11px;
   color: var(--amb);
@@ -5507,11 +5700,212 @@
   color: var(--ink);
   margin-bottom: 10px;
 }
+/* auto-fit rather than a fixed three-up: the form is worked from a desk and a
+   tablet both, and the column count should follow the space it actually has
+   instead of three fixed breakpoints guessing at it. */
 .gf .ref-form .rf-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px 9px;
   margin-bottom: 9px;
+}
+.gf .ref-form .rf-grid:last-child {
+  margin-bottom: 0;
+}
+
+/* ── The two field groups ──
+   A real <fieldset>/<legend>, so the grouping survives for a screen reader as
+   well as on screen. Not collapsible: every field inside is one a receiving
+   specialist reads, and a section folded shut is a section the desk forgets to
+   fill. */
+.gf .ref-form .rf-sec {
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  background: var(--white);
+  padding: 0 11px 11px;
+  margin: 0 0 9px;
+  min-width: 0;
+}
+.gf .ref-form .rf-sec.has-err {
+  border-color: var(--red-b);
+}
+.gf .ref-form .rf-sec > legend {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 6px;
+  margin-left: -3px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink2);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.gf .ref-form .rf-sec-hint {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--ink3);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.gf .ref-form .rf-sec-body {
+  padding-top: 4px;
+}
+
+/* "required" as a word, not an asterisk nobody has a legend for. */
+.gf .ref-form .rff-req {
+  font-size: 8.5px;
+  font-weight: 700;
+  color: var(--red);
+  background: var(--red-l);
+  border-radius: 20px;
+  padding: 1px 6px;
+  margin-left: 4px;
+  letter-spacing: 0.3px;
+}
+
+/* The message sits against the field it describes. A single line at the foot of
+   an eleven-input form said only that SOMETHING was wrong. */
+.gf .ref-form .rff-err {
+  margin: 4px 0 0;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--red);
+  line-height: 1.4;
+}
+.gf .ref-form .rff [aria-invalid="true"] {
+  border-color: var(--red);
+  background: var(--red-l);
+}
+.gf .ref-form .rff [aria-invalid="true"]:focus {
+  border-color: var(--red);
+}
+
+/* ── Allergies ──
+   The one field on this form with its own box and its own colour, because it is
+   the one a specialist prescribes against.
+
+   It was a <select>, which was wrong for it: a closed dropdown shows one option
+   and hides the other two, and the one it defaults to — "Not asked" — is the one
+   that prints an amber warning on a clinical letter. All three are on screen
+   now, each carrying the colour it will print in. */
+.gf .ref-form .rf-alg-field {
+  margin-top: 2px;
+}
+.gf .ref-form .rf-alg {
+  border: 1px solid var(--bd2);
+  border-radius: var(--r);
+  background: var(--bg);
+  padding: 0 10px 10px;
+  margin: 0;
+  min-width: 0;
+}
+.gf .ref-form .rf-alg > legend {
+  padding: 0 5px;
+  margin-left: -2px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--ink3);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.gf .ref-form .rf-alg-opts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px;
+  padding-top: 3px;
+}
+.gf .ref-form .rf-alg-opt {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 9px;
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  background: var(--white);
+  cursor: pointer;
+  min-width: 0;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+/* The radio itself is the accessible control and stays in the tab order; the
+   label around it is what is drawn. Hidden with position, never display:none —
+   a display:none radio is unfocusable and drops out of the group. */
+.gf .ref-form .rf-alg-opt input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.gf .ref-form .rf-alg-opt:hover {
+  border-color: var(--bd2);
+  background: var(--white);
+}
+.gf .ref-form .rf-alg-opt:has(input:focus-visible) {
+  outline: 2px solid var(--tl);
+  outline-offset: 1px;
+}
+.gf .ref-form .rf-alg-ico {
+  font-size: 13px;
+  line-height: 1;
+  flex-shrink: 0;
+  color: var(--ink3);
+}
+.gf .ref-form .rf-alg-txt {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.gf .ref-form .rf-alg-txt strong {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--ink2);
+}
+.gf .ref-form .rf-alg-txt em {
+  font-size: 10px;
+  font-style: normal;
+  color: var(--ink3);
+}
+
+/* Selected, in the colour the letter will use. */
+.gf .ref-form .rf-alg-opt.sel .rf-alg-txt strong {
+  color: inherit;
+}
+.gf .ref-form .rf-alg-amb.sel {
+  border-color: var(--amb);
+  background: var(--amb-l);
+  color: var(--amb);
+}
+.gf .ref-form .rf-alg-grn.sel {
+  border-color: var(--grn);
+  background: var(--grn-l);
+  color: var(--grn);
+}
+.gf .ref-form .rf-alg-red.sel {
+  border-color: var(--red);
+  background: var(--red-l);
+  color: var(--red);
+}
+.gf .ref-form .rf-alg-opt.sel .rf-alg-ico {
+  color: inherit;
+}
+
+.gf .ref-form .rf-alg-note {
+  margin-top: 7px;
+}
+.gf .ref-form .rf-alg-hint {
+  margin: 7px 0 0;
+  font-size: 10px;
+  color: var(--ink3);
+  line-height: 1.5;
 }
 .gf .ref-form .rff {
   min-width: 0;
@@ -5716,14 +6110,15 @@
    is the first thing to break, then the card's two-column strip; the footer
    already wraps, and its right-pushed status badge stops being pushed once the
    buttons have wrapped under it. */
-@media (max-width: 900px) {
-  .gf .ref-form .rf-grid {
-    grid-template-columns: 1fr 1fr;
-  }
-}
 @media (max-width: 620px) {
+  /* Below this the 190px track would still fit two columns on a phone, which is
+     two half-width selects nobody can read the options of. */
   .gf .ref-form .rf-grid {
     grid-template-columns: 1fr;
+  }
+  .gf .ref-form .rf-sec {
+    padding-left: 8px;
+    padding-right: 8px;
   }
   .gf .ref-card .rc-stats {
     flex-direction: column;
@@ -5733,6 +6128,9 @@
   .gf .ref-card .rc-book-note {
     width: 100%;
     min-width: 0;
+  }
+  .gf .ref-card .rc-rf-med {
+    grid-template-columns: 1fr 1fr;
   }
   .gf .ref-card .rc-status {
     margin-left: 0;
@@ -5796,4 +6194,65 @@
   display: flex;
   gap: 6px;
   margin-top: 8px;
+}
+
+/* ── Coordinator notice ──────────────────────────────────────────────────────
+   A message sent to this desk from the floor board (21-SUPABASE-REALTIME-PLAN
+   §3). A banner and not a toast: a toast is for something you did, and this is
+   something somebody else did to you — it stays until dismissed, because the
+   whole point is that a desk nobody is watching gets told. */
+.gf .st-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px 14px;
+  background: var(--amb-l);
+  border-bottom: 2px solid var(--amb);
+  color: #92400e;
+  flex-shrink: 0;
+}
+.gf .stn-ico {
+  font-size: 15px;
+  line-height: 1.3;
+}
+.gf .stn-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+.gf .stn-from {
+  font-size: 10.5px;
+  opacity: 0.8;
+}
+.gf .stn-x {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0 2px;
+  opacity: 0.7;
+}
+.gf .stn-x:hover {
+  opacity: 1;
+}
+
+/* Allergy status and its free-text, side by side — the input only appears for
+   "Known allergy", so the row is one control most of the time. */
+.gf .rf-allergy {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+}
+.gf .rf-allergy select {
+  flex: 0 0 210px;
+}
+.gf .rf-allergy input {
+  flex: 1;
+  min-width: 0;
 }

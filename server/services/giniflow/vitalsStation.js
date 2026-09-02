@@ -1,6 +1,7 @@
 import pool from "../../config/db.js";
 import { advanceStatus, returnToQueue, budgetColour, IST_TODAY } from "./statusEngine.js";
-import { getSlaConfig, budgetMap } from "./board.js";
+import { getSlaConfig, budgetLookup } from "./board.js";
+import { promoteVitals, promoteQuietly } from "./promote.js";
 import {
   STATUS_LABEL,
   slaKeyForStatus,
@@ -119,7 +120,7 @@ const DONE_SQL = `
    ORDER BY recorded_at DESC NULLS LAST`;
 
 export async function getVitalsQueue(visitDate, now = new Date(), db = pool) {
-  const budgets = budgetMap(await getSlaConfig(db));
+  const budgetFor = budgetLookup(await getSlaConfig(db));
 
   const [{ rows }, { rows: heldRows }, { rows: doneRows }] = await Promise.all([
     db.query(QUEUE_SQL, [visitDate, QUEUE_STATUSES]),
@@ -129,7 +130,7 @@ export async function getVitalsQueue(visitDate, now = new Date(), db = pool) {
 
   const waitFields = (r) => {
     const minutes = minutesSince(r.status_since, now);
-    const budget = budgets[slaKeyForStatus(r.current_status)] ?? null;
+    const budget = budgetFor(slaKeyForStatus(r.current_status), r.category);
     return {
       statusSince: r.status_since ? new Date(r.status_since).toISOString() : null,
       waitMinutes: minutes,
@@ -378,6 +379,12 @@ export async function saveVitals(
     }
 
     await client.query("COMMIT");
+
+    // Onto the chart, AFTER the commit — a reading the station has taken must
+    // not be undone by a failure to copy it forward, and the copy is idempotent
+    // so a retry (or `backfillPromotions`) can always finish the job.
+    promoteQuietly(promoteVitals, saved.rows[0].id);
+
     return { id: saved.rows[0].id, recordedAt: saved.rows[0].recorded_at, bmi };
   } catch (e) {
     await client.query("ROLLBACK");

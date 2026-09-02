@@ -28,6 +28,30 @@ export async function getSlaConfig(db = pool) {
 export const budgetMap = (slaConfig) =>
   Object.fromEntries(slaConfig.map((s) => [s.station, s.budgetMinutes]));
 
+// Per-category budgets (brief §3 `sla_config.category_overrides`, Phase 4).
+//
+// A station's budget is not one number for every patient. A red-category
+// patient — worse and out of range — is meant to take the doctor longer than an
+// in-control follow-up, and judging both against 20 minutes makes the board lie
+// twice: the careful consultation shows red, and the rushed one shows green.
+//
+// `budgetMap` stays for the callers with no patient in hand — the timeline's
+// lab_total, the day's per-station averages, which are across all categories by
+// definition. Anything looking at ONE visit resolves through this instead.
+//
+// The override is a plain `{category: minutes}` object on the row; anything
+// missing, null, or non-positive falls back to the station budget, so a
+// half-filled override cannot blank a budget out.
+export const budgetLookup = (slaConfig) => {
+  const byStation = new Map(slaConfig.map((s) => [s.station, s]));
+  return (station, category = null) => {
+    const row = byStation.get(station);
+    if (!row) return null;
+    const override = category ? row.categoryOverrides?.[category] : null;
+    return Number.isFinite(override) && override > 0 ? override : (row.budgetMinutes ?? null);
+  };
+};
+
 // One round trip for the whole day. The lateral joins keep it to a single query
 // no matter how many visits the day has — the board polls every 10s and a
 // per-visit follow-up query would multiply that by the floor's population.
@@ -159,6 +183,7 @@ const LAB_SUBTITLE = {
 
 export async function getDayBoard(visitDate, slaConfig, now = new Date(), db = pool) {
   const budgets = budgetMap(slaConfig);
+  const budgetFor = budgetLookup(slaConfig);
   const { rows } = await db.query(BOARD_SQL, [visitDate]);
 
   const cards = rows.map((row) => {
@@ -168,7 +193,7 @@ export async function getDayBoard(visitDate, slaConfig, now = new Date(), db = p
     const clock = finished && row.status_since ? new Date(row.status_since) : now;
     const statusMinutes = finished ? null : minutesSince(row.status_since, now);
     const totalMinutes = minutesSince(row.journey_started_at, clock);
-    const budget = budgets[slaKeyForStatus(row.current_status)] ?? null;
+    const budget = budgetFor(slaKeyForStatus(row.current_status), row.category);
     return {
       id: row.id,
       patientId: row.patient_id,

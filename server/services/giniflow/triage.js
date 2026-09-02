@@ -570,6 +570,31 @@ export async function autoCategoriseDay(visitDate, { db = pool } = {}) {
 // Passing `category: null` hands the row back to the engine: the source is
 // cleared and the day's sweep re-decides it. That is the only way to undo an
 // override, so it is a first-class action rather than a database fix.
+// The coordinator's own writes, logged so the tailer can carry them to a second
+// coordinator's screen within the second (migration 2026-09-02_giniflow_triage_events).
+//
+// A SEPARATE table from giniflow_visit_events, which is what keeps the rule
+// above true: nothing here is a journey step, and no station timer reads it.
+//
+// Fire-and-forget. The categorisation is already committed by the time this
+// runs, and failing to announce it must never fail the write — the other screen
+// simply learns on its next poll, which is what happened before this existed.
+async function logTriageEvent(
+  db,
+  { visitId, action, category = null, sdId = null, doctorId = null, actorId = null },
+) {
+  try {
+    await db.query(
+      `INSERT INTO giniflow_triage_events
+         (visit_id, action, category, assigned_sd_id, assigned_doctor_id, actor_id)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [visitId, action, category, sdId, doctorId, actorId],
+    );
+  } catch (e) {
+    console.warn("[giniflow triage] event log failed:", e.message);
+  }
+}
+
 export async function categorise(visitId, category, actorId = null, db = pool) {
   if (category !== null && !isCategory(category)) {
     throw Object.assign(new Error(`Unknown category: ${category}`), { status: 400 });
@@ -590,6 +615,12 @@ export async function categorise(visitId, category, actorId = null, db = pool) {
       `SELECT category, category_source FROM giniflow_visits WHERE id = $1`,
       [visitId],
     );
+    await logTriageEvent(db, {
+      visitId,
+      action: "categorised",
+      category: after.rows[0].category,
+      actorId,
+    });
     return {
       visitId,
       category: after.rows[0].category,
@@ -607,6 +638,12 @@ export async function categorise(visitId, category, actorId = null, db = pool) {
     [visitId, category, actorId],
   );
   if (!rows.length) throw Object.assign(new Error("No such visit"), { status: 404 });
+  await logTriageEvent(db, {
+    visitId,
+    action: "categorised",
+    category: rows[0].category,
+    actorId,
+  });
   return {
     visitId: rows[0].id,
     category: rows[0].category,
@@ -663,6 +700,13 @@ export async function assign(visitId, { sdId, doctorId } = {}, actorId = null, d
     [visitId],
   );
 
+  await logTriageEvent(db, {
+    visitId,
+    action: "assigned",
+    sdId: rows[0].assigned_sd_id,
+    doctorId: rows[0].assigned_doctor_id,
+    actorId,
+  });
   return {
     visitId,
     actorId,

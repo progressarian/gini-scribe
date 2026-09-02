@@ -217,6 +217,14 @@ export const ROLE_CAPABILITIES = {
     C.FLOW_STATION,
     C.FLOW_STATION_LAB,
     C.FLOW_FLOOR_VIEW,
+    // GINIFLOW_VIEW is what makes GINIFLOW_STATION_LAB below mean anything.
+    // `/api/giniflow*` is prefix-gated on VIEW in middleware/auth.js before any
+    // per-route capability runs, so without it a tech held the lab-station
+    // capability and still got 403 on every lab endpoint — and, worse, passed
+    // the FRONTEND check for /giniflow/station/lab (which gates on
+    // GINIFLOW_STATION_LAB) and landed on a page whose every call failed.
+    // A broken screen, not an honest refusal.
+    C.GINIFLOW_VIEW,
     C.GINIFLOW_STATION_LAB,
   ],
   [ROLES.RECEPTION]: [

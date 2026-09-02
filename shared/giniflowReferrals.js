@@ -47,16 +47,28 @@ export const isValidSpecialty = (v) => SPECIALTY_VALUES.includes(v);
 
 // The prototype's own wording, kept verbatim: "within 48 hrs" is the instruction
 // the desk acts on, and "Urgent" alone is not.
+// `hours` is the same promise the label makes, as a number. The label is what a
+// human reads; the number is what a report can group by, so "how many urgent
+// referrals went out past their window" is answerable without parsing "within
+// 48 hrs" out of a string. Emergency is same-day, not zero.
 export const URGENCIES = [
-  { value: "routine", label: "Routine (within 2 weeks)", short: "Routine", tone: "ink" },
-  { value: "soon", label: "Soon (within 1 week)", short: "Soon", tone: "amb" },
-  { value: "urgent", label: "Urgent (within 48 hrs)", short: "Urgent", tone: "red" },
-  { value: "emergency", label: "Emergency", short: "Emergency", tone: "red" },
+  {
+    value: "routine",
+    label: "Routine (within 2 weeks)",
+    short: "Routine",
+    tone: "ink",
+    hours: 336,
+  },
+  { value: "soon", label: "Soon (within 1 week)", short: "Soon", tone: "amb", hours: 168 },
+  { value: "urgent", label: "Urgent (within 48 hrs)", short: "Urgent", tone: "red", hours: 48 },
+  { value: "emergency", label: "Emergency", short: "Emergency", tone: "red", hours: 4 },
 ];
 
 export const URGENCY_VALUES = URGENCIES.map((u) => u.value);
 
 export const urgencyMeta = (v) => URGENCIES.find((u) => u.value === v) || URGENCIES[0];
+
+export const urgencyTargetHours = (v) => urgencyMeta(v).hours;
 
 // Ordering the station's list. A referral has no SLA — a specialist appointment
 // three weeks out is not a bottleneck a coordinator can clear — so urgency and
@@ -76,3 +88,15 @@ export const REFERRAL_STATUS_VALUES = REFERRAL_STATUSES.map((s) => s.value);
 
 export const referralStatusMeta = (v) =>
   REFERRAL_STATUSES.find((s) => s.value === v) || REFERRAL_STATUSES[0];
+
+// The reference a receiving clinic quotes back. The row's UUID is the key and
+// stays the key — but nobody reads 2a9696e4-6689-4047-b2c6-0470ef8f0e46 down a
+// phone line, so `ref_no` (a plain counter, migration
+// 2026-09-02_giniflow_referral_ref_no.sql) is printed with the year it was
+// raised in. Formatted here so the letter, the card and any future acknowledge
+// screen cannot render the same referral under two different numbers.
+export const referralNo = (refNo, createdAt) => {
+  if (!refNo) return null;
+  const year = new Date(createdAt || Date.now()).getFullYear();
+  return `REF-${year}-${String(refNo).padStart(6, "0")}`;
+};

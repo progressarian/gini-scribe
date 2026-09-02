@@ -32,7 +32,7 @@
 .gf-triage .tri-head {
   background: var(--white);
   border-bottom: 1px solid var(--bd);
-  padding: 10px 14px;
+  padding: 7px 14px;
   flex-shrink: 0;
   display: flex;
   align-items: flex-start;
@@ -41,16 +41,16 @@
 }
 .gf-triage .th-title {
   font-family: var(--fd);
-  font-size: 17px;
+  font-size: 15px;
   font-style: italic;
   color: var(--nv);
   line-height: 1.2;
 }
 .gf-triage .th-meta {
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--ink3);
-  margin-top: 2px;
-  line-height: 1.5;
+  margin-top: 1px;
+  line-height: 1.35;
 }
 .gf-triage .th-actions {
   margin-left: auto;
@@ -65,8 +65,8 @@
   gap: 3px;
 }
 .gf-triage .dnav {
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   border-radius: 6px;
   border: 1px solid var(--bd);
   background: var(--white);
@@ -81,7 +81,7 @@
   color: var(--ink);
 }
 .gf-triage .tri-input {
-  padding: 5px 9px;
+  padding: 4px 9px;
   border: 1px solid var(--bd);
   border-radius: 6px;
   font-family: var(--fb);
@@ -102,7 +102,7 @@
   width: 210px;
 }
 .gf-triage .tbtn {
-  padding: 5px 11px;
+  padding: 4px 10px;
   border-radius: 6px;
   font-size: 11px;
   font-weight: 600;
@@ -124,6 +124,17 @@
   opacity: 0.55;
   cursor: not-allowed;
 }
+/* Which day the board is on. The two shortcuts sit side by side, so the one you
+   are looking at has to say so — otherwise "Today" and "Tomorrow" read as two
+   buttons that both do nothing when you are already there. */
+.gf-triage .tbtn.on {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+}
+.gf-triage .tbtn.on:hover:not(:disabled) {
+  color: #fff;
+}
 .gf-triage .tbtn.primary {
   background: var(--tl);
   border-color: var(--tl);
@@ -138,6 +149,13 @@
   border-color: var(--pu-b);
   color: var(--pu);
 }
+/* A disabled tint button keeps its colour at 0.55 and still reads as live, so
+   it drops to the neutral grey the rest of the row uses. */
+.gf-triage .tbtn.pu:disabled {
+  background: var(--bg);
+  border-color: var(--bd);
+  color: var(--ink4);
+}
 
 /* ── PIPELINE ── */
 .gf-triage .pipeline {
@@ -146,13 +164,13 @@
   border: 1px solid var(--bd);
   border-radius: var(--r-lg);
   overflow: hidden;
-  margin: 0 14px 10px;
+  margin: 0 14px 8px;
   flex-shrink: 0;
 }
 .gf-triage .ps {
   flex: 1 1 0;
   min-width: 0;
-  padding: 8px 8px;
+  padding: 6px 8px;
   border-right: 1px solid var(--bd);
   text-align: center;
   cursor: pointer;
@@ -172,10 +190,10 @@
 }
 .gf-triage .ps-val {
   font-family: var(--fm);
-  font-size: 19px;
+  font-size: 17px;
   font-weight: 500;
   line-height: 1;
-  margin-bottom: 3px;
+  margin-bottom: 2px;
 }
 .gf-triage .ps-lbl {
   font-size: 9px;
@@ -188,8 +206,8 @@
 .gf-triage .ps-sub {
   font-size: 9px;
   color: var(--ink4);
-  margin-top: 2px;
-  line-height: 1.3;
+  margin-top: 1px;
+  line-height: 1.25;
 }
 .gf-triage .val-dim {
   color: var(--ink2);
@@ -209,7 +227,7 @@
   background: var(--white);
   border-top: 1px solid var(--bd);
   border-bottom: 1px solid var(--bd);
-  padding: 7px 14px;
+  padding: 5px 14px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -864,6 +882,61 @@
   border-color: var(--tl);
   background: var(--tl-l);
   color: var(--tl);
+}
+/* Both sides of the identity, side by side. A confirm step that shows only the
+   patient it chose asks "is this Kapil Dev?" against a report saying Kapil Dev —
+   which reads as agreement whichever Kapil Dev it picked. */
+/* A disagreement on a candidate in the shortlist — visible before the click,
+   not after, so the wrong one is never the easy one to press. */
+.gf-triage .sd-bad {
+  color: var(--amb);
+  font-style: normal;
+}
+.gf-triage .match-sides {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 11px;
+  margin-bottom: 8px;
+  background: var(--bg);
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+}
+.gf-triage .ms-col {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.gf-triage .ms-lbl {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink4);
+}
+.gf-triage .ms-val {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gf-triage .ms-sub {
+  font-family: var(--fm);
+  font-size: 10px;
+  color: var(--ink3);
+}
+.gf-triage .ms-arrow {
+  flex: 0 0 auto;
+  font-size: 14px;
+  color: var(--ink4);
+}
+.gf-triage .ms-warn {
+  margin-top: 5px;
+  font-weight: 600;
 }
 .gf-triage .match-row {
   background: var(--grn-l);

@@ -15,6 +15,8 @@ import {
   PRIORITY_ICON,
   canDropInColumn,
   compareQueue,
+  CATEGORIES,
+  CATEGORY_META,
 } from "../../../shared/giniflowStatus";
 import {
   useGiniflowBoard,
@@ -54,6 +56,13 @@ const WAIT_ONLY = new Set([
   "booked",
   "confirmed",
 ]);
+
+// How many categories carry an override for one station — the count on the
+// drawer's toggle, so a folded row still says it holds something.
+const countOverrides = (overrides, station) =>
+  Object.entries(overrides).filter(
+    ([k, v]) => k.startsWith(`${station}:`) && String(v).trim() !== "",
+  ).length;
 
 // The same three-way rule the server applies (statusEngine.budgetColour), kept
 // here so a card that ticks past its budget between two polls turns red on the
@@ -522,15 +531,33 @@ function Column({
 function SlaDrawer({ open, slaConfig, canEdit, onClose, onSave, saving, error }) {
   const [draft, setDraft] = useState({});
   const panelRef = useRef(null);
+  const [overrides, setOverrides] = useState({});
+  // One station open at a time — five categories under ten stations is fifty
+  // inputs, and the drawer is used to change one number.
+  const [expanded, setExpanded] = useState(null);
   useDismissable(open, onClose, panelRef);
   const invalid = (v) => {
     if (v === undefined || v === "") return false;
     const n = Number(v);
     return !Number.isInteger(n) || n < 1 || n > 600;
   };
-  const anyInvalid = Object.values(draft).some(invalid);
+  const anyInvalid = Object.values(draft).some(invalid) || Object.values(overrides).some(invalid);
   useEffect(() => {
-    if (open) setDraft(Object.fromEntries(slaConfig.map((s) => [s.station, s.budgetMinutes])));
+    if (!open) return;
+    setDraft(Object.fromEntries(slaConfig.map((s) => [s.station, s.budgetMinutes])));
+    // Flattened to "station:category" keys so one <input> owns one value and
+    // the nesting is rebuilt once, at save.
+    setOverrides(
+      Object.fromEntries(
+        slaConfig.flatMap((s) =>
+          Object.entries(s.categoryOverrides || {}).map(([cat, min]) => [
+            `${s.station}:${cat}`,
+            min,
+          ]),
+        ),
+      ),
+    );
+    setExpanded(null);
   }, [open, slaConfig]);
 
   return (
@@ -571,6 +598,55 @@ function SlaDrawer({ open, slaConfig, canEdit, onClose, onSave, saving, error })
               }
             />
             <span className="sla-unit">min</span>
+
+            {/* Per-category budgets (brief §3 `category_overrides`).
+                
+                A red-category patient is MEANT to take the doctor longer than an
+                in-control follow-up. Judged against one number the board lies
+                twice: the careful consultation shows red, the rushed one green.
+                
+                `total_journey` is excluded — it is the sum of the others, and an
+                override there would silently disagree with them. */}
+            {s.station !== "total_journey" && (
+              <button
+                type="button"
+                className="sla-cat-toggle"
+                aria-expanded={expanded === s.station}
+                disabled={!canEdit}
+                onClick={() => setExpanded((e) => (e === s.station ? null : s.station))}
+              >
+                {countOverrides(overrides, s.station)
+                  ? `${countOverrides(overrides, s.station)} per-category`
+                  : "Per category"}
+              </button>
+            )}
+
+            {expanded === s.station && (
+              <div className="sla-cats">
+                {CATEGORIES.map((cat) => (
+                  <label className="sla-cat" key={cat}>
+                    <span>
+                      {CATEGORY_META[cat]?.icon} {CATEGORY_META[cat]?.short || cat}
+                    </span>
+                    <input
+                      className="sla-inp"
+                      type="number"
+                      min="1"
+                      disabled={!canEdit}
+                      placeholder={String(draft[s.station] ?? s.budgetMinutes)}
+                      value={overrides[`${s.station}:${cat}`] ?? ""}
+                      onChange={(e) =>
+                        setOverrides((o) => ({ ...o, [`${s.station}:${cat}`]: e.target.value }))
+                      }
+                    />
+                    <span className="sla-unit">min</span>
+                  </label>
+                ))}
+                <div className="sla-cat-hint">
+                  Blank means this category uses the station budget above.
+                </div>
+              </div>
+            )}
           </div>
         ))}
         <div className="sla-warn">
@@ -578,9 +654,9 @@ function SlaDrawer({ open, slaConfig, canEdit, onClose, onSave, saving, error })
           to your view of the board.
         </div>
         <div className="sla-hint">
-          💡 Budgets can differ per patient category — red-category patients can get a longer doctor
-          budget, green-category can be SD-closed with 0 doctor time. Per-category overrides are not
-          built yet.
+          💡 <strong>Per category</strong> sets a different budget for one kind of patient — a
+          longer doctor budget for red-category, a shorter one for in-control follow-ups. Anything
+          left blank uses the station budget.
         </div>
       </div>
       <div className="dr-foot">
@@ -589,7 +665,7 @@ function SlaDrawer({ open, slaConfig, canEdit, onClose, onSave, saving, error })
           <button
             className="btn btn-tl"
             disabled={saving || anyInvalid}
-            onClick={() => onSave(draft)}
+            onClick={() => onSave({ draft, overrides })}
           >
             {saving ? "Saving…" : "Save budgets"}
           </button>
@@ -816,6 +892,56 @@ export default function FlowManagerPage() {
   const closeReport = useCallback(() => setReport(null), []);
   useDismissable(!!report, closeReport, reportRef);
 
+  const [notifying, setNotifying] = useState(false);
+
+  // Which desk a bottleneck column belongs to. The board's columns and the
+  // station screens are different vocabularies — `wait_doctor` is a queue and
+  // `doctor` is a desk — so the mapping is written once, here, against the
+  // actual keys in BOARD_COLUMNS.
+  const NOTIFY_TARGET = {
+    // Checked in but not yet seen: the queue is the vitals desk's to call from.
+    checked_in: ["vitals"],
+    vitals: ["vitals"],
+    sd: ["mo"],
+    wait_doctor: ["doctor"],
+    doctor: ["doctor"],
+    pharmacy: ["pharmacy"],
+    // The lab track stalls at either of two desks — an unpaid order is
+    // reception's, an uncollected sample is the lab's — and the column does not
+    // say which. Both are told rather than guessing and telling the wrong one.
+    lab: ["lab", "reception"],
+    // `done` is not a queue and has no desk, so it falls through to the refusal
+    // below rather than being silently mapped somewhere.
+  };
+
+  const notifyStations = async (bn) => {
+    const stations = NOTIFY_TARGET[bn?.station];
+    if (!stations?.length) return showToast("No station desk owns that column");
+    const station = stations.join(" and ");
+    setNotifying(true);
+    try {
+      const text = `${bn.label}: ${bn.count} waiting, avg ${bn.avgMinutes} min against a ${bn.budgetMinutes} min budget.`;
+      const { data } = await api.post("/api/giniflow/notify", { stations, text });
+      // Said plainly when nothing went out. A green tick over an undelivered
+      // message is worse than an honest failure — the coordinator would think
+      // the desk had been told.
+      showToast(
+        !data?.delivered
+          ? "Could not reach the station screens — tell them directly"
+          : data.reachable
+            ? `✓ Sent to ${station}`
+            : // Published, but no screen can subscribe yet. Saying "sent" here
+              // would stop the coordinator walking over, which is the one thing
+              // that still works.
+              `Sent, but no ${station} screen can receive it yet — tell them directly`,
+      );
+    } catch (e) {
+      showToast(e?.response?.data?.error || "Could not send that");
+    } finally {
+      setNotifying(false);
+    }
+  };
+
   const showToast = (msg) => {
     setToast(msg);
     clearTimeout(toastTimer.current);
@@ -867,11 +993,19 @@ export default function FlowManagerPage() {
   };
 
   const saveSla = useMutation({
-    mutationFn: async (draft) => {
-      const budgets = Object.entries(draft).map(([station, value]) => ({
-        station,
-        budgetMinutes: parseInt(value, 10),
-      }));
+    mutationFn: async ({ draft, overrides }) => {
+      // Flat "station:category" keys back into the {category: minutes} shape the
+      // column holds. A blank input drops out, which is how a category is
+      // returned to the station budget — the server COALESCEs an absent field
+      // but honours an explicit {}.
+      const budgets = Object.entries(draft).map(([station, value]) => {
+        const categoryOverrides = Object.fromEntries(
+          Object.entries(overrides)
+            .filter(([k, v]) => k.startsWith(`${station}:`) && String(v).trim() !== "")
+            .map(([k, v]) => [k.slice(station.length + 1), parseInt(v, 10)]),
+        );
+        return { station, budgetMinutes: parseInt(value, 10), categoryOverrides };
+      });
       return (await api.patch("/api/giniflow/sla-config", { budgets })).data;
     },
     onSuccess: () => {
@@ -1105,13 +1239,17 @@ export default function FlowManagerPage() {
               : ""}{" "}
             Suggest: {bottleneck.suggestion}
           </div>
+          {/* Real now. The toast used to say "station screens are not built yet",
+              which stopped being true some time ago — but rewording it would
+              have been lipstick, because there was no way to send a sentence
+              nobody had inserted into a table. That is what Realtime Broadcast
+              added (21-SUPABASE-REALTIME-PLAN.md §3). */}
           <button
             className="rbtn bn-btn"
-            onClick={() =>
-              showToast("Station screens are not built yet — tell the station directly")
-            }
+            disabled={notifying}
+            onClick={() => notifyStations(bottleneck)}
           >
-            Notify stations
+            {notifying ? "Sending…" : "Notify stations"}
           </button>
         </div>
       )}

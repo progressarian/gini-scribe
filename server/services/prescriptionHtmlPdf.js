@@ -71,11 +71,17 @@ export async function renderHtmlToPdf(html, { margin } = {}) {
   const page = await browser.newPage();
   try {
     await page.setContent(html, { waitUntil: "networkidle0", timeout: 30000 });
-    return await page.pdf({
+    // Buffer, not the Uint8Array Puppeteer 24 hands back. `res.send()` treats a
+    // plain Uint8Array as an object and JSON-encodes it, so the browser gets
+    // {"0":37,"1":80,...} with a Content-Type of application/pdf and reports
+    // "Failed to load PDF document". Buffer is a Uint8Array, so the storage
+    // upload path is unaffected.
+    const pdf = await page.pdf({
       format: "A4",
       printBackground: true,
       margin: margin || { top: "12mm", bottom: "12mm", left: "12mm", right: "12mm" },
     });
+    return Buffer.isBuffer(pdf) ? pdf : Buffer.from(pdf);
   } finally {
     await page.close();
   }

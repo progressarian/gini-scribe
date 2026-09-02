@@ -454,15 +454,19 @@ export async function addExternal(patientId, med, db = pool) {
   const { rows } = await db.query(
     `INSERT INTO medications
        (patient_id, name, pharmacy_match, composition, dose, frequency, timing,
-        timing_category, time_of_day, form, external_doctor, med_group, clinical_note,
-        started_date, is_active, is_new, notes)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::time,$10,$11,'external',$12,$13,true,false,$14)
+        timing_category, time_of_day, form, external_doctor, med_group, interaction_flag,
+        started_date, is_active, is_new, external_specialty, external_hospital,
+        external_condition)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::time,$10,$11,'external',$12,$13,true,false,$14,$15,$16)
      ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
      DO UPDATE SET dose = EXCLUDED.dose, frequency = EXCLUDED.frequency,
                    timing = EXCLUDED.timing, timing_category = EXCLUDED.timing_category,
                    time_of_day = EXCLUDED.time_of_day,
                    external_doctor = EXCLUDED.external_doctor,
-                   clinical_note = EXCLUDED.clinical_note, updated_at = NOW()
+                   external_specialty = EXCLUDED.external_specialty,
+                   external_hospital = EXCLUDED.external_hospital,
+                   external_condition = EXCLUDED.external_condition,
+                   interaction_flag = EXCLUDED.interaction_flag, updated_at = NOW()
      RETURNING id, name, dose, external_doctor`,
     [
       patientId,
@@ -479,9 +483,19 @@ export async function addExternal(patientId, med, db = pool) {
       // The interaction flag is written by a human, never generated. An
       // unchecked pair must look unchecked: rendering "✓ no interaction" for a
       // pair nobody has checked is the most dangerous thing this screen could do.
+      //
+      // Its own column since 2026-09-02. It used to share `clinical_note` with
+      // the reason a GINI dose was changed — one column, two meanings, and the
+      // safety-critical one could not be told apart well enough to render as a
+      // warning.
       med.interactionFlag ?? null,
       med.sinceDate || null,
-      [med.prescriberSpecialty, med.prescriberHospital].filter(Boolean).join(" · ") || null,
+      // Separate columns, not `notes` joined with " · ". Two facts in one string
+      // cannot be rendered apart or queried — the medicine card wants the
+      // specialty beside the name and the hospital under it.
+      med.prescriberSpecialty ?? null,
+      med.prescriberHospital ?? null,
+      med.condition ?? null,
     ],
   );
   return rows[0];

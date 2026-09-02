@@ -1,6 +1,6 @@
 import pool from "../../config/db.js";
 import { advanceStatus, budgetColour, returnToQueue } from "./statusEngine.js";
-import { getSlaConfig, budgetMap } from "./board.js";
+import { getSlaConfig, budgetMap, budgetLookup } from "./board.js";
 import { slaKeyForStatus, STATUS_LABEL } from "../../../shared/giniflowStatus.js";
 import { todaysVitals, previousVitals } from "./visitVitals.js";
 import { buildBrief } from "./consultBrief.js";
@@ -203,6 +203,9 @@ export async function getDoctorQueue(
       [visitDate],
     ),
   ]);
+  const budgetFor = budgetLookup(sla);
+  // The two day-level figures below are averages over every category, so they
+  // read the base budgets — an override belongs to one patient, not to a mean.
   const budgets = budgetMap(sla);
 
   // Gini runs one main consultant today, but a query that hard-codes that is a
@@ -251,7 +254,7 @@ export async function getDoctorQueue(
     }
 
     const waited = minutesSince(row.status_since, now);
-    const budget = budgets[slaKeyForStatus(row.current_status)] ?? null;
+    const budget = budgetFor(slaKeyForStatus(row.current_status), row.category);
 
     const card = {
       visitId: row.id,

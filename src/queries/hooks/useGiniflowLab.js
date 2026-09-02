@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import api from "../../services/api";
+import api, { API_URL } from "../../services/api";
 import { pollInterval } from "./giniflowPolling";
 
 export function useLabQueue(date) {
@@ -53,3 +53,16 @@ export function useAdvanceSample() {
     },
   });
 }
+
+// Where "View uploaded report" points.
+//
+// NOT the stored `reportUrl`: `patient-files` is a private bucket, so the public
+// object URL 404s with "Bucket not found". This hits the API, which proxies the
+// bytes with the service key and echoes the stored object's real content type —
+// the one report on file is a PNG, not a PDF, so the path is `.file`, not
+// `.pdf`. `?token=` because a tab opened on a URL carries no header — the same self-authenticating form the referral letter and
+// the document stream already use.
+export const reportHref = (orderId) =>
+  `${API_URL}/api/giniflow/stations/lab/${orderId}/report.file?token=${encodeURIComponent(
+    localStorage.getItem("gini_auth_token") || "",
+  )}`;

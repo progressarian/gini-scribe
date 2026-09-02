@@ -40,7 +40,7 @@ function StockChip({ stock }) {
   return <span className="mm-stock">✓ {stock.qty} in stock</span>;
 }
 
-function MedicineRow({ medicine, onDispense, busy }) {
+function MedicineRow({ medicine, onDispense, busy, closed }) {
   const [askingReason, setAskingReason] = useState(false);
   const [reason, setReason] = useState("");
   const mark = medicine.collection;
@@ -78,9 +78,25 @@ function MedicineRow({ medicine, onDispense, busy }) {
         )}
         <div className={`mm-dr${medicine.external ? "" : " gini"}`}>
           {medicine.external
-            ? `Prescribed by: ${medicine.prescriber || "another doctor"}`
+            ? `Prescribed by: ${[
+                medicine.prescriber || "another doctor",
+                medicine.prescriberSpecialty,
+                medicine.prescriberHospital,
+              ]
+                .filter(Boolean)
+                .join(" · ")}`
             : "Prescribed by: Gini Health"}
+          {medicine.external && medicine.condition && (
+            <div className="mm-ext-for">For {medicine.condition}</div>
+          )}
         </div>
+
+        {/* A checked interaction. Its own line and its own colour because it is
+            the reason anybody records an outside medicine at all — and it is
+            never generated, so an unchecked pair simply shows nothing. */}
+        {medicine.interactionFlag && (
+          <div className="mm-warn mm-warn-out">⚠ {medicine.interactionFlag}</div>
+        )}
         {medicine.warning && (
           <div className={`mm-warn mm-warn-${medicine.warning.tone}`}>
             {medicine.name} — {medicine.warning.message}
@@ -96,6 +112,15 @@ function MedicineRow({ medicine, onDispense, busy }) {
             them; not dispensed, and never recorded as dispensed. */}
         {!medicine.dispensable ? (
           <div className="mm-qty">External · not dispensed by Gini</div>
+        ) : closed ? (
+          /* The visit is over: the card has gone to the patient on WhatsApp and
+             the day's stats are computed. Marking a medicine now would change
+             the record of what somebody was handed after they left with it —
+             the server refuses it, so the buttons are not offered. What was
+             recorded still shows, because that is the point of the row. */
+          <div className={`mm-final${done ? " is-done" : refused ? " is-refused" : ""}`}>
+            {done ? "✓ Dispensed" : refused ? "Not given" : "Not marked"}
+          </div>
         ) : askingReason ? (
           <div className="mm-reason">
             {NOT_GIVEN_REASONS.map((r) => (
@@ -156,7 +181,7 @@ function MedicineRow({ medicine, onDispense, busy }) {
   );
 }
 
-export default function DispenseCard({ card, onDispense, busy }) {
+export default function DispenseCard({ card, onDispense, busy, closed = false }) {
   if (!card?.groups?.length) {
     return (
       <div className="empty-note">
@@ -175,7 +200,13 @@ export default function DispenseCard({ card, onDispense, busy }) {
           </div>
           <div className="mc-meds">
             {group.medicines.map((m) => (
-              <MedicineRow key={m.medicationId} medicine={m} onDispense={onDispense} busy={busy} />
+              <MedicineRow
+                key={m.medicationId}
+                medicine={m}
+                onDispense={onDispense}
+                busy={busy}
+                closed={closed}
+              />
             ))}
           </div>
         </div>

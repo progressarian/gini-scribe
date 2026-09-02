@@ -1,4 +1,5 @@
 import pool from "../../config/db.js";
+import { promoteLabReport, promoteQuietly } from "./promote.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config/storage.js";
 import { advanceStatus } from "./statusEngine.js";
 import { opensLabGate } from "./receptionStation.js";
@@ -236,6 +237,71 @@ export async function advanceSample(orderId, { to, actorId = null, reportUrl = n
 // second writer there would duplicate reports in the doctor's Labs tab. Promoting
 // a Gini Flow report into `documents` belongs with the same decision as vitals —
 // see 06-PHASE-2-PLAN.md question 12.
+const EXT_BY_TYPE = {
+  "application/pdf": "pdf",
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/webp": "webp",
+  "image/heic": "heic",
+};
+
+// The stored report's BYTES, fetched with the service key.
+//
+// Not a redirect to the stored URL: `patient-files` is private, so the object is
+// only reachable with a key the browser must never hold. The auth middleware has
+// already checked the caller by the time this runs — the same shape as
+// `GET /documents/:id/stream` and the referral letter.
+export async function fetchStoredReport(orderId, db = pool) {
+  const { rows } = await db.query(
+    `SELECT o.report_file_url, o.visit_id, v.patient_id, p.name, p.file_no
+       FROM giniflow_lab_orders o
+       JOIN giniflow_visits v ON v.id = o.visit_id
+       JOIN patients p        ON p.id = v.patient_id
+      WHERE o.id = $1`,
+    [orderId],
+  );
+  if (!rows.length) throw Object.assign(new Error("Order not found"), { status: 404 });
+
+  const url = rows[0].report_file_url;
+  if (!url) throw Object.assign(new Error("No report has been uploaded yet"), { status: 404 });
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
+    throw Object.assign(new Error("Storage is not configured"), { status: 503 });
+  }
+
+  // Accepts either shape, because rows written before this fix hold the public
+  // form: .../object/public/<bucket>/<path> and .../object/<bucket>/<path>.
+  const marker = "/storage/v1/object/";
+  const at = url.indexOf(marker);
+  if (at < 0) throw Object.assign(new Error("That report cannot be read"), { status: 409 });
+  const objectPath = url.slice(at + marker.length).replace(/^public\//, "");
+
+  const resp = await fetch(`${SUPABASE_URL}/storage/v1/object/${objectPath}`, {
+    headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` },
+  });
+  // A missing object is a 404 the technician can act on — re-upload — and not a
+  // 502 that reads as the server being broken.
+  if (!resp.ok) {
+    throw Object.assign(new Error("The stored report could not be read — re-upload it"), {
+      status: resp.status === 404 ? 404 : 502,
+    });
+  }
+
+  // The technician uploads whatever the machine printed — the form accepts an
+  // image as readily as a PDF, and the one report on file is a PNG. Serving it
+  // as application/pdf would hand the browser a picture inside a PDF viewer and
+  // fail. The stored object's own type is the truth.
+  const contentType = resp.headers.get("content-type") || "application/octet-stream";
+  const ext = (EXT_BY_TYPE[contentType.split(";")[0].trim()] || "bin").toLowerCase();
+  const who = String(rows[0].name || "patient").replace(/[^a-zA-Z0-9._-]/g, "_");
+
+  return {
+    bytes: Buffer.from(await resp.arrayBuffer()),
+    contentType,
+    fileName: `Lab_${who}_${rows[0].file_no}.${ext}`,
+  };
+}
+
 export async function uploadReport(
   orderId,
   { base64, fileName, mediaType = "application/pdf", actorId = null },
@@ -283,11 +349,28 @@ export async function uploadReport(
     throw Object.assign(new Error(`Upload failed: ${await resp.text()}`), { status: 502 });
   }
 
-  const url = `${SUPABASE_URL}/storage/v1/object/public/${STORAGE_BUCKET}/${storagePath}`;
+  // The OBJECT path, not a public URL.
+  //
+  // This used to store `/object/public/<bucket>/<path>`, which is the form
+  // Supabase composes for a public bucket. `patient-files` is PRIVATE — it holds
+  // every patient's prescriptions and lab reports — so that URL resolves to
+  // "Bucket not found" and every "View uploaded report" button 404'd. The bucket
+  // cannot be made public to fix it.
+  //
+  // So the row stores the authenticated form and the route proxies the bytes,
+  // exactly as the referral letter does. Rows written before this fix hold the
+  // public form; `fetchStoredReport` accepts both.
+  const url = `${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`;
 
   // The file is stored, so now mark it uploaded — which is what notifies the MO.
   // Done through advanceSample so trigger 1 and the event log are the same code
   // path whether or not a file was attached.
   await advanceSample(orderId, { to: "uploaded", actorId, reportUrl: url }, db);
+
+  // Onto the patient's record. `documents` is what the doctor's Labs tab reads
+  // and what the patient app reads — a report that stays on the lab order is a
+  // report only the lab station can see.
+  promoteQuietly(promoteLabReport, orderId);
+
   return { orderId, reportUrl: url, fileName: safeName, bytes: buffer.length };
 }

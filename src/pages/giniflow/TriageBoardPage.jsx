@@ -48,8 +48,16 @@ export default function TriageBoardPage() {
   const navigate = useNavigate();
   const { loadPatientDB } = usePatientStore();
 
-  // Tomorrow, not today: the screen's whole purpose is the day before the day.
-  const [date, setDate] = useState(() => istDay(1));
+  // Today. The screen was built as a pre-OPD board — categorise and assign the
+  // evening before, which is what 18-TRIAGE-BOARD-PLAN.md §3.2b describes and
+  // why the worker pre-builds tomorrow's visit rows. It opened on tomorrow for
+  // that reason.
+  //
+  // Changed on request: the floor reads it during the day too, and opening on a
+  // list whose bloods have not come back yet shows every patient in "No
+  // reports". "Tomorrow" is one tap away on the rail, and the heading names
+  // whichever day is on screen, so nothing is ambiguous.
+  const [date, setDate] = useState(() => istDay(0));
   const [filter, setFilter] = useState(null);
   const [doctorId, setDoctorId] = useState(null);
   const [search, setSearch] = useState("");
@@ -234,7 +242,20 @@ export default function TriageBoardPage() {
               >
                 ›
               </button>
-              <button type="button" className="tbtn" onClick={() => setDate(istDay(1))}>
+              {/* Both, now that the board can open on either — a reset that
+                  only goes one way strands whoever used the arrows. */}
+              <button
+                type="button"
+                className={`tbtn${isToday ? " on" : ""}`}
+                onClick={() => setDate(istDay(0))}
+              >
+                Today
+              </button>
+              <button
+                type="button"
+                className={`tbtn${isTomorrow ? " on" : ""}`}
+                onClick={() => setDate(istDay(1))}
+              >
                 Tomorrow
               </button>
             </div>
@@ -258,9 +279,26 @@ export default function TriageBoardPage() {
             >
               {rerun.isPending ? "Re-running…" : "⚙ Re-run engine"}
             </button>
+            {/* Disabled, not removed — an absent button reads as a permissions
+                problem, which is the same reason the launcher greys unbuilt
+                stations rather than hiding them.
+
+                This is the GLOBAL path: it has no patient, so it has to work
+                out whose report it is. Across all 783 lab reports on file, 17
+                carry a patient id and NONE of them matches the file_no we hold
+                — outside labs print their own accession number, and Gini's own
+                reports carry a UHID that has since been reassigned. So the only
+                identifier never fires, and every upload would fall to a name,
+                which is not an identifier: today's list alone has two Kapil
+                Devs. Off until a report carries something that identifies.
+
+                The per-card upload is unaffected and still open — there the
+                patient is pre-locked and nothing is being matched. */}
             <button
               type="button"
               className="tbtn pu"
+              disabled
+              title="Off for now. Reports do not carry a file number we can match on, and a name is not an identifier. Upload from the patient's own card instead — that path knows whose report it is."
               onClick={() => setUploading({ global: true })}
             >
               📤 Upload reports

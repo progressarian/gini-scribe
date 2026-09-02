@@ -1,6 +1,6 @@
 import pool from "../../config/db.js";
 import { advanceStatus, budgetColour } from "./statusEngine.js";
-import { getSlaConfig, budgetMap } from "./board.js";
+import { getSlaConfig, budgetLookup } from "./board.js";
 import { buildCard } from "./medicineCard.js";
 import { buildCounsellingNote } from "./counsellingNote.js";
 import {
@@ -35,7 +35,7 @@ const minutesSince = (from, now) =>
 const iso = (value) => (value ? new Date(value).toISOString() : null);
 
 const QUEUE_SQL = `
-  SELECT v.id, v.current_status, v.visit_date::text AS visit_date, v.card_sent_at,
+  SELECT v.id, v.current_status, v.visit_date::text AS visit_date, v.card_sent_at, v.category,
          v.priority, v.priority_reason, v.queue_position, v.queue_column,
          v.appointment_time::text AS appointment_time,
          p.id AS patient_id, p.name, p.file_no, p.age, p.sex, p.phone,
@@ -103,8 +103,9 @@ const QUEUE_SQL = `
      AND NOT COALESCE(p.is_blocked, FALSE)`;
 
 export async function getPharmacyQueue(visitDate, now = new Date(), db = pool) {
-  const budgets = budgetMap(await getSlaConfig(db));
-  const budget = budgets[slaKeyForStatus("pharmacy_pending")] ?? null;
+  // Resolved per row, not once: the pharmacy budget can be overridden per
+  // category, and this queue holds every category at the same moment.
+  const budgetFor = budgetLookup(await getSlaConfig(db));
 
   const [{ rows: waiting }, { rows: finished }] = await Promise.all([
     db.query(QUEUE_SQL, [visitDate, QUEUE_STATUSES]),
@@ -154,6 +155,7 @@ export async function getPharmacyQueue(visitDate, now = new Date(), db = pool) {
     .map((r) => {
       const since = r.pharmacy_since || r.finalized_at || r.status_since;
       const minutes = minutesSince(since, now);
+      const budget = budgetFor(slaKeyForStatus("pharmacy_pending"), r.category);
       return {
         ...card(r),
         since: iso(since),
@@ -355,6 +357,21 @@ export async function dispenseItem(
 
   const visit = await loadVisit(visitId, db);
   if (!visit) throw Object.assign(new Error("Visit not found"), { status: 404 });
+
+  // A closed visit takes no more marks.
+  //
+  // `dispenseAll` has refused this since it was written; this function never
+  // did, so the per-medicine buttons stayed live after "✓ Dispensed · visit
+  // closed" and every press still wrote to medicine_collections. The visit was
+  // already `exited`, the day's stats were already computed, and the WhatsApp
+  // card was already sent — so the write changed the record of what the patient
+  // was handed AFTER they had left with it.
+  if (DONE_STATUSES.includes(visit.current_status)) {
+    throw Object.assign(
+      new Error("This visit is closed — the medicine card has already gone to the patient"),
+      { status: 409 },
+    );
+  }
 
   const { rows } = await db.query(
     `SELECT id, name, external_doctor FROM medications

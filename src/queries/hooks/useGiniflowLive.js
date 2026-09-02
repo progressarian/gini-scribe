@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createRealtimeConnection } from "../../lib/giniflowRealtime";
 import { useQueryClient } from "@tanstack/react-query";
 import { API_URL } from "../../services/api";
 import { setLiveConnected } from "./giniflowPolling";
@@ -28,6 +29,24 @@ const INVALIDATES = {
     // No eventTailer stream of its own: referrals write no event table, and a
     // visit moving is the only thing that changes this list from outside (19 §10).
     ["giniflow", "referrals"],
+    // Triage was missing here, so the board opened the stream, rendered a "Live"
+    // badge, and was never invalidated by anything it carried — including
+    // `resync`, since ALL is derived from this map. A patient checking in or
+    // moving does change the board: the pipeline bar and "in building" counts
+    // read `current_status`.
+    //
+    ["giniflow", "triage"],
+  ],
+  // The coordinator's own writes, from giniflow_triage_events. Its own kind
+  // rather than folding into `visit`, because a categorise moves nothing on the
+  // floor: invalidating the board and every station for it would be five
+  // pointless refetches on a screen nobody is looking at yet.
+  //
+  // The floor board is the exception that earns its place — its cards carry the
+  // category dot, and the consultant's chip and the MO's close rule read it.
+  triage: [
+    ["giniflow", "triage"],
+    ["giniflow", "board"],
   ],
   lab_order: [
     ["giniflow", "reception"],
@@ -110,6 +129,22 @@ export function useGiniflowLive({ date, enabled = true, paused = false } = {}) {
 
     connection.start();
 
+    // Supabase Realtime, alongside SSE and not instead of it
+    // (21-SUPABASE-REALTIME-PLAN.md §5, Phase 1). Both feed the same `queue()`,
+    // and de-duplication is free: `pending` is a Set of query keys, so the same
+    // event arriving twice inside the 250 ms window adds the same string twice
+    // and invalidates once.
+    //
+    // It does NOT drive the live badge. While both transports run, "live" has
+    // to keep meaning what the queue hooks already read it for — is anything
+    // telling this screen — and SSE is still the one carrying every event.
+    const realtime = createRealtimeConnection({
+      date,
+      onSignal: ({ kind }) => queue(INVALIDATES[kind] || ALL),
+      onStatus: () => {},
+    });
+    realtime.start();
+
     // A tablet waking from sleep should not sit out the rest of its backoff.
     const onVisible = () => document.visibilityState === "visible" && connection.reconnectNow();
     document.addEventListener("visibilitychange", onVisible);
@@ -118,6 +153,7 @@ export function useGiniflowLive({ date, enabled = true, paused = false } = {}) {
       document.removeEventListener("visibilitychange", onVisible);
       clearTimeout(flushTimer);
       connection.stop();
+      realtime.stop();
     };
   }, [date, enabled, queryClient]);
 

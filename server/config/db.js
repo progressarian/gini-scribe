@@ -1,4 +1,5 @@
 import pg from "pg";
+import { parse as parseArrayLiteral } from "postgres-array";
 
 // Return DATE columns as plain strings ("2024-03-15") instead of JS Date objects
 // This prevents timezone-related off-by-one day issues on the frontend
@@ -113,9 +114,53 @@ function isTransient(err) {
   const msg = err.message || "";
   return TRANSIENT_MESSAGES.some((m) => msg.includes(m));
 }
+// Postgres ENUM ARRAYS come back as the raw literal string, not a JS array.
+//
+// node-postgres only ships parsers for the built-in type OIDs. `when_to_take` is
+// `when_to_take_pill[]` — an array of a user-defined enum — so its OID is not in
+// that table and the driver hands back the text Postgres sent:
+//
+//   '{"After dinner"}'   instead of   ["After dinner"]
+//
+// Every consumer then guesses. `Array.isArray(m.when_to_take) ? join : raw`
+// printed `{"After dinner"}` on the pharmacy medicine card, and
+// `normalizeWhenToTake` — which splits on commas — matched none of its vocabulary
+// against `{"after dinner"}` and returned null, dropping the value silently.
+// Both were reading the same unparsed string and failing differently.
+//
+// Registered by OID looked up from the catalogue rather than hard-coded: a
+// user-defined type's OID differs between databases, so a literal here would be
+// right on production and wrong everywhere else.
+let enumArrayTypesReady = Promise.resolve(0);
+
+function registerEnumArrayParsers(p) {
+  // The RAW query, before wrapQueryWithRetry replaces it — the wrapper awaits
+  // this promise, so going through it would deadlock on the first call.
+  const rawQuery = p.query.bind(p);
+  enumArrayTypesReady = rawQuery(
+    `SELECT DISTINCT t.typarray::int AS oid
+       FROM pg_type t
+       JOIN pg_enum e ON e.enumtypid = t.oid
+      WHERE t.typarray <> 0`,
+  )
+    .then(({ rows }) => {
+      for (const { oid } of rows) {
+        pg.types.setTypeParser(oid, (v) => (v == null ? v : parseArrayLiteral(v)));
+      }
+      return rows.length;
+    })
+    .catch((err) => {
+      // Never block the app on this. Without it the old behaviour returns — a
+      // raw literal — which is what shipped for a year.
+      console.warn("enum array type parsers not registered:", err.message);
+      return 0;
+    });
+}
+
 function wrapQueryWithRetry(p, label, { maxAttempts = 3, baseDelayMs = 150 } = {}) {
   const original = p.query.bind(p);
   p.query = async (...args) => {
+    await enumArrayTypesReady;
     let lastErr;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
@@ -133,10 +178,11 @@ function wrapQueryWithRetry(p, label, { maxAttempts = 3, baseDelayMs = 150 } = {
     throw lastErr;
   };
 }
+registerEnumArrayParsers(pool);
 wrapQueryWithRetry(pool, "DB");
 wrapQueryWithRetry(cronPool, "cron DB");
 
 console.log("DB:", !!dbUrl, "internal:", isInternal, "ssl:", needsSsl);
 
 export default pool;
-export { dbUrl, needsSsl, cronPool };
+export { dbUrl, needsSsl, cronPool, enumArrayTypesReady };
