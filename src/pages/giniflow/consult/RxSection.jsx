@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import {
   usePrescription,
-  useSeedDraft,
   useAddItem,
   useUpdateItem,
   useRemoveItem,
@@ -9,6 +8,7 @@ import {
   useStopItem,
   useMedicineSearch,
   useAlternatives,
+  useDecideItem,
 } from "../../../queries/hooks/useGiniflowPrescription";
 import { VoiceBar, VoiceButton } from "../../../components/giniflow/VoiceInput";
 
@@ -378,10 +378,10 @@ function AddMedicine({ onAdd, onClose, initialQuery = "" }) {
 
 export default function RxSection({ visitId, readOnly, onToast }) {
   const { data, isLoading } = usePrescription(visitId);
-  const seed = useSeedDraft(visitId);
   const add = useAddItem(visitId);
   const update = useUpdateItem(visitId);
   const remove = useRemoveItem(visitId);
+  const decide = useDecideItem(visitId);
   const pause = usePauseItem(visitId);
   const stop = useStopItem(visitId);
   const [editing, setEditing] = useState(null);
@@ -450,22 +450,10 @@ export default function RxSection({ visitId, readOnly, onToast }) {
       {items.length === 0 && (
         <div className="rx-seed">
           <p className="cn-empty">
-            The draft is empty.
             {data?.activeMedications?.length
-              ? ` This patient is on ${data.activeMedications.length} medicine${
-                  data.activeMedications.length === 1 ? "" : "s"
-                } — start from those rather than retyping them.`
-              : " This patient has no active medicines on record."}
+              ? "The draft is empty, but this patient is on medicines — reopen the patient to seed it, or add them below."
+              : "This patient has no active medicines. Add the first one below."}
           </p>
-          {!readOnly && data?.activeMedications?.length > 0 && (
-            <button
-              type="button"
-              className="btn-sm on"
-              onClick={() => seed.mutate(undefined, { onError: fail })}
-            >
-              Start from current regimen
-            </button>
-          )}
         </div>
       )}
 
@@ -488,13 +476,26 @@ export default function RxSection({ visitId, readOnly, onToast }) {
             <div
               className={`rx-row${item.change_type === "stopped" ? " rx-gone" : ""}${
                 item.change_type === "new" ? " rx-isnew" : ""
-              }${item.change_type === "changed" ? " rx-ischanged" : ""}`}
+              }${item.change_type === "changed" ? " rx-ischanged" : ""}${
+                item.approval_status === "pending" ? " rx-proposed" : ""
+              }`}
             >
               <div className="rx-num">{i + 1}.</div>
               <div className="rx-main">
                 <div className="rx-name">
                   {item.medicine_name}
                   {chip && <span className={`rx-chip ${chip.cls}`}>{chip.label}</span>}
+                  {item.approval_status === "pending" && (
+                    <span className="rx-chip ch-proposed">
+                      🩺 Proposed by {item.proposed_by_name || "the MO"}
+                    </span>
+                  )}
+                  {item.approval_status === "approved" && (
+                    <span className="rx-chip ch-approved">✓ Approved</span>
+                  )}
+                  {item.approval_status === "adjusted" && (
+                    <span className="rx-chip ch-adjusted">✎ Adjusted</span>
+                  )}
                 </div>
                 {/* composition · why — the column a consultant scans. */}
                 <div className="rx-sub">{item.composition || "—"}</div>
@@ -521,16 +522,48 @@ export default function RxSection({ visitId, readOnly, onToast }) {
               <StockCell stock={item.stock} onAlternatives={() => setAlternativesFor(item.id)} />
               {!readOnly && (
                 <div className="rx-rowacts">
+                  {item.approval_status === "pending" && (
+                    <button
+                      type="button"
+                      className="ra-btn ra-approve"
+                      onClick={() =>
+                        decide.mutate({ itemId: item.id, status: "approved" }, { onError: fail })
+                      }
+                    >
+                      ✓ Approve
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="ra-btn ra-edit"
                     onClick={() => setEditing(editing === item.id ? null : item.id)}
                   >
-                    {editing === item.id ? "Close" : "Edit"}
+                    {editing === item.id
+                      ? "Close"
+                      : item.approval_status === "pending"
+                        ? "Adjust"
+                        : "Edit"}
                   </button>
                   {/* A medicine the consultant added by mistake is removed; one the
                     patient is actually taking is stopped, with a reason. */}
-                  {item.change_type === "new" ? (
+                  {item.approval_status === "pending" ? (
+                    <button
+                      type="button"
+                      className="ra-btn ra-stop"
+                      onClick={() => {
+                        const note = window.prompt(
+                          `Why is ${item.medicine_name} not being prescribed?`,
+                        );
+                        if (note?.trim())
+                          decide.mutate(
+                            { itemId: item.id, status: "rejected", note: note.trim() },
+                            { onError: fail },
+                          );
+                      }}
+                    >
+                      Reject
+                    </button>
+                  ) : item.change_type === "new" ? (
                     <button
                       type="button"
                       className="ra-btn ra-stop"

@@ -8,6 +8,7 @@ import { blockActor, blockedResponse } from "../services/patientBlockGuard.js";
 import {
   giniflowRxItemSchema,
   giniflowRxItemPatchSchema,
+  giniflowRxDecisionSchema,
   giniflowRxPauseSchema,
   giniflowRxStopSchema,
   giniflowMedSearchQuerySchema,
@@ -110,6 +111,7 @@ import {
   seedDraftFromRegimen,
   addItem,
   updateItem,
+  decideItem,
   removeItem,
   pauseItem,
   stopItem,
@@ -375,13 +377,34 @@ router.post(
   },
 );
 
+// Approve · Adjust · Reject on a proposed row (addendum v1.1 §3). Adjust is
+// recorded by the PATCH below — editing a pending row is the decision — so this
+// carries the two explicit ones.
+router.post(
+  "/giniflow/stations/doctor/prescription/items/:itemId/decide",
+  doctorGate,
+  validate(giniflowRxDecisionSchema),
+  async (req, res) => {
+    try {
+      res.json(await decideItem(req.params.itemId, req.body, req.doctor?.doctor_id ?? null));
+    } catch (e) {
+      doctorError(res, e, "Gini Flow decide proposal");
+    }
+  },
+);
+
 router.patch(
   "/giniflow/stations/doctor/prescription/items/:itemId",
   doctorGate,
   validate(giniflowRxItemPatchSchema),
   async (req, res) => {
     try {
-      res.json(await updateItem(req.params.itemId, req.body));
+      res.json(
+        await updateItem(req.params.itemId, {
+          ...req.body,
+          actorId: req.doctor?.doctor_id ?? null,
+        }),
+      );
     } catch (e) {
       doctorError(res, e, "Gini Flow edit medicine");
     }
@@ -772,6 +795,37 @@ router.get(
 
 // ── MO / SD ─────────────────────────────────────────────────────────────────
 const moGate = requireCapability(CAP.GINIFLOW_STATION_MO);
+
+// ── The MO pre-drafts ───────────────────────────────────────────────────────
+// The same draft, the same service — but reached through the MO's own gate, so
+// "this is a proposal" is a property of which station wrote it rather than a
+// flag the browser sends. A consultant's row and an MO's row must not be
+// distinguishable only by something the client can set.
+router.get("/giniflow/stations/mo/:visitId/prescription", moGate, async (req, res) => {
+  try {
+    res.json(await getDraft(req.params.visitId));
+  } catch (e) {
+    handleError(res, e, "Gini Flow MO prescription");
+  }
+});
+
+router.post(
+  "/giniflow/stations/mo/:visitId/prescription/items",
+  moGate,
+  validate(giniflowRxItemSchema),
+  async (req, res) => {
+    try {
+      res.json(
+        await addItem(req.params.visitId, {
+          ...req.body,
+          proposedBy: req.doctor?.doctor_id ?? null,
+        }),
+      );
+    } catch (e) {
+      handleError(res, e, "Gini Flow MO propose medicine");
+    }
+  },
+);
 
 router.get(
   "/giniflow/stations/mo/queue",

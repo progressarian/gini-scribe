@@ -323,7 +323,30 @@ export async function buildVisitPayloadFromDb(pid, { appointmentId } = {}) {
   // who saw the patient. We don't currently join doctors metadata for the
   // template (qualification/reg_no) because the JSONB on the appointment
   // doesn't carry it; the template renders blanks gracefully.
-  const doctor = { name: appt?.doctor_name || "" };
+  // The appointment carries the consultant as free text, so the roster is
+  // matched on it to reach the registration number the letterhead footer prints
+  // (`doctor.reg_no`). Without this the PDF has no Reg. No. line at all — the
+  // legal gap addendum v1.1 §4 names, and the reason the field looked missing
+  // when it was only unreferenced.
+  //
+  // Exact match, and only a real clinician: a wrong number on a prescription is
+  // worse than none, and a near-miss would print somebody else's licence.
+  const docRow = appt?.doctor_name
+    ? (
+        await pool.query(
+          `SELECT name, short_name, license_no, specialty FROM doctors
+            WHERE lower(btrim(name)) = lower(btrim($1))
+              AND COALESCE(is_active, TRUE)
+            LIMIT 1`,
+          [appt.doctor_name],
+        )
+      ).rows[0]
+    : null;
+  const doctor = {
+    name: appt?.doctor_name || "",
+    reg_no: docRow?.license_no || null,
+    designation: docRow?.specialty || null,
+  };
 
   // Lab history grouped by canonical name (mirrors GET /visit/:pid logic)
   const labHistory = {};

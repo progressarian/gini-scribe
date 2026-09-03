@@ -145,6 +145,11 @@ The MO writes a plan; the brief is what they read first. From `gini-doctor-final
 - **Voice dictation** — the same `useVoiceVitals` pattern, but free text rather than a parser:
   transcript straight into the textarea, nurse edits. Reuses `/api/ai/transcribe`.
 - **Prescription proposals** (addendum ③): rows of `medicine · from → to · reason`, e.g.
+
+  > **Superseded by `24-ADDENDUM-V11-PLAN.md` §4.** The addendum has the MO editing the actual
+  > draft rather than a separate proposals list, and the model here is unused — one proposal ever.
+  > What is built still works; §4.1 says why it should converge before the floor adopts it.
+
   _Atchol 20mg → 40mg, LDL 127_. The MO proposes; the doctor approves, adjusts or rejects in
   Phase 3.
 

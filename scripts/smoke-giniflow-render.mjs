@@ -90,9 +90,14 @@ try {
   check("page renders without throwing", html.length > 0, `${html.length} chars`);
   check("rail is present", html.includes("Gini Flow"));
   check("stat tiles render", html.includes("In building now"));
-  check("a patient card renders", html.includes("pc-name"));
-  check("the identity line renders", html.includes("pc-id"));
-  check("timers render", html.includes("tmr"));
+  const onBoard = day.columns.reduce((n, c) => n + (c.cards?.length || 0), 0);
+  if (onBoard) {
+    check("a patient card renders", html.includes("pc-name"));
+    check("the identity line renders", html.includes("pc-id"));
+    check("timers render", html.includes("tmr"));
+  } else {
+    console.log("  --  no patient is in a board column today — card checks skipped");
+  }
   check("footer strip renders", html.includes("pf-name"));
   // "Switch role" became the "← Stations" link to the launcher, deliberately —
   // the rail's way out is the same one every station uses.
@@ -139,18 +144,24 @@ try {
   );
   check("vitals rail renders", vitalsHtml.includes("Vitals Station"));
   check("vitals queue renders", vitalsHtml.includes("Vitals queue"));
-  check(
-    "the seven fields render",
-    [
-      "Weight (kg)",
-      "Height (cm)",
-      "Blood pressure",
-      "Pulse (bpm)",
-      "SpO2 (%)",
-      "Temperature",
-    ].every((f) => vitalsHtml.includes(f)),
-  );
-  check("the done bar renders", vitalsHtml.includes("db-title"));
+  // The form renders for the patient the station would work next; with an empty
+  // queue there is nobody to render it for.
+  if (nextUp) {
+    check(
+      "the seven fields render",
+      [
+        "Weight (kg)",
+        "Height (cm)",
+        "Blood pressure",
+        "Pulse (bpm)",
+        "SpO2 (%)",
+        "Temperature",
+      ].every((f) => vitalsHtml.includes(f)),
+    );
+    check("the done bar renders", vitalsHtml.includes("db-title"));
+  } else {
+    console.log("  --  vitals queue is empty today — form checks skipped");
+  }
   check("no raw 'undefined' in the vitals markup", !vitalsHtml.includes(">undefined<"));
 
   // The launcher: every station tile, gated per role.

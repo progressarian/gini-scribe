@@ -20,7 +20,13 @@ import {
 import { buildBrief, classifyMarker, pickTiles } from "../services/giniflow/consultBrief.js";
 import * as rx from "../services/giniflow/prescription.js";
 import { buildCard } from "../services/giniflow/medicineCard.js";
-import { finalizeConsult, finalizePreview } from "../services/giniflow/finalize.js";
+import { buildVisitPayloadFromDb } from "../services/prescriptionAutoSave.js";
+import { buildPrescriptionHtml } from "../templates/prescriptionTemplate.js";
+import {
+  finalizeConsult,
+  finalizePreview,
+  pendingProposalCount,
+} from "../services/giniflow/finalize.js";
 import { advanceStatus } from "../services/giniflow/statusEngine.js";
 
 let failures = 0;
@@ -29,6 +35,18 @@ const check = (label, ok, detail = "") => {
   if (!ok) failures++;
 };
 const one = async (sql, params) => (await pool.query(sql, params)).rows[0];
+
+// Finalize now refuses while an MO proposal is undecided (addendum v1.1 §3), and
+// this suite runs against the real floor where the demo day seeds proposals of
+// its own. Any test that is not about the guard clears the visit first, so it is
+// testing what it says it is.
+const decidePendingFor = (visitId, doctorId) =>
+  pool.query(
+    `UPDATE giniflow_rx_proposals SET status = 'rejected', reason = 'smoke: not under test',
+            decided_by = $2, decided_at = NOW()
+      WHERE visit_id = $1 AND status = 'proposed'`,
+    [visitId, doctorId],
+  );
 
 // ── The classifier — pure, no database ──────────────────────────────────────
 console.log("\nconsult brief");
@@ -334,6 +352,213 @@ check("a one-letter search is refused", (await rx.searchMedicines("a")).length =
 console.log("\nprescription draft");
 
 queue = await getDoctorQueue(TEST_DAY, { scope: "all" });
+// ── Addendum v1.1 §1: the prescription opens pre-seeded ────────────────────
+// Driven through `seedDraftOn` in a transaction that rolls back: it needs a
+// patient with a regimen, not a patient in a claimable state, and a suite that
+// runs against the real floor should not park someone in a consulting room to
+// prove a copy worked. What `startConsult` adds is the call — asserted by the
+// `seeded` count it now returns.
+// ── Addendum v1.1 §4c: the prescription PDF ────────────────────────────────
+// Already produced by finalize (CS-03) — this covers the half that was missing:
+// the registration number the letterhead footer prints. It reaches the template
+// through `buildVisitPayloadFromDb`, matched from the appointment's consultant
+// name against the roster.
+// ── Addendum v1.1 §3: a proposal is a draft row, not a list beside it ──────
+// Driven in a transaction that rolls back — this is about the model, and the
+// floor should not gain four medicines to prove it.
+console.log("\nMO proposals as draft rows");
+{
+  const v = await one(`SELECT id FROM giniflow_visits ORDER BY created_at DESC LIMIT 1`);
+  // `consultant` is resolved later, in the rx block; this section runs before it.
+  const consultant = (await one(`SELECT id FROM doctors WHERE role = 'consultant' LIMIT 1`)).id;
+  const mo = (await one(`SELECT id FROM doctors WHERE role = 'mo' LIMIT 1`))?.id ?? consultant;
+  const c = await pool.connect();
+  try {
+    await c.query("BEGIN");
+
+    const proposed = await rx.addItem(
+      v.id,
+      { medicineName: "Atchol 20mg", dose: "20mg", changeType: "continued", proposedBy: mo },
+      c,
+    );
+    check(
+      "a row the MO adds is pending and carries who proposed it",
+      proposed.approval_status === "pending" && proposed.proposed_by === mo,
+      proposed.proposed_by_name,
+    );
+
+    const own = await rx.addItem(v.id, { medicineName: "Zzz Doctor Row" }, c);
+    check(
+      "a row the doctor adds is not a proposal",
+      own.approval_status === null && own.proposed_by === null,
+    );
+
+    check(
+      "finalize counts a pending draft row, not just the old table",
+      (await pendingProposalCount(v.id, c)) >= 1,
+    );
+
+    // Editing a pending row IS the Adjust decision.
+    const adjusted = await rx.updateItem(proposed.id, { dose: "40mg", actorId: consultant }, c);
+    check(
+      "editing a proposal records it as adjusted, not approved-as-proposed",
+      adjusted.approval_status === "adjusted",
+      adjusted.approval_status,
+    );
+    check(
+      "and the row still remembers the dose it came from",
+      adjusted.previous_dose === "20mg" && adjusted.change_type === "changed",
+      `${adjusted.previous_dose} → ${adjusted.dose}`,
+    );
+
+    const toApprove = await rx.addItem(v.id, { medicineName: "Yyy Proposal", proposedBy: mo }, c);
+    check(
+      "approving keeps the row",
+      (await rx.decideItem(toApprove.id, { status: "approved" }, consultant, c)).approval_status ===
+        "approved",
+    );
+    const refused = await rx
+      .decideItem(toApprove.id, { status: "rejected" }, consultant, c)
+      .then(() => false)
+      .catch((e) => e.status === 400);
+    check("rejecting without a reason is refused", refused);
+
+    // A rejected addition leaves nothing: the patient was never on it.
+    const toReject = await rx.addItem(v.id, { medicineName: "Xxx Proposal", proposedBy: mo }, c);
+    const rejected = await rx.decideItem(
+      toReject.id,
+      { status: "rejected", note: "not indicated" },
+      consultant,
+      c,
+    );
+    check("rejecting a proposed addition removes it", rejected.removed === true);
+    check(
+      "and nothing is left pending from it",
+      (
+        await c.query(`SELECT count(*)::int AS n FROM giniflow_rx_items WHERE id = $1`, [
+          toReject.id,
+        ])
+      ).rows[0].n === 0,
+    );
+
+    const notAProposal = await rx
+      .decideItem(own.id, { status: "approved" }, consultant, c)
+      .then(() => false)
+      .catch((e) => e.status === 409);
+    check("deciding a row that is not a proposal is refused", notAProposal);
+  } finally {
+    await c.query("ROLLBACK");
+    c.release();
+  }
+}
+
+console.log("\nPrescription PDF");
+{
+  // HealthRay leaves doctor_name null on most appointments, so the case has to
+  // be chosen rather than assumed — a payload with no consultant proves nothing
+  // about a consultant's registration number.
+  const named = await one(
+    `SELECT a.patient_id, a.doctor_name
+       FROM appointments a
+       JOIN doctors d ON lower(btrim(d.name)) = lower(btrim(a.doctor_name))
+      WHERE a.doctor_name IS NOT NULL AND COALESCE(d.is_active, TRUE)
+      ORDER BY a.appointment_date DESC LIMIT 1`,
+  );
+  check("an appointment naming a consultant on the roster", !!named, named?.doctor_name);
+  const payload = named ? await buildVisitPayloadFromDb(named.patient_id, {}) : null;
+  check("the payload carries a doctor", !!payload?.doctor?.name, payload?.doctor?.name);
+  check(
+    "and the fields the letterhead footer needs",
+    !!payload?.doctor && "reg_no" in payload.doctor,
+    "reg_no is null until doctors.license_no is filled in — see the plan §5.3",
+  );
+
+  // The footer only prints a number it has. Proven in a transaction that rolls
+  // back, so no licence number is invented on a real clinician.
+  const c = await pool.connect();
+  try {
+    await c.query("BEGIN");
+    const { rows } = payload?.doctor?.name
+      ? await c.query(
+          `UPDATE doctors SET license_no = 'SMOKE-REG-1'
+            WHERE lower(btrim(name)) = lower(btrim($1)) RETURNING name, license_no, specialty`,
+          [payload.doctor.name],
+        )
+      : { rows: [] };
+    if (rows.length) {
+      const html = buildPrescriptionHtml({
+        patient: { name: "Smoke", file_no: "P_0" },
+        doctor: { name: rows[0].name, reg_no: rows[0].license_no, designation: rows[0].specialty },
+      });
+      check(
+        "the footer prints the registration number once it exists",
+        /Reg\. No\. SMOKE-REG-1/.test(html),
+      );
+      const without = buildPrescriptionHtml({
+        patient: { name: "Smoke", file_no: "P_0" },
+        doctor: { name: rows[0].name, reg_no: null },
+      });
+      check(
+        "and prints no Reg. No. line when there is none, rather than an empty one",
+        !/Reg\. No\./.test(without),
+      );
+    }
+  } finally {
+    await c.query("ROLLBACK");
+    c.release();
+  }
+}
+
+console.log("\nPre-seeded prescription");
+const seedCase = await one(
+  `SELECT v.id AS visit_id,
+          (SELECT count(*)::int FROM medications m
+            WHERE m.patient_id = v.patient_id AND m.is_active AND m.external_doctor IS NULL) AS meds
+     FROM giniflow_visits v
+    WHERE NOT EXISTS (SELECT 1 FROM giniflow_rx_items i WHERE i.visit_id = v.id)
+      AND (SELECT count(*) FROM medications m
+            WHERE m.patient_id = v.patient_id AND m.is_active AND m.external_doctor IS NULL) > 2
+    LIMIT 1`,
+);
+check("a patient with a regimen to seed from", !!seedCase, `${seedCase?.meds} medicines`);
+if (seedCase) {
+  const c = await pool.connect();
+  try {
+    await c.query("BEGIN");
+    const first = await rx.seedDraftOn(c, seedCase.visit_id);
+    check(
+      "seeding clones the whole active regimen",
+      first.seeded === seedCase.meds,
+      `${seedCase.meds} active → ${first.seeded} rows`,
+    );
+    const { rows: seeded } = await c.query(
+      `SELECT change_type, source_medication_id FROM giniflow_rx_items WHERE visit_id = $1`,
+      [seedCase.visit_id],
+    );
+    check(
+      "every seeded row is marked continued, nothing invented",
+      seeded.every((r) => r.change_type === "continued"),
+    );
+    check(
+      "and each remembers the medication it came from",
+      seeded.every((r) => !!r.source_medication_id),
+      "so finalize can tell a continuation from a new prescription",
+    );
+    const second = await rx.seedDraftOn(c, seedCase.visit_id);
+    check(
+      "seeding a started draft is a no-op, not a duplicate",
+      second.seeded === 0 && second.reason === "draft already started",
+    );
+    // It must not abort the caller's transaction — startConsult seeds inside
+    // the claim, and a no-op that rolled back would take the claim with it.
+    const alive = await c.query(`SELECT 1`);
+    check("and does not abort the caller's transaction", alive.rowCount === 1);
+  } finally {
+    await c.query("ROLLBACK");
+    c.release();
+  }
+}
+
 const rxPatient = queue.groups.pipeline.find((c) => c.status !== "blocked_reports");
 check("a patient to prescribe for", !!rxPatient, rxPatient?.name);
 
@@ -434,6 +659,38 @@ if (rxPatient) {
   check("finalizing a patient who was never called in is refused", tooEarly);
 
   await startConsult(visitId, doctorId);
+  // Addendum v1.1 §3: a proposal the doctor has not decided blocks the fan-out.
+  // Before this, finalize updated every undecided proposal to `rejected` with
+  // "not decided at consultation" — so a consultant could finish with the MO's
+  // "TG tripled — add Fenofibrate" unread and the record said they rejected it.
+  await decidePendingFor(visitId, doctorId);
+  const undecided = await one(
+    `INSERT INTO giniflow_rx_proposals (visit_id, medicine_name, to_dose, reason)
+     VALUES ($1, 'Fenofibrate 145mg', '145mg', 'TG 368 — tripled') RETURNING id`,
+    [visitId],
+  );
+  const blocked = await finalizeConsult(visitId, doctorId)
+    .then(() => false)
+    .catch((e) => e.status === 409 && /still to review/.test(e.message));
+  check("finalize is refused while a proposal is undecided", blocked);
+  check(
+    "and the refusal names how many, so the button can say it",
+    (await finalizePreview(visitId)).undecidedProposals === 1,
+  );
+  const stillProposed = await one(`SELECT status FROM giniflow_rx_proposals WHERE id = $1`, [
+    undecided.id,
+  ]);
+  check(
+    "the undecided proposal is left undecided, not silently rejected",
+    stillProposed.status === "proposed",
+    stillProposed.status,
+  );
+  await decideProposal(undecided.id, { status: "rejected", note: "not indicated today" }, doctorId);
+  check(
+    "once decided, finalize is allowed again",
+    (await finalizePreview(visitId)).undecidedProposals === 0,
+  );
+
   const result = await finalizeConsult(visitId, doctorId);
   check("finalize reports what it did", result.finalized && result.medicines === 2);
 
@@ -538,11 +795,26 @@ if (rxPatient) {
     );
 
     await startConsult(repeatVisit.visitId, doctorId);
-    const stopRow = await rx.addItem(repeatVisit.visitId, {
-      medicineName: "Montair 10mg",
-      pharmacyMatch: "MONTAIR",
-      changeType: "continued",
-    });
+    await decidePendingFor(repeatVisit.visitId, doctorId);
+    // The claim seeds the draft, so Montair is already a row — the consultant
+    // stops the row in front of them rather than adding a second one. Adding a
+    // duplicate is now refused outright (prescription.js addItem).
+    const seededDraft = await rx.getDraft(repeatVisit.visitId);
+    const montair = seededDraft.items.find((i) =>
+      (i.pharmacy_match || i.medicine_name || "").toUpperCase().includes("MONTAIR"),
+    );
+    const stopRow =
+      montair ||
+      (await rx.addItem(repeatVisit.visitId, {
+        medicineName: "Montair 10mg",
+        pharmacyMatch: "MONTAIR",
+        changeType: "continued",
+      }));
+    const dupRefused = await rx
+      .addItem(repeatVisit.visitId, { medicineName: "Montair 10mg", pharmacyMatch: "MONTAIR" })
+      .then(() => false)
+      .catch((e) => e.status === 409);
+    check("a medicine already in the draft cannot be added twice", dupRefused);
     await rx.stopItem(stopRow.id, "Stopped again");
 
     let crashed = null;
@@ -580,6 +852,12 @@ if (rxPatient) {
         WHERE v.id = $1`,
       [other.visitId],
     );
+    // The draft is seeded on claim now, so its size depends on the patient's
+    // regimen. What matters is that a failed finalize leaves it alone.
+    const draftBefore = await one(
+      `SELECT count(*)::int AS n FROM giniflow_rx_items WHERE visit_id = $1`,
+      [other.visitId],
+    );
     let blewUp = false;
     try {
       // A doctor id that does not exist trips the consultations FK mid-transaction.
@@ -611,7 +889,11 @@ if (rxPatient) {
       afterStatus.current_status !== "pharmacy_pending",
       afterStatus.current_status,
     );
-    check("and the draft survived", draftKept.n === 1, `${draftKept.n}`);
+    check(
+      "and the draft survived intact",
+      draftKept.n === draftBefore.n && draftKept.n > 0,
+      `${draftBefore.n}→${draftKept.n}`,
+    );
   }
 }
 

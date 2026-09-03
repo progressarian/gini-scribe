@@ -27,6 +27,25 @@ import { referralsForVisit, generateLetter } from "./referralsStation.js";
 
 const DISPENSABLE = ["continued", "changed", "new"];
 
+// Proposals the doctor has not decided. One definition, read by the guard below
+// and by the preview the button renders — two counts could disagree, and the
+// disagreement would always surface as a refused click with no explanation.
+export async function pendingProposalCount(visitId, db = pool) {
+  // Both models are counted while the old one is retired (plan §4.1): proposals
+  // now live as draft rows, but the side table still holds what was written
+  // before the change, and a row in either is a decision the doctor has not
+  // made. Counting only the new one would let the old rows through silently —
+  // which is the exact failure this guard exists to prevent.
+  const { rows } = await db.query(
+    `SELECT (SELECT count(*) FROM giniflow_rx_proposals
+              WHERE visit_id = $1 AND status = 'proposed')
+          + (SELECT count(*) FROM giniflow_rx_items
+              WHERE visit_id = $1 AND approval_status = 'pending') AS n`,
+    [visitId],
+  );
+  return Number(rows[0].n);
+}
+
 export async function finalizeConsult(visitId, actorId = null, db = pool) {
   const client = await db.connect();
   let patientId = null;
@@ -56,6 +75,23 @@ export async function finalizeConsult(visitId, actorId = null, db = pool) {
       throw Object.assign(
         new Error("Start the consultation before finalizing it — this patient is not with you yet"),
         { status: 409 },
+      );
+    }
+
+    // The MO's proposals must be decided, not defaulted (addendum v1.1 §3,
+    // docs/gini-flow/24-ADDENDUM-V11-PLAN.md §4.3).
+    //
+    // This used to auto-reject anything still `proposed`, so a consultant could
+    // finalize with "TG tripled — add Fenofibrate" unread and the record would
+    // say they rejected it. They never saw it. A rejection has to be a decision
+    // somebody made.
+    const pending = await pendingProposalCount(visitId, client);
+    if (pending) {
+      throw Object.assign(
+        new Error(
+          `${pending} proposal${pending === 1 ? "" : "s"} still to review — approve, adjust or reject each one first`,
+        ),
+        { status: 409, pendingProposals: pending },
       );
     }
 
@@ -207,19 +243,6 @@ export async function finalizeConsult(visitId, actorId = null, db = pool) {
       );
     }
 
-    // ── 3. Undecided MO proposals ────────────────────────────────────────────
-    // Leaving them "proposed" for ever would tell the MO their suggestion is
-    // still being considered after the patient has gone home.
-    const { rows: undecided } = await client.query(
-      `UPDATE giniflow_rx_proposals
-          SET status = 'rejected',
-              reason = COALESCE(reason || ' · ', '') || 'not decided at consultation',
-              decided_by = $2, decided_at = NOW()
-        WHERE visit_id = $1 AND status = 'proposed'
-        RETURNING id`,
-      [visitId, actorId],
-    );
-
     // ── 4. Status ────────────────────────────────────────────────────────────
     await advanceStatus(client, {
       visitId,
@@ -306,7 +329,6 @@ export async function finalizeConsult(visitId, actorId = null, db = pool) {
       medicines: active.length,
       stopped: stopped.length,
       paused: paused.length,
-      proposalsAutoRejected: undecided.length,
     };
   } catch (e) {
     await client.query("ROLLBACK");
@@ -332,11 +354,6 @@ export async function finalizePreview(visitId, db = pool) {
       WHERE o.visit_id = $1 GROUP BY o.urgency`,
     [visitId],
   );
-  const { rows: pending } = await db.query(
-    `SELECT count(*)::int AS n FROM giniflow_rx_proposals
-      WHERE visit_id = $1 AND status = 'proposed'`,
-    [visitId],
-  );
   // Named, not counted: "Ophthalmology referral" is actionable, "1 referral" is
   // not — and the prototype's Finalize panel says the specialty out loud.
   const referrals = await referralsForVisit(visitId, db);
@@ -354,7 +371,7 @@ export async function finalizePreview(visitId, db = pool) {
     stopped: items.filter((i) => i.change_type === "stopped").length,
     tests: orders.reduce((n, o) => n + o.tests, 0),
     testsByUrgency: orders,
-    undecidedProposals: pending[0].n,
+    undecidedProposals: await pendingProposalCount(visitId, db),
     outOfStock: outOfStock.map((r) => r.medicine_name),
     referrals: referrals.map((r) => ({
       id: r.id,

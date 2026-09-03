@@ -285,6 +285,9 @@ nothing in it generalises to prose. Dictating a care plan needs the transcript, 
   one action: **Add addendum** — a new append-only note, never an edit of the finalized record.
   `gini-addendum-mockup.html` sketches this; it is not one of the brief's 8 files, so it is
   out of scope for the build and listed here so the next person knows why it exists.
+  **The rest of that mockup is not out of scope** — its four speed and safety changes are planned
+  in `24-ADDENDUM-V11-PLAN.md`, two of which change this screen (the pre-seeded prescription and
+  the fast-path bar).
 - **No unblocking, no status jumping.** Same rule as the board drag and the vitals station: a hold is
   cleared where it was set.
 - **No second patient chart.** Overview, Labs and Diagnoses read the existing Scribe tables

@@ -5,8 +5,22 @@
 //   fall back to phone.
 // Pass 2: for any no-show row that has NO appointment today at all, INSERT a
 //   new appointment row so the "No-Show" group in the OPD UI surfaces it.
+//
+// Two guards stand in front of both passes, because the sheet is a shared human
+// document and neither pass can tell a stale cell from a deliberate one:
+//
+//   The tab must be dated today (IST). The next day's names get pasted in the
+//   evening before while the Show/No-Show column still holds the outgoing day's
+//   answers — on 3 Sep 2026 that flipped all 56 of the day's appointments to
+//   no_show at 05:37 IST, before the OPD opened, and every Gini Flow station
+//   read zero for the rest of the day (no_show belongs to no board column).
+//
+//   A slot whose start time has not arrived yet is left alone. Nobody can have
+//   failed to turn up for a 4 PM appointment at breakfast, whatever the cell
+//   says; the row is simply picked up by a later run once the slot is due.
 
-import { readTodaysAppt } from "../sheets/reader.js";
+import { readTodaysAppt, parseSheetDate } from "../sheets/reader.js";
+import { slotStartHour } from "../../../shared/slotHour.js";
 import pool from "../../config/db.js";
 import { noteSyncedWhileBlocked } from "../patientBlockGuard.js";
 import { createLogger } from "../logger.js";
@@ -15,6 +29,21 @@ import { tryAcquireCronLock, CRON_LOCK_KEYS } from "./lowPriority.js";
 const { log, error } = createLogger("Today's Show Sync");
 
 const SYNC_INTERVAL_MS = 5 * 60 * 1000;
+
+// The clinic's day, not the server's. CURRENT_DATE is UTC here, so between
+// midnight and 05:30 IST it names yesterday — which is how 54 no-show
+// placeholders for 3 Sep were written onto 2 Sep and inflated its no-show rate.
+const IST_TODAY_SQL = `(NOW() AT TIME ZONE 'Asia/Kolkata')::date`;
+
+function istToday() {
+  return new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().split("T")[0];
+}
+
+function istHourNow() {
+  const ist = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+  return ist.getUTCHours() + ist.getUTCMinutes() / 60;
+}
+
 let intervalId = null;
 let syncInFlight = false;
 
@@ -50,6 +79,12 @@ function pickPhone(row) {
   return first.replace(/\D/g, "").trim();
 }
 
+// Each row carries its own "Appointment Date" alongside the tab header. Both
+// are checked: the header can be updated while a row is not, and vice versa.
+function pickApptDate(row) {
+  return (row["Appointment Date"] || row["Appt Date"] || row["Date"] || "").toString().trim();
+}
+
 function pickDoctor(row) {
   return (row["Consultant"] || row["Doctor"] || row["Doctor Name"] || "").toString().trim();
 }
@@ -80,12 +115,27 @@ export async function syncTodaysShow() {
     // placeholder.
     releaseLock = await tryAcquireCronLock("Today's Show Sync", CRON_LOCK_KEYS.TODAYS_SHOW_SYNC);
     if (!releaseLock) return { flipped: 0, inserted: 0, skipped: 0, noShow: 0 };
-    const { patients = [] } = await readTodaysAppt();
+    const { date: tabDateRaw, patients = [] } = await readTodaysAppt();
+
+    // Guard 1 — the tab must be today's. An unparseable header is treated the
+    // same as a wrong one: this pass writes no_show, and a no-show written in
+    // error costs the floor its whole board, so it only runs on a date it can
+    // read and agree with.
+    const day = istToday();
+    const tabDate = parseSheetDate(tabDateRaw);
+    if (tabDate !== day) {
+      log("Sync", `Skipping — "Today's Appt" is dated ${tabDateRaw || "(blank)"}, not ${day}`);
+      return { flipped: 0, inserted: 0, skipped: 0, noShow: 0, staleTab: true };
+    }
+
+    const nowHour = istHourNow();
 
     const noShowRows = [];
     let rowsSeen = 0;
     let rowsShow = 0;
     let rowsBlank = 0;
+    let rowsNotDue = 0;
+    let rowsOtherDay = 0;
 
     for (const row of patients) {
       rowsSeen++;
@@ -95,6 +145,19 @@ export async function syncTodaysShow() {
         continue;
       }
       if (isNoShow(showVal)) {
+        // Guard 2 — a slot that has not started yet cannot have been missed.
+        // An unparseable slot is let through: the sheet holds formats this
+        // parser does not know, and a real no-show must not be lost to one.
+        const startHour = slotStartHour(pickTimeSlot(row));
+        if (startHour !== null && nowHour < startHour) {
+          rowsNotDue++;
+          continue;
+        }
+        const rowDate = parseSheetDate(pickApptDate(row));
+        if (rowDate && rowDate !== day) {
+          rowsOtherDay++;
+          continue;
+        }
         noShowRows.push({
           fileNo: pickFileNo(row),
           phone: pickPhone(row),
@@ -116,7 +179,7 @@ export async function syncTodaysShow() {
       const res = await pool.query(
         `UPDATE appointments
             SET status = 'no_show', updated_at = NOW()
-          WHERE appointment_date = CURRENT_DATE
+          WHERE appointment_date = ${IST_TODAY_SQL}
             AND (status IS NULL OR status IN ('scheduled', 'pending'))
             AND file_no = ANY($1::text[])
           RETURNING file_no`,
@@ -146,7 +209,7 @@ export async function syncTodaysShow() {
       // for this file_no (could be already-seen / cancelled).
       const existing = await pool.query(
         `SELECT 1 FROM appointments
-          WHERE appointment_date = CURRENT_DATE AND file_no = $1
+          WHERE appointment_date = ${IST_TODAY_SQL} AND file_no = $1
           LIMIT 1`,
         [fileNo],
       );
@@ -213,7 +276,7 @@ export async function syncTodaysShow() {
         `INSERT INTO appointments
            (patient_id, file_no, patient_name, phone, doctor_name,
             appointment_date, time_slot, status, is_walkin, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, $6, 'no_show', true, NOW(), NOW())
+         VALUES ($1, $2, $3, $4, $5, ${IST_TODAY_SQL}, $6, 'no_show', true, NOW(), NOW())
          ON CONFLICT (file_no, appointment_date, time_slot, doctor_name, status)
            WHERE file_no IS NOT NULL AND appointment_date IS NOT NULL
              AND time_slot IS NOT NULL AND doctor_name IS NOT NULL
@@ -231,12 +294,14 @@ export async function syncTodaysShow() {
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     log(
       "Sync",
-      `Done in ${elapsed}s — rows=${rowsSeen}, noShow=${noShowRows.length}, flipped=${flipped}, inserted=${inserted}, skippedExisting=${skippedExisting}, skippedNoFileNo=${skippedNoFileNo}, show=${rowsShow}, blank=${rowsBlank}`,
+      `Done in ${elapsed}s — rows=${rowsSeen}, noShow=${noShowRows.length}, flipped=${flipped}, inserted=${inserted}, skippedExisting=${skippedExisting}, skippedNoFileNo=${skippedNoFileNo}, notDue=${rowsNotDue}, otherDay=${rowsOtherDay}, show=${rowsShow}, blank=${rowsBlank}`,
     );
     return {
       flipped,
       inserted,
       skipped: skippedExisting,
+      notDue: rowsNotDue,
+      otherDay: rowsOtherDay,
       noShow: noShowRows.length,
     };
   } catch (e) {

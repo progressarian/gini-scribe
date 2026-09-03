@@ -12,6 +12,12 @@ export default function FinalizeBar({ visitId, onDone, onToast }) {
   const { data: preview, isLoading } = useFinalizePreview(visitId, open);
   const finalize = useFinalize(visitId);
 
+  // A proposal the doctor has not decided blocks the fan-out (addendum v1.1 §3).
+  // Not a warning: finalizing used to record every undecided proposal as
+  // rejected, so the MO was told their suggestion was considered when nobody
+  // had read it.
+  const blocked = (preview?.undecidedProposals ?? 0) > 0;
+
   const run = () =>
     finalize.mutate(undefined, {
       onSuccess: (r) => {
@@ -84,10 +90,10 @@ export default function FinalizeBar({ visitId, onDone, onToast }) {
                       "proposed" would tell the MO their suggestion is still being
                       considered after the patient has gone home. */}
                   {preview.undecidedProposals > 0 && (
-                    <li className="fin-warn">
-                      ⚠ {preview.undecidedProposals} MO proposal
-                      {preview.undecidedProposals === 1 ? "" : "s"} still undecided — finalizing
-                      records them as rejected
+                    <li className="fin-block">
+                      ⛔ {preview.undecidedProposals} MO proposal
+                      {preview.undecidedProposals === 1 ? "" : "s"} still to review — approve,
+                      adjust or reject each one before finalizing
                     </li>
                   )}
                   {preview.medicines === 0 && (
@@ -102,8 +108,18 @@ export default function FinalizeBar({ visitId, onDone, onToast }) {
                 <button className="btn btn-g" onClick={() => setOpen(false)}>
                   Not yet
                 </button>
-                <button className="btn btn-tl" disabled={finalize.isPending} onClick={run}>
-                  {finalize.isPending ? "Finalizing…" : "Yes — finalize"}
+                {/* The server refuses this too (finalize.js). Disabling the
+                    button says why before the click rather than after it. */}
+                <button
+                  className="btn btn-tl"
+                  disabled={finalize.isPending || blocked}
+                  onClick={run}
+                >
+                  {finalize.isPending
+                    ? "Finalizing…"
+                    : blocked
+                      ? `${preview.undecidedProposals} to review`
+                      : "Yes — finalize"}
                 </button>
               </div>
             </div>

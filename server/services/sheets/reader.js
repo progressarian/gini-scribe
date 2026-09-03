@@ -12,6 +12,43 @@ const SHEET_NAME = "LIVE View of Today's patients";
 
 const UPCOMING_TABS = ["Tomorrow", "Day After", "Day After + 1"];
 
+// ── Parse date from sheet formats like "4/Apr/2026", "6/Apr/2026", etc. ────
+export function parseSheetDate(raw) {
+  if (!raw) return null;
+  const s = raw.toString().trim();
+
+  // "4/Apr/2026" or "6/Apr/2026" (D/Mon/YYYY)
+  const slashMatch = s.match(/^(\d{1,2})\/([A-Za-z]+)\/(\d{4})$/);
+  if (slashMatch) {
+    const [, day, monStr, year] = slashMatch;
+    const months = {
+      jan: "01",
+      feb: "02",
+      mar: "03",
+      apr: "04",
+      may: "05",
+      jun: "06",
+      jul: "07",
+      aug: "08",
+      sep: "09",
+      oct: "10",
+      nov: "11",
+      dec: "12",
+    };
+    const mon = months[monStr.toLowerCase().slice(0, 3)];
+    if (mon) return `${year}-${mon}-${day.padStart(2, "0")}`;
+  }
+
+  // "4/4/2026" or "4/5/2026" (M/D/YYYY)
+  const numMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (numMatch) {
+    const [, m, d, y] = numMatch;
+    return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  }
+
+  return null;
+}
+
 let sheetsClient = null;
 
 function getClient() {

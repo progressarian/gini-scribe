@@ -1,6 +1,6 @@
 // ── Google Sheets Cron — imports upcoming OPD appointments from sheet tabs ──
 
-import { readUpcomingAppointments } from "../sheets/reader.js";
+import { readUpcomingAppointments, parseSheetDate } from "../sheets/reader.js";
 import pool from "../../config/db.js";
 import { ownFu, IST_TODAY } from "../ghmDayWindow.js";
 import { noteSyncedWhileBlocked } from "../patientBlockGuard.js";
@@ -18,43 +18,6 @@ async function ensureSheetColumns() {
     ALTER TABLE appointments ADD COLUMN IF NOT EXISTS sheet_condition TEXT;
   `);
   columnsReady = true;
-}
-
-// ── Parse date from sheet formats like "4/Apr/2026", "6/Apr/2026", etc. ────
-function parseSheetDate(raw) {
-  if (!raw) return null;
-  const s = raw.toString().trim();
-
-  // "4/Apr/2026" or "6/Apr/2026" (D/Mon/YYYY)
-  const slashMatch = s.match(/^(\d{1,2})\/([A-Za-z]+)\/(\d{4})$/);
-  if (slashMatch) {
-    const [, day, monStr, year] = slashMatch;
-    const months = {
-      jan: "01",
-      feb: "02",
-      mar: "03",
-      apr: "04",
-      may: "05",
-      jun: "06",
-      jul: "07",
-      aug: "08",
-      sep: "09",
-      oct: "10",
-      nov: "11",
-      dec: "12",
-    };
-    const mon = months[monStr.toLowerCase().slice(0, 3)];
-    if (mon) return `${year}-${mon}-${day.padStart(2, "0")}`;
-  }
-
-  // "4/4/2026" or "4/5/2026" (M/D/YYYY)
-  const numMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (numMatch) {
-    const [, m, d, y] = numMatch;
-    return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
-  }
-
-  return null;
 }
 
 // ── Parse DOB from formats like "21/May/1979", "29 yrs", etc. ──────────────

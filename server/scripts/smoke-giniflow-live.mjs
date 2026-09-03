@@ -55,9 +55,18 @@ await seedDemoDay({ date: TEST_DAY });
 // ── The tailer reads what the floor already writes ──────────────────────────
 await startEventTailer();
 const primed = tailerWatermarks();
+// Each stream starts at its table's current end — which is 0 for a table
+// nothing has written yet, and that is still "now" rather than "the beginning
+// of time". Asserting `> 0` assumed every stream had history and broke the day
+// a fourth one was added.
+const ends = await one(
+  `SELECT COALESCE((SELECT max(seq) FROM giniflow_visit_events), 0)     AS visit,
+          COALESCE((SELECT max(seq) FROM giniflow_lab_order_events), 0) AS lab_order,
+          COALESCE((SELECT max(seq) FROM giniflow_vitals), 0)           AS vitals`,
+);
 check(
   "the tailer starts from where the tables are, not the beginning of time",
-  Object.values(primed).every((v) => v > 0),
+  ["visit", "lab_order", "vitals"].every((k) => Number(primed[k]) === Number(ends[k])),
   JSON.stringify(primed),
 );
 

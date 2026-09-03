@@ -4,6 +4,7 @@ import { getSlaConfig, budgetMap, budgetLookup } from "./board.js";
 import { slaKeyForStatus, STATUS_LABEL } from "../../../shared/giniflowStatus.js";
 import { todaysVitals, previousVitals } from "./visitVitals.js";
 import { buildBrief } from "./consultBrief.js";
+import { seedDraftOn } from "./prescription.js";
 
 // The consultant's station — the queue that forms in front of Dr. Bhansali, and
 // the consult screen itself.
@@ -619,8 +620,20 @@ export async function startConsult(visitId, actorId = null, db = pool) {
               updated_at = NOW() WHERE id = $1`,
       [visitId, actorId],
     );
+
+    // The prescription opens pre-seeded with last visit's regimen, every row
+    // `continued` — addendum v1.1 §1, docs/gini-flow/24-ADDENDUM-V11-PLAN.md §2.
+    // Copying is the default state, not a button: 400 of last week's 438 visits
+    // arrived on an average of 7.2 medicines, and the alternative to seeding is
+    // a consultant retyping them under time pressure, which is how a medicine
+    // gets dropped.
+    //
+    // In this transaction, so a claim that fails leaves no draft behind, and
+    // idempotent — a second claim finds the draft started and does nothing.
+    const seeded = await seedDraftOn(client, visitId);
+
     await client.query("COMMIT");
-    return { started: true };
+    return { started: true, seeded: seeded.seeded };
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;

@@ -55,7 +55,9 @@ const ITEM_COLUMNS = `id, visit_id, source_medication_id, medicine_name, pharmac
   composition, dose, previous_dose, frequency, timing, timing_category,
   time_of_day::text AS time_of_day, route, form, duration, reason,
   patient_instruction, change_type, stop_reason, resume_on::text AS resume_on,
-  drug_class, sort_order`;
+  drug_class, sort_order,
+  proposed_by, approval_status, decided_by, decided_at, decision_note,
+  (SELECT COALESCE(d.short_name, d.name) FROM doctors d WHERE d.id = proposed_by) AS proposed_by_name`;
 
 // Stock is joined, never assumed. A medicine with no inventory row comes back
 // with `stock: null`, which the screen renders as "Stock —" (plan §7).
@@ -164,20 +166,25 @@ export async function getDraft(visitId, db = pool) {
 // Seeds the draft from what the patient is already taking, every row marked
 // `continued`. The consultant then changes the two or three that need changing,
 // rather than retyping nine medicines — which is how medicines get dropped.
-export async function seedDraftFromRegimen(visitId, db = pool) {
-  const client = await db.connect();
-  try {
-    await client.query("BEGIN");
-    const { rows: existing } = await client.query(
-      `SELECT count(*)::int AS n FROM giniflow_rx_items WHERE visit_id = $1`,
-      [visitId],
-    );
-    if (existing[0].n > 0) {
-      await client.query("ROLLBACK");
-      return { seeded: 0, reason: "draft already started" };
-    }
-    const { rows } = await client.query(
-      `INSERT INTO giniflow_rx_items
+// The work, on a caller's client and inside a transaction the caller owns.
+//
+// `startConsult` seeds the draft as part of claiming the room, so this cannot
+// open a transaction of its own: a nested BEGIN throws, and a separate
+// connection would commit the draft independently — leaving a seeded
+// prescription on a patient whose claim rolled back.
+//
+// Starting a draft that already exists is a no-op, not an error: it RETURNS
+// rather than rolling back, because aborting a caller's transaction over
+// "nothing to do" would take the claim down with it.
+export async function seedDraftOn(client, visitId) {
+  const { rows: existing } = await client.query(
+    `SELECT count(*)::int AS n FROM giniflow_rx_items WHERE visit_id = $1`,
+    [visitId],
+  );
+  if (existing[0].n > 0) return { seeded: 0, reason: "draft already started" };
+
+  const { rows } = await client.query(
+    `INSERT INTO giniflow_rx_items
          (visit_id, source_medication_id, medicine_name, pharmacy_match, composition, dose,
           frequency, timing, timing_category, time_of_day, route, form, drug_class,
           reason, change_type, sort_order)
@@ -189,10 +196,19 @@ export async function seedDraftFromRegimen(visitId, db = pool) {
          JOIN giniflow_visits v ON v.id = $1
         WHERE m.patient_id = v.patient_id AND m.is_active = true AND m.external_doctor IS NULL
        RETURNING id`,
-      [visitId],
-    );
+    [visitId],
+  );
+  return { seeded: rows.length };
+}
+
+// The standalone entry, unchanged from outside: the route still calls this.
+export async function seedDraftFromRegimen(visitId, db = pool) {
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await seedDraftOn(client, visitId);
     await client.query("COMMIT");
-    return { seeded: rows.length };
+    return result;
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;
@@ -212,14 +228,85 @@ const normaliseItem = (item) => {
   };
 };
 
+// Approve · Adjust · Reject, on the row itself (addendum v1.1 §3).
+//
+// Approve keeps the row as proposed. Adjust is what the inline editor records
+// after the doctor changes something — `updateItem` marks it, so this only has
+// to carry the explicit decisions. Reject reverts the row to what the patient
+// was already on, which for a proposed *addition* means removing it: there is no
+// previous line to fall back to.
+export async function decideItem(itemId, { status, note = null }, actorId = null, db = pool) {
+  if (!["approved", "adjusted", "rejected"].includes(status)) {
+    throw Object.assign(new Error(`Unknown decision: ${status}`), { status: 400 });
+  }
+  // The same rule the old proposals table enforced: a rejection without a reason
+  // tells the MO their suggestion was refused and nothing about why.
+  if (status === "rejected" && !note) {
+    throw Object.assign(new Error("Rejecting a proposal needs a reason"), { status: 400 });
+  }
+
+  const { rows } = await db.query(
+    `SELECT id, visit_id, source_medication_id, approval_status
+       FROM giniflow_rx_items WHERE id = $1`,
+    [itemId],
+  );
+  if (!rows.length) throw Object.assign(new Error("Row not found"), { status: 404 });
+  if (!rows[0].approval_status) {
+    throw Object.assign(new Error("This row is not a proposal"), { status: 409 });
+  }
+
+  // A rejected addition leaves nothing behind — the patient was not on it.
+  if (status === "rejected" && !rows[0].source_medication_id) {
+    await db.query(`DELETE FROM giniflow_rx_items WHERE id = $1`, [itemId]);
+    return { decided: status, removed: true };
+  }
+
+  const { rows: updated } = await db.query(
+    `UPDATE giniflow_rx_items
+        SET approval_status = $2, decided_by = $3, decided_at = NOW(),
+            decision_note = $4, updated_at = NOW()
+      WHERE id = $1
+      RETURNING ${ITEM_COLUMNS}`,
+    [itemId, status, actorId, note],
+  );
+  return updated[0];
+}
+
 export async function addItem(visitId, item, db = pool) {
   const n = normaliseItem(item);
+  // A row an MO adds is a proposal the doctor has to decide (addendum v1.1 §3).
+  // The doctor's own rows carry neither field, which is what `proposed_by IS
+  // NULL` means everywhere else in this file.
+  const proposedBy = item.proposedBy ?? null;
+  const approvalStatus = proposedBy ? "pending" : null;
+
+  // The draft now opens pre-seeded (addendum v1.1 §1), so "add a medicine the
+  // patient is already on" went from unlikely to routine — and adding it twice
+  // finalizes into two prescriptions for the same drug. Matched on the pharmacy
+  // key, which is what the dispensing counter reads.
+  const { rows: clash } = await db.query(
+    `SELECT id, medicine_name, change_type FROM giniflow_rx_items
+      WHERE visit_id = $1 AND change_type <> 'stopped'
+        AND UPPER(COALESCE(pharmacy_match, medicine_name)) = UPPER($2)
+      LIMIT 1`,
+    [visitId, n.pharmacyMatch || n.name],
+  );
+  if (clash.length) {
+    throw Object.assign(
+      new Error(
+        `${clash[0].medicine_name} is already in this prescription — edit that row instead`,
+      ),
+      { status: 409, existingItemId: clash[0].id },
+    );
+  }
+
   const { rows } = await db.query(
     `INSERT INTO giniflow_rx_items
        (visit_id, source_medication_id, medicine_name, pharmacy_match, composition, dose,
         previous_dose, frequency, timing, timing_category, time_of_day, route, form,
-        duration, reason, patient_instruction, change_type, drug_class, sort_order)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::time,$12,$13,$14,$15,$16,$17,$18,
+        duration, reason, patient_instruction, change_type, drug_class,
+        proposed_by, approval_status, sort_order)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::time,$12,$13,$14,$15,$16,$17,$18,$19,$20,
              COALESCE((SELECT MAX(sort_order) + 1 FROM giniflow_rx_items WHERE visit_id = $1), 1))
      RETURNING ${ITEM_COLUMNS}`,
     [
@@ -241,6 +328,8 @@ export async function addItem(visitId, item, db = pool) {
       item.patientInstruction ?? null,
       item.changeType ?? "new",
       item.drugClass ?? null,
+      proposedBy,
+      approvalStatus,
     ],
   );
   return rows[0];
@@ -266,6 +355,16 @@ export async function updateItem(itemId, patch, db = pool) {
             reason = COALESCE($7, reason),
             patient_instruction = COALESCE($8, patient_instruction),
             route = COALESCE($10, route),
+            -- Editing a pending proposal IS the "Adjust" decision (addendum
+            -- v1.1 §3): the doctor changed it and kept it, which is not the same
+            -- as approving it as proposed. A row that was never a proposal is
+            -- untouched here.
+            approval_status = CASE
+              WHEN approval_status = 'pending' THEN 'adjusted' ELSE approval_status END,
+            decided_by = CASE
+              WHEN approval_status = 'pending' THEN $11 ELSE decided_by END,
+            decided_at = CASE
+              WHEN approval_status = 'pending' THEN NOW() ELSE decided_at END,
             updated_at = NOW()
       WHERE id = $1
       RETURNING ${ITEM_COLUMNS}`,
@@ -280,6 +379,7 @@ export async function updateItem(itemId, patch, db = pool) {
       patch.patientInstruction ?? null,
       patch.changeType ?? null,
       patch.route ?? null,
+      patch.actorId ?? null,
     ],
   );
   if (!rows.length) throw Object.assign(new Error("Draft row not found"), { status: 404 });

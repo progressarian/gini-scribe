@@ -100,6 +100,20 @@ export const useUpdateItem = (visitId) =>
       (await api.patch(`/api/giniflow/stations/doctor/prescription/items/${itemId}`, patch)).data,
   );
 
+// Approve or Reject a proposed row. Adjust is not here: editing the row through
+// `useUpdateItem` IS the adjust decision (addendum v1.1 §3).
+export const useDecideItem = (visitId) =>
+  useDraftMutation(
+    visitId,
+    async ({ itemId, status, note }) =>
+      (
+        await api.post(`/api/giniflow/stations/doctor/prescription/items/${itemId}/decide`, {
+          status,
+          note,
+        })
+      ).data,
+  );
+
 export const useRemoveItem = (visitId) =>
   useDraftMutation(
     visitId,

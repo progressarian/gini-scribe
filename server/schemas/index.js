@@ -819,6 +819,14 @@ export const giniflowRxItemSchema = z.object({
 
 export const giniflowRxItemPatchSchema = giniflowRxItemSchema.partial();
 
+// Approve · Adjust · Reject on a proposed row. `adjusted` is recorded by editing
+// the row, not by sending it here, but it stays valid so a client can be
+// explicit. A rejection carries its reason — the service refuses without one.
+export const giniflowRxDecisionSchema = z.object({
+  status: z.enum(["approved", "adjusted", "rejected"]),
+  note: z.string().trim().max(500).nullish(),
+});
+
 export const giniflowRxPauseSchema = z.object({
   weeks: z.number().int().min(1).max(52),
 });

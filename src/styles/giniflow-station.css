@@ -6256,3 +6256,40 @@
   flex: 1;
   min-width: 0;
 }
+
+/* A finalize blocker, not a caveat: the amber `.fin-warn` says "this will
+   happen anyway", and an undecided proposal must not read that way. */
+.gf .fin-block {
+  color: var(--red);
+  font-weight: 600;
+}
+
+/* ── A proposed row: the prescription itself, tagged (addendum v1.1 §3) ──────
+   Purple, as the mockup draws it, and distinct from the amber "changed" and
+   green "new" tints — those say what the doctor did, this says what somebody
+   is asking them to do. */
+.gf .rx-row.rx-proposed {
+  background: var(--pu-l);
+  border-color: var(--pu-b);
+  border-left: 3px solid var(--pu);
+}
+.gf .ch-proposed {
+  background: var(--pu-l);
+  color: var(--pu);
+}
+.gf .ch-approved {
+  background: var(--grn-l);
+  color: var(--grn);
+}
+.gf .ch-adjusted {
+  background: var(--amb-l);
+  color: #b45309;
+}
+.gf .ra-approve {
+  color: var(--grn);
+  border-color: var(--grn);
+}
+.gf .ra-approve:hover {
+  background: var(--grn);
+  color: #fff;
+}
