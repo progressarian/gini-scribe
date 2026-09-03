@@ -5,10 +5,16 @@ import {
   useSaveVitals,
   useStartVitals,
   useReleaseVitals,
+  useSaveAllergy,
 } from "../../queries/hooks/useGiniflowVitals";
 import { useVoiceVitals } from "../../hooks/useVoiceVitals";
 import { SPOKEN_EXAMPLE, flagLargeChanges } from "../../../shared/giniflowVitalsSpeech";
 import { useTick, minutesSince, budgetColour } from "../../lib/giniflowTime";
+import {
+  ALLERGY_OPTIONS,
+  parseAllergyNote,
+  formatAllergyNote,
+} from "../../../shared/giniflowAllergy";
 import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
 import LiveBadge from "../../components/giniflow/LiveBadge";
 import "../../styles/giniflow-station.css";
@@ -205,6 +211,8 @@ export default function VitalsStationPage() {
   const { data: queueData, isLoading } = useVitalsQueue();
   const live = useGiniflowLive({ date: queueData?.date });
   const saveVitals = useSaveVitals();
+  const saveAllergy = useSaveAllergy();
+  const [allergy, setAllergy] = useState({ status: "not_known", list: [], draft: "" });
   const startVitals = useStartVitals();
   const releaseVitals = useReleaseVitals();
 
@@ -258,6 +266,16 @@ export default function VitalsStationPage() {
     setSpokeAnything(false);
     setRechecked(false);
   }, [patient?.visitId, patient?.recorded, patient?.lastVisit?.height]);
+
+  // Keyed on the visit alone: a background refetch must not wipe an answer the
+  // nurse has picked but not yet saved.
+  useEffect(() => {
+    setAllergy({
+      status: patient?.allergyStatus || "not_known",
+      list: parseAllergyNote(patient?.allergyNote),
+      draft: "",
+    });
+  }, [patient?.visitId]);
 
   const showToast = (msg) => {
     setToast(msg);
@@ -344,7 +362,42 @@ export default function VitalsStationPage() {
     });
   };
 
-  const submit = () => {
+  const allergyList = () => {
+    const typed = allergy.draft.trim();
+    if (!typed || allergy.list.some((x) => x.toLowerCase() === typed.toLowerCase()))
+      return allergy.list;
+    return [...allergy.list, typed];
+  };
+
+  const addAllergy = () => {
+    const list = allergyList();
+    if (formatAllergyNote(list).length > 300)
+      return showToast("That is more than the allergy field holds — shorten the names");
+    setAllergy((a) => ({ ...a, list, draft: "" }));
+  };
+
+  const submit = async () => {
+    // A name typed but not added is still an answer the nurse gave.
+    const list = allergyList();
+    if (allergy.status === "known" && !list.length)
+      return showToast("Name the allergy before saving");
+
+    const note = formatAllergyNote(list);
+    const allergyChanged =
+      allergy.status !== (patient?.allergyStatus || "not_known") ||
+      (allergy.status === "known" && note !== (patient?.allergyNote || ""));
+    if (allergyChanged) {
+      try {
+        await saveAllergy.mutateAsync({
+          visitId: selectedId,
+          status: allergy.status,
+          note: allergy.status === "known" ? note : null,
+        });
+      } catch (e) {
+        return showToast(e?.response?.data?.error || "Could not save the allergy answer");
+      }
+    }
+
     saveVitals.mutate(
       {
         visitId: selectedId,
@@ -387,8 +440,8 @@ export default function VitalsStationPage() {
               it works without JS, and it keeps the station screen free of a
               router dependency. */}
           <LiveBadge live={live} className="tr-live" />
-          <a className="tr-back" href="/giniflow/manager">
-            ← Board
+          <a className="tr-back" href="/giniflow/stations">
+            ← Stations
           </a>
         </div>
       </div>
@@ -494,8 +547,11 @@ export default function VitalsStationPage() {
                   {badge && <span className={`badge ${badge.cls}`}>{badge.label}</span>}
                   {/* The chair holds one patient, so there has to be a way to
                       give it up without recording a reading — the patient who
-                      got up, or the wrong row tapped. */}
-                  {!correcting && (
+                      got up, or the wrong row tapped. Only for the patient
+                      actually in it: releasing anyone else is refused by
+                      releaseVitals, so offering the button to a queued patient
+                      only buys a toast saying no. */}
+                  {!correcting && patient.status === "with_vitals" && (
                     <button
                       type="button"
                       className="tr-back"
@@ -602,6 +658,95 @@ export default function VitalsStationPage() {
                 ) : (
                   <div className="last-visit">No previous vitals on record for this patient.</div>
                 )}
+
+                {/* Asked here because this is the first station that sits the
+                    patient down. Recorded against the patient, so every station
+                    reads one answer — and "not asked" stays visible until
+                    somebody actually asks. */}
+                <div className="vf-allergy">
+                  <div className="vf-lbl">Allergies</div>
+                  <div className="allergy-choices" role="group" aria-label="Allergy status">
+                    {ALLERGY_OPTIONS.map((o) => {
+                      const on = allergy.status === o.value;
+                      return (
+                        <button
+                          type="button"
+                          key={o.value}
+                          aria-pressed={on}
+                          className={`allergy-opt ao-${o.tone}${on ? " on" : ""}`}
+                          onClick={() => setAllergy((a) => ({ ...a, status: o.value }))}
+                        >
+                          <span className="ao-head">
+                            <span className="ao-ico" aria-hidden="true">
+                              {o.icon}
+                            </span>
+                            {o.label}
+                            {on && (
+                              <span className="ao-tick" aria-hidden="true">
+                                ✓
+                              </span>
+                            )}
+                          </span>
+                          <em>{on ? "Selected" : o.sub}</em>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {allergy.status === "known" && (
+                    <>
+                      <div className="allergy-name">
+                        <label className="sr-only" htmlFor="allergy-note">
+                          Name the allergy
+                        </label>
+                        <input
+                          id="allergy-note"
+                          className="vf-inp"
+                          placeholder={
+                            allergy.list.length
+                              ? "Add another — press Enter"
+                              : "Name the allergy — sulfa, penicillin…"
+                          }
+                          value={allergy.draft}
+                          onChange={(e) => setAllergy((a) => ({ ...a, draft: e.target.value }))}
+                          onKeyDown={(e) => {
+                            if (e.key !== "Enter") return;
+                            e.preventDefault();
+                            addAllergy();
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="btn-sm on"
+                          disabled={!allergy.draft.trim()}
+                          onClick={addAllergy}
+                        >
+                          + Add
+                        </button>
+                      </div>
+                      {allergy.list.length > 0 && (
+                        <div className="allergy-chips">
+                          {allergy.list.map((name) => (
+                            <span className="allergy-chip" key={name}>
+                              {name}
+                              <button
+                                type="button"
+                                aria-label={`Remove ${name}`}
+                                onClick={() =>
+                                  setAllergy((a) => ({
+                                    ...a,
+                                    list: a.list.filter((x) => x !== name),
+                                  }))
+                                }
+                              >
+                                ×
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
 
                 <div className="vitals-grid">
                   <div className="vf">

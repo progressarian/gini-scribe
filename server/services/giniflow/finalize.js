@@ -3,6 +3,9 @@ import { advanceStatus } from "./statusEngine.js";
 import { markMedicationVisitStatus } from "../medication/visitStatus.js";
 import { savePrescriptionForVisit, buildVisitPayloadFromDb } from "../prescriptionAutoSave.js";
 import { referralsForVisit, generateLetter } from "./referralsStation.js";
+import { saveCarePlan } from "./doctorStation.js";
+import { orderTests } from "./moStation.js";
+import { checkVisit } from "./interactions.js";
 
 // Finalize — brief §2.3 trigger 4, docs/gini-flow/14-CONSULTANT-PRESCRIPTION-PLAN.md §6.
 //
@@ -92,6 +95,24 @@ export async function finalizeConsult(visitId, actorId = null, db = pool) {
           `${pending} proposal${pending === 1 ? "" : "s"} still to review — approve, adjust or reject each one first`,
         ),
         { status: 409, pendingProposals: pending },
+      );
+    }
+
+    // A severe interaction stops the finalize until somebody has said why they
+    // are prescribing it anyway (§5.2). Not a hard block, deliberately: dual
+    // antiplatelet after a stent and an MRA with an ACE inhibitor in heart
+    // failure are the combinations this check is best at spotting, and both are
+    // things a cardiologist means. A stop that cannot be passed gets worked
+    // around, and then it protects nobody — so the way past it is a recorded
+    // reason, which is the sentence the whole check exists to produce.
+    const interactions = await checkVisit(visitId, client);
+    if (interactions.blocking.length) {
+      const first = interactions.blocking[0];
+      throw Object.assign(
+        new Error(
+          `${first.medicines.join(" + ")} — ${first.note} Say why this is intended, or change the prescription.`,
+        ),
+        { status: 409, blockingInteractions: interactions.blocking },
       );
     }
 
@@ -341,6 +362,106 @@ export async function finalizeConsult(visitId, actorId = null, db = pool) {
 // What Finalize is about to do, for the confirmation panel. Read-only: the
 // consultant sees the fan-out named before they trigger it, in the prototype's
 // own words.
+// The fast path — addendum v1.1 §2, docs/gini-flow/24-ADDENDUM-V11-PLAN.md §3.
+//
+// One tap for a green patient: keep the pre-seeded prescription, repeat today's
+// panel at the next visit, set the follow-up three months out, finalize. Roughly
+// 28% of visits are `in_control`, and for those the consultation is a
+// confirmation rather than a decision.
+//
+// Three transactions, not one, and the ORDER is the design (§3.2). `orderTests`
+// and `finalizeConsult` each own theirs, and giving them client-taking variants
+// would touch both stations for a path that is a convenience. So the sequence is
+// arranged by what a failure leaves behind:
+//
+//   care plan  — harmless on its own if the rest fails
+//   tests      — a patient with tests ordered and still in the room; a phone call
+//   finalize   — last, because a finished visit with no follow-up is not
+//                recoverable by hand
+//
+// Everything below reuses the normal services. `finalizeConsult` is not forked:
+// a second finalize would be a second answer to "what does finishing a visit
+// mean".
+export async function fastPathFinalize(visitId, actorId = null, db = pool) {
+  const { rows } = await db.query(
+    `SELECT v.category, v.current_status,
+            (SELECT count(*)::int FROM giniflow_rx_items i
+              WHERE i.visit_id = v.id AND i.change_type <> 'stopped') AS medicines,
+            (SELECT next_visit_date FROM giniflow_care_plans c WHERE c.visit_id = v.id)
+              AS next_visit_date
+       FROM giniflow_visits v WHERE v.id = $1`,
+    [visitId],
+  );
+  if (!rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
+  const visit = rows[0];
+
+  if (visit.category !== "in_control") {
+    throw Object.assign(
+      new Error(
+        `The fast path is for green-category patients — this one is ${visit.category || "uncategorised"}`,
+      ),
+      { status: 409 },
+    );
+  }
+  if (!visit.medicines) {
+    throw Object.assign(new Error("Nothing to continue — the prescription is empty"), {
+      status: 409,
+    });
+  }
+  const pending = await pendingProposalCount(visitId, db);
+  if (pending) {
+    throw Object.assign(
+      new Error(`${pending} proposal${pending === 1 ? "" : "s"} still to review`),
+      { status: 409 },
+    );
+  }
+  // The fast path finalizes without anybody reading the prescription screen, so
+  // it is the one route where an unread severe interaction would go out
+  // unnoticed. Same rule, and no override here — a combination that needs a
+  // reason needs the consultant to open the patient and give one.
+  const interactions = await checkVisit(visitId, db);
+  if (interactions.blocking.length) {
+    const first = interactions.blocking[0];
+    throw Object.assign(
+      new Error(`${first.medicines.join(" + ")} — ${first.note} Open the patient to record why.`),
+      { status: 409, blockingInteractions: interactions.blocking },
+    );
+  }
+
+  // 1. The follow-up, three months out. Never overwritten: a doctor who already
+  //    set a date meant it.
+  let nextVisitDate = visit.next_visit_date;
+  if (!nextVisitDate) {
+    const { rows: d } = await db.query(
+      `SELECT ((NOW() AT TIME ZONE 'Asia/Kolkata')::date + INTERVAL '3 months')::date::text AS d`,
+    );
+    nextVisitDate = d[0].d;
+    await saveCarePlan(visitId, { nextVisitDate, nextVisitInterval: "~3 months" }, actorId, db);
+  }
+
+  // 2. Repeat what was measured today. Read from the visit's own orders — a
+  //    panel nobody chose is a bill the patient did not agree to, so when there
+  //    is nothing to repeat this orders nothing and says so.
+  const { rows: repeatable } = await db.query(
+    `SELECT DISTINCT t.test_name FROM giniflow_lab_orders o
+       JOIN giniflow_lab_order_tests t ON t.lab_order_id = o.id
+      WHERE o.visit_id = $1`,
+    [visitId],
+  );
+  const tests = repeatable.map((r) => r.test_name);
+  if (tests.length) {
+    await orderTests(visitId, { urgency: "next_visit", tests, actorId }, db);
+  }
+
+  // 3. The ordinary fan-out — always on the pool, never on a caller's client.
+  //
+  // `finalizeConsult` opens its own transaction (`db.connect()`), so forwarding
+  // a client here would throw on the last and least reversible step. `db` above
+  // is for the reads and the two composable writes; this one owns its own.
+  const result = await finalizeConsult(visitId, actorId);
+  return { ...result, fastPath: true, nextVisitDate, testsRepeated: tests };
+}
+
 export async function finalizePreview(visitId, db = pool) {
   const { rows: items } = await db.query(
     `SELECT medicine_name, change_type, pharmacy_match FROM giniflow_rx_items
@@ -372,6 +493,7 @@ export async function finalizePreview(visitId, db = pool) {
     tests: orders.reduce((n, o) => n + o.tests, 0),
     testsByUrgency: orders,
     undecidedProposals: await pendingProposalCount(visitId, db),
+    interactions: await checkVisit(visitId, db),
     outOfStock: outOfStock.map((r) => r.medicine_name),
     referrals: referrals.map((r) => ({
       id: r.id,

@@ -4,12 +4,19 @@ import api from "../../services/api";
 // Prescription, tests, medicine card and Finalize.
 // docs/gini-flow/14-CONSULTANT-PRESCRIPTION-PLAN.md §9.
 
-const base = (visitId) => `/api/giniflow/stations/doctor/${visitId}`;
+// The MO edits the same draft through its own gate (addendum v1.1 §3): a row
+// written there is a proposal because of the route it came through, not because
+// of a flag the browser set. The hooks take the station so one component can
+// serve both screens.
+const base = (visitId, station = "doctor") => `/api/giniflow/stations/${station}/${visitId}`;
 
-export function usePrescription(visitId) {
+export function usePrescription(visitId, station = "doctor") {
   return useQuery({
+    // One cache entry per visit whichever station read it — the draft is the
+    // same row set, and two keys would let the MO and the doctor hold different
+    // pictures of it.
     queryKey: ["giniflow", "doctor", "rx", visitId],
-    queryFn: async () => (await api.get(`${base(visitId)}/prescription`)).data,
+    queryFn: async () => (await api.get(`${base(visitId, station)}/prescription`)).data,
     enabled: !!visitId,
   });
 }
@@ -77,6 +84,11 @@ const useDraftMutation = (visitId, fn) => {
       queryClient.invalidateQueries({
         queryKey: ["giniflow", "doctor", "finalize-preview", visitId],
       });
+      // Any edit to the list can create an interaction or clear one, so a stale
+      // check is a wrong check.
+      queryClient.invalidateQueries({
+        queryKey: ["giniflow", "doctor", "interactions", visitId],
+      });
     },
   });
 };
@@ -87,10 +99,10 @@ export const useSeedDraft = (visitId) =>
     async () => (await api.post(`${base(visitId)}/prescription/seed`)).data,
   );
 
-export const useAddItem = (visitId) =>
+export const useAddItem = (visitId, station = "doctor") =>
   useDraftMutation(
     visitId,
-    async (item) => (await api.post(`${base(visitId)}/prescription/items`, item)).data,
+    async (item) => (await api.post(`${base(visitId, station)}/prescription/items`, item)).data,
   );
 
 export const useUpdateItem = (visitId) =>
@@ -102,6 +114,11 @@ export const useUpdateItem = (visitId) =>
 
 // Approve or Reject a proposed row. Adjust is not here: editing the row through
 // `useUpdateItem` IS the adjust decision (addendum v1.1 §3).
+// The 30-second visit. Invalidates the same keys a normal finalize does — it is
+// a finalize, with three steps taken for the doctor.
+export const useFastFinalize = (visitId) =>
+  useDraftMutation(visitId, async () => (await api.post(`${base(visitId)}/fast-finalize`)).data);
+
 export const useDecideItem = (visitId) =>
   useDraftMutation(
     visitId,
@@ -141,6 +158,25 @@ export const useStopItem = (visitId) =>
           reason,
         })
       ).data,
+  );
+
+// The interaction check over the combined list (§5.2). Its own query, not part
+// of the draft: the draft is refetched on every medicine search keystroke.
+export function useInteractions(visitId, station = "doctor") {
+  return useQuery({
+    queryKey: ["giniflow", "doctor", "interactions", visitId],
+    queryFn: async () => (await api.get(`${base(visitId, station)}/interactions`)).data,
+    enabled: !!visitId,
+  });
+}
+
+// Prescribing a severe interaction deliberately. The consultant only — an MO
+// assembling the list can fix it, but cannot sign off on it.
+export const useAckInteraction = (visitId) =>
+  useDraftMutation(
+    visitId,
+    async ({ ruleKey, reason }) =>
+      (await api.post(`${base(visitId)}/interactions/ack`, { ruleKey, reason })).data,
   );
 
 export const useAddExternal = (visitId) =>

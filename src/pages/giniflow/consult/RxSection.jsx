@@ -9,8 +9,10 @@ import {
   useMedicineSearch,
   useAlternatives,
   useDecideItem,
+  useAddExternal,
 } from "../../../queries/hooks/useGiniflowPrescription";
 import { VoiceBar, VoiceButton } from "../../../components/giniflow/VoiceInput";
+import InteractionPanel from "./InteractionPanel";
 
 // Prescription — gini-doctor-final.html `s-rx` (which is where
 // gini-prescription-v2.html's mechanics were merged).
@@ -376,12 +378,85 @@ function AddMedicine({ onAdd, onClose, initialQuery = "" }) {
   );
 }
 
-export default function RxSection({ visitId, readOnly, onToast }) {
-  const { data, isLoading } = usePrescription(visitId);
-  const add = useAddItem(visitId);
+// A medicine another hospital prescribed. The prescriber is required, because
+// an external medicine with nobody's name against it cannot be chased and the
+// interaction check has nobody to cite.
+//
+// Gini never dispenses these: the seed filters them out, the card marks them
+// Ext, and the pharmacy screen does not list them. They are here so the
+// combined list exists at all.
+function ExternalMedicineForm({ onAdd, onClose }) {
+  const [f, setF] = useState({
+    medicineName: "",
+    dose: "",
+    frequency: "",
+    timing: "",
+    prescriberName: "",
+    prescriberHospital: "",
+  });
+  const set = (k) => (e) => setF((prev) => ({ ...prev, [k]: e.target.value }));
+  const ready = f.medicineName.trim() && f.prescriberName.trim();
+
+  return (
+    <div className="rx-ext-form">
+      <div className="cn-head">Medicine from another doctor</div>
+      <div className="rx-grid">
+        <label>
+          Medicine
+          <input className="cp-inp" value={f.medicineName} onChange={set("medicineName")} />
+        </label>
+        <label>
+          Dose
+          <input className="cp-inp" value={f.dose} onChange={set("dose")} />
+        </label>
+        <label>
+          Frequency
+          <input className="cp-inp" value={f.frequency} onChange={set("frequency")} />
+        </label>
+        <label>
+          Timing
+          <input className="cp-inp" value={f.timing} onChange={set("timing")} />
+        </label>
+        <label>
+          Prescribed by
+          <input className="cp-inp" value={f.prescriberName} onChange={set("prescriberName")} />
+        </label>
+        <label>
+          Hospital
+          <input
+            className="cp-inp"
+            value={f.prescriberHospital}
+            onChange={set("prescriberHospital")}
+          />
+        </label>
+      </div>
+      <div className="rx-acts">
+        <button
+          type="button"
+          className="btn-sm on"
+          disabled={!ready}
+          title={ready ? undefined : "The medicine and who prescribed it are both needed"}
+          onClick={() => onAdd(f)}
+        >
+          Add
+        </button>
+        <button type="button" className="btn-sm" onClick={onClose}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default function RxSection({ visitId, readOnly, onToast, station = "doctor" }) {
+  const proposing = station === "mo";
+  const { data, isLoading } = usePrescription(visitId, station);
+  const add = useAddItem(visitId, station);
   const update = useUpdateItem(visitId);
   const remove = useRemoveItem(visitId);
   const decide = useDecideItem(visitId);
+  const addExternal = useAddExternal(visitId);
+  const [addingExternal, setAddingExternal] = useState(false);
   const pause = usePauseItem(visitId);
   const stop = useStopItem(visitId);
   const [editing, setEditing] = useState(null);
@@ -446,6 +521,8 @@ export default function RxSection({ visitId, readOnly, onToast }) {
           }}
         />
       )}
+
+      <InteractionPanel visitId={visitId} readOnly={readOnly} onToast={onToast} station={station} />
 
       {items.length === 0 && (
         <div className="rx-seed">
@@ -522,7 +599,7 @@ export default function RxSection({ visitId, readOnly, onToast }) {
               <StockCell stock={item.stock} onAlternatives={() => setAlternativesFor(item.id)} />
               {!readOnly && (
                 <div className="rx-rowacts">
-                  {item.approval_status === "pending" && (
+                  {item.approval_status === "pending" && !proposing && (
                     <button
                       type="button"
                       className="ra-btn ra-approve"
@@ -546,7 +623,7 @@ export default function RxSection({ visitId, readOnly, onToast }) {
                   </button>
                   {/* A medicine the consultant added by mistake is removed; one the
                     patient is actually taking is stopped, with a reason. */}
-                  {item.approval_status === "pending" ? (
+                  {item.approval_status === "pending" && !proposing ? (
                     <button
                       type="button"
                       className="ra-btn ra-stop"
@@ -664,6 +741,26 @@ export default function RxSection({ visitId, readOnly, onToast }) {
       {(data?.external || []).length === 0 && (
         <div className="cn-empty">None recorded for this patient.</div>
       )}
+      {!readOnly &&
+        (addingExternal ? (
+          <ExternalMedicineForm
+            onAdd={(med) =>
+              addExternal.mutate(med, {
+                onError: fail,
+                onSuccess: () => setAddingExternal(false),
+              })
+            }
+            onClose={() => setAddingExternal(false)}
+          />
+        ) : (
+          <button
+            type="button"
+            className="btn-sm rx-addbtn"
+            onClick={() => setAddingExternal(true)}
+          >
+            + Medicine from another doctor
+          </button>
+        ))}
       {(data?.external || []).map((m) => (
         <div className="rx-ext" key={m.id}>
           <div className="rx-main">

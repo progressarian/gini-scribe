@@ -26,6 +26,7 @@ import {
   Star,
   Sunrise,
   Trash2,
+  UserPlus,
   X,
   RotateCcw,
 } from "lucide-react";
@@ -1599,6 +1600,27 @@ function CallHistoryPanel({ row, ccAgents, colSpan, details, actions }) {
             Call History — {row.patient_name}
           </div>
 
+          {row.booked_by_name && (
+            <div className="hist-booked">
+              <UserPlus size={13} aria-hidden="true" />
+              <span>
+                Booked by <strong>{row.booked_by_name}</strong>
+                {row.booking_source ? ` · ${row.booking_source}` : ""}
+                {/* created_at is when the booking was actually taken. booking_date
+                    falls back to the appointment date when the form omits it, so it
+                    can name a day the booking was not made on. */}
+                {row.booked_at
+                  ? ` · ${fmtDateTime(row.booked_at)}`
+                  : row.booking_date
+                    ? ` · ${prettyDate(row.booking_date)}`
+                    : ""}
+              </span>
+              <span className="hist-booked__tag" title="Who took the booking, not a call attempt.">
+                Booking
+              </span>
+            </div>
+          )}
+
           {history === null ? (
             <div className="hist-loading">Loading history…</div>
           ) : history.length === 0 ? (
@@ -2135,6 +2157,11 @@ export default function GHMPage() {
 
   const pages = listEnabled ? listQuery.data?.pages || [] : [];
   const rows = useMemo(() => pages.flatMap((pg) => safeArr(pg?.data)), [pages]);
+  // Patients Lookup found by name/file/phone but with no appointment row at
+  // all — invisible to every other query on this page, which all read FROM
+  // appointments. Not paginated (the backend caps it at 20) and identical on
+  // every page of the same search, so page 1 alone is enough.
+  const unbookedPatients = view === "lookup" ? safeArr(pages[0]?.unbooked) : [];
   const summary = pages[0]?.summary || {};
   const total = pages[0]?.total || 0;
   const loading = listEnabled && listQuery.isPending;
@@ -2613,18 +2640,78 @@ export default function GHMPage() {
           )}
 
           {/* ── Empty ── */}
-          {!coldLoading && !loading && rows.length === 0 && view === "lookup" && (
-            <div className="ghm__empty">
-              <div className="ghm__empty-icon">
-                <Search size={34} aria-hidden="true" />
+          {!coldLoading &&
+            !loading &&
+            rows.length === 0 &&
+            unbookedPatients.length === 0 &&
+            view === "lookup" && (
+              <div className="ghm__empty">
+                <div className="ghm__empty-icon">
+                  <Search size={34} aria-hidden="true" />
+                </div>
+                <div className="ghm__empty-title">
+                  {lookupQ ? "No patient found" : "Search a patient to begin"}
+                </div>
+                <div className="ghm__empty-sub">
+                  {lookupQ
+                    ? "No patient matches that name, file number, or phone. Clearing the filters may widen the search."
+                    : "Type a name, file number, or phone. Every patient is searched, whatever date is selected — the date only sets the point the Follow-up column counts forward from."}
+                </div>
               </div>
-              <div className="ghm__empty-title">
-                {lookupQ ? "No patient found" : "Search a patient to begin"}
+            )}
+
+          {/* ── Found in records, never booked ── */}
+          {!coldLoading && !loading && view === "lookup" && unbookedPatients.length > 0 && (
+            <div className="unbooked-panel">
+              <div className="unbooked-panel__title">
+                Also found — no appointment on record ({unbookedPatients.length})
               </div>
-              <div className="ghm__empty-sub">
-                {lookupQ
-                  ? "No patient matches that name, file number, or phone. Clearing the filters may widen the search."
-                  : "Type a name, file number, or phone. Every patient is searched, whatever date is selected — the date only sets the point the Follow-up column counts forward from."}
+              <div className="unbooked-panel__sub">
+                These patients exist but have never had an appointment, so there is nothing to call
+                or edit yet. Book one to bring them onto the day list.
+              </div>
+              <div className="unbooked-list">
+                {unbookedPatients.map((p) => (
+                  <div className="unbooked-item" key={`p-${p.patient_id}`}>
+                    <div className="unbooked-item__info">
+                      <span className="unbooked-item__name">{p.patient_name || "—"}</span>
+                      {p.file_no && <span className="unbooked-item__file">{p.file_no}</span>}
+                      {(p.disp_age || p.disp_sex) && (
+                        <span className="unbooked-item__agesex">
+                          {p.disp_sex || ""}
+                          {p.disp_sex && p.disp_age ? " · " : ""}
+                          {p.disp_age ? `${p.disp_age} yrs` : ""}
+                        </span>
+                      )}
+                      {p.phone && (
+                        <a className="unbooked-item__phone" href={`tel:${p.phone}`}>
+                          <Phone size={11} aria-hidden="true" />
+                          {fmtPhone(p.phone)}
+                        </a>
+                      )}
+                    </div>
+                    <div className="unbooked-item__actions">
+                      {p.patient_id && (
+                        <button
+                          className="records-btn"
+                          title="View all documents, prescriptions, labs and past visits"
+                          onClick={() => setRecordFor({ id: p.patient_id, name: p.patient_name })}
+                        >
+                          <FolderOpen size={12} aria-hidden="true" />
+                          All records
+                        </button>
+                      )}
+                      <button
+                        className="book-next-btn"
+                        title="Book the first appointment for this patient"
+                        onClick={() => bookNext(p)}
+                      >
+                        <Plus size={12} aria-hidden="true" />
+                        Book appointment
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}

@@ -54,6 +54,47 @@ export function useAdvanceSample() {
   });
 }
 
+// Confirm-and-attribute on a hospital-lab case. Nothing reaches HealthRay — this
+// records who chased the sample — so only the lab queries need refreshing.
+export function useMarkLabCaseAction() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ caseNo, action, undo }) =>
+      (await api.post(`/api/giniflow/stations/lab/case/${caseNo}/action`, { action, undo })).data,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["giniflow", "lab"] }),
+  });
+}
+
+// Admin override: attach a report to a HealthRay-run case the sync has not been
+// able to fetch a PDF for.
+export function useUploadLabCaseReport() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ caseNo, file }) => {
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).split(",")[1]);
+        reader.onerror = () => reject(new Error("Could not read that file"));
+        reader.readAsDataURL(file);
+      });
+      return (
+        await api.post(`/api/giniflow/stations/lab/case/${caseNo}/report`, {
+          base64,
+          fileName: file.name,
+          mediaType: file.type || "application/pdf",
+        })
+      ).data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "lab"] });
+      // It can flip results_status, which is what the MO, doctor and board read.
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "board"] });
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "mo"] });
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "doctor"] });
+    },
+  });
+}
+
 // Where "View uploaded report" points.
 //
 // NOT the stored `reportUrl`: `patient-files` is a private bucket, so the public

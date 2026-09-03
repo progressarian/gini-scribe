@@ -239,7 +239,40 @@ const doneJourney = (offsetMin, totalMin) => ({
 // `events` are [track, status, minutesAgo] — the log the lab and reception
 // screens will write for real. Without them the lab_total and reception_payment
 // footer budgets have nothing to measure (GF-07, GF-12).
+// One order per bucket, so a walkthrough can click every button on the lab
+// screen. `payment_pending` and `paid` both sit in the Sample-pending column but
+// are different states to the technician: the first is blocked on reception, the
+// second is the only one that offers "Mark sample collected".
 const LAB_ORDERS = [
+  {
+    journey: "with_sd_b",
+    sampleStatus: "paid",
+    paymentStatus: "paid",
+    minutes: 22,
+    events: [
+      ["payment", "pending", 22],
+      ["payment", "paid", 14],
+    ],
+    tests: [
+      ["Fasting blood sugar", 150],
+      ["Creatinine", 300],
+    ],
+  },
+  {
+    journey: "wait_doc_green",
+    sampleStatus: "sample_collected",
+    paymentStatus: "paid",
+    minutes: 34,
+    events: [
+      ["payment", "pending", 34],
+      ["payment", "paid", 30],
+      ["sample", "sample_collected", 18],
+    ],
+    tests: [
+      ["Complete blood count", 400],
+      ["TSH", 500],
+    ],
+  },
   {
     journey: "pharmacy_a",
     sampleStatus: "uploaded",
@@ -597,14 +630,7 @@ const CONSULT_PROFILES = {
     ],
     meds: [
       ["Glycomet 1000", "Metformin 1000mg", "1-0-1", "BD", "diabetes", "After meals"],
-      [
-        "Istamet 50/500",
-        "Sitagliptin 50mg + Metformin 500mg",
-        "1-0-0",
-        "OD",
-        "diabetes",
-        "After breakfast",
-      ],
+      ["Januvia 100", "Sitagliptin 100mg", "1-0-0", "OD", "diabetes", "After breakfast"],
     ],
     external: null,
     plan:
@@ -886,7 +912,7 @@ const DEMO_MARKER = "giniflow-demo";
 // them. Those are clinical attributes about identifiable people, in a DPDP-covered
 // production database. It creates its own patients instead, marked unmistakably in
 // both the name and the file number, and deletes them again on clean.
-const DEMO_FILE_PREFIX = "ZZDEMO_";
+export const DEMO_FILE_PREFIX = "ZZDEMO_";
 
 const DEMO_NAMES = [
   "Demo Nishant Puri",
@@ -999,7 +1025,12 @@ const assertDemoAllowed = () => {
 // `date` exists so the smoke suite can seed a day of its own. Once the HealthRay
 // sync runs, today belongs to real patients — a test that seeds into it collides
 // with them and asserts against a mixture of both.
-export async function seedDemoDay({ db = pool, date = null } = {}) {
+// `sdId` is who the demo patients belong to. Left null they belong to NOBODY,
+// which is the point: `groupOf` treats an unassigned visit as the viewer's own,
+// so whoever opens the MO station can pick every demo patient up. Assigning them
+// to a real doctor — which this used to do unconditionally — put the entire demo
+// day in "With another SD", disabled, for everyone except that one person.
+export async function seedDemoDay({ db = pool, date = null, sdId = null } = {}) {
   assertDemoAllowed();
   const client = await db.connect();
   try {
@@ -1057,7 +1088,7 @@ export async function seedDemoDay({ db = pool, date = null } = {}) {
         visitRows.map((v) => v.journey.results || "none"),
         visitRows.map((v) => v.journey.category),
         visitRows.map((v) => v.journey.blocked || null),
-        visitRows.map((v) => (v.journey.sd ? doctors.sd : null)),
+        visitRows.map((v) => (v.journey.sd ? sdId : null)),
         visitRows.map((v) => (v.journey.doctor ? doctors.chief : null)),
         visitRows.map((v) => v.appointmentTime),
         date,

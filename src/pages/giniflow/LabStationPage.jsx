@@ -3,12 +3,71 @@ import {
   useLabQueue,
   useAdvanceSample,
   useUploadReport,
+  useMarkLabCaseAction,
+  useUploadLabCaseReport,
   reportHref,
 } from "../../queries/hooks/useGiniflowLab";
 import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
 import LiveBadge from "../../components/giniflow/LiveBadge";
 import "../../styles/giniflow-station.css";
 import StationNotice from "../../components/giniflow/StationNotice";
+import useAuthStore from "../../stores/authStore";
+
+// The pill is where the patient is; the line under it says what that means for
+// a sample still running. "Exited" with "patient is here" underneath was the
+// screen contradicting itself.
+// Wording taken from the reference design's own lab pane (gini-stations.html
+// `openLab`): "✓ Mark sample collected", under the heading "Update status", with
+// its hint "Mark that you have collected the sample from this patient." The Gini
+// queue above already speaks that way and these must not speak differently for
+// the same physical act.
+//
+// One action only. A "mark chased" button was here briefly and is gone: it
+// appears nowhere in the reference, and inventing vocabulary for a screen that
+// has a design is how two screens end up describing the same floor differently.
+//
+// `shows` is the point: an action that cannot apply must not be offered. A
+// sample already collected has nothing left to mark.
+const CASE_ACTIONS = [
+  {
+    action: "sample_taken",
+    label: "✓ Mark sample collected",
+    doneLabel: "Sample collected",
+    hint: "Mark that you have collected the sample from this patient.",
+    shows: (c) => !c.collected,
+  },
+];
+
+const ACTION_LABEL = { sample_taken: "Sample collected" };
+
+const shortDate = (iso) =>
+  iso
+    ? new Date(`${iso}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short" })
+    : null;
+
+const stationPill = (r) => {
+  // No visit today is not a missed check-in. These patients were consulted on an
+  // earlier day and have come back for the sample alone, so the card names the
+  // day they were seen instead of implying they failed to arrive.
+  if (!r.station)
+    return {
+      cls: "sp-process",
+      text: "Lab only",
+      sub: r.lastSeenOn ? `seen ${shortDate(r.lastSeenOn)}` : "no OPD visit on record",
+    };
+  if (r.finished) return { cls: "sp-done", text: r.station, sub: "has left the floor" };
+  // Somebody else has them in a room, or they are sitting in a queue. Only the
+  // second is a patient the lab can call over.
+  // The pill names the board COLUMN, which is what the rest of Gini Flow calls
+  // this patient. The line under it has to resolve the apparent contradiction of
+  // a "With SD / MO" patient the lab may collect from: the column is where they
+  // are queued, not who has hold of them.
+  return {
+    cls: r.inARoom ? "sp-ready" : "sp-sample",
+    text: r.station,
+    sub: r.inARoom ? "in the room — not free" : "waiting — free to call",
+  };
+};
 
 const AVATAR_COLOURS = ["#374151", "#1e3a5f", "#14532d", "#7c2d12", "#7f1d1d", "#b45309"];
 
@@ -351,6 +410,447 @@ function LabDetailPane({ order, group, onClose, onAdvance, onUpload, busy }) {
 // How many of the day's finished uploads the column shows before it is asked.
 const UPLOADED_PREVIEW = 5;
 
+// Read-only states, so they borrow the queue's pills rather than earning new
+// ones: nothing here is a step a technician can move.
+// Two sides, and both are about a PERSON, not a tube.
+//
+// Left is the floor waiting on the lab: their sample is still out, so the card
+// says where they are standing while it runs — a result that is late matters
+// when the patient is sitting in the MO queue and matters differently when they
+// have already gone home. Right is the reverse: the lab is finished with them
+// and the delay, if any, is now somebody else's station.
+//
+// Patients whose lab is done AND who have left are neither — nobody is waiting
+// on anything — so they collapse into a single line rather than filling a column.
+// Longest wait first. A queue nobody works is ordered by whoever has been left
+// longest, not by whoever the sync happened to fetch first.
+const byLongestWait = (a, b) => (minutesSince(b.stageAt) ?? 0) - (minutesSince(a.stageAt) ?? 0);
+
+// Anyone the lab can actually reach comes first; the rest are there to be seen,
+// not worked, so they sink and dim.
+const byReachableThenWait = (a, b) =>
+  Number(b.collectable) - Number(a.collectable) || byLongestWait(a, b);
+
+// Inside "Waiting on the lab" the two halves are different problems, so the
+// column says which: a sample nobody has drawn is a patient who has not come to
+// the counter, and only the floor can move that. A sample already at the bench is
+// the lab's own turnaround and there is nothing to fetch.
+const WAITING_GROUPS = [
+  {
+    key: "queue",
+    label: "Sample pending — collect now",
+    hint: "Nobody has drawn these yet, and the patient is free to be called.",
+    holds: (r) => r.stage.key === "pending" && r.collectable,
+  },
+  {
+    key: "running",
+    label: "At the lab — running",
+    hint: "Sample is with the lab; this is their turnaround.",
+    holds: (r) => r.stage.key !== "pending",
+  },
+  // Last, and deliberately inert. Nobody can act on these — the patient is in
+  // someone else's room or has gone home — so a card that could be tapped, or a
+  // button that could be pressed, would only invite work that cannot happen.
+  {
+    key: "unreachable",
+    label: "Not here yet — cannot collect",
+    hint: "Sample still outstanding, but the patient is not available to the lab.",
+    holds: (r) => r.stage.key === "pending" && !r.collectable,
+    readOnly: true,
+  },
+];
+
+const DONE_GROUPS = [
+  {
+    key: "on_floor",
+    label: "Still on the floor",
+    hint: "Results are back and waiting for them at the next station.",
+    holds: (r) => r.station && !r.finished,
+  },
+  {
+    key: "left",
+    label: "Left the floor",
+    hint: "Nobody is waiting on these — kept for the day's record.",
+    holds: (r) => !r.station || r.finished,
+    readOnly: true,
+  },
+];
+
+const HEALTHRAY_COLUMNS = [
+  {
+    key: "waiting",
+    icon: "⏳",
+    label: "Waiting on the lab",
+    sub: "Longest wait first — who the floor is still held up by",
+    empty: "Nothing outstanding — every sample today has reported.",
+    holds: (r) => r.outstanding > 0,
+    groups: WAITING_GROUPS,
+  },
+  // One column, because the lab's part is finished for everyone in it. What
+  // differs is who is still waiting on the result: a patient at another station
+  // may be held up by it, one who has gone home cannot be — so they are groups
+  // within the same section rather than two sections claiming different states.
+  {
+    key: "done",
+    icon: "✅",
+    label: "Lab done",
+    sub: "Everything reported — grouped by whether anyone is still waiting",
+    empty: "No case has been reported yet today.",
+    holds: (r) => r.outstanding === 0,
+    groups: DONE_GROUPS,
+  },
+];
+
+// The hospital lab's own pane. Same shell as the order pane above, with every
+// action removed: there is no sample here for this technician to advance and no
+// report for them to upload. What it adds is the per-case breakdown the card can
+// only summarise — a patient with three samples usually has three different
+// states, and "2 still out" does not say which two.
+// One patient's hospital-lab row. Extracted because the settled group below the
+// two columns renders exactly the same card — a patient who has gone home is
+// still worth opening, and duplicating this markup to say so would guarantee the
+// two drift apart.
+// Why the lab cannot get to this patient right now. A sample that is overdue but
+// unreachable is not the technician's failure, and a card that says "Collect now"
+// about someone sitting in the doctor's room is asking for the impossible.
+const blockedReason = (row) => {
+  if (row.stage.key !== "pending") return null;
+  if (row.inARoom) return `In the ${(row.station || "").toLowerCase()} room — collect once free`;
+  if (row.finished) return "Patient has left — sample can no longer be taken";
+  return null;
+};
+
+function HealthrayCard({ row, onOpen, readOnly = false }) {
+  // A row nobody can act on must not be a button: it would take focus, look
+  // pressable and do nothing.
+  const Card = readOnly ? "div" : "button";
+  const pill = stationPill(row);
+  const mins = minutesSince(row.stageAt);
+  const blocked = blockedReason(row);
+  // A sample nobody has collected an hour after it was ordered is the one thing
+  // on this read-only list worth chasing, so it is the only thing marked.
+  const late = row.stage.key === "pending" && mins !== null && mins > 60;
+  return (
+    <Card
+      {...(readOnly
+        ? { className: "pt-card hr-case is-unreachable is-readonly", "aria-disabled": "true" }
+        : {
+            type: "button",
+            className: `pt-card hr-case${blocked ? " is-unreachable" : ""}`,
+            onClick: () => onOpen(row.patientId),
+          })}
+    >
+      <div className="pc-av" style={{ background: avatarColour(row.patientId) }}>
+        {initials(row.name)}
+      </div>
+      <div className="pc-body">
+        <div className="pc-name">
+          {row.name}
+          {row.fileNo && <span className="badge b-ink">{row.fileNo}</span>}
+        </div>
+        <div className="pc-meta">
+          {[
+            row.age && row.sex ? `${row.age}${row.sex[0]}` : row.age && `${row.age}y`,
+            row.orderedBy && `Ordered by ${row.orderedBy}`,
+            row.registeredAt && clock(row.registeredAt),
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </div>
+        <div className="pc-meta">
+          {[
+            `${row.cases} ${row.cases === 1 ? "case" : "cases"}`,
+            row.outstanding > 0
+              ? `${row.outstanding} still out`
+              : row.reportedOn
+                ? `all reported by ${clock(row.reportedOn)}`
+                : "all reported",
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </div>
+        <div className="pc-tests">🔬 {row.tests.join(" · ") || "No tests listed"}</div>
+        {blocked && <div className="lab-blocked">⏸ {blocked}</div>}
+        <div className="steps">
+          {row.steps.map((step, i) => (
+            <span key={step.name}>
+              <span className={`step step-${step.state}`}>
+                {step.name}
+                {step.state === "done" ? " ✓" : ""}
+              </span>
+              {i < row.steps.length - 1 && <span className="step-arr">›</span>}
+            </span>
+          ))}
+        </div>
+      </div>
+      <div className="pc-r">
+        <div className={`sp ${blocked ? "sp-process" : row.stage.pill}`}>
+          {blocked ? "Not here yet" : row.stage.label}
+        </div>
+        {mins !== null && <div className={`pc-time${late ? " late" : ""}`}>{mins}m</div>}
+        <div className="pc-tlbl">{row.stage.since}</div>
+        {/* Two different questions, so two pills: what the LAB is doing with the
+            sample, and where the PATIENT is standing while it happens. */}
+        <div className="hr-where">
+          <div className={`sp ${pill.cls}`}>{pill.text}</div>
+          <div className="pc-tlbl">{pill.sub}</div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function HealthrayCasePane({ row, onClose, onAction, onUploadCase, isAdmin, busy }) {
+  const paneRef = useRef(null);
+  const caseFileRef = useRef(null);
+  const [uploadFor, setUploadFor] = useState(null);
+  const [dragCase, setDragCase] = useState(null);
+  useDismiss(!!row, onClose, paneRef);
+  if (!row) return null;
+
+  const pill = stationPill(row);
+  return (
+    <div className="detail-overlay">
+      <div className="detail-pane" ref={paneRef} role="dialog" aria-label="Hospital lab cases">
+        <div className="dp-head">
+          <div className="dp-name">{row.name}</div>
+          <div className="dp-meta">
+            {[
+              row.age && row.sex ? `${row.age}${row.sex[0]}` : row.age && `${row.age}y`,
+              row.fileNo,
+              `${row.cases} ${row.cases === 1 ? "case" : "cases"} today`,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </div>
+          <div className="dp-acts">
+            <button className="rbtn" onClick={onClose}>
+              ← Back
+            </button>
+            <span className={`sp ${pill.cls}`}>{pill.text}</span>
+          </div>
+        </div>
+
+        <input
+          ref={caseFileRef}
+          type="file"
+          accept="application/pdf,image/*"
+          hidden
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file && uploadFor) onUploadCase(uploadFor, file);
+            e.target.value = "";
+            setUploadFor(null);
+          }}
+        />
+        <div className="dp-scroll">
+          <div className="dp-inner">
+            <div className="dp-sec">
+              <div className="dp-sec-title">Where this patient is</div>
+              <div className="dp-hint">
+                {row.station
+                  ? row.finished
+                    ? `The visit is over — ${row.station.toLowerCase()}. Any result still running will land on the chart after they have gone home.`
+                    : row.waiting
+                      ? `Waiting in the ${row.station.toLowerCase()} queue.`
+                      : `At ${row.station.toLowerCase()} right now.`
+                  : row.lastSeenOn
+                    ? `No OPD appointment today — consulted on ${shortDate(row.lastSeenOn)} and back for the sample only.`
+                    : "No OPD visit on record — the sample was taken outside the OPD floor."}
+              </div>
+              {row.statusLabel && row.statusLabel !== row.station && (
+                <div className="dp-hint">
+                  Last thing observed about them: <strong>{row.statusLabel}</strong>. HealthRay has
+                  no status for the workup, so a patient with the MO still reads “vitals done” until
+                  a station screen moves them.
+                </div>
+              )}
+              <div className="steps" style={{ marginTop: 8 }}>
+                {row.steps.map((step, i) => (
+                  <span key={step.name}>
+                    <span className={`step step-${step.state}`}>
+                      {step.name}
+                      {step.state === "done" ? " ✓" : ""}
+                    </span>
+                    {i < row.steps.length - 1 && <span className="step-arr">›</span>}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="dp-sec">
+              <div className="dp-sec-title">
+                Cases at the hospital lab — {row.outstanding} of {row.cases} still out
+              </div>
+              {row.caseList.map((c) => (
+                <div className="hr-case-block" key={c.caseNo}>
+                  <div className="hr-case-top">
+                    <span className="badge b-ink">Case {c.caseNo}</span>
+                    {/* The STAGE, not the old `state` field. `state` is derived
+                        from results_synced alone, so it called an uncollected
+                        sample "Awaiting results" — true of the results and
+                        nonsense about the case, which has not reached the lab. */}
+                    <span className={`sp ${c.stage.pill}`}>{c.stage.label}</span>
+                  </div>
+                  {c.tests.map((t) => (
+                    <div className="test-row" key={t}>
+                      <div className="tr-name">{t}</div>
+                      <div className="tr-status">
+                        <span className="badge b-ink">{c.stage.label}</span>
+                      </div>
+                    </div>
+                  ))}
+                  {c.tests.length === 0 && <div className="dp-hint">No tests listed.</div>}
+                  {c.orderedBy && (
+                    <div className="dp-hint">
+                      Ordered by <strong>{c.orderedBy}</strong>
+                    </div>
+                  )}
+                  {/* The one thing the stage cannot say: some panels are already
+                      back while the lab works through the rest. */}
+                  {c.synced && !c.reported && (
+                    <div className="dp-hint">
+                      Partial — some panels are already back, the lab is still entering the rest.
+                    </div>
+                  )}
+                  <div className="hr-times">
+                    {[
+                      ["Registered", c.registeredAt],
+                      // The clock may be missing while the phlebotomist's own
+                      // status already says done, so the fact and the time are
+                      // reported separately rather than the time standing in.
+                      ["Sample collected", c.collectedOn || (c.collected ? "done" : null)],
+                      ["Received by lab", c.receivedOn],
+                      ["Reported", c.reportedOn],
+                    ].map(([label, at]) => (
+                      <div className={`hr-time${at ? "" : " is-pending"}`} key={label}>
+                        <span>{label}</span>
+                        <strong>{at === "done" ? "✓" : at ? clock(at) : "—"}</strong>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Only says the file is missing once one could exist. Before
+                      the sample is drawn there is nothing to have a report of,
+                      and "No report file yet" reads as a problem rather than as
+                      the obvious. */}
+                  {(c.hasReport || c.collected) && (
+                    <div className="dp-hint">
+                      {c.hasReport ? "Report file stored" : "No report file yet"}
+                    </div>
+                  )}
+                  {/* 06-PHASE-2-PLAN §0.4: the lab screen confirms and attributes.
+                      Nothing here reaches HealthRay, and the buttons say so rather
+                      than implying they moved the sample. */}
+                  {(() => {
+                    const offered = CASE_ACTIONS.filter(
+                      (a) =>
+                        (a.shows(c) && row.collectable) ||
+                        (c.actions || []).some((x) => x.action === a.action),
+                    );
+                    if (!offered.length) return null;
+                    return (
+                      <>
+                        <div className="dp-sec-title">Update status</div>
+                        <div className="dp-hint">
+                          {row.collectable
+                            ? offered[0].hint
+                            : row.finished
+                              ? "This patient has left the floor — the sample can no longer be taken."
+                              : `This patient is in the ${(row.station || "").toLowerCase()} room right now. Collect once they are free.`}
+                        </div>
+                        <div className="hr-acts">
+                          {offered.map((a) => {
+                            const done = (c.actions || []).find((x) => x.action === a.action);
+                            return (
+                              <button
+                                key={a.action}
+                                type="button"
+                                className={`st-btn${done ? " is-done" : " st-btn-tl"}`}
+                                disabled={busy || (!done && !row.collectable)}
+                                onClick={() => onAction(c.caseNo, a.action, !!done)}
+                              >
+                                {done ? `✓ ${a.doneLabel}` : a.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </>
+                    );
+                  })()}
+                  {/* The reference design's own upload section (gini-stations.html
+                      `lp-upload`): a drop zone reading "Tap to upload lab report
+                      PDF", not a button. Its ⚡ note is deliberately NOT copied —
+                      it promises the upload flips the patient to "Results ready"
+                      on the MO board, which is true of a Gini order and false
+                      here, where nothing we store changes the case at HealthRay.
+
+                      Gated on the sample having been COLLECTED, not on the case
+                      being reported. A printed report may be in someone's hand
+                      before HealthRay stamps `reported_on`, so requiring that
+                      would keep a real result off the chart — but a sample nobody
+                      has drawn cannot have a report at all, and offering to
+                      upload one there is the screen inviting a fiction. */}
+                  {isAdmin && !c.hasReport && c.collected && (
+                    <>
+                      <div className="dp-sec-title">Upload report</div>
+                      <button
+                        type="button"
+                        className={`upload-area${dragCase === c.caseNo ? " drag" : ""}`}
+                        disabled={busy}
+                        onClick={() => {
+                          setUploadFor(c.caseNo);
+                          caseFileRef.current?.click();
+                        }}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          setDragCase(c.caseNo);
+                        }}
+                        onDragLeave={() => setDragCase(null)}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          setDragCase(null);
+                          const file = e.dataTransfer.files?.[0];
+                          if (file) onUploadCase(c.caseNo, file);
+                        }}
+                      >
+                        <div className="ua-ico">📄</div>
+                        <div className="ua-t">Tap to upload lab report PDF</div>
+                        <div className="ua-s">PDF · JPG · PNG accepted · Max 10MB</div>
+                      </button>
+                      <div className="dp-hint">
+                        Stored on the patient&apos;s chart, where the doctor and the patient app
+                        read it. If nothing else is outstanding for them today it also turns the
+                        patient <strong>&ldquo;Results ready&rdquo;</strong> on the MO and
+                        consultant queues. It does not change the case at HealthRay.
+                      </div>
+                    </>
+                  )}
+                  {(c.actions || []).map((x) => (
+                    <div className="dp-hint" key={x.action}>
+                      {ACTION_LABEL[x.action]} by <strong>{x.by}</strong> at {clock(x.at)} —
+                      recorded here only, not sent to HealthRay.
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+
+            <div className="dp-sec">
+              <div className="dp-sec-title">What this pane can and cannot do</div>
+              <div className="dp-hint">
+                These samples were ordered on HealthRay and run by the hospital lab, so they never
+                enter the Gini Flow queue above and nothing here changes their state over there —
+                results arrive on their own through the lab sync. What is recorded here is who did
+                what about a sample, so a tube nobody has collected has a name against it.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function LabStationPage() {
   const [toast, setToast] = useState("");
   const toastTimer = useRef(null);
@@ -359,9 +859,24 @@ export default function LabStationPage() {
   const advance = useAdvanceSample();
   const upload = useUploadReport();
   const [openOrderId, setOpenOrderId] = useState(null);
+  const [openCaseId, setOpenCaseId] = useState(null);
   const [showAllUploaded, setShowAllUploaded] = useState(false);
 
+  const healthray = data?.healthray || [];
+  const caseCount = healthray.reduce((n, r) => n + r.cases, 0);
+
+  // Both sources, one strip. The Gini queue's buckets and the hospital lab's
+  // stages are the same five steps; counting only the first is what made every
+  // number read 0 on a day the lab ran 46 cases.
+  const stage = data?.stageCounts || {};
   const counts = {
+    pending: (data?.pending?.length ?? 0) + (stage.pending ?? 0),
+    collecting: (data?.collecting?.length ?? 0) + (stage.collected ?? 0),
+    processing: (data?.processing?.length ?? 0) + (stage.processing ?? 0),
+    ready: (data?.ready?.length ?? 0) + (stage.results ?? 0),
+    uploaded: (data?.uploaded?.length ?? 0) + (stage.reported ?? 0),
+  };
+  const queueCounts = {
     pending: data?.pending?.length ?? 0,
     collecting: data?.collecting?.length ?? 0,
     processing: data?.processing?.length ?? 0,
@@ -412,6 +927,37 @@ export default function LabStationPage() {
   const openOrder = openPair?.o || null;
   const openGroup = openPair?.g || GROUPS[0];
   const closePane = useCallback(() => setOpenOrderId(null), []);
+  const closeCasePane = useCallback(() => setOpenCaseId(null), []);
+  const caseAction = useMarkLabCaseAction();
+  const caseUpload = useUploadLabCaseReport();
+  const isAdmin = useAuthStore((st) => st.currentDoctor?.role) === "admin";
+  const onUploadCase = (caseNo, file) => {
+    if (file.size > 10 * 1024 * 1024) return showToast("File is larger than 10 MB — not uploaded");
+    caseUpload.mutate(
+      { caseNo, file },
+      {
+        // The toast reports which of the two things happened. Saying "Results
+        // ready" when the guard declined would be the message contradicting the
+        // board it claims to have changed.
+        onSuccess: (res) =>
+          showToast(
+            res?.markedResultsReady
+              ? `📤 Report uploaded — MO and doctor now see "Results ready"`
+              : `📤 Report filed on the chart — other results still outstanding, so the queue is unchanged`,
+          ),
+        onError: (e) => showToast(e?.response?.data?.error || "Upload failed"),
+      },
+    );
+  };
+  const onCaseAction = (caseNo, action, undo) =>
+    caseAction.mutate(
+      { caseNo, action, undo },
+      {
+        onSuccess: () =>
+          showToast(undo ? "Undone — nothing recorded" : `✓ Recorded on case ${caseNo}`),
+        onError: (e) => showToast(e?.response?.data?.error || "Could not record that"),
+      },
+    );
 
   return (
     <div className="gf">
@@ -457,6 +1003,11 @@ export default function LabStationPage() {
               </div>
             ))}
           </div>
+
+          <p className="stats-note">
+            Counted by case. A patient with several samples appears once per case here, and once by
+            name in the columns below.
+          </p>
 
           <div className="workflow-note lab-note">
             <span className="wn-ico">⚡</span>
@@ -510,14 +1061,95 @@ export default function LabStationPage() {
               );
             })}
 
-          {!isLoading && Object.values(counts).every((c) => c === 0) && (
+          {!isLoading && Object.values(queueCounts).every((c) => c === 0) && (
             <div className="empty-note">
-              No lab orders today. Orders appear here once an MO orders tests and reception clears
-              payment.
+              No Gini Flow lab orders today. A patient lands here the moment an MO orders tests on
+              the MO/SD station — payment is not what makes them appear, it only unlocks &ldquo;Mark
+              sample collected&rdquo;. Tests ordered on HealthRay run at the hospital lab instead
+              and are listed below.
+            </div>
+          )}
+
+          {!isLoading && healthray.length > 0 && (
+            <div className="hr-lab">
+              <div className="grp-lbl" style={{ marginBottom: 7 }}>
+                🏥 Hospital lab today — {healthray.length}{" "}
+                {healthray.length === 1 ? "patient" : "patients"}, {caseCount}{" "}
+                {caseCount === 1 ? "case" : "cases"} ordered on HealthRay
+              </div>
+              <p className="hr-lab-note">
+                Ordered and run outside Gini Flow, so nothing here changes anything at HealthRay —
+                results arrive on their own through the lab sync. Open a patient to record that you
+                chased or collected a sample; that attribution is kept here.
+              </p>
+              <div className="hr-cols">
+                {HEALTHRAY_COLUMNS.map((column) => {
+                  const rows = healthray.filter(column.holds);
+                  return (
+                    <section className="hr-col" key={column.key}>
+                      <h3 className="hr-col-head">
+                        <span>
+                          {column.icon} {column.label}
+                        </span>
+                        <span className="hr-col-n">{rows.length}</span>
+                      </h3>
+                      {/* The strip at the top counts CASES and these columns count
+                          PATIENTS, so "6 waiting" sat under "3 + 3 = 6 cases" and
+                          "32 done" under "43 uploaded" with nothing explaining the
+                          difference. Each column now states its own arithmetic. */}
+                      <p className="hr-col-sub">
+                        {column.sub} · {rows.length} {rows.length === 1 ? "patient" : "patients"},{" "}
+                        {rows.reduce((n, r) => n + r.cases, 0)} cases
+                      </p>
+                      {rows.length === 0 ? (
+                        <div className="empty-note">{column.empty}</div>
+                      ) : (
+                        <div className="pt-list">
+                          {column.groups
+                            ? column.groups.map((group) => {
+                                const inGroup = rows.filter(group.holds).sort(byReachableThenWait);
+                                if (!inGroup.length) return null;
+                                return (
+                                  <div className="hr-group" key={group.key}>
+                                    <div className="hr-group-head">
+                                      {group.label} · {inGroup.length}
+                                    </div>
+                                    <div className="hr-group-hint">{group.hint}</div>
+                                    {inGroup.map((r) => (
+                                      <HealthrayCard
+                                        key={r.patientId}
+                                        row={r}
+                                        onOpen={setOpenCaseId}
+                                        readOnly={group.readOnly}
+                                      />
+                                    ))}
+                                  </div>
+                                );
+                              })
+                            : [...rows]
+                                .sort(byLongestWait)
+                                .map((r) => (
+                                  <HealthrayCard key={r.patientId} row={r} onOpen={setOpenCaseId} />
+                                ))}
+                        </div>
+                      )}
+                    </section>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>
       </div>
+
+      <HealthrayCasePane
+        row={healthray.find((r) => r.patientId === openCaseId) || null}
+        onClose={closeCasePane}
+        onAction={onCaseAction}
+        onUploadCase={onUploadCase}
+        isAdmin={isAdmin}
+        busy={caseAction.isPending || caseUpload.isPending}
+      />
 
       <LabDetailPane
         order={openOrder}

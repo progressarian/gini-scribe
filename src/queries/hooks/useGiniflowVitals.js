@@ -35,6 +35,21 @@ export function useSaveVitals() {
   });
 }
 
+// The allergy answer is recorded against the PATIENT, so it invalidates the
+// stations that display it — not just this queue.
+export function useSaveAllergy() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ visitId, ...body }) =>
+      (await api.post(`/api/giniflow/stations/vitals/${visitId}/allergy`, body)).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "vitals"] });
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "mo"] });
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "doctor"] });
+    },
+  });
+}
+
 export function useStartVitals() {
   const queryClient = useQueryClient();
   return useMutation({

@@ -38,7 +38,8 @@
     "smoke:giniflow-triage": "node scripts/smoke-giniflow-triage.mjs",
     "smoke:giniflow-realtime": "node scripts/smoke-giniflow-realtime.mjs",
     "smoke:giniflow-referrals": "node scripts/smoke-giniflow-referrals.mjs",
-    "smoke:giniflow-promote": "node scripts/smoke-giniflow-promote.mjs"
+    "smoke:giniflow-promote": "node scripts/smoke-giniflow-promote.mjs",
+    "smoke:giniflow-interactions": "node scripts/smoke-giniflow-interactions.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.101.1",

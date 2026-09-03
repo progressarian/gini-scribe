@@ -26,6 +26,7 @@ import {
   finalizeConsult,
   finalizePreview,
   pendingProposalCount,
+  fastPathFinalize,
 } from "../services/giniflow/finalize.js";
 import { advanceStatus } from "../services/giniflow/statusEngine.js";
 
@@ -449,6 +450,59 @@ console.log("\nMO proposals as draft rows");
   } finally {
     await c.query("ROLLBACK");
     c.release();
+  }
+}
+
+// ── Addendum v1.1 §2: the fast path ────────────────────────────────────────
+// The refusals are what matter: this control finishes a consultation without
+// the doctor reading anything, so every condition that makes it inappropriate
+// has to stop it at the service, not just hide the button.
+console.log("\nFast path");
+{
+  const v = await one(
+    `SELECT v.id, v.category FROM giniflow_visits v
+      WHERE v.current_status = ANY($1) ORDER BY v.created_at DESC LIMIT 1`,
+    [["with_doctor", "ready_for_doctor"]],
+  );
+  if (v) {
+    const c = await pool.connect();
+    try {
+      await c.query("BEGIN");
+      const consultant = (await one(`SELECT id FROM doctors WHERE role = 'consultant' LIMIT 1`)).id;
+
+      await c.query(`UPDATE giniflow_visits SET category = 'worse_out_of_range' WHERE id = $1`, [
+        v.id,
+      ]);
+      check(
+        "the fast path is refused for a patient who is not green",
+        await fastPathFinalize(v.id, consultant, c)
+          .then(() => false)
+          .catch((e) => e.status === 409 && /green-category/.test(e.message)),
+      );
+
+      await c.query(`UPDATE giniflow_visits SET category = 'in_control' WHERE id = $1`, [v.id]);
+      await c.query(`DELETE FROM giniflow_rx_items WHERE visit_id = $1`, [v.id]);
+      check(
+        "and refused when there is nothing to continue",
+        await fastPathFinalize(v.id, consultant, c)
+          .then(() => false)
+          .catch((e) => e.status === 409 && /empty/.test(e.message)),
+      );
+
+      await rx.addItem(v.id, { medicineName: "Zzz Continued", changeType: "continued" }, c);
+      await rx.addItem(v.id, { medicineName: "Yyy Proposal", proposedBy: consultant }, c);
+      check(
+        "and refused while a proposal is still to review",
+        await fastPathFinalize(v.id, consultant, c)
+          .then(() => false)
+          .catch((e) => e.status === 409 && /to review/.test(e.message)),
+      );
+    } finally {
+      await c.query("ROLLBACK");
+      c.release();
+    }
+  } else {
+    check("a visit to test the fast path on", false, "nobody is with a doctor right now");
   }
 }
 

@@ -16,7 +16,11 @@ export default function FinalizeBar({ visitId, onDone, onToast }) {
   // Not a warning: finalizing used to record every undecided proposal as
   // rejected, so the MO was told their suggestion was considered when nobody
   // had read it.
-  const blocked = (preview?.undecidedProposals ?? 0) > 0;
+  // A severe interaction nobody has explained blocks it for the same reason
+  // (§5.2): the server refuses either way, and a button that says why before
+  // the click beats a toast after it.
+  const unexplained = preview?.interactions?.blocking?.length ?? 0;
+  const blocked = (preview?.undecidedProposals ?? 0) > 0 || unexplained > 0;
 
   const run = () =>
     finalize.mutate(undefined, {
@@ -96,6 +100,21 @@ export default function FinalizeBar({ visitId, onDone, onToast }) {
                       adjust or reject each one before finalizing
                     </li>
                   )}
+                  {unexplained > 0 && (
+                    <li className="fin-block">
+                      ⛔{" "}
+                      {preview.interactions.blocking.map((f) => f.medicines.join(" + ")).join("; ")}{" "}
+                      — change the prescription, or record why it is intended in the interaction
+                      check above
+                    </li>
+                  )}
+                  {preview.interactions?.unchecked?.length > 0 && (
+                    <li className="fin-warn">
+                      ⚠ {preview.interactions.unchecked.length} medicine
+                      {preview.interactions.unchecked.length === 1 ? "" : "s"} could not be
+                      interaction-checked: {preview.interactions.unchecked.join(", ")}
+                    </li>
+                  )}
                   {preview.medicines === 0 && (
                     <li className="fin-warn">
                       ⚠ No medicines in the prescription. The patient will reach the pharmacy with
@@ -117,9 +136,11 @@ export default function FinalizeBar({ visitId, onDone, onToast }) {
                 >
                   {finalize.isPending
                     ? "Finalizing…"
-                    : blocked
-                      ? `${preview.undecidedProposals} to review`
-                      : "Yes — finalize"}
+                    : unexplained > 0
+                      ? `${unexplained} interaction${unexplained === 1 ? "" : "s"} to resolve`
+                      : blocked
+                        ? `${preview.undecidedProposals} to review`
+                        : "Yes — finalize"}
                 </button>
               </div>
             </div>

@@ -9,6 +9,8 @@ import {
 import OverviewSection from "./consult/OverviewSection";
 import LabsSection from "./consult/LabsSection";
 import CarePlanSection from "./consult/CarePlanSection";
+import { usePrescription } from "../../queries/hooks/useGiniflowPrescription";
+import FastPathBar from "./consult/FastPathBar";
 import ProposalsStrip from "./consult/ProposalsStrip";
 import RxSection from "./consult/RxSection";
 import TestsSection from "./consult/TestsSection";
@@ -55,6 +57,7 @@ const clock = (iso) =>
 export default function DoctorConsultPage() {
   const { visitId } = useParams();
   const navigate = useNavigate();
+  const { data: draft } = usePrescription(visitId);
   const { data: consult, isLoading, isError } = useConsult(visitId);
   const releaseConsult = useReleaseConsult();
   const saveCarePlan = useSaveCarePlan(visitId);
@@ -198,7 +201,31 @@ export default function DoctorConsultPage() {
         </nav>
 
         <div className="cbody">
-          <ProposalsStrip proposals={consult.proposals} onDecide={onDecide} readOnly={readOnly} />
+          {/* An addition, not a replacement: everything below still renders. */}
+          {!readOnly && (
+            <FastPathBar
+              visitId={visitId}
+              consult={consult}
+              draft={draft}
+              onDone={(r) => {
+                showToast(
+                  `✓ Finished — ${r.medicines} medicine${r.medicines === 1 ? "" : "s"} to the pharmacy${
+                    r.testsRepeated?.length
+                      ? `, ${r.testsRepeated.length} tests at the next visit`
+                      : ""
+                  }`,
+                );
+                navigate("/giniflow/station/doctor");
+              }}
+              onToast={showToast}
+            />
+          )}
+          <ProposalsStrip
+            proposals={consult.proposals}
+            draftItems={draft?.items || []}
+            onDecide={onDecide}
+            readOnly={readOnly}
+          />
           <OverviewSection consult={consult} onTile={setTrendMarker} />
           <LabsSection
             consult={consult}

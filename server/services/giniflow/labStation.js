@@ -3,6 +3,34 @@ import { promoteLabReport, promoteQuietly } from "./promote.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config/storage.js";
 import { advanceStatus } from "./statusEngine.js";
 import { opensLabGate } from "./receptionStation.js";
+import {
+  BOARD_COLUMNS,
+  STATUS_LABEL,
+  WAIT_STATUSES,
+  columnForStatus,
+} from "../../../shared/giniflowStatus.js";
+
+// The COLUMN, not the raw status. `vitals_done` is the last event the sync
+// observed, but the board files it under "With SD / MO" — HealthRay has no
+// status for the workup, so a patient sitting with the MO still reads
+// `vitals_done` in the table. Printing the status made the card claim eight
+// patients were at vitals when they were with the SD.
+const COLUMN_NAME = Object.fromEntries(BOARD_COLUMNS.map((c) => [c.key, c.name]));
+
+// The visit is over — the lab is holding a result nobody on the floor is waiting
+// for any more, which is a different problem from a slow sample.
+const FINISHED = ["dispensed", "exited", "no_show", "cancelled"];
+
+// A patient cannot be in two places. These three statuses mean somebody else has
+// them in a room right now, so the lab cannot draw a sample however overdue it
+// is — the card must not offer it. Every other on-floor status is a QUEUE: the
+// patient is sitting waiting and can be called.
+//
+// `vitals_done` is the one that matters most here. The board files it under
+// "With SD / MO" because that is the column it belongs to, but the status itself
+// means vitals are finished and the MO has not started — the patient is idle,
+// and collectable.
+const IN_A_ROOM = ["with_vitals", "with_sd", "with_doctor"];
 
 // The lab station. Five buckets along one track:
 //
@@ -56,7 +84,31 @@ const stepsFor = (sampleStatus, paid) => {
   ];
 };
 
+// Lab work the floor is waiting on that Gini Flow did not order.
+//
+// The MO and consultant boards counted `giniflow_lab_orders` alone, so a patient
+// whose bloods were ordered on HealthRay — which is all of them — never showed as
+// awaiting results. On a day with 46 lab cases and 5 outstanding, both boards
+// read zero, and an MO could close a patient without knowing today's results
+// were still out.
+//
+// Outstanding means the lab has neither signed the case out nor produced a file.
+// Matched by UHID as well as `patient_id`, because a case the lab is still
+// running is exactly the one with no `patient_id` yet.
+//
+// A correlated fragment rather than a helper: both boards select it inside one
+// large query each, and two copies of this rule would drift.
+export const OPEN_LAB_CASES_SQL = `
+  (SELECT count(*)::int FROM lab_cases lc
+    WHERE lc.case_date = v.visit_date
+      AND (lc.patient_id = v.patient_id
+           OR (lc.patient_id IS NULL
+               AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))
+      AND lc.raw_detail_json->>'reported_on' IS NULL
+      AND lc.pdf_storage_path IS NULL)`;
+
 export async function getLabQueue(visitDate, db = pool) {
+  const healthray = await getHealthrayCases(visitDate, db);
   const { rows } = await db.query(
     `SELECT o.id, o.visit_id, o.sample_status, o.payment_status, o.urgency,
             o.created_at, o.updated_at, o.uploaded_at, o.report_file_url,
@@ -97,7 +149,7 @@ export async function getLabQueue(visitDate, db = pool) {
       orderId: r.id,
       visitId: r.visit_id,
       patientId: r.patient_id,
-      name: r.name,
+      name: r.name || "Patient not matched yet",
       fileNo: r.file_no,
       age: r.age,
       sex: r.sex,
@@ -133,7 +185,284 @@ export async function getLabQueue(visitDate, db = pool) {
     processing: by("processing"),
     ready: by("ready"),
     uploaded: by("uploaded"),
+    healthray,
+    // The five counters at the top of the screen. They read 0 all day because
+    // they only ever counted `giniflow_lab_orders`; the hospital's own cases
+    // move through the same five stages and are simply added in, so the strip
+    // describes the lab rather than one unused table.
+    stageCounts: healthray.reduce(
+      (acc, r) => {
+        r.caseList.forEach((c) => {
+          acc[c.stage.key] += 1;
+        });
+        return acc;
+      },
+      { pending: 0, collected: 0, processing: 0, results: 0, reported: 0 },
+    ),
   };
+}
+
+// The hospital's own lab, read-only.
+//
+// The five buckets above queue `giniflow_lab_orders`, which only an MO ordering
+// on this floor writes — one row in the table's whole history. Meanwhile the lab
+// itself runs 40-odd cases a day, ordered on HealthRay and landing here through
+// the lab-API sync. The station was therefore empty on a busy day, which reads
+// as a broken screen rather than as two systems that never meet.
+//
+// Grouped by PATIENT, not by case: a patient with four samples is one person the
+// floor is waiting on, and the technician's question is "whose bloods are we
+// still holding up", not "how many tubes exist". So each row carries where that
+// patient is standing right now, which is the only thing that makes an unowned
+// queue actionable — a result that is late matters when the doctor is waiting
+// for it and does not when the patient has gone home.
+
+// `results_synced` is the trap: it flips TRUE the moment ONE numeric panel
+// lands, not when the case is done. A synced case with no `reported_on` is the
+// "Gini Lab Partial" bucket — lab staff are still entering the rest of it. The
+// definition is copied in meaning from `routes/opd.js`, so this screen and the
+// OPD chips can never disagree.
+// HealthRay stamps a clock at each stage, so the hospital lab has the same five
+// buckets the Gini queue does — they were simply never read. `result_saved_on`
+// before `reported_on` is the "results done, not signed out" window, which is
+// what the queue calls Ready to upload.
+const CASE_STAGE = [
+  {
+    key: "pending",
+    label: "Collect now",
+    pill: "sp-sample",
+    at: "registeredAt",
+    since: "since order",
+  },
+  {
+    key: "collected",
+    label: "Collected",
+    pill: "sp-sample",
+    at: "collectedOn",
+    since: "since collection",
+  },
+  {
+    key: "processing",
+    label: "Processing",
+    pill: "sp-process",
+    at: "receivedOn",
+    since: "in analyzer",
+  },
+  {
+    key: "results",
+    label: "Results done",
+    pill: "sp-ready",
+    at: "resultSavedOn",
+    since: "results waiting",
+  },
+  { key: "reported", label: "Reported", pill: "sp-done", at: "reportedOn", since: "reported" },
+];
+
+// `phlebotomy_status` before `collected_on`, deliberately.
+//
+// `collected_on` only arrives with the DETAIL fetch, which is the same call that
+// carries the results — so while that call is failing (and it retries roughly
+// once every 10 minutes for up to 14 days) a sample drawn hours ago still looks
+// uncollected. One case today sat on "Collect now" for three and a half hours
+// after the phlebotomist had finished with it, which is the screen sending a
+// technician to draw blood twice.
+//
+// The LIST payload carries `phlebotomy_status` on every pass and needs no detail
+// call. Across the last week it takes exactly two values and never contradicts
+// `collected_on` where both are present, so it is the earlier, safer signal.
+const isCollected = (c) => c.phlebotomy === "Completed" || !!c.collectedOn;
+
+const stageIndex = (c) => {
+  if (c.reportedOn) return 4;
+  if (c.resultSavedOn) return 3;
+  if (c.receivedOn) return 2;
+  if (isCollected(c)) return 1;
+  return 0;
+};
+
+// The rail and the pill are the SAME fact and must be computed from the same
+// thing. Driving the rail off `results_synced` while the pill read HealthRay's
+// timestamps let one card say "Sample at lab" beside a pill saying "Processing"
+// — two names for one state, disagreeing on the same row. Both now come from
+// the stage, so the rail simply marks how far along `CASE_STAGE` the case is.
+const RAIL = ["Ordered", "Collected", "Processing", "Reported"];
+
+// `CASE_STAGE` has five entries and the rail four, so the map is explicit: the
+// index here is the rail step currently in progress. A case AT the analyzer has
+// "Processing" as its live step, not as a finished one — and "Results done" and
+// "Reported" collapse into one rail step, the first being the lab not having
+// signed the case out yet.
+const RAIL_FOR_STAGE = [1, 2, 2, 3, 4];
+
+const labSteps = (stage) => {
+  const reached = RAIL_FOR_STAGE[stage];
+  return RAIL.map((name, i) => ({
+    name,
+    state: i < reached ? "done" : i === reached ? "now" : "next",
+  }));
+};
+
+async function getHealthrayCases(visitDate, db = pool) {
+  const { rows } = await db.query(
+    `WITH cases AS (
+       SELECT lc.*,
+              COALESCE(lc.raw_detail_json, lc.raw_list_json) AS payload,
+              -- A case the lab is still running has no patient_id: that column is
+              -- stamped only once the detail fetch has written the values. The
+              -- UHID is in the raw payload from the first list sync, so matching
+              -- on it is what keeps outstanding work visible at all.
+              COALESCE(lc.patient_id, uid.id) AS pid
+         FROM lab_cases lc
+         LEFT JOIN patients uid
+                ON uid.file_no = lc.raw_list_json->'patient'->>'healthray_uid'
+        WHERE lc.case_date = $1::date
+     )
+     SELECT c.pid AS patient_id,
+            COALESCE(p.name, max(c.raw_list_json->'patient'->>'patient_name')) AS name,
+            COALESCE(p.file_no, max(c.raw_list_json->'patient'->>'healthray_uid')) AS file_no,
+            p.age, p.sex,
+            v.current_status, v.id IS NOT NULL AS on_floor,
+            count(*)::int AS cases,
+            count(*) FILTER (WHERE NOT c.results_synced)::int AS pending,
+            count(*) FILTER (WHERE c.results_synced
+                               AND c.raw_detail_json->>'reported_on' IS NULL)::int AS partial,
+            count(*) FILTER (WHERE c.results_synced
+                               AND c.raw_detail_json->>'reported_on' IS NOT NULL)::int AS reported,
+            (SELECT array_agg(DISTINCT t)
+               FROM cases c2, unnest(c2.test_names) AS t
+              WHERE c2.pid IS NOT DISTINCT FROM c.pid) AS tests,
+            -- A patient with a sample today and no visit today is not a missing
+            -- check-in: they were consulted on an earlier day and have come back
+            -- for the sample alone. Saying WHEN they were seen answers the
+            -- question the card otherwise provokes.
+            (SELECT max(pv.visit_date)::text FROM giniflow_visits pv
+              WHERE pv.patient_id = c.pid AND pv.visit_date < $1::date) AS prev_visit,
+            (SELECT max(a.appointment_date)::text FROM appointments a
+              WHERE a.patient_id = c.pid AND a.appointment_date < $1::date) AS prev_appt,
+            min(c.payload->>'registered_at') AS registered_at,
+            max(c.payload->>'reported_on') AS reported_on,
+            (array_agg(btrim(
+               COALESCE(c.payload->'referral_doctor'->>'title', '') || ' ' ||
+               COALESCE(c.payload->'referral_doctor'->>'first_name', '') || ' ' ||
+               COALESCE(c.payload->'referral_doctor'->>'last_name', ''))
+             ORDER BY c.payload->>'registered_at'))[1] AS ordered_by,
+            min(c.fetched_at) AS first_seen,
+            max(c.fetched_at) AS last_seen,
+            json_agg(
+              json_build_object(
+                'caseNo', c.case_no,
+                'tests', COALESCE(c.test_names, ARRAY[]::text[]),
+                'synced', c.results_synced,
+                'reported', c.raw_detail_json->>'reported_on' IS NOT NULL,
+                'hasReport', c.pdf_storage_path IS NOT NULL,
+                -- HealthRay's own clocks, which are the real ones. fetched_at
+                -- is when our poller first saw the case, hours after the sample
+                -- was drawn, and putting it on a card dated the work wrongly.
+                'registeredAt', c.payload->>'registered_at',
+                'collectedOn', c.payload->>'collected_on',
+                'receivedOn', c.payload->>'received_on',
+                'reportedOn', c.payload->>'reported_on',
+                'resultSavedOn', c.payload->>'result_saved_on',
+                'phlebotomy', c.raw_list_json->>'phlebotomy_status',
+                'orderedBy', btrim(
+                  COALESCE(c.payload->'referral_doctor'->>'title', '') || ' ' ||
+                  COALESCE(c.payload->'referral_doctor'->>'first_name', '') || ' ' ||
+                  COALESCE(c.payload->'referral_doctor'->>'last_name', '')
+                ),
+                'fetchedAt', c.fetched_at,
+                'actions', COALESCE(act.list, '[]'::json)
+              ) ORDER BY c.fetched_at DESC
+            ) AS case_list
+       FROM cases c
+       LEFT JOIN LATERAL (
+         SELECT json_agg(json_build_object(
+                  'action', a.action,
+                  'at', a.created_at,
+                  'by', COALESCE(d.short_name, d.name, a.actor_role)
+                ) ORDER BY a.created_at) AS list
+           FROM giniflow_lab_case_actions a
+           LEFT JOIN doctors d ON d.id = a.actor_id
+          WHERE a.case_no = c.case_no
+       ) act ON TRUE
+       LEFT JOIN patients p ON p.id = c.pid
+       LEFT JOIN giniflow_visits v ON v.patient_id = c.pid AND v.visit_date = $1::date
+      WHERE NOT COALESCE(p.is_blocked, FALSE)
+      GROUP BY c.pid, p.id, p.name, p.file_no, p.age, p.sex, v.current_status, v.id
+      ORDER BY (count(*) FILTER (WHERE NOT c.results_synced)) DESC, min(c.fetched_at)`,
+    [visitDate],
+  );
+
+  return rows.map((r) => {
+    const counts = { pending: r.pending, partial: r.partial, reported: r.reported };
+    // The LEAST advanced case is the patient's stage: with three samples out, the
+    // one nobody has collected is what the floor is waiting on, not the one that
+    // has already reported.
+    const cases = (r.case_list || []).map((c) => ({
+      ...c,
+      stage: CASE_STAGE[stageIndex(c)],
+      stageAt: c[CASE_STAGE[stageIndex(c)].at] || null,
+      // The screen's collect button keys off this, so it has to be the same
+      // rule the stage uses: an absent `collected_on` is not evidence the sample
+      // is still in the patient.
+      collected: isCollected(c),
+      state: !c.synced
+        ? { key: "awaiting", label: "Awaiting results" }
+        : !c.reported
+          ? { key: "partial", label: "Partial — panels still coming in" }
+          : { key: "reported", label: "Reported" },
+    }));
+    const lowest = cases.reduce(
+      (worst, c) => (stageIndex(c) < stageIndex(worst) ? c : worst),
+      cases[0],
+    );
+    return {
+      patientId: r.patient_id,
+      name: r.name || "Unnamed patient",
+      fileNo: r.file_no,
+      age: r.age,
+      sex: r.sex,
+      tests: r.tests || [],
+      cases: r.cases,
+      caseList: cases,
+      stage: lowest?.stage || CASE_STAGE[0],
+      stageAt: lowest?.stageAt || null,
+      ...counts,
+      outstanding: r.pending + r.partial,
+      steps: labSteps(lowest ? stageIndex(lowest) : 0),
+      // Where the patient is standing while the lab holds their sample. A visit
+      // row is the only evidence they are in the building at all, so its absence
+      // is stated rather than guessed at.
+      station: r.on_floor
+        ? FINISHED.includes(r.current_status)
+          ? STATUS_LABEL[r.current_status] || r.current_status
+          : COLUMN_NAME[columnForStatus(r.current_status)] ||
+            STATUS_LABEL[r.current_status] ||
+            r.current_status
+        : null,
+      // The underlying status, for the pane: the column says where they are, this
+      // says what was last actually observed about them.
+      statusLabel: r.on_floor ? STATUS_LABEL[r.current_status] || r.current_status : null,
+      lastSeenOn: r.on_floor ? null : r.prev_visit || r.prev_appt || null,
+      // "In a queue" is the useful sense of waiting here, not the board's SLA
+      // sense: a patient at `vitals_done` has nobody with them either.
+      waiting: r.on_floor
+        ? WAIT_STATUSES.includes(r.current_status) ||
+          (!IN_A_ROOM.includes(r.current_status) && !FINISHED.includes(r.current_status))
+        : false,
+      inARoom: r.on_floor ? IN_A_ROOM.includes(r.current_status) : false,
+      finished: r.on_floor ? FINISHED.includes(r.current_status) : false,
+      // Can the lab physically get to this patient now? Not while another
+      // station has them, and not once they have gone home.
+      collectable: r.on_floor
+        ? !IN_A_ROOM.includes(r.current_status) && !FINISHED.includes(r.current_status)
+        : true,
+      orderedBy: r.ordered_by || null,
+      registeredAt: r.registered_at || null,
+      reportedOn: r.reported_on || null,
+      firstSeen: r.first_seen ? new Date(r.first_seen).toISOString() : null,
+      lastSeen: r.last_seen ? new Date(r.last_seen).toISOString() : null,
+    };
+  });
 }
 
 export async function advanceSample(orderId, { to, actorId = null, reportUrl = null }, db = pool) {
@@ -373,4 +702,201 @@ export async function uploadReport(
   promoteQuietly(promoteLabReport, orderId);
 
   return { orderId, reportUrl: url, fileName: safeName, bytes: buffer.length };
+}
+
+// Confirm-and-attribute (06-PHASE-2-PLAN §0.4). Records that a technician acted
+// on a case Gini Flow does not own — who chased the lab, who took the sample. It
+// changes nothing at HealthRay and deliberately does not pretend to: the sample's
+// real state still arrives through `labSync`.
+// One action. "chased" was dropped: it is not in the reference design, and the
+// screen should not invent vocabulary the rest of the floor does not use.
+export const CASE_ACTIONS = ["sample_taken"];
+
+export async function markLabCaseAction(
+  caseNo,
+  { action, actorId = null, actorRole = "lab", note = null, undo = false },
+  db = pool,
+) {
+  if (!CASE_ACTIONS.includes(action)) throw new Error(`Unknown lab case action: ${action}`);
+
+  const { rows: known } = await db.query(`SELECT 1 FROM lab_cases WHERE case_no = $1 LIMIT 1`, [
+    caseNo,
+  ]);
+  if (!known.length) throw new Error(`No such lab case: ${caseNo}`);
+
+  if (undo) {
+    await db.query(`DELETE FROM giniflow_lab_case_actions WHERE case_no = $1 AND action = $2`, [
+      caseNo,
+      action,
+    ]);
+    return { caseNo, action, undone: true };
+  }
+
+  // One row per case per action: tapping twice is the same statement, not two.
+  const { rows } = await db.query(
+    `INSERT INTO giniflow_lab_case_actions (case_no, action, actor_role, actor_id, note)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (case_no, action) DO UPDATE
+       SET actor_role = EXCLUDED.actor_role,
+           actor_id   = EXCLUDED.actor_id,
+           note       = COALESCE(EXCLUDED.note, giniflow_lab_case_actions.note)
+     RETURNING action, created_at`,
+    [caseNo, action, actorRole, actorId, note],
+  );
+  return { caseNo, ...rows[0] };
+}
+
+// Uploading a report against a HealthRay-run case.
+//
+// The sync normally fetches the PDF itself (`downloadAndStoreLabPdf`), but it
+// only can once HealthRay has produced one — today 41 of 46 reported cases have
+// no file. This is the manual path for the rest, authorised deliberately: an
+// admin may attach the report they were handed on paper.
+//
+// It writes exactly what the automatic path writes — the same
+// `patients/<id>/lab/<name>` storage path, the same `documents` row keyed on
+// `lab_case:<caseNo>`, the same `pdf_storage_path` — so the two can never
+// produce two copies of one report, and a later automatic fetch upserts over it
+// rather than duplicating.
+//
+// It does NOT touch `reported_on` or `results_synced`. Attaching a file is not
+// the lab signing a case out, and claiming otherwise would put a case into
+// "Reported" that the lab has not reported.
+export async function uploadLabCaseReport(
+  caseNo,
+  { base64, fileName, mediaType = "application/pdf", actorId = null },
+  db = pool,
+) {
+  if (!base64) throw Object.assign(new Error("No file was sent"), { status: 400 });
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
+    throw Object.assign(new Error("Storage is not configured"), { status: 503 });
+  }
+
+  const { rows } = await db.query(
+    `SELECT lc.case_no, lc.case_date::text AS case_date, lc.pdf_storage_path,
+            COALESCE(lc.patient_id, uid.id) AS patient_id,
+            COALESCE(p.file_no, lc.raw_list_json->'patient'->>'healthray_uid') AS uhid,
+            array_to_string(lc.test_names, ', ') AS tests
+       FROM lab_cases lc
+       LEFT JOIN patients uid ON uid.file_no = lc.raw_list_json->'patient'->>'healthray_uid'
+       LEFT JOIN patients p ON p.id = lc.patient_id
+      WHERE lc.case_no = $1`,
+    [caseNo],
+  );
+  if (!rows.length) throw Object.assign(new Error("Lab case not found"), { status: 404 });
+  const c = rows[0];
+  // Without a patient the file has no chart to land on, and `documents` is keyed
+  // on one. Refuse rather than store an orphan nobody will ever see.
+  if (!c.patient_id) {
+    throw Object.assign(new Error("This case is not linked to a patient yet"), { status: 409 });
+  }
+
+  const buffer = Buffer.from(base64, "base64");
+  const MAX_BYTES = 10 * 1024 * 1024;
+  if (buffer.length > MAX_BYTES) {
+    throw Object.assign(new Error("Report is larger than 10 MB"), { status: 413 });
+  }
+
+  const ext = mediaType === "image/jpeg" ? "jpg" : mediaType === "image/png" ? "png" : "pdf";
+  const safeName = String(fileName || `lab_case_${caseNo}.${ext}`).replace(/[^a-zA-Z0-9._-]/g, "_");
+  const storagePath = `patients/${c.patient_id}/lab/${safeName}`;
+
+  const resp = await fetch(`${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+      "Content-Type": mediaType,
+      "x-upsert": "true",
+    },
+    body: buffer,
+  });
+  if (!resp.ok) {
+    throw Object.assign(new Error(`Upload failed: ${await resp.text()}`), { status: 502 });
+  }
+
+  await db.query(
+    `INSERT INTO documents
+       (patient_id, doc_type, title, file_name, storage_path, mime_type, doc_date, source, notes)
+     VALUES ($1, 'lab_report', $2, $3, $4, $5, $6::date, 'lab_healthray', $7)
+     ON CONFLICT DO NOTHING`,
+    [
+      c.patient_id,
+      c.tests ? `Lab Report - ${caseNo} — ${c.tests}` : `Lab Report - ${caseNo}`,
+      safeName,
+      storagePath,
+      mediaType,
+      c.case_date,
+      `lab_case:${caseNo}`,
+    ],
+  );
+
+  // pdf_unavailable cleared for the same reason the sync clears it: a file now
+  // exists, so any earlier "no report found" verdict is stale.
+  await db.query(
+    `UPDATE lab_cases
+        SET pdf_storage_path = $2, pdf_unavailable = FALSE, pdf_next_attempt_at = NULL
+      WHERE case_no = $1`,
+    [caseNo, storagePath],
+  );
+
+  await db.query(
+    `INSERT INTO giniflow_lab_case_actions (case_no, action, actor_role, actor_id, note)
+     VALUES ($1, 'report_uploaded', 'admin', $2, $3)
+     ON CONFLICT (case_no, action) DO UPDATE
+       SET actor_id = EXCLUDED.actor_id, note = EXCLUDED.note, created_at = NOW()`,
+    [caseNo, actorId, safeName],
+  );
+
+  // Brief §2.3: uploading a report sets `results_status = 'ready'`, which is what
+  // turns the patient green on the MO and consultant queues. The Gini queue does
+  // this through `advanceSample`; a hospital case has no order to advance, so it
+  // is written here — the same flag, for the same reason.
+  //
+  // Guarded, because "ready" is a claim about the WHOLE visit and this upload is
+  // one case. It is only set when nothing else for that patient is still
+  // outstanding:
+  //
+  //   · no other lab_case that day without a `reported_on` and without a file,
+  //   · no Gini lab order that day still short of `uploaded`.
+  //
+  // Otherwise the MO would be told the results are in while a second panel is
+  // still running — the exact failure the partial state exists to prevent.
+  const ready = await db.query(
+    `UPDATE giniflow_visits v
+        SET results_status = 'ready', updated_at = NOW()
+      WHERE v.patient_id = $1
+        AND v.visit_date = $2::date
+        AND v.results_status <> 'ready'
+        AND NOT EXISTS (
+          SELECT 1 FROM lab_cases o
+           WHERE o.case_date = v.visit_date
+             AND o.case_no <> $3
+             -- Match the patient properly. COALESCE(o.patient_id, $1) = $1 was
+             -- here and is a trap: an unlinked case has a NULL patient_id, so it
+             -- matched EVERY patient and blocked every upload. An unlinked case
+             -- belongs to this patient only if its UHID says so.
+             AND (o.patient_id = $1
+                  OR (o.patient_id IS NULL
+                      AND o.raw_list_json->'patient'->>'healthray_uid' = $4))
+             AND o.raw_detail_json->>'reported_on' IS NULL
+             AND o.pdf_storage_path IS NULL
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM giniflow_lab_orders g
+           WHERE g.visit_id = v.id AND g.sample_status <> 'uploaded'
+        )
+      RETURNING v.id`,
+    [c.patient_id, c.case_date, caseNo, c.uhid],
+  );
+
+  return {
+    caseNo,
+    storagePath,
+    fileName: safeName,
+    bytes: buffer.length,
+    // The screen says which happened: a report filed, or a report filed AND the
+    // next station told. Reporting "results ready" when the guard declined would
+    // be the toast lying about the board.
+    markedResultsReady: ready.rowCount > 0,
+  };
 }

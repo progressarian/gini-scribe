@@ -404,7 +404,7 @@ export function ArrivalsTab({ search, setSearch, data, isLoading, onAct, onCheck
           ))}
         </div>
 
-        <div className="ar-col ar-col-floor">
+        <div className="ar-col">
           <div className="grp-lbl grp-lbl-sp">🏥 On the floor ({onFloor.length})</div>
           {onFloor.length === 0 && <div className="empty-note">Nobody in the building yet.</div>}
           {onFloor.map((a) => (

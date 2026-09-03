@@ -17,6 +17,7 @@ import {
   useWithdrawProposal,
 } from "../../queries/hooks/useGiniflowMo";
 import { useDictation } from "../../hooks/useDictation";
+import RxSection from "./consult/RxSection";
 import useAuthStore from "../../stores/authStore";
 import { useTick, minutesSince, budgetColour } from "../../lib/giniflowTime";
 import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
@@ -1161,6 +1162,19 @@ export default function MoStationPage() {
                   <div className="dp-hint">
                     Autosaves as you type. The doctor cannot take this patient without a plan.
                   </div>
+                </div>
+
+                {/* The MO edits the actual prescription; their rows reach the
+                    doctor as proposals to approve, adjust or reject (addendum
+                    v1.1 §3). The same section the consultant uses — one inline
+                    editor, not a second one that could drift from it. */}
+                <div className="dp-sec mo-rx">
+                  <RxSection
+                    visitId={activeId}
+                    station="mo"
+                    readOnly={patient.status !== "with_sd"}
+                    onToast={showToast}
+                  />
                 </div>
 
                 <div className="dp-sec">

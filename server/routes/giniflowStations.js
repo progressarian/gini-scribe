@@ -9,6 +9,7 @@ import {
   giniflowRxItemSchema,
   giniflowRxItemPatchSchema,
   giniflowRxDecisionSchema,
+  giniflowAllergySchema,
   giniflowRxPauseSchema,
   giniflowRxStopSchema,
   giniflowMedSearchQuerySchema,
@@ -20,6 +21,7 @@ import {
   giniflowDateQuerySchema,
   giniflowMoQueueQuerySchema,
   giniflowPaymentSchema,
+  giniflowLabCaseActionSchema,
   giniflowReportSchema,
   giniflowOrderTestsSchema,
   giniflowPlanSchema,
@@ -41,11 +43,13 @@ import {
   giniflowReferralSendSchema,
   giniflowReferralAppointmentSchema,
   giniflowReferralCompleteSchema,
+  giniflowInteractionAckSchema,
 } from "../schemas/index.js";
 import {
   getVitalsQueue,
   getVitalsPatient,
   saveVitals,
+  saveAllergy,
   startVitals,
   releaseVitals,
 } from "../services/giniflow/vitalsStation.js";
@@ -64,6 +68,8 @@ import {
 import {
   getLabQueue,
   advanceSample,
+  markLabCaseAction,
+  uploadLabCaseReport,
   uploadReport,
   fetchStoredReport,
 } from "../services/giniflow/labStation.js";
@@ -119,8 +125,13 @@ import {
   alternativesFor,
   addExternal,
 } from "../services/giniflow/prescription.js";
+import { checkVisit, acknowledge } from "../services/giniflow/interactions.js";
 import { buildCard } from "../services/giniflow/medicineCard.js";
-import { finalizeConsult, finalizePreview } from "../services/giniflow/finalize.js";
+import {
+  finalizeConsult,
+  finalizePreview,
+  fastPathFinalize,
+} from "../services/giniflow/finalize.js";
 import {
   getPharmacyQueue,
   getPharmacyPatient,
@@ -172,6 +183,27 @@ router.get("/giniflow/stations/vitals/:visitId", vitalsGate, async (req, res) =>
     handleError(res, e, "Gini Flow vitals patient");
   }
 });
+
+// The allergy question, asked where the patient is already sitting down
+// (24-ADDENDUM-V11-PLAN.md §5.1). Recorded against the patient, so every station
+// reads the same answer.
+router.post(
+  "/giniflow/stations/vitals/:visitId/allergy",
+  vitalsGate,
+  validate(giniflowAllergySchema),
+  async (req, res) => {
+    try {
+      res.json(
+        await saveAllergy(req.params.visitId, {
+          ...req.body,
+          actorId: req.doctor?.doctor_id ?? null,
+        }),
+      );
+    } catch (e) {
+      handleError(res, e, "Gini Flow allergy");
+    }
+  },
+);
 
 router.post("/giniflow/stations/vitals/:visitId/start", vitalsGate, async (req, res) => {
   try {
@@ -350,6 +382,32 @@ router.get("/giniflow/stations/doctor/:visitId/prescription", doctorGate, async 
   }
 });
 
+// The interaction check over the combined list — this prescription plus the
+// medicines another hospital started (24-ADDENDUM-V11-PLAN.md §5.2). Read on
+// demand rather than folded into the draft: the draft is fetched on every
+// keystroke of a medicine search, and this is not free.
+router.get("/giniflow/stations/doctor/:visitId/interactions", doctorGate, async (req, res) => {
+  try {
+    res.json(await checkVisit(req.params.visitId));
+  } catch (e) {
+    doctorError(res, e, "Gini Flow interaction check");
+  }
+});
+
+// Prescribing a severe interaction deliberately, with the reason on the record.
+router.post(
+  "/giniflow/stations/doctor/:visitId/interactions/ack",
+  doctorGate,
+  validate(giniflowInteractionAckSchema),
+  async (req, res) => {
+    try {
+      res.json(await acknowledge(req.params.visitId, req.body, req.user?.id ?? null));
+    } catch (e) {
+      doctorError(res, e, "Gini Flow interaction acknowledgement");
+    }
+  },
+);
+
 // Seeds the draft from what the patient is already taking. Not automatic: the
 // consultant decides when the consultation starts writing.
 router.post(
@@ -509,6 +567,17 @@ router.get("/giniflow/stations/doctor/:visitId/finalize", doctorGate, async (req
     res.json(await finalizePreview(req.params.visitId));
   } catch (e) {
     doctorError(res, e, "Gini Flow finalize preview");
+  }
+});
+
+// The 30-second visit (addendum v1.1 §2). One endpoint, because a network drop
+// between "order tests" and "finalize" must not leave a patient billed for a
+// panel and still sitting in the room.
+router.post("/giniflow/stations/doctor/:visitId/fast-finalize", doctorGate, async (req, res) => {
+  try {
+    res.json(await fastPathFinalize(req.params.visitId, req.doctor?.doctor_id ?? null));
+  } catch (e) {
+    doctorError(res, e, "Gini Flow fast path");
   }
 });
 
@@ -727,6 +796,55 @@ router.get(
   },
 );
 
+// Literal path BEFORE the parameterised ones on this prefix — `/lab/:orderId/...`
+// would otherwise swallow it, which is the bug this file already warns about.
+router.post(
+  "/giniflow/stations/lab/case/:caseNo/action",
+  labGate,
+  validate(giniflowLabCaseActionSchema),
+  async (req, res) => {
+    try {
+      res.json(
+        await markLabCaseAction(req.params.caseNo, {
+          action: req.body.action,
+          note: req.body.note ?? null,
+          undo: req.body.undo === true,
+          actorId: req.doctor?.doctor_id ?? null,
+          actorRole: req.doctor?.role || "lab",
+        }),
+      );
+    } catch (e) {
+      handleError(res, e, "Gini Flow lab case action");
+    }
+  },
+);
+
+// Attaching a report to a HealthRay-run case. Admin-gated rather than lab-gated:
+// the sync normally fetches the file, so a human doing it by hand is an override
+// of the automatic path, not part of the technician's routine.
+router.post(
+  "/giniflow/stations/lab/case/:caseNo/report",
+  requireCapability(CAP.GINIFLOW_STATION_LAB),
+  validate(giniflowReportSchema),
+  async (req, res) => {
+    if (req.doctor?.role !== "admin") {
+      return res.status(403).json({ error: "Only an admin may attach a report to a lab case" });
+    }
+    try {
+      res.json(
+        await uploadLabCaseReport(req.params.caseNo, {
+          base64: req.body.base64,
+          fileName: req.body.fileName,
+          mediaType: req.body.mediaType || "application/pdf",
+          actorId: req.doctor?.doctor_id ?? null,
+        }),
+      );
+    } catch (e) {
+      handleError(res, e, "Gini Flow lab case report");
+    }
+  },
+);
+
 router.post(
   "/giniflow/stations/lab/:orderId/advance",
   labGate,
@@ -808,6 +926,33 @@ router.get("/giniflow/stations/mo/:visitId/prescription", moGate, async (req, re
     handleError(res, e, "Gini Flow MO prescription");
   }
 });
+
+// The MO reads the same check — they are the one assembling the list, so they
+// are the one who can still fix it before the consultant sees it. Only the
+// consultant may override, which is why there is no MO ack route.
+router.get("/giniflow/stations/mo/:visitId/interactions", moGate, async (req, res) => {
+  try {
+    res.json(await checkVisit(req.params.visitId));
+  } catch (e) {
+    handleError(res, e, "Gini Flow MO interaction check");
+  }
+});
+
+router.post(
+  "/giniflow/stations/mo/:visitId/external-medicines",
+  moGate,
+  validate(giniflowExternalMedSchema),
+  async (req, res) => {
+    try {
+      // The consultant's own service — one implementation of "a medicine
+      // another hospital prescribed", reached from both stations.
+      const draft = await getDraft(req.params.visitId);
+      res.json(await addExternal(draft.patientId, req.body));
+    } catch (e) {
+      handleError(res, e, "Gini Flow external medicine");
+    }
+  },
+);
 
 router.post(
   "/giniflow/stations/mo/:visitId/prescription/items",

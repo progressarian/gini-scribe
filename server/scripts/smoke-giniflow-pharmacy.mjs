@@ -79,10 +79,16 @@ check(
   queue.dispensed.length > 0,
   `${queue.dispensed.length}`,
 );
+// `counts.dispensed` is no longer the length of the list. The list holds every
+// finished visit, and `DONE_STATUSES` includes `exited` — so on a real day it is
+// full of visits the HealthRay sync closed, which this counter never touched.
+// The count now reports only what was dispensed HERE, and `closedElsewhere` the
+// rest; together they are still the whole list.
 check(
   "three counts, and they match the lists",
   queue.counts.toDispense === queue.toDispense.length &&
-    queue.counts.dispensed === queue.dispensed.length,
+    queue.counts.dispensed + queue.counts.closedElsewhere === queue.dispensed.length,
+  `${queue.counts.dispensed} dispensed + ${queue.counts.closedElsewhere} closed elsewhere of ${queue.dispensed.length}`,
 );
 check(
   "stock warnings read 0 while the inventory is empty, never a false 'in stock'",

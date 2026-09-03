@@ -70,6 +70,40 @@ const PRIORITY_CHIP = {
   high: { cls: "pri-high", label: "⬆ High" },
 };
 
+// A patient prescribed on HealthRay: no Gini Flow prescription exists, so there
+// is nothing to open and no dispense flow to run. Rendered as a div, not a
+// button, for that reason — the queue cards above it are clickable and these
+// must not look like they are.
+function HandoverRow({ row }) {
+  return (
+    <div className={`pt-card ph-handover-row${row.gone ? " is-gone" : ""}`}>
+      <div className="pc-av" style={{ background: avatarColour(row.patientId) }}>
+        {initials(row.name)}
+      </div>
+      <div className="pc-body">
+        <div className="pc-name">
+          {row.name}
+          {row.fileNo && <span className="badge b-ink">{row.fileNo}</span>}
+        </div>
+        <div className="pc-meta">
+          {[
+            row.age && row.sex ? `${row.age}${row.sex[0]}` : row.age && `${row.age}y`,
+            `${row.medicines} ${row.medicines === 1 ? "medicine" : "medicines"}`,
+            `written ${clock(row.prescribedAt)}`,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </div>
+        <div className="pc-tests">💊 {row.names.join(" · ")}</div>
+      </div>
+      <div className="pc-r">
+        <div className={`sp ${row.gone ? "sp-done" : "sp-sample"}`}>{row.station}</div>
+        <div className="pc-tlbl">{row.gone ? "has left" : "still here"}</div>
+      </div>
+    </div>
+  );
+}
+
 function QueueCard({ card, now, onOpen, done }) {
   const minutes = minutesSince(done ? card.dispensedAt : card.since, now);
   const priority = PRIORITY_CHIP[card.priority];
@@ -364,15 +398,17 @@ function PharmacyPane({ visitId, onClose, onToast }) {
 
 // How many closed visits the column shows before it has to be asked. The
 // counter works forward, so the last few are the ones anybody scrolls to.
-const DISPENSED_PREVIEW = 5;
 
 export default function PharmacyStationPage() {
   const [toast, setToast] = useState("");
   const [openVisitId, setOpenVisitId] = useState(null);
+  // Both are day-long records, not today's work, so they default closed —
+  // the eye should land on the queue, not scroll past 121 finished rows first.
+  const [doneOpen, setDoneOpen] = useState(false);
+  const [goneOpen, setGoneOpen] = useState(false);
   // Dispensed is a day's worth of closed visits — 55 by the afternoon. The
   // column opens on the last few, because the counter works forward; the rest
   // are one press away rather than unreachable.
-  const [showAllDispensed, setShowAllDispensed] = useState(false);
   const toastTimer = useRef(null);
   const now = useTick();
 
@@ -387,9 +423,19 @@ export default function PharmacyStationPage() {
 
   useEffect(() => () => clearTimeout(toastTimer.current), []);
 
-  const counts = data?.counts || { toDispense: 0, stockWarnings: 0, dispensed: 0 };
+  const counts = data?.counts || {
+    toDispense: 0,
+    stockWarnings: 0,
+    dispensed: 0,
+    closedElsewhere: 0,
+  };
   const dispensed = data?.dispensed || [];
   const toDispense = data?.toDispense || [];
+  // Patients still in the building come first: they can still be handed their
+  // medicines, and the ones who have gone are a record rather than a worklist.
+  const pendingHandover = data?.pendingHandover || [];
+  const onFloor = pendingHandover.filter((r) => !r.gone);
+  const gone = pendingHandover.filter((r) => r.gone);
 
   // The pane follows the live queue rather than a copy of it, so a card that
   // moves out of "to dispense" while it is open does not go stale.
@@ -449,11 +495,30 @@ export default function PharmacyStationPage() {
                 {counts.dispensed}
               </div>
               <div>
-                <div className="sl">Dispensed</div>
-                <div className="ss">today</div>
+                <div className="sl">Dispensed here</div>
+                <div className="ss">handed over at this counter</div>
+              </div>
+            </div>
+            {/* Held apart from Dispensed on purpose. This tile used to be inside
+                that one: `DONE_STATUSES` counts `exited` as well as `dispensed`,
+                so every visit the HealthRay sync closed read as dispensed — 72 of
+                them today, on a day the counter handed over nothing. */}
+            <div className="stat">
+              <div className="sv" style={{ color: "var(--ink3)" }}>
+                {counts.closedElsewhere ?? 0}
+              </div>
+              <div>
+                <div className="sl">Closed elsewhere</div>
+                <div className="ss">visit ended, no pharmacy record</div>
               </div>
             </div>
           </div>
+
+          <p className="stats-note">
+            A patient reaches the queue below when a consultant taps Finalize on the Gini Flow
+            consult screen. Prescriptions written on HealthRay never do, so they are listed as
+            &ldquo;Prescribed on HealthRay&rdquo; instead — the medicines are owed either way.
+          </p>
 
           <div className="workflow-note ph-note-strip">
             <span className="wn-ico">⚡</span>
@@ -488,7 +553,7 @@ export default function PharmacyStationPage() {
                 <div className="grp-lbl" style={{ marginBottom: 7 }}>
                   💊 To dispense — prescription finalized by doctor
                 </div>
-                {toDispense.length ? (
+                {toDispense.length > 0 && (
                   <div className="pt-list">
                     {toDispense.map((card) => (
                       <QueueCard
@@ -499,49 +564,90 @@ export default function PharmacyStationPage() {
                       />
                     ))}
                   </div>
-                ) : (
-                  <div className="empty-note">
-                    {dispensed.length
-                      ? "Queue clear — nobody is waiting at the counter. A patient appears here the moment a consultant finalizes their prescription."
-                      : "Nobody waiting yet. A patient appears here the moment a consultant finalizes their prescription."}
+                )}
+                {/* Same column, because it is the same job: someone in the
+                    building who has not been given their medicines. The Gini
+                    queue is empty all day, so keeping these two apart put the
+                    counter's only real work in a footnote. */}
+                {onFloor.length > 0 && (
+                  <div className="ph-group">
+                    <div className="ph-group-head">Prescribed on HealthRay · {onFloor.length}</div>
+                    <div className="ph-group-hint">
+                      No Gini Flow prescription to close —{" "}
+                      {onFloor.reduce((n, r) => n + r.medicines, 0)} medicines owed, nothing
+                      recorded as collected.
+                    </div>
+                    <div className="pt-list">
+                      {onFloor.map((r) => (
+                        <HandoverRow key={r.patientId} row={r} />
+                      ))}
+                    </div>
                   </div>
+                )}
+                {toDispense.length === 0 && onFloor.length === 0 && (
+                  <div className="empty-note">Nobody in the building is waiting on medicines.</div>
                 )}
               </div>
 
               {/* Recessed: a record, not a worklist, so the eye goes left. */}
               <div className="dcol dcol-done">
-                <div className="grp-lbl" style={{ marginBottom: 7 }}>
-                  ✅ Dispensed today
-                </div>
-                {dispensed.length ? (
+                <button
+                  type="button"
+                  className="ph-collapse-head grp-lbl"
+                  aria-expanded={doneOpen}
+                  onClick={() => setDoneOpen((v) => !v)}
+                >
+                  <span className={`ph-chev${doneOpen ? " open" : ""}`} aria-hidden="true">
+                    ▸
+                  </span>
+                  ✅ Done today — {dispensed.length + gone.length}
+                </button>
+                {doneOpen && dispensed.length > 0 && (
                   <div className="pt-list">
-                    {(showAllDispensed ? dispensed : dispensed.slice(0, DISPENSED_PREVIEW)).map(
-                      (card) => (
-                        <QueueCard
-                          key={card.visitId}
-                          card={card}
-                          now={now}
-                          done
-                          onOpen={(c) => setOpenVisitId(c.visitId)}
-                        />
-                      ),
-                    )}
-                    {/* Was a plain "+ 52 more dispensed today" line, which named
-                        the other 52 and then gave nobody a way to reach them. */}
-                    {dispensed.length > DISPENSED_PREVIEW && (
-                      <button
-                        type="button"
-                        className="more-note more-btn"
-                        aria-expanded={showAllDispensed}
-                        onClick={() => setShowAllDispensed((v) => !v)}
-                      >
-                        {showAllDispensed
-                          ? `Show fewer — ${dispensed.length} dispensed today`
-                          : `+ ${dispensed.length - DISPENSED_PREVIEW} more dispensed today — show all`}
-                      </button>
+                    {dispensed.map((card) => (
+                      <QueueCard
+                        key={card.visitId}
+                        card={card}
+                        now={now}
+                        done
+                        onOpen={(c) => setOpenVisitId(c.visitId)}
+                      />
+                    ))}
+                  </div>
+                )}
+                {/* Merged in, because both are the same fact to the counter: the
+                    patient is gone. Held as its own group so the day's record
+                    does not imply this pharmacy handed anything over. */}
+                {/* Its own toggle, independent of Done today above — someone
+                    checking who left with medicines unrecorded should not have
+                    to open the dispensed list first to find it. */}
+                {gone.length > 0 && (
+                  <div className="ph-group">
+                    <button
+                      type="button"
+                      className="ph-collapse-head grp-lbl"
+                      aria-expanded={goneOpen}
+                      onClick={() => setGoneOpen((v) => !v)}
+                    >
+                      <span className={`ph-chev${goneOpen ? " open" : ""}`} aria-hidden="true">
+                        ▸
+                      </span>
+                      Left with medicines unrecorded · {gone.length}
+                    </button>
+                    <div className="ph-group-hint">
+                      Prescribed on HealthRay, {gone.reduce((n, r) => n + r.medicines, 0)}{" "}
+                      medicines, nothing recorded as collected before they left.
+                    </div>
+                    {goneOpen && (
+                      <div className="pt-list">
+                        {gone.map((r) => (
+                          <HandoverRow key={r.patientId} row={r} />
+                        ))}
+                      </div>
                     )}
                   </div>
-                ) : (
+                )}
+                {dispensed.length === 0 && gone.length === 0 && (
                   <div className="empty-note">Nothing dispensed yet today.</div>
                 )}
               </div>

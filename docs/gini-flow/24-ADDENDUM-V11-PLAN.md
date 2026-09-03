@@ -189,6 +189,33 @@ no follow-up, which is not.
 
 Decide this before writing the endpoint — it is the difference between a rollback and a phone call.
 
+### 3.2b Built — 2026-09-03
+
+`fastPathFinalize(visitId, actorId, db)` in `finalize.js`, wired to
+`POST …/doctor/:visitId/fast-finalize` and rendered by `consult/FastPathBar.jsx`.
+
+**Three transactions, in the order §3.2 argued for** — care plan, then tests, then finalize. The
+open question is answered by that ordering rather than by machinery: a failure after the care plan
+is harmless, a failure after the tests is a phone call, and a finished visit with no follow-up is
+neither.
+
+**One correction the tests forced.** `fastPathFinalize` took a `db` and forwarded it to
+`finalizeConsult`, which opens its own transaction with `db.connect()` — so passing a client would
+have thrown on the last and least reversible step. It now always finalizes on the pool; `db` is for
+the reads and the two composable writes only.
+
+**Four refusals, all at the service:**
+
+|                                   |                                                         |
+| --------------------------------- | ------------------------------------------------------- |
+| not green                         | `409` naming the actual category                        |
+| nothing to continue               | `409` — an empty prescription is not a 30-second visit  |
+| a proposal still pending          | `409` — §4.3's rule, reached before anything is written |
+| already finalized / not called in | inherited from `finalizeConsult`                        |
+
+The bar also hides itself in the last three cases, but the rule is the service's: the button being
+absent is not the same as the action being refused.
+
 ### 3.3 "Today's panel"
 
 The tests to repeat are the ones this visit already produced results for — read from
@@ -320,6 +347,19 @@ second one. The MO's edits write `giniflow_rx_items` with `proposed_by = <them>`
 `approval_status = 'pending'`. **"Ready for the doctor" continues to require a plan**: the plan
 textarea stays for reasoning that is not a medicine change.
 
+### 4.4b Built — 2026-09-03
+
+The MO station renders **the same `RxSection`**, passed `station="mo"`, which routes its writes
+through the MO gate so every row it adds is a proposal. The hooks take the station; the query key
+does not, so the MO and the consultant read one cache entry and cannot hold different pictures of
+the same draft.
+
+**Deciding is not offered at the MO station.** The approve and reject buttons are gated on
+`!proposing` — the person who proposed a change must not be the one who approves it.
+
+The plan textarea stays, as §4.4 said it would: reasoning that is not a medicine change still has to
+go somewhere.
+
 ### 4.5 The doctor's screen
 
 Purple rows inline in `s-rx`, tagged with the proposer's name, each with **Approve · Adjust ·
@@ -332,6 +372,12 @@ Reject**:
 
 `ProposalsStrip.jsx` becomes a **summary that scrolls to the rows**, not a second place to act. Two
 places to approve the same thing is how two people approve it twice.
+
+**Built — 2026-09-03, as two things at once.** It counts the new draft-row proposals and offers one
+button, _"Review in the prescription →"_, which scrolls to `s-rx`. It keeps its own Approve / Adjust
+/ Reject **only for the old `giniflow_rx_proposals` rows**, because those still exist on real visits
+and this is the only place they can be cleared — and finalize now blocks until they are. The strip
+disappears when both are empty, and its old half can be deleted once the table is.
 
 ---
 
@@ -359,6 +405,41 @@ allergies" for a patient nobody asked is the most dangerous string this system c
 or vitals. Until that is answered the column will be empty and the strip will keep saying the same
 thing it says now.
 
+#### Built, 2026-09-03 — the answer came out of the existing flow
+
+**Who asks today: nobody.** The question was asked of the code, not of a meeting. `patients` had no
+allergy column at all; the only allergy fields in the database were `giniflow_referrals.allergy_status`
+and `allergy_note`, written by `ReferralForm.jsx` — the one screen in the system that already asks,
+and only for the small number of patients being referred out.
+
+**So the model was lifted from there rather than invented**, into `shared/giniflowAllergy.js`:
+`ALLERGY_NOT_ASKED` / `none_known` / `known`, with `allergyLine()` so the same patient is never
+described two ways on two screens.
+
+**Asked at vitals**, not at reception. Reception is a desk with a queue behind it and the patient
+still standing; vitals is the first station that sits them down, already asks them questions, and
+already types into a form. The MO is too late — the brief is read there, not filled in.
+
+- `server/migrations/2026-09-03_patient_allergies.sql` — `allergy_status` (CHECK against the three
+  states), `allergy_note`, `allergy_asked_at`, `allergy_asked_by` on `patients`.
+- `vitalsStation.js` → `saveAllergy(visitId, {status, note, actorId})`, route
+  `POST /giniflow/stations/vitals/:visitId/allergy` behind the existing `vitalsGate`.
+- `VitalsStationPage.jsx` — three buttons above the readings, plus a name-it field for `known`.
+- `moStation.js:324` no longer returns the hardcoded `allergies: null`; it returns the recorded
+  answer, resolving NULL to `not_known` **on the server**, so no screen has to decide what an
+  absent answer means.
+
+**Two rules are enforced in the service, not the form**, because a form is not a rule:
+
+1. `known` without a name is a 400 — a red strip that cannot say what the allergy is helps nobody.
+2. **`not_known` can never overwrite a recorded allergy.** A nurse tabbing past the control must not
+   erase what somebody was told last month. This is the check that matters most, and
+   `smoke-giniflow-vitals.mjs` asserts it explicitly.
+
+**What is still true:** the column is empty for every existing patient, so the strip goes on saying
+"not recorded anywhere — ask the patient" until the floor starts answering. That is the honest
+state, not a gap.
+
 ### 5.2 ④b Interaction check — blocked on data, not logic
 
 The addendum wants the check to run across the **full combined list**: Gini prescription **plus**
@@ -373,6 +454,78 @@ _"interaction not checked"_ — it converts an absence of information into a fal
 
 Order: capture external medicines → then the check. The capture UI belongs on the MO station, where
 the addendum already puts the question.
+
+#### Built, 2026-09-03 — the capture half, and what was already there
+
+**Where external medicines get captured today: `AddMedicationModal.jsx:201`** — a `med_group`
+dropdown in Scribe with an "external" option, behind the consultation wizard. It is reachable, and
+it is not reached: `med_group = 'external'` is set on **0 of 181,068** medication rows. The capture
+exists; the place it lives is not on the path anyone walks.
+
+**The service existed too.** `prescription.js:551` `addExternal()` — specialty, hospital, condition,
+`interaction_flag`, upserting on the patient + medicine so re-entering a drug corrects it instead of
+duplicating it — with a route, a Zod schema and a `useAddExternal` hook already wired. An earlier
+pass here wrote a second `addExternalMedicine`; it was deleted and the MO route repointed at the
+existing one. **Nothing new was written on the server for this.**
+
+- MO route `POST /giniflow/stations/mo/:visitId/external-medicines` → the existing `addExternal`.
+- `ExternalMedicineForm` in `RxSection.jsx` — which serves both stations, because the MO renders the
+  same component the consultant does.
+- `getDraft()` already returns externals as a separate `external` list (`external_doctor IS NOT
+NULL`), so an outside drug appears beside the regimen without ever joining the list this clinic is
+  prescribing. `smoke-giniflow-mo.mjs` asserts both halves of that.
+
+#### Built, 2026-09-03 — the check itself
+
+`server/services/giniflow/interactions.js`, over the combined list: the prescription being written
+plus every medicine another hospital started. The patient's existing Gini regimen is deliberately
+not added on top — the seeded draft already contains those rows, and counting them twice would
+report every continued medicine as a duplication.
+
+**It runs on drug CLASSES, not molecules**, because that is what this database knows:
+`medications.composition` is populated on **74 of 124,708** active rows, while a class can be
+resolved for most of the list. Class is also the axis the brief's own example lives on — "dual
+antiplatelet" is a class statement.
+
+**Rules are a table, not code** (`giniflow_interaction_rules`, 40 seeded rows). They are clinical
+content: a doctor has to be able to read the list, disagree with a row and change it without a
+deploy. `class_a = class_b` is a duplication rule; anything else is a pair. Every note says what to
+do, not just that something is wrong.
+
+**Severe stops the finalize; moderate warns** — with an override, and the override is the design
+decision worth arguing with. A hard block would be wrong: dual antiplatelet after a stent and an MRA
+with an ACE inhibitor in heart failure are exactly the combinations this check is best at spotting,
+and both are things a cardiologist means. A stop that cannot be passed gets worked around, and then
+it protects nobody. So the way past is a recorded reason (`giniflow_interaction_acks`), which is the
+sentence the whole check exists to produce. Both routes into finalize are gated, the fast path
+included — it is the one that finalizes without anybody reading a screen.
+
+**Three sources for a medicine's class, in order of how much they can be trusted:** the curated
+reference tables (`drug_master`, `mhg_drug_formulary`), then a majority vote over every row the
+database holds for that brand, then the label on the row itself.
+
+That order was learned the hard way, on real data. `medications.drug_class` is per-row and wrong in
+places: **"TAB EMPHA M" — a metformin combination — is filed as `Antiplatelet`**, and "TAB PREGEB
+NT" with it. Trusting the row made the check report dual antiplatelet on a real patient,
+**Prabhjot Kaur**, and block her finalize. A false severe finding is not a small bug: it stops the
+consultation and teaches the consultant that the warnings are wrong. The majority vote fixes it —
+"Empha" is a biguanide on dozens of rows and an antiplatelet on two — and `smoke-giniflow-
+interactions.mjs` pins that exact pair so it cannot come back. "Other" is excluded from the vote, a
+bucket being the other way a wrong class wins.
+
+**The honesty rule is enforced, not just documented.** A medicine whose class cannot be resolved is
+returned by name in `unchecked`, and the result reads `partial`, never `clear`. The panel prints
+those names, the finalize panel repeats them, and no screen may render a partial check as a clean
+one. Noise is controlled from the same principle: two supplements or two antibiotics are not a
+finding, because a warning nobody needs is how people learn to click past the ones they do.
+
+**Where it shows:** `InteractionPanel.jsx` inside `RxSection` — which means the MO sees it too, on
+the same component. The MO cannot override: they assemble the list and can still fix it, but signing
+off on a severe interaction is the consultant's.
+
+**Measured before shipping:** across every real visit with a draft, no finalize is blocked today,
+after the mislabelling fix. The rules and the resolution can be re-measured any time with
+`smoke:giniflow-interactions`.
 
 ### 5.3 ④c Prescription PDF — **already built; the registration number was not**
 

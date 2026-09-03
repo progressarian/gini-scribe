@@ -3,6 +3,7 @@ import {
   HEALTHRAY_STATUS_TO_CHAIN,
   chainIndex,
   isChainStatus,
+  isExceptionStatus,
 } from "../../../shared/giniflowStatus.js";
 import { slotStartTime } from "../../../shared/slotHour.js";
 import { advanceStatus, IST_TODAY } from "./statusEngine.js";
@@ -81,6 +82,22 @@ async function observeHealthrayVitals(client, day) {
 
 const SYNCABLE = Object.keys(HEALTHRAY_STATUS_TO_CHAIN);
 
+// A visit the floor deliberately took OFF the day must not be put back on it by
+// a poll. `booked` is where every day starts, so it is never evidence of
+// anything: HealthRay reports `scheduled` for any appointment nobody has
+// touched, and an OBT-booked row keeps that value permanently because the
+// appointment exists only in our database — HealthRay was never told about it.
+// So `scheduled` → `booked` over a no-show or a cancellation is the sync
+// asserting the absence of news as news, and it undid reception twice in fifty
+// minutes on 3 Sep 2026.
+//
+// Only `booked` is refused. A target further along the chain IS real evidence —
+// a patient marked no-show who is later checked in at the desk did turn up, and
+// that should still come through. Un-cancelling is a decision, not an
+// observation, so it stays with the desk's own Undo button.
+const revivesException = (currentStatus, target) =>
+  isExceptionStatus(currentStatus) && target === "booked";
+
 // HealthRay reports `in_visit` when the patient reaches the consultation stage,
 // not when a doctor starts. Advancing everyone straight into `with_doctor` would
 // show one doctor seeing four patients at once — the exact bug the older module
@@ -95,6 +112,90 @@ async function consultRoomFree(client, visitDate) {
   return rows.length === 0;
 }
 
+// The pharmacy leg HealthRay cannot see.
+//
+// HealthRay's `completed` means the consultation is over, and it was mapped
+// straight to `exited` — so a patient walked out of the system the moment the
+// doctor finished, and no visit in the table's history has ever held
+// `doctor_done` or `pharmacy_pending`. The counter's queue was not empty, it was
+// unreachable.
+//
+// A patient with medicines prescribed today and nothing recorded against them in
+// `medicine_collections` still has to collect them, so `completed` parks them at
+// the pharmacy instead. Nothing is invented: the evidence is a prescription with
+// no dispensing record.
+const PHARMACY_LEG = ["doctor_done", "pharmacy_pending", "dispensed"];
+
+const atPharmacyLeg = (currentStatus, target) =>
+  target === "exited" && PHARMACY_LEG.includes(currentStatus);
+
+async function patientsAwaitingMedicines(client, day) {
+  const { rows } = await client.query(
+    `SELECT DISTINCT m.patient_id
+       FROM medications m
+      WHERE (m.created_at AT TIME ZONE 'Asia/Kolkata')::date = $1::date
+        AND m.is_active
+        AND NOT EXISTS (
+          SELECT 1 FROM medicine_collections c
+           WHERE c.medication_id = m.id AND c.collected_date = $1::date
+        )`,
+    [day],
+  );
+  return new Set(rows.map((r) => r.patient_id));
+}
+
+// The floor does not work the pharmacy screen, so a patient parked there would
+// stay there all day and the board would fill with a queue nobody is standing
+// in. The grace period is what makes the leg safe to write: past three times the
+// station's own budget the sync completes the exit itself, so the queue always
+// drains without the counter having to.
+async function pharmacyGraceMinutes(client) {
+  const { rows } = await client.query(
+    `SELECT budget_minutes FROM giniflow_sla_config WHERE station = 'pharmacy'`,
+  );
+  return (rows[0]?.budget_minutes || 10) * 3;
+}
+
+async function sweepPharmacyLeg(client, day, graceMinutes) {
+  const { rows } = await client.query(
+    `SELECT v.id
+       FROM giniflow_visits v
+       JOIN LATERAL (
+         SELECT occurred_at FROM giniflow_visit_events e
+          WHERE e.visit_id = v.id AND e.status = ANY($3)
+          ORDER BY occurred_at DESC LIMIT 1
+       ) leg ON TRUE
+      WHERE v.visit_date = $1::date
+        AND v.current_status = ANY($3)
+        AND leg.occurred_at < NOW() - ($2 || ' minutes')::interval`,
+    [day, graceMinutes, PHARMACY_LEG],
+  );
+
+  let swept = 0;
+  for (const row of rows) {
+    try {
+      await client.query("BEGIN");
+      await advanceStatus(client, {
+        visitId: row.id,
+        toStatus: "exited",
+        actorRole: "system",
+        allowSkip: true,
+        meta: {
+          source: "healthray",
+          reason: "pharmacy_grace_elapsed",
+          grace_minutes: graceMinutes,
+        },
+      });
+      await client.query("COMMIT");
+      swept += 1;
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => {});
+      console.error("[giniflow] pharmacy sweep:", row.id, e.message);
+    }
+  }
+  return swept;
+}
+
 export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
   const client = await db.connect();
   const result = {
@@ -104,6 +205,7 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
     skipped: 0,
     errors: 0,
     vitalsObserved: 0,
+    pharmacySwept: 0,
     advancedIds: [],
   };
   try {
@@ -181,6 +283,10 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
 
     result.vitalsObserved = await observeHealthrayVitals(client, day);
 
+    const grace = await pharmacyGraceMinutes(client);
+    result.pharmacySwept = await sweepPharmacyLeg(client, day, grace);
+    const awaitingMedicines = await patientsAwaitingMedicines(client, day);
+
     for (const appt of appts) {
       const target = HEALTHRAY_STATUS_TO_CHAIN[appt.status];
       if (!target) {
@@ -188,12 +294,16 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
         continue;
       }
 
-      // Nothing to do for a visit already at or past the target: skip it without
-      // opening a transaction. A BEGIN/COMMIT per appointment over the connection
-      // pooler is what made a full day take 20 seconds.
+      // Nothing to do for a visit already at or past the target, or for one the
+      // floor took off the day: skip it without opening a transaction. A
+      // BEGIN/COMMIT per appointment over the connection pooler is what made a
+      // full day take 20 seconds — and a cancelled patient would otherwise open
+      // one on every poll, all day, to write an event nobody wants.
       if (
         appt.visit_id &&
         (appt.current_status === target ||
+          revivesException(appt.current_status, target) ||
+          atPharmacyLeg(appt.current_status, target) ||
           (isChainStatus(appt.current_status) &&
             isChainStatus(target) &&
             chainIndex(appt.current_status) >= chainIndex(target)))
@@ -226,8 +336,13 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
 
         // Never move a patient backwards: a station screen may have advanced
         // them past what HealthRay knows about, and HealthRay lags by a poll.
+        // Re-checked here and not only above because the ON CONFLICT insert
+        // above returns the EXISTING row's status when a visit was created
+        // between the read and now — which can be a cancellation.
         const alreadyThere =
           currentStatus === target ||
+          revivesException(currentStatus, target) ||
+          atPharmacyLeg(currentStatus, target) ||
           (isChainStatus(currentStatus) &&
             isChainStatus(target) &&
             chainIndex(currentStatus) >= chainIndex(target));
@@ -241,6 +356,9 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
         let effective = target;
         if (target === "ready_for_doctor" && (await consultRoomFree(client, day))) {
           effective = "with_doctor";
+        }
+        if (target === "exited" && awaitingMedicines.has(appt.patient_id)) {
+          effective = "pharmacy_pending";
         }
 
         await advanceStatus(client, {

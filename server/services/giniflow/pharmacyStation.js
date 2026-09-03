@@ -10,7 +10,20 @@ import {
   COLLECTION_STATUSES,
 } from "../medication/collection.js";
 import { sendMedicineCard } from "../msg91.js";
-import { compareQueue, columnForStatus, slaKeyForStatus } from "../../../shared/giniflowStatus.js";
+import {
+  BOARD_COLUMNS,
+  STATUS_LABEL,
+  compareQueue,
+  columnForStatus,
+  slaKeyForStatus,
+} from "../../../shared/giniflowStatus.js";
+
+// The board's column name, not the raw status — `vitals_done` means the patient
+// is with the SD, and printing the status made the lab screen claim otherwise.
+const COLUMN_NAME = Object.fromEntries(BOARD_COLUMNS.map((c) => [c.key, c.name]));
+
+// The visit is over: nobody is coming to the counter for these.
+const FINISHED = ["dispensed", "exited", "no_show", "cancelled"];
 
 // The pharmacy — the last station on the floor.
 //
@@ -148,6 +161,16 @@ export async function getPharmacyQueue(visitDate, now = new Date(), db = pool) {
       // "all in stock", which is a claim this system cannot currently make
       // (16 §4.2, review CS-06).
       stock: low || out ? { low, out } : null,
+      // Did this counter actually hand anything over?
+      //
+      // `DONE_STATUSES` holds `exited` as well as `dispensed`, so every visit the
+      // HealthRay sync closed counted as dispensed — 72 of them today, all
+      // written by `system`, on a day this station dispensed nobody. A visit was
+      // worked here only if it reached `dispensed`, or if a medicine carries a
+      // collection record.
+      dispensedHere:
+        r.current_status === "dispensed" ||
+        (r.given ?? 0) + (r.not_given ?? 0) + (r.partial ?? 0) > 0,
     };
   };
 
@@ -178,15 +201,73 @@ export async function getPharmacyQueue(visitDate, now = new Date(), db = pool) {
   return {
     counts: {
       toDispense: toDispense.length,
+      // Only what this counter did. The rest are visits HealthRay closed, which
+      // is a different fact and gets its own number rather than inflating this one.
+      closedElsewhere: dispensed.filter((c) => !c.dispensedHere).length,
       // Of those waiting, how many carry a low or out-of-stock medicine. Reads 0
       // until the inventory has rows — §11 q2, and deliberately not hidden: a
       // count of zero is honest, a missing tile looks like a permissions problem.
       stockWarnings: toDispense.filter((c) => c.stock).length,
-      dispensed: dispensed.length,
+      dispensed: dispensed.filter((c) => c.dispensedHere).length,
     },
     toDispense,
     dispensed,
+    pendingHandover: await getPendingHandover(visitDate, db),
   };
+}
+
+// The counter's real backlog, from the table the hospital actually fills.
+//
+// `toDispense` queues `doctor_done`/`pharmacy_pending`, which no visit in this
+// table's history has ever held — the floor finalizes on HealthRay, so the
+// station reads zero on a day 46 patients were prescribed medicines. This is the
+// same shape of fallback the lab screen uses: `medications` written today with
+// nothing recorded against them in `medicine_collections`.
+//
+// Read-only and deliberately separate from `toDispense`: these patients have no
+// Gini Flow prescription to close, so the counter cannot run the dispense flow
+// on them — it can only see who is owed medicines.
+async function getPendingHandover(visitDate, db = pool) {
+  const { rows } = await db.query(
+    `SELECT p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
+            v.current_status,
+            count(*)::int AS medicines,
+            array_agg(m.name ORDER BY m.name) AS names,
+            min(m.created_at) AS prescribed_at
+       FROM medications m
+       JOIN giniflow_visits v ON v.patient_id = m.patient_id AND v.visit_date = $1::date
+       JOIN patients p ON p.id = m.patient_id
+      WHERE (m.created_at AT TIME ZONE 'Asia/Kolkata')::date = $1::date
+        AND m.is_active
+        AND m.external_doctor IS NULL
+        AND NOT COALESCE(p.is_blocked, FALSE)
+        AND NOT EXISTS (
+          SELECT 1 FROM medicine_collections c
+           WHERE c.medication_id = m.id AND c.collected_date = $1::date
+        )
+      GROUP BY p.id, p.name, p.file_no, p.age, p.sex, v.current_status
+      ORDER BY min(m.created_at)`,
+    [visitDate],
+  );
+
+  return rows.map((r) => ({
+    patientId: r.patient_id,
+    name: r.name,
+    fileNo: r.file_no,
+    age: r.age,
+    sex: r.sex,
+    medicines: r.medicines,
+    names: r.names || [],
+    // Where they are, by the board's column rather than the raw status — the
+    // same rule the lab screen uses, so the two cannot disagree about a patient.
+    station: FINISHED.includes(r.current_status)
+      ? STATUS_LABEL[r.current_status] || r.current_status
+      : COLUMN_NAME[columnForStatus(r.current_status)] ||
+        STATUS_LABEL[r.current_status] ||
+        r.current_status,
+    gone: FINISHED.includes(r.current_status),
+    prescribedAt: iso(r.prescribed_at),
+  }));
 }
 
 // ── One patient at the counter ──────────────────────────────────────────────

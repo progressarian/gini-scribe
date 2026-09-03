@@ -8,6 +8,7 @@ import {
   compareQueue,
   columnForStatus,
 } from "../../../shared/giniflowStatus.js";
+import { ALLERGY_NOT_ASKED } from "../../../shared/giniflowAllergy.js";
 
 // The vitals station: who is waiting, what was recorded last time, and the save
 // that moves the patient on.
@@ -250,6 +251,7 @@ export async function getVitalsPatient(visitId, db = pool) {
   const { rows } = await db.query(
     `SELECT v.id, v.current_status, v.category, v.patient_id,
             p.name, p.file_no, p.age, p.sex, p.notes,
+            p.allergy_status, p.allergy_note,
             first_ev.occurred_at AS checked_in_at,
             seq.visit_number
        FROM giniflow_visits v
@@ -298,6 +300,8 @@ export async function getVitalsPatient(visitId, db = pool) {
     category: visit.category,
     status: visit.current_status,
     checkedInAt: visit.checked_in_at ? new Date(visit.checked_in_at).toISOString() : null,
+    allergyStatus: visit.allergy_status || ALLERGY_NOT_ASKED,
+    allergyNote: visit.allergy_note || null,
     lastVisit: last[0] || null,
     recorded: current[0] || null,
   };
@@ -305,6 +309,40 @@ export async function getVitalsPatient(visitId, db = pool) {
 
 // Saving is one transaction: the reading, the status move, and the event that
 // carries the numbers so the timeline shows them without a join.
+// The allergy answer, recorded against the PATIENT rather than the visit: it is
+// true of them tomorrow too, and every station reads it from there
+// (24-ADDENDUM-V11-PLAN.md §5.1).
+//
+// Only ever moves the answer forward. "Not asked" cannot overwrite a recorded
+// allergy — a nurse tabbing past the control must not erase what somebody was
+// told last month.
+export async function saveAllergy(visitId, { status, note = null, actorId = null }, db = pool) {
+  if (!["not_known", "none_known", "known"].includes(status)) {
+    throw Object.assign(new Error(`Unknown allergy state: ${status}`), { status: 400 });
+  }
+  if (status === "known" && !note?.trim()) {
+    throw Object.assign(new Error("Name the allergy before recording it"), { status: 400 });
+  }
+  const { rows } = await db.query(
+    `UPDATE patients p
+        SET allergy_status = CASE
+              WHEN $2 = 'not_known' AND p.allergy_status IS NOT NULL THEN p.allergy_status
+              ELSE $2 END,
+            allergy_note = CASE
+              WHEN $2 = 'known' THEN $3
+              WHEN $2 = 'none_known' THEN NULL
+              ELSE p.allergy_note END,
+            allergy_asked_at = CASE WHEN $2 = 'not_known' THEN p.allergy_asked_at ELSE NOW() END,
+            allergy_asked_by = CASE WHEN $2 = 'not_known' THEN p.allergy_asked_by ELSE $4 END
+       FROM giniflow_visits v
+      WHERE v.id = $1 AND p.id = v.patient_id
+      RETURNING p.allergy_status, p.allergy_note`,
+    [visitId, status, note?.trim() || null, actorId],
+  );
+  if (!rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
+  return rows[0];
+}
+
 export async function saveVitals(
   visitId,
   { weight, height, bpSys, bpDia, pulse, spo2, temp, source = "manual", actorId = null },

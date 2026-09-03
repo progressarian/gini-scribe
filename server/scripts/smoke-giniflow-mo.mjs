@@ -25,6 +25,7 @@ import {
   getTestPanels,
 } from "../services/giniflow/moStation.js";
 import { getPaymentQueue } from "../services/giniflow/receptionStation.js";
+import { addExternal, getDraft } from "../services/giniflow/prescription.js";
 
 let failures = 0;
 const check = (label, ok, detail = "") => {
@@ -146,10 +147,12 @@ check(
 const target = all.find((c) => !["ready_for_doctor", "doctor_done"].includes(c.status));
 const patient = await getMoPatient(target.visitId);
 check("the brief loads", !!patient && patient.visitId === target.visitId);
+// The three states from vitals travel to the MO unchanged: "not known" is an
+// answer — nobody has asked — and must not read as "no allergies".
 check(
-  "allergies are null, not an empty list",
-  patient.allergies === null,
-  "so the screen says 'not recorded' rather than 'none'",
+  "the allergy answer travels, in its three states",
+  ["not_known", "none_known", "known"].includes(patient.allergyStatus) && "allergyNote" in patient,
+  patient.allergyStatus,
 );
 check("no invented phase is returned", !("phase" in patient), "plan §3b.1");
 check(
@@ -483,6 +486,46 @@ if (second) {
     "handing over moves the patient to the doctor queue",
     handed.current_status === "ready_for_doctor",
     handed.current_status,
+  );
+}
+
+// ── What the patient is already taking (24-ADDENDUM-V11-PLAN.md §5.2) ────────
+// Medicines from another hospital have to be on the chart before an MO proposes
+// a dose change, and they must stay distinguishable from what this clinic
+// prescribed — an outside drug is a fact to work around, not an order to repeat.
+{
+  const v = await one(
+    `SELECT id, patient_id FROM giniflow_visits WHERE visit_date = $1::date LIMIT 1`,
+    [TEST_DAY],
+  );
+  const ext = await addExternal(v.patient_id, {
+    medicineName: "Ramipril 5mg",
+    prescriberName: "Dr. Gupta",
+    hospitalName: "PGI",
+    dose: "5mg",
+    condition: "Hypertension",
+  });
+  check("an outside medicine reaches the chart", !!ext?.id && ext.name === "Ramipril 5mg");
+  check("attributed to the doctor who prescribed it", ext.external_doctor === "Dr. Gupta");
+  const marked = await one(`SELECT med_group, external_doctor FROM medications WHERE id = $1`, [
+    ext.id,
+  ]);
+  check(
+    "and is filed as external, not as something this clinic wrote",
+    marked.med_group === "external",
+    marked.med_group,
+  );
+  // The MO reads the medicine list through the prescription draft — the same
+  // component the consultant uses — so that is where it has to appear.
+  const rx = await getDraft(v.id);
+  check(
+    "the MO sees it beside the rest of the medicine list",
+    rx.external.some((m) => m.name === "Ramipril 5mg"),
+    `${rx.external.length} external`,
+  );
+  check(
+    "and it stays out of the list this clinic is prescribing",
+    !rx.items.some((i) => i.name === "Ramipril 5mg"),
   );
 }
 

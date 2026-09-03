@@ -611,6 +611,15 @@ export const giniflowSampleSchema = z.object({
   reportUrl: z.string().url().max(2000).nullish(),
 });
 
+// Confirm-and-attribute on a HealthRay-owned case. The DB CHECK still permits
+// the retired "chased" value; nothing writes it, and dropping a constraint on
+// production to remove a word is not worth the migration.
+export const giniflowLabCaseActionSchema = z.object({
+  action: z.enum(["sample_taken"]),
+  note: z.string().max(500).nullish(),
+  undo: z.boolean().optional(),
+});
+
 export const giniflowReportSchema = z.object({
   base64: z.string().min(1),
   fileName: z.string().max(200).optional(),
@@ -822,6 +831,21 @@ export const giniflowRxItemPatchSchema = giniflowRxItemSchema.partial();
 // Approve · Adjust · Reject on a proposed row. `adjusted` is recorded by editing
 // the row, not by sending it here, but it stays valid so a client can be
 // explicit. A rejection carries its reason — the service refuses without one.
+// "not asked" is a real answer, so it is a valid value — the service refuses to
+// let it overwrite a recorded allergy, rather than the schema refusing to carry
+// it (24-ADDENDUM-V11-PLAN.md §5.1).
+export const giniflowAllergySchema = z.object({
+  status: z.enum(["not_known", "none_known", "known"]),
+  note: z.string().trim().max(300).nullish(),
+});
+
+// An override with no reason is not an override. The minimum is enforced in the
+// service too — this is the form's copy of the rule, not the rule.
+export const giniflowInteractionAckSchema = z.object({
+  ruleKey: z.string().trim().min(1).max(120),
+  reason: z.string().trim().min(4).max(300),
+});
+
 export const giniflowRxDecisionSchema = z.object({
   status: z.enum(["approved", "adjusted", "rejected"]),
   note: z.string().trim().max(500).nullish(),

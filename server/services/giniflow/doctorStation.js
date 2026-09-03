@@ -5,6 +5,7 @@ import { slaKeyForStatus, STATUS_LABEL } from "../../../shared/giniflowStatus.js
 import { todaysVitals, previousVitals } from "./visitVitals.js";
 import { buildBrief } from "./consultBrief.js";
 import { seedDraftOn } from "./prescription.js";
+import { OPEN_LAB_CASES_SQL } from "./labStation.js";
 
 // The consultant's station — the queue that forms in front of Dr. Bhansali, and
 // the consult screen itself.
@@ -68,7 +69,8 @@ const minutesSince = (from, now) =>
 // yet — can't proceed", which is the opposite of true. The question is whether
 // anything is actually outstanding, so that is what this asks.
 const waitingOnLab = (row) =>
-  row.results_status === "partial" || (row.results_status !== "ready" && row.open_orders > 0);
+  row.results_status === "partial" ||
+  (row.results_status !== "ready" && row.open_orders + row.open_cases > 0);
 
 //
 // Ownership is part of the answer, not a filter applied afterwards. "With me
@@ -88,7 +90,7 @@ const resultsLine = (row) => {
     return { status: "ready", label: row.lab_name ? `✓ ${row.lab_name}` : "✓ Ready" };
   }
   if (row.results_status === "partial") return { status: "partial", label: "Partial results" };
-  if (row.open_orders > 0) return { status: "awaiting", label: "Awaiting lab" };
+  if (row.open_orders + row.open_cases > 0) return { status: "awaiting", label: "Awaiting lab" };
   if (row.biomarkers) return { status: "previous", label: "Previous reports on file" };
   return { status: "missing", label: "✗ Missing — no reports yet" };
 };
@@ -106,6 +108,7 @@ const QUEUE_SQL = `
          last_ev.occurred_at  AS status_since,
          (SELECT count(*)::int FROM giniflow_lab_orders o
            WHERE o.visit_id = v.id AND o.sample_status <> 'uploaded') AS open_orders,
+         ${OPEN_LAB_CASES_SQL} AS open_cases,
          -- Which rail steps this visit has actually passed through. Read from the
          -- log rather than inferred from the current status, so a patient the
          -- HealthRay sync jumped forward does not show phantom completed steps.

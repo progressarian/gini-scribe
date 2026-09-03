@@ -17,12 +17,18 @@ import { seedDemoDay, cleanDemoDay } from "../services/giniflow/demo.js";
 
 const mode = process.argv[2] === "clean" ? "clean" : "seed";
 
+// --sd=<doctorId> assigns the demo patients to one MO. Omit it and they belong
+// to nobody, so any MO who opens the station can work all of them — which is
+// what a walkthrough wants.
+const sdArg = process.argv.find((a) => a.startsWith("--sd="));
+const sdId = sdArg ? Number(sdArg.slice(5)) : null;
+
 try {
   if (mode === "clean") {
     const r = await cleanDemoDay();
     console.log(`Removed ${r.deleted} demo visits and ${r.demoPatientsRemoved} demo patients.`);
   } else {
-    const r = await seedDemoDay({});
+    const r = await seedDemoDay({ sdId });
     console.log(`Floor:  ${r.visits} visits · ${r.events} events · ${r.labOrders} lab orders`);
     console.log(`Charts: ${r.consults} consult screens — labs, diagnoses, medicines, MO plan`);
     console.log(

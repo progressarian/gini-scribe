@@ -747,16 +747,21 @@ export async function getAssignableStaff(visitDate, db = pool) {
   }));
 }
 
-// The launcher tile's number: how much of the NEXT day is still unsorted, which
-// is the whole reason to open this screen.
+// The launcher tile's numbers. Triage is a next-day screen, but the tile sits on
+// a board every other station reads for TODAY, so it leads with today's floor
+// and keeps tomorrow's backlog beside it — the board takes a date either way.
 export async function getTriageSummary(db = pool) {
   const { rows } = await db.query(
-    `SELECT COUNT(*)::int AS total,
-            COUNT(*) FILTER (WHERE v.category IS NULL)::int AS uncategorised
+    `SELECT COUNT(*) FILTER (WHERE v.visit_date = ${IST_TODAY})::int AS today_total,
+            COUNT(*) FILTER (WHERE v.visit_date = ${IST_TODAY}
+                               AND v.category IS NULL)::int AS today_uncategorised,
+            COUNT(*) FILTER (WHERE v.visit_date = ${IST_TODAY} + 1)::int AS total,
+            COUNT(*) FILTER (WHERE v.visit_date = ${IST_TODAY} + 1
+                               AND v.category IS NULL)::int AS uncategorised
        FROM giniflow_visits v
        JOIN patients p ON p.id = v.patient_id
-      WHERE v.visit_date = ${IST_TODAY} + 1
+      WHERE v.visit_date IN (${IST_TODAY}, ${IST_TODAY} + 1)
         AND NOT COALESCE(p.is_blocked, FALSE)`,
   );
-  return rows[0] || { total: 0, uncategorised: 0 };
+  return rows[0] || { today_total: 0, today_uncategorised: 0, total: 0, uncategorised: 0 };
 }

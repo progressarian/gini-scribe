@@ -29,6 +29,36 @@ export async function getStationSummary(visitDate, db = pool) {
     [visitDate],
   );
 
+  // The floor is still worked on HealthRay, so three of these stations have
+  // giniflow_* tables nobody writes to and would read a permanent zero. A zero
+  // that is structural rather than true is the worst thing a launcher tile can
+  // say, so each of them falls back to the table the hospital actually fills:
+  // `lab_cases` for the lab, the day's unarrived appointments for the desk, and
+  // `medications` against `medicine_collections` for the counter.
+  const { rows: live } = await db.query(
+    `SELECT
+       (SELECT count(*)::int FROM giniflow_visits
+         WHERE visit_date = $1::date AND current_status = 'booked') AS to_check_in,
+       (SELECT count(*)::int FROM lab_cases WHERE case_date = $1::date) AS lab_today,
+       -- Outstanding is pending AND partial, the same rule labStation.js and
+       -- the OPD chips use: results_synced flips on the first panel, so a
+       -- synced case with no reported_on is still being worked on.
+       (SELECT count(*) FILTER (
+                 WHERE NOT results_synced
+                    OR raw_detail_json->>'reported_on' IS NULL)::int
+          FROM lab_cases WHERE case_date = $1::date) AS lab_awaiting,
+       (SELECT count(DISTINCT m.patient_id)::int
+          FROM medications m
+          JOIN giniflow_visits v ON v.patient_id = m.patient_id AND v.visit_date = $1::date
+         WHERE (m.created_at AT TIME ZONE 'Asia/Kolkata')::date = $1::date
+           AND m.is_active
+           AND NOT EXISTS (
+             SELECT 1 FROM medicine_collections c
+              WHERE c.medication_id = m.id AND c.collected_date = $1::date
+           )) AS to_hand_over`,
+    [visitDate],
+  );
+
   // Referrals are parallel to the chain, so they are not a board column and the
   // count cannot come from `col()`. "Open" is every referral raised today whose
   // loop is not closed — a referral has no SLA, so this is a workload, not a
@@ -46,13 +76,22 @@ export async function getStationSummary(visitDate, db = pool) {
   // own read rather than a slice of the board above.
   const triage = await getTriageSummary(db);
 
+  const orders = lab[0];
+  const floor = live[0];
+  const toDispense = col("pharmacy");
+
   return {
+    // Today first — the tile sits beside eight stations all counting today — with
+    // tomorrow's unsorted backlog appended, since that is what the screen opens on.
     triage: {
-      count: triage.uncategorised,
-      label: triage.total
-        ? `${triage.uncategorised} of ${triage.total} to sort`
-        : "tomorrow not booked yet",
-      tone: triage.uncategorised ? "red" : "teal",
+      count: triage.today_uncategorised,
+      label: triage.today_total
+        ? `${triage.today_uncategorised} of ${triage.today_total} today` +
+          (triage.uncategorised ? ` · ${triage.uncategorised} tomorrow` : "")
+        : triage.uncategorised
+          ? `${triage.uncategorised} of ${triage.total} tomorrow`
+          : "nothing to sort",
+      tone: triage.today_uncategorised || triage.uncategorised ? "red" : "teal",
     },
     manager: {
       count: atRisk,
@@ -64,19 +103,46 @@ export async function getStationSummary(visitDate, db = pool) {
       label: `${col("checked_in") + col("vitals")} in queue`,
       tone: "blue",
     },
+    // Payment is the desk's blocking job and stays the headline whenever there
+    // is one; with nothing to collect the tile falls back to the arrivals the
+    // desk has not checked in yet, which is the same screen's other half.
     reception: {
-      count: lab[0].payment_pending,
-      label: `${lab[0].payment_pending} payment pending`,
-      tone: "red",
+      count: orders.payment_pending || floor.to_check_in,
+      label: orders.payment_pending
+        ? `${orders.payment_pending} payment pending`
+        : floor.to_check_in
+          ? `${floor.to_check_in} to check in`
+          : "desk clear",
+      tone: orders.payment_pending ? "red" : floor.to_check_in ? "blue" : "teal",
     },
+    // The fallback counts `lab_cases` — the hospital's own lab, synced from the
+    // lab API. The station screen lists those read-only below its own queue, so
+    // the label names the system rather than implying work to do: nothing there
+    // is a sample this technician collects or a report they upload.
     lab: {
-      count: lab[0].to_collect + lab[0].to_upload,
-      label: `${lab[0].to_collect} to collect · ${lab[0].to_upload} to upload`,
-      tone: "teal",
+      count: orders.to_collect + orders.to_upload || floor.lab_today,
+      label:
+        orders.to_collect + orders.to_upload
+          ? `${orders.to_collect} to collect · ${orders.to_upload} to upload`
+          : floor.lab_today
+            ? `${floor.lab_today} at hospital lab · ${floor.lab_awaiting} still out`
+            : "no samples today",
+      tone: orders.to_collect + orders.to_upload ? "blue" : "teal",
     },
     mo_sd: { count: col("sd"), label: `${col("sd")} in workup`, tone: "blue" },
     doctor: { count: col("wait_doctor"), label: `${col("wait_doctor")} waiting`, tone: "red" },
-    pharmacy: { count: col("pharmacy"), label: `${col("pharmacy")} ready`, tone: "teal" },
+    // `to_hand_over` counts patients prescribed today with nothing recorded as
+    // collected — the counter's real backlog even on a day the station screen
+    // itself was never opened.
+    pharmacy: {
+      count: toDispense || floor.to_hand_over,
+      label: toDispense
+        ? `${toDispense} to dispense`
+        : floor.to_hand_over
+          ? `${floor.to_hand_over} to hand over`
+          : "nothing to dispense",
+      tone: toDispense ? "blue" : "teal",
+    },
     referrals: {
       count: referrals[0].open,
       label: referrals[0].today ? `${referrals[0].today} today` : "none today",

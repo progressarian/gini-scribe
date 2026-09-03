@@ -1,8 +1,10 @@
 import pool from "../../config/db.js";
+import { OPEN_LAB_CASES_SQL } from "./labStation.js";
 import { advanceStatus, budgetColour } from "./statusEngine.js";
 import { getSlaConfig, budgetLookup } from "./board.js";
 import { slaKeyForStatus } from "../../../shared/giniflowStatus.js";
 import { todaysVitals, previousVitals } from "./visitVitals.js";
+import { ALLERGY_NOT_ASKED } from "../../../shared/giniflowAllergy.js";
 
 // The MO / SD station — where the queue forms.
 //
@@ -71,6 +73,7 @@ const QUEUE_SQL = `
          last_ev.occurred_at  AS status_since,
          (SELECT count(*)::int FROM giniflow_lab_orders o
            WHERE o.visit_id = v.id AND o.sample_status <> 'uploaded') AS open_orders,
+         ${OPEN_LAB_CASES_SQL} AS open_cases,
          (SELECT plan IS NOT NULL AND length(trim(plan)) > 0
             FROM giniflow_sd_notes n WHERE n.visit_id = v.id) AS has_plan,
          -- Search runs here, not in the browser, for two reasons: the queue the
@@ -124,7 +127,10 @@ const groupOf = (row, sdId) => {
   }
   if (["vitals_done", "sd_pending"].includes(row.current_status)) {
     if (!mine) return "withOtherSd";
-    if (row.results_status !== "ready" && row.open_orders > 0) return "awaitingResults";
+    // Either source counts: an MO waiting on bloods does not care which system
+    // the order was raised in.
+    const openLab = row.open_orders + row.open_cases;
+    if (row.results_status !== "ready" && openLab > 0) return "awaitingResults";
     if (row.results_status !== "ready" && !row.biomarkers) return "missingReports";
     return "waitingForMe";
   }
@@ -190,7 +196,7 @@ export async function getMoQueue(visitDate, sdId = null, q = null, now = new Dat
       // v2 shows "74% compliance". Only render when the source has a value —
       // it exists on appointments but is unpopulated for most patients.
       compliancePct,
-      openOrders: r.open_orders,
+      openOrders: r.open_orders + r.open_cases,
       hasPlan: !!r.has_plan,
       canClose: r.category === CLOSEABLE_CATEGORY,
     };
@@ -232,6 +238,7 @@ export async function getMoPatient(visitId, db = pool) {
             v.visit_date::text AS visit_date,
             v.assigned_sd_id, v.blocked_reason,
             p.name, p.file_no, p.age, p.sex, p.notes,
+            p.allergy_status, p.allergy_note,
             a.biomarkers, a.compliance, a.pre_visit_compliance,
             a.opd_diagnoses, a.opd_medications,
             seq.visit_number,
@@ -315,9 +322,12 @@ export async function getMoPatient(visitId, db = pool) {
     assignedSdId: v.assigned_sd_id,
     checkedInAt: v.checked_in_at ? new Date(v.checked_in_at).toISOString() : null,
     canClose: v.category === CLOSEABLE_CATEGORY,
-    // No allergy field exists anywhere (plan §7). Returning null rather than an
-    // empty list so the screen can say "not recorded" instead of "none".
-    allergies: null,
+    // `patients.allergy_status` exists now (24-ADDENDUM-V11-PLAN.md §5.1). A
+    // patient nobody has asked yet is NULL in the column and "not_known" here,
+    // so every screen deals with the three states and none of them has to read
+    // an absent answer as "no allergies".
+    allergyStatus: v.allergy_status || ALLERGY_NOT_ASKED,
+    allergyNote: v.allergy_note,
     // No phase column exists either (plan §3b.1). Omitted rather than guessed.
     vitals,
     lastVitals,
