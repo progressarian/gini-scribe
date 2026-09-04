@@ -303,7 +303,7 @@ Query recipes (clone these shapes so your answers match /visit value-for-value):
  - Latest HealthRay diagnoses / advice (the doctor's most recent diagnosis list shown on /visit):
      SELECT healthray_diagnoses, healthray_advice, appointment_date FROM appointments
      WHERE patient_id = $1 AND healthray_diagnoses IS NOT NULL AND jsonb_array_length(healthray_diagnoses) > 0
-     ORDER BY appointment_date DESC, id DESC LIMIT 1;
+     ORDER BY appointment_date DESC NULLS LAST, id DESC LIMIT 1;
  - Pending lab cases (?tab=labs "Gini Lab Processing" badge):
      SELECT case_no, patient_case_no, case_date FROM lab_cases
      WHERE patient_id = $1 AND results_synced = FALSE AND retry_abandoned = FALSE

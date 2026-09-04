@@ -443,7 +443,7 @@ router.get("/opd/appointments", async (req, res) => {
               WHERE a4.patient_id = pids.pid
                 AND a4.healthray_diagnoses IS NOT NULL
                 AND jsonb_array_length(a4.healthray_diagnoses) > 0
-              ORDER BY a4.appointment_date DESC LIMIT 1) AS latest_healthray_dx,
+              ORDER BY a4.appointment_date DESC NULLS LAST LIMIT 1) AS latest_healthray_dx,
            (SELECT lr.result FROM lab_results lr
               WHERE lr.patient_id = pids.pid
                 AND LOWER(COALESCE(lr.canonical_name, lr.test_name)) = ANY(ARRAY['hba1c','hb_a1c','glycated hemoglobin','a1c'])
@@ -799,7 +799,7 @@ router.get("/opd/appointments", async (req, res) => {
             WHERE patient_id = ANY($1::int[])
               AND appointment_date < $2
               AND biomarkers IS NOT NULL
-            ORDER BY patient_id, appointment_date DESC, created_at DESC`,
+            ORDER BY patient_id, appointment_date DESC NULLS LAST, created_at DESC`,
           [patientIds, date],
         );
         for (const r of histR) {

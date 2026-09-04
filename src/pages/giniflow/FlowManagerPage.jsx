@@ -318,7 +318,7 @@ function PatientCard({
         onDragStart(card);
       }}
       onDragEnd={onDragEnd}
-      style={card.finished ? { opacity: 0.6 } : undefined}
+      style={card.finished && !isLab ? { opacity: 0.6 } : undefined}
     >
       <button type="button" className="pc-open" onClick={() => onOpen(card)}>
         <div className="pc-top">
@@ -356,6 +356,11 @@ function PatientCard({
             </span>
           )}
         </div>
+        {isLab && card.finished && !card.lab.atLab && (
+          <div className="wait4 blocked">
+            <span className="w-ico">🚫</span> Left without giving a sample
+          </div>
+        )}
         {isLab && <div className="pc-parallel">Lab track · also on the main board</div>}
         {!isLab && card.blockedReason && (
           <div className="wait4 blocked">
@@ -496,7 +501,8 @@ function Column({
       </div>
       {column.budgetMinutes && (
         <div className="col-sla" style={column.hot ? { color: "var(--red)" } : undefined}>
-          Budget: <strong>{column.budgetMinutes} min</strong>
+          {column.key === "lab" ? "Sample→upload budget: " : "Budget: "}
+          <strong>{column.budgetMinutes} min</strong>
           {column.hot ? ` · avg now ${column.avgMinutes}m ⚠` : ""}
         </div>
       )}
@@ -1258,7 +1264,7 @@ export default function FlowManagerPage() {
         <strong>The floor board needs a wider screen.</strong>
         <span>
           Eight columns of live timers do not survive a phone. Open Gini Flow on the floor display
-          or a desktop (1024px or wider).
+          or a desktop (900px or wider).
         </span>
       </div>
 

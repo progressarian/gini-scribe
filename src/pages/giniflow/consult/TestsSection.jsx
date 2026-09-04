@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTestPanels, useOrderTests } from "../../../queries/hooks/useGiniflowPrescription";
 import { VoiceButton } from "../../../components/giniflow/VoiceInput";
 
@@ -20,12 +20,20 @@ const monthLabel = (ymd) => {
   return new Date(y, m - 1, 1).toLocaleDateString("en-IN", { month: "short", year: "numeric" });
 };
 
-export default function TestsSection({ visitId, consult, readOnly, onToast }) {
+export default function TestsSection({ visitId, consult, readOnly, onToast, onUnsaved }) {
   const { data } = useTestPanels();
   const orderTests = useOrderTests(visitId);
   const [selected, setSelected] = useState(() => new Set());
   const [urgency, setUrgency] = useState("next_visit");
   const [filter, setFilter] = useState("");
+
+  // A selection is not an order — it lives here until Confirm, so leaving with
+  // one is work the page has to ask about.
+  const picked = selected.size;
+  useEffect(() => {
+    onUnsaved?.("tests", picked > 0);
+  }, [picked, onUnsaved]);
+  useEffect(() => () => onUnsaved?.("tests", false), [onUnsaved]);
 
   const panels = data?.panels || [];
   const catalog = data?.tests || [];

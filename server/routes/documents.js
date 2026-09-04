@@ -251,7 +251,7 @@ async function syncFollowUpToAppointment(client, patientId, followUp, anchorDate
     `SELECT id FROM appointments
      WHERE patient_id = $1
        AND appointment_date::date BETWEEN ($2::date - INTERVAL '1 day') AND ($2::date + INTERVAL '1 day')
-     ORDER BY appointment_date DESC
+     ORDER BY appointment_date DESC NULLS LAST
      LIMIT 1`,
     [patientId, anchorDate],
   );
@@ -543,7 +543,7 @@ async function resolveDocumentUrl(docId) {
            WHERE patient_id=$1
              AND appointment_date::date BETWEEN ($2::date - INTERVAL '1 day') AND ($2::date + INTERVAL '1 day')
              AND healthray_id IS NOT NULL
-           ORDER BY appointment_date DESC`,
+           ORDER BY appointment_date DESC NULLS LAST`,
           [d.patient_id, d.doc_date],
         )
         .catch(() => ({ rows: [] }));
@@ -956,7 +956,7 @@ router.patch("/documents/:id", async (req, res) => {
       // Sync biomarkers to latest appointment so OPD page reflects new values
       try {
         const { rows: apptRows } = await client.query(
-          `SELECT id FROM appointments WHERE patient_id = $1 ORDER BY appointment_date DESC LIMIT 1`,
+          `SELECT id FROM appointments WHERE patient_id = $1 ORDER BY appointment_date DESC NULLS LAST LIMIT 1`,
           [doc.patient_id],
         );
         if (apptRows[0]) {
@@ -1388,7 +1388,7 @@ async function runServerExtraction(docId, { skipIfNotPending = false } = {}) {
         }
         try {
           const { rows: apptRows } = await client.query(
-            `SELECT id FROM appointments WHERE patient_id = $1 ORDER BY appointment_date DESC LIMIT 1`,
+            `SELECT id FROM appointments WHERE patient_id = $1 ORDER BY appointment_date DESC NULLS LAST LIMIT 1`,
             [doc.patient_id],
           );
           if (apptRows[0]) {
@@ -1662,7 +1662,7 @@ async function runPrescriptionExtraction(docId) {
            WHERE patient_id = $1
              AND appointment_date::date BETWEEN ($2::date - INTERVAL '1 day')
                                            AND ($2::date + INTERVAL '1 day')
-           ORDER BY appointment_date DESC LIMIT 1`,
+           ORDER BY appointment_date DESC NULLS LAST LIMIT 1`,
         [doc.patient_id, rxDate],
       );
       apptId = apptRows[0]?.id || null;
@@ -2193,7 +2193,7 @@ router.post("/admin/backfill-healthray-docs", async (req, res) => {
                WHERE patient_id = $1
                  AND appointment_date::date = CURRENT_DATE
                  AND healthray_id IS NOT NULL
-               ORDER BY appointment_date DESC`,
+               ORDER BY appointment_date DESC NULLS LAST`,
                 [doc.patient_id],
               )
               .catch(() => ({ rows: [] }));

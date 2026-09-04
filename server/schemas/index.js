@@ -563,6 +563,14 @@ export const giniflowDateQuerySchema = z.object({
     .optional(),
 });
 
+export const giniflowLabQuerySchema = z.object({
+  q: z.string().trim().max(60).optional(),
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD")
+    .optional(),
+});
+
 export const giniflowSearchQuerySchema = z.object({
   q: z.string().trim().min(2, "search needs at least 2 characters").max(60),
   date: z
@@ -624,6 +632,7 @@ export const giniflowReportSchema = z.object({
   base64: z.string().min(1),
   fileName: z.string().max(200).optional(),
   mediaType: z.string().max(120).optional(),
+  confirmAdditional: z.boolean().optional(),
 });
 
 export const giniflowPlanSchema = z.object({

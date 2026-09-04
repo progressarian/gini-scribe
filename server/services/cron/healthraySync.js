@@ -1338,7 +1338,7 @@ export async function backfillPatientOpd(
       WHERE patient_id = $1
         AND healthray_clinical_notes IS NOT NULL
         AND LENGTH(healthray_clinical_notes) > 20
-      ORDER BY appointment_date DESC LIMIT 1`,
+      ORDER BY appointment_date DESC NULLS LAST LIMIT 1`,
     [patientId],
   );
 
@@ -1537,7 +1537,7 @@ export async function runStuckStatusRecovery(windowDays) {
              AND d.notes LIKE '%healthray_appt:' || a.healthray_id || '%'
              AND (d.storage_path IS NOT NULL OR d.file_url IS NOT NULL)
         )
-      ORDER BY a.appointment_date DESC`,
+      ORDER BY a.appointment_date DESC NULLS LAST`,
       [String(days)],
     );
 
@@ -1603,7 +1603,7 @@ export async function runMissingMedsRecovery() {
         WHERE a.healthray_id IS NOT NULL
           AND jsonb_array_length(COALESCE(a.healthray_medications,'[]'::jsonb)) > 0
           AND a.patient_id IN (SELECT patient_id FROM future_pts)
-        ORDER BY a.patient_id, a.appointment_date DESC, a.id DESC
+        ORDER BY a.patient_id, a.appointment_date DESC NULLS LAST, a.id DESC
       ),
       tagged AS (
         SELECT m.patient_id, SUBSTRING(m.notes FROM 'healthray:([0-9]+)') AS hr_id

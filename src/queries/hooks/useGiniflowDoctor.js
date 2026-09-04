@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "../../services/api";
+import { visitWriteKey } from "./useGiniflowPrescription";
 
 // The consultant's station. Same polling contract as every other Gini Flow
 // screen — 15s, client-side ticking between polls — so that when
@@ -72,6 +73,7 @@ export function useReleaseConsult() {
 export function useSaveCarePlan(visitId) {
   const queryClient = useQueryClient();
   return useMutation({
+    mutationKey: visitWriteKey(visitId),
     mutationFn: async (plan) =>
       (await api.put(`/api/giniflow/stations/doctor/${visitId}/care-plan`, plan)).data,
     onSuccess: () =>

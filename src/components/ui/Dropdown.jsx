@@ -56,7 +56,7 @@ export default function Dropdown({ value, options, onChange, ariaLabel, variant,
         <ChevronDown className={`doc-dd__arrow ${open ? "doc-dd__arrow--up" : ""}`} size={13} />
       </button>
       {open && (
-        <AnchoredPopover anchorRef={anchorRef} popoverRef={listRef} matchWidth gap={4}>
+        <AnchoredPopover anchorRef={anchorRef} popoverRef={listRef} minWidth gap={4}>
           <div className="doc-dd__list" role="listbox">
             {options.map((o) => (
               <button

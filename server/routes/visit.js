@@ -407,7 +407,7 @@ router.get("/visit/:patientId", async (req, res) => {
         `SELECT healthray_investigations, healthray_follow_up, healthray_advice,
                 follow_up_with, compliance, biomarkers
          FROM appointments WHERE patient_id=$1 AND healthray_clinical_notes IS NOT NULL
-         ORDER BY appointment_date DESC LIMIT 1`,
+         ORDER BY appointment_date DESC NULLS LAST LIMIT 1`,
         [pid],
       ),
 
@@ -429,7 +429,7 @@ router.get("/visit/:patientId", async (req, res) => {
          WHERE patient_id=$1
            AND healthray_diagnoses IS NOT NULL
            AND jsonb_array_length(healthray_diagnoses) > 0
-         ORDER BY appointment_date DESC LIMIT 1`,
+         ORDER BY appointment_date DESC NULLS LAST LIMIT 1`,
         [pid],
       ),
 
@@ -437,7 +437,7 @@ router.get("/visit/:patientId", async (req, res) => {
       pool.query(
         `SELECT id, appointment_date, healthray_id, updated_at
          FROM appointments WHERE patient_id=$1 AND healthray_clinical_notes IS NOT NULL
-         ORDER BY appointment_date DESC LIMIT 1`,
+         ORDER BY appointment_date DESC NULLS LAST LIMIT 1`,
         [pid],
       ),
 
@@ -708,7 +708,7 @@ router.get("/visit/:patientId", async (req, res) => {
         `SELECT appointment_date, biomarkers FROM appointments
           WHERE patient_id = $1 AND biomarkers IS NOT NULL
             AND appointment_date IS NOT NULL
-          ORDER BY appointment_date DESC, created_at DESC`,
+          ORDER BY appointment_date DESC NULLS LAST, created_at DESC`,
         [pid],
       );
       const dayOf = (d) => (d ? String(d).slice(0, 10) : null);
@@ -1029,7 +1029,7 @@ router.post("/visit/:patientId/biomarkers/refresh", async (req, res) => {
   if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
   try {
     const { rows } = await pool.query(
-      `SELECT id FROM appointments WHERE patient_id = $1 ORDER BY appointment_date DESC LIMIT 1`,
+      `SELECT id FROM appointments WHERE patient_id = $1 ORDER BY appointment_date DESC NULLS LAST LIMIT 1`,
       [pid],
     );
     if (!rows[0]) return res.json({ ok: true, reason: "no_appointments" });
@@ -2094,7 +2094,7 @@ async function autoExtractLab(docId, patientId, base64, mediaType, docDate) {
     // Sync biomarkers to latest appointment so OPD page reflects new values
     try {
       const { rows: apptRows } = await pool.query(
-        `SELECT id FROM appointments WHERE patient_id = $1 ORDER BY appointment_date DESC LIMIT 1`,
+        `SELECT id FROM appointments WHERE patient_id = $1 ORDER BY appointment_date DESC NULLS LAST LIMIT 1`,
         [patientId],
       );
       if (apptRows[0]) {

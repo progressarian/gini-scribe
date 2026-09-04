@@ -81,7 +81,12 @@ const BOARD_SQL = `
          lab.sample_status                         AS lab_sample_status,
          lab.payment_status                        AS lab_payment_status,
          lab.test_count                            AS lab_test_count,
-         lab.since                                 AS lab_since
+         lab.since                                 AS lab_since,
+         hrlab.cases                               AS hr_lab_cases,
+         hrlab.tests                               AS hr_lab_tests,
+         hrlab.since                               AS hr_lab_since,
+         hrlab.collected                           AS hr_lab_collected,
+         hrlab.at_lab                              AS hr_lab_at_lab
     FROM giniflow_visits v
     JOIN patients p ON p.id = v.patient_id
     LEFT JOIN doctors sd  ON sd.id  = v.assigned_sd_id
@@ -111,6 +116,26 @@ const BOARD_SQL = `
        WHERE o.visit_id = v.id AND o.sample_status <> 'uploaded'
        ORDER BY o.created_at DESC LIMIT 1
     ) lab ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT count(*)::int AS cases,
+             sum(coalesce(array_length(lc.test_names, 1), 0))::int AS tests,
+             min(COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'registered_at') AS since,
+             bool_or(
+               lc.raw_list_json->>'phlebotomy_status' = 'Completed'
+               OR (COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'collected_on') IS NOT NULL
+             ) AS collected,
+             bool_or(
+               (COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'received_on') IS NOT NULL
+             ) AS at_lab
+        FROM lab_cases lc
+       WHERE lc.case_date = v.visit_date
+         AND (lc.patient_id = v.patient_id
+              OR (lc.patient_id IS NULL
+                  AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))
+         AND lc.raw_detail_json->>'reported_on' IS NULL
+         AND lc.pdf_storage_path IS NULL
+      HAVING count(*) > 0
+    ) hrlab ON TRUE
    WHERE v.visit_date = $1::date
    ORDER BY last_ev.occurred_at NULLS LAST`;
 
@@ -249,8 +274,37 @@ export async function getDayBoard(visitDate, slaConfig, now = new Date(), db = p
             hint: LAB_HINT[row.lab_sample_status] || null,
             hintIcon: row.lab_sample_status === "payment_pending" ? "💰" : "📤",
             blocking: row.lab_sample_status === "payment_pending",
+            source: "giniflow",
+            atLab: ["sample_collected", "processing", "results_ready"].includes(
+              row.lab_sample_status,
+            ),
           }
-        : null,
+        : row.hr_lab_cases
+          ? {
+              since: row.hr_lab_since ? new Date(row.hr_lab_since).toISOString() : null,
+              sampleStatus: row.hr_lab_at_lab
+                ? "processing"
+                : row.hr_lab_collected
+                  ? "sample_collected"
+                  : "paid",
+              paymentStatus: null,
+              testCount: row.hr_lab_tests ?? 0,
+              subtitle: row.hr_lab_at_lab
+                ? LAB_SUBTITLE.processing
+                : row.hr_lab_collected
+                  ? LAB_SUBTITLE.sample_collected
+                  : "Awaiting collection",
+              minutes: minutesSince(row.hr_lab_since, now),
+              budget: null,
+              colour: "grey",
+              hint: row.hr_lab_at_lab || row.hr_lab_collected ? null : LAB_HINT.paid,
+              hintIcon: "🧪",
+              blocking: false,
+              source: "healthray",
+              caseCount: row.hr_lab_cases,
+              atLab: !!row.hr_lab_at_lab,
+            }
+          : null,
     };
   });
 
@@ -268,7 +322,7 @@ export async function getDayBoard(visitDate, slaConfig, now = new Date(), db = p
     const timedCards = items.filter((c) => !c.blockedReason);
     const timed =
       col.key === "lab"
-        ? timedCards.map((c) => c.lab.minutes ?? 0)
+        ? timedCards.filter((c) => c.lab.budget).map((c) => c.lab.minutes ?? 0)
         : timedCards.map((c) => c.statusMinutes ?? 0);
     const avg = timed.length ? Math.round(timed.reduce((a, b) => a + b, 0) / timed.length) : 0;
     return {
@@ -482,11 +536,25 @@ export async function getStationAverages(visitDate, slaConfig, db = pool) {
   // spans the whole chain (GF-07).
   const [{ lab_minutes: labMinutes, lab_samples: labSamples }] = (
     await db.query(
-      `SELECT AVG(EXTRACT(EPOCH FROM (o.uploaded_at - o.created_at)) / 60)::numeric(10,1) AS lab_minutes,
-              COUNT(*)::int AS lab_samples
-         FROM giniflow_lab_orders o
-         JOIN giniflow_visits v ON v.id = o.visit_id AND v.visit_date = $1::date
-        WHERE o.uploaded_at IS NOT NULL`,
+      `SELECT AVG(mins)::numeric(10, 1) AS lab_minutes, COUNT(*)::int AS lab_samples
+         FROM (
+           SELECT EXTRACT(EPOCH FROM (o.uploaded_at - o.created_at)) / 60 AS mins
+             FROM giniflow_lab_orders o
+             JOIN giniflow_visits v ON v.id = o.visit_id AND v.visit_date = $1::date
+            WHERE o.uploaded_at IS NOT NULL
+           UNION ALL
+           SELECT EXTRACT(
+                    EPOCH FROM (
+                      (COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'reported_on')::timestamptz
+                      - (COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'registered_at')::timestamptz
+                    )
+                  ) / 60 AS mins
+             FROM lab_cases lc
+            WHERE lc.case_date = $1::date
+              AND lc.raw_detail_json->>'reported_on' IS NOT NULL
+              AND COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'registered_at' IS NOT NULL
+         ) t
+        WHERE mins >= 0`,
       [visitDate],
     )
   ).rows;

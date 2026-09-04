@@ -4666,7 +4666,7 @@
 .gf .rx-thead,
 .gf .rx-row {
   display: grid;
-  grid-template-columns: 20px minmax(0, 2.4fr) 84px 108px minmax(0, 1fr) 118px auto;
+  grid-template-columns: 20px minmax(0, 1fr) 92px 108px 112px 136px 108px;
   gap: 10px;
   align-items: start;
 }
@@ -4832,11 +4832,16 @@
 }
 
 /* ── Prescription: seven columns, as the prototype has them ── */
+/* The head is the SAME grid as the row, never its own flex line: two separate
+   flex boxes size their columns from their own contents, so "Actions" over two
+   buttons and "Medicine" over a long brand name drifted out of line. Fixed
+   tracks for all but the name, and a transparent side border matching the
+   row's, so every heading sits over its own column. */
 .gf .rx-thead {
-  display: flex;
   align-items: center;
-  gap: 10px;
   padding: 0 10px 5px;
+  border-left: 1px solid transparent;
+  border-right: 1px solid transparent;
   font-size: 9px;
   font-weight: 700;
   text-transform: uppercase;
@@ -4845,15 +4850,12 @@
   border-bottom: 2px solid var(--bd);
   margin-bottom: 6px;
 }
-.gf .rx-thead .rx-main {
-  flex: 1;
-}
 .gf .rx-col-dose,
 .gf .rx-col-timing,
 .gf .rx-col-for,
 .gf .rx-col-stock,
 .gf .rx-col-acts {
-  flex-shrink: 0;
+  min-width: 0;
   font-size: 11px;
   color: var(--ink2);
 }
@@ -6988,4 +6990,66 @@
 }
 .gf .ph-chev.open {
   transform: rotate(90deg);
+}
+
+.grp-split {
+  float: right;
+  font-weight: 500;
+  font-size: 11px;
+  opacity: 0.65;
+}
+
+.modal-back {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+  padding: 16px;
+}
+.modal-card {
+  background: var(--card, #fff);
+  border-radius: 10px;
+  max-width: 420px;
+  width: 100%;
+  padding: 18px 20px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+}
+.modal-title {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+.modal-body {
+  margin: 0 0 16px;
+  font-size: 13px;
+  line-height: 1.5;
+  opacity: 0.85;
+}
+.modal-acts {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* Sub-group labels sit inside a scrolling .ar-col, so they must not steal the
+   sticky slot the column heading already owns. */
+.gf .ar-col .grp-sub {
+  position: static;
+  font-size: 12px;
+  opacity: 0.8;
+  margin-top: 10px;
+}
+.gf .grp-hint {
+  font-size: 11px;
+  opacity: 0.6;
+  margin: 0 0 6px;
+}
+
+.gf .lab-running > div + div {
+  margin-top: 12px;
+}
+.gf .lab-running {
+  margin-bottom: 16px;
 }

@@ -40,7 +40,7 @@ export async function buildVisitLabContext(pool, patientId) {
       `SELECT appointment_date, biomarkers FROM appointments
         WHERE patient_id = $1 AND biomarkers IS NOT NULL
           AND appointment_date IS NOT NULL
-        ORDER BY appointment_date DESC, created_at DESC`,
+        ORDER BY appointment_date DESC NULLS LAST, created_at DESC`,
       [pid],
     ),
   ]);

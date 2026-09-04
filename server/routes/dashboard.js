@@ -330,7 +330,7 @@ router.get("/dashboard", async (req, res) => {
        FROM appointments a
        LEFT JOIN patients p ON p.id = a.patient_id
        WHERE a.appointment_date >= $1::date AND a.appointment_date <= $2::date
-       ORDER BY COALESCE(a.patient_id, p.id), a.appointment_date DESC`,
+       ORDER BY COALESCE(a.patient_id, p.id), a.appointment_date DESC NULLS LAST`,
       [dateFrom, dateTo],
     );
 

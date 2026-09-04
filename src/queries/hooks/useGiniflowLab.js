@@ -2,11 +2,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api, { API_URL } from "../../services/api";
 import { pollInterval } from "./giniflowPolling";
 
-export function useLabQueue(date) {
+export function useLabQueue(date, q = "") {
+  const search = q.trim().length >= 2 ? q.trim() : "";
   return useQuery({
-    queryKey: ["giniflow", "lab", "queue", date || "today"],
+    queryKey: ["giniflow", "lab", "queue", date || "today", search],
     queryFn: async () =>
-      (await api.get("/api/giniflow/stations/lab/queue", { params: date ? { date } : {} })).data,
+      (
+        await api.get("/api/giniflow/stations/lab/queue", {
+          params: { ...(date ? { date } : {}), ...(search ? { q: search } : {}) },
+        })
+      ).data,
     refetchInterval: pollInterval,
     refetchIntervalInBackground: false,
     placeholderData: (prev) => prev,
@@ -18,7 +23,7 @@ export function useLabQueue(date) {
 export function useUploadReport() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ orderId, file }) => {
+    mutationFn: async ({ orderId, file, confirmAdditional = false }) => {
       const base64 = await new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(String(reader.result).split(",")[1]);
@@ -28,6 +33,7 @@ export function useUploadReport() {
       return (
         await api.post(`/api/giniflow/stations/lab/${orderId}/report`, {
           base64,
+          confirmAdditional,
           fileName: file.name,
           mediaType: file.type || "application/pdf",
         })
@@ -70,7 +76,7 @@ export function useMarkLabCaseAction() {
 export function useUploadLabCaseReport() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ caseNo, file }) => {
+    mutationFn: async ({ caseNo, file, confirmAdditional = false }) => {
       const base64 = await new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(String(reader.result).split(",")[1]);
@@ -80,6 +86,7 @@ export function useUploadLabCaseReport() {
       return (
         await api.post(`/api/giniflow/stations/lab/case/${caseNo}/report`, {
           base64,
+          confirmAdditional,
           fileName: file.name,
           mediaType: file.type || "application/pdf",
         })

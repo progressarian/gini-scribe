@@ -617,14 +617,14 @@ router.get("/patients/:id/post-visit-summary", async (req, res) => {
       apptId
         ? pool.query(`SELECT compliance FROM appointments WHERE id=$1`, [apptId])
         : pool.query(
-            `SELECT compliance FROM appointments WHERE patient_id=$1 ORDER BY appointment_date DESC LIMIT 1`,
+            `SELECT compliance FROM appointments WHERE patient_id=$1 ORDER BY appointment_date DESC NULLS LAST LIMIT 1`,
             [pid],
           ),
       // Latest appointment with clinical notes — source of healthray_follow_up + investigations
       pool.query(
         `SELECT healthray_follow_up, follow_up_with, healthray_investigations, biomarkers
            FROM appointments WHERE patient_id=$1 AND healthray_clinical_notes IS NOT NULL
-           ORDER BY appointment_date DESC LIMIT 1`,
+           ORDER BY appointment_date DESC NULLS LAST LIMIT 1`,
         [pid],
       ),
       // Latest appointment carrying biomarkers.followup — 4-tier fallback

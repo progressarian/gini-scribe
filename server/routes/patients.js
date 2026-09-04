@@ -310,7 +310,7 @@ router.get("/patients/:id", async (req, res) => {
         `SELECT healthray_investigations, healthray_follow_up, compliance, biomarkers,
                 follow_up_with
            FROM appointments WHERE patient_id=$1 AND healthray_clinical_notes IS NOT NULL
-           ORDER BY appointment_date DESC LIMIT 1`,
+           ORDER BY appointment_date DESC NULLS LAST LIMIT 1`,
         [id],
       ),
       pool.query(
@@ -319,7 +319,7 @@ router.get("/patients/:id", async (req, res) => {
                   a.healthray_follow_up->>'timing' AS timing
              FROM appointments a
             WHERE a.patient_id = $1 AND ${ownFu("a")} IS NOT NULL
-            ORDER BY a.appointment_date DESC, a.created_at DESC
+            ORDER BY a.appointment_date DESC NULLS LAST, a.created_at DESC
             LIMIT 1`,
         [id],
       ),

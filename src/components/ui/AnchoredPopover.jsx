@@ -6,6 +6,7 @@ export default function AnchoredPopover({
   children,
   align = "left",
   matchWidth = false,
+  minWidth = false,
   width,
   gap = 4,
   className = "",
@@ -30,6 +31,7 @@ export default function AnchoredPopover({
         top: flip ? Math.max(4, a.top - h - gap) : a.bottom + gap,
         left: Math.min(Math.max(4, left), Math.max(4, window.innerWidth - w - 4)),
         width: matchWidth ? a.width : width,
+        minWidth: minWidth ? a.width : undefined,
       });
     };
     place();
@@ -41,7 +43,7 @@ export default function AnchoredPopover({
       window.removeEventListener("scroll", place, true);
       window.removeEventListener("resize", place);
     };
-  }, [anchorRef, ref, align, matchWidth, width, gap]);
+  }, [anchorRef, ref, align, matchWidth, minWidth, width, gap]);
 
   useEffect(() => {
     if (ref.current) ref.current.style.visibility = pos ? "visible" : "hidden";
@@ -57,6 +59,7 @@ export default function AnchoredPopover({
         top: pos?.top ?? 0,
         left: pos?.left ?? 0,
         ...(pos?.width ? { width: pos.width } : null),
+        ...(pos?.minWidth ? { minWidth: pos.minWidth } : null),
         zIndex: 1200,
         visibility: pos ? "visible" : "hidden",
       }}

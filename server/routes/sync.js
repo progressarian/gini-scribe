@@ -72,7 +72,7 @@ router.post("/sync/patient/:fileNo/resync", async (req, res) => {
        WHERE patient_id = $1
          AND healthray_clinical_notes IS NOT NULL
          AND LENGTH(healthray_clinical_notes) > 20
-       ORDER BY appointment_date DESC`,
+       ORDER BY appointment_date DESC NULLS LAST`,
       [patientId],
     );
 
@@ -243,7 +243,7 @@ router.get("/sync/debug/patient/:fileNo", async (req, res) => {
               healthray_previous_medications
        FROM appointments
        WHERE patient_id = $1
-       ORDER BY appointment_date DESC
+       ORDER BY appointment_date DESC NULLS LAST
        LIMIT 5`,
       [patient.id],
     );
@@ -403,7 +403,7 @@ router.post("/sync/backfill/labs/all", async (req, res) => {
        )
          AND a.healthray_labs IS NOT NULL
          AND jsonb_array_length(a.healthray_labs) > 0
-       ORDER BY a.patient_id, a.appointment_date DESC`,
+       ORDER BY a.patient_id, a.appointment_date DESC NULLS LAST`,
     );
     labsBackfillStatus.running = true;
     labsBackfillStatus.total = appts.length;
@@ -603,7 +603,7 @@ router.post("/sync/patient/:fileNo/note", async (req, res) => {
       // Use most recent appointment if no date match
       const { rows: latest } = await pool.query(
         `SELECT id, patient_id, healthray_id, appointment_date FROM appointments
-         WHERE patient_id = $1 ORDER BY appointment_date DESC LIMIT 1`,
+         WHERE patient_id = $1 ORDER BY appointment_date DESC NULLS LAST LIMIT 1`,
         [patient.id],
       );
       if (!latest[0]) return res.status(404).json({ error: "No appointments found for patient" });
@@ -1466,7 +1466,7 @@ router.post("/sync/backfill/medicines/opd/:date?", async (req, res) => {
              WHERE patient_id = $1
                AND healthray_clinical_notes IS NOT NULL
                AND LENGTH(healthray_clinical_notes) > 20
-             ORDER BY appointment_date DESC LIMIT 1`,
+             ORDER BY appointment_date DESC NULLS LAST LIMIT 1`,
             [patient_id],
           );
 
@@ -1618,7 +1618,7 @@ router.post("/sync/backfill/diagnoses/opd/:date?", async (req, res) => {
              WHERE patient_id = $1
                AND healthray_clinical_notes IS NOT NULL
                AND LENGTH(healthray_clinical_notes) > 20
-             ORDER BY appointment_date DESC LIMIT 1`,
+             ORDER BY appointment_date DESC NULLS LAST LIMIT 1`,
             [patient_id],
           );
 
@@ -1865,7 +1865,7 @@ router.post("/sync/resync-opd/:date?", async (req, res) => {
          WHERE patient_id = $1
            AND healthray_clinical_notes IS NOT NULL
            AND LENGTH(healthray_clinical_notes) > 20
-         ORDER BY appointment_date DESC LIMIT 1`,
+         ORDER BY appointment_date DESC NULLS LAST LIMIT 1`,
         [patient_id],
       );
 
@@ -2499,7 +2499,7 @@ router.post("/sync/backfill/diagnoses-all", async (req, res) => {
         AND NOT EXISTS (
           SELECT 1 FROM diagnoses d WHERE d.patient_id = a.patient_id
         )
-      ORDER BY a.patient_id, a.appointment_date DESC
+      ORDER BY a.patient_id, a.appointment_date DESC NULLS LAST
     `);
 
     if (appts.length === 0) {
@@ -3533,7 +3533,7 @@ router.get("/sync/audit/patients", async (_req, res) => {
            a.healthray_diagnoses IS NULL
            OR jsonb_array_length(a.healthray_diagnoses) = 0
          )
-       ORDER BY a.appointment_date DESC`,
+       ORDER BY a.appointment_date DESC NULLS LAST`,
     );
 
     // 3. Appointments with clinical notes but empty medications JSONB
@@ -3550,7 +3550,7 @@ router.get("/sync/audit/patients", async (_req, res) => {
            a.healthray_medications IS NULL
            OR jsonb_array_length(a.healthray_medications) = 0
          )
-       ORDER BY a.appointment_date DESC`,
+       ORDER BY a.appointment_date DESC NULLS LAST`,
     );
 
     // 4. Patients with duplicate active meds (same pharmacy_match, multiple rows)
@@ -3586,7 +3586,7 @@ router.get("/sync/audit/patients", async (_req, res) => {
          WHERE healthray_clinical_notes IS NOT NULL
            AND healthray_medications IS NOT NULL
            AND jsonb_array_length(COALESCE(healthray_medications, '[]'::jsonb)) > 0
-         ORDER BY patient_id, appointment_date DESC
+         ORDER BY patient_id, appointment_date DESC NULLS LAST
        ),
        active_count AS (
          SELECT patient_id, COUNT(*) AS db_med_count
@@ -3673,7 +3673,7 @@ router.post("/sync/audit/fix-empty-jsonb", async (req, res) => {
        WHERE a.healthray_clinical_notes IS NOT NULL
          AND LENGTH(a.healthray_clinical_notes) > 50
          AND (${dxCondition} OR ${medCondition})
-       ORDER BY a.appointment_date DESC`,
+       ORDER BY a.appointment_date DESC NULLS LAST`,
     );
 
     Object.assign(fixEmptyJsonbStatus, {

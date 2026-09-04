@@ -6,6 +6,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import api from "../../services/api";
+import { toast } from "../../stores/uiStore";
 import { qk } from "../keys";
 
 const arr = (v) => (Array.isArray(v) ? v : []);
@@ -13,6 +14,12 @@ const arr = (v) => (Array.isArray(v) ? v : []);
 const idKey = (ids) => [...new Set(ids)].sort((a, b) => a - b).join(",");
 
 export const PAGE_SIZE = 50;
+
+// A patient with no appointment can be called — the server opens a lead row for
+// the call fields. Everything else on the row has nothing to write to, and this
+// is what the sheet says instead of the server's bare "Not found".
+const NO_APPOINTMENT_MSG =
+  "Only call details can be recorded until this patient has an appointment — use “Book next” to book one.";
 
 // How many charts on one phone number the booking form will offer to choose
 // between. Beyond this the desk should search by name or File No instead.
@@ -293,8 +300,12 @@ export function usePatchAppointment(listKey, applyOptimistic) {
       if (ctx?.previous) queryClient.setQueryData(listKey, ctx.previous);
       // A rejected edit must say why — the optimistic cell has just snapped
       // back on its own otherwise.
-      const message = e?.response?.data?.error;
-      if (message) window.alert(message);
+      toast(
+        e?.response?.status === 404
+          ? NO_APPOINTMENT_MSG
+          : e?.response?.data?.error || "Could not save that change.",
+        "error",
+      );
     },
     onSettled: () => {
       // The optimistic cell is already correct, so the list is only marked
@@ -388,9 +399,10 @@ export function useExportPages(buildQuery, exportPageSize) {
       params.set("export", "1");
       const { data } = await api.get(`/api/ghm-appointments?${params}`);
       if (data?.truncated) {
-        window.alert(
+        toast(
           `This view has ${data.total} rows and the export is capped at ${data.exported}. ` +
             `Narrow it with a filter to get the rest.`,
+          "warn",
         );
       }
       return arr(data?.data);

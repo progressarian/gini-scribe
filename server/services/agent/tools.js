@@ -1301,7 +1301,7 @@ async function qAppointments(pool, patientId, args) {
     )
     SELECT * FROM merged
     WHERE appointment_date IS NOT NULL
-    ORDER BY appointment_date DESC, id DESC
+    ORDER BY appointment_date DESC NULLS LAST, id DESC
     LIMIT ${limit}
   `;
 

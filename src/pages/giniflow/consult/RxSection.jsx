@@ -13,6 +13,7 @@ import {
 } from "../../../queries/hooks/useGiniflowPrescription";
 import { VoiceBar, VoiceButton } from "../../../components/giniflow/VoiceInput";
 import InteractionPanel from "./InteractionPanel";
+import { extractDose } from "../../../lib/medName";
 
 // Prescription — gini-doctor-final.html `s-rx` (which is where
 // gini-prescription-v2.html's mechanics were merged).
@@ -34,12 +35,18 @@ export const TIMINGS = [
   ["bedtime", "At bedtime"],
   ["with_meals", "With meals"],
   ["sos", "As needed (SOS)"],
-  ["weekly", "Weekly"],
-  ["fortnightly", "Fortnightly"],
 ];
 
 const FREQUENCIES = ["OD", "BD", "TDS", "QID", "SOS", "Weekly", "Fortnightly"];
-const TIMING_LABEL = Object.fromEntries(TIMINGS);
+
+// Weekly and fortnightly are how OFTEN a medicine is taken, not when in the
+// day — they are offered on Frequency. They stay in the label map so a draft
+// that already carries one still reads as itself.
+const TIMING_LABEL = {
+  ...Object.fromEntries(TIMINGS),
+  weekly: "Weekly",
+  fortnightly: "Fortnightly",
+};
 
 // gini-doctor-final.html s-rx, verbatim. Voice dictates into the search box
 // today; the parser that would act on these is §4b step 3.
@@ -277,7 +284,16 @@ function AddMedicine({ onAdd, onClose, initialQuery = "" }) {
         <div className="rx-results">
           {isFetching && <div className="cn-empty">Searching…</div>}
           {(data?.results || []).map((r) => (
-            <button type="button" key={r.name} className="rx-result" onClick={() => setPicked(r)}>
+            <button
+              type="button"
+              key={r.name}
+              className="rx-result"
+              onClick={() => {
+                setPicked(r);
+                const dose = extractDose(r.name) || extractDose(query);
+                if (dose) setForm((p) => ({ ...p, dose: p.dose || dose }));
+              }}
+            >
               <strong>{r.name}</strong>
               <em>
                 {r.composition || r.drugClass || "—"}
@@ -448,7 +464,7 @@ function ExternalMedicineForm({ onAdd, onClose }) {
   );
 }
 
-export default function RxSection({ visitId, readOnly, onToast, station = "doctor" }) {
+export default function RxSection({ visitId, readOnly, onToast, onUnsaved, station = "doctor" }) {
   const proposing = station === "mo";
   const { data, isLoading } = usePrescription(visitId, station);
   const add = useAddItem(visitId, station);
@@ -465,6 +481,22 @@ export default function RxSection({ visitId, readOnly, onToast, station = "docto
   const [spoken, setSpoken] = useState("");
 
   const fail = (e) => onToast(e?.response?.data?.error || "That change was not saved");
+
+  // An open editor holds a dose nothing has been told about yet. The page asks
+  // before leaving with one, and clears the flag when this section goes.
+  const editorOpen = !!editing;
+  const formOpen = adding || addingExternal;
+  useEffect(() => {
+    onUnsaved?.("rx", editorOpen);
+    onUnsaved?.("add", formOpen);
+  }, [editorOpen, formOpen, onUnsaved]);
+  useEffect(
+    () => () => {
+      onUnsaved?.("rx", false);
+      onUnsaved?.("add", false);
+    },
+    [onUnsaved],
+  );
 
   if (isLoading) return <section className="csec">Loading the prescription…</section>;
   const items = data?.items || [];

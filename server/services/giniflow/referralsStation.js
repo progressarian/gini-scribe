@@ -429,7 +429,7 @@ export async function buildLetterData(referralId, db = pool) {
       WHERE patient_id = $1
         AND biomarkers IS NOT NULL AND biomarkers <> '{}'::jsonb
         AND appointment_date <= COALESCE($2::date, (NOW() AT TIME ZONE 'Asia/Kolkata')::date)
-      ORDER BY appointment_date DESC, id DESC
+      ORDER BY appointment_date DESC NULLS LAST, id DESC
       LIMIT 12`,
     [row.patient_id, row.visit_date || null],
   );

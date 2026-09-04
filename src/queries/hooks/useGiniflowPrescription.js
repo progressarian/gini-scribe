@@ -8,6 +8,8 @@ import api from "../../services/api";
 // written there is a proposal because of the route it came through, not because
 // of a flag the browser set. The hooks take the station so one component can
 // serve both screens.
+export const visitWriteKey = (visitId) => ["giniflow", "visit-write", visitId];
+
 const base = (visitId, station = "doctor") => `/api/giniflow/stations/${station}/${visitId}`;
 
 export function usePrescription(visitId, station = "doctor") {
@@ -77,6 +79,9 @@ export function useFinalizePreview(visitId, enabled) {
 const useDraftMutation = (visitId, fn) => {
   const queryClient = useQueryClient();
   return useMutation({
+    // Shared with the care plan so the consult rail can say when this visit's
+    // draft was last written to, whichever section wrote it.
+    mutationKey: visitWriteKey(visitId),
     mutationFn: fn,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["giniflow", "doctor", "rx", visitId] });

@@ -19,6 +19,7 @@ import {
   giniflowCarePlanSchema,
   giniflowProposalDecisionSchema,
   giniflowDateQuerySchema,
+  giniflowLabQuerySchema,
   giniflowMoQueueQuerySchema,
   giniflowPaymentSchema,
   giniflowLabCaseActionSchema,
@@ -784,11 +785,11 @@ const labGate = requireCapability(CAP.GINIFLOW_STATION_LAB);
 router.get(
   "/giniflow/stations/lab/queue",
   labGate,
-  validateQuery(giniflowDateQuerySchema),
+  validateQuery(giniflowLabQuerySchema),
   async (req, res) => {
     try {
       const date = await resolveDate(req.query.date);
-      const data = await getLabQueue(date);
+      const data = await getLabQueue(date, req.query.q ?? null);
       res.json({ date, ...data, serverTime: new Date().toISOString() });
     } catch (e) {
       handleError(res, e, "Gini Flow lab queue");
@@ -837,9 +838,17 @@ router.post(
           fileName: req.body.fileName,
           mediaType: req.body.mediaType || "application/pdf",
           actorId: req.doctor?.doctor_id ?? null,
+          confirmAdditional: req.body.confirmAdditional === true,
         }),
       );
     } catch (e) {
+      if (e.needsConfirmation) {
+        return res.status(409).json({
+          error: e.message,
+          needsConfirmation: e.needsConfirmation,
+          existingSource: e.existingSource ?? null,
+        });
+      }
       handleError(res, e, "Gini Flow lab case report");
     }
   },
@@ -879,9 +888,17 @@ router.post(
           fileName: req.body.fileName,
           mediaType: req.body.mediaType,
           actorId: req.doctor?.doctor_id ?? null,
+          confirmAdditional: req.body.confirmAdditional === true,
         }),
       );
     } catch (e) {
+      if (e.needsConfirmation) {
+        return res.status(409).json({
+          error: e.message,
+          needsConfirmation: e.needsConfirmation,
+          existingUploadedAt: e.existingUploadedAt ?? null,
+        });
+      }
       handleError(res, e, "Gini Flow lab report upload");
     }
   },

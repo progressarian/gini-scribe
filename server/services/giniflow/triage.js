@@ -296,7 +296,7 @@ const DAY_SQL = `
        WHERE pa.patient_id = v.patient_id
          AND pa.biomarkers IS NOT NULL
          AND pa.appointment_date < v.visit_date
-       ORDER BY pa.appointment_date DESC LIMIT 1
+       ORDER BY pa.appointment_date DESC NULLS LAST LIMIT 1
     ) prev ON TRUE
     LEFT JOIN LATERAL (
       SELECT pa.appointment_date
@@ -304,7 +304,7 @@ const DAY_SQL = `
        WHERE pa.patient_id = v.patient_id
          AND pa.appointment_date < v.visit_date
          AND pa.status IN ('completed', 'seen')
-       ORDER BY pa.appointment_date DESC LIMIT 1
+       ORDER BY pa.appointment_date DESC NULLS LAST LIMIT 1
     ) last_visit ON TRUE
     LEFT JOIN LATERAL (
       -- Where this patient's numbers came from, and when. 'lab' is the feed the
@@ -332,6 +332,7 @@ const DAY_SQL = `
     ) dx ON TRUE
    WHERE v.visit_date = $1::date
      AND NOT COALESCE(p.is_blocked, FALSE)
+     AND v.merged_into_visit_id IS NULL
    ORDER BY v.appointment_time NULLS LAST, p.name`;
 
 const iso = (ts) => (ts ? new Date(ts).toISOString() : null);
@@ -526,7 +527,7 @@ export async function autoCategoriseDay(visitDate, { db = pool } = {}) {
           WHERE pa.patient_id = v.patient_id
             AND pa.biomarkers IS NOT NULL
             AND pa.appointment_date < v.visit_date
-          ORDER BY pa.appointment_date DESC LIMIT 1
+          ORDER BY pa.appointment_date DESC NULLS LAST LIMIT 1
        ) prev ON TRUE
       WHERE v.visit_date = $1::date
         AND (v.category_source IS NULL OR v.category_source = 'auto')`,
@@ -761,7 +762,8 @@ export async function getTriageSummary(db = pool) {
        FROM giniflow_visits v
        JOIN patients p ON p.id = v.patient_id
       WHERE v.visit_date IN (${IST_TODAY}, ${IST_TODAY} + 1)
-        AND NOT COALESCE(p.is_blocked, FALSE)`,
+        AND NOT COALESCE(p.is_blocked, FALSE)
+        AND v.merged_into_visit_id IS NULL`,
   );
   return rows[0] || { today_total: 0, today_uncategorised: 0, total: 0, uncategorised: 0 };
 }

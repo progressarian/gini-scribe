@@ -285,7 +285,7 @@ export async function getMoPatient(visitId, db = pool) {
             AND appointment_date < COALESCE(
                   (SELECT visit_date FROM giniflow_visits WHERE id = $2),
                   (NOW() AT TIME ZONE 'Asia/Kolkata')::date)
-          ORDER BY appointment_date DESC LIMIT 6`,
+          ORDER BY appointment_date DESC NULLS LAST LIMIT 6`,
       [v.patient_id, visitId],
     ),
     db.query(`SELECT plan, source, updated_at FROM giniflow_sd_notes WHERE visit_id = $1`, [

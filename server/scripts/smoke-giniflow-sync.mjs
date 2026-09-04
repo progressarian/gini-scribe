@@ -81,15 +81,16 @@ check("at most one patient with the doctor", inRoom.c <= 1, `${inRoom.c}`);
 const events = await one(
   `SELECT count(*) FILTER (WHERE actor_role = 'system')::int AS system_events,
           count(*) FILTER (WHERE actor_role = 'system' AND meta->>'source' = 'healthray')::int AS from_hr,
+          count(*) FILTER (WHERE actor_role = 'system' AND meta->>'source' IS NULL)::int AS unattributed,
           count(*) FILTER (WHERE actor_role <> 'system')::int AS from_stations
      FROM giniflow_visit_events e
      JOIN giniflow_visits v ON v.id = e.visit_id
     WHERE v.visit_date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date`,
 );
 check(
-  "every system-written event records HealthRay as its source",
-  events.system_events > 0 && events.from_hr === events.system_events,
-  `${events.from_hr}/${events.system_events}`,
+  "every system-written event names the source that wrote it",
+  events.system_events > 0 && events.unattributed === 0,
+  `${events.system_events - events.unattributed}/${events.system_events} attributed, ${events.from_hr} from healthray`,
 );
 check(
   "station-written events are attributed to a station, not the system",

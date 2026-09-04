@@ -320,7 +320,7 @@ async function linkPendingFollowUp(fileNo, apptDate, bookingId) {
            AND ${ownFu("fu")} IS NOT NULL
            AND ${ownFu("fu")} <> $2
            AND ${ownFu("fu")} >= ${IST_TODAY}
-         ORDER BY fu.appointment_date DESC
+         ORDER BY fu.appointment_date DESC NULLS LAST
          LIMIT 1
       )
       RETURNING id`,

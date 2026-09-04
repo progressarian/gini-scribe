@@ -286,7 +286,7 @@ export async function findAppointmentWithNotes(fileNo, _phone, excludeHealthrayI
      WHERE healthray_clinical_notes IS NOT NULL AND LENGTH(healthray_clinical_notes) > 20
        AND healthray_id != $2
        AND file_no = $1
-     ORDER BY appointment_date DESC LIMIT 1`,
+     ORDER BY appointment_date DESC NULLS LAST LIMIT 1`,
     [fileNo, excludeHealthrayId],
   );
 }
@@ -394,6 +394,27 @@ function personLooksSame(existing, incomingName, incomingSex) {
   return ta.some((t) => setB.has(t)); // share at least one name token
 }
 
+async function matchIdentitylessByPhone(phone, name, sex) {
+  const digits = String(phone || "").replace(/\D/g, "");
+  if (digits.length < 10) return null;
+  const local10 = digits.slice(-10);
+
+  const { rows } = await pool.query(
+    `SELECT id, name, sex FROM patients
+      WHERE health_id IS NULL
+        AND file_no IS NULL
+        AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
+      LIMIT 2`,
+    [local10],
+  );
+  if (rows.length !== 1) return null;
+
+  const row = rows[0];
+  const knownSex = row.sex === "Other" ? null : row.sex;
+  if (!personLooksSame({ name: row.name, sex: knownSex }, name, sex)) return null;
+  return row.id;
+}
+
 // ── Upsert patient ──────────────────────────────────────────────────────────
 // Identity is keyed on health_id (HealthRay family_member id) — a stable
 // PER-PERSON id. file_no (patient_case_id / UHID) is NOT stable: HealthRay
@@ -496,6 +517,46 @@ export async function upsertPatient({
     }
     // Free the UHID from its previous owner before the new person claims it.
     await releaseFileNoFromOthers(fileNo, null);
+  }
+
+  const identitylessId = await matchIdentitylessByPhone(phone, name, sex);
+  if (identitylessId) {
+    if (fileNo) await releaseFileNoFromOthers(fileNo, identitylessId);
+    await pool.query(
+      `UPDATE patients SET
+         health_id = COALESCE(health_id, $2),
+         file_no = COALESCE(file_no, $3),
+         name = COALESCE($4, name),
+         phone = COALESCE(phone, $5),
+         age = COALESCE($6, age),
+         sex = COALESCE(NULLIF(sex, 'Other'), $7),
+         address = COALESCE(address, $8),
+         dob = COALESCE(dob, $9::date),
+         email = COALESCE(email, $10),
+         blood_group = COALESCE(blood_group, $11),
+         abha_id = COALESCE(abha_id, $12),
+         updated_at = NOW()
+       WHERE id = $1`,
+      [
+        identitylessId,
+        healthId,
+        fileNo,
+        name,
+        phone,
+        age,
+        sex,
+        address,
+        dob,
+        email,
+        bloodGroup,
+        abhaId,
+      ],
+    );
+    log(
+      "DB",
+      `adopted identity-less patient ${identitylessId} for file_no=${fileNo || "?"} (${name}) — phone match`,
+    );
+    return identitylessId;
   }
 
   // 3) New person → insert.
@@ -608,6 +669,43 @@ export async function syncDoctors(rayDoctors) {
   return mapping;
 }
 
+async function realignVisitToAppointment(appointmentId) {
+  if (!appointmentId) return;
+
+  const { rowCount } = await pool.query(
+    `UPDATE giniflow_visits v
+        SET patient_id = a.patient_id, updated_at = NOW()
+       FROM appointments a
+      WHERE a.id = $1
+        AND v.appointment_id = a.id
+        AND v.visit_date = a.appointment_date
+        AND a.patient_id IS NOT NULL
+        AND v.patient_id IS DISTINCT FROM a.patient_id
+        AND NOT EXISTS (
+          SELECT 1 FROM giniflow_visits w
+           WHERE w.patient_id = a.patient_id AND w.visit_date = a.appointment_date
+        )`,
+    [appointmentId],
+  );
+  if (rowCount) {
+    log("DB", `realigned ${rowCount} giniflow visit(s) to appointment ${appointmentId}`);
+    return;
+  }
+
+  const { rows } = await pool.query(
+    `SELECT v.id FROM giniflow_visits v
+       JOIN appointments a ON a.id = v.appointment_id AND v.visit_date = a.appointment_date
+      WHERE a.id = $1 AND v.patient_id IS DISTINCT FROM a.patient_id`,
+    [appointmentId],
+  );
+  if (rows.length) {
+    log(
+      "DB",
+      `appointment ${appointmentId} left visit ${rows[0].id} behind — target patient already holds a visit that day, needs merge`,
+    );
+  }
+}
+
 // ── Insert or update appointment ────────────────────────────────────────────
 export async function upsertAppointment(existingId, data) {
   const {
@@ -664,7 +762,7 @@ export async function upsertAppointment(existingId, data) {
         follow_up_with = COALESCE($25, follow_up_with),
         family_member_id = COALESCE($26, family_member_id),
         updated_at = NOW()
-       WHERE id = $1 RETURNING id`,
+       WHERE id = $1 RETURNING id, patient_id`,
       [
         existingId,
         JSON.stringify(opdVitals),
@@ -694,6 +792,7 @@ export async function upsertAppointment(existingId, data) {
         familyMemberId || null,
       ],
     );
+    await realignVisitToAppointment(rows[0].id);
     return rows[0].id;
   }
 

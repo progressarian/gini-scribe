@@ -79,7 +79,11 @@ const stepsFor = (sampleStatus, paid) => {
   return [
     at("Payment ✓", paid, !paid),
     at("Collect sample", idx >= SAMPLE_FLOW.indexOf("sample_collected"), sampleStatus === "paid"),
-    at("Process", idx >= SAMPLE_FLOW.indexOf("processing"), sampleStatus === "sample_collected"),
+    at(
+      "Process",
+      idx > SAMPLE_FLOW.indexOf("processing"),
+      sampleStatus === "sample_collected" || sampleStatus === "processing",
+    ),
     at("Upload", sampleStatus === "uploaded", sampleStatus === "results_ready"),
   ];
 };
@@ -107,12 +111,66 @@ export const OPEN_LAB_CASES_SQL = `
       AND lc.raw_detail_json->>'reported_on' IS NULL
       AND lc.pdf_storage_path IS NULL)`;
 
-export async function getLabQueue(visitDate, db = pool) {
-  const healthray = await getHealthrayCases(visitDate, db);
+const GINI_BUCKET_TO_STAGE = {
+  pending: "pending",
+  collecting: "collected",
+  processing: "processing",
+  ready: "results",
+  uploaded: "reported",
+};
+
+const unifiedFromOrder = (o) => ({
+  key: `giniflow:${o.orderId}`,
+  source: "giniflow",
+  driven: true,
+  stage: GINI_BUCKET_TO_STAGE[o.bucket] || "pending",
+  steps: o.steps,
+  patientId: o.patientId,
+  name: o.name,
+  fileNo: o.fileNo,
+  age: o.age,
+  sex: o.sex,
+  tests: o.tests.map((t) => t.name),
+  caseCount: 1,
+  since: o.since,
+  orderedBy: o.orderedBy,
+  nextAction: o.nextAction,
+  blockedReason: o.blockedReason,
+  reportUrl: o.reportUrl,
+  orderId: o.orderId,
+  visitId: o.visitId,
+});
+
+const unifiedFromCase = (r) => ({
+  key: `healthray:${r.patientId}`,
+  source: "healthray",
+  driven: false,
+  stage: r.stage?.key || "pending",
+  steps: r.steps,
+  patientId: r.patientId,
+  name: r.name,
+  fileNo: r.fileNo,
+  age: r.age,
+  sex: r.sex,
+  tests: r.tests || [],
+  caseCount: r.cases,
+  since: r.stageAt || r.registeredAt || null,
+  orderedBy: r.orderedBy || null,
+  nextAction: null,
+  blockedReason: null,
+  reportUrl: null,
+  station: r.station || null,
+  outstanding: r.outstanding,
+});
+
+export async function getLabQueue(visitDate, q = null, db = pool) {
+  const search = q && String(q).trim().length >= 2 ? String(q).trim() : null;
+  const healthray = await getHealthrayCases(visitDate, search, db);
   const { rows } = await db.query(
     `SELECT o.id, o.visit_id, o.sample_status, o.payment_status, o.urgency,
             o.created_at, o.updated_at, o.uploaded_at, o.report_file_url,
             p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
+            v.current_status,
             d.short_name AS ordered_by,
             COALESCE(t.tests, '[]'::json) AS tests,
             last_ev.occurred_at AS since
@@ -139,8 +197,18 @@ export async function getLabQueue(visitDate, db = pool) {
         AND o.urgency = 'today'
         -- No sample to take from a patient who never arrived or has gone home.
         AND v.current_status NOT IN ('no_show', 'cancelled')
+        AND (
+          $2::text IS NULL
+          OR p.name ILIKE '%' || $2 || '%'
+          OR p.file_no ILIKE '%' || $2 || '%'
+          OR d.short_name ILIKE '%' || $2 || '%'
+          OR EXISTS (
+            SELECT 1 FROM giniflow_lab_order_tests lt2
+             WHERE lt2.lab_order_id = o.id AND lt2.test_name ILIKE '%' || $2 || '%'
+          )
+        )
       ORDER BY o.created_at`,
-    [visitDate],
+    [visitDate, search],
   );
 
   const orders = rows.map((r) => {
@@ -175,10 +243,24 @@ export async function getLabQueue(visitDate, db = pool) {
           : null,
       uploadedAt: r.uploaded_at ? new Date(r.uploaded_at).toISOString() : null,
       reportUrl: r.report_file_url || null,
+      finished: FINISHED.includes(r.current_status),
+      station: FINISHED.includes(r.current_status)
+        ? STATUS_LABEL[r.current_status] || r.current_status
+        : COLUMN_NAME[columnForStatus(r.current_status)] ||
+          STATUS_LABEL[r.current_status] ||
+          r.current_status,
+      collectable: !IN_A_ROOM.includes(r.current_status) && !FINISHED.includes(r.current_status),
     };
   });
 
   const by = (b) => orders.filter((o) => o.bucket === b);
+
+  const unified = [...orders.map(unifiedFromOrder), ...healthray.map(unifiedFromCase)];
+  const unifiedCounts = LAB_STAGES.reduce(
+    (acc, s) => ({ ...acc, [s.key]: unified.filter((u) => u.stage === s.key).length }),
+    {},
+  );
+
   return {
     pending: by("pending"),
     collecting: by("collecting"),
@@ -186,6 +268,9 @@ export async function getLabQueue(visitDate, db = pool) {
     ready: by("ready"),
     uploaded: by("uploaded"),
     healthray,
+    unified,
+    unifiedCounts,
+    stages: LAB_STAGES,
     // The five counters at the top of the screen. They read 0 all day because
     // they only ever counted `giniflow_lab_orders`; the hospital's own cases
     // move through the same five stages and are simply added in, so the strip
@@ -258,6 +343,8 @@ const CASE_STAGE = [
   { key: "reported", label: "Reported", pill: "sp-done", at: "reportedOn", since: "reported" },
 ];
 
+export const LAB_STAGES = CASE_STAGE.map((s) => ({ key: s.key, label: s.label }));
+
 // `phlebotomy_status` before `collected_on`, deliberately.
 //
 // `collected_on` only arrives with the DETAIL fetch, which is the same call that
@@ -285,7 +372,7 @@ const stageIndex = (c) => {
 // timestamps let one card say "Sample at lab" beside a pill saying "Processing"
 // — two names for one state, disagreeing on the same row. Both now come from
 // the stage, so the rail simply marks how far along `CASE_STAGE` the case is.
-const RAIL = ["Ordered", "Collected", "Processing", "Reported"];
+const RAIL = ["Ordered", "Collect sample", "Process", "Upload"];
 
 // `CASE_STAGE` has five entries and the rail four, so the map is explicit: the
 // index here is the rail step currently in progress. A case AT the analyzer has
@@ -302,7 +389,7 @@ const labSteps = (stage) => {
   }));
 };
 
-async function getHealthrayCases(visitDate, db = pool) {
+async function getHealthrayCases(visitDate, q = null, db = pool) {
   const { rows } = await db.query(
     `WITH cases AS (
        SELECT lc.*,
@@ -316,6 +403,19 @@ async function getHealthrayCases(visitDate, db = pool) {
          LEFT JOIN patients uid
                 ON uid.file_no = lc.raw_list_json->'patient'->>'healthray_uid'
         WHERE lc.case_date = $1::date
+          AND (
+            $2::text IS NULL
+            OR lc.raw_list_json->'patient'->>'patient_name' ILIKE '%' || $2 || '%'
+            OR lc.raw_list_json->'patient'->>'healthray_uid' ILIKE '%' || $2 || '%'
+            OR array_to_string(lc.test_names, ' ') ILIKE '%' || $2 || '%'
+            OR (COALESCE(lc.raw_detail_json, lc.raw_list_json) -> 'referral_doctor')::text
+                 ILIKE '%' || $2 || '%'
+            OR EXISTS (
+              SELECT 1 FROM patients px
+               WHERE px.id = COALESCE(lc.patient_id, uid.id)
+                 AND (px.name ILIKE '%' || $2 || '%' OR px.file_no ILIKE '%' || $2 || '%')
+            )
+          )
      )
      SELECT c.pid AS patient_id,
             COALESCE(p.name, max(c.raw_list_json->'patient'->>'patient_name')) AS name,
@@ -389,7 +489,7 @@ async function getHealthrayCases(visitDate, db = pool) {
       WHERE NOT COALESCE(p.is_blocked, FALSE)
       GROUP BY c.pid, p.id, p.name, p.file_no, p.age, p.sex, v.current_status, v.id
       ORDER BY (count(*) FILTER (WHERE NOT c.results_synced)) DESC, min(c.fetched_at)`,
-    [visitDate],
+    [visitDate, q],
   );
 
   return rows.map((r) => {
@@ -633,7 +733,7 @@ export async function fetchStoredReport(orderId, db = pool) {
 
 export async function uploadReport(
   orderId,
-  { base64, fileName, mediaType = "application/pdf", actorId = null },
+  { base64, fileName, mediaType = "application/pdf", actorId = null, confirmAdditional = false },
   db = pool,
 ) {
   if (!base64) throw Object.assign(new Error("No file was sent"), { status: 400 });
@@ -642,7 +742,7 @@ export async function uploadReport(
   }
 
   const { rows } = await db.query(
-    `SELECT o.payment_status, o.sample_status, v.patient_id
+    `SELECT o.payment_status, o.sample_status, o.report_file_url, o.uploaded_at, v.patient_id
        FROM giniflow_lab_orders o
        JOIN giniflow_visits v ON v.id = o.visit_id
       WHERE o.id = $1`,
@@ -651,6 +751,13 @@ export async function uploadReport(
   if (!rows.length) throw Object.assign(new Error("Order not found"), { status: 404 });
   if (!opensLabGate(rows[0].payment_status)) {
     throw Object.assign(new Error("Payment is not cleared for this order"), { status: 409 });
+  }
+  if (rows[0].report_file_url && !confirmAdditional) {
+    throw Object.assign(new Error("A report is already on this order"), {
+      status: 409,
+      needsConfirmation: "additional_report",
+      existingUploadedAt: rows[0].uploaded_at,
+    });
   }
 
   const buffer = Buffer.from(base64, "base64");
@@ -764,7 +871,7 @@ export async function markLabCaseAction(
 // "Reported" that the lab has not reported.
 export async function uploadLabCaseReport(
   caseNo,
-  { base64, fileName, mediaType = "application/pdf", actorId = null },
+  { base64, fileName, mediaType = "application/pdf", actorId = null, confirmAdditional = false },
   db = pool,
 ) {
   if (!base64) throw Object.assign(new Error("No file was sent"), { status: 400 });
@@ -789,6 +896,13 @@ export async function uploadLabCaseReport(
   // on one. Refuse rather than store an orphan nobody will ever see.
   if (!c.patient_id) {
     throw Object.assign(new Error("This case is not linked to a patient yet"), { status: 409 });
+  }
+  if (c.pdf_storage_path && !confirmAdditional) {
+    throw Object.assign(new Error("A report is already on this case"), {
+      status: 409,
+      needsConfirmation: "additional_report",
+      existingSource: "hospital lab",
+    });
   }
 
   const buffer = Buffer.from(base64, "base64");

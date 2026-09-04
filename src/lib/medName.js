@@ -102,3 +102,46 @@ export function displayFormBadge(med) {
   // Last resort: show route
   return med.route ? ROUTE_BADGE[med.route] || med.route : null;
 }
+
+// The strength written into a name or a search box — "Atchol 20mg", "TAB
+// METFORMIN 500 MG", "Daplo M 10/500". The catalogue stores brands without a
+// strength (one Glycomet covers 500/850/1000mg), so this is the one place a
+// dose can be read back from what was typed or dictated rather than retyped.
+const UNIT = {
+  mg: "mg",
+  mcg: "mcg",
+  "\u00b5g": "mcg",
+  g: "g",
+  gm: "g",
+  gram: "g",
+  grams: "g",
+  ml: "ml",
+  iu: "IU",
+  unit: "units",
+  units: "units",
+  "%": "%",
+};
+
+const STRENGTH_RE =
+  /(\d+(?:\.\d+)?(?:\s*[/+]\s*\d+(?:\.\d+)?)*)\s*(mg|mcg|\u00b5g|gm|grams?|g|ml|iu|units?|%)\b/i;
+
+export function extractStrength(text) {
+  const m = String(text || "").match(STRENGTH_RE);
+  if (!m) return "";
+  const unit = UNIT[m[2].toLowerCase()] || m[2].toLowerCase();
+  return `${m[1].replace(/\s+/g, "")}${unit}`;
+}
+
+// Many catalogue names carry the number without its unit — "Atchol 20",
+// "Glycomet SR 500", 3,782 of them. The number is worth prefilling; the unit is
+// NOT worth guessing (Thyronorm 50 is 50mcg, and "mg" there would be wrong by a
+// thousand), so the consultant types it. Only a number standing on its own at
+// the end counts: "Vitamin B12" is a name, not a dose.
+const TRAILING_NUMBER_RE = /(?:^|\s)(\d+(?:\.\d+)?(?:\s*[/+]\s*\d+(?:\.\d+)?)*)\s*$/;
+
+export function extractDose(text) {
+  const withUnit = extractStrength(text);
+  if (withUnit) return withUnit;
+  const m = String(text || "").match(TRAILING_NUMBER_RE);
+  return m ? m[1].replace(/\s+/g, "") : "";
+}

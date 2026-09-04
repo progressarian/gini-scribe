@@ -133,6 +133,48 @@ const GROUPS = [
   },
 ];
 
+const MID_GROUPS_IDX = [1, 2, 3];
+
+const UNREACHABLE_GROUPS = [
+  {
+    key: "in_room",
+    label: "⏸ In a room — collect once free",
+    hint: "Somebody else has the patient right now. This clears itself when they come out.",
+    holds: (r) => !r.finished,
+  },
+  {
+    key: "gone",
+    label: "🚫 Left the floor — sample not taken",
+    hint: "The patient has gone home, so this sample cannot be drawn today. Chase it separately.",
+    holds: (r) => r.finished,
+  },
+];
+
+const DONE_SPLIT = [
+  {
+    key: "on_floor",
+    label: "Still on the floor",
+    hint: "Results are back and waiting for them at the next station.",
+    holds: (r) => r.onFloor,
+  },
+  {
+    key: "left",
+    label: "Left the floor",
+    hint: "Nobody is waiting on these — kept for the day's record.",
+    holds: (r) => !r.onFloor,
+  },
+];
+
+const GROUP_TO_STAGE = {
+  pending: "pending",
+  collecting: "collected",
+  processing: "processing",
+  ready: "results",
+  uploaded: "reported",
+};
+
+const MID_GROUPS = MID_GROUPS_IDX.map((i) => GROUPS[i]);
+
 // How long a report may sit in "results ready" before the wait itself is the
 // problem — the report exists, the MO just has not been told.
 const UPLOAD_WAIT_AMBER = 15;
@@ -424,82 +466,14 @@ const UPLOADED_PREVIEW = 5;
 // on anything — so they collapse into a single line rather than filling a column.
 // Longest wait first. A queue nobody works is ordered by whoever has been left
 // longest, not by whoever the sync happened to fetch first.
-const byLongestWait = (a, b) => (minutesSince(b.stageAt) ?? 0) - (minutesSince(a.stageAt) ?? 0);
 
 // Anyone the lab can actually reach comes first; the rest are there to be seen,
 // not worked, so they sink and dim.
-const byReachableThenWait = (a, b) =>
-  Number(b.collectable) - Number(a.collectable) || byLongestWait(a, b);
 
 // Inside "Waiting on the lab" the two halves are different problems, so the
 // column says which: a sample nobody has drawn is a patient who has not come to
 // the counter, and only the floor can move that. A sample already at the bench is
 // the lab's own turnaround and there is nothing to fetch.
-const WAITING_GROUPS = [
-  {
-    key: "queue",
-    label: "Sample pending — collect now",
-    hint: "Nobody has drawn these yet, and the patient is free to be called.",
-    holds: (r) => r.stage.key === "pending" && r.collectable,
-  },
-  {
-    key: "running",
-    label: "At the lab — running",
-    hint: "Sample is with the lab; this is their turnaround.",
-    holds: (r) => r.stage.key !== "pending",
-  },
-  // Last, and deliberately inert. Nobody can act on these — the patient is in
-  // someone else's room or has gone home — so a card that could be tapped, or a
-  // button that could be pressed, would only invite work that cannot happen.
-  {
-    key: "unreachable",
-    label: "Not here yet — cannot collect",
-    hint: "Sample still outstanding, but the patient is not available to the lab.",
-    holds: (r) => r.stage.key === "pending" && !r.collectable,
-    readOnly: true,
-  },
-];
-
-const DONE_GROUPS = [
-  {
-    key: "on_floor",
-    label: "Still on the floor",
-    hint: "Results are back and waiting for them at the next station.",
-    holds: (r) => r.station && !r.finished,
-  },
-  {
-    key: "left",
-    label: "Left the floor",
-    hint: "Nobody is waiting on these — kept for the day's record.",
-    holds: (r) => !r.station || r.finished,
-    readOnly: true,
-  },
-];
-
-const HEALTHRAY_COLUMNS = [
-  {
-    key: "waiting",
-    icon: "⏳",
-    label: "Waiting on the lab",
-    sub: "Longest wait first — who the floor is still held up by",
-    empty: "Nothing outstanding — every sample today has reported.",
-    holds: (r) => r.outstanding > 0,
-    groups: WAITING_GROUPS,
-  },
-  // One column, because the lab's part is finished for everyone in it. What
-  // differs is who is still waiting on the result: a patient at another station
-  // may be held up by it, one who has gone home cannot be — so they are groups
-  // within the same section rather than two sections claiming different states.
-  {
-    key: "done",
-    icon: "✅",
-    label: "Lab done",
-    sub: "Everything reported — grouped by whether anyone is still waiting",
-    empty: "No case has been reported yet today.",
-    holds: (r) => r.outstanding === 0,
-    groups: DONE_GROUPS,
-  },
-];
 
 // The hospital lab's own pane. Same shell as the order pane above, with every
 // action removed: there is no sample here for this technician to advance and no
@@ -585,7 +559,7 @@ function HealthrayCard({ row, onOpen, readOnly = false }) {
       </div>
       <div className="pc-r">
         <div className={`sp ${blocked ? "sp-process" : row.stage.pill}`}>
-          {blocked ? "Not here yet" : row.stage.label}
+          {blocked ? (row.finished ? "Not taken" : "Not free yet") : row.stage.label}
         </div>
         {mins !== null && <div className={`pc-time${late ? " late" : ""}`}>{mins}m</div>}
         <div className="pc-tlbl">{row.stage.since}</div>
@@ -853,8 +827,16 @@ function HealthrayCasePane({ row, onClose, onAction, onUploadCase, isAdmin, busy
 
 export default function LabStationPage() {
   const [toast, setToast] = useState("");
+  const [confirmUpload, setConfirmUpload] = useState(null);
+  const [openStages, setOpenStages] = useState({});
+  const [search, setSearch] = useState("");
+  const [debounced, setDebounced] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(search), 250);
+    return () => clearTimeout(t);
+  }, [search]);
   const toastTimer = useRef(null);
-  const { data, isLoading } = useLabQueue();
+  const { data, isLoading } = useLabQueue(undefined, debounced);
   const live = useGiniflowLive({ date: data?.date });
   const advance = useAdvanceSample();
   const upload = useUploadReport();
@@ -883,6 +865,39 @@ export default function LabStationPage() {
     ready: data?.ready?.length ?? 0,
     uploaded: data?.uploaded?.length ?? 0,
   };
+  const term = debounced.trim();
+
+  const hrPending = healthray.filter((r) => r.stage.key === "pending");
+  const toCall = [
+    ...(data?.pending || []).map((row) => ({ source: "giniflow", row })),
+    ...hrPending.filter((r) => r.collectable).map((row) => ({ source: "healthray", row })),
+  ];
+  const unreachable = hrPending
+    .filter((r) => !r.collectable)
+    .map((row) => ({ source: "healthray", row }));
+
+  const doneRows = [
+    ...(data?.uploaded || []).map((row) => ({
+      source: "giniflow",
+      row,
+      onFloor: !!row.station && !row.finished,
+    })),
+    ...healthray
+      .filter((r) => r.stage.key === "reported")
+      .map((row) => ({ source: "healthray", row, onFloor: !!row.station && !row.finished })),
+  ];
+  const doneTotal = doneRows.length;
+
+  const midVisible = ["collecting", "processing", "ready"].reduce(
+    (n, k) =>
+      n +
+      (data?.[k] || []).length +
+      healthray.filter((r) => r.stage.key === GROUP_TO_STAGE[k]).length,
+    0,
+  );
+  const visibleTotal = toCall.length + unreachable.length + midVisible + doneRows.length;
+
+  const unifiedTotal = Object.values(queueCounts).reduce((a, b) => a + b, 0) + healthray.length;
 
   const showToast = (msg) => {
     setToast(msg);
@@ -907,15 +922,25 @@ export default function LabStationPage() {
       },
     );
 
-  const onUpload = (order, file, refuseWith) => {
+  const onUpload = (order, file, refuseWith, confirmAdditional = false) => {
     if (refuseWith) return showToast(refuseWith);
     return upload.mutate(
-      { orderId: order.orderId, file },
+      { orderId: order.orderId, file, confirmAdditional },
       {
         onSuccess: () =>
           showToast(`📤 ${order.name}'s report uploaded — MO and doctor now see "Results ready"`),
-        onError: (e) =>
-          showToast(e?.response?.data?.error || "Upload failed — the report was not saved"),
+        onError: (e) => {
+          const d = e?.response?.data;
+          if (d?.needsConfirmation === "additional_report") {
+            return setConfirmUpload({
+              kind: "order",
+              order,
+              file,
+              at: d.existingUploadedAt || null,
+            });
+          }
+          showToast(d?.error || "Upload failed — the report was not saved");
+        },
       },
     );
   };
@@ -931,10 +956,10 @@ export default function LabStationPage() {
   const caseAction = useMarkLabCaseAction();
   const caseUpload = useUploadLabCaseReport();
   const isAdmin = useAuthStore((st) => st.currentDoctor?.role) === "admin";
-  const onUploadCase = (caseNo, file) => {
+  const onUploadCase = (caseNo, file, confirmAdditional = false) => {
     if (file.size > 10 * 1024 * 1024) return showToast("File is larger than 10 MB — not uploaded");
     caseUpload.mutate(
-      { caseNo, file },
+      { caseNo, file, confirmAdditional },
       {
         // The toast reports which of the two things happened. Saying "Results
         // ready" when the guard declined would be the message contradicting the
@@ -945,7 +970,18 @@ export default function LabStationPage() {
               ? `📤 Report uploaded — MO and doctor now see "Results ready"`
               : `📤 Report filed on the chart — other results still outstanding, so the queue is unchanged`,
           ),
-        onError: (e) => showToast(e?.response?.data?.error || "Upload failed"),
+        onError: (e) => {
+          const d = e?.response?.data;
+          if (d?.needsConfirmation === "additional_report") {
+            return setConfirmUpload({
+              kind: "case",
+              caseNo,
+              file,
+              source: d.existingSource || null,
+            });
+          }
+          showToast(d?.error || "Upload failed");
+        },
       },
     );
   };
@@ -975,6 +1011,14 @@ export default function LabStationPage() {
           })}
         </span>
         <div className="rr">
+          <input
+            className="rail-search"
+            type="search"
+            value={search}
+            placeholder="Search name, file no, test…"
+            aria-label="Search today's lab patients"
+            onChange={(e) => setSearch(e.target.value)}
+          />
           <LiveBadge live={live} className="tr-live" />
           <a className="rbtn" href="/giniflow/stations">
             ← Stations
@@ -1020,123 +1064,189 @@ export default function LabStationPage() {
 
           {isLoading && <div className="empty-note">Loading…</div>}
 
-          {!isLoading &&
-            GROUPS.map((group) => {
-              const orders = data?.[group.key] || [];
-              if (!orders.length) return null;
-              return (
-                <div key={group.key}>
-                  <div className="grp-lbl" style={{ marginBottom: 7 }}>
-                    {group.label}
+          {!isLoading && (
+            <div className="lab-running">
+              {MID_GROUPS.map((group) => {
+                const orders = data?.[group.key] || [];
+                const cases = healthray.filter((r) => r.stage.key === GROUP_TO_STAGE[group.key]);
+                const total = orders.length + cases.length;
+                const open = openStages[group.key] ?? total > 0;
+                return (
+                  <div key={group.key}>
+                    <h2 className="sq-gh">
+                      <button
+                        type="button"
+                        className="sq-toggle"
+                        aria-expanded={open}
+                        aria-controls={`lab-stage-${group.key}`}
+                        onClick={() => setOpenStages((v) => ({ ...v, [group.key]: !open }))}
+                      >
+                        <span className={`sq-chev${open ? " open" : ""}`} aria-hidden="true">
+                          ▸
+                        </span>
+                        {group.label}
+                        <span className="sq-count">
+                          {orders.length} Gini · {cases.length} hospital
+                        </span>
+                      </button>
+                    </h2>
+                    <div id={`lab-stage-${group.key}`} hidden={!open}>
+                      {!total ? (
+                        <div className="empty-note">—</div>
+                      ) : (
+                        <div className="pt-list">
+                          {cases.map((row) => (
+                            <HealthrayCard
+                              key={`hr-${row.patientId}`}
+                              row={row}
+                              onOpen={() => setOpenCaseId(row.patientId)}
+                              readOnly={!row.collectable}
+                            />
+                          ))}
+                          {orders.map((order) => (
+                            <LabCard
+                              key={order.orderId}
+                              order={order}
+                              group={group}
+                              onAdvance={onAdvance}
+                              onUpload={onUpload}
+                              onOpen={(o) => setOpenOrderId(o.orderId)}
+                              busy={advance.isPending || upload.isPending}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <div className="pt-list">
-                    {(group.key === "uploaded" && !showAllUploaded
-                      ? orders.slice(0, UPLOADED_PREVIEW)
-                      : orders
-                    ).map((order) => (
+                );
+              })}
+            </div>
+          )}
+
+          {!isLoading && (
+            <div className="ar-split">
+              <div className="ar-col">
+                <div className="grp-lbl">
+                  📞 To call — start lab steps
+                  <span className="grp-split">{toCall.length}</span>
+                </div>
+                {!toCall.length && <div className="empty-note">Nobody waiting to be called.</div>}
+                <div className="pt-list">
+                  {toCall.map((r) =>
+                    r.source === "giniflow" ? (
                       <LabCard
-                        key={order.orderId}
-                        order={order}
-                        group={group}
+                        key={`g-${r.row.orderId}`}
+                        order={r.row}
+                        group={GROUPS[0]}
                         onAdvance={onAdvance}
                         onUpload={onUpload}
                         onOpen={(o) => setOpenOrderId(o.orderId)}
                         busy={advance.isPending || upload.isPending}
                       />
-                    ))}
-                    {group.key === "uploaded" && orders.length > UPLOADED_PREVIEW && (
-                      <button
-                        type="button"
-                        className="more-note more-btn"
-                        aria-expanded={showAllUploaded}
-                        onClick={() => setShowAllUploaded((v) => !v)}
-                      >
-                        {showAllUploaded
-                          ? `Show fewer — ${orders.length} uploaded today`
-                          : `+ ${orders.length - UPLOADED_PREVIEW} more uploaded today — show all`}
-                      </button>
-                    )}
-                  </div>
+                    ) : (
+                      <HealthrayCard
+                        key={`h-${r.row.patientId}`}
+                        row={r.row}
+                        onOpen={() => setOpenCaseId(r.row.patientId)}
+                      />
+                    ),
+                  )}
                 </div>
-              );
-            })}
 
-          {!isLoading && Object.values(queueCounts).every((c) => c === 0) && (
-            <div className="empty-note">
-              No Gini Flow lab orders today. A patient lands here the moment an MO orders tests on
-              the MO/SD station — payment is not what makes them appear, it only unlocks &ldquo;Mark
-              sample collected&rdquo;. Tests ordered on HealthRay run at the hospital lab instead
-              and are listed below.
-            </div>
-          )}
-
-          {!isLoading && healthray.length > 0 && (
-            <div className="hr-lab">
-              <div className="grp-lbl" style={{ marginBottom: 7 }}>
-                🏥 Hospital lab today — {healthray.length}{" "}
-                {healthray.length === 1 ? "patient" : "patients"}, {caseCount}{" "}
-                {caseCount === 1 ? "case" : "cases"} ordered on HealthRay
-              </div>
-              <p className="hr-lab-note">
-                Ordered and run outside Gini Flow, so nothing here changes anything at HealthRay —
-                results arrive on their own through the lab sync. Open a patient to record that you
-                chased or collected a sample; that attribution is kept here.
-              </p>
-              <div className="hr-cols">
-                {HEALTHRAY_COLUMNS.map((column) => {
-                  const rows = healthray.filter(column.holds);
+                {UNREACHABLE_GROUPS.map((g) => {
+                  const rows = unreachable.filter((r) => g.holds(r.row));
+                  if (!rows.length) return null;
                   return (
-                    <section className="hr-col" key={column.key}>
-                      <h3 className="hr-col-head">
-                        <span>
-                          {column.icon} {column.label}
-                        </span>
-                        <span className="hr-col-n">{rows.length}</span>
-                      </h3>
-                      {/* The strip at the top counts CASES and these columns count
-                          PATIENTS, so "6 waiting" sat under "3 + 3 = 6 cases" and
-                          "32 done" under "43 uploaded" with nothing explaining the
-                          difference. Each column now states its own arithmetic. */}
-                      <p className="hr-col-sub">
-                        {column.sub} · {rows.length} {rows.length === 1 ? "patient" : "patients"},{" "}
-                        {rows.reduce((n, r) => n + r.cases, 0)} cases
-                      </p>
-                      {rows.length === 0 ? (
-                        <div className="empty-note">{column.empty}</div>
-                      ) : (
-                        <div className="pt-list">
-                          {column.groups
-                            ? column.groups.map((group) => {
-                                const inGroup = rows.filter(group.holds).sort(byReachableThenWait);
-                                if (!inGroup.length) return null;
-                                return (
-                                  <div className="hr-group" key={group.key}>
-                                    <div className="hr-group-head">
-                                      {group.label} · {inGroup.length}
-                                    </div>
-                                    <div className="hr-group-hint">{group.hint}</div>
-                                    {inGroup.map((r) => (
-                                      <HealthrayCard
-                                        key={r.patientId}
-                                        row={r}
-                                        onOpen={setOpenCaseId}
-                                        readOnly={group.readOnly}
-                                      />
-                                    ))}
-                                  </div>
-                                );
-                              })
-                            : [...rows]
-                                .sort(byLongestWait)
-                                .map((r) => (
-                                  <HealthrayCard key={r.patientId} row={r} onOpen={setOpenCaseId} />
-                                ))}
-                        </div>
-                      )}
-                    </section>
+                    <div key={g.key}>
+                      <div className="grp-lbl grp-sub">
+                        {g.label}
+                        <span className="grp-split">{rows.length}</span>
+                      </div>
+                      <div className="grp-hint">{g.hint}</div>
+                      <div className="pt-list">
+                        {rows.map((r) => (
+                          <HealthrayCard
+                            key={`u-${r.row.patientId}`}
+                            row={r.row}
+                            onOpen={() => setOpenCaseId(r.row.patientId)}
+                            readOnly
+                          />
+                        ))}
+                      </div>
+                    </div>
                   );
                 })}
               </div>
+
+              <div className="ar-col">
+                <div className="grp-lbl grp-lbl-sp">
+                  ✅ Lab done<span className="grp-split">{doneTotal}</span>
+                </div>
+                {!doneTotal && <div className="empty-note">No case has reported yet today.</div>}
+                {DONE_SPLIT.map((part) => {
+                  const rows = doneRows.filter(part.holds);
+                  if (!rows.length) return null;
+                  const shown =
+                    part.key === "left" && !showAllUploaded
+                      ? rows.slice(0, UPLOADED_PREVIEW)
+                      : rows;
+                  return (
+                    <div key={part.key}>
+                      <div className="grp-lbl grp-sub">
+                        {part.label}
+                        <span className="grp-split">{rows.length}</span>
+                      </div>
+                      <div className="grp-hint">{part.hint}</div>
+                      <div className="pt-list">
+                        {shown.map((r) =>
+                          r.source === "giniflow" ? (
+                            <LabCard
+                              key={`dg-${r.row.orderId}`}
+                              order={r.row}
+                              group={GROUPS[4]}
+                              onAdvance={onAdvance}
+                              onUpload={onUpload}
+                              onOpen={(o) => setOpenOrderId(o.orderId)}
+                              busy={advance.isPending || upload.isPending}
+                            />
+                          ) : (
+                            <HealthrayCard
+                              key={`dh-${r.row.patientId}`}
+                              row={r.row}
+                              onOpen={() => setOpenCaseId(r.row.patientId)}
+                              readOnly={part.key === "left"}
+                            />
+                          ),
+                        )}
+                      </div>
+                      {part.key === "left" && rows.length > UPLOADED_PREVIEW && (
+                        <button
+                          type="button"
+                          className="more-note more-btn"
+                          aria-expanded={showAllUploaded}
+                          onClick={() => setShowAllUploaded((v) => !v)}
+                        >
+                          {showAllUploaded
+                            ? `Show fewer — ${rows.length} left the floor`
+                            : `+ ${rows.length - UPLOADED_PREVIEW} more who left the floor — show all`}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {!isLoading && term && !visibleTotal && (
+            <div className="empty-note">Nobody matches “{search.trim()}”.</div>
+          )}
+
+          {!isLoading && !term && !unifiedTotal && (
+            <div className="empty-note">
+              No lab work today — neither a Gini Flow order nor a hospital-lab case. A patient lands
+              here the moment an MO orders tests on the MO/SD station, or the hospital lab registers
+              a case of their own.
             </div>
           )}
         </div>
@@ -1159,6 +1269,39 @@ export default function LabStationPage() {
         onAdvance={onAdvance}
         onUpload={onUpload}
       />
+
+      {confirmUpload && (
+        <div className="modal-back" onClick={() => setConfirmUpload(null)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <h3 className="modal-title">A report is already here</h3>
+            <p className="modal-body">
+              {confirmUpload.kind === "order"
+                ? `${confirmUpload.order.name} already has a report on this order${
+                    confirmUpload.at ? `, uploaded at ${clock(confirmUpload.at)}` : ""
+                  }.`
+                : `This case already has a report from the ${confirmUpload.source || "hospital lab"}.`}{" "}
+              Uploading <strong>{confirmUpload.file.name}</strong> adds it alongside — nothing is
+              replaced or deleted.
+            </p>
+            <div className="modal-acts">
+              <button className="st-btn st-btn-g" onClick={() => setConfirmUpload(null)}>
+                Cancel
+              </button>
+              <button
+                className="st-btn st-btn-grn"
+                onClick={() => {
+                  const c = confirmUpload;
+                  setConfirmUpload(null);
+                  if (c.kind === "order") onUpload(c.order, c.file, null, true);
+                  else onUploadCase(c.caseNo, c.file, true);
+                }}
+              >
+                Add as another report
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {toast && <div className="toast show">{toast}</div>}
     </div>

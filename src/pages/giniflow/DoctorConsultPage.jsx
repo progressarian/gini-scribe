@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useMutationState } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   useConsult,
@@ -9,7 +10,7 @@ import {
 import OverviewSection from "./consult/OverviewSection";
 import LabsSection from "./consult/LabsSection";
 import CarePlanSection from "./consult/CarePlanSection";
-import { usePrescription } from "../../queries/hooks/useGiniflowPrescription";
+import { usePrescription, visitWriteKey } from "../../queries/hooks/useGiniflowPrescription";
 import FastPathBar from "./consult/FastPathBar";
 import ProposalsStrip from "./consult/ProposalsStrip";
 import RxSection from "./consult/RxSection";
@@ -45,6 +46,16 @@ const NAV = [
   { id: "s-plan", label: "📝 Care plan" },
 ];
 
+// What a section can still be holding that no request has taken yet. The draft
+// itself is safe — every Rx edit and the care plan are already written — so the
+// guard is only about these three, and it names them rather than asking "are you
+// sure?" about nothing in particular.
+const UNSAVED_LABEL = {
+  rx: "a medicine editor is still open",
+  add: "a medicine has been filled in but not added",
+  tests: "tests are selected but not ordered",
+};
+
 const clock = (iso) =>
   iso
     ? new Date(iso).toLocaleTimeString("en-IN", {
@@ -64,7 +75,45 @@ export default function DoctorConsultPage() {
   const decideProposal = useDecideProposal(visitId);
   const [trendMarker, setTrendMarker] = useState(null);
   const [toast, setToast] = useState("");
+  const [unsaved, setUnsaved] = useState({});
+  const [confirmLeave, setConfirmLeave] = useState(null);
+  const [lastSavedAt, setLastSavedAt] = useState(null);
   const toastTimer = useRef(null);
+  const flushCarePlan = useRef(null);
+
+  const markUnsaved = useCallback(
+    (key, on) => setUnsaved((u) => (!!u[key] === !!on ? u : { ...u, [key]: !!on })),
+    [],
+  );
+  const pendingWork = useMemo(
+    () => Object.keys(unsaved).filter((k) => unsaved[k] && UNSAVED_LABEL[k]),
+    [unsaved],
+  );
+
+  // When this visit's draft was last written to, by any section. The care plan
+  // and every prescription edit share one mutation key for exactly this.
+  const writeTimes = useMutationState({
+    filters: { mutationKey: visitWriteKey(visitId), status: "success" },
+    select: (m) => m.state.submittedAt,
+  });
+  const newestWrite = writeTimes.length ? Math.max(...writeTimes) : null;
+  useEffect(() => {
+    if (newestWrite) setLastSavedAt(newestWrite);
+  }, [newestWrite]);
+
+  // Closing the tab is the one exit the app cannot finish work for, so it is
+  // the one exit that asks the browser to warn.
+  useEffect(() => {
+    if (!pendingWork.length) return undefined;
+    const warn = (e) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [pendingWork.length]);
+
+  const leave = (action) => (pendingWork.length ? setConfirmLeave(() => action) : action());
 
   const showToast = (msg) => {
     setToast(msg);
@@ -102,7 +151,10 @@ export default function DoctorConsultPage() {
   return (
     <div className="gf">
       <div className="top-rail">
-        <button className="tr-back" onClick={() => navigate("/giniflow/station/doctor")}>
+        <button
+          className="tr-back"
+          onClick={() => leave(() => navigate("/giniflow/station/doctor"))}
+        >
           ← Patients
         </button>
         <div className="tr-role" style={{ background: "var(--blu-l)", color: "var(--blu)" }}>
@@ -118,19 +170,25 @@ export default function DoctorConsultPage() {
         <div className="rail-right">
           {badge && <span className={`badge ${badge.cls}`}>{badge.label}</span>}
           <span className={`badge ${readOnly ? "b-grn" : "b-blu"}`}>
-            {readOnly ? "Finalized" : "Draft"}
+            {readOnly ? "Finalized" : lastSavedAt ? `Draft · saved ${clock(lastSavedAt)}` : "Draft"}
           </span>
+          {/* "Step out" read as walking away from the work. Nothing is lost —
+              the draft is written as it is made, and leaving flushes what the
+              care plan's autosave has not sent yet — so the button says so. */}
           {consult.inRoom && (
             <button
               className="tr-back"
               onClick={() =>
-                releaseConsult.mutate(visitId, {
-                  onSuccess: () => navigate("/giniflow/station/doctor"),
-                  onError: (e) => showToast(e?.response?.data?.error || "Could not release"),
+                leave(() => {
+                  flushCarePlan.current?.();
+                  releaseConsult.mutate(visitId, {
+                    onSuccess: () => navigate("/giniflow/station/doctor"),
+                    onError: (e) => showToast(e?.response?.data?.error || "Could not release"),
+                  });
                 })
               }
             >
-              Step out
+              Save &amp; step out
             </button>
           )}
         </div>
@@ -233,18 +291,25 @@ export default function DoctorConsultPage() {
               setTrendMarker({ key: l.test, label: l.test_name || l.test, unit: l.unit })
             }
           />
-          <RxSection visitId={visitId} readOnly={readOnly} onToast={showToast} />
+          <RxSection
+            visitId={visitId}
+            readOnly={readOnly}
+            onToast={showToast}
+            onUnsaved={markUnsaved}
+          />
           <TestsSection
             visitId={visitId}
             consult={consult}
             readOnly={readOnly}
             onToast={showToast}
+            onUnsaved={markUnsaved}
           />
           <MedCardSection visitId={visitId} onToast={showToast} />
           <CarePlanSection
             consult={consult}
             visitId={visitId}
             onToast={showToast}
+            flushRef={flushCarePlan}
             onSave={onSavePlan}
             saving={saveCarePlan.isPending}
             readOnly={readOnly}
@@ -279,6 +344,35 @@ export default function DoctorConsultPage() {
 
       {trendMarker && (
         <TrendModal visitId={visitId} marker={trendMarker} onClose={() => setTrendMarker(null)} />
+      )}
+      {confirmLeave && (
+        <div className="modal-back" onClick={() => setConfirmLeave(null)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <h3 className="modal-title">Leave with work in hand?</h3>
+            <p className="modal-body">
+              The draft is saved — every medicine already in the list and the care plan are kept and
+              will be here when you come back. What is not saved:
+              <span className="fin-gap">
+                {pendingWork.map((k) => UNSAVED_LABEL[k]).join(" · ")}.
+              </span>
+            </p>
+            <div className="modal-acts">
+              <button className="st-btn st-btn-g" onClick={() => setConfirmLeave(null)}>
+                Stay
+              </button>
+              <button
+                className="st-btn st-btn-grn"
+                onClick={() => {
+                  const go = confirmLeave;
+                  setConfirmLeave(null);
+                  go();
+                }}
+              >
+                Leave anyway
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       {toast && <div className="toast show">{toast}</div>}
     </div>

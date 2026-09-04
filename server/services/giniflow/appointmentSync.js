@@ -138,6 +138,17 @@ async function patientsAwaitingMedicines(client, day) {
         AND NOT EXISTS (
           SELECT 1 FROM medicine_collections c
            WHERE c.medication_id = m.id AND c.collected_date = $1::date
+        )
+      UNION
+     SELECT DISTINCT a.patient_id
+       FROM appointments a
+      WHERE a.appointment_date = $1::date
+        AND a.patient_id IS NOT NULL
+        AND jsonb_array_length(COALESCE(a.healthray_medications, '[]'::jsonb)) > 0
+        AND NOT EXISTS (
+          SELECT 1 FROM medicine_collections c
+            JOIN medications m2 ON m2.id = c.medication_id
+           WHERE m2.patient_id = a.patient_id AND c.collected_date = $1::date
         )`,
     [day],
   );
@@ -194,6 +205,15 @@ async function sweepPharmacyLeg(client, day, graceMinutes) {
     }
   }
   return swept;
+}
+
+async function hasCheckedInEvent(client, visitId) {
+  const { rows } = await client.query(
+    `SELECT 1 FROM giniflow_visit_events
+      WHERE visit_id = $1 AND status = 'checked_in' LIMIT 1`,
+    [visitId],
+  );
+  return rows.length > 0;
 }
 
 export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
@@ -361,17 +381,34 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
           effective = "pharmacy_pending";
         }
 
+        const meta = {
+          source: "healthray",
+          healthray_status: appt.status,
+          appointment_id: appt.id,
+          observed_from: currentStatus,
+        };
+
+        if (
+          isChainStatus(effective) &&
+          chainIndex(effective) > chainIndex("checked_in") &&
+          (!isChainStatus(currentStatus) || chainIndex(currentStatus) < chainIndex("checked_in")) &&
+          !(await hasCheckedInEvent(client, visitId))
+        ) {
+          await advanceStatus(client, {
+            visitId,
+            toStatus: "checked_in",
+            actorRole: "system",
+            allowSkip: true,
+            meta: { ...meta, implied: true },
+          });
+        }
+
         await advanceStatus(client, {
           visitId,
           toStatus: effective,
           actorRole: "system",
           allowSkip: true,
-          meta: {
-            source: "healthray",
-            healthray_status: appt.status,
-            appointment_id: appt.id,
-            observed_from: currentStatus,
-          },
+          meta,
         });
         await client.query("COMMIT");
         result.advanced++;

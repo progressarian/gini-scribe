@@ -242,6 +242,28 @@ Today those paths do not know about each other. Before this station runs on real
 This is question 8 in `06-PHASE-2-PLAN.md`. It is not a UI question: whichever way it goes changes
 what "uploaded" means, and the MO's queue depends on that word.
 
+### DECIDED, 4 Sep 2026 — an automatic arrival completes the step
+
+A result delivered by `labSync` advances `sample_status` to `uploaded` and fires trigger 1. The
+technician confirms nothing; "uploaded" means _the result is here_, whoever brought it. The MO's
+queue can therefore be read as "still waiting on the lab" without asking who did the work.
+
+**Not yet implemented.** `sample_status` is written in exactly three places today — order creation
+(`moStation`), payment (`receptionStation`), and technician actions (`labStation.advanceSample`).
+No sync path touches it, so this decision is a design intent, not current behaviour.
+
+Two things still open before it can be built:
+
+- **Which order does an arriving result complete?** `lab_cases` carries `patient_id` + `case_date`;
+  `giniflow_lab_orders` hangs off a visit. Patient-plus-day is the obvious join, but a patient with
+  two open orders, or a HealthRay case covering tests the Gini order did not ask for, has no
+  answer yet. Matching on tests is fuzzy — the two systems do not share test names.
+**Manual upload after an automatic one — DECIDED, 4 Sep 2026.** Kept as a second report, never an
+overwrite, but not silently: the first upload proceeds as now, and a second is refused until the
+technician confirms they mean to add another. The confirmation states that a report is already on
+the order and that this one will be added beside it, so "I did not realise one was already here"
+cannot become a duplicate nobody reconciles.
+
 ## 9. Also open
 
 - **Urgency, `amount_total` and claim approval** — §5b. The first is a correctness bug waiting for

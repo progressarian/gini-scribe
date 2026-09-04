@@ -85,6 +85,7 @@ import {
   useUpdateAppointmentPatient,
 } from "../queries/hooks/useGhm";
 import { qk } from "../queries/keys";
+import { toast } from "../stores/uiStore";
 import { visitStatus } from "../lib/visitStatus.js";
 
 const safeArr = (v) => (Array.isArray(v) ? v : []);
@@ -2218,7 +2219,7 @@ export default function GHMPage() {
     try {
       const all = await exportMutation.mutateAsync();
       if (!all.length) {
-        window.alert("Nothing to export for this view.");
+        toast("Nothing to export for this view.", "warn");
         return;
       }
       const label = EXPORT_LABELS[view] || "ghm-export";
@@ -2231,12 +2232,12 @@ export default function GHMPage() {
         label,
         lastSeen,
       );
-      if (!counts.total) window.alert("No patients with a phone number to export.");
+      if (!counts.total) toast("No patients with a phone number to export.", "warn");
     } catch (e) {
       // Without this the whole export failed into an unhandled rejection and
       // the button just looked broken.
       console.error("[GHM export] failed", e);
-      window.alert(`Export failed: ${e?.response?.data?.error || e?.message || e}`);
+      toast(`Export failed: ${e?.response?.data?.error || e?.message || e}`, "error");
     }
   }, [exportMutation, date, view]);
 

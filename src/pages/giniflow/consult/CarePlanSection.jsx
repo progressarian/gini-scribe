@@ -17,7 +17,15 @@ const INTERVALS = ["2 weeks", "1 month", "~3 months", "6 months", "1 year"];
 
 const emptyGoal = () => ({ test: "", target: "", unit: "" });
 
-export default function CarePlanSection({ consult, visitId, onSave, saving, readOnly, onToast }) {
+export default function CarePlanSection({
+  consult,
+  visitId,
+  onSave,
+  saving,
+  readOnly,
+  onToast,
+  flushRef,
+}) {
   // getConsult always sends an object, never null — but a blank consult screen
   // mid-clinic is a bad way to find out that changed.
   const saved = consult.carePlan || {};
@@ -31,31 +39,50 @@ export default function CarePlanSection({ consult, visitId, onSave, saving, read
   }));
   const [savedAt, setSavedAt] = useState(null);
   const dirty = useRef(false);
+  // Edits typed but not yet sent. The debounce clears it; leaving the page
+  // flushes on it.
+  const unsent = useRef(false);
+  const payload = {
+    ...plan,
+    nextVisitDate: plan.nextVisitDate || null,
+    goals: plan.goals.filter((g) => g.test.trim() && g.target.trim()),
+  };
+  const flush = useRef(null);
+  flush.current = () => {
+    if (readOnly || !unsent.current) return;
+    unsent.current = false;
+    onSave(payload);
+  };
 
   // Debounced autosave rather than save-on-blur: a doctor who closes the tab
   // mid-sentence has still said something worth keeping.
   useEffect(() => {
     if (readOnly || !dirty.current) return undefined;
     const id = setTimeout(() => {
-      onSave(
-        {
-          ...plan,
-          nextVisitDate: plan.nextVisitDate || null,
-          goals: plan.goals.filter((g) => g.test.trim() && g.target.trim()),
-        },
-        () => setSavedAt(Date.now()),
-      );
+      unsent.current = false;
+      onSave(payload, () => setSavedAt(Date.now()));
     }, 900);
     return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan, onSave, readOnly]);
+
+  // Stepping out unmounts this section, and the pending timer died with it —
+  // the last sentence typed was lost while the screen still read "Draft".
+  useEffect(() => () => flush.current?.(), []);
+
+  // "Save & step out" saves BEFORE it releases the room rather than relying on
+  // the unmount above, so the order is the one the button promises.
+  if (flushRef) flushRef.current = () => flush.current?.();
 
   const set = (field) => (e) => {
     dirty.current = true;
+    unsent.current = true;
     setPlan((p) => ({ ...p, [field]: e.target.value }));
   };
 
   const setGoal = (i, field) => (e) => {
     dirty.current = true;
+    unsent.current = true;
     setPlan((p) => {
       const goals = p.goals.map((g, gi) => (gi === i ? { ...g, [field]: e.target.value } : g));
       // Keep exactly one blank row at the end so adding a goal needs no button.
@@ -78,12 +105,14 @@ export default function CarePlanSection({ consult, visitId, onSave, saving, read
               small
               label="🎤 Dictate"
               title="Dictate the treatment plan"
-              onText={(text) =>
+              onText={(text) => {
+                dirty.current = true;
+                unsent.current = true;
                 setPlan((prev) => ({
                   ...prev,
                   treatment: prev.treatment ? `${prev.treatment.trim()} ${text}` : text,
-                }))
-              }
+                }));
+              }}
             />
           </div>
         )}
@@ -142,6 +171,7 @@ export default function CarePlanSection({ consult, visitId, onSave, saving, read
                 className={plan.nextVisitInterval === iv ? "on" : ""}
                 onClick={() => {
                   dirty.current = true;
+                  unsent.current = true;
                   setPlan((p) => ({ ...p, nextVisitInterval: iv }));
                 }}
               >

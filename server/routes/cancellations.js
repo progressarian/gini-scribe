@@ -34,7 +34,7 @@ router.get("/cancellations", async (req, res) => {
       pool.query(`SELECT COUNT(*)::int AS total FROM appointment_cancellations ${where}`, params),
       pool.query(
         `SELECT * FROM appointment_cancellations ${where}
-         ORDER BY appointment_date DESC, created_at DESC
+         ORDER BY appointment_date DESC NULLS LAST, created_at DESC
          LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
         [...params, Math.min(100, +limit), off],
       ),

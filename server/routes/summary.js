@@ -701,7 +701,7 @@ router.get("/patients/:id/summary", async (req, res) => {
           : pool.query(
               `SELECT id, compliance, biomarkers, healthray_follow_up, follow_up_with, healthray_investigations FROM appointments
                WHERE patient_id=$1 AND healthray_clinical_notes IS NOT NULL
-               ORDER BY appointment_date DESC LIMIT 1`,
+               ORDER BY appointment_date DESC NULLS LAST LIMIT 1`,
               [pid],
             ),
 

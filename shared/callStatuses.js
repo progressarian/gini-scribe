@@ -9,6 +9,13 @@ export const CALL_STATUSES = [
   { value: "pending", label: "Not Called Yet", color: "gray", open: true, attempt: false },
   { value: "called", label: "Called / Spoke", color: "green" },
   { value: "not_picked", label: "Not Picked Up", color: "red", open: true },
+  {
+    value: "call_disconnected",
+    label: "Call Disconnected",
+    color: "amber",
+    open: true,
+    unreachable: true,
+  },
   { value: "busy", label: "Busy", color: "amber", open: true, unreachable: true },
   { value: "switched_off", label: "Switched Off", color: "amber", open: true, unreachable: true },
   { value: "not_reachable", label: "Not Reachable", color: "amber", open: true, unreachable: true },
@@ -16,6 +23,7 @@ export const CALL_STATUSES = [
   { value: "call_later", label: "Will Call Later", color: "amber", open: true },
   { value: "rescheduled", label: "Rescheduled", color: "blue" },
   { value: "cancelled", label: "Cancelled Visit", color: "red" },
+  { value: "not_interested", label: "Not Interested", color: "red" },
   { value: "no_call_needed", label: "No Call Needed", color: "gray", attempt: false },
 ];
 

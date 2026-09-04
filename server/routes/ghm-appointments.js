@@ -18,8 +18,18 @@ import {
 import { UNREACHABLE_STATUSES, pgArray } from "../../shared/callStatuses.js";
 import { CATEGORY_VALUES, isValidCategory } from "../../shared/patientCategories.js";
 import { slotStartHour } from "../../shared/slotHour.js";
+import { resolveAppointmentId, opensLead } from "../services/ghmLead.js";
 
 const router = Router();
+
+const NO_APPOINTMENT_ERROR = "This patient has no appointment yet";
+
+const patientOf = async (rawId) => {
+  const id = Number(rawId);
+  if (id < 0) return -id;
+  const r = await pool.query("SELECT patient_id FROM appointments WHERE id=$1", [id]);
+  return r.rows[0]?.patient_id ?? null;
+};
 
 // Slot → reporting time mapping (from Slotsday sheet). Report 2 hours after
 // the booked slot, except late afternoon where the sheet tapers it (3 PM and
@@ -211,9 +221,13 @@ router.post("/ghm-appointments/active-calls", async (req, res) => {
     const ids = (req.body?.appointment_ids || []).filter((x) => Number.isInteger(x));
     if (!ids.length) return res.json({});
     const r = await pool.query(
-      `SELECT a.id, ${claimCols("a")}
-         FROM appointments a
-        WHERE a.id = ANY($1::int[]) AND ${claimActive("a")}`,
+      `WITH req AS (SELECT unnest($1::int[]) AS rid)
+       SELECT r.rid AS id, ${claimCols("a")}
+         FROM req r
+         JOIN appointments a
+           ON a.id = r.rid
+           OR (r.rid < 0 AND a.patient_id = -r.rid AND a.appointment_date IS NULL)
+        WHERE ${claimActive("a")}`,
       [ids],
     );
     const out = {};
@@ -233,8 +247,8 @@ router.post("/ghm-appointments/active-calls", async (req, res) => {
 // POST /api/ghm-appointments/:id/calling — take the claim
 router.post("/ghm-appointments/:id/calling", async (req, res) => {
   try {
-    const id = Number(req.params.id);
-    if (!Number.isInteger(id)) return res.status(400).json({ error: "Invalid appointment id" });
+    const id = await resolveAppointmentId(req.params.id, { create: true });
+    if (!id) return res.status(404).json({ error: NO_APPOINTMENT_ERROR });
     const me = claimant(req);
     if (!me.name) return res.status(401).json({ error: "Sign in to mark a call in progress" });
 
@@ -265,8 +279,8 @@ router.post("/ghm-appointments/:id/calling", async (req, res) => {
 // DELETE /api/ghm-appointments/:id/calling — drop your own claim
 router.delete("/ghm-appointments/:id/calling", async (req, res) => {
   try {
-    const id = Number(req.params.id);
-    if (!Number.isInteger(id)) return res.status(400).json({ error: "Invalid appointment id" });
+    const id = await resolveAppointmentId(req.params.id);
+    if (!id) return res.status(404).json({ error: NO_APPOINTMENT_ERROR });
     const me = claimant(req);
 
     const r = await pool.query(
@@ -287,15 +301,20 @@ router.delete("/ghm-appointments/:id/calling", async (req, res) => {
 
 // ─── Call attempt history ──────────────────────────────────────────────────
 
-// GET /api/call-attempts?appointment_id=X — full history, newest first
+// GET /api/call-attempts?appointment_id=X — full history, newest first.
+// Keyed on the PATIENT, not the row: calls made before they had a booking live
+// on their lead row, and those are the ones the next caller most needs to see.
+// The appointment_id fallback covers attempts logged before patient_id existed.
 router.get("/call-attempts", async (req, res) => {
   try {
     const { appointment_id } = req.query;
     if (!appointment_id) return res.status(400).json({ error: "appointment_id required" });
+    const patientId = await patientOf(appointment_id);
     const r = await pool.query(
-      `SELECT * FROM call_attempts WHERE appointment_id=$1
-       ORDER BY called_at DESC, id DESC`,
-      [appointment_id],
+      `SELECT * FROM call_attempts
+        WHERE ($2::int IS NOT NULL AND patient_id = $2::int) OR appointment_id = $1::int
+        ORDER BY called_at DESC, id DESC`,
+      [Number(appointment_id) > 0 ? Number(appointment_id) : 0, patientId],
     );
     res.json(r.rows);
   } catch (e) {
@@ -303,19 +322,29 @@ router.get("/call-attempts", async (req, res) => {
   }
 });
 
-// POST /api/call-attempts/counts — { appointment_ids:[...] } → { id: count }
+// POST /api/call-attempts/counts — { appointment_ids:[...] } → { id: count }.
+// Counted per patient for the same reason the history is: the badge has to
+// carry the calls made before the booking existed. A negative id IS the
+// patient (Patient Lookup rows for someone with no appointment).
 router.post("/call-attempts/counts", async (req, res) => {
   try {
     const ids = (req.body?.appointment_ids || []).filter((x) => Number.isInteger(x));
     if (!ids.length) return res.json({});
     const r = await pool.query(
-      `SELECT appointment_id, COUNT(*)::int AS cnt
-       FROM call_attempts WHERE appointment_id = ANY($1::int[])
-       GROUP BY appointment_id`,
+      `WITH req AS (SELECT unnest($1::int[]) AS rid),
+       mapped AS (
+         SELECT r.rid, CASE WHEN r.rid < 0 THEN -r.rid ELSE a.patient_id END AS pid
+           FROM req r LEFT JOIN appointments a ON a.id = r.rid
+       )
+       SELECT m.rid,
+              (SELECT COUNT(*)::int FROM call_attempts ca
+                WHERE (m.pid IS NOT NULL AND ca.patient_id = m.pid)
+                   OR (m.pid IS NULL AND ca.appointment_id = m.rid)) AS cnt
+         FROM mapped m`,
       [ids],
     );
     const out = {};
-    for (const row of r.rows) out[row.appointment_id] = row.cnt;
+    for (const row of r.rows) if (row.cnt) out[row.rid] = row.cnt;
     res.json(out);
   } catch (e) {
     handleError(res, e, "Call attempt counts");
@@ -326,11 +355,21 @@ router.post("/call-attempts/counts", async (req, res) => {
 router.post("/call-attempts", async (req, res) => {
   const client = await pool.connect();
   try {
-    const { appointment_id, outcome, called_by, notes, duration_mins, reschedule_date } = req.body;
-    if (!appointment_id) return res.status(400).json({ error: "appointment_id required" });
+    const { outcome, called_by, notes, duration_mins, reschedule_date } = req.body;
+    if (!req.body?.appointment_id)
+      return res.status(400).json({ error: "appointment_id required" });
     if (!outcome) return res.status(400).json({ error: "outcome required" });
 
     await client.query("BEGIN");
+
+    const appointment_id = await resolveAppointmentId(req.body.appointment_id, {
+      create: true,
+      db: client,
+    });
+    if (!appointment_id) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: NO_APPOINTMENT_ERROR });
+    }
 
     // patient_id + next attempt number
     const appt = await client.query("SELECT patient_id FROM appointments WHERE id=$1", [
@@ -909,9 +948,9 @@ router.get("/ghm-appointments", async (req, res) => {
       )`;
 
       const pickUpcoming = `ORDER BY COALESCE(a.file_no, a.id::text),
-                 (a.appointment_date >= $${dIdx}) DESC,
+                 COALESCE(a.appointment_date >= $${dIdx}, FALSE) DESC,
                  CASE WHEN a.appointment_date >= $${dIdx} THEN a.appointment_date END ASC,
-                 a.appointment_date DESC, a.created_at DESC`;
+                 a.appointment_date DESC NULLS LAST, a.created_at DESC`;
       const [countR, dataR, noApptR] = await Promise.all([
         pool.query(
           `WITH ${upcomingCte}
@@ -1094,7 +1133,7 @@ router.get("/ghm-appointments", async (req, res) => {
                      AND prev.follow_up_date IS NOT NULL
                      AND prev.appointment_date <= a.appointment_date
                      AND prev.follow_up_date >= a.appointment_date
-                   ORDER BY prev.appointment_date DESC
+                   ORDER BY prev.appointment_date DESC NULLS LAST
                    LIMIT 1)
                 ) AS follow_up_date
          ${joins}
@@ -1293,7 +1332,18 @@ router.post("/ghm-appointments", async (req, res) => {
           [resolved_file_no, appointment_date],
         )
       : { rows: [] };
-    const priorRow = existing.rows[0] || null;
+    // A patient called before they had any booking carries a LEAD row — dateless,
+    // holding that call history. Booking them fills the date into that same row
+    // instead of leaving the calls stranded on a row nothing shows any more.
+    const lead =
+      !existing.rows.length && patient_id
+        ? await pool.query(
+            `SELECT id, doctor_name, time_slot, booked_by_name, source
+               FROM appointments WHERE patient_id=$1 AND appointment_date IS NULL LIMIT 1`,
+            [patient_id],
+          )
+        : { rows: [] };
+    const priorRow = existing.rows[0] || lead.rows[0] || null;
     const placeholder = priorRow && !priorRow.doctor_name;
 
     if (priorRow && !placeholder && !req.body.allow_duplicate) {
@@ -1331,7 +1381,8 @@ router.post("/ghm-appointments", async (req, res) => {
              requested_by_cc=$21, cc_remark_date=$22, notes=$23, is_walkin=$24,
              whatsapp_message=$25, additional_whatsapp_msg=$26, home_collection=$27,
              status='scheduled', alt_phone=COALESCE($28, alt_phone),
-             age=COALESCE($29, age), sex=COALESCE($30, sex)
+             age=COALESCE($29, age), sex=COALESCE($30, sex),
+             appointment_date=$32::date, file_no=COALESCE(file_no, $33)
            WHERE id=$31 RETURNING *`,
           [
             patient_id,
@@ -1365,6 +1416,8 @@ router.post("/ghm-appointments", async (req, res) => {
             demo.age,
             demo.sex,
             priorRow.id,
+            appointment_date,
+            resolved_file_no,
           ],
         )
       : await pool.query(
@@ -1445,7 +1498,8 @@ router.post("/ghm-appointments", async (req, res) => {
 // PATCH /api/ghm-appointments/:id — update GHM fields
 router.patch("/ghm-appointments/:id", async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = await resolveAppointmentId(req.params.id, { create: opensLead(req.body) });
+    if (!id) return res.status(404).json({ error: NO_APPOINTMENT_ERROR });
     const allowed = [
       "time_slot",
       "reporting_time_slot",

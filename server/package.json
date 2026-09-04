@@ -14,6 +14,7 @@
     "smoke:ghm-sheet": "node scripts/smoke-ghm-sheet.mjs",
     "smoke:ghm-record": "node scripts/smoke-ghm-patient-record.mjs",
     "smoke:ghm-last-mo": "node scripts/smoke-ghm-last-mo.mjs",
+    "smoke:ghm-lead": "node scripts/smoke-ghm-lead.mjs",
     "smoke:ghm-calling": "node scripts/smoke-ghm-calling-flag.mjs",
     "smoke:ghm-call-statuses": "node scripts/smoke-ghm-call-statuses.mjs",
     "smoke:ghm-categories": "node scripts/smoke-ghm-categories.mjs",

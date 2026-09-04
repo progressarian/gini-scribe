@@ -234,6 +234,7 @@ const ARRIVAL_SELECT = `
     ) last_ev ON TRUE
    WHERE v.visit_date = $1::date
      AND NOT COALESCE(p.is_blocked, FALSE)
+     AND v.merged_into_visit_id IS NULL
    ORDER BY v.appointment_time NULLS LAST, p.name`;
 
 const minutesBetween = (from, now) =>

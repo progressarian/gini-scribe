@@ -398,7 +398,7 @@ export async function getConsult(visitId, db = pool) {
           AND appointment_date < COALESCE(
                 (SELECT visit_date FROM giniflow_visits WHERE id = $2),
                 (NOW() AT TIME ZONE 'Asia/Kolkata')::date)
-        ORDER BY appointment_date DESC LIMIT 8`,
+        ORDER BY appointment_date DESC NULLS LAST LIMIT 8`,
       [v.patient_id, visitId],
     ),
     // Either table may hold today's reading — see visitVitals.js. Reading only
@@ -465,7 +465,7 @@ export async function getConsult(visitId, db = pool) {
           AND appointment_date < COALESCE(
                 (SELECT visit_date FROM giniflow_visits WHERE id = $2),
                 (NOW() AT TIME ZONE 'Asia/Kolkata')::date)
-        ORDER BY appointment_date DESC LIMIT 1`,
+        ORDER BY appointment_date DESC NULLS LAST LIMIT 1`,
       [v.patient_id, visitId],
     ),
   ]);

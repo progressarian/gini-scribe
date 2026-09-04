@@ -527,7 +527,7 @@ router.get("/patients/:id/appointments", async (req, res) => {
         WHERE (patient_id = $1
                OR ($2::text IS NOT NULL AND file_no = $2))
           AND appointment_date BETWEEN $3 AND $4
-        ORDER BY appointment_date DESC, time_slot DESC NULLS LAST
+        ORDER BY appointment_date DESC NULLS LAST, time_slot DESC NULLS LAST
         LIMIT 200`,
       [scribePid, fileNo, from, to],
     );
