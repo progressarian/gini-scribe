@@ -816,7 +816,6 @@ router.get("/ghm-appointments", async (req, res) => {
       if (!q) {
         return res.json({
           data: [],
-          unbooked: [],
           total: 0,
           summary: {},
           page: +page,
@@ -855,7 +854,7 @@ router.get("/ghm-appointments", async (req, res) => {
                  (a.appointment_date >= $${dIdx}) DESC,
                  CASE WHEN a.appointment_date >= $${dIdx} THEN a.appointment_date END ASC,
                  a.appointment_date DESC, a.created_at DESC`;
-      const [countR, dataR, unbookedR] = await Promise.all([
+      const [countR, dataR] = await Promise.all([
         pool.query(
           `WITH ${upcomingCte}
            SELECT ${summaryCols("z", null, `$${dIdx}`)} FROM (
@@ -901,39 +900,11 @@ router.get("/ghm-appointments", async (req, res) => {
            ORDER BY patient_name ASC, file_no ASC NULLS LAST, id ASC`,
           [...likeParams, d, effLimit, offset],
         ),
-        // Everything above is driven `FROM appointments` — a patient who has
-        // never had an appointment row (an imported note, a HealthRay-only
-        // record, an OBT lead never booked) cannot appear in it no matter how
-        // exact the search, because they were never a candidate row to begin
-        // with. This is the one place we go `FROM patients` instead, so they
-        // are at least findable. They come back separately (`unbooked`, not
-        // merged into `data`): they have no appointment id, so the row-edit,
-        // call-log, and booking-status affordances the main list wires up all
-        // assume an appointment id — the desk's fix here is Book next, not
-        // edit-in-place.
-        pool.query(
-          `SELECT p.id AS patient_id, p.name AS patient_name, p.file_no, p.phone,
-                  p.alt_phone, p.address, p.dob AS disp_dob, p.age AS disp_age,
-                  p.sex AS disp_sex
-             FROM patients p
-            WHERE (${tokens
-              .map(
-                (_, i) =>
-                  `(p.name ILIKE $${i + 1} OR p.file_no ILIKE $${i + 1} OR p.phone ILIKE $${i + 1} OR EXISTS (SELECT 1 FROM unnest(COALESCE(p.alt_phone, '{}')) alt WHERE alt ILIKE $${i + 1}))`,
-              )
-              .join(" AND ")})
-              AND NOT COALESCE(p.is_blocked, FALSE)
-              AND NOT EXISTS (SELECT 1 FROM appointments a WHERE a.file_no = p.file_no)
-            ORDER BY p.name ASC
-            LIMIT 20`,
-          likeParams,
-        ),
       ]);
       const summary = countR.rows[0] || {};
       const total = (bucket ? summary[bucket] : summary.total) || 0;
       return res.json({
         data: dataR.rows,
-        unbooked: unbookedR.rows,
         total,
         summary,
         page: exportAll ? 1 : +page,
