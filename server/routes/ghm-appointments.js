@@ -753,6 +753,64 @@ const LAST_VISIT_SQL = `(
      AND prev.status = ANY(${ATTENDED_STATUSES})
 )`;
 
+// Every appointment-shaped column a lookup row carries, blanked. A patient
+// whose history lives only in `consultations` has none of them, and the list
+// reads these keys unconditionally, so they must be present and null rather
+// than missing.
+const NO_APPOINTMENT_ROW = {
+  appointment_date: null,
+  time_slot: null,
+  reporting_time_slot: null,
+  booking_status: null,
+  visit_type: null,
+  appointment_type: null,
+  booking_source: null,
+  booked_by_name: null,
+  booking_date: null,
+  booked_at: null,
+  condition: null,
+  chief_complaint: null,
+  insurance_taken: null,
+  how_did_you_know: null,
+  referred_by_doctor_name: null,
+  earlier_slot_given: null,
+  show_no_show: null,
+  status: null,
+  requested_by_cc: null,
+  cc_remark_date: null,
+  misc_notes: null,
+  reports_uploaded: null,
+  will_get_test_at_gini: null,
+  whatsapp_message: null,
+  additional_whatsapp_msg: null,
+  notes: null,
+  is_walkin: null,
+  age: null,
+  sex: null,
+  call_made_by: null,
+  call_date: null,
+  calling_by: null,
+  calling_by_id: null,
+  calling_since: null,
+  call_notes: null,
+  call_reschedule_date: null,
+  pt_recovery: null,
+  preferred_date: null,
+  preferred_doctor: null,
+  preferred_time_slot: null,
+  home_collection: false,
+  patient_category: null,
+  healthray_follow_up: null,
+  mode_of_appointment: null,
+  assigned_mo: null,
+  prescription_explained_by: null,
+  call_status_any: null,
+  call_status: null,
+  via_preferred: false,
+  is_booked: false,
+  follow_up_date: null,
+};
+
 // GET /api/ghm-appointments — list by date + optional doctor
 router.get("/ghm-appointments", async (req, res) => {
   try {
@@ -854,7 +912,7 @@ router.get("/ghm-appointments", async (req, res) => {
                  (a.appointment_date >= $${dIdx}) DESC,
                  CASE WHEN a.appointment_date >= $${dIdx} THEN a.appointment_date END ASC,
                  a.appointment_date DESC, a.created_at DESC`;
-      const [countR, dataR] = await Promise.all([
+      const [countR, dataR, noApptR] = await Promise.all([
         pool.query(
           `WITH ${upcomingCte}
            SELECT ${summaryCols("z", null, `$${dIdx}`)} FROM (
@@ -900,12 +958,53 @@ router.get("/ghm-appointments", async (req, res) => {
            ORDER BY patient_name ASC, file_no ASC NULLS LAST, id ASC`,
           [...likeParams, d, effLimit, offset],
         ),
+        // Lookup is driven FROM appointments, so a patient whose visits only
+        // ever reached `consultations` — older records never mirrored into the
+        // appointments table — matches nothing here and the tab dead-ends on
+        // "No patient found" while /find lists the same person with a full
+        // visit history. They are fetched separately and merged into the same
+        // list below.
+        pool.query(
+          `SELECT p.id AS patient_id, p.name AS patient_name, p.file_no, p.phone,
+                  p.alt_phone, p.address, p.email, p.dob AS disp_dob,
+                  p.age AS disp_age, p.sex AS disp_sex,
+                  COALESCE(p.is_blocked, FALSE) AS is_blocked,
+                  (SELECT MAX(c.visit_date)::date FROM consultations c
+                    WHERE c.patient_id = p.id) AS last_visit_date,
+                  (SELECT c.con_name FROM consultations c
+                    WHERE c.patient_id = p.id
+                    ORDER BY c.visit_date DESC LIMIT 1) AS doctor_name
+             FROM patients p
+            WHERE (${tokens
+              .map(
+                (_, i) =>
+                  `(p.name ILIKE $${i + 1} OR p.file_no ILIKE $${i + 1} OR p.phone ILIKE $${i + 1} OR EXISTS (SELECT 1 FROM unnest(COALESCE(p.alt_phone, '{}')) alt WHERE alt ILIKE $${i + 1}))`,
+              )
+              .join(" AND ")})
+              AND NOT COALESCE(p.is_blocked, FALSE)
+              -- Split rather than OR'd so each side can use its own index.
+              AND NOT EXISTS (SELECT 1 FROM appointments a WHERE a.patient_id = p.id)
+              AND NOT EXISTS (SELECT 1 FROM appointments a WHERE a.file_no = p.file_no)
+            ORDER BY p.name ASC
+            LIMIT 20`,
+          likeParams,
+        ),
       ]);
       const summary = countR.rows[0] || {};
       const total = (bucket ? summary[bucket] : summary.total) || 0;
+      // Merged into `data` so the list renders them as ordinary rows. The id is
+      // the patient id negated: it keeps the rows distinct without ever naming
+      // a real appointment, so a row-level edit 404s instead of writing to
+      // someone else's booking. Page 1 only (the list pages appointments, not
+      // these), and never under a summary-pill filter, whose buckets all count
+      // appointment state these rows do not have.
+      const noAppt =
+        bucket || (!exportAll && +page > 1)
+          ? []
+          : noApptR.rows.map((p) => ({ ...NO_APPOINTMENT_ROW, ...p, id: -p.patient_id }));
       return res.json({
-        data: dataR.rows,
-        total,
+        data: [...dataR.rows, ...noAppt],
+        total: total + noAppt.length,
         summary,
         page: exportAll ? 1 : +page,
         limit: effLimit,
