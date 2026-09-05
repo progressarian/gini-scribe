@@ -9,6 +9,7 @@ import {
   WAIT_STATUSES,
   columnForStatus,
 } from "../../../shared/giniflowStatus.js";
+import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 
 // The COLUMN, not the raw status. `vitals_done` is the last event the sync
 // observed, but the board files it under "With SD / MO" — HealthRay has no
@@ -422,6 +423,9 @@ async function getHealthrayCases(visitDate, q = null, db = pool) {
             COALESCE(p.file_no, max(c.raw_list_json->'patient'->>'healthray_uid')) AS file_no,
             p.age, p.sex,
             v.current_status, v.id IS NOT NULL AS on_floor,
+            -- Constant across the group (it depends only on the patient and the
+            -- day), so bool_or reads it without widening the GROUP BY.
+            bool_or(${labOnlyPredicate("v", "$3")}) AS lab_only,
             count(*)::int AS cases,
             count(*) FILTER (WHERE NOT c.results_synced)::int AS pending,
             count(*) FILTER (WHERE c.results_synced
@@ -489,7 +493,7 @@ async function getHealthrayCases(visitDate, q = null, db = pool) {
       WHERE NOT COALESCE(p.is_blocked, FALSE)
       GROUP BY c.pid, p.id, p.name, p.file_no, p.age, p.sex, v.current_status, v.id
       ORDER BY (count(*) FILTER (WHERE NOT c.results_synced)) DESC, min(c.fetched_at)`,
-    [visitDate, q],
+    [visitDate, q, LAB_ONLY_DOCTOR],
   );
 
   return rows.map((r) => {
@@ -532,12 +536,19 @@ async function getHealthrayCases(visitDate, q = null, db = pool) {
       // Where the patient is standing while the lab holds their sample. A visit
       // row is the only evidence they are in the building at all, so its absence
       // is stated rather than guessed at.
+      // Samples-only patients carry a pre-consultation status but are not in
+      // that queue — the manager board takes them out of it. Naming their
+      // column here anyway is what had this screen calling a patient
+      // "With SD / MO" while the board showed that column empty.
+      labOnly: !!r.lab_only,
       station: r.on_floor
         ? FINISHED.includes(r.current_status)
           ? STATUS_LABEL[r.current_status] || r.current_status
-          : COLUMN_NAME[columnForStatus(r.current_status)] ||
-            STATUS_LABEL[r.current_status] ||
-            r.current_status
+          : r.lab_only
+            ? null
+            : COLUMN_NAME[columnForStatus(r.current_status)] ||
+              STATUS_LABEL[r.current_status] ||
+              r.current_status
         : null,
       // The underlying status, for the pane: the column says where they are, this
       // says what was last actually observed about them.

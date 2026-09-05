@@ -46,14 +46,28 @@ const shortDate = (iso) =>
     : null;
 
 const stationPill = (r) => {
-  // No visit today is not a missed check-in. These patients were consulted on an
-  // earlier day and have come back for the sample alone, so the card names the
-  // day they were seen instead of implying they failed to arrive.
+  // One name for one thing. A patient booked under the lab-only provider and a
+  // patient who walked into the lab with no appointment at all do exactly the
+  // same thing here — a test and nothing else. Over the six days the flow has
+  // been writing visit rows, the no-appointment group recorded no vitals, no
+  // consultation and no appointment of any kind. Two different pills for that
+  // read as two situations and sent people looking for a clinical difference
+  // that does not exist.
+  //
+  // What DOES differ is only whether the floor knows they are here, so that
+  // goes on the sub-line: a booked patient is checked in and can be called
+  // over, a walk-in is known to the lab alone.
+  if (r.labOnly)
+    return {
+      cls: "sp-process",
+      text: "Lab only",
+      sub: r.finished ? "has left the floor" : "checked in · free to call",
+    };
   if (!r.station)
     return {
       cls: "sp-process",
       text: "Lab only",
-      sub: r.lastSeenOn ? `seen ${shortDate(r.lastSeenOn)}` : "no OPD visit on record",
+      sub: r.lastSeenOn ? `walk-in · last seen ${shortDate(r.lastSeenOn)}` : "walk-in · no booking",
     };
   if (r.finished) return { cls: "sp-done", text: r.station, sub: "has left the floor" };
   // Somebody else has them in a room, or they are sitting in a queue. Only the
@@ -155,7 +169,15 @@ const DONE_SPLIT = [
     key: "on_floor",
     label: "Still on the floor",
     hint: "Results are back and waiting for them at the next station.",
-    holds: (r) => r.onFloor,
+    holds: (r) => r.onFloor && !r.labOnly,
+  },
+  // Samples-only patients have no next station, so the group above would tell
+  // the lab somebody downstream is waiting when nobody is.
+  {
+    key: "samples_only",
+    label: "Lab only — free to go",
+    hint: "Booked for the test alone, so nothing downstream is waiting on these.",
+    holds: (r) => r.onFloor && r.labOnly,
   },
   {
     key: "left",
@@ -622,15 +644,17 @@ function HealthrayCasePane({ row, onClose, onAction, onUploadCase, isAdmin, busy
             <div className="dp-sec">
               <div className="dp-sec-title">Where this patient is</div>
               <div className="dp-hint">
-                {row.station
-                  ? row.finished
-                    ? `The visit is over — ${row.station.toLowerCase()}. Any result still running will land on the chart after they have gone home.`
-                    : row.waiting
-                      ? `Waiting in the ${row.station.toLowerCase()} queue.`
-                      : `At ${row.station.toLowerCase()} right now.`
-                  : row.lastSeenOn
-                    ? `No OPD appointment today — consulted on ${shortDate(row.lastSeenOn)} and back for the sample only.`
-                    : "No OPD visit on record — the sample was taken outside the OPD floor."}
+                {row.labOnly
+                  ? "Booked for the test only — no consultation today, so nobody downstream is waiting on this result. They are checked in, so the lab can call them over."
+                  : row.station
+                    ? row.finished
+                      ? `The visit is over — ${row.station.toLowerCase()}. Any result still running will land on the chart after they have gone home.`
+                      : row.waiting
+                        ? `Waiting in the ${row.station.toLowerCase()} queue.`
+                        : `At ${row.station.toLowerCase()} right now.`
+                    : row.lastSeenOn
+                      ? `No OPD appointment today — consulted on ${shortDate(row.lastSeenOn)} and back for the sample only.`
+                      : "No OPD visit on record — the sample was taken outside the OPD floor."}
               </div>
               {row.statusLabel && row.statusLabel !== row.station && (
                 <div className="dp-hint">

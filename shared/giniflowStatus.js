@@ -95,6 +95,7 @@ export const STATUS_TO_SLA_KEY = {
 };
 
 export const WAIT_STATUSES = ["checked_in", "vitals_pending", "sd_pending", "ready_for_doctor"];
+export const TERMINAL_STATUSES = ["dispensed", "exited"];
 export const BOARD_COLUMNS = [
   {
     key: "checked_in",
@@ -174,6 +175,8 @@ export const columnForStatus = (status) =>
 export const slaKeyForStatus = (status) => STATUS_TO_SLA_KEY[status] ?? null;
 
 export const isWaitStatus = (status) => WAIT_STATUSES.includes(status);
+
+export const isTerminalStatus = (status) => TERMINAL_STATUSES.includes(status);
 
 export const MAX_FORWARD_JUMP = 2;
 export const canTransition = (from, to, resumeFrom = null) => {

@@ -10,6 +10,7 @@ import { callLabel } from "../../../shared/callStatuses.js";
 import { syncAppointmentsToFlow } from "./appointmentSync.js";
 import { classifyMarker, MARKER_LABEL } from "./consultBrief.js";
 import { BIO_TARGET, STABILITY } from "../analytics/biomarkerTargets.js";
+import { LAB_ONLY_DOCTOR } from "../../../shared/labOnly.js";
 import { IST_TODAY } from "./statusEngine.js";
 
 // The day BEFORE the day: are the reports in, what do the numbers say, who
@@ -733,8 +734,11 @@ export async function getAssignableStaff(visitDate, db = pool) {
        ) load ON TRUE
       WHERE COALESCE(d.is_active, TRUE)
         AND LOWER(COALESCE(d.role, '')) IN ('consultant', 'md', 'mo', 'admin')
+        -- The lab-only provider is a consultant row, so it would otherwise be
+        -- offered as somebody to assign a patient to. Nobody consults it.
+        AND LOWER(BTRIM(d.name)) <> LOWER($2)
       ORDER BY COALESCE(d.is_chief, FALSE) DESC, d.name`,
-    [visitDate],
+    [visitDate, LAB_ONLY_DOCTOR],
   );
 
   return rows.map((r) => ({

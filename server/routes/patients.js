@@ -9,7 +9,9 @@ import { sortDiagnoses } from "../utils/diagnosisSort.js";
 import { encryptAadhaar, decryptAadhaar } from "../utils/aadhaarCrypt.js";
 import { validate } from "../middleware/validate.js";
 import { patientCreateSchema } from "../schemas/index.js";
-import { requireDoctor } from "../middleware/auth.js";
+import { requireDoctor, requireCapability } from "../middleware/auth.js";
+import { CAPABILITIES as CAP } from "../../shared/permissions.js";
+import { patientDirectory } from "../services/patientDirectory.js";
 import { getGenieDb } from "../services/genieImport.js";
 import { ownFu } from "../services/ghmDayWindow.js";
 import {
@@ -159,6 +161,85 @@ router.get("/stats", async (req, res) => {
 });
 
 // Check duplicate (must be before /:id route)
+router.get("/patients/directory-export", requireCapability(CAP.ADMIN), async (req, res) => {
+  try {
+    const XLSX = await import("xlsx");
+    const rows = await patientDirectory();
+
+    const header = [
+      "Name",
+      "UHID",
+      "Sex",
+      "Age",
+      "DOB",
+      "Contact number",
+      "Alternate numbers",
+      "Address",
+      "Latest doctor",
+      "Last visit",
+      "Most-seen doctor",
+      "Visits with them",
+      "Registered on",
+      "Blocked",
+    ];
+    const body = rows.map((r) => [
+      r.name || "",
+      r.file_no || "",
+      r.sex || "",
+      r.age ?? "",
+      r.dob || "",
+      r.phone || "",
+      r.alt_phones || "",
+      r.address || "",
+      r.latest_doctor || "",
+      r.last_visit || "",
+      r.most_seen_doctor || "",
+      r.most_seen_visits || "",
+      r.registered_on || "",
+      r.is_blocked ? "Yes" : "",
+    ]);
+
+    const ws = XLSX.utils.aoa_to_sheet([header, ...body]);
+    ws["!cols"] = [
+      { wch: 28 },
+      { wch: 13 },
+      { wch: 7 },
+      { wch: 6 },
+      { wch: 12 },
+      { wch: 14 },
+      { wch: 22 },
+      { wch: 46 },
+      { wch: 24 },
+      { wch: 12 },
+      { wch: 24 },
+      { wch: 15 },
+      { wch: 14 },
+      { wch: 9 },
+    ];
+    ws["!autofilter"] = {
+      ref: XLSX.utils.encode_range({
+        s: { r: 0, c: 0 },
+        e: { r: body.length, c: header.length - 1 },
+      }),
+    };
+    ws["!freeze"] = { xSplit: 2, ySplit: 1 };
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Patients");
+    const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+    const stamp = new Date().toISOString().slice(0, 10);
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="patients-${stamp}.xlsx"`);
+    res.setHeader("Content-Length", buf.length);
+    res.send(buf);
+  } catch (e) {
+    handleError(res, e, "Patient directory export");
+  }
+});
+
 router.get("/patients/check-duplicate", async (req, res) => {
   try {
     const { file_no, name, age, sex } = req.query;

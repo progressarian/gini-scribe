@@ -1,11 +1,14 @@
 import pool from "../../config/db.js";
 import {
   HEALTHRAY_STATUS_TO_CHAIN,
+  EXCEPTION_STATUSES,
+  TERMINAL_STATUSES,
   chainIndex,
   isChainStatus,
   isExceptionStatus,
 } from "../../../shared/giniflowStatus.js";
 import { slotStartTime } from "../../../shared/slotHour.js";
+import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { advanceStatus, IST_TODAY } from "./statusEngine.js";
 
 // Vitals HealthRay recorded, which its appointment status cannot express.
@@ -207,6 +210,74 @@ async function sweepPharmacyLeg(client, day, graceMinutes) {
   return swept;
 }
 
+// A lab-only visit is over when its last report lands. HealthRay will never say
+// so — it has no consultation to complete, so the appointment sits at
+// `checkedin` for ever: across the six days Gini Flow has run, 41 lab-only
+// visits were created and not one of them ever exited. They stayed in "In
+// building now" all day, could never reach "Completed", and their open clock
+// went on counting against a floor they had already left.
+//
+// The evidence is the same one the lab station reads: every case of the day
+// reported. The grace period is short because nothing follows a report — it
+// only covers the patient still at the counter collecting a printout.
+export const LAB_ONLY_EXIT_GRACE_MINUTES = 15;
+
+export async function sweepLabOnlyExits(client, day, graceMinutes = LAB_ONLY_EXIT_GRACE_MINUTES) {
+  const { rows } = await client.query(
+    `SELECT v.id, lab.last_report
+       FROM giniflow_visits v
+       JOIN patients p ON p.id = v.patient_id
+       JOIN LATERAL (
+         SELECT count(*)::int AS cases,
+                count(*) FILTER (
+                  WHERE COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'reported_on' IS NULL
+                )::int AS pending,
+                max((COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'reported_on')::timestamptz)
+                  AS last_report
+           FROM lab_cases lc
+          WHERE lc.case_date = v.visit_date
+            AND (lc.patient_id = v.patient_id
+                 OR (lc.patient_id IS NULL
+                     AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))
+       ) lab ON TRUE
+      WHERE v.visit_date = $1::date
+        AND v.current_status <> ALL($3)
+        AND lab.cases > 0
+        AND lab.pending = 0
+        AND lab.last_report < NOW() - ($2 || ' minutes')::interval
+        AND ${labOnlyPredicate("v", "$4")}`,
+    [day, graceMinutes, [...EXCEPTION_STATUSES, ...TERMINAL_STATUSES], LAB_ONLY_DOCTOR],
+  );
+
+  let swept = 0;
+  for (const row of rows) {
+    try {
+      await client.query("BEGIN");
+      await advanceStatus(client, {
+        visitId: row.id,
+        toStatus: "exited",
+        actorRole: "system",
+        allowSkip: true,
+        // Dated when the patient actually finished — the last report — not when
+        // the sweep happened to notice. Stamping NOW would give a visit closed
+        // days later a journey of several thousand minutes.
+        occurredAt: row.last_report,
+        meta: {
+          source: "giniflow",
+          reason: "lab_only_reports_complete",
+          grace_minutes: graceMinutes,
+        },
+      });
+      await client.query("COMMIT");
+      swept += 1;
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => {});
+      console.error("[giniflow] lab-only sweep:", row.id, e.message);
+    }
+  }
+  return swept;
+}
+
 async function hasCheckedInEvent(client, visitId) {
   const { rows } = await client.query(
     `SELECT 1 FROM giniflow_visit_events
@@ -255,10 +326,16 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
          -- actually consults. A near-miss is deliberately left unresolved: the
          -- cost of guessing is a patient queued to the wrong consultant, which
          -- is worse than an unassigned one that first-claim will pick up.
+         -- The lab-only provider is excluded even though it IS a consultant row:
+         -- a samples-only registration has no consultation to assign, and
+         -- resolving it handed the visit a doctor nobody would ever see, put a
+         -- name on the card that reads as booked, and counted toward that
+         -- "doctor's" load on the triage staff list.
          LEFT JOIN doctors doc
                 ON lower(btrim(doc.name)) = lower(btrim(a.doctor_name))
                AND doc.role = 'consultant'
                AND COALESCE(doc.is_active, TRUE)
+               AND lower(btrim(a.doctor_name)) <> lower($3)
         WHERE a.appointment_date = $1::date
           AND a.patient_id IS NOT NULL
           AND a.status = ANY($2)
@@ -275,7 +352,7 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
                    ELSE 0
                  END DESC,
                  a.id DESC`,
-      [day, SYNCABLE],
+      [day, SYNCABLE, LAB_ONLY_DOCTOR],
     );
 
     // The consultant the patient booked with, in one statement for the whole
@@ -294,10 +371,11 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
            ON lower(btrim(doc.name)) = lower(btrim(a.doctor_name))
           AND doc.role = 'consultant'
           AND COALESCE(doc.is_active, TRUE)
+          AND lower(btrim(a.doctor_name)) <> lower($2)
         WHERE a.id = v.appointment_id
           AND v.visit_date = $1::date
           AND v.assigned_doctor_id IS NULL`,
-      [day],
+      [day, LAB_ONLY_DOCTOR],
     );
     result.assigned = assigned.rowCount;
 
@@ -305,6 +383,7 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
 
     const grace = await pharmacyGraceMinutes(client);
     result.pharmacySwept = await sweepPharmacyLeg(client, day, grace);
+    result.labOnlySwept = await sweepLabOnlyExits(client, day);
     const awaitingMedicines = await patientsAwaitingMedicines(client, day);
 
     for (const appt of appts) {

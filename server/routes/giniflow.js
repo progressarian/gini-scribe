@@ -25,6 +25,12 @@ import {
   getStationAverages,
   searchDayVisits,
 } from "../services/giniflow/board.js";
+import {
+  LAB_ONLY_DOCTOR,
+  labOnlyPredicate,
+  getLabOnlyTimeline,
+  getLabTrack,
+} from "../services/giniflow/labOnlyVisits.js";
 import { setPriority, reorderColumn, moveToColumn } from "../services/giniflow/queue.js";
 import { seedDemoDay, cleanDemoDay, demoAllowed } from "../services/giniflow/demo.js";
 import { addClient, removeClient, hubStatus } from "../services/giniflow/eventHub.js";
@@ -188,25 +194,67 @@ router.get("/giniflow/board", validateQuery(giniflowDateQuerySchema), async (req
 router.get("/giniflow/visits/:id/timeline", async (req, res) => {
   try {
     const visit = await pool.query(
-      `SELECT v.id, v.current_status, v.category, v.blocked_reason, v.visit_date::text AS visit_date,
+      `SELECT v.id, v.patient_id, v.current_status, v.category, v.blocked_reason,
+              v.visit_date::text AS visit_date,
               p.name, p.age, p.sex, p.file_no,
-              (SELECT COUNT(*)::int FROM giniflow_visits pv
-                WHERE pv.patient_id = v.patient_id AND pv.visit_date <= v.visit_date) AS visit_number
+              ${labOnlyPredicate("v", "$2")} AS lab_only,
+              -- The same count the board's own query uses. Counting
+              -- giniflow_visits instead made the modal say "Visit 1" beside a
+              -- card reading "Visit 3": that table has no history before the
+              -- module was switched on (GF-05).
+              (SELECT COUNT(*)::int + 1 FROM appointments pa
+                WHERE pa.patient_id = v.patient_id
+                  AND pa.appointment_date < v.visit_date
+                  AND pa.status = 'completed') AS visit_number
          FROM giniflow_visits v JOIN patients p ON p.id = v.patient_id
         WHERE v.id = $1`,
-      [req.params.id],
+      [req.params.id, LAB_ONLY_DOCTOR],
     );
     if (!visit.rows.length) return res.status(404).json({ error: "Visit not found" });
+    const labOnly = !!visit.rows[0].lab_only;
 
     // Per-category budgets: a timeline judged against the base budget would
     // mark a red-category patient's consultation over budget while the board
     // beside it — which now resolves per category — shows the same step green.
     const sla = await getSlaConfig();
-    const steps = await getStationTimes(pool, req.params.id, budgetMap(sla), new Date(), {
-      slaConfig: sla,
-      category: visit.rows[0].category,
+    // A lab-only visit gets its own timeline rather than the chain's: see
+    // getLabOnlyTimeline for why the chain could not describe it truthfully.
+    const now = new Date();
+    const steps = labOnly
+      ? await getLabOnlyTimeline(
+          pool,
+          {
+            visitId: req.params.id,
+            visitDate: visit.rows[0].visit_date,
+            patientId: visit.rows[0].patient_id,
+            fileNo: visit.rows[0].file_no,
+          },
+          now,
+        )
+      : await getStationTimes(pool, req.params.id, budgetMap(sla), now, {
+          slaConfig: sla,
+          category: visit.rows[0].category,
+        });
+    // The parallel lab leg, for an ordinary visit that has one. A lab-only visit
+    // already has these milestones as its whole timeline.
+    const labTrack = labOnly
+      ? []
+      : await getLabTrack(
+          pool,
+          {
+            visitDate: visit.rows[0].visit_date,
+            patientId: visit.rows[0].patient_id,
+            fileNo: visit.rows[0].file_no,
+          },
+          now,
+        );
+
+    res.json({
+      visit: { ...visit.rows[0], labOnly },
+      steps,
+      labTrack,
+      serverTime: now.toISOString(),
     });
-    res.json({ visit: visit.rows[0], steps, serverTime: new Date().toISOString() });
   } catch (e) {
     handleError(res, e, "Gini Flow timeline");
   }

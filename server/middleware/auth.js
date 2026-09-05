@@ -146,6 +146,7 @@ const ROUTE_CAPABILITIES = [
   ["/api/obt-dashboard", CAP.OBT_OPS],
   ["/api/diabetes-champions", CAP.RECEPTION_OPS],
   ["/api/patients", CAP.PATIENT_READ],
+  ["/api/patients/directory-export", CAP.ADMIN],
   ["/api/documents", CAP.PATIENT_CHART],
   ["/api/outcomes", CAP.PATIENT_CHART],
   ["/api/conversations", CAP.PATIENT_READ],

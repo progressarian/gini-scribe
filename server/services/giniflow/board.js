@@ -7,7 +7,9 @@ import {
   columnForStatus,
   STATUS_LABEL,
   slaKeyForStatus,
+  TERMINAL_STATUSES,
 } from "../../../shared/giniflowStatus.js";
+import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { IST_TODAY, budgetColour } from "./statusEngine.js";
 
 export async function getSlaConfig(db = pool) {
@@ -73,9 +75,15 @@ const BOARD_SQL = `
          p.file_no,
          p.age,
          p.sex,
+         v.assigned_doctor_id,
          sd.short_name                             AS sd_name,
          doc.short_name                            AS doctor_name,
+         doc.name                                  AS doctor_full_name,
          seq.visit_number,
+         ${labOnlyPredicate("v", "$2")}            AS lab_only,
+         tests.names                               AS lab_test_names,
+         tests.cases                               AS lab_all_cases,
+         tests.reported                            AS lab_all_reported,
          first_ev.occurred_at                      AS journey_started_at,
          last_ev.occurred_at                       AS status_since,
          lab.sample_status                         AS lab_sample_status,
@@ -136,10 +144,27 @@ const BOARD_SQL = `
          AND lc.pdf_storage_path IS NULL
       HAVING count(*) > 0
     ) hrlab ON TRUE
+    LEFT JOIN LATERAL (
+      -- Every lab case of the day, reported ones included — which is what
+      -- separates it from the hrlab lateral above. hrlab answers "what is the lab still
+      -- working on"; this answers "what did this patient come to give", and a
+      -- samples-only patient whose reports are already back still has to appear
+      -- somewhere.
+      SELECT count(DISTINCT lc.id)::int                                       AS cases,
+             count(DISTINCT lc.id) FILTER (
+               WHERE COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'reported_on' IS NOT NULL
+             )::int                                                            AS reported,
+             array_remove(array_agg(DISTINCT t), NULL)                         AS names
+        FROM lab_cases lc
+        LEFT JOIN LATERAL unnest(COALESCE(lc.test_names, ARRAY[]::text[])) t ON TRUE
+       WHERE lc.case_date = v.visit_date
+         AND (lc.patient_id = v.patient_id
+              OR (lc.patient_id IS NULL
+                  AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))
+      HAVING count(*) > 0
+    ) tests ON TRUE
    WHERE v.visit_date = $1::date
    ORDER BY last_ev.occurred_at NULLS LAST`;
-
-const TERMINAL_STATUSES = ["dispensed", "exited"];
 
 const minutesSince = (from, now) =>
   from ? Math.max(0, Math.round((now - new Date(from)) / 60000)) : null;
@@ -197,6 +222,17 @@ const LAB_HINT = {
   ordered: "Waiting: payment request",
 };
 
+// A samples-only patient still on the board once the lab has finished with
+// them. `hrlab` has dropped them — nothing is pending — so the lab track builds
+// its own line rather than showing an empty card.
+const labOnlySummary = (row) => {
+  const cases = row.lab_all_cases ?? 0;
+  const reported = row.lab_all_reported ?? 0;
+  if (!cases) return { subtitle: "Registered · no case yet", hint: "Waiting: sample collection" };
+  if (reported >= cases) return { subtitle: "✅ Reports ready", hint: null };
+  return { subtitle: `${reported} of ${cases} reported`, hint: null };
+};
+
 const LAB_SUBTITLE = {
   ordered: "Ordered",
   payment_pending: "💰 Payment pending at reception",
@@ -209,7 +245,7 @@ const LAB_SUBTITLE = {
 export async function getDayBoard(visitDate, slaConfig, now = new Date(), db = pool) {
   const budgets = budgetMap(slaConfig);
   const budgetFor = budgetLookup(slaConfig);
-  const { rows } = await db.query(BOARD_SQL, [visitDate]);
+  const { rows } = await db.query(BOARD_SQL, [visitDate, LAB_ONLY_DOCTOR]);
 
   const cards = rows.map((row) => {
     // A finished visit's clock stopped when it exited; only a patient still in
@@ -219,6 +255,10 @@ export async function getDayBoard(visitDate, slaConfig, now = new Date(), db = p
     const statusMinutes = finished ? null : minutesSince(row.status_since, now);
     const totalMinutes = minutesSince(row.journey_started_at, clock);
     const budget = budgetFor(slaKeyForStatus(row.current_status), row.category);
+    // Settled entirely in SQL by labOnlyPredicate, so this board and the lab
+    // station cannot drift apart on who counts as samples-only.
+    const labOnly = !!row.lab_only;
+    const labOnlyLine = labOnly ? labOnlySummary(row) : null;
     return {
       id: row.id,
       patientId: row.patient_id,
@@ -247,6 +287,10 @@ export async function getDayBoard(visitDate, slaConfig, now = new Date(), db = p
         row.queue_column && row.queue_column === columnForStatus(row.current_status)
           ? row.queue_position
           : null,
+      labOnly,
+      labTests: row.lab_test_names || [],
+      assignedDoctorId: labOnly ? null : row.assigned_doctor_id,
+      assignedDoctorName: labOnly ? null : row.doctor_name || row.doctor_full_name || null,
       subtitle: subtitleFor(row),
       hint: hintFor(row),
       hintIcon: hintIconFor(row),
@@ -304,17 +348,51 @@ export async function getDayBoard(visitDate, slaConfig, now = new Date(), db = p
               caseCount: row.hr_lab_cases,
               atLab: !!row.hr_lab_at_lab,
             }
-          : null,
+          : labOnlyLine
+            ? {
+                since: row.journey_started_at
+                  ? new Date(row.journey_started_at).toISOString()
+                  : null,
+                // Derived, never assumed. Hardcoding results_ready/atLab:false
+                // told the card the patient had left without giving a sample
+                // while the row beside it read "Reports ready" — a report
+                // cannot exist without a sample.
+                sampleStatus: !row.lab_all_cases
+                  ? "paid"
+                  : (row.lab_all_reported ?? 0) >= row.lab_all_cases
+                    ? "results_ready"
+                    : "processing",
+                paymentStatus: null,
+                testCount: (row.lab_test_names || []).length,
+                subtitle: labOnlyLine.subtitle,
+                minutes: minutesSince(row.journey_started_at, clock),
+                budget: null,
+                colour: "grey",
+                hint: labOnlyLine.hint,
+                hintIcon: "🧪",
+                blocking: false,
+                source: "healthray",
+                caseCount: row.lab_all_cases ?? 0,
+                // A case that exists is a sample that was given.
+                atLab: (row.lab_all_cases ?? 0) > 0,
+              }
+            : null,
     };
   });
 
   const onFloor = cards.filter((c) => !OFF_BOARD_STATUSES.includes(c.status));
 
   const columns = BOARD_COLUMNS.map((col) => {
+    // Samples-only patients are kept out of the consultation columns entirely.
+    // They never reach a doctor, so leaving them in Checked-in and With SD / MO
+    // filled both with a queue nobody was working — on 5 Sep three of the seven
+    // patients on the floor were sitting in SD / MO for exactly that reason.
+    // The lab track keeps them reachable, which is what the coordinator needs to
+    // assign one to a consultant.
     const items =
       col.key === "lab"
         ? onFloor.filter((c) => c.lab)
-        : onFloor.filter((c) => col.statuses.includes(c.status));
+        : onFloor.filter((c) => !c.labOnly && col.statuses.includes(c.status));
     const budget = budgets[col.slaKey] ?? null;
     // Blocked patients are excluded from the average: they are stuck on missing
     // reports, not on this station's throughput, and letting them skew it points
@@ -458,12 +536,23 @@ export async function getDayStats(visitDate, board, slaConfig, db = pool) {
 
   const inBuilding = board.onFloor.filter((c) => !["dispensed", "exited"].includes(c.status));
   const done = board.cards.filter((c) => ["dispensed", "exited"].includes(c.status));
-  const journeys = done.map((c) => c.totalMinutes).filter((m) => m !== null);
+  // Lab-only visits are excluded here for the same reason they are excluded from
+  // every station average: a give-a-sample-and-go visit is not a consultation
+  // journey, and averaging the two answers neither question.
+  const journeys = done
+    .filter((c) => !c.labOnly)
+    .map((c) => c.totalMinutes)
+    .filter((m) => m !== null);
   const avgJourney = journeys.length
     ? Math.round(journeys.reduce((a, b) => a + b, 0) / journeys.length)
     : null;
 
-  const overBudget = inBuilding.filter((c) => c.statusColour === "red").length;
+  // Samples-only patients are excluded: they hold a pre-consultation status
+  // judged against the wait-for-SD budget, but they are not in that queue and
+  // nobody is going to call them. Counting them made the tile read "7 need
+  // attention" while With SD / MO showed 0, three of the seven waiting on
+  // nothing. Their lab clock is the one that matters and it is timed separately.
+  const overBudget = inBuilding.filter((c) => !c.labOnly && c.statusColour === "red").length;
   const blocked = board.onFloor.filter(
     (c) => c.status === "blocked_reports" || c.blockedReason,
   ).length;
@@ -478,8 +567,9 @@ export async function getDayStats(visitDate, board, slaConfig, db = pool) {
          SELECT occurred_at FROM giniflow_visit_events n
           WHERE n.visit_id = e.visit_id AND n.occurred_at > e.occurred_at
           ORDER BY n.occurred_at LIMIT 1
-       ) nxt ON TRUE`,
-    [visitDate],
+       ) nxt ON TRUE
+      WHERE NOT ${labOnlyPredicate("v", "$2")}`,
+    [visitDate, LAB_ONLY_DOCTOR],
   );
   const budgeted = hops
     .map((h) => ({ minutes: Number(h.minutes), budget: budgets[slaKeyForStatus(h.status)] }))
@@ -518,8 +608,15 @@ export async function getStationAverages(visitDate, slaConfig, db = pool) {
           WHERE n.visit_id = e.visit_id AND n.occurred_at > e.occurred_at
           ORDER BY n.occurred_at LIMIT 1
        ) nxt ON TRUE
+      -- Lab-only visits never walk these stations, so their hops must not
+      -- define how the stations are performing. On 5 Sep three of the five
+      -- closed check-in hops were lab-only, at 0m, 3m and 5m — the gap between
+      -- check-in and the sync noticing a HealthRay vitals row, not a queue.
+      -- They pulled the check-in average from 105m down to 44m and painted a
+      -- badly lagging station green.
+      WHERE NOT ${labOnlyPredicate("v", "$2")}
       GROUP BY e.status`,
-    [visitDate],
+    [visitDate, LAB_ONLY_DOCTOR],
   );
 
   const byStation = {};
@@ -573,8 +670,9 @@ export async function getStationAverages(visitDate, slaConfig, db = pool) {
             WHERE e.visit_id = v.id AND e.status IN ('exited', 'dispensed')
             ORDER BY occurred_at DESC LIMIT 1
          ) fin ON TRUE
-        WHERE v.visit_date = $1::date`,
-      [visitDate],
+        WHERE v.visit_date = $1::date
+          AND NOT ${labOnlyPredicate("v", "$2")}`,
+      [visitDate, LAB_ONLY_DOCTOR],
     )
   ).rows;
 

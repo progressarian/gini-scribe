@@ -39,10 +39,14 @@ export function useTriageDay(date, { filter, doctorId, q } = {}) {
   });
 }
 
-export function useTriageStaff(date) {
+// `enabled` because the flow manager board offers the same roster to a
+// coordinator but is read by roles without GINIFLOW_TRIAGE — fetching it for
+// them would be a 403 on every one of their page loads.
+export function useTriageStaff(date, enabled = true) {
   return useQuery({
     queryKey: ["giniflow", "triage", "staff", date || "today"],
     queryFn: async () => (await api.get(`${base}/staff`, { params: date ? { date } : {} })).data,
+    enabled,
     staleTime: 5 * 60_000,
   });
 }

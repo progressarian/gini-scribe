@@ -8,7 +8,7 @@ import { useNavigate } from "react-router-dom";
 import useAuthStore from "../stores/authStore.js";
 import usePatientStore from "../stores/patientStore.js";
 import useVisitStore from "../stores/visitStore.js";
-import useUiStore from "../stores/uiStore.js";
+import useUiStore, { toast } from "../stores/uiStore.js";
 import Shimmer from "../components/Shimmer.jsx";
 import api from "../services/api.js";
 import {
@@ -23,6 +23,25 @@ export default function FindPage() {
   const navigate = useNavigate();
   const sentinelRef = useRef(null);
   const { doctorsList, fetchDoctorsList, currentDoctor } = useAuthStore();
+  const canExportDirectory = hasCapability(currentDoctor?.role, CAPABILITIES.ADMIN);
+  const [exporting, setExporting] = useState(false);
+
+  const exportDirectory = async () => {
+    setExporting(true);
+    try {
+      const r = await api.get("/api/patients/directory-export", { responseType: "blob" });
+      const url = URL.createObjectURL(r.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `patients-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      toast(e?.response?.data?.error || "Could not export the patient list", "error");
+    } finally {
+      setExporting(false);
+    }
+  };
   const { loadPatientDB } = usePatientStore();
   const {
     todayAppointments,
@@ -154,6 +173,11 @@ export default function FindPage() {
         >
           + Book
         </button>
+        {canExportDirectory && (
+          <button className="find__book-btn" onClick={exportDirectory} disabled={exporting}>
+            {exporting ? "Exporting…" : "⬇ Patient list"}
+          </button>
+        )}
         <div className="find__stats">
           {searchStats
             ? [

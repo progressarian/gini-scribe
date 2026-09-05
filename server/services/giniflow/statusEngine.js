@@ -4,6 +4,7 @@ import {
   isChainStatus,
   isKnownStatus,
   isWaitStatus,
+  isTerminalStatus,
   slaKeyForStatus,
   STATUS_LABEL,
 } from "../../../shared/giniflowStatus.js";
@@ -146,6 +147,16 @@ export async function returnToQueue(
   return event.rows[0];
 }
 
+// STATUS_LABEL names the COLUMN a status feeds, which is what makes
+// `vitals_done` read "Waiting for SD / MO". On a lab-only visit that queue does
+// not exist for the patient, so the timeline named a station they will never
+// reach. These name the observation itself instead.
+const LAB_ONLY_LABEL = {
+  vitals_done: "Vitals done",
+  sd_pending: "Waiting",
+  ready_for_doctor: "Waiting",
+};
+
 // The one place durations are computed. Card timers, the timeline modal and the
 // station averages all read from here so they can never disagree.
 export async function getStationTimes(
@@ -153,7 +164,7 @@ export async function getStationTimes(
   visitId,
   slaConfig,
   now = new Date(),
-  { slaConfig: slaRows = null, category = null } = {},
+  { slaConfig: slaRows = null, category = null, unbudgeted = false } = {},
 ) {
   // `slaConfig` here is the flat station→minutes map every existing caller
   // passes. When the caller also knows whose timeline this is, it passes the
@@ -175,18 +186,27 @@ export async function getStationTimes(
     const enteredAt = new Date(row.occurred_at);
     const next = rows[i + 1];
     const leftAt = next ? new Date(next.occurred_at) : null;
+    const ended = !next && isTerminalStatus(row.status);
     return {
       status: row.status,
-      label: STATUS_LABEL[row.status] || row.status,
+      label:
+        (unbudgeted ? LAB_ONLY_LABEL[row.status] : null) || STATUS_LABEL[row.status] || row.status,
       actorRole: row.actor_role,
       meta: row.meta,
       enteredAt,
       leftAt,
-      minutes: minutesBetween(enteredAt, leftAt || now),
-      isCurrent: !next,
+      minutes: ended ? 0 : minutesBetween(enteredAt, leftAt || now),
+      isCurrent: !next && !ended,
       isWait: isWaitStatus(row.status),
-      budgetMinutes:
-        overrideFor(slaKeyForStatus(row.status)) ?? slaConfig[slaKeyForStatus(row.status)] ?? null,
+      // A lab-only visit is judged against nothing. Its statuses are the ones
+      // the sync happened to observe on the way to the lab — the patient is not
+      // in the SD / MO queue and never will be, so scoring 123 minutes against
+      // that station's 10-minute budget invents an overrun nobody can act on.
+      budgetMinutes: unbudgeted
+        ? null
+        : (overrideFor(slaKeyForStatus(row.status)) ??
+          slaConfig[slaKeyForStatus(row.status)] ??
+          null),
     };
   });
 
@@ -235,6 +255,27 @@ export async function getStationTimes(
     wait = null;
   };
 
+  // A queue may only be folded into the station it actually feeds.
+  //
+  // Merging it into whatever came next was wrong twice over. `vitals_done` is
+  // not a station at all — it is the sync noticing HealthRay holds a vitals row,
+  // and its own label is another queue's name — so a check-in absorbed into it
+  // produced a step headed "Waiting for SD / MO" timestamped at the arrival.
+  // And when the chain SKIPS, as it does whenever HealthRay reports a patient
+  // straight from checked-in to completed, the whole undocumented middle of the
+  // journey was relabelled as a queue for the station at the far end: one
+  // patient's consultation with a second doctor was shown as 129 minutes of
+  // "wait" for the pharmacy, judged against the 10-minute check-in budget.
+  //
+  // Unpaired, the wait stands as its own step under its own name, which is the
+  // honest description of time nobody recorded a station for.
+  const QUEUE_FEEDS = {
+    checked_in: "with_vitals",
+    vitals_pending: "with_vitals",
+    sd_pending: "with_sd",
+    ready_for_doctor: "with_doctor",
+  };
+
   for (const entry of raw) {
     // A queue the patient is still sitting in is a step in its own right — it is
     // the one the board is timing, so it must not be folded into a station.
@@ -247,6 +288,12 @@ export async function getStationTimes(
           }
         : entry;
       continue;
+    }
+    // Nothing to pair with: the wait stands as its own step, named for itself.
+    if (wait && QUEUE_FEEDS[wait.status] !== entry.status) {
+      const pending = wait;
+      wait = null;
+      emit({ ...pending, isCurrent: false, leftAt: entry.enteredAt });
     }
     emit(entry);
   }

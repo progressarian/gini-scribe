@@ -233,6 +233,11 @@
   background: var(--red-l);
   color: var(--red);
 }
+/* No budget applies to this clock. Deliberately not green: see colourClass. */
+.gf .tmr-n {
+  background: var(--bg2, #eef1f5);
+  color: var(--ink4);
+}
 .gf .tot {
   font-family: var(--fm);
   font-size: 9px;
@@ -554,6 +559,11 @@
 .gf .tsd-a {
   background: var(--amb-l);
   color: var(--amb);
+}
+/* No budget applies to this step — a lab-only visit. Not green: see tmr-n. */
+.gf .tsd-n {
+  background: var(--bg2, #eef1f5);
+  color: var(--ink4);
 }
 .gf .tsd-r {
   background: var(--red-l);
@@ -1109,3 +1119,76 @@
 
 /* Sending a patient to Done ends their visit on the board, and an append-only
    log has no way back — so it asks first (BQ-03). */
+
+/* ── SAMPLES-ONLY PATIENTS ── registered under the lab-only provider, with no
+   consultation booked. They are kept out of the consultation columns entirely
+   and live in the lab track, so the card has to say why it is there and offer
+   the one action that puts it back on the board. */
+.gf .pc-lo {
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  color: var(--tl);
+  background: rgba(13, 148, 136, 0.1);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+/* What they came to give. Two lines at most: a five-test panel is the common
+   case and the whole list is on the title attribute. */
+.gf .pc-tests {
+  font-size: 9px;
+  line-height: 1.35;
+  color: var(--ink3, var(--ink4));
+  margin-bottom: 3px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.gf .pc-assign-btn {
+  display: block;
+  width: 100%;
+  margin-top: 5px;
+  padding: 4px 6px;
+  background: none;
+  border: 1px solid var(--bd);
+  border-radius: 5px;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--tl);
+  cursor: pointer;
+}
+.gf .pc-assign-btn:hover {
+  background: rgba(13, 148, 136, 0.08);
+  border-color: var(--tl);
+}
+.gf .pc-menu.assign {
+  top: auto;
+  bottom: 4px;
+  max-height: 210px;
+  overflow-y: auto;
+}
+.gf .pcm-load {
+  margin-left: auto;
+  font-family: var(--fm);
+  font-size: 9px;
+  color: var(--ink4);
+}
+
+/* The lab leg of an ordinary visit, shown under the chain rather than woven into
+   it — the two tracks run at the same time and merging them implied an order
+   neither has. */
+.gf .ts-track-hd {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--ink4);
+  margin: 10px 0 4px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--bd);
+}

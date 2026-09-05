@@ -5,6 +5,9 @@ import useAuthStore from "../../stores/authStore";
 import { hasCapability, CAPABILITIES as CAP } from "../../../shared/permissions";
 import {
   CHAIN,
+  chainIndex,
+  isChainStatus,
+  isTerminalStatus,
   STATUS_LABEL,
   STATUS_TO_SLA_KEY,
   BOARD_COLUMNS,
@@ -29,6 +32,7 @@ import {
   useGiniflowMove,
 } from "../../queries/hooks/useGiniflowQueue";
 import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
+import { useTriageStaff, useAssignVisit } from "../../queries/hooks/useGiniflowTriage";
 import LiveBadge from "../../components/giniflow/LiveBadge";
 import "../../styles/giniflow.css";
 
@@ -104,8 +108,19 @@ const clockAt = (iso) =>
 const minutesSince = (iso, now) =>
   iso ? Math.max(0, Math.round((now - new Date(iso).getTime()) / 60000)) : null;
 
+// Neutral is its own style, not a fall-through to green. A lab card carries no
+// budget — the board has never timed a HealthRay lab case — and mapping that to
+// the green chip told the floor a 169-minute wait was inside a budget that was
+// never applied to it. Grey says the only true thing: this clock is running and
+// nothing is judging it.
 const colourClass = (colour) =>
-  colour === "red" ? "tmr-r" : colour === "amber" ? "tmr-a" : "tmr-g";
+  colour === "red"
+    ? "tmr-r"
+    : colour === "amber"
+      ? "tmr-a"
+      : colour === "green"
+        ? "tmr-g"
+        : "tmr-n";
 
 // Escape closes the topmost overlay and focus returns to whatever opened it —
 // without this a keyboard user who opens the timeline is stranded inside it (GF-16).
@@ -264,6 +279,40 @@ function CardMenu({ card, canMoveUp, canMoveDown, onPriority, onNudge, onMove, o
   );
 }
 
+// Handing a samples-only patient to a consultant. It reuses the triage board's
+// own assign endpoint rather than adding a second way to write the same column —
+// which is also why an assignment made here shows up there, and why the board
+// refreshes itself without a reload.
+function AssignMenu({ card, staff, onAssign, onClose }) {
+  const ref = useRef(null);
+  useDismissable(true, onClose, ref);
+
+  return (
+    <div className="pc-menu assign" ref={ref} role="menu">
+      <div className="pcm-hd">Send to</div>
+      {!staff.length && (
+        <div className="pcm-item" aria-disabled="true">
+          Nobody on today
+        </div>
+      )}
+      {staff.map((d) => (
+        <button
+          key={d.id}
+          type="button"
+          role="menuitem"
+          className="pcm-item"
+          onClick={() => onAssign(d.id, d.shortName)}
+        >
+          <span>{d.shortName}</span>
+          {/* The load each already carries, for the same reason the triage
+              board shows it: assigning blind is how one list reaches thirty. */}
+          <span className="pcm-load">{d.assignedToday}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function PatientCard({
   card,
   offsetMs,
@@ -279,14 +328,22 @@ function PatientCard({
   onPriority,
   onNudge,
   onMove,
+  canAssign,
+  staff,
+  onAssign,
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [assignOpen, setAssignOpen] = useState(false);
   const isLab = !!card.lab && card.column === "lab";
+  const isLabOnly = isLab && !!card.labOnly;
   const anchor = isLab ? card.lab.since : card.statusSince;
   const live = minutesSince(anchor, now - offsetMs);
   const minutes = live ?? (isLab ? card.lab.minutes : card.statusMinutes);
   const budget = isLab ? card.lab.budget : card.statusBudget;
-  const colour = budgetColour(minutes, budget);
+  // A finished visit's timer counts up from the exit, and no budget covers
+  // "time since exit" — the server marks those green deliberately. Only a LIVE
+  // clock with no budget behind it goes grey, which is the lab track.
+  const colour = card.finished ? "green" : budgetColour(minutes, budget);
   const totalMinutes = card.finished
     ? card.totalMinutes
     : (minutesSince(card.journeyStartedAt, now - offsetMs) ?? card.totalMinutes);
@@ -336,6 +393,11 @@ function PatientCard({
               {PRIORITY_ICON[card.priority]} {PRIORITY_LABEL[card.priority]}
             </span>
           )}
+          {isLabOnly && (
+            <span className="pc-lo" title="Registered for samples only — no consultation booked">
+              LAB ONLY
+            </span>
+          )}
           <div className="pc-cat" title={CATEGORY_DOT[card.category]?.label || "Uncategorised"}>
             {CATEGORY_DOT[card.category]?.icon || ""}
           </div>
@@ -344,6 +406,11 @@ function PatientCard({
           {card.age}
           {(card.sex || "")[0] || ""} · {card.fileNo || "—"} · Visit {card.visitNumber ?? "—"}
         </div>
+        {isLabOnly && !!card.labTests?.length && (
+          <div className="pc-tests" title={card.labTests.join(" · ")}>
+            {card.labTests.join(" · ")}
+          </div>
+        )}
         <div className="pc-mid">{isLab ? card.lab.subtitle : card.subtitle}</div>
         <div className="pc-bot">
           <span className={`tmr ${colourClass(colour)}`}>⏱ {minutes ?? 0}m</span>
@@ -361,7 +428,13 @@ function PatientCard({
             <span className="w-ico">🚫</span> Left without giving a sample
           </div>
         )}
-        {isLab && <div className="pc-parallel">Lab track · also on the main board</div>}
+        {isLab && (
+          <div className="pc-parallel">
+            {isLabOnly
+              ? "Samples only · not in the consultation queue"
+              : "Lab track · also on the main board"}
+          </div>
+        )}
         {!isLab && card.blockedReason && (
           <div className="wait4 blocked">
             <span className="w-ico">🚫</span> {card.blockedReason}
@@ -391,6 +464,29 @@ function PatientCard({
           ⋮
         </button>
       )}
+      {canAssign && isLabOnly && (
+        <button
+          type="button"
+          className="pc-assign-btn"
+          data-gf-toggle
+          aria-haspopup="menu"
+          aria-expanded={assignOpen}
+          onClick={() => setAssignOpen((v) => !v)}
+        >
+          Assign doctor
+        </button>
+      )}
+      {assignOpen && (
+        <AssignMenu
+          card={card}
+          staff={staff || []}
+          onAssign={(doctorId, doctorName) => {
+            setAssignOpen(false);
+            onAssign(card.id, doctorId, doctorName);
+          }}
+          onClose={() => setAssignOpen(false)}
+        />
+      )}
       {menuOpen && (
         <CardMenu
           card={card}
@@ -412,6 +508,9 @@ function PatientCard({
 const ORDERABLE = (key) => key !== "lab" && key !== "done";
 
 function Column({
+  canAssign,
+  staff,
+  onAssign,
   column,
   offsetMs,
   now,
@@ -525,6 +624,9 @@ function Column({
               onPriority={(priority, reason) => onPriority(card.id, priority, reason)}
               onNudge={(delta) => nudge(card, delta)}
               onMove={(key) => onMove(card.id, key, card.name)}
+              canAssign={canAssign}
+              staff={staff}
+              onAssign={onAssign}
             />
           </Fragment>
         ))}
@@ -691,6 +793,7 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
   if (!visitId) return null;
   const visit = data?.visit;
   const steps = data?.steps || [];
+  const labTrack = data?.labTrack || [];
 
   // The step the patient is standing in keeps counting while the modal is open;
   // finished steps are already fixed (GF-24).
@@ -701,24 +804,47 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
   const liveTotal = (step) =>
     step.isCurrent ? liveWait(step) + step.stationMinutes : step.totalMinutes;
   const liveOver = (step) =>
-    step.budgetMinutes ? Math.max(0, liveTotal(step) - step.budgetMinutes) : 0;
-  const liveColour = (step) => budgetColour(liveTotal(step), step.budgetMinutes);
+    step.isCurrent && step.budgetMinutes
+      ? Math.max(0, liveTotal(step) - step.budgetMinutes)
+      : step.overBy;
+  const liveColour = (step) =>
+    step.isCurrent ? budgetColour(liveTotal(step), step.budgetMinutes) : step.colour;
 
   // GF-14: what has not happened yet, so the modal answers "what is left" as well
   // as "what has taken so long".
   const doneStatuses = new Set(steps.map((s) => s.status));
   const budgetFor = (status) =>
     slaConfig?.find((c) => c.station === STATUS_TO_SLA_KEY[status])?.budgetMinutes ?? null;
-  const projected = CHAIN.slice(CHAIN.indexOf("checked_in"))
-    .filter((status) => !doneStatuses.has(status) && !WAIT_ONLY.has(status))
-    .map((status) => ({
-      status,
-      label: STATUS_LABEL[status] || status,
-      budget: budgetFor(status),
-    }));
+  const finished = isTerminalStatus(visit?.current_status);
+  const onChain = isChainStatus(visit?.current_status);
+  // A lab-only visit walks to the lab and goes home. Projecting the rest of the
+  // chain listed With SD / MO, Waiting for consultant and At pharmacy as "still
+  // to come" for a patient no consultant is going to see.
+  const projected =
+    !onChain || visit?.labOnly
+      ? []
+      : CHAIN.slice(CHAIN.indexOf("checked_in"))
+          .filter(
+            (status) =>
+              chainIndex(status) > chainIndex(visit.current_status) &&
+              !doneStatuses.has(status) &&
+              !WAIT_ONLY.has(status),
+          )
+          .map((status) => ({
+            status,
+            label: STATUS_LABEL[status] || status,
+            budget: budgetFor(status),
+          }));
   const journeySoFar = steps.reduce((sum, st) => sum + liveTotal(st), 0);
   const journeyTarget =
     slaConfig?.find((c) => c.station === "total_journey")?.budgetMinutes ?? null;
+
+  const plainDuration = (step) =>
+    step.isCurrent
+      ? `waiting ${minutesSince(step.enteredAt, now) ?? 0}m`
+      : step.totalMinutes === null
+        ? "reports back"
+        : `${step.totalMinutes}m to the next step`;
 
   return (
     <div className="tmodal open" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -748,12 +874,27 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
                 <div className="ts-time">
                   {step.isCurrent ? `Since ${clockAt(step.enteredAt)}` : clockAt(step.enteredAt)}
                 </div>
-                <span
-                  className={`ts-dur ${step.colour === "red" ? "tsd-r" : step.colour === "amber" ? "tsd-a" : "tsd-g"}`}
-                >
-                  {step.waitMinutes}m wait + {step.stationMinutes}m station
-                  {step.overBy ? ` — ${step.overBy}m OVER budget` : ""}
-                </span>
+                {!step.timestampOnly && (
+                  <span
+                    className={`ts-dur ${
+                      liveColour(step) === "red"
+                        ? "tsd-r"
+                        : liveColour(step) === "amber"
+                          ? "tsd-a"
+                          : liveColour(step) === "green"
+                            ? "tsd-g"
+                            : "tsd-n"
+                    }`}
+                  >
+                    {step.plain
+                      ? // A milestone is a point in time, not a queue and a
+                        // station: "0m wait + 56m station" described neither.
+                        plainDuration(step)
+                      : `${liveWait(step)}m wait + ${step.stationMinutes}m station${
+                          liveOver(step) ? ` — ${liveOver(step)}m OVER budget` : ""
+                        }`}
+                  </span>
+                )}
                 {step.meta?.vitals && (
                   <div className="ts-note">
                     BP {step.meta.vitals.bp} · {step.meta.vitals.weight} kg
@@ -762,8 +903,57 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
               </div>
             </div>
           ))}
+          {projected.map((step) => (
+            <div className="tstep" key={step.status}>
+              <div className="ts-dot tsd-next">○</div>
+              <div className="ts-body">
+                <div className="ts-name dim">{step.label}</div>
+                <span className="ts-dur tsd-next-dur">
+                  {step.budget ? `still to come · ${step.budget}m budget` : "still to come"}
+                </span>
+              </div>
+            </div>
+          ))}
+          {labTrack.length > 0 && (
+            <>
+              <div className="ts-track-hd">🧪 Lab track — runs alongside the journey above</div>
+              {labTrack.map((step, i) => (
+                <div className="tstep" key={`lab-${step.status}-${i}`}>
+                  <div className={`ts-dot ${step.isCurrent ? "tsd-now" : "tsd-done"}`}>
+                    {step.isCurrent ? "●" : "✓"}
+                  </div>
+                  <div className="ts-body">
+                    <div className="ts-name">{step.label}</div>
+                    <div className="ts-time">
+                      {step.isCurrent
+                        ? `Since ${clockAt(step.enteredAt)}`
+                        : clockAt(step.enteredAt)}
+                    </div>
+                    <span className="ts-dur tsd-n">{plainDuration(step)}</span>
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+          {visit?.labOnly && !isLoading && (
+            <div className="ts-note">
+              🧪 Lab only — booked for the test alone. These are the steps the hospital actually
+              timestamped; there is no consultation stage to show or to judge against a budget.
+            </div>
+          )}
           {visit?.blocked_reason && (
             <div className="ts-note ts-blocked">🚫 {visit.blocked_reason}</div>
+          )}
+          {!isLoading && steps.length > 0 && (
+            <div className="ts-summary">
+              {journeySoFar}m in the building
+              {journeyTarget && !visit?.labOnly ? ` of a ${journeyTarget}m target` : ""}
+              {finished
+                ? " · journey complete"
+                : projected.length
+                  ? ` · ${projected.length} step${projected.length === 1 ? "" : "s"} left`
+                  : ""}
+            </div>
           )}
         </div>
       </div>
@@ -784,9 +974,14 @@ const STAT_FILTERS = {
     label: "Completed",
     match: (card) => card.finished,
   },
+  // Both of these skip samples-only patients, to stay in step with the server's
+  // own count (board.js getDayStats): they are judged against a queue they are
+  // not in, so they belong in neither the over-budget list nor the within-SLA
+  // one. A filter that disagreed with the tile it opens would show seven cards
+  // under a count of four.
   overBudget: {
     label: "Over time budget",
-    match: (card) => !card.finished && card.statusColour === "red",
+    match: (card) => !card.finished && !card.labOnly && card.statusColour === "red",
   },
   blocked: {
     label: "Blocked",
@@ -795,7 +990,7 @@ const STAT_FILTERS = {
   },
   withinSla: {
     label: "Within SLA",
-    match: (card) => !card.finished && card.statusColour !== "red",
+    match: (card) => !card.finished && !card.labOnly && card.statusColour !== "red",
   },
   // The average is a number, not a set — but the journeys behind it are a set,
   // and those are what a coordinator wants when the average looks wrong. Making
@@ -839,6 +1034,10 @@ export default function FlowManagerPage() {
   const role = useAuthStore((s) => s.currentDoctor?.role);
   const canEditSla = hasCapability(role, CAP.GINIFLOW_SLA_ADMIN);
   const canManageQueue = hasCapability(role, CAP.GINIFLOW_MANAGE_QUEUE);
+  // Reassigning is the coordinator's triage capability, not the queue one: a
+  // nurse holding GINIFLOW_VIEW reads this board too, and moving a patient onto
+  // a consultant's list is the same decision the triage board gates.
+  const canAssign = hasCapability(role, CAP.GINIFLOW_TRIAGE);
   const queryClient = useQueryClient();
   const now = useTick();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -863,6 +1062,11 @@ export default function FlowManagerPage() {
   const setPriorityMutation = useGiniflowSetPriority(date);
   const reorderMutation = useGiniflowReorder(date);
   const moveMutation = useGiniflowMove(date, data?.slaConfig || []);
+  const assignMutation = useAssignVisit();
+  // Only fetched for the role that can act on it, and cached for five minutes by
+  // the hook — the roster does not change during a clinic.
+  const { data: staffData } = useTriageStaff(date, canAssign);
+  const staff = canAssign ? staffData?.staff || [] : [];
 
   // A display left open overnight would keep asking for yesterday. When the IST
   // date rolls over, drop back to "today" and refetch (GF: day rollover).
@@ -967,6 +1171,18 @@ export default function FlowManagerPage() {
 
   const onPriority = (visitId, priority, reason) =>
     setPriorityMutation.mutate({ visitId, priority, reason }, { onError: queueError });
+
+  // The name comes from the roster the menu drew, not from the response:
+  // assign() reports doctors.short_name, which part of the roster leaves null.
+  const onAssign = (visitId, doctorId, doctorName) =>
+    assignMutation.mutate(
+      { visitId, assignedDoctorId: doctorId },
+      {
+        onSuccess: () => showToast(`✓ ${doctorName} assigned — the patient is back on the board`),
+        onError: (e) =>
+          showToast(e?.response?.data?.error || "Could not assign that patient — nothing changed"),
+      },
+    );
 
   const onReorder = (columnKey, visitIds) =>
     reorderMutation.mutate(
@@ -1292,6 +1508,9 @@ export default function FlowManagerPage() {
               onReorder={onReorder}
               onMove={onMove}
               onPriority={onPriority}
+              canAssign={canAssign}
+              staff={staff}
+              onAssign={onAssign}
             />
           ))}
         </div>
