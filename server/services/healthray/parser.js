@@ -327,30 +327,110 @@ export function repairAndParseJSON(raw) {
   return null;
 }
 
-const RELATIVE_FOLLOW_UP_RE =
-  /\b(?:FOLLOW\s*-?\s*UP|FOLLOWUP|F\/?U|REVIEW|REVISIT|RTC)\s+(?:WITH\s*)?(?:AFTER|IN|WITHIN)\s+(\d{1,2})\s*(DAY|WEEK|MONTH|YEAR)S?\b([^\n]*)/gi;
+const FOLLOW_UP_LABEL = String.raw`(?:FOLLOW\s*-?\s*UP|FOLLOWUP|F\/?U|REVIEW|REVISIT|RTC)`;
 
-const DATED_LOG_TAIL_RE = /^[\s:-]*\d{1,2}\s*[/.-]\s*\d{1,2}\s*[/.-]\s*\d{2,4}/;
+const RELATIVE_FOLLOW_UP_RE = new RegExp(
+  String.raw`\b${FOLLOW_UP_LABEL}\s+(?:[A-Z.\s]{0,40}?\s)?(?:AFTER|IN|WITHIN)\s+(\d{1,2})\s*(DAY|WEEK|MONTH|YEAR)S?\b([^\n]*)`,
+  "gi",
+);
+
+const DATE_IN_TAIL_RE = /\d{1,2}\s*[/.-]\s*\d{1,2}\s*[/.-]\s*\d{2,4}/;
+
+const PAST_LOG_HEAD_RE = /TODAY/i;
+
+const ABSOLUTE_WORD_MONTH_RE = new RegExp(
+  String.raw`\b${FOLLOW_UP_LABEL}\b[^\n]{0,60}?\b(\d{1,2})\s*(?:ST|ND|RD|TH)?\s*[-/ ]?\s*(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|SEPT|OCT|NOV|DEC)[A-Z]*\s*,?\s*(\d{4}|\d{2})\b([^\n]*)`,
+  "gi",
+);
+
+const ABSOLUTE_NUMERIC_RE = new RegExp(
+  String.raw`\b${FOLLOW_UP_LABEL}\b[^\n]{0,60}?\b(\d{1,2})\s*[/-]\s*(\d{1,2})\s*[/-]\s*(\d{2,4})\b([^\n]*)`,
+  "gi",
+);
+
+const MONTH_NUMBERS = {
+  jan: 1,
+  feb: 2,
+  mar: 3,
+  apr: 4,
+  may: 5,
+  jun: 6,
+  jul: 7,
+  aug: 8,
+  sep: 9,
+  oct: 10,
+  nov: 11,
+  dec: 12,
+};
+
+const FOLLOW_UP_HORIZON_MONTHS = 12;
+
+const cleanFollowUpNotes = (tail) =>
+  (tail || "")
+    .replace(/^[\s:-]*WITH\s+/i, "")
+    .replace(/[.,;)\s]+$/, "")
+    .trim() || null;
+
+const fullYear = (raw) => (String(raw).length === 4 ? parseInt(raw, 10) : 2000 + parseInt(raw, 10));
+
+const toIsoDate = (year, month, day) => {
+  if (!year || !month || month > 12 || !day || day > 31) return null;
+  const dt = new Date(Date.UTC(year, month - 1, day));
+  if (dt.getUTCMonth() !== month - 1 || dt.getUTCDate() !== day) return null;
+  return dt.toISOString().slice(0, 10);
+};
+
+const shiftMonths = (isoDate, months) => {
+  const dt = new Date(`${isoDate}T00:00:00Z`);
+  dt.setUTCMonth(dt.getUTCMonth() + months);
+  return dt.toISOString().slice(0, 10);
+};
 
 export function extractRelativeFollowUp(rawText) {
   if (!rawText) return null;
   let last = null;
   for (const m of rawText.matchAll(RELATIVE_FOLLOW_UP_RE)) {
-    if (DATED_LOG_TAIL_RE.test(m[3] || "")) continue;
+    if (DATE_IN_TAIL_RE.test(m[3] || "")) continue;
+    if (PAST_LOG_HEAD_RE.test(m[0].slice(0, 40))) continue;
     last = m;
   }
   if (!last) return null;
   const count = parseInt(last[1], 10);
   if (!count) return null;
-  const notes = (last[3] || "")
-    .replace(/^[\s:-]*WITH\s+/i, "")
-    .replace(/[.,;)\s]+$/, "")
-    .trim();
   return {
     date: null,
     timing: `${count} ${last[2].toLowerCase()}${count === 1 ? "" : "s"}`,
-    notes: notes || null,
+    notes: cleanFollowUpNotes(last[3]),
   };
+}
+
+export function extractAbsoluteFollowUp(rawText, apptDate) {
+  if (!rawText || !/^\d{4}-\d{2}-\d{2}$/.test(apptDate || "")) return null;
+  const horizon = shiftMonths(apptDate, FOLLOW_UP_HORIZON_MONTHS);
+  let last = null;
+  for (const line of rawText.split("\n")) {
+    if (PAST_LOG_HEAD_RE.test(line)) continue;
+    const hits = [
+      ...[...line.matchAll(ABSOLUTE_WORD_MONTH_RE)].map((m) => ({
+        date: toIsoDate(fullYear(m[3]), MONTH_NUMBERS[m[2].toLowerCase().slice(0, 3)], +m[1]),
+        tail: m[4],
+      })),
+      ...[...line.matchAll(ABSOLUTE_NUMERIC_RE)].map((m) => ({
+        date: toIsoDate(fullYear(m[3]), +m[2], +m[1]),
+        tail: m[4],
+      })),
+    ];
+    for (const hit of hits) {
+      if (!hit.date || hit.date <= apptDate || hit.date > horizon) continue;
+      last = hit;
+    }
+  }
+  if (!last) return null;
+  return { date: last.date, timing: null, notes: cleanFollowUpNotes(last.tail) };
+}
+
+export function extractFollowUpFromNote(rawText, apptDate) {
+  return extractAbsoluteFollowUp(rawText, apptDate) || extractRelativeFollowUp(rawText);
 }
 
 export const CLINICAL_EXTRACTION_PROMPT = `Parse this clinical note into structured JSON. Extract ONLY data present in the text.

@@ -6,6 +6,7 @@ import { referralsForVisit, generateLetter } from "./referralsStation.js";
 import { saveCarePlan } from "./doctorStation.js";
 import { orderTests } from "./moStation.js";
 import { checkVisit } from "./interactions.js";
+import { whenToTakeFor } from "../../../shared/giniflowMedTiming.js";
 
 // Finalize — brief §2.3 trigger 4, docs/gini-flow/14-CONSULTANT-PRESCRIPTION-PLAN.md §6.
 //
@@ -64,7 +65,11 @@ export async function finalizeConsult(visitId, actorId = null, db = pool) {
     const visit = visitRows[0];
     patientId = visit.patient_id;
 
-    if (["doctor_done", "pharmacy_pending", "dispensed", "exited"].includes(visit.current_status)) {
+    if (
+      ["doctor_done", "rx_pending", "with_rx", "pharmacy_pending", "dispensed", "exited"].includes(
+        visit.current_status,
+      )
+    ) {
       throw Object.assign(new Error("This consultation is already finalized"), { status: 409 });
     }
 
@@ -208,20 +213,22 @@ export async function finalizeConsult(visitId, actorId = null, db = pool) {
       await client.query(
         `INSERT INTO medications
            (patient_id, consultation_id, name, pharmacy_match, composition, dose, previous_dose,
-            frequency, timing, timing_category, time_of_day, route, form, clinical_note,
-            instructions, drug_class, change_type, is_new, is_active, started_date,
-            last_prescribed_date)
+            frequency, timing, timing_category, when_to_take, time_of_day, route, form,
+            clinical_note, instructions, drug_class, change_type, is_new, is_active,
+            started_date, last_prescribed_date)
          SELECT $1, $2, t.name, t.pharm, t.composition, t.dose, t.previous_dose,
-                t.frequency, t.timing, t.timing_category, t.time_of_day::time, t.route, t.form,
+                t.frequency, t.timing, t.timing_category,
+                NULLIF(string_to_array(t.when_to_take, '|'), '{}')::when_to_take_pill[],
+                t.time_of_day::time, t.route, t.form,
                 t.reason, t.patient_instruction, t.drug_class, t.change_type,
                 t.change_type = 'new', true,
                 CASE WHEN t.change_type = 'new' THEN $3::date ELSE NULL END, $3::date
            FROM UNNEST($4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[],
                        $10::text[], $11::text[], $12::text[], $13::text[], $14::text[],
-                       $15::text[], $16::text[], $17::text[], $18::text[])
+                       $15::text[], $16::text[], $17::text[], $18::text[], $19::text[])
                 AS t(name, pharm, composition, dose, previous_dose, frequency, timing,
                      timing_category, time_of_day, route, form, reason, patient_instruction,
-                     drug_class, change_type)
+                     drug_class, change_type, when_to_take)
          ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
          DO UPDATE SET consultation_id = EXCLUDED.consultation_id,
            composition = COALESCE(EXCLUDED.composition, medications.composition),
@@ -230,6 +237,7 @@ export async function finalizeConsult(visitId, actorId = null, db = pool) {
            frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
            timing = COALESCE(EXCLUDED.timing, medications.timing),
            timing_category = COALESCE(EXCLUDED.timing_category, medications.timing_category),
+           when_to_take = COALESCE(EXCLUDED.when_to_take, medications.when_to_take),
            time_of_day = COALESCE(EXCLUDED.time_of_day, medications.time_of_day),
            route = COALESCE(EXCLUDED.route, medications.route),
            form = COALESCE(EXCLUDED.form, medications.form),
@@ -260,6 +268,7 @@ export async function finalizeConsult(visitId, actorId = null, db = pool) {
           active.map((i) => i.patient_instruction),
           active.map((i) => i.drug_class),
           active.map((i) => i.change_type),
+          active.map((i) => whenToTakeFor(i.timing_categories).join("|") || null),
         ],
       );
     }
@@ -279,7 +288,7 @@ export async function finalizeConsult(visitId, actorId = null, db = pool) {
     });
     await advanceStatus(client, {
       visitId,
-      toStatus: "pharmacy_pending",
+      toStatus: "rx_pending",
       actorRole: "doctor",
       actorId,
       meta: { source: "consult_finalize" },

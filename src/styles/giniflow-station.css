@@ -564,6 +564,70 @@
 .gf .caption.live {
   box-shadow: 0 0 0 2px var(--pu-b, rgba(124, 58, 237, 0.35));
 }
+/* The dictation review box: the caption, once recording stops, is a text field
+   and says so. Nothing it heard reaches the form until "Add this". */
+.gf .vrev {
+  flex-basis: 100%;
+  background: var(--nv);
+  color: #fff;
+  border-radius: var(--r-lg);
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  width: 100%;
+  min-width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.gf .vrev__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  font-weight: 700;
+}
+.gf .vrev__head em {
+  font-style: normal;
+  font-weight: 500;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.6);
+}
+.gf .vrev__text {
+  font: inherit;
+  font-family: var(--fm);
+  font-size: 12px;
+  line-height: 1.45;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: var(--r);
+  padding: 7px 9px;
+  resize: vertical;
+  width: 100%;
+}
+.gf .vrev__text:focus {
+  outline: none;
+  border-color: var(--pu-b, rgba(124, 58, 237, 0.55));
+  background: rgba(255, 255, 255, 0.16);
+}
+.gf .vrev__acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.gf .vrev__acts .btn-sm {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+.gf .vrev__acts .btn-sm.on {
+  background: var(--grn);
+  border-color: var(--grn);
+  color: #fff;
+}
+
 .gf .cap-dot {
   width: 8px;
   height: 8px;
@@ -1531,6 +1595,49 @@
 .gf .pb-count {
   font-size: 9px;
   color: var(--ink3);
+}
+
+.gf .mo-newtest {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.gf .mo-newtest .cp-inp {
+  flex: 1;
+  min-width: 180px;
+}
+
+.gf .mo-newtest__price {
+  flex: 0 0 auto;
+  width: 96px;
+  min-width: 0;
+}
+.gf .mo-customlist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.gf .mo-custom {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--pu);
+  background: var(--pu-l);
+  border: 1px solid var(--pu-b);
+  border-radius: 20px;
+  padding: 4px 9px;
+}
+.gf .mo-custom button {
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
 }
 
 .gf .mo-tests {
@@ -3101,6 +3208,33 @@
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 8px;
 }
+.gf .rx-timings {
+  margin-top: 8px;
+}
+.gf .rx-timings__head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--ink4);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.gf .rx-timings__head em {
+  font-style: normal;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--ink3);
+}
+.gf .rx-timings__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 4px;
+}
+
 .gf .rx-grid label,
 .gf .rx-wide {
   display: flex;
@@ -3226,6 +3360,56 @@
   font-size: 9px;
   color: var(--ink3);
 }
+.gf .tst-new {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--pu);
+  background: var(--pu-l);
+  border: 1px dashed var(--pu-b);
+  border-radius: var(--r);
+  padding: 7px 10px;
+  margin-bottom: 8px;
+}
+
+.gf .tst-new__price {
+  width: 92px;
+  flex: 0 0 auto;
+}
+.gf .tst-customlist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.gf .tst-custom {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--pu);
+  background: var(--pu-l);
+  border: 1px solid var(--pu-b);
+  border-radius: 20px;
+  padding: 4px 9px;
+}
+.gf .tst-custom button {
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0;
+}
+
+.gf .tst-filter {
+  flex: 1;
+  min-width: 0;
+}
+
 .gf .tst-list {
   display: flex;
   flex-wrap: wrap;
@@ -4748,10 +4932,7 @@
 .gf .tst-heard {
   font-size: 11px;
   color: var(--pu);
-  background: var(--pu-l);
-  border: 1px solid var(--pu-b);
   border-radius: var(--r);
-  padding: 6px 10px;
   margin-bottom: 8px;
   display: flex;
   align-items: center;
@@ -4933,12 +5114,6 @@
   opacity: 0.75;
 }
 .gf .tst-heard {
-  font-size: 11px;
-  color: var(--pu);
-  background: var(--pu-l);
-  border: 1px solid var(--pu-b);
-  border-radius: var(--r);
-  padding: 6px 10px;
   margin-bottom: 8px;
   display: flex;
   align-items: center;

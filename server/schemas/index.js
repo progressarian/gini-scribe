@@ -563,7 +563,7 @@ export const giniflowDateQuerySchema = z.object({
     .optional(),
 });
 
-export const giniflowLabQuerySchema = z.object({
+export const giniflowStationQuerySchema = z.object({
   q: z.string().trim().max(60).optional(),
   date: z
     .string()
@@ -668,10 +668,39 @@ export const giniflowMoQueueQuerySchema = giniflowDateQuerySchema.extend({
   q: z.string().trim().max(60).optional(),
 });
 
-export const giniflowOrderTestsSchema = z.object({
-  urgency: z.enum(["today", "tomorrow", "next_visit"]),
-  tests: z.array(z.string().min(1).max(120)).min(1).max(40),
+// A test the consultant types in because the catalogue has never heard of it.
+export const giniflowCatalogTestSchema = z.object({
+  name: z.string().trim().min(2, "A test needs a name").max(120),
+  gloss: z.string().trim().max(160).nullish(),
 });
+
+export const giniflowCatalogTestPatchSchema = z
+  .object({
+    price: z.number().min(0).max(1000000).nullish(),
+    gloss: z.string().trim().max(160).nullish(),
+    isActive: z.boolean().nullish(),
+  })
+  .refine((v) => v.price != null || v.gloss != null || v.isActive != null, {
+    message: "Nothing to change",
+  });
+
+// A test this patient needs that the clinic list does not have. It rides on the
+// ORDER, not the catalogue: one patient's ultrasound is not a test every other
+// patient should be offered.
+export const giniflowCustomTestSchema = z.object({
+  name: z.string().trim().min(2, "A test needs a name").max(120),
+  price: z.number().min(0).max(1000000).nullish(),
+});
+
+export const giniflowOrderTestsSchema = z
+  .object({
+    urgency: z.enum(["today", "tomorrow", "next_visit"]),
+    tests: z.array(z.string().min(1).max(120)).max(40).optional(),
+    customTests: z.array(giniflowCustomTestSchema).max(10).optional(),
+  })
+  .refine((v) => (v.tests?.length || 0) + (v.customTests?.length || 0) > 0, {
+    message: "No tests selected",
+  });
 
 // The specialist's reply (brief §4.7). `medicines` is the return leg: what the
 // specialist started, written to `medications` as external.
@@ -825,6 +854,7 @@ export const giniflowRxItemSchema = z.object({
   frequency: z.string().max(60).nullish(),
   timing: z.string().max(100).nullish(),
   timingCategory: TIMING_CATEGORY.nullish(),
+  timingCategories: z.array(TIMING_CATEGORY).max(6).nullish(),
   timeOfDay: CLOCK_TIME.nullish(),
   route: z.string().max(40).nullish(),
   form: z.string().max(60).nullish(),
@@ -884,6 +914,7 @@ export const giniflowExternalMedSchema = z.object({
   frequency: z.string().max(60).nullish(),
   timing: z.string().max(100).nullish(),
   timingCategory: TIMING_CATEGORY.nullish(),
+  timingCategories: z.array(TIMING_CATEGORY).max(6).nullish(),
   timeOfDay: CLOCK_TIME.nullish(),
   prescriberName: z.string().trim().min(1).max(120),
   prescriberSpecialty: z.string().max(120).nullish(),

@@ -127,7 +127,7 @@ async function consultRoomFree(client, visitDate) {
 // `medicine_collections` still has to collect them, so `completed` parks them at
 // the pharmacy instead. Nothing is invented: the evidence is a prescription with
 // no dispensing record.
-const PHARMACY_LEG = ["doctor_done", "pharmacy_pending", "dispensed"];
+const PHARMACY_LEG = ["doctor_done", "rx_pending", "with_rx", "pharmacy_pending", "dispensed"];
 
 const atPharmacyLeg = (currentStatus, target) =>
   target === "exited" && PHARMACY_LEG.includes(currentStatus);

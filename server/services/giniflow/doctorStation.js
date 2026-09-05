@@ -34,7 +34,14 @@ const QUEUE_STATUSES = [
   "blocked_reports",
 ];
 
-const DONE_STATUSES = ["doctor_done", "pharmacy_pending", "dispensed", "exited"];
+const DONE_STATUSES = [
+  "doctor_done",
+  "rx_pending",
+  "with_rx",
+  "pharmacy_pending",
+  "dispensed",
+  "exited",
+];
 
 // The journey rail every card carries: Check-in › Vitals › MO › With Dr. › Pharmacy.
 const RAIL = [
@@ -42,7 +49,12 @@ const RAIL = [
   { key: "vitals", label: "Vitals", statuses: ["with_vitals", "vitals_done"] },
   { key: "mo", label: "MO", statuses: ["sd_pending", "with_sd"] },
   { key: "doctor", label: "With Dr.", statuses: ["ready_for_doctor", "with_doctor"] },
-  { key: "pharmacy", label: "Pharmacy", statuses: ["doctor_done", "pharmacy_pending"] },
+  {
+    key: "rx",
+    label: "Prescription Explain",
+    statuses: ["doctor_done", "rx_pending", "with_rx"],
+  },
+  { key: "pharmacy", label: "Pharmacy", statuses: ["pharmacy_pending"] },
 ];
 
 const railFor = (status, reachedKeys) =>
@@ -500,6 +512,7 @@ export async function getConsult(visitId, db = pool) {
     blockedReason: v.blocked_reason,
     sdName: v.sd_name,
     doctorName: v.doctor_name,
+    assignedDoctorId: v.assigned_doctor_id,
     checkedInAt: v.checked_in_at ? new Date(v.checked_in_at).toISOString() : null,
     statusSince: v.status_since ? new Date(v.status_since).toISOString() : null,
     // A finalized visit is read-only; the only writable path is an addendum.
@@ -552,6 +565,50 @@ export async function getTrend(patientId, marker, db = pool) {
     .map((r) => ({ date: r.date, value: Number(r.biomarkers?.[key]) }))
     .filter((p) => Number.isFinite(p.value));
   return { marker, series };
+}
+
+// Whose patient is this? The queue's second column deliberately shows patients
+// assigned to OTHER consultants — "who is on the floor at all" — so a consultant
+// can open one. Opening is fine; writing is not. An unassigned patient stays
+// writable: nobody has claimed them, so the first consultant to open one is
+// picking them up, which is how the queue's "Mine" column already treats them.
+export async function visitOwnership(visitId, doctorId, db = pool) {
+  const { rows } = await db.query(
+    `SELECT v.assigned_doctor_id, COALESCE(d.short_name, d.name) AS doctor_name
+       FROM giniflow_visits v
+       LEFT JOIN doctors d ON d.id = v.assigned_doctor_id
+      WHERE v.id = $1`,
+    [visitId],
+  );
+  if (!rows.length) return { found: false, readOnly: false, ownerName: null };
+  const assigned = rows[0].assigned_doctor_id;
+  return {
+    found: true,
+    readOnly: !!assigned && !!doctorId && assigned !== doctorId,
+    ownerName: rows[0].doctor_name,
+  };
+}
+
+// The same question asked of a prescription item or a dose proposal. Those
+// endpoints are keyed on the row, not the visit, so the visit gate above cannot
+// see them — and a read-only page that still let an item be edited would be a
+// lock on the front door with the side gate open.
+export async function rowOwnership(table, rowId, doctorId, db = pool) {
+  const { rows } = await db.query(
+    `SELECT v.id AS visit_id, v.assigned_doctor_id, COALESCE(d.short_name, d.name) AS doctor_name
+       FROM ${table} r
+       JOIN giniflow_visits v ON v.id = r.visit_id
+       LEFT JOIN doctors d ON d.id = v.assigned_doctor_id
+      WHERE r.id = $1`,
+    [rowId],
+  );
+  if (!rows.length) return { found: false, readOnly: false, ownerName: null };
+  const assigned = rows[0].assigned_doctor_id;
+  return {
+    found: true,
+    readOnly: !!assigned && !!doctorId && assigned !== doctorId,
+    ownerName: rows[0].doctor_name,
+  };
 }
 
 // Claiming the room. One patient with a consultant at a time: the older module

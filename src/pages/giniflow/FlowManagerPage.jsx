@@ -337,7 +337,11 @@ function PatientCard({
   const isLab = !!card.lab && card.column === "lab";
   const isLabOnly = isLab && !!card.labOnly;
   const anchor = isLab ? card.lab.since : card.statusSince;
-  const live = minutesSince(anchor, now - offsetMs);
+  // Only a patient still in the building is timed against the present moment.
+  // The server already stops the clock at the exit; recomputing it here from the
+  // anchor ignored that and started it again, so a patient who left at 09:21 was
+  // still gaining a minute a minute — 61m on the server, 474m on the screen.
+  const live = card.finished ? null : minutesSince(anchor, now - offsetMs);
   const minutes = live ?? (isLab ? card.lab.minutes : card.statusMinutes);
   const budget = isLab ? card.lab.budget : card.statusBudget;
   // A finished visit's timer counts up from the exit, and no budget covers
@@ -839,13 +843,6 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
   const journeyTarget =
     slaConfig?.find((c) => c.station === "total_journey")?.budgetMinutes ?? null;
 
-  const plainDuration = (step) =>
-    step.isCurrent
-      ? `waiting ${minutesSince(step.enteredAt, now) ?? 0}m`
-      : step.totalMinutes === null
-        ? "reports back"
-        : `${step.totalMinutes}m to the next step`;
-
   return (
     <div className="tmodal open" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="tbox">
@@ -886,13 +883,9 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
                             : "tsd-n"
                     }`}
                   >
-                    {step.plain
-                      ? // A milestone is a point in time, not a queue and a
-                        // station: "0m wait + 56m station" described neither.
-                        plainDuration(step)
-                      : `${liveWait(step)}m wait + ${step.stationMinutes}m station${
-                          liveOver(step) ? ` — ${liveOver(step)}m OVER budget` : ""
-                        }`}
+                    {`${liveWait(step)}m wait + ${step.stationMinutes}m station${
+                      liveOver(step) ? ` — ${liveOver(step)}m OVER budget` : ""
+                    }`}
                   </span>
                 )}
                 {step.meta?.vitals && (
@@ -924,12 +917,7 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
                   </div>
                   <div className="ts-body">
                     <div className="ts-name">{step.label}</div>
-                    <div className="ts-time">
-                      {step.isCurrent
-                        ? `Since ${clockAt(step.enteredAt)}`
-                        : clockAt(step.enteredAt)}
-                    </div>
-                    <span className="ts-dur tsd-n">{plainDuration(step)}</span>
+                    <div className="ts-time">{clockAt(step.enteredAt)}</div>
                   </div>
                 </div>
               ))}

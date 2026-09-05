@@ -14,7 +14,7 @@ import {
   parsePrescriptionWithAi,
   extractVitalsFromAnswers,
   buildHealthrayParseRequest,
-  extractRelativeFollowUp,
+  extractFollowUpFromNote,
 } from "../healthray/parser.js";
 import { BATCH_ENABLED, enqueue } from "../batch/batchQueue.js";
 import {
@@ -139,6 +139,22 @@ function buildVitalsAndBiomarkers(appt, apptDate) {
   if (weight) biomarkers.weight = weight;
 
   return { opdVitals, biomarkers };
+}
+
+async function persistNoteFollowUp(appointmentId, followUp) {
+  if (!appointmentId || !followUp) return;
+  await pool.query(
+    `UPDATE appointments
+        SET healthray_follow_up = $2::jsonb,
+            follow_up_with = COALESCE(follow_up_with, $3),
+            updated_at = NOW()
+      WHERE id = $1
+        AND COALESCE(healthray_follow_up->>'date', '') = ''
+        AND COALESCE(healthray_follow_up->>'timing', '') = ''
+        AND follow_up_date IS NULL
+        AND COALESCE(biomarkers->>'followup', '') = ''`,
+    [appointmentId, JSON.stringify(followUp), followUp.notes || null],
+  );
 }
 
 // ── Analyse follow-up date headers in a raw clinical text string ─────────────
@@ -530,6 +546,8 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
         }
       }
 
+      const noteFollowUp = extractFollowUpFromNote(rawText, apptDate);
+
       if (rawText && rawText.trim().length > 20) {
         // Skip AI if text unchanged — but still propagate live status changes.
         // Without this branch, an appt that was once enriched (or has stable
@@ -562,6 +580,7 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
             await syncFlowVitalsFromOpdColumn(existing.id);
           }
           await syncFollowUpDate(existing.id, followUpDate);
+          await persistNoteFollowUp(existing.id, noteFollowUp);
           return { skipped: true, id: existing.id };
         }
 
@@ -618,6 +637,7 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
             );
             if (existing.patient_id)
               await syncAppointmentDocs(healthrayId, existing.patient_id, apptDate);
+            await persistNoteFollowUp(existing.id, noteFollowUp);
             return { skipped: true, id: existing.id, parseFailed: true };
           }
         }
@@ -634,7 +654,7 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
           clinical.healthrayFollowUp =
             parsedFollowUp?.date || parsedFollowUp?.timing
               ? parsedFollowUp
-              : extractRelativeFollowUp(rawText) || parsedFollowUp;
+              : noteFollowUp || parsedFollowUp;
           clinical.healthrayFollowUpWith =
             parsed.follow_up_with || clinical.healthrayFollowUp?.notes || null;
 
@@ -677,6 +697,9 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
             "Enrich",
             `${healthrayId}: ${clinical.healthrayDiagnoses.length} dx, ${clinical.healthrayLabs.length} labs, ${clinical.healthrayMedications.length} meds`,
           );
+        } else if (noteFollowUp) {
+          clinical.healthrayFollowUp = noteFollowUp;
+          clinical.healthrayFollowUpWith = noteFollowUp.notes || null;
         }
       }
     } catch (e) {

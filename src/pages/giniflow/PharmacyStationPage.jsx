@@ -12,6 +12,9 @@ import CounsellingNote from "./pharmacy/CounsellingNote";
 import DispenseCard from "./pharmacy/DispenseCard";
 import "../../styles/giniflow-station.css";
 import StationNotice from "../../components/giniflow/StationNotice";
+import useAuthStore from "../../stores/authStore";
+import { printRxHref } from "../../queries/hooks/useGiniflowRx";
+import { hasCapability, CAPABILITIES } from "../../../shared/permissions";
 
 // The pharmacy station — gini-stations.html `#s-pharmacy` + `#pharmPane`.
 //
@@ -196,6 +199,8 @@ function useDismiss(open, onClose, ref) {
 }
 
 function PharmacyPane({ visitId, onClose, onToast }) {
+  const role = useAuthStore((st) => st.currentDoctor?.role);
+  const canPrintRx = hasCapability(role, CAPABILITIES.GINIFLOW_PRINT_RX);
   const paneRef = useRef(null);
   const [confirming, setConfirming] = useState(false);
   const { data, isLoading } = usePharmacyPatient(visitId);
@@ -287,6 +292,11 @@ function PharmacyPane({ visitId, onClose, onToast }) {
             <button className="rbtn" onClick={onClose}>
               ← Back
             </button>
+            {canPrintRx && data?.visitId && (
+              <a className="rbtn" href={printRxHref(data.visitId)} target="_blank" rel="noreferrer">
+                🖨 Print Rx
+              </a>
+            )}
             {data && !data.finished && (
               <button
                 className="rbtn grn"

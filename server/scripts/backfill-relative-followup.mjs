@@ -1,7 +1,7 @@
 import "dotenv/config";
 import pool from "../config/db.js";
 import { ownFu } from "../services/ghmDayWindow.js";
-import { extractRelativeFollowUp } from "../services/healthray/parser.js";
+import { extractFollowUpFromNote } from "../services/healthray/parser.js";
 
 const args = process.argv.slice(2);
 const flag = (name) => {
@@ -50,29 +50,31 @@ const changes = [];
 for (const row of rows) {
   if (FILE_NOS.length && !FILE_NOS.includes(row.file_no)) continue;
 
-  const found = extractRelativeFollowUp(row.notes);
+  const found = extractFollowUpFromNote(row.notes, String(row.appointment_date).slice(0, 10));
   if (!found) {
     skipped += 1;
     continue;
   }
 
   const { rows: check } = await pool.query(
-    `SELECT CASE WHEN btrim(lower($2)) ~ '^[0-9]{1,2} *(day|week|month|year)s?$'
-                 THEN ($1::date + btrim(lower($2))::interval)::date END AS derived`,
-    [row.appointment_date, found.timing],
+    `SELECT CASE
+              WHEN $3::text ~ '^\\d{4}-\\d{2}-\\d{2}$' THEN $3::date
+              WHEN btrim(lower($2)) ~ '^[0-9]{1,2} *(day|week|month|year)s?$'
+              THEN ($1::date + btrim(lower($2))::interval)::date END AS derived`,
+    [row.appointment_date, found.timing, found.date],
   );
   const derived = check[0].derived;
   if (!derived) {
     console.error(
-      `  ! ${row.file_no} ${row.id}: timing "${found.timing}" is not castable — skipped`,
+      `  ! ${row.file_no} ${row.id}: follow-up "${found.date || found.timing}" is not castable — skipped`,
     );
     skipped += 1;
     continue;
   }
 
   const merged = {
-    date: row.healthray_follow_up?.date || null,
-    timing: found.timing,
+    date: found.date || row.healthray_follow_up?.date || null,
+    timing: found.timing || row.healthray_follow_up?.timing || null,
     notes: row.healthray_follow_up?.notes || found.notes,
   };
 
@@ -80,7 +82,7 @@ for (const row of rows) {
     file_no: row.file_no,
     patient: row.patient_name,
     visit: String(row.appointment_date).slice(0, 10),
-    timing: found.timing,
+    source: found.date ? "date" : found.timing,
     follow_up: derived,
   });
 
@@ -98,7 +100,5 @@ for (const row of rows) {
 }
 
 console.table(changes);
-console.log(
-  `${APPLY ? "updated" : "would update"}: ${updated} | no relative follow-up in note: ${skipped}`,
-);
+console.log(`${APPLY ? "updated" : "would update"}: ${updated} | no follow-up in note: ${skipped}`);
 process.exit(0);

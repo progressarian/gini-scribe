@@ -95,10 +95,13 @@ async function labMarks(db, { visitDate, patientId, fileNo }) {
   return marks;
 }
 
-// `timestampOnly` for the lab-only timeline: those steps are a record of when
-// things happened, not a queue anyone is working. A running "waiting 134m" on a
-// patient whose reports are already back describes nobody's problem — the floor
-// is not waiting on them and they are not waiting on the floor.
+// Lab milestones are a record of when things happened, not a queue anyone is
+// working, so they carry a timestamp and no duration.
+//
+// The running count was wrong in both directions. On a patient whose reports
+// were already back it described nobody's problem. On one who had gone home it
+// was worse: a patient who exited at 13:09 still read "waiting 320m", counting
+// up against a floor he had left hours earlier.
 const shapeMarks = (marks, now, timestampOnly = false) =>
   [...marks]
     .sort((a, b) => a.at - b.at)
@@ -147,5 +150,5 @@ export async function getLabOnlyTimeline(db, { visitId, visitDate, patientId, fi
 // invisible there. A patient checked in at 10:30 with a sample ordered at 10:44
 // showed one step and looked stalled, when the lab was the thing that had moved.
 export async function getLabTrack(db, ids, now) {
-  return shapeMarks(await labMarks(db, ids), now);
+  return shapeMarks(await labMarks(db, ids), now, true);
 }

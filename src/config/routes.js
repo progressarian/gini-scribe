@@ -102,6 +102,7 @@ export const PAGE_CAPABILITIES = {
   "/obt-dashboard": CAP.OBT_OPS,
   "/doctor-management": CAP.ADMIN,
   "/admin/blocklist": CAP.ADMIN,
+  "/admin/test-catalog": CAP.ADMIN,
   "/medicine-collection": CAP.MED_COLLECTION,
   "/reception-inbox": CAP.RECEPTION_OPS,
   // Appointment search + Quick Book (it POSTs /api/appointments — not read-only).
@@ -138,6 +139,7 @@ export const PAGE_CAPABILITIES = {
   "/giniflow/station/mo": CAP.GINIFLOW_STATION_MO,
   // capForPath prefix-matches, so this key also covers /giniflow/station/doctor/<visitId>.
   "/giniflow/station/doctor": CAP.GINIFLOW_STATION_DOCTOR,
+  "/giniflow/station/rx": CAP.GINIFLOW_STATION_RX,
   "/giniflow/station/pharmacy": CAP.GINIFLOW_STATION_PHARMACY,
   "/giniflow/station/referrals": CAP.GINIFLOW_REFERRALS,
   "/flow/admin": CAP.ADMIN,

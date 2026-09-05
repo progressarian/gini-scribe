@@ -122,6 +122,17 @@ const BOARD_SQL = `
              (SELECT COUNT(*)::int FROM giniflow_lab_order_tests t WHERE t.lab_order_id = o.id) AS test_count
         FROM giniflow_lab_orders o
        WHERE o.visit_id = v.id AND o.sample_status <> 'uploaded'
+         -- Today's tests only, the same rule the lab station and the reception
+         -- desk already apply. Without it a test ordered for the patient's NEXT
+         -- visit joined today's lab track: payment pending at a desk collecting
+         -- nothing, a sample nobody was waiting for, and — because a Gini order
+         -- is the only lab card carrying a budget — a red Lab column driven
+         -- entirely by work that is not due.
+         --
+         -- It also settles the LIMIT 1 below. A next-visit order is written at
+         -- the end of a consultation, so it is newer than a same-day one and
+         -- would otherwise hide the today sample the floor is actually waiting on.
+         AND o.urgency = 'today'
        ORDER BY o.created_at DESC LIMIT 1
     ) lab ON TRUE
     LEFT JOIN LATERAL (
@@ -288,6 +299,11 @@ export async function getDayBoard(visitDate, slaConfig, now = new Date(), db = p
           ? row.queue_position
           : null,
       labOnly,
+      // Nothing left for the lab to do. Used to retire a finished patient from
+      // the lab track: a sample that was never collected is still worth showing
+      // after they leave, a report that is already back is not.
+      labSettled:
+        labOnly && (row.lab_all_cases ?? 0) > 0 && (row.lab_all_reported ?? 0) >= row.lab_all_cases,
       labTests: row.lab_test_names || [],
       assignedDoctorId: labOnly ? null : row.assigned_doctor_id,
       assignedDoctorName: labOnly ? null : row.doctor_name || row.doctor_full_name || null,
@@ -391,8 +407,17 @@ export async function getDayBoard(visitDate, slaConfig, now = new Date(), db = p
     // assign one to a consultant.
     const items =
       col.key === "lab"
-        ? onFloor.filter((c) => c.lab)
-        : onFloor.filter((c) => !c.labOnly && col.statuses.includes(c.status));
+        ? // A finished patient stays in the lab track only while the lab still
+          // holds something of theirs. Once the reports are back and they have
+          // gone home there is nothing to work, and leaving them here is what
+          // kept an exited patient sitting in the column all day.
+          onFloor.filter((c) => c.lab && !(c.finished && c.labSettled))
+        : // "Done today" is a record of who finished, and a samples-only patient
+          // who exited did finish — it is only the consultation queues they do
+          // not belong in. Without this they had nowhere to go but the lab track.
+          onFloor.filter(
+            (c) => (!c.labOnly || col.key === "done") && col.statuses.includes(c.status),
+          );
     const budget = budgets[col.slaKey] ?? null;
     // Blocked patients are excluded from the average: they are stuck on missing
     // reports, not on this station's throughput, and letting them skew it points

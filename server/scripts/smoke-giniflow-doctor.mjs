@@ -117,7 +117,7 @@ check(
   "every card carries the journey rail",
   Object.values(queue.groups)
     .flat()
-    .every((c) => c.journey?.length === 5),
+    .every((c) => c.journey?.length === 6),
 );
 // The rule is "nothing outstanding", not "results_status = ready". A patient
 // nobody ordered a test for has nothing to wait for, and filing them under
@@ -766,7 +766,11 @@ if (rxPatient) {
   );
 
   const status = await one(`SELECT current_status FROM giniflow_visits WHERE id = $1`, [visitId]);
-  check("the patient is now at the pharmacy", status.current_status === "pharmacy_pending");
+  check(
+    "the patient is now waiting for the Rx explain desk",
+    status.current_status === "rx_pending",
+    status.current_status,
+  );
 
   const draftLeft = await one(
     `SELECT count(*)::int AS n FROM giniflow_rx_items WHERE visit_id = $1`,
@@ -780,9 +784,9 @@ if (rxPatient) {
   );
   const statuses = events.rows.map((e) => e.status);
   check(
-    "doctor_done and pharmacy_pending are both logged, in order",
+    "doctor_done and rx_pending are both logged, in order",
     statuses.indexOf("doctor_done") >= 0 &&
-      statuses.indexOf("pharmacy_pending") > statuses.indexOf("doctor_done"),
+      statuses.indexOf("rx_pending") > statuses.indexOf("doctor_done"),
   );
 
   const card = await buildCard(draft.patientId);

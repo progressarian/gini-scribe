@@ -10,6 +10,8 @@ export const CHAIN = [
   "ready_for_doctor",
   "with_doctor",
   "doctor_done",
+  "rx_pending",
+  "with_rx",
   "pharmacy_pending",
   "dispensed",
   "exited",
@@ -43,6 +45,7 @@ export const ACTOR_ROLES = [
   "mo_sd",
   "doctor",
   "lab",
+  "nurse",
   "pharmacy",
   // The floor manager moving a card on the board is a real actor, not the
   // system: an event they caused must be attributable to them in the log.
@@ -73,7 +76,9 @@ export const STATUS_LABEL = {
   with_sd: "With SD / MO",
   ready_for_doctor: "Waiting for consultant",
   with_doctor: "With consultant",
-  doctor_done: "Waiting for pharmacy",
+  doctor_done: "Waiting for Prescription Explain",
+  rx_pending: "Waiting for Prescription Explain",
+  with_rx: "Prescription being explained",
   pharmacy_pending: "At pharmacy",
   dispensed: "Dispensed",
   exited: "Exited",
@@ -90,11 +95,19 @@ export const STATUS_TO_SLA_KEY = {
   with_sd: "sd",
   ready_for_doctor: "wait_doctor",
   with_doctor: "doctor",
+  rx_pending: "wait_rx",
+  with_rx: "rx_explain",
   pharmacy_pending: "pharmacy",
   blocked_reports: "checkin_to_vitals",
 };
 
-export const WAIT_STATUSES = ["checked_in", "vitals_pending", "sd_pending", "ready_for_doctor"];
+export const WAIT_STATUSES = [
+  "checked_in",
+  "vitals_pending",
+  "sd_pending",
+  "ready_for_doctor",
+  "rx_pending",
+];
 export const TERMINAL_STATUSES = ["dispensed", "exited"];
 export const BOARD_COLUMNS = [
   {
@@ -127,11 +140,18 @@ export const BOARD_COLUMNS = [
     statuses: ["with_doctor"],
   },
   {
+    key: "rx",
+    name: "Prescription Explain",
+    icon: "🗒️",
+    slaKey: "rx_explain",
+    statuses: ["doctor_done", "rx_pending", "with_rx"],
+  },
+  {
     key: "pharmacy",
     name: "At pharmacy",
     icon: "💊",
     slaKey: "pharmacy",
-    statuses: ["doctor_done", "pharmacy_pending"],
+    statuses: ["pharmacy_pending"],
   },
   { key: "lab", name: "Lab track", icon: "🧪", slaKey: "lab_total", statuses: null },
   {
@@ -198,6 +218,7 @@ export const COLUMN_ENTRY_STATUS = {
   sd: "sd_pending",
   wait_doctor: "ready_for_doctor",
   doctor: "with_doctor",
+  rx: "rx_pending",
   pharmacy: "pharmacy_pending",
   lab: null,
   done: "dispensed",
@@ -209,6 +230,7 @@ export const ORDERED_COLUMNS = [
   "sd",
   "wait_doctor",
   "doctor",
+  "rx",
   "pharmacy",
   "done",
 ];

@@ -39,7 +39,7 @@ const FINISHED = ["dispensed", "exited", "no_show", "cancelled"];
 // finalized by the consultant lands on `pharmacy_pending`; `doctor_done` is the
 // half-second before that, and a patient the HealthRay sync moved by hand can
 // sit there, so the counter must be able to see and serve them.
-const QUEUE_STATUSES = ["doctor_done", "pharmacy_pending"];
+const QUEUE_STATUSES = ["doctor_done", "rx_pending", "with_rx", "pharmacy_pending"];
 const DONE_STATUSES = ["dispensed", "exited"];
 
 const minutesSince = (from, now) =>
@@ -297,7 +297,7 @@ async function loadVisit(visitId, db = pool) {
 // Medicines stopped at today's consultation. They are `is_active = false`, so
 // the card cannot show them — but "stop taking this one" is the single most
 // important sentence at this counter, so the counselling note needs them.
-async function stoppedToday(patientId, visitDate, db) {
+export async function stoppedToday(patientId, visitDate, db) {
   const { rows } = await db.query(
     `SELECT id, name, dose, previous_dose, stop_reason
        FROM medications
@@ -554,7 +554,7 @@ export async function dispenseAll(visitId, { actorId = null, actorName = null } 
     // A patient who was moved here by hand can still be at `doctor_done`. Writing
     // their arrival before their exit keeps the pharmacy budget measuring
     // something real rather than jumping the column.
-    if (visit.current_status === "doctor_done") {
+    if (["doctor_done", "rx_pending", "with_rx"].includes(visit.current_status)) {
       await advanceStatus(client, {
         visitId,
         toStatus: "pharmacy_pending",

@@ -10,6 +10,9 @@ import {
 import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
 import LiveBadge from "../../components/giniflow/LiveBadge";
 import "../../styles/giniflow-station.css";
+import useAuthStore from "../../stores/authStore";
+import { printRxHref } from "../../queries/hooks/useGiniflowRx";
+import { hasCapability, CAPABILITIES } from "../../../shared/permissions";
 import StationNotice from "../../components/giniflow/StationNotice";
 
 const AVATAR_COLOURS = ["#374151", "#1e3a5f", "#14532d", "#7c2d12", "#7f1d1d", "#b45309"];
@@ -350,6 +353,8 @@ function WalkInPanel({ onClose, onCheckIn, busy }) {
 
 export function ArrivalsTab({ search, setSearch, data, isLoading, onAct, onCheckIn, busy }) {
   const [walkIn, setWalkIn] = useState(false);
+  const role = useAuthStore((st) => st.currentDoctor?.role);
+  const canPrintRx = hasCapability(role, CAPABILITIES.GINIFLOW_PRINT_RX);
   const expected = data?.expected || [];
   const onFloor = data?.onFloor || [];
   const notComing = data?.notComing || [];
@@ -415,6 +420,16 @@ export function ArrivalsTab({ search, setSearch, data, isLoading, onAct, onCheck
             >
               <span className="ar-where">{a.statusLabel}</span>
               <span className="ar-since">in since {clock(a.checkedInAt)}</span>
+              {canPrintRx && (
+                <a
+                  className="st-btn"
+                  href={printRxHref(a.visitId)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  🖨 Rx
+                </a>
+              )}
             </ArrivalRow>
           ))}
         </div>

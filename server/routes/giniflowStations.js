@@ -2,6 +2,13 @@ import { Router } from "express";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
 import { requireCapability } from "../middleware/auth.js";
+import {
+  getRxQueue,
+  getRxPatient,
+  startRxExplain,
+  markRxExplained,
+} from "../services/giniflow/rxStation.js";
+import { fetchRxFile, regenerateRx } from "../services/giniflow/printRx.js";
 import { validate, validateQuery } from "../middleware/validate.js";
 import { CAPABILITIES as CAP } from "../../shared/permissions.js";
 import { blockActor, blockedResponse } from "../services/patientBlockGuard.js";
@@ -19,12 +26,14 @@ import {
   giniflowCarePlanSchema,
   giniflowProposalDecisionSchema,
   giniflowDateQuerySchema,
-  giniflowLabQuerySchema,
+  giniflowStationQuerySchema,
   giniflowMoQueueQuerySchema,
   giniflowPaymentSchema,
   giniflowLabCaseActionSchema,
   giniflowReportSchema,
   giniflowOrderTestsSchema,
+  giniflowCatalogTestSchema,
+  giniflowCatalogTestPatchSchema,
   giniflowPlanSchema,
   giniflowPlanExtractSchema,
   giniflowProposalSchema,
@@ -105,6 +114,11 @@ import {
   closeWithoutDoctor,
 } from "../services/giniflow/moStation.js";
 import {
+  addCatalogTest,
+  listCatalog,
+  updateCatalogTest,
+} from "../services/giniflow/testCatalog.js";
+import {
   getDoctorQueue,
   getConsult,
   getTrend,
@@ -112,6 +126,8 @@ import {
   releaseConsult,
   saveCarePlan,
   decideProposal,
+  visitOwnership,
+  rowOwnership,
 } from "../services/giniflow/doctorStation.js";
 import {
   getDraft,
@@ -246,6 +262,61 @@ router.post(
 
 const doctorGate = requireCapability(CAP.GINIFLOW_STATION_DOCTOR);
 
+// A consultant may OPEN another consultant's patient — the queue's second column
+// exists so the floor can be seen whole — but may not write to them. Read-only
+// in the UI is not enough on its own: the page is one URL, and anything that can
+// be opened can be POSTed to. So every write below the visit is gated here.
+//
+// Unassigned patients are deliberately still writable. Nobody has claimed them,
+// so opening one IS the claim, which is how the queue's "Mine" column already
+// counts them.
+// Admin overrides the whole rule. An admin holds every capability by definition
+// (ROLES.ADMIN => ALL), and the point of the account is that nothing on the
+// floor is closed to it — so ownership never makes an admin read-only.
+const overridesOwnership = (req) => hasCapability(req.doctor?.role, CAP.ADMIN);
+
+const requireOwnVisit = async (req, res, next) => {
+  if (overridesOwnership(req)) return next();
+  try {
+    const { found, readOnly, ownerName } = await visitOwnership(
+      req.params.visitId,
+      req.doctor?.doctor_id ?? null,
+    );
+    if (!found) return res.status(404).json({ error: "Visit not found" });
+    if (readOnly)
+      return res.status(403).json({
+        error: `${ownerName || "Another consultant"} is assigned to this patient — you have read-only access`,
+        readOnly: true,
+      });
+    next();
+  } catch (e) {
+    handleError(res, e, "Gini Flow visit ownership");
+  }
+};
+
+// Same rule for the row-keyed endpoints, which carry no :visitId of their own.
+const requireOwnRow = (table, param) => async (req, res, next) => {
+  if (overridesOwnership(req)) return next();
+  try {
+    const { found, readOnly, ownerName } = await rowOwnership(
+      table,
+      req.params[param],
+      req.doctor?.doctor_id ?? null,
+    );
+    if (!found) return res.status(404).json({ error: "Not found" });
+    if (readOnly)
+      return res.status(403).json({
+        error: `${ownerName || "Another consultant"} is assigned to this patient — you have read-only access`,
+        readOnly: true,
+      });
+    next();
+  } catch (e) {
+    handleError(res, e, "Gini Flow row ownership");
+  }
+};
+const requireOwnRxItem = requireOwnRow("giniflow_rx_items", "itemId");
+const requireOwnProposal = requireOwnRow("giniflow_rx_proposals", "id");
+
 // A clinical refusal the consultant can act on ("someone is already in the
 // room", "rejecting needs a reason") is a 409 with the reason, never a 500.
 const doctorError = (res, e, label) =>
@@ -283,6 +354,43 @@ router.get("/giniflow/stations/doctor/test-panels", doctorGate, async (req, res)
   }
 });
 
+// The catalogue itself — the clinic's price list. Admin only, and the ONLY way
+// a test becomes visible to every patient: what a consultant types during a
+// consultation rides on that patient's order instead (see orderTests).
+router.post(
+  "/giniflow/test-catalog",
+  requireCapability(CAP.ADMIN),
+  validate(giniflowCatalogTestSchema),
+  async (req, res) => {
+    try {
+      res.status(201).json(await addCatalogTest(req.body.name, { gloss: req.body.gloss ?? null }));
+    } catch (e) {
+      handleError(res, e, "Gini Flow add test to catalogue");
+    }
+  },
+);
+
+router.get("/giniflow/test-catalog", requireCapability(CAP.ADMIN), async (req, res) => {
+  try {
+    res.json({ tests: await listCatalog() });
+  } catch (e) {
+    handleError(res, e, "Gini Flow test catalogue");
+  }
+});
+
+router.patch(
+  "/giniflow/test-catalog/:id",
+  requireCapability(CAP.ADMIN),
+  validate(giniflowCatalogTestPatchSchema),
+  async (req, res) => {
+    try {
+      res.json(await updateCatalogTest(req.params.id, req.body));
+    } catch (e) {
+      handleError(res, e, "Gini Flow test catalogue update");
+    }
+  },
+);
+
 // These two are declared BEFORE /doctor/:visitId on purpose: Express matches in
 // order, so "/doctor/medicines" would otherwise be read as a visit id called
 // "medicines" and fail inside a uuid comparison.
@@ -314,7 +422,16 @@ router.get("/giniflow/stations/doctor/:visitId", doctorGate, async (req, res) =>
   try {
     const consult = await getConsult(req.params.visitId);
     if (!consult) return res.status(404).json({ error: "Visit not found" });
-    res.json({ ...consult, serverTime: new Date().toISOString() });
+    // Decided here rather than in the browser so the page and the gate that
+    // refuses its writes can never disagree about who owns this patient.
+    const owned = await visitOwnership(req.params.visitId, req.doctor?.doctor_id ?? null);
+    const readOnly = owned.readOnly && !overridesOwnership(req);
+    res.json({
+      ...consult,
+      readOnly,
+      readOnlyOwner: readOnly ? owned.ownerName : null,
+      serverTime: new Date().toISOString(),
+    });
   } catch (e) {
     doctorError(res, e, "Gini Flow consult");
   }
@@ -330,25 +447,36 @@ router.get("/giniflow/stations/doctor/:visitId/trend/:marker", doctorGate, async
   }
 });
 
-router.post("/giniflow/stations/doctor/:visitId/start", doctorGate, async (req, res) => {
-  try {
-    res.json(await startConsult(req.params.visitId, req.doctor?.doctor_id ?? null));
-  } catch (e) {
-    doctorError(res, e, "Gini Flow start consult");
-  }
-});
+router.post(
+  "/giniflow/stations/doctor/:visitId/start",
+  doctorGate,
+  requireOwnVisit,
+  async (req, res) => {
+    try {
+      res.json(await startConsult(req.params.visitId, req.doctor?.doctor_id ?? null));
+    } catch (e) {
+      doctorError(res, e, "Gini Flow start consult");
+    }
+  },
+);
 
-router.post("/giniflow/stations/doctor/:visitId/release", doctorGate, async (req, res) => {
-  try {
-    res.json(await releaseConsult(req.params.visitId, req.doctor?.doctor_id ?? null));
-  } catch (e) {
-    doctorError(res, e, "Gini Flow release consult");
-  }
-});
+router.post(
+  "/giniflow/stations/doctor/:visitId/release",
+  doctorGate,
+  requireOwnVisit,
+  async (req, res) => {
+    try {
+      res.json(await releaseConsult(req.params.visitId, req.doctor?.doctor_id ?? null));
+    } catch (e) {
+      doctorError(res, e, "Gini Flow release consult");
+    }
+  },
+);
 
 router.put(
   "/giniflow/stations/doctor/:visitId/care-plan",
   doctorGate,
+  requireOwnVisit,
   validate(giniflowCarePlanSchema),
   async (req, res) => {
     try {
@@ -362,6 +490,7 @@ router.put(
 router.patch(
   "/giniflow/stations/doctor/proposals/:id",
   doctorGate,
+  requireOwnProposal,
   validate(giniflowProposalDecisionSchema),
   async (req, res) => {
     try {
@@ -399,6 +528,7 @@ router.get("/giniflow/stations/doctor/:visitId/interactions", doctorGate, async 
 router.post(
   "/giniflow/stations/doctor/:visitId/interactions/ack",
   doctorGate,
+  requireOwnVisit,
   validate(giniflowInteractionAckSchema),
   async (req, res) => {
     try {
@@ -414,6 +544,7 @@ router.post(
 router.post(
   "/giniflow/stations/doctor/:visitId/prescription/seed",
   doctorGate,
+  requireOwnVisit,
   async (req, res) => {
     try {
       res.json(await seedDraftFromRegimen(req.params.visitId));
@@ -426,6 +557,7 @@ router.post(
 router.post(
   "/giniflow/stations/doctor/:visitId/prescription/items",
   doctorGate,
+  requireOwnVisit,
   validate(giniflowRxItemSchema),
   async (req, res) => {
     try {
@@ -442,6 +574,7 @@ router.post(
 router.post(
   "/giniflow/stations/doctor/prescription/items/:itemId/decide",
   doctorGate,
+  requireOwnRxItem,
   validate(giniflowRxDecisionSchema),
   async (req, res) => {
     try {
@@ -455,6 +588,7 @@ router.post(
 router.patch(
   "/giniflow/stations/doctor/prescription/items/:itemId",
   doctorGate,
+  requireOwnRxItem,
   validate(giniflowRxItemPatchSchema),
   async (req, res) => {
     try {
@@ -473,6 +607,7 @@ router.patch(
 router.delete(
   "/giniflow/stations/doctor/prescription/items/:itemId",
   doctorGate,
+  requireOwnRxItem,
   async (req, res) => {
     try {
       res.json(await removeItem(req.params.itemId));
@@ -485,6 +620,7 @@ router.delete(
 router.post(
   "/giniflow/stations/doctor/prescription/items/:itemId/pause",
   doctorGate,
+  requireOwnRxItem,
   validate(giniflowRxPauseSchema),
   async (req, res) => {
     try {
@@ -498,6 +634,7 @@ router.post(
 router.post(
   "/giniflow/stations/doctor/prescription/items/:itemId/stop",
   doctorGate,
+  requireOwnRxItem,
   validate(giniflowRxStopSchema),
   async (req, res) => {
     try {
@@ -511,6 +648,7 @@ router.post(
 router.post(
   "/giniflow/stations/doctor/:visitId/external",
   doctorGate,
+  requireOwnVisit,
   validate(giniflowExternalMedSchema),
   async (req, res) => {
     try {
@@ -525,6 +663,7 @@ router.post(
 router.post(
   "/giniflow/stations/doctor/:visitId/tests",
   doctorGate,
+  requireOwnVisit,
   validate(giniflowOrderTestsSchema),
   async (req, res) => {
     try {
@@ -532,6 +671,7 @@ router.post(
         await orderTests(req.params.visitId, {
           urgency: req.body.urgency,
           tests: req.body.tests,
+          customTests: req.body.customTests,
           actorId: req.doctor?.doctor_id ?? null,
         }),
       );
@@ -574,17 +714,23 @@ router.get("/giniflow/stations/doctor/:visitId/finalize", doctorGate, async (req
 // The 30-second visit (addendum v1.1 §2). One endpoint, because a network drop
 // between "order tests" and "finalize" must not leave a patient billed for a
 // panel and still sitting in the room.
-router.post("/giniflow/stations/doctor/:visitId/fast-finalize", doctorGate, async (req, res) => {
-  try {
-    res.json(await fastPathFinalize(req.params.visitId, req.doctor?.doctor_id ?? null));
-  } catch (e) {
-    doctorError(res, e, "Gini Flow fast path");
-  }
-});
+router.post(
+  "/giniflow/stations/doctor/:visitId/fast-finalize",
+  doctorGate,
+  requireOwnVisit,
+  async (req, res) => {
+    try {
+      res.json(await fastPathFinalize(req.params.visitId, req.doctor?.doctor_id ?? null));
+    } catch (e) {
+      doctorError(res, e, "Gini Flow fast path");
+    }
+  },
+);
 
 router.post(
   "/giniflow/stations/doctor/:visitId/finalize",
   doctorGate,
+  requireOwnVisit,
   validate(giniflowFinalizeSchema),
   async (req, res) => {
     try {
@@ -605,6 +751,7 @@ const STATION_CAPS = {
   lab: CAP.GINIFLOW_STATION_LAB,
   mo_sd: CAP.GINIFLOW_STATION_MO,
   doctor: CAP.GINIFLOW_STATION_DOCTOR,
+  rx: CAP.GINIFLOW_STATION_RX,
   pharmacy: CAP.GINIFLOW_STATION_PHARMACY,
   triage: CAP.GINIFLOW_TRIAGE,
   referrals: CAP.GINIFLOW_REFERRALS,
@@ -785,7 +932,7 @@ const labGate = requireCapability(CAP.GINIFLOW_STATION_LAB);
 router.get(
   "/giniflow/stations/lab/queue",
   labGate,
-  validateQuery(giniflowLabQuerySchema),
+  validateQuery(giniflowStationQuerySchema),
   async (req, res) => {
     try {
       const date = await resolveDate(req.query.date);
@@ -1105,6 +1252,7 @@ router.post(
         await orderTests(req.params.visitId, {
           urgency: req.body.urgency,
           tests: req.body.tests,
+          customTests: req.body.customTests,
           actorId: req.doctor?.doctor_id ?? null,
         }),
       );
@@ -1246,6 +1394,74 @@ router.post("/giniflow/stations/pharmacy/:visitId/send-card", pharmacyGate, asyn
 //
 // Nothing here moves `current_status`: a referral is parallel to the chain, and
 // the visit continues to pharmacy and exit exactly as it would have.
+
+const rxGate = requireCapability(CAP.GINIFLOW_STATION_RX);
+const printRxGate = requireCapability(CAP.GINIFLOW_PRINT_RX);
+
+router.get(
+  "/giniflow/stations/rx/queue",
+  rxGate,
+  validateQuery(giniflowStationQuerySchema),
+  async (req, res) => {
+    try {
+      const date = await resolveDate(req.query.date);
+      res.json({
+        date,
+        ...(await getRxQueue(date, req.query.q ?? null)),
+        serverTime: new Date().toISOString(),
+      });
+    } catch (e) {
+      handleError(res, e, "Gini Flow Rx queue");
+    }
+  },
+);
+
+router.get("/giniflow/stations/rx/:visitId", rxGate, async (req, res) => {
+  try {
+    res.json(await getRxPatient(req.params.visitId));
+  } catch (e) {
+    handleError(res, e, "Gini Flow Rx patient");
+  }
+});
+
+router.post("/giniflow/stations/rx/:visitId/start", rxGate, async (req, res) => {
+  try {
+    res.json(await startRxExplain(req.params.visitId, req.doctor?.doctor_id ?? null));
+  } catch (e) {
+    handleError(res, e, "Gini Flow Rx start");
+  }
+});
+
+router.post("/giniflow/stations/rx/:visitId/explained", rxGate, async (req, res) => {
+  try {
+    res.json(await markRxExplained(req.params.visitId, req.doctor?.doctor_id ?? null));
+  } catch (e) {
+    handleError(res, e, "Gini Flow Rx explained");
+  }
+});
+
+router.post("/giniflow/stations/rx/:visitId/reissue", printRxGate, async (req, res) => {
+  try {
+    res.json(await regenerateRx(req.params.visitId));
+  } catch (e) {
+    if (e.reason) return res.status(e.status || 409).json({ error: e.message, reason: e.reason });
+    handleError(res, e, "Gini Flow reissue prescription");
+  }
+});
+
+router.get("/giniflow/stations/rx/:visitId/print", printRxGate, async (req, res) => {
+  try {
+    const file = await fetchRxFile(req.params.visitId);
+    res.set("Content-Type", file.contentType);
+    res.set("Content-Disposition", `inline; filename="${encodeURIComponent(file.fileName)}"`);
+    res.set("Cache-Control", "private, max-age=60");
+    res.send(file.bytes);
+  } catch (e) {
+    if (e.reason) return res.status(e.status || 409).json({ error: e.message, reason: e.reason });
+    handleError(res, e, "Gini Flow print prescription");
+  }
+});
+
 const referralsGate = requireCapability(CAP.GINIFLOW_REFERRALS);
 
 // RF-03. The chips are not the desk. A consultant decides a referral from the

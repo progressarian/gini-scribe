@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTestPanels, useOrderTests } from "../../../queries/hooks/useGiniflowPrescription";
 import { VoiceButton } from "../../../components/giniflow/VoiceInput";
 
@@ -23,9 +23,14 @@ const monthLabel = (ymd) => {
 export default function TestsSection({ visitId, consult, readOnly, onToast, onUnsaved }) {
   const { data } = useTestPanels();
   const orderTests = useOrderTests(visitId);
+  // Tests typed in for THIS patient. They ride on the order and are never added
+  // to the clinic list — the next patient's picker is unchanged by them.
+  const [custom, setCustom] = useState([]);
   const [selected, setSelected] = useState(() => new Set());
   const [urgency, setUrgency] = useState("next_visit");
   const [filter, setFilter] = useState("");
+  const filterRef = useRef(null);
+  const [customPrice, setCustomPrice] = useState("");
 
   // A selection is not an order — it lives here until Confirm, so leaving with
   // one is work the page has to ask about.
@@ -58,11 +63,17 @@ export default function TestsSection({ visitId, consult, readOnly, onToast, onUn
       return next;
     });
 
+  const customNames = new Set(custom.map((t) => t.name));
   const submit = () =>
     orderTests.mutate(
-      { urgency, tests: [...selected] },
+      {
+        urgency,
+        tests: [...selected].filter((n) => !customNames.has(n)),
+        customTests: custom.filter((t) => selected.has(t.name)),
+      },
       {
         onSuccess: (r) => {
+          setCustom([]);
           setSelected(new Set());
           onToast(`✓ ${r.tests ?? selected.size} tests ordered`);
         },
@@ -83,7 +94,10 @@ export default function TestsSection({ visitId, consult, readOnly, onToast, onUn
               small
               label="🎤 Voice"
               title={'Say: "Order diabetes panel for next visit" or "Add TSH today"'}
-              onText={setFilter}
+              onText={(text) => {
+                setFilter(text);
+                filterRef.current?.focus();
+              }}
             />
           </div>
         )}
@@ -142,12 +156,76 @@ export default function TestsSection({ visitId, consult, readOnly, onToast, onUn
           </div>
 
           <div className="cn-head">Individual tests</div>
-          {filter && (
-            <div className="tst-heard">
-              Heard: &ldquo;{filter}&rdquo; — filtering the list.{" "}
+          <div className="tst-heard">
+            <input
+              ref={filterRef}
+              className="cp-inp tst-filter"
+              value={filter}
+              placeholder="Filter tests — type, or dictate with 🎤 Voice"
+              onChange={(e) => setFilter(e.target.value)}
+              aria-label="Filter tests"
+            />
+            {filter && (
               <button type="button" className="btn-sm" onClick={() => setFilter("")}>
                 Clear
               </button>
+            )}
+          </div>
+          {(() => {
+            const typed = filter.trim();
+            const known =
+              catalog.some((t) => t.name.toLowerCase() === typed.toLowerCase()) ||
+              custom.some((t) => t.name.toLowerCase() === typed.toLowerCase());
+            if (typed.length < 2 || known) return null;
+            return (
+              <div className="tst-new">
+                <span>“{typed}” is not in the list — order it for this patient only?</span>
+                <input
+                  className="cp-inp tst-new__price"
+                  inputMode="decimal"
+                  placeholder="₹ price"
+                  value={customPrice}
+                  onChange={(e) => setCustomPrice(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="btn-sm on"
+                  onClick={() => {
+                    setCustom((prev) => [
+                      ...prev,
+                      { name: typed, price: Number(customPrice) > 0 ? Number(customPrice) : 0 },
+                    ]);
+                    setSelected((prev) => new Set(prev).add(typed));
+                    setFilter("");
+                    setCustomPrice("");
+                  }}
+                >
+                  + Add for this patient
+                </button>
+              </div>
+            );
+          })()}
+          {custom.length > 0 && (
+            <div className="tst-customlist">
+              {custom.map((t) => (
+                <span key={t.name} className="tst-custom">
+                  {t.name} · {t.price ? `₹${t.price}` : "price not set"}
+                  <button
+                    type="button"
+                    aria-label={`Remove ${t.name}`}
+                    onClick={() => {
+                      setCustom((prev) => prev.filter((c) => c.name !== t.name));
+                      setSelected((prev) => {
+                        const next = new Set(prev);
+                        next.delete(t.name);
+                        return next;
+                      });
+                    }}
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
             </div>
           )}
           <div className="tst-list">

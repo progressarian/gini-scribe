@@ -102,6 +102,11 @@ export const CAPABILITIES = {
   GINIFLOW_STATION_DOCTOR: "GINIFLOW_STATION_DOCTOR", // the consultant's queue and consult screen
   GINIFLOW_STATION_MO: "GINIFLOW_STATION_MO", // MO/SD workup, order tests, hand over
   GINIFLOW_STATION_PHARMACY: "GINIFLOW_STATION_PHARMACY", // dispense, counsel, close the visit
+  GINIFLOW_STATION_RX: "GINIFLOW_STATION_RX", // the nurse desk: explain the prescription
+  // Print the finalised prescription for the patient. Its own key rather than a
+  // station one: several desks need this single action and none of them should
+  // inherit another desk's controls to get it.
+  GINIFLOW_PRINT_RX: "GINIFLOW_PRINT_RX",
   // The pre-OPD triage board: categorise tomorrow's list, assign it, chase the
   // missing reports. Coordinator and admin only — reception works the desk and
   // the payment queue, and the categorisation here is a clinical judgement.
@@ -159,6 +164,7 @@ export const ROLE_CAPABILITIES = {
     // loops — is the coordinator's, which is what 19 §9 describes. Granting the
     // capability outright would also have opened /giniflow/station/referrals,
     // because src/config/routes.js gates that page on the same key.
+    C.GINIFLOW_PRINT_RX,
   ],
   [ROLES.MO]: [
     C.PATIENT_READ,
@@ -195,6 +201,8 @@ export const ROLE_CAPABILITIES = {
     C.FLOW_FLOOR_VIEW,
     C.GINIFLOW_VIEW,
     C.GINIFLOW_STATION_VITALS,
+    C.GINIFLOW_STATION_RX,
+    C.GINIFLOW_PRINT_RX,
   ],
   // Lab/tech need PATIENT_READ so they can look up whose report they're
   // uploading (Find + chart), on top of the lab upload/request capabilities.
@@ -246,6 +254,7 @@ export const ROLE_CAPABILITIES = {
     // The payment desk clearing a lab bill has no reason to be able to move any
     // patient to any station, and no plan asked for it (BQ-10).
     C.GINIFLOW_STATION_RECEPTION,
+    C.GINIFLOW_PRINT_RX,
   ],
   // Coordinators run GHM ops/calling and need Genie Chats with patients.
   // The GDA works two desks: Vitals and the Assistant Station. Dietitian was
@@ -275,6 +284,8 @@ export const ROLE_CAPABILITIES = {
     C.GINIFLOW_STATION_MO,
     C.GINIFLOW_TRIAGE,
     C.GINIFLOW_REFERRALS,
+    C.GINIFLOW_STATION_RX,
+    C.GINIFLOW_PRINT_RX,
   ],
   [ROLES.PHARMACY]: [
     C.PATIENT_READ,
@@ -290,6 +301,7 @@ export const ROLE_CAPABILITIES = {
     // The last desk on the floor: dispensing, counselling and the exit that ends
     // the visit. Pharmacy and admin only — nobody else closes a patient's day.
     C.GINIFLOW_STATION_PHARMACY,
+    C.GINIFLOW_PRINT_RX,
   ],
   // OBT outbound call team. The ONLY role without PATIENT_CHART: they phone
   // patients to confirm tomorrow's appointment, which needs identity and phone

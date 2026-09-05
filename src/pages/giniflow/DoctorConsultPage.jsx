@@ -144,7 +144,14 @@ export default function DoctorConsultPage() {
   const { summary } = consult.header;
   // A finalized visit is read-only — the log only moves forward, so a correction
   // is an addendum, never an edit (plan §9).
-  const readOnly = consult.finalized;
+  //
+  // So is another consultant's patient. The queue's "Waiting for another
+  // consultant" column exists so the floor can be seen whole, and opening one
+  // from there is expected; writing to it is not. The server decides which it
+  // is and refuses the writes either way — this only keeps the page from
+  // offering an action that would come back 403.
+  const otherConsultant = !!consult.readOnly;
+  const readOnly = consult.finalized || otherConsultant;
 
   const jump = (id) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
 
@@ -169,13 +176,26 @@ export default function DoctorConsultPage() {
         </div>
         <div className="rail-right">
           {badge && <span className={`badge ${badge.cls}`}>{badge.label}</span>}
-          <span className={`badge ${readOnly ? "b-grn" : "b-blu"}`}>
-            {readOnly ? "Finalized" : lastSavedAt ? `Draft · saved ${clock(lastSavedAt)}` : "Draft"}
+          <span
+            className={`badge ${otherConsultant ? "b-amb" : readOnly ? "b-grn" : "b-blu"}`}
+            title={
+              otherConsultant
+                ? `${consult.readOnlyOwner || "Another consultant"} is assigned to this patient`
+                : undefined
+            }
+          >
+            {otherConsultant
+              ? `👁 Read-only · ${consult.readOnlyOwner || "another consultant"}'s patient`
+              : readOnly
+                ? "Finalized"
+                : lastSavedAt
+                  ? `Draft · saved ${clock(lastSavedAt)}`
+                  : "Draft"}
           </span>
           {/* "Step out" read as walking away from the work. Nothing is lost —
               the draft is written as it is made, and leaving flushes what the
               care plan's autosave has not sent yet — so the button says so. */}
-          {consult.inRoom && (
+          {consult.inRoom && !otherConsultant && (
             <button
               className="tr-back"
               onClick={() =>
@@ -209,28 +229,36 @@ export default function DoctorConsultPage() {
             {consult.sdName ? ` · ${consult.sdName} (SD)` : ""}
             {consult.doctorName ? ` · ${consult.doctorName}` : ""}
           </div>
-          <div className="ch-tiles">
-            <div className="cht">
-              <span>Checked in</span>
-              <strong>{clock(consult.checkedInAt)}</strong>
+          {/* Not on a read-only consult. These four answer "how is this visit
+              running" — the arrival clock, whether results are in, whether the
+              patient kept to the plan — and they are the assigned consultant's
+              to act on. A colleague reading the floor needs to know who the
+              patient is and where their markers stand, not to be handed
+              somebody else's running visit to judge. */}
+          {!otherConsultant && (
+            <div className="ch-tiles">
+              <div className="cht">
+                <span>Checked in</span>
+                <strong>{clock(consult.checkedInAt)}</strong>
+              </div>
+              <div className="cht">
+                <span>Last visit</span>
+                <strong>{consult.header.lastVisitDate || "first visit"}</strong>
+              </div>
+              <div className="cht">
+                <span>Reports</span>
+                <strong>
+                  {consult.resultsStatus === "ready" ? "✓ ready" : consult.resultsStatus}
+                </strong>
+              </div>
+              <div className="cht">
+                <span>Compliance</span>
+                <strong>
+                  {consult.header.compliancePct == null ? "—" : `${consult.header.compliancePct}%`}
+                </strong>
+              </div>
             </div>
-            <div className="cht">
-              <span>Last visit</span>
-              <strong>{consult.header.lastVisitDate || "first visit"}</strong>
-            </div>
-            <div className="cht">
-              <span>Reports</span>
-              <strong>
-                {consult.resultsStatus === "ready" ? "✓ ready" : consult.resultsStatus}
-              </strong>
-            </div>
-            <div className="cht">
-              <span>Compliance</span>
-              <strong>
-                {consult.header.compliancePct == null ? "—" : `${consult.header.compliancePct}%`}
-              </strong>
-            </div>
-          </div>
+          )}
           {/* The computed triage line — every tracked marker classified against
             its target. The most useful line on the screen. */}
           <div className="ch-sum">
@@ -315,7 +343,13 @@ export default function DoctorConsultPage() {
             readOnly={readOnly}
           />
 
-          {readOnly ? (
+          {otherConsultant ? (
+            <div className="fin-done">
+              <strong>👁 Read-only</strong> — {consult.readOnlyOwner || "another consultant"} is
+              assigned to this patient. You are seeing their consult so the floor can be read whole;
+              only the assigned consultant can write to it.
+            </div>
+          ) : readOnly ? (
             <div className="fin-done">
               <strong>✓ Finalized</strong> — this consultation is read-only, because Gini
               Flow&apos;s log only moves forward.

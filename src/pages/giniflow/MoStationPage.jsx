@@ -16,7 +16,7 @@ import {
   useAddProposal,
   useWithdrawProposal,
 } from "../../queries/hooks/useGiniflowMo";
-import { useDictation } from "../../hooks/useDictation";
+import { VoiceButton } from "../../components/giniflow/VoiceInput";
 import RxSection from "./consult/RxSection";
 import useAuthStore from "../../stores/authStore";
 import { useTick, minutesSince, budgetColour } from "../../lib/giniflowTime";
@@ -447,6 +447,11 @@ export default function MoStationPage() {
   const start = useStartWorkup();
   const savePlan = useSavePlan();
   const orderTests = useOrderTests();
+  // Typed in for THIS patient: the line goes on their order, never into the
+  // clinic list every other patient is offered.
+  const [custom, setCustom] = useState([]);
+  const [newTest, setNewTest] = useState("");
+  const [newPrice, setNewPrice] = useState("");
   const ready = useReadyForDoctor();
   const release = useReleaseWorkup();
   const takeOver = useTakeOver();
@@ -548,15 +553,12 @@ export default function MoStationPage() {
 
   // Dictation appends rather than replaces: an MO speaks one finding, types the
   // next, and speaks again. Overwriting what is already there loses work.
-  const dictation = useDictation({
-    onTranscript: (text) => {
-      setPlan((prev) => {
-        const next = prev.trim() ? `${prev.trim()} ${text}` : text;
-        queueSave(next, "spoken");
-        return next;
-      });
-    },
-  });
+  const appendSpoken = (text) =>
+    setPlan((prev) => {
+      const next = prev.trim() ? `${prev.trim()} ${text}` : text;
+      queueSave(next, "spoken");
+      return next;
+    });
 
   // Never lose the last thing typed — flush on the way out of the screen.
   useEffect(() => () => flushPlan(), []);
@@ -595,12 +597,19 @@ export default function MoStationPage() {
   const toggleTest = (name) =>
     setPicked((prev) => (prev.includes(name) ? prev.filter((t) => t !== name) : [...prev, name]));
 
-  const confirmTests = () =>
-    orderTests.mutate(
-      { visitId: activeId, urgency, tests: picked },
+  const confirmTests = () => {
+    const customNames = new Set(custom.map((t) => t.name));
+    return orderTests.mutate(
+      {
+        visitId: activeId,
+        urgency,
+        tests: picked.filter((n) => !customNames.has(n)),
+        customTests: custom.filter((t) => picked.includes(t.name)),
+      },
       {
         onSuccess: (r) => {
           setPicked([]);
+          setCustom([]);
           showToast(
             r.reachesReceptionToday
               ? `✓ ${r.tests.length} tests ordered — reception can collect ₹${r.total.toLocaleString("en-IN")}`
@@ -610,6 +619,7 @@ export default function MoStationPage() {
         onError: (e) => showToast(e?.response?.data?.error || "Could not order those tests"),
       },
     );
+  };
 
   const sendToDoctor = () =>
     ready.mutate(activeId, {
@@ -1060,32 +1070,12 @@ export default function MoStationPage() {
                     onChange={(e) => onPlanChange(e.target.value)}
                   />
                   <div className="mo-dictate">
-                    <button
-                      type="button"
-                      className={`voice-pill${dictation.listening ? " listening" : ""}`}
-                      onClick={dictation.toggle}
-                      disabled={dictation.busy}
-                    >
-                      🎤{" "}
-                      {dictation.busy
-                        ? "Reading back…"
-                        : dictation.listening
-                          ? "Stop"
-                          : "Dictate the plan"}
-                    </button>
-                    {(dictation.listening || dictation.caption) && (
-                      <div className={`caption${dictation.listening ? " live" : ""}`}>
-                        {dictation.listening && <span className="cap-dot" />}
-                        <span className="cap-text">
-                          {dictation.caption ||
-                            (dictation.live ? "Listening…" : "Recording — press Stop when done")}
-                        </span>
-                      </div>
-                    )}
+                    <VoiceButton
+                      label="🎤 Dictate the plan"
+                      title="Speak the plan — you can edit it before it is added"
+                      onText={appendSpoken}
+                    />
                   </div>
-                  {dictation.error && (
-                    <div className="voice-note voice-err">⚠ {dictation.error}</div>
-                  )}
 
                   {/* Reads back what the MO wrote and points at the two panels
                       below — it never adds a test the plan did not name. The
@@ -1288,6 +1278,64 @@ export default function MoStationPage() {
                     ))}
                   </div>
                   <div className="dp-hint">Add individual tests</div>
+                  {/* The catalogue is never complete. A test nobody listed is
+                      added to it here rather than written into the plan, where
+                      reception and the lab would never see it. */}
+                  <div className="mo-newtest">
+                    <input
+                      className="cp-inp"
+                      value={newTest}
+                      placeholder="Test not in the list? Type its name"
+                      onChange={(e) => setNewTest(e.target.value)}
+                    />
+                    <input
+                      className="cp-inp mo-newtest__price"
+                      inputMode="decimal"
+                      value={newPrice}
+                      placeholder="₹ price"
+                      onChange={(e) => setNewPrice(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="st-btn st-btn-g"
+                      disabled={newTest.trim().length < 2}
+                      onClick={() => {
+                        const name = newTest.trim();
+                        setCustom((prev) =>
+                          prev.some((c) => c.name.toLowerCase() === name.toLowerCase())
+                            ? prev
+                            : [
+                                ...prev,
+                                { name, price: Number(newPrice) > 0 ? Number(newPrice) : 0 },
+                              ],
+                        );
+                        setPicked((prev) => [...new Set([...prev, name])]);
+                        setNewTest("");
+                        setNewPrice("");
+                      }}
+                    >
+                      + Add for this patient
+                    </button>
+                  </div>
+                  {custom.length > 0 && (
+                    <div className="mo-customlist">
+                      {custom.map((t) => (
+                        <span key={t.name} className="mo-custom">
+                          {t.name} · {t.price ? `₹${t.price}` : "price not set"}
+                          <button
+                            type="button"
+                            aria-label={`Remove ${t.name}`}
+                            onClick={() => {
+                              setCustom((prev) => prev.filter((c) => c.name !== t.name));
+                              setPicked((prev) => prev.filter((n) => n !== t.name));
+                            }}
+                          >
+                            ✕
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   <div className="mo-tests">
                     {(catalogue?.tests || []).map((t) => {
                       const dup = alreadyOrdered.has(t.name);

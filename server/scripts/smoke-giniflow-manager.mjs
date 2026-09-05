@@ -53,7 +53,19 @@ const stats = await getDayStats(today, board, sla);
 const bottleneck = getBottleneck(board.columns);
 const averages = await getStationAverages(today, sla);
 
-check("sla config has 10 rows", sla.length === 10, `${sla.length}`);
+const REQUIRED_SLA = [
+  "checkin_to_vitals",
+  "vitals",
+  "wait_sd",
+  "sd",
+  "wait_doctor",
+  "doctor",
+  "pharmacy",
+  "lab_total",
+  "total_journey",
+];
+const missingSla = REQUIRED_SLA.filter((k) => !sla.some((r) => r.station === k));
+check("sla config covers every station budget", missingSla.length === 0, missingSla.join(", "));
 check(
   "board returns every seeded visit",
   board.cards.length === seeded.visits,

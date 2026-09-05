@@ -88,6 +88,7 @@ const GHMPage = lazyWithRetry(() => import("./pages/GHMPage"));
 const OBTDashboardPage = lazyWithRetry(() => import("./pages/OBTDashboardPage"));
 const DoctorManagementPage = lazyWithRetry(() => import("./pages/DoctorManagementPage"));
 const PatientBlocklistPage = lazyWithRetry(() => import("./pages/PatientBlocklistPage"));
+const TestCatalogPage = lazyWithRetry(() => import("./pages/TestCatalogPage"));
 const MedicineCollectionPage = lazyWithRetry(() => import("./pages/MedicineCollectionPage"));
 const FlowCheckinPage = lazyWithRetry(() => import("./pages/flow/FlowCheckinPage"));
 const FlowCoordinatorPage = lazyWithRetry(() => import("./pages/flow/FlowCoordinatorPage"));
@@ -101,6 +102,7 @@ const GiniFlowMoPage = lazyWithRetry(() => import("./pages/giniflow/MoStationPag
 const GiniFlowDoctorPage = lazyWithRetry(() => import("./pages/giniflow/DoctorStationPage"));
 const GiniFlowConsultPage = lazyWithRetry(() => import("./pages/giniflow/DoctorConsultPage"));
 const GiniFlowPharmacyPage = lazyWithRetry(() => import("./pages/giniflow/PharmacyStationPage"));
+const GiniFlowRxPage = lazyWithRetry(() => import("./pages/giniflow/RxStationPage"));
 const GiniFlowReferralsPage = lazyWithRetry(() => import("./pages/giniflow/ReferralsStationPage"));
 const FlowMyPatientsPage = lazyWithRetry(() => import("./pages/flow/FlowMyPatientsPage"));
 const FlowConsultantsPage = lazyWithRetry(() => import("./pages/flow/FlowConsultantsPage"));
@@ -218,6 +220,7 @@ const router = createBrowserRouter([
               // Doctor availability / leave / reassignment management
               { path: "/doctor-management", element: lazyEl(DoctorManagementPage) },
               { path: "/admin/blocklist", element: lazyEl(PatientBlocklistPage) },
+              { path: "/admin/test-catalog", element: lazyEl(TestCatalogPage) },
               // Pharmacy: mark which medicines each patient collected
               { path: "/medicine-collection", element: lazyEl(MedicineCollectionPage) },
               // Patient Flow Management
@@ -236,6 +239,7 @@ const router = createBrowserRouter([
                 path: "/giniflow/station/doctor/:visitId",
                 element: lazyEl(GiniFlowConsultPage),
               },
+              { path: "/giniflow/station/rx", element: lazyEl(GiniFlowRxPage) },
               { path: "/giniflow/station/pharmacy", element: lazyEl(GiniFlowPharmacyPage) },
               { path: "/giniflow/station/referrals", element: lazyEl(GiniFlowReferralsPage) },
               { path: "/flow/my-patients", element: lazyEl(FlowMyPatientsPage) },

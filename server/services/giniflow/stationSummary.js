@@ -134,6 +134,11 @@ export async function getStationSummary(visitDate, db = pool) {
     // `to_hand_over` counts patients prescribed today with nothing recorded as
     // collected — the counter's real backlog even on a day the station screen
     // itself was never opened.
+    rx: {
+      count: col("rx"),
+      label: col("rx") ? `${col("rx")} to explain` : "nobody waiting",
+      tone: col("rx") ? "blue" : "teal",
+    },
     pharmacy: {
       count: toDispense || floor.to_hand_over,
       label: toDispense

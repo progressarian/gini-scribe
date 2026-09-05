@@ -60,6 +60,13 @@ const STATIONS = [
     href: "/giniflow/station/doctor",
   },
   {
+    key: "rx",
+    icon: "🗒️",
+    name: "Prescription Explain",
+    desc: "Explain the prescription · print for the patient · send to pharmacy",
+    href: "/giniflow/station/rx",
+  },
+  {
     key: "pharmacy",
     icon: "💊",
     name: "Pharmacy",

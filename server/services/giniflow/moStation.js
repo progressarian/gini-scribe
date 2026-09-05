@@ -560,8 +560,29 @@ export async function getTestPanels(db = pool) {
 // Prices are copied from the catalogue onto the order lines and totalled onto the
 // order, so the patient is charged what they were quoted even if the catalogue
 // moves afterwards.
-export async function orderTests(visitId, { urgency, tests, actorId = null }, db = pool) {
-  if (!Array.isArray(tests) || tests.length === 0) {
+export async function orderTests(
+  visitId,
+  { urgency, tests = [], customTests = [], actorId = null },
+  db = pool,
+) {
+  // Two kinds of line on one order: tests from the clinic's catalogue, priced
+  // from it, and tests typed in for THIS patient, which exist only on this
+  // order. A one-off ultrasound is not a test the whole clinic should be
+  // offered from then on, which is what putting it in the catalogue would mean.
+  const custom = (Array.isArray(customTests) ? customTests : [])
+    .map((t) => ({
+      name: String(t?.name || "")
+        .replace(/\s+/g, " ")
+        .trim(),
+      price: Number(t?.price) > 0 ? Number(t.price) : 0,
+    }))
+    .filter((t) => t.name.length >= 2);
+  const catalogueNames = (Array.isArray(tests) ? tests : []).filter(Boolean);
+
+  const seen = new Set(catalogueNames.map((n) => n.toUpperCase()));
+  const customOnly = custom.filter((t) => !seen.has(t.name.toUpperCase()));
+
+  if (!catalogueNames.length && !customOnly.length) {
     throw Object.assign(new Error("No tests selected"), { status: 400 });
   }
 
@@ -572,14 +593,16 @@ export async function orderTests(visitId, { urgency, tests, actorId = null }, db
 
     const { rows: priced } = await client.query(
       `SELECT test_name, price FROM giniflow_test_catalog WHERE test_name = ANY($1)`,
-      [tests],
+      [catalogueNames],
     );
     const priceOf = Object.fromEntries(priced.map((r) => [r.test_name, Number(r.price)]));
-    const uncatalogued = tests.filter((name) => priceOf[name] === undefined);
+    const uncatalogued = catalogueNames.filter((name) => priceOf[name] === undefined);
     if (uncatalogued.length)
       throw Object.assign(new Error(`Not in the test catalogue: ${uncatalogued.join(", ")}`), {
         status: 400,
       });
+    for (const t of customOnly) priceOf[t.name] = t.price;
+    const tests = [...catalogueNames, ...customOnly.map((t) => t.name)];
     // MO-12: the same panel confirmed twice is two lab orders, two payment cards
     // on reception's desk and two charges. Only an order whose sample has not
     // been taken counts — once the blood is drawn, re-ordering the same test is

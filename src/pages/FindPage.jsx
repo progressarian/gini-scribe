@@ -173,11 +173,6 @@ export default function FindPage() {
         >
           + Book
         </button>
-        {canExportDirectory && (
-          <button className="find__book-btn" onClick={exportDirectory} disabled={exporting}>
-            {exporting ? "Exporting…" : "⬇ Patient list"}
-          </button>
-        )}
         <div className="find__stats">
           {searchStats
             ? [
@@ -202,6 +197,11 @@ export default function FindPage() {
                 </div>
               ))}
         </div>
+        {canExportDirectory && (
+          <button className="find__book-btn" onClick={exportDirectory} disabled={exporting}>
+            {exporting ? "Exporting…" : "⬇ Export all patients list"}
+          </button>
+        )}
       </div>
 
       {/* Search input */}

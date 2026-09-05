@@ -14,6 +14,7 @@ import {
 import { VoiceBar, VoiceButton } from "../../../components/giniflow/VoiceInput";
 import InteractionPanel from "./InteractionPanel";
 import { extractDose } from "../../../lib/medName";
+import { dosesFor, DEFAULT_TIMINGS } from "../../../../shared/giniflowMedTiming.js";
 
 // Prescription — gini-doctor-final.html `s-rx` (which is where
 // gini-prescription-v2.html's mechanics were merged).
@@ -22,6 +23,10 @@ import { extractDose } from "../../../lib/medName";
 // the draft. A consultation interrupted by a phone call loses nothing.
 
 export const TIMINGS = [
+  // Seeding reads `when_to_take` back off the patient's medicines, and those
+  // two values live there — without them a seeded row shows a slot the picker
+  // cannot display or clear.
+  ["fasting", "Empty stomach"],
   ["before_breakfast", "Before breakfast"],
   ["with_breakfast", "With breakfast"],
   ["after_breakfast", "After breakfast"],
@@ -35,9 +40,61 @@ export const TIMINGS = [
   ["bedtime", "At bedtime"],
   ["with_meals", "With meals"],
   ["sos", "As needed (SOS)"],
+  ["any_time", "Any time"],
 ];
 
 const FREQUENCIES = ["OD", "BD", "TDS", "QID", "SOS", "Weekly", "Fortnightly"];
+
+// BD is two doses and TDS three, so the timing is a set, not a value. The
+// picker offers every slot and says how many the frequency asks for; picking a
+// frequency fills in the usual ones so the common case stays one click.
+function TimingPicker({ value, frequency, onChange, disabled }) {
+  const chosen = value || [];
+  const need = dosesFor(frequency);
+  const toggle = (key) =>
+    onChange(chosen.includes(key) ? chosen.filter((k) => k !== key) : [...chosen, key]);
+
+  return (
+    <div className="rx-timings">
+      <span className="rx-timings__head">
+        Timing
+        <em>
+          {chosen.length} of {need}
+          {chosen.length > need ? " — more than the frequency" : ""}
+        </em>
+      </span>
+      <div className="rx-timings__chips">
+        {TIMINGS.map(([k, l]) => (
+          <button
+            type="button"
+            key={k}
+            disabled={disabled}
+            aria-pressed={chosen.includes(k)}
+            className={`tst-chip${chosen.includes(k) ? " on" : ""}`}
+            onClick={() => toggle(k)}
+          >
+            {l}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const withDefaultTimings = (prev, frequency) => ({
+  ...prev,
+  frequency,
+  timingCategories: prev.timingCategories?.length
+    ? prev.timingCategories
+    : DEFAULT_TIMINGS[frequency] || [],
+});
+
+const timingsOf = (item) =>
+  item.timing_categories?.length
+    ? item.timing_categories
+    : item.timing_category
+      ? [item.timing_category]
+      : [];
 
 // Weekly and fortnightly are how OFTEN a medicine is taken, not when in the
 // day — they are offered on Frequency. They stay in the label map so a draft
@@ -117,7 +174,7 @@ function RowEditor({ item, onSave, onCancel, onPause, onStop }) {
   const [form, setForm] = useState({
     dose: item.dose || "",
     frequency: item.frequency || "",
-    timingCategory: item.timing_category || "",
+    timingCategories: timingsOf(item),
     timeOfDay: (item.time_of_day || "").slice(0, 5),
     duration: item.duration || "",
     reason: item.reason || "",
@@ -137,21 +194,14 @@ function RowEditor({ item, onSave, onCancel, onPause, onStop }) {
         </label>
         <label>
           Frequency
-          <select className="cp-inp" value={form.frequency} onChange={set("frequency")}>
+          <select
+            className="cp-inp"
+            value={form.frequency}
+            onChange={(e) => setForm((p) => withDefaultTimings(p, e.target.value))}
+          >
             <option value="">—</option>
             {FREQUENCIES.map((f) => (
               <option key={f}>{f}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Timing
-          <select className="cp-inp" value={form.timingCategory} onChange={set("timingCategory")}>
-            <option value="">—</option>
-            {TIMINGS.map(([k, l]) => (
-              <option key={k} value={k}>
-                {l}
-              </option>
             ))}
           </select>
         </label>
@@ -177,6 +227,11 @@ function RowEditor({ item, onSave, onCancel, onPause, onStop }) {
           <input className="cp-inp" value={form.duration} onChange={set("duration")} />
         </label>
       </div>
+      <TimingPicker
+        value={form.timingCategories}
+        frequency={form.frequency}
+        onChange={(timingCategories) => setForm((p) => ({ ...p, timingCategories }))}
+      />
       <label className="rx-wide">
         Reason / for
         <input className="cp-inp" value={form.reason} onChange={set("reason")} />
@@ -222,7 +277,7 @@ function RowEditor({ item, onSave, onCancel, onPause, onStop }) {
               onSave({
                 ...form,
                 timeOfDay: form.timeOfDay || null,
-                timingCategory: form.timingCategory || null,
+                timingCategories: form.timingCategories,
               })
             }
           >
@@ -249,7 +304,12 @@ function AddMedicine({ onAdd, onClose, initialQuery = "" }) {
   const [query, setQuery] = useState(initialQuery);
   const [debounced, setDebounced] = useState("");
   const [picked, setPicked] = useState(null);
-  const [form, setForm] = useState({ dose: "", frequency: "OD", timingCategory: "", reason: "" });
+  const [form, setForm] = useState({
+    dose: "",
+    frequency: "OD",
+    timingCategories: DEFAULT_TIMINGS.OD,
+    reason: "",
+  });
   const { data, isFetching } = useMedicineSearch(debounced);
 
   useEffect(() => {
@@ -331,29 +391,25 @@ function AddMedicine({ onAdd, onClose, initialQuery = "" }) {
               <select
                 className="cp-inp"
                 value={form.frequency}
-                onChange={(e) => setForm((p) => ({ ...p, frequency: e.target.value }))}
+                onChange={(e) =>
+                  setForm((p) => ({
+                    ...p,
+                    frequency: e.target.value,
+                    timingCategories: DEFAULT_TIMINGS[e.target.value] || [],
+                  }))
+                }
               >
                 {FREQUENCIES.map((f) => (
                   <option key={f}>{f}</option>
                 ))}
               </select>
             </label>
-            <label>
-              Timing
-              <select
-                className="cp-inp"
-                value={form.timingCategory}
-                onChange={(e) => setForm((p) => ({ ...p, timingCategory: e.target.value }))}
-              >
-                <option value="">—</option>
-                {TIMINGS.map(([k, l]) => (
-                  <option key={k} value={k}>
-                    {l}
-                  </option>
-                ))}
-              </select>
-            </label>
           </div>
+          <TimingPicker
+            value={form.timingCategories}
+            frequency={form.frequency}
+            onChange={(timingCategories) => setForm((p) => ({ ...p, timingCategories }))}
+          />
           <label className="rx-wide">
             Reason / for
             <input
@@ -373,7 +429,7 @@ function AddMedicine({ onAdd, onClose, initialQuery = "" }) {
                   drugClass: picked.drugClass,
                   changeType: "new",
                   ...form,
-                  timingCategory: form.timingCategory || null,
+                  timingCategories: form.timingCategories,
                 })
               }
             >
@@ -406,7 +462,7 @@ function ExternalMedicineForm({ onAdd, onClose }) {
     medicineName: "",
     dose: "",
     frequency: "",
-    timing: "",
+    timingCategories: [],
     prescriberName: "",
     prescriberHospital: "",
   });
@@ -427,11 +483,16 @@ function ExternalMedicineForm({ onAdd, onClose }) {
         </label>
         <label>
           Frequency
-          <input className="cp-inp" value={f.frequency} onChange={set("frequency")} />
-        </label>
-        <label>
-          Timing
-          <input className="cp-inp" value={f.timing} onChange={set("timing")} />
+          <select
+            className="cp-inp"
+            value={f.frequency}
+            onChange={(e) => setF((prev) => withDefaultTimings(prev, e.target.value))}
+          >
+            <option value="">—</option>
+            {FREQUENCIES.map((x) => (
+              <option key={x}>{x}</option>
+            ))}
+          </select>
         </label>
         <label>
           Prescribed by
@@ -446,6 +507,11 @@ function ExternalMedicineForm({ onAdd, onClose }) {
           />
         </label>
       </div>
+      <TimingPicker
+        value={f.timingCategories}
+        frequency={f.frequency}
+        onChange={(timingCategories) => setF((prev) => ({ ...prev, timingCategories }))}
+      />
       <div className="rx-acts">
         <button
           type="button"
@@ -622,7 +688,9 @@ export default function RxSection({ visitId, readOnly, onToast, onUnsaved, stati
                 {[item.dose, item.frequency].filter(Boolean).join(" ") || "—"}
               </div>
               <div className="rx-col-timing">
-                {TIMING_LABEL[item.timing_category] || "not set"}
+                {timingsOf(item)
+                  .map((k) => TIMING_LABEL[k] || k)
+                  .join(" · ") || "not set"}
                 {item.time_of_day && <em>{item.time_of_day.slice(0, 5)}</em>}
               </div>
               <div className="rx-col-for">
@@ -727,7 +795,7 @@ export default function RxSection({ visitId, readOnly, onToast, onUnsaved, stati
                       medicineName: alt.name,
                       dose: item.dose,
                       frequency: item.frequency,
-                      timingCategory: item.timing_category,
+                      timingCategories: timingsOf(item),
                       reason: item.reason,
                       changeType: "new",
                     },

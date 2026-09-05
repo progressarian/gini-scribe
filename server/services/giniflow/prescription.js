@@ -1,5 +1,6 @@
 import pool from "../../config/db.js";
 import { stripFormPrefix, canonicalMedKey } from "../medication/normalize.js";
+import { SLOT_ORDER, whenToTakeFor } from "../../../shared/giniflowMedTiming.js";
 
 // The consultant's prescription draft — gini-doctor-final.html `s-rx`.
 //
@@ -52,7 +53,7 @@ const DEFAULT_TIME = {
 export const defaultTimeFor = (category) => DEFAULT_TIME[category] || null;
 
 const ITEM_COLUMNS = `id, visit_id, source_medication_id, medicine_name, pharmacy_match,
-  composition, dose, previous_dose, frequency, timing, timing_category,
+  composition, dose, previous_dose, frequency, timing, timing_category, timing_categories,
   time_of_day::text AS time_of_day, route, form, duration, reason,
   patient_instruction, change_type, stop_reason, resume_on::text AS resume_on,
   drug_class, sort_order,
@@ -176,6 +177,28 @@ export async function getDraft(visitId, db = pool) {
 // Starting a draft that already exists is a no-op, not an error: it RETURNS
 // rather than rolling back, because aborting a caller's transaction over
 // "nothing to do" would take the claim down with it.
+// A medicine the patient is already on twice a day arrives with BOTH its
+// timings, read back from `when_to_take` — the draft opening with one of them
+// is how a BD row silently became OD at the next visit.
+const SEEDED_SLOTS = `COALESCE(
+  (SELECT ARRAY_AGG(k) FROM (
+     SELECT CASE lower(btrim(w::text))
+              WHEN 'fasting' THEN 'fasting'
+              WHEN 'before breakfast' THEN 'before_breakfast'
+              WHEN 'after breakfast' THEN 'after_breakfast'
+              WHEN 'before lunch' THEN 'before_lunch'
+              WHEN 'after lunch' THEN 'after_lunch'
+              WHEN 'before dinner' THEN 'before_dinner'
+              WHEN 'after dinner' THEN 'after_dinner'
+              WHEN 'at bedtime' THEN 'bedtime'
+              WHEN 'sos only' THEN 'sos'
+              WHEN 'any time' THEN 'any_time'
+            END AS k
+       FROM unnest(COALESCE(m.when_to_take, '{}')) w) t
+    WHERE k IS NOT NULL),
+  CASE WHEN m.timing_category IS NOT NULL THEN ARRAY[m.timing_category] END
+)`;
+
 export async function seedDraftOn(client, visitId) {
   const { rows: existing } = await client.query(
     `SELECT count(*)::int AS n FROM giniflow_rx_items WHERE visit_id = $1`,
@@ -186,10 +209,11 @@ export async function seedDraftOn(client, visitId) {
   const { rows } = await client.query(
     `INSERT INTO giniflow_rx_items
          (visit_id, source_medication_id, medicine_name, pharmacy_match, composition, dose,
-          frequency, timing, timing_category, time_of_day, route, form, drug_class,
-          reason, change_type, sort_order)
+          frequency, timing, timing_category, timing_categories, time_of_day, route, form,
+          drug_class, reason, change_type, sort_order)
        SELECT $1, m.id, m.name, m.pharmacy_match, m.composition, m.dose,
-              m.frequency, m.timing, m.timing_category, m.time_of_day, m.route, m.form,
+              m.frequency, m.timing, m.timing_category, ${SEEDED_SLOTS},
+              m.time_of_day, m.route, m.form,
               m.drug_class, m.clinical_note, 'continued',
               row_number() OVER (ORDER BY m.med_group NULLS LAST, m.name)
          FROM medications m
@@ -217,14 +241,28 @@ export async function seedDraftFromRegimen(visitId, db = pool) {
   }
 }
 
+// A row can carry several timings (BD, TDS). The single-value columns keep the
+// EARLIEST of them, which is the slot the medicine card files the row under and
+// what every reader written before the array still asks for.
+export const orderSlots = (slots) =>
+  [...new Set((slots || []).filter((s) => SLOT_ORDER.has(s)))].sort(
+    (a, b) => SLOT_ORDER.get(a) - SLOT_ORDER.get(b),
+  );
+
 const normaliseItem = (item) => {
   const { name: cleanName, form: detectedForm } = stripFormPrefix(item.medicineName || "");
   const name = cleanName || item.medicineName;
+  const slots = orderSlots(
+    item.timingCategories?.length ? item.timingCategories : [item.timingCategory],
+  );
+  const primary = slots[0] ?? item.timingCategory ?? null;
   return {
     name,
     pharmacyMatch: item.pharmacyMatch || canonicalMedKey(name) || null,
     form: item.form || detectedForm || null,
-    timeOfDay: item.timeOfDay || defaultTimeFor(item.timingCategory),
+    timingCategory: primary,
+    timingCategories: slots.length ? slots : null,
+    timeOfDay: item.timeOfDay || defaultTimeFor(primary),
   };
 };
 
@@ -303,10 +341,10 @@ export async function addItem(visitId, item, db = pool) {
   const { rows } = await db.query(
     `INSERT INTO giniflow_rx_items
        (visit_id, source_medication_id, medicine_name, pharmacy_match, composition, dose,
-        previous_dose, frequency, timing, timing_category, time_of_day, route, form,
-        duration, reason, patient_instruction, change_type, drug_class,
+        previous_dose, frequency, timing, timing_category, timing_categories, time_of_day,
+        route, form, duration, reason, patient_instruction, change_type, drug_class,
         proposed_by, approval_status, sort_order)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::time,$12,$13,$14,$15,$16,$17,$18,$19,$20,
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$21::text[],$11::time,$12,$13,$14,$15,$16,$17,$18,$19,$20,
              COALESCE((SELECT MAX(sort_order) + 1 FROM giniflow_rx_items WHERE visit_id = $1), 1))
      RETURNING ${ITEM_COLUMNS}`,
     [
@@ -319,7 +357,7 @@ export async function addItem(visitId, item, db = pool) {
       item.previousDose ?? null,
       item.frequency ?? null,
       item.timing ?? null,
-      item.timingCategory ?? null,
+      n.timingCategory,
       n.timeOfDay,
       item.route ?? "Oral",
       n.form,
@@ -330,12 +368,16 @@ export async function addItem(visitId, item, db = pool) {
       item.drugClass ?? null,
       proposedBy,
       approvalStatus,
+      n.timingCategories,
     ],
   );
   return rows[0];
 }
 
 export async function updateItem(itemId, patch, db = pool) {
+  const slots = orderSlots(
+    patch.timingCategories?.length ? patch.timingCategories : [patch.timingCategory],
+  );
   // A dose change is a clinical event, not an edit: the row remembers what it
   // was changed from so the pharmacy's counselling note and the card's "↑
   // Changed" chip have something to say.
@@ -350,6 +392,7 @@ export async function updateItem(itemId, patch, db = pool) {
                 THEN 'changed' ELSE COALESCE($9, change_type) END,
             frequency = COALESCE($3, frequency),
             timing_category = COALESCE($4, timing_category),
+            timing_categories = COALESCE($12::text[], timing_categories),
             time_of_day = COALESCE($5::time, time_of_day),
             duration = COALESCE($6, duration),
             reason = COALESCE($7, reason),
@@ -372,14 +415,15 @@ export async function updateItem(itemId, patch, db = pool) {
       itemId,
       patch.dose ?? null,
       patch.frequency ?? null,
-      patch.timingCategory ?? null,
-      patch.timeOfDay ?? null,
+      slots[0] ?? patch.timingCategory ?? null,
+      patch.timeOfDay ?? (slots[0] ? defaultTimeFor(slots[0]) : null),
       patch.duration ?? null,
       patch.reason ?? null,
       patch.patientInstruction ?? null,
       patch.changeType ?? null,
       patch.route ?? null,
       patch.actorId ?? null,
+      slots.length ? slots : null,
     ],
   );
   if (!rows.length) throw Object.assign(new Error("Draft row not found"), { status: 404 });
@@ -551,16 +595,25 @@ export async function alternativesFor(medicineName, db = pool) {
 export async function addExternal(patientId, med, db = pool) {
   const { name: cleanName, form } = stripFormPrefix(med.medicineName || "");
   const name = cleanName || med.medicineName;
+  // The outside doctor's BD is still BD: the same slots the consultant's own
+  // rows carry, so the medicine card files this beside them rather than under
+  // "timing not set".
+  const slots = orderSlots(
+    med.timingCategories?.length ? med.timingCategories : [med.timingCategory],
+  );
+  const whenToTake = whenToTakeFor(slots);
   const { rows } = await db.query(
     `INSERT INTO medications
        (patient_id, name, pharmacy_match, composition, dose, frequency, timing,
-        timing_category, time_of_day, form, external_doctor, med_group, interaction_flag,
-        started_date, is_active, is_new, external_specialty, external_hospital,
-        external_condition)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::time,$10,$11,'external',$12,$13,true,false,$14,$15,$16)
+        timing_category, when_to_take, time_of_day, form, external_doctor, med_group,
+        interaction_flag, started_date, is_active, is_new, external_specialty,
+        external_hospital, external_condition)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$17::when_to_take_pill[],$9::time,$10,$11,'external',
+             $12,$13,true,false,$14,$15,$16)
      ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
      DO UPDATE SET dose = EXCLUDED.dose, frequency = EXCLUDED.frequency,
                    timing = EXCLUDED.timing, timing_category = EXCLUDED.timing_category,
+                   when_to_take = COALESCE(EXCLUDED.when_to_take, medications.when_to_take),
                    time_of_day = EXCLUDED.time_of_day,
                    external_doctor = EXCLUDED.external_doctor,
                    external_specialty = EXCLUDED.external_specialty,
@@ -576,8 +629,8 @@ export async function addExternal(patientId, med, db = pool) {
       med.dose ?? null,
       med.frequency ?? null,
       med.timing ?? null,
-      med.timingCategory ?? null,
-      med.timeOfDay || defaultTimeFor(med.timingCategory),
+      slots[0] ?? med.timingCategory ?? null,
+      med.timeOfDay || defaultTimeFor(slots[0] ?? med.timingCategory),
       form,
       med.prescriberName,
       // The interaction flag is written by a human, never generated. An
@@ -596,6 +649,7 @@ export async function addExternal(patientId, med, db = pool) {
       med.prescriberSpecialty ?? null,
       med.prescriberHospital ?? null,
       med.condition ?? null,
+      whenToTake.length ? whenToTake : null,
     ],
   );
   return rows[0];

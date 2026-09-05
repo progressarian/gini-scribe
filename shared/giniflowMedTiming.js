@@ -53,3 +53,49 @@ export const WHEN_TO_TAKE_SLOT = new Map([
   // nobody recorded when. healthray/parser.js already routes new "with milk"
   // text into `instructions` instead.
 ]);
+
+// How many doses a frequency means, and the slots a consultant almost always
+// picks for it. BD is two timings, not one — the form offers that many and
+// fills these in, so the common case is a click and the unusual one is an edit.
+export const DOSES_PER_DAY = {
+  OD: 1,
+  BD: 2,
+  TDS: 3,
+  QID: 4,
+  SOS: 1,
+  Weekly: 1,
+  Fortnightly: 1,
+};
+
+export const DEFAULT_TIMINGS = {
+  OD: ["after_breakfast"],
+  BD: ["after_breakfast", "after_dinner"],
+  TDS: ["after_breakfast", "after_lunch", "after_dinner"],
+  QID: ["after_breakfast", "after_lunch", "evening", "after_dinner"],
+  SOS: ["sos"],
+  Weekly: ["after_breakfast"],
+  Fortnightly: ["after_breakfast"],
+};
+
+export const dosesFor = (frequency) =>
+  DOSES_PER_DAY[String(frequency || "").toUpperCase()] ?? DOSES_PER_DAY[frequency] ?? 1;
+
+// The draft's slot keys -> the `when_to_take` enum medications stores. Slots the
+// enum has no value for (with_breakfast, evening, with_meals...) are left out
+// rather than bent into a neighbouring one: a wrong time is worse than none.
+export const SLOT_TO_WHEN_TO_TAKE = new Map([
+  ["fasting", "Fasting"],
+  ["before_breakfast", "Before breakfast"],
+  ["after_breakfast", "After breakfast"],
+  ["before_lunch", "Before lunch"],
+  ["after_lunch", "After lunch"],
+  ["before_dinner", "Before dinner"],
+  ["after_dinner", "After dinner"],
+  ["bedtime", "At bedtime"],
+  ["sos", "SOS only"],
+  ["any_time", "Any time"],
+]);
+
+export const whenToTakeFor = (slots) => [
+  ...new Set((slots || []).map((s) => SLOT_TO_WHEN_TO_TAKE.get(s)).filter(Boolean)),
+];

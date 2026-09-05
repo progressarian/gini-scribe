@@ -146,6 +146,13 @@ const NAV_ITEMS = [
     cap: C["/admin/blocklist"],
     show: () => true,
   },
+  // Admin: the clinic's test price list
+  {
+    path: "/admin/test-catalog",
+    label: "🔬 Test Catalogue",
+    cap: C["/admin/test-catalog"],
+    show: () => true,
+  },
   // Pharmacy: medicine collection tracking
   {
     path: "/medicine-collection",
