@@ -185,8 +185,6 @@ function Pane({ visitId, onClose, onExplained, onView, onReissue, reissuing, bus
 }
 
 export default function RxStationPage() {
-  const { data, isLoading } = useRxQueue(undefined, debounced);
-  const live = useGiniflowLive();
   const [openId, setOpenId] = useState(null);
   const [toast, setToast] = useState("");
   const [viewing, setViewing] = useState(null);
@@ -196,6 +194,9 @@ export default function RxStationPage() {
     const t = setTimeout(() => setDebounced(search), 250);
     return () => clearTimeout(t);
   }, [search]);
+
+  const { data, isLoading } = useRxQueue(undefined, debounced);
+  const live = useGiniflowLive();
   const start = useStartRxExplain();
   const explained = useMarkRxExplained();
   const reissue = useReissueRx();

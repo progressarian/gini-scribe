@@ -233,7 +233,7 @@ function RowEditor({ item, onSave, onCancel, onPause, onStop }) {
         onChange={(timingCategories) => setForm((p) => ({ ...p, timingCategories }))}
       />
       <label className="rx-wide">
-        Reason / for
+        Remarks
         <input className="cp-inp" value={form.reason} onChange={set("reason")} />
       </label>
       <label className="rx-wide">
@@ -411,7 +411,7 @@ function AddMedicine({ onAdd, onClose, initialQuery = "" }) {
             onChange={(timingCategories) => setForm((p) => ({ ...p, timingCategories }))}
           />
           <label className="rx-wide">
-            Reason / for
+              Remarks
             <input
               className="cp-inp"
               value={form.reason}
