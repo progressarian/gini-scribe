@@ -867,6 +867,12 @@ export const giniflowRxItemSchema = z.object({
 
 export const giniflowRxItemPatchSchema = giniflowRxItemSchema.partial();
 
+// A pasted prescription, read back as draft rows. The cap matches
+// planExtract's: a runaway guard, not a limit anyone meets.
+export const giniflowRxPasteSchema = z.object({
+  text: z.string().trim().min(1).max(6000),
+});
+
 // Approve · Adjust · Reject on a proposed row. `adjusted` is recorded by editing
 // the row, not by sending it here, but it stays valid so a client can be
 // explicit. A rejection carries its reason — the service refuses without one.

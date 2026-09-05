@@ -262,7 +262,12 @@ const normaliseItem = (item) => {
     form: item.form || detectedForm || null,
     timingCategory: primary,
     timingCategories: slots.length ? slots : null,
-    timeOfDay: item.timeOfDay || defaultTimeFor(primary),
+    // No clock is derived from the slot any more. Across 124,921 active
+    // medications the field is set on 3, while `when_to_take` is set on 77,056:
+    // the slot is how this hospital records when to take a medicine. Defaulting
+    // it wrote 08:30 onto rows nobody had given a time, and it cannot describe
+    // a BD medicine at all — one column against an array of timings.
+    timeOfDay: item.timeOfDay || null,
   };
 };
 
@@ -416,7 +421,7 @@ export async function updateItem(itemId, patch, db = pool) {
       patch.dose ?? null,
       patch.frequency ?? null,
       slots[0] ?? patch.timingCategory ?? null,
-      patch.timeOfDay ?? (slots[0] ? defaultTimeFor(slots[0]) : null),
+      patch.timeOfDay ?? null,
       patch.duration ?? null,
       patch.reason ?? null,
       patch.patientInstruction ?? null,
@@ -483,6 +488,21 @@ export async function stopItem(itemId, reason, db = pool) {
 //   3. `mhg_drug_formulary`, which carries molecule and route
 //
 // Stock is joined on top wherever it is known.
+// The way back from a pause or a stop. Both are reversible inside a draft — the
+// consultation has not been finalized, so a mis-click should not survive it.
+// `continued` rather than `changed`: resuming restores the medicine as it was,
+// and calling that a change would put it in the counselling note as one.
+export async function resumeItem(itemId, db = pool) {
+  const { rows } = await db.query(
+    `UPDATE giniflow_rx_items
+        SET change_type = 'continued', resume_on = NULL, stop_reason = NULL, updated_at = NOW()
+      WHERE id = $1 RETURNING ${ITEM_COLUMNS}`,
+    [itemId],
+  );
+  if (!rows.length) throw Object.assign(new Error("Draft row not found"), { status: 404 });
+  return rows[0];
+}
+
 export async function searchMedicines(query, db = pool) {
   const q = (query || "").trim();
   if (q.length < 2) return [];
@@ -490,11 +510,40 @@ export async function searchMedicines(query, db = pool) {
 
   const { rows } = await db.query(
     `WITH prescribed AS (
-       SELECT DISTINCT ON (UPPER(m.name))
-              m.name, m.composition, m.drug_class, count(*) OVER (PARTITION BY UPPER(m.name)) AS uses
-         FROM medications m
-        WHERE m.name ILIKE '%' || $1 || '%'
-        ORDER BY UPPER(m.name), m.updated_at DESC NULLS LAST
+       -- Grouped on the canonical dispensing key, not the raw name.
+       --
+       -- medications is 181,703 rows in 34,105 spellings, and a search for
+       -- "atc" returned twelve of them for one drug: Atchol, Atchol 20,
+       -- Atchol 20mg, Atchol-F, ATCHOL 10 TAB, plus the typos Atcol, Atcholf
+       -- and Atcohol. Every one is a real prescription, so none can be deleted,
+       -- but they are one medicine and the picker should say so.
+       --
+       -- pharmacy_match already collapses them — 12 spellings behind ATCHOL,
+       -- 11 behind ATCHOL F — because canonicalMedKey strips the TAB/CAP/INJ
+       -- prefix and the case. It is null on roughly half the table, so the name
+       -- is the fallback and those rows behave exactly as they did before.
+       --
+       -- The spelling shown is the one prescribed most often, and the count is
+       -- the whole group: "Atchol · 3,373×" rather than twelve rows summing to
+       -- the same thing.
+       SELECT DISTINCT ON (grp) name, composition, drug_class, uses
+         FROM (
+           SELECT UPPER(COALESCE(NULLIF(BTRIM(m.pharmacy_match), ''), m.name)) AS grp,
+                  m.name, m.composition, m.drug_class, m.updated_at,
+                  count(*) OVER (
+                    PARTITION BY UPPER(COALESCE(NULLIF(BTRIM(m.pharmacy_match), ''), m.name))
+                  ) AS uses,
+                  count(*) OVER (
+                    PARTITION BY UPPER(COALESCE(NULLIF(BTRIM(m.pharmacy_match), ''), m.name)), m.name
+                  ) AS spelling_uses
+             FROM medications m
+            -- Only the name is searched. pharmacy_match is derived FROM the
+            -- name, so it can never match a term the name misses — checked
+            -- across several terms, zero such rows — and the extra OR widened
+            -- the scan for nothing.
+            WHERE m.name ILIKE '%' || $1 || '%'
+         ) g
+        ORDER BY grp, spelling_uses DESC, updated_at DESC NULLS LAST
      ),
      master AS (
        SELECT unnest(COALESCE(brand_names, ARRAY[generic_name])) AS name,
@@ -630,7 +679,7 @@ export async function addExternal(patientId, med, db = pool) {
       med.frequency ?? null,
       med.timing ?? null,
       slots[0] ?? med.timingCategory ?? null,
-      med.timeOfDay || defaultTimeFor(slots[0] ?? med.timingCategory),
+      med.timeOfDay || null,
       form,
       med.prescriberName,
       // The interaction flag is written by a human, never generated. An

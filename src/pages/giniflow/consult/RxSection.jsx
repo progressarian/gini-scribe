@@ -5,11 +5,13 @@ import {
   useUpdateItem,
   useRemoveItem,
   usePauseItem,
+  useResumeItem,
   useStopItem,
   useMedicineSearch,
   useAlternatives,
   useDecideItem,
   useAddExternal,
+  useParsePaste,
 } from "../../../queries/hooks/useGiniflowPrescription";
 import { VoiceBar, VoiceButton } from "../../../components/giniflow/VoiceInput";
 import InteractionPanel from "./InteractionPanel";
@@ -170,18 +172,20 @@ function AlternativesPanel({ name, onClose, onPick }) {
   );
 }
 
+const PAUSE_OPTIONS = [1, 2, 4, 6, 8, 12];
+
 function RowEditor({ item, onSave, onCancel, onPause, onStop }) {
   const [form, setForm] = useState({
     dose: item.dose || "",
     frequency: item.frequency || "",
     timingCategories: timingsOf(item),
-    timeOfDay: (item.time_of_day || "").slice(0, 5),
     duration: item.duration || "",
     reason: item.reason || "",
     patientInstruction: item.patient_instruction || "",
     route: item.route || "Oral",
   });
   const [stopping, setStopping] = useState(false);
+  const [pauseWeeks, setPauseWeeks] = useState(2);
   const [stopReason, setStopReason] = useState("");
   const set = (f) => (e) => setForm((p) => ({ ...p, [f]: e.target.value }));
 
@@ -204,15 +208,6 @@ function RowEditor({ item, onSave, onCancel, onPause, onStop }) {
               <option key={f}>{f}</option>
             ))}
           </select>
-        </label>
-        <label>
-          Time
-          <input
-            className="cp-inp"
-            type="time"
-            value={form.timeOfDay}
-            onChange={set("timeOfDay")}
-          />
         </label>
         <label>
           Route
@@ -276,7 +271,6 @@ function RowEditor({ item, onSave, onCancel, onPause, onStop }) {
             onClick={() =>
               onSave({
                 ...form,
-                timeOfDay: form.timeOfDay || null,
                 timingCategories: form.timingCategories,
               })
             }
@@ -288,9 +282,23 @@ function RowEditor({ item, onSave, onCancel, onPause, onStop }) {
           </button>
           {/* Pause and stop are different clinical acts: a pause keeps the
               medicine and a resume date, a stop ends it. */}
-          <button type="button" className="btn-sm ep-pause" onClick={() => onPause(2)}>
-            Pause 2 weeks
-          </button>
+          <label className="ep-pause-wrap">
+            <select
+              className="btn-sm ep-pause-weeks"
+              value={pauseWeeks}
+              onChange={(e) => setPauseWeeks(Number(e.target.value))}
+              aria-label="How long to pause for"
+            >
+              {PAUSE_OPTIONS.map((w) => (
+                <option key={w} value={w}>
+                  {w === 1 ? "1 week" : `${w} weeks`}
+                </option>
+              ))}
+            </select>
+            <button type="button" className="btn-sm ep-pause" onClick={() => onPause(pauseWeeks)}>
+              Pause
+            </button>
+          </label>
           <button type="button" className="btn-sm ep-stop" onClick={() => setStopping(true)}>
             Stop
           </button>
@@ -411,7 +419,7 @@ function AddMedicine({ onAdd, onClose, initialQuery = "" }) {
             onChange={(timingCategories) => setForm((p) => ({ ...p, timingCategories }))}
           />
           <label className="rx-wide">
-              Remarks
+            Remarks
             <input
               className="cp-inp"
               value={form.reason}
@@ -530,6 +538,193 @@ function ExternalMedicineForm({ onAdd, onClose }) {
   );
 }
 
+// Paste a prescription and have the draft fill itself.
+// docs/gini-flow/27-RX-PASTE-PLAN.md §5.
+//
+// Two states in one inline panel: the textarea, then the review table. Inline
+// because that is this section's idiom — the teaching bar, the add form and the
+// external-medicine form all open in place, and a modal here would be the only
+// one on the screen.
+//
+// Nothing is saved until "Add". The rows below are a proposal held in the
+// browser; the endpoint that produced them writes nothing at all.
+function PastePanel({ visitId, onAdd, onCancel, adding, result, onRead, reading, error }) {
+  const [text, setText] = useState("");
+  const [rows, setRows] = useState(null);
+  const [editing, setEditing] = useState(null);
+
+  useEffect(() => {
+    if (result) setRows(result.items.map((i, n) => ({ ...i, key: `${i.medicineName}-${n}` })));
+  }, [result]);
+
+  const keep = rows?.filter((r) => !r.discarded) || [];
+  const ready = keep.filter((r) => r.matched);
+
+  const patch = (key, fields) =>
+    setRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...fields } : r)));
+
+  if (!rows)
+    return (
+      <div className="rx-paste">
+        <div className="rxp-head">📋 Paste a prescription</div>
+        <textarea
+          className="rxp-text"
+          rows={5}
+          autoFocus
+          value={text}
+          placeholder={"Tab Atchol 40mg 1-0-1 after food x 30 days\nFenofibrate 145 OD with lunch"}
+          onChange={(e) => setText(e.target.value)}
+        />
+        {error && <div className="rxp-err">{error}</div>}
+        <div className="rxp-acts">
+          <button
+            type="button"
+            className="btn-sm on"
+            disabled={!text.trim() || reading}
+            onClick={() => onRead(text.trim())}
+          >
+            {reading ? "Reading…" : "Read it"}
+          </button>
+          <button type="button" className="btn-sm" onClick={onCancel}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+
+  return (
+    <div className="rx-paste">
+      <div className="rxp-head">
+        {result.counts.read} read · {result.counts.matched} matched
+        {result.counts.needsBrand ? ` · ${result.counts.needsBrand} need a brand` : ""}
+        {result.counts.unreadable ? ` · ${result.counts.unreadable} not read` : ""}
+      </div>
+
+      {keep.map((r) => (
+        <div className={`rxp-row${r.matched ? "" : " rxp-unmatched"}`} key={r.key}>
+          <div className="rxp-ok">{r.matched ? "✓" : "⚠"}</div>
+          <div className="rxp-main">
+            <div className="rxp-name">
+              {r.medicineName}
+              {r.firstTimeHere && (
+                <span className="rx-chip ch-proposed" title="Not prescribed here before">
+                  first time here
+                </span>
+              )}
+              {r.source === "model" && (
+                <span className="rx-chip ch-adjusted" title="Read by AI, not by the rule parser">
+                  AI read
+                </span>
+              )}
+            </div>
+            <div className="rxp-sub">{r.composition || (r.matched ? "—" : "no brand matched")}</div>
+            {!r.matched && !!r.candidates?.length && (
+              <div className="rxp-cands">
+                {r.candidates.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    className="btn-sm"
+                    onClick={() => patch(r.key, { medicineName: c, matched: true })}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          {editing === r.key ? (
+            <div className="rxp-edit">
+              <input
+                className="cp-inp"
+                value={r.dose || ""}
+                placeholder="dose"
+                onChange={(e) => patch(r.key, { dose: e.target.value })}
+              />
+              <input
+                className="cp-inp"
+                value={r.frequency || ""}
+                placeholder="freq"
+                onChange={(e) => patch(r.key, { frequency: e.target.value })}
+              />
+              <input
+                className="cp-inp"
+                value={r.timing || ""}
+                placeholder="timing"
+                onChange={(e) => patch(r.key, { timing: e.target.value })}
+              />
+              <input
+                className="cp-inp"
+                value={r.duration || ""}
+                placeholder="duration"
+                onChange={(e) => patch(r.key, { duration: e.target.value })}
+              />
+              <button type="button" className="btn-sm on" onClick={() => setEditing(null)}>
+                Done
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="rxp-col">
+                {[r.dose, r.frequency].filter(Boolean).join(" ") || "—"}
+              </div>
+              <div className="rxp-col">{r.timing || "not set"}</div>
+              <div className="rxp-col">{r.duration || "—"}</div>
+            </>
+          )}
+          <div className="rxp-acts-row">
+            <button
+              type="button"
+              className="ra-btn ra-edit"
+              onClick={() => setEditing(editing === r.key ? null : r.key)}
+            >
+              {editing === r.key ? "Close" : "✎"}
+            </button>
+            <button
+              type="button"
+              className="ra-btn ra-stop"
+              title="Discard this line"
+              onClick={() => patch(r.key, { discarded: true })}
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      ))}
+
+      {!!result.unreadable.length && (
+        <div className="rxp-unread">
+          Not read, add these by hand: {result.unreadable.map((u) => `“${u}”`).join(" · ")}
+        </div>
+      )}
+      {result.modelFailed && (
+        <div className="rxp-err">
+          The AI reader did not answer, so only the lines the rule parser understood are shown.
+        </div>
+      )}
+
+      <div className="rxp-acts">
+        <button
+          type="button"
+          className="btn-sm on"
+          disabled={!ready.length || adding}
+          onClick={() => onAdd(ready)}
+        >
+          {adding ? "Adding…" : `Add ${ready.length} medicine${ready.length === 1 ? "" : "s"}`}
+        </button>
+        <button type="button" className="btn-sm" onClick={onCancel}>
+          Cancel
+        </button>
+        {keep.length > ready.length && (
+          <span className="rxp-note">
+            {keep.length - ready.length} still need a brand — pick one or discard
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function RxSection({ visitId, readOnly, onToast, onUnsaved, station = "doctor" }) {
   const proposing = station === "mo";
   const { data, isLoading } = usePrescription(visitId, station);
@@ -539,7 +734,13 @@ export default function RxSection({ visitId, readOnly, onToast, onUnsaved, stati
   const decide = useDecideItem(visitId);
   const addExternal = useAddExternal(visitId);
   const [addingExternal, setAddingExternal] = useState(false);
+  const [pasting, setPasting] = useState(false);
+  const [pasteResult, setPasteResult] = useState(null);
+  const [pasteError, setPasteError] = useState(null);
+  const [pasteAdding, setPasteAdding] = useState(false);
+  const parsePaste = useParsePaste(visitId);
   const pause = usePauseItem(visitId);
+  const resume = useResumeItem(visitId);
   const stop = useStopItem(visitId);
   const [editing, setEditing] = useState(null);
   const [adding, setAdding] = useState(false);
@@ -595,6 +796,20 @@ export default function RxSection({ visitId, readOnly, onToast, onUnsaved, stati
             </button>
           )}
           {!readOnly && (
+            <button
+              type="button"
+              className="voice-pill vp-sm"
+              title="Paste a prescription and have the draft fill itself"
+              onClick={() => {
+                setPasting(true);
+                setPasteResult(null);
+                setPasteError(null);
+              }}
+            >
+              📋 Paste
+            </button>
+          )}
+          {!readOnly && (
             <VoiceButton
               small
               label="🎤 Voice edit"
@@ -616,6 +831,83 @@ export default function RxSection({ visitId, readOnly, onToast, onUnsaved, stati
           onText={(text) => {
             setAdding(true);
             setSpoken(text);
+          }}
+        />
+      )}
+
+      {!readOnly && pasting && (
+        <PastePanel
+          visitId={visitId}
+          reading={parsePaste.isPending}
+          error={pasteError}
+          result={pasteResult}
+          adding={pasteAdding}
+          onRead={(text) => {
+            setPasteError(null);
+            parsePaste.mutate(text, {
+              onSuccess: (r) => {
+                if (!r.items.length) {
+                  setPasteError(
+                    r.unreadable.length
+                      ? "Nothing here reads as a medicine — add them by hand."
+                      : "Nothing to read in that.",
+                  );
+                  return;
+                }
+                setPasteResult(r);
+              },
+              onError: (e) =>
+                setPasteError(e?.response?.data?.error || "Could not read that — try again"),
+            });
+          }}
+          onCancel={() => {
+            setPasting(false);
+            setPasteResult(null);
+            setPasteError(null);
+          }}
+          onAdd={async (rows) => {
+            // One request per row, because there is no batch endpoint and
+            // addItem's duplicate guard is per row. A 409 is not a failure of
+            // the paste — it means the medicine is already in the prescription —
+            // so the others still go in and the toast says exactly what happened.
+            setPasteAdding(true);
+            let added = 0;
+            const clashed = [];
+            const failed = [];
+            for (const r of rows) {
+              try {
+                await add.mutateAsync({
+                  medicineName: r.medicineName,
+                  dose: r.dose || null,
+                  frequency: r.frequency || null,
+                  timing: r.timing || null,
+                  timingCategory: r.timingCategory || null,
+                  duration: r.duration || null,
+                  reason: r.reason || null,
+                  composition: r.composition || null,
+                  drugClass: r.drugClass || null,
+                  changeType: "new",
+                });
+                added += 1;
+              } catch (e) {
+                if (e?.response?.status === 409) clashed.push(r.medicineName);
+                else failed.push(r.medicineName);
+              }
+            }
+            setPasteAdding(false);
+            setPasting(false);
+            setPasteResult(null);
+            onToast(
+              [
+                `✓ ${added} added`,
+                clashed.length
+                  ? `${clashed.length} already in the prescription (${clashed.join(", ")})`
+                  : "",
+                failed.length ? `${failed.length} could not be added (${failed.join(", ")})` : "",
+              ]
+                .filter(Boolean)
+                .join(" · "),
+            );
           }}
         />
       )}
@@ -749,17 +1041,38 @@ export default function RxSection({ visitId, readOnly, onToast, onUnsaved, stati
                       Remove
                     </button>
                   ) : (
-                    item.change_type !== "stopped" && (
-                      <button
-                        type="button"
-                        className="ra-btn ra-pause"
-                        onClick={() =>
-                          pause.mutate({ itemId: item.id, weeks: 2 }, { onError: fail })
-                        }
-                      >
-                        Pause
-                      </button>
-                    )
+                    <>
+                      {(item.change_type === "paused" || item.change_type === "stopped") && (
+                        <button
+                          type="button"
+                          className="ra-btn ra-resume"
+                          onClick={() => resume.mutate(item.id, { onError: fail })}
+                        >
+                          Resume
+                        </button>
+                      )}
+                      {item.change_type !== "paused" && item.change_type !== "stopped" && (
+                        <button
+                          type="button"
+                          className="ra-btn ra-pause"
+                          onClick={() =>
+                            pause.mutate({ itemId: item.id, weeks: 2 }, { onError: fail })
+                          }
+                        >
+                          Pause
+                        </button>
+                      )}
+                      {item.change_type !== "stopped" && (
+                        <button
+                          type="button"
+                          className="ra-btn ra-stop"
+                          onClick={() => setEditing(item.id)}
+                          title="Stopping needs a reason — opens the row"
+                        >
+                          Stop
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               )}

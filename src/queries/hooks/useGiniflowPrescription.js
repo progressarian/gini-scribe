@@ -104,6 +104,15 @@ export const useSeedDraft = (visitId) =>
     async () => (await api.post(`${base(visitId)}/prescription/seed`)).data,
   );
 
+// Reads a pasted prescription. Deliberately NOT a draft mutation: it writes
+// nothing, so there is no cache to invalidate — the rows it returns live in the
+// panel until the consultant presses Add.
+export const useParsePaste = (visitId) =>
+  useMutation({
+    mutationFn: async (text) =>
+      (await api.post(`${base(visitId)}/prescription/parse`, { text })).data,
+  });
+
 export const useAddItem = (visitId, station = "doctor") =>
   useDraftMutation(
     visitId,
@@ -141,6 +150,13 @@ export const useRemoveItem = (visitId) =>
     visitId,
     async (itemId) =>
       (await api.delete(`/api/giniflow/stations/doctor/prescription/items/${itemId}`)).data,
+  );
+
+export const useResumeItem = (visitId) =>
+  useDraftMutation(
+    visitId,
+    async (itemId) =>
+      (await api.post(`/api/giniflow/stations/doctor/prescription/items/${itemId}/resume`)).data,
   );
 
 export const usePauseItem = (visitId) =>

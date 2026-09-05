@@ -2,13 +2,14 @@ import { useQuery } from "@tanstack/react-query";
 import api from "../../services/api";
 import "../../styles/giniflow-station.css";
 
-// Every station a person can open, with what is waiting at each. The tiles are
-// filtered server-side by capability, so a nurse sees vitals and the board while
-// a coordinator holding every desk sees all of them from one screen.
+// Every station a person can open, with what is waiting at each. The summary is
+// filtered server-side by capability and always returns a value for a station
+// the role may open, so a missing key means "not yours" and the tile is left out
+// entirely — a nurse sees vitals and the board, a coordinator holding every desk
+// sees all of them from one screen.
 //
-// Stations not built yet appear greyed with "Coming soon" rather than being
-// hidden: the floor should be able to see what is coming, and an absent tile
-// reads as a permissions problem.
+// Stations not built yet still appear, greyed with "Coming soon": the floor
+// should be able to see what is coming.
 const STATIONS = [
   {
     key: "triage",
@@ -89,7 +90,7 @@ const TONE = {
 };
 
 export default function StationsLauncherPage() {
-  const { data } = useQuery({
+  const { data, isPending } = useQuery({
     queryKey: ["giniflow", "stations", "summary"],
     queryFn: async () => (await api.get("/api/giniflow/stations/summary")).data,
     refetchInterval: 20_000,
@@ -98,6 +99,7 @@ export default function StationsLauncherPage() {
   });
 
   const stations = data?.stations || {};
+  const visible = STATIONS.filter((s) => stations[s.key] || !s.href);
   const today = new Date().toLocaleDateString("en-IN", {
     weekday: "short",
     day: "numeric",
@@ -116,35 +118,42 @@ export default function StationsLauncherPage() {
         </div>
       )}
 
-      <div className="role-grid">
-        {STATIONS.map((s) => {
-          const live = stations[s.key];
-          const open = !!s.href && !!live;
-          const body = (
-            <>
-              <div className="rc-ico">{s.icon}</div>
-              <div className="rc-name">{s.name}</div>
-              <div className="rc-desc">{s.desc}</div>
-              {open ? (
-                <div className="rc-count" style={TONE[live.tone] || TONE.teal}>
-                  {live.label}
-                </div>
-              ) : (
-                <div className="rc-count rc-soon">{s.href ? "No access" : "Coming soon"}</div>
-              )}
-            </>
-          );
-          return open ? (
-            <a className="role-card" key={s.key} href={s.href}>
-              {body}
-            </a>
-          ) : (
-            <div className="role-card is-disabled" key={s.key} aria-disabled="true">
-              {body}
-            </div>
-          );
-        })}
-      </div>
+      {isPending ? (
+        <div className="land-sub">Loading your stations…</div>
+      ) : visible.length === 0 ? (
+        <div className="land-sub">
+          No stations are assigned to your role yet — ask an admin for access.
+        </div>
+      ) : (
+        <div className="role-grid">
+          {visible.map((s) => {
+            const live = stations[s.key];
+            const body = (
+              <>
+                <div className="rc-ico">{s.icon}</div>
+                <div className="rc-name">{s.name}</div>
+                <div className="rc-desc">{s.desc}</div>
+                {s.href ? (
+                  <div className="rc-count" style={TONE[live.tone] || TONE.teal}>
+                    {live.label}
+                  </div>
+                ) : (
+                  <div className="rc-count rc-soon">Coming soon</div>
+                )}
+              </>
+            );
+            return s.href ? (
+              <a className="role-card" key={s.key} href={s.href}>
+                {body}
+              </a>
+            ) : (
+              <div className="role-card is-disabled" key={s.key} aria-disabled="true">
+                {body}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

@@ -109,11 +109,27 @@ function QueueCard({ card, now, group, onOpen }) {
   const badge = CATEGORY_BADGE[card.category];
   const missing = card.results.status === "missing";
 
+  // An anchor, not a button, because this navigates to a URL.
+  //
+  // A consultant reviewing two or three patients side by side had no way to do
+  // it: a button cannot be ctrl-clicked, middle-clicked, or right-clicked into
+  // a new tab, and the browser could not show the destination on hover. Making
+  // it a real link hands all of that back for free.
+  //
+  // A modified click is left entirely to the browser. That matters clinically:
+  // the plain click below claims the room, and opening three patients in three
+  // tabs must not claim three rooms — one consultant with four consultations at
+  // once is the exact fiction startConsult was written to prevent. Reading a
+  // patient in another tab records nothing, which is what reading ahead is.
   return (
-    <button
-      type="button"
+    <a
+      href={`/giniflow/station/doctor/${card.visitId}`}
       className={`dcard${chip ? ` ${chip.cls}` : ""}`}
-      onClick={() => onOpen(card)}
+      onClick={(e) => {
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+        e.preventDefault();
+        onOpen(card);
+      }}
     >
       <div className="dc-time">{card.appointmentTime || "—"}</div>
       <div className="dc-av">{initials(card.name)}</div>
@@ -165,7 +181,7 @@ function QueueCard({ card, now, group, onOpen }) {
                 : "waiting"}
         </span>
       </div>
-    </button>
+    </a>
   );
 }
 

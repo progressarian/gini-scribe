@@ -2409,6 +2409,12 @@
   padding: 0 8px;
 }
 
+/* A link now, not a button (see QueueCard) — so it must not arrive underlined
+   and blue on top of the card styling it already has. */
+.gf a.dcard,
+.gf a.dcard:hover {
+  text-decoration: none;
+}
 .gf .dcard {
   display: flex;
   align-items: flex-start;
@@ -7227,4 +7233,113 @@
 }
 .gf .lab-running {
   margin-bottom: 16px;
+}
+
+.gf .ra-btn.ra-resume {
+  color: var(--grn);
+  border-color: var(--grn-b, var(--grn));
+}
+.gf .ep-pause-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.gf .ep-pause-weeks {
+  padding: 3px 6px;
+}
+
+/* ── PASTE A PRESCRIPTION ── docs/gini-flow/27-RX-PASTE-PLAN.md §5.
+   An inline panel, matching the add form and the teaching bar beside it. The
+   review rows borrow the prescription list's column rhythm so the proposal
+   reads like the list it is about to join. */
+.gf .rx-paste {
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  background: var(--bg2, #f7f9fb);
+  padding: 10px;
+  margin: 8px 0;
+}
+.gf .rxp-head {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 8px;
+}
+.gf .rxp-text {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--bd);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+}
+.gf .rxp-acts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.gf .rxp-note,
+.gf .rxp-unread {
+  font-size: 10px;
+  color: var(--ink4);
+}
+.gf .rxp-unread {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--bd);
+}
+.gf .rxp-err {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--red);
+}
+.gf .rxp-row {
+  display: grid;
+  grid-template-columns: 18px minmax(160px, 1.6fr) 1fr 1fr 0.8fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  border-top: 1px solid var(--bd);
+  font-size: 11px;
+}
+/* Amber, not red: a row needing a brand is unfinished, not wrong. */
+.gf .rxp-row.rxp-unmatched {
+  background: var(--amb-l);
+}
+.gf .rxp-ok {
+  font-size: 12px;
+}
+.gf .rxp-name {
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.gf .rxp-sub,
+.gf .rxp-col {
+  font-size: 10px;
+  color: var(--ink4);
+}
+.gf .rxp-cands {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.gf .rxp-edit {
+  grid-column: 3 / 6;
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.gf .rxp-edit .cp-inp {
+  max-width: 110px;
+}
+.gf .rxp-acts-row {
+  display: flex;
+  gap: 4px;
 }

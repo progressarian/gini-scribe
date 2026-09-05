@@ -11,6 +11,7 @@ import {
 import { fetchRxFile, regenerateRx } from "../services/giniflow/printRx.js";
 import { validate, validateQuery } from "../middleware/validate.js";
 import { CAPABILITIES as CAP } from "../../shared/permissions.js";
+import { parsePaste } from "../services/giniflow/rxPaste.js";
 import { blockActor, blockedResponse } from "../services/patientBlockGuard.js";
 import {
   giniflowRxItemSchema,
@@ -54,6 +55,7 @@ import {
   giniflowReferralAppointmentSchema,
   giniflowReferralCompleteSchema,
   giniflowInteractionAckSchema,
+  giniflowRxPasteSchema,
 } from "../schemas/index.js";
 import {
   getVitalsQueue,
@@ -138,6 +140,7 @@ import {
   removeItem,
   pauseItem,
   stopItem,
+  resumeItem,
   searchMedicines,
   alternativesFor,
   addExternal,
@@ -554,6 +557,23 @@ router.post(
   },
 );
 
+// Reads a pasted prescription and hands back proposed rows. WRITES NOTHING —
+// the consultant reviews the panel and presses Add, which goes through the
+// ordinary add-item route below, duplicate guard and all.
+router.post(
+  "/giniflow/stations/doctor/:visitId/prescription/parse",
+  doctorGate,
+  requireOwnVisit,
+  validate(giniflowRxPasteSchema),
+  async (req, res) => {
+    try {
+      res.json(await parsePaste(req.params.visitId, req.body.text));
+    } catch (e) {
+      doctorError(res, e, "Gini Flow prescription paste");
+    }
+  },
+);
+
 router.post(
   "/giniflow/stations/doctor/:visitId/prescription/items",
   doctorGate,
@@ -627,6 +647,19 @@ router.post(
       res.json(await pauseItem(req.params.itemId, req.body.weeks));
     } catch (e) {
       doctorError(res, e, "Gini Flow pause medicine");
+    }
+  },
+);
+
+router.post(
+  "/giniflow/stations/doctor/prescription/items/:itemId/resume",
+  doctorGate,
+  requireOwnRxItem,
+  async (req, res) => {
+    try {
+      res.json(await resumeItem(req.params.itemId));
+    } catch (e) {
+      doctorError(res, e, "Gini Flow resume medicine");
     }
   },
 );
