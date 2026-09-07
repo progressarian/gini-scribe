@@ -17,8 +17,15 @@ export function useReceptionQueue(date) {
 export function useClearPayment() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ orderId, method }) =>
-      (await api.post(`/api/giniflow/stations/reception/${orderId}/clear`, { method })).data,
+    mutationFn: async ({ orderId, method, insurer, policyNo, claimNo }) =>
+      (
+        await api.post(`/api/giniflow/stations/reception/${orderId}/clear`, {
+          method,
+          insurer,
+          policyNo,
+          claimNo,
+        })
+      ).data,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["giniflow", "reception"] });
       // Clearing a payment is what makes the sample task appear for the lab.

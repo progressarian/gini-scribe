@@ -62,7 +62,17 @@ const identity = (p) =>
     p.phone ? ` · ${p.phone}` : ""
   }`;
 
-function OrderCard({ order, onClear, pending }) {
+function OrderCard({ order, onClear, pending, actorId }) {
+  const claimed = order.paymentStatus === "insurance_claim";
+  const [form, setForm] = useState(null);
+  const ownClaim = claimed && actorId != null && order.claimSubmittedBy === actorId;
+
+  const submitClaim = (e) => {
+    e.preventDefault();
+    onClear(order, "insurance_claim", { insurer: form.insurer, policyNo: form.policyNo });
+    setForm(null);
+  };
+
   return (
     <div className="test-order-card">
       <div className="toc-head">
@@ -80,7 +90,9 @@ function OrderCard({ order, onClear, pending }) {
             · Urgency: <strong>{order.urgency}</strong>
           </div>
         </div>
-        <div className="sp sp-pay">⚠ Payment pending</div>
+        <div className={`sp ${claimed ? "sp-sample" : "sp-pay"}`}>
+          {claimed ? "💰 Claim submitted — awaiting approval" : "⚠ Payment pending"}
+        </div>
       </div>
 
       <div className="toc-body">
@@ -97,24 +109,74 @@ function OrderCard({ order, onClear, pending }) {
         <span className="badge b-ink">
           {order.tests.length} test{order.tests.length === 1 ? "" : "s"}
         </span>
-        <span className="toc-ins">Insurance: None</span>
+        <span className="toc-ins">
+          Insurance:{" "}
+          {order.insurer
+            ? `${order.insurer}${order.policyNo ? ` · ${order.policyNo}` : ""}`
+            : "None"}
+        </span>
       </div>
 
+      {claimed && (
+        <div className="toc-claim">
+          Claim submitted by {order.claimSubmittedByName || "the desk"}
+          {ownClaim && " — someone else has to confirm the approval"}
+        </div>
+      )}
+
       <div className="toc-foot">
-        <button
-          className="st-btn st-btn-grn"
-          disabled={pending}
-          onClick={() => onClear(order, "paid")}
-        >
-          ✓ Payment received — notify lab
-        </button>
-        <button
-          className="st-btn st-btn-blu"
-          disabled={pending}
-          onClick={() => onClear(order, "insurance_claim")}
-        >
-          Insurance claim
-        </button>
+        {form ? (
+          <form className="toc-claim-form" onSubmit={submitClaim}>
+            <input
+              autoFocus
+              required
+              className="ar-reason-input"
+              placeholder="Insurer or TPA"
+              value={form.insurer}
+              onChange={(e) => setForm({ ...form, insurer: e.target.value })}
+            />
+            <input
+              className="ar-reason-input"
+              placeholder="Policy no (optional)"
+              value={form.policyNo}
+              onChange={(e) => setForm({ ...form, policyNo: e.target.value })}
+            />
+            <button className="st-btn st-btn-blu" type="submit" disabled={pending}>
+              Submit claim
+            </button>
+            <button className="st-btn st-btn-ghost" type="button" onClick={() => setForm(null)}>
+              Cancel
+            </button>
+          </form>
+        ) : claimed ? (
+          <button
+            className="st-btn st-btn-grn"
+            disabled={pending || ownClaim}
+            title={
+              ownClaim ? "You submitted this claim — another user has to approve it" : undefined
+            }
+            onClick={() => onClear(order, "claim_approved")}
+          >
+            ✓ Claim approved — notify lab
+          </button>
+        ) : (
+          <>
+            <button
+              className="st-btn st-btn-grn"
+              disabled={pending}
+              onClick={() => onClear(order, "paid")}
+            >
+              ✓ Payment received — notify lab
+            </button>
+            <button
+              className="st-btn st-btn-blu"
+              disabled={pending}
+              onClick={() => setForm({ insurer: "", policyNo: "" })}
+            >
+              Insurance claim
+            </button>
+          </>
+        )}
         <span className="toc-age">{sinceLabel(order.orderedAt)}</span>
       </div>
     </div>
@@ -126,7 +188,7 @@ const CLEARED_PREVIEW = 8;
 
 // Exported so the render smoke can execute the payments branch too — only one
 // tab is mounted at a time, and the tab that is not showing still has to render.
-export function PaymentsTab({ data, isLoading, onClear, pending }) {
+export function PaymentsTab({ data, isLoading, onClear, pending, actorId }) {
   const queue = data?.pending || [];
   const cleared = data?.cleared || [];
   const [showAllCleared, setShowAllCleared] = useState(false);
@@ -158,7 +220,13 @@ export function PaymentsTab({ data, isLoading, onClear, pending }) {
           <div className="empty-note">Nothing waiting for payment.</div>
         )}
         {queue.map((order) => (
-          <OrderCard key={order.orderId} order={order} onClear={onClear} pending={pending} />
+          <OrderCard
+            key={order.orderId}
+            order={order}
+            onClear={onClear}
+            pending={pending}
+            actorId={actorId}
+          />
         ))}
       </div>
 
@@ -171,8 +239,8 @@ export function PaymentsTab({ data, isLoading, onClear, pending }) {
                 <div className="toc-cleared">
                   {o.name} ·{" "}
                   <span className="tc-detail">
-                    {o.paymentStatus === "insurance_claim"
-                      ? "Insurance claim"
+                    {o.paymentStatus === "claim_approved"
+                      ? "Insurance claim approved"
                       : `Paid ${rupees(o.total)}`}{" "}
                     · {SAMPLE_LABEL[o.sampleStatus] || o.sampleStatus.replace(/_/g, " ")}
                   </span>
@@ -476,6 +544,7 @@ export default function ReceptionStationPage() {
   const { data, isLoading } = useReceptionQueue();
   const { data: arrivals, isLoading: arrivalsLoading } = useArrivals(undefined, term);
   const live = useGiniflowLive({ date: data?.date });
+  const actorId = useAuthStore((st) => st.currentDoctor?.doctor_id);
   const clearPayment = useClearPayment();
   const arrivalAction = useArrivalAction();
   const checkInWalkIn = useCheckInWalkIn();
@@ -495,17 +564,21 @@ export default function ReceptionStationPage() {
   const failed = (e, fallback) =>
     showToast(e?.response?.data?.detail || e?.response?.data?.error || fallback);
 
-  const onClear = (order, method) =>
+  const onClear = (order, method, claim = {}) =>
     clearPayment.mutate(
-      { orderId: order.orderId, method },
+      { orderId: order.orderId, method, ...claim },
       {
         onSuccess: (r) =>
           showToast(
             r.alreadySettled
-              ? `${order.name} was already cleared — nothing charged twice`
+              ? r.paymentStatus === "insurance_claim"
+                ? `${order.name}'s claim is already submitted — waiting for approval`
+                : `${order.name} was already cleared — nothing charged twice`
               : method === "insurance_claim"
-                ? `${order.name} sent as an insurance claim — lab notified`
-                : `✓ ${rupees(order.total)} received from ${order.name} — lab can collect now`,
+                ? `${order.name}'s claim sent to ${claim.insurer} — lab waits for approval`
+                : method === "claim_approved"
+                  ? `✓ ${order.name}'s claim approved — lab can collect now`
+                  : `✓ ${rupees(order.total)} received from ${order.name} — lab can collect now`,
           ),
         onError: (e) => failed(e, "Could not clear this — nothing was changed"),
       },
@@ -657,6 +730,7 @@ export default function ReceptionStationPage() {
               isLoading={isLoading}
               onClear={onClear}
               pending={clearPayment.isPending}
+              actorId={actorId}
             />
           )}
         </div>

@@ -951,6 +951,10 @@ router.post(
         await clearPayment(req.params.orderId, {
           method: req.body.method,
           actorId: req.doctor?.doctor_id ?? null,
+          actorRole: req.doctor?.role || "reception",
+          insurer: req.body.insurer,
+          policyNo: req.body.policyNo,
+          claimNo: req.body.claimNo,
         }),
       );
     } catch (e) {

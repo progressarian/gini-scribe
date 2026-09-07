@@ -22,8 +22,12 @@ import { createWalkinBooking } from "../walkinBooking.js";
 const ORDER_SELECT = `
   SELECT o.id, o.visit_id, o.urgency, o.payment_status, o.sample_status,
          o.amount_total, o.created_at, o.updated_at,
+         o.insurer, o.policy_no, o.claim_no,
          p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
          d.short_name AS ordered_by,
+         claim_ev.actor_id AS claim_submitted_by,
+         COALESCE(cs.short_name, cs.name) AS claim_submitted_by_name,
+         COALESCE(ca.short_name, ca.name) AS claim_approved_by_name,
          paid_ev.occurred_at AS paid_at,
          COALESCE(t.tests, '[]'::json) AS tests
     FROM giniflow_lab_orders o
@@ -38,9 +42,16 @@ const ORDER_SELECT = `
     LEFT JOIN LATERAL (
       SELECT occurred_at FROM giniflow_lab_order_events e
        WHERE e.lab_order_id = o.id AND e.track = 'payment'
-         AND e.status IN ('paid', 'insurance_claim')
+         AND e.status IN ('paid', 'insurance_claim', 'claim_approved')
        ORDER BY occurred_at DESC LIMIT 1
     ) paid_ev ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT actor_id FROM giniflow_lab_order_events e
+       WHERE e.lab_order_id = o.id AND e.track = 'payment' AND e.status = 'insurance_claim'
+       ORDER BY occurred_at DESC LIMIT 1
+    ) claim_ev ON TRUE
+    LEFT JOIN doctors cs ON cs.id = claim_ev.actor_id
+    LEFT JOIN doctors ca ON ca.id = o.claim_approved_by
    WHERE v.visit_date = $1::date
      AND NOT COALESCE(p.is_blocked, FALSE)
      -- Brief §2.3 trigger 2: only tests ordered FOR TODAY reach reception. A test
@@ -63,6 +74,12 @@ const shape = (r) => ({
   urgency: r.urgency,
   paymentStatus: r.payment_status,
   sampleStatus: r.sample_status,
+  insurer: r.insurer,
+  policyNo: r.policy_no,
+  claimNo: r.claim_no,
+  claimSubmittedBy: r.claim_submitted_by,
+  claimSubmittedByName: r.claim_submitted_by_name,
+  claimApprovedByName: r.claim_approved_by_name,
   tests: r.tests || [],
   // The amount the order itself recorded — what the patient was quoted. Falls
   // back to summing the lines for orders created before amount_total was written.
@@ -82,11 +99,11 @@ export async function getPaymentQueue(visitDate, db = pool) {
   // clearing actually reach the lab" check.
   const awaitingSample = orders.filter(
     (o) =>
-      o.paymentStatus !== "pending" &&
+      opensLabGate(o.paymentStatus) &&
       ["ordered", "payment_pending", "paid"].includes(o.sampleStatus),
   );
   const cleared = orders.filter(
-    (o) => o.paymentStatus !== "pending" && !awaitingSample.includes(o),
+    (o) => opensLabGate(o.paymentStatus) && !awaitingSample.includes(o),
   );
 
   // Whether reception is looking at real prices or the mockup's. Drives the
@@ -116,12 +133,32 @@ export const SETTLED_METHODS = ["paid", "insurance_claim", "claim_approved"];
 // What counts as cleared for the lab.
 export const opensLabGate = (paymentStatus) => ["paid", "claim_approved"].includes(paymentStatus);
 
-export async function clearPayment(orderId, { method = "paid", actorId = null }, db = pool) {
+const trimmed = (v) => (typeof v === "string" && v.trim() ? v.trim() : null);
+
+export async function clearPayment(
+  orderId,
+  {
+    method = "paid",
+    actorId = null,
+    actorRole = "reception",
+    insurer = null,
+    policyNo = null,
+    claimNo = null,
+  },
+  db = pool,
+) {
   if (!SETTLED_METHODS.includes(method)) {
     throw Object.assign(
       new Error("Payment must be settled as paid, insurance_claim or claim_approved"),
       { status: 400 },
     );
+  }
+  // A claim nobody can chase is not a claim. The insurer is the minimum: it is
+  // who the desk has to ring when the approval does not come.
+  if (method === "insurance_claim" && !trimmed(insurer)) {
+    throw Object.assign(new Error("An insurance claim needs the insurer or TPA name"), {
+      status: 400,
+    });
   }
 
   const client = await db.connect();
@@ -143,6 +180,25 @@ export async function clearPayment(orderId, { method = "paid", actorId = null },
       return { orderId, paymentStatus: current, alreadySettled: true };
     }
 
+    // Maker-checker: approving a claim is asserting that the insurer said yes,
+    // and it opens the lab gate. The person who submitted it cannot be the one
+    // who confirms it — a second pair of eyes, from the log, not from a policy
+    // nobody can audit.
+    if (isApprovingAClaim) {
+      const { rows: submitter } = await client.query(
+        `SELECT actor_id FROM giniflow_lab_order_events
+          WHERE lab_order_id = $1 AND track = 'payment' AND status = 'insurance_claim'
+          ORDER BY occurred_at DESC LIMIT 1`,
+        [orderId],
+      );
+      if (actorId && submitter[0]?.actor_id === actorId) {
+        throw Object.assign(
+          new Error("The claim was submitted by you — someone else has to confirm the approval"),
+          { status: 409 },
+        );
+      }
+    }
+
     await client.query(
       `UPDATE giniflow_lab_orders
           SET payment_status = $2,
@@ -151,14 +207,18 @@ export async function clearPayment(orderId, { method = "paid", actorId = null },
                 WHEN $2 IN ('paid', 'claim_approved')
                  AND sample_status IN ('ordered', 'payment_pending') THEN 'paid'
                 ELSE sample_status END,
+              insurer   = COALESCE($4, insurer),
+              policy_no = COALESCE($5, policy_no),
+              claim_no  = COALESCE($6, claim_no),
+              claim_approved_by = CASE WHEN $2 = 'claim_approved' THEN $3 ELSE claim_approved_by END,
               updated_at = NOW()
         WHERE id = $1`,
-      [orderId, method],
+      [orderId, method, actorId, trimmed(insurer), trimmed(policyNo), trimmed(claimNo)],
     );
     await client.query(
       `INSERT INTO giniflow_lab_order_events (lab_order_id, track, status, actor_role, actor_id)
-       VALUES ($1, 'payment', $2, 'reception', $3)`,
-      [orderId, method, actorId],
+       VALUES ($1, 'payment', $2, $4, $3)`,
+      [orderId, method, actorId, actorRole],
     );
     // The lab's queue reads sample_status, so the sample task appearing there is
     // the same write — trigger 3 in the brief, not a second job that can fail.
@@ -167,8 +227,8 @@ export async function clearPayment(orderId, { method = "paid", actorId = null },
     if (opensLabGate(method)) {
       await client.query(
         `INSERT INTO giniflow_lab_order_events (lab_order_id, track, status, actor_role, actor_id)
-         VALUES ($1, 'sample', 'paid', 'reception', $2)`,
-        [orderId, actorId],
+         VALUES ($1, 'sample', 'paid', $3, $2)`,
+        [orderId, actorId, actorRole],
       );
     }
 

@@ -105,10 +105,85 @@ check(
   [...q2.cleared, ...q2.awaitingSample].some((o) => o.orderId === order.orderId),
 );
 
-// Insurance is the other way across the same line.
-if (q2.pending[0]) {
-  const claim = await clearPayment(q2.pending[0].orderId, { method: "insurance_claim" });
-  check("an insurance claim also clears the order", claim.paymentStatus === "insurance_claim");
+// Insurance is the other way across the same line — but a SUBMITTED claim has
+// not crossed it yet. Reception keeps chasing it; the lab must not see it.
+{
+  const claimed = (
+    await one(
+      `INSERT INTO giniflow_lab_orders (visit_id, urgency, payment_status, amount_total, sample_status)
+       VALUES ($1, 'today', 'pending', 900, 'ordered') RETURNING id`,
+      [order.visitId],
+    )
+  ).id;
+  const nameless = await clearPayment(claimed, { method: "insurance_claim" })
+    .then(() => false)
+    .catch(() => true);
+  check("a claim with no insurer is refused — nobody could chase it", nameless);
+
+  const MAKER = 20;
+  const CHECKER = 26;
+  const claim = await clearPayment(claimed, {
+    method: "insurance_claim",
+    actorId: MAKER,
+    actorRole: "reception",
+    insurer: "  Star Health  ",
+    policyNo: "POL-99",
+  });
+  check("an insurance claim is submitted", claim.paymentStatus === "insurance_claim");
+
+  const q3 = await getPaymentQueue(TEST_DAY);
+  const onList = q3.pending.find((o) => o.orderId === claimed);
+  check("a submitted claim stays on reception's list", onList?.paymentStatus === "insurance_claim");
+  check("the insurer is recorded and trimmed", onList?.insurer === "Star Health", onList?.insurer);
+  check("so is the policy the claim is under", onList?.policyNo === "POL-99");
+  check("and who submitted it, for the checker to see", onList?.claimSubmittedBy === MAKER);
+  check(
+    "and counts as neither cleared nor waiting on the lab",
+    ![...q3.cleared, ...q3.awaitingSample].some((o) => o.orderId === claimed),
+  );
+
+  const repeat = await clearPayment(claimed, { method: "paid" });
+  check("paying a claimed order is refused as a repeat", repeat.alreadySettled === true);
+  check("and it keeps its claim status", repeat.paymentStatus === "insurance_claim");
+
+  const selfApproved = await clearPayment(claimed, {
+    method: "claim_approved",
+    actorId: MAKER,
+  })
+    .then(() => false)
+    .catch((e) => e.status === 409);
+  check("the submitter cannot approve their own claim", selfApproved);
+  const stillWaiting = await one(`SELECT payment_status FROM giniflow_lab_orders WHERE id = $1`, [
+    claimed,
+  ]);
+  check("and the refusal changed nothing", stillWaiting.payment_status === "insurance_claim");
+
+  const approved = await clearPayment(claimed, {
+    method: "claim_approved",
+    actorId: CHECKER,
+    actorRole: "coordinator",
+    claimNo: "CLM-1",
+  });
+  check("a second pair of eyes can approve it", approved.alreadySettled === false);
+  const log = await one(
+    `SELECT o.claim_approved_by, o.claim_no,
+            (SELECT actor_role FROM giniflow_lab_order_events e
+              WHERE e.lab_order_id = o.id AND e.status = 'claim_approved') AS role
+       FROM giniflow_lab_orders o WHERE o.id = $1`,
+    [claimed],
+  );
+  check("the approver is recorded, not just the action", log.claim_approved_by === CHECKER);
+  check("the log carries the real role, not a hardcoded one", log.role === "coordinator", log.role);
+  check("and the claim reference is kept", log.claim_no === "CLM-1");
+  const q4 = await getPaymentQueue(TEST_DAY);
+  check(
+    "an approved claim leaves the pending list",
+    !q4.pending.some((o) => o.orderId === claimed),
+  );
+  check(
+    "and opens the lab gate",
+    [...q4.cleared, ...q4.awaitingSample].some((o) => o.orderId === claimed),
+  );
 }
 
 const bad = await clearPayment(order.orderId, { method: "waived" })

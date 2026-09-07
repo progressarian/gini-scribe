@@ -594,6 +594,9 @@ export const giniflowVitalsSchema = z.object({
 
 export const giniflowPaymentSchema = z.object({
   method: z.enum(["paid", "insurance_claim", "claim_approved"]).default("paid"),
+  insurer: z.string().trim().max(120).optional(),
+  policyNo: z.string().trim().max(60).optional(),
+  claimNo: z.string().trim().max(60).optional(),
 });
 
 // Reception's arrivals tab: the same day + optional search shape the board's

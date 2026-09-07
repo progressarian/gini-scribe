@@ -795,6 +795,22 @@
   gap: 7px;
   align-items: center;
 }
+/* Who submitted the claim, above the button that confirms it — the checker has
+   to see the maker before deciding, not after. */
+.gf .toc-claim {
+  font-size: 11px;
+  color: var(--ink3);
+  margin-bottom: 8px;
+}
+/* Submitting a claim asks for the insurer in the row the buttons were in, the
+   same way a cancellation asks for its reason. */
+.gf .toc-claim-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  flex-wrap: wrap;
+}
 .gf .toc-age {
   margin-left: auto;
   font-size: 10px;
