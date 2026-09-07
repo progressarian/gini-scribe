@@ -43,6 +43,9 @@ function AssignSelect({ step, onChange }) {
 }
 
 export default function JourneyBuilder({ steps, onChange, visitTypes, visitTypeId, onTypeChange }) {
+  // /flow/step-catalog already withholds the lab's background stages — they
+  // belong to a test, not to a patient's journey, and the older module has the
+  // scar to prove it. Nothing to filter here.
   const { data: catalog = [] } = useFlowStepCatalog();
   const [custom, setCustom] = useState(null);
 
@@ -138,9 +141,6 @@ export default function JourneyBuilder({ steps, onChange, visitTypes, visitTypeI
           </span>
           <span className="jb-name">
             {i + 1}. {step.name}
-            {/* A stop the board has no column for is one the desk will have to
-                tick itself — better said here than discovered later. */}
-            {!step.chainStatus && <span className="jb-manual">ticked by hand</span>}
           </span>
           <input
             className="jb-dur"

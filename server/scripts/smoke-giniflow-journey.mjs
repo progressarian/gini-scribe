@@ -125,6 +125,19 @@ check(
 );
 const emptyPlan = await defaultPlan("ZZ_NO_SUCH_TYPE");
 check("a type with no template gives an empty plan, not an error", emptyPlan.length === 0);
+// The lab's own pipeline — delivered / processing / reports available, and the
+// report desk's stages — is work the lab station records. Putting it on the
+// desk's list asked reception to tick boxes for things they never touch.
+const testsPlan = await defaultPlan(testsOnly);
+check(
+  "the lab's internal stages are not stops on the patient's journey",
+  !testsPlan.some((s) => /^(Lab|Reports) —/.test(s.name)),
+  testsPlan.map((s) => s.name).join(", "),
+);
+check(
+  "and what is left that nobody can tick automatically is only the real stops",
+  testsPlan.filter((s) => !s.chainStatus).every((s) => /Blood Sample|Billing/.test(s.name)),
+);
 
 // ── Check-in ────────────────────────────────────────────────────────────────
 const v1 = await bookedVisit("901", "Demo Journey One");

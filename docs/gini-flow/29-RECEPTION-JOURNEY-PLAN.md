@@ -344,6 +344,36 @@ overwrite: the module's rule is that whoever is in the room beats whoever was
 booked. The panel also opens with the booked consultant already filled in, so the
 desk confirms rather than picks from an empty box.
 
+## The lab is one block, not steps
+
+Decided on the floor, 2026-09-07, after reception saw the first build.
+
+The templates listed the lab's pipeline as journey steps — delivered, processing,
+reports available, printed, delivered to doctor, MO reviews — each with its own
+duration, and the check-in panel dutifully showed all seven with a "tick this
+yourself" badge. That is wrong twice over: the lab station already records that
+work, and the hospital does not time it per stage. **A simple test is 45 minutes
+for the whole thing**, managed by the lab's own SLA, and nobody at the desk can
+or should be asked to break it down.
+
+So those steps are not journey stops. The catalog already marks them
+`is_background` and `/flow/step-catalog` already refuses to offer them — the
+older module has the scar to prove it ("Blood — reports available once landed on
+a follow-up that had no blood draw"); the plan now applies the same rule when it
+reads a template. What remains of the lab on a patient's journey is the one thing
+the patient actually does: the blood draw.
+
+The badge went with them. A journey of nine ordinary stops does not need seven of
+them captioned, and the tick for a stop with no board column lives where it is
+used — on the patient's row, not in the planner.
+
+**Consequence, stated rather than hidden:** the tests journey's estimate is ~70
+minutes rather than the ~185 the template implied, because the lab's own time is
+no longer counted as journey time. That is the intended reading — the lab's 45
+minutes are the lab's SLA, not a promise the desk makes — but it means a patient
+who waits for reports before seeing the consultant is quoted only the part of the
+day the journey covers.
+
 ## Code review
 
 `/code-review high` over the diff. Thirteen findings, all fixed. The four that

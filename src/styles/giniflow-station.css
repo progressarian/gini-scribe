@@ -4911,17 +4911,6 @@
   gap: 6px;
   align-items: center;
 }
-/* A stop with no board column is one the desk has to tick itself. Saying so on
-   the step is the difference between a plan and a promise nobody keeps. */
-.gf .jb-manual {
-  font-size: 9px;
-  font-weight: 700;
-  color: var(--amb);
-  background: var(--amb-l);
-  border-radius: 20px;
-  padding: 2px 7px;
-  white-space: nowrap;
-}
 .gf .jb-dur,
 .gf .jb-assign {
   border: 1px solid var(--bd2);

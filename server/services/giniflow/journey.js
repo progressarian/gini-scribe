@@ -67,6 +67,13 @@ export async function defaultPlan(visitTypeId, db = pool) {
        FROM flow_step_templates t
        JOIN flow_step_catalog c ON c.id = t.step_catalog_id
       WHERE t.visit_type_id = $1 AND COALESCE(c.is_active, TRUE)
+        -- The lab's own pipeline — delivered / processing / reports available,
+        -- and the report desk's stages — is not a stop the patient makes. The
+        -- lab station records that work already, and listing it here asked the
+        -- desk to tick seven boxes for things they never touch. A background
+        -- step that DOES map to a board column (the MO preparing a prescription)
+        -- stays: it ticks itself and costs nobody anything.
+        AND NOT (COALESCE(c.is_background, FALSE) AND c.chain_status IS NULL)
       ORDER BY t.step_order`,
     [visitTypeId],
   );
