@@ -56,8 +56,35 @@ if (unpaid) {
 }
 
 // ── The track ───────────────────────────────────────────────────────────────
-const target = (await getLabQueue(TEST_DAY)).pending.find((o) => o.paid);
-check("a paid order is ready to collect", !!target);
+const pendingNow = (await getLabQueue(TEST_DAY)).pending;
+let target = pendingNow.find((o) => o.paid && o.collectable);
+
+// The seeder parks its lab patients with the MO, and the service now refuses a
+// collection from a patient another station has. Freeing one is setup for the
+// track below, not the thing under test — the room rule itself is asserted
+// separately, just after this.
+if (!target) {
+  const parked = pendingNow.find((o) => o.paid);
+  if (parked) {
+    await pool.query(`UPDATE giniflow_visits SET current_status = 'vitals_done' WHERE id = $1`, [
+      parked.visitId,
+    ]);
+    target = (await getLabQueue(TEST_DAY)).pending.find((o) => o.orderId === parked.orderId);
+  }
+}
+check("a paid order is ready to collect", !!target && target.collectable);
+
+// The room rule, enforced by the service and not only by the hidden button: a
+// patient another station has in front of them cannot also be at the lab.
+const inRoom = pendingNow.find((o) => o.paid && !o.collectable && o.orderId !== target?.orderId);
+if (inRoom) {
+  const refusedInRoom = await advanceSample(inRoom.orderId, { to: "sample_collected" })
+    .then(() => false)
+    .catch((e) => e.status === 409);
+  check("collecting from a patient another station has is refused", refusedInRoom);
+} else {
+  check("an in-room order exists to test the room gate", false);
+}
 
 for (const step of ["sample_collected", "processing", "results_ready"]) {
   const r = await advanceSample(target.orderId, { to: step });

@@ -79,6 +79,12 @@ export const useReadyForDoctor = () =>
 export const useCloseWithoutDoctor = () =>
   useMoAction(async (visitId) => (await api.post(`${base}/${visitId}/close`)).data);
 
+export const useReviewReports = () =>
+  useMoAction(
+    async ({ visitId, outcome, note = null }) =>
+      (await api.post(`${base}/${visitId}/review-reports`, { outcome, note })).data,
+  );
+
 export const useAddProposal = () =>
   useMoAction(
     async ({ visitId, ...proposal }) =>

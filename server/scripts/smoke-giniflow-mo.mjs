@@ -23,6 +23,7 @@ import {
   addProposal,
   withdrawProposal,
   getTestPanels,
+  reviewReports,
 } from "../services/giniflow/moStation.js";
 import { getPaymentQueue } from "../services/giniflow/receptionStation.js";
 import { addExternal, getDraft } from "../services/giniflow/prescription.js";
@@ -269,6 +270,9 @@ check(
 );
 
 const receptionBefore = (await getPaymentQueue(TEST_DAY)).pending.length;
+const ownerBefore = (
+  await one(`SELECT assigned_sd_id FROM giniflow_visits WHERE id = $1`, [target.visitId])
+).assigned_sd_id;
 const order = await orderTests(target.visitId, {
   urgency: "today",
   tests: ["HbA1c", "Lipid panel"],
@@ -281,6 +285,36 @@ check(
   "the amount is stored on the order, not only displayed",
   Number(stored.amount_total) === order.total,
 );
+
+// 31 §5.2a: ordering today's tests ends the sitting. The patient goes to the
+// lab, the desk is free for the next one, and they stay attached to this MO so
+// the reports come back to them.
+check("ordering today's tests sends the patient to the lab", order.sentToLab === true);
+const afterOrder = await one(
+  `SELECT current_status, assigned_sd_id FROM giniflow_visits WHERE id = $1`,
+  [target.visitId],
+);
+check(
+  "the MO's room is free again",
+  afterOrder.current_status === "sd_pending",
+  afterOrder.current_status,
+);
+check("but the patient is still theirs", afterOrder.assigned_sd_id === ownerBefore);
+
+// The queue must now file them under "waiting on results", not "with me".
+const labQueue = await getMoQueue(TEST_DAY, ownerBefore);
+// The groups are spread onto the result, not nested under `groups`.
+const landedIn = ["withMe", "waitingForMe", "awaitingResults", "missingReports", "done"].find((g) =>
+  (labQueue[g] || []).some((r) => r.visitId === target.visitId),
+);
+check(
+  "and they show in the MO's waiting-on-results list",
+  landedIn === "awaitingResults",
+  landedIn,
+);
+
+// Re-claim for the rest of the assertions below, which need them at the desk.
+await startWorkup(target.visitId, ownerBefore);
 
 const receptionAfter = (await getPaymentQueue(TEST_DAY)).pending;
 check(
@@ -441,32 +475,91 @@ await pool.query(`UPDATE giniflow_visits SET assigned_sd_id = NULL WHERE id = $1
   target.visitId,
 ]);
 
-// ── Close is green-only ─────────────────────────────────────────────────────
-await pool.query(`UPDATE giniflow_visits SET category = 'worse_out_of_range' WHERE id = $1`, [
-  target.visitId,
-]);
-const refused = await closeWithoutDoctor(target.visitId)
-  .then(() => false)
-  .catch((e) => e.status === 409);
-check("closing a red-category patient is refused by the service", refused);
+// ── Close is gated on the MO reading the reports, not on the category ───────
+// 31-MO-LED-CLOSURE-PLAN §4 D1. The category stopped being the gate: what the
+// close now requires is that an MO read the reports and said they were normal.
+const hasOrders = await one(
+  `SELECT count(*)::int AS n FROM giniflow_lab_orders WHERE visit_id = $1`,
+  [target.visitId],
+);
 
-await pool.query(`UPDATE giniflow_visits SET category = 'in_control' WHERE id = $1`, [
+if (hasOrders.n > 0) {
+  const refusedUnreviewed = await closeWithoutDoctor(target.visitId, sdA)
+    .then(() => false)
+    .catch((e) => e.status === 409);
+  check("closing before the reports are read is refused", refusedUnreviewed);
+
+  await pool.query(`UPDATE giniflow_visits SET results_status = 'ready' WHERE id = $1`, [
+    target.visitId,
+  ]);
+  await reviewReports(target.visitId, { outcome: "needs_consultant", actorId: sdA });
+  const refusedReferred = await closeWithoutDoctor(target.visitId, sdA)
+    .then(() => false)
+    .catch((e) => e.status === 409);
+  check("closing a patient the MO referred on is refused", refusedReferred);
+
+  await reviewReports(target.visitId, { outcome: "normal", actorId: sdA });
+} else {
+  check("the target has lab orders to gate the close on", false);
+}
+
+// Finalize's own rule, inherited by this path rather than re-implemented: a
+// medicine nobody decided cannot ride out on a prescription.
+const refusedUndecided = await closeWithoutDoctor(target.visitId, sdA)
+  .then(() => false)
+  .catch((e) => e.status === 409 && e.pendingProposals > 0);
+check("closing with an undecided proposal is refused", refusedUndecided);
+
+await pool.query(`UPDATE giniflow_rx_items SET approval_status = 'approved' WHERE visit_id = $1`, [
   target.visitId,
 ]);
-const closed = await closeWithoutDoctor(target.visitId);
-check("a green-category patient can be closed", closed.skippedDoctor === true);
+await pool.query(
+  `UPDATE giniflow_rx_proposals SET status = 'rejected' WHERE visit_id = $1 AND status = 'proposed'`,
+  [target.visitId],
+);
+
+const medsBefore = await one(
+  `SELECT count(*)::int AS n FROM medications m
+     JOIN giniflow_visits v ON v.patient_id = m.patient_id
+    WHERE v.id = $1 AND m.is_active`,
+  [target.visitId],
+);
+
+const closed = await closeWithoutDoctor(target.visitId, sdA);
+check("a reviewed patient can be closed", closed.skippedDoctor === true);
+
 const final = await one(`SELECT current_status FROM giniflow_visits WHERE id = $1`, [
   target.visitId,
 ]);
+// Past the consultant and on to the Rx desk — the same place a consultant's own
+// finalize leaves a patient, because it is the same finalize.
 check(
-  "closing sends them past the doctor",
-  final.current_status === "doctor_done",
+  "closing sends them past the doctor to the Rx desk",
+  final.current_status === "rx_pending",
   final.current_status,
+);
+
+// The gap this whole plan exists to close (31 §3 G4): before, the draft stayed
+// a draft and the patient reached the pharmacy with nothing.
+const medsAfter = await one(
+  `SELECT count(*)::int AS n FROM medications m
+     JOIN giniflow_visits v ON v.patient_id = m.patient_id
+    WHERE v.id = $1 AND m.is_active`,
+  [target.visitId],
+);
+const draftLeft = await one(
+  `SELECT count(*)::int AS n FROM giniflow_rx_items WHERE visit_id = $1`,
+  [target.visitId],
+);
+check(
+  "closing writes the prescription, not just the status",
+  medsAfter.n > 0 && draftLeft.n === 0,
+  `${medsBefore.n}→${medsAfter.n} active, ${draftLeft.n} draft rows left`,
 );
 
 const ev = await one(
   `SELECT actor_role, meta FROM giniflow_visit_events
-    WHERE visit_id = $1 ORDER BY occurred_at DESC LIMIT 1`,
+    WHERE visit_id = $1 AND status = 'doctor_done' ORDER BY occurred_at DESC LIMIT 1`,
   [target.visitId],
 );
 check("the close is attributed to the MO", ev.actor_role === "mo_sd", ev.actor_role);

@@ -74,9 +74,17 @@ export const SLOT_REASON = {
 // Hide non-clinical staff from a doctor picker; keep doctors (incl. odd roles).
 export const isClinicalDoctor = (d) =>
   d?.name &&
-  !["nurse", "lab", "tech", "reception", "pharmacy", "coordinator", "admin", "guest"].includes(
-    String(d.role || "").toLowerCase(),
-  );
+  ![
+    "nurse",
+    "lab",
+    "tech",
+    "reception",
+    "pharmacy",
+    "rx",
+    "coordinator",
+    "admin",
+    "guest",
+  ].includes(String(d.role || "").toLowerCase());
 
 // Options for the slot dropdown: all catalog slots annotated, with the
 // out-of-hours ("not_working") ones removed. Available ones are selectable;

@@ -46,6 +46,39 @@ export function useUploadReport() {
   });
 }
 
+// Results typed in rather than scanned (32-LAB-TYPED-RESULTS-PLAN.md). The rows
+// go to lab_results, so nothing else needs a hook to read them — the Labs tab,
+// the trends and the patient app already do.
+export function useLabResults(orderId) {
+  return useQuery({
+    queryKey: ["giniflow", "lab", "results", orderId],
+    queryFn: async () => (await api.get(`/api/giniflow/lab/${orderId}/results`)).data,
+    enabled: !!orderId,
+  });
+}
+
+export function useTestNameSearch(term) {
+  return useQuery({
+    queryKey: ["giniflow", "lab", "test-names", term],
+    queryFn: async () =>
+      (await api.get(`/api/giniflow/lab/test-names?q=${encodeURIComponent(term)}`)).data,
+    enabled: (term || "").trim().length >= 2,
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useSaveLabResults() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ orderId, rows, panelName }) =>
+      (await api.post(`/api/giniflow/lab/${orderId}/results`, { rows, panelName })).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "lab"] });
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "board"] });
+    },
+  });
+}
+
 export function useAdvanceSample() {
   const queryClient = useQueryClient();
   return useMutation({

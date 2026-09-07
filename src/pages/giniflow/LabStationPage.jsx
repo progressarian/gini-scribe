@@ -10,6 +10,7 @@ import {
 import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
 import LiveBadge from "../../components/giniflow/LiveBadge";
 import "../../styles/giniflow-station.css";
+import LabResultsForm from "../../components/giniflow/LabResultsForm";
 import StationNotice from "../../components/giniflow/StationNotice";
 import useAuthStore from "../../stores/authStore";
 
@@ -323,14 +324,33 @@ function useDismiss(open, onClose, ref) {
   }, [open, onClose, ref]);
 }
 
-function LabDetailPane({ order, group, onClose, onAdvance, onUpload, busy }) {
+function LabDetailPane({
+  order,
+  group,
+  onClose,
+  onAdvance,
+  onUpload,
+  onResultsSaved,
+  onResultsFailed,
+  busy,
+}) {
   const paneRef = useRef(null);
   const fileRef = useRef(null);
   const [dragging, setDragging] = useState(false);
   useDismiss(!!order, onClose, paneRef);
   if (!order) return null;
 
-  const canUpload = ["processing", "results_ready"].includes(order.sampleStatus) && order.paid;
+  // 'uploaded' included: typing the values finishes the order, and the whole
+  // point of having both is that the scan can still be attached afterwards —
+  // which the upload zone disappearing would have quietly prevented.
+  const canUpload =
+    ["processing", "results_ready", "uploaded"].includes(order.sampleStatus) && order.paid;
+  // Values can be typed once the sample is in the lab's hands, and afterwards —
+  // an order finished by an upload can still have its numbers added, and one
+  // finished by numbers can be corrected.
+  const canEnterResults =
+    ["sample_collected", "processing", "results_ready", "uploaded"].includes(order.sampleStatus) &&
+    order.paid;
 
   // Refuse an oversized file here rather than spending a minute base64-encoding
   // it only for the service to reject it. The limit is the one the zone states.
@@ -408,9 +428,30 @@ function LabDetailPane({ order, group, onClose, onAdvance, onUpload, busy }) {
               )}
             </div>
 
+            {/* Typing the values in is the other way to finish an order, and the
+                better one where the lab runs the test itself: a number can be
+                trended and flagged, a scan of a number cannot. Either finishes
+                the order; a case may carry both.
+                docs/gini-flow/32-LAB-TYPED-RESULTS-PLAN.md */}
+            {canEnterResults && (
+              <div className="dp-sec">
+                <div className="dp-sec-title">Enter results — values the doctor can trend</div>
+                <LabResultsForm
+                  // Keyed on the order: the detail pane is reused when the
+                  // technician clicks straight from one patient's card to the
+                  // next, and without this the form keeps the first patient's
+                  // typed values and would save them onto the second's record.
+                  key={order.orderId}
+                  orderId={order.orderId}
+                  onSaved={(r) => onResultsSaved?.(order, r)}
+                  onFailed={(e) => onResultsFailed?.(e)}
+                />
+              </div>
+            )}
+
             {canUpload && (
               <div className="dp-sec">
-                <div className="dp-sec-title">Upload report — triggers MO notification</div>
+                <div className="dp-sec-title">Or upload a report — triggers MO notification</div>
                 <input
                   ref={fileRef}
                   type="file"
@@ -946,6 +987,19 @@ export default function LabStationPage() {
       },
     );
 
+  const onResultsSaved = (order, r) =>
+    showToast(
+      // A value the lab already has from another source is not saved, and a
+      // toast that counted it would send the technician away believing a number
+      // is on the record that is not.
+      r.skipped?.length
+        ? `🧪 ${r.saved} saved · ${r.skipped.join(", ")} already reported today from another source — not overwritten`
+        : `🧪 ${r.saved} result${r.saved === 1 ? "" : "s"} saved for ${order.name} — the doctor sees them as labs now`,
+    );
+
+  const onResultsFailed = (e) =>
+    showToast(e?.response?.data?.error || "Could not save those results — nothing was written");
+
   const onUpload = (order, file, refuseWith, confirmAdditional = false) => {
     if (refuseWith) return showToast(refuseWith);
     return upload.mutate(
@@ -1292,6 +1346,8 @@ export default function LabStationPage() {
         onClose={closePane}
         onAdvance={onAdvance}
         onUpload={onUpload}
+        onResultsSaved={onResultsSaved}
+        onResultsFailed={onResultsFailed}
       />
 
       {confirmUpload && (

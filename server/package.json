@@ -27,6 +27,7 @@
     "smoke:giniflow": "node scripts/smoke-giniflow-manager.mjs",
     "smoke:giniflow-http": "node scripts/smoke-giniflow-http.mjs",
     "smoke:giniflow-journey": "node scripts/smoke-giniflow-journey.mjs",
+    "smoke:giniflow-lab-results": "node scripts/smoke-giniflow-lab-results.mjs",
     "smoke:giniflow-sync": "node scripts/smoke-giniflow-sync.mjs",
     "smoke:giniflow-vitals": "node scripts/smoke-giniflow-vitals.mjs",
     "smoke:giniflow-speech": "node scripts/smoke-giniflow-speech.mjs",

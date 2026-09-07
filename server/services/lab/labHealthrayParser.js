@@ -6,6 +6,7 @@
 //   3. case_reports[].reports[].report_tests[].test (direct)      (e.g. HbA1c, FBS, Lipids — has_sub_tests=false)
 
 import { getCanonical } from "../../utils/labCanonical.js";
+import { flagFor } from "../../utils/labFlag.js";
 
 function mapParam(param, categoryName) {
   const result = param.result || {};
@@ -22,12 +23,9 @@ function mapParam(param, categoryName) {
   else if (refMin != null) refRange = `> ${refMin}`;
   else if (refMax != null) refRange = `< ${refMax}`;
 
-  // Compute flag from numeric value vs reference range
-  let flag = null;
-  if (!isNaN(numVal) && (refMin != null || refMax != null)) {
-    if (refMin != null && numVal < refMin) flag = "LOW";
-    else if (refMax != null && numVal > refMax) flag = "HIGH";
-  }
+  // The shared rule, so a value typed at the lab station and one that arrived
+  // through this feed are flagged identically rather than by two copies.
+  const flag = flagFor(numVal, { min: refMin, max: refMax });
 
   return {
     name: param.name,

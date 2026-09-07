@@ -125,6 +125,15 @@ const ROUTE_CASES = [
   ["/api/home-stats", "obt", true],
   ["/api/home-stats", "pharmacy", true],
   ["/api/home-stats", "guest", true],
+  // Prescription explainer: the Gini Flow station and nothing else on the floor.
+  ["/api/giniflow/stations/rx/queue", "rx", true],
+  ["/api/giniflow/stations/summary", "rx", true],
+  ["/api/giniflow/stations/pharmacy/queue", "rx", true], // prefix-gated on VIEW; the route gate below is what closes it
+  ["/api/giniflow/triage", "rx", false],
+  ["/api/patients/55", "rx", false],
+  ["/api/documents/55", "rx", false],
+  ["/api/opd/appointments", "rx", false],
+  ["/api/flow/visits", "rx", false],
 ];
 
 // [path, doctorSession, expected] — "allow" means next() was called.

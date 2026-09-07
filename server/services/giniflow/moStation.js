@@ -1,5 +1,6 @@
 import pool from "../../config/db.js";
 import { OPEN_LAB_CASES_SQL } from "./labStation.js";
+import { finalizeConsult } from "./finalize.js";
 import { advanceStatus, budgetColour } from "./statusEngine.js";
 import { getSlaConfig, budgetLookup } from "./board.js";
 import { slaKeyForStatus } from "../../../shared/giniflowStatus.js";
@@ -14,8 +15,16 @@ import { ALLERGY_NOT_ASKED } from "../../../shared/giniflowAllergy.js";
 //
 // Design and the gaps it is built around: docs/gini-flow/08-MO-SD-STATION-PLAN.md
 
-// Only a patient whose markers are all at target may skip the consultation.
+// The category no longer gates the close — the MO's recorded reading of the
+// reports does (31 §4 D1). It is still exported: the triage smoke asserts a
+// green patient is categorised as one, and the screen shows the category beside
+// the decision as evidence.
 export const CLOSEABLE_CATEGORY = "in_control";
+
+// Can this patient be ended here, without the consultant? A plan has to exist,
+// and reports — if any were ordered — have to have been read and called normal.
+const closeableNow = ({ hasPlan, orders, outcome }) =>
+  !!hasPlan && (orders === 0 || outcome === "normal");
 
 // Lab-track statuses that mean the sample has not been taken yet.
 const UNCOLLECTED = ["ordered", "payment_pending", "paid"];
@@ -73,9 +82,19 @@ const QUEUE_SQL = `
          last_ev.occurred_at  AS status_since,
          (SELECT count(*)::int FROM giniflow_lab_orders o
            WHERE o.visit_id = v.id AND o.sample_status <> 'uploaded') AS open_orders,
+         -- How far the slowest outstanding order has got. "Waiting on results"
+         -- is not one state: a sample nobody has drawn is the MO's to chase,
+         -- one on the analyser is not.
+         (SELECT o.sample_status FROM giniflow_lab_orders o
+           WHERE o.visit_id = v.id AND o.sample_status <> 'uploaded'
+           ORDER BY array_position(
+             ARRAY['ordered','payment_pending','paid','sample_collected','processing','results_ready'],
+             o.sample_status) LIMIT 1) AS lab_stage,
          ${OPEN_LAB_CASES_SQL} AS open_cases,
          (SELECT plan IS NOT NULL AND length(trim(plan)) > 0
             FROM giniflow_sd_notes n WHERE n.visit_id = v.id) AS has_plan,
+         (SELECT reports_outcome FROM giniflow_sd_notes n WHERE n.visit_id = v.id)
+           AS reports_outcome,
          -- Search runs here, not in the browser, for two reasons: the queue the
          -- MO can see is only part of the day, and a phone number is never sent
          -- to the client at all, so it is unsearchable anywhere else. Digits are
@@ -197,8 +216,14 @@ export async function getMoQueue(visitDate, sdId = null, q = null, now = new Dat
       // it exists on appointments but is unpopulated for most patients.
       compliancePct,
       openOrders: r.open_orders + r.open_cases,
+      labStage: r.lab_stage || null,
       hasPlan: !!r.has_plan,
-      canClose: r.category === CLOSEABLE_CATEGORY,
+      canClose: closeableNow({
+        hasPlan: r.has_plan,
+        orders: r.open_orders + r.open_cases,
+        outcome: r.reports_outcome,
+      }),
+      reportsOutcome: r.reports_outcome || null,
     };
     const group = groupOf(r, sdId);
     counters[group] = (counters[group] || 0) + 1;
@@ -288,9 +313,11 @@ export async function getMoPatient(visitId, db = pool) {
           ORDER BY appointment_date DESC NULLS LAST LIMIT 6`,
       [v.patient_id, visitId],
     ),
-    db.query(`SELECT plan, source, updated_at FROM giniflow_sd_notes WHERE visit_id = $1`, [
-      visitId,
-    ]),
+    db.query(
+      `SELECT plan, source, updated_at, reports_outcome, reports_reviewed_at, reports_review_note
+         FROM giniflow_sd_notes WHERE visit_id = $1`,
+      [visitId],
+    ),
     db.query(
       `SELECT id, medicine_name, from_dose, to_dose, reason, change_type, status
            FROM giniflow_rx_proposals WHERE visit_id = $1 ORDER BY created_at`,
@@ -299,7 +326,21 @@ export async function getMoPatient(visitId, db = pool) {
     db.query(
       `SELECT o.id, o.urgency, o.payment_status, o.sample_status,
                 COALESCE(json_agg(t.test_name ORDER BY t.test_name)
-                         FILTER (WHERE t.test_name IS NOT NULL), '[]'::json) AS tests
+                         FILTER (WHERE t.test_name IS NOT NULL), '[]'::json) AS tests,
+                -- Values the lab typed in rather than scanned. They are in
+                -- lab_results like any other, so the chart and the trends have
+                -- them already — this puts the numbers on the card where the MO
+                -- is looking at the order they belong to. A scalar subquery, not
+                -- a lateral: json has no equality operator, so it cannot be
+                -- carried through the GROUP BY the tests need.
+                COALESCE((
+                  SELECT json_agg(json_build_object(
+                           'testName', lr.test_name, 'value', lr.result,
+                           'valueText', lr.result_text, 'unit', lr.unit,
+                           'refRange', lr.ref_range, 'flag', lr.flag)
+                         ORDER BY lr.flag NULLS LAST, lr.test_name)
+                    FROM lab_results lr WHERE lr.lab_order_id = o.id
+                ), '[]'::json) AS values
            FROM giniflow_lab_orders o
            LEFT JOIN giniflow_lab_order_tests t ON t.lab_order_id = o.id
           WHERE o.visit_id = $1
@@ -321,7 +362,16 @@ export async function getMoPatient(visitId, db = pool) {
     resultsStatus: v.results_status,
     assignedSdId: v.assigned_sd_id,
     checkedInAt: v.checked_in_at ? new Date(v.checked_in_at).toISOString() : null,
-    canClose: v.category === CLOSEABLE_CATEGORY,
+    canClose: closeableNow({
+      hasPlan: !!notes[0]?.plan?.trim(),
+      orders: orders.length,
+      outcome: notes[0]?.reports_outcome,
+    }),
+    reportsOutcome: notes[0]?.reports_outcome || null,
+    reportsReviewNote: notes[0]?.reports_review_note || null,
+    reportsReviewedAt: notes[0]?.reports_reviewed_at
+      ? new Date(notes[0].reports_reviewed_at).toISOString()
+      : null,
     // `patients.allergy_status` exists now (24-ADDENDUM-V11-PLAN.md §5.1). A
     // patient nobody has asked yet is NULL in the column and "not_known" here,
     // so every screen deals with the three states and none of them has to read
@@ -348,7 +398,7 @@ export async function getMoPatient(visitId, db = pool) {
     plan: notes[0]?.plan ?? "",
     planUpdatedAt: notes[0]?.updated_at ?? null,
     proposals,
-    orders: orders.map((o) => ({ ...o, tests: o.tests || [] })),
+    orders: orders.map((o) => ({ ...o, tests: o.tests || [], values: o.values || [] })),
   };
 }
 
@@ -591,6 +641,13 @@ export async function orderTests(
     await client.query("BEGIN");
     await assertOwner(client, visitId, actorId);
 
+    const { rows: visitRows } = await client.query(
+      `SELECT current_status FROM giniflow_visits WHERE id = $1 FOR UPDATE`,
+      [visitId],
+    );
+    if (!visitRows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
+    const current = visitRows[0].current_status;
+
     const { rows: priced } = await client.query(
       `SELECT test_name, price FROM giniflow_test_catalog WHERE test_name = ANY($1)`,
       [catalogueNames],
@@ -645,12 +702,43 @@ export async function orderTests(
       [orderId, actorId],
     );
 
+    // Ordering today's tests ends this sitting: the patient goes to reception
+    // and the lab, the MO takes the next one, and they come back when the
+    // reports land. Three things depended on this and none of them worked while
+    // the patient stayed at `with_sd`:
+    //
+    //   - the lab could not draw the sample at all — `with_sd` is a room, and
+    //     the lab station refuses to collect from a patient another station has;
+    //   - the MO's own "waiting on results" group only holds `vitals_done` /
+    //     `sd_pending`, so the patient they had just sent to the lab never
+    //     appeared in it;
+    //   - the desk stayed occupied, so the queue behind them did not move.
+    //
+    // Written directly, like `releaseWorkup`: `sd_pending` is behind `with_sd`
+    // and the chain only moves forwards. The MO keeps the patient
+    // (`assigned_sd_id` is untouched) so the reports come back to them.
+    let sentToLab = false;
+    if (urgency === "today" && current === "with_sd") {
+      await client.query(
+        `INSERT INTO giniflow_visit_events (visit_id, status, actor_role, actor_id, meta)
+         VALUES ($1, 'sd_pending', 'mo_sd', $2, $3)`,
+        [visitId, actorId, { source: "lab_ordered", lab_order_id: orderId, tests: tests.length }],
+      );
+      await client.query(
+        `UPDATE giniflow_visits SET current_status = 'sd_pending', updated_at = NOW()
+          WHERE id = $1`,
+        [visitId],
+      );
+      sentToLab = true;
+    }
+
     await client.query("COMMIT");
     return {
       orderId,
       urgency,
       tests,
       total,
+      sentToLab,
       // Only today's tests reach reception now; the rest wait for their day.
       reachesReceptionToday: urgency === "today",
     };
@@ -755,38 +843,98 @@ export async function closeWithoutDoctor(visitId, actorId = null, db = pool) {
     await client.query("BEGIN");
     await assertOwner(client, visitId, actorId);
     const { rows } = await client.query(
-      `SELECT category,
-              (SELECT plan FROM giniflow_sd_notes n WHERE n.visit_id = v.id) AS plan
-         FROM giniflow_visits v WHERE v.id = $1 FOR UPDATE`,
+      // Subselects, not a LEFT JOIN: FOR UPDATE cannot be applied to the
+      // nullable side of an outer join, and the row that must be locked is the
+      // visit.
+      `SELECT v.category, v.results_status,
+              (SELECT plan FROM giniflow_sd_notes n WHERE n.visit_id = v.id) AS plan,
+              (SELECT reports_outcome FROM giniflow_sd_notes n WHERE n.visit_id = v.id)
+                AS reports_outcome,
+              (SELECT count(*)::int FROM giniflow_lab_orders o WHERE o.visit_id = v.id) AS orders
+         FROM giniflow_visits v
+        WHERE v.id = $1 FOR UPDATE`,
       [visitId],
     );
     if (!rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
-    if (rows[0].category !== CLOSEABLE_CATEGORY) {
+    const { plan, reports_outcome: outcome, orders } = rows[0];
+
+    if (!plan || !plan.trim()) {
+      throw Object.assign(new Error("Write a plan before closing this patient"), { status: 409 });
+    }
+
+    // The gate is the MO's recorded reading of the reports, not the category
+    // (31 §4 D1). A patient with no tests ordered has nothing to have read, so
+    // the plan above is the whole record; one with reports must have them read
+    // and called normal, by name and at a time, before the consultation is
+    // removed from their visit.
+    if (orders > 0 && outcome !== "normal") {
       throw Object.assign(
         new Error(
-          "Only green-category patients can be closed without the doctor — this one is " +
-            (rows[0].category || "uncategorised"),
+          outcome === "needs_consultant"
+            ? "You marked these reports as needing the consultant — send them on instead"
+            : "Review the reports before closing this patient",
         ),
         { status: 409 },
       );
     }
-    if (!rows[0].plan || !rows[0].plan.trim()) {
-      throw Object.assign(new Error("Write a plan before closing this patient"), { status: 409 });
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    client.release();
+    throw e;
+  }
+  client.release();
+
+  // Finalize owns the atomic save, the medicine matching, the card, the
+  // counselling note and the status. Closing without it left the draft in
+  // `giniflow_rx_items` and sent the patient to a pharmacy with no prescription
+  // at all (31 §3 G4) — so the close IS the finalize, not a status change
+  // beside one.
+  const result = await finalizeConsult(visitId, actorId, db, { closedBySd: true });
+  return { ...result, status: "doctor_done", skippedDoctor: true };
+}
+
+// The MO's attestation that they read the reports and what they concluded. The
+// close gate reads `normal` from here; `needs_consultant` is the referral, and
+// the screen turns it into the existing hand-off to the consultant.
+export async function reviewReports(visitId, { outcome, note = null, actorId = null }, db = pool) {
+  if (!["normal", "needs_consultant"].includes(outcome)) {
+    throw Object.assign(new Error(`Unknown review outcome: ${outcome}`), { status: 400 });
+  }
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    await assertOwner(client, visitId, actorId);
+    const { rows } = await client.query(
+      `SELECT results_status FROM giniflow_visits WHERE id = $1 FOR UPDATE`,
+      [visitId],
+    );
+    if (!rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
+    if (rows[0].results_status !== "ready") {
+      throw Object.assign(new Error("The reports are not in yet — there is nothing to review"), {
+        status: 409,
+      });
     }
 
-    // The one place a skip is the point: closing deliberately steps over
-    // ready_for_doctor and with_doctor, which is further than the chain's normal
-    // limit allows.
-    await advanceStatus(client, {
-      visitId,
-      toStatus: "doctor_done",
-      actorRole: "mo_sd",
-      actorId,
-      allowSkip: true,
-      meta: { closed_by_sd: true },
-    });
+    await client.query(
+      `INSERT INTO giniflow_sd_notes (visit_id, reports_reviewed_at, reports_reviewed_by,
+                                      reports_outcome, reports_review_note)
+       VALUES ($1, NOW(), $2, $3, $4)
+       ON CONFLICT (visit_id) DO UPDATE
+         SET reports_reviewed_at  = NOW(),
+             reports_reviewed_by  = EXCLUDED.reports_reviewed_by,
+             reports_outcome      = EXCLUDED.reports_outcome,
+             reports_review_note  = COALESCE(EXCLUDED.reports_review_note,
+                                             giniflow_sd_notes.reports_review_note)`,
+      [visitId, actorId, outcome, note],
+    );
+    await client.query(
+      `INSERT INTO giniflow_visit_events (visit_id, status, actor_role, actor_id, meta)
+       VALUES ($1, 'reports_reviewed', 'mo_sd', $2, $3)`,
+      [visitId, actorId, { outcome, source: "mo_review" }],
+    );
     await client.query("COMMIT");
-    return { status: "doctor_done", skippedDoctor: true };
+    return { visitId, outcome };
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;

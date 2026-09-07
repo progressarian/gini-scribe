@@ -76,6 +76,9 @@ export const STATUS_LABEL = {
   with_sd: "With SD / MO",
   ready_for_doctor: "Waiting for consultant",
   with_doctor: "With consultant",
+  // Not a status any visit holds — an event the lab writes when a report lands,
+  // shown on the timeline as a dated marker.
+  results_received: "Reports arrived",
   doctor_done: "Waiting for Prescription Explain",
   rx_pending: "Waiting for Prescription Explain",
   with_rx: "Prescription being explained",

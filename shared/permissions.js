@@ -40,6 +40,10 @@ export const ROLES = {
   RECEPTION: "reception",
   COORDINATOR: "coordinator",
   PHARMACY: "pharmacy",
+  // Prescription explainer. Its own role rather than a nurse account: the desk
+  // is staffed by people who only explain and print the prescription, and
+  // nothing else on the floor is theirs.
+  RX: "rx",
   OBT: "obt", // outbound booking / call team — works tomorrow's appointment list
   GUEST: "guest",
 };
@@ -100,9 +104,10 @@ export const CAPABILITIES = {
   GINIFLOW_STATION_RECEPTION: "GINIFLOW_STATION_RECEPTION", // clear lab payments
   GINIFLOW_STATION_LAB: "GINIFLOW_STATION_LAB", // collect samples, upload results
   GINIFLOW_STATION_DOCTOR: "GINIFLOW_STATION_DOCTOR", // the consultant's queue and consult screen
+  GINIFLOW_MO_CLOSE: "GINIFLOW_MO_CLOSE", // end a visit without the consultant, prescription and all
   GINIFLOW_STATION_MO: "GINIFLOW_STATION_MO", // MO/SD workup, order tests, hand over
   GINIFLOW_STATION_PHARMACY: "GINIFLOW_STATION_PHARMACY", // dispense, counsel, close the visit
-  GINIFLOW_STATION_RX: "GINIFLOW_STATION_RX", // the nurse desk: explain the prescription
+  GINIFLOW_STATION_RX: "GINIFLOW_STATION_RX", // the prescription explainer: explain the prescription
   // Print the finalised prescription for the patient. Its own key rather than a
   // station one: several desks need this single action and none of them should
   // inherit another desk's controls to get it.
@@ -183,6 +188,7 @@ export const ROLE_CAPABILITIES = {
     C.GINIFLOW_VIEW,
     C.GINIFLOW_STATION_VITALS,
     C.GINIFLOW_STATION_MO,
+    C.GINIFLOW_MO_CLOSE,
   ],
   // No REFILLS: working the refill queue is a prescribing decision, so nurses
   // don't approve them. They can still see a patient's refill history in the
@@ -309,6 +315,12 @@ export const ROLE_CAPABILITIES = {
   // them through those pages' own any-of gates, not through RECEPTION_OPS, so
   // /opd and the reception inbox stay closed. Doctor roles (consultant/mo) are
   // intentionally excluded from OBT_OPS.
+  // Prescription explainer. Three capabilities and nothing more: GINIFLOW_VIEW
+  // because `/api/giniflow*` is prefix-gated on it before any per-route check
+  // runs, the station itself, and the print/reissue action the desk exists for.
+  // No PATIENT_READ or PATIENT_CHART — the station's own endpoints carry
+  // everything the screen shows, so the chart never has to open here.
+  [ROLES.RX]: [C.GINIFLOW_VIEW, C.GINIFLOW_STATION_RX, C.GINIFLOW_PRINT_RX],
   [ROLES.OBT]: [C.PATIENT_READ, C.OBT_OPS],
   [ROLES.GUEST]: [],
 };

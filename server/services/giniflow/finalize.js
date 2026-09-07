@@ -50,7 +50,12 @@ export async function pendingProposalCount(visitId, db = pool) {
   return Number(rows[0].n);
 }
 
-export async function finalizeConsult(visitId, actorId = null, db = pool) {
+export async function finalizeConsult(
+  visitId,
+  actorId = null,
+  db = pool,
+  { closedBySd = false } = {},
+) {
   const client = await db.connect();
   let patientId = null;
   try {
@@ -79,9 +84,19 @@ export async function finalizeConsult(visitId, actorId = null, db = pool) {
     // and would log a consultation for a patient the consultant never saw.
     // `ready_for_doctor` is allowed because a consultant who calls a patient and
     // finishes immediately is a real thing; anything earlier is a mis-tap.
-    if (!["with_doctor", "ready_for_doctor"].includes(visit.current_status)) {
+    // The MO closing a visit without the consultant finalizes from their own
+    // station, so `with_sd` is theirs and theirs only — 31 §5.3. The two sets
+    // stay disjoint deliberately: a consultant must not finalize a patient still
+    // at the MO desk, and an MO must not finalize one sitting with the
+    // consultant.
+    const allowed = closedBySd ? ["with_sd"] : ["with_doctor", "ready_for_doctor"];
+    if (!allowed.includes(visit.current_status)) {
       throw Object.assign(
-        new Error("Start the consultation before finalizing it — this patient is not with you yet"),
+        new Error(
+          closedBySd
+            ? "Claim this patient at your desk before closing them"
+            : "Start the consultation before finalizing it — this patient is not with you yet",
+        ),
         { status: 409 },
       );
     }
@@ -274,24 +289,30 @@ export async function finalizeConsult(visitId, actorId = null, db = pool) {
     }
 
     // ── 4. Status ────────────────────────────────────────────────────────────
+    const actorRole = closedBySd ? "mo_sd" : "doctor";
     await advanceStatus(client, {
       visitId,
       toStatus: "doctor_done",
-      actorRole: "doctor",
+      actorRole,
       actorId,
+      // From `with_sd` this steps over ready_for_doctor and with_doctor, which
+      // is further than the chain's normal limit — and is the point: no
+      // consultant saw this patient.
+      allowSkip: closedBySd,
       meta: {
         source: "consult_finalize",
         consultation_id: consultationId,
         medicines: active.length,
         stopped: stopped.length,
+        ...(closedBySd ? { closed_by_sd: true } : {}),
       },
     });
     await advanceStatus(client, {
       visitId,
       toStatus: "rx_pending",
-      actorRole: "doctor",
+      actorRole,
       actorId,
-      meta: { source: "consult_finalize" },
+      meta: { source: "consult_finalize", ...(closedBySd ? { closed_by_sd: true } : {}) },
     });
 
     // The draft has become the prescription; keeping it would give the next

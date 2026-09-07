@@ -12,6 +12,7 @@ const ROLE_GROUPS = [
   { role: "lab", label: "Laboratory", showSpecialty: false },
   { role: "tech", label: "Technicians", showSpecialty: false },
   { role: "pharmacy", label: "Pharmacy", showSpecialty: false },
+  { role: "rx", label: "Prescription Explainer", showSpecialty: false },
   { role: "reception", label: "Reception", showSpecialty: false },
   { role: "obt", label: "OBT Team", showSpecialty: false },
 ];
@@ -51,6 +52,7 @@ export default function LoginPage() {
     reception: "/opd",
     coordinator: "/opd",
     pharmacy: "/refills",
+    rx: "/giniflow/station/rx",
   };
   const getDefaultRoute = (role) => ROLE_LANDING[role] || "/";
 

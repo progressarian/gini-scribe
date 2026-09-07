@@ -4796,6 +4796,135 @@
   margin-top: 3px;
 }
 
+/* The lab's typed values, on the card where the MO is reading the order. */
+.gf .mo-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+}
+.gf .mo-val {
+  font-size: 10px;
+  font-family: var(--fm);
+  background: var(--bg);
+  border: 1px solid var(--bd);
+  border-radius: 20px;
+  padding: 3px 8px;
+  color: var(--ink2);
+}
+.gf .mo-val-high {
+  background: var(--red-l);
+  border-color: var(--red-l);
+  color: var(--red);
+}
+.gf .mo-val-low {
+  background: var(--amb-l);
+  border-color: var(--amb-l);
+  color: var(--amb);
+}
+
+/* ── Results typed at the lab station (32-LAB-TYPED-RESULTS-PLAN) ── */
+.gf .lr {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.gf .lr-head,
+.gf .lr-row {
+  display: grid;
+  grid-template-columns: 1fr 120px 80px 100px 20px;
+  gap: 6px;
+  align-items: center;
+}
+.gf .lr-head {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--ink3);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0 2px 2px;
+}
+.gf .lr-name {
+  font-size: 11px;
+  color: var(--ink);
+}
+.gf .lr-val {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.gf .lr-val input,
+.gf .lr-unit,
+.gf .lr-ref {
+  font-family: var(--fm);
+  font-size: 11px;
+  padding: 4px 6px;
+  min-width: 0;
+}
+/* The flag the value will carry, shown while it is still a keystroke rather
+   than a line on a patient's record. */
+.gf .lr-flag {
+  font-size: 9px;
+  font-weight: 700;
+  border-radius: 20px;
+  padding: 2px 6px;
+}
+.gf .lr-high {
+  background: var(--red-l);
+  color: var(--red);
+}
+.gf .lr-low {
+  background: var(--amb-l);
+  color: var(--amb);
+}
+.gf .lr-add {
+  position: relative;
+  margin-top: 6px;
+}
+.gf .lr-add input {
+  width: 100%;
+}
+.gf .lr-matches {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--bd2);
+  border-radius: var(--r);
+  margin-top: 4px;
+  max-height: 190px;
+  overflow-y: auto;
+  background: var(--white);
+}
+.gf .lr-match {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--bd);
+  padding: 6px 9px;
+  font-family: var(--fb);
+  font-size: 11px;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+.gf .lr-match:hover {
+  background: var(--bg);
+}
+.gf .lr-match-meta {
+  font-family: var(--fm);
+  font-size: 10px;
+  color: var(--ink4);
+  white-space: nowrap;
+}
+.gf .lr-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
 /* ── The journey reception builds at check-in (29-RECEPTION-JOURNEY-PLAN) ── */
 /* The desk opens check-in and the journey from a row near the bottom of a long
    list, so they open as the same right-hand pane every other station uses —
@@ -4810,6 +4939,41 @@
   border: 0;
   border-radius: 0;
   margin-bottom: 0;
+}
+
+/* Where the sample has got to, on the queue card. */
+.gf .si-lab {
+  font-size: 10px;
+  color: var(--ink3);
+  margin-top: 3px;
+}
+
+/* The MO's report decision — 31-MO-LED-CLOSURE-PLAN §5.6. Sits above the
+   action row because it is the thing that decides which of those actions is
+   available. */
+.gf .mo-review {
+  background: var(--tl-l);
+  border: 1px solid var(--tl-b);
+  border-radius: var(--r);
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gf .mo-review-t {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--tl);
+}
+.gf .mo-review-done {
+  font-size: 11px;
+  color: var(--ink2);
+}
+.gf .mo-review-acts {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .gf .ci-panel {

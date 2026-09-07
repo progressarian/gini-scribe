@@ -13,6 +13,7 @@ import {
   useReleaseWorkup,
   useTakeOver,
   useCloseWithoutDoctor,
+  useReviewReports,
   useAddProposal,
   useWithdrawProposal,
 } from "../../queries/hooks/useGiniflowMo";
@@ -267,6 +268,16 @@ function WaitChip({ card, now }) {
   );
 }
 
+// The lab's own word for where the sample is, said the way an MO would ask it.
+const LAB_STAGE = {
+  ordered: "ordered — not paid yet",
+  payment_pending: "waiting on payment",
+  paid: "paid — sample not drawn yet",
+  sample_collected: "sample taken, on its way",
+  processing: "on the analyser",
+  results_ready: "reporting",
+};
+
 function RowDetail({ card, now }) {
   const cat = CATEGORY[card.category];
   return (
@@ -279,6 +290,11 @@ function RowDetail({ card, now }) {
       {/* The wait is what the MO can act on, so it reads before the biomarkers
           — and it is judged against the same budget the board uses. */}
       <WaitChip card={card} now={now} />
+      {/* "Waiting on results" is not one state. A sample nobody has drawn is the
+          MO's to chase; one on the analyser is only to be waited for. 31 §3 G1. */}
+      {card.openOrders > 0 && card.resultsStatus !== "ready" && (
+        <div className="si-lab">🧪 {LAB_STAGE[card.labStage] || "at the hospital lab"}</div>
+      )}
       {card.bios?.length > 0 && (
         <div className="si-bios">
           {card.bios.map((b) => (
@@ -456,6 +472,7 @@ export default function MoStationPage() {
   const release = useReleaseWorkup();
   const takeOver = useTakeOver();
   const close = useCloseWithoutDoctor();
+  const review = useReviewReports();
   const addProposal = useAddProposal();
   const withdrawProposal = useWithdrawProposal();
 
@@ -472,6 +489,23 @@ export default function MoStationPage() {
     clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(""), 3500);
   };
+
+  // "Once the report is done the MO is notified." The live channel already
+  // refetches the queue, which silently moves the patient from "waiting on
+  // results" to "waiting for me" — an MO deep in another workup never sees it.
+  // The transition itself is the signal: anyone who was on the results list and
+  // is now actionable has had their reports land. 31 §3 G2.
+  const wasAwaiting = useRef(new Set());
+  useEffect(() => {
+    if (!queue) return;
+    const arrived = (queue.waitingForMe || []).filter((r) => wasAwaiting.current.has(r.visitId));
+    if (arrived.length === 1) showToast(`🧪 Reports in for ${arrived[0].name}`);
+    else if (arrived.length > 1) showToast(`🧪 Reports in for ${arrived.length} patients`);
+    wasAwaiting.current = new Set((queue.awaitingResults || []).map((r) => r.visitId));
+    // showToast is stable for the life of the page; re-running on it would fire
+    // the notice again on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queue]);
 
   // A different patient means a fresh plan — never carry one patient's notes
   // onto another's record.
@@ -673,10 +707,24 @@ export default function MoStationPage() {
       onError: (e) => showToast(e?.response?.data?.error || "Could not put this patient back"),
     });
 
+  const reviewAs = (outcome) =>
+    review.mutate(
+      { visitId: activeId, outcome },
+      {
+        onSuccess: () =>
+          showToast(
+            outcome === "normal"
+              ? "✓ Reports recorded as normal — you can close this patient here"
+              : "→ Recorded — send them on to the consultant",
+          ),
+        onError: (e) => showToast(e?.response?.data?.error || "Could not record that"),
+      },
+    );
+
   const closePatient = () =>
     close.mutate(activeId, {
       onSuccess: () => {
-        showToast(`✓ ${patient.name} closed — straight to pharmacy`);
+        showToast(`✓ ${patient.name} closed — prescription written, on to the Rx desk`);
         setConfirm(null);
         setSelected(null);
       },
@@ -1378,8 +1426,71 @@ export default function MoStationPage() {
                         .join(" · ")}
                     </div>
                   )}
+                  {/* Values the lab typed in rather than scanned. They are in the
+                      patient's labs like any other result, but the MO deciding
+                      on THIS order should not have to leave the card to read
+                      them. docs/gini-flow/32-LAB-TYPED-RESULTS-PLAN.md */}
+                  {patient.orders.some((o) => o.values?.length > 0) && (
+                    <div className="mo-values">
+                      {patient.orders.flatMap((o) =>
+                        (o.values || []).map((v) => (
+                          <span
+                            key={`${o.id}-${v.testName}`}
+                            className={`mo-val${v.flag ? ` mo-val-${v.flag.toLowerCase()}` : ""}`}
+                          >
+                            {v.testName} <strong>{v.value ?? v.valueText}</strong>
+                            {v.unit ? ` ${v.unit}` : ""}
+                            {v.flag ? ` ${v.flag}` : ""}
+                          </span>
+                        )),
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
+
+              {/* 31-MO-LED-CLOSURE-PLAN §5.6. The decision the whole flow turns
+                  on, and it only exists once there is something to decide: the
+                  MO says whether the reports they just read are normal, and
+                  that recorded answer is what lets the visit end here. */}
+              {patient.resultsStatus === "ready" && (
+                <div className="mo-review">
+                  <div className="mo-review-t">
+                    📄 Reports are in — read them, then say what they show
+                  </div>
+                  {patient.reportsOutcome ? (
+                    <div className="mo-review-done">
+                      {patient.reportsOutcome === "normal"
+                        ? "✓ Reviewed — normal. You can close this patient here."
+                        : "→ Reviewed — the consultant is needed."}
+                      {patient.reportsReviewedAt
+                        ? ` (${new Date(patient.reportsReviewedAt).toLocaleTimeString("en-IN", {
+                            timeZone: "Asia/Kolkata",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            hour12: false,
+                          })})`
+                        : ""}
+                    </div>
+                  ) : null}
+                  <div className="mo-review-acts">
+                    <button
+                      className="st-btn st-btn-grn"
+                      disabled={busy || review.isPending}
+                      onClick={() => reviewAs("normal")}
+                    >
+                      Normal — I will prescribe
+                    </button>
+                    <button
+                      className="st-btn st-btn-tl"
+                      disabled={busy || review.isPending}
+                      onClick={() => reviewAs("needs_consultant")}
+                    >
+                      Needs the consultant
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div className="mo-actions">
                 <button
@@ -1398,7 +1509,7 @@ export default function MoStationPage() {
                       setConfirm({
                         key: "close",
                         title: `Close ${patient.name} without the doctor?`,
-                        body: "They go straight to pharmacy. Only for green-category patients.",
+                        body: "Their prescription is written now and they go to the Prescription Explain desk, then the pharmacy. No consultant will see them today.",
                         confirmLabel: "Close — no doctor needed",
                         tone: "grn",
                         onConfirm: closePatient,
@@ -1408,7 +1519,13 @@ export default function MoStationPage() {
                     ✓ Close — no doctor needed
                   </button>
                 ) : (
-                  <span className="mo-close-note">Close is for green-category patients only</span>
+                  <span className="mo-close-note">
+                    {patient.reportsOutcome === "needs_consultant"
+                      ? "You marked these reports as needing the consultant"
+                      : !plan.trim()
+                        ? "Write a plan before closing this patient"
+                        : "Review the reports before closing this patient"}
+                  </span>
                 )}
               </div>
             </>

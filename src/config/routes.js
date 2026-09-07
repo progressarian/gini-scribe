@@ -147,10 +147,16 @@ export const PAGE_CAPABILITIES = {
 
 export const ROLE_NAV_ALLOWLIST = {
   [ROLES.OBT]: ["/obt-dashboard", "/ghm"],
+  // The prescription explainer holds GINIFLOW_VIEW only because `/api/giniflow*` is
+  // prefix-gated on it, so a plain capability nav would also offer them the
+  // manager board. The allowlist keeps the nav to the launcher, which shows
+  // them the one station they can open.
+  [ROLES.RX]: ["/giniflow/stations"],
 };
 
 export const ROLE_HOME = {
   [ROLES.OBT]: "/obt-dashboard",
+  [ROLES.RX]: "/giniflow/station/rx",
 };
 
 export function navAllowlistForRole(role) {

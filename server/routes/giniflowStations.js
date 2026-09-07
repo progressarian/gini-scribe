@@ -12,6 +12,7 @@ import {
 import { fetchRxFile, regenerateRx } from "../services/giniflow/printRx.js";
 import { validate, validateQuery } from "../middleware/validate.js";
 import { CAPABILITIES as CAP } from "../../shared/permissions.js";
+import { giniflowReportReviewSchema } from "../schemas/index.js";
 import { parsePaste } from "../services/giniflow/rxPaste.js";
 import { blockActor, blockedResponse } from "../services/patientBlockGuard.js";
 import {
@@ -32,6 +33,7 @@ import {
   giniflowMoQueueQuerySchema,
   giniflowPaymentSchemaChecked,
   giniflowCheckinSchema,
+  giniflowLabResultsSchema,
   giniflowJourneyStepSchema,
   giniflowStepStatusSchema,
   giniflowJourneyOrderSchema,
@@ -119,6 +121,7 @@ import {
   releaseWorkup,
   takeOver,
   closeWithoutDoctor,
+  reviewReports,
 } from "../services/giniflow/moStation.js";
 import {
   addCatalogTest,
@@ -178,6 +181,12 @@ import {
   setStepStatus,
 } from "../services/giniflow/journey.js";
 import { sendFlowCheckin } from "../services/msg91.js";
+import {
+  suggestedRows,
+  searchTestNames,
+  getResults,
+  saveResults,
+} from "../services/giniflow/labResults.js";
 import { hasCapability } from "../../shared/permissions.js";
 
 const router = Router();
@@ -1141,6 +1150,47 @@ router.post(
 // ── Lab ─────────────────────────────────────────────────────────────────────
 const labGate = requireCapability(CAP.GINIFLOW_STATION_LAB);
 
+// Typing the values in, rather than scanning them (32-LAB-TYPED-RESULTS-PLAN.md).
+// The rows land in lab_results, so every screen that already shows labs shows
+// these too — reading them needs no endpoint of its own.
+router.get("/giniflow/lab/:orderId/results", labGate, async (req, res) => {
+  try {
+    res.json({
+      results: await getResults(req.params.orderId),
+      suggestions: await suggestedRows(req.params.orderId),
+    });
+  } catch (e) {
+    handleError(res, e, "Gini Flow lab results");
+  }
+});
+
+router.get("/giniflow/lab/test-names", labGate, async (req, res) => {
+  try {
+    res.json(await searchTestNames(req.query.q));
+  } catch (e) {
+    handleError(res, e, "Gini Flow lab test search");
+  }
+});
+
+router.post(
+  "/giniflow/lab/:orderId/results",
+  labGate,
+  validate(giniflowLabResultsSchema),
+  async (req, res) => {
+    try {
+      res.json(
+        await saveResults(req.params.orderId, {
+          rows: req.body.rows,
+          panelName: req.body.panelName,
+          actorId: req.doctor?.doctor_id ?? null,
+        }),
+      );
+    } catch (e) {
+      handleError(res, e, "Gini Flow save lab results");
+    }
+  },
+);
+
 router.get(
   "/giniflow/stations/lab/queue",
   labGate,
@@ -1498,13 +1548,39 @@ router.post("/giniflow/stations/mo/:visitId/ready", moGate, async (req, res) => 
   }
 });
 
-router.post("/giniflow/stations/mo/:visitId/close", moGate, async (req, res) => {
-  try {
-    res.json(await closeWithoutDoctor(req.params.visitId, req.doctor?.doctor_id ?? null));
-  } catch (e) {
-    handleError(res, e, "Gini Flow MO close");
-  }
-});
+// The MO's recorded reading of the reports — the gate the close now reads, and
+// the referral when it says the consultant is needed (31 §5.2).
+router.post(
+  "/giniflow/stations/mo/:visitId/review-reports",
+  moGate,
+  requireCapability(CAP.GINIFLOW_MO_CLOSE),
+  validate(giniflowReportReviewSchema),
+  async (req, res) => {
+    try {
+      res.json(
+        await reviewReports(req.params.visitId, {
+          ...req.body,
+          actorId: req.doctor?.doctor_id ?? null,
+        }),
+      );
+    } catch (e) {
+      handleError(res, e, "Gini Flow MO report review");
+    }
+  },
+);
+
+router.post(
+  "/giniflow/stations/mo/:visitId/close",
+  moGate,
+  requireCapability(CAP.GINIFLOW_MO_CLOSE),
+  async (req, res) => {
+    try {
+      res.json(await closeWithoutDoctor(req.params.visitId, req.doctor?.doctor_id ?? null));
+    } catch (e) {
+      handleError(res, e, "Gini Flow MO close");
+    }
+  },
+);
 
 // ── Pharmacy ────────────────────────────────────────────────────────────────
 // docs/gini-flow/16-PHARMACY-STATION-PLAN.md §8. The last station on the floor:

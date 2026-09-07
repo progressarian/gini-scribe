@@ -577,6 +577,37 @@ async function getHealthrayCases(visitDate, q = null, db = pool) {
   });
 }
 
+// The patient cannot be in two places at once, and the read side already says
+// so: `collectable` is false while another station has them. That hid the
+// button and stopped there, so a sample could still be recorded as drawn from a
+// patient sitting in the MO's room — by a direct call, a stale tab, or a second
+// technician on an older render. The payment gate below states the principle
+// this now follows: a hidden button is not a rule.
+async function assertPatientIsFree(db, visitId, what) {
+  if (!visitId) return;
+  const { rows } = await db.query(
+    `SELECT v.current_status, p.name FROM giniflow_visits v
+       JOIN patients p ON p.id = v.patient_id
+      WHERE v.id = $1`,
+    [visitId],
+  );
+  if (!rows.length) return;
+  const { current_status: status, name } = rows[0];
+  if (IN_A_ROOM.includes(status)) {
+    throw Object.assign(
+      new Error(
+        `${name} is with another station right now (${STATUS_LABEL[status] || status}) — ${what} once they are free`,
+      ),
+      { status: 409 },
+    );
+  }
+  if (FINISHED.includes(status)) {
+    throw Object.assign(new Error(`${name} has left the floor — ${what} is no longer possible`), {
+      status: 409,
+    });
+  }
+}
+
 export async function advanceSample(orderId, { to, actorId = null, reportUrl = null }, db = pool) {
   if (!SAMPLE_FLOW.includes(to)) {
     throw Object.assign(new Error(`Unknown sample status: ${to}`), { status: 400 });
@@ -616,6 +647,12 @@ export async function advanceSample(orderId, { to, actorId = null, reportUrl = n
       return { orderId, sampleStatus: from, unchanged: true };
     }
 
+    // After the no-op check, so re-tapping a sample already collected stays a
+    // no-op rather than becoming an error about where the patient is now.
+    if (to === "sample_collected") {
+      await assertPatientIsFree(client, visitId, "collect the sample");
+    }
+
     await client.query(
       `UPDATE giniflow_lab_orders
           SET sample_status = $2,
@@ -646,17 +683,16 @@ export async function advanceSample(orderId, { to, actorId = null, reportUrl = n
         `UPDATE giniflow_visits SET results_status = 'ready', updated_at = NOW() WHERE id = $1`,
         [visitId],
       );
-      await advanceStatus(client, {
-        visitId,
-        toStatus: "results_received",
-        actorRole: "lab",
-        actorId,
-        allowSkip: true,
-        meta: { source: "lab_upload", lab_order_id: orderId },
-      }).catch(() => {
-        // The visit may already be past this point — the report is what matters,
-        // and results_status is set either way.
-      });
+      // "Reports arrived" is a fact about the patient, not a place they moved
+      // to. This used to go through advanceStatus, which sets current_status —
+      // and `results_received` is in no chain, so every call threw into a bare
+      // catch and the log gained nothing. Written directly, the event exists
+      // and the patient stays exactly where they are.
+      await client.query(
+        `INSERT INTO giniflow_visit_events (visit_id, status, actor_role, actor_id, meta)
+         VALUES ($1, 'results_received', 'lab', $2, $3)`,
+        [visitId, actorId, { source: "lab_upload", lab_order_id: orderId }],
+      );
     }
 
     await client.query("COMMIT");
@@ -842,6 +878,20 @@ export async function markLabCaseAction(
     caseNo,
   ]);
   if (!known.length) throw new Error(`No such lab case: ${caseNo}`);
+
+  if (action === "sample_taken" && !undo) {
+    const { rows: visit } = await db.query(
+      `SELECT v.id FROM lab_cases lc
+         JOIN giniflow_visits v ON v.visit_date = lc.case_date
+          AND v.patient_id = COALESCE(lc.patient_id, (
+                SELECT id FROM patients
+                 WHERE file_no = lc.raw_list_json->'patient'->>'healthray_uid'))
+        WHERE lc.case_no = $1
+        LIMIT 1`,
+      [caseNo],
+    );
+    await assertPatientIsFree(db, visit[0]?.id, "collect the sample");
+  }
 
   if (undo) {
     await db.query(`DELETE FROM giniflow_lab_case_actions WHERE case_no = $1 AND action = $2`, [

@@ -209,8 +209,14 @@ export async function getStationTimes(
     const next = rows[i + 1];
     const leftAt = next ? new Date(next.occurred_at) : null;
     const ended = !next && isTerminalStatus(row.status);
-    const minutes = isTerminalStatus(row.status) ? 0 : minutesBetween(enteredAt, leftAt || now);
+    // A row that is not a status at all — `results_received` — is a fact that
+    // arrived, not a place the patient stood. It carries no duration and is
+    // rendered as a dated marker, the way the lab track's milestones are.
+    const marker = !isKnownStatus(row.status);
+    const minutes =
+      isTerminalStatus(row.status) || marker ? 0 : minutesBetween(enteredAt, leftAt || now);
     return {
+      timestampOnly: marker,
       // HealthRay reports only checked-in and completed, so a patient whose MO
       // and consultant were never tapped onto a screen leaves ONE step covering
       // all of it, filed under whatever queue was recorded last. Judging that
@@ -274,6 +280,7 @@ export async function getStationTimes(
       Math.max(0, stationBudget ? stationMinutes - stationBudget : 0);
     steps.push({
       status: entry.status,
+      timestampOnly: !!entry.timestampOnly,
       label: entry.unrecorded ? "Not recorded on any station screen" : entry.label,
       unrecorded: !!entry.unrecorded,
       actorRole: entry.actorRole,

@@ -639,6 +639,41 @@ const giniflowStepSchema = z.object({
   source: z.enum(["template", "added", "custom", "auto"]).optional(),
 });
 
+// Results the lab types in. A value is a number or a word ("Positive"), and a
+// row with neither is not a result — the service drops those rather than writing
+// an empty line onto a patient's record.
+export const giniflowLabResultsSchema = z.object({
+  panelName: z.string().trim().max(120).optional(),
+  rows: z
+    .array(
+      z.object({
+        testName: z.string().trim().min(1).max(120),
+        // One box on the form, two kinds of result. A number is a number; a
+        // blank is nothing; anything else is a word ("Positive", "Non-reactive")
+        // and belongs in result_text — where it can be read but not trended.
+        // Coercing first would turn both a blank and a word into 0, which is a
+        // real value on a patient's record and would be flagged LOW.
+        value: z
+          .preprocess(
+            (v) => {
+              if (v === null || v === undefined) return null;
+              const raw = String(v).trim();
+              if (raw === "") return null;
+              return Number.isFinite(Number(raw)) ? Number(raw) : raw;
+            },
+            z.union([z.number(), z.string().max(120), z.null()]),
+          )
+          .optional(),
+        valueText: z.string().trim().max(120).nullish(),
+        unit: z.string().trim().max(40).nullish(),
+        refRange: z.string().trim().max(60).nullish(),
+        panelName: z.string().trim().max(120).nullish(),
+      }),
+    )
+    .min(1)
+    .max(120),
+});
+
 export const giniflowCheckinSchema = z.object({
   visitTypeId: z.string().trim().max(60).nullish(),
   steps: z.array(giniflowStepSchema).max(40).default([]),
@@ -1119,3 +1154,8 @@ export const giniflowTriagePatchSchema = z
     (v) => "category" in v || "assignedSdId" in v || "assignedDoctorId" in v,
     "Nothing to change",
   );
+
+export const giniflowReportReviewSchema = z.object({
+  outcome: z.enum(["normal", "needs_consultant"]),
+  note: z.string().trim().max(2000).optional().nullable(),
+});
