@@ -416,6 +416,14 @@ function PatientCard({
           </div>
         )}
         <div className="pc-mid">{isLab ? card.lab.subtitle : card.subtitle}</div>
+        {/* What this patient still has left of their own journey — the columns
+            say where they are, not how much of it is done. */}
+        {!isLab && card.journey && (
+          <div className="pc-journey">
+            {card.journey.done}/{card.journey.total}
+            {card.journey.next ? ` · next: ${card.journey.next}` : " · all stops done"}
+          </div>
+        )}
         <div className="pc-bot">
           <span className={`tmr ${colourClass(colour)}`}>⏱ {minutes ?? 0}m</span>
           {!isLab && totalMinutes !== null && (
@@ -867,7 +875,10 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
                 {step.isCurrent ? "●" : "✓"}
               </div>
               <div className="ts-body">
-                <div className="ts-name">{step.label}</div>
+                <div className="ts-name">
+                  {step.label}
+                  {step.visits > 1 && <span className="ts-visits">· {step.visits} visits</span>}
+                </div>
                 <div className="ts-time">
                   {step.isCurrent ? `Since ${clockAt(step.enteredAt)}` : clockAt(step.enteredAt)}
                 </div>
@@ -883,10 +894,18 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
                             : "tsd-n"
                     }`}
                   >
-                    {`${liveWait(step)}m wait + ${step.stationMinutes}m station${
-                      liveOver(step) ? ` — ${liveOver(step)}m OVER budget` : ""
-                    }`}
+                    {step.unrecorded
+                      ? `${step.totalMinutes}m — no station screen was used, so what happened in here was never recorded`
+                      : `${liveWait(step)}m wait + ${step.stationMinutes}m station${
+                          liveOver(step) ? ` — ${liveOver(step)}m OVER budget` : ""
+                        }`}
                   </span>
+                )}
+                {step.meta?.correction && (
+                  <div className="ts-note">
+                    Reopened after the visit was closed
+                    {step.meta.reason ? ` — ${step.meta.reason}` : ""}
+                  </div>
                 )}
                 {step.meta?.vitals && (
                   <div className="ts-note">

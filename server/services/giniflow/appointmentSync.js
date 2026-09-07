@@ -115,7 +115,14 @@ async function consultRoomFree(client, visitDate) {
   return rows.length === 0;
 }
 
-// The pharmacy leg HealthRay cannot see.
+// The pharmacy leg HealthRay cannot see, and the one visit it may not close.
+//
+// A prescription written in Scribe is closed by a station screen or not at all:
+// this side holds the record of what was explained and what was handed over, and
+// a clock ending the visit destroys that record with no way to re-enter it. The
+// sweep below therefore passes over any visit carrying a `consult_finalize`
+// event. A HealthRay prescription has no such record to lose, so the sweep still
+// drains it.
 //
 // HealthRay's `completed` means the consultation is over, and it was mapped
 // straight to `exited` — so a patient walked out of the system the moment the
@@ -124,9 +131,10 @@ async function consultRoomFree(client, visitDate) {
 // unreachable.
 //
 // A patient with medicines prescribed today and nothing recorded against them in
-// `medicine_collections` still has to collect them, so `completed` parks them at
-// the pharmacy instead. Nothing is invented: the evidence is a prescription with
-// no dispensing record.
+// `medicine_collections` still has to be told what they are and then collect
+// them, so `completed` parks them at the START of that leg — the Rx Explain
+// desk — and the nurse hands them on to the counter. Nothing is invented: the
+// evidence is a prescription with no dispensing record.
 const PHARMACY_LEG = ["doctor_done", "rx_pending", "with_rx", "pharmacy_pending", "dispensed"];
 
 const atPharmacyLeg = (currentStatus, target) =>
@@ -181,7 +189,11 @@ async function sweepPharmacyLeg(client, day, graceMinutes) {
        ) leg ON TRUE
       WHERE v.visit_date = $1::date
         AND v.current_status = ANY($3)
-        AND leg.occurred_at < NOW() - ($2 || ' minutes')::interval`,
+        AND leg.occurred_at < NOW() - ($2 || ' minutes')::interval
+        AND NOT EXISTS (
+          SELECT 1 FROM giniflow_visit_events e2
+           WHERE e2.visit_id = v.id AND e2.meta->>'source' = 'consult_finalize'
+        )`,
     [day, graceMinutes, PHARMACY_LEG],
   );
 
@@ -457,7 +469,7 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
           effective = "with_doctor";
         }
         if (target === "exited" && awaitingMedicines.has(appt.patient_id)) {
-          effective = "pharmacy_pending";
+          effective = "rx_pending";
         }
 
         const meta = {

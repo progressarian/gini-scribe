@@ -7,6 +7,7 @@ import {
   getRxPatient,
   startRxExplain,
   markRxExplained,
+  returnRxToQueue,
 } from "../services/giniflow/rxStation.js";
 import { fetchRxFile, regenerateRx } from "../services/giniflow/printRx.js";
 import { validate, validateQuery } from "../middleware/validate.js";
@@ -30,6 +31,10 @@ import {
   giniflowStationQuerySchema,
   giniflowMoQueueQuerySchema,
   giniflowPaymentSchemaChecked,
+  giniflowCheckinSchema,
+  giniflowJourneyStepSchema,
+  giniflowStepStatusSchema,
+  giniflowJourneyOrderSchema,
   giniflowLabCaseActionSchema,
   giniflowReportSchema,
   giniflowOrderTestsSchema,
@@ -161,6 +166,18 @@ import {
 } from "../services/giniflow/pharmacyStation.js";
 import { generateMedicineCardPdf } from "../services/giniflow/medicineCardPdf.js";
 import { getStationSummary } from "../services/giniflow/stationSummary.js";
+import {
+  defaultPlan,
+  suggestVisitType,
+  checkInWithJourney,
+  getJourney,
+  ensurePlan,
+  addStep,
+  removeStep,
+  reorderSteps,
+  setStepStatus,
+} from "../services/giniflow/journey.js";
+import { sendFlowCheckin } from "../services/msg91.js";
 import { hasCapability } from "../../shared/permissions.js";
 
 const router = Router();
@@ -883,18 +900,33 @@ router.post(
   validate(giniflowWalkInSchema),
   async (req, res) => {
     try {
-      res.json(
-        await checkInWalkIn(
-          {
-            patientId: req.body.patientId,
-            appointmentId: req.body.appointmentId ?? null,
-            force: req.body.force,
-            role: req.doctor?.role,
-            actor: blockActor(req),
-          },
-          req.doctor?.doctor_id ?? null,
-        ),
+      const created = await checkInWalkIn(
+        {
+          patientId: req.body.patientId,
+          appointmentId: req.body.appointmentId ?? null,
+          force: req.body.force,
+          role: req.doctor?.role,
+          actor: blockActor(req),
+        },
+        req.doctor?.doctor_id ?? null,
       );
+      // The desk plans the journey next, in the same panel a booked patient
+      // gets, so the walk-in arrives with its type already suggested — a walk-in
+      // is by definition the case with no appointment to infer one from.
+      const seen = await pool.query(
+        `SELECT EXISTS (
+           SELECT 1 FROM appointments a
+            WHERE a.patient_id = $1 AND a.appointment_date < CURRENT_DATE
+         ) AS returning`,
+        [req.body.patientId],
+      );
+      res.json({
+        ...created,
+        suggestedVisitTypeId: await suggestVisitType({
+          isFollowUp: seen.rows[0].returning,
+          isWalkIn: true,
+        }),
+      });
     } catch (e) {
       if (e.blocked) return res.status(409).json(blockedResponse(e.blocked));
       handleError(res, e, "Gini Flow walk-in check-in");
@@ -963,6 +995,145 @@ router.post(
       );
     } catch (e) {
       handleError(res, e, "Gini Flow clear payment");
+    }
+  },
+);
+
+// ── The patient's journey ───────────────────────────────────────────────────
+// docs/gini-flow/29-RECEPTION-JOURNEY-PLAN.md. Reception picks a visit type and
+// confirms the stops before the arrival completes; the plan then shows on the
+// floor and to the patient. Reading is open to anyone who can see the board, so
+// a station can show what the patient is here for; writing is reception's, and
+// the coordinator's for a journey that changes mid-visit.
+const journeyEditGate = requireCapability([
+  CAP.GINIFLOW_STATION_RECEPTION,
+  CAP.GINIFLOW_MANAGE_QUEUE,
+]);
+
+router.get(
+  "/giniflow/journey/plan/:visitTypeId",
+  requireCapability(CAP.GINIFLOW_VIEW),
+  async (req, res) => {
+    try {
+      res.json(await defaultPlan(req.params.visitTypeId));
+    } catch (e) {
+      handleError(res, e, "Gini Flow journey plan");
+    }
+  },
+);
+
+router.get("/giniflow/journey/:visitId", requireCapability(CAP.GINIFLOW_VIEW), async (req, res) => {
+  try {
+    // A patient the HealthRay sync checked in never passed this screen, so the
+    // plan is seeded the first time anyone looks rather than left empty.
+    await ensurePlan(req.params.visitId);
+    res.json(await getJourney(req.params.visitId));
+  } catch (e) {
+    handleError(res, e, "Gini Flow journey");
+  }
+});
+
+router.post(
+  "/giniflow/stations/reception/:visitId/checkin",
+  receptionGate,
+  validate(giniflowCheckinSchema),
+  async (req, res) => {
+    try {
+      const result = await checkInWithJourney(req.params.visitId, {
+        visitTypeId: req.body.visitTypeId,
+        steps: req.body.steps,
+        actorId: req.doctor?.doctor_id ?? null,
+        actorRole: req.doctor?.role || "reception",
+      });
+
+      // Best-effort, after the check-in is already safe: a message that fails
+      // must never cost the arrival. Same rule /flow/checkin has.
+      let whatsappSent = false;
+      if (req.body.sendWhatsapp && result.visitToken) {
+        try {
+          const who = await pool.query(
+            `SELECT p.name, p.phone, p.file_no, d.short_name AS doctor
+               FROM giniflow_visits v
+               JOIN patients p ON p.id = v.patient_id
+               LEFT JOIN doctors d ON d.id = COALESCE(v.assigned_doctor_id, v.assigned_sd_id)
+              WHERE v.id = $1 AND NOT COALESCE(p.is_blocked, FALSE)`,
+            [req.params.visitId],
+          );
+          const patient = who.rows[0];
+          if (patient?.phone) {
+            const proto = req.headers["x-forwarded-proto"] || req.protocol || "https";
+            const doneBy = new Date(
+              Date.now() + (result.plannedTotalMin || 0) * 60000,
+            ).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
+            const sent = await sendFlowCheckin(patient.phone, {
+              patient_name: (patient.name || "").split(" ")[0],
+              file_number: patient.file_no,
+              doctor_name: patient.doctor || "your care team",
+              estimate_min: result.plannedTotalMin || 0,
+              est_completion_time: doneBy,
+              visit_link: `${proto}://${req.get("host")}/visit/${result.visitToken}`,
+            });
+            whatsappSent = !!sent?.ok;
+            if (whatsappSent) {
+              await pool.query(`UPDATE giniflow_visits SET whatsapp_sent = TRUE WHERE id = $1`, [
+                req.params.visitId,
+              ]);
+            }
+          }
+        } catch (waErr) {
+          console.error("Gini Flow check-in WhatsApp failed:", waErr.message);
+        }
+      }
+      res.json({ ...result, whatsappSent });
+    } catch (e) {
+      handleError(res, e, "Gini Flow check-in");
+    }
+  },
+);
+
+router.post(
+  "/giniflow/journey/:visitId/steps",
+  journeyEditGate,
+  validate(giniflowJourneyStepSchema),
+  async (req, res) => {
+    try {
+      res.json(await addStep(req.params.visitId, req.body));
+    } catch (e) {
+      handleError(res, e, "Gini Flow journey add step");
+    }
+  },
+);
+
+router.patch(
+  "/giniflow/journey/steps/:stepId",
+  journeyEditGate,
+  validate(giniflowStepStatusSchema),
+  async (req, res) => {
+    try {
+      res.json(await setStepStatus(req.params.stepId, req.body.status));
+    } catch (e) {
+      handleError(res, e, "Gini Flow journey step status");
+    }
+  },
+);
+
+router.delete("/giniflow/journey/steps/:stepId", journeyEditGate, async (req, res) => {
+  try {
+    res.json(await removeStep(req.params.stepId));
+  } catch (e) {
+    handleError(res, e, "Gini Flow journey remove step");
+  }
+});
+
+router.post(
+  "/giniflow/journey/:visitId/order",
+  journeyEditGate,
+  validate(giniflowJourneyOrderSchema),
+  async (req, res) => {
+    try {
+      res.json(await reorderSteps(req.params.visitId, req.body.stepIds));
+    } catch (e) {
+      handleError(res, e, "Gini Flow journey reorder");
     }
   },
 );
@@ -1470,6 +1641,14 @@ router.post("/giniflow/stations/rx/:visitId/start", rxGate, async (req, res) => 
     res.json(await startRxExplain(req.params.visitId, req.doctor?.doctor_id ?? null));
   } catch (e) {
     handleError(res, e, "Gini Flow Rx start");
+  }
+});
+
+router.post("/giniflow/stations/rx/:visitId/return", rxGate, async (req, res) => {
+  try {
+    res.json(await returnRxToQueue(req.params.visitId, req.doctor?.doctor_id ?? null));
+  } catch (e) {
+    handleError(res, e, "Gini Flow Rx return to queue");
   }
 });
 

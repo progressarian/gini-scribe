@@ -22,11 +22,35 @@ const SCALE = [
 // sanitized /api/flow/track/:token endpoint (first name + step status only) and
 // polls so the patient sees their journey advance live. Bare fetch (not the
 // authenticated axios instance) so it works for logged-out visitors.
+// Two modules issue these links and both return the same shape, so one page
+// serves both: the Gini Flow journey is asked for first and the older flow one
+// answers when the token is not its own.
 async function fetchTrack(token) {
-  const res = await fetch(`${API_URL}/api/flow/track/${encodeURIComponent(token)}`);
-  if (res.status === 404) throw new Error("not_found");
-  if (!res.ok) throw new Error("failed");
-  return res.json();
+  const safe = encodeURIComponent(token);
+  for (const [module, path] of [
+    ["giniflow", `/api/giniflow/track/${safe}`],
+    ["flow", `/api/flow/track/${safe}`],
+  ]) {
+    const res = await fetch(`${API_URL}${path}`);
+    if (res.ok) return { ...asFlowShape(await res.json()), module };
+    if (res.status !== 404) throw new Error("failed");
+  }
+  throw new Error("not_found");
+}
+
+// The two modules name the same things differently — a finished step is "done"
+// in one and "completed" in the other, and a finished visit is "exited" rather
+// than "completed". Translated once, here, so the page below has one vocabulary
+// and the patient never sees a bullet where a tick belongs.
+function asFlowShape(data) {
+  return {
+    ...data,
+    status: data.status === "exited" ? "completed" : data.status,
+    timeline: (data.timeline || []).map((s) => ({
+      ...s,
+      status: s.status === "done" ? "completed" : s.status,
+    })),
+  };
 }
 
 const STATUS_ICON = { completed: "✓", in_progress: "🔸", ready: "•", pending: "•", skipped: "–" };
@@ -166,7 +190,11 @@ export default function PatientJourneyPage() {
               ))}
             </div>
 
-            <PreConsult token={token} />
+            {/* The pre-consultation assessment is the older module's: its verify
+                and submit endpoints read flow_visits, and offering the form to a
+                Gini Flow patient would tell them their own correct file number
+                does not match. Shown only to the visits that can answer it. */}
+            {data.module === "flow" && <PreConsult token={token} />}
 
             <div className="flow-muted" style={{ textAlign: "center", padding: "12px 0" }}>
               This page updates automatically. Estimated times may vary on busy days.

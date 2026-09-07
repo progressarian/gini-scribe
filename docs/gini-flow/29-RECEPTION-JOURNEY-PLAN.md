@@ -1,6 +1,6 @@
 # 29 — Reception check-in with a per-patient journey
 
-Planned 2026-09-07. Not yet built.
+Planned and built 2026-09-07.
 
 ## Why
 
@@ -90,6 +90,37 @@ the way the desk was shown when they checked the patient in.
   without naming an id in code. No match → nothing preselected, reception picks.
 
 Both nullable, both admin-editable. No `flow_*` behaviour changes.
+
+## The step → column mapping (the seed)
+
+Confirmed with the floor, 2026-09-07. This is what the migration writes into
+`flow_step_catalog.chain_status`; every row stays editable afterwards.
+
+| Catalog step                              | Gini Flow status     | Note                                                                                                                       |
+| ----------------------------------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `vitals`                                  | `with_vitals`        |                                                                                                                            |
+| `mo_assessment` (Doctor Assessment)       | `with_sd`            | the MO half of the "With SD / MO" column                                                                                   |
+| `wait_sd` (Wait for Consultant)           | `ready_for_doctor`   | a waiting step maps to the waiting column                                                                                  |
+| `sd_consult` (SD Consultation)            | `with_doctor`        | the SD **is** the consultant here                                                                                          |
+| `wait_chief`                              | `ready_for_doctor`   |                                                                                                                            |
+| `chief_consult`                           | `with_doctor`        |                                                                                                                            |
+| `rx_ready` (Prescription — MO to prepare) | `rx_pending`         |                                                                                                                            |
+| `rx_explain`                              | `with_rx`            |                                                                                                                            |
+| `pharmacy` (Pharmacy / Exit)              | `dispensed`          |                                                                                                                            |
+| everything else                           | **NULL — off-chain** | `ecg`, `tmt`, `vpt`, `x_ray`, `abi`, `dietitian`, `blood_sample`, the `lab_*` and `report_*` steps, `mo_review`, `billing` |
+
+`billing` is deliberately off-chain: Gini Flow has no billing column, and mapping
+it to `pharmacy_pending` would tick "billed" the moment a patient reached the
+pharmacy queue — a claim the board cannot actually support. The `lab_*` steps are
+off-chain because the lab track already owns them, and having two systems tick
+the same work is how they end up disagreeing.
+
+**Two steps can share one status** (`sd_consult` and `chief_consult` both map to
+`with_doctor`). The rule: when the visit reaches that status, the **earliest
+unfinished** step carrying it becomes `in_progress`; all of them complete once
+the visit moves past it. So a patient who sees the SD and then the chief shows
+two stops on their tracker and one column on the board, which is exactly what
+happened.
 
 ## Backend flow
 
@@ -195,6 +226,13 @@ prefill need.
 New component `src/components/giniflow/JourneyBuilder.jsx`, presentational: it
 takes steps and returns steps.
 
+**`/flow/checkin` stays.** Both screens run side by side until the new panel is
+trusted on the floor. The risk that creates is real and has to be visible: a
+patient checked in on the old screen has a `flow_visits` journey and no Gini Flow
+one, and vice versa. So the old page carries a line saying which screen reception
+should be using, and `ensurePlan` means a patient who arrives by any route still
+has a Gini Flow journey when someone opens their card.
+
 **Deliberately not done:** `FlowCheckinPage.jsx` (1,808 lines, live, no automated
 coverage) is _not_ refactored onto the new builder. Extracting the shared block
 would be tidier, but with no test over that page it is a poor trade today. Worth
@@ -251,6 +289,108 @@ left is the Gini Flow status chain itself, unchanged by decision 2.
    vitals → SD and watch the journey tick itself.
 6. `/code-review high` over the diff; fix findings; re-run 2-4; record the
    outcome in this doc.
+
+## Built
+
+Everything above, in the build order it set out. What the code added, beyond the
+plan's own description:
+
+- `giniflow_visit_steps`, the two reference columns and the mapping seed —
+  `server/migrations/2026-09-08_giniflow_journey.sql`, applied. Nine steps
+  mapped, fifteen deliberately off-chain.
+- `server/services/giniflow/journey.js` — the plan, the check-in, the auto-tick,
+  `ensurePlan`, the mid-visit edits and the patient's view.
+- `syncFromStatus` called from `advanceStatus`, so the plan follows the board in
+  the same transaction.
+- Routes for the journey and the check-in, the WhatsApp after commit, and the
+  public tracker (registered in `PUBLIC_PATTERNS`).
+- `JourneyBuilder` + the reception check-in panel; the arrival row's
+  `3/8 · next: ECG`, which opens the journey and ticks the stops no board column
+  can complete; the same line on the board card.
+- `PatientJourneyPage` asks Gini Flow first and falls back to the older module,
+  translating the two modules' vocabularies at the boundary so the page keeps one.
+
+Two things the plan did not foresee, found while building:
+
+1. **A second press hit the status engine, not the idempotent path.** Pressing
+   Arrived twice threw `Illegal transition: checked_in → checked_in` instead of
+   returning "already planned". `checkInWithJourney` now reads the status first:
+   past reception is refused with the message the Arrived button always gave, and
+   a patient standing at the desk is the double-tap — no second event, and the
+   journey still attaches.
+2. **A plan attached to a patient who has already moved** (the walk-in path, and
+   `ensurePlan`) has to be caught up to where they are, or a patient at the
+   consultant shows an untouched journey. Both paths run the tick immediately.
+
+## Added after the first floor read-through
+
+**A tests-only booking gets the tests journey.** HealthRay labels five of a
+ninety-patient day "Investigation": the patient comes to give blood and leave,
+booked against Dr. Hospital Admin. `FU_APPT_TESTS` already existed for that and
+stayed unflagged, because a follow-up who happens to need tests is reception's
+choice — what makes it a _suggestion_ is the booking saying so itself. So
+`for_tests` is a third axis rather than a replacement: (follow-up?, walk-in?,
+tests-only?) picks exactly one type
+(`2026-09-09_giniflow_journey_tests_type.sql`). Live: 58 FU_APPT, 15 NEW_APPT,
+5 FU_APPT_TESTS, 1 with nothing preselected.
+
+**Assigning a consultant now means what it looks like it means.** The builder's
+per-step dropdown wrote only to `giniflow_visit_steps`, which nothing but the
+journey display reads — so picking a consultant at the desk left the doctor's own
+queue untouched. Check-in now reads the steps back and, using the catalog's
+mapping rather than anything the client sent, fills the visit's `assigned_sd_id`
+(`with_sd`) and `assigned_doctor_id` (`with_doctor`). `COALESCE`, never an
+overwrite: the module's rule is that whoever is in the room beats whoever was
+booked. The panel also opens with the booked consultant already filled in, so the
+desk confirms rather than picks from an empty box.
+
+## Code review
+
+`/code-review high` over the diff. Thirteen findings, all fixed. The four that
+mattered:
+
+1. **The suggestion read `appointments.is_walkin`** — which the sibling module
+   documents, with production numbers, as unusable: HealthRay sets it on 6702 of
+   7636 bookings, 6481 of them with a real booked slot, and reception chose a
+   walk-in type **zero times in 1304 check-ins**. It would have put ~85% of the
+   day on a 90-minute walk-in template and sent those patients a WhatsApp ETA
+   half an hour short. The suggestion now reads HealthRay's `visit_type` text
+   the way `classifyAppointment()` does, falls back to completed visits, and
+   never treats a booking as a walk-in — a genuine walk-in arrives through the
+   walk-in panel, which says so for itself. Live check: 62 follow-ups, 16 new,
+   no spurious walk-ins.
+2. **`exited` struck through the step in progress.** Terminal was handled before
+   the "everything behind is done" rule, so every patient who finished properly
+   was shown their pharmacy stop crossed out on their own tracker, and the
+   board's count was one short for every completed visit. The rules now run in
+   the right order; only stops with no board column can end up skipped, which a
+   new check asserts both ways.
+3. **The seed could never fire.** `ensurePlan` was reachable only through a
+   button that appeared once a journey existed — so the patients who needed it,
+   the ones the HealthRay sync checks in, could never get one. The button is now
+   always there and reads "Journey" until there is one.
+4. **A refetch silently wiped reception's edits.** The template reloaded whenever
+   the query refetched — on window focus, or when another panel invalidated the
+   prefix — so removed steps reappeared and edited durations reverted, and the
+   desk could check a patient in on a journey they had not built. The template
+   now loads only when the visit type changes, and journey writes no longer
+   invalidate the template cache.
+
+The rest: the pre-consult form is hidden for Gini Flow tokens (its verify
+endpoint reads `flow_visits` and would have told patients their correct file
+number was wrong); `ensurePlan`, `addStep` and `reorderSteps` take the visit row
+as a lock, and a reorder against a stale list is refused rather than half
+applied; `returnToQueue` ticks the journey too, and a released step can go live
+again; `dispensed` ends the patient's countdown; the follow-up test counts only
+completed bookings, matching GF-05; the schema keeps `source`, so a step the desk
+added is not recorded as a template step; and the smoke suite has its npm script
+and cleans up after itself on any failure, since it writes to production.
+
+Separately, three assertions in `smoke-giniflow-manager.mjs` were already failing
+before this work — it asserted `giniflow_lab_orders` was globally empty, which
+stopped being true when the floor started using the feature, and expected three
+lab cards where the demo seeder now makes six. Rebased on a baseline instead of
+zero: 52 ok, 0 fail.
 
 ## Plan review
 

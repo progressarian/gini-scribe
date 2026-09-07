@@ -1384,6 +1384,24 @@
   flex-direction: column;
   gap: 12px;
 }
+/* The pane's action bar. It never had a rule, so its buttons sat hard against
+   the pane's edges with nothing between them and the content scrolling past
+   underneath. It does not scroll — whatever the pane holds, the action stays
+   reachable. */
+.gf .dp-foot {
+  flex-shrink: 0;
+  display: flex;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--bd);
+  background: var(--white);
+}
+/* Inside the bar, "full width" means the rest of the row — a literal 100% left
+   no room for the button beside it. */
+.gf .dp-foot .btn-full {
+  flex: 1;
+  width: auto;
+}
 .gf .dp-sec {
   background: var(--bg);
   border-radius: var(--r-lg);
@@ -4442,6 +4460,9 @@
    at the hatch; the medicine row's control column moves under the medicine
    rather than squeezing the instruction that has to be read out loud. */
 @media (max-width: 760px) {
+  .gf .detail-pane.ci-pane {
+    width: 100vw;
+  }
   .gf .detail-pane.ph-pane {
     width: 100vw;
   }
@@ -4721,6 +4742,260 @@
   outline: none;
   border-color: var(--blu);
   box-shadow: 0 0 0 2px var(--blu-b);
+}
+
+.gf .jp-row {
+  display: grid;
+  grid-template-columns: 10px 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 4px;
+  border-bottom: 1px solid var(--bd);
+  font-size: 11px;
+}
+.gf .jp-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--bd2);
+}
+.gf .jp-done {
+  background: var(--grn);
+}
+.gf .jp-in_progress {
+  background: var(--blu);
+}
+.gf .jp-skipped {
+  background: var(--amb);
+}
+.gf .jp-name {
+  color: var(--ink);
+}
+.gf .jp-min,
+.gf .jp-status {
+  font-family: var(--fm);
+  font-size: 10px;
+  color: var(--ink4);
+}
+/* The journey count is a way in to the stops, so it reads as one. */
+.gf button.ar-journey {
+  border: 1px solid var(--bd2);
+  cursor: pointer;
+  font-family: var(--fm);
+}
+.gf button.ar-journey:hover {
+  border-color: var(--blu);
+  color: var(--blu);
+}
+
+/* The same journey line on a board card. */
+.gf .pc-journey {
+  font-family: var(--fm);
+  font-size: 9px;
+  color: var(--ink3);
+  margin-top: 3px;
+}
+
+/* ── The journey reception builds at check-in (29-RECEPTION-JOURNEY-PLAN) ── */
+/* The desk opens check-in and the journey from a row near the bottom of a long
+   list, so they open as the same right-hand pane every other station uses —
+   inline, the panel appeared above the fold and the row that opened it stayed
+   where it was, with nothing to say anything had happened. Wider than the
+   others because the journey builder is a 17-row form. */
+.gf .detail-pane.ci-pane {
+  width: 720px;
+}
+.gf .dp-inner.ci-panel {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  margin-bottom: 0;
+}
+
+.gf .ci-panel {
+  background: var(--white);
+  border: 1px solid var(--bd2);
+  border-radius: var(--r-lg);
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.gf .jb {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+/* The visit type is the first decision and it changes everything below it, so
+   it reads as a row of choices rather than a dropdown to go hunting in. */
+.gf .jb-types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.gf .jb-type {
+  border: 1px solid var(--bd2);
+  background: var(--white);
+  border-radius: 20px;
+  padding: 5px 12px;
+  font-family: var(--fb);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink2);
+  cursor: pointer;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+.gf .jb-type.on {
+  border-color: var(--blu);
+  background: var(--blu-l);
+  color: var(--blu);
+}
+.gf .jb-type-min {
+  font-family: var(--fm);
+  font-size: 10px;
+  color: var(--ink4);
+}
+.gf .jb-head,
+.gf .jb-step {
+  display: grid;
+  grid-template-columns: 22px 1fr 64px 150px 22px;
+  gap: 6px;
+  align-items: center;
+}
+.gf .jb-head {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--ink3);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0 4px 4px;
+}
+.gf .jb-head .jb-h-min,
+.gf .jb-head .jb-h-assign {
+  text-align: center;
+}
+.gf .jb-head span:first-child {
+  grid-column: 2;
+}
+.gf .jb-step {
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  padding: 5px 6px;
+  background: var(--white);
+}
+.gf .jb-move {
+  display: flex;
+  flex-direction: column;
+  line-height: 1;
+}
+.gf .jb-move button {
+  background: none;
+  border: 0;
+  color: var(--ink3);
+  font-size: 9px;
+  cursor: pointer;
+  padding: 0;
+}
+.gf .jb-move button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.gf .jb-name {
+  font-size: 11px;
+  color: var(--ink);
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+/* A stop with no board column is one the desk has to tick itself. Saying so on
+   the step is the difference between a plan and a promise nobody keeps. */
+.gf .jb-manual {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--amb);
+  background: var(--amb-l);
+  border-radius: 20px;
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+.gf .jb-dur,
+.gf .jb-assign {
+  border: 1px solid var(--bd2);
+  border-radius: var(--r);
+  padding: 4px 6px;
+  font-family: var(--fb);
+  font-size: 11px;
+  color: var(--ink);
+  background: var(--white);
+  min-width: 0;
+}
+.gf .jb-remove {
+  background: none;
+  border: 0;
+  color: var(--ink4);
+  cursor: pointer;
+  font-size: 11px;
+}
+.gf .jb-remove:hover {
+  color: var(--red);
+}
+.gf .jb-add,
+.gf .jb-add-custom {
+  border: 1px dashed var(--bd2);
+  border-radius: var(--r);
+  padding: 6px 8px;
+  font-family: var(--fb);
+  font-size: 11px;
+  color: var(--ink3);
+  background: var(--bg);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+.gf .jb-custom {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.gf .jb-total {
+  background: var(--tl-l);
+  color: var(--tl);
+  border-radius: var(--r);
+  padding: 8px 10px;
+  font-size: 11px;
+}
+.gf .ci-wa {
+  background: #e7f5e4;
+  border: 1px solid #c5e8c0;
+  border-radius: var(--r);
+  padding: 9px 11px;
+  font-size: 11px;
+  color: #1a3a1a;
+  line-height: 1.5;
+}
+.gf .ci-wa-t {
+  font-weight: 700;
+  font-size: 10px;
+  margin-bottom: 3px;
+}
+.gf .ci-acts {
+  display: flex;
+  gap: 8px;
+}
+/* How far along their own journey they are — the columns cannot say. */
+.gf .ar-journey {
+  font-family: var(--fm);
+  font-size: 10px;
+  color: var(--ink3);
+  background: var(--bg);
+  border-radius: 20px;
+  padding: 3px 8px;
+  white-space: nowrap;
 }
 
 /* ── Walk-in ── */

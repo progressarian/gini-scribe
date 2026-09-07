@@ -9,6 +9,8 @@ import {
   STATUS_LABEL,
 } from "../../../shared/giniflowStatus.js";
 
+import { syncFromStatus } from "./journey.js";
+
 export const IST_TODAY = `(NOW() AT TIME ZONE 'Asia/Kolkata')::date`;
 
 export const budgetColour = (minutes, budget) => {
@@ -117,6 +119,12 @@ export async function advanceStatus(
     [visitId, toStatus, fromStatus, blockedReason],
   );
 
+  // The patient's journey follows the status in the same transaction, so the
+  // plan and the board can never disagree about where someone is. It only ever
+  // UPDATEs giniflow_visit_steps for this visit and matches no rows when the
+  // visit has no plan (29-RECEPTION-JOURNEY-PLAN.md).
+  await syncFromStatus(client, visitId, toStatus);
+
   return { from: fromStatus, ...event.rows[0] };
 }
 
@@ -144,6 +152,10 @@ export async function returnToQueue(
       WHERE id = $1`,
     [visitId, toStatus],
   );
+  // A release moves the patient as surely as an advance does. Without this the
+  // step they were released from stays "in progress" and the patient's own
+  // tracker says they are with the nurse while the board says they are waiting.
+  await syncFromStatus(client, visitId, toStatus);
   return event.rows[0];
 }
 
@@ -182,12 +194,29 @@ export async function getStationTimes(
     [visitId],
   );
 
+  // The rooms a patient is physically in. A step that ends at an event further
+  // down the chain than one of these has swallowed a room nobody recorded.
+  const STATION_STATUSES = ["with_vitals", "with_sd", "with_doctor", "with_rx"];
+  const skipsAStation = (from, to) =>
+    isChainStatus(from) &&
+    isChainStatus(to) &&
+    STATION_STATUSES.some(
+      (st) => chainIndex(st) > chainIndex(from) && chainIndex(st) < chainIndex(to),
+    );
+
   const raw = rows.map((row, i) => {
     const enteredAt = new Date(row.occurred_at);
     const next = rows[i + 1];
     const leftAt = next ? new Date(next.occurred_at) : null;
     const ended = !next && isTerminalStatus(row.status);
+    const minutes = isTerminalStatus(row.status) ? 0 : minutesBetween(enteredAt, leftAt || now);
     return {
+      // HealthRay reports only checked-in and completed, so a patient whose MO
+      // and consultant were never tapped onto a screen leaves ONE step covering
+      // all of it, filed under whatever queue was recorded last. Judging that
+      // against the queue's budget invented a 230-minute overrun for a station
+      // nobody sat in. Unrecorded time is judged against nothing.
+      unrecorded: !!next && minutes >= 1 && skipsAStation(row.status, next.status),
       status: row.status,
       label:
         (unbudgeted ? LAB_ONLY_LABEL[row.status] : null) || STATUS_LABEL[row.status] || row.status,
@@ -195,7 +224,11 @@ export async function getStationTimes(
       meta: row.meta,
       enteredAt,
       leftAt,
-      minutes: ended ? 0 : minutesBetween(enteredAt, leftAt || now),
+      // Exiting is an instant, not a station. When a visit is reopened — a
+      // correction, or a patient put back on the floor — the exit acquired the
+      // whole gap until the next event and the timeline read "Exited · 102m
+      // station" for a patient who had gone home.
+      minutes,
       isCurrent: !next && !ended,
       isWait: isWaitStatus(row.status),
       // A lab-only visit is judged against nothing. Its statuses are the ones
@@ -226,15 +259,23 @@ export async function getStationTimes(
 
   const emit = (entry) => {
     const waitMinutes = (wait ? wait.minutes : 0) + (entry.isWait ? entry.minutes : 0);
-    const waitBudget = wait?.budgetMinutes ?? (entry.isWait ? entry.budgetMinutes : null);
+    // Time the chain skipped over is judged against nothing. It is not the queue
+    // it happens to be filed under — HealthRay reports only checked-in and
+    // completed, so a patient whose MO and consultant were never tapped onto a
+    // screen leaves one gap covering all of it, and scoring that against the MO
+    // queue invented a 230-minute overrun for a station nobody sat in.
+    const waitBudget = entry.unrecorded
+      ? null
+      : (wait?.budgetMinutes ?? (entry.isWait ? entry.budgetMinutes : null));
     const stationMinutes = entry.isWait ? 0 : entry.minutes;
-    const stationBudget = entry.isWait ? null : entry.budgetMinutes;
+    const stationBudget = entry.isWait || entry.unrecorded ? null : entry.budgetMinutes;
     const overBy =
       Math.max(0, waitBudget ? waitMinutes - waitBudget : 0) +
       Math.max(0, stationBudget ? stationMinutes - stationBudget : 0);
     steps.push({
       status: entry.status,
-      label: entry.label,
+      label: entry.unrecorded ? "Not recorded on any station screen" : entry.label,
+      unrecorded: !!entry.unrecorded,
       actorRole: entry.actorRole,
       meta: entry.meta,
       enteredAt: (wait?.enteredAt ?? entry.enteredAt).toISOString(),
@@ -274,6 +315,7 @@ export async function getStationTimes(
     vitals_pending: "with_vitals",
     sd_pending: "with_sd",
     ready_for_doctor: "with_doctor",
+    rx_pending: "with_rx",
   };
 
   for (const entry of raw) {
@@ -299,5 +341,33 @@ export async function getStationTimes(
   }
   if (wait) emit({ ...wait, minutes: 0, isCurrent: true, isWait: true, leftAt: null });
 
-  return steps;
+  // A patient sent back to a station they have already been at is one step with
+  // two visits, not two steps. The Rx desk makes this ordinary: opening a card
+  // puts the patient at the desk and "not this patient" returns them, so a
+  // mis-click wrote a fresh pair of steps and a timeline read as five visits to
+  // one desk. Merged, the time still counts in full and `visits` says how often
+  // they came back.
+  const merged = [];
+  for (const step of steps) {
+    const prev = merged[merged.length - 1];
+    if (!prev || prev.status !== step.status) {
+      merged.push({ ...step, visits: 1 });
+      continue;
+    }
+    prev.waitMinutes += step.waitMinutes;
+    prev.stationMinutes += step.stationMinutes;
+    prev.totalMinutes = prev.waitMinutes + prev.stationMinutes;
+    prev.overBy =
+      Math.max(0, prev.waitBudget ? prev.waitMinutes - prev.waitBudget : 0) +
+      Math.max(0, prev.stationBudget ? prev.stationMinutes - prev.stationBudget : 0);
+    prev.colour = worse(
+      budgetColour(prev.waitMinutes, prev.waitBudget),
+      budgetColour(prev.stationMinutes, prev.stationBudget),
+    );
+    prev.leftAt = step.leftAt;
+    prev.isCurrent = step.isCurrent;
+    prev.visits += 1;
+  }
+
+  return merged;
 }

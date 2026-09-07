@@ -42,6 +42,15 @@ export function useStartRxExplain() {
   });
 }
 
+export function useReturnRxToQueue() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ visitId }) =>
+      (await api.post(`/api/giniflow/stations/rx/${visitId}/return`)).data,
+    onSuccess: () => invalidate(queryClient),
+  });
+}
+
 export function useMarkRxExplained() {
   const queryClient = useQueryClient();
   return useMutation({

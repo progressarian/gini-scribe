@@ -34,6 +34,7 @@ import {
 import { setPriority, reorderColumn, moveToColumn } from "../services/giniflow/queue.js";
 import { seedDemoDay, cleanDemoDay, demoAllowed } from "../services/giniflow/demo.js";
 import { addClient, removeClient, hubStatus } from "../services/giniflow/eventHub.js";
+import { trackByToken } from "../services/giniflow/journey.js";
 
 const router = Router();
 
@@ -44,6 +45,20 @@ const router = Router();
 // headers, which is exactly what the `?token=` form in middleware/auth.js is
 // for — and no anon key reaches the browser. The frames carry a signal, never a
 // patient row; the screen refetches through the API it is already signed in to.
+// The patient's own view of their journey. No login — the opaque token IS the
+// credential — so the payload carries a first name and their stops, nothing
+// that would identify them to someone who found the link.
+// Public paths are listed explicitly in middleware/auth.js; this one is there.
+router.get("/giniflow/track/:token", async (req, res) => {
+  try {
+    const view = await trackByToken(req.params.token);
+    if (!view) return res.status(404).json({ error: "Not found" });
+    res.json(view);
+  } catch (e) {
+    handleError(res, e, "Gini Flow track");
+  }
+});
+
 router.get("/giniflow/events", requireCapability(CAP.GINIFLOW_VIEW), async (req, res) => {
   try {
     const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || "") ? req.query.date : null;

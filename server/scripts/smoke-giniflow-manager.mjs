@@ -33,7 +33,8 @@ const one = async (sql, params) => (await pool.query(sql, params)).rows[0];
 
 const before = await one(
   `SELECT (SELECT count(*)::int FROM flow_visits) AS visits,
-          (SELECT count(*)::int FROM flow_events) AS events`,
+          (SELECT count(*)::int FROM flow_events) AS events,
+          (SELECT count(*)::int FROM giniflow_lab_orders) AS lab_orders`,
 );
 
 // Seed a day of the suite's own rather than today: since the HealthRay sync
@@ -83,7 +84,10 @@ check(
 );
 check("with-doctor column has 2", col("doctor").count === 2, `${col("doctor").count}`);
 check("pharmacy column has 2", col("pharmacy").count === 2, `${col("pharmacy").count}`);
-check("lab track has 3", col("lab").count === 3, `${col("lab").count}`);
+// Five of the seeder's six lab orders are still in the track; the sixth has been
+// uploaded and sits in Done. The number follows the demo seeder, so it moves
+// when the seeder does — which is the point of asserting it exactly.
+check("lab track has 5", col("lab").count === 5, `${col("lab").count}`);
 check("done column has 8", col("done").count === 8, `${col("done").count}`);
 check(
   "waiting-for-doctor is hot",
@@ -367,7 +371,14 @@ const survived = await one(`SELECT count(*)::int c FROM giniflow_visits WHERE id
 ]);
 check("clean spares a visit it did not seed", survived.c === 1);
 await pool.query(`DELETE FROM giniflow_visits WHERE id = $1`, [bystander.id]);
-check("clean removes every seeded visit", cleaned.deleted === seeded.visits, `${cleaned.deleted}`);
+// Every suite's demo day carries the same is_demo flag, so a clean legitimately
+// takes away more than this run seeded — what matters is that it takes at least
+// all of them and leaves nothing of its own behind.
+check(
+  "clean removes every seeded visit",
+  cleaned.deleted >= seeded.visits,
+  `${cleaned.deleted} ≥ ${seeded.visits}`,
+);
 check(
   "clean removes its demo patients",
   cleaned.demoPatientsRemoved > 0,
@@ -380,7 +391,13 @@ const leftover = await one(
           (SELECT count(*)::int FROM giniflow_lab_orders) AS orders`,
   [today],
 );
-check("no orphan lab orders", leftover.orders === 0, `${leftover.orders}`);
+// Against the count from before the run, not zero: the hospital has real lab
+// orders now, and a suite that demands an empty table can only ever be red.
+check(
+  "no orphan lab orders",
+  leftover.orders === before.lab_orders,
+  `${leftover.orders} vs ${before.lab_orders} before`,
+);
 
 const after = await one(
   `SELECT (SELECT count(*)::int FROM flow_visits) AS visits,

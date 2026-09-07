@@ -11,9 +11,15 @@ import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
 import LiveBadge from "../../components/giniflow/LiveBadge";
 import "../../styles/giniflow-station.css";
 import useAuthStore from "../../stores/authStore";
-import { printRxHref } from "../../queries/hooks/useGiniflowRx";
-import { hasCapability, CAPABILITIES } from "../../../shared/permissions";
 import StationNotice from "../../components/giniflow/StationNotice";
+import JourneyBuilder from "../../components/giniflow/JourneyBuilder";
+import { useFlowVisitTypes } from "../../queries/hooks/useFlow";
+import {
+  useJourneyPlan,
+  useCheckIn,
+  useJourney,
+  useJourneyStep,
+} from "../../queries/hooks/useGiniflowJourney";
 
 const AVATAR_COLOURS = ["#374151", "#1e3a5f", "#14532d", "#7c2d12", "#7f1d1d", "#b45309"];
 
@@ -430,6 +436,188 @@ export function PaymentsTab({ data, isLoading, onClear, pending, actorId }) {
   );
 }
 
+// The arrival itself: which visit this is, and the stops it will take. Opened by
+// "✓ Arrived" and by a walk-in check-in — nothing is written until it is
+// confirmed. docs/gini-flow/29-RECEPTION-JOURNEY-PLAN.md
+function CheckInPanel({ arrival, onClose, onDone, onFailed }) {
+  const { data: visitTypes = [] } = useFlowVisitTypes();
+  const [visitTypeId, setVisitTypeId] = useState(arrival.suggestedVisitTypeId || null);
+  const [steps, setSteps] = useState(null);
+  const { data: plan } = useJourneyPlan(visitTypeId);
+  const checkIn = useCheckIn();
+
+  // The template loads when the TYPE changes — never merely because the query
+  // refetched. A refetch on window focus, or the invalidation another panel
+  // causes, would otherwise throw away everything reception had edited and check
+  // the patient in on a journey they did not build.
+  const loadedFor = useRef(null);
+  useEffect(() => {
+    if (!plan || loadedFor.current === visitTypeId) return;
+    loadedFor.current = visitTypeId;
+    // A consultant the booking already named is filled in, so the desk confirms
+    // rather than picks from an empty box — and so an assignment that already
+    // exists is not quietly replaced by a blank.
+    const preassigned = (step) =>
+      step.chainStatus === "with_doctor" && arrival.assignedDoctorId
+        ? { staffId: String(arrival.assignedDoctorId), staffName: arrival.assignedDoctorName }
+        : step.chainStatus === "with_sd" && arrival.assignedSdId
+          ? { staffId: String(arrival.assignedSdId), staffName: arrival.assignedSdName }
+          : null;
+    setSteps((current) => [
+      ...plan.filter((p) => p.included).map((p) => ({ ...p, ...(preassigned(p) || {}) })),
+      // Steps the desk added by hand survive a change of type: retyping an X-Ray
+      // because they corrected the visit type is how a screen gets abandoned.
+      ...(current || []).filter((s) => s.source === "added" || s.source === "custom"),
+    ]);
+  }, [plan, visitTypeId, arrival]);
+
+  const list = steps || [];
+  const minutes = list.reduce((sum, s) => sum + (Number(s.minutes) || 0), 0);
+  const doneBy = new Date(Date.now() + minutes * 60000).toLocaleTimeString("en-IN", {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+  const submit = (sendWhatsapp) =>
+    checkIn.mutate(
+      { visitId: arrival.visitId, visitTypeId, steps: list, sendWhatsapp },
+      {
+        onSuccess: (r) => onDone(arrival, r, sendWhatsapp),
+        onError: (e) => onFailed(e),
+      },
+    );
+
+  return (
+    <div className="detail-overlay">
+      <div className="detail-pane ci-pane" role="dialog" aria-label="Check in">
+        <div className="dp-head">
+          <div className="dp-name">{arrival.name}</div>
+          <div className="dp-meta">{identity(arrival)}</div>
+          <div className="dp-acts">
+            <button className="rbtn" onClick={onClose}>
+              ← Back
+            </button>
+          </div>
+        </div>
+
+        <div className="dp-scroll">
+          <div className="dp-inner ci-panel">
+            <div className="wi-head">
+              <strong>What is this visit?</strong>
+            </div>
+
+            <JourneyBuilder
+              steps={list}
+              onChange={setSteps}
+              visitTypes={visitTypes}
+              visitTypeId={visitTypeId}
+              onTypeChange={setVisitTypeId}
+            />
+
+            {arrival.phone && (
+              <div className="ci-wa">
+                <div className="ci-wa-t">📱 WhatsApp preview</div>
+                <div>
+                  🏥 Gini Advanced Care
+                  <br />
+                  Namaste {(arrival.name || "").split(" ")[0]} — file {arrival.fileNo || "—"}
+                  <br />
+                  Est. visit: ~{minutes} min · Done by ~{doneBy}
+                </div>
+              </div>
+            )}
+
+            {!list.length && (
+              <div className="dp-hint">
+                Add at least one step — a journey with no stops tells the floor nothing.
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="dp-foot">
+          <button
+            className="st-btn st-btn-grn btn-full"
+            disabled={checkIn.isPending || !list.length}
+            onClick={() => submit(!!arrival.phone)}
+          >
+            {arrival.phone ? "✓ Check in + send WhatsApp" : "✓ Check in"}
+          </button>
+          {arrival.phone && (
+            <button
+              className="st-btn st-btn-g"
+              disabled={checkIn.isPending || !list.length}
+              onClick={() => submit(false)}
+            >
+              Check in only
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// The stops a patient still has, opened from their row. An ECG or an X-Ray has
+// no board column, so nothing but this can complete it — the board would show
+// them "with the consultant" for the whole time they were at the X-Ray.
+function JourneyPanel({ arrival, onClose }) {
+  const { data, isLoading } = useJourney(arrival.visitId);
+  const step = useJourneyStep();
+  const steps = data?.steps || [];
+
+  return (
+    <div className="detail-overlay">
+      <div className="detail-pane ci-pane" role="dialog" aria-label="Journey">
+        <div className="dp-head">
+          <div className="dp-name">{arrival.name}</div>
+          <div className="dp-meta">Journey</div>
+          <div className="dp-acts">
+            <button className="rbtn" onClick={onClose}>
+              ← Back
+            </button>
+          </div>
+        </div>
+
+        <div className="dp-scroll">
+          <div className="dp-inner ci-panel">
+            {isLoading && <div className="empty-note">Loading…</div>}
+            {steps.map((s) => (
+              <div className="jp-row" key={s.stepId}>
+                <span className={`jp-dot jp-${s.status}`} />
+                <span className="jp-name">
+                  {s.order}. {s.name}
+                  {s.staffName ? ` · ${s.staffName}` : ""}
+                </span>
+                <span className="jp-min">{s.minutes}m</span>
+                {/* Only the steps the board cannot see are the desk's to tick. The
+              rest follow the patient's status on their own, and a button that
+              duplicated that would let two truths disagree. */}
+                {s.manual && s.status !== "done" ? (
+                  <button
+                    className="st-btn st-btn-grn"
+                    disabled={step.isPending}
+                    onClick={() =>
+                      step.mutate({ action: "status", stepId: s.stepId, status: "done" })
+                    }
+                  >
+                    ✓ Done
+                  </button>
+                ) : (
+                  <span className="jp-status">{s.status.replace(/_/g, " ")}</span>
+                )}
+              </div>
+            ))}
+            {!isLoading && steps.length === 0 && (
+              <div className="empty-note">No journey recorded for this visit.</div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // How late they are against their own slot. The desk phones the patient 40
 // minutes past their appointment, so lateness reads louder the longer it runs;
 // a patient whose slot has not arrived yet is not a problem at all.
@@ -457,7 +645,7 @@ function ArrivalRow({ arrival, children, note, wide }) {
   );
 }
 
-function ExpectedRow({ arrival, onAct, busy }) {
+function ExpectedRow({ arrival, onAct, onCheckIn, busy }) {
   const [reason, setReason] = useState(null);
 
   if (reason !== null) {
@@ -493,11 +681,9 @@ function ExpectedRow({ arrival, onAct, busy }) {
   return (
     <ArrivalRow arrival={arrival}>
       <LateChip minutesLate={arrival.minutesLate} />
-      <button
-        className="st-btn st-btn-grn"
-        disabled={busy}
-        onClick={() => onAct(arrival, "arrived")}
-      >
+      {/* Arriving is no longer one click: reception says what the patient is
+          here for first, so the floor and the patient both know. */}
+      <button className="st-btn st-btn-grn" disabled={busy} onClick={() => onCheckIn(arrival)}>
         ✓ Arrived
       </button>
       <button
@@ -582,10 +768,21 @@ function WalkInPanel({ onClose, onCheckIn, busy }) {
   );
 }
 
-export function ArrivalsTab({ search, setSearch, data, isLoading, onAct, onCheckIn, busy }) {
+export function ArrivalsTab({
+  search,
+  setSearch,
+  data,
+  isLoading,
+  onAct,
+  onCheckIn,
+  onCheckedIn,
+  onFailed,
+  busy,
+}) {
   const [walkIn, setWalkIn] = useState(false);
-  const role = useAuthStore((st) => st.currentDoctor?.role);
-  const canPrintRx = hasCapability(role, CAPABILITIES.GINIFLOW_PRINT_RX);
+  // The arrival being planned. Nothing is written until it is confirmed.
+  const [arriving, setArriving] = useState(null);
+  const [journeyFor, setJourneyFor] = useState(null);
   const expected = data?.expected || [];
   const onFloor = data?.onFloor || [];
   const notComing = data?.notComing || [];
@@ -620,7 +817,42 @@ export function ArrivalsTab({ search, setSearch, data, isLoading, onAct, onCheck
         </button>
       </div>
 
-      {walkIn && <WalkInPanel onClose={() => setWalkIn(false)} onCheckIn={onCheckIn} busy={busy} />}
+      {walkIn && (
+        <WalkInPanel
+          onClose={() => setWalkIn(false)}
+          busy={busy}
+          // A walk-in has no appointment to infer anything from, so it gets the
+          // same question: the visit is created, then its journey is planned.
+          onCheckIn={(patient) =>
+            onCheckIn(patient, (created) => {
+              setWalkIn(false);
+              setArriving({
+                visitId: created.visitId,
+                suggestedVisitTypeId: created.suggestedVisitTypeId,
+                name: created.name || patient.name,
+                fileNo: patient.fileNo,
+                age: patient.age,
+                sex: patient.sex,
+                phone: patient.phone,
+              });
+            })
+          }
+        />
+      )}
+
+      {journeyFor && <JourneyPanel arrival={journeyFor} onClose={() => setJourneyFor(null)} />}
+
+      {arriving && (
+        <CheckInPanel
+          arrival={arriving}
+          onClose={() => setArriving(null)}
+          onFailed={onFailed}
+          onDone={(arrival, result, sentWhatsapp) => {
+            setArriving(null);
+            onCheckedIn(arrival, result, sentWhatsapp);
+          }}
+        />
+      )}
 
       {/* Two columns, because the desk uses them differently: Expected is the
           worklist — the people to greet or chase — and On the floor is
@@ -636,7 +868,13 @@ export function ArrivalsTab({ search, setSearch, data, isLoading, onAct, onCheck
             </div>
           )}
           {expected.map((a) => (
-            <ExpectedRow key={a.visitId} arrival={a} onAct={onAct} busy={busy} />
+            <ExpectedRow
+              key={a.visitId}
+              arrival={a}
+              onAct={onAct}
+              onCheckIn={setArriving}
+              busy={busy}
+            />
           ))}
         </div>
 
@@ -650,17 +888,26 @@ export function ArrivalsTab({ search, setSearch, data, isLoading, onAct, onCheck
               note={a.blockedReason && `🚫 ${a.blockedReason}`}
             >
               <span className="ar-where">{a.statusLabel}</span>
+              {/* Where they are in their OWN journey, which the columns cannot
+                  show: a patient with an ECG and an X-Ray still to do reads the
+                  same as one who is nearly finished. */}
+              {/* Shown whether or not a journey exists yet: most patients are
+                  checked in by the HealthRay sync and have none, and opening
+                  this is what gives them one. A button that appeared only for
+                  patients who already had a plan could never seed the ones who
+                  did not. */}
+              <button
+                className="ar-journey"
+                title="Their stops — and tick the ones the board cannot see"
+                onClick={() => setJourneyFor(journeyFor?.visitId === a.visitId ? null : a)}
+              >
+                {a.journey
+                  ? `${a.journey.done}/${a.journey.total}${
+                      a.journey.next ? ` · next: ${a.journey.next}` : " · done"
+                    }`
+                  : "Journey"}
+              </button>
               <span className="ar-since">in since {clock(a.checkedInAt)}</span>
-              {canPrintRx && (
-                <a
-                  className="st-btn"
-                  href={printRxHref(a.visitId)}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  🖨 Rx
-                </a>
-              )}
             </ArrivalRow>
           ))}
         </div>
@@ -762,18 +1009,35 @@ export default function ReceptionStationPage() {
       },
     );
 
-  const onCheckIn = (patient) =>
+  // A walk-in is created first — that is what gives it a visit to plan against —
+  // and the journey is asked for immediately afterwards, in the same panel a
+  // booked patient gets.
+  const onCheckIn = (patient, thenPlan) =>
     checkInWalkIn.mutate(
       { patientId: patient.patientId, appointmentId: patient.appointmentId },
       {
-        onSuccess: (r) =>
-          showToast(
-            r.unchanged
-              ? `${patient.name} was already checked in`
-              : `✓ ${patient.name} checked in as a walk-in — they are on the board now`,
-          ),
+        onSuccess: (r) => {
+          // Already past reception — the sync moved them while the desk was
+          // searching. Opening the planner would only earn a 409, so they are
+          // told what happened instead.
+          if (r.unchanged) {
+            showToast(`${patient.name} was already checked in — ${r.status.replace(/_/g, " ")}`);
+            return;
+          }
+          if (thenPlan) thenPlan(r);
+          else showToast(`✓ ${patient.name} checked in as a walk-in`);
+        },
         onError: (e) => failed(e, "Could not check this patient in — nothing was created"),
       },
+    );
+
+  const onCheckedIn = (arrival, result, sentWhatsapp) =>
+    showToast(
+      result.alreadyPlanned
+        ? `${arrival.name} was already checked in — their journey is unchanged`
+        : `✓ ${arrival.name} checked in · ${result.totalCount} stops · ~${result.plannedTotalMin} min${
+            sentWhatsapp && result.whatsappSent ? " · WhatsApp sent" : ""
+          }`,
     );
 
   return (
@@ -873,6 +1137,8 @@ export default function ReceptionStationPage() {
 
           {tab === "arrivals" ? (
             <ArrivalsTab
+              onCheckedIn={onCheckedIn}
+              onFailed={(e) => failed(e, "Could not check this patient in — nothing was changed")}
               search={search}
               setSearch={setSearch}
               data={arrivals}

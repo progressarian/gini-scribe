@@ -623,6 +623,38 @@ export const giniflowPaymentSchemaChecked = giniflowPaymentSchema.superRefine((v
   }
 });
 
+// The journey reception builds at check-in. Steps arrive as the desk left them —
+// order is the array order — and a step with no catalog id is one they typed
+// themselves, which the catalog was never going to cover.
+const giniflowStepSchema = z.object({
+  catalogId: z.string().trim().max(60).nullish(),
+  name: z.string().trim().min(1).max(120),
+  minutes: z.coerce.number().int().min(0).max(600).default(0),
+  station: z.string().trim().max(120).nullish(),
+  role: z.string().trim().max(60).nullish(),
+  staffId: z.union([z.string(), z.number()]).nullish(),
+  staffName: z.string().trim().max(120).nullish(),
+  // Kept, not stripped: "the desk added this at the desk" is the one thing the
+  // template cannot tell you afterwards.
+  source: z.enum(["template", "added", "custom", "auto"]).optional(),
+});
+
+export const giniflowCheckinSchema = z.object({
+  visitTypeId: z.string().trim().max(60).nullish(),
+  steps: z.array(giniflowStepSchema).max(40).default([]),
+  sendWhatsapp: z.boolean().default(false),
+});
+
+export const giniflowJourneyStepSchema = giniflowStepSchema;
+
+export const giniflowStepStatusSchema = z.object({
+  status: z.enum(["pending", "in_progress", "done", "skipped"]),
+});
+
+export const giniflowJourneyOrderSchema = z.object({
+  stepIds: z.array(z.string().uuid()).min(1).max(40),
+});
+
 // Reception's arrivals tab: the same day + optional search shape the board's
 // own search uses, so a receptionist's query behaves identically on both screens.
 export const giniflowArrivalsQuerySchema = giniflowDateQuerySchema.extend({

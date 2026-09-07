@@ -28,6 +28,8 @@ const QUEUE_STATUSES = [
   "ready_for_doctor",
   "with_doctor",
   "doctor_done",
+  "rx_pending",
+  "with_rx",
   "pharmacy_pending",
   "dispensed",
   "exited",

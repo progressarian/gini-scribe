@@ -4,6 +4,7 @@ import {
   useRxPatient,
   useStartRxExplain,
   useMarkRxExplained,
+  useReturnRxToQueue,
   printRxHref,
   useReissueRx,
 } from "../../queries/hooks/useGiniflowRx";
@@ -84,101 +85,124 @@ function MedicineGroup({ group }) {
   );
 }
 
-function Pane({ visitId, onClose, onExplained, onView, onReissue, reissuing, busy }) {
+function Pane({
+  visitId,
+  onClose,
+  onReturn,
+  onExplained,
+  onView,
+  onReissue,
+  reissuing,
+  returning,
+  busy,
+}) {
   const { data, isLoading } = useRxPatient(visitId);
   if (!visitId) return null;
 
   return (
-    <div className="detail-pane" role="dialog" aria-label="Explain the prescription">
-      <div className="dp-head">
-        <div className="dp-name">{data?.name || "…"}</div>
-        <div className="dp-meta">
-          {data ? `${data.age}${(data.sex || "")[0] || ""} · ${data.fileNo || "—"}` : ""}
-          {data?.doctorName ? ` · ${data.doctorName}` : ""}
-        </div>
-        <div className="dp-acts">
-          <button className="rbtn" onClick={onClose}>
-            ← Back
-          </button>
-          {data?.canPrint ? (
-            <button className="st-btn st-btn-grn" onClick={() => onView(visitId, data.name)}>
-              🖨 View / print prescription
+    <div className="detail-overlay">
+      <div className="detail-pane" role="dialog" aria-label="Explain the prescription">
+        <div className="dp-head">
+          <div className="dp-name">{data?.name || "…"}</div>
+          <div className="dp-meta">
+            {data ? `${data.age}${(data.sex || "")[0] || ""} · ${data.fileNo || "—"}` : ""}
+            {data?.doctorName ? ` · ${data.doctorName}` : ""}
+          </div>
+          <div className="dp-acts">
+            <button className="rbtn" onClick={onClose}>
+              ← Back
             </button>
-          ) : (
-            <button
-              className="st-btn"
-              disabled={!data?.rxStale || reissuing}
-              title={
-                data?.rxStale
-                  ? "The prescription changed after this copy was made — re-issue it"
-                  : "The prescription is still being prepared"
-              }
-              onClick={() => data?.rxStale && onReissue(visitId)}
-            >
-              {reissuing
-                ? "↻ Re-issuing…"
-                : data?.rxStale
-                  ? "↻ Re-issue prescription"
-                  : "🖨 Preparing…"}
-            </button>
-          )}
+            {data?.status === "with_rx" && (
+              <button
+                className="rbtn"
+                disabled={returning}
+                title="Opening a patient puts them at the desk — this puts them back in the queue"
+                onClick={() => onReturn(visitId)}
+              >
+                {returning ? "↩ Returning…" : "↩ Not this patient"}
+              </button>
+            )}
+            {data?.canPrint ? (
+              <button className="st-btn st-btn-grn" onClick={() => onView(visitId, data.name)}>
+                🖨 View / print prescription
+              </button>
+            ) : (
+              <button
+                className="st-btn"
+                disabled={!data?.rxStale || reissuing}
+                title={
+                  data?.rxStale
+                    ? "The prescription changed after this copy was made — re-issue it"
+                    : "The prescription is still being prepared"
+                }
+                onClick={() => data?.rxStale && onReissue(visitId)}
+              >
+                {reissuing
+                  ? "↻ Re-issuing…"
+                  : data?.rxStale
+                    ? "↻ Re-issue prescription"
+                    : "🖨 Preparing…"}
+              </button>
+            )}
+          </div>
         </div>
-      </div>
 
-      <div className="dp-scroll">
-        <div className="dp-inner">
-          {isLoading && <div className="empty-note">Loading…</div>}
+        <div className="dp-scroll">
+          <div className="dp-inner">
+            {isLoading && <div className="empty-note">Loading…</div>}
 
-          {data?.counselling?.hasChanges && (
-            <div className="dp-sec">
-              <div className="dp-sec-title">Read this to the patient</div>
-              <p className="dp-hint">{data.counselling.hindi}</p>
-              <p className="dp-hint">{data.counselling.english}</p>
-            </div>
-          )}
-
-          {data?.card?.groups?.length > 0 && (
-            <div className="dp-sec">
-              <div className="dp-sec-title">Medicine card</div>
-              <div className="dp-hint">
-                The full card, including medicines from outside Gini — the patient takes those too.
+            {data?.counselling?.hasChanges && (
+              <div className="dp-sec">
+                <div className="dp-sec-title">Read this to the patient</div>
+                <p className="dp-hint">{data.counselling.hindi}</p>
+                <p className="dp-hint">{data.counselling.english}</p>
               </div>
-              {data.card.groups.map((g) => (
-                <MedicineGroup group={g} key={g.key || g.label} />
-              ))}
-            </div>
-          )}
+            )}
 
-          {data?.stopped?.length > 0 && (
-            <div className="dp-sec">
-              <div className="dp-sec-title">Stopped today</div>
-              {data.stopped.map((m) => (
-                <div className="test-row" key={m.medicationId || m.name}>
-                  <div className="tr-name">{m.name}</div>
+            {data?.card?.groups?.length > 0 && (
+              <div className="dp-sec">
+                <div className="dp-sec-title">Medicine card</div>
+                <div className="dp-hint">
+                  The full card, including medicines from outside Gini — the patient takes those
+                  too.
                 </div>
-              ))}
-            </div>
-          )}
+                {data.card.groups.map((g) => (
+                  <MedicineGroup group={g} key={g.key || g.label} />
+                ))}
+              </div>
+            )}
 
-          <div className="dp-sec">
-            <div className="dp-sec-title">What this station can and cannot do</div>
-            <div className="dp-hint">
-              Explaining only. The prescription cannot be edited here — a correction goes back to
-              the consultant as an addendum — and medicines are handed over at the pharmacy, not
-              here.
+            {data?.stopped?.length > 0 && (
+              <div className="dp-sec">
+                <div className="dp-sec-title">Stopped today</div>
+                {data.stopped.map((m) => (
+                  <div className="test-row" key={m.medicationId || m.name}>
+                    <div className="tr-name">{m.name}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="dp-sec">
+              <div className="dp-sec-title">What this station can and cannot do</div>
+              <div className="dp-hint">
+                Explaining only. The prescription cannot be edited here — a correction goes back to
+                the consultant as an addendum — and medicines are handed over at the pharmacy, not
+                here.
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <div className="dp-foot">
-        <button
-          className="st-btn st-btn-grn"
-          disabled={busy || data?.status === "pharmacy_pending"}
-          onClick={() => onExplained(visitId)}
-        >
-          ✓ Explained — send to pharmacy
-        </button>
+        <div className="dp-foot">
+          <button
+            className="st-btn st-btn-grn"
+            disabled={busy || data?.status === "pharmacy_pending"}
+            onClick={() => onExplained(visitId)}
+          >
+            ✓ Explained — send to pharmacy
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -199,6 +223,7 @@ export default function RxStationPage() {
   const live = useGiniflowLive();
   const start = useStartRxExplain();
   const explained = useMarkRxExplained();
+  const returnToQueue = useReturnRxToQueue();
   const reissue = useReissueRx();
 
   const onReissue = (visitId) =>
@@ -218,6 +243,19 @@ export default function RxStationPage() {
     setOpenId(visitId);
     if (!atDesk.some((r) => r.visitId === visitId)) start.mutate({ visitId });
   };
+
+  const onReturn = (visitId) =>
+    returnToQueue.mutate(
+      { visitId },
+      {
+        onSuccess: () => {
+          setOpenId(null);
+          setToast("↩ Put back in the queue — nothing was recorded");
+          setTimeout(() => setToast(""), 3500);
+        },
+        onError: (e) => setToast(e?.response?.data?.error || "Could not return them to the queue"),
+      },
+    );
 
   const onExplained = (visitId) => {
     explained.mutate(
@@ -327,10 +365,12 @@ export default function RxStationPage() {
       <Pane
         visitId={openId}
         onClose={() => setOpenId(null)}
+        onReturn={onReturn}
         onExplained={onExplained}
         onView={(visitId, name) => setViewing({ visitId, name })}
         onReissue={onReissue}
         reissuing={reissue.isPending}
+        returning={returnToQueue.isPending}
         busy={explained.isPending}
       />
 

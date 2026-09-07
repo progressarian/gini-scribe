@@ -523,9 +523,65 @@ const ARRIVAL_SELECT = `
            AT TIME ZONE 'Asia/Kolkata' AS slot_at,
          p.name, p.file_no, p.age, p.sex, p.phone,
          checkin_ev.occurred_at AS checked_in_at,
-         last_ev.occurred_at    AS status_since
+         last_ev.occurred_at    AS status_since,
+         sugg.id AS suggested_visit_type_id,
+         v.assigned_sd_id, v.assigned_doctor_id,
+         COALESCE(asd.short_name, asd.name) AS assigned_sd_name,
+         COALESCE(adoc.short_name, adoc.name) AS assigned_doctor_name,
+         jr.total AS journey_total, jr.done AS journey_done, nxt.step_name AS journey_next
     FROM giniflow_visits v
     JOIN patients p ON p.id = v.patient_id
+    LEFT JOIN appointments ap ON ap.id = v.appointment_id
+    LEFT JOIN doctors asd  ON asd.id  = v.assigned_sd_id
+    LEFT JOIN doctors adoc ON adoc.id = v.assigned_doctor_id
+    -- Which visit type to offer the desk. The flags live on flow_visit_types and
+    -- the history is the patient's own, so no id is named here.
+    --
+    -- WARNING: appointments.is_walkin is deliberately NOT read, for the reason
+    -- src/lib/flowAppointmentType.js documents with the numbers: HealthRay sets
+    -- it on 88% of bookings, 6481 of which have a real booked slot, and trusting
+    -- it put 85% of a day's list on a walk-in type — every one of them handed a
+    -- 90-minute ETA against the 120 they actually need. A row in the
+    -- appointments table IS a booking; a genuine walk-in arrives through the
+    -- walk-in panel, which says so for itself.
+    LEFT JOIN LATERAL (
+      -- Completed visits only, the same rule the board's visit_number uses
+      -- (GF-05): a cancelled booking is not a visit the patient made, and
+      -- counting it would greet a first-timer as a follow-up.
+      SELECT COUNT(*)::int AS prior FROM appointments pa
+       WHERE pa.patient_id = v.patient_id
+         AND pa.appointment_date < v.visit_date
+         AND pa.status = 'completed'
+    ) seq ON TRUE
+    LEFT JOIN LATERAL (
+      -- HealthRay's own word for the booking first, the patient's history when
+      -- it says nothing useful ("OPD" is the generic both systems write). Same
+      -- reading as classifyAppointment() in src/lib/flowAppointmentType.js, so
+      -- the two screens cannot disagree about who is a follow-up.
+      SELECT t.id FROM flow_visit_types t
+       WHERE t.for_followup = (
+               CASE
+                 WHEN ap.visit_type ~* '(follow|f/?u|review)' THEN TRUE
+                 WHEN ap.visit_type ~* '^\s*new\b' THEN FALSE
+                 ELSE seq.prior > 0
+               END)
+         AND t.for_walkin = FALSE
+         -- A booking HealthRay calls an investigation is a patient coming to
+         -- GIVE samples and go, booked against Dr. Hospital Admin. They should
+         -- not be offered an hour of consultation they are not here for.
+         AND COALESCE(t.for_tests, FALSE) = (ap.visit_type ~* '(investigat|lab|test)')
+       ORDER BY t.max_time_min, t.id LIMIT 1
+    ) sugg ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT count(*)::int AS total,
+             count(*) FILTER (WHERE s.status = 'done')::int AS done
+        FROM giniflow_visit_steps s WHERE s.visit_id = v.id
+    ) jr ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT s.step_name FROM giniflow_visit_steps s
+       WHERE s.visit_id = v.id AND s.status IN ('in_progress', 'pending')
+       ORDER BY s.step_order LIMIT 1
+    ) nxt ON TRUE
     LEFT JOIN LATERAL (
       SELECT occurred_at FROM giniflow_visit_events e
        WHERE e.visit_id = v.id AND e.status = 'checked_in'
@@ -562,6 +618,18 @@ const shapeArrival = (r, now) => ({
   statusSince: r.status_since ? new Date(r.status_since).toISOString() : null,
   sinceMinutes: minutesBetween(r.status_since, now),
   blockedReason: r.blocked_reason || null,
+  // What reception is offered before they confirm the arrival, and — once the
+  // patient is on the floor — how far along their own journey they are.
+  suggestedVisitTypeId: r.suggested_visit_type_id || null,
+  // Who the booking already named, so the desk confirms a consultant rather
+  // than picking one from an empty box.
+  assignedSdId: r.assigned_sd_id || null,
+  assignedSdName: r.assigned_sd_name || null,
+  assignedDoctorId: r.assigned_doctor_id || null,
+  assignedDoctorName: r.assigned_doctor_name || null,
+  journey: r.journey_total
+    ? { done: r.journey_done, total: r.journey_total, next: r.journey_next || null }
+    : null,
 });
 
 export async function getArrivals(visitDate, q = "", now = new Date(), db = pool) {

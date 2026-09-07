@@ -533,6 +533,11 @@
   font-weight: 700;
   color: var(--ink);
 }
+.gf .ts-visits {
+  margin-left: 5px;
+  font-weight: 500;
+  color: var(--ink4);
+}
 .gf .ts-name.dim {
   color: var(--ink4);
   font-weight: 500;

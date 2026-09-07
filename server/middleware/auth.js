@@ -73,6 +73,8 @@ const PUBLIC_PATTERNS = [
   // Patient flow tracking page — read-only, by opaque visit token, no login.
   // Plus the file-gated verify/assessment posts on the same public page.
   /^\/api\/flow\/track\/[^/]+$/,
+  // Same page, the Gini Flow module's own journeys.
+  /^\/api\/giniflow\/track\/[^/]+$/,
   /^\/api\/flow\/track\/[^/]+\/(verify|assessment)$/,
 ];
 

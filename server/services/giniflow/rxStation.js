@@ -1,5 +1,5 @@
 import pool from "../../config/db.js";
-import { advanceStatus, budgetColour } from "./statusEngine.js";
+import { advanceStatus, budgetColour, returnToQueue } from "./statusEngine.js";
 import { getSlaConfig, budgetLookup } from "./board.js";
 import { buildCard } from "./medicineCard.js";
 import { buildCounsellingNote } from "./counsellingNote.js";
@@ -46,9 +46,7 @@ const QUEUE_SQL = `
     ) rxchg ON TRUE
     LEFT JOIN LATERAL (
       SELECT count(*)::int AS n FROM medications m
-       WHERE m.patient_id = v.patient_id
-         AND (m.created_at AT TIME ZONE 'Asia/Kolkata')::date = v.visit_date
-         AND m.is_active
+       WHERE m.patient_id = v.patient_id AND m.is_active
     ) meds ON TRUE
    WHERE v.visit_date = $1::date
      AND v.current_status = ANY($2)
@@ -62,7 +60,6 @@ const QUEUE_SQL = `
        OR EXISTS (
          SELECT 1 FROM medications ms
           WHERE ms.patient_id = v.patient_id
-            AND (ms.created_at AT TIME ZONE 'Asia/Kolkata')::date = v.visit_date
             AND ms.is_active
             AND ms.name ILIKE '%' || $4 || '%'
        )
@@ -198,6 +195,35 @@ export async function startRxExplain(visitId, actorId = null, db = pool) {
     });
     await client.query("COMMIT");
     return { ok: true, status: "with_rx" };
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+export async function returnRxToQueue(visitId, actorId = null, db = pool) {
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query(
+      `SELECT current_status FROM giniflow_visits WHERE id = $1 FOR UPDATE`,
+      [visitId],
+    );
+    if (!rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
+    if (rows[0].current_status !== "with_rx") {
+      throw Object.assign(new Error("This patient is not at the desk"), { status: 409 });
+    }
+    await returnToQueue(client, {
+      visitId,
+      toStatus: "rx_pending",
+      actorRole: "nurse",
+      actorId,
+      meta: { source: "rx_station", reason: "opened_in_error" },
+    });
+    await client.query("COMMIT");
+    return { ok: true, status: "rx_pending" };
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;

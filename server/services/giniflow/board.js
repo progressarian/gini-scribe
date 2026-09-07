@@ -80,6 +80,7 @@ const BOARD_SQL = `
          doc.short_name                            AS doctor_name,
          doc.name                                  AS doctor_full_name,
          seq.visit_number,
+         jr.total AS journey_total, jr.done AS journey_done, nxt.step_name AS journey_next,
          ${labOnlyPredicate("v", "$2")}            AS lab_only,
          tests.names                               AS lab_test_names,
          tests.cases                               AS lab_all_cases,
@@ -99,6 +100,20 @@ const BOARD_SQL = `
     JOIN patients p ON p.id = v.patient_id
     LEFT JOIN doctors sd  ON sd.id  = v.assigned_sd_id
     LEFT JOIN doctors doc ON doc.id = v.assigned_doctor_id
+    -- How far along this patient's OWN journey is. The columns show where the
+    -- floor has them; this shows how much of what they came for is left, which
+    -- for a patient with an ECG and an X-Ray still to do is a different answer
+    -- (29-RECEPTION-JOURNEY-PLAN.md).
+    LEFT JOIN LATERAL (
+      SELECT count(*)::int AS total,
+             count(*) FILTER (WHERE s.status = 'done')::int AS done
+        FROM giniflow_visit_steps s WHERE s.visit_id = v.id
+    ) jr ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT s.step_name FROM giniflow_visit_steps s
+       WHERE s.visit_id = v.id AND s.status IN ('in_progress', 'pending')
+       ORDER BY s.step_order LIMIT 1
+    ) nxt ON TRUE
     LEFT JOIN LATERAL (
       -- The patient's real visit sequence. giniflow_visits alone would always
       -- say 1 — it has no history before today (GF-05).
@@ -278,6 +293,9 @@ export async function getDayBoard(visitDate, slaConfig, now = new Date(), db = p
       age: row.age,
       sex: row.sex,
       visitNumber: row.visit_number,
+      journey: row.journey_total
+        ? { done: row.journey_done, total: row.journey_total, next: row.journey_next || null }
+        : null,
       status: row.current_status,
       statusLabel: STATUS_LABEL[row.current_status] || row.current_status,
       category: row.category,
