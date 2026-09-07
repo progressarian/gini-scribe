@@ -24,6 +24,7 @@ import {
   getDayStats,
   getStationAverages,
   searchDayVisits,
+  boardClock,
 } from "../services/giniflow/board.js";
 import {
   LAB_ONLY_DOCTOR,
@@ -186,7 +187,7 @@ router.get("/giniflow/board", validateQuery(giniflowDateQuerySchema), async (req
     const date = await resolveDate(req.query.date);
     const now = new Date();
     const sla = await getSlaConfig();
-    const board = await getDayBoard(date, sla, now);
+    const board = await getDayBoard(date, sla, boardClock(date, now));
     const [stats, stationAverages] = await Promise.all([
       getDayStats(date, board, sla),
       getStationAverages(date, sla),
@@ -234,7 +235,7 @@ router.get("/giniflow/visits/:id/timeline", async (req, res) => {
     const sla = await getSlaConfig();
     // A lab-only visit gets its own timeline rather than the chain's: see
     // getLabOnlyTimeline for why the chain could not describe it truthfully.
-    const now = new Date();
+    const now = boardClock(visit.rows[0].visit_date);
     const steps = labOnly
       ? await getLabOnlyTimeline(
           pool,
@@ -338,7 +339,7 @@ router.get("/giniflow/day-report", validateQuery(giniflowDateQuerySchema), async
   try {
     const date = await resolveDate(req.query.date);
     const sla = await getSlaConfig();
-    const board = await getDayBoard(date, sla, new Date());
+    const board = await getDayBoard(date, sla, boardClock(date));
     const stats = await getDayStats(date, board, sla);
     const bottleneck = getBottleneck(board.columns);
 

@@ -888,7 +888,7 @@ export default function VitalsStationPage() {
                           ? "Confirm you have taken the reading again"
                           : correcting
                             ? "Already recorded — saving updates the reading, the patient stays where they are"
-                            : "Patient moves to the MO queue automatically"}
+                            : "Patient moves to the Chief Endocrinologist queue automatically"}
                     </div>
                   </div>
                   <button className="db-btn" disabled={!canSave} onClick={submit}>

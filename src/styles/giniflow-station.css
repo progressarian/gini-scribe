@@ -5016,6 +5016,28 @@
 /* The MO's report decision — 31-MO-LED-CLOSURE-PLAN §5.6. Sits above the
    action row because it is the thing that decides which of those actions is
    available. */
+/* Something came back for this visit — the one section on the screen the MO is
+   meant to open before deciding anything. */
+.gf .dp-sec.mo-reports-new {
+  background: var(--tl-l);
+  border: 1px solid var(--tl-b);
+}
+.gf .sq-new {
+  margin-left: 6px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #fff;
+  background: var(--tl);
+  border-radius: 999px;
+  padding: 1px 6px;
+}
+/* Typed results sit with the reports, so they read as one answer. */
+.gf .dp-sec.mo-results {
+  background: var(--tl-l);
+  border: 1px solid var(--tl-b);
+}
+
 .gf .mo-review {
   background: var(--tl-l);
   border: 1px solid var(--tl-b);

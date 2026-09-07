@@ -16,7 +16,7 @@ export const CHAIN = [
   "dispensed",
   "exited",
 ];
-export const EXCEPTION_STATUSES = ["no_show", "cancelled", "blocked_reports"];
+export const EXCEPTION_STATUSES = ["no_show", "cancelled", "blocked_reports", "abandoned"];
 export const LAB_TRACK = [
   "ordered",
   "payment_pending",
@@ -71,9 +71,9 @@ export const STATUS_LABEL = {
   checked_in: "Checked in",
   vitals_pending: "Waiting for vitals",
   with_vitals: "At vitals",
-  vitals_done: "Waiting for SD / MO",
-  sd_pending: "Waiting for SD / MO",
-  with_sd: "With SD / MO",
+  vitals_done: "Waiting for Chief Endocrinologist",
+  sd_pending: "Waiting for Chief Endocrinologist",
+  with_sd: "With Chief Endocrinologist",
   ready_for_doctor: "Waiting for consultant",
   with_doctor: "With consultant",
   // Not a status any visit holds — an event the lab writes when a report lands,
@@ -92,6 +92,7 @@ export const STATUS_LABEL = {
   no_show: "No show",
   cancelled: "Cancelled",
   blocked_reports: "Blocked — reports",
+  abandoned: "Never closed on the floor",
 };
 export const STATUS_TO_SLA_KEY = {
   checked_in: "checkin_to_vitals",
@@ -127,7 +128,7 @@ export const BOARD_COLUMNS = [
   { key: "vitals", name: "At vitals", icon: "🩺", slaKey: "vitals", statuses: ["with_vitals"] },
   {
     key: "sd",
-    name: "With SD / MO",
+    name: "With Chief Endocrinologist",
     icon: "👨‍⚕️",
     slaKey: "sd",
     statuses: ["vitals_done", "sd_pending", "with_sd"],
@@ -170,7 +171,7 @@ export const BOARD_COLUMNS = [
   },
 ];
 
-export const OFF_BOARD_STATUSES = ["booked", "confirmed", "no_show", "cancelled"];
+export const OFF_BOARD_STATUSES = ["booked", "confirmed", "no_show", "cancelled", "abandoned"];
 export const HEALTHRAY_STATUS_TO_CHAIN = {
   scheduled: "booked",
   checkedin: "checked_in",
@@ -206,6 +207,43 @@ export const isMarkerStatus = (status) => MARKER_STATUSES.includes(status);
 // drifted from this one is exactly the bug it prevents.
 export const NOT_A_MARKER_SQL = (col) =>
   `${col} <> ALL (ARRAY[${MARKER_STATUSES.map((m) => `'${m}'`).join(", ")}])`;
+
+// What the wait clock may read as "waiting since". Two kinds of event are not an
+// arrival:
+//
+//   · a marker, which is a fact rather than a place;
+//   · a RELEASE — a consultant stepping out, an MO pressing "not my patient".
+//     The patient is handed back to the queue they were already in, and their
+//     wait did not restart: they never stopped waiting. Reading it reset a
+//     patient who had waited two and a half hours to "0m", at the exact moment
+//     somebody had looked at them and put them back.
+// The rooms a patient is physically taken into, as opposed to the queues they
+// wait in. A room they were taken into and handed straight back out of did not
+// end their wait.
+export const STATION_STATUSES = ["with_vitals", "with_sd", "with_doctor", "with_rx"];
+
+const IN_LIST = (col, list) => `${col} = ANY (ARRAY[${list.map((v) => `'${v}'`).join(", ")}])`;
+
+// What the wait clock may read as "here since". `e` is the events alias, `v` the
+// visit's.
+//
+// Three kinds of event are not an arrival:
+//   · a marker — a fact, not a place;
+//   · a RELEASE — "not my patient", a consultant stepping out. The patient goes
+//     back to the queue they were already in and their wait never stopped;
+//   · while they are WAITING, the room that took them and handed them back. A
+//     two-minute look does not restart a two-hour wait.
+//
+// Read together, a patient waiting since 12:17, taken at 13:26 and released at
+// 13:28 still reads as waiting since 12:17 — not "0m", which is what the board
+// showed at the exact moment somebody had looked at them and put them back.
+// A patient actually IN a room is timed from entering it, which is what the
+// station's own "at my desk" clock means.
+export const WAIT_SINCE_SQL = (alias, visitAlias = "v") =>
+  `${NOT_A_MARKER_SQL(`${alias}.status`)}
+       AND NOT COALESCE((${alias}.meta->>'released')::boolean, FALSE)
+       AND (${IN_LIST(`${visitAlias}.current_status`, STATION_STATUSES)}
+            OR NOT ${IN_LIST(`${alias}.status`, STATION_STATUSES)})`;
 
 export const chainIndex = (status) => CHAIN_INDEX.get(status) ?? -1;
 

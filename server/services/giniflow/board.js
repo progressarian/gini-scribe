@@ -9,6 +9,7 @@ import {
   slaKeyForStatus,
   TERMINAL_STATUSES,
   NOT_A_MARKER_SQL,
+  WAIT_SINCE_SQL,
 } from "../../../shared/giniflowStatus.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { IST_TODAY, budgetColour } from "./statusEngine.js";
@@ -131,7 +132,7 @@ const BOARD_SQL = `
     ) first_ev ON TRUE
     LEFT JOIN LATERAL (
       SELECT e.occurred_at FROM giniflow_visit_events e
-       WHERE e.visit_id = v.id AND ${NOT_A_MARKER_SQL("e.status")}
+       WHERE e.visit_id = v.id AND ${WAIT_SINCE_SQL("e", "v")}
        ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1
     ) last_ev ON TRUE
     LEFT JOIN LATERAL (
@@ -233,7 +234,7 @@ const hintFor = (row) => {
     return "Waiting for vitals station";
   if (row.current_status === "ready_for_doctor" && row.category === "in_control")
     return "Green category — SD could close";
-  if (row.current_status === "sd_pending") return "Waiting for SD / MO";
+  if (row.current_status === "sd_pending") return "Waiting for Chief Endocrinologist";
   return null;
 };
 
@@ -270,7 +271,17 @@ const LAB_SUBTITLE = {
   results_ready: "📤 Results ready — awaiting upload",
 };
 
-export async function getDayBoard(visitDate, slaConfig, now = new Date(), db = pool) {
+// A visit the floor never closed keeps its clock running, which is right while
+// the day is still being worked and wrong the moment the day is over: reading
+// back a past board, an unfinished patient showed days of waiting and dragged
+// every average and bottleneck with them. The clock stops at midnight IST of
+// the day being read.
+export const boardClock = (visitDate, now = new Date()) => {
+  const end = new Date(`${visitDate}T23:59:59.999+05:30`);
+  return now < end ? now : end;
+};
+
+export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDate), db = pool) {
   const budgets = budgetMap(slaConfig);
   const budgetFor = budgetLookup(slaConfig);
   const { rows } = await db.query(BOARD_SQL, [visitDate, LAB_ONLY_DOCTOR]);

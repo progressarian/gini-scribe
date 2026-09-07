@@ -236,11 +236,42 @@ check("a stop can be added mid-visit", withEcg.totalCount === atDoctor.totalCoun
 const added = withEcg.steps.find((s) => s.catalogId === "ecg");
 check("an added ECG has no board column, so the desk ticks it", added?.manual === true);
 
+// A stop with no board column only becomes tickable when the ones before it are
+// finished. Billing sits seventh of eight in every template, and a tick offered
+// from check-in let a patient be marked billed before they had seen the doctor.
+{
+  const billing = withEcg.steps.find((x) => x.catalogId === "billing");
+  if (billing) {
+    const tooSoon = await setStepStatus(billing.stepId, "done")
+      .then(() => false)
+      .catch((e) => e.status === 409);
+    check("a template stop cannot be ticked before its turn", tooSoon, billing.name);
+    const untouched = await getJourney(v1.id);
+    check(
+      "and the refusal leaves it alone",
+      untouched.steps.find((x) => x.stepId === billing.stepId)?.status === "pending",
+    );
+  } else {
+    check("the template has an off-chain stop to test the order on", false);
+  }
+}
+
+// ...but a stop the DESK added during the visit is appended to the end of the
+// list and happened now. Holding it behind the pharmacy would make it
+// untickable for the entire visit.
 const ticked = await setStepStatus(added.stepId, "done");
 check(
   "and ticking it is recorded",
   ticked.steps.find((s) => s.stepId === added.stepId)?.status === "done",
 );
+
+// A mis-tick has to be correctable, so undo is never blocked.
+const undone = await setStepStatus(added.stepId, "pending");
+check(
+  "a tick can be undone",
+  undone.steps.find((s) => s.stepId === added.stepId)?.status === "pending",
+);
+await setStepStatus(added.stepId, "done");
 
 const custom = await addStep(v1.id, { name: "Counselling with the family", minutes: 15 });
 const customStep = custom.steps.find((s) => s.name === "Counselling with the family");

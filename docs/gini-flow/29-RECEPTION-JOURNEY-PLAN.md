@@ -374,6 +374,31 @@ minutes are the lab's SLA, not a promise the desk makes — but it means a patie
 who waits for reports before seeing the consultant is quoted only the part of the
 day the journey covers.
 
+## A manual stop waits its turn
+
+Spotted on the floor, 2026-09-07. Billing showed **✓ Done** from the moment the
+patient checked in — seventh of eight steps, offered while the doctor assessment,
+the consultation and the prescription were all still pending. Nothing stopped a
+patient being marked billed before they had been seen.
+
+The button itself was right: Billing is the one stop in that journey with no
+board column, so nothing but the desk can ever complete it. What was missing was
+_when_. A manual stop is now offered only once everything before it is done or
+skipped; until then the row names what comes first — "after SD Consultation" —
+because a button that cannot be pressed reads as broken unless it says why.
+
+Refused server-side too, not merely hidden: a hidden button is not a rule, and
+this one decides whether a patient's record says they paid.
+
+**Two exceptions, both deliberate:**
+
+- **A stop the desk added during the visit is theirs to tick immediately.**
+  `addStep` appends to the end of the list, so an ECG added at 11am sits after
+  the pharmacy — holding it to the sequence would make it untickable for the
+  whole visit. Only `template` and `auto` steps are a sequence.
+- **Undo is never blocked.** A mis-tick has to be correctable, and the panel now
+  offers "✓ done · undo" on a stop that was ticked.
+
 ## Code review
 
 `/code-review high` over the diff. Thirteen findings, all fixed. The four that

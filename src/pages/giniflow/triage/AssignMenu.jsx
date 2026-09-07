@@ -75,7 +75,7 @@ export default function AssignMenu({ card, staff, saving, onClose, onSave, onRes
               : "Set automatically from HbA1c. Changing it here makes it yours, and the sweep will not overwrite it again."}
           </p>
 
-          <p className="dlg-label">SD / MO who leads the workup</p>
+          <p className="dlg-label">Chief Endocrinologist who leads the workup</p>
           {(staff || []).map((person) => (
             <button
               type="button"

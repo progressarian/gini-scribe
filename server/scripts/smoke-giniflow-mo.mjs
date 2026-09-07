@@ -10,7 +10,7 @@ import "../loadEnv.js";
 process.env.GINIFLOW_ALLOW_DEMO = "1";
 import pool from "../config/db.js";
 import { getStationTimes } from "../services/giniflow/statusEngine.js";
-import { NOT_A_MARKER_SQL } from "../../shared/giniflowStatus.js";
+import { NOT_A_MARKER_SQL, WAIT_SINCE_SQL } from "../../shared/giniflowStatus.js";
 import { seedDemoDay, cleanDemoDay } from "../services/giniflow/demo.js";
 import {
   getMoQueue,
@@ -575,6 +575,49 @@ await pool.query(
     reviewed?.label,
   );
   check("and carries no minutes either", reviewed?.totalMinutes === 0);
+
+  // "Not my patient" must not restart the clock. A patient waiting since 12:17,
+  // taken at 13:26 and handed back at 13:28 read as "0m" — the board turning
+  // green at the exact moment somebody had looked at them and put them back.
+  await at("with_sd", 45, "mo_sd");
+  await pool.query(
+    `INSERT INTO giniflow_visit_events (visit_id, status, actor_role, occurred_at, meta)
+     VALUES ($1, 'sd_pending', 'mo_sd', NOW() - make_interval(mins => 43), '{"released":true}')`,
+    [v.id],
+  );
+  const releasedSince = await one(
+    `SELECT e.status, EXTRACT(EPOCH FROM (NOW() - e.occurred_at)) / 60 AS mins
+       FROM giniflow_visit_events e,
+            (SELECT 'sd_pending'::text AS current_status) v
+      WHERE e.visit_id = $1 AND ${WAIT_SINCE_SQL("e", "v")}
+      ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1`,
+    [v.id],
+  );
+  check(
+    "a release does not restart the wait",
+    Math.round(releasedSince.mins) >= 85,
+    `${Math.round(releasedSince.mins)}m since ${releasedSince.status}`,
+  );
+  check(
+    "and the room that handed them back is not the start of it",
+    releasedSince.status !== "with_sd",
+  );
+
+  // A patient actually IN the room is timed from entering it — that is what a
+  // station's own "at my desk" clock means.
+  const atDesk = await one(
+    `SELECT e.status, EXTRACT(EPOCH FROM (NOW() - e.occurred_at)) / 60 AS mins
+       FROM giniflow_visit_events e,
+            (SELECT 'with_sd'::text AS current_status) v
+      WHERE e.visit_id = $1 AND ${WAIT_SINCE_SQL("e", "v")}
+      ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1`,
+    [v.id],
+  );
+  check(
+    "but a patient in the room is timed from entering it",
+    atDesk.status === "with_sd",
+    atDesk.status,
+  );
 
   // What the board reads to time the current wait.
   const since = await one(

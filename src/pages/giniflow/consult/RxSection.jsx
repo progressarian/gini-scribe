@@ -954,7 +954,7 @@ export default function RxSection({ visitId, readOnly, onToast, onUnsaved, stati
                   {chip && <span className={`rx-chip ${chip.cls}`}>{chip.label}</span>}
                   {item.approval_status === "pending" && (
                     <span className="rx-chip ch-proposed">
-                      🩺 Proposed by {item.proposed_by_name || "the MO"}
+                      🩺 Proposed by {item.proposed_by_name || "the Chief Endocrinologist"}
                     </span>
                   )}
                   {item.approval_status === "approved" && (

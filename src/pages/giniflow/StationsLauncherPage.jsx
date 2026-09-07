@@ -36,7 +36,7 @@ const STATIONS = [
     key: "reception",
     icon: "🏥",
     name: "Reception",
-    desc: "Test orders from MO · payment collection · trigger lab sample",
+    desc: "Test orders from the Chief Endocrinologist · payment collection · trigger lab sample",
     href: "/giniflow/station/reception",
   },
   {
@@ -49,7 +49,7 @@ const STATIONS = [
   {
     key: "mo_sd",
     icon: "👨‍⚕️",
-    name: "MO / SD",
+    name: "Chief Endocrinologist",
     desc: "Workup · plan · order tests · ready for doctor",
     href: "/giniflow/station/mo",
   },

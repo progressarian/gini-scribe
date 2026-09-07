@@ -1,9 +1,17 @@
 import { useMemo, useState } from "react";
 import PdfViewerModal from "../visit/PdfViewerModal";
 
-const COLLAPSED = 3;
+const COLLAPSED = 5;
 
 const dateOf = (r) => r.doc_date || (r.created_at || "").slice(0, 10);
+
+// Newest first, by the day the report is FOR and then by the moment it landed.
+// Two reports filed on one day arrived in whatever order the query happened to
+// return them, which on a day with three lab uploads is no order at all. Sorted
+// here rather than trusted from the caller: this list has two of them.
+const newestFirst = (a, b) =>
+  (dateOf(b) || "").localeCompare(dateOf(a) || "") ||
+  (b.created_at || "").localeCompare(a.created_at || "");
 
 const toDoc = (r) => ({
   id: r.id,
@@ -32,7 +40,8 @@ export default function ReportsList({ reports = [], visitDate, empty = "No docum
   const { today, earlier } = useMemo(() => {
     const t = [];
     const e = [];
-    for (const r of reports) (visitDate && dateOf(r) === visitDate ? t : e).push(r);
+    for (const r of [...reports].sort(newestFirst))
+      (visitDate && dateOf(r) === visitDate ? t : e).push(r);
     return { today: t, earlier: e };
   }, [reports, visitDate]);
 

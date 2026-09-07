@@ -21,6 +21,10 @@ import {
   useJourneyStep,
 } from "../../queries/hooks/useGiniflowJourney";
 
+// Arrived and done. They stay on the floor list — the desk is asked about them
+// — but they are not in the building.
+const FINISHED_STATUSES = ["dispensed", "exited"];
+
 const AVATAR_COLOURS = ["#374151", "#1e3a5f", "#14532d", "#7c2d12", "#7f1d1d", "#b45309"];
 
 const initials = (name = "") =>
@@ -539,17 +543,17 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed }) {
           <button
             className="st-btn st-btn-grn btn-full"
             disabled={checkIn.isPending || !list.length}
-            onClick={() => submit(!!arrival.phone)}
+            onClick={() => submit(false)}
           >
-            {arrival.phone ? "✓ Check in + send WhatsApp" : "✓ Check in"}
+            {arrival.phone ? "✓ Check in only" : "✓ Check in"}
           </button>
           {arrival.phone && (
             <button
               className="st-btn st-btn-g"
               disabled={checkIn.isPending || !list.length}
-              onClick={() => submit(false)}
+              onClick={() => submit(true)}
             >
-              Check in only
+              Check in + send WhatsApp
             </button>
           )}
         </div>
@@ -582,32 +586,61 @@ function JourneyPanel({ arrival, onClose }) {
         <div className="dp-scroll">
           <div className="dp-inner ci-panel">
             {isLoading && <div className="empty-note">Loading…</div>}
-            {steps.map((s) => (
-              <div className="jp-row" key={s.stepId}>
-                <span className={`jp-dot jp-${s.status}`} />
-                <span className="jp-name">
-                  {s.order}. {s.name}
-                  {s.staffName ? ` · ${s.staffName}` : ""}
-                </span>
-                <span className="jp-min">{s.minutes}m</span>
-                {/* Only the steps the board cannot see are the desk's to tick. The
-              rest follow the patient's status on their own, and a button that
-              duplicated that would let two truths disagree. */}
-                {s.manual && s.status !== "done" ? (
-                  <button
-                    className="st-btn st-btn-grn"
-                    disabled={step.isPending}
-                    onClick={() =>
-                      step.mutate({ action: "status", stepId: s.stepId, status: "done" })
-                    }
-                  >
-                    ✓ Done
-                  </button>
-                ) : (
-                  <span className="jp-status">{s.status.replace(/_/g, " ")}</span>
-                )}
-              </div>
-            ))}
+            {steps.map((s, i) => {
+              // Its turn: everything before it is finished, one way or another.
+              // Billing sits at seven of eight in every template, and a tick
+              // offered from check-in invited "billed" on a patient who had not
+              // yet seen the doctor.
+              // Only the template's own stops are a sequence. One the desk added
+              // during the visit is appended to the end of the list but happened
+              // now, so it is theirs to tick when they say.
+              const ordered = s.source === "template" || s.source === "auto";
+              const blocker = ordered
+                ? steps.slice(0, i).find((e) => !["done", "skipped"].includes(e.status))
+                : null;
+              return (
+                <div className="jp-row" key={s.stepId}>
+                  <span className={`jp-dot jp-${s.status}`} />
+                  <span className="jp-name">
+                    {s.order}. {s.name}
+                    {s.staffName ? ` · ${s.staffName}` : ""}
+                  </span>
+                  <span className="jp-min">{s.minutes}m</span>
+                  {/* Only the steps the board cannot see are the desk's to tick.
+                      The rest follow the patient's status on their own, and a
+                      button that duplicated that would let two truths
+                      disagree. */}
+                  {s.manual && s.status === "done" ? (
+                    <button
+                      className="st-btn st-btn-ghost"
+                      disabled={step.isPending}
+                      title="Mark it not done again"
+                      onClick={() =>
+                        step.mutate({ action: "status", stepId: s.stepId, status: "pending" })
+                      }
+                    >
+                      ✓ done · undo
+                    </button>
+                  ) : s.manual && !blocker ? (
+                    <button
+                      className="st-btn st-btn-grn"
+                      disabled={step.isPending}
+                      onClick={() =>
+                        step.mutate({ action: "status", stepId: s.stepId, status: "done" })
+                      }
+                    >
+                      ✓ Done
+                    </button>
+                  ) : s.manual ? (
+                    // Named, not just greyed: the desk needs to know WHAT comes
+                    // first, or a step that cannot be ticked reads as broken.
+                    <span className="jp-status">after {blocker.name}</span>
+                  ) : (
+                    <span className="jp-status">{s.status.replace(/_/g, " ")}</span>
+                  )}
+                </div>
+              );
+            })}
             {!isLoading && steps.length === 0 && (
               <div className="empty-note">No journey recorded for this visit.</div>
             )}
@@ -785,6 +818,11 @@ export function ArrivalsTab({
   const [journeyFor, setJourneyFor] = useState(null);
   const expected = data?.expected || [];
   const onFloor = data?.onFloor || [];
+  // The list holds everyone who is not expected and not a no-show, so it counts
+  // the patients who have already gone home alongside the ones standing in the
+  // building. One number for both read as 89 people on a floor holding 32.
+  const stillHere = onFloor.filter((a) => !FINISHED_STATUSES.includes(a.status)).length;
+  const alreadyLeft = onFloor.length - stillHere;
   const notComing = data?.notComing || [];
   const searching = (data?.query || "").length >= 2;
 
@@ -879,7 +917,10 @@ export function ArrivalsTab({
         </div>
 
         <div className="ar-col">
-          <div className="grp-lbl grp-lbl-sp">🏥 On the floor ({onFloor.length})</div>
+          <div className="grp-lbl grp-lbl-sp">
+            🏥 On the floor ({stillHere} here
+            {alreadyLeft > 0 ? ` · ${alreadyLeft} left` : ""})
+          </div>
           {onFloor.length === 0 && <div className="empty-note">Nobody in the building yet.</div>}
           {onFloor.map((a) => (
             <ArrivalRow
@@ -1094,10 +1135,13 @@ export default function ReceptionStationPage() {
                   </div>
                 </div>
                 <div className="stat">
-                  <div className="sv sv-grn">{counts.onFloor}</div>
+                  <div className="sv sv-grn">{counts.onFloorHere ?? counts.onFloor}</div>
                   <div>
                     <div className="sl">On the floor</div>
-                    <div className="ss">checked in and past it</div>
+                    <div className="ss">
+                      in the building
+                      {counts.onFloorLeft > 0 ? ` · ${counts.onFloorLeft} left today` : ""}
+                    </div>
                   </div>
                 </div>
                 <div className="stat">

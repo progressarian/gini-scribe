@@ -396,3 +396,34 @@ MO's Done list; an order for the next visit puts nobody on results-watch while
 the same order raised for today does; a wait interrupted by a report keeps its
 whole 90 minutes; both markers are named, carry no duration, and sit in time
 order; and the wait clock still reads from a real status.
+
+## "Not my patient" reset the wait clock
+
+Reported from the floor, 2026-09-07: a patient who had waited a long time was
+taken into the MO's room, handed back with **Not my patient**, and the card then
+read **0m waiting**.
+
+`status_since` was the latest event, and a release writes one. So the board
+restarted the clock at the exact moment somebody had looked at the patient and
+put them back — turning the most overdue patient on the floor green.
+
+Fixing only the release was not enough: the room visit it undid is an event too,
+so the clock would have restarted from _that_ instead. Verified on the live case,
+Gurjot Singh — waiting since 12:17, taken at 13:26, released at 13:28:
+
+| rule                  | reads                            |
+| --------------------- | -------------------------------- |
+| before                | `sd_pending` at 13:28 — **0m**   |
+| release excluded only | `with_sd` at 13:26 — 2m          |
+| now                   | `vitals_done` at 12:17 — **71m** |
+
+`WAIT_SINCE_SQL` in `shared/giniflowStatus.js` states all of it in one place, used
+by the board, the MO queue and both doctor queries. Three kinds of event are not
+an arrival: a marker (a fact, not a place), a release (the wait never stopped),
+and — **while the patient is waiting** — the room that took them and handed them
+back. A patient actually IN a room is still timed from entering it, which is what
+a station's own "at my desk" clock means, so that number is unchanged.
+
+Three checks in `smoke:giniflow-mo` hold it: a release does not restart the wait,
+the room that handed them back is not the start of it, and a patient in the room
+is timed from entering it.

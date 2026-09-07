@@ -134,14 +134,14 @@ const GROUPS = [
   },
   {
     key: "ready",
-    label: "✅ Results ready — upload now to notify MO",
+    label: "✅ Results ready — upload now to notify the Chief Endocrinologist",
     pill: "sp-ready",
     pillText: "Upload now",
     timerLabel: "results waiting",
   },
   {
     key: "uploaded",
-    label: "📤 Uploaded today — MO notified",
+    label: "📤 Uploaded today — Chief Endocrinologist notified",
     pill: "sp-done",
     pillText: "Done",
     timerLabel: "uploaded",
@@ -422,8 +422,8 @@ function LabDetailPane({
               ) : (
                 <div className="dp-hint">
                   {order.sampleStatus === "uploaded"
-                    ? "✓ Report uploaded and the MO has been notified. This patient reads “Results ready” on every dashboard."
-                    : "Upload the report below to notify the MO instantly."}
+                    ? "✓ Report uploaded and the Chief Endocrinologist has been notified. This patient reads “Results ready” on every dashboard."
+                    : "Upload the report below to notify the Chief Endocrinologist instantly."}
                 </div>
               )}
             </div>
@@ -1129,7 +1129,7 @@ export default function LabStationPage() {
               ["collecting", "Collecting", "sample taken", "var(--blu)"],
               ["processing", "Processing", "in analyzer", "var(--pu)"],
               ["ready", "Ready to upload", "results done", "var(--amb)"],
-              ["uploaded", "Uploaded", "MO notified", "var(--grn)"],
+              ["uploaded", "Uploaded", "Chief Endo notified", "var(--grn)"],
             ].map(([key, label, sub, colour]) => (
               <div className="stat" key={key}>
                 <div className="sv" style={{ color: colour }}>
@@ -1339,8 +1339,8 @@ export default function LabStationPage() {
           {!isLoading && !term && !unifiedTotal && (
             <div className="empty-note">
               No lab work today — neither a Gini Flow order nor a hospital-lab case. A patient lands
-              here the moment an MO orders tests on the MO/SD station, or the hospital lab registers
-              a case of their own.
+              here the moment tests are ordered on the Chief Endocrinologist station, or the
+              hospital lab registers a case of their own.
             </div>
           )}
         </div>

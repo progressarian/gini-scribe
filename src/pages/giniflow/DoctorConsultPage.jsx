@@ -37,7 +37,7 @@ const CATEGORY_BADGE = {
 };
 
 const NAV = [
-  { id: "s-proposals", label: "🩺 MO proposed" },
+  { id: "s-proposals", label: "🩺 Chief Endo proposed" },
   { id: "s-overview", label: "📋 Overview" },
   { id: "s-labs", label: "📊 Labs & graphs" },
   { id: "s-rx", label: "💊 Prescription" },

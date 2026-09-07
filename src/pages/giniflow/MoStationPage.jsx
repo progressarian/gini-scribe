@@ -180,7 +180,7 @@ const URGENCY = [
 const RAIL = [
   { label: "Check-in", at: "checked_in" },
   { label: "Vitals", at: "vitals_pending" },
-  { label: "MO", at: "sd_pending" },
+  { label: "Chief Endo", at: "sd_pending" },
   { label: "Doctor", at: "ready_for_doctor" },
   { label: "Pharmacy", at: "pharmacy_pending" },
 ];
@@ -775,6 +775,14 @@ export default function MoStationPage() {
     () => readMarkers(patient?.biomarkers, patient?.previousBiomarkers),
     [patient?.biomarkers, patient?.previousBiomarkers],
   );
+
+  // One definition, read by the count, the NEW flag and the highlight — three
+  // copies of this filter could disagree about what arrived today.
+  const reportsAll = patient?.reports || [];
+  const reportsToday = reportsAll.filter(
+    (r) =>
+      patient?.visitDate && (r.doc_date || (r.created_at || "").slice(0, 10)) === patient.visitDate,
+  ).length;
   const summary = useMemo(
     () => ({
       g: markers.filter((m) => m.tone === "g").length,
@@ -791,7 +799,7 @@ export default function MoStationPage() {
       <div className="top-rail">
         <div className="tr-logo">Gini Flow</div>
         <div className="tr-role" style={{ background: "var(--tl-l)", color: "var(--tl)" }}>
-          👨‍⚕️ MO / SD Station
+          👨‍⚕️ Chief Endocrinologist Station
         </div>
         {/* Whose queue this is, and for which day — a station tablet is shared,
             and an MO must be able to see at a glance that it is signed in as
@@ -909,7 +917,7 @@ export default function MoStationPage() {
                         setConfirm({
                           key: "release",
                           title: `Put ${patient.name} back in the queue?`,
-                          body: "Anything you have written is kept. They return to the waiting list for any MO to pick up.",
+                          body: "Anything you have written is kept. They return to the waiting list for any Chief Endocrinologist to pick up.",
                           confirmLabel: "Put back",
                           tone: "ghost",
                           onConfirm: releasePatient,
@@ -1030,6 +1038,73 @@ export default function MoStationPage() {
                     )}
                   </div>
                 )}
+
+                {/* Sits with the vitals and the numbers, because it is the same
+                    thing: what is known about this patient before anyone decides
+                    anything. It used to be the last section on the screen, below
+                    the prescription editor and twenty-five test chips — so the
+                    reports an MO is meant to read before closing a visit were
+                    the furthest thing from them.
+
+                    Still folded shut. Twelve full-width document rows would put
+                    the plan off the bottom, and the MO who wants a report knows
+                    they want one — what has to stand open is the count, and
+                    whether any of it arrived today. */}
+                {/* The same field ReportsList groups on, so the count, the
+                    highlight and the "Today's visit" group underneath cannot
+                    disagree about what arrived today. */}
+                {/* Values the lab typed in rather than scanned. They live in
+                    the patient's labs like any other result, but the MO reading
+                    what came back should not have to scroll past the whole
+                    prescription editor to reach them — so they sit with the
+                    reports. docs/gini-flow/32-LAB-TYPED-RESULTS-PLAN.md */}
+                {(patient.orders || []).some((o) => o.values?.length > 0) && (
+                  <div className="dp-sec mo-results">
+                    <div className="dp-sec-title">🧪 Results the lab entered</div>
+                    <div className="mo-values">
+                      {(patient.orders || []).flatMap((o) =>
+                        (o.values || []).map((v) => (
+                          <span
+                            key={`${o.id}-${v.testName}`}
+                            className={`mo-val${v.flag ? ` mo-val-${v.flag.toLowerCase()}` : ""}`}
+                          >
+                            {v.testName} <strong>{v.value ?? v.valueText}</strong>
+                            {v.unit ? ` ${v.unit}` : ""}
+                            {v.flag ? ` ${v.flag}` : ""}
+                          </span>
+                        )),
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <div className={`dp-sec${reportsToday > 0 ? " mo-reports-new" : ""}`}>
+                  <button
+                    type="button"
+                    className="sq-toggle"
+                    aria-expanded={showReports}
+                    aria-controls="mo-reports"
+                    onClick={() => setShowReports((v) => !v)}
+                  >
+                    <span className={`sq-chev${showReports ? " open" : ""}`} aria-hidden="true">
+                      ▸
+                    </span>
+                    📄 Reports
+                    <span className="sq-count">
+                      {reportsAll.length
+                        ? `${reportsAll.length}${reportsToday ? ` · ${reportsToday} from today` : ""}`
+                        : "none on file"}
+                    </span>
+                    {reportsToday > 0 && <span className="sq-new">NEW</span>}
+                  </button>
+                  <div id="mo-reports" hidden={!showReports}>
+                    <ReportsList
+                      reports={patient.reports || []}
+                      visitDate={patient.visitDate}
+                      empty="No documents on file for this patient."
+                    />
+                  </div>
+                </div>
 
                 <div className="dp-sec">
                   <div className="dp-sec-title">Today's concerns</div>
@@ -1430,67 +1505,6 @@ export default function MoStationPage() {
                         .join(" · ")}
                     </div>
                   )}
-                  {/* Values the lab typed in rather than scanned. They are in the
-                      patient's labs like any other result, but the MO deciding
-                      on THIS order should not have to leave the card to read
-                      them. docs/gini-flow/32-LAB-TYPED-RESULTS-PLAN.md */}
-                  {patient.orders.some((o) => o.values?.length > 0) && (
-                    <div className="mo-values">
-                      {patient.orders.flatMap((o) =>
-                        (o.values || []).map((v) => (
-                          <span
-                            key={`${o.id}-${v.testName}`}
-                            className={`mo-val${v.flag ? ` mo-val-${v.flag.toLowerCase()}` : ""}`}
-                          >
-                            {v.testName} <strong>{v.value ?? v.valueText}</strong>
-                            {v.unit ? ` ${v.unit}` : ""}
-                            {v.flag ? ` ${v.flag}` : ""}
-                          </span>
-                        )),
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Folded shut. Twelve full-width document rows at the foot of an
-                  already long screen pushed "Ready for the doctor" off the
-                  bottom, and the MO who wants a report knows they want one —
-                  what they need standing open is the count, and whether any of
-                  it arrived today. */}
-              <div className="dp-sec">
-                <button
-                  type="button"
-                  className="sq-toggle"
-                  aria-expanded={showReports}
-                  aria-controls="mo-reports"
-                  onClick={() => setShowReports((v) => !v)}
-                >
-                  <span className={`sq-chev${showReports ? " open" : ""}`} aria-hidden="true">
-                    ▸
-                  </span>
-                  📄 Reports
-                  <span className="sq-count">
-                    {(() => {
-                      const all = patient.reports || [];
-                      // The same field ReportsList groups on, so the count and
-                      // the "Today's visit" group underneath cannot disagree.
-                      const today = all.filter(
-                        (r) =>
-                          patient.visitDate &&
-                          (r.doc_date || (r.created_at || "").slice(0, 10)) === patient.visitDate,
-                      ).length;
-                      if (!all.length) return "none on file";
-                      return `${all.length}${today ? ` · ${today} from today` : ""}`;
-                    })()}
-                  </span>
-                </button>
-                <div id="mo-reports" hidden={!showReports}>
-                  <ReportsList
-                    reports={patient.reports || []}
-                    visitDate={patient.visitDate}
-                    empty="No documents on file for this patient."
-                  />
                 </div>
               </div>
 

@@ -26,3 +26,9 @@ export const budgetColour = (minutes, budget) => {
   if (pct >= 80) return "a";
   return "g";
 };
+
+export const dayClock = (visitDate, now = Date.now()) => {
+  if (!visitDate) return now;
+  const end = new Date(`${visitDate}T23:59:59.999+05:30`).getTime();
+  return Number.isNaN(end) ? now : Math.min(now, end);
+};

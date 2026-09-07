@@ -34,6 +34,7 @@ import {
 import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
 import { useTriageStaff, useAssignVisit } from "../../queries/hooks/useGiniflowTriage";
 import LiveBadge from "../../components/giniflow/LiveBadge";
+import { dayClock } from "../../lib/giniflowTime";
 import "../../styles/giniflow.css";
 
 // Each category needs its own mark: 🟡 for both "worse in range" and "getting
@@ -800,7 +801,8 @@ function SlaDrawer({ open, slaConfig, canEdit, onClose, onSave, saving, error })
 
 function TimelineModal({ visitId, onClose, slaConfig }) {
   const { data, isLoading } = useGiniflowTimeline(visitId);
-  const now = useTick();
+  const tick = useTick();
+  const now = dayClock(data?.visit?.visit_date, tick);
   useDismissable(!!visitId, onClose);
   if (!visitId) return null;
   const visit = data?.visit;
@@ -1273,6 +1275,7 @@ export default function FlowManagerPage() {
   if (isError && !data) return <div className="gf gf-loading">Board unavailable — retrying…</div>;
 
   const { columns = [], stats = {}, bottleneck, stationAverages = [], slaConfig = [] } = data || {};
+  const boardNow = dayClock(date, now);
   const ageSeconds = Math.round((now - dataUpdatedAt) / 1000);
   const stale = !live && ageSeconds > 45;
 
@@ -1498,7 +1501,7 @@ export default function FlowManagerPage() {
               key={column.key}
               column={column}
               offsetMs={offsetMs}
-              now={now}
+              now={boardNow}
               onOpen={(c) => setOpenVisit(c.id)}
               canManage={canRearrange}
               drag={drag}

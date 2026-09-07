@@ -40,7 +40,9 @@ export default function OverviewSection({ consult, onTile }) {
           reading what another clinician concluded, not rewriting it. */}
       {moPlan?.plan && (
         <div className="mo-plan">
-          <div className="cn-head">🩺 MO / SD plan{moPlan.author ? ` — ${moPlan.author}` : ""}</div>
+          <div className="cn-head">
+            🩺 Chief Endocrinologist plan{moPlan.author ? ` — ${moPlan.author}` : ""}
+          </div>
           <p>{moPlan.plan}</p>
         </div>
       )}

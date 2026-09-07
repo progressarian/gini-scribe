@@ -1,5 +1,5 @@
 import pool from "../../config/db.js";
-import { getSlaConfig, getDayBoard, getBottleneck } from "./board.js";
+import { getSlaConfig, getDayBoard, getBottleneck, boardClock } from "./board.js";
 import { getTriageSummary } from "./triage.js";
 
 // The counts on the launcher tiles. One query set for the whole floor, so the
@@ -11,7 +11,7 @@ import { getTriageSummary } from "./triage.js";
 // appears and then 403s is worse than no tile.
 export async function getStationSummary(visitDate, db = pool) {
   const sla = await getSlaConfig(db);
-  const board = await getDayBoard(visitDate, sla, new Date(), db);
+  const board = await getDayBoard(visitDate, sla, boardClock(visitDate), db);
   const bottleneck = getBottleneck(board.columns);
 
   const col = (key) => board.columns.find((c) => c.key === key)?.count ?? 0;

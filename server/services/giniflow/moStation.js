@@ -3,7 +3,7 @@ import { OPEN_LAB_CASES_SQL } from "./labStation.js";
 import { finalizeConsult } from "./finalize.js";
 import { advanceStatus, budgetColour } from "./statusEngine.js";
 import { getSlaConfig, budgetLookup } from "./board.js";
-import { slaKeyForStatus, NOT_A_MARKER_SQL } from "../../../shared/giniflowStatus.js";
+import { slaKeyForStatus, WAIT_SINCE_SQL } from "../../../shared/giniflowStatus.js";
 import { todaysVitals, previousVitals } from "./visitVitals.js";
 import { ALLERGY_NOT_ASKED } from "../../../shared/giniflowAllergy.js";
 
@@ -144,7 +144,7 @@ const QUEUE_SQL = `
     ) first_ev ON TRUE
     LEFT JOIN LATERAL (
       SELECT occurred_at FROM giniflow_visit_events e
-       WHERE e.visit_id = v.id AND ${NOT_A_MARKER_SQL("e.status")}
+       WHERE e.visit_id = v.id AND ${WAIT_SINCE_SQL("e", "v")}
        ORDER BY occurred_at DESC, id DESC LIMIT 1
     ) last_ev ON TRUE
    WHERE v.visit_date = $1::date
@@ -373,7 +373,7 @@ export async function getMoPatient(visitId, db = pool) {
     db.query(
       `SELECT id, doc_type, title, doc_date, created_at, file_name, mime_type
          FROM documents WHERE patient_id = $1
-        ORDER BY COALESCE(doc_date, created_at::date) DESC LIMIT 30`,
+        ORDER BY COALESCE(doc_date, created_at::date) DESC, created_at DESC LIMIT 30`,
       [v.patient_id],
     ),
   ]);

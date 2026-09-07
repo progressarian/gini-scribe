@@ -26,6 +26,8 @@ const INVALIDATES = {
     ["giniflow", "reception"],
     ["giniflow", "lab"],
     ["giniflow", "pharmacy"],
+    ["giniflow", "doctor"],
+    ["giniflow", "rx"],
     // No eventTailer stream of its own: referrals write no event table, and a
     // visit moving is the only thing that changes this list from outside (19 §10).
     ["giniflow", "referrals"],
@@ -52,11 +54,13 @@ const INVALIDATES = {
     ["giniflow", "reception"],
     ["giniflow", "lab"],
     ["giniflow", "mo"],
+    ["giniflow", "doctor"],
     ["giniflow", "board"],
   ],
   vitals: [
     ["giniflow", "vitals"],
     ["giniflow", "mo"],
+    ["giniflow", "doctor"],
     ["giniflow", "board"],
   ],
 };
@@ -75,7 +79,7 @@ const DROP_GRACE_MS = 8000;
 
 export function useGiniflowLive({ date, enabled = true, paused = false } = {}) {
   const queryClient = useQueryClient();
-  const [live, setLiveState] = useState(false);
+  const [live, setLiveState] = useState(null);
   const pausedRef = useRef(paused);
   pausedRef.current = paused;
 

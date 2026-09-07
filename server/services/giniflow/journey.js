@@ -453,6 +453,37 @@ export async function setStepStatus(stepId, status, db = pool) {
   if (!["pending", "in_progress", "done", "skipped"].includes(status)) {
     throw Object.assign(new Error("Unknown step status"), { status: 400 });
   }
+
+  // A stop only becomes tickable when the ones before it are finished. Billing
+  // sits seventh of eight in every template, and a tick available from check-in
+  // let a patient be marked billed before they had seen the doctor.
+  //
+  // Enforced here as well as hidden on the screen: a hidden button is not a
+  // rule, and this one decides whether a patient's record says they paid.
+  // Undoing is never blocked — a mis-tick has to be correctable.
+  if (status === "done") {
+    const { rows: earlier } = await db.query(
+      `SELECT prev.step_name
+         FROM giniflow_visit_steps s
+         JOIN giniflow_visit_steps prev
+           ON prev.visit_id = s.visit_id AND prev.step_order < s.step_order
+        WHERE s.id = $1 AND prev.status NOT IN ('done', 'skipped')
+          -- Only what the TEMPLATE laid out is a sequence. A stop the desk added
+          -- during the visit is appended to the end of the list but happened
+          -- now, and holding it until the pharmacy had been done would make it
+          -- untickable for the whole visit.
+          AND s.source IN ('template', 'auto')
+        ORDER BY prev.step_order LIMIT 1`,
+      [stepId],
+    );
+    if (earlier.length) {
+      throw Object.assign(
+        new Error(`${earlier[0].step_name} comes first — this stop is not due yet`),
+        { status: 409 },
+      );
+    }
+  }
+
   const { rows } = await db.query(
     `UPDATE giniflow_visit_steps
         SET status = $2,

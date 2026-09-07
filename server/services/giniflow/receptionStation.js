@@ -509,6 +509,9 @@ export async function getTestCatalog(db = pool) {
 
 const EXPECTED_STATUSES = ["booked", "confirmed"];
 const NOT_COMING_STATUSES = ["no_show", "cancelled"];
+// Arrived and done. They stay on the floor list — the desk is asked about them
+// — but they are not in the building.
+const FINISHED_STATUSES = ["dispensed", "exited"];
 
 // Marking someone absent is only truthful while the desk is the last thing that
 // happened to them. Once a station has seen the patient, the building itself has
@@ -647,11 +650,31 @@ export async function getArrivals(visitDate, q = "", now = new Date(), db = pool
 
   const arrivals = visible.map((r) => shapeArrival(r, now));
 
+  // The two lists are ordered by different clocks, because they answer
+  // different questions. Expected keeps the booked slot — it is the day as
+  // planned, and the desk works down it. On the floor is the building as it
+  // actually is, so it runs by arrival: the person who has been here longest is
+  // at the top, where someone should be looking at them. Sorted by slot it read
+  // as nonsense — an 8:14 arrival sat below a 15:30 booking who walked in at
+  // 8:42, and the people waiting longest were scattered down a list of 82.
+  // Still here outranks gone. "On the floor" holds everyone who is not expected
+  // and not a no-show, which includes the patients who have already left — sort
+  // those in with the rest and the whole top of an 82-row list is people who
+  // went home hours ago. They stay on the list, because the desk is asked about
+  // them, but they belong under the people still in the building.
+  const gone = (a) => (FINISHED_STATUSES.includes(a.status) ? 1 : 0);
+  const byArrival = (a, b) =>
+    gone(a) - gone(b) ||
+    (a.checkedInAt || "").localeCompare(b.checkedInAt || "") ||
+    (a.slot || "").localeCompare(b.slot || "");
+
   return {
     expected: arrivals.filter((a) => EXPECTED_STATUSES.includes(a.status)),
-    onFloor: arrivals.filter(
-      (a) => !EXPECTED_STATUSES.includes(a.status) && !NOT_COMING_STATUSES.includes(a.status),
-    ),
+    onFloor: arrivals
+      .filter(
+        (a) => !EXPECTED_STATUSES.includes(a.status) && !NOT_COMING_STATUSES.includes(a.status),
+      )
+      .sort(byArrival),
     notComing: arrivals.filter((a) => NOT_COMING_STATUSES.includes(a.status)),
     // The unfiltered day, so a search does not make the tab's own count move.
     counts: rows.reduce(
@@ -662,9 +685,14 @@ export async function getArrivals(visitDate, q = "", now = new Date(), db = pool
             ? "notComing"
             : "onFloor";
         acc[key]++;
+        // `onFloor` is everyone who arrived, finished or not, so on its own it
+        // says 89 about a floor holding 32. Split so the tile can say which.
+        if (key === "onFloor") {
+          acc[FINISHED_STATUSES.includes(r.current_status) ? "onFloorLeft" : "onFloorHere"]++;
+        }
         return acc;
       },
-      { expected: 0, onFloor: 0, notComing: 0 },
+      { expected: 0, onFloor: 0, notComing: 0, onFloorHere: 0, onFloorLeft: 0 },
     ),
     query,
   };

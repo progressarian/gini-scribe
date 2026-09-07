@@ -1,12 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "../../services/api";
+import { pollInterval } from "./giniflowPolling";
 import { visitWriteKey } from "./useGiniflowPrescription";
 
 // The consultant's station. Same polling contract as every other Gini Flow
-// screen — 15s, client-side ticking between polls — so that when
-// docs/gini-flow/12-REALTIME-PLAN.md replaces the transport, this switches over
-// with the rest rather than needing its own unpicking. Never hand-roll an
-// interval in the page.
+// screen — the shared pollInterval, client-side ticking between polls, and the
+// live stream on top of it (docs/gini-flow/12-REALTIME-PLAN.md). Never
+// hand-roll an interval in the page.
 export function useDoctorQueue({ date, scope = "mine", q = "" } = {}) {
   return useQuery({
     queryKey: ["giniflow", "doctor", "queue", date || "today", scope, q],
@@ -16,7 +16,7 @@ export function useDoctorQueue({ date, scope = "mine", q = "" } = {}) {
           params: { ...(date ? { date } : {}), scope, ...(q ? { q } : {}) },
         })
       ).data,
-    refetchInterval: 15_000,
+    refetchInterval: pollInterval,
     refetchIntervalInBackground: false,
     placeholderData: (prev) => prev,
   });
