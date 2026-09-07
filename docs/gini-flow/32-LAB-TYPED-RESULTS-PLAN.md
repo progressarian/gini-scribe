@@ -57,10 +57,15 @@ KFT   Uric Acid mg/dL 3.5-7.2 · Creatinine mg/dL 0.80-1.30 · BUN mg/dL 8.0-23.
 LFT   Direct Bilirubin mg/dL 0.00-0.20 · SGPT (ALT) U/L <50 …
 ```
 
-**Capped at 12 rows per ordered test.** Those three panels have 192 parameters on
-file between them, which is a form nobody fills in; the rest stay one
-autocomplete away. A parameter both panels claim — creatinine on a KFT and an LFT
-— appears once.
+**Ten rows on the screen, the rest one pick away.** Those three panels have 192
+parameters on file between them; the server takes the 12 each ordered test
+reports most often, and the form shows the first ten of those and puts the
+remainder behind a **"+ More from this order (26)"** picker. Thirty-six input
+boxes is a form nobody reads to the bottom, and ten is also the honest shape —
+the lab types the handful it has values for, not every line it might. Removing a
+row returns it to the picker, so a test dropped and then printed by the analyser
+does not have to be retyped. A parameter both panels claim — creatinine on a KFT
+and an LFT — appears once.
 
 ## The flag rule, shared
 

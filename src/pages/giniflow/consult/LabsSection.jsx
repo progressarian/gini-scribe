@@ -50,19 +50,33 @@ export default function LabsSection({ consult, onTrend }) {
     [labs],
   );
 
+  // Newest first. The list arrived in whatever order the query produced —
+  // roughly alphabetical — so a panel run this morning sat scattered between
+  // results from last November, and the consultant had to read the date column
+  // of forty rows to find the ones they are consulting about.
+  const byNewest = useMemo(() => {
+    const when = (l) => l.test_date || "";
+    return (list) =>
+      [...list].sort(
+        (a, b) =>
+          when(b).localeCompare(when(a)) ||
+          (a.test_name || a.test || "").localeCompare(b.test_name || b.test || ""),
+      );
+  }, []);
+
   const shown = useMemo(() => {
     if (tab === "reports") return [];
-    if (tab === "all") return labs;
+    if (tab === "all") return byNewest(labs);
     // "Other" and "Reports" are tabs without a TABS entry — they are computed,
     // not matched. Looking one up returned undefined and reading `.match` off it
     // crashed the whole section the moment anybody opened Other.
-    if (tab === "other") return other;
+    if (tab === "other") return byNewest(other);
     const spec = TABS.find((t) => t.key === tab);
     if (!spec) return [];
     // A tab with nothing in it would read as "this patient has no lipids" when
     // it may mean "nothing matched the filter" — so the empty state says which.
-    return labs.filter((l) => matches(l.test, spec.match));
-  }, [labs, tab, other]);
+    return byNewest(labs.filter((l) => matches(l.test, spec.match)));
+  }, [labs, tab, other, byNewest]);
 
   // Switching tabs collapses again — a new list should open at its top, not
   // half-way down someone else's expansion.
@@ -139,7 +153,16 @@ export default function LabsSection({ consult, onTrend }) {
                     {l.result ?? l.result_text ?? "—"} {l.unit || ""}
                   </td>
                   <td className="lt-ref">{l.ref_range || "—"}</td>
-                  <td className="lt-ref">{l.test_date || "—"}</td>
+                  <td className="lt-ref">
+                    {/* Same words the reports list beneath this table uses for
+                        the same idea — a result from today's visit is the one
+                        the consultation is actually about. */}
+                    {visitDate && l.test_date === visitDate ? (
+                      <span className="lt-today">🟢 Today&apos;s visit</span>
+                    ) : (
+                      l.test_date || "—"
+                    )}
+                  </td>
                   <td>
                     <button type="button" className="lt-graph" onClick={() => onTrend(l)}>
                       Graph →

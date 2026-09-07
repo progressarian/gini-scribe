@@ -83,10 +83,18 @@ function AddRow({ onAdd }) {
   );
 }
 
+// A CBC with a KFT and an LFT prefills thirty-six rows, and a form that long is
+// one nobody reads to the bottom. The first ten are on the screen; the rest of
+// the order's own parameters are one pick away, which is also the honest shape —
+// the lab types the handful it has values for, not every line it might.
+const VISIBLE_ROWS = 10;
+
 export default function LabResultsForm({ orderId, onSaved, onFailed }) {
   const { data, isLoading } = useLabResults(orderId);
   const save = useSaveLabResults();
   const [rows, setRows] = useState(null);
+  // The order's remaining suggested parameters, offered in the picker below.
+  const [rest, setRest] = useState([]);
 
   // Whatever has already been entered comes back for correcting; an order with
   // nothing on it yet opens on the suggested rows.
@@ -104,18 +112,18 @@ export default function LabResultsForm({ orderId, onSaved, onFailed }) {
       setRows(entered);
       return;
     }
-    setRows(
-      (data.suggestions || []).flatMap((group) =>
-        group.params.map((p) => ({
-          testName: p.testName,
-          value: "",
-          valueText: "",
-          unit: p.unit || "",
-          refRange: p.refRange || "",
-          panelName: group.test,
-        })),
-      ),
+    const suggested = (data.suggestions || []).flatMap((group) =>
+      group.params.map((p) => ({
+        testName: p.testName,
+        value: "",
+        valueText: "",
+        unit: p.unit || "",
+        refRange: p.refRange || "",
+        panelName: group.test,
+      })),
     );
+    setRows(suggested.slice(0, VISIBLE_ROWS));
+    setRest(suggested.slice(VISIBLE_ROWS));
   }, [data, rows]);
 
   const list = rows || [];
@@ -173,13 +181,43 @@ export default function LabResultsForm({ orderId, onSaved, onFailed }) {
               type="button"
               className="jb-remove"
               title="Remove this test"
-              onClick={() => setRows(list.filter((_, idx) => idx !== i))}
+              onClick={() => {
+                setRows(list.filter((_, idx) => idx !== i));
+                // Back into the picker rather than gone: removing a row the desk
+                // has no value for should not mean retyping its name and range
+                // if the analyser prints it after all.
+                if (row.panelName && !rest.some((r) => r.testName === row.testName)) {
+                  setRest([...rest, { ...row, value: "", valueText: "" }]);
+                }
+              }}
             >
               ✕
             </button>
           </div>
         );
       })}
+
+      {rest.length > 0 && (
+        <select
+          className="jb-add"
+          value=""
+          onChange={(e) => {
+            const picked = rest.find((r) => r.testName === e.target.value);
+            if (!picked) return;
+            setRows([...list, picked]);
+            setRest(rest.filter((r) => r.testName !== picked.testName));
+          }}
+        >
+          <option value="">+ More from this order ({rest.length})</option>
+          {rest.map((r) => (
+            <option key={r.testName} value={r.testName}>
+              {r.panelName ? `${r.panelName} · ` : ""}
+              {r.testName}
+              {r.unit ? ` (${r.unit})` : ""}
+            </option>
+          ))}
+        </select>
+      )}
 
       <AddRow onAdd={(row) => setRows([...list, { ...row, valueText: "", panelName: "" }])} />
 

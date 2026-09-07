@@ -2936,6 +2936,14 @@
   padding: 5px 6px;
   border-bottom: 1px solid var(--bd);
 }
+/* A result from the visit being consulted about, called out where its date
+   would otherwise be — the consultant is looking for exactly these. */
+.gf .lt-today {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--grn);
+  white-space: nowrap;
+}
 .gf .lt-ref {
   color: var(--ink4);
   font-size: 10px;
