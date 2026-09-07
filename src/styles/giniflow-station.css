@@ -1383,6 +1383,13 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+  /* The column and its sections stay inside the pane whatever they hold: a
+     flex child that cannot shrink below its content is how one long document
+     title widened this whole pane. */
+  min-width: 0;
+}
+.gf .dp-sec {
+  min-width: 0;
 }
 /* The pane's action bar. It never had a rule, so its buttons sat hard against
    the pane's edges with nothing between them and the content scrolling past
@@ -1406,6 +1413,17 @@
   background: var(--bg);
   border-radius: var(--r-lg);
   padding: 11px 13px;
+}
+/* A section that folds reads like one that does not: the toggle wears the
+   section title's own type and sits flush, rather than carrying the padding it
+   needs inside the station queue. */
+.gf .dp-sec > .sq-toggle {
+  padding: 0;
+  font-size: 10px;
+  letter-spacing: 0.4px;
+}
+.gf .dp-sec > .sq-toggle[aria-expanded="true"] {
+  margin-bottom: 8px;
 }
 .gf .dp-sec-title {
   font-size: 10px;
@@ -2968,6 +2986,10 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  /* A flex item defaults to min-width:auto, so one long document title —
+     "Prescription — Dr. Beant Sidhu — Visit — 2026-07-20 04:26 PM" — was wider
+     than the pane and pushed the whole column out with it. */
+  min-width: 0;
 }
 /* A button now, not a link: the report opens in the app's PDF viewer rather
    than a new tab carrying the auth token in its URL. */
@@ -2976,6 +2998,7 @@
   align-items: center;
   gap: 8px;
   width: 100%;
+  min-width: 0;
   padding: 7px 10px;
   border: 1px solid var(--bd);
   border-radius: var(--r);
@@ -2993,6 +3016,13 @@
   display: flex;
   flex-direction: column;
   font-size: 11px;
+  /* Takes the room that is left and wraps inside it, rather than demanding the
+     width its longest word wants. */
+  flex: 1;
+  min-width: 0;
+}
+.gf .lr-t strong {
+  overflow-wrap: anywhere;
 }
 .gf .lr-t em {
   font-style: normal;
@@ -3003,6 +3033,8 @@
   margin-left: auto;
   font-size: 10px;
   color: var(--blu);
+  /* Never squeezed to nothing, and never the reason the row grows. */
+  flex-shrink: 0;
 }
 .gf .lrep-grp {
   font-size: 9px;

@@ -420,6 +420,9 @@ export default function MoStationPage() {
   const [urgency, setUrgency] = useState("today");
   const [picked, setPicked] = useState([]);
   const [pinned, setPinned] = useState(false);
+  // Reports open on request. Twelve of them standing open pushed the actions off
+  // the foot of the screen.
+  const [showReports, setShowReports] = useState(false);
   const [toast, setToast] = useState("");
   const [openMarker, setOpenMarker] = useState(null);
   const [draft, setDraft] = useState(EMPTY_PROPOSAL);
@@ -1450,13 +1453,45 @@ export default function MoStationPage() {
                 </div>
               </div>
 
+              {/* Folded shut. Twelve full-width document rows at the foot of an
+                  already long screen pushed "Ready for the doctor" off the
+                  bottom, and the MO who wants a report knows they want one —
+                  what they need standing open is the count, and whether any of
+                  it arrived today. */}
               <div className="dp-sec">
-                <div className="dp-sec-title">📄 Reports</div>
-                <ReportsList
-                  reports={patient.reports || []}
-                  visitDate={patient.visitDate}
-                  empty="No documents on file for this patient."
-                />
+                <button
+                  type="button"
+                  className="sq-toggle"
+                  aria-expanded={showReports}
+                  aria-controls="mo-reports"
+                  onClick={() => setShowReports((v) => !v)}
+                >
+                  <span className={`sq-chev${showReports ? " open" : ""}`} aria-hidden="true">
+                    ▸
+                  </span>
+                  📄 Reports
+                  <span className="sq-count">
+                    {(() => {
+                      const all = patient.reports || [];
+                      // The same field ReportsList groups on, so the count and
+                      // the "Today's visit" group underneath cannot disagree.
+                      const today = all.filter(
+                        (r) =>
+                          patient.visitDate &&
+                          (r.doc_date || (r.created_at || "").slice(0, 10)) === patient.visitDate,
+                      ).length;
+                      if (!all.length) return "none on file";
+                      return `${all.length}${today ? ` · ${today} from today` : ""}`;
+                    })()}
+                  </span>
+                </button>
+                <div id="mo-reports" hidden={!showReports}>
+                  <ReportsList
+                    reports={patient.reports || []}
+                    visitDate={patient.visitDate}
+                    empty="No documents on file for this patient."
+                  />
+                </div>
               </div>
 
               {/* 31-MO-LED-CLOSURE-PLAN §5.6. The decision the whole flow turns
