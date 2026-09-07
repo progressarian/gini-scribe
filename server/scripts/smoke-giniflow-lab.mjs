@@ -10,7 +10,7 @@ import "../loadEnv.js";
 process.env.GINIFLOW_ALLOW_DEMO = "1";
 import pool from "../config/db.js";
 import { seedDemoDay, cleanDemoDay } from "../services/giniflow/demo.js";
-import { getLabQueue, advanceSample } from "../services/giniflow/labStation.js";
+import { getLabQueue, advanceSample, isCollected } from "../services/giniflow/labStation.js";
 import { clearPayment } from "../services/giniflow/receptionStation.js";
 
 let failures = 0;
@@ -22,6 +22,24 @@ const one = async (sql, params) => (await pool.query(sql, params)).rows[0];
 
 const TEST_DAY = "2019-01-06";
 const before = await one(`SELECT count(*)::int AS c FROM flow_visits`);
+
+// ── A sample the lab already has is not one to go and draw ─────────────────
+// HealthRay leaves phlebotomy_status at "In progress" on cases whose tube is
+// demonstrably in the lab, so reading that field alone put "✓ Mark sample
+// collected" on a case sitting in Processing — which is the screen sending a
+// technician to draw blood twice.
+check("phlebotomy Completed is collected", isCollected({ phlebotomy: "Completed" }) === true);
+check("a collection timestamp is collected", isCollected({ collectedOn: "2026-09-07" }) === true);
+check(
+  "so is a tube the lab has received",
+  isCollected({ phlebotomy: "In progress", receivedOn: "2026-09-07T08:07:00Z" }) === true,
+);
+check("and one already run", isCollected({ resultSavedOn: "2026-09-07" }) === true);
+check("and one already reported", isCollected({ reportedOn: "2026-09-07" }) === true);
+check(
+  "but a case nobody has touched is still to draw",
+  isCollected({ phlebotomy: "In progress" }) === false,
+);
 
 await cleanDemoDay();
 await seedDemoDay({ date: TEST_DAY });

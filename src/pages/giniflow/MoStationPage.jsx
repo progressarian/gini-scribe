@@ -23,6 +23,7 @@ import useAuthStore from "../../stores/authStore";
 import { useTick, minutesSince, budgetColour } from "../../lib/giniflowTime";
 import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
 import LiveBadge from "../../components/giniflow/LiveBadge";
+import ReportsList from "../../components/giniflow/ReportsList";
 import "../../styles/giniflow-station.css";
 import StationNotice from "../../components/giniflow/StationNotice";
 
@@ -1447,6 +1448,15 @@ export default function MoStationPage() {
                     </div>
                   )}
                 </div>
+              </div>
+
+              <div className="dp-sec">
+                <div className="dp-sec-title">📄 Reports</div>
+                <ReportsList
+                  reports={patient.reports || []}
+                  visitDate={patient.visitDate}
+                  empty="No documents on file for this patient."
+                />
               </div>
 
               {/* 31-MO-LED-CLOSURE-PLAN §5.6. The decision the whole flow turns

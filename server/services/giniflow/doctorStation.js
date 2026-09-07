@@ -6,6 +6,7 @@ import { todaysVitals, previousVitals } from "./visitVitals.js";
 import { buildBrief } from "./consultBrief.js";
 import { seedDraftOn } from "./prescription.js";
 import { OPEN_LAB_CASES_SQL } from "./labStation.js";
+import { nonTestPredicate } from "../../utils/nonTests.js";
 
 // The consultant's station — the queue that forms in front of Dr. Bhansali, and
 // the consult screen itself.
@@ -457,14 +458,17 @@ export async function getConsult(visitId, db = pool) {
       `SELECT DISTINCT ON (COALESCE(canonical_name, test_name))
               COALESCE(canonical_name, test_name) AS test, test_name, result, result_text,
               unit, ref_range, flag, panel_name, test_date
-         FROM lab_results WHERE patient_id = $1
+         FROM lab_results
+        WHERE patient_id = $1
+          AND ${nonTestPredicate("COALESCE(canonical_name, test_name)")}
+          AND ${nonTestPredicate("test_name")}
         ORDER BY COALESCE(canonical_name, test_name), test_date DESC, id DESC`,
       [v.patient_id],
     ),
     db.query(
-      `SELECT id, doc_type, title, doc_date, created_at
+      `SELECT id, doc_type, title, doc_date, created_at, file_name, mime_type
          FROM documents WHERE patient_id = $1
-        ORDER BY COALESCE(doc_date, created_at::date) DESC LIMIT 12`,
+        ORDER BY COALESCE(doc_date, created_at::date) DESC LIMIT 30`,
       [v.patient_id],
     ),
     db.query(

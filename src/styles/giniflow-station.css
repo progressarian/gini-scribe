@@ -2996,6 +2996,31 @@
   font-size: 10px;
   color: var(--blu);
 }
+.gf .lrep-grp {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--ink3);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 4px 2px 0;
+}
+.gf .lrep.is-today {
+  border-color: var(--grn);
+  background: var(--grn-l);
+}
+.gf .lrep-more {
+  align-self: flex-start;
+  background: none;
+  border: 0;
+  padding: 2px 2px 0;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--blu);
+  cursor: pointer;
+}
+.gf .lrep-more:hover {
+  text-decoration: underline;
+}
 
 /* ── MO proposals ── */
 .gf .prop {

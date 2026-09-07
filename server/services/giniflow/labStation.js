@@ -359,7 +359,16 @@ export const LAB_STAGES = CASE_STAGE.map((s) => ({ key: s.key, label: s.label })
 // The LIST payload carries `phlebotomy_status` on every pass and needs no detail
 // call. Across the last week it takes exactly two values and never contradicts
 // `collected_on` where both are present, so it is the earlier, safer signal.
-const isCollected = (c) => c.phlebotomy === "Completed" || !!c.collectedOn;
+// ...and any stage BEYOND collection is proof too. HealthRay leaves
+// phlebotomy_status at "In progress" on cases whose tube is demonstrably in the
+// lab — case 19609 was received at 08:07 with the field never updated — so a
+// case sitting in Processing was still being offered "✓ Mark sample collected".
+// A tube cannot be run before it is drawn, and offering an action that cannot
+// apply is how a technician is sent to draw blood twice.
+const pastCollection = (c) => !!c.receivedOn || !!c.resultSavedOn || !!c.reportedOn;
+
+export const isCollected = (c) =>
+  c.phlebotomy === "Completed" || !!c.collectedOn || pastCollection(c);
 
 const stageIndex = (c) => {
   if (c.reportedOn) return 4;
@@ -880,6 +889,31 @@ export async function markLabCaseAction(
   if (!known.length) throw new Error(`No such lab case: ${caseNo}`);
 
   if (action === "sample_taken" && !undo) {
+    // The lab already has this tube. A screen open since before it was received
+    // would otherwise write "collected by" against a sample somebody else drew,
+    // and that name is the only record of who drew it.
+    const { rows: state } = await db.query(
+      `SELECT raw_list_json->>'phlebotomy_status' AS phlebotomy,
+              raw_list_json->>'collected_on'      AS collected_on,
+              raw_list_json->>'received_on'       AS received_on,
+              raw_list_json->>'result_saved_on'   AS result_saved_on,
+              raw_list_json->>'reported_on'       AS reported_on
+         FROM lab_cases WHERE case_no = $1`,
+      [caseNo],
+    );
+    const c = state[0] || {};
+    const already =
+      c.phlebotomy === "Completed" ||
+      !!c.collected_on ||
+      !!c.received_on ||
+      !!c.result_saved_on ||
+      !!c.reported_on;
+    if (already) {
+      throw Object.assign(new Error("This sample has already been collected — the lab has it"), {
+        status: 409,
+      });
+    }
+
     const { rows: visit } = await db.query(
       `SELECT v.id FROM lab_cases lc
          JOIN giniflow_visits v ON v.visit_date = lc.case_date

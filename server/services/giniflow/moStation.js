@@ -295,6 +295,7 @@ export async function getMoPatient(visitId, db = pool) {
     { rows: notes },
     { rows: proposals },
     { rows: orders },
+    { rows: reports },
   ] = await Promise.all([
     // Today's reading and the one before it — the MO is reading a change, not a
     // number. Through the shared reader, because the reading may be in either
@@ -347,11 +348,18 @@ export async function getMoPatient(visitId, db = pool) {
           GROUP BY o.id ORDER BY o.created_at`,
       [visitId],
     ),
+    db.query(
+      `SELECT id, doc_type, title, doc_date, created_at, file_name, mime_type
+         FROM documents WHERE patient_id = $1
+        ORDER BY COALESCE(doc_date, created_at::date) DESC LIMIT 30`,
+      [v.patient_id],
+    ),
   ]);
 
   return {
     visitId: v.id,
     patientId: v.patient_id,
+    visitDate: v.visit_date,
     name: v.name,
     fileNo: v.file_no,
     age: v.age,
@@ -395,6 +403,7 @@ export async function getMoPatient(visitId, db = pool) {
     compliancePct: v.pre_visit_compliance?.pct ?? null,
     diagnoses: v.opd_diagnoses || null,
     medications: v.opd_medications || null,
+    reports,
     plan: notes[0]?.plan ?? "",
     planUpdatedAt: notes[0]?.updated_at ?? null,
     proposals,

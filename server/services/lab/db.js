@@ -1,6 +1,7 @@
 // ── Lab HealthRay Sync — DB operations ──────────────────────────────────────
 
 import pool from "../../config/db.js";
+import { isNonTest } from "../../utils/nonTests.js";
 import { inflateSync } from "zlib";
 import { extractInvestigationSummary, isLabCasePrintable } from "./labHealthrayParser.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config/storage.js";
@@ -912,6 +913,9 @@ export async function syncLabCaseResults(patientId, appointmentId, caseDate, res
   let written = 0;
   for (const r of results) {
     if (r.value === null) continue; // skip non-numeric results (e.g. "Positive", "Negative")
+    // The report header is not a result. Without this every synced report filed
+    // the patient's age as a test.
+    if (isNonTest(r.canonicalName) || isNonTest(r.testName)) continue;
 
     // Always remove any existing lab_healthray row for same patient+test+date
     // Handles re-sync when appointmentId is null (no matching appointment)

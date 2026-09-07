@@ -550,6 +550,14 @@ const UPLOADED_PREVIEW = 5;
 // Why the lab cannot get to this patient right now. A sample that is overdue but
 // unreachable is not the technician's failure, and a card that says "Collect now"
 // about someone sitting in the doctor's room is asking for the impossible.
+// Where the patient is matters only while the tube is still in their arm. Once
+// it is drawn, processing, reporting and entering the values have nothing to do
+// with them — so a case past collection stays openable after they have gone
+// home, and the lab can carry on with it.
+const stillNeedsThePatient = (row) => row.stage.key === "pending";
+
+const cannotBeWorked = (row) => stillNeedsThePatient(row) && !row.collectable;
+
 const blockedReason = (row) => {
   if (row.stage.key !== "pending") return null;
   if (row.inARoom) return `In the ${(row.station || "").toLowerCase()} room — collect once free`;
@@ -787,16 +795,25 @@ function HealthrayCasePane({ row, onClose, onAction, onUploadCase, isAdmin, busy
                         (c.actions || []).some((x) => x.action === a.action),
                     );
                     if (!offered.length) return null;
+                    // Only what is still OUTSTANDING can be blocked by where the
+                    // patient is. An action already recorded needs nothing from
+                    // them, and telling a technician the sample "can no longer be
+                    // taken" next to a ✓ saying it was taken is the screen
+                    // contradicting itself.
+                    const outstanding = offered.filter(
+                      (a) => !(c.actions || []).some((x) => x.action === a.action),
+                    );
+                    const hint = !outstanding.length
+                      ? null
+                      : row.collectable
+                        ? outstanding[0].hint
+                        : row.finished
+                          ? "This patient has left the floor — the sample can no longer be taken."
+                          : `This patient is in the ${(row.station || "").toLowerCase()} room right now. Collect once they are free.`;
                     return (
                       <>
                         <div className="dp-sec-title">Update status</div>
-                        <div className="dp-hint">
-                          {row.collectable
-                            ? offered[0].hint
-                            : row.finished
-                              ? "This patient has left the floor — the sample can no longer be taken."
-                              : `This patient is in the ${(row.station || "").toLowerCase()} room right now. Collect once they are free.`}
-                        </div>
+                        {hint && <div className="dp-hint">{hint}</div>}
                         <div className="hr-acts">
                           {offered.map((a) => {
                             const done = (c.actions || []).find((x) => x.action === a.action);
@@ -1178,7 +1195,7 @@ export default function LabStationPage() {
                               key={`hr-${row.patientId}`}
                               row={row}
                               onOpen={() => setOpenCaseId(row.patientId)}
-                              readOnly={!row.collectable}
+                              readOnly={cannotBeWorked(row)}
                             />
                           ))}
                           {orders.map((order) => (
@@ -1292,7 +1309,6 @@ export default function LabStationPage() {
                               key={`dh-${r.row.patientId}`}
                               row={r.row}
                               onOpen={() => setOpenCaseId(r.row.patientId)}
-                              readOnly={part.key === "left"}
                             />
                           ),
                         )}

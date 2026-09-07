@@ -168,6 +168,55 @@ Two things the review surfaced that were bigger than the finding:
   suite's `cleanDemoDay()` deletes those, which was deleting this suite's order
   out from under it whenever two runs overlapped. Four consecutive green runs.
 
+## Also fixed: "Mark sample collected" on a case already processing
+
+Spotted on the floor, 2026-09-07. A HealthRay case sitting in **Processing**,
+with "Received by lab 15:42" printed on the same pane, still offered
+**✓ Mark sample collected**.
+
+`isCollected` read only `phlebotomy_status === "Completed"` or `collected_on`.
+HealthRay leaves that field at "In progress" on cases whose tube is demonstrably
+in the lab — case 19609 was received at 08:07 with `phlebotomy_status` never
+updated and `collected_on` null — so the button appeared on a sample already
+being run. The pane's own comment states the rule it was breaking: "an action
+that cannot apply must not be offered. A sample already collected has nothing
+left to mark." A tube cannot be run before it is drawn, and offering the action
+anyway is how a technician is sent to draw blood twice.
+
+Now any stage beyond collection — received, result saved, reported — counts as
+collected, and `markLabCaseAction` **refuses** `sample_taken` on such a case
+rather than only hiding the button: a screen left open since before the tube
+arrived would otherwise write a collector's name against a sample somebody else
+drew, and that name is the only record of who drew it.
+
+Six checks in `smoke:giniflow-lab` pin the truth table. They are pure and sit
+above the demo seeding, so they run whatever state the shared demo day is in.
+
+## Also fixed: a case in the analyser was a dead card once the patient left
+
+Same screen, same afternoon. Cases showing **Processing · 283m in analyzer** with
+"Exited — has left the floor" rendered as `aria-disabled` divs: not openable, not
+focusable, nothing to click. **25 of today's 32 hospital-lab patients** were in
+that state.
+
+The cause is one field used for two questions. `collectable` answers "can the lab
+physically get to this patient right now" — false while another station has them
+and once they go home. That is exactly right for **drawing blood**, and the stage
+list was using it to disable the whole card.
+
+But where the patient is matters only while the tube is still in their arm. Once
+it is drawn, processing, reporting, reading the tests and entering the values have
+nothing to do with them. So the card is now inert only when the case is still
+waiting to be drawn _and_ the patient is out of reach
+(`cannotBeWorked = stillNeedsThePatient(row) && !row.collectable`); a case past
+collection stays openable, and the finished cases in "Lab done" opened up too —
+reading a case never needed the patient present.
+
+The detail pane had the matching contradiction: it printed "This patient has left
+the floor — the sample can no longer be taken" beside a ✓ saying the sample was
+taken. Only an action still outstanding can be blocked by where the patient is,
+so the hint is computed from those and omitted when there are none.
+
 ## Risks worth stating
 
 - These rows are a patient's permanent record and reach their app. That is the

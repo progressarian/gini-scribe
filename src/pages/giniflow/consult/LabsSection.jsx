@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
-import PdfViewerModal from "../../../components/visit/PdfViewerModal";
+import ReportsList from "../../../components/giniflow/ReportsList";
 
 // Labs & graphs — gini-doctor-final.html `s-labs`.
 //
-// Five tabs, then the actual report PDFs. Reports are opened here, never
+// Six tabs, then the actual report PDFs. Reports are opened here, never
 // re-uploaded: uploading is the lab station's job, and a report filed under the
 // wrong document type is fixed at the classifier rather than worked around with
 // a second upload button (plan §7).
@@ -28,15 +28,20 @@ const matches = (test, words) => {
   return words.some((w) => t.includes(w));
 };
 
+// A patient on file since 2025 has 41 rows in All, and the consultant reads the
+// top of the list — today's panel — not the tail. The table had no cap at all,
+// so every tab rendered its whole history and pushed the rest of the consult
+// screen off the page. Same preview-and-toggle the lab station's "left the
+// floor" list uses.
+const PREVIEW_ROWS = 12;
+
 const flagClass = (flag) =>
   flag === "HIGH" ? "lab-hi" : flag === "LOW" ? "lab-lo" : flag ? "lab-hi" : "";
 
 export default function LabsSection({ consult, onTrend }) {
-  const [tab, setTab] = useState("diabetes");
-  // The same viewer the visit tab, the lab portal and the flow panel use: it
-  // fetches the file from the id, so this only has to hand it one.
-  const [viewingDoc, setViewingDoc] = useState(null);
-  const { labs, reports } = consult;
+  const [tab, setTab] = useState("all");
+  const [showAll, setShowAll] = useState(false);
+  const { labs, reports, visitDate } = consult;
 
   // Everything that fits none of the panels above. Computed first because the
   // "Other" tab shows exactly this list.
@@ -47,6 +52,7 @@ export default function LabsSection({ consult, onTrend }) {
 
   const shown = useMemo(() => {
     if (tab === "reports") return [];
+    if (tab === "all") return labs;
     // "Other" and "Reports" are tabs without a TABS entry — they are computed,
     // not matched. Looking one up returned undefined and reading `.match` off it
     // crashed the whole section the moment anybody opened Other.
@@ -58,67 +64,51 @@ export default function LabsSection({ consult, onTrend }) {
     return labs.filter((l) => matches(l.test, spec.match));
   }, [labs, tab, other]);
 
+  // Switching tabs collapses again — a new list should open at its top, not
+  // half-way down someone else's expansion.
+  const pick = (key) => {
+    setTab(key);
+    setShowAll(false);
+  };
+
+  const rows = showAll ? shown : shown.slice(0, PREVIEW_ROWS);
+  const hidden = shown.length - rows.length;
+
   return (
     <section className="csec" id="s-labs">
-      {viewingDoc && <PdfViewerModal doc={viewingDoc} onClose={() => setViewingDoc(null)} />}
       <div className="cs-head">
         <h2>📊 Labs &amp; graphs</h2>
         <span className="cs-sub">{labs.length} tests on file</span>
       </div>
 
       <div className="ltabs">
+        <button type="button" className={tab === "all" ? "on" : ""} onClick={() => pick("all")}>
+          All ({labs.length})
+        </button>
         {TABS.map((t) => (
           <button
             type="button"
             key={t.key}
             className={tab === t.key ? "on" : ""}
-            onClick={() => setTab(t.key)}
+            onClick={() => pick(t.key)}
           >
             {t.label}
           </button>
         ))}
-        <button
-          type="button"
-          className={tab === "other" ? "on" : ""}
-          onClick={() => setTab("other")}
-        >
+        <button type="button" className={tab === "other" ? "on" : ""} onClick={() => pick("other")}>
           Other ({other.length})
         </button>
         <button
           type="button"
           className={tab === "reports" ? "on" : ""}
-          onClick={() => setTab("reports")}
+          onClick={() => pick("reports")}
         >
           📄 Reports ({reports.length})
         </button>
       </div>
 
       {tab === "reports" ? (
-        <div className="lreports">
-          {reports.length === 0 && <div className="cn-empty">No documents on file.</div>}
-          {reports.map((r) => (
-            <button
-              type="button"
-              className="lrep"
-              key={r.id}
-              onClick={() =>
-                setViewingDoc({
-                  id: r.id,
-                  title: r.title || r.doc_type || "Report",
-                  file_name: r.file_name || `${r.doc_type || "report"}.pdf`,
-                  mime_type: r.mime_type,
-                })
-              }
-            >
-              <span className="lr-ico">🧪</span>
-              <span className="lr-t">
-                <strong>{r.title || r.doc_type}</strong>
-                <em>{r.doc_date || (r.created_at || "").slice(0, 10)}</em>
-              </span>
-              <span className="lr-go">View →</span>
-            </button>
-          ))}
-        </div>
+        <ReportsList reports={reports} visitDate={visitDate} />
       ) : (
         // A results table has five columns of numbers and cannot usefully
         // narrow. It scrolls inside its own box rather than pushing the page
@@ -142,7 +132,7 @@ export default function LabsSection({ consult, onTrend }) {
                   </td>
                 </tr>
               )}
-              {shown.map((l) => (
+              {rows.map((l) => (
                 <tr key={`${l.test}-${l.test_date}`}>
                   <td>{l.test_name || l.test}</td>
                   <td className={flagClass(l.flag)}>
@@ -159,6 +149,18 @@ export default function LabsSection({ consult, onTrend }) {
               ))}
             </tbody>
           </table>
+          {(hidden > 0 || showAll) && shown.length > PREVIEW_ROWS && (
+            <button
+              type="button"
+              className="more-note more-btn"
+              aria-expanded={showAll}
+              onClick={() => setShowAll((v) => !v)}
+            >
+              {showAll
+                ? `Show fewer — ${shown.length} tests in this group`
+                : `+ ${hidden} older ${hidden === 1 ? "test" : "tests"} — show all`}
+            </button>
+          )}
         </div>
       )}
     </section>
