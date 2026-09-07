@@ -62,15 +62,51 @@ const identity = (p) =>
     p.phone ? ` · ${p.phone}` : ""
   }`;
 
+const CHIP = {
+  pending: { cls: "sp-pay", text: "⚠ Payment pending" },
+  part_paid: { cls: "sp-process", text: "◐ Part paid — balance due" },
+  insurance_claim: { cls: "sp-sample", text: "💰 Claim submitted — awaiting approval" },
+};
+
+const CLAIM_LINE = {
+  submitted: "awaiting approval",
+  approved: "approved",
+  rejected: "rejected by the insurer",
+};
+
 function OrderCard({ order, onClear, pending, actorId }) {
-  const claimed = order.paymentStatus === "insurance_claim";
+  const claimed = order.claimState === "submitted";
   const [form, setForm] = useState(null);
   const ownClaim = claimed && actorId != null && order.claimSubmittedBy === actorId;
+  const chip = CHIP[order.paymentStatus] || CHIP.pending;
+  const due = Number(order.outstanding ?? order.total);
+  // The cash button offers what can actually be collected — with a claim
+  // standing, the balance is with the insurer, not at the counter.
+  const collectible = Number(order.collectible ?? due);
 
-  const submitClaim = (e) => {
-    e.preventDefault();
-    onClear(order, "insurance_claim", { insurer: form.insurer, policyNo: form.policyNo });
+  const field = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const send = (method, body) => {
+    onClear(order, method, body);
     setForm(null);
+  };
+  const submit = (e) => {
+    e.preventDefault();
+    if (form.kind === "claim") {
+      send("insurance_claim", {
+        insurer: form.insurer,
+        policyNo: form.policyNo || undefined,
+        amountClaimed: form.amountClaimed ? Number(form.amountClaimed) : undefined,
+      });
+    } else if (form.kind === "split") {
+      send("split", {
+        amountPaid: Number(form.amountPaid),
+        amountClaimed: Number(form.amountClaimed),
+        insurer: form.insurer,
+        policyNo: form.policyNo || undefined,
+      });
+    } else {
+      send("claim_rejected", { note: form.note || undefined });
+    }
   };
 
   return (
@@ -90,9 +126,7 @@ function OrderCard({ order, onClear, pending, actorId }) {
             · Urgency: <strong>{order.urgency}</strong>
           </div>
         </div>
-        <div className={`sp ${claimed ? "sp-sample" : "sp-pay"}`}>
-          {claimed ? "💰 Claim submitted — awaiting approval" : "⚠ Payment pending"}
-        </div>
+        <div className={`sp ${chip.cls}`}>{chip.text}</div>
       </div>
 
       <div className="toc-body">
@@ -104,10 +138,19 @@ function OrderCard({ order, onClear, pending, actorId }) {
         {order.tests.length === 0 && <span className="toc-test">No tests listed</span>}
       </div>
 
+      {/* What has actually been collected against what was quoted. The
+          outstanding figure is the one the desk acts on, so it is the one that
+          turns red. */}
       <div className="toc-total">
         <span className="amt">Total: {rupees(order.total)}</span>
-        <span className="badge b-ink">
-          {order.tests.length} test{order.tests.length === 1 ? "" : "s"}
+        {order.paid > 0 && <span className="toc-part">Collected {rupees(order.paid)}</span>}
+        {order.claimed > 0 && (
+          <span className="toc-part">
+            Claim {rupees(order.claimed)} · {CLAIM_LINE[order.claimState] || order.claimState}
+          </span>
+        )}
+        <span className={due > 0 ? "toc-due" : "toc-settled"}>
+          {due > 0 ? `Outstanding ${rupees(due)}` : "✓ Settled"}
         </span>
         <span className="toc-ins">
           Insurance:{" "}
@@ -120,60 +163,149 @@ function OrderCard({ order, onClear, pending, actorId }) {
       {claimed && (
         <div className="toc-claim">
           Claim submitted by {order.claimSubmittedByName || "the desk"}
-          {ownClaim && " — someone else has to confirm the approval"}
+        </div>
+      )}
+      {order.claimState === "rejected" && (
+        <div className="toc-claim">
+          Claim rejected{order.claimNote ? ` — ${order.claimNote}` : ""} · collect from the patient
         </div>
       )}
 
       <div className="toc-foot">
         {form ? (
-          <form className="toc-claim-form" onSubmit={submitClaim}>
-            <input
-              autoFocus
-              required
-              className="ar-reason-input"
-              placeholder="Insurer or TPA"
-              value={form.insurer}
-              onChange={(e) => setForm({ ...form, insurer: e.target.value })}
-            />
-            <input
-              className="ar-reason-input"
-              placeholder="Policy no (optional)"
-              value={form.policyNo}
-              onChange={(e) => setForm({ ...form, policyNo: e.target.value })}
-            />
-            <button className="st-btn st-btn-blu" type="submit" disabled={pending}>
-              Submit claim
+          <form className="toc-claim-form" onSubmit={submit}>
+            {form.kind === "split" && (
+              <input
+                autoFocus
+                required
+                type="number"
+                min="1"
+                step="0.01"
+                className="ar-reason-input toc-amt-input"
+                placeholder="Cash ₹"
+                value={form.amountPaid}
+                onChange={field("amountPaid")}
+              />
+            )}
+            {form.kind !== "reject" && (
+              <input
+                autoFocus={form.kind === "claim"}
+                required={form.kind === "split"}
+                type="number"
+                min="1"
+                step="0.01"
+                className="ar-reason-input toc-amt-input"
+                placeholder={form.kind === "split" ? "Claim ₹" : `Claim ₹ (default ${due})`}
+                value={form.amountClaimed}
+                onChange={field("amountClaimed")}
+              />
+            )}
+            {form.kind !== "reject" && (
+              <>
+                <input
+                  required
+                  className="ar-reason-input"
+                  placeholder="Insurer or TPA"
+                  value={form.insurer}
+                  onChange={field("insurer")}
+                />
+                <input
+                  className="ar-reason-input"
+                  placeholder="Policy no (optional)"
+                  value={form.policyNo}
+                  onChange={field("policyNo")}
+                />
+              </>
+            )}
+            {form.kind === "reject" && (
+              <input
+                autoFocus
+                className="ar-reason-input"
+                placeholder="What the insurer said (optional)"
+                value={form.note}
+                onChange={field("note")}
+              />
+            )}
+            <button
+              className={`st-btn ${form.kind === "reject" ? "st-btn-red" : "st-btn-blu"}`}
+              type="submit"
+              disabled={pending}
+            >
+              {form.kind === "split"
+                ? "Take cash + claim rest"
+                : form.kind === "claim"
+                  ? "Submit claim"
+                  : "Record rejection"}
             </button>
             <button className="st-btn st-btn-ghost" type="button" onClick={() => setForm(null)}>
               Cancel
             </button>
           </form>
         ) : claimed ? (
-          <button
-            className="st-btn st-btn-grn"
-            disabled={pending || ownClaim}
-            title={
-              ownClaim ? "You submitted this claim — another user has to approve it" : undefined
-            }
-            onClick={() => onClear(order, "claim_approved")}
-          >
-            ✓ Claim approved — notify lab
-          </button>
+          <>
+            {/* The submitter is not offered the approval at all. A disabled
+                button says "you may not", which reads as a fault; what the desk
+                needs is who CAN, so the order can move. */}
+            {ownClaim ? (
+              <span className="toc-await">
+                Waiting for a second person to confirm the insurer approved this — you submitted it
+              </span>
+            ) : (
+              <button
+                className="st-btn st-btn-grn"
+                disabled={pending}
+                onClick={() => onClear(order, "claim_approved")}
+              >
+                ✓ Claim approved — notify lab
+              </button>
+            )}
+            <button
+              className="st-btn st-btn-ghost"
+              disabled={pending}
+              onClick={() => setForm({ kind: "reject", note: "" })}
+            >
+              Insurer refused
+            </button>
+          </>
         ) : (
           <>
+            {/* An order with nothing left to collect is still on this list
+                because its status says so — an unpriced order, or one written by
+                an older build. The button stays live: it is what reconciles the
+                order and lets the lab have it, and greying it out would strand
+                the patient with no way forward. */}
             <button
               className="st-btn st-btn-grn"
               disabled={pending}
               onClick={() => onClear(order, "paid")}
             >
-              ✓ Payment received — notify lab
+              {collectible > 0
+                ? `✓ ${rupees(collectible)} received — notify lab`
+                : "✓ Nothing to collect — notify lab"}
             </button>
             <button
               className="st-btn st-btn-blu"
               disabled={pending}
-              onClick={() => setForm({ insurer: "", policyNo: "" })}
+              onClick={() =>
+                setForm({ kind: "claim", insurer: "", policyNo: "", amountClaimed: "" })
+              }
             >
               Insurance claim
+            </button>
+            <button
+              className="st-btn st-btn-g"
+              disabled={pending}
+              onClick={() =>
+                setForm({
+                  kind: "split",
+                  insurer: "",
+                  policyNo: "",
+                  amountPaid: "",
+                  amountClaimed: "",
+                })
+              }
+            >
+              Split
             </button>
           </>
         )}
@@ -182,6 +314,39 @@ function OrderCard({ order, onClear, pending, actorId }) {
     </div>
   );
 }
+
+// What the desk is told after a write. The outstanding balance is the useful
+// half: "received" on an order that still owes ₹350 would read as finished.
+const clearedMessage = (order, method, body, r) => {
+  const name = order.name;
+  if (r.alreadySettled) {
+    // The reconcile write settles nothing new but DOES hand the order to the
+    // lab, so "nothing changed" would be the wrong thing to tell the desk.
+    if (r.reconciled) return `✓ ${name}'s order had nothing left to collect — lab notified`;
+    return r.claimState === "submitted"
+      ? `${name}'s claim is already submitted — waiting for approval`
+      : `${name} was already settled — nothing charged twice`;
+  }
+  const rest = r.outstanding > 0 ? `₹${r.outstanding} still outstanding` : "lab can collect now";
+  if (method === "insurance_claim") return `${name}'s claim sent to ${body.insurer} — ${rest}`;
+  if (method === "split")
+    return `✓ ${rupees(body.amountPaid)} taken from ${name}, ${rupees(body.amountClaimed)} claimed from ${body.insurer} — ${rest}`;
+  if (method === "claim_approved") return `✓ ${name}'s claim approved — ${rest}`;
+  if (method === "claim_rejected")
+    return `${name}'s claim was refused — ₹${r.outstanding} to collect from the patient`;
+  return `✓ ${rupees(r.amountPaid - order.paid)} received from ${name} — ${rest}`;
+};
+
+// How a settled order reads once it is off the working list. A split says both
+// halves — "Paid ₹1,250" on an order where the insurer covered ₹900 would be a
+// lie the accounts would have to unpick later.
+const settledAs = (o) => {
+  const cash = Number(o.paid) || 0;
+  const claim = o.claimState === "approved" ? Number(o.claimed) || 0 : 0;
+  if (cash && claim) return `Cash ${rupees(cash)} + claim ${rupees(claim)} approved`;
+  if (claim) return `Insurance claim ${rupees(claim)} approved`;
+  return `Paid ${rupees(cash || o.total)}`;
+};
 
 // How many of the day's cleared orders the tab shows before it is asked.
 const CLEARED_PREVIEW = 8;
@@ -239,10 +404,8 @@ export function PaymentsTab({ data, isLoading, onClear, pending, actorId }) {
                 <div className="toc-cleared">
                   {o.name} ·{" "}
                   <span className="tc-detail">
-                    {o.paymentStatus === "claim_approved"
-                      ? "Insurance claim approved"
-                      : `Paid ${rupees(o.total)}`}{" "}
-                    · {SAMPLE_LABEL[o.sampleStatus] || o.sampleStatus.replace(/_/g, " ")}
+                    {settledAs(o)} ·{" "}
+                    {SAMPLE_LABEL[o.sampleStatus] || o.sampleStatus.replace(/_/g, " ")}
                   </span>
                 </div>
                 <div className="sp sp-paid">✓ Cleared {clock(o.paidAt)}</div>
@@ -544,7 +707,10 @@ export default function ReceptionStationPage() {
   const { data, isLoading } = useReceptionQueue();
   const { data: arrivals, isLoading: arrivalsLoading } = useArrivals(undefined, term);
   const live = useGiniflowLive({ date: data?.date });
-  const actorId = useAuthStore((st) => st.currentDoctor?.doctor_id);
+  // /api/auth/me returns the doctors row, so the id is `id` — `doctor_id` is
+  // only the login form's field name, and reading it left the card unable to
+  // tell whose claim it was showing.
+  const actorId = useAuthStore((st) => st.currentDoctor?.id ?? st.currentDoctor?.doctor_id);
   const clearPayment = useClearPayment();
   const arrivalAction = useArrivalAction();
   const checkInWalkIn = useCheckInWalkIn();
@@ -564,22 +730,13 @@ export default function ReceptionStationPage() {
   const failed = (e, fallback) =>
     showToast(e?.response?.data?.detail || e?.response?.data?.error || fallback);
 
-  const onClear = (order, method, claim = {}) =>
+  // Every write carries the version the card was rendered from, so a second tap
+  // on a stale card is refused by the server instead of charging twice.
+  const onClear = (order, method, body = {}) =>
     clearPayment.mutate(
-      { orderId: order.orderId, method, ...claim },
+      { orderId: order.orderId, method, version: order.version, ...body },
       {
-        onSuccess: (r) =>
-          showToast(
-            r.alreadySettled
-              ? r.paymentStatus === "insurance_claim"
-                ? `${order.name}'s claim is already submitted — waiting for approval`
-                : `${order.name} was already cleared — nothing charged twice`
-              : method === "insurance_claim"
-                ? `${order.name}'s claim sent to ${claim.insurer} — lab waits for approval`
-                : method === "claim_approved"
-                  ? `✓ ${order.name}'s claim approved — lab can collect now`
-                  : `✓ ${rupees(order.total)} received from ${order.name} — lab can collect now`,
-          ),
+        onSuccess: (r) => showToast(clearedMessage(order, method, body, r)),
         onError: (e) => failed(e, "Could not clear this — nothing was changed"),
       },
     );

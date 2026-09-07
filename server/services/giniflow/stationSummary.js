@@ -19,8 +19,12 @@ export async function getStationSummary(visitDate, db = pool) {
 
   const { rows: lab } = await db.query(
     `SELECT
-       count(*) FILTER (WHERE o.payment_status = 'pending')::int AS payment_pending,
-       count(*) FILTER (WHERE o.payment_status <> 'pending'
+       -- Settled means paid or an APPROVED claim. A submitted claim and a
+       -- part-paid order are both still reception's work, the same way the
+       -- reception queue counts them (shared/labPayment.js).
+       count(*) FILTER (WHERE o.payment_status NOT IN ('paid','claim_approved'))::int
+         AS payment_pending,
+       count(*) FILTER (WHERE o.payment_status IN ('paid','claim_approved')
                           AND o.sample_status IN ('ordered','payment_pending','paid'))::int AS to_collect,
        count(*) FILTER (WHERE o.sample_status = 'results_ready')::int AS to_upload
      FROM giniflow_lab_orders o

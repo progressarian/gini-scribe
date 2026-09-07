@@ -29,7 +29,7 @@ import {
   giniflowDateQuerySchema,
   giniflowStationQuerySchema,
   giniflowMoQueueQuerySchema,
-  giniflowPaymentSchema,
+  giniflowPaymentSchemaChecked,
   giniflowLabCaseActionSchema,
   giniflowReportSchema,
   giniflowOrderTestsSchema,
@@ -944,7 +944,7 @@ router.post("/giniflow/stations/reception/:visitId/undo", receptionGate, async (
 router.post(
   "/giniflow/stations/reception/:orderId/clear",
   receptionGate,
-  validate(giniflowPaymentSchema),
+  validate(giniflowPaymentSchemaChecked),
   async (req, res) => {
     try {
       res.json(
@@ -952,9 +952,13 @@ router.post(
           method: req.body.method,
           actorId: req.doctor?.doctor_id ?? null,
           actorRole: req.doctor?.role || "reception",
+          amountPaid: req.body.amountPaid,
+          amountClaimed: req.body.amountClaimed,
           insurer: req.body.insurer,
           policyNo: req.body.policyNo,
           claimNo: req.body.claimNo,
+          note: req.body.note,
+          version: req.body.version,
         }),
       );
     } catch (e) {

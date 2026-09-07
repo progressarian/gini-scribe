@@ -802,6 +802,38 @@
   color: var(--ink3);
   margin-bottom: 8px;
 }
+/* Shown where the approve button would be, to the one person who cannot press
+   it. It occupies the button's place so the row does not collapse. */
+.gf .toc-await {
+  font-size: 11px;
+  color: var(--ink3);
+  background: var(--bg);
+  border-radius: var(--r);
+  padding: 5px 9px;
+}
+/* What has been collected so far, next to what is still owed. The outstanding
+   figure is the number the desk acts on, so it is the one with weight. */
+.gf .toc-part {
+  font-size: 11px;
+  color: var(--ink3);
+}
+.gf .toc-due {
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--fm);
+  color: var(--red);
+}
+.gf .toc-settled {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--grn);
+}
+/* Amounts are typed, not chosen, so they get a narrow field rather than the
+   width a free-text reason needs. */
+.gf .toc-amt-input {
+  flex: 0 0 110px;
+  min-width: 90px;
+}
 /* Submitting a claim asks for the insurer in the row the buttons were in, the
    same way a cancellation asks for its reason. */
 .gf .toc-claim-form {
@@ -863,6 +895,14 @@
 }
 .gf .st-btn-g:hover {
   color: var(--ink);
+}
+.gf .st-btn-red {
+  background: var(--red-l);
+  color: var(--red);
+  border-color: var(--red);
+}
+.gf .st-btn-red:hover {
+  opacity: 0.88;
 }
 .gf .st-btn:disabled {
   opacity: 0.55;

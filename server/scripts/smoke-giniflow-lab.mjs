@@ -147,14 +147,23 @@ const claimRow = await one(
   [TEST_DAY],
 );
 await pool.query(
-  `UPDATE giniflow_lab_orders SET payment_status = 'pending', sample_status = 'payment_pending'
+  // The money is reset with the status: payment_status is derived from it now,
+  // so an order set back to pending with the cash still recorded is not unpaid,
+  // it is inconsistent.
+  `UPDATE giniflow_lab_orders
+      SET payment_status = 'pending', sample_status = 'payment_pending',
+          amount_paid = 0, amount_claimed = 0, claim_state = 'none', claim_note = NULL
     WHERE id = $1`,
   [claimRow.id],
 );
 const claimOrder = (await getLabQueue(TEST_DAY)).pending.find((o) => o.orderId === claimRow.id);
 check("an order is available to test the claim path", !!claimOrder);
 if (claimOrder) {
-  await clearPayment(claimOrder.orderId, { method: "insurance_claim" });
+  await clearPayment(claimOrder.orderId, {
+    method: "insurance_claim",
+    actorId: 20,
+    insurer: "Star Health",
+  });
   const afterClaim = (await getLabQueue(TEST_DAY)).pending.find(
     (o) => o.orderId === claimOrder.orderId,
   );
@@ -169,7 +178,7 @@ if (claimOrder) {
     .catch((e) => e.status === 409);
   check("collecting on an unapproved claim is refused", refusedOnClaim);
 
-  await clearPayment(claimOrder.orderId, { method: "claim_approved" });
+  await clearPayment(claimOrder.orderId, { method: "claim_approved", actorId: 26 });
   const approved = (await getLabQueue(TEST_DAY)).pending.find(
     (o) => o.orderId === claimOrder.orderId,
   );

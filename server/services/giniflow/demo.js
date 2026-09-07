@@ -1161,10 +1161,14 @@ export async function seedDemoDay({ db = pool, date = null, sdId = null } = {}) 
       const visitId = byKey[order.journey];
       if (!visitId) continue;
       const created = await client.query(
+        // amount_paid follows payment_status: the money is what the status is
+        // derived from now, so a demo order marked paid with nothing collected
+        // would render as unpaid on the very screen the demo is showing.
         `INSERT INTO giniflow_lab_orders
            (visit_id, ordered_by, urgency, payment_status, amount_total, sample_status,
-          created_at, updated_at, uploaded_at)
-         VALUES ($1, $2, 'today', $3, $4, $5, $6, $6, $7) RETURNING id`,
+          created_at, updated_at, uploaded_at, amount_paid)
+         VALUES ($1, $2, 'today', $3, $4, $5, $6, $6, $7,
+                 CASE WHEN $3 = 'paid' THEN $4::numeric ELSE 0 END) RETURNING id`,
         [
           visitId,
           doctors.chief,

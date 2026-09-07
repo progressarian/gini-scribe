@@ -592,11 +592,35 @@ export const giniflowVitalsSchema = z.object({
   source: z.enum(["manual", "voice"]).default("manual"),
 });
 
+// An order can be settled by cash, by a claim, or by both at once, so the
+// amounts are optional: absent means "the whole outstanding balance", which is
+// what keeps the common full-payment case a single tap with no form.
 export const giniflowPaymentSchema = z.object({
-  method: z.enum(["paid", "insurance_claim", "claim_approved"]).default("paid"),
+  method: z
+    .enum(["paid", "insurance_claim", "split", "claim_approved", "claim_rejected"])
+    .default("paid"),
+  amountPaid: z.coerce.number().positive().max(10000000).optional(),
+  amountClaimed: z.coerce.number().positive().max(10000000).optional(),
   insurer: z.string().trim().max(120).optional(),
   policyNo: z.string().trim().max(60).optional(),
   claimNo: z.string().trim().max(60).optional(),
+  note: z.string().trim().max(500).optional(),
+  // The version the desk was looking at — a stale one means the order moved
+  // under them and the write is refused rather than applied twice. Required for
+  // anything that moves money: without it a repeated POST (a stale browser tab,
+  // a retried request) collects the same amount again, which is the whole reason
+  // the column exists.
+  version: z.coerce.number().int().min(0).optional(),
+});
+
+export const giniflowPaymentSchemaChecked = giniflowPaymentSchema.superRefine((v, ctx) => {
+  if (["paid", "split", "insurance_claim"].includes(v.method) && v.version === undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["version"],
+      message: "Reload the payments list and try again — this request is missing its order version",
+    });
+  }
 });
 
 // Reception's arrivals tab: the same day + optional search shape the board's

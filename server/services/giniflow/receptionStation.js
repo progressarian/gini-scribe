@@ -9,6 +9,15 @@ import { advanceStatus, IST_TODAY } from "./statusEngine.js";
 import { searchDayVisits } from "./board.js";
 import { blockDetail } from "../patientBlockView.js";
 import { createWalkinBooking } from "../walkinBooking.js";
+import {
+  CLAIM_STATE,
+  collectiblePaise,
+  derivePaymentStatus,
+  opensLabGate,
+  outstandingPaise,
+  paise,
+  rupeesFromPaise,
+} from "../../../shared/labPayment.js";
 
 // Reception: the payment desk between the MO ordering tests and the lab
 // collecting a sample.
@@ -21,8 +30,8 @@ import { createWalkinBooking } from "../walkinBooking.js";
 
 const ORDER_SELECT = `
   SELECT o.id, o.visit_id, o.urgency, o.payment_status, o.sample_status,
-         o.amount_total, o.created_at, o.updated_at,
-         o.insurer, o.policy_no, o.claim_no,
+         o.amount_total, o.amount_paid, o.amount_claimed, o.created_at, o.updated_at,
+         o.insurer, o.policy_no, o.claim_no, o.claim_state, o.claim_note, o.version,
          p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
          d.short_name AS ordered_by,
          claim_ev.actor_id AS claim_submitted_by,
@@ -42,7 +51,7 @@ const ORDER_SELECT = `
     LEFT JOIN LATERAL (
       SELECT occurred_at FROM giniflow_lab_order_events e
        WHERE e.lab_order_id = o.id AND e.track = 'payment'
-         AND e.status IN ('paid', 'insurance_claim', 'claim_approved')
+         AND e.status IN ('paid', 'part_paid', 'insurance_claim', 'claim_approved')
        ORDER BY occurred_at DESC LIMIT 1
     ) paid_ev ON TRUE
     LEFT JOIN LATERAL (
@@ -62,6 +71,20 @@ const ORDER_SELECT = `
      -- A patient who never arrived or has gone home is not at the counter.
      AND v.current_status NOT IN ('no_show', 'cancelled')`;
 
+// An order written before amount_total existed carries the price only on its
+// test lines. The card falls back to their sum, so the money maths has to use
+// the same figure — reading the raw column there would call such an order
+// settled while the card still shows what it is worth.
+const totalOf = (r) =>
+  Number(r.amount_total) || (r.tests || []).reduce((s, t) => s + Number(t.price || 0), 0);
+
+const moneyOf = (r) => ({
+  amountTotal: totalOf(r),
+  amountPaid: r.amount_paid,
+  amountClaimed: r.amount_claimed,
+  claimState: r.claim_state,
+});
+
 const shape = (r) => ({
   orderId: r.id,
   visitId: r.visit_id,
@@ -77,13 +100,22 @@ const shape = (r) => ({
   insurer: r.insurer,
   policyNo: r.policy_no,
   claimNo: r.claim_no,
+  claimState: r.claim_state,
+  claimNote: r.claim_note,
+  version: r.version,
   claimSubmittedBy: r.claim_submitted_by,
   claimSubmittedByName: r.claim_submitted_by_name,
   claimApprovedByName: r.claim_approved_by_name,
   tests: r.tests || [],
   // The amount the order itself recorded — what the patient was quoted. Falls
   // back to summing the lines for orders created before amount_total was written.
-  total: Number(r.amount_total) || (r.tests || []).reduce((s, t) => s + Number(t.price || 0), 0),
+  total: totalOf(r),
+  paid: Number(r.amount_paid),
+  claimed: Number(r.amount_claimed),
+  // Two different numbers the desk needs: what the order still owes, and what
+  // of it can be taken in cash rather than being with an insurer.
+  outstanding: rupeesFromPaise(outstandingPaise(moneyOf(r))),
+  collectible: rupeesFromPaise(collectiblePaise(moneyOf(r))),
   orderedAt: r.created_at ? new Date(r.created_at).toISOString() : null,
   paidAt: r.paid_at ? new Date(r.paid_at).toISOString() : null,
 });
@@ -92,9 +124,9 @@ export async function getPaymentQueue(visitDate, db = pool) {
   const { rows } = await db.query(`${ORDER_SELECT} ORDER BY o.created_at`, [visitDate]);
   const orders = rows.map(shape);
 
-  // A submitted claim still needs someone to chase the approval, so it stays on
-  // reception's list rather than disappearing into "cleared".
-  const pending = orders.filter((o) => ["pending", "insurance_claim"].includes(o.paymentStatus));
+  // Anything not settled is still reception's work: an untouched order, one
+  // part paid, and a submitted claim somebody has to chase the approval for.
+  const pending = orders.filter((o) => !opensLabGate(o.paymentStatus));
   // Paid, but the lab has not taken the sample yet — reception's own "did my
   // clearing actually reach the lab" check.
   const awaitingSample = orders.filter(
@@ -123,17 +155,41 @@ export async function getPaymentQueue(visitDate, db = pool) {
   };
 }
 
-// Clearing an order is what lets the lab collect. One transaction: the status,
-// and the event that records who cleared it and how.
-// `insurance_claim` records that a claim was SUBMITTED — it does not open the
-// lab gate. `claim_approved` does. Brief §2.2: "Lab cannot collect a sample until
-// paid (or claim approved)."
-export const SETTLED_METHODS = ["paid", "insurance_claim", "claim_approved"];
+// Clearing an order is what lets the lab collect. One transaction: the money,
+// the derived status, and the event that records who did it and how.
+//
+// An order can be settled two ways at once — a policy that covers ₹900 of a
+// ₹1,250 order leaves ₹350 for the patient. So these are the actions on the
+// money, not the states of it: the state is derived in shared/labPayment.js from
+// what has actually been collected and what the insurer has actually approved.
+//
+// `insurance_claim` records that a claim was SUBMITTED — a promise settles
+// nothing and does not open the lab gate. `claim_approved` does.
+// Brief §2.2: "Lab cannot collect a sample until paid (or claim approved)."
+export const PAYMENT_METHODS = [
+  "paid",
+  "insurance_claim",
+  "split",
+  "claim_approved",
+  "claim_rejected",
+];
 
-// What counts as cleared for the lab.
-export const opensLabGate = (paymentStatus) => ["paid", "claim_approved"].includes(paymentStatus);
+export { opensLabGate };
 
 const trimmed = (v) => (typeof v === "string" && v.trim() ? v.trim() : null);
+
+const bad = (message, status = 400) => Object.assign(new Error(message), { status });
+
+// An amount the desk typed. Absent means "whatever is still outstanding", which
+// is what makes the one-tap full payment a single button with no form.
+const amountPaise = (value, fallbackPaise, label) => {
+  if (value === null || value === undefined || value === "") return fallbackPaise;
+  const n = Number(value);
+  if (!Number.isFinite(n)) throw bad(`${label} must be an amount`);
+  const p = paise(n);
+  if (p <= 0) throw bad(`${label} must be more than zero`);
+  return p;
+};
 
 export async function clearPayment(
   orderId,
@@ -141,90 +197,268 @@ export async function clearPayment(
     method = "paid",
     actorId = null,
     actorRole = "reception",
+    amountPaid = null,
+    amountClaimed = null,
     insurer = null,
     policyNo = null,
     claimNo = null,
+    note = null,
+    version = null,
   },
   db = pool,
 ) {
-  if (!SETTLED_METHODS.includes(method)) {
-    throw Object.assign(
-      new Error("Payment must be settled as paid, insurance_claim or claim_approved"),
-      { status: 400 },
-    );
+  if (!PAYMENT_METHODS.includes(method)) {
+    throw bad(`Payment must be settled as one of: ${PAYMENT_METHODS.join(", ")}`);
   }
   // A claim nobody can chase is not a claim. The insurer is the minimum: it is
   // who the desk has to ring when the approval does not come.
-  if (method === "insurance_claim" && !trimmed(insurer)) {
-    throw Object.assign(new Error("An insurance claim needs the insurer or TPA name"), {
-      status: 400,
-    });
+  const claiming = method === "insurance_claim" || method === "split";
+  if (claiming && !trimmed(insurer)) {
+    throw bad("An insurance claim needs the insurer or TPA name");
   }
 
   const client = await db.connect();
   try {
     await client.query("BEGIN");
     const { rows } = await client.query(
-      `SELECT payment_status, sample_status FROM giniflow_lab_orders WHERE id = $1 FOR UPDATE`,
+      `SELECT o.payment_status, o.sample_status, o.amount_total, o.amount_paid,
+              o.amount_claimed, o.claim_state, o.version,
+              COALESCE((SELECT SUM(price) FROM giniflow_lab_order_tests t
+                         WHERE t.lab_order_id = o.id), 0) AS lines_total
+         FROM giniflow_lab_orders o WHERE o.id = $1 FOR UPDATE`,
       [orderId],
     );
-    if (!rows.length) throw Object.assign(new Error("Order not found"), { status: 404 });
+    if (!rows.length) throw bad("Order not found", 404);
+    const row = rows[0];
 
-    // A double-tap at a busy counter must not read later as paying twice. But a
-    // submitted claim CAN legitimately move on to approved, so that one is not a
-    // repeat.
-    const current = rows[0].payment_status;
-    const isApprovingAClaim = current === "insurance_claim" && method === "claim_approved";
-    if (current !== "pending" && !isApprovingAClaim) {
-      await client.query("COMMIT");
-      return { orderId, paymentStatus: current, alreadySettled: true };
+    // An order written before amount_total existed carries its price only on the
+    // test lines, and the CHECK constraint measures against the column — so the
+    // column is repaired first, once, rather than every reader guessing.
+    if (paise(row.amount_total) === 0 && paise(row.lines_total) > 0) {
+      row.amount_total = row.lines_total;
+      await client.query(`UPDATE giniflow_lab_orders SET amount_total = $2 WHERE id = $1`, [
+        orderId,
+        row.lines_total,
+      ]);
+    }
+    const before = moneyOf(row);
+
+    // Optimistic lock. A status check cannot catch a double-tap once amounts are
+    // involved: two taps of "collect ₹350" on a ₹1,250 order are both legal and
+    // the patient pays ₹700. The desk sends the version it read; anything else
+    // means the order moved under them.
+    if (version !== null && version !== undefined && Number(version) !== row.version) {
+      throw Object.assign(
+        bad("This order changed while the screen was open — check it and try again", 409),
+        { stale: true, version: row.version },
+      );
     }
 
-    // Maker-checker: approving a claim is asserting that the insurer said yes,
-    // and it opens the lab gate. The person who submitted it cannot be the one
-    // who confirms it — a second pair of eyes, from the log, not from a policy
-    // nobody can audit.
-    if (isApprovingAClaim) {
-      const { rows: submitter } = await client.query(
-        `SELECT actor_id FROM giniflow_lab_order_events
-          WHERE lab_order_id = $1 AND track = 'payment' AND status = 'insurance_claim'
-          ORDER BY occurred_at DESC LIMIT 1`,
-        [orderId],
-      );
-      if (actorId && submitter[0]?.actor_id === actorId) {
-        throw Object.assign(
-          new Error("The claim was submitted by you — someone else has to confirm the approval"),
-          { status: 409 },
+    const outstanding = outstandingPaise(before);
+    // What is still owed and what can still be taken in cash are not the same
+    // number. A standing claim has ₹900 spoken for: it has settled nothing, but
+    // the desk cannot collect it in cash either, or the order is paid twice over.
+    const collectible = collectiblePaise(before);
+    const claimState = row.claim_state;
+
+    // A repeat of a settling action on a settled order is a no-op, not a second
+    // charge — the busy-counter double-tap this desk has always had.
+    const settlingAgain =
+      (["paid", "insurance_claim", "split"].includes(method) && outstanding === 0) ||
+      (method === "claim_approved" && claimState === CLAIM_STATE.APPROVED) ||
+      (method === "claim_rejected" && claimState === CLAIM_STATE.REJECTED);
+    if (settlingAgain) {
+      // Nothing left to settle. If the column already agrees with the money this
+      // is the busy-counter double-tap and the answer is "nothing changed" — but
+      // if it disagrees (an order written by an older build, or by hand) the
+      // desk would otherwise be stuck pressing a button that can never work.
+      // Correct the column to what the money says instead of dead-ending.
+      const derived = derivePaymentStatus(before);
+      const drifted = derived !== row.payment_status;
+      if (drifted) {
+        await client.query(
+          `UPDATE giniflow_lab_orders
+              SET payment_status = $2,
+                  sample_status = CASE
+                    WHEN $3 AND sample_status IN ('ordered', 'payment_pending') THEN 'paid'
+                    ELSE sample_status END,
+                  version = version + 1,
+                  updated_at = NOW()
+            WHERE id = $1`,
+          [orderId, derived, opensLabGate(derived)],
+        );
+        // The sample task the lab sees has to have an origin in the ledger, the
+        // same as when the desk clears a payment by hand.
+        if (opensLabGate(derived) && !opensLabGate(row.payment_status)) {
+          await client.query(
+            `INSERT INTO giniflow_lab_order_events
+               (lab_order_id, track, status, actor_role, actor_id)
+             VALUES ($1, 'sample', 'paid', $3, $2)`,
+            [orderId, actorId, actorRole],
+          );
+        }
+      }
+      await client.query("COMMIT");
+      return {
+        orderId,
+        paymentStatus: derived,
+        claimState,
+        outstanding: rupeesFromPaise(outstanding),
+        version: row.version + (drifted ? 1 : 0),
+        alreadySettled: true,
+        reconciled: drifted,
+      };
+    }
+
+    let cash = 0;
+    let claim = paise(row.amount_claimed);
+    let nextClaimState = claimState;
+    let approvedBy = null;
+    let rejection = null;
+
+    if (method === "paid" || method === "split") {
+      if (collectible === 0 && claimState === CLAIM_STATE.SUBMITTED) {
+        throw bad(
+          `₹${rupeesFromPaise(outstanding)} is with the insurer — approve or reject that claim before taking cash`,
+          409,
         );
       }
+      cash = amountPaise(
+        amountPaid,
+        method === "paid" ? collectible : null,
+        "The amount collected",
+      );
+      if (cash === null) throw bad("A split needs the amount collected in cash");
     }
+    if (claiming) {
+      // A second claim cannot be raised while one is standing — approve or
+      // reject the first, or the two would both count against the same money.
+      if (claimState === CLAIM_STATE.SUBMITTED) {
+        throw bad("A claim is already submitted on this order — approve or reject it first", 409);
+      }
+      if (claimState === CLAIM_STATE.APPROVED) {
+        throw bad("This order's claim is already approved", 409);
+      }
+      claim = amountPaise(
+        amountClaimed,
+        method === "insurance_claim" ? collectible - cash : null,
+        "The amount claimed",
+      );
+      if (claim === null) throw bad("A split needs the amount being claimed");
+      nextClaimState = CLAIM_STATE.SUBMITTED;
+    }
+    if (cash + (claiming ? claim : 0) > collectible) {
+      throw bad(
+        `That is more than the ₹${rupeesFromPaise(collectible)} still to be collected on this order`,
+      );
+    }
+
+    if (method === "claim_approved" || method === "claim_rejected") {
+      // An insurer can refuse a claim it had approved — rarely, but it happens
+      // after the fact, and that is exactly when the lab gate has to close
+      // again. Approval, though, only ever follows a submission.
+      const rejectable = [CLAIM_STATE.SUBMITTED, CLAIM_STATE.APPROVED];
+      const allowed = method === "claim_rejected" ? rejectable : [CLAIM_STATE.SUBMITTED];
+      if (!allowed.includes(claimState)) {
+        throw bad("There is no claim waiting on this order", 409);
+      }
+      if (method === "claim_approved") {
+        // Maker-checker: approving a claim asserts that the insurer said yes,
+        // and it opens the lab gate. The person who submitted it cannot be the
+        // one who confirms it — a second pair of eyes, from the log, not from a
+        // policy nobody can audit.
+        const { rows: submitter } = await client.query(
+          `SELECT actor_id FROM giniflow_lab_order_events
+            WHERE lab_order_id = $1 AND track = 'payment' AND status = 'insurance_claim'
+            ORDER BY occurred_at DESC LIMIT 1`,
+          [orderId],
+        );
+        if (actorId && submitter[0]?.actor_id === actorId) {
+          throw bad(
+            "The claim was submitted by you — someone else has to confirm the approval",
+            409,
+          );
+        }
+        nextClaimState = CLAIM_STATE.APPROVED;
+        approvedBy = actorId;
+      } else {
+        nextClaimState = CLAIM_STATE.REJECTED;
+        rejection = trimmed(note);
+      }
+    }
+
+    const after = {
+      amountTotal: row.amount_total,
+      amountPaid: rupeesFromPaise(paise(row.amount_paid) + cash),
+      amountClaimed: rupeesFromPaise(claim),
+      claimState: nextClaimState,
+    };
+    const paymentStatus = derivePaymentStatus(after);
+    const stillOutstanding = outstandingPaise(after);
 
     await client.query(
       `UPDATE giniflow_lab_orders
           SET payment_status = $2,
-              -- Only an approved settlement opens the sample task.
+              amount_paid    = $3,
+              amount_claimed = $4,
+              claim_state    = $5,
+              -- The sample task follows the money in both directions: settled
+              -- opens it, and a claim the insurer refuses closes it again — but
+              -- only while the sample is still uncollected. Once the lab has
+              -- taken it the work is done and what is left is a bill, not a task.
               sample_status = CASE
-                WHEN $2 IN ('paid', 'claim_approved')
-                 AND sample_status IN ('ordered', 'payment_pending') THEN 'paid'
+                WHEN $6 AND sample_status IN ('ordered', 'payment_pending') THEN 'paid'
+                WHEN NOT $6 AND sample_status = 'paid' THEN 'ordered'
                 ELSE sample_status END,
-              insurer   = COALESCE($4, insurer),
-              policy_no = COALESCE($5, policy_no),
-              claim_no  = COALESCE($6, claim_no),
-              claim_approved_by = CASE WHEN $2 = 'claim_approved' THEN $3 ELSE claim_approved_by END,
+              insurer   = COALESCE($7, insurer),
+              policy_no = COALESCE($8, policy_no),
+              claim_no  = COALESCE($9, claim_no),
+              -- A new claim starts clean: the note explains the CURRENT claim's
+              -- rejection, and carrying the last one over would caption the new
+              -- claim with an insurer's answer about a different one.
+              claim_note = CASE
+                WHEN $5 = 'rejected' THEN $10
+                WHEN $5 = 'submitted' THEN NULL
+                ELSE claim_note END,
+              claim_approved_by = COALESCE($11, claim_approved_by),
+              version = version + 1,
               updated_at = NOW()
         WHERE id = $1`,
-      [orderId, method, actorId, trimmed(insurer), trimmed(policyNo), trimmed(claimNo)],
+      [
+        orderId,
+        paymentStatus,
+        after.amountPaid,
+        after.amountClaimed,
+        nextClaimState,
+        opensLabGate(paymentStatus),
+        trimmed(insurer),
+        trimmed(policyNo),
+        trimmed(claimNo),
+        rejection,
+        approvedBy,
+      ],
     );
-    await client.query(
-      `INSERT INTO giniflow_lab_order_events (lab_order_id, track, status, actor_role, actor_id)
-       VALUES ($1, 'payment', $2, $4, $3)`,
-      [orderId, method, actorId, actorRole],
-    );
+
+    // The ledger: one event per action taken, so a dispute a week later reads as
+    // a sequence rather than as whatever the status column says today.
+    const events = [];
+    if (cash > 0) events.push(stillOutstanding === 0 ? "paid" : "part_paid");
+    if (claiming) events.push("insurance_claim");
+    if (method === "claim_approved") events.push("claim_approved");
+    if (method === "claim_rejected") events.push("claim_rejected");
+    for (const status of events) {
+      await client.query(
+        `INSERT INTO giniflow_lab_order_events (lab_order_id, track, status, actor_role, actor_id)
+         VALUES ($1, 'payment', $2, $4, $3)`,
+        [orderId, status, actorId, actorRole],
+      );
+    }
+
     // The lab's queue reads sample_status, so the sample task appearing there is
     // the same write — trigger 3 in the brief, not a second job that can fail.
     // A submitted-but-unapproved claim writes no sample event: there is nothing
     // for the lab to do yet.
-    if (opensLabGate(method)) {
+    if (opensLabGate(paymentStatus) && !opensLabGate(row.payment_status)) {
       await client.query(
         `INSERT INTO giniflow_lab_order_events (lab_order_id, track, status, actor_role, actor_id)
          VALUES ($1, 'sample', 'paid', $3, $2)`,
@@ -233,7 +467,16 @@ export async function clearPayment(
     }
 
     await client.query("COMMIT");
-    return { orderId, paymentStatus: method, alreadySettled: false };
+    return {
+      orderId,
+      paymentStatus,
+      claimState: nextClaimState,
+      amountPaid: after.amountPaid,
+      amountClaimed: after.amountClaimed,
+      outstanding: rupeesFromPaise(stillOutstanding),
+      version: row.version + 1,
+      alreadySettled: false,
+    };
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;

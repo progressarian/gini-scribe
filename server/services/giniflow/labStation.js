@@ -2,7 +2,7 @@ import pool from "../../config/db.js";
 import { promoteLabReport, promoteQuietly } from "./promote.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config/storage.js";
 import { advanceStatus } from "./statusEngine.js";
-import { opensLabGate } from "./receptionStation.js";
+import { opensLabGate, outstandingOf } from "../../../shared/labPayment.js";
 import {
   BOARD_COLUMNS,
   STATUS_LABEL,
@@ -169,6 +169,7 @@ export async function getLabQueue(visitDate, q = null, db = pool) {
   const healthray = await getHealthrayCases(visitDate, search, db);
   const { rows } = await db.query(
     `SELECT o.id, o.visit_id, o.sample_status, o.payment_status, o.urgency,
+            o.amount_total, o.amount_paid, o.amount_claimed, o.claim_state,
             o.created_at, o.updated_at, o.uploaded_at, o.report_file_url,
             p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
             v.current_status,
@@ -235,8 +236,8 @@ export async function getLabQueue(visitDate, q = null, db = pool) {
       blockedReason: paid
         ? null
         : r.payment_status === "insurance_claim"
-          ? "Insurance claim submitted — waiting for approval"
-          : "Waiting for reception to clear payment",
+          ? `Insurance claim submitted — waiting for approval (₹${outstandingOf(r)} outstanding)`
+          : `Waiting for reception to clear payment — ₹${outstandingOf(r)} outstanding`,
       orderedAt: r.created_at ? new Date(r.created_at).toISOString() : null,
       since:
         r.since || r.updated_at || r.created_at

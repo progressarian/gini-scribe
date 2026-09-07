@@ -142,9 +142,18 @@ check(
     ![...q3.cleared, ...q3.awaitingSample].some((o) => o.orderId === claimed),
   );
 
-  const repeat = await clearPayment(claimed, { method: "paid" });
-  check("paying a claimed order is refused as a repeat", repeat.alreadySettled === true);
-  check("and it keeps its claim status", repeat.paymentStatus === "insurance_claim");
+  // The money is with the insurer, so it cannot also be taken at the counter —
+  // the desk has to settle the claim one way or the other first.
+  const cashOverClaim = await clearPayment(claimed, { method: "paid" })
+    .then(() => false)
+    .catch((e) => e.status === 409);
+  check("cash cannot be taken while the claim stands", cashOverClaim);
+  const kept = await one(
+    `SELECT payment_status, amount_paid FROM giniflow_lab_orders WHERE id = $1`,
+    [claimed],
+  );
+  check("and nothing was collected", Number(kept.amount_paid) === 0);
+  check("and it keeps its claim status", kept.payment_status === "insurance_claim");
 
   const selfApproved = await clearPayment(claimed, {
     method: "claim_approved",
@@ -184,6 +193,204 @@ check(
     "and opens the lab gate",
     [...q4.cleared, ...q4.awaitingSample].some((o) => o.orderId === claimed),
   );
+}
+
+// ── The split: part cash, part insurance ───────────────────────────────────
+// The ordinary OPD case. A policy covers ₹900 of a ₹1,250 order and the patient
+// pays the rest at the desk — and NEITHER half settles the order until the
+// insurer has actually approved its half.
+const newOrder = async (total) =>
+  (
+    await one(
+      `INSERT INTO giniflow_lab_orders (visit_id, urgency, payment_status, amount_total, sample_status)
+       VALUES ($1, 'today', 'pending', $2, 'ordered') RETURNING id`,
+      [order.visitId, total],
+    )
+  ).id;
+
+{
+  const MAKER = 20;
+  const CHECKER = 26;
+  const split = await newOrder(1250);
+
+  const overpay = await clearPayment(split, { method: "paid", amountPaid: 2000 })
+    .then(() => false)
+    .catch((e) => e.status === 400);
+  check("collecting more than the order is worth is refused", overpay);
+
+  const overSplit = await clearPayment(split, {
+    method: "split",
+    amountPaid: 350,
+    amountClaimed: 1500,
+    insurer: "Star Health",
+  })
+    .then(() => false)
+    .catch((e) => e.status === 400);
+  check("a split that adds up to more than the total is refused", overSplit);
+
+  const done = await clearPayment(split, {
+    method: "split",
+    actorId: MAKER,
+    amountPaid: 350,
+    amountClaimed: 900,
+    insurer: "Star Health",
+    policyNo: "POL-1",
+  });
+  check("the cash half is recorded", Number(done.amountPaid) === 350);
+  check("the claimed half is recorded", Number(done.amountClaimed) === 900);
+  check(
+    "a submitted claim settles nothing — the balance is still the claim",
+    done.outstanding === 900,
+    `₹${done.outstanding}`,
+  );
+  check(
+    "so the order reads as a claim, not as part paid",
+    done.paymentStatus === "insurance_claim",
+  );
+
+  const gate = await one(`SELECT sample_status FROM giniflow_lab_orders WHERE id = $1`, [split]);
+  check("and the lab gate stays shut", gate.sample_status === "ordered", gate.sample_status);
+
+  const ledger = await pool.query(
+    `SELECT status FROM giniflow_lab_order_events
+      WHERE lab_order_id = $1 AND track = 'payment' ORDER BY occurred_at`,
+    [split],
+  );
+  check(
+    "both halves are in the ledger, not just the last one",
+    ledger.rows.map((r) => r.status).join(",") === "part_paid,insurance_claim",
+    ledger.rows.map((r) => r.status).join(","),
+  );
+
+  const second = await clearPayment(split, {
+    method: "insurance_claim",
+    insurer: "Star Health",
+    amountClaimed: 100,
+  })
+    .then(() => false)
+    .catch((e) => e.status === 409);
+  check("a second claim cannot stand against the same money", second);
+
+  // Double-tap: the guard that a status check cannot give once amounts are real.
+  const stale = await clearPayment(split, {
+    method: "claim_approved",
+    actorId: CHECKER,
+    version: 0,
+  })
+    .then(() => false)
+    .catch((e) => e.status === 409 && e.stale === true);
+  check("a write from a stale screen is refused", stale);
+  const untouched = await one(`SELECT payment_status FROM giniflow_lab_orders WHERE id = $1`, [
+    split,
+  ]);
+  check("and it changed nothing", untouched.payment_status === "insurance_claim");
+
+  const ok = await clearPayment(split, {
+    method: "claim_approved",
+    actorId: CHECKER,
+    version: done.version,
+  });
+  check("the version the desk actually read is accepted", ok.alreadySettled === false);
+  check("approving the claim settles the order", ok.outstanding === 0);
+  check("and it reads as claim_approved", ok.paymentStatus === "claim_approved");
+  const opened = await one(`SELECT sample_status FROM giniflow_lab_orders WHERE id = $1`, [split]);
+  check("the lab gate opens on the approval", opened.sample_status === "paid");
+}
+
+// ── Rejection: the insurer says no ─────────────────────────────────────────
+// The money goes back to outstanding, the order returns to reception's list and
+// the gate closes again — as long as the sample has not already been taken.
+{
+  const MAKER = 20;
+  const CHECKER = 26;
+  const refused = await newOrder(1000);
+  const submitted = await clearPayment(refused, {
+    method: "split",
+    actorId: MAKER,
+    amountPaid: 200,
+    amountClaimed: 800,
+    insurer: "Care Health",
+  });
+  await clearPayment(refused, {
+    method: "claim_approved",
+    actorId: CHECKER,
+    version: submitted.version,
+  });
+  const openedGate = await one(`SELECT sample_status FROM giniflow_lab_orders WHERE id = $1`, [
+    refused,
+  ]);
+  check("an approved split opens the gate", openedGate.sample_status === "paid");
+
+  // An insurer can go back on an approval, and that is the one case where the
+  // gate has to shut on an order the lab has already been shown.
+  const reversed = await clearPayment(refused, {
+    method: "claim_rejected",
+    actorId: CHECKER,
+    note: "Reversed on review",
+  });
+  check("an approved claim can still be reversed", reversed.alreadySettled === false);
+  check("the money goes back to outstanding", reversed.outstanding === 800);
+  const shut = await one(`SELECT sample_status FROM giniflow_lab_orders WHERE id = $1`, [refused]);
+  check("and the lab gate closes on an uncollected sample", shut.sample_status === "ordered");
+
+  // Once the sample is in the lab's hand the work is done — a reversal after
+  // that is a bill to chase, not a task to withdraw.
+  const collected = await newOrder(500);
+  const c1 = await clearPayment(collected, {
+    method: "insurance_claim",
+    actorId: MAKER,
+    insurer: "Care Health",
+  });
+  await clearPayment(collected, {
+    method: "claim_approved",
+    actorId: CHECKER,
+    version: c1.version,
+  });
+  await pool.query(
+    `UPDATE giniflow_lab_orders SET sample_status = 'sample_collected' WHERE id = $1`,
+    [collected],
+  );
+  await clearPayment(collected, { method: "claim_rejected", actorId: CHECKER });
+  const kept2 = await one(`SELECT sample_status FROM giniflow_lab_orders WHERE id = $1`, [
+    collected,
+  ]);
+  check("a sample already taken is left alone", kept2.sample_status === "sample_collected");
+
+  const again = await newOrder(1000);
+  const claim2 = await clearPayment(again, {
+    method: "split",
+    actorId: MAKER,
+    amountPaid: 200,
+    amountClaimed: 800,
+    insurer: "Care Health",
+  });
+  const no = await clearPayment(again, {
+    method: "claim_rejected",
+    actorId: CHECKER,
+    actorRole: "coordinator",
+    note: "  OPD tests not covered  ",
+    version: claim2.version,
+  });
+  check("a refused claim stops counting toward settlement", no.outstanding === 800);
+  check("the cash already taken is kept", Number(no.amountPaid) === 200);
+  check("and the order falls back to part paid", no.paymentStatus === "part_paid");
+  const why = await one(
+    `SELECT claim_state, claim_note, sample_status FROM giniflow_lab_orders WHERE id = $1`,
+    [again],
+  );
+  check("the reason the insurer gave is kept", why.claim_note === "OPD tests not covered");
+  check("the claim reads as rejected", why.claim_state === "rejected");
+  check("the lab gate is shut again", why.sample_status === "ordered", why.sample_status);
+  const backOnList = await getPaymentQueue(TEST_DAY);
+  check(
+    "and the order is back on reception's list to collect from the patient",
+    backOnList.pending.some((o) => o.orderId === again),
+  );
+
+  const balance = await clearPayment(again, { method: "paid" });
+  check("collecting the balance settles it in one tap", balance.outstanding === 0);
+  check("with the full amount recorded as cash", Number(balance.amountPaid) === 1000);
+  check("and the order reads as paid", balance.paymentStatus === "paid");
 }
 
 const bad = await clearPayment(order.orderId, { method: "waived" })
