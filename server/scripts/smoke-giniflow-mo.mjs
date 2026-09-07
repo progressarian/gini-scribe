@@ -9,6 +9,8 @@
 import "../loadEnv.js";
 process.env.GINIFLOW_ALLOW_DEMO = "1";
 import pool from "../config/db.js";
+import { getStationTimes } from "../services/giniflow/statusEngine.js";
+import { NOT_A_MARKER_SQL } from "../../shared/giniflowStatus.js";
 import { seedDemoDay, cleanDemoDay } from "../services/giniflow/demo.js";
 import {
   getMoQueue,
@@ -518,6 +520,79 @@ await pool.query(
   [target.visitId],
 );
 
+// ── A marker is a fact, not a place ───────────────────────────────────────
+// A report landing mid-wait used to be the "latest event", which is what the
+// board reads as the start of the current wait — so a patient ninety minutes
+// overdue turned green at the moment they were most overdue, and the SLA
+// figures scored a five-minute fragment as a station hop kept within budget.
+{
+  const p = await one(
+    `INSERT INTO patients (name, file_no, age, sex, phone)
+     VALUES ('Demo Marker Timeline', 'ZZMRK_1', 61, 'Female', '9888700002')
+     ON CONFLICT (file_no) DO UPDATE SET name = EXCLUDED.name RETURNING id`,
+  );
+  const v = await one(
+    `INSERT INTO giniflow_visits (patient_id, visit_date, current_status)
+     VALUES ($1, $2::date, 'sd_pending')
+     ON CONFLICT (patient_id, visit_date) DO UPDATE SET current_status = 'sd_pending'
+     RETURNING id`,
+    [p.id, TEST_DAY],
+  );
+  const at = async (status, minsAgo, role = "system") =>
+    pool.query(
+      `INSERT INTO giniflow_visit_events (visit_id, status, actor_role, occurred_at)
+       VALUES ($1, $2, $3, NOW() - make_interval(mins => $4))`,
+      [v.id, status, role, minsAgo],
+    );
+  await at("checked_in", 120, "reception");
+  await at("sd_pending", 90);
+  await at("results_received", 70, "lab");
+
+  const times = await getStationTimes(pool, v.id, {});
+  const wait = times.find((t) => t.status === "sd_pending");
+  check(
+    "a wait interrupted by a report keeps its whole length",
+    wait && wait.totalMinutes >= 85,
+    `${wait?.totalMinutes}m`,
+  );
+  const marker = times.find((t) => t.status === "results_received");
+  check("the report is still on the timeline", !!marker);
+  check(
+    "as a dated fact with no duration",
+    marker?.timestampOnly === true && marker.totalMinutes === 0,
+  );
+  check("named, not shown as a raw key", marker?.label === "Reports arrived", marker?.label);
+  check("and in the order it happened", times.indexOf(marker) > times.indexOf(wait));
+
+  // The other marker the MO writes. It was missing from the label table, so the
+  // patient's timeline rendered the database key.
+  await at("reports_reviewed", 60, "mo_sd");
+  const withReview = await getStationTimes(pool, v.id, {});
+  const reviewed = withReview.find((t) => t.status === "reports_reviewed");
+  check(
+    "the MO's reading is named too",
+    reviewed?.label === "Reports read by the MO",
+    reviewed?.label,
+  );
+  check("and carries no minutes either", reviewed?.totalMinutes === 0);
+
+  // What the board reads to time the current wait.
+  const since = await one(
+    `SELECT e.status FROM giniflow_visit_events e
+      WHERE e.visit_id = $1 AND ${NOT_A_MARKER_SQL("e.status")}
+      ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1`,
+    [v.id],
+  );
+  check(
+    "the wait clock still reads from a real status",
+    since.status === "sd_pending",
+    since.status,
+  );
+
+  await pool.query(`DELETE FROM giniflow_visits WHERE id = $1`, [v.id]);
+  await pool.query(`DELETE FROM patients WHERE file_no = 'ZZMRK_1'`);
+}
+
 const medsBefore = await one(
   `SELECT count(*)::int AS n FROM medications m
      JOIN giniflow_visits v ON v.patient_id = m.patient_id
@@ -538,6 +613,68 @@ check(
   final.current_status === "rx_pending",
   final.current_status,
 );
+
+// ...and the MO can still see who they closed. The queue stopped at doctor_done
+// while the close advances past it, so a patient the MO ended vanished off their
+// screen entirely — no card, no record of the decision, no way back in.
+const afterClose = await getMoQueue(TEST_DAY, sdA);
+const stillListed = (afterClose.done || []).some((r) => r.visitId === target.visitId);
+check("a closed patient stays on the MO's own Done list", stillListed);
+
+// An order for another day gates nothing today. Counting it left the patient
+// unclosable for ever: results_status could never reach "ready", so the review
+// was refused and the close refused for wanting the review.
+{
+  // Its own patient: whether the demo day happens to leave somebody in this
+  // group is not what the check is about.
+  const p = await one(
+    `INSERT INTO patients (name, file_no, age, sex, phone)
+     VALUES ('Demo Next Visit Order', 'ZZMOG_1', 54, 'Male', '9888700001')
+     ON CONFLICT (file_no) DO UPDATE SET name = EXCLUDED.name RETURNING id`,
+  );
+  const v = await one(
+    `INSERT INTO giniflow_visits (patient_id, visit_date, current_status, results_status)
+     VALUES ($1, $2::date, 'vitals_done', 'ready')
+     ON CONFLICT (patient_id, visit_date)
+       DO UPDATE SET current_status = 'vitals_done', results_status = 'ready'
+     RETURNING id`,
+    [p.id, TEST_DAY],
+  );
+  const before = await getMoQueue(TEST_DAY, sdA);
+  check(
+    "a patient with nothing outstanding waits for the MO",
+    (before.waitingForMe || []).some((r) => r.visitId === v.id),
+  );
+
+  const later = await one(
+    `INSERT INTO giniflow_lab_orders (visit_id, urgency, payment_status, amount_total, sample_status)
+     VALUES ($1, 'next_visit', 'pending', 500, 'ordered') RETURNING id`,
+    [v.id],
+  );
+  const after = await getMoQueue(TEST_DAY, sdA);
+  check(
+    "an order for the NEXT visit does not put them on results-watch",
+    !(after.awaitingResults || []).some((r) => r.visitId === v.id),
+  );
+  check(
+    "they stay ready to be seen",
+    (after.waitingForMe || []).some((r) => r.visitId === v.id),
+  );
+
+  // The same order raised for TODAY is a real wait — the distinction the whole
+  // fix rests on.
+  await pool.query(`UPDATE giniflow_lab_orders SET urgency = 'today' WHERE id = $1`, [later.id]);
+  await pool.query(`UPDATE giniflow_visits SET results_status = 'none' WHERE id = $1`, [v.id]);
+  const todayQ = await getMoQueue(TEST_DAY, sdA);
+  check(
+    "the same order raised for today does",
+    (todayQ.awaitingResults || []).some((r) => r.visitId === v.id),
+  );
+
+  await pool.query(`DELETE FROM giniflow_lab_orders WHERE id = $1`, [later.id]);
+  await pool.query(`DELETE FROM giniflow_visits WHERE id = $1`, [v.id]);
+  await pool.query(`DELETE FROM patients WHERE file_no = 'ZZMOG_1'`);
+}
 
 // The gap this whole plan exists to close (31 §3 G4): before, the draft stayed
 // a draft and the patient reached the pharmacy with nothing.

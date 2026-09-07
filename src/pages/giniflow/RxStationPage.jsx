@@ -50,7 +50,7 @@ function QueueRow({ row, active, onPick }) {
       {!row.canPrint && (
         <div className="grp-hint">
           {row.rxStale
-            ? "Prescription changed since the copy was made — ask the consultant to re-issue"
+            ? "Prescription changed since the copy was made — open them and re-issue it"
             : "Prescription still being prepared"}
         </div>
       )}
@@ -127,21 +127,26 @@ function Pane({
                 🖨 View / print prescription
               </button>
             ) : (
+              /* No printable copy is two situations and only one of them had a
+                 way out. A stale copy offered "re-issue"; a missing one read
+                 "🖨 Preparing…", disabled, with nothing the desk could do but
+                 wait for a file that in some cases never arrives. Both are the
+                 same fix — build it from the consultation — so both offer it. */
               <button
                 className="st-btn"
-                disabled={!data?.rxStale || reissuing}
+                disabled={!data || reissuing}
                 title={
                   data?.rxStale
                     ? "The prescription changed after this copy was made — re-issue it"
-                    : "The prescription is still being prepared"
+                    : "No printable copy yet — build one from the consultation"
                 }
-                onClick={() => data?.rxStale && onReissue(visitId)}
+                onClick={() => onReissue(visitId)}
               >
                 {reissuing
-                  ? "↻ Re-issuing…"
+                  ? "↻ Working…"
                   : data?.rxStale
                     ? "↻ Re-issue prescription"
-                    : "🖨 Preparing…"}
+                    : "🖨 Generate prescription"}
               </button>
             )}
           </div>
@@ -230,8 +235,8 @@ export default function RxStationPage() {
     reissue.mutate(
       { visitId },
       {
-        onSuccess: () => setToast("↻ Prescription re-issued — it is current now"),
-        onError: (e) => setToast(e?.response?.data?.error || "Could not re-issue"),
+        onSuccess: () => setToast("✓ Prescription ready — it is current now"),
+        onError: (e) => setToast(e?.response?.data?.error || "Could not build the prescription"),
       },
     );
 

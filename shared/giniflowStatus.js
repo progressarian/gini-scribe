@@ -79,6 +79,10 @@ export const STATUS_LABEL = {
   // Not a status any visit holds — an event the lab writes when a report lands,
   // shown on the timeline as a dated marker.
   results_received: "Reports arrived",
+  // The MO's recorded reading of those reports. Same shape: a fact with a
+  // timestamp, not a place the patient stood. Without a label here the timeline
+  // rendered the raw key.
+  reports_reviewed: "Reports read by the MO",
   doctor_done: "Waiting for Prescription Explain",
   rx_pending: "Waiting for Prescription Explain",
   with_rx: "Prescription being explained",
@@ -184,6 +188,24 @@ export const isChainStatus = (status) => CHAIN_INDEX.has(status);
 export const isExceptionStatus = (status) => EXCEPTION_STATUSES.includes(status);
 
 export const isKnownStatus = (status) => isChainStatus(status) || isExceptionStatus(status);
+
+// Events that are FACTS, not places. They live in giniflow_visit_events beside
+// the real statuses because the log is one sequence, but a patient is never
+// "in" them: they have no duration, they end no wait and they start none.
+//
+// Every query that asks "what happened last" or "how long has this hop taken"
+// has to skip them, or a report landing mid-wait resets the clock on a patient
+// who has been waiting ninety minutes — turning them green at the moment they
+// are most overdue — and splits one hop into two in the SLA figures.
+export const MARKER_STATUSES = ["results_received", "reports_reviewed"];
+
+export const isMarkerStatus = (status) => MARKER_STATUSES.includes(status);
+
+// For the SQL that has to exclude them. Inlined rather than parameterised
+// because these queries are built as template strings and a marker list that
+// drifted from this one is exactly the bug it prevents.
+export const NOT_A_MARKER_SQL = (col) =>
+  `${col} <> ALL (ARRAY[${MARKER_STATUSES.map((m) => `'${m}'`).join(", ")}])`;
 
 export const chainIndex = (status) => CHAIN_INDEX.get(status) ?? -1;
 

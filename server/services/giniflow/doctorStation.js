@@ -1,7 +1,7 @@
 import pool from "../../config/db.js";
 import { advanceStatus, budgetColour, returnToQueue } from "./statusEngine.js";
 import { getSlaConfig, budgetMap, budgetLookup } from "./board.js";
-import { slaKeyForStatus, STATUS_LABEL } from "../../../shared/giniflowStatus.js";
+import { slaKeyForStatus, STATUS_LABEL, NOT_A_MARKER_SQL } from "../../../shared/giniflowStatus.js";
 import { todaysVitals, previousVitals } from "./visitVitals.js";
 import { buildBrief } from "./consultBrief.js";
 import { seedDraftOn } from "./prescription.js";
@@ -386,7 +386,8 @@ export async function getConsult(visitId, db = pool) {
        ) first_ev ON TRUE
        LEFT JOIN LATERAL (
          SELECT occurred_at FROM giniflow_visit_events e
-          WHERE e.visit_id = v.id ORDER BY occurred_at DESC, id DESC LIMIT 1
+          WHERE e.visit_id = v.id AND ${NOT_A_MARKER_SQL("e.status")}
+          ORDER BY occurred_at DESC, id DESC LIMIT 1
        ) last_ev ON TRUE
       WHERE v.id = $1`,
     [visitId],

@@ -3,7 +3,7 @@ import { OPEN_LAB_CASES_SQL } from "./labStation.js";
 import { finalizeConsult } from "./finalize.js";
 import { advanceStatus, budgetColour } from "./statusEngine.js";
 import { getSlaConfig, budgetLookup } from "./board.js";
-import { slaKeyForStatus } from "../../../shared/giniflowStatus.js";
+import { slaKeyForStatus, NOT_A_MARKER_SQL } from "../../../shared/giniflowStatus.js";
 import { todaysVitals, previousVitals } from "./visitVitals.js";
 import { ALLERGY_NOT_ASKED } from "../../../shared/giniflowAllergy.js";
 
@@ -26,6 +26,19 @@ export const CLOSEABLE_CATEGORY = "in_control";
 const closeableNow = ({ hasPlan, orders, outcome }) =>
   !!hasPlan && (orders === 0 || outcome === "normal");
 
+// The orders that gate all of this: the ones that produce something to read
+// TODAY. An order raised for tomorrow or the next visit produces no report now,
+// and counting it deadlocked the patient — results_status could never reach
+// "ready", so reviewReports refused ("the reports are not in yet") and the close
+// refused in turn ("review the reports before closing"), for ever.
+//
+// One rule, used by the queue's grouping, the patient pane's canClose and the
+// close itself. Three readings of "does this visit have tests" is how a row
+// advertises closeable while the service refuses.
+const GATING_ORDER_SQL = `o.urgency = 'today'`;
+
+const gatingOrders = (orders = []) => orders.filter((o) => o.urgency === "today").length;
+
 // Lab-track statuses that mean the sample has not been taken yet.
 const UNCOLLECTED = ["ordered", "payment_pending", "paid"];
 
@@ -38,6 +51,12 @@ const QUEUE_STATUSES = [
   "with_sd",
   "ready_for_doctor",
   "doctor_done",
+  // Closing without the doctor finalizes, and finalize advances the visit past
+  // doctor_done. Stopping the queue there made the patient vanish the moment the
+  // MO closed them: no card, no list of who they had closed today, no way back
+  // into the record. They belong in "Done", which is where groupOf puts them.
+  "rx_pending",
+  "with_rx",
 ];
 
 const bioChips = (biomarkers) => {
@@ -81,12 +100,14 @@ const QUEUE_SQL = `
          first_ev.occurred_at AS checked_in_at,
          last_ev.occurred_at  AS status_since,
          (SELECT count(*)::int FROM giniflow_lab_orders o
-           WHERE o.visit_id = v.id AND o.sample_status <> 'uploaded') AS open_orders,
+           WHERE o.visit_id = v.id AND o.sample_status <> 'uploaded'
+             AND ${GATING_ORDER_SQL}) AS open_orders,
          -- How far the slowest outstanding order has got. "Waiting on results"
          -- is not one state: a sample nobody has drawn is the MO's to chase,
          -- one on the analyser is not.
          (SELECT o.sample_status FROM giniflow_lab_orders o
            WHERE o.visit_id = v.id AND o.sample_status <> 'uploaded'
+             AND ${GATING_ORDER_SQL}
            ORDER BY array_position(
              ARRAY['ordered','payment_pending','paid','sample_collected','processing','results_ready'],
              o.sample_status) LIMIT 1) AS lab_stage,
@@ -123,7 +144,8 @@ const QUEUE_SQL = `
     ) first_ev ON TRUE
     LEFT JOIN LATERAL (
       SELECT occurred_at FROM giniflow_visit_events e
-       WHERE e.visit_id = v.id ORDER BY occurred_at DESC, id DESC LIMIT 1
+       WHERE e.visit_id = v.id AND ${NOT_A_MARKER_SQL("e.status")}
+       ORDER BY occurred_at DESC, id DESC LIMIT 1
     ) last_ev ON TRUE
    WHERE v.visit_date = $1::date
      AND v.current_status = ANY($2)
@@ -141,7 +163,7 @@ const waitMinutes = (row, now) =>
 const groupOf = (row, sdId) => {
   const mine = !row.assigned_sd_id || row.assigned_sd_id === sdId;
   if (row.current_status === "with_sd") return mine ? "withMe" : "withOtherSd";
-  if (["ready_for_doctor", "doctor_done"].includes(row.current_status)) {
+  if (["ready_for_doctor", "doctor_done", "rx_pending", "with_rx"].includes(row.current_status)) {
     return mine ? "done" : "withOtherSd";
   }
   if (["vitals_done", "sd_pending"].includes(row.current_status)) {
@@ -372,7 +394,9 @@ export async function getMoPatient(visitId, db = pool) {
     checkedInAt: v.checked_in_at ? new Date(v.checked_in_at).toISOString() : null,
     canClose: closeableNow({
       hasPlan: !!notes[0]?.plan?.trim(),
-      orders: orders.length,
+      // Not orders.length: the list below shows tomorrow's and next visit's
+      // orders too, and those gate nothing today.
+      orders: gatingOrders(orders),
       outcome: notes[0]?.reports_outcome,
     }),
     reportsOutcome: notes[0]?.reports_outcome || null,
@@ -859,7 +883,8 @@ export async function closeWithoutDoctor(visitId, actorId = null, db = pool) {
               (SELECT plan FROM giniflow_sd_notes n WHERE n.visit_id = v.id) AS plan,
               (SELECT reports_outcome FROM giniflow_sd_notes n WHERE n.visit_id = v.id)
                 AS reports_outcome,
-              (SELECT count(*)::int FROM giniflow_lab_orders o WHERE o.visit_id = v.id) AS orders
+              (SELECT count(*)::int FROM giniflow_lab_orders o
+                WHERE o.visit_id = v.id AND ${GATING_ORDER_SQL}) AS orders
          FROM giniflow_visits v
         WHERE v.id = $1 FOR UPDATE`,
       [visitId],
@@ -888,11 +913,14 @@ export async function closeWithoutDoctor(visitId, actorId = null, db = pool) {
     }
     await client.query("COMMIT");
   } catch (e) {
-    await client.query("ROLLBACK");
-    client.release();
+    // If the connection has dropped, ROLLBACK rejects too — and the release
+    // below it would never run, losing a client from the pool every time. Every
+    // sibling in this file uses `finally` for exactly that reason.
+    await client.query("ROLLBACK").catch(() => {});
     throw e;
+  } finally {
+    client.release();
   }
-  client.release();
 
   // Finalize owns the atomic save, the medicine matching, the card, the
   // counselling note and the status. Closing without it left the draft in

@@ -914,13 +914,17 @@ export async function markLabCaseAction(
       });
     }
 
+    // Only lc.patient_id. The fallback matched patients.file_no against
+    // HealthRay's UHID, and HealthRay REASSIGNS a UHID to a different person
+    // over time — so on a case whose patient was never linked, this could find
+    // somebody else's visit and refuse a legitimate collection while naming the
+    // wrong patient. A guard that cannot identify the patient does not guess at
+    // one: it steps aside, and the desk's own eyes are the check.
     const { rows: visit } = await db.query(
       `SELECT v.id FROM lab_cases lc
-         JOIN giniflow_visits v ON v.visit_date = lc.case_date
-          AND v.patient_id = COALESCE(lc.patient_id, (
-                SELECT id FROM patients
-                 WHERE file_no = lc.raw_list_json->'patient'->>'healthray_uid'))
-        WHERE lc.case_no = $1
+         JOIN giniflow_visits v
+           ON v.visit_date = lc.case_date AND v.patient_id = lc.patient_id
+        WHERE lc.case_no = $1 AND lc.patient_id IS NOT NULL
         LIMIT 1`,
       [caseNo],
     );

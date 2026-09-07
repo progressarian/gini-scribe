@@ -678,14 +678,8 @@
   font-family: var(--fm);
 }
 
-/* ── Staleness (GF-23) ── a board left open must look wrong when it is wrong,
-   read from across the room, not just say so in small text. */
-.gf.stale .board-wrap,
-.gf.stale .stats,
-.gf.stale .perf {
-  opacity: 0.55;
-  filter: grayscale(0.35);
-}
+/* ── Staleness (GF-23) ── said in the badge only: dimming the board hid live
+   data from the floor while the screen was still working. */
 .gf .rail-live.is-stale {
   color: var(--amb);
   font-weight: 600;

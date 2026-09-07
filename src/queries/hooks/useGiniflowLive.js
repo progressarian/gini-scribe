@@ -71,6 +71,8 @@ const ALL = [
 
 const COALESCE_MS = 250;
 
+const DROP_GRACE_MS = 8000;
+
 export function useGiniflowLive({ date, enabled = true, paused = false } = {}) {
   const queryClient = useQueryClient();
   const [live, setLiveState] = useState(false);
@@ -83,13 +85,23 @@ export function useGiniflowLive({ date, enabled = true, paused = false } = {}) {
     if (!localStorage.getItem("gini_auth_token")) return;
 
     let flushTimer = null;
+    let dropTimer = null;
     const pending = new Set();
 
     const setLive = (value) => {
-      setLiveState(value);
       // The queue hooks read this to decide whether their poll is the only
       // thing keeping the floor current, or a slow safety net behind it.
       setLiveConnected(value);
+      clearTimeout(dropTimer);
+      dropTimer = null;
+      if (value) {
+        setLiveState(true);
+        return;
+      }
+      dropTimer = setTimeout(() => {
+        dropTimer = null;
+        setLiveState(false);
+      }, DROP_GRACE_MS);
     };
 
     // A patient moving fires several events in a second. Invalidating on each
@@ -152,6 +164,7 @@ export function useGiniflowLive({ date, enabled = true, paused = false } = {}) {
     return () => {
       document.removeEventListener("visibilitychange", onVisible);
       clearTimeout(flushTimer);
+      clearTimeout(dropTimer);
       connection.stop();
       realtime.stop();
     };

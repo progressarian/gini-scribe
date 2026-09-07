@@ -8,6 +8,7 @@ import {
   STATUS_LABEL,
   slaKeyForStatus,
   TERMINAL_STATUSES,
+  NOT_A_MARKER_SQL,
 } from "../../../shared/giniflowStatus.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { IST_TODAY, budgetColour } from "./statusEngine.js";
@@ -130,7 +131,8 @@ const BOARD_SQL = `
     ) first_ev ON TRUE
     LEFT JOIN LATERAL (
       SELECT e.occurred_at FROM giniflow_visit_events e
-       WHERE e.visit_id = v.id ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1
+       WHERE e.visit_id = v.id AND ${NOT_A_MARKER_SQL("e.status")}
+       ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1
     ) last_ev ON TRUE
     LEFT JOIN LATERAL (
       SELECT o.sample_status, o.payment_status, o.updated_at AS since,
@@ -609,9 +611,14 @@ export async function getDayStats(visitDate, board, slaConfig, db = pool) {
        JOIN LATERAL (
          SELECT occurred_at FROM giniflow_visit_events n
           WHERE n.visit_id = e.visit_id AND n.occurred_at > e.occurred_at
+            -- A marker is a fact, not the end of a hop. A report landing while
+            -- a patient waited for the MO split one 90-minute wait into a
+            -- 5-minute hop scored as within budget plus an untracked remainder.
+            AND ${NOT_A_MARKER_SQL("n.status")}
           ORDER BY n.occurred_at LIMIT 1
        ) nxt ON TRUE
-      WHERE NOT ${labOnlyPredicate("v", "$2")}`,
+      WHERE NOT ${labOnlyPredicate("v", "$2")}
+        AND ${NOT_A_MARKER_SQL("e.status")}`,
     [visitDate, LAB_ONLY_DOCTOR],
   );
   const budgeted = hops
@@ -649,6 +656,10 @@ export async function getStationAverages(visitDate, slaConfig, db = pool) {
        JOIN LATERAL (
          SELECT occurred_at FROM giniflow_visit_events n
           WHERE n.visit_id = e.visit_id AND n.occurred_at > e.occurred_at
+            -- A marker is a fact, not the end of a hop. A report landing while
+            -- a patient waited for the MO split one 90-minute wait into a
+            -- 5-minute hop scored as within budget plus an untracked remainder.
+            AND ${NOT_A_MARKER_SQL("n.status")}
           ORDER BY n.occurred_at LIMIT 1
        ) nxt ON TRUE
       -- Lab-only visits never walk these stations, so their hops must not
@@ -658,6 +669,7 @@ export async function getStationAverages(visitDate, slaConfig, db = pool) {
       -- They pulled the check-in average from 105m down to 44m and painted a
       -- badly lagging station green.
       WHERE NOT ${labOnlyPredicate("v", "$2")}
+        AND ${NOT_A_MARKER_SQL("e.status")}
       GROUP BY e.status`,
     [visitDate, LAB_ONLY_DOCTOR],
   );

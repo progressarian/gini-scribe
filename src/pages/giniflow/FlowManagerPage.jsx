@@ -1274,7 +1274,7 @@ export default function FlowManagerPage() {
 
   const { columns = [], stats = {}, bottleneck, stationAverages = [], slaConfig = [] } = data || {};
   const ageSeconds = Math.round((now - dataUpdatedAt) / 1000);
-  const stale = ageSeconds > 45;
+  const stale = !live && ageSeconds > 45;
 
   const filter = statFilter ? STAT_FILTERS[statFilter] : null;
   const searchActive = debouncedSearch.trim().length >= 2;
@@ -1299,7 +1299,7 @@ export default function FlowManagerPage() {
   const canRearrange = canManageQueue && !hiding && !date;
 
   return (
-    <div className={`gf${stale ? " stale" : ""}`} ref={rootRef}>
+    <div className="gf" ref={rootRef}>
       <div className="rail">
         <div className="rl">Gini Flow</div>
         <div className="rsep" />

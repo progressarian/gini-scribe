@@ -1,5 +1,6 @@
 import {
   canTransition,
+  isMarkerStatus,
   chainIndex,
   isChainStatus,
   isKnownStatus,
@@ -204,14 +205,24 @@ export async function getStationTimes(
       (st) => chainIndex(st) > chainIndex(from) && chainIndex(st) < chainIndex(to),
     );
 
-  const raw = rows.map((row, i) => {
+  // Markers are pulled out before the walk below, not skipped inside it. Left in
+  // the sequence, a report arriving at 10:20 became `rows[i + 1]` for the wait
+  // that started at 10:00 — so a patient who waited an hour for the MO showed
+  // 20 minutes, and the rest of that wait belonged to nothing. They are put back
+  // afterwards as the dated facts they are.
+  const statusRows = rows.filter((r) => !isMarkerStatus(r.status));
+  const markerRows = rows.filter((r) => isMarkerStatus(r.status));
+
+  const raw = statusRows.map((row, i) => {
     const enteredAt = new Date(row.occurred_at);
-    const next = rows[i + 1];
+    const next = statusRows[i + 1];
     const leftAt = next ? new Date(next.occurred_at) : null;
     const ended = !next && isTerminalStatus(row.status);
     // A row that is not a status at all — `results_received` — is a fact that
     // arrived, not a place the patient stood. It carries no duration and is
     // rendered as a dated marker, the way the lab track's milestones are.
+    // A status the vocabulary does not know is still not a place with a
+    // duration — an unknown one is a bug, not a station.
     const marker = !isKnownStatus(row.status);
     const minutes =
       isTerminalStatus(row.status) || marker ? 0 : minutesBetween(enteredAt, leftAt || now);
@@ -376,5 +387,31 @@ export async function getStationTimes(
     prev.visits += 1;
   }
 
-  return merged;
+  // The markers, back in time order: dated facts between the steps rather than
+  // steps of their own. They carry no minutes and no budget, so nothing is
+  // judged against them and nothing they interrupt loses its time.
+  const withMarkers = [
+    ...merged,
+    ...markerRows.map((row) => ({
+      status: row.status,
+      timestampOnly: true,
+      label: STATUS_LABEL[row.status] || row.status,
+      actorRole: row.actor_role,
+      meta: row.meta,
+      enteredAt: new Date(row.occurred_at).toISOString(),
+      leftAt: null,
+      waitMinutes: 0,
+      waitBudget: null,
+      stationMinutes: 0,
+      stationBudget: null,
+      totalMinutes: 0,
+      budgetMinutes: null,
+      overBy: 0,
+      colour: "neutral",
+      isCurrent: false,
+      visits: 1,
+    })),
+  ].sort((a, b) => new Date(a.enteredAt) - new Date(b.enteredAt));
+
+  return withMarkers;
 }

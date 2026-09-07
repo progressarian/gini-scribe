@@ -348,3 +348,51 @@ another screen. Verified, not assumed.
 | **needs consultant** → Ready for doctor | → `ready_for_doctor`   | one-status move, plan required                    |
 | consultant finalizes                    | → `rx_pending`         | unchanged                                         |
 | Rx explain → pharmacy                   | unchanged              | same desks for both paths                         |
+
+## Code review — findings fixed 2026-09-07
+
+`/code-review high` over the diff. Nine findings against this feature, all fixed.
+Two would have stopped the floor:
+
+1. **An MO could never close a patient who had an order for another day.** The
+   gate counted every `giniflow_lab_orders` row for the visit, and `urgency`
+   accepts `tomorrow` and `next_visit` — so a fasting panel booked for the next
+   visit meant `orders > 0` for ever. `results_status` could never reach `ready`,
+   `reviewReports` refused ("the reports are not in yet") and the close refused
+   for wanting the review. **One rule now** — `GATING_ORDER_SQL`, today's orders
+   only — used by the queue's grouping, the pane's `canClose` and the close
+   itself, because three readings of "does this visit have tests" is how a row
+   advertises closeable while the service refuses.
+2. **A closed patient vanished off the MO's screen.** The close finalizes, and
+   finalize advances past `doctor_done`, which is where `QUEUE_STATUSES` stopped
+   — so the card disappeared with no record of who had been closed and no way
+   back in. `rx_pending` and `with_rx` are in the queue, and `groupOf` routes
+   them to **Done**.
+
+**The marker events corrupted every clock they touched.** `results_received` and
+`reports_reviewed` are facts, not places, but the board and both stations derive
+`status_since` from _the latest event of any status_, and the SLA queries take
+the next event of any kind as the end of a hop. So a report landing during a
+90-minute wait reset that patient's chip to 0m — turning them green at the moment
+they were most overdue — and split one hop into a 5-minute fragment scored as
+within budget plus an untracked remainder. `MARKER_STATUSES` and
+`NOT_A_MARKER_SQL` now live in `shared/giniflowStatus.js`, and every one of those
+queries excludes them. `getStationTimes` pulls markers out before the pairing
+walk and puts them back as dated facts, so the wait keeps its full length and the
+queue→station pairing is not broken by an event standing between them.
+`reports_reviewed` also had no label, so the timeline rendered the raw key.
+
+Two smaller ones: `closeWithoutDoctor` released its client outside a `finally`,
+so a rollback that threw on a dropped connection leaked one from the pool every
+time; and the `sample_taken` room guard resolved the visit through
+`patients.file_no = healthray_uid`, which is the UHID hazard this codebase
+already knows about — HealthRay reassigns them, so it could find a different
+person's visit and refuse a legitimate collection while naming the wrong patient.
+It keys on `lc.patient_id` alone now and steps aside when that is null: a guard
+that cannot identify the patient does not guess at one.
+
+**Covered by `smoke:giniflow-mo`** (90 checks): a closed patient stays on the
+MO's Done list; an order for the next visit puts nobody on results-watch while
+the same order raised for today does; a wait interrupted by a report keeps its
+whole 90 minutes; both markers are named, carry no duration, and sit in time
+order; and the wait clock still reads from a real status.
