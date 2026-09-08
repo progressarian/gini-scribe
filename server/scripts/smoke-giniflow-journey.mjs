@@ -19,9 +19,12 @@ import {
   removeStep,
   reorderSteps,
   setStepStatus,
+  insertLabStepsForOrder,
+  syncLabStepsFromLab,
   trackByToken,
 } from "../services/giniflow/journey.js";
 import { advanceStatus } from "../services/giniflow/statusEngine.js";
+import { clearPayment } from "../services/giniflow/receptionStation.js";
 
 let failures = 0;
 const check = (label, ok, detail = "") => {
@@ -351,6 +354,221 @@ check(
 check("rather than starting them from the beginning", caught.steps[0].status !== "pending");
 const again = await ensurePlan(v2.id);
 check("a second look does not seed a second one", again.seeded === false);
+
+// ── Lab Billing (33-LAB-BILLING-STEP-PLAN.md) ──────────────────────────────
+const testPlan = await defaultPlan("FU_APPT_TESTS");
+const billAt = testPlan.findIndex((s) => s.catalogId === "lab_billing");
+const sampleAt = testPlan.findIndex((s) => s.catalogId === "blood_sample");
+check("a tests journey carries a Lab Billing stop", billAt >= 0);
+check("in front of the sample, which is what the lab waits on", billAt >= 0 && billAt < sampleAt);
+check("and no board column claims it", !testPlan[billAt]?.chainStatus);
+const plainPlan = await defaultPlan("FU_APPT");
+check(
+  "a journey with no tests grows no counter",
+  !plainPlan.some((s) => s.catalogId === "lab_billing"),
+);
+check(
+  "and the medicines bill at the end is untouched",
+  plainPlan.some((s) => s.catalogId === "billing"),
+);
+
+const v3 = await bookedVisit("903", "Demo Journey Lab Bill");
+// bookedVisit reuses the row on conflict, so a run that died mid-way leaves its
+// plan behind and the check-in below would report it as already planned.
+await pool.query(`DELETE FROM giniflow_visit_steps WHERE visit_id = $1`, [v3.id]);
+await pool.query(`DELETE FROM giniflow_lab_orders WHERE visit_id = $1`, [v3.id]);
+await checkInWithJourney(v3.id, {
+  visitTypeId: "FU_APPT_TESTS",
+  steps: testPlan.filter((s) => s.included),
+  actorId: 20,
+  actorRole: "reception",
+});
+const billStep = (await getJourney(v3.id)).steps.find((s) => s.catalogId === "lab_billing");
+check("the stop reaches the patient's journey", !!billStep);
+check("as one a person ticks, not one the board ticks", billStep?.manual === true);
+
+const labOrder = await one(
+  `INSERT INTO giniflow_lab_orders (visit_id, urgency, payment_status, sample_status, amount_total)
+   VALUES ($1, 'today', 'pending', 'ordered', 500) RETURNING id`,
+  [v3.id],
+);
+const client3 = await pool.connect();
+try {
+  await client3.query("BEGIN");
+  await syncLabStepsFromLab(client3, v3.id);
+  await client3.query("COMMIT");
+} finally {
+  client3.release();
+}
+const unpaid = (await getJourney(v3.id)).steps.find((s) => s.catalogId === "lab_billing");
+check("an unpaid order leaves it untouched", unpaid.status === "pending");
+
+await pool.query(`UPDATE giniflow_lab_orders SET payment_status = 'paid' WHERE id = $1`, [
+  labOrder.id,
+]);
+const client4 = await pool.connect();
+try {
+  await client4.query("BEGIN");
+  await syncLabStepsFromLab(client4, v3.id);
+  await client4.query("COMMIT");
+} finally {
+  client4.release();
+}
+const paid = (await getJourney(v3.id)).steps.find((s) => s.catalogId === "lab_billing");
+check("settling the order ticks it without anyone pressing anything", paid.status === "done");
+
+await pool.query(
+  `INSERT INTO giniflow_lab_orders (visit_id, urgency, payment_status, sample_status, amount_total)
+   VALUES ($1, 'today', 'pending', 'ordered', 300)`,
+  [v3.id],
+);
+const client5 = await pool.connect();
+try {
+  await client5.query("BEGIN");
+  await syncLabStepsFromLab(client5, v3.id);
+  await client5.query("COMMIT");
+} finally {
+  client5.release();
+}
+const second = (await getJourney(v3.id)).steps.find((s) => s.catalogId === "lab_billing");
+check("a second unpaid order does not untick what reception recorded", second.status === "done");
+
+// The desk settling the order is what normally ticks it, including on the
+// reconcile path a drifted column takes.
+const drifted = await one(
+  `INSERT INTO giniflow_lab_orders
+     (visit_id, urgency, payment_status, sample_status, amount_total, amount_paid)
+   VALUES ($1, 'today', 'pending', 'ordered', 400, 400) RETURNING id`,
+  [v3.id],
+);
+await pool.query(
+  `UPDATE giniflow_visit_steps SET status = 'pending', completed_at = NULL
+    WHERE visit_id = $1 AND step_catalog_id = 'lab_billing'`,
+  [v3.id],
+);
+await pool.query(`UPDATE giniflow_lab_orders SET payment_status = 'paid' WHERE visit_id = $1`, [
+  v3.id,
+]);
+await pool.query(`UPDATE giniflow_lab_orders SET payment_status = 'pending' WHERE id = $1`, [
+  drifted.id,
+]);
+const settled = await clearPayment(drifted.id, { method: "paid", actorId: 20 });
+check("a drifted order reconciles rather than dead-ending", settled.alreadySettled === true);
+const afterDrift = (await getJourney(v3.id)).steps.find((s) => s.catalogId === "lab_billing");
+check("and the counter is ticked on that path too", afterDrift.status === "done");
+
+// Tests ordered mid-visit, on a journey planned without them.
+const v4 = await bookedVisit("906", "Demo Journey Late Tests");
+await pool.query(`DELETE FROM giniflow_visit_steps WHERE visit_id = $1`, [v4.id]);
+const plainSteps = (await defaultPlan("FU_APPT")).filter((s) => s.included);
+await checkInWithJourney(v4.id, {
+  visitTypeId: "FU_APPT",
+  steps: plainSteps,
+  actorId: 20,
+  actorRole: "reception",
+});
+const beforeOrder = await getJourney(v4.id);
+check(
+  "a follow-up journey starts with no lab stops",
+  !beforeOrder.steps.some((s) => s.catalogId === "lab_billing"),
+);
+const plannedBefore = (
+  await one(`SELECT planned_total_min FROM giniflow_visits WHERE id = $1`, [v4.id])
+).planned_total_min;
+
+// The first stop is done, so the insert has somewhere to go that is not the end.
+await setStepStatus(beforeOrder.steps[0].stepId, "done");
+const client7 = await pool.connect();
+try {
+  await client7.query("BEGIN");
+  await insertLabStepsForOrder(client7, v4.id);
+  await client7.query("COMMIT");
+} finally {
+  client7.release();
+}
+const late = await getJourney(v4.id);
+const lateIds = late.steps.map((s) => s.catalogId);
+check("ordering tests adds the counter and the sample", lateIds.includes("lab_billing"));
+check(
+  "in front of the work still to come, not after the pharmacy",
+  lateIds.indexOf("lab_billing") === 1 && lateIds.indexOf("blood_sample") === 2,
+  lateIds.join(" → "),
+);
+check("and the stop the patient already finished keeps its place", late.steps[0].status === "done");
+check(
+  "the estimate grows with them",
+  (await one(`SELECT planned_total_min FROM giniflow_visits WHERE id = $1`, [v4.id]))
+    .planned_total_min > plannedBefore,
+);
+const client8 = await pool.connect();
+try {
+  await client8.query("BEGIN");
+  const again2 = await insertLabStepsForOrder(client8, v4.id);
+  await client8.query("COMMIT");
+  check("a second order adds no second counter", again2.added.length === 0);
+} finally {
+  client8.release();
+}
+
+// A HealthRay-run lab: no order here at all, and the case is the evidence.
+const v5 = await bookedVisit("907", "Demo Journey HealthRay Lab");
+await pool.query(`DELETE FROM giniflow_visit_steps WHERE visit_id = $1`, [v5.id]);
+await checkInWithJourney(v5.id, {
+  visitTypeId: "FU_APPT_TESTS",
+  steps: (await defaultPlan("FU_APPT_TESTS")).filter((s) => s.included),
+  actorId: 20,
+  actorRole: "reception",
+});
+const v5row = await one(`SELECT patient_id, visit_date FROM giniflow_visits WHERE id = $1`, [
+  v5.id,
+]);
+await pool.query(
+  `INSERT INTO lab_cases (case_no, patient_case_no, case_uid, lab_case_id, patient_id,
+                          case_date, test_names, raw_list_json, raw_detail_json)
+   VALUES ('ZZJRN-LAB', 'ZZJRN-LAB', 'ZZJRN-LAB-UID', -9001, $1, $2::date, ARRAY['HBA1C'],
+           '{"phlebotomy_status":"Completed"}'::jsonb, '{"reported_on":"2019-01-04 11:00"}'::jsonb)`,
+  [v5row.patient_id, v5row.visit_date],
+);
+const hrEvidence = await syncLabStepsFromLab(pool, v5.id);
+check("a HealthRay case counts as billed and drawn", hrEvidence.billed && hrEvidence.drawn);
+const hrJourney = await getJourney(v5.id);
+const hrBill = hrJourney.steps.find((s) => s.catalogId === "lab_billing");
+const hrSample = hrJourney.steps.find((s) => s.catalogId === "blood_sample");
+check("so the counter is not left for the desk to tick", hrBill.status === "done");
+check("and neither is the sample the lab already drew", hrSample.status === "done");
+await pool.query(`DELETE FROM lab_cases WHERE case_no = 'ZZJRN-LAB'`);
+
+// The exit sweep strikes through what is still pending; lab evidence outranks it.
+await pool.query(
+  `UPDATE giniflow_visit_steps SET status = 'skipped'
+    WHERE visit_id = $1 AND step_catalog_id IN ('lab_billing', 'blood_sample')`,
+  [v5.id],
+);
+await pool.query(
+  `INSERT INTO giniflow_lab_orders (visit_id, urgency, payment_status, sample_status, amount_total)
+   VALUES ($1, 'today', 'paid', 'processing', 250)`,
+  [v5.id],
+);
+await syncLabStepsFromLab(pool, v5.id);
+const unskipped = await getJourney(v5.id);
+check(
+  "a stop struck through on the way out is corrected by what the lab recorded",
+  unskipped.steps.find((s) => s.catalogId === "lab_billing").status === "done" &&
+    unskipped.steps.find((s) => s.catalogId === "blood_sample").status === "done",
+);
+
+const noPlan = await bookedVisit("904", "Demo Journey No Plan");
+const client6 = await pool.connect();
+try {
+  await client6.query("BEGIN");
+  await syncLabStepsFromLab(client6, noPlan.id);
+  await client6.query("COMMIT");
+  check("a visit with no journey is a no-op, not an error", true);
+} catch (e) {
+  check("a visit with no journey is a no-op, not an error", false, e.message);
+} finally {
+  client6.release();
+}
 
 // ── The older module is not touched ────────────────────────────────────────
 const after = await one(

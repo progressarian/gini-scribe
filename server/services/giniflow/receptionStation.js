@@ -6,6 +6,7 @@ import {
   isExceptionStatus,
 } from "../../../shared/giniflowStatus.js";
 import { advanceStatus, IST_TODAY } from "./statusEngine.js";
+import { syncLabStepsFromLab } from "./journey.js";
 import { searchDayVisits } from "./board.js";
 import { blockDetail } from "../patientBlockView.js";
 import { createWalkinBooking } from "../walkinBooking.js";
@@ -297,6 +298,14 @@ export async function clearPayment(
             [orderId, actorId, actorRole],
           );
         }
+        // The journey's counter follows the money here too. An order the
+        // column had wrong is still an order that is paid, and the patient
+        // standing at the desk has to be able to move on.
+        const { rows: driftedVisit } = await client.query(
+          `SELECT visit_id FROM giniflow_lab_orders WHERE id = $1`,
+          [orderId],
+        );
+        if (driftedVisit[0]?.visit_id) await syncLabStepsFromLab(client, driftedVisit[0].visit_id);
       }
       await client.query("COMMIT");
       return {
@@ -466,6 +475,15 @@ export async function clearPayment(
       );
     }
 
+    // The Lab Billing stop on the patient's journey, when there is a plan and
+    // the money for it is here. In the same transaction as the settle, so the
+    // journey cannot claim a payment the ledger rolled back.
+    const { rows: forVisit } = await client.query(
+      `SELECT visit_id FROM giniflow_lab_orders WHERE id = $1`,
+      [orderId],
+    );
+    if (forVisit[0]?.visit_id) await syncLabStepsFromLab(client, forVisit[0].visit_id);
+
     await client.query("COMMIT");
     return {
       orderId,
@@ -573,6 +591,9 @@ const ARRIVAL_SELECT = `
          -- GIVE samples and go, booked against Dr. Hospital Admin. They should
          -- not be offered an hour of consultation they are not here for.
          AND COALESCE(t.for_tests, FALSE) = (ap.visit_type ~* '(investigat|lab|test)')
+         -- A type an admin has switched off is not offered again; visits already
+         -- on it keep running, since the id still resolves everywhere else.
+         AND t.is_active = TRUE
        ORDER BY t.max_time_min, t.id LIMIT 1
     ) sugg ON TRUE
     LEFT JOIN LATERAL (

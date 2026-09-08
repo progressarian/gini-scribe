@@ -7914,3 +7914,36 @@
   display: flex;
   gap: 4px;
 }
+
+/* The journey's conditional questions — "Having tests today?" and friends.
+   Answering one adds or removes the steps whose template row names that
+   condition, so the desk stops deleting five lab rows by hand. */
+.gf .jb-conds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 4px;
+}
+.gf .jb-cond {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink2);
+  background: var(--white);
+  border: 1px solid var(--bd2);
+  border-radius: 20px;
+  padding: 5px 12px 5px 9px;
+  cursor: pointer;
+  user-select: none;
+}
+.gf .jb-cond:has(input:checked) {
+  border-color: var(--blu);
+  background: var(--blu-l);
+  color: var(--blu);
+}
+.gf .jb-cond input {
+  cursor: pointer;
+  accent-color: var(--blu);
+}

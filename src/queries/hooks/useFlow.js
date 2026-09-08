@@ -10,11 +10,14 @@ const errMsg = (err, fallback) =>
   err?.response?.data?.error || err?.response?.data?.message || err?.message || fallback;
 
 // ── Reference data (cached longer — rarely changes) ──
-export function useFlowVisitTypes() {
+// all=true returns deactivated types too — only Settings wants those, so that a
+// type switched off can still be switched back on. Same shape as
+// useFlowStepCatalog below.
+export function useFlowVisitTypes(all = false) {
   return useQuery({
-    queryKey: qk.flow.visitTypes(),
-    queryFn: async () => (await api.get("/api/flow/visit-types")).data,
-    staleTime: 5 * 60_000,
+    queryKey: [...qk.flow.visitTypes(), all ? "all" : "active"],
+    queryFn: async () => (await api.get(`/api/flow/visit-types${all ? "?all=1" : ""}`)).data,
+    staleTime: all ? 0 : 5 * 60_000,
   });
 }
 export function useFlowStepCatalog(all = false) {
@@ -375,6 +378,17 @@ export function useFlowEditVisitType() {
       return (await api.patch(`/api/flow/visit-types/${id}`, body)).data;
     } catch (err) {
       throw new Error(errMsg(err, "Could not update benchmark"));
+    }
+  });
+}
+// Replaces a visit type's whole default journey. The body must carry every step
+// to keep — the endpoint rewrites the template rather than patching it.
+export function useFlowSaveTemplate() {
+  return useFlowMutation(async ({ visitTypeId, steps }) => {
+    try {
+      return (await api.put(`/api/flow/templates/${visitTypeId}`, { steps })).data;
+    } catch (err) {
+      throw new Error(errMsg(err, "Could not save the journey"));
     }
   });
 }

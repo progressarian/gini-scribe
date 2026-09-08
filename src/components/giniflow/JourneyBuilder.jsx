@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useFlowStepCatalog, useFlowStaff } from "../../queries/hooks/useFlow";
 import useAuthStore from "../../stores/authStore";
+import { CONDITIONS } from "../../../shared/giniflowConditions.js";
 
 // The journey reception confirms before an arrival completes: what this patient
 // is here for, in the order they will do it.
@@ -42,7 +43,18 @@ function AssignSelect({ step, onChange }) {
   );
 }
 
-export default function JourneyBuilder({ steps, onChange, visitTypes, visitTypeId, onTypeChange }) {
+export default function JourneyBuilder({
+  steps,
+  onChange,
+  visitTypes,
+  visitTypeId,
+  onTypeChange,
+  // Only the conditions this type's template actually uses are asked about, so
+  // a journey with no conditional steps shows no questions at all.
+  askable = [],
+  conditions = {},
+  onConditionChange,
+}) {
   // /flow/step-catalog already withholds the lab's background stages — they
   // belong to a test, not to a patient's journey, and the older module has the
   // scar to prove it. Nothing to filter here.
@@ -110,6 +122,21 @@ export default function JourneyBuilder({ steps, onChange, visitTypes, visitTypeI
           </button>
         ))}
       </div>
+
+      {askable.length > 0 && onConditionChange && (
+        <div className="jb-conds">
+          {CONDITIONS.filter((c) => askable.includes(c.key)).map((c) => (
+            <label key={c.key} className="jb-cond" title={c.hint}>
+              <input
+                type="checkbox"
+                checked={conditions[c.key] !== false}
+                onChange={(e) => onConditionChange(c.key, e.target.checked)}
+              />
+              {c.question}
+            </label>
+          ))}
+        </div>
+      )}
 
       <div className="jb-head">
         <span>Step</span>

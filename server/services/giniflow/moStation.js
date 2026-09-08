@@ -5,6 +5,7 @@ import { advanceStatus, budgetColour } from "./statusEngine.js";
 import { getSlaConfig, budgetLookup } from "./board.js";
 import { slaKeyForStatus, WAIT_SINCE_SQL } from "../../../shared/giniflowStatus.js";
 import { todaysVitals, previousVitals } from "./visitVitals.js";
+import { insertLabStepsForOrder } from "./journey.js";
 import { ALLERGY_NOT_ASKED } from "../../../shared/giniflowAllergy.js";
 
 // The MO / SD station — where the queue forms.
@@ -764,6 +765,10 @@ export async function orderTests(
       );
       sentToLab = true;
     }
+
+    // The journey the patient is shown, and the counter they are about to stand
+    // at. Only today's tests: a next-visit panel is not a stop on this visit.
+    if (urgency === "today") await insertLabStepsForOrder(client, visitId);
 
     await client.query("COMMIT");
     return {

@@ -11,7 +11,9 @@ import {
   useFlowCreateCatalogStep,
   useFlowDeleteCatalogStep,
 } from "../../queries/hooks/useFlow";
+import JourneyTemplateEditor from "../../components/flow/JourneyTemplateEditor";
 import "../../styles/flow.css";
+import "./FlowSettings.css";
 
 // Admin settings: edit visit-time benchmarks (max minutes) and fully manage the
 // step catalog (create / update / delete). Inline-edit on blur. ADMIN-gated
@@ -21,7 +23,7 @@ import "../../styles/flow.css";
 // title and blurb, so this owns only its own controls. .flow-root stays: the
 // cards and tables below read their palette off its variables.
 export default function FlowAdminPage() {
-  const { data: types = [] } = useFlowVisitTypes();
+  const { data: types = [] } = useFlowVisitTypes(true);
   const { data: catalog = [] } = useFlowStepCatalog(true);
   const editType = useFlowEditVisitType();
   const createType = useFlowCreateVisitType();
@@ -31,7 +33,7 @@ export default function FlowAdminPage() {
   const deleteStep = useFlowDeleteCatalogStep();
 
   // "+ Add visit type" form for the benchmarks table.
-  const [newType, setNewType] = useState({ label: "", min: "", flexible: false });
+  const [newType, setNewType] = useState({ label: "", min: "" });
   // Visit type pending delete-confirmation (drives its ConfirmModal).
   const [deleteTypeTarget, setDeleteTypeTarget] = useState(null);
   // "+ Add step" form for the catalog.
@@ -64,12 +66,8 @@ export default function FlowAdminPage() {
     if (!label) return toast("Visit type needs a name", "error");
     if (!(min >= 1)) return toast("Enter a max time in minutes", "error");
     try {
-      await createType.mutateAsync({
-        label,
-        max_time_min: min,
-        is_flexible: newType.flexible,
-      });
-      setNewType({ label: "", min: "", flexible: false });
+      await createType.mutateAsync({ label, max_time_min: min });
+      setNewType({ label: "", min: "" });
       toast(`Added “${label}”`, "success");
     } catch (e) {
       toast(e.message, "error");
@@ -130,79 +128,93 @@ export default function FlowAdminPage() {
   };
 
   return (
-    <div className="flow-root">
+    <div className="flow-root fset">
       <div className="flow-wrap">
-        <div
-          style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, alignItems: "start" }}
-        >
+        <div className="fset__grid">
           {/* Benchmarks — add / edit / delete */}
           <div className="flow-card">
-            <div className="flow-sec-title">Visit-time benchmarks</div>
-            <table className="flow-table" style={{ border: "none" }}>
-              <thead>
-                <tr>
-                  <th>Visit type</th>
-                  <th style={{ width: 90 }}>Max (min)</th>
-                  <th style={{ width: 70 }}>Flexible</th>
-                  <th style={{ width: 36 }} />
-                </tr>
-              </thead>
-              <tbody>
-                {types.map((t) => (
-                  <tr key={t.id}>
-                    <td>
-                      <input
-                        className="jb-assign"
-                        style={{ maxWidth: "none", fontWeight: 700 }}
-                        defaultValue={t.label}
-                        onBlur={(e) => {
-                          const v = e.target.value.trim();
-                          if (v && v !== t.label) saveType(t.id, { label: v }, "Saved");
-                        }}
-                      />
-                      <div className="flow-muted">{t.id}</div>
-                    </td>
-                    <td>
-                      <input
-                        className="jb-dur"
-                        type="number"
-                        min="1"
-                        defaultValue={t.max_time_min}
-                        onBlur={(e) => {
-                          const v = parseInt(e.target.value);
-                          if (v && v !== t.max_time_min)
-                            saveType(t.id, { max_time_min: v }, `${t.label} → ${v} min`);
-                        }}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="checkbox"
-                        defaultChecked={t.is_flexible}
-                        onChange={(e) => saveType(t.id, { is_flexible: e.target.checked }, "Saved")}
-                      />
-                    </td>
-                    <td>
-                      <button
-                        className="jb-remove"
-                        title="Delete visit type"
-                        disabled={deleteType.isPending}
-                        onClick={() => setDeleteTypeTarget(t)}
-                      >
-                        ✕
-                      </button>
-                    </td>
+            <div className="fset__cardhead">
+              <div className="flow-sec-title">Visit-time benchmarks</div>
+              <span className="fset__count">{types.length}</span>
+            </div>
+            <div className="fset__cardsub">
+              How long each kind of visit should take. The board times a patient against the
+              benchmark for their type.
+            </div>
+            <div className="fset__scroll">
+              <table className="flow-table" style={{ border: "none" }}>
+                <thead>
+                  <tr>
+                    <th>Visit type</th>
+                    <th style={{ width: 90 }}>Max (min)</th>
+                    <th style={{ width: 60 }}>Active</th>
+                    <th style={{ width: 36 }} />
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {types.map((t) => (
+                    <tr key={t.id} className={t.is_active === false ? "fset__row--off" : undefined}>
+                      <td>
+                        <input
+                          className="jb-assign"
+                          style={{ maxWidth: "none", fontWeight: 700 }}
+                          defaultValue={t.label}
+                          onBlur={(e) => {
+                            const v = e.target.value.trim();
+                            if (v && v !== t.label) saveType(t.id, { label: v }, "Saved");
+                          }}
+                        />
+                        <div className="flow-muted">{t.id}</div>
+                      </td>
+                      <td>
+                        <input
+                          className="jb-dur"
+                          type="number"
+                          min="1"
+                          defaultValue={t.max_time_min}
+                          onBlur={(e) => {
+                            const v = parseInt(e.target.value);
+                            if (v && v !== t.max_time_min)
+                              saveType(t.id, { max_time_min: v }, `${t.label} → ${v} min`);
+                          }}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={t.is_active !== false}
+                          title="Offer this visit type at check-in"
+                          onChange={(e) =>
+                            saveType(
+                              t.id,
+                              { is_active: e.target.checked },
+                              e.target.checked
+                                ? `${t.label} is selectable again`
+                                : `${t.label} switched off — visits already on it keep running`,
+                            )
+                          }
+                        />
+                      </td>
+                      <td>
+                        <button
+                          className="jb-remove"
+                          title="Delete visit type"
+                          disabled={deleteType.isPending}
+                          onClick={() => setDeleteTypeTarget(t)}
+                        >
+                          ✕
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
             {/* Add a new visit type */}
-            <div style={{ marginTop: 10 }}>
-              <div className="flow-sec-title" style={{ fontSize: 10 }}>
-                Add visit type
-              </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+            <div className="fset__add">
+              <div className="fset__addtitle">Add visit type</div>
+              <div className="fset__addrow">
                 <input
                   className="jb-assign"
                   style={{ maxWidth: "none", flex: "2 1 150px" }}
@@ -218,14 +230,6 @@ export default function FlowAdminPage() {
                   value={newType.min}
                   onChange={(e) => setNewType((n) => ({ ...n, min: e.target.value }))}
                 />
-                <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11 }}>
-                  <input
-                    type="checkbox"
-                    checked={newType.flexible}
-                    onChange={(e) => setNewType((n) => ({ ...n, flexible: e.target.checked }))}
-                  />
-                  Flexible
-                </label>
                 <button
                   className="flow-btn flow-btn-primary"
                   disabled={createType.isPending}
@@ -234,7 +238,7 @@ export default function FlowAdminPage() {
                   + Add
                 </button>
               </div>
-              <div className="flow-muted" style={{ marginTop: 4 }}>
+              <div className="fset__hint">
                 New types get a code from the name. Build its journey in the journey builder before
                 check-ins can use it. Built-in types can’t be deleted (they’re in use).
               </div>
@@ -243,66 +247,73 @@ export default function FlowAdminPage() {
 
           {/* Step catalog — add / edit / delete */}
           <div className="flow-card">
-            <div className="flow-sec-title">Step catalog</div>
-            <table className="flow-table" style={{ border: "none" }}>
-              <thead>
-                <tr>
-                  <th>Step</th>
-                  <th style={{ width: 80 }}>Default min</th>
-                  <th style={{ width: 60 }}>Active</th>
-                  <th style={{ width: 36 }} />
-                </tr>
-              </thead>
-              <tbody>
-                {catalog.map((c) => (
-                  <tr key={c.id} style={{ opacity: c.is_active ? 1 : 0.5 }}>
-                    <td>
-                      <b>{c.name}</b>
-                      <div className="flow-muted">
-                        {c.station} · {c.assigned_role}
-                      </div>
-                    </td>
-                    <td>
-                      <input
-                        className="jb-dur"
-                        type="number"
-                        min="0"
-                        defaultValue={c.default_duration_min}
-                        onBlur={(e) => {
-                          const v = parseInt(e.target.value);
-                          if (Number.isInteger(v) && v !== c.default_duration_min)
-                            saveStep(c.id, { default_duration_min: v }, `${c.name} → ${v} min`);
-                        }}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="checkbox"
-                        defaultChecked={c.is_active}
-                        onChange={(e) => saveStep(c.id, { is_active: e.target.checked }, "Saved")}
-                      />
-                    </td>
-                    <td>
-                      <button
-                        className="jb-remove"
-                        title="Delete step"
-                        disabled={deleteStep.isPending}
-                        onClick={() => setDeleteTarget(c)}
-                      >
-                        ✕
-                      </button>
-                    </td>
+            <div className="fset__cardhead">
+              <div className="flow-sec-title">Step catalog</div>
+              <span className="fset__count">{catalog.length}</span>
+            </div>
+            <div className="fset__cardsub">
+              Every stop that can appear in a journey. Switching one off keeps it out of new
+              journeys without disturbing visits already running.
+            </div>
+            <div className="fset__scroll">
+              <table className="flow-table" style={{ border: "none" }}>
+                <thead>
+                  <tr>
+                    <th>Step</th>
+                    <th style={{ width: 80 }}>Default min</th>
+                    <th style={{ width: 60 }}>Active</th>
+                    <th style={{ width: 36 }} />
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {catalog.map((c) => (
+                    <tr key={c.id} className={c.is_active ? undefined : "fset__row--off"}>
+                      <td>
+                        <b>{c.name}</b>
+                        <div className="flow-muted">
+                          {c.station} · {c.assigned_role}
+                        </div>
+                      </td>
+                      <td>
+                        <input
+                          className="jb-dur"
+                          type="number"
+                          min="0"
+                          defaultValue={c.default_duration_min}
+                          onBlur={(e) => {
+                            const v = parseInt(e.target.value);
+                            if (Number.isInteger(v) && v !== c.default_duration_min)
+                              saveStep(c.id, { default_duration_min: v }, `${c.name} → ${v} min`);
+                          }}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="checkbox"
+                          defaultChecked={c.is_active}
+                          onChange={(e) => saveStep(c.id, { is_active: e.target.checked }, "Saved")}
+                        />
+                      </td>
+                      <td>
+                        <button
+                          className="jb-remove"
+                          title="Delete step"
+                          disabled={deleteStep.isPending}
+                          onClick={() => setDeleteTarget(c)}
+                        >
+                          ✕
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
             {/* Add a new step */}
-            <div style={{ marginTop: 10 }}>
-              <div className="flow-sec-title" style={{ fontSize: 10 }}>
-                Add step
-              </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+            <div className="fset__add">
+              <div className="fset__addtitle">Add step</div>
+              <div className="fset__addrow">
                 <input
                   className="jb-assign"
                   style={{ maxWidth: "none", flex: "2 1 150px" }}
@@ -355,6 +366,9 @@ export default function FlowAdminPage() {
             </div>
           </div>
         </div>
+
+        {/* Full width, under the two half-width cards: a journey is a long row. */}
+        <JourneyTemplateEditor types={types} />
       </div>
 
       <ConfirmModal

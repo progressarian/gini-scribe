@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   useReceptionQueue,
   useClearPayment,
@@ -14,6 +14,7 @@ import useAuthStore from "../../stores/authStore";
 import StationNotice from "../../components/giniflow/StationNotice";
 import JourneyBuilder from "../../components/giniflow/JourneyBuilder";
 import { useFlowVisitTypes } from "../../queries/hooks/useFlow";
+import { stepPassesConditions } from "../../../shared/giniflowConditions.js";
 import {
   useJourneyPlan,
   useCheckIn,
@@ -447,17 +448,32 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed }) {
   const { data: visitTypes = [] } = useFlowVisitTypes();
   const [visitTypeId, setVisitTypeId] = useState(arrival.suggestedVisitTypeId || null);
   const [steps, setSteps] = useState(null);
+  // Answers to the template's conditions. Only the keys this type's template
+  // actually uses ever appear, and every one starts true: the journey a desk
+  // sees on open is the journey they saw before this gate existed, and saying
+  // "no tests today" is now one tick instead of deleting five rows.
+  const [conditions, setConditions] = useState({});
   const { data: plan } = useJourneyPlan(visitTypeId);
   const checkIn = useCheckIn();
 
-  // The template loads when the TYPE changes — never merely because the query
-  // refetched. A refetch on window focus, or the invalidation another panel
-  // causes, would otherwise throw away everything reception had edited and check
-  // the patient in on a journey they did not build.
-  const loadedFor = useRef(null);
+  const askable = useMemo(
+    () => [...new Set((plan || []).filter((p) => p.conditionKey).map((p) => p.conditionKey))],
+    [plan],
+  );
+
   useEffect(() => {
-    if (!plan || loadedFor.current === visitTypeId) return;
-    loadedFor.current = visitTypeId;
+    setConditions(Object.fromEntries(askable.map((k) => [k, true])));
+  }, [askable, visitTypeId]);
+
+  // The template loads when the TYPE or an ANSWER changes — never merely because
+  // the query refetched. A refetch on window focus, or the invalidation another
+  // panel causes, would otherwise throw away everything reception had edited and
+  // check the patient in on a journey they did not build.
+  const loadedFor = useRef(null);
+  const answerKey = `${visitTypeId}|${askable.map((k) => `${k}:${conditions[k] !== false}`).join(",")}`;
+  useEffect(() => {
+    if (!plan || loadedFor.current === answerKey) return;
+    loadedFor.current = answerKey;
     // A consultant the booking already named is filled in, so the desk confirms
     // rather than picks from an empty box — and so an assignment that already
     // exists is not quietly replaced by a blank.
@@ -467,13 +483,32 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed }) {
         : step.chainStatus === "with_sd" && arrival.assignedSdId
           ? { staffId: String(arrival.assignedSdId), staffName: arrival.assignedSdName }
           : null;
-    setSteps((current) => [
-      ...plan.filter((p) => p.included).map((p) => ({ ...p, ...(preassigned(p) || {}) })),
-      // Steps the desk added by hand survive a change of type: retyping an X-Ray
-      // because they corrected the visit type is how a screen gets abandoned.
-      ...(current || []).filter((s) => s.source === "added" || s.source === "custom"),
-    ]);
-  }, [plan, visitTypeId, arrival]);
+    setSteps((current) => {
+      // Toggling an answer rebuilds the template half of the list, so the edits
+      // already made to the steps that survive have to be carried across —
+      // otherwise answering "no dietitian" would also silently reset the
+      // consultant the desk had just chosen three rows above.
+      const kept = new Map(
+        (current || []).filter((s) => s.source === "template").map((s) => [s.catalogId, s]),
+      );
+      const template = plan
+        .filter((p) => p.included && stepPassesConditions(p, conditions))
+        .map((p) => {
+          const base = { ...p, ...(preassigned(p) || {}) };
+          const prev = kept.get(p.catalogId);
+          return prev
+            ? { ...base, minutes: prev.minutes, staffId: prev.staffId, staffName: prev.staffName }
+            : base;
+        });
+      return [
+        ...template,
+        // Steps the desk added by hand survive a change of type: retyping an
+        // X-Ray because they corrected the visit type is how a screen gets
+        // abandoned.
+        ...(current || []).filter((s) => s.source === "added" || s.source === "custom"),
+      ];
+    });
+  }, [plan, answerKey, arrival, conditions]);
 
   const list = steps || [];
   const minutes = list.reduce((sum, s) => sum + (Number(s.minutes) || 0), 0);
@@ -516,6 +551,9 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed }) {
               visitTypes={visitTypes}
               visitTypeId={visitTypeId}
               onTypeChange={setVisitTypeId}
+              askable={askable}
+              conditions={conditions}
+              onConditionChange={(key, value) => setConditions((c) => ({ ...c, [key]: value }))}
             />
 
             {arrival.phone && (
@@ -569,13 +607,18 @@ function JourneyPanel({ arrival, onClose }) {
   const { data, isLoading } = useJourney(arrival.visitId);
   const step = useJourneyStep();
   const steps = data?.steps || [];
+  const doctorName = arrival.assignedDoctorName || arrival.assignedSdName || null;
 
   return (
     <div className="detail-overlay">
       <div className="detail-pane ci-pane" role="dialog" aria-label="Journey">
         <div className="dp-head">
           <div className="dp-name">{arrival.name}</div>
-          <div className="dp-meta">Journey</div>
+          <div className="dp-meta">
+            {identity(arrival)}
+            {arrival.slot ? ` · ${arrival.slot}` : ""}
+            {doctorName ? ` · ${doctorName}` : ""}
+          </div>
           <div className="dp-acts">
             <button className="rbtn" onClick={onClose}>
               ← Back
@@ -586,6 +629,16 @@ function JourneyPanel({ arrival, onClose }) {
         <div className="dp-scroll">
           <div className="dp-inner ci-panel">
             {isLoading && <div className="empty-note">Loading…</div>}
+            {steps.length > 0 && (
+              <div className="dp-hint">
+                {data.doneCount} of {data.totalCount} stops done · ~{data.plannedTotalMin}m planned
+                {data.currentStep
+                  ? ` · now: ${data.currentStep}`
+                  : data.nextStep
+                    ? ` · next: ${data.nextStep}`
+                    : ""}
+              </div>
+            )}
             {steps.map((s, i) => {
               // Its turn: everything before it is finished, one way or another.
               // Billing sits at seven of eight in every template, and a tick
@@ -610,7 +663,14 @@ function JourneyPanel({ arrival, onClose }) {
                       The rest follow the patient's status on their own, and a
                       button that duplicated that would let two truths
                       disagree. */}
-                  {s.manual && s.status === "done" ? (
+                  {data?.finished ? (
+                    // The patient has gone. What they did and did not do is a
+                    // record now, and a tick offered here would be somebody
+                    // writing history from memory.
+                    <span className="jp-status">
+                      {s.status === "skipped" ? "not done" : s.status.replace(/_/g, " ")}
+                    </span>
+                  ) : s.manual && s.status === "done" ? (
                     <button
                       className="st-btn st-btn-ghost"
                       disabled={step.isPending}
@@ -631,10 +691,12 @@ function JourneyPanel({ arrival, onClose }) {
                     >
                       ✓ Done
                     </button>
-                  ) : s.manual ? (
+                  ) : s.manual && blocker ? (
                     // Named, not just greyed: the desk needs to know WHAT comes
                     // first, or a step that cannot be ticked reads as broken.
                     <span className="jp-status">after {blocker.name}</span>
+                  ) : s.manual ? (
+                    <span className="jp-status">{s.status.replace(/_/g, " ")}</span>
                   ) : (
                     <span className="jp-status">{s.status.replace(/_/g, " ")}</span>
                   )}

@@ -1,0 +1,273 @@
+/* Patient Flow settings — the Settings tab, not the floor board.
+ *
+ * Scoped to .fset so nothing here can reach the live board, which shares
+ * .flow-card / .flow-table / .jb-* with this page. The chip styles in
+ * particular exist because .jb-types and .jb-type are defined only under .gf
+ * in giniflow-station.css: reused here they rendered as bare browser buttons.
+ *
+ * Responsive rule of the page: two cards side by side while both can hold their
+ * columns, one column under that, and every table scrolls inside its own box
+ * rather than pushing the page sideways. */
+
+.fset__grid {
+  display: grid;
+  /* auto-fit, not a breakpoint: the cards reflow at the width they actually
+     stop fitting, which is also correct inside the narrower Settings shell. */
+  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.fset .flow-card {
+  padding: 16px;
+  min-width: 0; /* a grid item defaults to min-content: without this the table wins */
+}
+
+.fset__cardhead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.fset__cardhead .flow-sec-title {
+  margin-bottom: 0;
+}
+.fset__count {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--fink3);
+  background: var(--fbg);
+  border: 1px solid var(--fbd);
+  border-radius: 20px;
+  padding: 1px 7px;
+}
+.fset__cardsub {
+  font-size: 11px;
+  color: var(--fink3);
+  line-height: 1.6;
+  margin-bottom: 12px;
+}
+
+/* Every table lives in one of these. Below the min-width it scrolls itself
+   instead of stretching the card past the viewport. */
+.fset__scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0 -16px;
+  padding: 0 16px;
+}
+.fset__scroll > .flow-table {
+  min-width: 460px;
+}
+.fset__scroll--wide > .flow-table {
+  min-width: 720px;
+}
+
+.fset .flow-table th,
+.fset .flow-table td {
+  padding: 8px 10px;
+}
+.fset .flow-table td {
+  vertical-align: middle;
+}
+.fset .flow-table tbody tr:hover {
+  background: var(--fbg);
+}
+.fset__row--off td {
+  opacity: 0.55;
+}
+.fset__row--auto td {
+  background: var(--fbg);
+}
+
+.fset .jb-dur {
+  width: 100%;
+  min-width: 52px;
+  max-width: 72px;
+}
+.fset .jb-assign {
+  max-width: 100%;
+}
+.fset input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  accent-color: var(--ftl);
+}
+.fset input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+}
+
+/* Add-a-row forms at the foot of each card. */
+.fset__add {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--fbd);
+}
+.fset__addtitle {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--fink3);
+  margin-bottom: 8px;
+}
+.fset__addrow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.fset__addrow .jb-assign {
+  flex: 1 1 130px;
+  min-width: 0;
+}
+.fset__addrow .jb-dur {
+  flex: 0 0 auto;
+}
+.fset__hint {
+  font-size: 11px;
+  color: var(--fink3);
+  line-height: 1.6;
+  margin-top: 8px;
+}
+
+/* ── Journey editor ─────────────────────────────────────────────────── */
+
+.fset__journey {
+  margin-top: 14px;
+}
+
+/* The visit-type picker. A strip that wraps on desktop and scrolls on a phone,
+   so a long list never becomes four stacked rows of chips. */
+.fset__types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.fset__type {
+  border: 1px solid var(--fbd2);
+  background: var(--fwhite);
+  border-radius: 20px;
+  padding: 6px 13px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fink2);
+  cursor: pointer;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  white-space: nowrap;
+}
+.fset__type:hover {
+  border-color: var(--ftl);
+}
+.fset__type.on {
+  border-color: var(--ftl);
+  background: var(--ftll);
+  color: var(--ftl);
+}
+.fset__type--off {
+  opacity: 0.5;
+}
+.fset__typemin {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--fink3);
+}
+.fset__type.on .fset__typemin {
+  color: var(--ftl);
+}
+
+.fset__stepname {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--fink);
+}
+.fset__stepmeta {
+  font-size: 10px;
+  color: var(--fink3);
+  margin-top: 2px;
+}
+.fset__auto {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fink3);
+  background: var(--fwhite);
+  border: 1px solid var(--fbd2);
+  border-radius: 3px;
+  padding: 0 4px;
+  margin-left: 4px;
+}
+.fset__ord {
+  font-size: 11px;
+  color: var(--fink3);
+  font-variant-numeric: tabular-nums;
+}
+
+.fset .jb-move {
+  flex-direction: row;
+  gap: 2px;
+  margin: 0;
+}
+.fset .jb-move button {
+  background: var(--fwhite);
+  border: 1px solid var(--fbd);
+  border-radius: 4px;
+  width: 20px;
+  height: 20px;
+  line-height: 1;
+  font-size: 9px;
+  color: var(--fink2);
+  cursor: pointer;
+  padding: 0;
+}
+.fset .jb-move button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* Action bar under the journey table. Wraps to two lines on a phone rather
+   than squeezing the Save button off the card. */
+.fset__actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--fbd);
+}
+.fset__actions .jb-add {
+  margin-top: 0;
+}
+.fset__total {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--fink3);
+  font-variant-numeric: tabular-nums;
+}
+.fset__dirty {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fam);
+}
+
+@media (max-width: 620px) {
+  .fset__scroll {
+    margin: 0 -12px;
+    padding: 0 12px;
+  }
+  .fset .flow-card {
+    padding: 12px;
+  }
+  .fset__total {
+    margin-left: 0;
+    width: 100%;
+  }
+}

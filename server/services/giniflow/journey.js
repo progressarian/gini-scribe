@@ -50,6 +50,25 @@ const shapeStep = (r) => ({
 
 const clampMinutes = (v) => Math.min(600, Math.max(0, Math.round(Number(v) || 0)));
 
+// A HealthRay case is registered at their counter, billed there, and its
+// collection and reporting times are the lab's own. Matched the way every other
+// reader of lab_cases matches — id first, healthray_uid only when the case was
+// never linked.
+const HR_LAB_EVIDENCE_SQL = `
+  (SELECT count(*)::int FROM lab_cases lc
+    WHERE lc.case_date = v.visit_date
+      AND (lc.patient_id = v.patient_id
+           OR (lc.patient_id IS NULL
+               AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))) AS hr_cases,
+  (SELECT bool_or(lc.raw_list_json->>'phlebotomy_status' = 'Completed'
+                  OR (COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'collected_on') IS NOT NULL
+                  OR (COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'reported_on') IS NOT NULL)
+     FROM lab_cases lc
+    WHERE lc.case_date = v.visit_date
+      AND (lc.patient_id = v.patient_id
+           OR (lc.patient_id IS NULL
+               AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))) AS hr_collected`;
+
 const trimmed = (v, max = 120) =>
   typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null;
 
@@ -94,14 +113,15 @@ export async function defaultPlan(visitTypeId, db = pool) {
 
 // Which visit type to preselect. Data, not a hardcoded id: the flags live on
 // flow_visit_types and an admin can move them. No match — an unflagged type like
-// ONLINE, or a floor that has not filled the flags in — means no preselection,
-// and reception picks. A type with no template rows is also fine: the builder
+// ONLINE, a deactivated one, or a floor that has not filled the flags in — means
+// no preselection, and reception picks. A type with no template rows is also fine: the builder
 // opens empty and they add what the patient needs.
 export async function suggestVisitType({ isFollowUp, isWalkIn, isTests = false }, db = pool) {
   const { rows } = await db.query(
     `SELECT id FROM flow_visit_types
       WHERE for_followup = $1 AND for_walkin = $2
         AND COALESCE(for_tests, FALSE) = $3
+        AND is_active = TRUE
       ORDER BY max_time_min, id LIMIT 1`,
     [!!isFollowUp, !!isWalkIn, !!isTests],
   );
@@ -114,6 +134,11 @@ export async function getJourney(visitId, db = pool) {
   const { rows } = await db.query(`${STEP_SELECT} WHERE visit_id = $1 ORDER BY step_order`, [
     visitId,
   ]);
+  const { rows: visitRows } = await db.query(
+    `SELECT current_status FROM giniflow_visits WHERE id = $1`,
+    [visitId],
+  );
+  const visitStatus = visitRows[0]?.current_status || null;
   const steps = rows.map(shapeStep);
   const done = steps.filter((s) => s.status === "done").length;
   const current = steps.find((s) => s.status === "in_progress") || null;
@@ -121,6 +146,10 @@ export async function getJourney(visitId, db = pool) {
   return {
     visitId,
     steps,
+    visitStatus,
+    // A visit that ended is a record, not a worklist: nothing left in it is
+    // still somebody's to do.
+    finished: isTerminalStatus(visitStatus) || ABANDONED.includes(visitStatus),
     doneCount: done,
     totalCount: steps.length,
     plannedTotalMin: steps.reduce((sum, s) => sum + s.minutes, 0),
@@ -445,6 +474,134 @@ export async function syncFromStatus(client, visitId, toStatus) {
       [visitId],
     );
   }
+}
+
+// Lab Billing is the counter a patient pays at before the lab draws anything
+// (34-LAB-BILLING-STEP-PLAN.md). Reception and admin tick it, because most tests
+// are still billed in HealthRay where this side sees no money at all. When the
+// money IS here — a Gini order, settled — the tick is not a judgement anybody
+// needs to make, so it happens on its own. One way only: nothing here unticks a
+// step a person ticked.
+// Tests ordered mid-visit. A patient checked in as a plain follow-up who is then
+// sent for bloods has a journey with no lab stops at all, and `addStep` appends
+// at MAX+1 — which would put the counter after the pharmacy. These go in front
+// of the work still to come, which is where the patient is actually going.
+//
+// Runs inside the caller's transaction: an order that rolls back must not leave
+// stops behind for tests nobody ordered.
+export async function insertLabStepsForOrder(client, visitId) {
+  const { rows: plan } = await client.query(
+    `SELECT step_catalog_id, step_order, status FROM giniflow_visit_steps
+      WHERE visit_id = $1 ORDER BY step_order`,
+    [visitId],
+  );
+  if (!plan.length) return { added: [] };
+
+  const missing = ["lab_billing", "blood_sample"].filter(
+    (id) => !plan.some((s) => s.step_catalog_id === id),
+  );
+  if (!missing.length) return { added: [] };
+
+  const { rows: catalog } = await client.query(
+    `SELECT id, name, default_duration_min, station, assigned_role, chain_status
+       FROM flow_step_catalog WHERE id = ANY($1) AND COALESCE(is_active, TRUE)`,
+    [missing],
+  );
+  if (!catalog.length) return { added: [] };
+
+  // In front of what the patient has not done yet. A journey whose every stop is
+  // finished takes them at the end, which is still the next thing that happens.
+  // A plan that already holds the sample puts the counter in front of THAT: the
+  // lab cannot draw until the money is settled, wherever the rest of the journey
+  // has got to.
+  const pendingSample = plan.find(
+    (s) => s.step_catalog_id === "blood_sample" && s.status === "pending",
+  );
+  const firstPending = pendingSample || plan.find((s) => s.status === "pending");
+  const at = firstPending ? firstPending.step_order : plan[plan.length - 1].step_order + 1;
+
+  await client.query(`SET CONSTRAINTS giniflow_visit_steps_order DEFERRED`);
+  await client.query(
+    `UPDATE giniflow_visit_steps SET step_order = step_order + $3
+      WHERE visit_id = $1 AND step_order >= $2`,
+    [visitId, at, missing.length],
+  );
+
+  const ordered = missing.map((id) => catalog.find((c) => c.id === id)).filter(Boolean);
+  for (let i = 0; i < ordered.length; i++) {
+    const c = ordered[i];
+    await client.query(
+      `INSERT INTO giniflow_visit_steps
+         (visit_id, step_order, step_catalog_id, step_name, planned_duration_min,
+          station, assigned_role, chain_status, source)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'auto')`,
+      [
+        visitId,
+        at + i,
+        c.id,
+        c.name,
+        c.default_duration_min,
+        c.station,
+        c.assigned_role,
+        c.chain_status,
+      ],
+    );
+  }
+  await client.query(
+    `UPDATE giniflow_visits
+        SET planned_total_min = COALESCE(planned_total_min, 0) + $2, updated_at = NOW()
+      WHERE id = $1`,
+    [visitId, ordered.reduce((sum, c) => sum + (c.default_duration_min || 0), 0)],
+  );
+  return { added: ordered.map((c) => c.id) };
+}
+
+// The lab's own record, read back onto the journey. Lab Billing and Blood Sample
+// are stops nobody here works: the money is taken at a counter and the sample is
+// drawn by the lab, and both leave evidence — a settled order, or a HealthRay
+// case that was collected and reported. A lab that reported results was paid for
+// and drawn, whatever this side was told, so the journey says so rather than
+// asking the desk to tick what already happened.
+//
+// `skipped` is included deliberately: the exit sweep strikes through whatever is
+// still pending when a patient leaves, and evidence from the lab beats a guess
+// made on the way out.
+export async function syncLabStepsFromLab(db, visitId) {
+  const { rows } = await db.query(
+    `SELECT
+       (SELECT count(*)::int FROM giniflow_lab_orders o
+         WHERE o.visit_id = v.id AND o.urgency = 'today') AS orders,
+       (SELECT count(*)::int FROM giniflow_lab_orders o
+         WHERE o.visit_id = v.id AND o.urgency = 'today'
+           AND o.payment_status NOT IN ('paid', 'claim_approved')) AS unsettled,
+       (SELECT count(*)::int FROM giniflow_lab_orders o
+         WHERE o.visit_id = v.id AND o.urgency = 'today'
+           AND o.sample_status IN ('sample_collected', 'processing', 'results_ready', 'uploaded'))
+         AS drawn,
+       ${HR_LAB_EVIDENCE_SQL}
+       FROM giniflow_visits v JOIN patients p ON p.id = v.patient_id
+      WHERE v.id = $1`,
+    [visitId],
+  );
+  const e = rows[0];
+  if (!e) return { billed: false, drawn: false };
+
+  const billed = e.orders > 0 ? e.unsettled === 0 : e.hr_cases > 0;
+  const drawn = e.orders > 0 ? e.drawn > 0 : !!e.hr_collected;
+
+  const tick = async (catalogId) =>
+    db.query(
+      `UPDATE giniflow_visit_steps
+          SET status = 'done',
+              started_at = COALESCE(started_at, NOW()),
+              completed_at = COALESCE(completed_at, NOW())
+        WHERE visit_id = $1 AND step_catalog_id = $2
+          AND status IN ('pending', 'in_progress', 'skipped')`,
+      [visitId, catalogId],
+    );
+  if (billed) await tick("lab_billing");
+  if (drawn) await tick("blood_sample");
+  return { billed, drawn };
 }
 
 // ── Editing a journey that is already on the floor ─────────────────────────

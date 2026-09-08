@@ -179,6 +179,7 @@ import {
   removeStep,
   reorderSteps,
   setStepStatus,
+  syncLabStepsFromLab,
 } from "../services/giniflow/journey.js";
 import { sendFlowCheckin } from "../services/msg91.js";
 import {
@@ -187,7 +188,7 @@ import {
   getResults,
   saveResults,
 } from "../services/giniflow/labResults.js";
-import { hasCapability } from "../../shared/permissions.js";
+import { hasCapability, hasAnyCapability } from "../../shared/permissions.js";
 
 const router = Router();
 
@@ -1034,8 +1035,11 @@ router.get(
 router.get("/giniflow/journey/:visitId", requireCapability(CAP.GINIFLOW_VIEW), async (req, res) => {
   try {
     // A patient the HealthRay sync checked in never passed this screen, so the
-    // plan is seeded the first time anyone looks rather than left empty.
+    // plan is seeded the first time anyone looks rather than left empty, and the
+    // lab's own record is read back onto it — the counter and the sample are
+    // stops nobody on this side works.
     await ensurePlan(req.params.visitId);
+    await syncLabStepsFromLab(pool, req.params.visitId);
     res.json(await getJourney(req.params.visitId));
   } catch (e) {
     handleError(res, e, "Gini Flow journey");
@@ -1113,12 +1117,27 @@ router.post(
   },
 );
 
+// Lab Billing is the counter, so it is reception's to tick and admin's to
+// correct — not the coordinator's, who holds the rest of the journey through
+// GINIFLOW_MANAGE_QUEUE but takes no money (34-LAB-BILLING-STEP-PLAN.md §3).
+const mayTickStep = async (req, stepId) => {
+  const { rows } = await pool.query(
+    `SELECT step_catalog_id FROM giniflow_visit_steps WHERE id = $1`,
+    [stepId],
+  );
+  if (rows[0]?.step_catalog_id !== "lab_billing") return true;
+  return hasAnyCapability(req.doctor?.role, [CAP.GINIFLOW_STATION_RECEPTION, CAP.ADMIN]);
+};
+
 router.patch(
   "/giniflow/journey/steps/:stepId",
   journeyEditGate,
   validate(giniflowStepStatusSchema),
   async (req, res) => {
     try {
+      if (!(await mayTickStep(req, req.params.stepId))) {
+        return res.status(403).json({ error: "Lab Billing is reception's to record" });
+      }
       res.json(await setStepStatus(req.params.stepId, req.body.status));
     } catch (e) {
       handleError(res, e, "Gini Flow journey step status");

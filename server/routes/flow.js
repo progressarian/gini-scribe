@@ -601,7 +601,10 @@ async function recalcEstimate(client, visitId) {
 // ─────────────────────────────────────────────────────────────────────────
 router.get("/flow/visit-types", async (req, res) => {
   try {
-    const r = await pool.query("SELECT * FROM flow_visit_types ORDER BY max_time_min ASC");
+    // ?all=1 returns deactivated types too (for the admin settings page), the
+    // same convention /flow/step-catalog uses.
+    const where = req.query.all ? "" : "WHERE is_active = TRUE";
+    const r = await pool.query(`SELECT * FROM flow_visit_types ${where} ORDER BY max_time_min ASC`);
     res.json(r.rows);
   } catch (e) {
     handleError(res, e, "Flow visit types");
@@ -654,12 +657,13 @@ router.post("/flow/demo/clean", requireCapability(CAP.ADMIN), async (req, res) =
 // ── Admin settings: edit benchmarks + catalog (ADMIN only) ──
 router.patch("/flow/visit-types/:id", requireCapability(CAP.ADMIN), async (req, res) => {
   try {
-    const { max_time_min, label, is_flexible } = req.body || {};
+    const { max_time_min, label, is_flexible, is_active } = req.body || {};
     const r = await pool.query(
       `UPDATE flow_visit_types
           SET max_time_min = COALESCE($2, max_time_min),
               label        = COALESCE($3, label),
               is_flexible  = COALESCE($4, is_flexible),
+              is_active    = COALESCE($5, is_active),
               updated_at   = NOW()
         WHERE id=$1 RETURNING *`,
       [
@@ -667,6 +671,7 @@ router.patch("/flow/visit-types/:id", requireCapability(CAP.ADMIN), async (req, 
         Number.isInteger(max_time_min) ? max_time_min : null,
         label ?? null,
         typeof is_flexible === "boolean" ? is_flexible : null,
+        typeof is_active === "boolean" ? is_active : null,
       ],
     );
     if (!r.rows.length) return res.status(404).json({ error: "Visit type not found" });
@@ -868,8 +873,10 @@ router.get("/flow/templates/:visitType", async (req, res) => {
   try {
     const r = await pool.query(
       `SELECT t.step_order, t.is_default, t.is_optional, t.condition_key,
+              t.override_duration_min,
               COALESCE(t.override_duration_min, c.default_duration_min) AS planned_duration_min,
-              c.id AS step_catalog_id, c.name AS step_name, c.station, c.assigned_role
+              c.id AS step_catalog_id, c.name AS step_name, c.station, c.assigned_role,
+              COALESCE(c.is_background, FALSE) AS is_background, c.chain_status
          FROM flow_step_templates t
          JOIN flow_step_catalog c ON c.id = t.step_catalog_id
         WHERE t.visit_type_id = $1
@@ -879,6 +886,152 @@ router.get("/flow/templates/:visitType", async (req, res) => {
     res.json(r.rows);
   } catch (e) {
     handleError(res, e, "Flow template");
+  }
+});
+
+// Replace a visit type's default journey. ADMIN only.
+//
+// The whole template is rewritten rather than patched row by row, because order
+// IS the data here and UNIQUE (visit_type_id, step_order) makes an incremental
+// reorder a dance of collisions. Delete + insert inside one transaction is both
+// simpler and atomic.
+//
+// The caller sends only the steps a person edits. Background stages — the lab
+// pipeline, the report desk, the MO's prescription slot — are read here first
+// and laid back down afterwards, each one following the same step it followed
+// before. They are machine-managed rows that no admin should have to think
+// about, but a wholesale rewrite would delete them, so the preserving happens
+// on this side rather than asking every client to remember to send them back.
+router.put("/flow/templates/:visitType", requireCapability(CAP.ADMIN), async (req, res) => {
+  const visitTypeId = req.params.visitType;
+  const steps = Array.isArray(req.body?.steps) ? req.body.steps : null;
+  if (!steps) return res.status(400).json({ error: "steps must be an array" });
+  if (steps.length > 60) return res.status(400).json({ error: "That is too many steps" });
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const type = await client.query("SELECT 1 FROM flow_visit_types WHERE id=$1", [visitTypeId]);
+    if (!type.rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Visit type not found" });
+    }
+
+    // What is there now, so the background rows can be put back where they were.
+    const existing = (
+      await client.query(
+        `SELECT t.step_catalog_id, t.step_order, t.is_default, t.is_optional,
+                t.condition_key, t.override_duration_min,
+                COALESCE(c.is_background, FALSE) AS is_background
+           FROM flow_step_templates t
+           JOIN flow_step_catalog c ON c.id = t.step_catalog_id
+          WHERE t.visit_type_id = $1
+          ORDER BY t.step_order ASC`,
+        [visitTypeId],
+      )
+    ).rows;
+
+    // Each background row remembers the visible step it trailed, so a reordered
+    // journey carries its stages along instead of stranding them at the end.
+    const background = [];
+    let anchor = null;
+    for (const row of existing) {
+      if (row.is_background) background.push({ ...row, anchor });
+      else anchor = row.step_catalog_id;
+    }
+    const backgroundIds = new Set(background.map((b) => b.step_catalog_id));
+
+    // A client that does send a background id is not an error — it just does not
+    // get to position it, since this side owns those rows.
+    const ids = steps
+      .map((s) => String(s?.step_catalog_id || "").trim())
+      .filter((id) => !backgroundIds.has(id));
+    if (steps.some((s) => !String(s?.step_catalog_id || "").trim())) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Every step needs a step_catalog_id" });
+    }
+    // A journey that visits the same stop twice is a mistake every time it has
+    // appeared: two identical rows on the board, one of which can never close.
+    const dupe = ids.find((id, i) => ids.indexOf(id) !== i);
+    if (dupe) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: `"${dupe}" is in the journey twice` });
+    }
+
+    if (ids.length) {
+      const known = await client.query("SELECT id FROM flow_step_catalog WHERE id = ANY($1)", [
+        ids,
+      ]);
+      if (known.rows.length !== ids.length) {
+        const found = new Set(known.rows.map((r) => r.id));
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: `Unknown step: ${ids.find((i) => !found.has(i))}` });
+      }
+    }
+
+    // Lay the journey back down: each submitted step, then whatever background
+    // rows used to follow it. Rows whose anchor was removed go to the end rather
+    // than being dropped — a stage with nothing to trail is still a real row.
+    const visible = steps.filter((s) => ids.includes(String(s?.step_catalog_id || "").trim()));
+    const trailing = (id) => background.filter((b) => b.anchor === id);
+
+    const write = async (row, order) =>
+      client.query(
+        `INSERT INTO flow_step_templates
+           (visit_type_id, step_catalog_id, step_order, is_default, is_optional,
+            condition_key, override_duration_min)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [
+          visitTypeId,
+          row.step_catalog_id,
+          order,
+          row.is_default !== false,
+          row.is_optional === true,
+          row.condition_key ? String(row.condition_key).trim() : null,
+          row.override_duration_min,
+        ],
+      );
+
+    await client.query("DELETE FROM flow_step_templates WHERE visit_type_id=$1", [visitTypeId]);
+
+    let order = 0;
+    const placed = new Set();
+    for (const b of trailing(null)) {
+      await write(b, ++order);
+      placed.add(b.step_catalog_id);
+    }
+    for (const step of visible) {
+      const id = String(step.step_catalog_id).trim();
+      const override = Number(step.override_duration_min);
+      await write(
+        {
+          step_catalog_id: id,
+          is_default: step.is_default !== false,
+          is_optional: step.is_optional === true,
+          condition_key: step.condition_key,
+          override_duration_min:
+            Number.isFinite(override) && override >= 0 ? Math.round(override) : null,
+        },
+        ++order,
+      );
+      for (const b of trailing(id)) {
+        await write(b, ++order);
+        placed.add(b.step_catalog_id);
+      }
+    }
+    for (const b of background) {
+      if (placed.has(b.step_catalog_id)) continue;
+      await write(b, ++order);
+    }
+
+    await client.query("COMMIT");
+    res.json({ visit_type_id: visitTypeId, steps: order, editable: visible.length });
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    handleError(res, e, "Flow save template");
+  } finally {
+    client.release();
   }
 });
 
