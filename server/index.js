@@ -53,6 +53,7 @@ import patientAlertRoutes from "./routes/patient-alerts.js";
 import patientBlockRoutes from "./routes/patientBlocks.js";
 import diabetesChampionRoutes from "./routes/diabetes-champions.js";
 import appInstallRoutes from "./routes/app-installs.js";
+import appDownloadRoutes from "./routes/app-download.js";
 import doctorScheduleRoutes from "./routes/doctorSchedule.js";
 import medicineCollectionRoutes from "./routes/medicineCollection.js";
 import flowRoutes from "./routes/flow.js";
@@ -186,6 +187,8 @@ app.use("/api", settingsRoutes);
 app.use("/api", giniflowRoutes);
 app.use("/api", giniflowStationRoutes);
 app.use("/api", giniflowTriageRoutes);
+
+app.use(appDownloadRoutes);
 
 // Serve frontend
 const distPath = path.join(__dirname, "..", "dist");
