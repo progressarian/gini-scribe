@@ -57,6 +57,7 @@ import doctorScheduleRoutes from "./routes/doctorSchedule.js";
 import medicineCollectionRoutes from "./routes/medicineCollection.js";
 import flowRoutes from "./routes/flow.js";
 import giniflowRoutes from "./routes/giniflow.js";
+import settingsRoutes from "./routes/settings.js";
 import { startEventTailer } from "./services/giniflow/eventTailer.js";
 import giniflowStationRoutes from "./routes/giniflowStations.js";
 import giniflowTriageRoutes from "./routes/giniflowTriage.js";
@@ -109,7 +110,10 @@ app.use((req, res, next) => {
     p.includes("/document") ||
     p.includes("/reasoning") ||
     p.includes("/rx-feedback") ||
-    p.includes("/history");
+    p.includes("/history") ||
+    // The letterhead logo arrives as a base64 data URI, which the 1mb default
+    // rejects for any real artwork.
+    p.includes("/prescription-logo");
 
   const limit = isLarge ? "50mb" : isMedium ? "5mb" : "1mb";
   express.json({ limit })(req, res, next);
@@ -178,6 +182,7 @@ app.use("/api", appInstallRoutes);
 app.use("/api", doctorScheduleRoutes);
 app.use("/api", medicineCollectionRoutes);
 app.use("/api", flowRoutes);
+app.use("/api", settingsRoutes);
 app.use("/api", giniflowRoutes);
 app.use("/api", giniflowStationRoutes);
 app.use("/api", giniflowTriageRoutes);

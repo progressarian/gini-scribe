@@ -40,6 +40,12 @@ const parseExt = (raw) => {
 const isMismatchReview = (doc) =>
   parseExt(doc.extracted_data)?.extraction_status === "mismatch_review";
 
+const staleFollowUp = (doc) => {
+  const printed = doc.rx_follow_up_date;
+  const current = doc.current_follow_up_date;
+  return printed && current && printed !== current ? { printed, current } : null;
+};
+
 const VisitDocsPanel = memo(function VisitDocsPanel({
   documents,
   patientId,
@@ -131,14 +137,27 @@ const VisitDocsPanel = memo(function VisitDocsPanel({
     const status = getDocStatus(doc);
     const needsReview = status.kind === "mismatch";
     const isPending = status.kind === "pending";
+    const stale = staleFollowUp(doc);
     return (
       <div
         key={doc.id || i}
         className="report-card"
         style={{
           cursor: "pointer",
-          border: needsReview ? "1px solid #fecaca" : isPending ? "1px solid #c4b5fd" : undefined,
-          background: needsReview ? "#fef2f2" : isPending ? "#f5f3ff" : undefined,
+          border: needsReview
+            ? "1px solid #fecaca"
+            : isPending
+              ? "1px solid #c4b5fd"
+              : stale
+                ? "1px solid #fde68a"
+                : undefined,
+          background: needsReview
+            ? "#fef2f2"
+            : isPending
+              ? "#f5f3ff"
+              : stale
+                ? "#fffbeb"
+                : undefined,
         }}
         onClick={() => openDoc(doc)}
       >
@@ -171,6 +190,24 @@ const VisitDocsPanel = memo(function VisitDocsPanel({
                 }}
               >
                 Patient
+              </span>
+            ) : null}
+            {stale ? (
+              <span
+                title={`This PDF printed ${fmtDate(stale.printed)} as the next visit. HealthRay now says ${fmtDate(stale.current)}. Regenerate to correct it.`}
+                style={{
+                  fontSize: 9,
+                  fontWeight: 700,
+                  letterSpacing: 0.3,
+                  textTransform: "uppercase",
+                  color: "#92400e",
+                  background: "#fef3c7",
+                  border: "1px solid #fde68a",
+                  borderRadius: 999,
+                  padding: "1px 6px",
+                }}
+              >
+                Outdated
               </span>
             ) : null}
           </div>

@@ -804,7 +804,7 @@ router.post(
 // Every station's count in one call, filtered to the stations this role may
 // open. A tile that appears and then 403s is worse than no tile.
 const STATION_CAPS = {
-  manager: CAP.GINIFLOW_VIEW,
+  manager: CAP.GINIFLOW_BOARD,
   vitals: CAP.GINIFLOW_STATION_VITALS,
   reception: CAP.GINIFLOW_STATION_RECEPTION,
   lab: CAP.GINIFLOW_STATION_LAB,

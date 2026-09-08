@@ -172,12 +172,25 @@ const LAB_ONLY_LABEL = {
 
 // The one place durations are computed. Card timers, the timeline modal and the
 // station averages all read from here so they can never disagree.
+const SKIPPED_STATION_NAME = {
+  with_vitals: "Vitals",
+  with_sd: "Chief Endocrinologist",
+  with_doctor: "Consultant",
+  with_rx: "Prescription Explain",
+};
+
 export async function getStationTimes(
   db,
   visitId,
   slaConfig,
   now = new Date(),
-  { slaConfig: slaRows = null, category = null, unbudgeted = false } = {},
+  {
+    slaConfig: slaRows = null,
+    category = null,
+    unbudgeted = false,
+    labReadyAt = null,
+    labPending = false,
+  } = {},
 ) {
   // `slaConfig` here is the flat station→minutes map every existing caller
   // passes. When the caller also knows whose timeline this is, it passes the
@@ -198,12 +211,13 @@ export async function getStationTimes(
   // The rooms a patient is physically in. A step that ends at an event further
   // down the chain than one of these has swallowed a room nobody recorded.
   const STATION_STATUSES = ["with_vitals", "with_sd", "with_doctor", "with_rx"];
-  const skipsAStation = (from, to) =>
-    isChainStatus(from) &&
-    isChainStatus(to) &&
-    STATION_STATUSES.some(
-      (st) => chainIndex(st) > chainIndex(from) && chainIndex(st) < chainIndex(to),
-    );
+  const stationsSkipped = (from, to) =>
+    isChainStatus(from) && isChainStatus(to)
+      ? STATION_STATUSES.filter(
+          (st) => chainIndex(st) > chainIndex(from) && chainIndex(st) < chainIndex(to),
+        )
+      : [];
+  const skipsAStation = (from, to) => stationsSkipped(from, to).length > 0;
 
   // Markers are pulled out before the walk below, not skipped inside it. Left in
   // the sequence, a report arriving at 10:20 became `rows[i + 1]` for the wait
@@ -260,6 +274,39 @@ export async function getStationTimes(
     };
   });
 
+  // The MO cannot see a patient whose bloods are still at the lab, so the wait
+  // before the reports land is judged against nothing, not against the MO queue.
+  const AWAITING_LAB_LABEL = "Waiting for lab reports";
+  const blockedByLab = (entry) =>
+    entry.isWait && slaKeyForStatus(entry.status) === "wait_sd" && !entry.unrecorded;
+
+  const withLabSplit = raw.flatMap((entry) => {
+    if (!blockedByLab(entry)) return [entry];
+    const endsAt = entry.leftAt || now;
+    if (labPending && !labReadyAt)
+      return [{ ...entry, label: AWAITING_LAB_LABEL, budgetMinutes: null, awaitingLab: true }];
+    if (!labReadyAt) return [entry];
+    if (labReadyAt >= endsAt)
+      return [{ ...entry, label: AWAITING_LAB_LABEL, budgetMinutes: null, awaitingLab: true }];
+    if (labReadyAt <= entry.enteredAt) return [entry];
+    return [
+      {
+        ...entry,
+        label: AWAITING_LAB_LABEL,
+        budgetMinutes: null,
+        awaitingLab: true,
+        leftAt: labReadyAt,
+        minutes: minutesBetween(entry.enteredAt, labReadyAt),
+        isCurrent: false,
+      },
+      {
+        ...entry,
+        enteredAt: labReadyAt,
+        minutes: minutesBetween(labReadyAt, endsAt),
+      },
+    ];
+  });
+
   // Pair each queue with the station it fed, so the timeline reads
   // "8m wait + 12m station" rather than listing two half-steps. Consecutive
   // queue statuses (checked_in → vitals_pending, both "waiting for vitals")
@@ -292,7 +339,7 @@ export async function getStationTimes(
     steps.push({
       status: entry.status,
       timestampOnly: !!entry.timestampOnly,
-      label: entry.unrecorded ? "Not recorded on any station screen" : entry.label,
+      label: entry.label,
       unrecorded: !!entry.unrecorded,
       actorRole: entry.actorRole,
       meta: entry.meta,
@@ -331,15 +378,27 @@ export async function getStationTimes(
   const QUEUE_FEEDS = {
     checked_in: "with_vitals",
     vitals_pending: "with_vitals",
+    vitals_done: "with_sd",
     sd_pending: "with_sd",
     ready_for_doctor: "with_doctor",
     rx_pending: "with_rx",
   };
 
-  for (const entry of raw) {
+  for (const entry of withLabSplit) {
     // A queue the patient is still sitting in is a step in its own right — it is
     // the one the board is timing, so it must not be folded into a station.
     if (entry.isWait && !entry.isCurrent) {
+      // Only queues for the same station accumulate, and never across the lab
+      // split: `checked_in` waits for vitals, `vitals_done` for the MO.
+      if (
+        wait &&
+        (QUEUE_FEEDS[wait.status] !== QUEUE_FEEDS[entry.status] ||
+          !!wait.awaitingLab !== !!entry.awaitingLab)
+      ) {
+        const pending = wait;
+        wait = null;
+        emit({ ...pending, isCurrent: false, leftAt: entry.enteredAt });
+      }
       wait = wait
         ? {
             ...wait,
@@ -359,6 +418,47 @@ export async function getStationTimes(
   }
   if (wait) emit({ ...wait, minutes: 0, isCurrent: true, isWait: true, leftAt: null });
 
+  // A card opened and let go in the same minute is a glance, not a visit: it
+  // split one continuous wait into two and reset the clock the floor is judged on.
+  const collapsed = [];
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i];
+    const next = steps[i + 1];
+    const glance =
+      STATION_STATUSES.includes(step.status) &&
+      step.stationMinutes === 0 &&
+      next &&
+      QUEUE_FEEDS[next.status] === step.status;
+    if (!glance) {
+      collapsed.push(step);
+      continue;
+    }
+    next.waitMinutes += step.waitMinutes;
+    next.enteredAt = step.enteredAt;
+    next.totalMinutes = next.waitMinutes + next.stationMinutes;
+    next.overBy =
+      Math.max(0, next.waitBudget ? next.waitMinutes - next.waitBudget : 0) +
+      Math.max(0, next.stationBudget ? next.stationMinutes - next.stationBudget : 0);
+    next.colour = worse(
+      budgetColour(next.waitMinutes, next.waitBudget),
+      budgetColour(next.stationMinutes, next.stationBudget),
+    );
+    collapsed.push({
+      ...step,
+      timestampOnly: true,
+      label: `${SKIPPED_STATION_NAME[step.status] || step.label} — opened, then returned to the queue`,
+      enteredAt: step.leftAt || step.enteredAt,
+      waitMinutes: 0,
+      stationMinutes: 0,
+      totalMinutes: 0,
+      waitBudget: null,
+      stationBudget: null,
+      budgetMinutes: null,
+      overBy: 0,
+      colour: "neutral",
+    });
+  }
+
   // A patient sent back to a station they have already been at is one step with
   // two visits, not two steps. The Rx desk makes this ordinary: opening a card
   // puts the patient at the desk and "not this patient" returns them, so a
@@ -366,7 +466,7 @@ export async function getStationTimes(
   // one desk. Merged, the time still counts in full and `visits` says how often
   // they came back.
   const merged = [];
-  for (const step of steps) {
+  for (const step of collapsed) {
     const prev = merged[merged.length - 1];
     if (!prev || prev.status !== step.status) {
       merged.push({ ...step, visits: 1 });
@@ -390,7 +490,33 @@ export async function getStationTimes(
   // The markers, back in time order: dated facts between the steps rather than
   // steps of their own. They carry no minutes and no budget, so nothing is
   // judged against them and nothing they interrupt loses its time.
+  const skipped = statusRows.flatMap((row, i) => {
+    const next = statusRows[i + 1];
+    if (!next) return [];
+    return stationsSkipped(row.status, next.status).map((station) => ({
+      status: `skipped:${station}`,
+      timestampOnly: true,
+      skipped: true,
+      label: `${SKIPPED_STATION_NAME[station] || STATUS_LABEL[station] || station} — not recorded on a station screen`,
+      actorRole: null,
+      meta: null,
+      enteredAt: new Date(next.occurred_at).toISOString(),
+      leftAt: null,
+      waitMinutes: 0,
+      waitBudget: null,
+      stationMinutes: 0,
+      stationBudget: null,
+      totalMinutes: 0,
+      budgetMinutes: null,
+      overBy: 0,
+      colour: "neutral",
+      isCurrent: false,
+      visits: 1,
+    }));
+  });
+
   const withMarkers = [
+    ...skipped,
     ...merged,
     ...markerRows.map((row) => ({
       status: row.status,

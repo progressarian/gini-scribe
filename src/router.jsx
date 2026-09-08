@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { createBrowserRouter } from "react-router-dom";
+import { createBrowserRouter, Navigate } from "react-router-dom";
 import AppLayout from "./components/AppLayout";
 import ProtectedRoute from "./components/ProtectedRoute";
 import RequireCapability from "./components/RequireCapability";
@@ -89,6 +89,8 @@ const OBTDashboardPage = lazyWithRetry(() => import("./pages/OBTDashboardPage"))
 const DoctorManagementPage = lazyWithRetry(() => import("./pages/DoctorManagementPage"));
 const PatientBlocklistPage = lazyWithRetry(() => import("./pages/PatientBlocklistPage"));
 const TestCatalogPage = lazyWithRetry(() => import("./pages/TestCatalogPage"));
+const PrescriptionFooterPage = lazyWithRetry(() => import("./pages/PrescriptionFooterPage"));
+const SettingsLayout = lazyWithRetry(() => import("./pages/SettingsLayout"));
 const MedicineCollectionPage = lazyWithRetry(() => import("./pages/MedicineCollectionPage"));
 const FlowCheckinPage = lazyWithRetry(() => import("./pages/flow/FlowCheckinPage"));
 const FlowCoordinatorPage = lazyWithRetry(() => import("./pages/flow/FlowCoordinatorPage"));
@@ -221,6 +223,22 @@ const router = createBrowserRouter([
               { path: "/doctor-management", element: lazyEl(DoctorManagementPage) },
               { path: "/admin/blocklist", element: lazyEl(PatientBlocklistPage) },
               { path: "/admin/test-catalog", element: lazyEl(TestCatalogPage) },
+              // Settings — one section, one tab per area. /flow/admin and
+              // /admin/prescription-footer were their own pages before this and
+              // are still linked from elsewhere, so both redirect in.
+              {
+                path: "/settings",
+                element: lazyEl(SettingsLayout),
+                children: [
+                  { index: true, element: <Navigate to="/settings/flow" replace /> },
+                  { path: "flow", element: lazyEl(FlowAdminPage) },
+                  { path: "prescription", element: lazyEl(PrescriptionFooterPage) },
+                ],
+              },
+              {
+                path: "/admin/prescription-footer",
+                element: <Navigate to="/settings/prescription" replace />,
+              },
               // Pharmacy: mark which medicines each patient collected
               { path: "/medicine-collection", element: lazyEl(MedicineCollectionPage) },
               // Patient Flow Management
@@ -247,7 +265,7 @@ const router = createBrowserRouter([
               { path: "/flow/station", element: lazyEl(FlowStationPage) },
               { path: "/flow/station/:role", element: lazyEl(FlowStationPage) },
               { path: "/flow/reports", element: lazyEl(FlowReportsPage) },
-              { path: "/flow/admin", element: lazyEl(FlowAdminPage) },
+              { path: "/flow/admin", element: <Navigate to="/settings/flow" replace /> },
             ],
           },
         ],

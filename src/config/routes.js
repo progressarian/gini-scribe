@@ -103,6 +103,12 @@ export const PAGE_CAPABILITIES = {
   "/doctor-management": CAP.ADMIN,
   "/admin/blocklist": CAP.ADMIN,
   "/admin/test-catalog": CAP.ADMIN,
+  "/admin/prescription-footer": CAP.ADMIN,
+  // Settings — one section, tab per area. Each tab is listed so a deep link is
+  // gated the same as the section itself.
+  "/settings": CAP.ADMIN,
+  "/settings/flow": CAP.ADMIN,
+  "/settings/prescription": CAP.ADMIN,
   "/medicine-collection": CAP.MED_COLLECTION,
   "/reception-inbox": CAP.RECEPTION_OPS,
   // Appointment search + Quick Book (it POSTs /api/appointments — not read-only).
@@ -129,7 +135,10 @@ export const PAGE_CAPABILITIES = {
   // The launcher shows only the stations a role can open, so viewing the board
   // is enough to reach it.
   "/giniflow/stations": CAP.GINIFLOW_VIEW,
-  "/giniflow/manager": CAP.GINIFLOW_VIEW,
+  // Its own key, not GINIFLOW_VIEW: desk-only roles (nurse, pharmacy, rx) need
+  // VIEW to reach `/api/giniflow*` for their station and still must not open
+  // the floor board.
+  "/giniflow/manager": CAP.GINIFLOW_BOARD,
   // The pre-OPD triage board writes the clinical category, so it is narrower
   // than the read-only board above: coordinator and admin.
   "/giniflow/triage": CAP.GINIFLOW_TRIAGE,

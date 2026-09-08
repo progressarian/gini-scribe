@@ -82,8 +82,10 @@ export async function savePrescriptionForVisit(pid, payload, opts = {}) {
         reason: "already-saved",
       };
     }
-    // Overwrite: delete the stale document row so we generate a fresh one below.
-    await pool.query("DELETE FROM documents WHERE id=$1", [existing.id]);
+    // Overwrite: the stale row is retired only once the replacement PDF is
+    // actually stored. Deleting it up front loses the prescription outright
+    // when the upload then fails — the row that replaces it carries no
+    // storage_path, and the docs panel only lists documents that have a file.
     console.log(
       `[prescriptionAutoSave] Overwriting stale prescription id=${existing.id} for pid=${pid} consultationId=${consultationId}`,
     );
@@ -175,6 +177,8 @@ export async function savePrescriptionForVisit(pid, payload, opts = {}) {
   );
   const docRow = ins.rows[0];
 
+  let uploadError = SUPABASE_URL && SUPABASE_SERVICE_KEY ? null : "storage not configured";
+
   if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
     const safeName = sanitizeForStorageKey(fileName);
     const storagePath = `patients/${pid}/prescription/${Date.now()}_${safeName}`;
@@ -200,15 +204,23 @@ export async function savePrescriptionForVisit(pid, payload, opts = {}) {
         docRow.mime_type = "application/pdf";
       } else {
         const errText = await uploadResp.text().catch(() => "");
-        console.warn(
-          "[prescriptionAutoSave] PDF upload failed:",
-          uploadResp.status,
-          errText.slice(0, 200),
-        );
+        uploadError = `${uploadResp.status} ${errText.slice(0, 200)}`;
+        console.warn("[prescriptionAutoSave] PDF upload failed:", uploadError);
       }
     } catch (uploadErr) {
+      uploadError = uploadErr.message;
       console.warn("[prescriptionAutoSave] PDF upload error:", uploadErr.message);
     }
+  }
+
+  // An unstorable replacement is worse than the stale document it was meant to
+  // replace, so roll back to that one and let the caller report the failure.
+  if (existing && uploadError) {
+    await pool.query("DELETE FROM documents WHERE id=$1", [docRow.id]);
+    throw new Error(`Could not store the regenerated prescription (${uploadError})`);
+  }
+  if (existing) {
+    await pool.query("DELETE FROM documents WHERE id=$1", [existing.id]);
   }
 
   if (consultationId) {
@@ -304,14 +316,19 @@ export async function buildVisitPayloadFromDb(pid, { appointmentId } = {}) {
     pool.query(`SELECT * FROM goals WHERE patient_id=$1 ORDER BY status, created_at DESC`, [pid]),
     // Latest appointment carrying biomarkers.followup — same source the OPD
     // page reads, used as fallback when consultation/healthray follow-up
-    // lacks a date.
+    // lacks a date. Never reaches back past the visit being printed: an
+    // earlier appointment's follow-up belongs to that visit, not this one,
+    // and printing it puts a stale date on the prescription.
     pool.query(
       `SELECT biomarkers, healthray_follow_up, healthray_investigations, follow_up_with
          FROM appointments
           WHERE patient_id=$1 AND biomarkers ? 'followup'
+            AND appointment_date >= COALESCE(
+                  (SELECT appointment_date FROM appointments WHERE id=$2::int),
+                  appointment_date)
           ORDER BY appointment_date DESC NULLS LAST, id DESC
           LIMIT 1`,
-      [pid],
+      [pid, appointmentId],
     ),
   ]);
 

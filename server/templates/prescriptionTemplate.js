@@ -2,8 +2,101 @@
 // "Printed Prescription" layout. Used by the Puppeteer PDF generator. Keep CSS
 // in sync with that file (lines 9-115) when the design changes.
 
+import { readFileSync, readdirSync } from "node:fs";
+import { dirname, extname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { detectMedCategory } from "../config/medicationCategories.js";
 import { pickNextVisit } from "../../shared/followUp.js";
+
+const HOSPITAL_NAME = "Gini Advanced Care Hospital";
+const HOSPITAL_ADDRESS = "Shivalik Hospital, 2nd Floor, Sector 69, Mohali, Punjab, India";
+const HOSPITAL_PHONE = "+91 81463 20100";
+
+// The letterhead logo is read off disk once and inlined as a data URI: Puppeteer
+// renders the PDF with no network access to this server, so a src="/logo.png"
+// prints an empty box. Drop the artwork in templates/assets/ as logo.<ext> —
+// with no file there the header simply prints without it.
+//
+// That file is the white-knockout wordmark, not the app icon: the header band is
+// navy, and the icon's deep-blue lettering on its white tile reads as a sticker
+// pasted over the letterhead. public/brand/logo.png keeps the original colours
+// for light backgrounds.
+const LOGO_MIME = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".svg": "image/svg+xml",
+  ".webp": "image/webp",
+};
+
+// The shipped artwork, and the fallback whenever no logo has been uploaded from
+// Settings (services/prescriptionLogo.js) — so the letterhead is never blank.
+export const DEFAULT_LOGO_DATA_URI = (() => {
+  const dir = join(dirname(fileURLToPath(import.meta.url)), "assets");
+  try {
+    const file = readdirSync(dir)
+      .filter((f) => f.toLowerCase().startsWith("logo") && LOGO_MIME[extname(f).toLowerCase()])
+      .sort()[0];
+    if (!file) return "";
+    const mime = LOGO_MIME[extname(file).toLowerCase()];
+    return `data:${mime};base64,${readFileSync(join(dir, file)).toString("base64")}`;
+  } catch {
+    return "";
+  }
+})();
+
+// The closing strip — the services note the clinic used to rubber-stamp on the
+// printed Rx, set as part of the document instead. Navy to bookend the header,
+// so the page reads as designed rather than as a stamp added afterwards.
+// The wording is a setting, not a literal — admin edits it at
+// /admin/prescription-footer (services/prescriptionFooter.js). Rendering falls
+// back to that module's DEFAULT_FOOTER, so a prescription still prints its
+// strip if the lookup failed upstream. Any line left blank drops out entirely,
+// and with every line blank the strip itself does.
+function promoHtml(footer, logo = DEFAULT_LOGO_DATA_URI) {
+  const lines = (footer?.serviceLines || []).map((l) => String(l).trim()).filter(Boolean);
+  const appLine = String(footer?.appLine || "").trim();
+  const storeLine = String(footer?.storeLine || "").trim();
+  if (!lines.length && !appLine && !storeLine) return "";
+
+  const mark = logo && (appLine || storeLine) ? `<img src="${logo}" alt="">` : "";
+  const svc = lines.map((l) => `<div>${escape(l)}</div>`).join("");
+  const app =
+    appLine || storeLine
+      ? `<div class="rx-promo-app">
+      ${mark}
+      <div class="rx-promo-txt">
+        ${appLine ? `<div class="rx-promo-ttl">${escape(appLine)}</div>` : ""}
+        ${storeLine ? `<div class="rx-promo-sub">${escape(storeLine)}</div>` : ""}
+      </div>
+    </div>`
+      : "";
+  return `<div class="rx-promo">
+    <div class="rx-promo-svc">${svc}</div>
+    ${app}
+  </div>`;
+}
+
+// One letterhead, two documents. The prescription and the referral letter print
+// the same header off this helper so a patient handed both cannot read them as
+// coming from two different hospitals.
+function letterheadHtml(docNameHtml, docCredHtml, logoDataUri = DEFAULT_LOGO_DATA_URI) {
+  const logo = logoDataUri ? `<div class="rx-logo"><img src="${logoDataUri}" alt=""></div>` : "";
+  return `<div class="rx-header">
+    <div class="rx-header-top">
+      <div class="rx-hosp">
+        <div class="rx-hosp-name">${HOSPITAL_NAME}</div>
+      </div>
+      ${logo}
+      <div class="rx-doc">
+        <div class="rx-doc-name">${docNameHtml}</div>
+        <div class="rx-doc-cred">${docCredHtml}</div>
+      </div>
+    </div>
+    <div class="rx-hosp-tag">${HOSPITAL_ADDRESS} &middot; ${HOSPITAL_PHONE}</div>
+  </div>`;
+}
 
 // Strip "healthray:<id>" markers (and any trailing dash separator) from notes
 // so the printed Rx doesn't leak the upstream healthray reference. Mirrors
@@ -232,10 +325,17 @@ const CSS = `
 body{font-family:var(--fb);color:var(--ink);background:var(--white);font-size:13px}
 
 .rx-page{background:var(--white);border:1px solid var(--bd);border-radius:var(--r);margin-bottom:16px;overflow:hidden}
-.rx-header{background:var(--nv);padding:16px 22px;display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+.rx-header{background:var(--nv);padding:16px 22px}
+.rx-header-top{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.rx-hosp{flex:1 1 0;min-width:0}
 .rx-hosp-name{font-family:var(--fd);font-size:22px;color:#fff;font-style:italic}
-.rx-hosp-tag{font-size:10px;color:rgba(255,255,255,.5);margin-top:2px}
-.rx-doc{text-align:right}
+/* The address sits on its own full-width line under the row rather than under
+   the hospital name: in a three-column header it only gets a third of the page
+   and orphans the phone number onto a second line. */
+.rx-hosp-tag{font-size:10px;color:rgba(255,255,255,.5);margin-top:10px;padding-top:9px;border-top:1px solid rgba(255,255,255,.12)}
+.rx-logo{flex:0 0 auto;display:flex;align-items:center;justify-content:center}
+.rx-logo img{height:46px;width:auto;display:block}
+.rx-doc{flex:1 1 0;text-align:right}
 .rx-doc-name{font-size:13px;font-weight:700;color:#fff}
 .rx-doc-cred{font-size:10px;color:rgba(255,255,255,.5);line-height:1.6;margin-top:2px}
 .rx-patient-bar{background:var(--bg);padding:10px 22px;display:flex;gap:20px;align-items:center;border-bottom:1px solid var(--bd);flex-wrap:wrap}
@@ -331,6 +431,16 @@ body{font-family:var(--fb);color:var(--ink);background:var(--white);font-size:13
 .rx-footer{background:var(--bg);border-top:1px solid var(--bd);padding:10px 22px;display:flex;justify-content:space-between;align-items:center}
 .rx-sig{font-size:11px;color:var(--ink3)}
 .rx-next{font-size:11px;font-weight:700;color:var(--nv)}
+
+.rx-promo{background:var(--nv);padding:11px 22px;display:flex;justify-content:space-between;align-items:center;gap:18px}
+.rx-promo-svc{font-size:10px;color:rgba(255,255,255,.72);line-height:1.75}
+.rx-promo-svc div{padding-left:11px;position:relative}
+.rx-promo-svc div::before{content:"";position:absolute;left:0;top:6px;width:4px;height:4px;border-radius:50%;background:var(--am)}
+.rx-promo-app{display:flex;align-items:center;gap:10px;flex:0 0 auto}
+.rx-promo-app img{height:30px;width:auto;display:block}
+.rx-promo-txt{text-align:right}
+.rx-promo-ttl{font-size:11px;font-weight:700;color:#fff}
+.rx-promo-sub{font-size:9px;color:rgba(255,255,255,.55);margin-top:1px}
 
 @page{size:A4;margin:14mm 18mm}
 `;
@@ -1095,16 +1205,7 @@ function buildPrescriptionHtml(data = {}) {
 </head>
 <body>
 <div class="rx-page">
-  <div class="rx-header">
-    <div>
-      <div class="rx-hosp-name">Gini Advanced Care Hospital</div>
-      <div class="rx-hosp-tag">NABH Accredited · SCO 14-15, Sector 68, SAS Nagar, Mohali 160068 · +91 81463 20100</div>
-    </div>
-    <div class="rx-doc">
-      <div class="rx-doc-name">${escape(doctor.name || "Doctor")}</div>
-      <div class="rx-doc-cred">${docCredHtml}</div>
-    </div>
-  </div>
+  ${letterheadHtml(escape(doctor.name || "Doctor"), docCredHtml, data.rx_logo || DEFAULT_LOGO_DATA_URI)}
 
   <div class="rx-patient-bar">
     <div>
@@ -1189,6 +1290,8 @@ function buildPrescriptionHtml(data = {}) {
     </div>
     <div class="rx-next">${nextVisitText}</div>
   </div>
+
+  ${promoHtml(data.rx_footer, data.rx_logo || DEFAULT_LOGO_DATA_URI)}
 </div>
 </body>
 </html>`;
@@ -1197,4 +1300,12 @@ function buildPrescriptionHtml(data = {}) {
 // The letterhead is shared, not copied: the referral letter (19 §7.1) prints the
 // same `.rx-header` markup off the same CSS, so a letter and the prescription in
 // the same envelope cannot look like they came from two hospitals.
-export { buildPrescriptionHtml, escape as escapeHtml, CSS as LETTERHEAD_CSS };
+export {
+  buildPrescriptionHtml,
+  escape as escapeHtml,
+  CSS as LETTERHEAD_CSS,
+  letterheadHtml,
+  HOSPITAL_NAME,
+  HOSPITAL_ADDRESS,
+  HOSPITAL_PHONE,
+};

@@ -182,30 +182,35 @@ const resolveDate = async (raw) => (/^\d{4}-\d{2}-\d{2}$/.test(raw || "") ? raw 
 
 // Everything the board needs in one request. serverTime lets the client tick its
 // timers against the server rather than a wall display's drifting clock.
-router.get("/giniflow/board", validateQuery(giniflowDateQuerySchema), async (req, res) => {
-  try {
-    const date = await resolveDate(req.query.date);
-    const now = new Date();
-    const sla = await getSlaConfig();
-    const board = await getDayBoard(date, sla, boardClock(date, now));
-    const [stats, stationAverages] = await Promise.all([
-      getDayStats(date, board, sla),
-      getStationAverages(date, sla),
-    ]);
+router.get(
+  "/giniflow/board",
+  requireCapability(CAP.GINIFLOW_BOARD),
+  validateQuery(giniflowDateQuerySchema),
+  async (req, res) => {
+    try {
+      const date = await resolveDate(req.query.date);
+      const now = new Date();
+      const sla = await getSlaConfig();
+      const board = await getDayBoard(date, sla, boardClock(date, now));
+      const [stats, stationAverages] = await Promise.all([
+        getDayStats(date, board, sla),
+        getStationAverages(date, sla),
+      ]);
 
-    res.json({
-      date,
-      serverTime: now.toISOString(),
-      columns: board.columns,
-      stats,
-      bottleneck: getBottleneck(board.columns),
-      stationAverages,
-      slaConfig: sla,
-    });
-  } catch (e) {
-    handleError(res, e, "Gini Flow board");
-  }
-});
+      res.json({
+        date,
+        serverTime: now.toISOString(),
+        columns: board.columns,
+        stats,
+        bottleneck: getBottleneck(board.columns),
+        stationAverages,
+        slaConfig: sla,
+      });
+    } catch (e) {
+      handleError(res, e, "Gini Flow board");
+    }
+  },
+);
 
 router.get("/giniflow/visits/:id/timeline", async (req, res) => {
   try {
@@ -236,6 +241,21 @@ router.get("/giniflow/visits/:id/timeline", async (req, res) => {
     // A lab-only visit gets its own timeline rather than the chain's: see
     // getLabOnlyTimeline for why the chain could not describe it truthfully.
     const now = boardClock(visit.rows[0].visit_date);
+    // The parallel lab leg, for an ordinary visit that has one. A lab-only visit
+    // already has these milestones as its whole timeline. Read before the chain,
+    // which is judged against it.
+    const labTrack = labOnly
+      ? []
+      : await getLabTrack(
+          pool,
+          {
+            visitDate: visit.rows[0].visit_date,
+            patientId: visit.rows[0].patient_id,
+            fileNo: visit.rows[0].file_no,
+          },
+          now,
+        );
+    const labReported = labTrack.find((m) => m.status === "lab_reported");
     const steps = labOnly
       ? await getLabOnlyTimeline(
           pool,
@@ -250,20 +270,9 @@ router.get("/giniflow/visits/:id/timeline", async (req, res) => {
       : await getStationTimes(pool, req.params.id, budgetMap(sla), now, {
           slaConfig: sla,
           category: visit.rows[0].category,
+          labReadyAt: labReported ? new Date(labReported.enteredAt) : null,
+          labPending: labTrack.length > 0 && !labReported,
         });
-    // The parallel lab leg, for an ordinary visit that has one. A lab-only visit
-    // already has these milestones as its whole timeline.
-    const labTrack = labOnly
-      ? []
-      : await getLabTrack(
-          pool,
-          {
-            visitDate: visit.rows[0].visit_date,
-            patientId: visit.rows[0].patient_id,
-            fileNo: visit.rows[0].file_no,
-          },
-          now,
-        );
 
     res.json({
       visit: { ...visit.rows[0], labOnly },
@@ -278,14 +287,19 @@ router.get("/giniflow/visits/:id/timeline", async (req, res) => {
 
 // Search is server-side: the floor can hold 100+ patients and the answer must
 // not depend on which cards happen to be rendered.
-router.get("/giniflow/search", validateQuery(giniflowSearchQuerySchema), async (req, res) => {
-  try {
-    const date = await resolveDate(req.query.date);
-    res.json({ date, query: req.query.q, results: await searchDayVisits(date, req.query.q) });
-  } catch (e) {
-    handleError(res, e, "Gini Flow search");
-  }
-});
+router.get(
+  "/giniflow/search",
+  requireCapability(CAP.GINIFLOW_BOARD),
+  validateQuery(giniflowSearchQuerySchema),
+  async (req, res) => {
+    try {
+      const date = await resolveDate(req.query.date);
+      res.json({ date, query: req.query.q, results: await searchDayVisits(date, req.query.q) });
+    } catch (e) {
+      handleError(res, e, "Gini Flow search");
+    }
+  },
+);
 
 router.get("/giniflow/sla-config", async (req, res) => {
   try {
@@ -335,27 +349,32 @@ router.patch(
   },
 );
 
-router.get("/giniflow/day-report", validateQuery(giniflowDateQuerySchema), async (req, res) => {
-  try {
-    const date = await resolveDate(req.query.date);
-    const sla = await getSlaConfig();
-    const board = await getDayBoard(date, sla, boardClock(date));
-    const stats = await getDayStats(date, board, sla);
-    const bottleneck = getBottleneck(board.columns);
+router.get(
+  "/giniflow/day-report",
+  requireCapability(CAP.GINIFLOW_BOARD),
+  validateQuery(giniflowDateQuerySchema),
+  async (req, res) => {
+    try {
+      const date = await resolveDate(req.query.date);
+      const sla = await getSlaConfig();
+      const board = await getDayBoard(date, sla, boardClock(date));
+      const stats = await getDayStats(date, board, sla);
+      const bottleneck = getBottleneck(board.columns);
 
-    const parts = [
-      stats.avgCompletedMinutes
-        ? `avg journey ${stats.avgCompletedMinutes}m`
-        : "no completed visits yet",
-      `${stats.completed} completed`,
-      `${stats.overBudget} over SLA`,
-      bottleneck ? `bottleneck: ${bottleneck.label}` : "no bottleneck",
-    ];
-    res.json({ date, summary: parts.join(" · "), stats, bottleneck });
-  } catch (e) {
-    handleError(res, e, "Gini Flow day report");
-  }
-});
+      const parts = [
+        stats.avgCompletedMinutes
+          ? `avg journey ${stats.avgCompletedMinutes}m`
+          : "no completed visits yet",
+        `${stats.completed} completed`,
+        `${stats.overBudget} over SLA`,
+        bottleneck ? `bottleneck: ${bottleneck.label}` : "no bottleneck",
+      ];
+      res.json({ date, summary: parts.join(" · "), stats, bottleneck });
+    } catch (e) {
+      handleError(res, e, "Gini Flow day report");
+    }
+  },
+);
 
 // ── Queue management ────────────────────────────────────────────────────────
 // Three ways the floor manager rearranges the board, all behind one capability.

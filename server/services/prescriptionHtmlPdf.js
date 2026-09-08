@@ -7,6 +7,8 @@ import { createRequire } from "module";
 import crypto from "crypto";
 import { buildPrescriptionHtml } from "../templates/prescriptionTemplate.js";
 import { buildReferralLetterHtml } from "../templates/referralLetterTemplate.js";
+import { getPrescriptionFooter } from "./prescriptionFooter.js";
+import { getPrescriptionLogo } from "./prescriptionLogo.js";
 
 const require = createRequire(import.meta.url);
 
@@ -88,12 +90,22 @@ export async function renderHtmlToPdf(html, { margin } = {}) {
 }
 
 export async function generatePrescriptionPdf(data) {
-  return renderHtmlToPdf(buildPrescriptionHtml(data));
+  // Resolved here rather than at each call site: the strip is fixed clinic-wide,
+  // and prescriptions are rendered from the client, the visit route and the
+  // sync auto-save alike — none of which should have to remember to fetch it.
+  const [rx_footer, logo] = await Promise.all([
+    data?.rx_footer ? Promise.resolve(data.rx_footer) : getPrescriptionFooter(),
+    data?.rx_logo ? Promise.resolve({ dataUri: data.rx_logo }) : getPrescriptionLogo(),
+  ]);
+  return renderHtmlToPdf(buildPrescriptionHtml({ ...data, rx_footer, rx_logo: logo.dataUri }));
 }
 
 // The referral letter (19 §7.1). Same warm browser, deliberately — a second
 // Chromium for a one-page letter would double the memory the API holds all day
 // for a render that costs the same as the prescription's.
 export async function generateReferralLetterPdf(data) {
-  return renderHtmlToPdf(buildReferralLetterHtml(data));
+  // Same letterhead, so the same mark — a letter and a prescription handed over
+  // together must not show two different logos.
+  const logo = data?.rx_logo ? { dataUri: data.rx_logo } : await getPrescriptionLogo();
+  return renderHtmlToPdf(buildReferralLetterHtml({ ...data, rx_logo: logo.dataUri }));
 }

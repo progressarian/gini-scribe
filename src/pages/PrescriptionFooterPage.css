@@ -1,0 +1,283 @@
+.rxf {
+  max-width: 860px;
+}
+.rxf__sub {
+  font-size: 13px;
+  color: #6b7d90;
+  margin-bottom: 16px;
+}
+.rxf__loading {
+  font-size: 13px;
+  color: #6b7d90;
+}
+.rxf__form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.rxf__group {
+  border: 1px solid #dde3ea;
+  border-radius: 10px;
+  padding: 14px 16px 16px;
+  background: #fff;
+}
+.rxf__legend {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: #6b7d90;
+  padding: 0 6px;
+}
+.rxf__field {
+  display: block;
+  margin-top: 10px;
+}
+.rxf__label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: #3d4f63;
+  margin-bottom: 4px;
+}
+.rxf__input {
+  width: 100%;
+  font: inherit;
+  font-size: 13px;
+  color: #1a2332;
+  padding: 8px 10px;
+  border: 1px solid #dde3ea;
+  border-radius: 8px;
+  background: #fff;
+}
+.rxf__input:focus {
+  outline: none;
+  border-color: #009e8c;
+  box-shadow: 0 0 0 3px rgba(0, 158, 140, 0.12);
+}
+.rxf__add {
+  margin-top: 10px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: #009e8c;
+  background: none;
+  border: 1px dashed #c4cdd8;
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.rxf__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.rxf__save {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  background: #009e8c;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 20px;
+  cursor: pointer;
+}
+.rxf__save:disabled {
+  background: #c4cdd8;
+  cursor: not-allowed;
+}
+.rxf__note {
+  font-size: 12px;
+  color: #6b7d90;
+}
+.rxf__previewWrap {
+  margin-top: 26px;
+}
+.rxf__preview {
+  margin-top: 8px;
+  background: #0e2240;
+  border-radius: 10px;
+  padding: 11px 22px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+  min-height: 62px;
+}
+.rxf__previewSvc {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.72);
+  line-height: 1.75;
+}
+.rxf__previewSvc div {
+  padding-left: 11px;
+  position: relative;
+}
+.rxf__previewSvc div::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 6px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #d97a0a;
+}
+.rxf__previewApp {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+.rxf__previewLogo {
+  height: 30px;
+  width: auto;
+  display: block;
+}
+.rxf__previewTxt {
+  text-align: right;
+}
+.rxf__previewTtl {
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+}
+.rxf__previewSub {
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.55);
+  margin-top: 1px;
+}
+
+.rxf__hint {
+  font-size: 12px;
+  color: #6b7d90;
+  line-height: 1.6;
+  margin-top: 8px;
+}
+.rxf__logoRow {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 12px;
+}
+.rxf__logoWell {
+  flex: 0 0 auto;
+  width: 150px;
+  height: 76px;
+  border: 1px solid #dde3ea;
+  border-radius: 8px;
+  background: #0e2240;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+}
+.rxf__logoImg {
+  max-width: 100%;
+  max-height: 100%;
+  display: block;
+}
+.rxf__logoNone {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+}
+.rxf__logoMeta {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.rxf__logoState {
+  font-size: 12px;
+  color: #3d4f63;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.rxf__logoBtns {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.rxf__upload {
+  font-size: 12px;
+  font-weight: 600;
+  color: #009e8c;
+  border: 1px dashed #c4cdd8;
+  border-radius: 8px;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+.rxf__upload--busy {
+  color: #6b7d90;
+  cursor: default;
+}
+.rxf__upload input {
+  display: none;
+}
+.rxf__reset {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7d90;
+  background: none;
+  border: 1px solid #dde3ea;
+  border-radius: 8px;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+.rxf__headPreview {
+  margin-top: 14px;
+  background: #0e2240;
+  border-radius: 10px;
+  padding: 14px 18px;
+}
+.rxf__headTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.rxf__headName {
+  flex: 1 1 0;
+  min-width: 0;
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 19px;
+  color: #fff;
+}
+.rxf__headLogo {
+  flex: 0 0 auto;
+  height: 40px;
+  width: auto;
+  display: block;
+}
+.rxf__headDoc {
+  flex: 1 1 0;
+  text-align: right;
+}
+.rxf__headDocName {
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+}
+.rxf__headDocCred {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.55);
+}
+.rxf__headAddr {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.5);
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.rxf__warn {
+  margin-top: 12px;
+  padding: 9px 12px;
+  background: #fef6e6;
+  border: 1px solid rgba(217, 122, 10, 0.25);
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #92400e;
+}

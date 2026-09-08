@@ -97,7 +97,12 @@ export const CAPABILITIES = {
   // own keys rather than reusing FLOW_*: access to the two boards is granted
   // independently while both run, and retiring the old module means deleting
   // every FLOW_* key without touching these.
-  GINIFLOW_VIEW: "GINIFLOW_VIEW", // read the Gini Flow manager board
+  GINIFLOW_VIEW: "GINIFLOW_VIEW", // reach `/api/giniflow*` at all: every station gate sits behind it
+  // The manager board itself (/giniflow/manager and the board/search/day-report
+  // endpoints). Separate from GINIFLOW_VIEW because that key is the API-wide
+  // prefix gate — a desk role needs it to work its own station, and taking it
+  // away to hide the board would break the station instead.
+  GINIFLOW_BOARD: "GINIFLOW_BOARD",
   GINIFLOW_SLA_ADMIN: "GINIFLOW_SLA_ADMIN", // edit the Gini Flow time budgets
   GINIFLOW_MANAGE_QUEUE: "GINIFLOW_MANAGE_QUEUE", // reorder, prioritise and move patients on the board
   GINIFLOW_STATION_VITALS: "GINIFLOW_STATION_VITALS", // record vitals at the Gini Flow station
@@ -160,6 +165,7 @@ export const ROLE_CAPABILITIES = {
     C.FLOW_MY_PATIENTS,
     C.FLOW_REPORTS,
     C.GINIFLOW_VIEW,
+    C.GINIFLOW_BOARD,
     C.GINIFLOW_STATION_MO,
     C.GINIFLOW_STATION_DOCTOR,
     // NOT GINIFLOW_REFERRALS. The consultant DECIDES referrals, from the Care
@@ -186,6 +192,7 @@ export const ROLE_CAPABILITIES = {
     C.FLOW_STATION_MO,
     C.FLOW_FLOOR_VIEW,
     C.GINIFLOW_VIEW,
+    C.GINIFLOW_BOARD,
     C.GINIFLOW_STATION_VITALS,
     C.GINIFLOW_STATION_MO,
     C.GINIFLOW_MO_CLOSE,
@@ -200,11 +207,6 @@ export const ROLE_CAPABILITIES = {
     C.VITALS,
     C.LAB_REQUESTS,
     C.SIDE_EFFECTS,
-    C.FLOW_STATION,
-    C.FLOW_STATION_VITALS,
-    C.FLOW_STATION_DIET,
-    C.FLOW_STATION_RX,
-    C.FLOW_FLOOR_VIEW,
     C.GINIFLOW_VIEW,
     C.GINIFLOW_STATION_VITALS,
     C.GINIFLOW_STATION_RX,
@@ -221,6 +223,7 @@ export const ROLE_CAPABILITIES = {
     C.FLOW_STATION_LAB,
     C.FLOW_FLOOR_VIEW,
     C.GINIFLOW_VIEW,
+    C.GINIFLOW_BOARD,
     C.GINIFLOW_STATION_LAB,
   ],
   [ROLES.TECH]: [
@@ -239,6 +242,7 @@ export const ROLE_CAPABILITIES = {
     // GINIFLOW_STATION_LAB) and landed on a page whose every call failed.
     // A broken screen, not an honest refusal.
     C.GINIFLOW_VIEW,
+    C.GINIFLOW_BOARD,
     C.GINIFLOW_STATION_LAB,
   ],
   [ROLES.RECEPTION]: [
@@ -256,6 +260,7 @@ export const ROLE_CAPABILITIES = {
     C.FLOW_STATION_VITALS,
     C.OBT_OPS,
     C.GINIFLOW_VIEW,
+    C.GINIFLOW_BOARD,
     // No GINIFLOW_MANAGE_QUEUE: rearranging the floor is the coordinator's job.
     // The payment desk clearing a lab bill has no reason to be able to move any
     // patient to any station, and no plan asked for it (BQ-10).
@@ -282,6 +287,7 @@ export const ROLE_CAPABILITIES = {
     C.FLOW_STATION_REPORTS,
     C.OBT_OPS,
     C.GINIFLOW_VIEW,
+    C.GINIFLOW_BOARD,
     C.GINIFLOW_SLA_ADMIN,
     C.GINIFLOW_MANAGE_QUEUE,
     C.GINIFLOW_STATION_VITALS,
@@ -300,9 +306,6 @@ export const ROLE_CAPABILITIES = {
     C.DOSE_REVIEWS,
     C.MED_COLLECTION,
     C.FLOW_PHARMACY,
-    C.FLOW_STATION,
-    C.FLOW_STATION_PHARM,
-    C.FLOW_FLOOR_VIEW,
     C.GINIFLOW_VIEW,
     // The last desk on the floor: dispensing, counselling and the exit that ends
     // the visit. Pharmacy and admin only — nobody else closes a patient's day.

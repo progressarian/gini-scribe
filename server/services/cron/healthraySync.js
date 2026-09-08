@@ -142,8 +142,8 @@ function buildVitalsAndBiomarkers(appt, apptDate) {
 }
 
 async function persistNoteFollowUp(appointmentId, followUp) {
-  if (!appointmentId || !followUp) return;
-  await pool.query(
+  if (!appointmentId || !followUp) return false;
+  const { rowCount } = await pool.query(
     `UPDATE appointments
         SET healthray_follow_up = $2::jsonb,
             follow_up_with = COALESCE(follow_up_with, $3),
@@ -155,6 +155,7 @@ async function persistNoteFollowUp(appointmentId, followUp) {
         AND COALESCE(biomarkers->>'followup', '') = ''`,
     [appointmentId, JSON.stringify(followUp), followUp.notes || null],
   );
+  return rowCount > 0;
 }
 
 // ── Analyse follow-up date headers in a raw clinical text string ─────────────
@@ -485,7 +486,9 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
         await syncFlowFromAppointment(existing.id, "completed");
       }
     }
-    await syncFollowUpDate(existing.id, followUpDate);
+    if (await syncFollowUpDate(existing.id, followUpDate)) {
+      await maybeAutoSavePrescription(existing.id);
+    }
     return { skipped: true, id: existing.id };
   }
 
@@ -579,8 +582,11 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
           if (status && !["completed", "cancelled", "no_show"].includes(status)) {
             await syncFlowVitalsFromOpdColumn(existing.id);
           }
-          await syncFollowUpDate(existing.id, followUpDate);
-          await persistNoteFollowUp(existing.id, noteFollowUp);
+          const fuChanged = await syncFollowUpDate(existing.id, followUpDate);
+          const noteFuChanged = await persistNoteFollowUp(existing.id, noteFollowUp);
+          if (fuChanged || noteFuChanged) {
+            await maybeAutoSavePrescription(existing.id);
+          }
           return { skipped: true, id: existing.id };
         }
 
@@ -637,7 +643,9 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
             );
             if (existing.patient_id)
               await syncAppointmentDocs(healthrayId, existing.patient_id, apptDate);
-            await persistNoteFollowUp(existing.id, noteFollowUp);
+            if (await persistNoteFollowUp(existing.id, noteFollowUp)) {
+              await maybeAutoSavePrescription(existing.id);
+            }
             return { skipped: true, id: existing.id, parseFailed: true };
           }
         }

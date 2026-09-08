@@ -194,7 +194,7 @@ const NAV_ITEMS = [
     match: (p) => p.startsWith("/flow/station") || p === "/flow/my-patients",
   },
   { path: "/flow/reports", label: "📊 Flow Reports", cap: C["/flow/reports"], show: () => true },
-  { path: "/flow/admin", label: "⚙️ Flow Settings", cap: C["/flow/admin"], show: () => true },
+  { path: "/settings", label: "⚙️ Settings", cap: C["/settings"], show: () => true },
 ];
 
 export default function AppLayout() {

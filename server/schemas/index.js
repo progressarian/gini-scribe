@@ -1159,3 +1159,11 @@ export const giniflowReportReviewSchema = z.object({
   outcome: z.enum(["normal", "needs_consultant"]),
   note: z.string().trim().max(2000).optional().nullable(),
 });
+
+// The fixed strip at the foot of every prescription. Empty strings are allowed
+// and meaningful: they drop that line from the printed page.
+export const prescriptionFooterSchema = z.object({
+  serviceLines: z.array(z.string().trim().max(120)).max(4),
+  appLine: z.string().trim().max(120),
+  storeLine: z.string().trim().max(120),
+});

@@ -155,7 +155,11 @@ check(
 const longest = col("wait_doctor").cards.sort((a, b) => b.statusMinutes - a.statusMinutes)[0];
 const steps = await getStationTimes(pool, longest.id, budgets, now);
 const current = steps.find((s) => s.isCurrent);
-check("timeline reconstructs the full journey", steps.length >= 4, `${steps.length} steps`);
+check(
+  "timeline reconstructs the full journey",
+  steps.length >= 3 && steps.some((s) => s.status === "with_vitals"),
+  `${steps.length} steps: ${steps.map((s) => s.status).join(" → ")}`,
+);
 const firstEvent = await one(
   `SELECT min(occurred_at) AS at FROM giniflow_visit_events WHERE visit_id = $1`,
   [longest.id],

@@ -337,8 +337,26 @@ router.get("/visit/:patientId", async (req, res) => {
 
       // 8. Documents
       pool.query(
-        `SELECT id, doc_type, title, file_name, doc_date, source, notes, extracted_data, storage_path, file_url, reviewed, created_at
-         FROM documents WHERE patient_id=$1 ORDER BY doc_date DESC NULLS LAST, created_at DESC
+        `SELECT d.id, d.doc_type, d.title, d.file_name, d.doc_date, d.source, d.notes,
+                d.extracted_data, d.storage_path, d.file_url, d.reviewed, d.created_at,
+                CASE WHEN d.doc_type = 'prescription' AND d.source = 'visit'
+                     THEN NULLIF(d.extracted_data->'appt_plan'->'follow_up'->>'date', '')
+                END AS rx_follow_up_date,
+                CASE WHEN d.doc_type = 'prescription' AND d.source = 'visit'
+                     THEN (SELECT NULLIF(a.biomarkers->>'followup', '')
+                             FROM appointments a
+                            WHERE a.patient_id = d.patient_id
+                              AND a.appointment_date = d.doc_date
+                            ORDER BY a.id DESC LIMIT 1)
+                END AS current_follow_up_date,
+                CASE WHEN d.doc_type = 'prescription' AND d.source = 'visit'
+                     THEN (SELECT a.id FROM appointments a
+                            WHERE a.patient_id = d.patient_id
+                              AND a.appointment_date = d.doc_date
+                            ORDER BY a.id DESC LIMIT 1)
+                END AS appointment_id
+         FROM documents d WHERE d.patient_id=$1
+         ORDER BY d.doc_date DESC NULLS LAST, d.created_at DESC
          LIMIT 200`,
         [pid],
       ),
@@ -489,10 +507,16 @@ router.get("/visit/:patientId", async (req, res) => {
       // 25. Latest appointment that carries a biomarkers.followup value.
       //     Mirrors the OPD page, which reads appt.biomarkers.followup per row,
       //     so the visit page surfaces the same scheduled date even when the
-      //     latest clinical-notes appointment lags behind.
+      //     latest clinical-notes appointment lags behind. Bounded to that
+      //     appointment's date or later — an earlier visit's follow-up is that
+      //     visit's next date, never this one's.
       pool.query(
         `SELECT biomarkers, healthray_follow_up, healthray_investigations, follow_up_with FROM appointments
           WHERE patient_id=$1 AND biomarkers ? 'followup'
+            AND appointment_date >= COALESCE(
+                  (SELECT MAX(appointment_date) FROM appointments
+                    WHERE patient_id=$1 AND healthray_clinical_notes IS NOT NULL),
+                  appointment_date)
           ORDER BY appointment_date DESC NULLS LAST, id DESC
           LIMIT 1`,
         [pid],

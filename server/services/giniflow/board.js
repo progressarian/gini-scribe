@@ -8,6 +8,7 @@ import {
   STATUS_LABEL,
   slaKeyForStatus,
   TERMINAL_STATUSES,
+  STATION_STATUSES,
   NOT_A_MARKER_SQL,
   WAIT_SINCE_SQL,
 } from "../../../shared/giniflowStatus.js";
@@ -281,6 +282,8 @@ export const boardClock = (visitDate, now = new Date()) => {
   return now < end ? now : end;
 };
 
+const PRE_MO_COLUMNS = ["checked_in", "vitals", "sd"];
+
 export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDate), db = pool) {
   const budgets = budgetMap(slaConfig);
   const budgetFor = budgetLookup(slaConfig);
@@ -446,8 +449,21 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
         : // "Done today" is a record of who finished, and a samples-only patient
           // who exited did finish — it is only the consultation queues they do
           // not belong in. Without this they had nowhere to go but the lab track.
+          // A patient whose sample is with the lab cannot be worked up until the
+          // reports are back, so they wait on the lab track rather than in a
+          // queue nobody can move. Only the columns before the MO: a hand-over
+          // to a consultant is an assignment, and hiding it loses the patient.
+          // A station physically holding them is exempt either way.
           onFloor.filter(
-            (c) => (!c.labOnly || col.key === "done") && col.statuses.includes(c.status),
+            (c) =>
+              (!c.labOnly || col.key === "done") &&
+              col.statuses.includes(c.status) &&
+              !(
+                PRE_MO_COLUMNS.includes(col.key) &&
+                !!c.lab &&
+                !c.finished &&
+                !STATION_STATUSES.includes(c.status)
+              ),
           );
     const budget = budgets[col.slaKey] ?? null;
     // Blocked patients are excluded from the average: they are stuck on missing

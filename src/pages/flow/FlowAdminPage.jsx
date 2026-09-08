@@ -16,6 +16,10 @@ import "../../styles/flow.css";
 // Admin settings: edit visit-time benchmarks (max minutes) and fully manage the
 // step catalog (create / update / delete). Inline-edit on blur. ADMIN-gated
 // (route cap + backend requireCapability).
+//
+// Renders as the Patient Flow panel of /settings — the shell there prints the
+// title and blurb, so this owns only its own controls. .flow-root stays: the
+// cards and tables below read their palette off its variables.
 export default function FlowAdminPage() {
   const { data: types = [] } = useFlowVisitTypes();
   const { data: catalog = [] } = useFlowStepCatalog(true);
@@ -128,15 +132,6 @@ export default function FlowAdminPage() {
   return (
     <div className="flow-root">
       <div className="flow-wrap">
-        <div className="flow-header">
-          <div>
-            <div className="flow-title">⚙️ Flow Settings</div>
-            <div className="flow-sub">
-              Edit visit-time benchmarks and manage journey steps · changes apply to new check-ins
-            </div>
-          </div>
-        </div>
-
         <div
           style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, alignItems: "start" }}
         >

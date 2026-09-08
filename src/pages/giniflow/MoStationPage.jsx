@@ -180,27 +180,35 @@ const URGENCY = [
 const RAIL = [
   { label: "Check-in", at: "checked_in" },
   { label: "Vitals", at: "vitals_pending" },
-  { label: "Chief Endo", at: "sd_pending" },
+  { label: "Chief Endo", at: "vitals_done" },
   { label: "Doctor", at: "ready_for_doctor" },
   { label: "Pharmacy", at: "pharmacy_pending" },
 ];
-const RAIL_END = ["vitals_done", "sd_pending", "ready_for_doctor", "pharmacy_pending", null];
+const RAIL_END = ["vitals_pending", "vitals_done", "ready_for_doctor", "pharmacy_pending", null];
 
-function JourneyRail({ status }) {
+function JourneyRail({ status, atLab = false }) {
   const here = CHAIN.indexOf(status);
+  const stops = RAIL.map((stop, i) => {
+    const from = CHAIN.indexOf(stop.at);
+    const doneAt = RAIL_END[i] ? CHAIN.indexOf(RAIL_END[i]) : CHAIN.length;
+    return {
+      label: stop.label,
+      state: here < 0 || here < from ? "todo" : here >= doneAt ? "done" : "now",
+    };
+  });
+  const at = stops.findIndex((s) => s.label === "Chief Endo");
+  if (atLab && status !== "with_sd" && stops[at].state === "now") {
+    stops[at] = { ...stops[at], state: "todo" };
+    stops.splice(at, 0, { label: "Lab", state: "now" });
+  }
   return (
     <div className="mo-rail">
-      {RAIL.map((stop, i) => {
-        const from = CHAIN.indexOf(stop.at);
-        const doneAt = RAIL_END[i] ? CHAIN.indexOf(RAIL_END[i]) : CHAIN.length;
-        const state = here < 0 || here < from ? "todo" : here >= doneAt ? "done" : "now";
-        return (
-          <span key={stop.label} className={`mr-stop mr-${state}`}>
-            {stop.label}
-            {state === "done" ? " ✓" : ""}
-          </span>
-        );
-      })}
+      {stops.map((stop) => (
+        <span key={stop.label} className={`mr-stop mr-${stop.state}`}>
+          {stop.label}
+          {stop.state === "done" ? " ✓" : ""}
+        </span>
+      ))}
     </div>
   );
 }
@@ -305,7 +313,10 @@ function RowDetail({ card, now }) {
           ))}
         </div>
       )}
-      <JourneyRail status={card.status} />
+      <JourneyRail
+        status={card.status}
+        atLab={card.openOrders > 0 && card.resultsStatus !== "ready"}
+      />
       <div className="si-foot">
         <span className={`si-reports si-reports-${card.reports.tone}`}>{card.reports.label}</span>
         {card.compliancePct != null && (
@@ -902,7 +913,15 @@ export default function MoStationPage() {
                       ? ` · Checked in ${clock(patient.checkedInAt)}`
                       : ""}
                   </div>
-                  <JourneyRail status={patient.status} />
+                  <JourneyRail
+                    status={patient.status}
+                    atLab={
+                      patient.resultsStatus !== "ready" &&
+                      (patient.orders || []).some(
+                        (o) => o.urgency === "today" && o.sample_status !== "uploaded",
+                      )
+                    }
+                  />
                 </div>
                 <div className="sdh-acts">
                   {cat && (

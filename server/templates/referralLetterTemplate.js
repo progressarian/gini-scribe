@@ -1,4 +1,10 @@
-import { escapeHtml as escape, LETTERHEAD_CSS } from "./prescriptionTemplate.js";
+import {
+  escapeHtml as escape,
+  LETTERHEAD_CSS,
+  letterheadHtml,
+  HOSPITAL_NAME,
+  HOSPITAL_PHONE,
+} from "./prescriptionTemplate.js";
 import { specialtyLabel, specialtyIcon, urgencyMeta } from "../../shared/giniflowReferrals.js";
 
 // The referral letter — docs/gini-flow/19-REFERRALS-STATION-PLAN.md §7.
@@ -54,8 +60,6 @@ const LETTER_CSS = `
 .rl-urg-soon{background:var(--aml);color:var(--am)}
 .rl-urg-urgent,.rl-urg-emergency{background:var(--rel);color:var(--re)}
 `;
-
-const HOSPITAL_PHONE = "+91 81463 20100";
 
 const fmtDateTime = (value) =>
   new Date(value || Date.now()).toLocaleString("en-IN", {
@@ -179,16 +183,7 @@ export function buildReferralLetterHtml(data = {}) {
 </head>
 <body>
 <div class="rx-page">
-  <div class="rx-header">
-    <div>
-      <div class="rx-hosp-name">Gini Advanced Care Hospital</div>
-      <div class="rx-hosp-tag">NABH Accredited · SCO 14-15, Sector 68, SAS Nagar, Mohali 160068 · ${HOSPITAL_PHONE}</div>
-    </div>
-    <div class="rx-doc">
-      <div class="rx-doc-name">${escape(doctor.name || "Doctor")}</div>
-      <div class="rx-doc-cred">${credLines || "Gini Advanced Care Hospital"}</div>
-    </div>
-  </div>
+  ${letterheadHtml(escape(doctor.name || "Doctor"), credLines || HOSPITAL_NAME, data.rx_logo)}
 
   <div class="rl-body">
     <div class="rl-date">

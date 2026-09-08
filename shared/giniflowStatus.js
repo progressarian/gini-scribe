@@ -112,6 +112,7 @@ export const STATUS_TO_SLA_KEY = {
 export const WAIT_STATUSES = [
   "checked_in",
   "vitals_pending",
+  "vitals_done",
   "sd_pending",
   "ready_for_doctor",
   "rx_pending",

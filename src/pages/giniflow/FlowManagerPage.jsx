@@ -20,6 +20,7 @@ import {
   compareQueue,
   CATEGORIES,
   CATEGORY_META,
+  STATION_STATUSES,
 } from "../../../shared/giniflowStatus";
 import {
   useGiniflowBoard,
@@ -445,7 +446,9 @@ function PatientCard({
           <div className="pc-parallel">
             {isLabOnly
               ? "Samples only · not in the consultation queue"
-              : "Lab track · also on the main board"}
+              : card.finished || STATION_STATUSES.includes(card.status)
+                ? "Lab track · also on the main board"
+                : "At the lab · rejoins the queue when reports land"}
           </div>
         )}
         {!isLab && card.blockedReason && (
@@ -1044,8 +1047,8 @@ export default function FlowManagerPage() {
   const canEditSla = hasCapability(role, CAP.GINIFLOW_SLA_ADMIN);
   const canManageQueue = hasCapability(role, CAP.GINIFLOW_MANAGE_QUEUE);
   // Reassigning is the coordinator's triage capability, not the queue one: a
-  // nurse holding GINIFLOW_VIEW reads this board too, and moving a patient onto
-  // a consultant's list is the same decision the triage board gates.
+  // lab tech holding GINIFLOW_BOARD reads this board too, and moving a patient
+  // onto a consultant's list is the same decision the triage board gates.
   const canAssign = hasCapability(role, CAP.GINIFLOW_TRIAGE);
   const queryClient = useQueryClient();
   const now = useTick();
