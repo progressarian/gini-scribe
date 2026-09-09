@@ -164,7 +164,18 @@ const unifiedFromCase = (r) => ({
   outstanding: r.outstanding,
 });
 
-export async function getLabQueue(visitDate, q = null, db = pool) {
+// The page's filter groups → the Gini bucket and the HealthRay stage that make
+// up each one. The two vocabularies differ, so the mapping lives here rather
+// than being reconstructed on the client.
+export const LAB_GROUPS = {
+  pending: { bucket: "pending", stage: "pending" },
+  collecting: { bucket: "collecting", stage: "collected" },
+  processing: { bucket: "processing", stage: "processing" },
+  ready: { bucket: "ready", stage: "results" },
+  done: { bucket: "uploaded", stage: "reported" },
+};
+
+export async function getLabQueue(visitDate, q = null, db = pool, { group = "all" } = {}) {
   const search = q && String(q).trim().length >= 2 ? String(q).trim() : null;
   const healthray = await getHealthrayCases(visitDate, search, db);
   const { rows } = await db.query(
@@ -263,13 +274,37 @@ export async function getLabQueue(visitDate, q = null, db = pool) {
     {},
   );
 
+  // Whole-day totals, computed before any filtering. The stats strip and the
+  // filter chips both read these: derived from the returned array lengths they
+  // would collapse to one non-zero group the moment a filter was applied.
+  const bucketCounts = Object.fromEntries(
+    ["pending", "collecting", "processing", "ready", "uploaded"].map((b) => [b, by(b).length]),
+  );
+  const groupCounts = Object.fromEntries(
+    Object.entries(LAB_GROUPS).map(([k, m]) => [
+      k,
+      by(m.bucket).length + healthray.filter((r) => r.stage.key === m.stage).length,
+    ]),
+  );
+
+  const wanted = LAB_GROUPS[group] ? group : "all";
+  const keep = (bucket) =>
+    wanted === "all" || LAB_GROUPS[wanted].bucket === bucket ? by(bucket) : [];
+  const keptHealthray =
+    wanted === "all"
+      ? healthray
+      : healthray.filter((r) => r.stage.key === LAB_GROUPS[wanted].stage);
+
   return {
-    pending: by("pending"),
-    collecting: by("collecting"),
-    processing: by("processing"),
-    ready: by("ready"),
-    uploaded: by("uploaded"),
-    healthray,
+    group: wanted,
+    counts: groupCounts,
+    bucketCounts,
+    pending: keep("pending"),
+    collecting: keep("collecting"),
+    processing: keep("processing"),
+    ready: keep("ready"),
+    uploaded: keep("uploaded"),
+    healthray: keptHealthray,
     unified,
     unifiedCounts,
     stages: LAB_STAGES,

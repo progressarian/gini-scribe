@@ -14,12 +14,15 @@ const invalidate = (queryClient) => {
   queryClient.invalidateQueries({ queryKey: ["giniflow", "stations", "summary"] });
 };
 
-export function usePharmacyQueue(date) {
+export function usePharmacyQueue(date, group = "all") {
   return useQuery({
-    queryKey: ["giniflow", "pharmacy", "queue", date || "today"],
+    queryKey: ["giniflow", "pharmacy", "queue", date || "today", group],
     queryFn: async () =>
-      (await api.get("/api/giniflow/stations/pharmacy/queue", { params: date ? { date } : {} }))
-        .data,
+      (
+        await api.get("/api/giniflow/stations/pharmacy/queue", {
+          params: { ...(date ? { date } : {}), ...(group && group !== "all" ? { group } : {}) },
+        })
+      ).data,
     refetchInterval: pollInterval,
     refetchIntervalInBackground: false,
     placeholderData: (prev) => prev,

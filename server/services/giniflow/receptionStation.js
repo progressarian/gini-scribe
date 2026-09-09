@@ -539,7 +539,7 @@ const ABSENTABLE_STATUSES = [...EXPECTED_STATUSES, "checked_in"];
 
 const ARRIVAL_SELECT = `
   SELECT v.id, v.patient_id, v.current_status, v.appointment_time::text AS appointment_time,
-         v.priority, v.blocked_reason,
+         v.priority, v.blocked_reason, v.paused_at, v.paused_reason,
          (v.visit_date + COALESCE(v.appointment_time, '00:00'::time))
            AT TIME ZONE 'Asia/Kolkata' AS slot_at,
          p.name, p.file_no, p.age, p.sex, p.phone,
@@ -640,7 +640,12 @@ const shapeArrival = (r, now) => ({
   minutesLate: r.appointment_time ? minutesBetween(r.slot_at, now) : null,
   checkedInAt: r.checked_in_at ? new Date(r.checked_in_at).toISOString() : null,
   statusSince: r.status_since ? new Date(r.status_since).toISOString() : null,
-  sinceMinutes: minutesBetween(r.status_since, now),
+  // Frozen at the moment they stepped out, so the desk's row holds still like
+  // the board's card does rather than counting a break nobody is waiting on.
+  sinceMinutes: minutesBetween(r.status_since, r.paused_at ? new Date(r.paused_at) : now),
+  paused: !!r.paused_at,
+  pausedAt: r.paused_at ? new Date(r.paused_at).toISOString() : null,
+  pausedReason: r.paused_reason || null,
   blockedReason: r.blocked_reason || null,
   // What reception is offered before they confirm the arrival, and — once the
   // patient is on the floor — how far along their own journey they are.

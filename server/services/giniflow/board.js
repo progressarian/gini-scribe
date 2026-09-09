@@ -10,6 +10,7 @@ import {
   TERMINAL_STATUSES,
   STATION_STATUSES,
   NOT_A_MARKER_SQL,
+  JOURNEY_START_SQL,
   WAIT_SINCE_SQL,
 } from "../../../shared/giniflowStatus.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
@@ -69,6 +70,7 @@ const BOARD_SQL = `
          v.category,
          v.blocked_reason,
          v.resume_status,
+         v.paused_at, v.paused_reason, v.paused_ms_total,
          v.priority,
          v.priority_reason,
          v.queue_position,
@@ -128,9 +130,14 @@ const BOARD_SQL = `
          AND pa.status = 'completed'
     ) seq ON TRUE
     LEFT JOIN LATERAL (
+      -- The LAST check-in, not the first. A patient who steps out for lunch is
+      -- re-checked in on HealthRay when they come back, and the total is meant
+      -- to answer "how long since we last had them", not to bill them for the
+      -- hour they spent at the canteen. Only one visit in the 60 days to
+      -- 9 Sep 2026 carried two check-ins, and it read 133 min against a real 44.
       SELECT e.occurred_at FROM giniflow_visit_events e
-       WHERE e.visit_id = v.id AND e.status = 'checked_in'
-       ORDER BY e.occurred_at LIMIT 1
+       WHERE e.visit_id = v.id AND ${JOURNEY_START_SQL("e.status")}
+       ORDER BY e.occurred_at DESC LIMIT 1
     ) first_ev ON TRUE
     LEFT JOIN LATERAL (
       SELECT e.occurred_at FROM giniflow_visit_events e
@@ -316,9 +323,15 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
     // A finished visit's clock stopped when it exited; only a patient still in
     // the building is timed against the present moment.
     const finished = TERMINAL_STATUSES.includes(row.current_status);
+    // A paused patient's clocks read against the moment they stepped out, so
+    // the card holds still instead of counting a break nobody is waiting on.
+    // Resume shifts the anchors forward by the same span, which is what keeps
+    // every other duration in the system right without it knowing about pause.
+    const paused = !!row.paused_at;
     const clock = finished && row.status_since ? new Date(row.status_since) : now;
-    const statusMinutes = finished ? null : minutesSince(row.status_since, now);
-    const totalMinutes = minutesSince(row.journey_started_at, clock);
+    const liveClock = paused ? new Date(row.paused_at) : now;
+    const statusMinutes = finished ? null : minutesSince(row.status_since, liveClock);
+    const totalMinutes = minutesSince(row.journey_started_at, paused ? liveClock : clock);
     const budget = budgetFor(slaKeyForStatus(row.current_status), row.category);
     // Settled entirely in SQL by labOnlyPredicate, so this board and the lab
     // station cannot drift apart on who counts as samples-only.
@@ -343,6 +356,10 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
       // Carried to the card so the client can tell, before a drag starts, which
       // columns this patient may legally be dropped on.
       resumeStatus: row.resume_status,
+      paused,
+      pausedAt: paused ? new Date(row.paused_at).toISOString() : null,
+      pausedReason: row.paused_reason || null,
+      pausedMinutes: Math.round(Number(row.paused_ms_total || 0) / 60000),
       priority: row.priority,
       priorityReason: row.priority_reason,
       // A manual position belongs to the queue it was set in. advanceStatus
@@ -774,8 +791,11 @@ export async function getStationAverages(visitDate, slaConfig, db = pool) {
               COUNT(*)::int AS journey_samples
          FROM giniflow_visits v
          JOIN LATERAL (
+           -- Last check-in, matching the board above: the averages must not
+           -- count a break the board already excludes.
            SELECT occurred_at FROM giniflow_visit_events e
-            WHERE e.visit_id = v.id AND e.status = 'checked_in' ORDER BY occurred_at LIMIT 1
+            WHERE e.visit_id = v.id AND ${JOURNEY_START_SQL("e.status")}
+            ORDER BY occurred_at DESC LIMIT 1
          ) start ON TRUE
          JOIN LATERAL (
            SELECT occurred_at FROM giniflow_visit_events e

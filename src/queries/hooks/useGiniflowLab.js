@@ -2,14 +2,18 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api, { API_URL } from "../../services/api";
 import { pollInterval } from "./giniflowPolling";
 
-export function useLabQueue(date, q = "") {
+export function useLabQueue(date, q = "", group = "all") {
   const search = q.trim().length >= 2 ? q.trim() : "";
   return useQuery({
-    queryKey: ["giniflow", "lab", "queue", date || "today", search],
+    queryKey: ["giniflow", "lab", "queue", date || "today", search, group],
     queryFn: async () =>
       (
         await api.get("/api/giniflow/stations/lab/queue", {
-          params: { ...(date ? { date } : {}), ...(search ? { q: search } : {}) },
+          params: {
+            ...(date ? { date } : {}),
+            ...(search ? { q: search } : {}),
+            ...(group && group !== "all" ? { group } : {}),
+          },
         })
       ).data,
     refetchInterval: pollInterval,

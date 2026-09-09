@@ -563,7 +563,22 @@ export const giniflowDateQuerySchema = z.object({
     .optional(),
 });
 
+export const giniflowStationGroupQuerySchema = giniflowDateQuerySchema.extend({
+  group: z.string().trim().max(20).optional(),
+});
+
+export const giniflowStationSearchGroupQuerySchema = giniflowStationGroupQuerySchema.extend({
+  q: z.string().trim().max(60).optional(),
+});
+
+// The station queue endpoints return one group's rows instead of the whole day
+// when `group` is given. Kept as a plain trimmed string rather than an enum:
+// each station has its own group names, and the service is what knows them —
+// an unknown value falls back to the full day rather than 400ing a screen.
+const stationGroup = z.string().trim().max(20).optional();
+
 export const giniflowStationQuerySchema = z.object({
+  group: stationGroup,
   q: z.string().trim().max(60).optional(),
   date: z
     .string()

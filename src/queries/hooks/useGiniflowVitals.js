@@ -3,11 +3,20 @@ import api from "../../services/api";
 import { pollInterval } from "./giniflowPolling";
 
 // The queue polls like the board does; the detail pane is fetched per patient.
-export function useVitalsQueue(date) {
+export function useVitalsQueue(date, group = "all", q = "") {
+  const search = q.trim().length >= 2 ? q.trim() : "";
   return useQuery({
-    queryKey: ["giniflow", "vitals", "queue", date || "today"],
+    queryKey: ["giniflow", "vitals", "queue", date || "today", group, search],
     queryFn: async () =>
-      (await api.get("/api/giniflow/stations/vitals/queue", { params: date ? { date } : {} })).data,
+      (
+        await api.get("/api/giniflow/stations/vitals/queue", {
+          params: {
+            ...(date ? { date } : {}),
+            ...(group && group !== "all" ? { group } : {}),
+            ...(search ? { q: search } : {}),
+          },
+        })
+      ).data,
     refetchInterval: pollInterval,
     refetchIntervalInBackground: false,
     placeholderData: (prev) => prev,

@@ -190,6 +190,16 @@ const GROUPS = [
 
 const MID_GROUPS_IDX = [1, 2, 3];
 
+// The filter row across the top. Keys match the sections below: the three
+// running stages, plus the two columns of the split underneath them.
+const LAB_FILTERS = [
+  { key: "pending", label: "To call" },
+  { key: "collecting", label: "Collecting" },
+  { key: "processing", label: "Processing" },
+  { key: "ready", label: "Ready" },
+  { key: "done", label: "Done" },
+];
+
 const UNREACHABLE_GROUPS = [
   {
     key: "in_room",
@@ -237,6 +247,19 @@ const GROUP_TO_STAGE = {
 };
 
 const MID_GROUPS = MID_GROUPS_IDX.map((i) => GROUPS[i]);
+
+// One clock for two sources. The lists used to be a Gini block followed by a
+// HealthRay block, so a case registered at 15:31 could sit above one from 09:12
+// and the column read in no order at all. Sorted ascending, the top of every
+// list is the person who has been waiting longest — the list is also the order
+// to work them in. A row with no timestamp sorts last rather than jumping to
+// the top on a 1970 epoch.
+const rowTime = (r) => {
+  const iso = r.source === "giniflow" ? r.row.orderedAt : r.row.registeredAt;
+  const t = iso ? new Date(iso).getTime() : NaN;
+  return Number.isFinite(t) ? t : Infinity;
+};
+const byTimeAsc = (a, b) => rowTime(a) - rowTime(b);
 
 // How long a report may sit in "results ready" before the wait itself is the
 // problem — the report exists, the MO just has not been told.
@@ -1025,7 +1048,10 @@ export default function LabStationPage() {
     return () => clearTimeout(t);
   }, [search]);
   const toastTimer = useRef(null);
-  const { data, isLoading } = useLabQueue(undefined, debounced);
+  // Must stay above useLabQueue: `filter` is a const, so it is in the temporal
+  // dead zone until this line and the query below reads it on the first render.
+  const [filter, setFilter] = useState("all");
+  const { data, isLoading } = useLabQueue(undefined, debounced, filter);
   const live = useGiniflowLive({ date: data?.date });
   const advance = useAdvanceSample();
   const upload = useUploadReport();
@@ -1040,12 +1066,15 @@ export default function LabStationPage() {
   // stages are the same five steps; counting only the first is what made every
   // number read 0 on a day the lab ran 46 cases.
   const stage = data?.stageCounts || {};
+  // Whole-day Gini bucket totals from the server. The arrays hold only the
+  // filtered group now, so their lengths cannot feed the stats strip.
+  const bucket = data?.bucketCounts || {};
   const counts = {
-    pending: (data?.pending?.length ?? 0) + (stage.pending ?? 0),
-    collecting: (data?.collecting?.length ?? 0) + (stage.collected ?? 0),
-    processing: (data?.processing?.length ?? 0) + (stage.processing ?? 0),
-    ready: (data?.ready?.length ?? 0) + (stage.results ?? 0),
-    uploaded: (data?.uploaded?.length ?? 0) + (stage.reported ?? 0),
+    pending: (bucket.pending ?? 0) + (stage.pending ?? 0),
+    collecting: (bucket.collecting ?? 0) + (stage.collected ?? 0),
+    processing: (bucket.processing ?? 0) + (stage.processing ?? 0),
+    ready: (bucket.ready ?? 0) + (stage.results ?? 0),
+    uploaded: (bucket.uploaded ?? 0) + (stage.reported ?? 0),
   };
   const queueCounts = {
     pending: data?.pending?.length ?? 0,
@@ -1055,15 +1084,17 @@ export default function LabStationPage() {
     uploaded: data?.uploaded?.length ?? 0,
   };
   const term = debounced.trim();
+  // Which section the page is narrowed to. "all" is the full page as before.
 
   const hrPending = healthray.filter((r) => r.stage.key === "pending");
   const toCall = [
     ...(data?.pending || []).map((row) => ({ source: "giniflow", row })),
     ...hrPending.filter((r) => r.collectable).map((row) => ({ source: "healthray", row })),
-  ];
+  ].sort(byTimeAsc);
   const unreachable = hrPending
     .filter((r) => !r.collectable)
-    .map((row) => ({ source: "healthray", row }));
+    .map((row) => ({ source: "healthray", row }))
+    .sort(byTimeAsc);
 
   const doneRows = [
     ...(data?.uploaded || []).map((row) => ({
@@ -1074,17 +1105,24 @@ export default function LabStationPage() {
     ...healthray
       .filter((r) => r.stage.key === "reported")
       .map((row) => ({ source: "healthray", row, onFloor: !!row.station && !row.finished })),
-  ];
+  ].sort(byTimeAsc);
   const doneTotal = doneRows.length;
 
-  const midVisible = ["collecting", "processing", "ready"].reduce(
-    (n, k) =>
-      n +
-      (data?.[k] || []).length +
-      healthray.filter((r) => r.stage.key === GROUP_TO_STAGE[k]).length,
-    0,
-  );
-  const visibleTotal = toCall.length + unreachable.length + midVisible + doneRows.length;
+  const stageVisible = (k) =>
+    (data?.[k] || []).length + healthray.filter((r) => r.stage.key === GROUP_TO_STAGE[k]).length;
+  // Straight from the server, which counts the whole day (already narrowed by
+  // the search, because that is server-side too). The local values are the
+  // fallback for a response that predates this field — under a filter they
+  // hold one group and would read 0 everywhere else.
+  const serverCounts = data?.counts;
+  const filterCounts = serverCounts || {
+    pending: toCall.length + unreachable.length,
+    collecting: stageVisible("collecting"),
+    processing: stageVisible("processing"),
+    ready: stageVisible("ready"),
+    done: doneRows.length,
+  };
+  const visibleTotal = Object.values(filterCounts).reduce((a, b) => a + b, 0);
 
   const unifiedTotal = Object.values(queueCounts).reduce((a, b) => a + b, 0) + healthray.length;
 
@@ -1230,7 +1268,7 @@ export default function LabStationPage() {
 
       <div className="scroll">
         <div className="inner">
-          <div className="stats">
+          <div className="stats stats--compact">
             {[
               ["pending", "Sample pending", "not yet collected", "var(--tl)"],
               ["collecting", "Collecting", "sample taken", "var(--blu)"],
@@ -1267,8 +1305,41 @@ export default function LabStationPage() {
           {isLoading && <div className="empty-note">Loading…</div>}
 
           {!isLoading && (
+            <div
+              className="sq-filters sq-filters--page"
+              role="group"
+              aria-label="Filter the lab queue"
+            >
+              <button
+                type="button"
+                className={filter === "all" ? "on" : ""}
+                aria-pressed={filter === "all"}
+                onClick={() => setFilter("all")}
+              >
+                All
+                <span className="sq-fcount">{visibleTotal}</span>
+              </button>
+              {/* A chip for a stage nobody is in filters to an empty page, so it
+                  is left out until it has somebody — except the one currently
+                  selected, which has to stay for the way back to All. */}
+              {LAB_FILTERS.filter((f) => filterCounts[f.key] || filter === f.key).map((f) => (
+                <button
+                  key={f.key}
+                  type="button"
+                  className={filter === f.key ? "on" : ""}
+                  aria-pressed={filter === f.key}
+                  onClick={() => setFilter(filter === f.key ? "all" : f.key)}
+                >
+                  {f.label}
+                  <span className="sq-fcount">{filterCounts[f.key]}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {!isLoading && MID_GROUPS.some((g) => filter === "all" || filter === g.key) && (
             <div className="lab-running">
-              {MID_GROUPS.map((group) => {
+              {MID_GROUPS.filter((g) => filter === "all" || filter === g.key).map((group) => {
                 const orders = data?.[group.key] || [];
                 const cases = healthray.filter((r) => r.stage.key === GROUP_TO_STAGE[group.key]);
                 const total = orders.length + cases.length;
@@ -1297,25 +1368,31 @@ export default function LabStationPage() {
                         <div className="empty-note">—</div>
                       ) : (
                         <div className="pt-list">
-                          {cases.map((row) => (
-                            <HealthrayCard
-                              key={`hr-${caseRowKey(row)}`}
-                              row={row}
-                              onOpen={() => setOpenCaseId(caseRowKey(row))}
-                              readOnly={cannotBeWorked(row)}
-                            />
-                          ))}
-                          {orders.map((order) => (
-                            <LabCard
-                              key={order.orderId}
-                              order={order}
-                              group={group}
-                              onAdvance={onAdvance}
-                              onUpload={onUpload}
-                              onOpen={(o) => setOpenOrderId(o.orderId)}
-                              busy={advance.isPending || upload.isPending}
-                            />
-                          ))}
+                          {[
+                            ...cases.map((row) => ({ source: "healthray", row })),
+                            ...orders.map((row) => ({ source: "giniflow", row })),
+                          ]
+                            .sort(byTimeAsc)
+                            .map((r) =>
+                              r.source === "healthray" ? (
+                                <HealthrayCard
+                                  key={`hr-${caseRowKey(r.row)}`}
+                                  row={r.row}
+                                  onOpen={() => setOpenCaseId(caseRowKey(r.row))}
+                                  readOnly={cannotBeWorked(r.row)}
+                                />
+                              ) : (
+                                <LabCard
+                                  key={r.row.orderId}
+                                  order={r.row}
+                                  group={group}
+                                  onAdvance={onAdvance}
+                                  onUpload={onUpload}
+                                  onOpen={(o) => setOpenOrderId(o.orderId)}
+                                  busy={advance.isPending || upload.isPending}
+                                />
+                              ),
+                            )}
                         </div>
                       )}
                     </div>
@@ -1325,117 +1402,134 @@ export default function LabStationPage() {
             </div>
           )}
 
-          {!isLoading && (
-            <div className="ar-split">
-              <div className="ar-col">
-                <div className="grp-lbl">
-                  📞 To call — start lab steps
-                  <span className="grp-split">{toCall.length}</span>
-                </div>
-                {!toCall.length && <div className="empty-note">Nobody waiting to be called.</div>}
-                <div className="pt-list">
-                  {toCall.map((r) =>
-                    r.source === "giniflow" ? (
-                      <LabCard
-                        key={`g-${r.row.orderId}`}
-                        order={r.row}
-                        group={GROUPS[0]}
-                        onAdvance={onAdvance}
-                        onUpload={onUpload}
-                        onOpen={(o) => setOpenOrderId(o.orderId)}
-                        busy={advance.isPending || upload.isPending}
-                      />
-                    ) : (
-                      <HealthrayCard
-                        key={`h-${caseRowKey(r.row)}`}
-                        row={r.row}
-                        onOpen={() => setOpenCaseId(caseRowKey(r.row))}
-                      />
-                    ),
-                  )}
-                </div>
+          {!isLoading && (filter === "all" || filter === "pending" || filter === "done") && (
+            <div className={`ar-split${filter === "all" ? "" : " ar-split--one"}`}>
+              {(filter === "all" || filter === "pending") && (
+                <div className="ar-col">
+                  <div className="grp-lbl">
+                    📞 To call — start lab steps
+                    <span className="grp-split">{toCall.length}</span>
+                  </div>
+                  {!toCall.length && <div className="empty-note">Nobody waiting to be called.</div>}
+                  <div className="pt-list">
+                    {toCall.map((r) =>
+                      r.source === "giniflow" ? (
+                        <LabCard
+                          key={`g-${r.row.orderId}`}
+                          order={r.row}
+                          group={GROUPS[0]}
+                          onAdvance={onAdvance}
+                          onUpload={onUpload}
+                          onOpen={(o) => setOpenOrderId(o.orderId)}
+                          busy={advance.isPending || upload.isPending}
+                        />
+                      ) : (
+                        <HealthrayCard
+                          key={`h-${caseRowKey(r.row)}`}
+                          row={r.row}
+                          onOpen={() => setOpenCaseId(caseRowKey(r.row))}
+                        />
+                      ),
+                    )}
+                  </div>
 
-                {UNREACHABLE_GROUPS.map((g) => {
-                  const rows = unreachable.filter((r) => g.holds(r.row));
-                  if (!rows.length) return null;
-                  return (
-                    <div key={g.key}>
-                      <div className="grp-lbl grp-sub">
-                        {g.label}
-                        <span className="grp-split">{rows.length}</span>
-                      </div>
-                      <div className="grp-hint">{g.hint}</div>
-                      <div className="pt-list">
-                        {rows.map((r) => (
-                          <HealthrayCard
-                            key={`u-${caseRowKey(r.row)}`}
-                            row={r.row}
-                            onOpen={() => setOpenCaseId(caseRowKey(r.row))}
-                            readOnly
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="ar-col">
-                <div className="grp-lbl grp-lbl-sp">
-                  ✅ Lab done<span className="grp-split">{doneTotal}</span>
-                </div>
-                {!doneTotal && <div className="empty-note">No case has reported yet today.</div>}
-                {DONE_SPLIT.map((part) => {
-                  const rows = doneRows.filter(part.holds);
-                  if (!rows.length) return null;
-                  const shown =
-                    part.key === "left" && !showAllUploaded
-                      ? rows.slice(0, UPLOADED_PREVIEW)
-                      : rows;
-                  return (
-                    <div key={part.key}>
-                      <div className="grp-lbl grp-sub">
-                        {part.label}
-                        <span className="grp-split">{rows.length}</span>
-                      </div>
-                      <div className="grp-hint">{part.hint}</div>
-                      <div className="pt-list">
-                        {shown.map((r) =>
-                          r.source === "giniflow" ? (
-                            <LabCard
-                              key={`dg-${r.row.orderId}`}
-                              order={r.row}
-                              group={GROUPS[4]}
-                              onAdvance={onAdvance}
-                              onUpload={onUpload}
-                              onOpen={(o) => setOpenOrderId(o.orderId)}
-                              busy={advance.isPending || upload.isPending}
-                            />
-                          ) : (
+                  {UNREACHABLE_GROUPS.map((g) => {
+                    const rows = unreachable.filter((r) => g.holds(r.row));
+                    if (!rows.length) return null;
+                    return (
+                      <div key={g.key}>
+                        <div className="grp-lbl grp-sub">
+                          {g.label}
+                          <span className="grp-split">{rows.length}</span>
+                        </div>
+                        <div className="grp-hint">{g.hint}</div>
+                        <div className="pt-list">
+                          {rows.map((r) => (
                             <HealthrayCard
-                              key={`dh-${caseRowKey(r.row)}`}
+                              key={`u-${caseRowKey(r.row)}`}
                               row={r.row}
                               onOpen={() => setOpenCaseId(caseRowKey(r.row))}
+                              readOnly
                             />
-                          ),
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {(filter === "all" || filter === "done") && (
+                <div className="ar-col">
+                  <div className="grp-lbl grp-lbl-sp">
+                    ✅ Lab done<span className="grp-split">{doneTotal}</span>
+                  </div>
+                  {!doneTotal && <div className="empty-note">No case has reported yet today.</div>}
+                  {DONE_SPLIT.map((part) => {
+                    const rows = doneRows.filter(part.holds);
+                    if (!rows.length) return null;
+                    const shown =
+                      part.key === "left" && !showAllUploaded
+                        ? rows.slice(0, UPLOADED_PREVIEW)
+                        : rows;
+                    return (
+                      <div key={part.key}>
+                        <div className="grp-lbl grp-sub">
+                          {part.label}
+                          <span className="grp-split">{rows.length}</span>
+                        </div>
+                        <div className="grp-hint">{part.hint}</div>
+                        <div className="pt-list">
+                          {shown.map((r) =>
+                            r.source === "giniflow" ? (
+                              <LabCard
+                                key={`dg-${r.row.orderId}`}
+                                order={r.row}
+                                group={GROUPS[4]}
+                                onAdvance={onAdvance}
+                                onUpload={onUpload}
+                                onOpen={(o) => setOpenOrderId(o.orderId)}
+                                busy={advance.isPending || upload.isPending}
+                              />
+                            ) : (
+                              <HealthrayCard
+                                key={`dh-${caseRowKey(r.row)}`}
+                                row={r.row}
+                                onOpen={() => setOpenCaseId(caseRowKey(r.row))}
+                              />
+                            ),
+                          )}
+                        </div>
+                        {part.key === "left" && rows.length > UPLOADED_PREVIEW && (
+                          <button
+                            type="button"
+                            className="more-note more-btn"
+                            aria-expanded={showAllUploaded}
+                            onClick={() => setShowAllUploaded((v) => !v)}
+                          >
+                            {showAllUploaded
+                              ? `Show fewer — ${rows.length} left the floor`
+                              : `+ ${rows.length - UPLOADED_PREVIEW} more who left the floor — show all`}
+                          </button>
                         )}
                       </div>
-                      {part.key === "left" && rows.length > UPLOADED_PREVIEW && (
-                        <button
-                          type="button"
-                          className="more-note more-btn"
-                          aria-expanded={showAllUploaded}
-                          onClick={() => setShowAllUploaded((v) => !v)}
-                        >
-                          {showAllUploaded
-                            ? `Show fewer — ${rows.length} left the floor`
-                            : `+ ${rows.length - UPLOADED_PREVIEW} more who left the floor — show all`}
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* A filter can land on a section that today has nobody in it, and an
+              empty page with no explanation reads as a fault rather than as an
+              empty filter. */}
+          {!isLoading && filter !== "all" && !filterCounts[filter] && (
+            <div className="empty-note">
+              Nobody in {LAB_FILTERS.find((f) => f.key === filter)?.label || "this group"}
+              {term ? ` matching “${search.trim()}”` : ""}.{" "}
+              <button type="button" className="sq-clearfilter" onClick={() => setFilter("all")}>
+                Show all
+              </button>
             </div>
           )}
 

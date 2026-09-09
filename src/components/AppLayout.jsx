@@ -10,7 +10,7 @@ import useUiStore, { toast } from "../stores/uiStore";
 import useMessagingStore from "../stores/messagingStore";
 import PageErrorBoundary from "./PageErrorBoundary";
 import { PAGE_CAPABILITIES, navAllowlistForRole } from "../config/routes";
-import { hasAnyCapability, canViewAnalytics } from "../../shared/permissions";
+import { hasAnyCapability, canViewAnalytics, ROLES } from "../../shared/permissions";
 
 import "../styles/App.css";
 
@@ -21,6 +21,8 @@ import "../styles/App.css";
 // shared/permissions.js, and is ENFORCED. Note this only hides the tab —
 // RequireCapability is what actually blocks the route.
 const C = PAGE_CAPABILITIES;
+
+const isLabDesk = (role) => role === ROLES.LAB || role === ROLES.TECH;
 
 const NAV_ITEMS = [
   { path: "/", label: "🏠 Home", show: () => true },
@@ -160,13 +162,17 @@ const NAV_ITEMS = [
     cap: C["/medicine-collection"],
     show: () => true,
   },
+  // The lab desk works one screen: samples in, results out. Neither floor board
+  // is theirs to run, and a tab they never open is a tab they can tap by mistake
+  // in the middle of a collection. Capability already keeps Flow Floor away from
+  // them; this holds even if that is ever widened.
   // Patient Flow Management
   { path: "/flow/checkin", label: "🏥 Flow Check-in", cap: C["/flow/checkin"], show: () => true },
   {
     path: "/flow/coordinator",
     label: "📋 Flow Floor",
     cap: C["/flow/coordinator"],
-    show: () => true,
+    show: (s) => !isLabDesk(s.role),
   },
   // Gini Flow. Runs alongside the old Flow Floor board until parity is signed
   // off, then that one and its FLOW_* keys are deleted (docs/gini-flow/).
@@ -182,7 +188,7 @@ const NAV_ITEMS = [
     path: "/giniflow/manager",
     label: "🕐 Gini Flow",
     cap: C["/giniflow/manager"],
-    show: () => true,
+    show: (s) => !isLabDesk(s.role),
   },
   // One tab for all six station desks — the page's own switcher is the
   // sub-navigation, showing only the desks this role can work.

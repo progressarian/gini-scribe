@@ -199,7 +199,38 @@ export const isKnownStatus = (status) => isChainStatus(status) || isExceptionSta
 // has to skip them, or a report landing mid-wait resets the clock on a patient
 // who has been waiting ninety minutes — turning them green at the moment they
 // are most overdue — and splits one hop into two in the SLA figures.
-export const MARKER_STATUSES = ["results_received", "reports_reviewed"];
+// paused/resumed are markers for exactly the reason the comment above gives:
+// they are facts, not places. Without this the `paused` row became the newest
+// wait event and the card's timer reset to 0 at the moment it should have
+// frozen — the opposite of what pausing means.
+export const MARKER_STATUSES = ["results_received", "reports_reviewed", "paused", "resumed"];
+
+// A patient who stepped out — lunch, a phone call, the bank — and came back.
+// Recorded as its own event rather than a second 'checked_in' so the timeline
+// can say what it was, and so nothing downstream mistakes it for an arrival.
+//
+// It does NOT change current_status: someone who left from 'vitals_done' is
+// still vitals_done when they return; only their clocks restart. And it is
+// deliberately NOT a marker — a marker ends no wait and starts none, whereas
+// this is exactly a wait starting again, which is what stops an hour at the
+// canteen reading as an hour waiting for the MO.
+export const BREAK_RETURN_STATUS = "returned_from_break";
+
+// Nothing has happened to this patient yet: they arrived and are waiting for
+// their first stop. A break here is not a pause — there is no journey in
+// progress to hold — it is the patient leaving the queue before anyone saw
+// them, which is what reception already does on HealthRay by checking them back
+// in. So the clock restarts from zero on their return rather than resuming the
+// wait they accrued before walking off.
+export const NOT_STARTED_STATUSES = ["checked_in", "vitals_pending"];
+
+export const hasNotStarted = (status) => NOT_STARTED_STATUSES.includes(status);
+
+// What may start the visit's total clock: the patient arriving, or coming back.
+export const JOURNEY_START_STATUSES = ["checked_in", BREAK_RETURN_STATUS];
+
+export const JOURNEY_START_SQL = (col) =>
+  `${col} = ANY (ARRAY[${JOURNEY_START_STATUSES.map((s) => `'${s}'`).join(", ")}])`;
 
 export const isMarkerStatus = (status) => MARKER_STATUSES.includes(status);
 

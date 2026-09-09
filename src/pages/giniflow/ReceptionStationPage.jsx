@@ -8,6 +8,10 @@ import {
   useCheckInWalkIn,
 } from "../../queries/hooks/useGiniflowReception";
 import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
+import {
+  useGiniflowPauseVisit,
+  useGiniflowResumeVisit,
+} from "../../queries/hooks/useGiniflowQueue";
 import LiveBadge from "../../components/giniflow/LiveBadge";
 import "../../styles/giniflow-station.css";
 import useAuthStore from "../../stores/authStore";
@@ -15,6 +19,7 @@ import StationNotice from "../../components/giniflow/StationNotice";
 import JourneyBuilder from "../../components/giniflow/JourneyBuilder";
 import { useFlowVisitTypes } from "../../queries/hooks/useFlow";
 import { stepPassesConditions } from "../../../shared/giniflowConditions.js";
+import { hasNotStarted } from "../../../shared/giniflowStatus.js";
 import {
   useJourneyPlan,
   useCheckIn,
@@ -872,6 +877,8 @@ export function ArrivalsTab({
   onCheckIn,
   onCheckedIn,
   onFailed,
+  onPauseToggle,
+  breakBusy,
   busy,
 }) {
   const [walkIn, setWalkIn] = useState(false);
@@ -1010,6 +1017,39 @@ export function ArrivalsTab({
                     }`
                   : "Journey"}
               </button>
+              {/* The desk sees the patient leave and come back, so the desk is
+                  who can say the clocks stop. One control showing the action that
+                  applies — never both.
+
+                  This list holds the whole day, not only the people still in the
+                  building: on the floor reads "18 here · 61 left". A finished
+                  visit has no clock to hold, so it gets no control — the server
+                  refuses those with a 409 and a button that only ever errors is
+                  worse than no button. */}
+              {!FINISHED_STATUSES.includes(a.status) && (
+                <button
+                  className={`st-btn ${a.paused ? "st-btn-grn" : "st-btn-ghost"}`}
+                  disabled={breakBusy}
+                  title={
+                    hasNotStarted(a.status)
+                      ? a.paused
+                        ? "They are back — their wait starts again from zero, because nobody had seen them yet"
+                        : "They left before anyone saw them — stop their clock until they come back"
+                      : a.paused
+                        ? "They are back — start the clocks again and leave the break out of their waiting time"
+                        : "They have stepped out — hold their clocks until they are back"
+                  }
+                  onClick={() => onPauseToggle(a)}
+                >
+                  {hasNotStarted(a.status)
+                    ? a.paused
+                      ? "▶ Restart"
+                      : "⏹ Stop"
+                    : a.paused
+                      ? "▶ Resume"
+                      : "⏸ Pause"}
+                </button>
+              )}
               <span className="ar-since">in since {clock(a.checkedInAt)}</span>
             </ArrivalRow>
           ))}
@@ -1057,6 +1097,39 @@ export default function ReceptionStationPage() {
   const { data, isLoading } = useReceptionQueue();
   const { data: arrivals, isLoading: arrivalsLoading } = useArrivals(undefined, term);
   const live = useGiniflowLive({ date: data?.date });
+  const pauseVisit = useGiniflowPauseVisit();
+  const resumeVisit = useGiniflowResumeVisit();
+  const pauseErr = (e) =>
+    showToast(e?.response?.data?.error || "Could not record that — nothing changed");
+
+  const onPauseToggle = (a) => {
+    const fresh = hasNotStarted(a.status);
+    return a.paused
+      ? resumeVisit.mutate(
+          { visitId: a.visitId },
+          {
+            onSuccess: () =>
+              showToast(
+                fresh
+                  ? `▶ ${a.name} is back — their wait starts again from now`
+                  : `▶ ${a.name} resumed — the break is left out of their waiting time`,
+              ),
+            onError: pauseErr,
+          },
+        )
+      : pauseVisit.mutate(
+          { visitId: a.visitId },
+          {
+            onSuccess: () =>
+              showToast(
+                fresh
+                  ? `⏹ ${a.name} stopped — nobody had seen them yet, so their clock restarts when they return`
+                  : `⏸ ${a.name} paused — their clocks are held until they are back`,
+              ),
+            onError: pauseErr,
+          },
+        );
+  };
   // /api/auth/me returns the doctors row, so the id is `id` — `doctor_id` is
   // only the login form's field name, and reading it left the card unable to
   // tell whose claim it was showing.
@@ -1251,6 +1324,8 @@ export default function ReceptionStationPage() {
               isLoading={arrivalsLoading}
               onAct={onAct}
               onCheckIn={onCheckIn}
+              onPauseToggle={onPauseToggle}
+              breakBusy={pauseVisit.isPending || resumeVisit.isPending}
               busy={arrivalAction.isPending || checkInWalkIn.isPending}
             />
           ) : (

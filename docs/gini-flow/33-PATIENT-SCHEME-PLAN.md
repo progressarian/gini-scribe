@@ -1,198 +1,245 @@
-# 33 — Patient schemes: CGHS / ECHS tagging, scheme fees, daily caps
+# 33 — Patient schemes: CGHS / ECHS tagging, scheme pricing, daily caps
 
-Plan, not built. Extends `appointments.patient_category`
-(`2026-08-21_appointment_patient_category.sql`), which today is a tally on the
-GHM sheet and nothing else.
+Plan, not built. Revised 2026-09-13 against the code as it stands; the first
+version of this doc was written before the lab payment split (28) and the lab
+billing step (34) landed, and several of its line references had drifted.
 
-## Why
+Extends `appointments.patient_category`
+(`2026-08-21_appointment_patient_category.sql`).
 
-CGHS and ECHS patients are billed at a different rate from a private patient,
-and the hospital agrees a ceiling on how many of them it will see in a day.
-Neither fact is anywhere in the system. The desk works both out of somebody's
-head, which means the wrong OPD fee gets keyed into HealthRay and the ceiling is
-discovered only after it has been breached.
+## 0. What this revision changes
 
-There is already a tag — `appointments.patient_category`, with CGHS in it. It is
-a **tally, not a rule**: an editable dropdown on the GHM sheet, filter pills, and
-a per-day count in `ghm-appointments.js:705`. Nothing reads it for money or for
-capacity, and ECHS is not in the list.
+Six findings from re-reading the code changed the shape of the work:
 
-The list is also hardcoded in `shared/patientCategories.js`, so adding ECHS today
-is a code change and a deploy. The brief says more schemes are coming. That is
-the first thing that has to change — everything else is built on top of it.
+1. **The tag has never been used.** 7,413 appointments in the last 60 days,
+   **zero** carrying a `patient_category`. This is not "extend an existing
+   tag" — it is "make a tag nobody uses carry money and capacity decisions".
+   Adoption, not schema, is the risk.
+2. **The tag's code surface is two files plus two smoke scripts.**
+   `shared/patientCategories.js` is imported by `src/pages/GHMPage.jsx:39`,
+   `server/routes/ghm-appointments.js:19`, and the two GHM smoke scripts.
+   Nothing else. Turning the list into data is far cheaper than the original
+   doc implied — and **nothing downstream reads the tag at all**: no pricing
+   path, no capacity path, no station.
+3. **Pharmacy has no money in it at all** — no price column, no tariff, and
+   `16-PHARMACY-STATION-PLAN.md` never mentions one. Scheme pricing cannot
+   reach the pharmacy because there is nothing there to price.
+4. **The lab pricing machinery is real but unexercised**: 6 lab orders ever, 18
+   order lines, 26 catalogue tests. Correct plumbing, no traffic. Scheme test
+   pricing would be built on a road nobody drives yet.
+5. **HealthRay bill data is never stored.** `billingExtractor.js` is read-only
+   by design — bills are fetched live through `GET /flow/patient-billing`
+   (`routes/flow.js:3552`) and rendered. There is no bill table anywhere in the
+   migrations. This changes §4b: reconciliation needs somewhere to reconcile
+   _against_, and that does not exist yet.
+6. **The tag lives only on `appointments`.** Neither `giniflow_visits` nor
+   `giniflow_lab_orders` carries it, so lab pricing cannot see a scheme without
+   the order snapshotting it first (§4a).
 
-## What exists
+## 1. What exists today
 
-| Piece                      | Where                                                                                              | State                                                                                                         |
-| -------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| The tag                    | `appointments.patient_category`, indexed on `(appointment_date, patient_category)`                 | Exists. Per-appointment, GHM-sheet only                                                                       |
-| The vocabulary             | `shared/patientCategories.js` — General / CGHS / Himachal Govt / Senior Citizen / Special Discount | Hardcoded JS. No ECHS, no fee, no cap                                                                         |
-| Test prices                | `giniflow_test_catalog (test_name, price)`; copied per line to `giniflow_lab_order_tests.price`    | One price per test. Every row still `prototype_placeholder`                                                   |
-| The one pricing chokepoint | `moStation.js:685–730` — builds `priceOf`, sums `amount_total`                                     | Single place an order is priced. Good                                                                         |
-| OPD consultation fee       | —                                                                                                  | **Does not exist.** HealthRay raises OPD bills; Gini only reads them back via `healthray/billingExtractor.js` |
-| Capacity                   | `appointment_slots.total_capacity` → `availability.js:isSlotAvailable` → `bookingGuard.js`         | Per doctor per 30-min slot. Gated behind `SCHEDULE_ENFORCEMENT`, which defaults to `off`                      |
-| Admin-screen precedent     | `/admin/test-catalog`, `/settings/*` — both `CAP.ADMIN` in `src/config/routes.js:104–111`          | Reuse this shape                                                                                              |
+| Piece                          | Where                                                                                               | State                                                                                                         |
+| ------------------------------ | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| The tag                        | `appointments.patient_category`, indexed `(appointment_date, patient_category)`                     | Exists. **0 of 7,413 rows tagged in 60 days**                                                                 |
+| The vocabulary                 | `shared/patientCategories.js` — General / CGHS / Himachal Govt / Senior Citizen / Special Discount  | Hardcoded. **No ECHS.** Two app import sites + two smoke scripts                                              |
+| Sheet UI                       | `GHMPage.jsx:453` filter pills, `:2231` per-day count badges, `:2976` the editable cell             | Works. The count badge is where a cap indicator belongs                                                       |
+| Server validator               | `ghm-appointments.js:1617`                                                                          | Pure function over a constant array. PATCH allow-list at `:1606`                                              |
+| Per-day counts                 | `GET /ghm-appointments/category-counts` (`ghm-appointments.js:762-766`)                             | Already grouped by category and zero-filled — the cap counter's data source                                   |
+| Test prices                    | `giniflow_test_catalog` (26 rows) → copied per line to `giniflow_lab_order_tests.price`             | One price per test, no scheme dimension                                                                       |
+| Pricing chokepoint             | `moStation.js:685-689` builds `priceOf`, `:717` totals it, `:719-732` writes order + lines          | **Single place an order is priced.** The hook for scheme pricing                                              |
+| Money arithmetic               | `shared/labPayment.js` — `paise()`, `derivePaymentStatus`, `opensLabGate`                           | Integer-paise throughout. Scheme pricing must reuse it, not re-do rupee maths                                 |
+| Test-price admin               | `/admin/test-catalog` → `TestCatalogPage.jsx`; `testCatalog.js:94-119` is the only price-write path | The screen and capability shape to copy for `/settings/schemes`                                               |
+| Lab money                      | `giniflow_lab_orders.amount_total / amount_paid / amount_claimed / claim_state`                     | Modelled properly (28). 6 orders ever                                                                         |
+| Pharmacy money                 | —                                                                                                   | **Does not exist.** No price anywhere in the pharmacy path                                                    |
+| OPD consultation fee           | —                                                                                                   | **Does not exist.** HealthRay raises OPD bills; Gini only reads them back via `healthray/billingExtractor.js` |
+| `appointments.insurance_taken` | column exists                                                                                       | **Dead** — null on all 11,318 rows. Do not build on it                                                        |
+| Capacity                       | `availability.js:26` `ACTIVE_BOOKING_SQL` → `bookingGuard.js:14`                                    | Per doctor per slot, gated behind `SCHEDULE_ENFORCEMENT`, default `off`. Admin `force=true` escape at `:34`   |
+| Encryption precedent           | `server/utils/aadhaarCrypt.js`, used at `routes/patients.js:9`                                      | Reuse verbatim for a card number                                                                              |
+| Admin shell                    | `SettingsLayout.jsx:10` — "adding a section is two lines here and one route"                        | Reuse                                                                                                         |
 
-Two things that make the work cheaper than it looks: the HealthRay appointment
-upsert (`healthray/db.js:801`) never writes `patient_category`, so a tag set in
-Gini survives the polling loops; and `ARRIVAL_SELECT` in `receptionStation.js:537`
-already `LEFT JOIN`s `appointments` without reading a column from it, so the
-reception desk can show a scheme badge for the cost of one column in a select.
+Three properties that make this cheaper than it looks, each re-verified:
 
-One naming trap: `giniflow_visits.category` is the **triage colour** (red/green),
+- **HealthRay never writes the tag.** `grep patient_category server/services/healthray/db.js` returns nothing, so a tag set in Gini survives every polling loop. `upsertAppointment` is at `db.js:710`.
+- **The sheet already counts per category per day** (`GHMPage.jsx:2231`), so "CGHS 8/10 today" is a label change, not a new query.
+- **Every journey template already has a `billing` step** (7th of 8, per doc 34), so a scheme has somewhere to be shown at the moment money is handled.
+
+One naming trap, unchanged: `giniflow_visits.category` is the **triage colour**,
 `appointments.category` is legacy free text, `appointments.patient_category` is
 the scheme. Do not add a fourth `category`. New columns are named `scheme_*`.
 
-## 1. The scheme list becomes data
+## 2. The design: a tag is a dimension, not a list
+
+The brief says more scheme options are coming. So the tag must be **data with a
+stable key**, and everything priced or capped hangs off that key. Three rules:
+
+**R1 — one vocabulary table, one code.** `patient_schemes.code` is the join key
+for every future feature. Nothing else identifies a scheme.
 
 ```
 patient_schemes
-  code            TEXT PRIMARY KEY      -- 'cghs', 'echs', 'himachal_govt', ...
-  label           TEXT NOT NULL         -- 'ECHS'
-  color           TEXT                  -- reuses the existing pill colours
-  is_active       BOOLEAN NOT NULL DEFAULT TRUE
-  requires_ref    BOOLEAN NOT NULL DEFAULT FALSE   -- prompt for a card number
-  daily_cap       INT                   -- NULL = unlimited
-  sort_order      INT NOT NULL DEFAULT 0
+  code          TEXT PRIMARY KEY   -- 'cghs', 'echs', 'himachal_govt', …
+  label         TEXT NOT NULL
+  color         TEXT               -- reuses the existing pill colours
+  is_active     BOOLEAN NOT NULL DEFAULT TRUE
+  requires_ref  BOOLEAN NOT NULL DEFAULT FALSE  -- prompt for a card number
+  daily_cap     INT                -- NULL = unlimited
+  sort_order    INT NOT NULL DEFAULT 0
 ```
 
-Seeded with the five values already in `shared/patientCategories.js`, at their
-existing `code`s, plus ECHS. `appointments.patient_category` keeps its name and
-its meaning — no data migration, no rewrite of the GHM sheet.
+Seeded with the five existing values at their existing `code`s, plus ECHS. No
+data migration: `appointments.patient_category` keeps its name and meaning.
+
+**R2 — one override table per priced domain, never a column per scheme.** A new
+domain is a new table; a new scheme is a new row. Neither is a schema change to
+anything that already works.
+
+```
+scheme_test_prices (scheme_code, test_name, price)     -- v1, Gini owns this
+scheme_opd_fees    (scheme_code, doctor_id NULL, visit_type, fee)  -- display only
+scheme_<domain>_…  (scheme_code, …)                    -- the pattern for later
+```
+
+**R3 — resolution is always "override if present, else base".** One helper in a
+new `server/services/pricing.js`, called from the single chokepoint in
+`moStation.js`. Schemes differ on some items, not all, so an override table stays
+small and onboarding a scheme is not forty rows of re-entry.
 
 `shared/patientCategories.js` stays as the import surface and becomes a thin
 cached client over `GET /api/patient-schemes`. `categoryLabel`, `categoryColor`
-and `isValidCategory` keep their signatures, so `GHMPage.jsx`,
-`smoke-ghm-categories.mjs` and `smoke-ghm-pill-filters.mjs` do not change.
-**Those two smoke scripts passing untouched is the proof this step was
-invisible** — run them before and after.
+and `isValidCategory` keep their signatures, so `GHMPage.jsx` and the two GHM
+smoke scripts do not change. **Those scripts passing untouched is the proof step
+1 was invisible** — run `smoke:ghm-categories` and `smoke:ghm-pill-filters`
+before and after.
 
-`isValidCategory` is the one behaviour change worth naming: it goes from a pure
-function over a constant array to a lookup against a cache, and the server
-validator at `ghm-appointments.js:1550` must read the table directly rather than
-a possibly-cold cache.
+`isValidCategory` is the one real behaviour change: from a pure function over a
+constant to a cache lookup. The server validator must read the table directly
+rather than a possibly-cold cache.
 
-## 2. Getting the tag onto patients
+### Where the tag lives
 
-Today `patient_category` is settable in exactly one place: `PATCH
-/ghm-appointments/:id` from the sheet. That covers the OBT day list and nothing
-else — a walk-in or a HealthRay-booked patient is never tagged, and a patient who
-IS tagged has to be re-tagged by hand at every visit.
-
-A CGHS or ECHS entitlement is a card the **person** holds. So the master tag
-moves onto the patient and falls onto each appointment:
+A CGHS or ECHS entitlement is a card the **person** holds, so the master is on
+the patient and falls onto each appointment:
 
 ```
 patients
-  scheme_code   TEXT REFERENCES patient_schemes(code)
-  scheme_ref    TEXT      -- card / beneficiary number, encrypted like aadhaar
+  scheme_code  TEXT REFERENCES patient_schemes(code)
+  scheme_ref   TEXT   -- card / beneficiary number, encrypted via aadhaarCrypt.js
 ```
 
-Four entry points, in the order a patient meets the hospital:
-
-1. **Patient record** — the master. Identity block on `PatientPage.jsx`, written
-   through `PUT /api/patients/:id`, which is already `COALESCE`-shaped
-   (`patients.js:605`), so two more columns are additive. Set once, holds
-   forever.
-2. **GHM booking form and sheet cell** — already exists, keeps working. On
-   booking, prefill the appointment's `patient_category` from the patient's
-   `scheme_code`.
-3. **Reception check-in** — the catch-all, and the one that closes the walk-in
-   gap. Show the scheme as a badge on the arrivals card (one column added to
-   `ARRIVAL_SELECT`), with a set-scheme action that writes the appointment and,
-   when the patient has none, the patient too.
-4. **Sync-created appointments** — HealthRay and Sheets insert appointments
-   without ever passing a booking route. Apply the patient default inside
-   `upsertAppointment` in `healthray/db.js`, so a synced booking for a tagged
-   patient arrives already tagged.
-
-**The inheritance rule, stated once:** the appointment's value is the explicit
-one if set, otherwise the patient's scheme **snapshotted at appointment
-creation**. Never a live join. A card that lapses in March must not silently
+**The inheritance rule, stated once:** an appointment's scheme is its explicit
+value if set, otherwise the patient's scheme **snapshotted at appointment
+creation**. Never a live join — a card that lapses in March must not silently
 rewrite February's counts, and the daily cap is counted off these rows.
 
-The per-visit override stays, because it is a real case: a CGHS patient who
-chooses to come private today.
+The per-visit override stays: a CGHS patient may choose to come private today.
 
-## 3. Who can change what
+## 3. Where the tag is shown
 
-Three different powers, and collapsing them into one capability is the mistake to
-avoid — a receptionist who can raise the ECHS cap from 10 to 30 has defeated the
-cap.
+Eight surfaces, in the order a patient meets the hospital. The first four are
+where it is **set**; the rest are where it must be **visible** because someone is
+about to make a decision with money or capacity in it.
 
-| Power                                                     | Who                                | How                                                                                                                                     |
-| --------------------------------------------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Tag a patient / an appointment                            | reception, coordinator, OBT, admin | Existing `RECEPTION_OPS` / `OBT_OPS`. OBT already patches `patient_category` today; no new capability                                   |
-| Add or retire a scheme, set its `daily_cap`, set its fees | **admin only**                     | New `SCHEME_ADMIN` capability, granted to `ROLES.ADMIN` alone. Route `/settings/schemes`, following `/admin/test-catalog`               |
-| Override the cap for one booking                          | admin                              | Reuse the existing pattern in `bookingGuard.js:34` verbatim — `force=true` honoured only when `hasCapability(role, CAPABILITIES.ADMIN)` |
+| #   | Surface                                                                    | Shows                       | Why here                                                                                                               |
+| --- | -------------------------------------------------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| 1   | **Patient record** (`PatientPage.jsx` identity block, beside ABHA/Aadhaar) | scheme + card no., editable | The master. Set once, holds forever. `PUT /api/patients/:id` is already `COALESCE`-shaped, so two columns are additive |
+| 2   | **GHM booking form + sheet cell** (`GHMPage.jsx:2976`)                     | existing dropdown           | Already works. On booking, prefill from the patient's `scheme_code`                                                    |
+| 3   | **Reception check-in** (`ARRIVAL_SELECT` in `receptionStation.js`)         | badge + set-scheme action   | Closes the walk-in gap. Writes the appointment, and the patient too when they have none                                |
+| 4   | **Sync-created appointments** (`healthray/db.js:710`)                      | —                           | Apply the patient default inside `upsertAppointment` so a synced booking for a tagged patient arrives tagged           |
+| 5   | **GHM day counter** (`GHMPage.jsx:2231`)                                   | `ECHS 8/10 today`           | The cap has to be visible _before_ it is hit. The count badge already exists                                           |
+| 6   | **MO test ordering** (`moStation.js`)                                      | scheme price per test       | The MO is choosing tests; the price shown must be the price that will be charged                                       |
+| 7   | **Reception lab payment** (`getPaymentQueue` / `clearPayment`)             | scheme + expected total     | Where lab money is actually settled                                                                                    |
+| 8   | **Billing step on the journey** (7th of 8, per doc 34)                     | scheme + expected OPD fee   | The one moment the OPD fee is keyed into HealthRay                                                                     |
 
-One new capability, not three. Caps and fees are commercial decisions and belong
-with whoever already manages the test catalogue and the doctor roster.
+Rendering is the existing pill: `categoryColor()` already returns the colour and
+`ColorSelect` already renders it. A scheme badge is a `<span className="badge">`,
+not a new component.
 
-**Every override writes an audit row** — who, when, which scheme, which date,
-what the count was. Without it the cap is theatre: it will be forced, and nobody
-will be able to say how often or by whom.
+## 4. Billing, domain by domain
 
-## 4. Which fee, and how it resolves
+Four domains, and they differ in how much Gini can honestly control. Saying so
+explicitly is the point of this section.
 
-There are three fees on an OPD bill and they behave differently. Say so
-explicitly, because "the fee" hides the one we cannot control.
+### 4a. Lab / investigations — **Gini owns this fully**
 
-**a. OPD consultation fee** — varies by scheme × doctor tier × visit type
-(`New` / `Follow Up` / `Investigation`, the values `GHMPage.jsx:801` and `:2957`
-already use).
+`scheme_test_prices (scheme_code, test_name, price)`, resolved override-else-base
+by `pricing.js`, called from the single chokepoint at `moStation.js:685-689`.
+`giniflow_test_catalog.test_name` is `UNIQUE`, so a scheme dimension cannot go on
+that table — a companion table is the only shape available, which is what R2
+already prescribes.
 
-```
-scheme_opd_fees (scheme_code, doctor_id NULL, visit_type, fee)
-```
+The existing rule that an order line snapshots its price into
+`giniflow_lab_order_tests.price` is what stops a scheme change re-pricing a
+quoted order — that already works and needs nothing.
+
+⚠️ **The order must snapshot the scheme, not look it up.** Today the tag lives
+only on `appointments`; `giniflow_lab_orders` has no scheme column. Add
+`giniflow_lab_orders.scheme_code`, written at order time from the appointment,
+for the same reason the price is snapshotted: a scheme corrected next week must
+not silently re-price last week's settled order. `pricing.js` reads that column,
+never a live join back to the patient.
+
+All arithmetic goes through `shared/labPayment.js` `paise()` — the money path is
+integer paise end to end, and a scheme discount computed in floating-point rupees
+would break the `amounts_within_total` CHECK for the sake of a rounding error.
+
+⚠️ The base catalogue is 26 rows of placeholder figures and reception's warning
+about it must stay up until the hospital's real tariff lands. **Scheme overrides
+on fictional base prices are still fictional.**
+
+### 4b. OPD consultation fee — **display and reconcile only**
+
+`scheme_opd_fees (scheme_code, doctor_id NULL, visit_type, fee)`, where
+`visit_type` is the `New` / `Follow Up` / `Investigation` vocabulary the sheet
+already uses.
 
 ⚠️ **Gini cannot make HealthRay charge this.** HealthRay raises the bill and
-exposes no write path. What Gini can honestly do:
+exposes no write path; nothing in this repo suggests one exists. What Gini can
+honestly do:
 
-- **Display** — reception sees "ECHS · OPD ₹X · card 1234" at check-in, so the
-  right number is keyed into HealthRay by the person keying it.
-- **Reconcile** — `billingExtractor.js` already classifies every bill line as
-  `consultation` / `lab` / `imaging` / `procedure`. Once the patient's scheme and
-  the expected rate are known, flag bills whose consultation line disagrees. A
-  report, not a control.
+- **Display** — "ECHS · OPD ₹X · card 1234" at check-in and at the billing step,
+  so the right number is keyed in by the person keying it.
+- **Reconcile** — `billingExtractor.js` already classifies each bill line as
+  `consultation` / `lab` / `imaging` / `procedure`. With the scheme and expected
+  rate known, flag bills whose consultation line disagrees. A report, not a
+  control.
 
-Anything beyond that needs a HealthRay write API that does not exist. This is the
-one place the plan stops short of the brief, deliberately.
+⚠️ **Reconciliation needs a bill table first, and there isn't one.** Bills are
+fetched live from HealthRay per request (`routes/flow.js:3552` →
+`transactionsToBilling`) and never stored — no migration anywhere defines a bill,
+invoice or charge table. So §4b is really two pieces of work: persist the bill
+lines Gini already fetches, then compare them to the expected scheme rate. The
+first is the larger half and is not scheme-specific.
 
-**b. Test / investigation fee** — varies by scheme × test. This one Gini fully
-owns.
+(`parseBillingPdfWithAi` in the same file has no caller anywhere — it is dead
+code, not a second path to build on.)
 
-```
-scheme_test_prices (scheme_code, test_name, price)
-```
+This is the one place the plan stops short of the brief, deliberately.
 
-Resolution is **override if present, else the base catalogue price** — one helper
-in a new `server/services/pricing.js`, called from the single chokepoint at
-`moStation.js:685`. Schemes differ on some tests, not all; an override table
-stays small, and onboarding a scheme does not mean re-entering forty prices. The
-existing rule that the order line snapshots its price (`giniflow_lab_order_tests.price`)
-is what keeps a scheme change from re-pricing a quoted order, and it already
-works — nothing to add.
+### 4c. Pharmacy — **in scope, but a medicine tariff comes first** (D6)
 
-⚠️ The base catalogue is still entirely placeholder figures stamped
-`prototype_placeholder`, and reception's warning about it
-(`receptionStation.js:141`) must stay up until the hospital's real tariff lands.
-Scheme overrides on top of fictional base prices are still fictional.
+There is no price, cost or tariff anywhere in the pharmacy path, and the
+pharmacy station plan never proposed one. The station dispenses and counsels; it
+counts stock warnings, not rupees. A scheme discount on medicines therefore
+needs a **medicine tariff first** — a separate piece of work of similar size to
+the test catalogue, not a scheme feature.
 
-**c. Procedure / imaging** — classified by the bill extractor, but has no
-catalogue in Gini at all. Out of scope for v1; named here so it is not mistaken
-for an oversight.
+What v1 _can_ do at the pharmacy is show the scheme badge, so the counter knows
+which rate card the patient is on when HealthRay raises the medicines bill.
+
+### 4d. Procedures / imaging — **out of scope for v1**
+
+Classified by the bill extractor, but has no catalogue in Gini at all. Named
+here so it is not mistaken for an oversight.
 
 ## 5. The daily cap
 
-**Dimension: per scheme, per calendar day, hospital-wide.** Not per doctor and
-not per slot — a CGHS ceiling is a reimbursement-volume agreement with the
-scheme, not a scheduling matter for one consultant. A per-doctor override can be
-added later as a nullable column; it should not shape v1.
+**Dimension: per scheme, per calendar day, hospital-wide.** Not per doctor, not
+per slot — a CGHS ceiling is a reimbursement-volume agreement, not a scheduling
+matter for one consultant. A per-doctor override can be added later as a
+nullable column; it should not shape v1.
 
-Counted with the existing `ACTIVE_BOOKING_SQL` from `availability.js:25`
-(`status NOT IN ('cancelled','no_show')`) so the number agrees with every other
-screen in the app:
+Counted with the existing `ACTIVE_BOOKING_SQL` from `availability.js` so the
+number agrees with every other screen:
 
 ```sql
 SELECT COUNT(*) FROM appointments
@@ -201,53 +248,186 @@ SELECT COUNT(*) FROM appointments
 ```
 
 Enforced in `bookingGuard.js` as a new refusal reason alongside `full`. Three
-things it has to get right:
+things it must get right:
 
 1. **Sync-created appointments count but cannot be blocked.** HealthRay is
-   authoritative; rejecting its rows would only desync the two systems. So they
+   authoritative; rejecting its rows would only desync the two systems. They
    increment the count and never fail. The cap binds the two guarded booking
-   paths (`ghm-appointments.js:1309`, `appointments.js`) and advises everywhere
-   else. The GHM sheet grows an "ECHS 8/10 today" counter so OBT sees the ceiling
-   before it is hit, not after.
-2. **`SCHEDULE_ENFORCEMENT` is `off` in production.** The cap must not inherit a
-   disabled guard. It gets its own switch — `SCHEME_CAP_ENFORCEMENT`, with the
-   same `off` / `warn` / `strict` shape — and ships in `warn`.
-3. **Count inside the booking transaction.** Two OBT bookings racing at 9/10 both
-   pass an unlocked count. Take it in the same transaction as the insert.
+   paths and advises everywhere else.
+2. **It must not inherit a disabled guard.** `SCHEDULE_ENFORCEMENT` is `off` in
+   production. The cap gets its own `SCHEME_CAP_ENFORCEMENT` with the same
+   `off` / `warn` / `strict` shape, and ships in `warn`.
+3. **Count inside the booking transaction.** Two bookings racing at 9/10 both
+   pass an unlocked count.
 
-## 6. Order of work
+## 6. Who can change what
 
-Five steps, each shippable and testable on its own.
+Three different powers; collapsing them is the mistake to avoid — a receptionist
+who can raise the ECHS cap from 10 to 30 has defeated the cap.
+
+| Power                                             | Who                                | How                                                                                                           |
+| ------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Tag a patient / an appointment                    | reception, coordinator, OBT, admin | Existing `RECEPTION_OPS` / `OBT_OPS`. No new capability                                                       |
+| Add or retire a scheme, set `daily_cap`, set fees | **admin only**                     | New `SCHEME_ADMIN`, granted to `ROLES.ADMIN` alone. Route `/settings/schemes`, following `GINIFLOW_SLA_ADMIN` |
+| Override the cap for one booking                  | admin                              | Reuse `bookingGuard.js`'s existing `force=true` pattern verbatim                                              |
+
+One new capability, not three. **Every override writes an audit row** — who,
+when, which scheme, which date, what the count was. Without it the cap is
+theatre: it will be forced, and nobody will be able to say how often or by whom.
+
+## 7. Order of work (superseded by §9)
+
+Six steps, each shippable and testable alone.
 
 1. **Scheme list becomes data.** `patient_schemes` + `SCHEME_ADMIN` +
    `/settings/schemes`. Seed the existing five, add ECHS. Gate: both GHM smoke
    scripts pass unchanged.
 2. **Patient tag + inheritance.** `patients.scheme_code` / `scheme_ref`, the four
-   entry points, the snapshot-at-creation rule. Gate: a walk-in can be tagged at
-   the desk, and their next HealthRay-synced booking arrives tagged.
-3. **Daily cap.** `daily_cap`, the guard, the GHM counter, the override audit.
-   Ship in `warn`; watch a week of real bookings; then `strict`.
-4. **Scheme test pricing.** `scheme_test_prices`, `pricing.js`, wired into
-   `moStation.js`. Gate: an order for a tagged patient prices at the override and
-   an untagged one is unchanged to the rupee.
-5. **OPD fee display + bill reconciliation.** `scheme_opd_fees`, shown at
-   check-in; the reconciliation report over `billingExtractor` output.
+   entry points, snapshot-at-creation. Gate: a walk-in tagged at the desk, and
+   their next HealthRay-synced booking arrives tagged.
+3. **Make the tag visible where money happens.** Surfaces 5–8. No behaviour
+   change, no pricing yet — this is what drives adoption, and adoption is the
+   real risk given 0/7,413.
+4. **Daily cap.** `daily_cap`, the guard, the GHM counter, the override audit.
+   Ship in `warn`, watch a week, then `strict`.
+5. **Scheme test pricing.** `scheme_test_prices`, `pricing.js`, wired into
+   `moStation.js`. Gate: a tagged patient's order prices at the override and an
+   untagged one is unchanged to the rupee. **Blocked on a real tariff.**
+6. **OPD fee display.** `scheme_opd_fees` shown at check-in and at the billing
+   step, so the right number is keyed into HealthRay.
+7. **Bill reconciliation.** Persist the bill lines Gini already fetches, then
+   compare against the expected scheme rate. Split from step 6 because the
+   storage half is the larger one and is not scheme-specific.
 
-Steps 1–3 answer the capacity requirement. Steps 4–5 answer billing, with the
-limit in §4a understood.
+Steps 1–4 answer the capacity requirement and cost nothing in accuracy. Steps
+5–7 answer billing, with the limits in §4b and §4c understood.
 
-## 7. Open questions
+Step 3 is new in this revision and deliberately precedes the cap: a tag that
+nobody sets cannot cap anything, and today nobody sets it.
 
-1. **Cap dimension.** Confirmed as per scheme per day hospital-wide? A
-   per-doctor cap is a different table shape and is cheaper to decide now than to
-   retrofit.
-2. **The real tariff.** Is there a CGHS/ECHS rate card — OPD fee and test rates?
-   Steps 4 and 5 cannot ship against placeholder numbers.
-3. **OPD billing.** Display + reconcile, as scoped in §4a? If Gini is expected to
-   push the fee into HealthRay, that is a separate investigation into whether any
-   HealthRay write path exists at all — nothing in this repo suggests one does.
-4. **What happens at the cap.** Hard refuse, or offer the next day with free
-   capacity? `availability.js:226` already has a suggest-alternative resolver
-   that could be reused.
-5. **Card expiry.** Does `scheme_ref` need a validity date, and should an expired
-   card drop the patient to General automatically or just warn the desk?
+## 8. Decisions
+
+Answered 2026-09-13. Each states the verdict and what it settles in the sections
+above.
+
+### D1 — cap dimension. **Per scheme, per calendar day, hospital-wide.**
+
+One `daily_cap` integer on the scheme row. Not per doctor: a reimbursement
+ceiling is an agreement with the scheme, not a scheduling matter for one
+consultant. §5 stands as written. A per-doctor cap, if it is ever wanted, is a
+nullable `doctor_id` on a companion table — it must not shape v1.
+
+### D2 — the tariff exists. **Steps 5–7 are buildable.**
+
+The hospital has CGHS/ECHS rates and will supply them. This unblocks the whole
+pricing half, and makes the admin screen in step 1 load-bearing rather than
+decorative: it is where the rates get keyed in.
+
+Two consequences worth stating:
+
+- The 26 placeholder rows in `giniflow_test_catalog` are still placeholders
+  until the **base** tariff lands too. Scheme overrides sit on top of base
+  prices; a correct CGHS rate over a fictional general rate is still half
+  fictional, and reception's placeholder warning stays up until both are real.
+- Entering rates is data entry at hospital scale, not a migration. The screen
+  must support it: search, bulk paste, and "which of these still have no rate".
+
+### D3 — OPD fee. **Display only, at check-in and at the billing step.**
+
+Gini shows `ECHS · OPD ₹X · card 1234` so the right number is keyed into
+HealthRay by the person keying it. **Reconciliation is not in scope**, which
+removes step 7 and the bill-storage work behind it. §4b's warning about there
+being no bill table stops being a blocker and becomes a note: nothing is stored,
+and nothing needs to be.
+
+If reconciliation is wanted later it returns as its own plan, because persisting
+HealthRay's bill lines is the larger half and is not scheme-specific.
+
+### D4 — at the cap. **Refuse, and suggest the next day with room.**
+
+`bookingGuard.js` gains a `scheme_cap_full` refusal carrying the next dates under
+the cap, reusing the `findAvailableDoctors` shape in `availability.js:228` — same
+resolver idea, different axis (dates rather than doctors). The admin
+`force=true` override at `bookingGuard.js:34` still applies and still writes an
+audit row.
+
+The desk is never left at a dead end, which is the difference between a cap that
+gets respected and a cap that gets forced.
+
+### D5 — card expiry. **No expiry date. `scheme_ref` is the number, and nothing more.**
+
+Encrypted with `aadhaarCrypt.js` exactly as Aadhaar is. Gini never claims a card
+is valid — the desk checks the card, as they do today. This drops
+`scheme_valid_to` from §2 entirely.
+
+The reasoning is that a wrong expiry is worse than no expiry: auto-dropping a
+renewed card to General bills a entitled patient privately, and a warning nobody
+can act on is noise.
+
+### D6 — pharmacy. **In scope. A medicine tariff is a prerequisite.**
+
+This is the largest single decision here, and §4c is rewritten by it. The work
+does not exist today in any form:
+
+|                                                   |                                                      |
+| ------------------------------------------------- | ---------------------------------------------------- |
+| Distinct canonical medicines ever prescribed      | **9,964**                                            |
+| Distinct medicines prescribed in the last 60 days | **2,129**                                            |
+| `medicine_db.json` price data                     | **none** — keys are `raw, brand, form, dose, search` |
+| `medicine_collections` rows                       | 263, and no price column                             |
+
+A flat 9,964-row tariff is not the way in. Prescribing is heavily concentrated,
+so the tariff should be built by volume:
+
+| Tariff size | Covers                 |
+| ----------- | ---------------------- |
+| 50 items    | 56.5% of prescriptions |
+| 100 items   | 69.3%                  |
+| 200 items   | **80.0%**              |
+| 500 items   | 89.9%                  |
+| 1,000 items | 94.8%                  |
+
+**200 items covers four prescriptions in five.** So: price the top 200 by volume
+first, show "no rate yet" honestly for the rest, and let the list grow as the
+pharmacy meets them. The same `source` marker the test catalogue uses
+(`prototype_placeholder` / `priced_by_admin`) tells everyone which is which.
+
+Shape follows the test catalogue exactly — `medicine_catalog (name, price,
+is_active, source)` keyed on the canonical `pharmacy_match`, plus
+`scheme_medicine_prices (scheme_code, medicine_name, price)` per R2. Dispensing
+then writes a priced line, which `medicine_collections` does not do today.
+
+This is a phase of its own, sequenced after the lab pricing that proves the
+pattern.
+
+### D7 — why the tag has never been used. **Unknown; ask the desk before step 3.**
+
+0 of 7,413 is unexplained. Step 3 assumes the answer is "nobody sees it" and
+fixes visibility; if the real answer is "it was never anyone's job", the fix is a
+required field at check-in and a word with the desk, not more screens.
+
+**Do not build step 3 until someone has asked.** It is one conversation, and it
+decides whether step 3 is the right work at all.
+
+## 9. Revised order of work
+
+1. **Scheme list becomes data** — `patient_schemes`, `SCHEME_ADMIN`,
+   `/settings/schemes`, seed the five + ECHS. Gate: both GHM smoke scripts pass
+   untouched.
+2. **Patient tag + inheritance** — `patients.scheme_code` / `scheme_ref`, four
+   entry points, snapshot-at-creation. Gate: a walk-in tagged at the desk, and
+   their next synced booking arrives tagged.
+3. **Ask the desk (D7), then make the tag visible where money happens** —
+   surfaces 5–8. Blocked on one conversation, not on code.
+4. **Daily cap** — `daily_cap`, the guard with next-day suggestions (D4), the GHM
+   counter, the override audit. Ship in `warn`, watch a week, then `strict`.
+5. **Base test tariff, then scheme test pricing** — real prices into
+   `giniflow_test_catalog`, then `scheme_test_prices` + `pricing.js` +
+   `giniflow_lab_orders.scheme_code`. Gate: a tagged patient's order prices at
+   the override, an untagged one is unchanged to the rupee.
+6. **OPD fee display** — `scheme_opd_fees`, shown at check-in and at the billing
+   step. No reconciliation (D3).
+7. **Medicine tariff, then scheme pharmacy pricing** (D6) — `medicine_catalog`
+   seeded with the top 200 by volume, priced dispensing lines, then
+   `scheme_medicine_prices`. The largest phase; sequenced last because the lab
+   work proves the pattern first.

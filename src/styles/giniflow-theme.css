@@ -247,6 +247,23 @@
   flex-shrink: 0;
 }
 /* ── STATS STRIP ── */
+/* Shorter tiles for the station screens, where the strip is a glance on the way
+   to the queue rather than the subject of the page. Opt-in so the flow board's
+   own filter tiles keep their size. */
+.gf .stats--compact {
+  gap: 6px;
+}
+.gf .stats--compact .stat {
+  padding: 5px 10px;
+  gap: 7px;
+}
+.gf .stats--compact .sv {
+  font-size: 16px;
+}
+.gf .stats--compact .sl {
+  line-height: 1.25;
+}
+
 .gf .stat {
   background: var(--white);
   border: 1px solid var(--bd);

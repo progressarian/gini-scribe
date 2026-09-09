@@ -29,6 +29,8 @@ import {
   giniflowCarePlanSchema,
   giniflowProposalDecisionSchema,
   giniflowDateQuerySchema,
+  giniflowStationGroupQuerySchema,
+  giniflowStationSearchGroupQuerySchema,
   giniflowStationQuerySchema,
   giniflowMoQueueQuerySchema,
   giniflowPaymentSchemaChecked,
@@ -212,11 +214,14 @@ const vitalsError = (res, e, label) =>
 router.get(
   "/giniflow/stations/vitals/queue",
   vitalsGate,
-  validateQuery(giniflowDateQuerySchema),
+  validateQuery(giniflowStationSearchGroupQuerySchema),
   async (req, res) => {
     try {
       const date = await resolveDate(req.query.date);
-      const data = await getVitalsQueue(date);
+      const data = await getVitalsQueue(date, new Date(), undefined, {
+        group: req.query.group ?? "all",
+        q: req.query.q ?? null,
+      });
       res.json({ date, ...data, serverTime: new Date().toISOString() });
     } catch (e) {
       handleError(res, e, "Gini Flow vitals queue");
@@ -1254,7 +1259,9 @@ router.get(
   async (req, res) => {
     try {
       const date = await resolveDate(req.query.date);
-      const data = await getLabQueue(date, req.query.q ?? null);
+      const data = await getLabQueue(date, req.query.q ?? null, undefined, {
+        group: req.query.group ?? "all",
+      });
       res.json({ date, ...data, serverTime: new Date().toISOString() });
     } catch (e) {
       handleError(res, e, "Gini Flow lab queue");
@@ -1654,11 +1661,13 @@ const pharmacyError = (res, e, label) =>
 router.get(
   "/giniflow/stations/pharmacy/queue",
   pharmacyGate,
-  validateQuery(giniflowDateQuerySchema),
+  validateQuery(giniflowStationGroupQuerySchema),
   async (req, res) => {
     try {
       const date = await resolveDate(req.query.date);
-      const data = await getPharmacyQueue(date);
+      const data = await getPharmacyQueue(date, new Date(), undefined, {
+        group: req.query.group ?? "all",
+      });
       res.json({ date, ...data, serverTime: new Date().toISOString() });
     } catch (e) {
       pharmacyError(res, e, "Gini Flow pharmacy queue");

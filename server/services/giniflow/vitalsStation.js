@@ -69,6 +69,11 @@ const QUEUE_SQL = `
    WHERE v.visit_date = $1::date
      AND v.current_status = ANY($2)
      AND NOT COALESCE(p.is_blocked, FALSE)
+     AND (
+       $3::text IS NULL
+       OR p.name ILIKE '%' || $3 || '%'
+       OR p.file_no ILIKE '%' || $3 || '%'
+     )
    ORDER BY v.appointment_time NULLS LAST, first_ev.occurred_at NULLS LAST`;
 
 // Vitals recorded today, newest first. The count alone told the nurse how many
@@ -120,15 +125,31 @@ const DONE_SQL = `
     ) done_ev ON TRUE
    WHERE v.visit_date = $1::date
      AND (gv.id IS NOT NULL OR v.current_status = ANY($2))
+     AND (
+       $3::text IS NULL
+       OR p.name ILIKE '%' || $3 || '%'
+       OR p.file_no ILIKE '%' || $3 || '%'
+     )
    ORDER BY recorded_at DESC NULLS LAST`;
 
-export async function getVitalsQueue(visitDate, now = new Date(), db = pool) {
+// The groups the station splits into, and the only values `group` accepts.
+export const VITALS_GROUPS = ["atStation", "waiting", "held", "moved", "exited"];
+
+export async function getVitalsQueue(
+  visitDate,
+  now = new Date(),
+  db = pool,
+  { group = "all", q = null } = {},
+) {
   const budgetFor = budgetLookup(await getSlaConfig(db));
+  // Two characters is the lab queue's threshold too: a single letter matches
+  // most of the floor and costs a full scan to say so.
+  const search = q && String(q).trim().length >= 2 ? String(q).trim() : null;
 
   const [{ rows }, { rows: heldRows }, { rows: doneRows }] = await Promise.all([
-    db.query(QUEUE_SQL, [visitDate, QUEUE_STATUSES]),
-    db.query(QUEUE_SQL, [visitDate, HELD_STATUSES]),
-    db.query(DONE_SQL, [visitDate, DONE_STATUSES]),
+    db.query(QUEUE_SQL, [visitDate, QUEUE_STATUSES, search]),
+    db.query(QUEUE_SQL, [visitDate, HELD_STATUSES, search]),
+    db.query(DONE_SQL, [visitDate, DONE_STATUSES, search]),
   ]);
 
   const waitFields = (r) => {
@@ -215,8 +236,7 @@ export async function getVitalsQueue(visitDate, now = new Date(), db = pool) {
     nowAt: STATUS_LABEL[r.current_status] || r.current_status,
   }));
 
-  return {
-    doneToday: doneRows.length,
+  const groups = {
     atStation,
     waiting,
     held: heldRows.map(base),
@@ -227,6 +247,17 @@ export async function getVitalsQueue(visitDate, now = new Date(), db = pool) {
     // Every step done and out of the building.
     exited: doneMapped.filter((d) => d.status === "exited"),
   };
+
+  // Counts are always for the WHOLE day, never for the slice being returned:
+  // the filter chips have to say how many are in the groups they are offering,
+  // and a count taken after the filter would read 0 for every group but one.
+  const counts = Object.fromEntries(VITALS_GROUPS.map((k) => [k, groups[k].length]));
+  const wanted = VITALS_GROUPS.includes(group) ? group : "all";
+  const picked = Object.fromEntries(
+    VITALS_GROUPS.map((k) => [k, wanted === "all" || wanted === k ? groups[k] : []]),
+  );
+
+  return { doneToday: doneRows.length, group: wanted, counts, ...picked };
 }
 
 // The two chips the prototype shows beside a queued patient, from the

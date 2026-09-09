@@ -21,6 +21,8 @@ import {
   CATEGORIES,
   CATEGORY_META,
   STATION_STATUSES,
+  TERMINAL_STATUSES,
+  hasNotStarted,
 } from "../../../shared/giniflowStatus";
 import {
   useGiniflowBoard,
@@ -28,6 +30,8 @@ import {
   useGiniflowTimeline,
 } from "../../queries/hooks/useGiniflowBoard";
 import {
+  useGiniflowPauseVisit,
+  useGiniflowResumeVisit,
   useGiniflowSetPriority,
   useGiniflowReorder,
   useGiniflowMove,
@@ -191,7 +195,17 @@ const noMoveReason = (card) => {
 // Dragging is a mouse gesture and the floor board is also driven from a keyboard,
 // so every drag has a menu equivalent: priority, a nudge up or down inside the
 // column, and the same forward move a drop would make.
-function CardMenu({ card, canMoveUp, canMoveDown, onPriority, onNudge, onMove, onClose }) {
+function CardMenu({
+  card,
+  canMoveUp,
+  canMoveDown,
+  onPriority,
+  onNudge,
+  onMove,
+  onPause,
+  onResume,
+  onClose,
+}) {
   const ref = useRef(null);
   const [pending, setPending] = useState(null);
   const [reason, setReason] = useState(card.priorityReason || "");
@@ -244,6 +258,37 @@ function CardMenu({ card, canMoveUp, canMoveDown, onPriority, onNudge, onMove, o
             Set {PRIORITY_LABEL[pending]}
           </button>
         </div>
+      )}
+      {/* Not a move: the patient holds their stop, their column and their queue
+          position — only the clocks stop. One control, and it shows the action
+          that applies: a running patient can be paused, a paused one resumed. */}
+      {!TERMINAL_STATUSES.includes(card.status) && (
+        <>
+          <div className="pcm-hd">{card.paused ? "Away" : "Stepped out"}</div>
+          <button
+            type="button"
+            role="menuitem"
+            className="pcm-item"
+            title={
+              hasNotStarted(card.status)
+                ? card.paused
+                  ? "They are back — their wait starts again from zero, because nobody had seen them yet"
+                  : "They left before anyone saw them — stop their clock until they come back"
+                : card.paused
+                  ? "They are back — the clocks start again and the break is left out of their waiting time"
+                  : "They have stepped out — hold their clocks until they are back"
+            }
+            onClick={card.paused ? onResume : onPause}
+          >
+            {hasNotStarted(card.status)
+              ? card.paused
+                ? "▶ Restart — they are back"
+                : "⏹ Stop — they left"
+              : card.paused
+                ? "▶ Resume — they are back"
+                : "⏸ Pause — they stepped out"}
+          </button>
+        </>
       )}
       <div className="pcm-hd">Order in this column</div>
       <button
@@ -330,6 +375,8 @@ function PatientCard({
   onPriority,
   onNudge,
   onMove,
+  onPause,
+  onResume,
   canAssign,
   staff,
   onAssign,
@@ -343,16 +390,20 @@ function PatientCard({
   // The server already stops the clock at the exit; recomputing it here from the
   // anchor ignored that and started it again, so a patient who left at 09:21 was
   // still gaining a minute a minute — 61m on the server, 474m on the screen.
-  const live = card.finished ? null : minutesSince(anchor, now - offsetMs);
+  // A paused card must not tick between polls either: the server froze its
+  // numbers, and recomputing them here from `now` would undo that a second
+  // later — the same class of bug the exit clock had.
+  const live = card.finished || card.paused ? null : minutesSince(anchor, now - offsetMs);
   const minutes = live ?? (isLab ? card.lab.minutes : card.statusMinutes);
   const budget = isLab ? card.lab.budget : card.statusBudget;
   // A finished visit's timer counts up from the exit, and no budget covers
   // "time since exit" — the server marks those green deliberately. Only a LIVE
   // clock with no budget behind it goes grey, which is the lab track.
-  const colour = card.finished ? "green" : budgetColour(minutes, budget);
-  const totalMinutes = card.finished
-    ? card.totalMinutes
-    : (minutesSince(card.journeyStartedAt, now - offsetMs) ?? card.totalMinutes);
+  const colour = card.finished || card.paused ? "green" : budgetColour(minutes, budget);
+  const totalMinutes =
+    card.finished || card.paused
+      ? card.totalMinutes
+      : (minutesSince(card.journeyStartedAt, now - offsetMs) ?? card.totalMinutes);
   // Derived live rather than taken from the poll, so the red styling and the
   // number it describes can never disagree.
   const totalOver = !!card.totalBudget && totalMinutes !== null && totalMinutes > card.totalBudget;
@@ -437,6 +488,15 @@ function PatientCard({
             </span>
           )}
         </div>
+        {/* Says the timer is held on purpose. Without it a card frozen at 42m
+            reads as a board that has stopped updating. */}
+        {card.paused && (
+          <div className="wait4 blocked">
+            <span className="w-ico">{hasNotStarted(card.status) ? "⏹" : "⏸"}</span>{" "}
+            {hasNotStarted(card.status) ? "Left before being seen" : "On a break — clock held"}
+            {card.pausedReason ? ` · ${card.pausedReason}` : ""}
+          </div>
+        )}
         {isLab && card.finished && !card.lab.collected && (
           <div className="wait4 blocked">
             <span className="w-ico">🚫</span> Left without giving a sample
@@ -511,6 +571,8 @@ function PatientCard({
           onPriority={act(onPriority)}
           onNudge={act(onNudge)}
           onMove={act(onMove)}
+          onPause={act(onPause)}
+          onResume={act(onResume)}
           onClose={() => setMenuOpen(false)}
         />
       )}
@@ -538,6 +600,8 @@ function Column({
   onReorder,
   onMove,
   onPriority,
+  onPause,
+  onResume,
 }) {
   const bodyRef = useRef(null);
   const [dropIndex, setDropIndex] = useState(null);
@@ -640,6 +704,8 @@ function Column({
               onPriority={(priority, reason) => onPriority(card.id, priority, reason)}
               onNudge={(delta) => nudge(card, delta)}
               onMove={(key) => onMove(card.id, key, card.name)}
+              onPause={() => onPause(card.id, card.name)}
+              onResume={() => onResume(card.id, card.name)}
               canAssign={canAssign}
               staff={staff}
               onAssign={onAssign}
@@ -1071,6 +1137,8 @@ export default function FlowManagerPage() {
   const { data: searchData, isFetching: searching } = useGiniflowSearch(debouncedSearch, date);
   const { data, isLoading, isError, error, dataUpdatedAt } = useGiniflowBoard(date);
   const expired = error?.response?.status === 401;
+  const pauseVisit = useGiniflowPauseVisit();
+  const resumeVisit = useGiniflowResumeVisit();
   const setPriorityMutation = useGiniflowSetPriority(date);
   const reorderMutation = useGiniflowReorder(date);
   const moveMutation = useGiniflowMove(date, data?.slaConfig || []);
@@ -1183,6 +1251,28 @@ export default function FlowManagerPage() {
 
   const onPriority = (visitId, priority, reason) =>
     setPriorityMutation.mutate({ visitId, priority, reason }, { onError: queueError });
+
+  const pauseErr = (e) =>
+    showToast(e?.response?.data?.error || "Could not record that — nothing changed");
+
+  const onPause = (visitId, name) =>
+    pauseVisit.mutate(
+      { visitId },
+      {
+        onSuccess: () => showToast(`⏸ ${name} paused — their clocks are held until they are back`),
+        onError: pauseErr,
+      },
+    );
+
+  const onResume = (visitId, name) =>
+    resumeVisit.mutate(
+      { visitId },
+      {
+        onSuccess: () =>
+          showToast(`▶ ${name} resumed — the break is left out of their waiting time`),
+        onError: pauseErr,
+      },
+    );
 
   // The name comes from the roster the menu drew, not from the response:
   // assign() reports doctors.short_name, which part of the roster leaves null.
@@ -1521,6 +1611,8 @@ export default function FlowManagerPage() {
               onReorder={onReorder}
               onMove={onMove}
               onPriority={onPriority}
+              onPause={onPause}
+              onResume={onResume}
               canAssign={canAssign}
               staff={staff}
               onAssign={onAssign}

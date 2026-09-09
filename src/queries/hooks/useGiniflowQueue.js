@@ -40,6 +40,25 @@ const withCards = (column, cards) => ({
   count: cards.length,
 });
 
+// Pause and resume a visit while the patient is away. No optimistic update: the
+// server decides the new clock — resume shifts the anchor events — and guessing
+// it would flash a wrong number on a board several people are watching.
+function usePauseMutation(action) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ visitId, reason } = {}) =>
+      (await api.post(`/api/giniflow/visits/${visitId}/${action}`, reason ? { reason } : {})).data,
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "board"] });
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "queue"] });
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "reception"] });
+    },
+  });
+}
+
+export const useGiniflowPauseVisit = () => usePauseMutation("pause");
+export const useGiniflowResumeVisit = () => usePauseMutation("resume");
+
 export function useGiniflowSetPriority(date) {
   const queryClient = useQueryClient();
   return useMutation({

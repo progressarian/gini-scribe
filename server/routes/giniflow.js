@@ -15,7 +15,7 @@ import {
 } from "../schemas/index.js";
 import { CAPABILITIES as CAP } from "../../shared/permissions.js";
 import { publishNotice, realtimeStatus } from "../services/giniflow/realtimeBus.js";
-import { getStationTimes } from "../services/giniflow/statusEngine.js";
+import { getStationTimes, pauseVisit, resumeVisit } from "../services/giniflow/statusEngine.js";
 import {
   getSlaConfig,
   budgetMap,
@@ -411,6 +411,51 @@ router.patch(
     }
   },
 );
+
+// The patient stepped out. Not a status change — they resume at the same stop —
+// so this only stops their clocks. Reception can do it (they see the patient
+// leave and come back) as well as the coordinator on the board; the station
+// desks get resume so whoever the patient walks back to can lift it.
+// Starting a break is a decision about the day's queue, so it stays with the
+// board and the desk. Ending one only has to be done by whoever the patient
+// walks back to, which is any station — refusing there would leave a card frozen
+// until someone else could be found.
+const PAUSE_CAPS = [CAP.GINIFLOW_MANAGE_QUEUE, CAP.RECEPTION_OPS, CAP.GINIFLOW_STATION_RECEPTION];
+const RESUME_CAPS = [
+  ...PAUSE_CAPS,
+  CAP.GINIFLOW_STATION_VITALS,
+  CAP.GINIFLOW_STATION_MO,
+  CAP.GINIFLOW_STATION_LAB,
+  CAP.GINIFLOW_STATION_RX,
+  CAP.GINIFLOW_STATION_PHARMACY,
+];
+
+router.post("/giniflow/visits/:id/pause", requireCapability(PAUSE_CAPS), async (req, res) => {
+  try {
+    res.json(
+      await pauseVisit(req.params.id, {
+        actorId: req.doctor?.doctor_id ?? null,
+        actorRole: req.doctor?.role || "reception",
+        reason: (req.body?.reason || "").trim() || null,
+      }),
+    );
+  } catch (e) {
+    queueError(res, e, "Gini Flow pause visit");
+  }
+});
+
+router.post("/giniflow/visits/:id/resume", requireCapability(RESUME_CAPS), async (req, res) => {
+  try {
+    res.json(
+      await resumeVisit(req.params.id, {
+        actorId: req.doctor?.doctor_id ?? null,
+        actorRole: req.doctor?.role || "reception",
+      }),
+    );
+  } catch (e) {
+    queueError(res, e, "Gini Flow resume visit");
+  }
+});
 
 // Dropping a card on another column. The same transition a station screen makes,
 // logged against the manager who made it.

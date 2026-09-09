@@ -139,14 +139,26 @@
 .gf .squeue {
   border-right: 1px solid var(--bd);
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--bd2) transparent;
   background: var(--white);
   min-height: 0;
   display: flex;
   flex-direction: column;
 }
+.gf .squeue::-webkit-scrollbar {
+  width: 6px;
+}
+.gf .squeue::-webkit-scrollbar-thumb {
+  background: var(--bd2);
+  border-radius: 3px;
+}
+.gf .squeue::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 .gf .sq-header {
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--bd);
+  padding: 12px 14px 10px;
   background: var(--bg);
   flex-shrink: 0;
 }
@@ -160,21 +172,127 @@
   font-size: 10px;
   color: var(--ink3);
 }
-.gf .sq-search {
+
+/* Scoped to input.sq-search on purpose. `.sq-search` is overloaded: the vitals
+   queue puts it on a bare <input>, while Reception and the MO station put it on
+   a <div> WRAPPING an input (styled at `.gf .sq-search input` further down).
+   An unscoped rule here paints a pill border and a second magnifier around
+   those wrappers.
+   The magnifier is a background image rather than an element so this stays a
+   bare input and no station needs new markup. */
+.gf input.sq-search {
   width: 100%;
-  margin-top: 8px;
-  padding: 6px 9px;
+  margin-top: 9px;
+  padding: 7px 10px 7px 30px;
   border: 1px solid var(--bd2);
-  border-radius: 6px;
-  background: var(--white);
+  border-radius: 999px;
+  background: var(--white)
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round'><circle cx='6.5' cy='6.5' r='4.5'/><path d='M10 10l3 3'/></svg>")
+    no-repeat 9px 50%;
   font-family: inherit;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--ink);
 }
-.gf .sq-search:focus {
+.gf input.sq-search::placeholder {
+  color: var(--ink3);
+}
+.gf input.sq-search:focus {
   outline: none;
   border-color: var(--blu);
+  box-shadow: 0 0 0 3px rgb(37 99 235 / 0.12);
 }
+.gf input.sq-search::-webkit-search-cancel-button {
+  cursor: pointer;
+}
+
+/* The group filter closes the header block — one border under the pair, not one
+   under each, which read as two competing toolbars. Sticky so the station can
+   re-filter without scrolling a 70-row list back to the top.
+   The chips share the width rather than scrolling: with the short labels all
+   four fit one line, and a filter you have to scroll to reach is one nobody
+   uses. min-width:0 lets a long label ellipsis instead of forcing an overflow,
+   and the row only ever wraps if a station adds enough groups to need it. */
+.gf .sq-filters {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 0 14px 10px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--bd);
+  flex-shrink: 0;
+}
+.gf .sq-filters button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 6px 8px;
+  color: var(--ink2);
+  background: var(--white);
+  border: 1px solid var(--bd2);
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition:
+    background 0.12s,
+    border-color 0.12s,
+    color 0.12s;
+}
+.gf .sq-filters button:hover {
+  border-color: var(--blu);
+  color: var(--blu);
+}
+.gf .sq-filters button.on {
+  background: var(--blu);
+  border-color: var(--blu);
+  color: #fff;
+}
+/* The count sits in its own bubble so the number never reads as part of the
+   label — "Waiting 5" was being scanned as a name. flex-shrink:0 keeps it
+   readable when a long label is being ellipsised beside it. */
+.gf .sq-fcount {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--ink2);
+}
+.gf .sq-filters button.on .sq-fcount {
+  background: rgb(255 255 255 / 0.25);
+  color: #fff;
+}
+.gf .sq-filters--page {
+  position: static;
+  padding: 0 0 12px;
+  margin-bottom: 14px;
+}
+.gf .sq-filters--page button {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+}
+.gf .sq-clearfilter {
+  font: inherit;
+  color: var(--blu);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
 .gf .sq-item {
   padding: 10px 14px;
   border-bottom: 1px solid var(--bd);
@@ -682,6 +800,14 @@
    A day-long worklist is not a reading column: rows of `patient · detail ·
    actions` keep going where a paragraph or a form would stop. Still capped, so a
    patient's name and their buttons never end up a metre apart on an ultrawide. */
+/* `.stats` carries its own 11px 14px for layouts that place it outside a padded
+   wrapper (the flow board does). Inside `.inner` that lands on top of .inner's
+   own 14px, so the tiles were inset 28px while the note and the columns beneath
+   them sat at 14px — the strip read as indented rather than aligned. */
+.gf .inner > .stats {
+  padding: 0;
+}
+
 .gf .inner {
   padding: 14px;
   display: flex;
@@ -3817,6 +3943,11 @@
   gap: 12px;
   align-items: start;
 }
+/* Filtered to one group: the surviving column takes the whole width rather than
+   sitting in half of it with the other half empty. */
+.gf .dsplit--one {
+  grid-template-columns: minmax(0, 1fr);
+}
 .gf .dcol {
   min-width: 0;
 }
@@ -5347,6 +5478,11 @@
   grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
   gap: 14px;
   align-items: start;
+}
+/* Filtered to one section: the surviving column takes the full width rather
+   than sitting in its 5fr slot with a column of dead space beside it. */
+.gf .ar-split--one {
+  grid-template-columns: minmax(0, 1fr);
 }
 /* Both columns scroll in their own box rather than setting the height of the
    whole page — otherwise the longer of the two drags the shorter one's buttons

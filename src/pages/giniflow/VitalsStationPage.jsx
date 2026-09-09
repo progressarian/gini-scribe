@@ -90,12 +90,28 @@ const clock = (iso) =>
 // The screen top to bottom, in the order the station reads it. Several staff
 // work this station at once, so "at the station" is a group rather than a
 // single "Now" row — each colleague has their own patient in front of them.
+// `short` is the filter chip's label. The headings below keep the full wording;
+// the chips have to fit one line of a narrow column, and "Finished and left 47"
+// alone eats half of it.
 const SECTIONS = [
-  { key: "atStation", icon: "🟢", title: "At the station", sub: "being seen now" },
-  { key: "waiting", icon: "⏳", title: "Waiting", sub: "ready to call" },
-  { key: "held", icon: "🚫", title: "Held", sub: "cannot be called" },
-  { key: "moved", icon: "➡️", title: "Vitals done", sub: "still on the floor", done: true },
-  { key: "exited", icon: "✅", title: "Finished and left", sub: "", done: true },
+  {
+    key: "atStation",
+    icon: "🟢",
+    short: "At station",
+    title: "At the station",
+    sub: "being seen now",
+  },
+  { key: "waiting", icon: "⏳", short: "Waiting", title: "Waiting", sub: "ready to call" },
+  { key: "held", icon: "🚫", short: "Held", title: "Held", sub: "cannot be called" },
+  {
+    key: "moved",
+    icon: "➡️",
+    short: "Done",
+    title: "Vitals done",
+    sub: "still on the floor",
+    done: true,
+  },
+  { key: "exited", icon: "✅", short: "Exited", title: "Finished and left", sub: "", done: true },
 ];
 
 // A group heading that opens and closes its own section. A real button inside
@@ -193,10 +209,21 @@ export default function VitalsStationPage() {
   const [spokeAnything, setSpokeAnything] = useState(false);
   const [rechecked, setRechecked] = useState(false);
   const [search, setSearch] = useState("");
+  // The search now costs a round trip, so it waits for a pause in typing
+  // instead of querying on every keystroke. Same 250ms the lab station uses.
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 250);
+    return () => clearTimeout(t);
+  }, [search]);
   // The two history groups start closed: they are a record of work already
   // done, and on a full day they are the longest lists on the screen. The two
   // groups the station acts on must not sit below fifty rows of history.
   const [collapsed, setCollapsed] = useState(() => new Set(["moved", "exited"]));
+  // Which group the queue is narrowed to. "all" keeps the stacked sections the
+  // station has always had; picking one shows that group alone, expanded, so a
+  // filter never lands the user on a collapsed heading with nothing under it.
+  const [filter, setFilter] = useState("all");
   const toastTimer = useRef(null);
 
   const toggleGroup = (key) =>
@@ -208,7 +235,7 @@ export default function VitalsStationPage() {
     });
 
   const now = useTick();
-  const { data: queueData, isLoading } = useVitalsQueue();
+  const { data: queueData, isLoading } = useVitalsQueue(undefined, filter, debouncedSearch);
   const live = useGiniflowLive({ date: queueData?.date });
   const saveVitals = useSaveVitals();
   const saveAllergy = useSaveAllergy();
@@ -216,25 +243,28 @@ export default function VitalsStationPage() {
   const startVitals = useStartVitals();
   const releaseVitals = useReleaseVitals();
 
-  // Filtered client-side: the whole day is already in this response, so the
-  // search is instant and costs no round trip. The server filters the
-  // consultant's queue instead only because that one pages.
+  // Both the search and the group filter are applied by the server, so these
+  // are the rows as sent. `term` is kept only for the wording of the empty
+  // state, which has to name what was searched for.
   const term = search.trim().toLowerCase();
-  const matches = (r) =>
-    !term ||
-    (r.name || "").toLowerCase().includes(term) ||
-    (r.fileNo || "").toLowerCase().includes(term);
 
-  const atStation = (queueData?.atStation || []).filter(matches);
-  const waitingList = (queueData?.waiting || []).filter(matches);
-  const held = (queueData?.held || []).filter(matches);
-  const moved = (queueData?.moved || []).filter(matches);
-  const exited = (queueData?.exited || []).filter(matches);
-  // Everyone the station can still claim. Searching must not change who can be
-  // claimed, so this reads the unfiltered response.
-  const queue = [...(queueData?.atStation || []), ...(queueData?.waiting || [])];
-  const totalShown =
-    atStation.length + waitingList.length + held.length + moved.length + exited.length;
+  const atStation = queueData?.atStation || [];
+  const waitingList = queueData?.waiting || [];
+  const held = queueData?.held || [];
+  const moved = queueData?.moved || [];
+  const exited = queueData?.exited || [];
+  // Everyone the station can claim out of what came back. The search and the
+  // group filter are both applied by the server now, so this is the searched
+  // set rather than the whole day — the pane opens on the first patient the
+  // station is actually looking at, and on a done-only filter it opens on none.
+  const queue = [...atStation, ...waitingList];
+  const sectionRows = { atStation, waiting: waitingList, held, moved, exited };
+  // Counts come from the server, whole-day and search-aware, so a chip says how
+  // many of the searched-for patients are in that group — never the returned
+  // array lengths, which hold one group once a filter is on.
+  const counts = queueData?.counts || {};
+  const countOf = (key) => counts[key] ?? sectionRows[key].length;
+  const totalShown = Object.keys(sectionRows).reduce((n, k) => n + countOf(k), 0);
 
   // Derived, not set in an effect: the screen opens on whoever is at the station
   // with no click and no flash of the empty state.
@@ -461,25 +491,60 @@ export default function VitalsStationPage() {
             />
           </div>
 
+          {!isLoading && (
+            <div className="sq-filters" role="group" aria-label="Filter the queue">
+              <button
+                type="button"
+                className={filter === "all" ? "on" : ""}
+                aria-pressed={filter === "all"}
+                onClick={() => setFilter("all")}
+              >
+                All
+                <span className="sq-fcount">{totalShown}</span>
+              </button>
+              {SECTIONS.filter((g) => countOf(g.key) || filter === g.key).map((g) => (
+                <button
+                  key={g.key}
+                  type="button"
+                  className={filter === g.key ? "on" : ""}
+                  aria-pressed={filter === g.key}
+                  aria-label={`${g.title} — ${countOf(g.key)}`}
+                  onClick={() => setFilter(filter === g.key ? "all" : g.key)}
+                >
+                  {g.short}
+                  <span className="sq-fcount">{countOf(g.key)}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
           {isLoading && <div className="sq-foot">Loading…</div>}
           {!isLoading && totalShown === 0 && (
             <div className="sq-foot">
               {term ? `Nobody matches “${search.trim()}”.` : "Nobody at this station today."}
             </div>
           )}
+          {/* A search can empty the group the filter is pinned to while other
+              groups still have hits. Without this the list renders nothing and
+              reads as broken rather than as an empty filter. */}
+          {!isLoading && totalShown > 0 && filter !== "all" && !sectionRows[filter]?.length && (
+            <div className="sq-foot">
+              Nobody in {SECTIONS.find((g) => g.key === filter)?.title || "this group"}
+              {term ? ` matching “${search.trim()}”` : ""}.{" "}
+              <button type="button" className="sq-clearfilter" onClick={() => setFilter("all")}>
+                Show all
+              </button>
+            </div>
+          )}
 
           {SECTIONS.map((g) => {
-            const rows = {
-              atStation,
-              waiting: waitingList,
-              held,
-              moved,
-              exited,
-            }[g.key];
-            if (!rows.length) return null;
+            const rows = sectionRows[g.key];
+            if (!rows.length || (filter !== "all" && filter !== g.key)) return null;
             // A search that matches inside a closed group would hide its own
-            // results, so searching opens every group that has a hit.
-            const open = !!term || !collapsed.has(g.key);
+            // results, so searching opens every group that has a hit. A group
+            // picked from the filter row is the only thing on screen, so it is
+            // always open too.
+            const open = !!term || filter === g.key || !collapsed.has(g.key);
             const id = `sq-group-${g.key}`;
             return (
               <div className="sq-sect" key={g.key}>
@@ -487,7 +552,7 @@ export default function VitalsStationPage() {
                   icon={g.icon}
                   title={g.title}
                   sub={g.sub}
-                  count={rows.length}
+                  count={countOf(g.key)}
                   open={open}
                   onToggle={() => toggleGroup(g.key)}
                   id={id}

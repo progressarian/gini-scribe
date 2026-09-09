@@ -115,7 +115,16 @@ const QUEUE_SQL = `
      AND v.current_status = ANY($2)
      AND NOT COALESCE(p.is_blocked, FALSE)`;
 
-export async function getPharmacyQueue(visitDate, now = new Date(), db = pool) {
+// The groups the counter's two columns split into, and the only values `group`
+// accepts. pendingHandover is one list holding both onFloor and gone.
+export const PHARMACY_GROUPS = ["toDispense", "onFloor", "dispensed", "gone"];
+
+export async function getPharmacyQueue(
+  visitDate,
+  now = new Date(),
+  db = pool,
+  { group = "all" } = {},
+) {
   // Resolved per row, not once: the pharmacy budget can be overridden per
   // category, and this queue holds every category at the same moment.
   const budgetFor = budgetLookup(await getSlaConfig(db));
@@ -198,6 +207,9 @@ export async function getPharmacyQueue(visitDate, now = new Date(), db = pool) {
     }))
     .sort((a, b) => (b.dispensedAt || "").localeCompare(a.dispensedAt || ""));
 
+  const handover = await getPendingHandover(visitDate, db);
+  const wanted = PHARMACY_GROUPS.includes(group) ? group : "all";
+
   return {
     counts: {
       toDispense: toDispense.length,
@@ -210,9 +222,21 @@ export async function getPharmacyQueue(visitDate, now = new Date(), db = pool) {
       stockWarnings: toDispense.filter((c) => c.stock).length,
       dispensed: dispensed.filter((c) => c.dispensedHere).length,
     },
-    toDispense,
-    dispensed,
-    pendingHandover: await getPendingHandover(visitDate, db),
+    toDispense: wanted === "all" || wanted === "toDispense" ? toDispense : [],
+    dispensed: wanted === "all" || wanted === "dispensed" ? dispensed : [],
+    pendingHandover: handover.filter(
+      (r) =>
+        wanted === "all" || (wanted === "onFloor" && !r.gone) || (wanted === "gone" && !!r.gone),
+    ),
+    group: wanted,
+    // Whole-day totals for the filter chips, taken before the slice above —
+    // counted from the returned lists they would read 0 for every group but one.
+    groupCounts: {
+      toDispense: toDispense.length,
+      onFloor: handover.filter((r) => !r.gone).length,
+      dispensed: dispensed.length,
+      gone: handover.filter((r) => r.gone).length,
+    },
   };
 }
 
