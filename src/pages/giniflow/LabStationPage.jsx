@@ -813,7 +813,7 @@ function HealthrayCasePane({ row, onClose, onAction, onUploadCase, isAdmin, busy
                       the sample is drawn there is nothing to have a report of,
                       and "No report file yet" reads as a problem rather than as
                       the obvious. */}
-                  {(c.hasReport || c.collected) && (
+                  {(c.hasReport || c.canHaveReport) && (
                     <div className="dp-hint">
                       {c.hasReport ? "Report file stored" : "No report file yet"}
                     </div>
@@ -884,13 +884,14 @@ function HealthrayCasePane({ row, onClose, onAction, onUploadCase, isAdmin, busy
                       on the MO board, which is true of a Gini order and false
                       here, where nothing we store changes the case at HealthRay.
 
-                      Gated on the sample having been COLLECTED, not on the case
-                      being reported. A printed report may be in someone's hand
-                      before HealthRay stamps `reported_on`, so requiring that
-                      would keep a real result off the chart — but a sample nobody
-                      has drawn cannot have a report at all, and offering to
-                      upload one there is the screen inviting a fiction. */}
-                  {isAdmin && !c.hasReport && c.collected && (
+                      Gated on the case being able to HAVE a report, not on the
+                      sample having been drawn. A printed report may be in
+                      someone's hand before HealthRay stamps `reported_on`, so
+                      requiring that would keep a real result off the chart — but
+                      a tube the floor drew twenty minutes ago has nothing behind
+                      it, and offering to upload one there is the screen inviting
+                      a fiction. */}
+                  {isAdmin && !c.hasReport && c.canHaveReport && (
                     <>
                       <div className="dp-sec-title">Upload report</div>
                       <button

@@ -397,6 +397,14 @@ const stageIndex = (c) => Math.max(healthrayStage(c), floorStage(c));
 
 export const isCollected = (c) => stageIndex(c) >= 1;
 
+// Whether a report could exist yet. HealthRay stamps collection, receipt and
+// sign-out at the same instant — 240 of 258 reported cases carry four identical
+// timestamps — so ITS collection means a finished case with a file behind it.
+// The floor's own "collected" means the opposite: a tube that left the patient
+// minutes ago, nothing run, nothing to attach. Offering a drop zone there asks
+// somebody to upload a report that does not exist, against an empty case.
+const canHaveReport = (c) => healthrayStage(c) >= 1 || floorStage(c) >= FLOOR_STAGE.results_ready;
+
 // What the technician does next on a case Gini Flow does not own — the same
 // question `NEXT_ACTION` answers for a Gini order, so the two halves of this
 // screen stop describing one physical act in two different vocabularies.
@@ -573,6 +581,7 @@ async function getHealthrayCases(visitDate, q = null, db = pool) {
         // Only the floor's own steps are offerable, and only the next one. A case
         // HealthRay has already carried past this point needs nothing recorded.
         nextAction: idx < CASE_NEXT_ACTION.length ? CASE_NEXT_ACTION[idx] : null,
+        canHaveReport: canHaveReport(c),
         state: !c.synced
           ? { key: "awaiting", label: "Awaiting results" }
           : !c.reported
