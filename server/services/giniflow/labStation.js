@@ -1073,6 +1073,58 @@ export async function markLabCaseAction(
 // It does NOT touch `reported_on` or `results_synced`. Attaching a file is not
 // the lab signing a case out, and claiming otherwise would put a case into
 // "Reported" that the lab has not reported.
+// Brief §2.3: a result landing sets `results_status = 'ready'`, which is what
+// turns the patient green on the MO and consultant queues. The Gini queue does
+// this through `advanceSample`; a hospital case has no order to advance, so it is
+// written here — the same flag, for the same reason.
+//
+// Guarded, because "ready" is a claim about the WHOLE visit and one case is one
+// panel. It is set only when nothing else for that patient that day is still
+// outstanding, or the MO is told the results are in while a second panel is still
+// running — the exact failure the partial state exists to prevent.
+//
+// A case counts as finished when HealthRay has reported it, when a file is
+// stored, when the lab typed its values, or when the floor marked it results-done.
+// The first two were the whole test until typed values existed for hospital cases,
+// which left a patient whose numbers were all typed waiting on themselves.
+export async function markCaseResultsReady(db, { patientId, caseDate, caseNo, uhid }) {
+  const { rowCount } = await db.query(
+    `UPDATE giniflow_visits v
+        SET results_status = 'ready', updated_at = NOW()
+      WHERE v.patient_id = $1
+        AND v.visit_date = $2::date
+        AND v.results_status <> 'ready'
+        AND NOT EXISTS (
+          SELECT 1 FROM lab_cases o
+           WHERE o.case_date = v.visit_date
+             AND o.case_no <> $3
+             -- Match the patient properly. COALESCE(o.patient_id, $1) = $1 was
+             -- here and is a trap: an unlinked case has a NULL patient_id, so it
+             -- matched EVERY patient and blocked every upload. An unlinked case
+             -- belongs to this patient only if its UHID says so.
+             AND (o.patient_id = $1
+                  OR (o.patient_id IS NULL
+                      AND o.raw_list_json->'patient'->>'healthray_uid' = $4))
+             AND o.raw_detail_json->>'reported_on' IS NULL
+             AND o.pdf_storage_path IS NULL
+             AND NOT EXISTS (
+               SELECT 1 FROM lab_results lr WHERE lr.lab_case_no = o.case_no
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM giniflow_lab_case_actions a
+                WHERE a.case_no = o.case_no AND a.action = 'results_ready'
+             )
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM giniflow_lab_orders g
+           WHERE g.visit_id = v.id AND g.sample_status <> 'uploaded'
+        )
+      RETURNING v.id`,
+    [patientId, caseDate, caseNo, uhid],
+  );
+  return { rowCount };
+}
+
 export async function uploadLabCaseReport(
   caseNo,
   { base64, fileName, mediaType = "application/pdf", actorId = null, confirmAdditional = false },
@@ -1179,33 +1231,12 @@ export async function uploadLabCaseReport(
   //
   // Otherwise the MO would be told the results are in while a second panel is
   // still running — the exact failure the partial state exists to prevent.
-  const ready = await db.query(
-    `UPDATE giniflow_visits v
-        SET results_status = 'ready', updated_at = NOW()
-      WHERE v.patient_id = $1
-        AND v.visit_date = $2::date
-        AND v.results_status <> 'ready'
-        AND NOT EXISTS (
-          SELECT 1 FROM lab_cases o
-           WHERE o.case_date = v.visit_date
-             AND o.case_no <> $3
-             -- Match the patient properly. COALESCE(o.patient_id, $1) = $1 was
-             -- here and is a trap: an unlinked case has a NULL patient_id, so it
-             -- matched EVERY patient and blocked every upload. An unlinked case
-             -- belongs to this patient only if its UHID says so.
-             AND (o.patient_id = $1
-                  OR (o.patient_id IS NULL
-                      AND o.raw_list_json->'patient'->>'healthray_uid' = $4))
-             AND o.raw_detail_json->>'reported_on' IS NULL
-             AND o.pdf_storage_path IS NULL
-        )
-        AND NOT EXISTS (
-          SELECT 1 FROM giniflow_lab_orders g
-           WHERE g.visit_id = v.id AND g.sample_status <> 'uploaded'
-        )
-      RETURNING v.id`,
-    [c.patient_id, c.case_date, caseNo, c.uhid],
-  );
+  const ready = await markCaseResultsReady(db, {
+    patientId: c.patient_id,
+    caseDate: c.case_date,
+    caseNo,
+    uhid: c.uhid,
+  });
 
   return {
     caseNo,

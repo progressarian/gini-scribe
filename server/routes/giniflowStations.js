@@ -186,6 +186,9 @@ import {
   suggestedRows,
   searchTestNames,
   getResults,
+  getCaseResults,
+  saveCaseResults,
+  suggestedCaseRows,
   saveResults,
 } from "../services/giniflow/labResults.js";
 import { hasCapability, hasAnyCapability } from "../../shared/permissions.js";
@@ -1182,6 +1185,40 @@ router.get("/giniflow/lab/:orderId/results", labGate, async (req, res) => {
     handleError(res, e, "Gini Flow lab results");
   }
 });
+
+// The same two endpoints for a case the hospital raised on HealthRay — which is
+// every lab at this hospital. Three segments deep, so it cannot be swallowed by
+// the `/giniflow/lab/:orderId/results` pattern above.
+router.get("/giniflow/lab/case/:caseNo/results", labGate, async (req, res) => {
+  try {
+    res.json({
+      results: await getCaseResults(req.params.caseNo),
+      suggestions: await suggestedCaseRows(req.params.caseNo),
+    });
+  } catch (e) {
+    handleError(res, e, "Gini Flow lab case results");
+  }
+});
+
+router.post(
+  "/giniflow/lab/case/:caseNo/results",
+  labGate,
+  validate(giniflowLabResultsSchema),
+  async (req, res) => {
+    try {
+      res.json(
+        await saveCaseResults(req.params.caseNo, {
+          rows: req.body.rows,
+          panelName: req.body.panelName,
+          actorId: req.doctor?.doctor_id ?? null,
+          actorRole: req.doctor?.role || "lab",
+        }),
+      );
+    } catch (e) {
+      handleError(res, e, "Gini Flow save lab case results");
+    }
+  },
+);
 
 router.get("/giniflow/lab/test-names", labGate, async (req, res) => {
   try {

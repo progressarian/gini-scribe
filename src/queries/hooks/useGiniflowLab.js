@@ -49,11 +49,21 @@ export function useUploadReport() {
 // Results typed in rather than scanned (32-LAB-TYPED-RESULTS-PLAN.md). The rows
 // go to lab_results, so nothing else needs a hook to read them — the Labs tab,
 // the trends and the patient app already do.
-export function useLabResults(orderId) {
+// One form serves both halves of the lab station, so one pair of hooks addresses
+// both: a Gini order by id, a hospital case by case number.
+const resultsPath = ({ orderId, caseNo } = {}) =>
+  caseNo
+    ? `/api/giniflow/lab/case/${encodeURIComponent(caseNo)}/results`
+    : `/api/giniflow/lab/${orderId}/results`;
+
+const resultsKey = ({ orderId, caseNo } = {}) => (caseNo ? `case:${caseNo}` : orderId);
+
+export function useLabResults(target) {
+  const key = resultsKey(target);
   return useQuery({
-    queryKey: ["giniflow", "lab", "results", orderId],
-    queryFn: async () => (await api.get(`/api/giniflow/lab/${orderId}/results`)).data,
-    enabled: !!orderId,
+    queryKey: ["giniflow", "lab", "results", key],
+    queryFn: async () => (await api.get(resultsPath(target))).data,
+    enabled: !!key,
   });
 }
 
@@ -70,8 +80,8 @@ export function useTestNameSearch(term) {
 export function useSaveLabResults() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ orderId, rows, panelName }) =>
-      (await api.post(`/api/giniflow/lab/${orderId}/results`, { rows, panelName })).data,
+    mutationFn: async ({ orderId, caseNo, rows, panelName }) =>
+      (await api.post(resultsPath({ orderId, caseNo }), { rows, panelName })).data,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["giniflow", "lab"] });
       queryClient.invalidateQueries({ queryKey: ["giniflow", "board"] });

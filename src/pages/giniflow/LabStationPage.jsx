@@ -693,7 +693,16 @@ function HealthrayCard({ row, onOpen, readOnly = false }) {
   );
 }
 
-function HealthrayCasePane({ row, onClose, onAction, onUploadCase, isAdmin, busy }) {
+function HealthrayCasePane({
+  row,
+  onClose,
+  onAction,
+  onUploadCase,
+  onResultsSaved,
+  onResultsFailed,
+  isAdmin,
+  busy,
+}) {
   const paneRef = useRef(null);
   const caseFileRef = useRef(null);
   const [uploadFor, setUploadFor] = useState(null);
@@ -905,6 +914,31 @@ function HealthrayCasePane({ row, onClose, onAction, onUploadCase, isAdmin, busy
                       </>
                     );
                   })()}
+                  {/* Typed values, for a hospital case as much as a Gini order
+                      (32-LAB-TYPED-RESULTS-PLAN.md). That plan built the form
+                      against `giniflow_lab_orders` only — six rows in the table's
+                      whole history — so at this hospital, where every lab is
+                      raised on HealthRay, the lab could never type a value.
+                      Gated on the sample being in the lab's hands, the same rule
+                      the Gini form uses, and available afterwards so a number can
+                      be corrected or added late. */}
+                  {c.collected && (
+                    <>
+                      <div className="dp-sec-title">
+                        Enter results — values the doctor can trend
+                      </div>
+                      <LabResultsForm
+                        // Keyed on the case: the pane is reused when the
+                        // technician clicks from one patient to the next, and
+                        // without this the form would carry the first patient's
+                        // typed values onto the second's record.
+                        key={c.caseNo}
+                        caseNo={c.caseNo}
+                        onSaved={(r) => onResultsSaved?.(row, r)}
+                        onFailed={(e) => onResultsFailed?.(e)}
+                      />
+                    </>
+                  )}
                   {/* The reference design's own upload section (gini-stations.html
                       `lp-upload`): a drop zone reading "Tap to upload lab report
                       PDF", not a button. Its ⚡ note is deliberately NOT copied —
@@ -1420,6 +1454,8 @@ export default function LabStationPage() {
       </div>
 
       <HealthrayCasePane
+        onResultsSaved={onResultsSaved}
+        onResultsFailed={onResultsFailed}
         row={
           openCaseId == null ? null : healthray.find((r) => caseRowKey(r) === openCaseId) || null
         }

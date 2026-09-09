@@ -1712,6 +1712,7 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
       home_collection: "Home Collection",
       call_status: "Call Status",
       appointment_type: "Mode",
+      time_slot: "Time Slot",
     };
     const trackingNow = Object.keys(TRACK).filter((k) => k in req.body);
     let before = {};

@@ -1,7 +1,7 @@
 import pool from "../../config/db.js";
 import { getCanonical } from "../../utils/labCanonical.js";
 import { flagForRange } from "../../utils/labFlag.js";
-import { advanceSample } from "./labStation.js";
+import { advanceSample, markCaseResultsReady } from "./labStation.js";
 import { opensLabGate } from "../../../shared/labPayment.js";
 import { syncBiomarkersFromLatestLabs } from "../healthray/db.js";
 
@@ -43,6 +43,65 @@ const orderContext = async (orderId, db) => {
   return rows[0];
 };
 
+// The same, for a case the hospital raised on HealthRay — which is every lab at
+// this hospital. `giniflow_lab_orders` has six rows in its whole history, so the
+// typed-results feature shipped reachable only through a path nobody uses.
+//
+// The patient is the delicate part. `lab_cases.patient_id` is stamped only by the
+// DETAIL sync, which does not run until results come back, so almost every case
+// the lab is working on has none. The UHID in the payload is the fallback the
+// board and the lab station already group by — but HealthRay REASSIGNS a UHID to
+// a different person over time, and this write puts numbers on a clinical record.
+// So the resolved patient is NAMED back to the caller, and a case that resolves to
+// nobody is refused rather than guessed at.
+const caseContext = async (caseNo, db) => {
+  const { rows } = await db.query(
+    `SELECT lc.case_no,
+            lc.case_date::text AS visit_date,
+            lc.test_names,
+            lc.raw_list_json->'patient'->>'healthray_uid' AS uhid,
+            COALESCE(lc.patient_id, uid.id) AS patient_id,
+            COALESCE(p.name, uid.name) AS patient_name,
+            v.id            AS visit_id,
+            v.appointment_id
+       FROM lab_cases lc
+       LEFT JOIN patients uid ON uid.file_no = lc.raw_list_json->'patient'->>'healthray_uid'
+       LEFT JOIN patients p ON p.id = lc.patient_id
+       LEFT JOIN LATERAL (
+         -- One row, deterministically. A patient with two appointments in a day
+         -- can hold two visit rows (one per appointment), and an unordered join
+         -- would take an arbitrary one — putting the results against whichever
+         -- appointment the planner happened to return.
+         SELECT gv.id, gv.appointment_id
+           FROM giniflow_visits gv
+          WHERE gv.visit_date = lc.case_date
+            AND gv.patient_id = COALESCE(lc.patient_id, uid.id)
+          ORDER BY gv.appointment_time NULLS LAST, gv.created_at
+          LIMIT 1
+       ) v ON TRUE
+      WHERE lc.case_no = $1`,
+    [caseNo],
+  );
+  if (!rows.length) throw bad("Lab case not found", 404);
+  const r = rows[0];
+  if (!r.patient_id) {
+    throw bad(
+      "This case is not linked to a patient yet — values cannot be recorded against it",
+      409,
+    );
+  }
+  return {
+    kind: "case",
+    caseNo: r.case_no,
+    patient_id: r.patient_id,
+    patientName: r.patient_name,
+    visit_date: r.visit_date,
+    appointment_id: r.appointment_id ?? null,
+    uhid: r.uhid,
+    tests: r.test_names || [],
+  };
+};
+
 // What this lab has actually reported before under the panels this order asks
 // for — each parameter's name, and the unit and range it most often carries.
 // The hospital's own history rather than a catalogue somebody would have to
@@ -56,7 +115,18 @@ const PREFILL_PER_TEST = 12;
 
 export async function suggestedRows(orderId, db = pool) {
   const order = await orderContext(orderId, db);
-  const tests = order.tests || [];
+  return suggestionsForTests(order.tests || [], db);
+}
+
+// A hospital case carries its panels in `lab_cases.test_names`, an order carries
+// them in a join table; past that point the question — what does this lab report
+// under these panels — is identical, so it is asked once.
+export async function suggestedCaseRows(caseNo, db = pool) {
+  const c = await caseContext(caseNo, db);
+  return suggestionsForTests(c.tests || [], db);
+}
+
+async function suggestionsForTests(tests, db = pool) {
   if (!tests.length) return [];
 
   const { rows } = await db.query(
@@ -121,13 +191,24 @@ export async function searchTestNames(q, db = pool) {
 }
 
 export async function getResults(orderId, db = pool) {
+  return resultsLinkedTo("lab_order_id", orderId, db);
+}
+
+export async function getCaseResults(caseNo, db = pool) {
+  return resultsLinkedTo("lab_case_no", caseNo, db);
+}
+
+// The link column is chosen here, never interpolated from a caller: the two
+// literals are the only values this ever takes.
+async function resultsLinkedTo(column, value, db = pool) {
+  const where = column === "lab_case_no" ? "lab_case_no = $1" : "lab_order_id = $1";
   const { rows } = await db.query(
     `SELECT id, test_name, canonical_name, result, result_text, unit, ref_range, flag,
             panel_name, test_date::text AS test_date
        FROM lab_results
-      WHERE lab_order_id = $1
+      WHERE ${where}
       ORDER BY test_name`,
-    [orderId],
+    [value],
   );
   return rows.map((r) => ({
     id: r.id,
@@ -146,16 +227,8 @@ export async function getResults(orderId, db = pool) {
 // One transaction: the values onto the patient's record, the order finished the
 // same way an upload finishes it, and the biomarkers the MO and doctor screens
 // read brought up to date.
-export async function saveResults(
-  orderId,
-  { rows = [], actorId = null, panelName = null },
-  db = pool,
-) {
-  // One box on the form, two kinds of result. "Positive" is a result the doctor
-  // needs; it simply cannot be trended or flagged, so it goes to result_text and
-  // leaves `result` null rather than being coerced into a 0 that would read as a
-  // real — and dangerously low — value.
-  const entries = rows
+const normalise = (rows, panelName) =>
+  rows
     .map((r) => {
       const raw = r.value;
       const numeric = typeof raw === "number" ? raw : null;
@@ -171,29 +244,16 @@ export async function saveResults(
     })
     .filter((r) => r.testName && (Number.isFinite(r.value) || r.valueText));
 
-  if (!entries.length) throw bad("Nothing to save — every row needs a test and a value");
-
-  const order = await orderContext(orderId, db);
+// The write itself, identical for an order and for a hospital case — only the
+// column that links a row back to what produced it differs. `column` is one of
+// two literals chosen here and never taken from a caller.
+async function writeEntries(db, ctx, entries, column) {
+  const link = column === "lab_case_no" ? ctx.caseNo : ctx.id;
   let written = 0;
   const skipped = [];
-
-  // The same gate uploadReport enforces, checked BEFORE anything is written: the
-  // upload path refuses an uncleared order, and advanceSample would refuse this
-  // one too — but only after the values had already landed on the patient's
-  // permanent record, leaving rows behind and an error on the screen.
-  if (!opensLabGate(order.payment_status)) {
-    throw bad(
-      order.payment_status === "insurance_claim"
-        ? "The insurance claim is not approved yet — results cannot be recorded against this order"
-        : "Payment is not cleared for this order",
-      409,
-    );
-  }
-
   const client = await db.connect();
   try {
     await client.query("BEGIN");
-
     for (const e of entries) {
       const canonical = getCanonical(e.testName) || e.testName.toLowerCase().replace(/\s+/g, "_");
       const flag = e.value === null ? null : flagForRange(e.value, e.refRange);
@@ -206,13 +266,13 @@ export async function saveResults(
         `UPDATE lab_results
             SET test_name = $4, result = $5, result_text = $6, unit = $7,
                 ref_range = $8, flag = $9, panel_name = COALESCE($10, panel_name),
-                lab_order_id = $11, source = $12
+                ${column} = $11, source = $12
           WHERE patient_id = $1 AND canonical_name = $2 AND test_date::date = $3::date
-            AND (source = $12 OR lab_order_id = $11)`,
+            AND (source = $12 OR ${column} = $11)`,
         [
-          order.patient_id,
+          ctx.patient_id,
           canonical,
-          order.visit_date,
+          ctx.visit_date,
           e.testName,
           e.value,
           e.valueText,
@@ -220,7 +280,7 @@ export async function saveResults(
           e.refRange,
           flag,
           e.panelName,
-          orderId,
+          link,
           SOURCE,
         ],
       );
@@ -241,7 +301,7 @@ export async function saveResults(
         `SELECT 1 FROM lab_results
           WHERE patient_id = $1 AND canonical_name = $2 AND test_date::date = $3::date
           LIMIT 1`,
-        [order.patient_id, canonical, order.visit_date],
+        [ctx.patient_id, canonical, ctx.visit_date],
       );
       if (owned.rowCount) {
         skipped.push(e.testName);
@@ -250,15 +310,15 @@ export async function saveResults(
 
       const inserted = await client.query(
         `INSERT INTO lab_results
-           (patient_id, appointment_id, lab_order_id, test_date, test_name, canonical_name,
+           (patient_id, appointment_id, ${column}, test_date, test_name, canonical_name,
             result, result_text, unit, ref_range, flag, panel_name, source)
          VALUES ($1,$2,$3,$4::date,$5,$6,$7,$8,$9,$10,$11,$12,$13)
          ON CONFLICT DO NOTHING`,
         [
-          order.patient_id,
-          order.appointment_id,
-          orderId,
-          order.visit_date,
+          ctx.patient_id,
+          ctx.appointment_id,
+          link,
+          ctx.visit_date,
           e.testName,
           canonical,
           e.value,
@@ -275,7 +335,6 @@ export async function saveResults(
       if (inserted.rowCount) written += 1;
       else skipped.push(e.testName);
     }
-
     await client.query("COMMIT");
   } catch (e) {
     await client.query("ROLLBACK");
@@ -283,6 +342,51 @@ export async function saveResults(
   } finally {
     client.release();
   }
+  return { written, skipped };
+}
+
+// The MO and doctor cards read appointments.biomarkers, not lab_results, so
+// without this the numbers would be in the chart and absent from the screens the
+// floor is actually looking at. Best-effort: a biomarker sync that fails must not
+// lose the results.
+const syncBiomarkers = async (patientId, appointmentId) => {
+  if (!appointmentId) return;
+  try {
+    await syncBiomarkersFromLatestLabs(patientId, appointmentId);
+  } catch (e) {
+    console.error("Lab results biomarker sync failed:", e.message);
+  }
+};
+
+export async function saveResults(
+  orderId,
+  { rows = [], actorId = null, panelName = null },
+  db = pool,
+) {
+  const entries = normalise(rows, panelName);
+  if (!entries.length) throw bad("Nothing to save — every row needs a test and a value");
+
+  const order = await orderContext(orderId, db);
+
+  // The same gate uploadReport enforces, checked BEFORE anything is written: the
+  // upload path refuses an uncleared order, and advanceSample would refuse this
+  // one too — but only after the values had already landed on the patient's
+  // permanent record, leaving rows behind and an error on the screen.
+  if (!opensLabGate(order.payment_status)) {
+    throw bad(
+      order.payment_status === "insurance_claim"
+        ? "The insurance claim is not approved yet — results cannot be recorded against this order"
+        : "Payment is not cleared for this order",
+      409,
+    );
+  }
+
+  const { written, skipped } = await writeEntries(
+    db,
+    { ...order, id: orderId },
+    entries,
+    "lab_order_id",
+  );
 
   // Typed values finish the order exactly as a file does — same call, so the MO
   // is notified by one code path whether the result arrived as numbers or as a
@@ -290,17 +394,7 @@ export async function saveResults(
   if (order.sample_status !== "uploaded") {
     await advanceSample(orderId, { to: "uploaded", actorId }, db);
   }
-
-  // The MO and doctor cards read appointments.biomarkers, not lab_results, so
-  // without this the numbers would be in the chart and absent from the screens
-  // the floor is actually looking at.
-  if (order.appointment_id) {
-    try {
-      await syncBiomarkersFromLatestLabs(order.patient_id, order.appointment_id);
-    } catch (e) {
-      console.error("Lab results biomarker sync failed:", e.message);
-    }
-  }
+  await syncBiomarkers(order.patient_id, order.appointment_id);
 
   return {
     orderId,
@@ -309,5 +403,58 @@ export async function saveResults(
     // the one already on file came from somewhere else and may disagree.
     skipped,
     results: await getResults(orderId, db),
+  };
+}
+
+// The same, for a case the hospital raised on HealthRay.
+//
+// No payment gate: a HealthRay case is billed in HealthRay and this system has no
+// say in it — the lab station has never gated one, and inventing a gate here
+// would block the values for a bill we cannot read.
+//
+// Nothing is written back to HealthRay, so the case is finished the only way this
+// system can finish one: the floor's own `results_ready` step, which is what moves
+// it out of the lab queue, plus the visit-level results flag the upload path sets.
+export async function saveCaseResults(
+  caseNo,
+  { rows = [], actorId = null, actorRole = "lab", panelName = null },
+  db = pool,
+) {
+  const entries = normalise(rows, panelName);
+  if (!entries.length) throw bad("Nothing to save — every row needs a test and a value");
+
+  const c = await caseContext(caseNo, db);
+  const { written, skipped } = await writeEntries(db, c, entries, "lab_case_no");
+
+  // Both only when something actually landed. A save whose every row was already
+  // owned by another source has written nothing, and the results-ready check
+  // deliberately excludes THIS case — so calling it here would clear the visit on
+  // the strength of a case that still has nothing against it.
+  let ready = { rowCount: 0 };
+  if (written) {
+    await db.query(
+      `INSERT INTO giniflow_lab_case_actions (case_no, action, actor_role, actor_id)
+       VALUES ($1, 'results_ready', $2, $3)
+       ON CONFLICT (case_no, action) DO NOTHING`,
+      [caseNo, actorRole, actorId],
+    );
+    ready = await markCaseResultsReady(db, {
+      patientId: c.patient_id,
+      caseDate: c.visit_date,
+      caseNo,
+      uhid: c.uhid,
+    });
+  }
+  if (written) await syncBiomarkers(c.patient_id, c.appointment_id);
+
+  return {
+    caseNo,
+    // Whose record this went on. The patient may have been resolved through a
+    // reassignable UHID, so the desk is told the name rather than trusting it.
+    patientName: c.patientName,
+    saved: written,
+    skipped,
+    markedResultsReady: ready.rowCount > 0,
+    results: await getCaseResults(caseNo, db),
   };
 }

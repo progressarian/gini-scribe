@@ -238,10 +238,12 @@ async function importSheetPatient(patient, tabDate) {
 
     await pool.query(
       `UPDATE appointments SET
-        patient_id = $2, patient_name = $3, phone = $4,
-        time_slot = COALESCE($5, time_slot),
-        visit_type = COALESCE($6, visit_type),
-        age = COALESCE($7, age), sex = COALESCE($8, sex),
+        patient_id = COALESCE($2, patient_id),
+        patient_name = COALESCE(NULLIF(patient_name, ''), $3),
+        phone = COALESCE(NULLIF(phone, ''), $4),
+        time_slot = COALESCE(NULLIF(time_slot, ''), $5),
+        visit_type = COALESCE(NULLIF(visit_type, ''), $6),
+        age = COALESCE(age, $7), sex = COALESCE(NULLIF(sex, ''), $8),
         sheet_condition = $9, updated_at = NOW()
        WHERE id = $1`,
       [row.id, patientId, name, phone, timeSlot, visitType, age, sex, condition],

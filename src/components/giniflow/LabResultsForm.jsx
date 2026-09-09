@@ -89,8 +89,8 @@ function AddRow({ onAdd }) {
 // the lab types the handful it has values for, not every line it might.
 const VISIBLE_ROWS = 10;
 
-export default function LabResultsForm({ orderId, onSaved, onFailed }) {
-  const { data, isLoading } = useLabResults(orderId);
+export default function LabResultsForm({ orderId, caseNo, onSaved, onFailed }) {
+  const { data, isLoading } = useLabResults({ orderId, caseNo });
   const save = useSaveLabResults();
   const [rows, setRows] = useState(null);
   // The order's remaining suggested parameters, offered in the picker below.
@@ -132,7 +132,7 @@ export default function LabResultsForm({ orderId, onSaved, onFailed }) {
 
   const submit = () =>
     save.mutate(
-      { orderId, rows: filled },
+      { orderId, caseNo, rows: filled },
       { onSuccess: (r) => onSaved?.(r), onError: (e) => onFailed?.(e) },
     );
 
