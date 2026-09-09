@@ -1447,7 +1447,8 @@ router.post("/ghm-appointments", async (req, res) => {
              whatsapp_message=$25, additional_whatsapp_msg=$26, home_collection=$27,
              status='scheduled', alt_phone=COALESCE($28, alt_phone),
              age=COALESCE($29, age), sex=COALESCE($30, sex),
-             appointment_date=$32::date, file_no=COALESCE(file_no, $33)
+             appointment_date=$32::date, file_no=COALESCE(file_no, $33),
+             booking_status=CASE WHEN $32::date IS NULL THEN booking_status ELSE 'booked' END
            WHERE id=$31 RETURNING *`,
           [
             patient_id,
@@ -1496,11 +1497,12 @@ router.post("/ghm-appointments", async (req, res) => {
         misc_notes, reports_uploaded, will_get_test_at_gini,
         requested_by_cc, cc_remark_date, notes, is_walkin,
         whatsapp_message, additional_whatsapp_msg, home_collection, alt_phone,
-        age, sex, status
+        age, sex, status, booking_status
       ) VALUES (
         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
         $15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,
-        $31,$32,'scheduled'
+        $31,$32,'scheduled',
+        CASE WHEN $6::date IS NULL THEN NULL ELSE 'booked' END
       ) RETURNING *`,
           [
             patient_id,
@@ -1709,6 +1711,7 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
       booking_status: "Booking Status",
       home_collection: "Home Collection",
       call_status: "Call Status",
+      appointment_type: "Mode",
     };
     const trackingNow = Object.keys(TRACK).filter((k) => k in req.body);
     let before = {};

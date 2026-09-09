@@ -1248,7 +1248,7 @@ function EditPatientModal({ row, doctors, onClose }) {
     appointment_date: toDateInput(row.appointment_date),
     time_slot: row.time_slot || "",
     doctor_name: row.doctor_name || "",
-    appointment_type: row.mode_of_appointment || row.appointment_type || "",
+    appointment_type: row.appointment_type || row.mode_of_appointment || "",
     condition: row.condition || "",
     address: row.address || "",
     booked_by_name: row.booked_by_name || "",
@@ -2982,8 +2982,8 @@ export default function GHMPage() {
                           {/* Mode of appointment — editable */}
                           <td>
                             <Dropdown
-                              value={row.mode_of_appointment || ""}
-                              options={withCurrent(MODE_OPTIONS, row.mode_of_appointment)}
+                              value={row.appointment_type || ""}
+                              options={withCurrent(MODE_OPTIONS, row.appointment_type)}
                               onChange={(v) => patch(row.id, "appointment_type", v)}
                               variant="cell"
                               ariaLabel="Mode of appointment"

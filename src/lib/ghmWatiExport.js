@@ -98,7 +98,7 @@ const toSheetRow = (row, fallbackDate, lastSeen = {}) => {
     fmtSheetDate(row.follow_up_date),
     fmtSheetDate(row.preferred_date),
     row.visit_type || "",
-    row.mode_of_appointment || row.appointment_type || "",
+    row.appointment_type || row.mode_of_appointment || "",
     lastSeenLabel(lastSeen[row.patient_id]),
     row.prescription_explained_by || "",
     // The STORED status, not the day-scoped one. On screen the status resets
