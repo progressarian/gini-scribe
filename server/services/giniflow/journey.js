@@ -74,13 +74,12 @@ const trimmed = (v, max = 120) =>
 
 // ── Reference data → an editable plan ──────────────────────────────────────
 
-// The type's template, shaped for the builder. is_optional / condition_key are
-// carried through rather than flattened: the templates already encode which
-// steps are a choice, and dropping that would quietly make every journey the
-// maximal one.
+// The type's template, shaped for the builder. condition_key is carried through
+// rather than flattened: the templates already encode which steps are a choice,
+// and dropping that would quietly make every journey the maximal one.
 export async function defaultPlan(visitTypeId, db = pool) {
   const { rows } = await db.query(
-    `SELECT t.step_order, t.is_default, t.is_optional, t.condition_key,
+    `SELECT t.step_order, t.is_default, t.condition_key,
             c.id AS catalog_id, c.name, c.station, c.assigned_role, c.chain_status,
             COALESCE(t.override_duration_min, c.default_duration_min)::int AS minutes
        FROM flow_step_templates t
@@ -103,10 +102,8 @@ export async function defaultPlan(visitTypeId, db = pool) {
     station: r.station,
     role: r.assigned_role,
     chainStatus: r.chain_status,
-    optional: !!r.is_optional,
     conditionKey: r.condition_key,
-    // An optional step is offered unticked; everything else starts included.
-    included: r.is_default !== false && !r.is_optional,
+    included: r.is_default !== false,
     source: "template",
   }));
 }

@@ -437,7 +437,7 @@ function PatientCard({
             </span>
           )}
         </div>
-        {isLab && card.finished && !card.lab.atLab && (
+        {isLab && card.finished && !card.lab.collected && (
           <div className="wait4 blocked">
             <span className="w-ico">🚫</span> Left without giving a sample
           </div>

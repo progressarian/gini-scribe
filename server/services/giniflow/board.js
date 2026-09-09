@@ -98,6 +98,7 @@ const BOARD_SQL = `
          hrlab.tests                               AS hr_lab_tests,
          hrlab.since                               AS hr_lab_since,
          hrlab.collected                           AS hr_lab_collected,
+         hrlab.all_collected                       AS hr_lab_all_collected,
          hrlab.at_lab                              AS hr_lab_at_lab
     FROM giniflow_visits v
     JOIN patients p ON p.id = v.patient_id
@@ -158,12 +159,34 @@ const BOARD_SQL = `
       SELECT count(*)::int AS cases,
              sum(coalesce(array_length(lc.test_names, 1), 0))::int AS tests,
              min(COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'registered_at') AS since,
+             -- The floor's own record counts, exactly as it does in labStation.
+             -- HealthRay only learns a sample was drawn when the RESULTS come
+             -- back: collected_on rides in on raw_detail_json hours later, and
+             -- phlebotomy_status is left at Pending on most days. Reading
+             -- HealthRay alone therefore told a floor of twenty drawn samples
+             -- that every one was still awaiting collection, and labelled
+             -- patients whose blood was taken as having left without giving one.
              bool_or(
                lc.raw_list_json->>'phlebotomy_status' = 'Completed'
                OR (COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'collected_on') IS NOT NULL
+               OR EXISTS (SELECT 1 FROM giniflow_lab_case_actions a
+                           WHERE a.case_no = lc.case_no AND a.action = 'sample_taken')
              ) AS collected,
+             -- "Any drawn" answers what the lab is doing; "every one drawn"
+             -- answers whether a patient went home with a tube still owed. A
+             -- patient with two cases and one collected satisfies the first and
+             -- fails the second, and it is the second that must not be missed.
+             bool_and(
+               lc.raw_list_json->>'phlebotomy_status' = 'Completed'
+               OR (COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'collected_on') IS NOT NULL
+               OR EXISTS (SELECT 1 FROM giniflow_lab_case_actions a
+                           WHERE a.case_no = lc.case_no AND a.action = 'sample_taken')
+             ) AS all_collected,
              bool_or(
                (COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'received_on') IS NOT NULL
+               OR EXISTS (SELECT 1 FROM giniflow_lab_case_actions a
+                           WHERE a.case_no = lc.case_no
+                             AND a.action IN ('processing', 'results_ready'))
              ) AS at_lab
         FROM lab_cases lc
        WHERE lc.case_date = v.visit_date
@@ -369,6 +392,9 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
             hintIcon: row.lab_sample_status === "payment_pending" ? "💰" : "📤",
             blocking: row.lab_sample_status === "payment_pending",
             source: "giniflow",
+            collected: ["sample_collected", "processing", "results_ready"].includes(
+              row.lab_sample_status,
+            ),
             atLab: ["sample_collected", "processing", "results_ready"].includes(
               row.lab_sample_status,
             ),
@@ -396,6 +422,10 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
               blocking: false,
               source: "healthray",
               caseCount: row.hr_lab_cases,
+              // Drawn and at the analyzer are two different facts. The card said
+              // "Left without giving a sample" whenever the lab had not RECEIVED
+              // the tube, which is true of every sample drawn in the last hour.
+              collected: !!row.hr_lab_all_collected || !!row.hr_lab_at_lab,
               atLab: !!row.hr_lab_at_lab,
             }
           : labOnlyLine

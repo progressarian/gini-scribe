@@ -133,6 +133,7 @@ const ROUTE_CAPABILITIES = [
   // Call logging on the GHM sheet — the part of it OBT actually works.
   ["/api/cc-calling", [CAP.RECEPTION_OPS, CAP.OBT_OPS]],
   ["/api/call-attempts", [CAP.RECEPTION_OPS, CAP.OBT_OPS]],
+  ["/api/call-sessions", [CAP.RECEPTION_OPS, CAP.OBT_OPS]],
   ["/api/clinic-holidays", CAP.RECEPTION_OPS],
   ["/api/obt-status", CAP.OBT_OPS],
   // Gini Flow. The board is read-only, so one capability covers every route

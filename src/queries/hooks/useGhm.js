@@ -165,7 +165,12 @@ export function useActiveCalls(appointmentIds) {
 
 export function useCallClaim() {
   const queryClient = useQueryClient();
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: qk.ghm.any.activeCalls });
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: qk.ghm.any.activeCalls });
+    // Releasing the flag writes the session row, so the open History panel is
+    // stale the moment the claim clears.
+    queryClient.invalidateQueries({ queryKey: qk.ghm.any.callSessions });
+  };
   const claim = useMutation({
     mutationFn: async (appointmentId) => {
       const { data } = await api.post(`/api/ghm-appointments/${appointmentId}/calling`);
@@ -188,6 +193,16 @@ export function useCallAttempts(appointmentId) {
     queryKey: qk.ghm.callAttempts(appointmentId),
     queryFn: async () => {
       const { data } = await api.get(`/api/call-attempts?appointment_id=${appointmentId}`);
+      return arr(data);
+    },
+  });
+}
+
+export function useCallSessions(appointmentId) {
+  return useQuery({
+    queryKey: qk.ghm.callSessions(appointmentId),
+    queryFn: async () => {
+      const { data } = await api.get(`/api/call-sessions?appointment_id=${appointmentId}`);
       return arr(data);
     },
   });

@@ -88,15 +88,39 @@ const stationPill = (r) => {
     };
   if (r.finished) return { cls: "sp-done", text: r.station, sub: "has left the floor" };
   // Somebody else has them in a room, or they are sitting in a queue. Only the
-  // second is a patient the lab can call over.
-  // The pill names the board COLUMN, which is what the rest of Gini Flow calls
-  // this patient. The line under it has to resolve the apparent contradiction of
-  // a "With SD / MO" patient the lab may collect from: the column is where they
-  // are queued, not who has hold of them.
+  // first is a patient the lab cannot get to.
+  if (r.inARoom) return { cls: "sp-ready", text: r.station, sub: "in the room — not free" };
+  // What are they actually waiting ON? A patient with today's bloods still out is
+  // not waiting for the MO — the MO is waiting for the lab, which is exactly what
+  // `awaitingResults` says on the MO board and `waitingOnLab` on the consultant's.
+  // Naming the board column here instead had this screen call such a patient
+  // "With Chief Endocrinologist" while the MO board called them "awaiting
+  // results": one patient, two screens, opposite stories. On the LAB's own screen
+  // the honest line is that the floor is stopped on this sample.
+  if (r.awaitingResults) {
+    // Nothing has been drawn, so there is no report to be waiting for. Saying
+    // "waiting for lab reports" over an uncollected tube names the wrong problem
+    // and hides the urgent one: the patient is on the floor NOW and about to
+    // leave with their bloods untaken.
+    if (r.stage.key === "pending")
+      return {
+        cls: "sp-sample",
+        text: "Sample not taken",
+        sub: `${r.statusLabel || r.station} · nothing drawn yet`,
+      };
+    return {
+      cls: "sp-sample",
+      text: "Waiting for lab reports",
+      sub: `${r.statusLabel || r.station} · floor held on this sample`,
+    };
+  }
+  // Nothing outstanding — then the board column is the whole answer, and the
+  // status label draws the distinction the column erases (`vitals_done`,
+  // `sd_pending` and `with_sd` all share one column name).
   return {
-    cls: r.inARoom ? "sp-ready" : "sp-sample",
-    text: r.station,
-    sub: r.inARoom ? "in the room — not free" : "waiting — free to call",
+    cls: "sp-sample",
+    text: r.statusLabel || r.station,
+    sub: "waiting — free to call",
   };
 };
 
@@ -726,18 +750,22 @@ function HealthrayCasePane({ row, onClose, onAction, onUploadCase, isAdmin, busy
                   : row.station
                     ? row.finished
                       ? `The visit is over — ${row.station.toLowerCase()}. Any result still running will land on the chart after they have gone home.`
-                      : row.waiting
-                        ? `${row.statusLabel || row.station} — queued in the ${row.station} column, nobody has them in a room. Free to call.`
-                        : `${row.statusLabel || row.station} — somebody has them in a room right now. Collect once they are free.`
+                      : row.awaitingResults && row.stage.key === "pending"
+                        ? `Nothing has been drawn yet, so there is no report to wait for. They are at ${row.statusLabel || row.station} and still on the floor — collect now, before they leave.`
+                        : row.awaitingResults
+                          ? `Waiting for today's lab reports. On the board they sit at ${row.statusLabel || row.station}, and the result is what releases them.`
+                          : row.waiting
+                            ? `${row.statusLabel || row.station} — queued in the ${row.station} column, nobody has them in a room. Free to call.`
+                            : `${row.statusLabel || row.station} — somebody has them in a room right now. Collect once they are free.`
                     : row.lastSeenOn
                       ? `No OPD appointment today — consulted on ${shortDate(row.lastSeenOn)} and back for the sample only.`
                       : "No OPD visit on record — the sample was taken outside the OPD floor."}
               </div>
-              {!row.labOnly && row.station && !row.finished && (
+              {row.awaitingResults && row.stage.key !== "pending" && (
                 <div className="dp-hint">
-                  The pill above names the board <strong>column</strong>, not who is with them — one
-                  column covers everyone queued for that station as well as the patient actually in
-                  the room. Giving a sample is a parallel track and never moves it.
+                  Uploading the report sets them <strong>&ldquo;Results ready&rdquo;</strong> on the
+                  MO and consultant queues, which is what releases them. Until then they wait,
+                  whatever column the board files them under.
                 </div>
               )}
               <div className="steps" style={{ marginTop: 8 }}>

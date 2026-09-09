@@ -21,6 +21,12 @@ import {
 // tests today?" and left out when they do not. The vocabulary is shared with
 // that screen so the two cannot drift.
 //
+// There was an "Optional" checkbox here until 2026-09-12. Its tooltip promised
+// reception would add the step by hand, but no screen ever offered one back —
+// is_optional only ever removed the step from the seeded journey, the same job
+// "When" does with a question attached. It was set on 0 of 70 template rows
+// across all six visit types, so nothing was carrying it.
+//
 // Background rows — the lab pipeline, the report desk, the MO's prescription
 // slot — are filtered out here. They are machine-managed and nobody edits them,
 // so listing them only padded the table and made the estimate meaningless (the
@@ -37,7 +43,6 @@ const fromApi = (rows) =>
       name: r.step_name,
       station: r.station,
       role: r.assigned_role,
-      is_optional: !!r.is_optional,
       is_default: r.is_default !== false,
       condition_key: r.condition_key || "",
       override_duration_min: r.override_duration_min ?? "",
@@ -48,7 +53,6 @@ const serialize = (steps) =>
   JSON.stringify(
     steps.map((s) => [
       s.step_catalog_id,
-      s.is_optional,
       s.is_default,
       s.condition_key,
       String(s.override_duration_min ?? ""),
@@ -80,6 +84,25 @@ export default function JourneyTemplateEditor({ types }) {
 
   const dirty = serialize(steps) !== baseline;
 
+  // The Min box shows the time the step is actually planned for, never an empty
+  // field: an admin reading the journey wants the number the floor is measured
+  // against, and a blank box with a grey placeholder read as "no time set".
+  //
+  // Blank still MEANS "inherit from the catalogue", so a value equal to the
+  // catalogue default is stored as blank rather than frozen as an override.
+  // Without that, opening this screen and saving would stamp a private copy of
+  // every duration onto the journey, and a later edit to the Step catalog would
+  // stop reaching it.
+  const catalogDefault = (step) => {
+    const c = catalog.find((x) => x.id === step.step_catalog_id);
+    return c?.default_duration_min ?? step.planned ?? "";
+  };
+
+  const setDuration = (i, step, raw) =>
+    replace(i, {
+      override_duration_min: raw !== "" && Number(raw) === Number(catalogDefault(step)) ? "" : raw,
+    });
+
   const replace = (i, patch) =>
     setSteps((prev) => prev.map((s, idx) => (idx === i ? { ...s, ...patch } : s)));
 
@@ -106,7 +129,6 @@ export default function JourneyTemplateEditor({ types }) {
         name: c.name,
         station: c.station,
         role: c.assigned_role,
-        is_optional: false,
         is_default: true,
         condition_key: "",
         override_duration_min: "",
@@ -121,7 +143,6 @@ export default function JourneyTemplateEditor({ types }) {
         visitTypeId: active,
         steps: steps.map((s) => ({
           step_catalog_id: s.step_catalog_id,
-          is_optional: s.is_optional,
           is_default: s.is_default,
           condition_key: s.condition_key || null,
           override_duration_min:
@@ -188,7 +209,6 @@ export default function JourneyTemplateEditor({ types }) {
                   <th>Step</th>
                   <th style={{ width: 80 }}>Min</th>
                   <th style={{ width: 150 }}>When</th>
-                  <th style={{ width: 90 }}>Optional</th>
                   <th style={{ width: 36 }} />
                 </tr>
               </thead>
@@ -229,10 +249,17 @@ export default function JourneyTemplateEditor({ types }) {
                         className="jb-dur"
                         type="number"
                         min="0"
-                        placeholder={String(s.planned ?? "")}
-                        value={s.override_duration_min}
-                        title="Leave blank to use the catalogue default"
-                        onChange={(e) => replace(i, { override_duration_min: e.target.value })}
+                        value={
+                          s.override_duration_min === ""
+                            ? String(catalogDefault(s))
+                            : s.override_duration_min
+                        }
+                        title={
+                          s.override_duration_min === ""
+                            ? `Catalogue default for this step (${catalogDefault(s)} min). Type a different number to override it here.`
+                            : `Overridden for this visit type — the Step catalog says ${catalogDefault(s)} min`
+                        }
+                        onChange={(e) => setDuration(i, s, e.target.value)}
                       />
                     </td>
                     <td>
@@ -249,14 +276,6 @@ export default function JourneyTemplateEditor({ types }) {
                           </option>
                         ))}
                       </select>
-                    </td>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={s.is_optional}
-                        title="Leave this step out of the default journey — reception adds it by hand when the patient needs it"
-                        onChange={(e) => replace(i, { is_optional: e.target.checked })}
-                      />
                     </td>
                     <td>
                       <button

@@ -208,11 +208,34 @@ const claimant = (req) => ({
   name: (req.doctor?.short_name || req.doctor?.doctor_name || "").trim(),
 });
 
-const releaseClaim = (client, appointmentId) =>
+// Close the live claim and keep what it was: the appointments columns hold one
+// claim at a time, so without this row the fact that anyone called is lost the
+// moment the flag clears. A session is only recorded when calling_since is set
+// and the elapsed time is real, so clearing an already-empty flag writes nothing.
+const closeClaimSession = (client, appointmentId, reason = "released") =>
   client.query(
+    `INSERT INTO call_claim_sessions
+       (appointment_id, patient_id, called_by, called_by_id, started_at, ended_at,
+        duration_secs, ended_reason)
+     SELECT a.id, a.patient_id, a.calling_by, a.calling_by_id, a.calling_since, NOW(),
+            GREATEST(0, EXTRACT(EPOCH FROM (NOW() - a.calling_since))::int),
+            $2
+       FROM appointments a
+      WHERE a.id = $1 AND a.calling_since IS NOT NULL
+        -- 'expired' is only ever true of a claim past its TTL. Without this the
+        -- next agent's claim attempt would file the current holder's call as
+        -- finished while they are still on it.
+        AND ($2 <> 'expired' OR NOT ${claimActive("a")})`,
+    [appointmentId, reason],
+  );
+
+const releaseClaim = async (client, appointmentId) => {
+  await closeClaimSession(client, appointmentId);
+  return client.query(
     `UPDATE appointments SET calling_by=NULL, calling_by_id=NULL, calling_since=NULL WHERE id=$1`,
     [appointmentId],
   );
+};
 
 // POST /api/ghm-appointments/active-calls — { appointment_ids:[...] }
 // → { id: { calling_by, calling_by_id, calling_since } } for rows claimed now
@@ -252,6 +275,11 @@ router.post("/ghm-appointments/:id/calling", async (req, res) => {
     const me = claimant(req);
     if (!me.name) return res.status(401).json({ error: "Sign in to mark a call in progress" });
 
+    // A claim that lapsed past the TTL is still a session that happened — record
+    // it before overwriting it, marked as expired so its duration reads as a
+    // floor rather than a measured call.
+    await closeClaimSession(pool, id, "expired").catch(() => {});
+
     const r = await pool.query(
       `UPDATE appointments
           SET calling_by=$2, calling_by_id=$3, calling_since=NOW()
@@ -283,17 +311,23 @@ router.delete("/ghm-appointments/:id/calling", async (req, res) => {
     if (!id) return res.status(404).json({ error: NO_APPOINTMENT_ERROR });
     const me = claimant(req);
 
+    const owns = await pool.query(
+      `SELECT 1 FROM appointments
+        WHERE id=$1 AND (calling_by_id IS NOT DISTINCT FROM $2 OR NOT ${claimActive("appointments")})`,
+      [id, me.id],
+    );
+    if (!owns.rows.length)
+      return res.status(403).json({ error: "This call is marked by another team member" });
+
+    await closeClaimSession(pool, id);
     const r = await pool.query(
       `UPDATE appointments
           SET calling_by=NULL, calling_by_id=NULL, calling_since=NULL
         WHERE id=$1
-          AND (calling_by_id IS NOT DISTINCT FROM $2 OR NOT ${claimActive("appointments")})
         RETURNING id`,
-      [id, me.id],
+      [id],
     );
-    if (!r.rows.length)
-      return res.status(403).json({ error: "This call is marked by another team member" });
-    res.json({ ok: true, id });
+    res.json({ ok: true, id: r.rows[0]?.id ?? id });
   } catch (e) {
     handleError(res, e, "GHM call release");
   }
@@ -319,6 +353,29 @@ router.get("/call-attempts", async (req, res) => {
     res.json(r.rows);
   } catch (e) {
     handleError(res, e, "Call attempts list");
+  }
+});
+
+// GET /api/call-sessions?appointment_id=X — every press of the Calling flag on
+// this patient, newest first. Scoped to the patient like the attempt history is,
+// so calls made before the booking existed still show.
+router.get("/call-sessions", async (req, res) => {
+  try {
+    const { appointment_id } = req.query;
+    if (!appointment_id) return res.status(400).json({ error: "appointment_id required" });
+    const patientId = await patientOf(appointment_id);
+    const r = await pool.query(
+      `SELECT id, appointment_id, called_by, called_by_id, started_at, ended_at,
+              duration_secs, ended_reason
+         FROM call_claim_sessions
+        WHERE ($2::int IS NOT NULL AND patient_id = $2::int) OR appointment_id = $1::int
+        ORDER BY started_at DESC, id DESC
+        LIMIT 100`,
+      [Number(appointment_id) > 0 ? Number(appointment_id) : 0, patientId],
+    );
+    res.json(r.rows);
+  } catch (e) {
+    handleError(res, e, "Call sessions list");
   }
 });
 
@@ -925,7 +982,7 @@ router.get("/ghm-appointments", async (req, res) => {
       const tokenConds = tokens
         .map(
           (_, i) =>
-            `(a.patient_name ILIKE $${i + 1} OR a.file_no ILIKE $${i + 1} OR a.phone ILIKE $${i + 1} OR EXISTS (SELECT 1 FROM unnest(COALESCE(a.alt_phone, '{}')) alt WHERE alt ILIKE $${i + 1}))`,
+            `(a.patient_name ILIKE $${i + 1} OR a.file_no ILIKE $${i + 1} OR a.phone ILIKE $${i + 1} OR alt_phone_text(a.alt_phone) ILIKE $${i + 1})`,
         )
         .join(" AND ");
       // Lookup is still GHM ops, so blocked patients stay hidden here too — they
@@ -934,15 +991,23 @@ router.get("/ghm-appointments", async (req, res) => {
       const likeParams = tokens.map((t) => `%${t}%`);
       const dIdx = tokens.length + 1;
 
-      const upcomingCte = `upcoming AS (
+      const matchedCte = `matched AS (
+        SELECT DISTINCT a.file_no
+          FROM appointments a
+          ${searchWhere} AND a.file_no IS NOT NULL
+      )`;
+      const upcomingCte = `${matchedCte},
+      upcoming AS (
         SELECT file_no, MIN(x) AS next_date FROM (
           SELECT up.file_no, up.appointment_date AS x
             FROM appointments up
-           WHERE up.file_no IS NOT NULL AND up.appointment_date >= $${dIdx}
+            JOIN matched m ON m.file_no = up.file_no
+           WHERE up.appointment_date >= $${dIdx}
           UNION ALL
           SELECT fu.file_no, ${ownFu("fu")} AS x
             FROM appointments fu
-           WHERE fu.file_no IS NOT NULL AND ${ownFu("fu")} >= $${dIdx}
+            JOIN matched m ON m.file_no = fu.file_no
+           WHERE ${ownFu("fu")} >= $${dIdx}
              AND ${isLatestFollowUpVisit("fu")}
         ) s GROUP BY file_no
       )`;

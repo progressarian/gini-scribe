@@ -481,7 +481,7 @@ async function getHealthrayCases(visitDate, q = null, db = pool) {
             COALESCE(p.name, max(c.raw_list_json->'patient'->>'patient_name')) AS name,
             COALESCE(p.file_no, max(c.raw_list_json->'patient'->>'healthray_uid')) AS file_no,
             p.age, p.sex,
-            v.current_status, v.id IS NOT NULL AS on_floor,
+            v.current_status, v.results_status, v.id IS NOT NULL AS on_floor,
             -- Constant across the group (it depends only on the patient and the
             -- day), so bool_or reads it without widening the GROUP BY.
             bool_or(${labOnlyPredicate("v", "$3")}) AS lab_only,
@@ -550,7 +550,8 @@ async function getHealthrayCases(visitDate, q = null, db = pool) {
        LEFT JOIN patients p ON p.id = c.pid
        LEFT JOIN giniflow_visits v ON v.patient_id = c.pid AND v.visit_date = $1::date
       WHERE NOT COALESCE(p.is_blocked, FALSE)
-      GROUP BY c.grp, c.pid, p.id, p.name, p.file_no, p.age, p.sex, v.current_status, v.id
+      GROUP BY c.grp, c.pid, p.id, p.name, p.file_no, p.age, p.sex, v.current_status,
+               v.results_status, v.id
       ORDER BY (count(*) FILTER (WHERE NOT c.results_synced)) DESC, min(c.fetched_at)`,
     [visitDate, q, LAB_ONLY_DOCTOR],
   );
@@ -642,6 +643,19 @@ async function getHealthrayCases(visitDate, q = null, db = pool) {
       collectable: r.on_floor
         ? !IN_A_ROOM.includes(r.current_status) && !FINISHED.includes(r.current_status)
         : true,
+      // The floor is stopped on this sample. `moStation`'s `awaitingResults` and
+      // `doctorStation`'s `waitingOnLab` already say so — same rule, same two
+      // facts — and this screen was the only one that did not, so one patient
+      // read "awaiting results" on the MO board and "Waiting for Chief
+      // Endocrinologist" here. The board column is where they are queued; it is
+      // not what they are queued ON. Same-day bloods are what the MO cannot
+      // proceed without, so the sample IS the wait.
+      awaitingResults:
+        r.on_floor &&
+        !FINISHED.includes(r.current_status) &&
+        !r.lab_only &&
+        r.results_status !== "ready" &&
+        r.pending + r.partial > 0,
       orderedBy: r.ordered_by || null,
       registeredAt: r.registered_at || null,
       reportedOn: r.reported_on || null,

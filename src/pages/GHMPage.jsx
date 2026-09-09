@@ -64,6 +64,7 @@ import {
   useCallAttemptCounts,
   useCategoryCounts,
   useCallAttempts,
+  useCallSessions,
   useCallClaim,
   useCcAgents,
   useCreateAppointment,
@@ -211,6 +212,17 @@ const RECOVERY_STATUSES = [
 ];
 
 // Outcomes for an individual call attempt (richer than the row summary)
+
+// A claim the agent cleared themselves was measured; one the server expired only
+// tells us the call ran at least that long, so it reads "10m+" rather than an
+// exact figure it cannot support.
+function fmtCallDuration({ duration_secs: secs, ended_reason: reason }) {
+  const n = Math.max(0, Number(secs) || 0);
+  const mins = Math.floor(n / 60);
+  const rest = n % 60;
+  const text = mins > 0 ? `${mins}m ${String(rest).padStart(2, "0")}s` : `${rest}s`;
+  return reason === "expired" ? `${mins || 0}m+` : text;
+}
 
 function fmtDateTime(ts) {
   if (!ts) return "";
@@ -1536,8 +1548,10 @@ function CallHistoryPanel({ row, ccAgents, colSpan, details, actions }) {
 
   const attemptsQuery = useCallAttempts(row.id);
   const changesQuery = useAppointmentChanges(row.id);
+  const sessionsQuery = useCallSessions(row.id);
   const history = attemptsQuery.isPending ? null : attemptsQuery.data || [];
   const changes = changesQuery.data || [];
+  const sessions = sessionsQuery.data || [];
 
   const logMutation = useLogCallAttempt();
   const deleteAttempt = useDeleteCallAttempt();
@@ -1653,6 +1667,32 @@ function CallHistoryPanel({ row, ccAgents, colSpan, details, actions }) {
                   </button>
                 </div>
               ))}
+            </div>
+          )}
+
+          {sessions.length > 0 && (
+            <div className="chg-section">
+              <div className="chg-title">
+                <PhoneCall size={13} aria-hidden="true" />
+                Calling Activity (who pressed Calling, and for how long)
+              </div>
+              <div className="hist-list">
+                {sessions.map((cs) => (
+                  <div key={cs.id} className="hist-item">
+                    <span className="hist-when">{fmtDateTime(cs.started_at)}</span>
+                    {cs.called_by && <span className="hist-by">{cs.called_by}</span>}
+                    <span className="badge badge--gray">{fmtCallDuration(cs)}</span>
+                    {cs.ended_reason === "expired" && (
+                      <span
+                        className="hist-notes"
+                        title="Nobody cleared the flag — it lapsed after 10 minutes, so this is a minimum, not a measured call."
+                      >
+                        timed out
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 

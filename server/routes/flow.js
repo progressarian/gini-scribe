@@ -872,7 +872,7 @@ router.get("/flow/staff", async (req, res) => {
 router.get("/flow/templates/:visitType", async (req, res) => {
   try {
     const r = await pool.query(
-      `SELECT t.step_order, t.is_default, t.is_optional, t.condition_key,
+      `SELECT t.step_order, t.is_default, t.condition_key,
               t.override_duration_min,
               COALESCE(t.override_duration_min, c.default_duration_min) AS planned_duration_min,
               c.id AS step_catalog_id, c.name AS step_name, c.station, c.assigned_role,
@@ -987,6 +987,9 @@ router.put("/flow/templates/:visitType", requireCapability(CAP.ADMIN), async (re
           row.step_catalog_id,
           order,
           row.is_default !== false,
+          // Column kept so the seed migrations' INSERT lists still match; the
+          // editor no longer sets it, and background rows carry their own value
+          // through the read-and-relay below.
           row.is_optional === true,
           row.condition_key ? String(row.condition_key).trim() : null,
           row.override_duration_min,
@@ -1003,12 +1006,16 @@ router.put("/flow/templates/:visitType", requireCapability(CAP.ADMIN), async (re
     }
     for (const step of visible) {
       const id = String(step.step_catalog_id).trim();
-      const override = Number(step.override_duration_min);
+      // "No override" has to be checked before Number(), not after: Number(null)
+      // and Number("") are both 0, which is finite and >= 0, so a blank box was
+      // stored as a real 0-minute override. That then beat the catalogue default
+      // in COALESCE(override, default) and the step planned as zero minutes.
+      const raw = step.override_duration_min;
+      const override = raw === null || raw === undefined || raw === "" ? NaN : Number(raw);
       await write(
         {
           step_catalog_id: id,
           is_default: step.is_default !== false,
-          is_optional: step.is_optional === true,
           condition_key: step.condition_key,
           override_duration_min:
             Number.isFinite(override) && override >= 0 ? Math.round(override) : null,
