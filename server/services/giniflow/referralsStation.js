@@ -380,7 +380,7 @@ export async function buildLetterData(referralId, db = pool) {
   // is neither. The consultant on the visit is the referrer; the person who
   // typed it is recorded separately, which is also the better audit trail.
   const { rows: doctor } = await db.query(
-    `SELECT COALESCE(d.name, d.short_name) AS name, d.specialty, d.license_no, d.phone,
+    `SELECT COALESCE(d.name, d.short_name) AS name, d.specialty, d.qualification, d.license_no, d.phone,
             COALESCE(c.short_name, c.name)  AS created_by_name
        FROM giniflow_referrals r
        LEFT JOIN giniflow_visits v ON v.id = r.visit_id
@@ -492,7 +492,8 @@ export async function buildLetterData(referralId, db = pool) {
       },
       doctor: {
         name: doctor[0]?.name || "Gini Advanced Care Hospital",
-        qualification: doctor[0]?.specialty || null,
+        qualification: doctor[0]?.qualification || null,
+        designation: doctor[0]?.specialty || null,
         registration: doctor[0]?.license_no ? `Reg. ${doctor[0].license_no}` : null,
         // Who the specialist calls back. The letterhead carries the hospital
         // switchboard, which is not the same thing as reaching the clinician

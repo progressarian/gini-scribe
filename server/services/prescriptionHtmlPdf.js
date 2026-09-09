@@ -104,8 +104,12 @@ export async function generatePrescriptionPdf(data) {
 // Chromium for a one-page letter would double the memory the API holds all day
 // for a render that costs the same as the prescription's.
 export async function generateReferralLetterPdf(data) {
-  // Same letterhead, so the same mark — a letter and a prescription handed over
-  // together must not show two different logos.
-  const logo = data?.rx_logo ? { dataUri: data.rx_logo } : await getPrescriptionLogo();
-  return renderHtmlToPdf(buildReferralLetterHtml({ ...data, rx_logo: logo.dataUri }));
+  // Same letterhead, so the same mark and the same hospital identity — a letter
+  // and a prescription handed over together must not show two different logos,
+  // nor two different addresses for the place that issued them.
+  const [rx_footer, logo] = await Promise.all([
+    data?.rx_footer ? Promise.resolve(data.rx_footer) : getPrescriptionFooter(),
+    data?.rx_logo ? Promise.resolve({ dataUri: data.rx_logo }) : getPrescriptionLogo(),
+  ]);
+  return renderHtmlToPdf(buildReferralLetterHtml({ ...data, rx_footer, rx_logo: logo.dataUri }));
 }

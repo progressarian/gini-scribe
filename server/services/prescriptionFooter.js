@@ -10,16 +10,37 @@ const KEY = "rx_footer";
 
 // Also the fallback whenever the row is missing or the DB is unreachable: a
 // prescription must still print if this lookup fails, so nothing here throws.
+// The letterhead identity rides on the same row: it is the same "printed on
+// every prescription" setting, and the templates already receive this object.
+// Unlike the footer lines a blank here is never honoured — a prescription
+// without a hospital name is not a document worth printing — so each field
+// falls back to the shipped value individually.
+export const DEFAULT_HOSPITAL = {
+  name: "Gini Advanced Care Hospital",
+  address: "Shivalik Hospital, 2nd Floor, Sector 69, Mohali, Punjab, India",
+  phone: "+91 81463 20100",
+};
+
 export const DEFAULT_FOOTER = {
   serviceLines: ["Online consultation available", "Home collection for blood tests within tricity"],
   appLine: "Track this prescription on My Gini",
   storeLine: "Free on Google Play and the App Store",
+  hospital: DEFAULT_HOSPITAL,
 };
 
 const clean = (v, max) =>
   String(v ?? "")
     .trim()
     .slice(0, max);
+
+export function normalizeHospital(raw) {
+  const h = raw && typeof raw === "object" ? raw : {};
+  return {
+    name: clean(h.name, 120) || DEFAULT_HOSPITAL.name,
+    address: clean(h.address, 200) || DEFAULT_HOSPITAL.address,
+    phone: clean(h.phone, 120) || DEFAULT_HOSPITAL.phone,
+  };
+}
 
 function normalize(raw) {
   if (!raw || typeof raw !== "object") return DEFAULT_FOOTER;
@@ -31,6 +52,7 @@ function normalize(raw) {
       .slice(0, 4),
     appLine: clean(raw.appLine, 120),
     storeLine: clean(raw.storeLine, 120),
+    hospital: normalizeHospital(raw.hospital),
   };
 }
 

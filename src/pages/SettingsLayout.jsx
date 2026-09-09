@@ -16,7 +16,8 @@ export const SETTINGS_TABS = [
   {
     to: "/settings/prescription",
     label: "Prescription",
-    blurb: "The fixed strip printed at the foot of every prescription",
+    blurb:
+      "Hospital identity, letterhead logo, and the strip printed at the foot of every prescription",
   },
 ];
 

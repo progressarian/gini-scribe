@@ -8,7 +8,8 @@ const RX_FOR_VISIT_SQL = `
   SELECT v.id AS visit_id, v.visit_date::text AS visit_date, v.current_status,
          p.id AS patient_id, p.name, p.file_no,
          cons.id AS consultation_id,
-         d.id AS document_id, d.file_url, d.file_name, d.created_at AS rendered_at,
+         d.id AS document_id, d.file_url, d.file_name, d.source AS doc_source,
+         d.created_at AS rendered_at,
          meds.last_change
     FROM giniflow_visits v
     JOIN patients p ON p.id = v.patient_id
@@ -18,7 +19,7 @@ const RX_FOR_VISIT_SQL = `
        ORDER BY id DESC LIMIT 1
     ) cons ON TRUE
     LEFT JOIN LATERAL (
-      SELECT id, file_url, storage_path, file_name, created_at FROM documents dd
+      SELECT id, file_url, storage_path, file_name, source, created_at FROM documents dd
        WHERE dd.patient_id = v.patient_id
          AND dd.doc_type = 'prescription'
          AND (dd.file_url IS NOT NULL OR dd.storage_path IS NOT NULL)
@@ -59,7 +60,16 @@ export async function getPrintableRx(visitId, db = pool) {
   // theirs, three of which never got a newer document. Handing a patient a
   // superseded prescription is worse than handing them none, so this refuses
   // rather than serving quietly.
-  if (r.last_change && r.rendered_at && new Date(r.last_change) > new Date(r.rendered_at)) {
+  // Only a Scribe-rendered copy can go stale against `medications.updated_at`.
+  // A HealthRay PDF is the doctor's own signed document — our medication rows
+  // were extracted from it, so their timestamps say nothing about whether it
+  // still matches, and the comparison would refuse a perfectly current file.
+  if (
+    r.doc_source === "visit" &&
+    r.last_change &&
+    r.rendered_at &&
+    new Date(r.last_change) > new Date(r.rendered_at)
+  ) {
     throw Object.assign(new Error("The prescription changed after this copy was made"), {
       status: 409,
       reason: "stale",
@@ -84,7 +94,8 @@ export async function fetchRxFile(visitId, db = pool) {
   }
 
   const who = String(r.name || "patient").replace(/[^a-zA-Z0-9._-]/g, "_");
-  const fileName = `Rx_${who}_${r.file_no || r.patient_id}.pdf`;
+  const suffix = r.doc_source === "healthray" ? "_HealthRay" : "";
+  const fileName = `Rx_${who}_${r.file_no || r.patient_id}${suffix}.pdf`;
 
   if (resolved.buffer) {
     return {
@@ -135,6 +146,27 @@ export async function regenerateRx(visitId, db = pool) {
       status: 409,
       reason: "not_finalized",
     });
+  }
+
+  // The consult was written in HealthRay, not here. `overwrite` would delete the
+  // doctor's own signed PDF and replace it with one rendered from medication
+  // rows extracted out of that same PDF — strictly less faithful than what it
+  // destroys, and unrecoverable.
+  const existing = await db.query(
+    `SELECT source FROM documents
+      WHERE consultation_id = $1 AND doc_type = 'prescription'
+        AND (file_url IS NOT NULL OR storage_path IS NOT NULL)
+      ORDER BY id DESC LIMIT 1`,
+    [consultationId],
+  );
+  if (existing.rows[0]?.source === "healthray") {
+    throw Object.assign(
+      new Error("This prescription came from HealthRay — it cannot be re-issued here"),
+      {
+        status: 409,
+        reason: "healthray_rx",
+      },
+    );
   }
 
   const payload = await buildVisitPayloadFromDb(pid, { appointmentId });

@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS doctors (
   short_name    TEXT,                -- Short display name
   role          TEXT DEFAULT 'MO',  -- 'MO','Consultant','Surgeon'
   specialty     TEXT,
+  qualification TEXT,               -- Degrees printed on the prescription letterhead
   license_no    TEXT,
   phone         TEXT,
   pin           TEXT,                -- bcrypt-hashed PIN for login

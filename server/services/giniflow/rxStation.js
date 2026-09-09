@@ -16,9 +16,10 @@ const QUEUE_SQL = `
          doc.short_name AS doctor_name,
          last_ev.occurred_at AS since,
          cons.id AS consultation_id,
-         (rx.id IS NOT NULL AND (rxchg.last_change IS NULL OR rxchg.last_change <= rx.created_at))
+         rx.source AS rx_source,
+         (rx.id IS NOT NULL AND (rx.source <> 'visit' OR rxchg.last_change IS NULL OR rxchg.last_change <= rx.created_at))
            AS has_printable_rx,
-         (rx.id IS NOT NULL AND rxchg.last_change > rx.created_at) AS rx_stale,
+         (rx.id IS NOT NULL AND rx.source = 'visit' AND rxchg.last_change > rx.created_at) AS rx_stale,
          meds.n AS medicine_count
     FROM giniflow_visits v
     JOIN patients p ON p.id = v.patient_id
@@ -33,7 +34,7 @@ const QUEUE_SQL = `
        ORDER BY id DESC LIMIT 1
     ) cons ON TRUE
     LEFT JOIN LATERAL (
-      SELECT d.id, d.created_at FROM documents d
+      SELECT d.id, d.created_at, d.source FROM documents d
        WHERE d.patient_id = v.patient_id
          AND d.doc_type = 'prescription'
          AND (d.file_url IS NOT NULL OR d.storage_path IS NOT NULL)
@@ -87,6 +88,7 @@ const toRow = (r, budgetFor, now) => {
     medicineCount: r.medicine_count ?? 0,
     canPrint: !!r.has_printable_rx,
     rxStale: !!r.rx_stale,
+    rxFromHealthray: r.rx_source === "healthray",
     since: r.since ? new Date(r.since).toISOString() : null,
     minutes,
     budget,
@@ -120,7 +122,8 @@ export async function getRxPatient(visitId, db = pool) {
             doc.short_name AS doctor_name,
             cons.id AS consultation_id,
             rx.id AS document_id,
-            (rx.id IS NOT NULL AND rxchg.last_change > rx.created_at) AS rx_stale,
+            rx.source AS rx_source,
+            (rx.id IS NOT NULL AND rx.source = 'visit' AND rxchg.last_change > rx.created_at) AS rx_stale,
             ${labOnlyPredicate("v", "$2")} AS lab_only
        FROM giniflow_visits v
        JOIN patients p ON p.id = v.patient_id
@@ -131,7 +134,7 @@ export async function getRxPatient(visitId, db = pool) {
           ORDER BY id DESC LIMIT 1
        ) cons ON TRUE
        LEFT JOIN LATERAL (
-         SELECT d.id, d.created_at FROM documents d
+         SELECT d.id, d.created_at, d.source FROM documents d
           WHERE d.patient_id = v.patient_id
             AND d.doc_type = 'prescription'
             AND (d.file_url IS NOT NULL OR d.storage_path IS NOT NULL)
@@ -175,6 +178,7 @@ export async function getRxPatient(visitId, db = pool) {
     consultationId: v.consultation_id,
     canPrint: !!v.document_id && !v.rx_stale,
     rxStale: !!v.rx_stale,
+    rxFromHealthray: v.rx_source === "healthray",
     card,
     stopped,
     counselling: buildCounsellingNote([...active, ...stopped]),

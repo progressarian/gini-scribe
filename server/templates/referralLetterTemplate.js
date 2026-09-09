@@ -1,10 +1,5 @@
-import {
-  escapeHtml as escape,
-  LETTERHEAD_CSS,
-  letterheadHtml,
-  HOSPITAL_NAME,
-  HOSPITAL_PHONE,
-} from "./prescriptionTemplate.js";
+import { escapeHtml as escape, LETTERHEAD_CSS, letterheadHtml } from "./prescriptionTemplate.js";
+import { normalizeHospital } from "../services/prescriptionFooter.js";
 import { specialtyLabel, specialtyIcon, urgencyMeta } from "../../shared/giniflowReferrals.js";
 
 // The referral letter — docs/gini-flow/19-REFERRALS-STATION-PLAN.md §7.
@@ -151,6 +146,8 @@ export function buildReferralLetterHtml(data = {}) {
     ? escape(referral.toDoctor)
     : `The Consultant — ${escape(specialty)}`;
 
+  const hospital = normalizeHospital(data.rx_footer?.hospital);
+
   const credLines = [doctor.qualification, doctor.designation, doctor.registration]
     .filter(Boolean)
     .map((l) => escape(l))
@@ -183,7 +180,7 @@ export function buildReferralLetterHtml(data = {}) {
 </head>
 <body>
 <div class="rx-page">
-  ${letterheadHtml(escape(doctor.name || "Doctor"), credLines || HOSPITAL_NAME, data.rx_logo)}
+  ${letterheadHtml(escape(doctor.name || "Doctor"), credLines || escape(hospital.name), data.rx_logo, hospital)}
 
   <div class="rl-body">
     <div class="rl-date">
@@ -304,8 +301,8 @@ export function buildReferralLetterHtml(data = {}) {
     <div class="rl-sign">
       <div>
         <div class="rl-sign-name">${escape(doctor.name || "Doctor")}</div>
-        <div class="rl-sign-cred">${credLines || "Gini Advanced Care Hospital"}</div>
-        <div class="rl-sign-cred">${doctor.phone ? `${escape(doctor.phone)} &middot; ` : ""}${HOSPITAL_PHONE}</div>
+        <div class="rl-sign-cred">${credLines || escape(hospital.name)}</div>
+        <div class="rl-sign-cred">${doctor.phone ? `${escape(doctor.phone)} &middot; ` : ""}${escape(hospital.phone)}</div>
         ${
           doctor.preparedBy
             ? `<div class="rl-sign-prep">Letter prepared by ${escape(doctor.preparedBy)}</div>`
@@ -314,7 +311,7 @@ export function buildReferralLetterHtml(data = {}) {
       </div>
       <div class="rl-reply">
         Please reply with your assessment and any medicine changes to
-        <strong>${doctor.phone ? escape(doctor.phone) : HOSPITAL_PHONE}</strong>${
+        <strong>${doctor.phone ? escape(doctor.phone) : escape(hospital.phone)}</strong>${
           referral.referralNo ? `, quoting <strong>${escape(referral.referralNo)}</strong>,` : ""
         } so the patient's record here stays complete.
       </div>

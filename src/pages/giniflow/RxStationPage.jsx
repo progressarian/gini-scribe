@@ -42,6 +42,7 @@ function QueueRow({ row, active, onPick }) {
         {(row.sex || "")[0] || ""} · {row.fileNo || "—"} · {row.medicineCount} medicine
         {row.medicineCount === 1 ? "" : "s"}
         {row.doctorName ? ` · ${row.doctorName}` : ""}
+        {row.rxFromHealthray && <span className="badge b-ink"> HealthRay Rx</span>}
       </div>
       <div className="si-wait">
         <span className={`si-tmr ${toneClass(row.colour)}`}>⏱ {row.minutes ?? 0}m</span>
@@ -108,6 +109,12 @@ function Pane({
             {data ? `${data.age}${(data.sex || "")[0] || ""} · ${data.fileNo || "—"}` : ""}
             {data?.doctorName ? ` · ${data.doctorName}` : ""}
           </div>
+          {data?.rxFromHealthray && (
+            <div className="dp-hint">
+              Written in HealthRay, not here — the copy below is the doctor's own document. It
+              cannot be re-issued from this station.
+            </div>
+          )}
           <div className="dp-acts">
             <button className="rbtn" onClick={onClose}>
               ← Back
@@ -123,8 +130,13 @@ function Pane({
               </button>
             )}
             {data?.canPrint ? (
-              <button className="st-btn st-btn-grn" onClick={() => onView(visitId, data.name)}>
-                🖨 View / print prescription
+              <button
+                className="st-btn st-btn-grn"
+                onClick={() => onView(visitId, data.name, data.rxFromHealthray)}
+              >
+                {data.rxFromHealthray
+                  ? "🖨 View / print HealthRay Rx"
+                  : "🖨 View / print prescription"}
               </button>
             ) : (
               /* No printable copy is two situations and only one of them had a
@@ -354,9 +366,13 @@ export default function RxStationPage() {
                   <div className="si-name">{r.name}</div>
                   <div className="si-meta">
                     {r.fileNo || "—"} · {r.statusLabel}
+                    {r.rxFromHealthray && <span className="badge b-ink"> HealthRay Rx</span>}
                   </div>
                   {r.canPrint && (
-                    <button className="st-btn" onClick={() => setViewing(r)}>
+                    <button
+                      className="st-btn"
+                      onClick={() => setViewing({ ...r, fromHealthray: r.rxFromHealthray })}
+                    >
                       🖨 View
                     </button>
                   )}
@@ -372,7 +388,7 @@ export default function RxStationPage() {
         onClose={() => setOpenId(null)}
         onReturn={onReturn}
         onExplained={onExplained}
-        onView={(visitId, name) => setViewing({ visitId, name })}
+        onView={(visitId, name, fromHealthray) => setViewing({ visitId, name, fromHealthray })}
         onReissue={onReissue}
         reissuing={reissue.isPending}
         returning={returnToQueue.isPending}
@@ -385,7 +401,9 @@ export default function RxStationPage() {
             url: printRxHref(viewing.visitId),
             mimeType: "application/pdf",
             fileName: `Prescription — ${viewing.name || "patient"}`,
-            title: `Prescription — ${viewing.name || "patient"}`,
+            title: `${viewing.fromHealthray ? "HealthRay prescription" : "Prescription"} — ${
+              viewing.name || "patient"
+            }`,
           }}
           onClose={() => setViewing(null)}
         />

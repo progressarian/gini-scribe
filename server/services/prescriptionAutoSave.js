@@ -351,7 +351,7 @@ export async function buildVisitPayloadFromDb(pid, { appointmentId } = {}) {
   const docRow = appt?.doctor_name
     ? (
         await pool.query(
-          `SELECT name, short_name, license_no, specialty FROM doctors
+          `SELECT name, short_name, license_no, specialty, qualification FROM doctors
             WHERE lower(btrim(name)) = lower(btrim($1))
               AND COALESCE(is_active, TRUE)
             LIMIT 1`,
@@ -363,6 +363,7 @@ export async function buildVisitPayloadFromDb(pid, { appointmentId } = {}) {
     name: appt?.doctor_name || "",
     reg_no: docRow?.license_no || null,
     designation: docRow?.specialty || null,
+    qualification: docRow?.qualification || null,
   };
 
   // Lab history grouped by canonical name (mirrors GET /visit/:pid logic)

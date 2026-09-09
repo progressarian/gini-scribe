@@ -8,7 +8,12 @@ import "./PrescriptionFooterPage.css";
 // setting; without it here, renaming the patient app meant a code deploy.
 // Renders as the Prescription panel of /settings, which prints the heading.
 
-const BLANK = { serviceLines: ["", ""], appLine: "", storeLine: "" };
+const BLANK = {
+  serviceLines: ["", ""],
+  appLine: "",
+  storeLine: "",
+  hospital: { name: "", address: "", phone: "" },
+};
 
 const useFooter = () =>
   useQuery({
@@ -35,7 +40,7 @@ const readAsDataUri = (file) =>
 // The letterhead band is navy, so a logo on a white tile prints as a white
 // sticker over it. The preview below is the real header colour for exactly this
 // reason — it is cheaper to see the problem here than in a printed prescription.
-function LogoSection() {
+function LogoSection({ hospital }) {
   const queryClient = useQueryClient();
   const { data: logo } = useLogo();
   const [busy, setBusy] = useState(false);
@@ -123,17 +128,22 @@ function LogoSection() {
 
       <div className="rxf__headPreview">
         <div className="rxf__headTop">
-          <div className="rxf__headName">Gini Advanced Care Hospital</div>
+          <div className="rxf__headName">{hospital.name}</div>
           {logo?.dataUri && <img src={logo.dataUri} alt="" className="rxf__headLogo" />}
           <div className="rxf__headDoc">
-            <div className="rxf__headDocName">Dr. Beant Sidhu</div>
-            <div className="rxf__headDocCred">Diabetic Foot Specialist</div>
+            <div className="rxf__headDocName">Dr. —</div>
+            <div className="rxf__headDocCred">Specialty</div>
           </div>
         </div>
         <div className="rxf__headAddr">
-          Shivalik Hospital, 2nd Floor, Sector 69, Mohali, Punjab, India · +91 81463 20100
+          {hospital.address} · {hospital.phone}
         </div>
       </div>
+      <p className="rxf__hint">
+        The doctor block is filled in when a prescription is printed — the consultant on the
+        appointment, with the specialty and registration number from their entry in Doctors. It is
+        not set here.
+      </p>
     </fieldset>
   );
 }
@@ -151,6 +161,11 @@ export default function PrescriptionFooterPage() {
       serviceLines: lines.length < 2 ? [...lines, ""] : lines,
       appLine: data.appLine || "",
       storeLine: data.storeLine || "",
+      hospital: {
+        name: data.hospital?.name || "",
+        address: data.hospital?.address || "",
+        phone: data.hospital?.phone || "",
+      },
     });
   }, [data]);
 
@@ -166,18 +181,39 @@ export default function PrescriptionFooterPage() {
   const setLine = (i, value) =>
     setForm((f) => ({ ...f, serviceLines: f.serviceLines.map((l, n) => (n === i ? value : l)) }));
 
+  const setHospital = (key, value) =>
+    setForm((f) => ({ ...f, hospital: { ...f.hospital, [key]: value } }));
+
+  const payload = {
+    serviceLines: form.serviceLines.map((l) => l.trim()).filter(Boolean),
+    appLine: form.appLine.trim(),
+    storeLine: form.storeLine.trim(),
+    hospital: {
+      name: form.hospital.name.trim(),
+      address: form.hospital.address.trim(),
+      phone: form.hospital.phone.trim(),
+    },
+  };
+
   const dirty =
     !!data &&
-    JSON.stringify({
-      serviceLines: form.serviceLines.map((l) => l.trim()).filter(Boolean),
-      appLine: form.appLine.trim(),
-      storeLine: form.storeLine.trim(),
-    }) !==
+    JSON.stringify(payload) !==
       JSON.stringify({
         serviceLines: data.serviceLines || [],
         appLine: data.appLine || "",
         storeLine: data.storeLine || "",
+        hospital: {
+          name: data.hospital?.name || "",
+          address: data.hospital?.address || "",
+          phone: data.hospital?.phone || "",
+        },
       });
+
+  const previewHospital = {
+    name: form.hospital.name.trim() || data?.hospital?.name || "",
+    address: form.hospital.address.trim() || data?.hospital?.address || "",
+    phone: form.hospital.phone.trim() || data?.hospital?.phone || "",
+  };
 
   const preview = {
     lines: form.serviceLines.map((l) => l.trim()).filter(Boolean),
@@ -193,19 +229,54 @@ export default function PrescriptionFooterPage() {
         <p className="rxf__loading">Loading…</p>
       ) : (
         <>
-          <LogoSection />
-
           <form
             className="rxf__form"
             onSubmit={(e) => {
               e.preventDefault();
-              save.mutate({
-                serviceLines: form.serviceLines.map((l) => l.trim()).filter(Boolean),
-                appLine: form.appLine.trim(),
-                storeLine: form.storeLine.trim(),
-              });
+              save.mutate(payload);
             }}
           >
+            <fieldset className="rxf__group">
+              <legend className="rxf__legend">Hospital identity</legend>
+              <p className="rxf__hint">
+                Printed across the top of every prescription and referral letter. Leave a field
+                blank to keep the current value.
+              </p>
+              <label className="rxf__field">
+                <span className="rxf__label">Hospital name</span>
+                <input
+                  className="rxf__input"
+                  value={form.hospital.name}
+                  maxLength={120}
+                  placeholder={data?.hospital?.name || "Gini Advanced Care Hospital"}
+                  onChange={(e) => setHospital("name", e.target.value)}
+                />
+              </label>
+              <label className="rxf__field">
+                <span className="rxf__label">Address</span>
+                <input
+                  className="rxf__input"
+                  value={form.hospital.address}
+                  maxLength={200}
+                  placeholder={data?.hospital?.address || ""}
+                  onChange={(e) => setHospital("address", e.target.value)}
+                />
+              </label>
+              <label className="rxf__field">
+                <span className="rxf__label">Phone</span>
+                <input
+                  className="rxf__input"
+                  type="tel"
+                  value={form.hospital.phone}
+                  maxLength={120}
+                  placeholder={data?.hospital?.phone || ""}
+                  onChange={(e) => setHospital("phone", e.target.value)}
+                />
+              </label>
+            </fieldset>
+
+            <LogoSection hospital={previewHospital} />
+
             <fieldset className="rxf__group">
               <legend className="rxf__legend">Clinic services</legend>
               {form.serviceLines.map((line, i) => (

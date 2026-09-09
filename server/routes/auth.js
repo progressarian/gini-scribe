@@ -46,7 +46,7 @@ router.post("/convert-heic", async (req, res) => {
 router.get("/doctors", async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT id, name, short_name, specialty, role, is_chief FROM doctors WHERE is_active=true ORDER BY role, name",
+      "SELECT id, name, short_name, specialty, qualification, role, is_chief FROM doctors WHERE is_active=true ORDER BY role, name",
     );
     res.json(result.rows);
   } catch (e) {
@@ -120,7 +120,7 @@ router.get("/auth/me", async (req, res) => {
   if (!req.doctor) return res.json({ authenticated: false });
   try {
     const result = await pool.query(
-      "SELECT id, name, short_name, specialty, role FROM doctors WHERE id=$1 AND is_active=true",
+      "SELECT id, name, short_name, specialty, qualification, role FROM doctors WHERE id=$1 AND is_active=true",
       [req.doctor.doctor_id],
     );
     if (result.rows.length === 0) return res.json({ authenticated: false });
@@ -158,16 +158,40 @@ router.post("/doctors", requireCapability(CAPABILITIES.ADMIN), async (req, res) 
   }
 });
 
-// Update editable doctor flags (currently the chief designation). Admin-only.
+// Update editable doctor fields — the chief designation and the qualification
+// printed on the letterhead. Admin-only. Fields absent from the body are left
+// alone, so the Chief toggle and the qualification box save independently.
 router.patch("/doctors/:id", requireCapability(CAPABILITIES.ADMIN), async (req, res) => {
   try {
-    const { is_chief } = req.body || {};
-    if (typeof is_chief !== "boolean") {
-      return res.status(400).json({ error: "is_chief (boolean) required" });
+    const { is_chief, qualification } = req.body || {};
+    const sets = [];
+    const params = [req.params.id];
+
+    if (is_chief !== undefined) {
+      if (typeof is_chief !== "boolean") {
+        return res.status(400).json({ error: "is_chief must be a boolean" });
+      }
+      params.push(is_chief);
+      sets.push(`is_chief=$${params.length}`);
     }
+
+    if (qualification !== undefined) {
+      if (qualification !== null && typeof qualification !== "string") {
+        return res.status(400).json({ error: "qualification must be a string" });
+      }
+      const q = String(qualification ?? "")
+        .trim()
+        .slice(0, 120);
+      params.push(q || null);
+      sets.push(`qualification=$${params.length}`);
+    }
+
+    if (!sets.length) return res.status(400).json({ error: "Nothing to update" });
+
     const r = await pool.query(
-      "UPDATE doctors SET is_chief=$2 WHERE id=$1 RETURNING id, name, short_name, is_chief",
-      [req.params.id, is_chief],
+      `UPDATE doctors SET ${sets.join(", ")} WHERE id=$1
+        RETURNING id, name, short_name, is_chief, qualification`,
+      params,
     );
     if (!r.rows.length) return res.status(404).json({ error: "Doctor not found" });
     res.json(r.rows[0]);

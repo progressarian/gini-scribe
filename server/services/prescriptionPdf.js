@@ -4,6 +4,8 @@
 // symptoms → diagnoses → meds → previous meds → labs → vitals → investigations
 // → lifestyle → follow-up → advice. Always stamps a "Created by Scribe" footer.
 
+import { getPrescriptionFooter, normalizeHospital } from "./prescriptionFooter.js";
+
 // pdfkit is CJS-only — load lazily via dynamic import so module load doesn't
 // break in ESM-quirky setups (tests, type-checking, etc.).
 async function loadPdfKit() {
@@ -116,21 +118,12 @@ export async function buildPrescriptionPdf({ patient = {}, doctor = {}, parsed =
   });
 
   // ─── HEADER ────────────────────────────────────────────────────────────
-  doc
-    .fillColor(TEAL)
-    .font("Helvetica-Bold")
-    .fontSize(20)
-    .text("Gini Health", { continued: true })
-    .fillColor(MUTED)
-    .font("Helvetica")
-    .fontSize(10)
-    .text("   Advanced Care Hospital");
-  doc
-    .fillColor(MUTED)
-    .fontSize(9)
-    .text(
-      "Shivalik Hospital, 2nd Floor, Sector 69, Mohali, Punjab · 0172-4120100 · +91 8146320100",
-    );
+  // Same identity as the Puppeteer letterhead, read from the same setting: this
+  // builder carried its own copy of the address and a second phone number, so
+  // the two prescription paths already printed different contact details.
+  const hospital = normalizeHospital((await getPrescriptionFooter())?.hospital);
+  doc.fillColor(TEAL).font("Helvetica-Bold").fontSize(20).text(hospital.name);
+  doc.fillColor(MUTED).fontSize(9).text(`${hospital.address} · ${hospital.phone}`);
   doc.moveDown(0.6);
 
   // Doctor block (right-aligned)

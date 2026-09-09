@@ -1166,4 +1166,11 @@ export const prescriptionFooterSchema = z.object({
   serviceLines: z.array(z.string().trim().max(120)).max(4),
   appLine: z.string().trim().max(120),
   storeLine: z.string().trim().max(120),
+  hospital: z
+    .object({
+      name: z.string().trim().max(120),
+      address: z.string().trim().max(200),
+      phone: z.string().trim().max(120),
+    })
+    .optional(),
 });

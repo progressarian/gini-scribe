@@ -8,10 +8,11 @@ import { fileURLToPath } from "node:url";
 
 import { detectMedCategory } from "../config/medicationCategories.js";
 import { pickNextVisit } from "../../shared/followUp.js";
+import { DEFAULT_HOSPITAL, normalizeHospital } from "../services/prescriptionFooter.js";
 
-const HOSPITAL_NAME = "Gini Advanced Care Hospital";
-const HOSPITAL_ADDRESS = "Shivalik Hospital, 2nd Floor, Sector 69, Mohali, Punjab, India";
-const HOSPITAL_PHONE = "+91 81463 20100";
+const HOSPITAL_NAME = DEFAULT_HOSPITAL.name;
+const HOSPITAL_ADDRESS = DEFAULT_HOSPITAL.address;
+const HOSPITAL_PHONE = DEFAULT_HOSPITAL.phone;
 
 // The letterhead logo is read off disk once and inlined as a data URI: Puppeteer
 // renders the PDF with no network access to this server, so a src="/logo.png"
@@ -81,12 +82,13 @@ function promoHtml(footer, logo = DEFAULT_LOGO_DATA_URI) {
 // One letterhead, two documents. The prescription and the referral letter print
 // the same header off this helper so a patient handed both cannot read them as
 // coming from two different hospitals.
-function letterheadHtml(docNameHtml, docCredHtml, logoDataUri = DEFAULT_LOGO_DATA_URI) {
+function letterheadHtml(docNameHtml, docCredHtml, logoDataUri = DEFAULT_LOGO_DATA_URI, hospital) {
+  const hosp = normalizeHospital(hospital);
   const logo = logoDataUri ? `<div class="rx-logo"><img src="${logoDataUri}" alt=""></div>` : "";
   return `<div class="rx-header">
     <div class="rx-header-top">
       <div class="rx-hosp">
-        <div class="rx-hosp-name">${HOSPITAL_NAME}</div>
+        <div class="rx-hosp-name">${escape(hosp.name)}</div>
       </div>
       ${logo}
       <div class="rx-doc">
@@ -94,7 +96,7 @@ function letterheadHtml(docNameHtml, docCredHtml, logoDataUri = DEFAULT_LOGO_DAT
         <div class="rx-doc-cred">${docCredHtml}</div>
       </div>
     </div>
-    <div class="rx-hosp-tag">${HOSPITAL_ADDRESS} &middot; ${HOSPITAL_PHONE}</div>
+    <div class="rx-hosp-tag">${escape(hosp.address)} &middot; ${escape(hosp.phone)}</div>
   </div>`;
 }
 
@@ -717,10 +719,22 @@ function buildPrescriptionHtml(data = {}) {
     .sort((a, b) => b._r - a._r || a.defaultOrder - b.defaultOrder)
     .slice(0, 6);
 
-  // ── Patient meta line
+  // ── Patient name and meta line
+  // Age and sex ride with the name in chart shorthand — "Pawan Kumar (61M)"
+  // reads as one fact to a doctor going through a stack. The line beneath
+  // identifies the document instead: UHID, then the date it was issued.
+  // Either half of the parenthetical can be missing, and with both absent the
+  // brackets go too.
+  const sexInitial = String(patient.sex || "")
+    .trim()
+    .charAt(0)
+    .toUpperCase();
+  const patientQualifier = `${patient.age ?? ""}${sexInitial}`;
+  const patientTitle = [patient.name || "", patientQualifier ? `(${patientQualifier})` : ""]
+    .filter(Boolean)
+    .join(" ");
+
   const patientMeta = [
-    patient.age ? `${patient.age} yrs` : null,
-    patient.sex,
     patient.file_no || patient.id,
     fmtDateLong(today),
     summary.totalVisits ? `Visit ${summary.totalVisits}` : null,
@@ -1205,11 +1219,11 @@ function buildPrescriptionHtml(data = {}) {
 </head>
 <body>
 <div class="rx-page">
-  ${letterheadHtml(escape(doctor.name || "Doctor"), docCredHtml, data.rx_logo || DEFAULT_LOGO_DATA_URI)}
+  ${letterheadHtml(escape(doctor.name || "Doctor"), docCredHtml, data.rx_logo || DEFAULT_LOGO_DATA_URI, data.rx_footer?.hospital)}
 
   <div class="rx-patient-bar">
     <div>
-      <div class="rx-pt-name">${escape(patient.name || "")}</div>
+      <div class="rx-pt-name">${escape(patientTitle)}</div>
       <div class="rx-pt-meta">${escape(patientMeta)}</div>
     </div>
     <div class="rx-pt-pills">${phasePill}${monthsPill}</div>

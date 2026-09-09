@@ -6,6 +6,64 @@ import "./DoctorManagementPage.css";
 
 const todayISO = () => new Date().toISOString().split("T")[0];
 
+// The degree line under the doctor's name on every prescription and referral
+// letter. The template has always rendered it; until doctors.qualification
+// existed there was nothing to render, so it printed blank.
+function LetterheadSection({ doctor, onSaved }) {
+  const [value, setValue] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setValue(doctor?.qualification || "");
+  }, [doctor?.id, doctor?.qualification]);
+
+  const dirty = value.trim() !== (doctor?.qualification || "");
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.patch(`/api/doctors/${doctor.id}`, { qualification: value.trim() });
+      await onSaved();
+      toast("Qualification saved — applies to the next prescription printed", "success");
+    } catch (err) {
+      toast(err?.response?.data?.error || "Could not save the qualification", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <>
+      <p className="docmgmt-hint">
+        Printed under {doctor?.short_name || doctor?.name || "the doctor"}&rsquo;s name on every
+        prescription and referral letter, above the specialty. The name, specialty and registration
+        number already come from this record — leave this blank to keep the degree line off the
+        page.
+      </p>
+      <form
+        className="docmgmt-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (dirty) save();
+        }}
+      >
+        <label className="docmgmt-docpick">
+          Qualification:
+          <input
+            value={value}
+            maxLength={120}
+            placeholder="e.g. MBBS, MD (Medicine)"
+            onChange={(e) => setValue(e.target.value)}
+          />
+        </label>
+        <button className="docmgmt-primary" type="submit" disabled={!dirty || saving}>
+          {saving ? "Saving…" : "Save"}
+        </button>
+      </form>
+    </>
+  );
+}
+
 export default function DoctorManagementPage() {
   const doctorsList = useAuthStore((s) => s.doctorsList);
   const fetchDoctorsList = useAuthStore((s) => s.fetchDoctorsList);
@@ -88,6 +146,10 @@ export default function DoctorManagementPage() {
         <p className="docmgmt-empty">Select a doctor.</p>
       ) : (
         <div className="docmgmt-body">
+          <section className="docmgmt-section">
+            <h2 className="docmgmt-section-title">🖋️ Letterhead</h2>
+            <LetterheadSection doctor={doctor} onSaved={fetchDoctorsList} />
+          </section>
           <section className="docmgmt-section">
             <h2 className="docmgmt-section-title">🗓️ Working Profile</h2>
             <ProfileTab doctorId={doctorId} doctor={doctor} refresh={refresh} onChange={onChange} />
