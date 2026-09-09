@@ -3,11 +3,11 @@ import { callLabel } from "../../shared/callStatuses.js";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-const BLOCK_WIDTH = 26;
+const BLOCK_WIDTH = 27;
 
 const COL_WIDTHS = [
-  22, 12, 14, 14, 12, 14, 12, 12, 14, 12, 6, 6, 20, 14, 14, 14, 14, 14, 26, 22, 18, 16, 12, 16, 22,
-  30,
+  22, 12, 14, 14, 12, 14, 12, 12, 14, 12, 6, 6, 20, 14, 14, 14, 14, 14, 26, 22, 18, 18, 16, 12, 16,
+  22, 30,
 ];
 
 const HEADERS = [
@@ -32,6 +32,7 @@ const HEADERS = [
   "Last Consultant Seen",
   "Prescription Explained By",
   "Call Status",
+  "Last Call Status",
   "Called By",
   "Call Date",
   "Home Collection",
@@ -102,6 +103,7 @@ const toSheetRow = (row, fallbackDate, lastSeen = {}) => {
     lastSeenLabel(lastSeen[row.patient_id]),
     row.prescription_explained_by || "",
     callLabel(row.call_status || "pending"),
+    callLabel(row.call_status_any || "pending"),
     row.call_made_by || "",
     fmtSheetDate(row.call_date),
     row.home_collection ? "Yes" : "No",

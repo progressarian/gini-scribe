@@ -143,7 +143,7 @@ const unifiedFromOrder = (o) => ({
 });
 
 const unifiedFromCase = (r) => ({
-  key: `healthray:${r.patientId}`,
+  key: `healthray:${r.rowKey}`,
   source: "healthray",
   driven: false,
   stage: r.stage?.key || "pending",
@@ -409,7 +409,18 @@ async function getHealthrayCases(visitDate, q = null, db = pool) {
               -- stamped only once the detail fetch has written the values. The
               -- UHID is in the raw payload from the first list sync, so matching
               -- on it is what keeps outstanding work visible at all.
-              COALESCE(lc.patient_id, uid.id) AS pid
+              COALESCE(lc.patient_id, uid.id) AS pid,
+              -- What counts as "one patient" for grouping. pid alone cannot:
+              -- every case the hospital registered for somebody with no chart
+              -- here has pid NULL, and grouping on that collapses all of them
+              -- into a single card carrying one arbitrary name. Unmatched cases
+              -- fall back to HealthRay's own UHID, and to the case number when
+              -- even that is absent, so a stranger is at worst their own row.
+              COALESCE(
+                (COALESCE(lc.patient_id, uid.id))::text,
+                'hr:' || (lc.raw_list_json->'patient'->>'healthray_uid'),
+                'case:' || lc.case_no
+              ) AS grp
          FROM lab_cases lc
          LEFT JOIN patients uid
                 ON uid.file_no = lc.raw_list_json->'patient'->>'healthray_uid'
@@ -428,7 +439,8 @@ async function getHealthrayCases(visitDate, q = null, db = pool) {
             )
           )
      )
-     SELECT c.pid AS patient_id,
+     SELECT c.grp,
+            c.pid AS patient_id,
             COALESCE(p.name, max(c.raw_list_json->'patient'->>'patient_name')) AS name,
             COALESCE(p.file_no, max(c.raw_list_json->'patient'->>'healthray_uid')) AS file_no,
             p.age, p.sex,
@@ -444,7 +456,7 @@ async function getHealthrayCases(visitDate, q = null, db = pool) {
                                AND c.raw_detail_json->>'reported_on' IS NOT NULL)::int AS reported,
             (SELECT array_agg(DISTINCT t)
                FROM cases c2, unnest(c2.test_names) AS t
-              WHERE c2.pid IS NOT DISTINCT FROM c.pid) AS tests,
+              WHERE c2.grp = c.grp) AS tests,
             -- A patient with a sample today and no visit today is not a missing
             -- check-in: they were consulted on an earlier day and have come back
             -- for the sample alone. Saying WHEN they were seen answers the
@@ -501,7 +513,7 @@ async function getHealthrayCases(visitDate, q = null, db = pool) {
        LEFT JOIN patients p ON p.id = c.pid
        LEFT JOIN giniflow_visits v ON v.patient_id = c.pid AND v.visit_date = $1::date
       WHERE NOT COALESCE(p.is_blocked, FALSE)
-      GROUP BY c.pid, p.id, p.name, p.file_no, p.age, p.sex, v.current_status, v.id
+      GROUP BY c.grp, c.pid, p.id, p.name, p.file_no, p.age, p.sex, v.current_status, v.id
       ORDER BY (count(*) FILTER (WHERE NOT c.results_synced)) DESC, min(c.fetched_at)`,
     [visitDate, q, LAB_ONLY_DOCTOR],
   );
@@ -530,6 +542,7 @@ async function getHealthrayCases(visitDate, q = null, db = pool) {
       cases[0],
     );
     return {
+      rowKey: r.grp,
       patientId: r.patient_id,
       name: r.name || "Unnamed patient",
       fileNo: r.file_no,

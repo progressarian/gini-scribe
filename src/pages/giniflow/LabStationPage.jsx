@@ -305,6 +305,14 @@ const TEST_STATUS_LABEL = {
   uploaded: "Uploaded",
 };
 
+// A hospital-lab row has no patient_id until the detail sync matches the case
+// to a chart, so `patientId` is null for a walk-in the hospital registered on
+// its own. That null cannot address a row: it equals the closed state, so the
+// pane opened itself on load and every close re-matched the same row. `rowKey`
+// is the identity the query grouped on and is never null; the local fallback
+// only covers a server that has not shipped it yet.
+const caseRowKey = (r) => r.rowKey ?? r.patientId ?? `hr:${r.fileNo || "?"}`;
+
 // Escape closes, focus returns, click outside closes — the same contract the
 // board's modal and drawer follow.
 function useDismiss(open, onClose, ref) {
@@ -1192,9 +1200,9 @@ export default function LabStationPage() {
                         <div className="pt-list">
                           {cases.map((row) => (
                             <HealthrayCard
-                              key={`hr-${row.patientId}`}
+                              key={`hr-${caseRowKey(row)}`}
                               row={row}
-                              onOpen={() => setOpenCaseId(row.patientId)}
+                              onOpen={() => setOpenCaseId(caseRowKey(row))}
                               readOnly={cannotBeWorked(row)}
                             />
                           ))}
@@ -1240,9 +1248,9 @@ export default function LabStationPage() {
                       />
                     ) : (
                       <HealthrayCard
-                        key={`h-${r.row.patientId}`}
+                        key={`h-${caseRowKey(r.row)}`}
                         row={r.row}
-                        onOpen={() => setOpenCaseId(r.row.patientId)}
+                        onOpen={() => setOpenCaseId(caseRowKey(r.row))}
                       />
                     ),
                   )}
@@ -1261,9 +1269,9 @@ export default function LabStationPage() {
                       <div className="pt-list">
                         {rows.map((r) => (
                           <HealthrayCard
-                            key={`u-${r.row.patientId}`}
+                            key={`u-${caseRowKey(r.row)}`}
                             row={r.row}
-                            onOpen={() => setOpenCaseId(r.row.patientId)}
+                            onOpen={() => setOpenCaseId(caseRowKey(r.row))}
                             readOnly
                           />
                         ))}
@@ -1306,9 +1314,9 @@ export default function LabStationPage() {
                             />
                           ) : (
                             <HealthrayCard
-                              key={`dh-${r.row.patientId}`}
+                              key={`dh-${caseRowKey(r.row)}`}
                               row={r.row}
-                              onOpen={() => setOpenCaseId(r.row.patientId)}
+                              onOpen={() => setOpenCaseId(caseRowKey(r.row))}
                             />
                           ),
                         )}
@@ -1347,7 +1355,9 @@ export default function LabStationPage() {
       </div>
 
       <HealthrayCasePane
-        row={healthray.find((r) => r.patientId === openCaseId) || null}
+        row={
+          openCaseId == null ? null : healthray.find((r) => caseRowKey(r) === openCaseId) || null
+        }
         onClose={closeCasePane}
         onAction={onCaseAction}
         onUploadCase={onUploadCase}

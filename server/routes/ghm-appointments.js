@@ -1642,6 +1642,8 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
       preferred_time_slot: "Preferred Time",
       call_made_by: "Called By",
       booking_status: "Booking Status",
+      home_collection: "Home Collection",
+      call_status: "Call Status",
     };
     const trackingNow = Object.keys(TRACK).filter((k) => k in req.body);
     let before = {};
@@ -1687,11 +1689,18 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
       );
     }
 
-    // Log doctor changes
+    // Log doctor changes. Values are normalised to text first — home_collection
+    // is a boolean, and `false || ""` would otherwise read as "no value" and
+    // silently skip the very transition the log exists to record.
+    const logValue = (v) => {
+      if (v === null || v === undefined) return "";
+      if (typeof v === "boolean") return v ? "Yes" : "No";
+      return String(v);
+    };
     const actor = claimant(req);
     for (const k of trackingNow) {
-      const oldV = before[k] || "";
-      const newV = req.body[k] || "";
+      const oldV = logValue(before[k]);
+      const newV = logValue(req.body[k] === "" ? null : req.body[k]);
       if (oldV !== newV) {
         await pool.query(
           `INSERT INTO appointment_change_log
