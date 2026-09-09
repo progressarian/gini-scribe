@@ -32,14 +32,30 @@ import useAuthStore from "../../stores/authStore";
 const CASE_ACTIONS = [
   {
     action: "sample_taken",
-    label: "✓ Mark sample collected",
     doneLabel: "Sample collected",
     hint: "Mark that you have collected the sample from this patient.",
-    shows: (c) => !c.collected,
+    // The only step that needs the patient in front of you. Processing and
+    // results happen at the bench, long after they have gone home, so gating
+    // those on where the patient is standing would strand the case.
+    needsPatient: true,
+  },
+  {
+    action: "processing",
+    doneLabel: "Processing",
+    hint: "Mark that the sample is on the analyzer.",
+  },
+  {
+    action: "results_ready",
+    doneLabel: "Results done",
+    hint: "Mark that the values are out and the report can be uploaded.",
   },
 ];
 
-const ACTION_LABEL = { sample_taken: "Sample collected" };
+const ACTION_LABEL = {
+  sample_taken: "Sample collected",
+  processing: "Processing started",
+  results_ready: "Results done",
+};
 
 const shortDate = (iso) =>
   iso
@@ -681,6 +697,10 @@ function HealthrayCasePane({ row, onClose, onAction, onUploadCase, isAdmin, busy
               ← Back
             </button>
             <span className={`sp ${pill.cls}`}>{pill.text}</span>
+            {/* The card renders this and the pane did not, so the pane dropped the
+                one line that says a "With Chief Endocrinologist" patient is queued
+                rather than held — the exact contradiction the pill provokes. */}
+            {pill.sub && <span className="dp-pill-sub">{pill.sub}</span>}
           </div>
         </div>
 
@@ -707,17 +727,17 @@ function HealthrayCasePane({ row, onClose, onAction, onUploadCase, isAdmin, busy
                     ? row.finished
                       ? `The visit is over — ${row.station.toLowerCase()}. Any result still running will land on the chart after they have gone home.`
                       : row.waiting
-                        ? `Waiting in the ${row.station.toLowerCase()} queue.`
-                        : `At ${row.station.toLowerCase()} right now.`
+                        ? `${row.statusLabel || row.station} — queued in the ${row.station} column, nobody has them in a room. Free to call.`
+                        : `${row.statusLabel || row.station} — somebody has them in a room right now. Collect once they are free.`
                     : row.lastSeenOn
                       ? `No OPD appointment today — consulted on ${shortDate(row.lastSeenOn)} and back for the sample only.`
                       : "No OPD visit on record — the sample was taken outside the OPD floor."}
               </div>
-              {row.statusLabel && row.statusLabel !== row.station && (
+              {!row.labOnly && row.station && !row.finished && (
                 <div className="dp-hint">
-                  Last thing observed about them: <strong>{row.statusLabel}</strong>. HealthRay has
-                  no status for the workup, so a patient with the MO still reads “vitals done” until
-                  a station screen moves them.
+                  The pill above names the board <strong>column</strong>, not who is with them — one
+                  column covers everyone queued for that station as well as the patient actually in
+                  the room. Giving a sample is a parallel track and never moves it.
                 </div>
               )}
               <div className="steps" style={{ marginTop: 8 }}>
@@ -774,7 +794,12 @@ function HealthrayCasePane({ row, onClose, onAction, onUploadCase, isAdmin, busy
                       // The clock may be missing while the phlebotomist's own
                       // status already says done, so the fact and the time are
                       // reported separately rather than the time standing in.
-                      ["Sample collected", c.collectedOn || (c.collected ? "done" : null)],
+                      [
+                        "Sample collected",
+                        c.collectedOn ||
+                          (c.actions || []).find((a) => a.action === "sample_taken")?.at ||
+                          (c.collected ? "done" : null),
+                      ],
                       ["Received by lab", c.receivedOn],
                       ["Reported", c.reportedOn],
                     ].map(([label, at]) => (
@@ -797,24 +822,28 @@ function HealthrayCasePane({ row, onClose, onAction, onUploadCase, isAdmin, busy
                       Nothing here reaches HealthRay, and the buttons say so rather
                       than implying they moved the sample. */}
                   {(() => {
-                    const offered = CASE_ACTIONS.filter(
-                      (a) =>
-                        (a.shows(c) && row.collectable) ||
-                        (c.actions || []).some((x) => x.action === a.action),
+                    // What has been recorded, plus the ONE step that comes next —
+                    // the same shape the Gini queue's cards have. Offering every
+                    // step at once let a mis-tap record results on a tube nobody
+                    // had drawn; the service refuses that now, and the screen
+                    // should not ask for it either.
+                    const done = CASE_ACTIONS.filter((a) =>
+                      (c.actions || []).some((x) => x.action === a.action),
                     );
-                    if (!offered.length) return null;
-                    // Only what is still OUTSTANDING can be blocked by where the
-                    // patient is. An action already recorded needs nothing from
-                    // them, and telling a technician the sample "can no longer be
-                    // taken" next to a ✓ saying it was taken is the screen
-                    // contradicting itself.
-                    const outstanding = offered.filter(
-                      (a) => !(c.actions || []).some((x) => x.action === a.action),
-                    );
-                    const hint = !outstanding.length
+                    const next = c.nextAction
+                      ? CASE_ACTIONS.find((a) => a.action === c.nextAction.action)
+                      : null;
+                    if (!done.length && !next) return null;
+                    // Only the step that still needs the PATIENT can be blocked by
+                    // where they are standing. Processing and results happen at the
+                    // bench — telling a technician the sample "can no longer be
+                    // taken" while they are running it is the screen contradicting
+                    // itself, and it stranded every case of a patient who left.
+                    const blocked = !!next?.needsPatient && !row.collectable;
+                    const hint = !next
                       ? null
-                      : row.collectable
-                        ? outstanding[0].hint
+                      : !blocked
+                        ? next.hint
                         : row.finished
                           ? "This patient has left the floor — the sample can no longer be taken."
                           : `This patient is in the ${(row.station || "").toLowerCase()} room right now. Collect once they are free.`;
@@ -823,20 +852,27 @@ function HealthrayCasePane({ row, onClose, onAction, onUploadCase, isAdmin, busy
                         <div className="dp-sec-title">Update status</div>
                         {hint && <div className="dp-hint">{hint}</div>}
                         <div className="hr-acts">
-                          {offered.map((a) => {
-                            const done = (c.actions || []).find((x) => x.action === a.action);
-                            return (
-                              <button
-                                key={a.action}
-                                type="button"
-                                className={`st-btn${done ? " is-done" : " st-btn-tl"}`}
-                                disabled={busy || (!done && !row.collectable)}
-                                onClick={() => onAction(c.caseNo, a.action, !!done)}
-                              >
-                                {done ? `✓ ${a.doneLabel}` : a.label}
-                              </button>
-                            );
-                          })}
+                          {done.map((a) => (
+                            <button
+                              key={a.action}
+                              type="button"
+                              className="st-btn is-done"
+                              disabled={busy}
+                              onClick={() => onAction(c.caseNo, a.action, true)}
+                            >
+                              ✓ {a.doneLabel}
+                            </button>
+                          ))}
+                          {next && (
+                            <button
+                              type="button"
+                              className="st-btn st-btn-tl"
+                              disabled={busy || blocked}
+                              onClick={() => onAction(c.caseNo, next.action, false)}
+                            >
+                              {c.nextAction.label}
+                            </button>
+                          )}
                         </div>
                       </>
                     );

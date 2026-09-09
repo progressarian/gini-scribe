@@ -1366,6 +1366,11 @@
   margin-top: 8px;
   align-items: center;
 }
+.gf .dp-pill-sub {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.45);
+  line-height: 1.6;
+}
 .gf .dp-scroll {
   flex: 1;
   overflow-y: auto;

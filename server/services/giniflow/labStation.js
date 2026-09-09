@@ -367,16 +367,45 @@ export const LAB_STAGES = CASE_STAGE.map((s) => ({ key: s.key, label: s.label })
 // apply is how a technician is sent to draw blood twice.
 const pastCollection = (c) => !!c.receivedOn || !!c.resultSavedOn || !!c.reportedOn;
 
-export const isCollected = (c) =>
-  c.phlebotomy === "Completed" || !!c.collectedOn || pastCollection(c);
-
-const stageIndex = (c) => {
+// HealthRay's own evidence, and the only evidence this screen used to have.
+const healthrayStage = (c) => {
   if (c.reportedOn) return 4;
   if (c.resultSavedOn) return 3;
   if (c.receivedOn) return 2;
-  if (isCollected(c)) return 1;
+  if (c.phlebotomy === "Completed" || !!c.collectedOn || pastCollection(c)) return 1;
   return 0;
 };
+
+// What the floor recorded here. HealthRay learns a sample was drawn only when
+// the RESULTS come back — `collected_on` rides in on `raw_detail_json`, hours
+// later — and `phlebotomy_status`, the one live field, is left at "Pending" by
+// the hospital's phlebotomists on most days. So a technician who has drawn every
+// tube on the floor has no way to say so, and the queue keeps sending them back.
+//
+// These are the same three steps the Gini-ordered queue has in `SAMPLE_FLOW`.
+// They are the floor's own account of the sample, never HealthRay's.
+const FLOOR_STAGE = { sample_taken: 1, processing: 2, results_ready: 3 };
+
+const floorStage = (c) =>
+  (c.actions || []).reduce((max, a) => Math.max(max, FLOOR_STAGE[a.action] ?? 0), 0);
+
+// HealthRay wins wherever it is further along: it is authoritative about its own
+// lab, and a case it has already received cannot be un-received by this screen.
+// It simply has nothing to say for the first few hours, and that silence is what
+// the floor's own record fills.
+const stageIndex = (c) => Math.max(healthrayStage(c), floorStage(c));
+
+export const isCollected = (c) => stageIndex(c) >= 1;
+
+// What the technician does next on a case Gini Flow does not own — the same
+// question `NEXT_ACTION` answers for a Gini order, so the two halves of this
+// screen stop describing one physical act in two different vocabularies.
+// Upload is deliberately absent: it is a file, handled by its own drop zone.
+const CASE_NEXT_ACTION = [
+  { action: "sample_taken", label: "✓ Mark sample collected" },
+  { action: "processing", label: "⚙️ Start processing" },
+  { action: "results_ready", label: "✓ Results done — ready to upload" },
+];
 
 // The rail and the pill are the SAME fact and must be computed from the same
 // thing. Driving the rail off `results_synced` while the pill read HealthRay's
@@ -523,20 +552,34 @@ async function getHealthrayCases(visitDate, q = null, db = pool) {
     // The LEAST advanced case is the patient's stage: with three samples out, the
     // one nobody has collected is what the floor is waiting on, not the one that
     // has already reported.
-    const cases = (r.case_list || []).map((c) => ({
-      ...c,
-      stage: CASE_STAGE[stageIndex(c)],
-      stageAt: c[CASE_STAGE[stageIndex(c)].at] || null,
-      // The screen's collect button keys off this, so it has to be the same
-      // rule the stage uses: an absent `collected_on` is not evidence the sample
-      // is still in the patient.
-      collected: isCollected(c),
-      state: !c.synced
-        ? { key: "awaiting", label: "Awaiting results" }
-        : !c.reported
-          ? { key: "partial", label: "Partial — panels still coming in" }
-          : { key: "reported", label: "Reported" },
-    }));
+    const cases = (r.case_list || []).map((c) => {
+      const idx = stageIndex(c);
+      // Whose account this is. The lab must never read a tube the floor says it
+      // drew as one HealthRay has confirmed, so the label carries its source —
+      // but the case still leaves the "collect now" bucket, because it has been
+      // drawn and sending somebody to draw it again is the actual harm.
+      const onFloor = idx > healthrayStage(c);
+      const at = (c.actions || []).find((a) => FLOOR_STAGE[a.action] === idx);
+      return {
+        ...c,
+        stage: onFloor
+          ? { ...CASE_STAGE[idx], label: `${CASE_STAGE[idx].label} · floor` }
+          : CASE_STAGE[idx],
+        stageAt: (onFloor ? at?.at : c[CASE_STAGE[idx].at]) || null,
+        // The screen's collect button keys off this, so it has to be the same
+        // rule the stage uses: an absent `collected_on` is not evidence the sample
+        // is still in the patient.
+        collected: isCollected(c),
+        // Only the floor's own steps are offerable, and only the next one. A case
+        // HealthRay has already carried past this point needs nothing recorded.
+        nextAction: idx < CASE_NEXT_ACTION.length ? CASE_NEXT_ACTION[idx] : null,
+        state: !c.synced
+          ? { key: "awaiting", label: "Awaiting results" }
+          : !c.reported
+            ? { key: "partial", label: "Partial — panels still coming in" }
+            : { key: "reported", label: "Reported" },
+      };
+    });
     const lowest = cases.reduce(
       (worst, c) => (stageIndex(c) < stageIndex(worst) ? c : worst),
       cases[0],
@@ -887,7 +930,13 @@ export async function uploadReport(
 // real state still arrives through `labSync`.
 // One action. "chased" was dropped: it is not in the reference design, and the
 // screen should not invent vocabulary the rest of the floor does not use.
-export const CASE_ACTIONS = ["sample_taken"];
+export const CASE_ACTIONS = ["sample_taken", "processing", "results_ready"];
+
+const ACTION_NOUN = {
+  sample_taken: "collection",
+  processing: "processing",
+  results_ready: "results done",
+};
 
 export async function markLabCaseAction(
   caseNo,
@@ -901,32 +950,47 @@ export async function markLabCaseAction(
   ]);
   if (!known.length) throw new Error(`No such lab case: ${caseNo}`);
 
-  if (action === "sample_taken" && !undo) {
-    // The lab already has this tube. A screen open since before it was received
-    // would otherwise write "collected by" against a sample somebody else drew,
-    // and that name is the only record of who drew it.
+  if (!undo) {
+    // Where HealthRay and the floor each think this case is. A screen open since
+    // before the lab received the tube would otherwise write "collected by"
+    // against a sample somebody else drew, and that name is the only record of
+    // who drew it.
     const { rows: state } = await db.query(
-      `SELECT raw_list_json->>'phlebotomy_status' AS phlebotomy,
-              raw_list_json->>'collected_on'      AS collected_on,
-              raw_list_json->>'received_on'       AS received_on,
-              raw_list_json->>'result_saved_on'   AS result_saved_on,
-              raw_list_json->>'reported_on'       AS reported_on
-         FROM lab_cases WHERE case_no = $1`,
+      `SELECT lc.raw_list_json->>'phlebotomy_status' AS phlebotomy,
+              lc.raw_list_json->>'collected_on'      AS "collectedOn",
+              lc.raw_list_json->>'received_on'       AS "receivedOn",
+              lc.raw_list_json->>'result_saved_on'   AS "resultSavedOn",
+              lc.raw_list_json->>'reported_on'       AS "reportedOn",
+              COALESCE(
+                (SELECT json_agg(json_build_object('action', a.action))
+                   FROM giniflow_lab_case_actions a WHERE a.case_no = lc.case_no),
+                '[]'::json
+              ) AS actions
+         FROM lab_cases lc WHERE lc.case_no = $1`,
       [caseNo],
     );
     const c = state[0] || {};
-    const already =
-      c.phlebotomy === "Completed" ||
-      !!c.collected_on ||
-      !!c.received_on ||
-      !!c.result_saved_on ||
-      !!c.reported_on;
-    if (already) {
-      throw Object.assign(new Error("This sample has already been collected — the lab has it"), {
+    const want = CASE_ACTIONS.indexOf(action) + 1;
+
+    // HealthRay has already carried the case past this point, so recording it
+    // here would only add a name to work somebody else did.
+    if (healthrayStage(c) >= want) {
+      throw Object.assign(
+        new Error(`The lab has already taken this case past ${ACTION_NOUN[action]}`),
+        { status: 409 },
+      );
+    }
+    // The steps are a sequence, not a set: a tube cannot be run before it is
+    // drawn. Without this a mis-tap on the last button silently skips the two
+    // before it and the case reports a stage the lab never reached.
+    if (stageIndex(c) < want - 1) {
+      throw Object.assign(new Error(`Record ${ACTION_NOUN[CASE_ACTIONS[want - 2]]} first`), {
         status: 409,
       });
     }
+  }
 
+  if (action === "sample_taken" && !undo) {
     // Only lc.patient_id. The fallback matched patients.file_no against
     // HealthRay's UHID, and HealthRay REASSIGNS a UHID to a different person
     // over time — so on a case whose patient was never linked, this could find
@@ -945,10 +1009,14 @@ export async function markLabCaseAction(
   }
 
   if (undo) {
-    await db.query(`DELETE FROM giniflow_lab_case_actions WHERE case_no = $1 AND action = $2`, [
-      caseNo,
-      action,
-    ]);
+    // Taking back a step takes back what was built on it. Deleting `sample_taken`
+    // alone would leave a case recorded as processing a tube nobody drew, which
+    // is a worse statement than either the technician made.
+    await db.query(
+      `DELETE FROM giniflow_lab_case_actions
+        WHERE case_no = $1 AND action = ANY($2::text[])`,
+      [caseNo, CASE_ACTIONS.slice(CASE_ACTIONS.indexOf(action))],
+    );
     return { caseNo, action, undone: true };
   }
 

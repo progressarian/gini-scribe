@@ -3,11 +3,11 @@ import { callLabel } from "../../shared/callStatuses.js";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-const BLOCK_WIDTH = 27;
+const BLOCK_WIDTH = 26;
 
 const COL_WIDTHS = [
-  22, 12, 14, 14, 12, 14, 12, 12, 14, 12, 6, 6, 20, 14, 14, 14, 14, 14, 26, 22, 18, 18, 16, 12, 16,
-  22, 30,
+  22, 12, 14, 14, 12, 14, 12, 12, 14, 12, 6, 6, 20, 14, 14, 14, 14, 14, 26, 22, 18, 16, 12, 16, 22,
+  30,
 ];
 
 const HEADERS = [
@@ -32,7 +32,6 @@ const HEADERS = [
   "Last Consultant Seen",
   "Prescription Explained By",
   "Call Status",
-  "Last Call Status",
   "Called By",
   "Call Date",
   "Home Collection",
@@ -102,7 +101,11 @@ const toSheetRow = (row, fallbackDate, lastSeen = {}) => {
     row.mode_of_appointment || row.appointment_type || "",
     lastSeenLabel(lastSeen[row.patient_id]),
     row.prescription_explained_by || "",
-    callLabel(row.call_status || "pending"),
+    // The STORED status, not the day-scoped one. On screen the status resets
+    // each morning on purpose — an unreset list would read "already called" and
+    // the team would skip patients on today's round. The sheet is the opposite
+    // job: it is the record of what happened, read alongside Call Date, so a
+    // call logged yesterday must still say so here.
     callLabel(row.call_status_any || "pending"),
     row.call_made_by || "",
     fmtSheetDate(row.call_date),

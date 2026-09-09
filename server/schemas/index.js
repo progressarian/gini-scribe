@@ -717,7 +717,7 @@ export const giniflowSampleSchema = z.object({
 // the retired "chased" value; nothing writes it, and dropping a constraint on
 // production to remove a word is not worth the migration.
 export const giniflowLabCaseActionSchema = z.object({
-  action: z.enum(["sample_taken"]),
+  action: z.enum(["sample_taken", "processing", "results_ready"]),
   note: z.string().max(500).nullish(),
   undo: z.boolean().optional(),
 });
