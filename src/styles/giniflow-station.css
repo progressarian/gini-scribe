@@ -5338,6 +5338,63 @@
   align-items: center;
   flex-wrap: wrap;
 }
+.gf .jb-step-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.gf .jb-tests {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin: 0 0 2px 28px;
+}
+.gf .jb-test {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--bd);
+  border-radius: 999px;
+  background: var(--white);
+  padding: 2px 4px 2px 8px;
+  font-size: 10px;
+  color: var(--ink);
+}
+.gf .jb-test-p {
+  color: var(--ink3);
+}
+.gf .jb-test button {
+  border: 0;
+  background: transparent;
+  color: var(--ink3);
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 3px;
+}
+.gf .jb-test button:hover {
+  color: var(--rd, #b4232a);
+}
+.gf .jb-test-add {
+  border: 1px dashed var(--bd2);
+  border-radius: 999px;
+  background: var(--bg);
+  font-family: var(--fb);
+  font-size: 10px;
+  color: var(--ink3);
+  padding: 3px 6px;
+  cursor: pointer;
+  max-width: 100%;
+}
+.gf .jb-test-total,
+.gf .jb-test-none {
+  font-size: 10px;
+  color: var(--ink3);
+}
+.gf .jb-test-total {
+  font-weight: 700;
+}
 .gf .jb-total {
   background: var(--tl-l);
   color: var(--tl);

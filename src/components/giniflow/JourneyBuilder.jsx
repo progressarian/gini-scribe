@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useFlowStepCatalog, useFlowStaff } from "../../queries/hooks/useFlow";
+import { useReceptionTestCatalog } from "../../queries/hooks/useGiniflowReception";
+import { machineFor } from "../../../shared/machineStages.js";
 import useAuthStore from "../../stores/authStore";
 import { CONDITIONS } from "../../../shared/giniflowConditions.js";
 
@@ -40,6 +42,58 @@ function AssignSelect({ step, onChange }) {
         </option>
       ))}
     </select>
+  );
+}
+
+const rupees = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
+
+// Which tests to draw. "Blood Sample" is a stop, not a test — so the desk names
+// the tests here and the check-in raises one lab order for them, priced from the
+// catalogue and left for the payment desk to clear.
+function TestPicker({ picked, onChange }) {
+  const { data: catalog = [], isLoading } = useReceptionTestCatalog();
+  const lab = catalog.filter((t) => t.category !== "machine");
+  const priceOf = (name) => lab.find((t) => t.name === name)?.price ?? 0;
+  const total = picked.reduce((sum, n) => sum + priceOf(n), 0);
+
+  return (
+    <div className="jb-tests">
+      {picked.map((name) => (
+        <span className="jb-test" key={name}>
+          {name} <span className="jb-test-p">{rupees(priceOf(name))}</span>
+          <button
+            type="button"
+            title={`Remove ${name}`}
+            onClick={() => onChange(picked.filter((n) => n !== name))}
+          >
+            ✕
+          </button>
+        </span>
+      ))}
+      <select
+        className="jb-test-add"
+        value=""
+        disabled={isLoading}
+        onChange={(e) => e.target.value && onChange([...picked, e.target.value])}
+      >
+        <option value="">{picked.length ? "+ another test" : "+ which tests?"}</option>
+        {lab
+          .filter((t) => !picked.includes(t.name))
+          .map((t) => (
+            <option key={t.name} value={t.name}>
+              {t.name} — {rupees(t.price)}
+            </option>
+          ))}
+      </select>
+      {picked.length > 0 && (
+        <span className="jb-test-total">
+          {picked.length} test{picked.length === 1 ? "" : "s"} · {rupees(total)} to collect
+        </span>
+      )}
+      {picked.length === 0 && (
+        <span className="jb-test-none">No tests named — nothing will reach the lab</span>
+      )}
+    </div>
   );
 }
 
@@ -152,39 +206,51 @@ export default function JourneyBuilder({
       )}
 
       {steps.map((step, i) => (
-        <div className="jb-step" key={`${step.catalogId || "custom"}-${i}`}>
-          <span className="jb-move">
-            <button type="button" disabled={i === 0} onClick={() => move(i, -1)} title="Move up">
-              ▲
-            </button>
+        <div className="jb-step-wrap" key={`${step.catalogId || "custom"}-${i}`}>
+          <div className="jb-step">
+            <span className="jb-move">
+              <button type="button" disabled={i === 0} onClick={() => move(i, -1)} title="Move up">
+                ▲
+              </button>
+              <button
+                type="button"
+                disabled={i === steps.length - 1}
+                onClick={() => move(i, 1)}
+                title="Move down"
+              >
+                ▼
+              </button>
+            </span>
+            <span className="jb-name">
+              {i + 1}. {step.name}
+            </span>
+            <input
+              className="jb-dur"
+              type="number"
+              min="0"
+              value={step.minutes}
+              onChange={(e) => replace(i, { minutes: e.target.value })}
+            />
+            <AssignSelect step={step} onChange={(patch) => replace(i, patch)} />
             <button
               type="button"
-              disabled={i === steps.length - 1}
-              onClick={() => move(i, 1)}
-              title="Move down"
+              className="jb-remove"
+              title="Remove step"
+              onClick={() => onChange(steps.filter((_, idx) => idx !== i))}
             >
-              ▼
+              ✕
             </button>
-          </span>
-          <span className="jb-name">
-            {i + 1}. {step.name}
-          </span>
-          <input
-            className="jb-dur"
-            type="number"
-            min="0"
-            value={step.minutes}
-            onChange={(e) => replace(i, { minutes: e.target.value })}
-          />
-          <AssignSelect step={step} onChange={(patch) => replace(i, patch)} />
-          <button
-            type="button"
-            className="jb-remove"
-            title="Remove step"
-            onClick={() => onChange(steps.filter((_, idx) => idx !== i))}
-          >
-            ✕
-          </button>
+          </div>
+          {step.catalogId === "blood_sample" && (
+            <TestPicker picked={step.tests || []} onChange={(tests) => replace(i, { tests })} />
+          )}
+          {step.catalogId && machineFor(step.catalogId) && (
+            <div className="jb-tests">
+              <span className="jb-test-total">
+                Raises a {machineFor(step.catalogId).name} order for the payment desk
+              </span>
+            </div>
+          )}
         </div>
       ))}
 

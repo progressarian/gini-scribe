@@ -10,6 +10,7 @@ import {
   forceResyncDate,
   syncAppointmentStatuses,
 } from "./healthraySync.js";
+import { manualFloor } from "../../../shared/manualFloor.js";
 import {
   runLabSync,
   retryPendingLabCases,
@@ -345,8 +346,12 @@ export function startCronJobs() {
   // above, so a slow AI parse never blocks status updates.
   if (process.env.HEALTHRAY_MOBILE || process.env.HEALTHRAY_SESSION) {
     console.log("[Cron] Starting HealthRay status sync (continuous loop, 10–12s break)...");
-    statusLoopRunning = true;
-    scheduleNextStatusSync(5_000); // 5s after boot — let initial full sync start first
+    if (manualFloor()) {
+      console.log("[Cron] HealthRay status mirroring OFF — the floor moves its own patients");
+    } else {
+      statusLoopRunning = true;
+      scheduleNextStatusSync(5_000); // 5s after boot — let initial full sync start first
+    }
   }
 
   // ── Lab HealthRay sync (continuous loop, 30–40s break between runs) ──────
@@ -357,8 +362,14 @@ export function startCronJobs() {
   // timer that can drift behind a long-running sync.
   console.log("[Cron] Starting lab sync (continuous loop, 30–40s break between runs)...");
 
-  labLoopRunning = true;
-  scheduleNextLabSync(0);
+  // The lab's own record is the floor's now: cases, results and report PDFs all
+  // come from somebody at a bench pressing a button (38-MANUAL-FLOOR-PLAN.md).
+  if (manualFloor()) {
+    console.log("[Cron] Lab HealthRay sync OFF — Scribe is the system of record");
+  } else {
+    labLoopRunning = true;
+    scheduleNextLabSync(0);
+  }
 
   // Gini Flow floor board. Reads the appointments table the HealthRay loop
   // maintains; writes only giniflow_* — it never touches the older flow_* module.
@@ -390,7 +401,11 @@ export function startCronJobs() {
   // (30s on last_retry_at) keeps each case to ~one fetch per loop tick.
   // Distinct from retryPendingLabCases (which only handles results_synced=FALSE).
   console.log("[Cron] Starting lab partial-results recovery (continuous loop, 30–40s break)...");
-  partialLoopRunning = true;
+  if (manualFloor()) {
+    console.log("[Cron] Partial-results recovery OFF — no results arrive from HealthRay");
+  } else {
+    partialLoopRunning = true;
+  }
   scheduleNextPartialRetry(0);
 
   // ── Lab PDF retry recovery ────────────────────────────────────────────────

@@ -2,6 +2,17 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "../../services/api";
 import { pollInterval } from "./giniflowPolling";
 
+// The priced test catalogue, for the check-in panel's test picker. A price list
+// does not change while a patient is being arrived, so it is cached for the
+// session rather than polled.
+export function useReceptionTestCatalog() {
+  return useQuery({
+    queryKey: ["giniflow", "reception", "test-catalog"],
+    queryFn: async () => (await api.get("/api/giniflow/stations/reception/catalog")).data.tests,
+    staleTime: 10 * 60 * 1000,
+  });
+}
+
 export function useReceptionQueue(date) {
   return useQuery({
     queryKey: ["giniflow", "reception", "queue", date || "today"],

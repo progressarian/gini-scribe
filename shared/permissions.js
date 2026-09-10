@@ -37,6 +37,7 @@ export const ROLES = {
   NURSE: "nurse",
   LAB: "lab",
   LAB_ADMIN: "lab_admin",
+  MACHINE_TECH: "machine_tech",
   TECH: "tech",
   RECEPTION: "reception",
   COORDINATOR: "coordinator",
@@ -129,11 +130,23 @@ export const CAPABILITIES = {
   // losing track of where a sample physically is.
   GINIFLOW_STATION_LAB_COLLECT: "GINIFLOW_STATION_LAB_COLLECT", // lab station 1: order → collect → send
   GINIFLOW_STATION_LAB_PROCESS: "GINIFLOW_STATION_LAB_PROCESS", // lab station 2: receive → process → upload
+  // The machine room: ABI, VPT, Fundus, TMT, ECG
+  // (36-MACHINE-TEST-STATION-PLAN.md). Its own key rather than a lab one,
+  // because nothing is drawn here — the patient sits at a machine, and the
+  // person who runs them is not a phlebotomist.
+  GINIFLOW_STATION_MACHINE: "GINIFLOW_STATION_MACHINE",
   GINIFLOW_STATION_DOCTOR: "GINIFLOW_STATION_DOCTOR", // the consultant's queue and consult screen
   GINIFLOW_MO_CLOSE: "GINIFLOW_MO_CLOSE", // end a visit without the consultant, prescription and all
   GINIFLOW_STATION_MO: "GINIFLOW_STATION_MO", // MO/SD workup, order tests, hand over
   GINIFLOW_STATION_PHARMACY: "GINIFLOW_STATION_PHARMACY", // dispense, counsel, close the visit
   GINIFLOW_STATION_RX: "GINIFLOW_STATION_RX", // the prescription explainer: explain the prescription
+  // End a visit that never reaches a dispense. Roughly 90% of visits do not —
+  // the patient takes the prescription from the counter and goes — and HealthRay
+  // used to close those. The counter is where the visit actually ends, so this
+  // belongs to the two people standing at it and to nobody else: a station that
+  // cannot see the patient leave cannot honestly say they have
+  // (38-MANUAL-FLOOR-PLAN.md).
+  GINIFLOW_END_VISIT: "GINIFLOW_END_VISIT",
   // Print the finalised prescription for the patient. Its own key rather than a
   // station one: several desks need this single action and none of them should
   // inherit another desk's controls to get it.
@@ -274,6 +287,24 @@ export const ROLE_CAPABILITIES = {
     C.GINIFLOW_STATION_LAB_COLLECT,
     C.GINIFLOW_STATION_LAB_PROCESS,
   ],
+  // The machine room — ABI, VPT, Fundus, TMT and ECG. Modelled on the lab role,
+  // because the shape of the job is the same: one desk, one queue, reports that
+  // land on a chart. What differs is that nothing is drawn, so it holds neither
+  // collection nor the analyzer bench.
+  //
+  // GINIFLOW_VIEW is not optional: `/api/giniflow*` is prefix-gated on it in
+  // middleware/auth.js before any per-route capability runs, so without it this
+  // role would pass the frontend check for its own station and then 403 on every
+  // call the page makes — a broken screen rather than an honest refusal.
+  [ROLES.MACHINE_TECH]: [
+    C.PATIENT_READ,
+    C.PATIENT_CHART,
+    C.LAB_PORTAL,
+    C.LAB_REQUESTS,
+    C.GINIFLOW_VIEW,
+    C.GINIFLOW_BOARD,
+    C.GINIFLOW_STATION_MACHINE,
+  ],
   [ROLES.TECH]: [
     C.PATIENT_READ,
     C.PATIENT_CHART,
@@ -364,6 +395,7 @@ export const ROLE_CAPABILITIES = {
     // The last desk on the floor: dispensing, counselling and the exit that ends
     // the visit. Pharmacy and admin only — nobody else closes a patient's day.
     C.GINIFLOW_STATION_PHARMACY,
+    C.GINIFLOW_END_VISIT,
     C.GINIFLOW_PRINT_RX,
   ],
   // OBT outbound call team. The ONLY role without PATIENT_CHART: they phone
@@ -377,7 +409,7 @@ export const ROLE_CAPABILITIES = {
   // runs, the station itself, and the print/reissue action the desk exists for.
   // No PATIENT_READ or PATIENT_CHART — the station's own endpoints carry
   // everything the screen shows, so the chart never has to open here.
-  [ROLES.RX]: [C.GINIFLOW_VIEW, C.GINIFLOW_STATION_RX, C.GINIFLOW_PRINT_RX],
+  [ROLES.RX]: [C.GINIFLOW_VIEW, C.GINIFLOW_STATION_RX, C.GINIFLOW_END_VISIT, C.GINIFLOW_PRINT_RX],
   [ROLES.OBT]: [C.PATIENT_READ, C.OBT_OPS],
   [ROLES.GUEST]: [],
 };

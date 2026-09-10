@@ -83,3 +83,17 @@ export function useSendCard() {
     },
   });
 }
+
+// Ending a visit that never reaches a dispense — about nine in ten do not. The
+// counter is where the visit actually ends, so the two people standing at it can
+// say so (38-MANUAL-FLOOR-PLAN.md).
+export function useEndVisit(station) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ visitId }) =>
+      (await api.post(`/api/giniflow/stations/${station}/${visitId}/end-visit`)).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["giniflow"] });
+    },
+  });
+}

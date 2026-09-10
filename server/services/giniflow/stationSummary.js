@@ -24,8 +24,16 @@ export async function getStationSummary(visitDate, db = pool) {
        -- reception queue counts them (shared/labPayment.js).
        count(*) FILTER (WHERE o.payment_status NOT IN ('paid','claim_approved'))::int
          AS payment_pending,
-       count(*) FILTER (WHERE o.payment_status IN ('paid','claim_approved')
+       count(*) FILTER (WHERE o.kind = 'lab'
+                          AND o.payment_status IN ('paid','claim_approved')
                           AND o.sample_status IN ('ordered','payment_pending','paid'))::int AS to_collect,
+       count(*) FILTER (WHERE o.kind = 'machine'
+                          AND o.sample_status IN ('ordered','payment_pending','paid'))::int
+         AS machine_waiting,
+       count(*) FILTER (WHERE o.kind = 'machine' AND o.sample_status = 'in_progress')::int
+         AS machine_running,
+       count(*) FILTER (WHERE o.kind = 'machine' AND o.sample_status = 'done')::int
+         AS machine_unreported,
        count(*) FILTER (WHERE o.sample_status = 'sample_collected')::int AS to_send,
        count(*) FILTER (WHERE o.sample_status = 'sample_sent')::int AS to_receive,
        count(*) FILTER (WHERE o.sample_status IN ('sample_received','processing'))::int AS in_lab,
@@ -158,6 +166,20 @@ export async function getStationSummary(visitDate, db = pool) {
             ? `${floor.lab_awaiting} still out`
             : "bench clear",
       tone: orders.to_upload ? "red" : orders.to_receive ? "blue" : "teal",
+    },
+    // ABI, VPT, Fundus, TMT, ECG. Machine tests raise an order like any other, so
+    // unlike the lab tiles this one has no HealthRay fallback to count — a test
+    // nobody ordered through Gini Flow leaves no trace until its report lands.
+    machine: {
+      count: orders.machine_waiting + orders.machine_running + orders.machine_unreported,
+      label: orders.machine_running
+        ? `${orders.machine_running} on a machine · ${orders.machine_waiting} waiting`
+        : orders.machine_waiting
+          ? `${orders.machine_waiting} waiting`
+          : orders.machine_unreported
+            ? `${orders.machine_unreported} awaiting a report`
+            : "no machine tests today",
+      tone: orders.machine_waiting ? "blue" : "teal",
     },
     mo_sd: { count: col("sd"), label: `${col("sd")} in workup`, tone: "blue" },
     doctor: { count: col("wait_doctor"), label: `${col("wait_doctor")} waiting`, tone: "red" },

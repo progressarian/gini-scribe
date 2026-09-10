@@ -1,8 +1,3 @@
-.tcat__sub {
-  font-size: 12px;
-  color: #64748b;
-  margin: 0 0 10px;
-}
 .tcat__warn {
   font-size: 12px;
   color: #b45309;
@@ -116,4 +111,70 @@
   padding: 16px 8px;
   color: #94a3b8;
   font-size: 12px;
+}
+
+/* Which station a test belongs to — set here, beside its price, because they are
+   one decision the admin makes in one place. */
+.tcat__station {
+  font-size: 12px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid #d1d9e0;
+  background: #fff;
+  color: #334155;
+  cursor: pointer;
+  max-width: 100%;
+}
+.tcat__stations {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.tcat__stations button {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid #d1d9e0;
+  background: #fff;
+  color: #334155;
+  cursor: pointer;
+}
+.tcat__stations button.on {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+.tcat__scount {
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The table is the one thing here that cannot reflow: seven columns of a price
+   list are seven columns. It scrolls sideways inside its own box rather than
+   pushing the page wider, so the rest of the screen still fits a phone. */
+.tcat__scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.tcat__table {
+  min-width: 720px;
+}
+
+@media (max-width: 640px) {
+  .tcat__add,
+  .tcat__bar {
+    align-items: stretch;
+  }
+  .tcat__add .tcat__search,
+  .tcat__bar .tcat__search {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  .tcat__add .tcat__price,
+  .tcat__add .tcat__station {
+    flex: 1 1 auto;
+  }
+  .tcat__count {
+    width: 100%;
+  }
 }

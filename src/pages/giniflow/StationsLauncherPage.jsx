@@ -54,6 +54,13 @@ const STATIONS = [
     href: "/giniflow/station/lab/processing",
   },
   {
+    key: "machine",
+    icon: "🫀",
+    name: "Machine Tests",
+    desc: "ABI · VPT · Fundus · TMT · ECG — call the patient, run the machine, file the report",
+    href: "/giniflow/station/machine",
+  },
+  {
     key: "mo_sd",
     icon: "👨‍⚕️",
     name: "Chief Endocrinologist",

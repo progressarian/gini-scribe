@@ -597,6 +597,15 @@ check(
   "and is not already on the day's list",
   found.find((p) => p.patientId === walkIn)?.visitId == null,
 );
+// The journey panel opens on this row BEFORE any visit exists, so the search
+// has to carry the type it should suggest. Without it the desk would have to be
+// checked in first just to be asked what kind of visit it is — which is how a
+// patient ends up on the floor after pressing Back.
+check(
+  "the search says which visit type to suggest",
+  !!found.find((p) => p.patientId === walkIn)?.suggestedVisitTypeId,
+  found.find((p) => p.patientId === walkIn)?.suggestedVisitTypeId,
+);
 
 const checkedIn = await checkInWalkIn({ patientId: walkIn, visitDate: TEST_DAY });
 check("a walk-in is checked in in one action", checkedIn.status === "checked_in");

@@ -6,7 +6,8 @@ import { readFileSync, readdirSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { detectMedCategory } from "../config/medicationCategories.js";
+import { MED_CATEGORIES, detectMedCategory } from "../config/medicationCategories.js";
+import { sortDiagnoses } from "../utils/diagnosisSort.js";
 import { pickNextVisit } from "../../shared/followUp.js";
 import { DEFAULT_HOSPITAL, normalizeHospital } from "../services/prescriptionFooter.js";
 
@@ -169,63 +170,6 @@ const valueColor = (val, goal, lowerBetter = true) => {
   return onTarget ? "#15803d" : wayOff ? "#d94f4f" : "#d97a0a";
 };
 
-// Compact month-day label for the x-axis (e.g. "12 Mar"). Falls back to an
-// empty string when the date is missing/unparseable so the chart row still
-// aligns with the bars above.
-const fmtSparkDate = (d) => {
-  if (!d) return "";
-  const t = new Date(d);
-  if (Number.isNaN(t.getTime())) return "";
-  return t.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
-};
-
-// Build a 4-bar sparkline rendered chronologically (oldest → newest, left → right).
-// labHistory comes newest-first from the visit endpoint, so reverse before slicing.
-// Returns { bars, goalPct } so the renderer can draw a target line at the
-// same vertical scale the bars use.
-const buildSparkline = (history, goal, lowerBetter = true) => {
-  if (!history || history.length === 0) return { bars: [], goalPct: null };
-  const chronological = [...history].reverse();
-  const entries = chronological
-    .slice(-4)
-    .map((h) => ({ value: Number(h.result ?? h.value), date: h.date || h.test_date }))
-    .filter((e) => !Number.isNaN(e.value));
-  if (entries.length === 0) return { bars: [], goalPct: null };
-  // Scale bars on the spread between min/max (with a small floor) so visit-to-
-  // visit changes are visually distinguishable, instead of all bars looking
-  // nearly identical when values cluster (typical for weight/waist).
-  const vals = entries.map((e) => e.value);
-  const min = Math.min(...vals, goal != null ? goal : Infinity);
-  const max = Math.max(...vals, goal != null ? goal : -Infinity);
-  const span = Math.max(max - min, max * 0.15, 1);
-  const heightPct = (v) => Math.max(20, Math.round(((v - min) / span) * 80) + 20);
-  const bars = entries.map((e) => {
-    let bg = "#d97a0a";
-    if (goal != null) {
-      const onTarget = lowerBetter ? e.value <= goal : e.value >= goal;
-      const wayOff = lowerBetter ? e.value > goal * 1.3 : e.value < goal * 0.7;
-      bg = onTarget ? "#15803d" : wayOff ? "#d94f4f" : "#d97a0a";
-    }
-    return {
-      height: heightPct(e.value),
-      bg,
-      value: e.value,
-      date: e.date,
-      dateLabel: fmtSparkDate(e.date),
-    };
-  });
-  const goalPct = goal != null ? Math.max(0, Math.min(100, heightPct(goal))) : null;
-  return { bars, goalPct };
-};
-
-// First (oldest) reading from labHistory. labHistory is newest-first, so the
-// last element is the oldest. Returns null when there's only one reading.
-const firstReading = (history) => {
-  if (!history || history.length < 2) return null;
-  return history[history.length - 1];
-};
-
-// Find lab history by canonical name (case-insensitive, alias-tolerant)
 const ALIASES = {
   hba1c: ["hba1c", "a1c", "glycated haemoglobin", "glycated hemoglobin"],
   fbs: ["fbs", "fasting blood sugar", "fasting glucose", "fpg"],
@@ -268,13 +212,29 @@ const fmtDateLong = (d) => {
   });
 };
 
+const MED_GROUP_RANK = MED_CATEGORIES.reduce((acc, c) => {
+  acc[c.id] = c.rank;
+  return acc;
+}, {});
+
+// Order the printed medicine list by the clinical sequence the consultants
+// review in — diabetes first, supplements last — so the printed Rx reads in the
+// same order as the diagnosis list above it. Child/support meds keep their
+// parent's position; they are pulled out by rank later, not sorted here.
+const sortMedsClinically = (meds) =>
+  meds
+    .map((m, i) => ({ m, i, rank: MED_GROUP_RANK[detectMedCategory(m)] ?? 45 }))
+    .sort((a, b) => a.rank - b.rank || a.i - b.i)
+    .map((x) => x.m);
+
 const splitMeds = (activeMeds = []) => {
   // Belt-and-braces: drop any stopped meds even if the client forgot to filter
   const live = activeMeds.filter((m) => m.is_active !== false);
-  // Use detectMedCategory (same logic as the UI) so meds that are auto-detected
-  // as "external" by name pattern (e.g. Urimax/tamsulosin synced from HealthRay
-  // without explicit med_group/external_doctor fields) are not silently dropped.
-  const ownMeds = live.filter((m) => detectMedCategory(m) !== "external");
+  // "external" is provenance, not a drug class: only external_doctor or an
+  // explicit med_group puts a medicine under another doctor's heading. It used
+  // to be inferred from urology drug names, which printed the treating doctor's
+  // own Urimax as somebody else's prescription.
+  const ownMeds = sortMedsClinically(live.filter((m) => detectMedCategory(m) !== "external"));
   const externalMeds = live.filter((m) => detectMedCategory(m) === "external");
   return { ownMeds, externalMeds };
 };
@@ -356,10 +316,10 @@ body{font-family:var(--fb);color:var(--ink);background:var(--white);font-size:13
 .rx-summary-tests-list{display:flex;flex-wrap:wrap;gap:4px}
 .rx-summary-test-chip{font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:var(--bg);border:1px solid var(--tlb);color:var(--ink2)}
 
-.rx-section-title{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--ink3);margin-bottom:8px;margin-top:16px;padding-bottom:4px;border-bottom:1px solid var(--bd)}
+.rx-section-title{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--ink3);margin-bottom:8px;margin-top:16px;padding-bottom:4px;border-bottom:1px solid var(--bd);break-inside:avoid;break-after:avoid}
 .rx-med-cat{display:flex;align-items:center;gap:6px;font-size:10px;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.08em;background:#f5f7fa;padding:4px 8px;border-left:3px solid var(--tl);margin:10px 0 2px}
 .rx-med-cat-count{font-size:9px;font-weight:600;color:var(--ink3);text-transform:none;letter-spacing:0}
-.rx-dx{display:flex;gap:10px;align-items:flex-start;margin-bottom:7px}
+.rx-dx{display:flex;gap:10px;align-items:flex-start;margin-bottom:7px;break-inside:avoid}
 .rx-dx-num{font-family:var(--fm);font-size:11px;color:var(--ink3);flex-shrink:0;min-width:18px;padding-top:1px}
 .rx-dx-body{flex:1}
 .rx-dx-name{font-size:13px;font-weight:600;color:var(--ink)}
@@ -378,30 +338,8 @@ body{font-family:var(--fb);color:var(--ink);background:var(--white);font-size:13
 .rx-goal-val{font-family:var(--fm);font-size:12px;font-weight:500}
 .rx-goal-current{font-size:10px;color:var(--ink3);margin-top:2px}
 
-.rx-bio-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:4px}
-.rx-bio-section{}
-.rx-bio{background:var(--bg);border-radius:8px;padding:10px 12px;border:1px solid var(--bd);break-inside:avoid}
-.rx-bio-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px}
-.rx-bio-name{font-size:10px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.04em}
-.rx-bio-goal{font-size:9px;color:var(--ink3);font-weight:600}
-.rx-bio-val{font-family:var(--fm);font-size:18px;font-weight:600;line-height:1.1}
-.rx-bio-trend{font-size:10px;margin-top:2px;font-weight:600}
-.rx-bio-trend .arrow{font-weight:700;margin-right:2px}
-.rx-bio-chart{margin-top:8px;padding-top:14px;border-top:1px dashed var(--bd2)}
-.rx-bio-sparkline{display:flex;gap:6px;align-items:flex-end;height:38px;position:relative}
-.sp-col{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;position:relative;z-index:1}
-.sp-val{font-family:var(--fm);font-size:8.5px;font-weight:600;color:var(--ink2);position:absolute;top:-12px;white-space:nowrap}
-.sp-bar{width:100%;max-width:14px;border-radius:2px 2px 0 0;min-height:3px}
-.sp-col.latest .sp-val{color:var(--ink);font-weight:700}
-.sp-col.latest .sp-bar{box-shadow:0 0 0 1.5px var(--nv)}
-.sp-goal{position:absolute;left:0;right:0;height:0;border-top:1px dashed #1a233266;z-index:0;pointer-events:none}
-.sp-goal-tag{position:absolute;right:-2px;top:-7px;font-family:var(--fm);font-size:7.5px;font-weight:700;color:var(--ink2);background:var(--bg);padding:0 3px;border-radius:2px;letter-spacing:.02em}
-.sp-trend-svg{position:absolute;left:0;right:0;top:0;bottom:0;width:100%;height:100%;z-index:0;pointer-events:none;overflow:visible}
-.sp-dates{display:flex;gap:6px;margin-top:3px}
-.sp-date{flex:1;text-align:center;font-family:var(--fm);font-size:7.5px;font-weight:500;color:var(--ink3);white-space:nowrap;letter-spacing:0}
-.sp-dates .sp-date.latest{color:var(--ink);font-weight:700}
 
-.rx-med{display:flex;gap:12px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--bg)}
+.rx-med{display:flex;gap:12px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--bg);break-inside:avoid}
 .rx-med:last-child{border:none}
 .rx-med-num{font-family:var(--fm);font-size:11px;color:var(--ink3);flex-shrink:0;min-width:20px;padding-top:2px}
 .rx-med-body{flex:1;min-width:0;word-break:break-word;overflow-wrap:break-word}
@@ -453,7 +391,7 @@ function buildPrescriptionHtml(data = {}) {
     doctor = {},
     summary = {},
     visitSummaryText: visitSummaryTextOverride,
-    activeDx = [],
+    activeDx: activeDxInput = [],
     activeMeds = [],
     latestVitals = {},
     prevVitals = {},
@@ -464,6 +402,11 @@ function buildPrescriptionHtml(data = {}) {
     goals = [],
     appt_plan = null,
   } = data;
+
+  // Every caller (client print, /visit route, sync auto-save) gets the same
+  // clinical sequence: diabetes, obesity, CAD, CVA, PVD, hypercholesterolemia,
+  // nephropathy, neuropathy, retinopathy, hypertension, MASLD, thyroid, rest.
+  const activeDx = sortDiagnoses(activeDxInput) || [];
 
   const today = new Date().toISOString().split("T")[0];
   const latestCon = consultations?.[0]?.con_data || {};
@@ -533,191 +476,8 @@ function buildPrescriptionHtml(data = {}) {
   const egfr = findLatest(labResults, "egfr");
   const alt = findLatest(labResults, "alt");
 
-  // ── Condition flags from active diagnoses ─────────────────────────
-  // Same keyword match used by VisitBiomarkers — keeps the prescription
-  // and the visit page in agreement on which conditions the patient has.
-  const dxText = (activeDx || [])
-    .filter((d) => d && d.is_active !== false)
-    .map((d) => `${d.diagnosis_id || ""} ${d.label || ""}`.toLowerCase())
-    .join(" | ");
-  const has = (words) => words.some((w) => dxText.includes(w));
-  const dx = {
-    diabetes: has(["diabetes", "dm1", "dm2", "t1dm", "t2dm", "prediabetes", "hyperglycemia"]),
-    htn: has(["hypertension", "htn", "hypertensive"]),
-    cad: has(["cad", "coronary", "ihd", "cvd", "cva", "atherosclero"]),
-    ckd: has(["ckd", "kidney", "renal", "nephropathy", "albuminuria"]),
-    lipid: has(["dyslipid", "hyperlipid", "cholesterol", "lipid"]),
-    thyroid: has(["thyroid", "hypothyroid", "hyperthyroid", "hashimoto", "graves", "goiter"]),
-    obesity: has(["obesity", "obese", "overweight", "adiposity", "metabolic syndrome"]),
-    liver: has(["nafld", "masld", "fatty liver", "hepatitis", "cirrhosis"]),
-  };
-
   const { ownMeds, externalMeds } = splitMeds(activeMeds);
   const { referrals, labTests } = splitTests(tests);
-
-  // ── Build vitals history for a single field (newest → oldest), trimmed to
-  // rows that actually carry a value. Mirrors the lab-history shape so the
-  // sparkline / first-reading helpers can be reused.
-  const vitalsHistFor = (field) => {
-    if (!Array.isArray(vitalsHistory) || vitalsHistory.length === 0) return [];
-    return vitalsHistory
-      .filter((v) => v && v[field] != null && v[field] !== "")
-      .map((v) => ({ result: Number(v[field]), date: v.recorded_at }))
-      .filter((v) => !Number.isNaN(v.result));
-  };
-
-  const weightHist = vitalsHistFor("weight");
-  const waistHist = vitalsHistFor("waist");
-
-  // ── Biomarker cards
-  // Each candidate card is tagged with the conditions it tracks. Cards whose
-  // conditions match the patient's active diagnoses get a relevance boost so
-  // they bubble to the top of the printed grid — e.g. a thyroid patient's Rx
-  // shows TSH, a CKD patient's Rx shows eGFR + UACR, even when those values
-  // would otherwise have been crowded out by the default lipid/glucose set.
-  const candidates = [
-    hba1c && {
-      label: "HbA1c (%)",
-      val: hba1c.result,
-      sparks: buildSparkline(findHist(labHistory, "hba1c"), 7.0, true),
-      goal: 7.0,
-      lowerBetter: true,
-      first: firstReading(findHist(labHistory, "hba1c")),
-      tracks: ["diabetes"],
-      defaultOrder: 1,
-    },
-    fbs && {
-      label: "FBS (mg/dL)",
-      val: fbs.result,
-      sparks: buildSparkline(findHist(labHistory, "fbs"), 100, true),
-      goal: 100,
-      lowerBetter: true,
-      first: firstReading(findHist(labHistory, "fbs")),
-      tracks: ["diabetes"],
-      defaultOrder: 2,
-    },
-    latestVitals?.bp_sys && {
-      label: "BP (mmHg)",
-      val: `${latestVitals.bp_sys}/${latestVitals.bp_dia}`,
-      raw: latestVitals.bp_sys,
-      sparks: prevVitals?.bp_sys
-        ? buildSparkline(
-            [{ result: prevVitals.bp_sys }, { result: latestVitals.bp_sys }],
-            130,
-            true,
-          )
-        : { bars: [], goalPct: null },
-      goal: 130,
-      lowerBetter: true,
-      tracks: ["htn", "cad", "ckd"],
-      defaultOrder: 3,
-    },
-    ldl && {
-      label: "LDL (mg/dL)",
-      val: ldl.result,
-      sparks: buildSparkline(findHist(labHistory, "ldl"), 100, true),
-      goal: 100,
-      lowerBetter: true,
-      first: firstReading(findHist(labHistory, "ldl")),
-      tracks: ["lipid", "cad"],
-      defaultOrder: 4,
-    },
-    tg && {
-      label: "TG (mg/dL)",
-      val: tg.result,
-      sparks: buildSparkline(findHist(labHistory, "triglycerides"), 150, true),
-      goal: 150,
-      lowerBetter: true,
-      first: firstReading(findHist(labHistory, "triglycerides")),
-      tracks: ["lipid", "cad"],
-      defaultOrder: 5,
-    },
-    egfr && {
-      label: "eGFR (mL/min)",
-      val: egfr.result,
-      sparks: buildSparkline(findHist(labHistory, "egfr"), 90, false),
-      goal: 90,
-      lowerBetter: false,
-      first: firstReading(findHist(labHistory, "egfr")),
-      tracks: ["ckd"],
-      defaultOrder: 6,
-    },
-    creatinine && {
-      label: "Creatinine",
-      val: creatinine.result,
-      sparks: buildSparkline(findHist(labHistory, "creatinine"), null, true),
-      lowerBetter: true,
-      tracks: ["ckd"],
-      defaultOrder: 7,
-    },
-    uacr && {
-      label: "UACR (mg/g)",
-      val: uacr.result,
-      sparks: buildSparkline(findHist(labHistory, "uacr"), 30, true),
-      goal: 30,
-      lowerBetter: true,
-      first: firstReading(findHist(labHistory, "uacr")),
-      tracks: ["ckd", "diabetes"],
-      defaultOrder: 8,
-    },
-    tsh && {
-      label: "TSH (µIU/mL)",
-      val: tsh.result,
-      sparks: buildSparkline(findHist(labHistory, "tsh"), 4.5, true),
-      goal: 4.5,
-      lowerBetter: true,
-      first: firstReading(findHist(labHistory, "tsh")),
-      tracks: ["thyroid"],
-      defaultOrder: 9,
-    },
-    alt && {
-      label: "ALT (U/L)",
-      val: alt.result,
-      sparks: buildSparkline(findHist(labHistory, "alt"), 40, true),
-      goal: 40,
-      lowerBetter: true,
-      first: firstReading(findHist(labHistory, "alt")),
-      tracks: ["liver", "obesity"],
-      defaultOrder: 10,
-    },
-    latestVitals?.weight && {
-      label: "Weight (kg)",
-      val: latestVitals.weight,
-      sparks: buildSparkline(weightHist, null, true),
-      lowerBetter: true,
-      first: firstReading(weightHist),
-      tracks: ["obesity", "diabetes"],
-      defaultOrder: 11,
-    },
-    latestVitals?.waist && {
-      label: "Waist (cm)",
-      val: latestVitals.waist,
-      sparks: buildSparkline(waistHist, 90, true),
-      goal: 90,
-      lowerBetter: true,
-      first: firstReading(waistHist),
-      tracks: ["obesity"],
-      defaultOrder: 12,
-    },
-    latestVitals?.bmi && {
-      label: "BMI",
-      val: latestVitals.bmi,
-      sparks: buildSparkline(vitalsHistFor("bmi"), 25, true),
-      goal: 25,
-      lowerBetter: true,
-      first: firstReading(vitalsHistFor("bmi")),
-      tracks: ["obesity", "diabetes"],
-      defaultOrder: 13,
-    },
-  ].filter(Boolean);
-
-  // Rank: condition-relevant cards first, ties broken by clinical order.
-  // A card is "relevant" when any of its `tracks` matches an active dx.
-  const relevance = (c) => ((c.tracks || []).some((t) => dx[t]) ? 1 : 0);
-  const biomarkerCards = candidates
-    .map((c, i) => ({ ...c, _r: relevance(c), _i: i }))
-    .sort((a, b) => b._r - a._r || a.defaultOrder - b.defaultOrder)
-    .slice(0, 6);
 
   // ── Patient name and meta line
   // Age and sex ride with the name in chart shorthand — "Pawan Kumar (61M)"
@@ -851,7 +611,7 @@ function buildPrescriptionHtml(data = {}) {
         return [renderBio("LDL", " mg/dL", h[0].value, oldestOf(h), "≤ 100 mg/dL", true)];
       }
     }
-    if (text.includes("thyroid") || text.includes("hypo")) {
+    if (text.includes("thyroid") || text.includes("hashimoto") || text.includes("graves")) {
       const h = findBioHistory(["TSH", "Thyroid Stimulating Hormone"]);
       if (h.length > 0) {
         return [renderBio("TSH", " mIU/L", h[0].value, oldestOf(h), "0.5–4.5 mIU/L", true)];
@@ -936,109 +696,6 @@ function buildPrescriptionHtml(data = {}) {
           ${
             g.current_value != null
               ? `<div class="rx-goal-current">Today: ${escape(g.current_value)}</div>`
-              : ""
-          }
-        </div>`;
-    })
-    .join("");
-
-  // ── Biomarker grid HTML
-  // Card layout: header row with marker name + goal pill, then the current
-  // value (color-coded vs target), a one-line trend vs first visit, and a
-  // mini chart with each visit's value labeled directly above its bar so
-  // the doctor can read trends at a glance instead of decoding bar heights.
-  const fmtBioNum = (v) => {
-    if (v == null || Number.isNaN(Number(v))) return String(v ?? "");
-    const n = Number(v);
-    if (Number.isInteger(n)) return String(n);
-    return Number(n.toFixed(1)).toString();
-  };
-  const bioHtml = biomarkerCards
-    .map((b) => {
-      const numVal = b.raw != null ? b.raw : parseFloat(b.val);
-      const color = valueColor(numVal, b.goal, b.lowerBetter);
-      let trendText = "";
-      let trendColor = "#6b7d90";
-      if (b.first?.result != null) {
-        const f = Number(b.first.result);
-        const c = Number(numVal);
-        if (!Number.isNaN(f) && !Number.isNaN(c) && f !== c) {
-          const improving = b.lowerBetter ? c < f : c > f;
-          const arrow = c < f ? "↓" : "↑";
-          trendText = `<span class="arrow">${arrow}</span>from ${fmtBioNum(f)} at first visit`;
-          trendColor = improving ? "#15803d" : "#d94f4f";
-        }
-      } else if (b.goal != null && !Number.isNaN(Number(numVal))) {
-        const onTarget = b.lowerBetter ? numVal <= b.goal : numVal >= b.goal;
-        trendText = onTarget ? "● at target" : "● needs work";
-        trendColor = onTarget ? "#15803d" : "#d94f4f";
-      }
-      // sparks is now { bars, goalPct } — bars[] keep value/date/colour and
-      // goalPct positions the dashed target line on the same y-scale used
-      // for bar heights, so "above/below goal" is visible at a glance.
-      const sparkObj = b.sparks || {};
-      const bars = Array.isArray(sparkObj) ? sparkObj : sparkObj.bars || [];
-      const goalPct = Array.isArray(sparkObj) ? null : sparkObj.goalPct;
-      const sparksHtml = bars
-        .map((s, i) => {
-          const isLatest = i === bars.length - 1;
-          return `<div class="sp-col${isLatest ? " latest" : ""}">
-            <div class="sp-val">${escape(fmtBioNum(s.value))}</div>
-            <div class="sp-bar" style="height:${s.height}%;background:${s.bg}"></div>
-          </div>`;
-        })
-        .join("");
-      // Trend connector: thin line linking the tops of consecutive bars.
-      // Drawn in SVG with viewBox 0–100 / 0–100 so the polyline scales to
-      // whatever pixel size the chart ends up at. y is inverted (SVG 0 = top,
-      // bar height 0 = bottom) so we use 100 - height%.
-      let trendSvg = "";
-      if (bars.length >= 2) {
-        const stepX = 100 / bars.length;
-        const points = bars.map((s, i) => `${(i + 0.5) * stepX},${100 - s.height}`).join(" ");
-        trendSvg = `<svg class="sp-trend-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
-          <polyline points="${points}" fill="none" stroke="#1a2332" stroke-opacity="0.45" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
-        </svg>`;
-      }
-      // Goal line (dashed). Shown only when we have a numeric goal AND any
-      // bars to anchor it against.
-      const goalLineHtml =
-        goalPct != null && bars.length > 0
-          ? `<div class="sp-goal" style="bottom:${goalPct}%"><span class="sp-goal-tag">${b.lowerBetter ? "≤" : "≥"} ${escape(fmtBioNum(b.goal))}</span></div>`
-          : "";
-      // Per-bar date row, kept in a separate flex strip below the chart so
-      // dates stay aligned with their bar even when columns flex.
-      const datesHtml =
-        bars.length > 0
-          ? `<div class="sp-dates">${bars
-              .map(
-                (s, i) =>
-                  `<div class="sp-date${i === bars.length - 1 ? " latest" : ""}">${escape(s.dateLabel || "")}</div>`,
-              )
-              .join("")}</div>`
-          : "";
-      const goalLabel =
-        b.goal != null
-          ? `<span class="rx-bio-goal">Goal ${b.lowerBetter ? "≤" : "≥"} ${escape(fmtBioNum(b.goal))}</span>`
-          : "";
-      return `
-        <div class="rx-bio">
-          <div class="rx-bio-head">
-            <span class="rx-bio-name">${escape(b.label)}</span>
-            ${goalLabel}
-          </div>
-          <div class="rx-bio-val" style="color:${color}">${escape(b.val)}</div>
-          ${trendText ? `<div class="rx-bio-trend" style="color:${trendColor}">${trendText}</div>` : ""}
-          ${
-            sparksHtml
-              ? `<div class="rx-bio-chart">
-                  <div class="rx-bio-sparkline">
-                    ${trendSvg}
-                    ${goalLineHtml}
-                    ${sparksHtml}
-                  </div>
-                  ${datesHtml}
-                </div>`
               : ""
           }
         </div>`;
@@ -1263,13 +920,6 @@ function buildPrescriptionHtml(data = {}) {
       goals.length > 0
         ? `<div class="rx-section-title">Goals for next visit</div>
            <div class="rx-goals">${goalsHtml}</div>`
-        : ""
-    }
-
-    ${
-      biomarkerCards.length > 0
-        ? `<div class="rx-bio-section"><div class="rx-section-title">Biomarker trends — last 4 visits</div>
-           <div class="rx-bio-grid">${bioHtml}</div></div>`
         : ""
     }
 

@@ -4,7 +4,7 @@ import { LAB_SAMPLE_FLOW, rungFor } from "../../../shared/labStages.js";
 import { finalizeConsult } from "./finalize.js";
 import { advanceStatus, budgetColour } from "./statusEngine.js";
 import { getSlaConfig, budgetLookup } from "./board.js";
-import { testPricesFor, schemeForVisit } from "../pricing.js";
+import { testPricesFor, testCategoriesFor, schemeForVisit } from "../pricing.js";
 import { slaKeyForStatus, WAIT_SINCE_SQL } from "../../../shared/giniflowStatus.js";
 import { todaysVitals, previousVitals } from "./visitVitals.js";
 import { insertLabStepsForOrder } from "./journey.js";
@@ -756,26 +756,54 @@ export async function orderTests(
 
     const total = tests.reduce((sum, name) => sum + priceOf[name], 0);
 
-    const order = await client.query(
-      `INSERT INTO giniflow_lab_orders
-         (visit_id, ordered_by, urgency, payment_status, amount_total, sample_status,
-          scheme_code)
-       VALUES ($1, $2, $3, 'pending', $4, 'payment_pending', $5)
-       RETURNING id`,
-      [visitId, actorId, urgency, total, schemeCode],
-    );
-    const orderId = order.rows[0].id;
+    // One order per STATION, not one per confirmation. A doctor ticking HbA1c
+    // and ECG together has ordered two different pieces of work in two different
+    // rooms — a tube drawn at the collection bench and a machine a patient sits
+    // at — and a single row carrying both would land the ECG in the lab queue
+    // telling a phlebotomist to draw a sample. Each order therefore carries its
+    // own tests, its own total and its own payment state.
+    //
+    // A test typed in for this patient alone is `lab`: that is what a one-off
+    // has always been, and it is what every order was before `kind` existed.
+    const categoryOf = await testCategoriesFor(catalogueNames, client);
+    const kindOf = (name) => (categoryOf[name] === "machine" ? "machine" : "lab");
+    const byKind = new Map();
+    for (const name of tests) {
+      const k = kindOf(name);
+      if (!byKind.has(k)) byKind.set(k, []);
+      byKind.get(k).push(name);
+    }
 
-    await client.query(
-      `INSERT INTO giniflow_lab_order_tests (lab_order_id, test_name, price)
-       SELECT $1, * FROM UNNEST($2::text[], $3::numeric[])`,
-      [orderId, tests, tests.map((n) => priceOf[n])],
-    );
-    await client.query(
-      `INSERT INTO giniflow_lab_order_events (lab_order_id, track, status, actor_role, actor_id)
-       VALUES ($1, 'payment', 'pending', 'mo_sd', $2)`,
-      [orderId, actorId],
-    );
+    const orders = [];
+    for (const [kind, kindTests] of byKind) {
+      const kindTotal = kindTests.reduce((sum, name) => sum + priceOf[name], 0);
+      const order = await client.query(
+        `INSERT INTO giniflow_lab_orders
+           (visit_id, ordered_by, urgency, payment_status, amount_total, sample_status,
+            scheme_code, kind)
+         VALUES ($1, $2, $3, 'pending', $4, 'payment_pending', $5, $6)
+         RETURNING id`,
+        [visitId, actorId, urgency, kindTotal, schemeCode, kind],
+      );
+      const id = order.rows[0].id;
+      await client.query(
+        `INSERT INTO giniflow_lab_order_tests (lab_order_id, test_name, price)
+         SELECT $1, * FROM UNNEST($2::text[], $3::numeric[])`,
+        [id, kindTests, kindTests.map((n) => priceOf[n])],
+      );
+      await client.query(
+        `INSERT INTO giniflow_lab_order_events (lab_order_id, track, status, actor_role, actor_id)
+         VALUES ($1, 'payment', 'pending', 'mo_sd', $2)`,
+        [id, actorId],
+      );
+      orders.push({ id, kind, tests: kindTests, total: kindTotal });
+    }
+
+    // The lab order is what the rest of this function has always meant by
+    // "the order" — the visit event it writes, and the journey steps below.
+    // A machine-only confirmation has none, and must not pretend to.
+    const labOrder = orders.find((o) => o.kind === "lab") || null;
+    const orderId = labOrder?.id ?? orders[0]?.id ?? null;
 
     // Ordering today's tests ends this sitting: the patient goes to reception
     // and the lab, the MO takes the next one, and they come back when the
@@ -814,6 +842,9 @@ export async function orderTests(
     await client.query("COMMIT");
     return {
       orderId,
+      // Every order this confirmation raised, one per station. `orderId` above
+      // stays the lab one so existing callers read what they always read.
+      orders: orders.map((o) => ({ orderId: o.id, kind: o.kind, tests: o.tests, total: o.total })),
       urgency,
       tests,
       total,

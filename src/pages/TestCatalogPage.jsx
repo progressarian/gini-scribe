@@ -2,12 +2,19 @@ import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../services/api.js";
 import { toast } from "../stores/uiStore.js";
-import "./GHMPage.css";
+// Same vocabulary as the other settings panels: .flow-* from flow.css, the
+// .fset__* wrappers from FlowSettings.css, and the .flow-root .fset wrapper
+// they are scoped under.
+import "../styles/flow.css";
+import "./flow/FlowSettings.css";
 import "./TestCatalogPage.css";
 
 // The clinic's test price list. One table behind the consultant's picker, the
 // MO's chips and reception's payment card — so a test the floor added mid-clinic
 // is priced here, and a typo is retired here, without a database session.
+//
+// The Test catalogue tab of /settings. It was its own page at
+// /admin/test-catalog, which is now a redirect.
 
 const useCatalog = () =>
   useQuery({
@@ -63,6 +70,32 @@ function PriceCell({ test, onSave, saving }) {
   );
 }
 
+// Which station a test belongs to. Changing it moves where the NEXT order lands;
+// orders already raised keep the station they were raised in, so a sample the lab
+// has drawn cannot vanish off their queue because somebody re-filed the test.
+const STATIONS = [
+  { value: "lab", label: "🩸 Lab" },
+  { value: "machine", label: "🫀 Machine" },
+];
+
+function StationCell({ test, onSave, saving }) {
+  return (
+    <select
+      className="tcat__station"
+      value={test.category || "lab"}
+      disabled={saving}
+      aria-label={`Station for ${test.name}`}
+      onChange={(e) => onSave(e.target.value)}
+    >
+      {STATIONS.map((s) => (
+        <option key={s.value} value={s.value}>
+          {s.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 const useAddTest = () => {
   const queryClient = useQueryClient();
   return useMutation({
@@ -82,6 +115,8 @@ export default function TestCatalogPage() {
   const [newPrice, setNewPrice] = useState("");
   const [q, setQ] = useState("");
   const [showRetired, setShowRetired] = useState(false);
+  const [station, setStation] = useState("all");
+  const [newStation, setNewStation] = useState("lab");
 
   const tests = data?.tests || [];
   const rows = useMemo(() => {
@@ -89,9 +124,19 @@ export default function TestCatalogPage() {
     return tests.filter(
       (t) =>
         (showRetired || t.isActive) &&
+        (station === "all" || (t.category || "lab") === station) &&
         (!needle || `${t.name} ${t.gloss || ""}`.toLowerCase().includes(needle)),
     );
-  }, [tests, q, showRetired]);
+  }, [tests, q, showRetired, station]);
+
+  const perStation = useMemo(
+    () =>
+      STATIONS.map((s) => ({
+        ...s,
+        count: tests.filter((t) => t.isActive && (t.category || "lab") === s.value).length,
+      })),
+    [tests],
+  );
 
   const unpriced = tests.filter((t) => t.isActive && !t.price).length;
 
@@ -105,151 +150,195 @@ export default function TestCatalogPage() {
     );
 
   return (
-    <div className="ghm tcat">
-      <h1 style={{ fontSize: 20, margin: "0 0 4px" }}>Test catalogue</h1>
-      <p className="tcat__sub">
-        What the floor can order and what reception charges. A test added during a consultation
-        arrives here priced ₹0 until someone sets it.
-      </p>
-
-      {unpriced > 0 && (
-        <div className="tcat__warn">
-          ⚠ {unpriced} active test{unpriced === 1 ? "" : "s"} priced ₹0 — they can be ordered and
-          will bill nothing.
+    <div className="flow-root fset tcat">
+      <div className="flow-card">
+        <div className="fset__cardhead">
+          <div className="flow-sec-title">Test catalogue</div>
+          <span className="fset__count">{tests.length}</span>
         </div>
-      )}
+        <div className="fset__cardsub">
+          What the floor can order and what reception charges. A test added during a consultation
+          arrives here priced ₹0 until someone sets it.
+        </div>
 
-      <div className="tcat__add">
-        <strong>Add a test to the clinic list</strong>
-        <input
-          className="tcat__search"
-          value={newName}
-          placeholder="Test name — offered to every patient"
-          onChange={(e) => setNewName(e.target.value)}
-        />
-        <input
-          className="tcat__price"
-          inputMode="decimal"
-          value={newPrice}
-          placeholder="₹ price"
-          onChange={(e) => setNewPrice(e.target.value)}
-        />
-        <button
-          type="button"
-          className="tcat__save"
-          disabled={newName.trim().length < 2 || addTest.isPending}
-          onClick={() =>
-            addTest.mutate(
-              { name: newName.trim() },
-              {
-                onSuccess: async (t) => {
-                  const price = Number(newPrice);
-                  if (price > 0) {
-                    const row = (await api.get("/api/giniflow/test-catalog")).data.tests.find(
-                      (x) => x.name === t.name,
-                    );
-                    if (row) update.mutate({ id: row.id, price });
-                  }
-                  setNewName("");
-                  setNewPrice("");
-                  toast(
-                    t.created ? `✓ ${t.name} added` : `${t.name} was already listed`,
-                    "success",
-                  );
-                },
-                onError: (e) => toast(e?.response?.data?.error || "Could not add that", "error"),
-              },
-            )
-          }
-        >
-          {addTest.isPending ? "Adding…" : "+ Add"}
-        </button>
-      </div>
+        {unpriced > 0 && (
+          <div className="tcat__warn">
+            ⚠ {unpriced} active test{unpriced === 1 ? "" : "s"} priced ₹0 — they can be ordered and
+            will bill nothing.
+          </div>
+        )}
 
-      <div className="tcat__bar">
-        <input
-          className="tcat__search"
-          value={q}
-          placeholder="Search tests…"
-          onChange={(e) => setQ(e.target.value)}
-        />
-        <label className="tcat__toggle">
+        <div className="tcat__add">
+          <strong>Add a test to the clinic list</strong>
           <input
-            type="checkbox"
-            checked={showRetired}
-            onChange={(e) => setShowRetired(e.target.checked)}
+            className="tcat__search"
+            value={newName}
+            placeholder="Test name — offered to every patient"
+            onChange={(e) => setNewName(e.target.value)}
           />
-          Show retired
-        </label>
-        <span className="tcat__count">
-          {rows.length} of {tests.length}
-        </span>
-      </div>
-
-      {isLoading ? (
-        <div className="tcat__empty">Loading the catalogue…</div>
-      ) : (
-        <table className="tcat__table">
-          <thead>
-            <tr>
-              <th>Test</th>
-              <th>Price</th>
-              <th>What it is for</th>
-              <th>Where it came from</th>
-              <th>Ordered</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((t) => (
-              <tr key={t.id} className={t.isActive ? "" : "tcat__retired"}>
-                <td>
-                  <strong>{t.name}</strong>
-                </td>
-                <td>
-                  <PriceCell
-                    test={t}
-                    saving={update.isPending}
-                    onSave={(price) => save(t, { price })}
-                  />
-                </td>
-                <td>
-                  <input
-                    className="tcat__gloss"
-                    defaultValue={t.gloss || ""}
-                    placeholder="Why a doctor orders it"
-                    onBlur={(e) => {
-                      const gloss = e.target.value.trim();
-                      if (gloss !== (t.gloss || "")) save(t, { gloss });
-                    }}
-                  />
-                </td>
-                <td className="tcat__src">{SOURCE_LABEL(t.source)}</td>
-                <td className="tcat__src">
-                  {t.timesOrdered ? `${t.timesOrdered}× · ${t.lastOrdered}` : "never"}
-                </td>
-                <td>
-                  <button
-                    type="button"
-                    className="tcat__retire"
-                    disabled={update.isPending}
-                    onClick={() => save(t, { isActive: !t.isActive })}
-                  >
-                    {t.isActive ? "Retire" : "Restore"}
-                  </button>
-                </td>
-              </tr>
+          <input
+            className="tcat__price"
+            inputMode="decimal"
+            value={newPrice}
+            placeholder="₹ price"
+            onChange={(e) => setNewPrice(e.target.value)}
+          />
+          <select
+            className="tcat__station"
+            value={newStation}
+            aria-label="Station for the new test"
+            onChange={(e) => setNewStation(e.target.value)}
+          >
+            {STATIONS.map((s) => (
+              <option key={s.value} value={s.value}>
+                {s.label}
+              </option>
             ))}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={6} className="tcat__empty">
-                  Nothing matches.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      )}
+          </select>
+          <button
+            type="button"
+            className="tcat__save"
+            disabled={newName.trim().length < 2 || addTest.isPending}
+            onClick={() =>
+              addTest.mutate(
+                { name: newName.trim(), category: newStation },
+                {
+                  onSuccess: async (t) => {
+                    const price = Number(newPrice);
+                    if (price > 0) {
+                      const row = (await api.get("/api/giniflow/test-catalog")).data.tests.find(
+                        (x) => x.name === t.name,
+                      );
+                      if (row) update.mutate({ id: row.id, price });
+                    }
+                    setNewName("");
+                    setNewPrice("");
+                    toast(
+                      t.created ? `✓ ${t.name} added` : `${t.name} was already listed`,
+                      "success",
+                    );
+                  },
+                  onError: (e) => toast(e?.response?.data?.error || "Could not add that", "error"),
+                },
+              )
+            }
+          >
+            {addTest.isPending ? "Adding…" : "+ Add"}
+          </button>
+        </div>
+
+        <div className="tcat__bar">
+          <input
+            className="tcat__search"
+            value={q}
+            placeholder="Search tests…"
+            onChange={(e) => setQ(e.target.value)}
+          />
+          <label className="tcat__toggle">
+            <input
+              type="checkbox"
+              checked={showRetired}
+              onChange={(e) => setShowRetired(e.target.checked)}
+            />
+            Show retired
+          </label>
+          <div className="tcat__stations" role="group" aria-label="Filter by station">
+            <button
+              type="button"
+              className={station === "all" ? "on" : ""}
+              aria-pressed={station === "all"}
+              onClick={() => setStation("all")}
+            >
+              All
+            </button>
+            {perStation.map((s) => (
+              <button
+                key={s.value}
+                type="button"
+                className={station === s.value ? "on" : ""}
+                aria-pressed={station === s.value}
+                onClick={() => setStation(station === s.value ? "all" : s.value)}
+              >
+                {s.label} <span className="tcat__scount">{s.count}</span>
+              </button>
+            ))}
+          </div>
+          <span className="tcat__count">
+            {rows.length} of {tests.length}
+          </span>
+        </div>
+
+        {isLoading ? (
+          <div className="tcat__empty">Loading the catalogue…</div>
+        ) : (
+          <div className="tcat__scroll">
+            <table className="tcat__table">
+              <thead>
+                <tr>
+                  <th>Test</th>
+                  <th>Station</th>
+                  <th>Price</th>
+                  <th>What it is for</th>
+                  <th>Where it came from</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((t) => (
+                  <tr key={t.id} className={t.isActive ? "" : "tcat__retired"}>
+                    <td>
+                      <strong>{t.name}</strong>
+                    </td>
+                    <td>
+                      <StationCell
+                        test={t}
+                        saving={update.isPending}
+                        onSave={(category) => save(t, { category })}
+                      />
+                    </td>
+                    <td>
+                      <PriceCell
+                        test={t}
+                        saving={update.isPending}
+                        onSave={(price) => save(t, { price })}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        className="tcat__gloss"
+                        defaultValue={t.gloss || ""}
+                        placeholder="Why a doctor orders it"
+                        onBlur={(e) => {
+                          const gloss = e.target.value.trim();
+                          if (gloss !== (t.gloss || "")) save(t, { gloss });
+                        }}
+                      />
+                    </td>
+                    <td className="tcat__src">{SOURCE_LABEL(t.source)}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="tcat__retire"
+                        disabled={update.isPending}
+                        onClick={() => save(t, { isActive: !t.isActive })}
+                      >
+                        {t.isActive ? "Retire" : "Restore"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {rows.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="tcat__empty">
+                      Nothing matches.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

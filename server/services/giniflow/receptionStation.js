@@ -6,7 +6,7 @@ import {
   isExceptionStatus,
 } from "../../../shared/giniflowStatus.js";
 import { advanceStatus, IST_TODAY } from "./statusEngine.js";
-import { syncLabStepsFromLab } from "./journey.js";
+import { syncLabStepsFromLab, suggestVisitType } from "./journey.js";
 import { searchDayVisits } from "./board.js";
 import { blockDetail } from "../patientBlockView.js";
 import { createWalkinBooking } from "../walkinBooking.js";
@@ -30,7 +30,7 @@ import {
 // that log, not from a status column that only shows the present.
 
 const ORDER_SELECT = `
-  SELECT o.id, o.visit_id, o.urgency, o.payment_status, o.sample_status,
+  SELECT o.id, o.visit_id, o.urgency, o.payment_status, o.sample_status, o.kind,
          o.amount_total, o.amount_paid, o.amount_claimed, o.created_at, o.updated_at,
          o.insurer, o.policy_no, o.claim_no, o.claim_state, o.claim_note, o.version,
          p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
@@ -96,6 +96,7 @@ const shape = (r) => ({
   sex: r.sex,
   orderedBy: r.ordered_by,
   urgency: r.urgency,
+  kind: r.kind,
   paymentStatus: r.payment_status,
   sampleStatus: r.sample_status,
   insurer: r.insurer,
@@ -505,10 +506,18 @@ export async function clearPayment(
 
 export async function getTestCatalog(db = pool) {
   const { rows } = await db.query(
-    `SELECT test_name, price, source FROM giniflow_test_catalog
+    `SELECT test_name, price, source, category FROM giniflow_test_catalog
       WHERE is_active ORDER BY test_name`,
   );
-  return rows.map((r) => ({ name: r.test_name, price: Number(r.price), source: r.source }));
+  return rows.map((r) => ({
+    name: r.test_name,
+    price: Number(r.price),
+    source: r.source,
+    // Which station runs it. The desk picks LAB tests against a Blood Sample
+    // step; a machine test is a Machine Room step of its own, so offering it
+    // here would raise the order twice.
+    category: r.category,
+  }));
 }
 
 // ── Arrivals — the front door ────────────────────────────────────────────────
@@ -856,7 +865,11 @@ export async function searchWalkInPatients(visitDate, q, role, db = pool) {
   const { rows } = await db.query(
     `SELECT p.id, p.is_blocked, p.blocked_reason_code, p.name, p.file_no, p.age, p.sex, p.phone,
             v.id AS visit_id, v.current_status,
-            a.id AS appointment_id
+            a.id AS appointment_id,
+            EXISTS (
+              SELECT 1 FROM appointments pa
+               WHERE pa.patient_id = p.id AND pa.appointment_date < $1::date
+            ) AS returning
        FROM patients p
        LEFT JOIN giniflow_visits v ON v.patient_id = p.id AND v.visit_date = $1::date
        LEFT JOIN LATERAL (
@@ -879,8 +892,18 @@ export async function searchWalkInPatients(visitDate, q, role, db = pool) {
     [visitDate, `%${raw}%`, digits ? `%${digits}%` : null],
   );
 
+  // The journey panel opens BEFORE the visit exists, so the type it suggests has
+  // to come from the search — a walk-in that is only created when the desk
+  // presses check in has nothing else to infer one from. Two lookups serve
+  // twenty rows: a walk-in is either a first visit or a return.
+  const [firstTime, returning] = await Promise.all([
+    suggestVisitType({ isFollowUp: false, isWalkIn: true }, db),
+    suggestVisitType({ isFollowUp: true, isWalkIn: true }, db),
+  ]);
+
   return rows.map((r) => ({
     patientId: r.id,
+    suggestedVisitTypeId: r.returning ? returning : firstTime,
     name: r.name,
     fileNo: r.file_no,
     age: r.age,

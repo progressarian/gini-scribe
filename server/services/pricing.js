@@ -28,7 +28,7 @@ export async function testPricesFor(testNames, schemeCode = null, db = pool) {
   if (!names.length) return {};
 
   const { rows } = await db.query(
-    `SELECT c.test_name, c.price AS base, s.price AS scheme
+    `SELECT c.test_name, c.price AS base, c.category, s.price AS scheme
        FROM giniflow_test_catalog c
        LEFT JOIN scheme_test_prices s
               ON s.test_name = c.test_name AND s.scheme_code = $2
@@ -39,6 +39,24 @@ export async function testPricesFor(testNames, schemeCode = null, db = pool) {
   const out = {};
   for (const r of rows) out[r.test_name] = num(r.scheme ?? r.base);
   return out;
+}
+
+// Which station each catalogued test belongs to. Separate from the price so the
+// caller asks for what it needs — but read from the same row, because a test's
+// station and its price are one decision the admin makes in one place
+// (36-MACHINE-TEST-STATION-PLAN.md §7 Phase 0).
+//
+// A name the catalogue does not have is `lab`: that is what a one-off test typed
+// in for a single patient is, and it is what every order was before this column
+// existed.
+export async function testCategoriesFor(testNames, db = pool) {
+  const names = [...new Set((testNames || []).filter(Boolean))];
+  if (!names.length) return {};
+  const { rows } = await db.query(
+    `SELECT test_name, category FROM giniflow_test_catalog WHERE test_name = ANY($1::text[])`,
+    [names],
+  );
+  return Object.fromEntries(rows.map((r) => [r.test_name, r.category || "lab"]));
 }
 
 // What one OPD consultation should cost. Display only — HealthRay raises the

@@ -3,6 +3,8 @@ import { CATEGORIES, TRIAGE_FILTERS } from "../../shared/giniflowStatus.js";
 import { MED_SLOT_KEYS } from "../../shared/giniflowMedTiming.js";
 import { SPECIALTY_VALUES, URGENCY_VALUES } from "../../shared/giniflowReferrals.js";
 import { CASE_ACTION_VERBS } from "../../shared/labStages.js";
+import { CATEGORIES as TEST_CATEGORIES } from "../services/giniflow/testCatalog.js";
+import { MACHINE_SAMPLE_FLOW } from "../../shared/machineStages.js";
 
 // Canonical patient-facing "when to take" vocabulary. Must stay in sync
 // with src/config/medicationTimings.js and the Postgres when_to_take_pill
@@ -583,6 +585,30 @@ export const giniflowStationSearchGroupQuerySchema = giniflowStationGroupQuerySc
 // an unknown value falls back to the full day rather than 400ing a screen.
 const stationGroup = z.string().trim().max(20).optional();
 
+// The machine room's queue. Both filters are named here so an unknown value is
+// a 400 rather than something the service has to guess at.
+export const giniflowMachineQuerySchema = z.object({
+  machine: z.string().trim().max(20).optional(),
+  group: z.string().trim().max(20).optional(),
+  q: z.string().trim().max(60).optional(),
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD")
+    .optional(),
+});
+
+// Raising a machine test at the machine. The machine is named rather than the
+// test, because the technician is standing at one.
+export const giniflowMachineAddSchema = z.object({
+  visitId: z.string().uuid(),
+  machine: z.string().trim().min(2).max(20),
+});
+
+export const giniflowMachineAdvanceSchema = z.object({
+  to: z.enum(MACHINE_SAMPLE_FLOW),
+  reportUrl: z.string().url().max(2000).nullish(),
+});
+
 export const giniflowStationQuerySchema = z.object({
   group: stationGroup,
   room: z.enum(["collection", "processing"]).optional(),
@@ -659,6 +685,10 @@ const giniflowStepSchema = z.object({
   // Kept, not stripped: "the desk added this at the desk" is the one thing the
   // template cannot tell you afterwards.
   source: z.enum(["template", "added", "custom", "auto"]).optional(),
+  // The tests the desk picked against a Blood Sample step. Names from the test
+  // catalogue — the service prices them and refuses any it cannot find, so an
+  // unknown name is a 400 and never a silent ₹0 order.
+  tests: z.array(z.string().trim().min(1).max(120)).max(30).optional(),
 });
 
 // Results the lab types in. A value is a number or a word ("Positive"), and a
@@ -802,6 +832,7 @@ export const giniflowMoQueueQuerySchema = giniflowDateQuerySchema.extend({
 export const giniflowCatalogTestSchema = z.object({
   name: z.string().trim().min(2, "A test needs a name").max(120),
   gloss: z.string().trim().max(160).nullish(),
+  category: z.enum(TEST_CATEGORIES).nullish(),
 });
 
 export const giniflowCatalogTestPatchSchema = z
@@ -809,8 +840,9 @@ export const giniflowCatalogTestPatchSchema = z
     price: z.number().min(0).max(1000000).nullish(),
     gloss: z.string().trim().max(160).nullish(),
     isActive: z.boolean().nullish(),
+    category: z.enum(TEST_CATEGORIES).nullish(),
   })
-  .refine((v) => v.price != null || v.gloss != null || v.isActive != null, {
+  .refine((v) => v.price != null || v.gloss != null || v.isActive != null || v.category != null, {
     message: "Nothing to change",
   });
 

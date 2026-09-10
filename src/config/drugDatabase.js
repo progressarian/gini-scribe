@@ -1,16 +1,10 @@
+import { MED_CATEGORIES } from "../server-utils/medicationCategories";
+
 // ── Drug Database for Gini Scribe ───────────────────────────────────────────
 // Defines medications with clinical grouping, drug class, brand names, and defaults
 
-// Medication groups
-export const MED_GROUPS = [
-  { id: "diabetes", label: "Diabetes", icon: "💉" },
-  { id: "kidney", label: "Kidney Protection", icon: "🫘" },
-  { id: "bp", label: "Blood Pressure", icon: "💓" },
-  { id: "lipids", label: "Lipids", icon: "🫀" },
-  { id: "thyroid", label: "Thyroid", icon: "🦋" },
-  { id: "supplement", label: "Supplements", icon: "💊" },
-  { id: "external", label: "External Doctor", icon: "👨‍⚕️" },
-];
+// Medication groups — mirror of the canonical category list.
+export const MED_GROUPS = MED_CATEGORIES.map(({ id, label, icon }) => ({ id, label, icon }));
 
 // Diabetes drug classes
 export const DIABETES_CLASSES = [

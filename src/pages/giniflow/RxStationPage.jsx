@@ -7,8 +7,11 @@ import {
   useReturnRxToQueue,
   printRxHref,
   useReissueRx,
+  useEndVisit,
 } from "../../queries/hooks/useGiniflowRx";
 import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
+import useAuthStore from "../../stores/authStore";
+import { CAPABILITIES as CAP, hasCapability } from "../../../shared/permissions.js";
 import LiveBadge from "../../components/giniflow/LiveBadge";
 import StationNotice from "../../components/giniflow/StationNotice";
 import PdfViewerModal from "../../components/visit/PdfViewerModal";
@@ -88,6 +91,8 @@ function MedicineGroup({ group }) {
 
 function Pane({
   visitId,
+  canEndVisit,
+  onEndVisit,
   onClose,
   onReturn,
   onExplained,
@@ -219,6 +224,20 @@ function Pane({
           >
             ✓ Explained — send to pharmacy
           </button>
+          {/* Most patients never reach a dispense: they take the prescription
+              from the counter and go, buying medicines elsewhere or having none
+              to collect. HealthRay's checkout used to close those; the counter
+              says it now (38-MANUAL-FLOOR-PLAN.md). */}
+          {canEndVisit && (
+            <button
+              className="st-btn"
+              disabled={busy}
+              onClick={() => onEndVisit(visitId, data?.name)}
+              title="The patient has taken the prescription and gone"
+            >
+              🚪 Explained — patient leaving
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -271,6 +290,27 @@ export default function RxStationPage() {
           setTimeout(() => setToast(""), 3500);
         },
         onError: (e) => setToast(e?.response?.data?.error || "Could not return them to the queue"),
+      },
+    );
+
+  // The counter ends the visit; a station that cannot see the patient leave
+  // cannot honestly say they have.
+  const canEndVisit = hasCapability(
+    useAuthStore((st) => st.currentDoctor?.role),
+    CAP.GINIFLOW_END_VISIT,
+  );
+  const endVisit = useEndVisit("rx");
+  const onEndVisit = (visitId, name) =>
+    endVisit.mutate(
+      { visitId },
+      {
+        onSuccess: (r) =>
+          setToast(
+            r.unchanged
+              ? `${name || "That patient"}'s visit was already closed`
+              : `🚪 ${name || "Patient"} — visit closed`,
+          ),
+        onError: (e) => setToast(e?.response?.data?.error || "Could not close that visit"),
       },
     );
 
@@ -388,6 +428,8 @@ export default function RxStationPage() {
         onClose={() => setOpenId(null)}
         onReturn={onReturn}
         onExplained={onExplained}
+        canEndVisit={canEndVisit}
+        onEndVisit={onEndVisit}
         onView={(visitId, name, fromHealthray) => setViewing({ visitId, name, fromHealthray })}
         onReissue={onReissue}
         reissuing={reissue.isPending}

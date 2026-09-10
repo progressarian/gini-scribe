@@ -20,6 +20,11 @@ export const SETTINGS_TABS = [
       "Hospital identity, letterhead logo, and the strip printed at the foot of every prescription",
   },
   {
+    to: "/settings/tests",
+    label: "Test catalogue",
+    blurb: "What the floor can order and what reception charges for it",
+  },
+  {
     to: "/settings/schemes",
     label: "Patient schemes",
     blurb: "CGHS, ECHS and the rest — their labels, their card requirement, and the daily cap",

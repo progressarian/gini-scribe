@@ -644,6 +644,64 @@ export async function dispenseAll(visitId, { actorId = null, actorName = null } 
 // the two leaves `card_sent_at` unset, so the next attempt re-sends. A duplicate
 // medicine card is a nuisance; a missing one is a patient with no instructions.
 
+// Ending a visit that never reaches a dispense.
+//
+// About nine in ten do not: the patient takes the prescription from the counter
+// and goes, buying medicines elsewhere or having none to collect. HealthRay's
+// checkout used to close those — 621 of 698 last month — and with the floor
+// keeping its own record, somebody at the counter has to say it instead.
+//
+// Deliberately NOT a shortcut through the chain: it writes `exited` and nothing
+// else. A visit that never dispensed must not claim it did, because `dispensed`
+// is what the medicine reports count.
+export async function endVisit(
+  visitId,
+  { actorId = null, actorRole = "pharmacy" } = {},
+  db = pool,
+) {
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query(
+      `SELECT v.current_status, p.name
+         FROM giniflow_visits v JOIN patients p ON p.id = v.patient_id
+        WHERE v.id = $1 FOR UPDATE OF v`,
+      [visitId],
+    );
+    if (!rows.length) throw Object.assign(new Error("No such visit"), { status: 404 });
+    const { current_status: from, name } = rows[0];
+
+    if (FINISHED.includes(from)) {
+      // Two people closing the same patient is one statement, not an error.
+      await client.query("COMMIT");
+      return { visitId, currentStatus: from, unchanged: true };
+    }
+
+    // allowSkip, because a patient who leaves from the consultant's room never
+    // passes through rx or pharmacy and the chain would refuse the jump. The
+    // rail on every screen is drawn from the EVENTS, not from the current
+    // status, so the steps they skipped stay visibly un-ticked rather than
+    // being filled in retrospectively — the record says they left early, which
+    // is what happened.
+    await advanceStatus(client, {
+      visitId,
+      toStatus: "exited",
+      actorRole,
+      actorId,
+      allowSkip: true,
+      meta: { source: "counter_end_visit", from },
+    });
+
+    await client.query("COMMIT");
+    return { visitId, name, currentStatus: "exited", from, unchanged: false };
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 export async function sendCardToPatient(visitId, { force = false } = {}, db = pool) {
   const visit = await loadVisit(visitId, db);
   if (!visit) throw Object.assign(new Error("Visit not found"), { status: 404 });

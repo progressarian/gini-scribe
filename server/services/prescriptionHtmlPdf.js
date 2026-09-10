@@ -66,9 +66,19 @@ async function getBrowser() {
   return browser;
 }
 
+// "Page 2 of 3" in the bottom margin of every printed page. A prescription that
+// runs past one sheet is handed over as loose paper, so each sheet has to say
+// where it sits in the set — and a patient (or a pharmacy) has to be able to
+// tell that a page is missing. Rendered by Chromium, not the template, because
+// only the print engine knows the final page count.
+const PAGE_NUMBER_FOOTER = `
+  <div style="width:100%;padding:0 12mm;font-family:Arial,Helvetica,sans-serif;font-size:8px;color:#6b7d90;">
+    <div style="text-align:right;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>
+  </div>`;
+
 // The rendering half, without the prescription's own template — the warm
 // browser is the expensive part and there is now more than one thing to print.
-export async function renderHtmlToPdf(html, { margin } = {}) {
+export async function renderHtmlToPdf(html, { margin, pageNumbers = true } = {}) {
   const browser = await getBrowser();
   const page = await browser.newPage();
   try {
@@ -81,7 +91,17 @@ export async function renderHtmlToPdf(html, { margin } = {}) {
     const pdf = await page.pdf({
       format: "A4",
       printBackground: true,
-      margin: margin || { top: "12mm", bottom: "12mm", left: "12mm", right: "12mm" },
+      // The footer is drawn INSIDE the bottom margin, so the margin has to grow
+      // with it or Chromium prints the page number over the last line of body.
+      margin: margin || {
+        top: "12mm",
+        bottom: pageNumbers ? "16mm" : "12mm",
+        left: "12mm",
+        right: "12mm",
+      },
+      displayHeaderFooter: pageNumbers,
+      headerTemplate: pageNumbers ? "<div></div>" : undefined,
+      footerTemplate: pageNumbers ? PAGE_NUMBER_FOOTER : undefined,
     });
     return Buffer.isBuffer(pdf) ? pdf : Buffer.from(pdf);
   } finally {

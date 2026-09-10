@@ -4,6 +4,7 @@ import {
   usePharmacyPatient,
   useDispenseItem,
   useDispenseAll,
+  useEndVisit,
   useSendCard,
 } from "../../queries/hooks/useGiniflowPharmacy";
 import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
@@ -206,10 +207,29 @@ function PharmacyPane({ visitId, onClose, onToast }) {
   const { data, isLoading } = usePharmacyPatient(visitId);
   const dispense = useDispenseItem();
   const dispenseAll = useDispenseAll();
+  // The counter closes the visit; a station that cannot see the patient leave
+  // cannot honestly say they have.
+  const canEndVisit = hasCapability(role, CAPABILITIES.GINIFLOW_END_VISIT);
+  const endVisit = useEndVisit("pharmacy");
+  const onEndVisit = (id, name) =>
+    endVisit.mutate(
+      { visitId: id },
+      {
+        onSuccess: (r) => {
+          onToast(
+            r.unchanged
+              ? `${name || "That patient"}'s visit was already closed`
+              : `🚪 ${name || "Patient"} — visit closed without a dispense`,
+          );
+          onClose();
+        },
+        onError: (e) => onToast(e?.response?.data?.error || "Could not close that visit"),
+      },
+    );
   const sendCard = useSendCard();
   useDismiss(!!visitId, onClose, paneRef);
 
-  const busy = dispense.isPending || dispenseAll.isPending;
+  const busy = dispense.isPending || dispenseAll.isPending || endVisit.isPending;
 
   const onDispense = (medicine, status, reason) =>
     dispense.mutate(
@@ -304,6 +324,21 @@ function PharmacyPane({ visitId, onClose, onToast }) {
                 onClick={() => setConfirming(true)}
               >
                 ✓ {blocked ? "Dispense the rest" : "Mark all dispensed"}
+              </button>
+            )}
+            {/* Nothing to dispense is the common case, not the edge: about nine
+                visits in ten end with the patient taking the prescription from
+                the counter and going. The button above is disabled for exactly
+                those, so without this one they could not be closed at all
+                (38-MANUAL-FLOOR-PLAN.md). */}
+            {data && !data.finished && canEndVisit && (
+              <button
+                className="rbtn"
+                disabled={busy}
+                onClick={() => onEndVisit(visitId, data.name)}
+                title="The patient has gone without collecting medicines here"
+              >
+                🚪 Patient left — close visit
               </button>
             )}
             {data?.finished && <span className="sp sp-done">✓ Dispensed · visit closed</span>}

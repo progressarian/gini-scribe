@@ -290,6 +290,11 @@ export async function getLabQueue(
        ) last_ev ON TRUE
       WHERE v.visit_date = $1::date
         AND NOT COALESCE(p.is_blocked, FALSE)
+        -- The lab's own work only. A machine test is an order like any other —
+        -- it is priced, paid for and waited on — but nothing is drawn for it, so
+        -- on this queue it would be a card asking a phlebotomist to take a
+        -- sample that does not exist (36-MACHINE-TEST-STATION-PLAN.md §2.7).
+        AND o.kind = 'lab'
         -- Only today's tests are today's work (brief §2.3 trigger 2). A test
         -- ordered for the next visit would otherwise sit here as a sample that
         -- never arrives.
@@ -856,12 +861,21 @@ export async function advanceSample(
   try {
     await client.query("BEGIN");
     const { rows } = await client.query(
-      `SELECT o.sample_status, o.payment_status, o.visit_id
+      `SELECT o.sample_status, o.payment_status, o.visit_id, o.kind
          FROM giniflow_lab_orders o WHERE o.id = $1 FOR UPDATE`,
       [orderId],
     );
     if (!rows.length) throw Object.assign(new Error("Order not found"), { status: 404 });
     const { sample_status: from, payment_status: payment, visit_id: visitId } = rows[0];
+    // The mirror of the check the machine room makes. Both endpoints are reached
+    // by a capability, and a capability says which ROOM somebody works — not
+    // which orders exist. Without this, a lab role could walk a machine test up
+    // the lab ladder and record a sample nobody drew.
+    if (rows[0].kind !== "lab") {
+      throw Object.assign(new Error("That order belongs to the machine room, not the lab"), {
+        status: 409,
+      });
+    }
 
     // The payment gate. Enforced here, not in the UI: a hidden button is not a
     // rule, and this one decides whether a patient is charged for a test.

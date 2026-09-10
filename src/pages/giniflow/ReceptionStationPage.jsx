@@ -135,6 +135,7 @@ function OrderCard({ order, onClear, pending, actorId }) {
         <div className="toc-who">
           <div className="toc-name">
             {order.name} <span className="badge b-ink">{order.fileNo}</span>
+            {order.kind === "machine" && <span className="badge b-ink">Machine Room</span>}
           </div>
           <div className="toc-meta">
             {order.age}
@@ -450,7 +451,11 @@ export function PaymentsTab({ data, isLoading, onClear, pending, actorId }) {
 // The arrival itself: which visit this is, and the stops it will take. Opened by
 // "✓ Arrived" and by a walk-in check-in — nothing is written until it is
 // confirmed. docs/gini-flow/29-RECEPTION-JOURNEY-PLAN.md
-function CheckInPanel({ arrival, onClose, onDone, onFailed }) {
+//
+// A walk-in has no visit yet when this opens: it is created by the same press
+// that plans it, so backing out of the panel leaves the patient exactly as they
+// were found, with nothing on the floor to undo.
+function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   const { data: visitTypes = [] } = useFlowVisitTypes();
   const [visitTypeId, setVisitTypeId] = useState(arrival.suggestedVisitTypeId || null);
   const [steps, setSteps] = useState(null);
@@ -461,6 +466,8 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed }) {
   const [conditions, setConditions] = useState({});
   const { data: plan } = useJourneyPlan(visitTypeId);
   const checkIn = useCheckIn();
+  const checkInWalkIn = useCheckInWalkIn();
+  const saving = checkIn.isPending || checkInWalkIn.isPending;
 
   const askable = useMemo(
     () => [...new Set((plan || []).filter((p) => p.conditionKey).map((p) => p.conditionKey))],
@@ -523,14 +530,31 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed }) {
     minute: "2-digit",
   });
 
-  const submit = (sendWhatsapp) =>
-    checkIn.mutate(
-      { visitId: arrival.visitId, visitTypeId, steps: list, sendWhatsapp },
-      {
-        onSuccess: (r) => onDone(arrival, r, sendWhatsapp),
-        onError: (e) => onFailed(e),
-      },
-    );
+  const submit = async (sendWhatsapp) => {
+    try {
+      let visitId = arrival.visitId;
+      if (!visitId) {
+        const created = await checkInWalkIn.mutateAsync({
+          patientId: arrival.patientId,
+          appointmentId: arrival.appointmentId,
+        });
+        // The sync, or another desk, moved them past reception while this panel
+        // was open. Planning a journey onto that visit would only earn a 409.
+        if (created.unchanged) {
+          onNote(
+            `${arrival.name} was already checked in — ${String(created.status || "").replace(/_/g, " ")}`,
+          );
+          onClose();
+          return;
+        }
+        visitId = created.visitId;
+      }
+      const r = await checkIn.mutateAsync({ visitId, visitTypeId, steps: list, sendWhatsapp });
+      onDone({ ...arrival, visitId }, r, sendWhatsapp);
+    } catch (e) {
+      onFailed(e);
+    }
+  };
 
   return (
     <div className="detail-overlay">
@@ -586,7 +610,7 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed }) {
         <div className="dp-foot">
           <button
             className="st-btn st-btn-grn btn-full"
-            disabled={checkIn.isPending || !list.length}
+            disabled={saving || !list.length}
             onClick={() => submit(false)}
           >
             {arrival.phone ? "✓ Check in only" : "✓ Check in"}
@@ -594,7 +618,7 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed }) {
           {arrival.phone && (
             <button
               className="st-btn st-btn-g"
-              disabled={checkIn.isPending || !list.length}
+              disabled={saving || !list.length}
               onClick={() => submit(true)}
             >
               Check in + send WhatsApp
@@ -875,9 +899,9 @@ export function ArrivalsTab({
   data,
   isLoading,
   onAct,
-  onCheckIn,
   onCheckedIn,
   onFailed,
+  onNote,
   onPauseToggle,
   breakBusy,
   busy,
@@ -930,21 +954,21 @@ export function ArrivalsTab({
           onClose={() => setWalkIn(false)}
           busy={busy}
           // A walk-in has no appointment to infer anything from, so it gets the
-          // same question: the visit is created, then its journey is planned.
-          onCheckIn={(patient) =>
-            onCheckIn(patient, (created) => {
-              setWalkIn(false);
-              setArriving({
-                visitId: created.visitId,
-                suggestedVisitTypeId: created.suggestedVisitTypeId,
-                name: created.name || patient.name,
-                fileNo: patient.fileNo,
-                age: patient.age,
-                sex: patient.sex,
-                phone: patient.phone,
-              });
-            })
-          }
+          // same question a booked patient gets — and the same promise: the
+          // visit is created by the press that plans it, not by this one.
+          onCheckIn={(patient) => {
+            setWalkIn(false);
+            setArriving({
+              patientId: patient.patientId,
+              appointmentId: patient.appointmentId,
+              suggestedVisitTypeId: patient.suggestedVisitTypeId,
+              name: patient.name,
+              fileNo: patient.fileNo,
+              age: patient.age,
+              sex: patient.sex,
+              phone: patient.phone,
+            });
+          }}
         />
       )}
 
@@ -955,6 +979,7 @@ export function ArrivalsTab({
           arrival={arriving}
           onClose={() => setArriving(null)}
           onFailed={onFailed}
+          onNote={onNote}
           onDone={(arrival, result, sentWhatsapp) => {
             setArriving(null);
             onCheckedIn(arrival, result, sentWhatsapp);
@@ -1153,7 +1178,6 @@ export default function ReceptionStationPage() {
   const actorId = useAuthStore((st) => st.currentDoctor?.id ?? st.currentDoctor?.doctor_id);
   const clearPayment = useClearPayment();
   const arrivalAction = useArrivalAction();
-  const checkInWalkIn = useCheckInWalkIn();
 
   const pending = data?.pending || [];
   const awaitingSample = data?.awaitingSample || [];
@@ -1202,35 +1226,24 @@ export default function ReceptionStationPage() {
       },
     );
 
-  // A walk-in is created first — that is what gives it a visit to plan against —
-  // and the journey is asked for immediately afterwards, in the same panel a
-  // booked patient gets.
-  const onCheckIn = (patient, thenPlan) =>
-    checkInWalkIn.mutate(
-      { patientId: patient.patientId, appointmentId: patient.appointmentId },
-      {
-        onSuccess: (r) => {
-          // Already past reception — the sync moved them while the desk was
-          // searching. Opening the planner would only earn a 409, so they are
-          // told what happened instead.
-          if (r.unchanged) {
-            showToast(`${patient.name} was already checked in — ${r.status.replace(/_/g, " ")}`);
-            return;
-          }
-          if (thenPlan) thenPlan(r);
-          else showToast(`✓ ${patient.name} checked in as a walk-in`);
-        },
-        onError: (e) => failed(e, "Could not check this patient in — nothing was created"),
-      },
-    );
+  // What the desk has to do next, said in the toast: an order raised here is
+  // money still to collect, and the patient cannot reach the lab or a machine
+  // until this desk clears it.
+  const ordersRaised = (raised) => {
+    const parts = [];
+    if (raised?.labTests?.length) parts.push(`${raised.labTests.length} lab test(s)`);
+    const machines = (raised?.machine || []).filter((m) => !m.alreadyThere).length;
+    if (machines) parts.push(`${machines} machine test(s)`);
+    return parts.length ? ` · ${parts.join(" + ")} to bill on Test Orders` : "";
+  };
 
   const onCheckedIn = (arrival, result, sentWhatsapp) =>
     showToast(
       result.alreadyPlanned
         ? `${arrival.name} was already checked in — their journey is unchanged`
-        : `✓ ${arrival.name} checked in · ${result.totalCount} stops · ~${result.plannedTotalMin} min${
-            sentWhatsapp && result.whatsappSent ? " · WhatsApp sent" : ""
-          }`,
+        : `✓ ${arrival.name} checked in · ${result.totalCount} stops · ~${result.plannedTotalMin} min${ordersRaised(
+            result.raised,
+          )}${sentWhatsapp && result.whatsappSent ? " · WhatsApp sent" : ""}`,
     );
 
   return (
@@ -1335,15 +1348,15 @@ export default function ReceptionStationPage() {
             <ArrivalsTab
               onCheckedIn={onCheckedIn}
               onFailed={(e) => failed(e, "Could not check this patient in — nothing was changed")}
+              onNote={showToast}
               search={search}
               setSearch={setSearch}
               data={arrivals}
               isLoading={arrivalsLoading}
               onAct={onAct}
-              onCheckIn={onCheckIn}
               onPauseToggle={onPauseToggle}
               breakBusy={pauseVisit.isPending || resumeVisit.isPending}
-              busy={arrivalAction.isPending || checkInWalkIn.isPending}
+              busy={arrivalAction.isPending}
             />
           ) : (
             <PaymentsTab

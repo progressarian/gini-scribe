@@ -1,4 +1,5 @@
 import pool from "../../config/db.js";
+import { manualFloor } from "../../../shared/manualFloor.js";
 import {
   HEALTHRAY_STATUS_TO_CHAIN,
   EXCEPTION_STATUSES,
@@ -171,11 +172,11 @@ async function patientsAwaitingMedicines(client, day) {
   return new Set(rows.map((r) => r.patient_id));
 }
 
-// The floor does not work the pharmacy screen, so a patient parked there would
-// stay there all day and the board would fill with a queue nobody is standing
-// in. The grace period is what makes the leg safe to write: past three times the
-// station's own budget the sync completes the exit itself, so the queue always
-// drains without the counter having to.
+// For the days the pharmacy screen is not worked: a patient parked on the leg
+// would stay there all day and the board would fill with a queue nobody is
+// standing in, so past three times the station's own budget the sync completes
+// the exit itself. Behind the manual-floor flag — once the counter records its
+// own exits, a timer doing it is a step nobody took.
 async function pharmacyGraceMinutes(client) {
   const { rows } = await client.query(
     `SELECT budget_minutes FROM giniflow_sla_config WHERE station = 'pharmacy'`,
@@ -380,6 +381,9 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
     //
     // COALESCE, never an overwrite: a consultant who has already claimed the
     // patient keeps them, because who is in the room beats who was booked.
+    // Assignment stays even on a manual floor: who the patient is booked with is
+    // part of the list reception is given, not a step anybody performs. Still a
+    // COALESCE — a consultant who has claimed them keeps them.
     const assigned = await client.query(
       `UPDATE giniflow_visits v
           SET assigned_doctor_id = doc.id, updated_at = NOW()
@@ -396,10 +400,17 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
     );
     result.assigned = assigned.rowCount;
 
-    result.vitalsObserved = await observeHealthrayVitals(client, day);
+    // Vitals are taken at the vitals station and recorded there. Reading
+    // HealthRay's would fill a chart nobody on this floor wrote.
+    result.vitalsObserved = manualFloor() ? 0 : await observeHealthrayVitals(client, day);
 
-    const grace = await pharmacyGraceMinutes(client);
-    result.pharmacySwept = await sweepPharmacyLeg(client, day, grace);
+    // The exit is the counter's to record. A timer that closes a visit thirty
+    // minutes after the patient reached the pharmacy leg is a step nobody took,
+    // and on a manual floor the counter's own End visit button is the only
+    // thing that ends a day (38-MANUAL-FLOOR-PLAN.md).
+    result.pharmacySwept = manualFloor()
+      ? 0
+      : await sweepPharmacyLeg(client, day, await pharmacyGraceMinutes(client));
     result.labOnlySwept = await sweepLabOnlyExits(client, day);
     const awaitingMedicines = await patientsAwaitingMedicines(client, day);
 
@@ -415,6 +426,16 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
       // BEGIN/COMMIT per appointment over the connection pooler is what made a
       // full day take 20 seconds — and a cancelled patient would otherwise open
       // one on every poll, all day, to write an event nobody wants.
+      // A visit that already exists is the floor's, not HealthRay's. Reception
+      // arrives the patient, and every station after that records its own step —
+      // so the sync's job ends at putting the day's list on the board
+      // (38-MANUAL-FLOOR-PLAN.md). Without this the 30-second poll walks a
+      // patient forward that nobody moved, and undoes a no-show reception marked
+      // by hand.
+      if (appt.visit_id && manualFloor()) {
+        result.unchanged++;
+        continue;
+      }
       if (
         appt.visit_id &&
         (appt.current_status === target ||
@@ -448,6 +469,19 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
           visitId = created.rows[0].id;
           currentStatus = created.rows[0].current_status;
           result.created++;
+        }
+
+        // The list ends here. A visit is created at `booked` and stays there
+        // until a person arrives the patient — including one HealthRay already
+        // shows as checked in, or seen. The guard above skips visits that
+        // already exist without opening a transaction; this one catches the row
+        // that was just created, which would otherwise be walked forward to
+        // HealthRay's status in the same tick — a step from the sync by the back
+        // door (38-MANUAL-FLOOR-PLAN.md).
+        if (manualFloor()) {
+          await client.query("COMMIT");
+          result.unchanged++;
+          continue;
         }
 
         // Never move a patient backwards: a station screen may have advanced

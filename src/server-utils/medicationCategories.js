@@ -11,16 +11,28 @@
 // printed.
 export const MED_CATEGORIES = [
   { id: "diabetes", label: "Diabetes", icon: "💉", rank: 1 },
-  { id: "kidney", label: "Kidney Protection", icon: "🫘", rank: 2 },
-  { id: "bp", label: "Blood Pressure", icon: "💓", rank: 3 },
-  { id: "lipids", label: "Lipids", icon: "🫀", rank: 4 },
-  { id: "thyroid", label: "Thyroid", icon: "🦋", rank: 5 },
-  { id: "supplement", label: "Supplements", icon: "💊", rank: 6 },
-  { id: "external", label: "Prescribed by External Doctor", icon: "👨‍⚕️", rank: 7 },
+  { id: "cardiac", label: "Cardiac / Antiplatelet", icon: "🫀", rank: 3 },
+  { id: "lipids", label: "Lipids", icon: "🧈", rank: 6 },
+  { id: "kidney", label: "Kidney Protection", icon: "🫘", rank: 7 },
+  { id: "bp", label: "Blood Pressure", icon: "💓", rank: 10 },
+  { id: "thyroid", label: "Thyroid", icon: "🦋", rank: 12 },
+  { id: "urology", label: "Urology / Prostate", icon: "🚻", rank: 40 },
+  { id: "other", label: "Other", icon: "🩺", rank: 45 },
+  { id: "supplement", label: "Supplements", icon: "💊", rank: 90 },
+  {
+    id: "external",
+    label: "Prescribed by External Doctor",
+    icon: "👨‍⚕️",
+    rank: 99,
+  },
 ];
 
 // Default category when none is set and no pattern matches.
-export const DEFAULT_CATEGORY = "supplement";
+export const DEFAULT_CATEGORY = "other";
+
+// Categories that carry no clinical intent — a stored value of one of these is
+// treated as "not yet categorised" and can be overridden by a pattern match.
+export const GENERIC_CATEGORIES = new Set(["other", "supplement"]);
 
 // Diabetes drug class ordering (within the Diabetes group).
 export const DIABETES_CLASS_RANK = {
@@ -53,11 +65,14 @@ export const DRUG_PATTERNS = {
 export const CATEGORY_PATTERNS = {
   kidney:
     /\b(ramipril|enalapril|lisinopril|captopril|perindopril|cardace|hopace|encardil|coversyl|telmisartan|losartan|irbesartan|valsartan|candesartan|olmesartan|telma|telmikind|losacar|arbista|telisatan|finerenone|kerendia|spironolactone|eplerenone|aldactone)\b/i,
-  bp: /\b(amlodipine|nifedipine|felodipine|norvasc|amlokind|amlong|amlopres|cilacar|cilnidipine|chlorthalidone|hydrochlorothiazide|metoprolol|bisoprolol|atenolol|carvedilol|nebivolol|betaloc|concor|aten|nebistar|carvedil|prazosin|aspirin|ecospirin|ecosprin|clopidogrel|prasugrel|ticagrelor|plavix)\b/i,
+  cardiac:
+    /\b(aspirin|ecospirin|ecosprin|clopidogrel|prasugrel|ticagrelor|plavix|deplatt|clopilet|brilinta|ivabradine|ranolazine|nitroglycerin|isosorbide|nicorandil|trimetazidine)\b/i,
+  bp: /\b(amlodipine|nifedipine|felodipine|norvasc|amlokind|amlong|amlopres|cilacar|cilnidipine|chlorthalidone|hydrochlorothiazide|metoprolol|bisoprolol|biso-t|bisotel|atenolol|carvedilol|nebivolol|nebicard|betaloc|concor|aten|nebistar|carvedil|prazosin|torsemide|dytor|furosemide|lasix|indapamide|metolar|revelol|stamlo|amtas)\b/i,
   lipids:
     /\b(rosuvastatin|atorvastatin|simvastatin|pravastatin|crestor|rozavel|lipitor|storvas|rosuvas|rosulip|rosuless|rosulast|rosutor|atorva|lipitas|fenofibrate|gemfibrozil|fenolip|tricor|lipicard|ezetimibe|bempedoic|nexlizet|statin)\b/i,
   thyroid: /\b(levothyroxine|thyronorm|eltroxin|thyrox|lethroxin|thyroxine)\b/i,
-  external: /\b(tamsulosin|urimax|silodosin|dutasteride|finasteride|alfuzosin|flotral)\b/i,
+  urology:
+    /\b(tamsulosin|urimax|silodosin|dutasteride|finasteride|alfuzosin|flotral|veltam|contiflo|solifenacin|mirabegron|darifenacin)\b/i,
   supplement:
     /\b(vitamin|aktiv|calcium|calci|omega|b12|d3|cobadex|methylcobal|shelcal|calshine|d-rise|maxepa|omacor|omega|iron|folic|cospiaq|probiot|enzyme|pantop|panto|rabep|omeprazole)\b/i,
 };
@@ -73,10 +88,13 @@ export function detectDrugClass(med) {
   return "other";
 }
 
-// Detect the category for a med. If `med.med_group` is set, that wins; otherwise
-// we fall back to name/composition pattern matching.
+// Detect the category for a med. "external" is provenance, not a drug class:
+// only external_doctor or an explicitly stored med_group can set it. It used to
+// be pattern-matched off urology drug names, which filed the treating doctor's
+// own Urimax under "prescribed by another doctor".
 export function detectMedCategory(med) {
   if (med?.external_doctor) return "external";
+  if (med?.med_group === "external") return "external";
 
   const name = (med?.name || "").toLowerCase();
   const composition = (med?.composition || "").toLowerCase();
@@ -95,7 +113,7 @@ export function detectMedCategory(med) {
   }
   if (!patternMatch) {
     for (const cat of MED_CATEGORIES) {
-      if (cat.id === "diabetes" || cat.id === "external") continue;
+      if (cat.id === "diabetes" || cat.id === "external" || cat.id === "other") continue;
       const pat = CATEGORY_PATTERNS[cat.id];
       if (pat && pat.test(combined)) {
         patternMatch = cat.id;
@@ -103,16 +121,13 @@ export function detectMedCategory(med) {
       }
     }
   }
-  if (!patternMatch && CATEGORY_PATTERNS.external.test(combined)) {
-    patternMatch = "external";
-  }
 
   const stored =
     med?.med_group && MED_CATEGORIES.some((c) => c.id === med.med_group) ? med.med_group : null;
 
-  // If the stored group is the generic fallback "supplement", let a stronger
-  // pattern match win. Otherwise trust the doctor-curated stored value.
-  if (stored && stored !== DEFAULT_CATEGORY) return stored;
+  // If the stored group is a generic fallback, let a stronger pattern match
+  // win. Otherwise trust the doctor-curated stored value.
+  if (stored && !GENERIC_CATEGORIES.has(stored)) return stored;
   if (patternMatch) return patternMatch;
   if (stored) return stored;
   return DEFAULT_CATEGORY;

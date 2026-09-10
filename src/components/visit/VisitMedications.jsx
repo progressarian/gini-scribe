@@ -3,6 +3,7 @@ import { MED_COLORS, fmtDate, fmtDateShort, isSameDate } from "./helpers";
 import { findDrug } from "../../config/drugDatabase";
 import { formatWhenToTake } from "../../config/medicationTimings";
 import {
+  MED_CATEGORIES,
   detectMedCategory,
   getCategoryLabel,
   groupMedicationsByCategory as sharedGroupByCategory,
@@ -638,8 +639,9 @@ const VisitMedications = memo(function VisitMedications({
   // Group medications by category (parents only — children render nested below their parent)
   const groupedMeds = useMemo(() => groupMedsByCategory(topLevelMeds), [topLevelMeds]);
 
-  // Group order
-  const groupOrder = ["diabetes", "kidney", "bp", "lipids", "thyroid", "supplement", "external"];
+  // Group order — derived from the canonical category list so a new category
+  // never silently drops its medicines out of the card.
+  const groupOrder = MED_CATEGORIES.map((c) => c.id);
 
   const medSummary = useMemo(() => {
     if (!activeMeds?.length) return null;

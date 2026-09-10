@@ -109,6 +109,7 @@ export const PAGE_CAPABILITIES = {
   "/settings": CAP.ADMIN,
   "/settings/flow": CAP.ADMIN,
   "/settings/prescription": CAP.ADMIN,
+  "/settings/tests": CAP.ADMIN,
   "/settings/schemes": CAP.SCHEME_ADMIN,
   "/medicine-collection": CAP.MED_COLLECTION,
   "/reception-inbox": CAP.RECEPTION_OPS,
@@ -148,6 +149,7 @@ export const PAGE_CAPABILITIES = {
   "/giniflow/station/lab": CAP.GINIFLOW_STATION_LAB,
   "/giniflow/station/lab/collection": CAP.GINIFLOW_STATION_LAB_COLLECT,
   "/giniflow/station/lab/processing": CAP.GINIFLOW_STATION_LAB_PROCESS,
+  "/giniflow/station/machine": CAP.GINIFLOW_STATION_MACHINE,
   "/giniflow/station/mo": CAP.GINIFLOW_STATION_MO,
   // capForPath prefix-matches, so this key also covers /giniflow/station/doctor/<visitId>.
   "/giniflow/station/doctor": CAP.GINIFLOW_STATION_DOCTOR,

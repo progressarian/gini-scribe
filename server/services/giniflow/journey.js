@@ -8,7 +8,10 @@ import {
 } from "../../../shared/giniflowStatus.js";
 import { advanceStatus } from "./statusEngine.js";
 import { genVisitToken } from "../flow/journey.js";
-import { LAB_RUNGS, stageIndexOf } from "../../../shared/labStages.js";
+import { LAB_RUNGS, stageIndexOf, rungFor } from "../../../shared/labStages.js";
+import { machineFor } from "../../../shared/machineStages.js";
+import { addMachineTestOn } from "./machineStation.js";
+import { testPricesFor, schemeForVisit } from "../pricing.js";
 
 const DRAWN_STATUS_SQL = LAB_RUNGS.filter((r) => stageIndexOf(r.key) >= stageIndexOf("collected"))
   .flatMap((r) => r.sampleStatuses)
@@ -192,6 +195,103 @@ const insertSteps = async (client, visitId, steps) => {
   }
 };
 
+// A test the desk names at check-in is an order, not a tick.
+//
+// The journey builder is the one place reception says what a patient is here
+// for, so it is the one place the orders come from: a Machine Room step IS a
+// test (one step, one machine, one order), and Blood Sample carries the lab
+// tests the desk picked, because "Blood Sample" alone does not say what to draw
+// and a collection card with no tests on it is a tube nobody can run.
+//
+// Raised unpaid on purpose. Reception is the payment desk, but raising and
+// clearing in one breath would make the billing gate a formality — so these
+// land on the payment queue like a doctor's order, and Lab 1 and the machine
+// room refuse to start until the money is recorded.
+const UNCOLLECTED = rungFor("pending").sampleStatuses;
+
+const labTestsOf = (steps) => [
+  ...new Set(
+    steps
+      .filter((s) => s.catalogId === "blood_sample")
+      .flatMap((s) => (Array.isArray(s.tests) ? s.tests : []))
+      .map((t) => trimmed(t))
+      .filter(Boolean),
+  ),
+];
+
+export async function raiseOrdersFromSteps(client, visitId, steps, actorId = null) {
+  const raised = { labOrderId: null, labTests: [], machine: [] };
+  const wantedTests = labTestsOf(steps);
+
+  if (wantedTests.length) {
+    // Priced the way every other order is: the scheme is snapshotted onto the
+    // row, so a card corrected next week cannot re-price a settled order.
+    const schemeCode = await schemeForVisit(visitId, client);
+    const priceOf = await testPricesFor(wantedTests, schemeCode, client);
+    const unknown = wantedTests.filter((n) => priceOf[n] === undefined);
+    if (unknown.length) {
+      throw Object.assign(new Error(`Not in the test catalogue: ${unknown.join(", ")}`), {
+        status: 400,
+      });
+    }
+
+    // The same rule the MO's own ordering has: a test already ordered and not
+    // yet drawn is one order, not two payment cards on this desk.
+    const { rows: already } = await client.query(
+      `SELECT DISTINCT t.test_name
+         FROM giniflow_lab_orders o
+         JOIN giniflow_lab_order_tests t ON t.lab_order_id = o.id
+        WHERE o.visit_id = $1 AND t.test_name = ANY($2) AND o.sample_status = ANY($3)`,
+      [visitId, wantedTests, UNCOLLECTED],
+    );
+    const tests = wantedTests.filter((n) => !already.some((r) => r.test_name === n));
+
+    if (tests.length) {
+      const total = tests.reduce((sum, n) => sum + priceOf[n], 0);
+      const { rows: order } = await client.query(
+        `INSERT INTO giniflow_lab_orders
+           (visit_id, ordered_by, urgency, payment_status, amount_total, sample_status,
+            scheme_code, kind)
+         VALUES ($1, $2, 'today', 'pending', $3, 'payment_pending', $4, 'lab')
+         RETURNING id`,
+        [visitId, actorId, total, schemeCode],
+      );
+      const labOrderId = order[0].id;
+      await client.query(
+        `INSERT INTO giniflow_lab_order_tests (lab_order_id, test_name, price)
+         SELECT $1, * FROM UNNEST($2::text[], $3::numeric[])`,
+        [labOrderId, tests, tests.map((n) => priceOf[n])],
+      );
+      await client.query(
+        `INSERT INTO giniflow_lab_order_events (lab_order_id, track, status, actor_role, actor_id)
+         VALUES ($1, 'payment', 'pending', 'reception', $2)`,
+        [labOrderId, actorId],
+      );
+      raised.labOrderId = labOrderId;
+      raised.labTests = tests;
+    }
+  }
+
+  // One order per machine step, through the machine room's own rules rather than
+  // around them — a price to bill, a patient still on the floor, one open test
+  // per machine.
+  for (const step of steps) {
+    const machine = step.catalogId ? machineFor(step.catalogId) : null;
+    if (!machine) continue;
+    const r = await addMachineTestOn(client, visitId, { machineId: machine.id, actorId });
+    raised.machine.push({
+      machine: r.machine,
+      orderId: r.orderId,
+      alreadyThere: !!r.alreadyThere,
+    });
+  }
+
+  // Lab Billing is a stop on the journey once there is a bill to pay. Blood
+  // Sample is already there — it is the step that carried the tests.
+  if (raised.labOrderId) await insertLabStepsForOrder(client, visitId);
+  return raised;
+}
+
 const uniqueToken = async (client) => {
   for (let i = 0; i < 5; i++) {
     const token = genVisitToken();
@@ -246,11 +346,17 @@ export async function checkInWithJourney(
       });
     }
 
+    let raised = { labOrderId: null, labTests: [], machine: [] };
     if (!alreadyPlanned) {
       await insertSteps(client, visitId, steps);
       // A plan attached to a patient who is already here has to agree with where
       // they are, the same way a seeded one does.
       if (alreadyHere) await syncFromStatus(client, visitId, current);
+      // In the same transaction as the arrival: a patient checked in for tests
+      // whose orders failed to write would stand in a queue nobody can see.
+      // Guarded by `alreadyPlanned` for the same reason the steps are — a second
+      // press at a busy counter must not bill the patient twice.
+      raised = await raiseOrdersFromSteps(client, visitId, steps, actorId);
     }
 
     // Assigning a doctor on the journey has to mean what it looks like it
@@ -304,6 +410,7 @@ export async function checkInWithJourney(
     return {
       ...journey,
       alreadyPlanned,
+      raised,
       visitToken: rows[0]?.visit_token || null,
       plannedTotalMin: rows[0]?.planned_total_min ?? journey.plannedTotalMin,
     };

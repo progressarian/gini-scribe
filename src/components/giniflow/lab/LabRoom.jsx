@@ -611,7 +611,6 @@ function LabDetailPane({
 }
 
 // How many of the day's finished uploads the column shows before it is asked.
-const UPLOADED_PREVIEW = 5;
 
 // Read-only states, so they borrow the queue's pills rather than earning new
 // ones: nothing here is a step a technician can move.
@@ -1232,7 +1231,6 @@ export default function LabRoom({ room = null }) {
   const upload = useUploadReport();
   const [openOrderId, setOpenOrderId] = useState(null);
   const [openCaseId, setOpenCaseId] = useState(null);
-  const [showAllUploaded, setShowAllUploaded] = useState(false);
   const [viewingDoc, setViewingDoc] = useState(null);
   const deleteCaseReport = useDeleteLabCaseReport();
 
@@ -1693,10 +1691,6 @@ export default function LabRoom({ room = null }) {
                     {doneSplit.map((part) => {
                       const rows = doneRows.filter(part.holds);
                       if (!rows.length) return null;
-                      const shown =
-                        part.key === "left" && !showAllUploaded
-                          ? rows.slice(0, UPLOADED_PREVIEW)
-                          : rows;
                       return (
                         <div key={part.key}>
                           <div className="grp-lbl grp-sub">
@@ -1705,7 +1699,7 @@ export default function LabRoom({ room = null }) {
                           </div>
                           <div className="grp-hint">{part.hint}</div>
                           <div className="pt-list">
-                            {shown.map((r) =>
+                            {rows.map((r) =>
                               r.source === "giniflow" ? (
                                 <LabCard
                                   key={`dg-${r.row.orderId}`}
@@ -1725,18 +1719,6 @@ export default function LabRoom({ room = null }) {
                               ),
                             )}
                           </div>
-                          {part.key === "left" && rows.length > UPLOADED_PREVIEW && (
-                            <button
-                              type="button"
-                              className="more-note more-btn"
-                              aria-expanded={showAllUploaded}
-                              onClick={() => setShowAllUploaded((v) => !v)}
-                            >
-                              {showAllUploaded
-                                ? `Show fewer — ${rows.length} left the floor`
-                                : `+ ${rows.length - UPLOADED_PREVIEW} more who left the floor — show all`}
-                            </button>
-                          )}
                         </div>
                       );
                     })}

@@ -150,6 +150,13 @@ const BOARD_SQL = `
              (SELECT COUNT(*)::int FROM giniflow_lab_order_tests t WHERE t.lab_order_id = o.id) AS test_count
         FROM giniflow_lab_orders o
        WHERE o.visit_id = v.id AND o.sample_status <> 'uploaded'
+         -- The LAB track. A machine test is an order too, and it holds the
+         -- patient the same way — but nothing is drawn for it, so shown here it
+         -- reads "Paid · awaiting collection" against a sample that will never
+         -- exist (36-MACHINE-TEST-STATION-PLAN.md §2.7). It still blocks the
+         -- visit results status, so the patient is not released early; it simply
+         -- stops pretending to be blood.
+         AND o.kind = 'lab'
          -- Today's tests only, the same rule the lab station and the reception
          -- desk already apply. Without it a test ordered for the patient's NEXT
          -- visit joined today's lab track: payment pending at a desk collecting

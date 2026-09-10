@@ -1,5 +1,10 @@
 import pool from "../../config/db.js";
 
+// Which station a test belongs to. The lab draws and runs a specimen; the
+// machine room sits a patient at a machine. One list, so the admin screen, the
+// order splitter and the two queues cannot disagree about what exists.
+export const CATEGORIES = ["lab", "machine"];
+
 // The clinic's test list: what the floor can order, what reception prices.
 // One table behind three screens — the consultant's picker, the MO's chips and
 // this admin view — so a test added on the floor is priced here and nowhere else.
@@ -12,7 +17,11 @@ import pool from "../../config/db.js";
 //
 // Price 0 because nobody has set one; `source` says who added it, which is how
 // reception's "prices are placeholders" warning already works.
-export async function addCatalogTest(name, { gloss = null, addedBy = null } = {}, db = pool) {
+export async function addCatalogTest(
+  name,
+  { gloss = null, addedBy = null, category = "lab" } = {},
+  db = pool,
+) {
   const clean = String(name || "")
     .replace(/\s+/g, " ")
     .trim();
@@ -21,7 +30,7 @@ export async function addCatalogTest(name, { gloss = null, addedBy = null } = {}
   }
 
   const { rows: existing } = await db.query(
-    `SELECT test_name, price, gloss, is_active FROM giniflow_test_catalog
+    `SELECT test_name, price, gloss, is_active, category FROM giniflow_test_catalog
       WHERE UPPER(test_name) = UPPER($1)`,
     [clean],
   );
@@ -37,21 +46,28 @@ export async function addCatalogTest(name, { gloss = null, addedBy = null } = {}
       name: existing[0].test_name,
       price: Number(existing[0].price),
       gloss: existing[0].gloss,
+      category: existing[0].category,
       created: false,
     };
   }
 
   const { rows } = await db.query(
-    `INSERT INTO giniflow_test_catalog (test_name, price, gloss, source)
-     VALUES ($1, 0, $2, $3)
+    `INSERT INTO giniflow_test_catalog (test_name, price, gloss, source, category)
+     VALUES ($1, 0, $2, $3, $4)
      ON CONFLICT (test_name) DO UPDATE SET is_active = true, updated_at = NOW()
-     RETURNING test_name, price, gloss`,
-    [clean, gloss, addedBy ? `added_by_doctor_${addedBy}` : "added_on_the_floor"],
+     RETURNING test_name, price, gloss, category`,
+    [
+      clean,
+      gloss,
+      addedBy ? `added_by_doctor_${addedBy}` : "added_on_the_floor",
+      CATEGORIES.includes(category) ? category : "lab",
+    ],
   );
   return {
     name: rows[0].test_name,
     price: Number(rows[0].price),
     gloss: rows[0].gloss,
+    category: rows[0].category,
     created: true,
   };
 }
@@ -61,7 +77,7 @@ export async function addCatalogTest(name, { gloss = null, addedBy = null } = {}
 // list that hides them cannot show that it worked.
 export async function listCatalog(db = pool) {
   const { rows } = await db.query(
-    `SELECT c.id, c.test_name, c.price, c.gloss, c.is_active, c.source, c.updated_at,
+    `SELECT c.id, c.test_name, c.price, c.gloss, c.is_active, c.source, c.category, c.updated_at,
             COALESCE(u.times_ordered, 0)::int AS times_ordered,
             u.last_ordered::text AS last_ordered
        FROM giniflow_test_catalog c
@@ -82,6 +98,7 @@ export async function listCatalog(db = pool) {
     gloss: r.gloss,
     isActive: r.is_active,
     source: r.source,
+    category: r.category || "lab",
     updatedAt: r.updated_at,
     timesOrdered: r.times_ordered,
     lastOrdered: r.last_ordered,
@@ -91,20 +108,28 @@ export async function listCatalog(db = pool) {
 // Renaming is deliberately not here. Orders store the test NAME, so a rename
 // would orphan every line already placed against the old one; retire it and add
 // the correct name instead.
-export async function updateCatalogTest(id, { price, gloss, isActive } = {}, db = pool) {
+export async function updateCatalogTest(id, { price, gloss, isActive, category } = {}, db = pool) {
   if (price != null && (!Number.isFinite(Number(price)) || Number(price) < 0)) {
     throw Object.assign(new Error("Price cannot be negative"), { status: 400 });
   }
+  if (category != null && !CATEGORIES.includes(category)) {
+    throw Object.assign(new Error(`Unknown station: ${category}`), { status: 400 });
+  }
+  // Only the NEXT order follows a change of station. `giniflow_lab_orders.kind`
+  // is copied from here when the order is raised and never re-read, so a test
+  // moved to another station does not drag yesterday's orders across with it —
+  // which would take a sample the lab has already drawn off their queue.
   const { rows } = await db.query(
     `UPDATE giniflow_test_catalog
         SET price = COALESCE($2, price),
             gloss = COALESCE($3, gloss),
             is_active = COALESCE($4, is_active),
+            category = COALESCE($5, category),
             source = CASE WHEN $2 IS NULL THEN source ELSE 'priced_by_admin' END,
             updated_at = NOW()
       WHERE id = $1
-      RETURNING id, test_name, price, gloss, is_active, source`,
-    [id, price ?? null, gloss ?? null, isActive ?? null],
+      RETURNING id, test_name, price, gloss, is_active, source, category`,
+    [id, price ?? null, gloss ?? null, isActive ?? null, category ?? null],
   );
   if (!rows.length) throw Object.assign(new Error("Test not found"), { status: 404 });
   const r = rows[0];
@@ -115,5 +140,6 @@ export async function updateCatalogTest(id, { price, gloss, isActive } = {}, db 
     gloss: r.gloss,
     isActive: r.is_active,
     source: r.source,
+    category: r.category,
   };
 }

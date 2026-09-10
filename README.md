@@ -274,6 +274,7 @@ Both the API and the worker load the **repo-root `.env`** (`server/loadEnv.js` r
 | `MSG91_*`, `FIREBASE_SERVICE_ACCOUNT` | No | WhatsApp and push notifications |
 | `HOSPITAL_PHONE` / `HOSPITAL_NAME` | No | Shown on the patient chat's "call clinic" card |
 | `RUN_CRON_IN_API` | No | `1` runs cron inside the API process instead of the worker |
+| `SCRIBE_MANUAL_FLOOR` | No | The floor is manual by default — Scribe is the system of record. Set to `0` (and only `0`) to hand the flow back to the HealthRay sync |
 | `AADHAAR_ENCRYPTION_KEY` | No | Encrypts stored Aadhaar numbers |
 
 ---

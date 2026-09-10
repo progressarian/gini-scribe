@@ -88,9 +88,9 @@ const GHMPage = lazyWithRetry(() => import("./pages/GHMPage"));
 const OBTDashboardPage = lazyWithRetry(() => import("./pages/OBTDashboardPage"));
 const DoctorManagementPage = lazyWithRetry(() => import("./pages/DoctorManagementPage"));
 const PatientBlocklistPage = lazyWithRetry(() => import("./pages/PatientBlocklistPage"));
-const TestCatalogPage = lazyWithRetry(() => import("./pages/TestCatalogPage"));
 const PrescriptionFooterPage = lazyWithRetry(() => import("./pages/PrescriptionFooterPage"));
 const SchemesSettingsPage = lazyWithRetry(() => import("./pages/SchemesSettingsPage"));
+const TestCatalogPage = lazyWithRetry(() => import("./pages/TestCatalogPage"));
 const SettingsLayout = lazyWithRetry(() => import("./pages/SettingsLayout"));
 const MedicineCollectionPage = lazyWithRetry(() => import("./pages/MedicineCollectionPage"));
 const FlowCheckinPage = lazyWithRetry(() => import("./pages/flow/FlowCheckinPage"));
@@ -107,6 +107,7 @@ const GiniFlowLabCollectionPage = lazyWithRetry(
 const GiniFlowLabProcessingPage = lazyWithRetry(
   () => import("./pages/giniflow/LabProcessingStationPage"),
 );
+const GiniFlowMachinePage = lazyWithRetry(() => import("./pages/giniflow/MachineStationPage"));
 const GiniFlowMoPage = lazyWithRetry(() => import("./pages/giniflow/MoStationPage"));
 const GiniFlowDoctorPage = lazyWithRetry(() => import("./pages/giniflow/DoctorStationPage"));
 const GiniFlowConsultPage = lazyWithRetry(() => import("./pages/giniflow/DoctorConsultPage"));
@@ -229,7 +230,6 @@ const router = createBrowserRouter([
               // Doctor availability / leave / reassignment management
               { path: "/doctor-management", element: lazyEl(DoctorManagementPage) },
               { path: "/admin/blocklist", element: lazyEl(PatientBlocklistPage) },
-              { path: "/admin/test-catalog", element: lazyEl(TestCatalogPage) },
               // Settings — one section, one tab per area. /flow/admin and
               // /admin/prescription-footer were their own pages before this and
               // are still linked from elsewhere, so both redirect in.
@@ -240,12 +240,17 @@ const router = createBrowserRouter([
                   { index: true, element: <Navigate to="/settings/flow" replace /> },
                   { path: "flow", element: lazyEl(FlowAdminPage) },
                   { path: "prescription", element: lazyEl(PrescriptionFooterPage) },
+                  { path: "tests", element: lazyEl(TestCatalogPage) },
                   { path: "schemes", element: lazyEl(SchemesSettingsPage) },
                 ],
               },
               {
                 path: "/admin/prescription-footer",
                 element: <Navigate to="/settings/prescription" replace />,
+              },
+              {
+                path: "/admin/test-catalog",
+                element: <Navigate to="/settings/tests" replace />,
               },
               // Pharmacy: mark which medicines each patient collected
               { path: "/medicine-collection", element: lazyEl(MedicineCollectionPage) },
@@ -267,6 +272,7 @@ const router = createBrowserRouter([
                 path: "/giniflow/station/lab/processing",
                 element: lazyEl(GiniFlowLabProcessingPage),
               },
+              { path: "/giniflow/station/machine", element: lazyEl(GiniFlowMachinePage) },
               { path: "/giniflow/station/mo", element: lazyEl(GiniFlowMoPage) },
               { path: "/giniflow/station/doctor", element: lazyEl(GiniFlowDoctorPage) },
               {

@@ -1,0 +1,311 @@
+/* The machine room. Mobile-first: the technician works this on a phone beside
+   the machine, so every layout below starts as one column and only widens when
+   there is room for it. Nothing here may scroll the page sideways. */
+
+/* ── The machines themselves ──────────────────────────────────────────────
+   A tile per machine, showing who is on it and how long the queue behind it
+   will take. Auto-fit rather than a fixed count: five tiles sit in one row on a
+   desktop, two on a phone, and never overflow. */
+.mroom__machines {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 6px;
+  margin: 8px 0 10px;
+}
+.mroom__machine {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--bd, #e2e8f0);
+  background: var(--card, #fff);
+  cursor: pointer;
+  min-width: 0;
+}
+.mroom__machine.on {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 1px #2563eb inset;
+}
+/* Icon and name share a line — the tile is a glance, not a card, so its height
+   is the thing worth spending least of. */
+.mroom__top {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.mroom__icon {
+  font-size: 13px;
+  line-height: 1;
+}
+.mroom__mname {
+  font-weight: 600;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mroom__busy {
+  font-size: 10px;
+  color: var(--ink3, #64748b);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mroom__busy.is-busy {
+  color: #b45309;
+  font-weight: 600;
+}
+.mroom__queue {
+  font-size: 9px;
+  color: var(--ink3, #94a3b8);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── A stage, and the cards in it ─────────────────────────────────────────── */
+.mroom__stage {
+  margin-bottom: 16px;
+}
+.mroom__list {
+  display: grid;
+  gap: 8px;
+}
+
+.mc-card {
+  border: 1px solid var(--bd, #e2e8f0);
+  border-radius: 10px;
+  background: var(--card, #fff);
+  overflow: hidden;
+}
+.mc-card.is-blocked {
+  opacity: 0.75;
+}
+.mc-card__main {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 10px;
+  background: none;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+.mc-av {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.mc-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.mc-name {
+  font-weight: 600;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.mc-meta {
+  font-size: 11px;
+  color: var(--ink3, #64748b);
+  /* Long test names must wrap rather than widen the card past the screen. */
+  overflow-wrap: anywhere;
+}
+.mc-blocked {
+  font-size: 11px;
+  color: #b45309;
+}
+.mc-right {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  text-align: right;
+}
+.mc-time {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.mc-tlbl {
+  font-size: 10px;
+  color: var(--ink3, #94a3b8);
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mc-act {
+  width: 100%;
+  border-radius: 0;
+  border-left: 0;
+  border-right: 0;
+  border-bottom: 0;
+}
+
+/* ── Reconciliation ───────────────────────────────────────────────────────── */
+.mroom__recon-list {
+  display: grid;
+  gap: 4px;
+}
+.mroom__recon-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--bg, #f8fafc);
+  font-size: 12px;
+  min-width: 0;
+}
+.mroom__recon-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mroom__recon-at {
+  flex: 0 0 auto;
+  color: var(--ink3, #94a3b8);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Phone ────────────────────────────────────────────────────────────────
+   The card's right-hand column stops being a column: on a narrow screen the
+   pill, the timer and the station read better on one line under the name than
+   squeezed into 90px beside it. */
+@media (max-width: 560px) {
+  .mroom__machines {
+    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  }
+  .mc-card__main {
+    flex-wrap: wrap;
+  }
+  .mc-right {
+    flex: 1 1 100%;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+    text-align: left;
+    padding-left: 44px;
+  }
+  .mc-tlbl {
+    max-width: none;
+    flex: 1 1 auto;
+  }
+}
+
+/* A stage inside a machine. The machine is the heading; the rungs beneath it are
+   sub-labels, the same shape the lab's done-split uses. */
+.mroom__sub {
+  margin-bottom: 10px;
+}
+.mroom__sub:last-child {
+  margin-bottom: 0;
+}
+
+/* Where the patient is now, on a reconciliation row. Usually "Exited" — the
+   report reaches us long after they have gone — so it is stated rather than
+   left for somebody to assume the row is actionable. */
+.mroom__recon-where {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--ink3, #64748b);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 130px;
+}
+.mroom__recon-where.is-gone {
+  opacity: 0.65;
+}
+
+/* Raising a test at the machine. Opens in place rather than as a modal — the
+   technician has one hand free and a patient in front of them. */
+.mroom__add-open {
+  align-self: flex-start;
+}
+.mroom__add {
+  border: 1px solid var(--bd, #e2e8f0);
+  border-radius: 10px;
+  background: var(--card, #fff);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mroom__add-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.mroom__add-search {
+  width: 100%;
+  min-width: 0;
+}
+.mroom__add-list {
+  display: grid;
+  gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.mroom__add-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: var(--bg, #f8fafc);
+  cursor: pointer;
+  text-align: left;
+  min-width: 0;
+}
+.mroom__add-row:hover {
+  border-color: #2563eb;
+}
+.mroom__add-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mroom__add-where {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--ink3, #94a3b8);
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mroom__add-machines {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}

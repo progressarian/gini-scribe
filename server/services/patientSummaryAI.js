@@ -4,6 +4,7 @@
 // is the caller's responsibility — store the returned text as a new version.
 
 import { pickNextVisit } from "../../shared/followUp.js";
+import { sortDiagnoses } from "../utils/diagnosisSort.js";
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 const MODEL = "claude-sonnet-4-6";
 
@@ -32,11 +33,17 @@ Heading rules:
 - Choose tone strictly from the data — don't say "bahut achha" if HbA1c just rose; don't say "chinta nahi" if everything improved.
 
 Body style (English):
-- One short paragraph, 3-5 sentences, plain prose (no bullets, no headings, no markdown, no medical jargon).
+- One short paragraph, 4-6 sentences, plain prose (no bullets, no headings, no markdown, no medical jargon).
 - Warm, simple, second-person ("you", "your"). Use everyday words a non-medical reader can understand.
 - Avoid Latin / abbreviations (write "blood pressure" not "BP", "blood sugar" not "FBS", "long-term sugar" or "HbA1c (3-month sugar average)" — explain abbreviations).
 - Keep it a GENERAL summary of the patient's current health picture and care plan — what's improving, what's being managed, and what they should focus on going forward.
-- 60-110 words.
+- 80-150 words.
+
+COVERAGE (most important rule):
+- The input "diagnoses" array is the patient's FULL active problem list, already in the order the doctor reviews them. EVERY diagnosis in that array must be reflected in the body — none may be skipped, however minor it looks, and however few numbers are attached to it.
+- Do NOT write the summary as if the patient had only one condition. A patient carrying diabetes, heart disease, thyroid and a chest infection must read about all of them, not only their sugar.
+- Give the conditions weight in the order they are listed, but a condition with no lab value still gets its own clause in plain words ("your thyroid is being kept steady on medicine", "the chest infection is being treated").
+- Where the input "labs" or "vitals" carry a value for a condition, use that value for it — not only the sugar numbers. Blood pressure, thyroid, kidney, liver and cholesterol numbers are all available when present; use each one against the condition it belongs to.
 
 Hard rules:
 - Do NOT invent values. Only use numbers from the input JSON.
@@ -96,9 +103,29 @@ function buildContext(data) {
     }
     return null;
   };
-  const hba1cLatest = pickLab("hba1c", "a1c");
-  const fbsLatest = pickLab("fbs", "fasting");
-  const ldlLatest = pickLab("ldl");
+  // The summary used to receive only sugar and LDL, so however many conditions
+  // the patient carried, the only numbers it could write about were diabetic
+  // ones. Every marker the diagnosis list can refer to is passed instead.
+  const LAB_FIELDS = [
+    { key: "hba1c", keys: ["hba1c", "a1c"] },
+    { key: "fbs", keys: ["fbs", "fasting blood", "fasting glucose"] },
+    { key: "ppbs", keys: ["ppbs", "post prandial"] },
+    { key: "ldl", keys: ["ldl"] },
+    { key: "hdl", keys: ["hdl"] },
+    { key: "triglycerides", keys: ["triglyceride"] },
+    { key: "totalCholesterol", keys: ["total cholesterol"] },
+    { key: "creatinine", keys: ["creatinine"] },
+    { key: "egfr", keys: ["egfr", "gfr"] },
+    { key: "uacr", keys: ["uacr", "urine acr", "microalbumin"] },
+    { key: "tsh", keys: ["tsh"] },
+    { key: "alt", keys: ["sgpt", "alt"] },
+    { key: "ast", keys: ["sgot", "ast"] },
+    { key: "haemoglobin", keys: ["haemoglobin", "hemoglobin"] },
+    { key: "vitaminD", keys: ["vitamin d", "25-oh"] },
+    { key: "vitaminB12", keys: ["b12", "cobalamin"] },
+    { key: "uricAcid", keys: ["uric acid"] },
+    { key: "potassium", keys: ["potassium", "k+"] },
+  ];
 
   // labHistory[k] is newest-first; arr[1] is the immediately-prior reading.
   const previousOf = (key) => {
@@ -138,33 +165,44 @@ function buildContext(data) {
   const safeLatestVitals = latestVitals && typeof latestVitals === "object" ? latestVitals : {};
   const safePrevVitals = prevVitals && typeof prevVitals === "object" ? prevVitals : {};
 
+  // Full problem list in the clinical sequence, never truncated: the prompt's
+  // coverage rule requires every active diagnosis, and a slice was silently
+  // dropping the conditions that sat at the end of the list.
+  const diagnoses = (sortDiagnoses(activeDx) || [])
+    .filter((d) => d && d.is_active !== false)
+    .map((d) => ({
+      name: d.label || d.diagnosis_id,
+      status: d.status || null,
+      since: d.since_year || null,
+      detail: d.detail || null,
+    }));
+
+  const labs = {};
+  for (const f of LAB_FIELDS) {
+    const latest = pickLab(...f.keys);
+    if (!latest || latest.result == null) continue;
+    labs[f.key] = {
+      value: latest.result,
+      unit: latest.unit || null,
+      previous: previousOf(f.keys[0])?.result ?? null,
+    };
+  }
+
   return {
     patient: { name: patient.name, age: patient.age, sex: patient.sex },
-    diagnoses: activeDx.slice(0, 4).map((d) => ({
-      name: d.label || d.diagnosis_id,
-      status: d.status,
-    })),
+    diagnoses,
     medicineChanges: newOrChanged,
     vitals: {
       bp: safeLatestVitals.bp_sys ? `${safeLatestVitals.bp_sys}/${safeLatestVitals.bp_dia}` : null,
+      prevBp: safePrevVitals.bp_sys ? `${safePrevVitals.bp_sys}/${safePrevVitals.bp_dia}` : null,
+      pulse: safeLatestVitals.pulse ?? null,
+      spo2: safeLatestVitals.spo2 ?? null,
       weight: safeLatestVitals.weight ?? null,
       prevWeight: safePrevVitals.weight ?? null,
+      bmi: safeLatestVitals.bmi ?? null,
+      waist: safeLatestVitals.waist ?? null,
     },
-    labs: {
-      hba1c: hba1cLatest && {
-        value: hba1cLatest.result,
-        unit: hba1cLatest.unit,
-        previous: previousOf("hba1c")?.result,
-      },
-      fbs: fbsLatest && {
-        value: fbsLatest.result,
-        unit: fbsLatest.unit,
-      },
-      ldl: ldlLatest && {
-        value: ldlLatest.result,
-        unit: ldlLatest.unit,
-      },
-    },
+    labs,
     goals: (goals || []).map((g) => ({
       marker: g.marker,
       target: g.target_value,

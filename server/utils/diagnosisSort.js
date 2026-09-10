@@ -1,5 +1,6 @@
 // ── Diagnosis Sorting Utility ──────────────────────────────────────────────
 // Implements clinical ordering rules from diagnosis-rx-brief
+import { clinicalRankForDiagnosis } from "../../shared/clinicalOrder.js";
 
 import { extractDiagnosisGrade } from "./diagnosisGrade.js";
 
@@ -163,34 +164,31 @@ export function sortDiagnoses(diagnoses) {
       ...dx,
       _category: dx.category || detectDiagnosisCategory(dx),
       _complicationType: dx.complication_type || detectComplicationType(dx),
+      _clinicalRank: clinicalRankForDiagnosis(dx),
     }))
     .sort((a, b) => {
-      // 1. Sort by category rank
+      if (a._clinicalRank !== b._clinicalRank) return a._clinicalRank - b._clinicalRank;
+
       const catA = CATEGORY_RANK[a._category] || 99;
       const catB = CATEGORY_RANK[b._category] || 99;
       if (catA !== catB) return catA - catB;
 
-      // 2. Within category, apply specific ordering
-      // Complications: by severity (nephropathy first)
       if (a._category === "complication") {
         const sevA = COMPLICATION_SEVERITY[a._complicationType] || 99;
         const sevB = COMPLICATION_SEVERITY[b._complicationType] || 99;
         if (sevA !== sevB) return sevA - sevB;
       }
 
-      // Comorbidities: HTN → Dyslipidemia → Obesity → NAFLD → Others
       if (a._category === "comorbidity") {
         const comA = getComorbiditySortKey(a);
         const comB = getComorbiditySortKey(b);
         if (comA !== comB) return comA - comB;
       }
 
-      // 3. Use sort_order if specified
       if (a.sort_order !== b.sort_order) {
         return (a.sort_order || 0) - (b.sort_order || 0);
       }
 
-      // 4. Sort by label alphabetically as final tiebreaker
       return (a.label || a.name || "").localeCompare(b.label || b.name || "");
     });
 }
