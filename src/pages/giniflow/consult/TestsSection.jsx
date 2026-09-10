@@ -21,7 +21,7 @@ const monthLabel = (ymd) => {
 };
 
 export default function TestsSection({ visitId, consult, readOnly, onToast, onUnsaved }) {
-  const { data } = useTestPanels();
+  const { data } = useTestPanels(visitId);
   const orderTests = useOrderTests(visitId);
   // Tests typed in for THIS patient. They ride on the order and are never added
   // to the clinic list — the next patient's picker is unchanged by them.

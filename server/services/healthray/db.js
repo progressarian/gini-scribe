@@ -804,8 +804,15 @@ export async function upsertAppointment(existingId, data) {
         age, sex, notes, healthray_id, opd_vitals, biomarkers, compliance,
         healthray_clinical_notes, healthray_diagnoses, healthray_medications,
         healthray_labs, healthray_advice, healthray_investigations, healthray_follow_up,
-        healthray_previous_medications, follow_up_with, family_member_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16::jsonb,$17::jsonb,$18,$19::jsonb,$20::jsonb,$21::jsonb,$22,$23::jsonb,$24::jsonb,$25::jsonb,$26,$27)
+        healthray_previous_medications, follow_up_with, family_member_id,
+        -- The scheme the patient holds, SNAPSHOTTED here rather than joined at
+        -- read time (33-PATIENT-SCHEME-PLAN.md §2). HealthRay and the Sheets
+        -- sync insert appointments without passing a booking route, so without
+        -- this a tagged patient's synced booking would arrive untagged and the
+        -- daily cap — counted off these rows — would undercount.
+        patient_category)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16::jsonb,$17::jsonb,$18,$19::jsonb,$20::jsonb,$21::jsonb,$22,$23::jsonb,$24::jsonb,$25::jsonb,$26,$27,
+             (SELECT scheme_code FROM patients WHERE id = $1))
      RETURNING id`,
     [
       patientId,

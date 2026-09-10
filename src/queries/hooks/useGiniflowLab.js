@@ -2,10 +2,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api, { API_URL } from "../../services/api";
 import { pollInterval } from "./giniflowPolling";
 
-export function useLabQueue(date, q = "", group = "all") {
+export function useLabQueue(date, q = "", group = "all", room = null) {
   const search = q.trim().length >= 2 ? q.trim() : "";
   return useQuery({
-    queryKey: ["giniflow", "lab", "queue", date || "today", search, group],
+    queryKey: ["giniflow", "lab", "queue", date || "today", search, group, room || "all"],
     queryFn: async () =>
       (
         await api.get("/api/giniflow/stations/lab/queue", {
@@ -13,6 +13,7 @@ export function useLabQueue(date, q = "", group = "all") {
             ...(date ? { date } : {}),
             ...(search ? { q: search } : {}),
             ...(group && group !== "all" ? { group } : {}),
+            ...(room ? { room } : {}),
           },
         })
       ).data,
@@ -145,6 +146,20 @@ export function useUploadLabCaseReport() {
       queryClient.invalidateQueries({ queryKey: ["giniflow", "board"] });
       queryClient.invalidateQueries({ queryKey: ["giniflow", "mo"] });
       queryClient.invalidateQueries({ queryKey: ["giniflow", "doctor"] });
+    },
+  });
+}
+
+// Taking a report back off a case, while the case is still open.
+export function useDeleteLabCaseReport() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ caseNo }) =>
+      (await api.delete(`/api/giniflow/stations/lab/case/${encodeURIComponent(caseNo)}/report`))
+        .data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "lab"] });
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "board"] });
     },
   });
 }

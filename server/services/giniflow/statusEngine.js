@@ -14,6 +14,7 @@ import {
 } from "../../../shared/giniflowStatus.js";
 
 import { syncFromStatus } from "./journey.js";
+import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import pool from "../../config/db.js";
 
 export const IST_TODAY = `(NOW() AT TIME ZONE 'Asia/Kolkata')::date`;
@@ -27,6 +28,47 @@ export const budgetColour = (minutes, budget) => {
 };
 
 const minutesBetween = (from, to) => Math.max(0, Math.round((to - from) / 60000));
+
+// The consultation leg, which a samples-only patient has no business entering.
+// `checked_in` and `exited` are absent on purpose: they arrive at reception and
+// they leave, and appointmentSync's lab-only sweep closes them with `exited`.
+// The exception statuses are absent for the same reason — a patient who came
+// only for bloods can still be a no-show.
+const CONSULT_STATUSES = [
+  "vitals_pending",
+  "with_vitals",
+  "vitals_done",
+  "sd_pending",
+  "with_sd",
+  "ready_for_doctor",
+  "with_doctor",
+  "doctor_done",
+  "rx_pending",
+  "with_rx",
+  "pharmacy_pending",
+  "dispensed",
+];
+
+// Keeping these patients off the station queues stops them being OFFERED to the
+// floor; it does not stop a status write reaching here by another route — a
+// board drag, the HealthRay sync, an admin. P_181420 spent 2026-09-09 in the
+// consultant's queue because one such write moved him to `with_vitals` and
+// nothing refused it. This is where it is refused. Asked only for the statuses
+// that could be wrong, so the ordinary advance pays nothing for it.
+async function assertNotLabOnly(client, visitId, toStatus) {
+  if (!CONSULT_STATUSES.includes(toStatus)) return;
+  const { rows } = await client.query(
+    `SELECT ${labOnlyPredicate("v", "$2")} AS lab_only
+       FROM giniflow_visits v WHERE v.id = $1`,
+    [visitId, LAB_ONLY_DOCTOR],
+  );
+  if (rows[0]?.lab_only) {
+    throw new Error(
+      `Samples-only visit cannot enter the consultation flow: ${toStatus}. ` +
+        `Assign a consultant to this patient first.`,
+    );
+  }
+}
 
 // Appends one event and moves the visit's denormalised status. Caller supplies
 // the client so the write joins whatever transaction it belongs to — the fan-out
@@ -60,6 +102,7 @@ export async function advanceStatus(
   if (!current.rows.length) throw new Error(`No such visit: ${visitId}`);
 
   const fromStatus = current.rows[0].current_status;
+  await assertNotLabOnly(client, visitId, toStatus);
   // `allowSkip` says: the caller knows the patient is HERE, and does not claim
   // to know every step they took to arrive. That is the real rule (CS-12) — an
   // earlier comment here said "never a station screen", which four callers now

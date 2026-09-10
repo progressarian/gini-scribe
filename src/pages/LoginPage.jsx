@@ -10,6 +10,7 @@ const ROLE_GROUPS = [
   { role: "nurse", label: "Nursing", showSpecialty: false },
   { role: "coordinator", label: "Coordinators", showSpecialty: false },
   { role: "lab", label: "Laboratory", showSpecialty: false },
+  { role: "lab_admin", label: "Lab Admin", showSpecialty: false },
   { role: "tech", label: "Technicians", showSpecialty: false },
   { role: "pharmacy", label: "Pharmacy", showSpecialty: false },
   { role: "rx", label: "Prescription Explainer", showSpecialty: false },

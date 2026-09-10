@@ -258,6 +258,29 @@
   color: var(--fam);
 }
 
+/* ── Patient schemes ── the two classes SchemesSettingsPage adds of its own.
+   The scheme `code` is the join key every price table and the daily cap hang
+   off, and unlike the label it cannot be edited — so it is set as a fixed-width
+   token rather than a field, to look like the identifier it is. */
+.fset .sch-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--fink3);
+  background: var(--fbg, transparent);
+  border: 1px solid var(--fbd);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+/* A retired scheme stays listed — historical appointments still resolve their
+   label through it — but it is not one of today's choices, so it recedes. */
+.fset tr.sch-retired {
+  opacity: 0.5;
+}
+.fset tr.sch-retired .sch-code {
+  text-decoration: line-through;
+}
+
 @media (max-width: 620px) {
   .fset__scroll {
     margin: 0 -12px;

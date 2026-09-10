@@ -40,11 +40,18 @@ const STATIONS = [
     href: "/giniflow/station/reception",
   },
   {
-    key: "lab",
-    icon: "🧪",
-    name: "Lab Station",
-    desc: "Sample queue · processing · upload results",
-    href: "/giniflow/station/lab",
+    key: "lab_collect",
+    icon: "🩸",
+    name: "Lab 1 — Collection",
+    desc: "Test ordered · collect the sample · send it to the lab",
+    href: "/giniflow/station/lab/collection",
+  },
+  {
+    key: "lab_process",
+    icon: "🔬",
+    name: "Lab 2 — Processing",
+    desc: "Receive the sample · run it · upload the report",
+    href: "/giniflow/station/lab/processing",
   },
   {
     key: "mo_sd",

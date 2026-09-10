@@ -90,6 +90,7 @@ const DoctorManagementPage = lazyWithRetry(() => import("./pages/DoctorManagemen
 const PatientBlocklistPage = lazyWithRetry(() => import("./pages/PatientBlocklistPage"));
 const TestCatalogPage = lazyWithRetry(() => import("./pages/TestCatalogPage"));
 const PrescriptionFooterPage = lazyWithRetry(() => import("./pages/PrescriptionFooterPage"));
+const SchemesSettingsPage = lazyWithRetry(() => import("./pages/SchemesSettingsPage"));
 const SettingsLayout = lazyWithRetry(() => import("./pages/SettingsLayout"));
 const MedicineCollectionPage = lazyWithRetry(() => import("./pages/MedicineCollectionPage"));
 const FlowCheckinPage = lazyWithRetry(() => import("./pages/flow/FlowCheckinPage"));
@@ -100,6 +101,12 @@ const GiniFlowTriagePage = lazyWithRetry(() => import("./pages/giniflow/TriageBo
 const GiniFlowVitalsPage = lazyWithRetry(() => import("./pages/giniflow/VitalsStationPage"));
 const GiniFlowReceptionPage = lazyWithRetry(() => import("./pages/giniflow/ReceptionStationPage"));
 const GiniFlowLabPage = lazyWithRetry(() => import("./pages/giniflow/LabStationPage"));
+const GiniFlowLabCollectionPage = lazyWithRetry(
+  () => import("./pages/giniflow/LabCollectionStationPage"),
+);
+const GiniFlowLabProcessingPage = lazyWithRetry(
+  () => import("./pages/giniflow/LabProcessingStationPage"),
+);
 const GiniFlowMoPage = lazyWithRetry(() => import("./pages/giniflow/MoStationPage"));
 const GiniFlowDoctorPage = lazyWithRetry(() => import("./pages/giniflow/DoctorStationPage"));
 const GiniFlowConsultPage = lazyWithRetry(() => import("./pages/giniflow/DoctorConsultPage"));
@@ -233,6 +240,7 @@ const router = createBrowserRouter([
                   { index: true, element: <Navigate to="/settings/flow" replace /> },
                   { path: "flow", element: lazyEl(FlowAdminPage) },
                   { path: "prescription", element: lazyEl(PrescriptionFooterPage) },
+                  { path: "schemes", element: lazyEl(SchemesSettingsPage) },
                 ],
               },
               {
@@ -251,6 +259,14 @@ const router = createBrowserRouter([
               { path: "/giniflow/station/vitals", element: lazyEl(GiniFlowVitalsPage) },
               { path: "/giniflow/station/reception", element: lazyEl(GiniFlowReceptionPage) },
               { path: "/giniflow/station/lab", element: lazyEl(GiniFlowLabPage) },
+              {
+                path: "/giniflow/station/lab/collection",
+                element: lazyEl(GiniFlowLabCollectionPage),
+              },
+              {
+                path: "/giniflow/station/lab/processing",
+                element: lazyEl(GiniFlowLabProcessingPage),
+              },
               { path: "/giniflow/station/mo", element: lazyEl(GiniFlowMoPage) },
               { path: "/giniflow/station/doctor", element: lazyEl(GiniFlowDoctorPage) },
               {

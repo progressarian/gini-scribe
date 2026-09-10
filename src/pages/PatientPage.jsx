@@ -6,6 +6,7 @@ import useUiStore from "../stores/uiStore.js";
 import AudioInput from "../components/AudioInput.jsx";
 import Err from "../components/Err.jsx";
 import api from "../services/api.js";
+import { PATIENT_CATEGORIES, categoryLabel } from "../../shared/patientCategories.js";
 import "./PatientPage.css";
 
 export default function PatientPage() {
@@ -197,6 +198,37 @@ export default function PatientPage() {
               className="patient-page__id-input"
             />
           </div>
+          {/* The billing scheme is an entitlement the person holds, so it lives
+              with the other government IDs rather than on one appointment. Set
+              once here, it falls onto every future booking automatically
+              (33-PATIENT-SCHEME-PLAN.md §2). */}
+          <div>
+            <label className="patient-page__label">Billing scheme</label>
+            <select
+              value={patient.schemeCode || ""}
+              onChange={(e) => updatePatient("schemeCode", e.target.value)}
+              className="patient-page__id-input"
+            >
+              {PATIENT_CATEGORIES.map((c) => (
+                <option key={c.value} value={c.value}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          {patient.schemeCode && (
+            <div>
+              <label className="patient-page__label">
+                {categoryLabel(patient.schemeCode)} card no.
+              </label>
+              <input
+                value={patient.schemeRef || ""}
+                onChange={(e) => updatePatient("schemeRef", e.target.value)}
+                placeholder="Beneficiary / card number"
+                className="patient-page__id-input"
+              />
+            </div>
+          )}
           <div>
             <label className="patient-page__label">Aadhaar</label>
             <input

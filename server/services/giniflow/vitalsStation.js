@@ -9,6 +9,7 @@ import {
   columnForStatus,
 } from "../../../shared/giniflowStatus.js";
 import { ALLERGY_NOT_ASKED } from "../../../shared/giniflowAllergy.js";
+import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 
 // The vitals station: who is waiting, what was recorded last time, and the save
 // that moves the patient on.
@@ -69,6 +70,11 @@ const QUEUE_SQL = `
    WHERE v.visit_date = $1::date
      AND v.current_status = ANY($2)
      AND NOT COALESCE(p.is_blocked, FALSE)
+     -- A samples-only patient checks in like anyone else, so this queue used to
+     -- offer them to the station — and calling one in was the only way they ever
+     -- reached the consultation statuses. They have no vitals leg: the lab track
+     -- is their whole visit.
+     AND NOT ${labOnlyPredicate("v", "$4")}
      AND (
        $3::text IS NULL
        OR p.name ILIKE '%' || $3 || '%'
@@ -125,6 +131,7 @@ const DONE_SQL = `
     ) done_ev ON TRUE
    WHERE v.visit_date = $1::date
      AND (gv.id IS NOT NULL OR v.current_status = ANY($2))
+     AND NOT ${labOnlyPredicate("v", "$4")}
      AND (
        $3::text IS NULL
        OR p.name ILIKE '%' || $3 || '%'
@@ -147,9 +154,9 @@ export async function getVitalsQueue(
   const search = q && String(q).trim().length >= 2 ? String(q).trim() : null;
 
   const [{ rows }, { rows: heldRows }, { rows: doneRows }] = await Promise.all([
-    db.query(QUEUE_SQL, [visitDate, QUEUE_STATUSES, search]),
-    db.query(QUEUE_SQL, [visitDate, HELD_STATUSES, search]),
-    db.query(DONE_SQL, [visitDate, DONE_STATUSES, search]),
+    db.query(QUEUE_SQL, [visitDate, QUEUE_STATUSES, search, LAB_ONLY_DOCTOR]),
+    db.query(QUEUE_SQL, [visitDate, HELD_STATUSES, search, LAB_ONLY_DOCTOR]),
+    db.query(DONE_SQL, [visitDate, DONE_STATUSES, search, LAB_ONLY_DOCTOR]),
   ]);
 
   const waitFields = (r) => {

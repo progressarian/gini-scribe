@@ -7,6 +7,7 @@ import { buildBrief } from "./consultBrief.js";
 import { seedDraftOn } from "./prescription.js";
 import { OPEN_LAB_CASES_SQL } from "./labStation.js";
 import { nonTestPredicate } from "../../utils/nonTests.js";
+import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 
 // The consultant's station — the queue that forms in front of Dr. Bhansali, and
 // the consult screen itself.
@@ -163,6 +164,11 @@ const QUEUE_SQL = `
    WHERE v.visit_date = $1::date
      AND v.current_status = ANY($2)
      AND NOT COALESCE(p.is_blocked, FALSE)
+     -- Samples-only patients are not this consultant's queue, and the manager
+     -- board has always kept them out of the consultation columns. This query
+     -- did not, so anyone advancing such a visit past check-in put a patient
+     -- who came only to give bloods in front of the doctor.
+     AND NOT ${labOnlyPredicate("v", "$4")}
    ORDER BY v.appointment_time NULLS LAST, first_ev.occurred_at NULLS LAST`;
 
 const RAIL_STATUS_TO_KEY = new Map(RAIL.flatMap((step) => step.statuses.map((s) => [s, step.key])));
@@ -203,7 +209,7 @@ export async function getDoctorQueue(
   const term = raw ? raw.replace(/[%_\\]/g, "\\$&") : null;
 
   const [{ rows }, sla, { rows: durations }] = await Promise.all([
-    db.query(QUEUE_SQL, [visitDate, QUEUE_STATUSES, term]),
+    db.query(QUEUE_SQL, [visitDate, QUEUE_STATUSES, term, LAB_ONLY_DOCTOR]),
     getSlaConfig(db),
     // Time actually spent in the room today: the gap between entering
     // `with_doctor` and whatever event followed it. Derived from the log rather
@@ -263,14 +269,26 @@ export async function getDoctorQueue(
     // second column of the pipeline, whatever the scope toggle says, because
     // that column is exactly the question "who is waiting for someone else".
     const belongsToOther = !isMine && group === "pipeline";
-    if (!inScope(row) && !belongsToOther) continue;
-    counters.total++;
+    const onScreen = inScope(row) || belongsToOther;
+    // A search is a lookup, not a filter on the day: asked for a file number,
+    // the station answers with the patient who has it. Searching "My patients"
+    // for a colleague's patient used to return an empty screen — the scope test
+    // ran before the search filter, and `belongsToOther` rescues only the
+    // pipeline, so anyone further along was invisible on the Mine tab however
+    // exactly you spelled their file number.
+    const foundBySearch = term !== null && row.matches;
+    if (!onScreen && !foundBySearch) continue;
 
-    if (!belongsToOther) counters[group]++;
-    // Same distinction: this counts patients the lab is still holding up, not
-    // every patient who happens to have no tests today.
-    if (!DONE_STATUSES.includes(row.current_status) && waitingOnLab(row)) {
-      counters.missingResults++;
+    // The stat tiles keep describing the scope, not the search. They are the
+    // day's numbers, and a typed query must not make "Today's patients" jump.
+    if (onScreen) {
+      counters.total++;
+      if (!belongsToOther) counters[group]++;
+      // Same distinction: this counts patients the lab is still holding up, not
+      // every patient who happens to have no tests today.
+      if (!DONE_STATUSES.includes(row.current_status) && waitingOnLab(row)) {
+        counters.missingResults++;
+      }
     }
 
     const waited = minutesSince(row.status_since, now);

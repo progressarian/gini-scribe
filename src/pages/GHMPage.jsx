@@ -2231,13 +2231,24 @@ export default function GHMPage() {
   const categoryOptions = useMemo(
     () =>
       PATIENT_CATEGORIES.map((c) => {
-        const count = c.value ? categoryCounts?.[c.value]?.count || 0 : 0;
+        const entry = c.value ? categoryCounts?.[c.value] : null;
+        const count = entry?.count || 0;
+        const cap = entry?.cap ?? null;
+        // With a ceiling the badge reads "8/10", so the desk sees the limit
+        // before it is hit rather than after (33-PATIENT-SCHEME-PLAN.md §5).
+        const full = cap !== null && count >= cap;
         return {
           ...c,
-          badge: count || undefined,
-          badgeTitle: count
-            ? `${count} patient${count > 1 ? "s" : ""} in this category today`
-            : undefined,
+          badge: cap !== null ? `${count}/${cap}` : count || undefined,
+          badgeTone: full ? "red" : undefined,
+          badgeTitle:
+            cap !== null
+              ? full
+                ? `${c.label} is full for today — ${count} of ${cap}`
+                : `${count} of ${cap} allowed today`
+              : count
+                ? `${count} patient${count > 1 ? "s" : ""} in this category today`
+                : undefined,
         };
       }),
     [categoryCounts],

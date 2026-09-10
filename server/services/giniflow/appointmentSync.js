@@ -37,8 +37,13 @@ async function observeHealthrayVitals(client, day) {
        ) hv ON TRUE
       WHERE v.visit_date = $1::date
         AND v.current_status = ANY($2)
-        AND NOT EXISTS (SELECT 1 FROM giniflow_vitals g WHERE g.visit_id = v.id)`,
-    [day, PRE_VITALS],
+        AND NOT EXISTS (SELECT 1 FROM giniflow_vitals g WHERE g.visit_id = v.id)
+        -- HealthRay stamps a vitals row for samples-only patients too, and
+        -- advancing on it is what put them on the consultation track. The
+        -- status engine now refuses that move, so without this clause the poll
+        -- would retry and log the same refusal every cycle, forever.
+        AND NOT ${labOnlyPredicate("v", "$3")}`,
+    [day, PRE_VITALS, LAB_ONLY_DOCTOR],
   );
 
   let moved = 0;

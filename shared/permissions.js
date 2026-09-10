@@ -36,6 +36,7 @@ export const ROLES = {
   MO: "mo",
   NURSE: "nurse",
   LAB: "lab",
+  LAB_ADMIN: "lab_admin",
   TECH: "tech",
   RECEPTION: "reception",
   COORDINATOR: "coordinator",
@@ -104,10 +105,22 @@ export const CAPABILITIES = {
   // away to hide the board would break the station instead.
   GINIFLOW_BOARD: "GINIFLOW_BOARD",
   GINIFLOW_SLA_ADMIN: "GINIFLOW_SLA_ADMIN", // edit the Gini Flow time budgets
+  // Add or retire a patient scheme, set its daily cap and its fees. Admin only,
+  // deliberately: a receptionist who can raise the ECHS cap from 10 to 30 has
+  // defeated the cap (33-PATIENT-SCHEME-PLAN.md §6). Tagging a patient with a
+  // scheme is a different, wider power and stays on RECEPTION_OPS / OBT_OPS.
+  SCHEME_ADMIN: "SCHEME_ADMIN",
   GINIFLOW_MANAGE_QUEUE: "GINIFLOW_MANAGE_QUEUE", // reorder, prioritise and move patients on the board
   GINIFLOW_STATION_VITALS: "GINIFLOW_STATION_VITALS", // record vitals at the Gini Flow station
   GINIFLOW_STATION_RECEPTION: "GINIFLOW_STATION_RECEPTION", // clear lab payments
   GINIFLOW_STATION_LAB: "GINIFLOW_STATION_LAB", // collect samples, upload results
+  // The lab is two physical benches (35-LAB-TWO-ROOM-SPLIT-PLAN.md §3.5). The
+  // collection room draws the sample and sends it; the analyzer room receives,
+  // runs and signs it out. One capability each, because a room may only record
+  // its own steps — a phlebotomist marking a tube "processing" is the floor
+  // losing track of where a sample physically is.
+  GINIFLOW_STATION_LAB_COLLECT: "GINIFLOW_STATION_LAB_COLLECT", // lab station 1: order → collect → send
+  GINIFLOW_STATION_LAB_PROCESS: "GINIFLOW_STATION_LAB_PROCESS", // lab station 2: receive → process → upload
   GINIFLOW_STATION_DOCTOR: "GINIFLOW_STATION_DOCTOR", // the consultant's queue and consult screen
   GINIFLOW_MO_CLOSE: "GINIFLOW_MO_CLOSE", // end a visit without the consultant, prescription and all
   GINIFLOW_STATION_MO: "GINIFLOW_STATION_MO", // MO/SD workup, order tests, hand over
@@ -225,6 +238,28 @@ export const ROLE_CAPABILITIES = {
     C.GINIFLOW_VIEW,
     C.GINIFLOW_BOARD,
     C.GINIFLOW_STATION_LAB,
+    C.GINIFLOW_STATION_LAB_COLLECT,
+  ],
+  // The analyzer bench. Everything `lab` has, minus the collection room and plus
+  // the processing room — the split is the point, so this role deliberately
+  // cannot mark a sample collected or sent.
+  //
+  // GINIFLOW_VIEW is not optional here: `/api/giniflow*` is prefix-gated on it
+  // in middleware/auth.js before any per-route capability runs, so without it
+  // this role would pass the frontend check for its own station and then 403 on
+  // every call the page makes — see the note on TECH below.
+  [ROLES.LAB_ADMIN]: [
+    C.PATIENT_READ,
+    C.PATIENT_CHART,
+    C.LAB_PORTAL,
+    C.LAB_REQUESTS,
+    C.FLOW_STATION,
+    C.FLOW_STATION_LAB,
+    C.FLOW_FLOOR_VIEW,
+    C.GINIFLOW_VIEW,
+    C.GINIFLOW_BOARD,
+    C.GINIFLOW_STATION_LAB,
+    C.GINIFLOW_STATION_LAB_PROCESS,
   ],
   [ROLES.TECH]: [
     C.PATIENT_READ,
@@ -244,6 +279,7 @@ export const ROLE_CAPABILITIES = {
     C.GINIFLOW_VIEW,
     C.GINIFLOW_BOARD,
     C.GINIFLOW_STATION_LAB,
+    C.GINIFLOW_STATION_LAB_COLLECT,
   ],
   [ROLES.RECEPTION]: [
     C.PATIENT_READ,
@@ -293,6 +329,8 @@ export const ROLE_CAPABILITIES = {
     C.GINIFLOW_STATION_VITALS,
     C.GINIFLOW_STATION_RECEPTION,
     C.GINIFLOW_STATION_LAB,
+    C.GINIFLOW_STATION_LAB_COLLECT,
+    C.GINIFLOW_STATION_LAB_PROCESS,
     C.GINIFLOW_STATION_MO,
     C.GINIFLOW_TRIAGE,
     C.GINIFLOW_REFERRALS,

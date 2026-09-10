@@ -19,6 +19,11 @@ export const SETTINGS_TABS = [
     blurb:
       "Hospital identity, letterhead logo, and the strip printed at the foot of every prescription",
   },
+  {
+    to: "/settings/schemes",
+    label: "Patient schemes",
+    blurb: "CGHS, ECHS and the rest — their labels, their card requirement, and the daily cap",
+  },
 ];
 
 export default function SettingsLayout() {

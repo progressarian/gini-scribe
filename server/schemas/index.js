@@ -2,6 +2,7 @@ import { z } from "zod";
 import { CATEGORIES, TRIAGE_FILTERS } from "../../shared/giniflowStatus.js";
 import { MED_SLOT_KEYS } from "../../shared/giniflowMedTiming.js";
 import { SPECIALTY_VALUES, URGENCY_VALUES } from "../../shared/giniflowReferrals.js";
+import { CASE_ACTION_VERBS } from "../../shared/labStages.js";
 
 // Canonical patient-facing "when to take" vocabulary. Must stay in sync
 // with src/config/medicationTimings.js and the Postgres when_to_take_pill
@@ -111,6 +112,11 @@ export const patientCreateSchema = z
     govt_id_type: optStr,
     email: optStr,
     address: optStr,
+    // The billing scheme the patient is entitled to, and their card number.
+    // "" clears the tag — a lapsed CGHS card goes back to General — so an empty
+    // string is meaningful here and must not be coerced to null.
+    scheme_code: z.string().trim().max(32).optional().nullable(),
+    scheme_ref: z.string().trim().max(64).optional().nullable(),
   })
   .passthrough();
 
@@ -579,6 +585,7 @@ const stationGroup = z.string().trim().max(20).optional();
 
 export const giniflowStationQuerySchema = z.object({
   group: stationGroup,
+  room: z.enum(["collection", "processing"]).optional(),
   q: z.string().trim().max(60).optional(),
   date: z
     .string()
@@ -724,7 +731,16 @@ export const giniflowWalkInSchema = z.object({
 });
 
 export const giniflowSampleSchema = z.object({
-  to: z.enum(["paid", "sample_collected", "processing", "results_ready", "uploaded"]),
+  to: z.enum([
+    "paid",
+    "sample_collected",
+    "sample_sent",
+    "sample_received",
+    "processing",
+    "results_ready",
+    "uploaded",
+  ]),
+  room: z.enum(["collection", "processing"]).nullish(),
   reportUrl: z.string().url().max(2000).nullish(),
 });
 
@@ -732,7 +748,12 @@ export const giniflowSampleSchema = z.object({
 // the retired "chased" value; nothing writes it, and dropping a constraint on
 // production to remove a word is not worth the migration.
 export const giniflowLabCaseActionSchema = z.object({
-  action: z.enum(["sample_taken", "processing", "results_ready"]),
+  // Straight off the ladder. Listed by hand this enum fell a step behind twice —
+  // and because validation runs before the room gate, a verb missing here reads
+  // as a malformed request rather than as a refusal, which sends whoever is
+  // debugging it looking in the wrong place.
+  action: z.enum(CASE_ACTION_VERBS),
+  room: z.enum(["collection", "processing"]).nullish(),
   note: z.string().max(500).nullish(),
   undo: z.boolean().optional(),
 });

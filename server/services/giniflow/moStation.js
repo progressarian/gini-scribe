@@ -1,12 +1,15 @@
 import pool from "../../config/db.js";
 import { OPEN_LAB_CASES_SQL } from "./labStation.js";
+import { LAB_SAMPLE_FLOW, rungFor } from "../../../shared/labStages.js";
 import { finalizeConsult } from "./finalize.js";
 import { advanceStatus, budgetColour } from "./statusEngine.js";
 import { getSlaConfig, budgetLookup } from "./board.js";
+import { testPricesFor, schemeForVisit } from "../pricing.js";
 import { slaKeyForStatus, WAIT_SINCE_SQL } from "../../../shared/giniflowStatus.js";
 import { todaysVitals, previousVitals } from "./visitVitals.js";
 import { insertLabStepsForOrder } from "./journey.js";
 import { ALLERGY_NOT_ASKED } from "../../../shared/giniflowAllergy.js";
+import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 
 // The MO / SD station — where the queue forms.
 //
@@ -41,7 +44,11 @@ const GATING_ORDER_SQL = `o.urgency = 'today'`;
 const gatingOrders = (orders = []) => orders.filter((o) => o.urgency === "today").length;
 
 // Lab-track statuses that mean the sample has not been taken yet.
-const UNCOLLECTED = ["ordered", "payment_pending", "paid"];
+const UNCOLLECTED = rungFor("pending").sampleStatuses;
+
+const LAB_STAGE_ORDER_SQL = LAB_SAMPLE_FLOW.filter((v) => v !== "uploaded")
+  .map((v) => `'${v}'`)
+  .join(",");
 
 const QUEUE_STATUSES = [
   "checked_in",
@@ -110,7 +117,7 @@ const QUEUE_SQL = `
            WHERE o.visit_id = v.id AND o.sample_status <> 'uploaded'
              AND ${GATING_ORDER_SQL}
            ORDER BY array_position(
-             ARRAY['ordered','payment_pending','paid','sample_collected','processing','results_ready'],
+             ARRAY[${LAB_STAGE_ORDER_SQL}],
              o.sample_status) LIMIT 1) AS lab_stage,
          ${OPEN_LAB_CASES_SQL} AS open_cases,
          (SELECT plan IS NOT NULL AND length(trim(plan)) > 0
@@ -151,6 +158,9 @@ const QUEUE_SQL = `
    WHERE v.visit_date = $1::date
      AND v.current_status = ANY($2)
      AND NOT COALESCE(p.is_blocked, FALSE)
+     -- Samples-only patients belong to the lab track, not the MO's queue. See
+     -- the same clause in doctorStation.js.
+     AND NOT ${labOnlyPredicate("v", "$5")}
    ORDER BY v.appointment_time NULLS LAST, first_ev.occurred_at NULLS LAST`;
 
 // Five groups, not four: "waiting on results" and "no reports at all" need
@@ -185,7 +195,7 @@ export async function getMoQueue(visitDate, sdId = null, q = null, now = new Dat
   const term = raw ? raw.replace(/[%_\\]/g, "\\$&") : null;
   const digits = raw ? raw.replace(/\D/g, "") : "";
   const [{ rows }, sla] = await Promise.all([
-    db.query(QUEUE_SQL, [visitDate, QUEUE_STATUSES, term, digits]),
+    db.query(QUEUE_SQL, [visitDate, QUEUE_STATUSES, term, digits, LAB_ONLY_DOCTOR]),
     getSlaConfig(db),
   ]);
   const budgetFor = budgetLookup(sla);
@@ -620,7 +630,12 @@ export async function withdrawProposal(proposalId, db = pool) {
   return { withdrawn: true };
 }
 
-export async function getTestPanels(db = pool) {
+// `visitId` is optional but matters: without it the picker shows the base
+// catalogue price while orderTests below charges the patient's scheme rate, so
+// an MO ordering for a CGHS patient would be quoted one number and the order
+// created at another. The comment under orderTests — "the patient is charged
+// what they were quoted" — is only true if both read the same tariff.
+export async function getTestPanels(db = pool, visitId = null) {
   const { rows: panels } = await db.query(
     `SELECT panel_key, label, icon, test_names FROM giniflow_test_panels
       WHERE is_active ORDER BY display_order`,
@@ -628,6 +643,14 @@ export async function getTestPanels(db = pool) {
   const { rows: tests } = await db.query(
     `SELECT test_name, price, gloss FROM giniflow_test_catalog WHERE is_active ORDER BY test_name`,
   );
+  const schemeCode = visitId ? await schemeForVisit(visitId, db) : null;
+  const schemePrices = schemeCode
+    ? await testPricesFor(
+        tests.map((t) => t.test_name),
+        schemeCode,
+        db,
+      )
+    : {};
   return {
     panels: panels.map((p) => ({
       key: p.panel_key,
@@ -636,7 +659,20 @@ export async function getTestPanels(db = pool) {
       tests: p.test_names,
     })),
     // The gloss is why an MO picks a test, so it travels with the price.
-    tests: tests.map((t) => ({ name: t.test_name, price: Number(t.price), gloss: t.gloss })),
+    tests: tests.map((t) => {
+      const scheme = schemePrices[t.test_name];
+      const price = scheme === undefined || scheme === null ? Number(t.price) : Number(scheme);
+      return {
+        name: t.test_name,
+        price,
+        gloss: t.gloss,
+        // The picker can say WHY a price differs from the usual one, instead of
+        // the MO wondering whether the list is wrong.
+        basePrice: Number(t.price),
+        schemePriced: price !== Number(t.price),
+      };
+    }),
+    schemeCode,
   };
 }
 
@@ -682,11 +718,15 @@ export async function orderTests(
     if (!visitRows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
     const current = visitRows[0].current_status;
 
-    const { rows: priced } = await client.query(
-      `SELECT test_name, price FROM giniflow_test_catalog WHERE test_name = ANY($1)`,
-      [catalogueNames],
-    );
-    const priceOf = Object.fromEntries(priced.map((r) => [r.test_name, Number(r.price)]));
+    // The scheme this visit is billed under, snapshotted onto the order below.
+    // Resolved once here rather than joined at read time: a card corrected next
+    // week must not re-price a settled order (33-PATIENT-SCHEME-PLAN.md §4a).
+    const schemeCode = await schemeForVisit(visitId, client);
+
+    // Override if the scheme has one for this test, else the catalogue price.
+    // Every override table is empty until the hospital's rate card lands, so
+    // today this returns exactly the base prices it always did.
+    const priceOf = await testPricesFor(catalogueNames, schemeCode, client);
     const uncatalogued = catalogueNames.filter((name) => priceOf[name] === undefined);
     if (uncatalogued.length)
       throw Object.assign(new Error(`Not in the test catalogue: ${uncatalogued.join(", ")}`), {
@@ -718,10 +758,11 @@ export async function orderTests(
 
     const order = await client.query(
       `INSERT INTO giniflow_lab_orders
-         (visit_id, ordered_by, urgency, payment_status, amount_total, sample_status)
-       VALUES ($1, $2, $3, 'pending', $4, 'payment_pending')
+         (visit_id, ordered_by, urgency, payment_status, amount_total, sample_status,
+          scheme_code)
+       VALUES ($1, $2, $3, 'pending', $4, 'payment_pending', $5)
        RETURNING id`,
-      [visitId, actorId, urgency, total],
+      [visitId, actorId, urgency, total, schemeCode],
     );
     const orderId = order.rows[0].id;
 

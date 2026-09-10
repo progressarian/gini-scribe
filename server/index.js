@@ -40,6 +40,7 @@ import summaryRoutes from "./routes/summary.js";
 import postVisitSummaryRoutes from "./routes/postVisitSummary.js";
 import dashboardRoutes from "./routes/dashboard.js";
 import ghmAppointmentRoutes from "./routes/ghm-appointments.js";
+import patientSchemeRoutes from "./routes/patientSchemes.js";
 import ghmPatientRecordRoutes from "./routes/ghm-patient-record.js";
 import ccCallingRoutes from "./routes/cc-calling.js";
 import clinicHolidayRoutes from "./routes/clinic-holidays.js";
@@ -167,6 +168,7 @@ app.use("/api", postVisitSummaryRoutes);
 app.use("/api", dashboardRoutes);
 // GHM + CC system routes
 app.use("/api", ghmAppointmentRoutes);
+app.use("/api", patientSchemeRoutes);
 app.use("/api", ghmPatientRecordRoutes);
 app.use("/api", ccCallingRoutes);
 app.use("/api", clinicHolidayRoutes);

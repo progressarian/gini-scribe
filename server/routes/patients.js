@@ -6,7 +6,8 @@ import { n, int } from "../utils/helpers.js";
 import { handleError } from "../utils/errorHandler.js";
 import { isPatientBlocked } from "../services/patientBlockGuard.js";
 import { sortDiagnoses } from "../utils/diagnosisSort.js";
-import { encryptAadhaar, decryptAadhaar } from "../utils/aadhaarCrypt.js";
+import { encryptAadhaar, decryptAadhaar, decryptAadhaarFull } from "../utils/aadhaarCrypt.js";
+import { isKnownScheme } from "../services/patientSchemes.js";
 import { validate } from "../middleware/validate.js";
 import { patientCreateSchema } from "../schemas/index.js";
 import { requireDoctor, requireCapability } from "../middleware/auth.js";
@@ -474,6 +475,13 @@ router.get("/patients/:id", async (req, res) => {
 
     const patientData = patient.rows[0];
     if (patientData.aadhaar) patientData.aadhaar = decryptAadhaar(patientData.aadhaar);
+    // Full, not masked. Aadhaar is masked to its last four because nobody needs
+    // the rest; a scheme card number is the thing reception keys into HealthRay
+    // to bill at the right rate, so a masked one would be useless. It is still
+    // encrypted at rest with the same key and the same helper.
+    if (patientData.scheme_ref) {
+      patientData.scheme_ref = decryptAadhaarFull(patientData.scheme_ref);
+    }
 
     const apptPlan = latestAppt.rows[0] || null;
     const apptCompliance = apptPlan?.compliance || {};
@@ -605,12 +613,24 @@ router.post("/patients", validate(patientCreateSchema), async (req, res) => {
 router.put("/patients/:id", validate(patientCreateSchema), async (req, res) => {
   try {
     const p = req.body;
+    // A scheme code is the key prices and caps hang off, so a typo must not
+    // reach the column. Checked against the table, never a cached list.
+    if (p.scheme_code && !(await isKnownScheme(p.scheme_code))) {
+      return res.status(400).json({ error: `Unknown scheme: ${p.scheme_code}` });
+    }
     const result = await pool.query(
       `UPDATE patients SET name=COALESCE($2,name), dob=COALESCE($3,dob), age=COALESCE($4,age),
        sex=COALESCE($5,sex), file_no=COALESCE($6,file_no), abha_id=COALESCE($7,abha_id),
        health_id=COALESCE($8,health_id), aadhaar=COALESCE($9,aadhaar),
        govt_id=COALESCE($10,govt_id), govt_id_type=COALESCE($11,govt_id_type),
        email=COALESCE($12,email), phone=COALESCE($13,phone), address=COALESCE($14,address),
+       -- The scheme is the one identity field that must be CLEARABLE: a patient
+       -- whose CGHS card lapses goes back to General, and COALESCE would make
+       -- that impossible. '' is the client's way of saying "no scheme".
+       scheme_code = CASE WHEN $15::text IS NULL THEN scheme_code
+                          WHEN $15 = '' THEN NULL ELSE $15 END,
+       scheme_ref  = CASE WHEN $16::text IS NULL THEN scheme_ref
+                          WHEN $16 = '' THEN NULL ELSE $16 END,
        updated_at=NOW()
        WHERE id=$1 RETURNING *`,
       [
@@ -628,11 +648,21 @@ router.put("/patients/:id", validate(patientCreateSchema), async (req, res) => {
         n(p.email),
         n(p.phone),
         n(p.address),
+        // undefined -> leave alone; "" -> clear; a code -> set.
+        p.scheme_code === undefined ? null : String(p.scheme_code || ""),
+        // The card number is a government identifier, encrypted at rest exactly
+        // as Aadhaar is.
+        p.scheme_ref === undefined
+          ? null
+          : p.scheme_ref
+            ? encryptAadhaar(String(p.scheme_ref).trim())
+            : "",
       ],
     );
     if (!result.rows[0]) return res.status(404).json({ error: "Patient not found" });
     const row = result.rows[0];
     if (row.aadhaar) row.aadhaar = decryptAadhaar(row.aadhaar);
+    if (row.scheme_ref) row.scheme_ref = decryptAadhaarFull(row.scheme_ref);
     res.json(row);
   } catch (e) {
     handleError(res, e, "Patient update");

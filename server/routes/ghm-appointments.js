@@ -2,6 +2,7 @@ import { Router } from "express";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
 import { resolveDoctorIdByName, checkBookingAvailability } from "../services/bookingGuard.js";
+import { checkSchemeCap, schemeDayCount, logCapOverride } from "../services/schemeCap.js";
 import {
   checkPatientBlocked,
   blockedResponse,
@@ -16,7 +17,8 @@ import {
   upcomingBookingElsewhere,
 } from "../services/ghmDayWindow.js";
 import { UNREACHABLE_STATUSES, pgArray } from "../../shared/callStatuses.js";
-import { CATEGORY_VALUES, isValidCategory } from "../../shared/patientCategories.js";
+import { CATEGORY_VALUES } from "../../shared/patientCategories.js";
+import { listSchemes, isKnownScheme } from "../services/patientSchemes.js";
 import { slotStartHour } from "../../shared/slotHour.js";
 import { resolveAppointmentId, opensLead } from "../services/ghmLead.js";
 
@@ -758,18 +760,26 @@ router.get("/ghm-appointments/category-counts", async (req, res) => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || "")))
       return res.status(400).json({ error: "date=YYYY-MM-DD required" });
 
+    // Read the scheme list from the table, not the shared seed: this module
+    // runs on the server, where nothing hydrates that cache, so a scheme added
+    // this morning would be counted as zero forever.
+    const schemes = await listSchemes();
+    const codes = schemes.map((s) => s.code);
+
     const r = await pool.query(
       `SELECT patient_category AS category, COUNT(*)::int AS count
          FROM appointments
         WHERE appointment_date = $1
           AND patient_category = ANY($2::text[])
         GROUP BY 1`,
-      [date, CATEGORY_VALUES],
+      [date, codes],
     );
 
     const out = {};
-    for (const v of CATEGORY_VALUES) out[v] = { count: 0 };
-    for (const row of r.rows) out[row.category].count = row.count;
+    // The cap travels with the count so the sheet can render "ECHS 8/10" from
+    // one response instead of joining two.
+    for (const s of schemes) out[s.code] = { count: 0, cap: s.daily_cap ?? null };
+    for (const row of r.rows) if (out[row.category]) out[row.category].count = row.count;
     res.json({ date, categories: out });
   } catch (e) {
     handleError(res, e, "GHM category counts");
@@ -808,16 +818,37 @@ const SUMMARY_BUCKETS = {
     `(COALESCE(${a}.appointment_date = ${d}, FALSE) OR COALESCE(${a}.booking_status, '') = 'booked')`,
   not_booked: (a, cs, d) =>
     `(NOT COALESCE(${a}.appointment_date = ${d}, FALSE) AND COALESCE(${a}.booking_status, '') <> 'booked')`,
+  // One summary column per scheme. Built at import time from the seed, which is
+  // why it is still the seed and not the table: `summaryCols` emits a fixed
+  // column list into SQL and cannot await. The seed and the table hold the same
+  // codes today; a scheme added later is filterable (see `summaryBucket`) but
+  // does not get its own count column until the sheet is reworked to ask for
+  // the list first. Noted in 33-PATIENT-SCHEME-PLAN.md.
   ...Object.fromEntries(
     CATEGORY_VALUES.map((v) => [`cat_${v}`, (a) => `${a}.patient_category = '${v}'`]),
   ),
 };
 
-// "Total" is the cleared state, not a bucket, so it filters nothing.
-const summaryBucket = (v) => (Object.hasOwn(SUMMARY_BUCKETS, String(v)) ? String(v) : null);
+// A scheme code is [a-z0-9_], so a `cat_` bucket for one the seed does not know
+// is still safe to inline — and filtering by a newly added scheme has to work
+// the day it is added, not the next deploy.
+const CAT_BUCKET_RE = /^cat_([a-z0-9_]{2,32})$/;
 
-const bucketWhere = (name, a, callStat = null, dateParam = "$1") =>
-  SUMMARY_BUCKETS[name](a, callStat || `${a}.call_status`, dateParam);
+// "Total" is the cleared state, not a bucket, so it filters nothing.
+const summaryBucket = (v) => {
+  const name = String(v ?? "");
+  if (Object.hasOwn(SUMMARY_BUCKETS, name)) return name;
+  return CAT_BUCKET_RE.test(name) ? name : null;
+};
+
+const bucketWhere = (name, a, callStat = null, dateParam = "$1") => {
+  if (Object.hasOwn(SUMMARY_BUCKETS, name)) {
+    return SUMMARY_BUCKETS[name](a, callStat || `${a}.call_status`, dateParam);
+  }
+  const m = CAT_BUCKET_RE.exec(name);
+  if (m) return `${a}.patient_category = '${m[1]}'`;
+  throw Object.assign(new Error(`Unknown bucket: ${name}`), { status: 400 });
+};
 
 const summaryCols = (a, callStat = null, dateParam = "$1") => {
   const cs = callStat || `${a}.call_status`;
@@ -1386,6 +1417,47 @@ router.post("/ghm-appointments", async (req, res) => {
       });
     }
 
+    // Scheme daily cap (no-op unless SCHEME_CAP_ENFORCEMENT=warn|strict). Its
+    // own switch, because SCHEDULE_ENFORCEMENT is off in production and a cap
+    // that inherited a disabled guard would never fire.
+    //
+    // The scheme is the explicit one if the booking form set it, otherwise the
+    // patient's — the same snapshot rule the INSERT below applies, evaluated
+    // here so the count and the row agree.
+    const bookingScheme =
+      req.body.patient_category ??
+      (patient_id
+        ? (await pool.query(`SELECT scheme_code FROM patients WHERE id = $1`, [patient_id])).rows[0]
+            ?.scheme_code
+        : null);
+    const capState = await checkSchemeCap({
+      schemeCode: bookingScheme,
+      date: appointment_date,
+      force: req.body.force,
+      role: req.doctor?.role,
+    });
+    if (capState?.blocked) {
+      return res.status(409).json({
+        error: "scheme_cap_full",
+        reason: capState.reason,
+        detail: capState.detail,
+        // Never a dead end: the desk is told which days still have room (D4).
+        alternatives: capState.alternatives,
+        booked: capState.booked,
+        cap: capState.cap,
+      });
+    }
+    if (capState?.overridden) {
+      await logCapOverride({
+        schemeCode: bookingScheme,
+        date: appointment_date,
+        booked: capState.booked,
+        cap: capState.cap,
+        actorId: req.doctor?.doctor_id ?? null,
+        actorName: req.doctor?.short_name || req.doctor?.doctor_name || null,
+      });
+    }
+
     const existing = resolved_file_no
       ? await pool.query(
           `SELECT id, doctor_name, time_slot, booked_by_name, source
@@ -1497,12 +1569,17 @@ router.post("/ghm-appointments", async (req, res) => {
         misc_notes, reports_uploaded, will_get_test_at_gini,
         requested_by_cc, cc_remark_date, notes, is_walkin,
         whatsapp_message, additional_whatsapp_msg, home_collection, alt_phone,
-        age, sex, status, booking_status
+        age, sex, status, booking_status,
+        -- Snapshot of the patient's scheme at creation (§2). The sheet can still
+        -- override it per visit — a CGHS patient who comes private today — but
+        -- the default means a tagged patient never arrives untagged.
+        patient_category
       ) VALUES (
         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
         $15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,
         $31,$32,'scheduled',
-        CASE WHEN $6::date IS NULL THEN NULL ELSE 'booked' END
+        CASE WHEN $6::date IS NULL THEN NULL ELSE 'booked' END,
+        (SELECT scheme_code FROM patients WHERE id = $1)
       ) RETURNING *`,
           [
             patient_id,
@@ -1567,6 +1644,7 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
   try {
     const id = await resolveAppointmentId(req.params.id, { create: opensLead(req.body) });
     if (!id) return res.status(404).json({ error: NO_APPOINTMENT_ERROR });
+    const sentKeys = new Set(Object.keys(req.body));
     const allowed = [
       "time_slot",
       "reporting_time_slot",
@@ -1614,8 +1692,14 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
       "additional_whatsapp_msg",
     ];
 
-    if ("patient_category" in req.body && !isValidCategory(req.body.patient_category || null))
+    // Validated against the table, not the shared seed — same reason as the
+    // counts above: a scheme created a minute ago must be accepted now.
+    if (
+      "patient_category" in req.body &&
+      !(await isKnownScheme(req.body.patient_category || null))
+    ) {
       return res.status(400).json({ error: `Unknown category: ${req.body.patient_category}` });
+    }
 
     // Patient details the desk corrects after the booking. They live on the
     // appointment and on the patient master, so both are written together —
@@ -1701,27 +1785,76 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
     const patientOnly = "dob" in req.body || "address" in req.body;
     if (!sets.length && !patientOnly) return res.status(400).json({ error: "Nothing to update" });
 
-    // If a doctor field is being changed, record the old value first (for audit log)
+    // Every editable column is audited, so any cell the desk changes leaves a
+    // trace. Derived fields the handler fills in itself (the regenerated
+    // WhatsApp message and reporting slot) are excluded via sentKeys — only
+    // what the caller actually sent is a real edit.
     const TRACK = {
-      doctor_name: "Assigned Doctor",
-      preferred_doctor: "Preferred Doctor",
-      preferred_date: "Preferred Date",
-      preferred_time_slot: "Preferred Time",
-      call_made_by: "Called By",
-      booking_status: "Booking Status",
-      home_collection: "Home Collection",
-      call_status: "Call Status",
-      appointment_type: "Mode",
       time_slot: "Time Slot",
+      reporting_time_slot: "Reporting Time",
+      doctor_name: "Assigned Doctor",
+      appointment_date: "Appointment Date",
+      visit_type: "Visit Type",
+      appointment_type: "Mode",
+      booking_source: "Booking Source",
+      booked_by_name: "Booked By",
+      booking_date: "Booking Date",
+      insurance_taken: "Insurance Taken",
+      how_did_you_know: "How Did You Know",
+      referred_by_doctor_name: "Referred By Doctor",
+      earlier_slot_given: "Earlier Slot Given",
+      condition: "Condition",
+      chief_complaint: "Chief Complaint",
+      misc_notes: "Misc Notes",
+      reports_uploaded: "Reports Uploaded",
+      will_get_test_at_gini: "Test At Gini",
+      requested_by_cc: "Requested By CC",
+      cc_remark_date: "CC Remark Date",
+      show_no_show: "Show / No Show",
+      status: "Status",
+      notes: "Notes",
+      call_status: "Call Status",
+      call_made_by: "Called By",
+      call_date: "Call Date",
+      call_notes: "Call Notes",
+      call_reschedule_date: "Call Reschedule Date",
+      pt_recovery: "Patient Recovery",
+      preferred_date: "Preferred Date",
+      preferred_doctor: "Preferred Doctor",
+      preferred_time_slot: "Preferred Time",
+      home_collection: "Home Collection",
+      assigned_mo: "Assigned MO",
+      prescription_explained_by: "Prescription Explained By",
+      patient_category: "Category",
+      alt_phone: "Alt Numbers",
+      booking_status: "Booking Status",
+      patient_name: "Patient Name",
+      phone: "Phone",
+      age: "Age",
+      sex: "Gender",
+      whatsapp_message: "WhatsApp Message",
+      additional_whatsapp_msg: "Additional WhatsApp Message",
+      dob: "Date of Birth",
+      address: "Address",
     };
-    const trackingNow = Object.keys(TRACK).filter((k) => k in req.body);
+    const PATIENT_TRACKED = ["dob", "address"];
+    const trackingNow = allowed.filter((k) => sentKeys.has(k) && TRACK[k]);
+    const trackingPatient = PATIENT_TRACKED.filter((k) => sentKeys.has(k));
     let before = {};
-    if (trackingNow.length) {
+    if (trackingNow.length || trackingPatient.length) {
       const prev = await pool.query(
-        `SELECT ${trackingNow.join(",")} FROM appointments WHERE id=$1`,
+        `SELECT patient_id${trackingNow.length ? `, ${trackingNow.join(",")}` : ""}
+           FROM appointments WHERE id=$1`,
         [id],
       );
       before = prev.rows[0] || {};
+      if (trackingPatient.length && before.patient_id) {
+        const prevPt = await pool.query(
+          `SELECT ${trackingPatient.join(",")} FROM patients WHERE id=$1`,
+          [before.patient_id],
+        );
+        before = { ...before, ...(prevPt.rows[0] || {}) };
+      }
     }
 
     vals.push(id);
@@ -1764,10 +1897,13 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
     const logValue = (v) => {
       if (v === null || v === undefined) return "";
       if (typeof v === "boolean") return v ? "Yes" : "No";
-      return String(v);
+      if (Array.isArray(v)) return v.join(", ");
+      if (v instanceof Date) return v.toISOString();
+      const s = typeof v === "object" ? JSON.stringify(v) : String(v);
+      return s.length > 2000 ? `${s.slice(0, 2000)}…` : s;
     };
     const actor = claimant(req);
-    for (const k of trackingNow) {
+    for (const k of [...trackingNow, ...trackingPatient]) {
       const oldV = logValue(before[k]);
       const newV = logValue(req.body[k] === "" ? null : req.body[k]);
       if (oldV !== newV) {

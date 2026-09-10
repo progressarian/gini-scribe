@@ -26,6 +26,9 @@ export async function getStationSummary(visitDate, db = pool) {
          AS payment_pending,
        count(*) FILTER (WHERE o.payment_status IN ('paid','claim_approved')
                           AND o.sample_status IN ('ordered','payment_pending','paid'))::int AS to_collect,
+       count(*) FILTER (WHERE o.sample_status = 'sample_collected')::int AS to_send,
+       count(*) FILTER (WHERE o.sample_status = 'sample_sent')::int AS to_receive,
+       count(*) FILTER (WHERE o.sample_status IN ('sample_received','processing'))::int AS in_lab,
        count(*) FILTER (WHERE o.sample_status = 'results_ready')::int AS to_upload
      FROM giniflow_lab_orders o
      JOIN giniflow_visits v ON v.id = o.visit_id
@@ -132,6 +135,29 @@ export async function getStationSummary(visitDate, db = pool) {
             ? `${floor.lab_today} at hospital lab · ${floor.lab_awaiting} still out`
             : "no samples today",
       tone: orders.to_collect + orders.to_upload ? "blue" : "teal",
+    },
+    // The two rooms, each counting only its own work
+    // (35-LAB-TWO-ROOM-SPLIT-PLAN.md §3.5). The umbrella `lab` tile above stays
+    // for whoever holds the whole day.
+    lab_collect: {
+      count: orders.to_collect + orders.to_send || floor.lab_today,
+      label:
+        orders.to_collect + orders.to_send
+          ? `${orders.to_collect} to collect · ${orders.to_send} to send`
+          : floor.lab_today
+            ? `${floor.lab_today} at hospital lab`
+            : "no samples today",
+      tone: orders.to_collect ? "blue" : "teal",
+    },
+    lab_process: {
+      count: orders.to_receive + orders.in_lab + orders.to_upload || floor.lab_awaiting,
+      label:
+        orders.to_receive + orders.in_lab + orders.to_upload
+          ? `${orders.to_receive} to receive · ${orders.to_upload} to upload`
+          : floor.lab_awaiting
+            ? `${floor.lab_awaiting} still out`
+            : "bench clear",
+      tone: orders.to_upload ? "red" : orders.to_receive ? "blue" : "teal",
     },
     mo_sd: { count: col("sd"), label: `${col("sd")} in workup`, tone: "blue" },
     doctor: { count: col("wait_doctor"), label: `${col("wait_doctor")} waiting`, tone: "red" },

@@ -3,6 +3,7 @@ import { createRequire } from "module";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
 import { validate } from "../middleware/validate.js";
+import { checkSchemeCap, logCapOverride } from "../services/schemeCap.js";
 import { appointmentCreateSchema, appointmentUpdateSchema } from "../schemas/index.js";
 import {
   resolveDoctorIdByName,
@@ -216,6 +217,39 @@ router.post("/appointments", validate(appointmentCreateSchema), async (req, res)
       });
     }
 
+    // Scheme daily cap. The scheme comes from the patient, because this path has
+    // no category field of its own — the INSERT below snapshots the same value.
+    const capScheme = patient_id
+      ? (await pool.query(`SELECT scheme_code FROM patients WHERE id = $1`, [patient_id])).rows[0]
+          ?.scheme_code
+      : null;
+    const capState = await checkSchemeCap({
+      schemeCode: capScheme,
+      date: apptDate,
+      force: req.body.force,
+      role: req.doctor?.role,
+    });
+    if (capState?.blocked) {
+      return res.status(409).json({
+        error: "scheme_cap_full",
+        reason: capState.reason,
+        detail: capState.detail,
+        alternatives: capState.alternatives,
+        booked: capState.booked,
+        cap: capState.cap,
+      });
+    }
+    if (capState?.overridden) {
+      await logCapOverride({
+        schemeCode: capScheme,
+        date: apptDate,
+        booked: capState.booked,
+        cap: capState.cap,
+        actorId: req.doctor?.doctor_id ?? null,
+        actorName: req.doctor?.short_name || req.doctor?.doctor_name || null,
+      });
+    }
+
     // Walk-in inserts always start scheduled — must match the index predicate
     // so the ON CONFLICT arbiter is found.
     const apptStatus = "scheduled";
@@ -226,8 +260,13 @@ router.post("/appointments", validate(appointmentCreateSchema), async (req, res)
     // a new row — that lets a cancelled stub + real visit coexist, and a
     // patient seeing two doctors back-to-back is allowed.
     let { rows } = await pool.query(
-      `INSERT INTO appointments (patient_id, patient_name, file_no, phone, doctor_name, appointment_date, time_slot, visit_type, notes, category, is_walkin, status, doctor_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+      `INSERT INTO appointments (patient_id, patient_name, file_no, phone, doctor_name, appointment_date, time_slot, visit_type, notes, category, is_walkin, status, doctor_id,
+        -- Snapshot of the patient's scheme at creation, never a live join: a
+        -- card that lapses later must not rewrite this booking's billing or the
+        -- day's cap count (33-PATIENT-SCHEME-PLAN.md §2).
+        patient_category)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,
+               (SELECT scheme_code FROM patients WHERE id = $1))
        ON CONFLICT (file_no, appointment_date, time_slot, doctor_name, status)
          WHERE file_no IS NOT NULL AND appointment_date IS NOT NULL
            AND time_slot IS NOT NULL AND doctor_name IS NOT NULL

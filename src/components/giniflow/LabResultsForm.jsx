@@ -227,10 +227,13 @@ export default function LabResultsForm({ orderId, caseNo, onSaved, onFailed }) {
           disabled={save.isPending || filled.length === 0}
           onClick={submit}
         >
-          ✓ Save {filled.length || "no"} result{filled.length === 1 ? "" : "s"} — notify the MO
+          {filled.length
+            ? `✓ Save ${filled.length} result${filled.length === 1 ? "" : "s"} — notify the MO`
+            : "Type a value to save — or upload the report below"}
         </button>
         <span className="dp-hint">
-          Empty rows are ignored. A report can still be attached below.
+          Empty rows are ignored. Typing values and attaching the report are two ways to finish the
+          same sample, and either one notifies the MO — a case can carry both.
         </span>
       </div>
     </div>

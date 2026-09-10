@@ -28,10 +28,13 @@ export function useMoPatient(visitId) {
   });
 }
 
-export function useTestPanels() {
+// Keyed on the visit: two patients on different schemes see different prices,
+// and a shared cache entry would show one of them the other's tariff.
+export function useTestPanels(visitId = null) {
   return useQuery({
-    queryKey: ["giniflow", "mo", "test-panels"],
-    queryFn: async () => (await api.get(`${base}/test-panels`)).data,
+    queryKey: ["giniflow", "mo", "test-panels", visitId || "base"],
+    queryFn: async () =>
+      (await api.get(`${base}/test-panels`, { params: visitId ? { visitId } : {} })).data,
     staleTime: 10 * 60_000,
   });
 }

@@ -11,6 +11,7 @@ import useMessagingStore from "../stores/messagingStore";
 import PageErrorBoundary from "./PageErrorBoundary";
 import { PAGE_CAPABILITIES, navAllowlistForRole } from "../config/routes";
 import { hasAnyCapability, canViewAnalytics, ROLES } from "../../shared/permissions";
+import { hydrateCategories } from "../../shared/patientCategories.js";
 
 import "../styles/App.css";
 
@@ -228,6 +229,22 @@ export default function AppLayout() {
     enabled: hasAnyCapability(currentDoctor?.role, C["/lab-requests"]),
   });
   const labRequestCount = labRequestCountQuery.data || 0;
+
+  // The scheme vocabulary moved from a hardcoded array into `patient_schemes`,
+  // so every screen that renders a scheme pill needs the live list before it
+  // draws (33-PATIENT-SCHEME-PLAN.md §1). Fetched once here rather than in each
+  // page: the helpers in shared/patientCategories.js are synchronous by design
+  // and read a module-level cache, and until this lands they answer from the
+  // seed — the five schemes that have existed for months — rather than blank.
+  const schemesQuery = useQuery({
+    queryKey: ["patient-schemes"],
+    queryFn: async () => (await api.get("/api/patient-schemes")).data,
+    staleTime: 5 * 60_000,
+    enabled: !!currentDoctor,
+  });
+  useEffect(() => {
+    if (Array.isArray(schemesQuery.data)) hydrateCategories(schemesQuery.data);
+  }, [schemesQuery.data]);
 
   // Unread reception-chat count for the nav badge — sum of team_unread_count
   // across the shared reception conversations.

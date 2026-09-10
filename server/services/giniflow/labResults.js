@@ -113,6 +113,13 @@ const caseContext = async (caseNo, db) => {
 // autocomplete away, and every prefilled row can be deleted.
 const PREFILL_PER_TEST = 12;
 
+// One parameter, however it was typed. Case, punctuation and spacing are the
+// only differences between the variants in `lab_results.canonical_name`.
+const flattenName = (name) =>
+  String(name || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+
 export async function suggestedRows(orderId, db = pool) {
   const order = await orderContext(orderId, db);
   return suggestionsForTests(order.tests || [], db);
@@ -155,8 +162,26 @@ async function suggestionsForTests(tests, db = pool) {
     if (!group || group.length >= PREFILL_PER_TEST) continue;
     // A parameter belongs to the first ordered test that claims it — creatinine
     // asked for by both a KFT and an LFT is one row on the form, not two.
-    if (claimed.has(r.canonical_name)) continue;
-    claimed.add(r.canonical_name);
+    //
+    // Matched on a flattened name, because `canonical_name` is not canonical:
+    // the column holds "DHEA Sulphate" (143 rows), "DHEA sulphate" (2) and
+    // "DHEA SULPHATE" (1) as three different values, and "Potassium, Serum"
+    // under both "potassium,_serum" (806) and "Potassium Serum" (6). Comparing
+    // them literally put the same parameter on the form three times over,
+    // burning the per-test prefill budget on spellings of one test. Ordering is
+    // already `seen DESC`, so the variant that survives is the one the lab
+    // actually uses.
+    // The label too, not just the canonical name. "Potassium, Serum" is stored
+    // under both `potassium,_serum` (806 rows) and `Potassium` (4138) — two
+    // genuinely different canonical names whose most recent rows carry the same
+    // test_name, so the form printed one analyte twice with identical unit and
+    // range. Two rows a technician cannot tell apart are a duplicate whatever
+    // the column underneath them says.
+    const parameter = flattenName(r.canonical_name);
+    const label = flattenName(r.test_name);
+    if (claimed.has(parameter) || claimed.has(label)) continue;
+    claimed.add(parameter);
+    claimed.add(label);
     group.push({
       testName: r.test_name,
       canonicalName: r.canonical_name,
@@ -166,7 +191,33 @@ async function suggestionsForTests(tests, db = pool) {
       seen: Number(r.seen),
     });
   }
-  return [...byTest.entries()].map(([test, params]) => ({ test, params }));
+  // A test nobody has ever reported has no history to prefill from, and the
+  // LATERAL join is an inner one — so it used to vanish from the form entirely
+  // and the technician had to know to re-add it by hand. That is exactly the
+  // rare endocrine work this hospital sends out (ALDOSTERONE PRA, METANEPHRINES
+  // FREE PLASMA, CREATININE EGFR), so the ordered test carries its own blank
+  // row: no unit, no range, nothing claimed about it beyond the name it was
+  // ordered under. Skipped when another test on the same case already covers
+  // that name, so the fallback cannot itself become a duplicate.
+  return [...byTest.entries()].map(([test, params]) => {
+    if (params.length) return { test, params };
+    const label = flattenName(test);
+    if (claimed.has(label)) return { test, params };
+    claimed.add(label);
+    return {
+      test,
+      params: [
+        {
+          testName: test,
+          canonicalName: null,
+          unit: null,
+          refRange: null,
+          panelName: test,
+          seen: 0,
+        },
+      ],
+    };
+  });
 }
 
 // Autocomplete for a row the technician adds by hand, over the same history —

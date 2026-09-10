@@ -20,6 +20,7 @@ import JourneyBuilder from "../../components/giniflow/JourneyBuilder";
 import { useFlowVisitTypes } from "../../queries/hooks/useFlow";
 import { stepPassesConditions } from "../../../shared/giniflowConditions.js";
 import { hasNotStarted } from "../../../shared/giniflowStatus.js";
+import { categoryColor, categoryLabel } from "../../../shared/patientCategories.js";
 import {
   useJourneyPlan,
   useCheckIn,
@@ -998,6 +999,22 @@ export function ArrivalsTab({
               note={a.blockedReason && `🚫 ${a.blockedReason}`}
             >
               <span className="ar-where">{a.statusLabel}</span>
+              {/* Check-in is the last moment before an OPD fee is keyed into
+                  HealthRay, and the only point a walk-in passes at all — so the
+                  scheme is shown here whether or not anyone set it upstream. */}
+              {a.schemeCode && (
+                <span
+                  className={`badge b-${categoryColor(a.schemeCode)}`}
+                  title={
+                    a.schemeOpdFee !== null
+                      ? `${categoryLabel(a.schemeCode)} — OPD ₹${a.schemeOpdFee}. Key this into HealthRay; Gini cannot set it.`
+                      : `${categoryLabel(a.schemeCode)} — no OPD rate entered for this scheme yet`
+                  }
+                >
+                  {categoryLabel(a.schemeCode)}
+                  {a.schemeOpdFee !== null ? ` · ₹${a.schemeOpdFee}` : ""}
+                </span>
+              )}
               {/* Where they are in their OWN journey, which the columns cannot
                   show: a patient with an ECG and an X-Ray still to do reads the
                   same as one who is nearly finished. */}

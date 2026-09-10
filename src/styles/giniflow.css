@@ -897,10 +897,15 @@
   outline: 2px solid var(--tl);
   outline-offset: -2px;
 }
-.gf .pc-menu-btn {
+.gf .pc-acts {
   position: absolute;
-  top: 4px;
+  top: 3px;
   right: 3px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.gf .pc-menu-btn {
   width: 18px;
   height: 18px;
   line-height: 1;
@@ -924,8 +929,67 @@
   background: var(--bg2, #eef1f5);
   color: var(--ink);
 }
+
+/* The hold control. Faint but PRESENT at rest — the ⋮ taught us that a control
+   at opacity 0 is a control that does not exist for anyone who was not told.
+   Icon only until the card is hovered, so a column of cards reads as patients
+   rather than as a column of buttons; the word arrives with the pointer. */
+.gf .pc-hold {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 18px;
+  padding: 0 4px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--ink4);
+  cursor: pointer;
+  opacity: 0.45;
+  transition:
+    opacity 0.12s,
+    background 0.12s,
+    border-color 0.12s;
+}
+.gf .pc-hold-t {
+  display: none;
+}
+.gf .pc:hover .pc-hold,
+.gf .pc-hold:focus-visible {
+  opacity: 1;
+  border-color: var(--bd);
+}
+.gf .pc:hover .pc-hold-t,
+.gf .pc-hold:focus-visible .pc-hold-t {
+  display: inline;
+}
+.gf .pc-hold:hover {
+  background: var(--bg2, #eef1f5);
+  color: var(--ink);
+  border-color: var(--ink4);
+}
+/* Held: never faint, never icon-only. The one card on the board whose clock is
+   stopped is the one card whose button has to say what it does. */
+.gf .pc-hold.on,
+.gf .pc:hover .pc-hold.on {
+  opacity: 1;
+  color: var(--grn, #15803d);
+  background: var(--grn-l, rgba(21, 128, 61, 0.1));
+  border-color: currentColor;
+}
+.gf .pc-hold.on .pc-hold-t {
+  display: inline;
+}
+.gf .pc-hold.on:hover {
+  background: var(--grn, #15803d);
+  color: var(--white, #fff);
+}
 .gf .pc-open .pc-top {
-  padding-right: 16px;
+  padding-right: 46px;
 }
 
 /* Priority: a chip on the card and a matching left edge, so an urgent patient

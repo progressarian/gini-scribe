@@ -1,5 +1,6 @@
 import pool from "../../config/db.js";
 import { toLocal10 } from "../../../shared/phone.js";
+import { LAB_RUNGS } from "../../../shared/labStages.js";
 import {
   BOARD_COLUMNS,
   OFF_BOARD_STATUSES,
@@ -273,10 +274,21 @@ const hintIconFor = (row) =>
   row.current_status === "ready_for_doctor" && row.category === "in_control" ? "💡" : "→";
 
 // What the lab card is waiting on, distinct from the main journey's hints (GF-19).
+// Everything from the moment the tube leaves the patient to the moment the
+// report is filed. Derived, so the two rungs the room split added cannot be
+// missed here — a sample sent to the lab and not yet received had neither
+// `collected` nor `atLab`, which is the card claiming the patient left without
+// giving a sample.
+const DRAWN_STATUSES = LAB_RUNGS.filter((r) => r.key !== "pending" && r.key !== "reported").flatMap(
+  (r) => r.sampleStatuses,
+);
+
 const LAB_HINT = {
   payment_pending: "Waiting: reception payment",
   results_ready: "Upload pending",
   processing: null,
+  sample_received: null,
+  sample_sent: "Waiting: lab to receive the sample",
   sample_collected: null,
   paid: "Waiting: sample collection",
   ordered: "Waiting: payment request",
@@ -298,6 +310,8 @@ const LAB_SUBTITLE = {
   payment_pending: "💰 Payment pending at reception",
   paid: "Paid · awaiting collection",
   sample_collected: "Sample collected",
+  sample_sent: "📤 Sent to the lab",
+  sample_received: "📥 Received at the lab",
   processing: "⚙️ Processing in analyzer",
   results_ready: "📤 Results ready — awaiting upload",
 };
@@ -409,12 +423,8 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
             hintIcon: row.lab_sample_status === "payment_pending" ? "💰" : "📤",
             blocking: row.lab_sample_status === "payment_pending",
             source: "giniflow",
-            collected: ["sample_collected", "processing", "results_ready"].includes(
-              row.lab_sample_status,
-            ),
-            atLab: ["sample_collected", "processing", "results_ready"].includes(
-              row.lab_sample_status,
-            ),
+            collected: DRAWN_STATUSES.includes(row.lab_sample_status),
+            atLab: DRAWN_STATUSES.includes(row.lab_sample_status),
           }
         : row.hr_lab_cases
           ? {

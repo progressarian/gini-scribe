@@ -8,6 +8,12 @@ import {
 } from "../../../shared/giniflowStatus.js";
 import { advanceStatus } from "./statusEngine.js";
 import { genVisitToken } from "../flow/journey.js";
+import { LAB_RUNGS, stageIndexOf } from "../../../shared/labStages.js";
+
+const DRAWN_STATUS_SQL = LAB_RUNGS.filter((r) => stageIndexOf(r.key) >= stageIndexOf("collected"))
+  .flatMap((r) => r.sampleStatuses)
+  .map((v) => `'${v}'`)
+  .join(", ");
 
 // The journey reception builds when a patient arrives — what this patient is
 // here for, in the order they will do it.
@@ -573,7 +579,7 @@ export async function syncLabStepsFromLab(db, visitId) {
            AND o.payment_status NOT IN ('paid', 'claim_approved')) AS unsettled,
        (SELECT count(*)::int FROM giniflow_lab_orders o
          WHERE o.visit_id = v.id AND o.urgency = 'today'
-           AND o.sample_status IN ('sample_collected', 'processing', 'results_ready', 'uploaded'))
+           AND o.sample_status IN (${DRAWN_STATUS_SQL}))
          AS drawn,
        ${HR_LAB_EVIDENCE_SQL}
        FROM giniflow_visits v JOIN patients p ON p.id = v.patient_id

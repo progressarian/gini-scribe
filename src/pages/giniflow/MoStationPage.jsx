@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Line, LineChart, ResponsiveContainer, Tooltip, YAxis } from "recharts";
 import { CHAIN } from "../../../shared/giniflowStatus";
+import { rungFor } from "../../../shared/labStages.js";
 import {
   useMoQueue,
   useMoPatient,
@@ -167,7 +168,7 @@ function GroupHead({ icon, title, sub, count, open, onToggle, id }) {
 
 // Lab-track statuses that mean the sample has not been taken yet — the server
 // refuses a repeat of any test still sitting in one of them.
-const UNCOLLECTED = new Set(["ordered", "payment_pending", "paid"]);
+const UNCOLLECTED = new Set(rungFor("pending").sampleStatuses);
 
 const URGENCY = [
   { key: "today", label: "Today → lab now" },
@@ -282,7 +283,9 @@ const LAB_STAGE = {
   ordered: "ordered — not paid yet",
   payment_pending: "waiting on payment",
   paid: "paid — sample not drawn yet",
-  sample_collected: "sample taken, on its way",
+  sample_collected: "sample taken, not sent yet",
+  sample_sent: "sent to the lab",
+  sample_received: "received at the lab",
   processing: "on the analyser",
   results_ready: "reporting",
 };
@@ -469,7 +472,7 @@ export default function MoStationPage() {
   const autoId = queue?.withMe?.[0]?.visitId ?? queue?.waitingForMe?.[0]?.visitId ?? null;
   const activeId = selected ?? (pinned ? null : autoId);
   const { data: patient } = useMoPatient(activeId);
-  const { data: catalogue } = useTestPanels();
+  const { data: catalogue } = useTestPanels(activeId);
 
   // `paused` is the same guard the textarea already uses: a live refetch must
   // never pull the queue out from under an MO who is typing a plan.

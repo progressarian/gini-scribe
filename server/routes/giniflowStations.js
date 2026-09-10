@@ -91,6 +91,7 @@ import {
   advanceSample,
   markLabCaseAction,
   uploadLabCaseReport,
+  deleteLabCaseReport,
   uploadReport,
   fetchStoredReport,
 } from "../services/giniflow/labStation.js";
@@ -386,7 +387,10 @@ router.get(
 // capability rather than borrowing the MO's.
 router.get("/giniflow/stations/doctor/test-panels", doctorGate, async (req, res) => {
   try {
-    res.json(await getTestPanels());
+    // visitId is optional — without it the picker prices at the base catalogue,
+    // which is right for a patient on no scheme and for any caller that has no
+    // visit in hand.
+    res.json(await getTestPanels(undefined, req.query.visitId || null));
   } catch (e) {
     doctorError(res, e, "Gini Flow doctor test panels");
   }
@@ -817,6 +821,8 @@ const STATION_CAPS = {
   vitals: CAP.GINIFLOW_STATION_VITALS,
   reception: CAP.GINIFLOW_STATION_RECEPTION,
   lab: CAP.GINIFLOW_STATION_LAB,
+  lab_collect: CAP.GINIFLOW_STATION_LAB_COLLECT,
+  lab_process: CAP.GINIFLOW_STATION_LAB_PROCESS,
   mo_sd: CAP.GINIFLOW_STATION_MO,
   doctor: CAP.GINIFLOW_STATION_DOCTOR,
   rx: CAP.GINIFLOW_STATION_RX,
@@ -1177,6 +1183,59 @@ router.post(
 // ── Lab ─────────────────────────────────────────────────────────────────────
 const labGate = requireCapability(CAP.GINIFLOW_STATION_LAB);
 
+// Which lab room this request is working in (35-LAB-TWO-ROOM-SPLIT-PLAN.md §3.5).
+//
+// Derived from the ROLE, never taken on trust from the request. Reading it off
+// the body would make the room split advisory: a collection technician could
+// omit `room`, fall through to the combined view and mark a tube "processing"
+// from the wrong bench — which is the floor losing track of where a sample
+// physically is, the exact thing the split exists to prevent.
+//
+// Somebody who holds both rooms (admin, coordinator) may name one to narrow the
+// screen, or name none and work the whole day as before.
+const attachLabRoom = (asked) => (req, res, next) => {
+  const role = req.doctor?.role;
+  const can = {
+    collection: hasCapability(role, CAP.GINIFLOW_STATION_LAB_COLLECT),
+    processing: hasCapability(role, CAP.GINIFLOW_STATION_LAB_PROCESS),
+  };
+  const wanted = asked(req) ?? null;
+  if (wanted && !can[wanted]) {
+    return res.status(403).json({ error: `Insufficient permissions for the ${wanted} lab room` });
+  }
+  req.labRoom =
+    can.collection && can.processing
+      ? wanted
+      : can.collection
+        ? "collection"
+        : can.processing
+          ? "processing"
+          : wanted;
+  next();
+};
+
+// Recording a result — typed values or an attached file — is the analyzer
+// bench's work, so it takes that room's capability rather than the umbrella one.
+// The screens already hide these controls outside Lab 2, but this codebase's own
+// rule applies: hiding is not enforcing. Without this a collection technician
+// could POST results or a report straight to the API and the room split would be
+// a matter of which buttons they happened to be shown.
+const benchGate = requireCapability(CAP.GINIFLOW_STATION_LAB_PROCESS);
+
+// Attaching a file to a HealthRay-run case overrides the sync that normally
+// fetches it, so it is admin-only on top of the room rule. A gate, not a check
+// inside the handler: sitting after `validate` it answered 400 before 403, so a
+// coordinator with a malformed body learned the shape of a request they may not
+// make. Authorisation goes first, like every other route here.
+const reportOverrideGate = (req, res, next) =>
+  req.doctor?.role === "admin"
+    ? next()
+    : res.status(403).json({ error: "Only an admin may attach a report to a lab case" });
+
+const labQueryRoom = attachLabRoom((req) => req.query.room);
+
+const labBodyRoom = attachLabRoom((req) => req.body?.room);
+
 // Typing the values in, rather than scanning them (32-LAB-TYPED-RESULTS-PLAN.md).
 // The rows land in lab_results, so every screen that already shows labs shows
 // these too — reading them needs no endpoint of its own.
@@ -1207,7 +1266,7 @@ router.get("/giniflow/lab/case/:caseNo/results", labGate, async (req, res) => {
 
 router.post(
   "/giniflow/lab/case/:caseNo/results",
-  labGate,
+  benchGate,
   validate(giniflowLabResultsSchema),
   async (req, res) => {
     try {
@@ -1235,7 +1294,7 @@ router.get("/giniflow/lab/test-names", labGate, async (req, res) => {
 
 router.post(
   "/giniflow/lab/:orderId/results",
-  labGate,
+  benchGate,
   validate(giniflowLabResultsSchema),
   async (req, res) => {
     try {
@@ -1256,11 +1315,13 @@ router.get(
   "/giniflow/stations/lab/queue",
   labGate,
   validateQuery(giniflowStationQuerySchema),
+  labQueryRoom,
   async (req, res) => {
     try {
       const date = await resolveDate(req.query.date);
       const data = await getLabQueue(date, req.query.q ?? null, undefined, {
         group: req.query.group ?? "all",
+        room: req.labRoom,
       });
       res.json({ date, ...data, serverTime: new Date().toISOString() });
     } catch (e) {
@@ -1275,6 +1336,7 @@ router.post(
   "/giniflow/stations/lab/case/:caseNo/action",
   labGate,
   validate(giniflowLabCaseActionSchema),
+  labBodyRoom,
   async (req, res) => {
     try {
       res.json(
@@ -1282,6 +1344,7 @@ router.post(
           action: req.body.action,
           note: req.body.note ?? null,
           undo: req.body.undo === true,
+          room: req.labRoom,
           actorId: req.doctor?.doctor_id ?? null,
           actorRole: req.doctor?.role || "lab",
         }),
@@ -1297,12 +1360,10 @@ router.post(
 // of the automatic path, not part of the technician's routine.
 router.post(
   "/giniflow/stations/lab/case/:caseNo/report",
-  requireCapability(CAP.GINIFLOW_STATION_LAB),
+  benchGate,
+  reportOverrideGate,
   validate(giniflowReportSchema),
   async (req, res) => {
-    if (req.doctor?.role !== "admin") {
-      return res.status(403).json({ error: "Only an admin may attach a report to a lab case" });
-    }
     try {
       res.json(
         await uploadLabCaseReport(req.params.caseNo, {
@@ -1326,15 +1387,33 @@ router.post(
   },
 );
 
+// Taking a wrongly-attached report back off a case, while the case is still
+// open. Bench-gated like every other act on a result, and admin-gated like the
+// upload it undoes.
+router.delete(
+  "/giniflow/stations/lab/case/:caseNo/report",
+  benchGate,
+  reportOverrideGate,
+  async (req, res) => {
+    try {
+      res.json(await deleteLabCaseReport(req.params.caseNo));
+    } catch (e) {
+      handleError(res, e, "Gini Flow lab case report delete");
+    }
+  },
+);
+
 router.post(
   "/giniflow/stations/lab/:orderId/advance",
   labGate,
   validate(giniflowSampleSchema),
+  labBodyRoom,
   async (req, res) => {
     try {
       res.json(
         await advanceSample(req.params.orderId, {
           to: req.body.to,
+          room: req.labRoom,
           reportUrl: req.body.reportUrl ?? null,
           actorId: req.doctor?.doctor_id ?? null,
         }),
@@ -1350,7 +1429,7 @@ router.post(
 // would be a report nobody is told about.
 router.post(
   "/giniflow/stations/lab/:orderId/report",
-  labGate,
+  benchGate,
   validate(giniflowReportSchema),
   async (req, res) => {
     try {
@@ -1478,7 +1557,7 @@ router.get(
 
 router.get("/giniflow/stations/mo/test-panels", moGate, async (req, res) => {
   try {
-    res.json(await getTestPanels());
+    res.json(await getTestPanels(undefined, req.query.visitId || null));
   } catch (e) {
     handleError(res, e, "Gini Flow test panels");
   }

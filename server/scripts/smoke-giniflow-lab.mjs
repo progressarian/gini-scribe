@@ -12,6 +12,7 @@ import pool from "../config/db.js";
 import { seedDemoDay, cleanDemoDay } from "../services/giniflow/demo.js";
 import { getLabQueue, advanceSample, isCollected } from "../services/giniflow/labStation.js";
 import { clearPayment } from "../services/giniflow/receptionStation.js";
+import { LAB_RUNGS, LAB_RAIL } from "../../shared/labStages.js";
 
 let failures = 0;
 const check = (label, ok, detail = "") => {
@@ -45,14 +46,15 @@ await cleanDemoDay();
 await seedDemoDay({ date: TEST_DAY });
 
 const q = await getLabQueue(TEST_DAY);
-const all = [...q.pending, ...q.collecting, ...q.processing, ...q.ready, ...q.uploaded];
+const all = LAB_RUNGS.flatMap((r) => q[r.bucket]);
 check("the lab queue loads", all.length > 0, `${all.length} orders`);
 check(
-  "orders are grouped into the five buckets",
-  ["pending", "collecting", "processing", "ready", "uploaded"].every((k) => Array.isArray(q[k])),
+  "orders are grouped into one bucket per rung",
+  LAB_RUNGS.every((r) => Array.isArray(q[r.bucket])),
+  LAB_RUNGS.map((r) => r.bucket).join(", "),
 );
 check("a card carries its tests", all[0].tests.length > 0);
-check("a card carries its progress rail", all[0].steps.length === 4);
+check("a card carries its progress rail", all[0].steps.length === LAB_RAIL.length);
 
 // ── The payment gate ────────────────────────────────────────────────────────
 const unpaid = all.find((o) => o.paymentStatus === "pending");

@@ -197,13 +197,12 @@ const noMoveReason = (card) => {
 // column, and the same forward move a drop would make.
 function CardMenu({
   card,
+  canReorder,
   canMoveUp,
   canMoveDown,
   onPriority,
   onNudge,
   onMove,
-  onPause,
-  onResume,
   onClose,
 }) {
   const ref = useRef(null);
@@ -259,69 +258,47 @@ function CardMenu({
           </button>
         </div>
       )}
-      {/* Not a move: the patient holds their stop, their column and their queue
-          position — only the clocks stop. One control, and it shows the action
-          that applies: a running patient can be paused, a paused one resumed. */}
-      {!TERMINAL_STATUSES.includes(card.status) && (
+      {/* Position is the only part of this menu a filter can invalidate — a
+          reorder sends the column's whole order, and a filtered column does not
+          know it. Pausing one patient does not, so it stays above and stays
+          available: the coordinator watching a filtered board is exactly who
+          sees someone walk out. */}
+      {canReorder && (
         <>
-          <div className="pcm-hd">{card.paused ? "Away" : "Stepped out"}</div>
+          <div className="pcm-hd">Order in this column</div>
           <button
             type="button"
             role="menuitem"
             className="pcm-item"
-            title={
-              hasNotStarted(card.status)
-                ? card.paused
-                  ? "They are back — their wait starts again from zero, because nobody had seen them yet"
-                  : "They left before anyone saw them — stop their clock until they come back"
-                : card.paused
-                  ? "They are back — the clocks start again and the break is left out of their waiting time"
-                  : "They have stepped out — hold their clocks until they are back"
-            }
-            onClick={card.paused ? onResume : onPause}
+            disabled={!canMoveUp}
+            onClick={() => onNudge(-1)}
           >
-            {hasNotStarted(card.status)
-              ? card.paused
-                ? "▶ Restart — they are back"
-                : "⏹ Stop — they left"
-              : card.paused
-                ? "▶ Resume — they are back"
-                : "⏸ Pause — they stepped out"}
+            ↑ Move up
           </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="pcm-item"
+            disabled={!canMoveDown}
+            onClick={() => onNudge(1)}
+          >
+            ↓ Move down
+          </button>
+          <div className="pcm-hd">Send to</div>
+          {targets.length === 0 && <div className="pcm-note">{blocked || "Nowhere from here"}</div>}
+          {targets.map((key) => (
+            <button
+              key={key}
+              type="button"
+              role="menuitem"
+              className="pcm-item"
+              onClick={() => onMove(key)}
+            >
+              → {COLUMN_NAME[key]}
+            </button>
+          ))}
         </>
       )}
-      <div className="pcm-hd">Order in this column</div>
-      <button
-        type="button"
-        role="menuitem"
-        className="pcm-item"
-        disabled={!canMoveUp}
-        onClick={() => onNudge(-1)}
-      >
-        ↑ Move up
-      </button>
-      <button
-        type="button"
-        role="menuitem"
-        className="pcm-item"
-        disabled={!canMoveDown}
-        onClick={() => onNudge(1)}
-      >
-        ↓ Move down
-      </button>
-      <div className="pcm-hd">Send to</div>
-      {targets.length === 0 && <div className="pcm-note">{blocked || "Nowhere from here"}</div>}
-      {targets.map((key) => (
-        <button
-          key={key}
-          type="button"
-          role="menuitem"
-          className="pcm-item"
-          onClick={() => onMove(key)}
-        >
-          → {COLUMN_NAME[key]}
-        </button>
-      ))}
     </div>
   );
 }
@@ -367,6 +344,7 @@ function PatientCard({
   onOpen,
   flagged,
   canManage,
+  canMenu,
   dragging,
   onDragStart,
   onDragEnd,
@@ -527,18 +505,57 @@ function PatientCard({
           </div>
         )}
       </button>
-      {canManage && !isLab && (
-        <button
-          type="button"
-          className="pc-menu-btn"
-          data-gf-toggle
-          aria-haspopup="menu"
-          aria-expanded={menuOpen}
-          aria-label={`Priority and position for ${card.name}`}
-          onClick={() => setMenuOpen((v) => !v)}
-        >
-          ⋮
-        </button>
+      {/* The hold lives on the card, not in the ⋮ menu. A control nobody can see
+          is a control nobody uses: the menu button is revealed on hover, so
+          "they stepped out" was two hidden steps away from the person watching
+          them walk out. A paused card keeps its button lit and labelled, because
+          a held clock has to be obviously undoable. */}
+      {canMenu && !isLab && (
+        <div className="pc-acts">
+          {!TERMINAL_STATUSES.includes(card.status) && (
+            <button
+              type="button"
+              className={`pc-hold${card.paused ? " on" : ""}`}
+              title={
+                hasNotStarted(card.status)
+                  ? card.paused
+                    ? "They are back — their wait starts again from zero, because nobody had seen them yet"
+                    : "They left before anyone saw them — stop their clock until they come back"
+                  : card.paused
+                    ? "They are back — the clocks start again and the break is left out of their waiting time"
+                    : "They have stepped out — hold their clocks until they are back"
+              }
+              onClick={(e) => {
+                e.stopPropagation();
+                (card.paused ? onResume : onPause)();
+              }}
+            >
+              <span aria-hidden="true">
+                {card.paused ? "▶" : hasNotStarted(card.status) ? "⏹" : "⏸"}
+              </span>
+              <span className="pc-hold-t">
+                {hasNotStarted(card.status)
+                  ? card.paused
+                    ? "Restart"
+                    : "Stop"
+                  : card.paused
+                    ? "Resume"
+                    : "Pause"}
+              </span>
+            </button>
+          )}
+          <button
+            type="button"
+            className="pc-menu-btn"
+            data-gf-toggle
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            aria-label={`Priority and position for ${card.name}`}
+            onClick={() => setMenuOpen((v) => !v)}
+          >
+            ⋮
+          </button>
+        </div>
       )}
       {canAssign && isLabOnly && (
         <button
@@ -566,13 +583,12 @@ function PatientCard({
       {menuOpen && (
         <CardMenu
           card={card}
+          canReorder={canManage}
           canMoveUp={canMoveUp}
           canMoveDown={canMoveDown}
           onPriority={act(onPriority)}
           onNudge={act(onNudge)}
           onMove={act(onMove)}
-          onPause={act(onPause)}
-          onResume={act(onResume)}
           onClose={() => setMenuOpen(false)}
         />
       )}
@@ -594,6 +610,7 @@ function Column({
   now,
   onOpen,
   canManage,
+  canMenu,
   drag,
   onDragStart,
   onDragEnd,
@@ -696,6 +713,7 @@ function Column({
               now={now}
               onOpen={onOpen}
               canManage={canManage}
+              canMenu={canMenu}
               dragging={drag?.id === card.id}
               onDragStart={onDragStart}
               onDragEnd={onDragEnd}
@@ -1393,6 +1411,10 @@ export default function FlowManagerPage() {
   // that happen to be visible and leave everyone else unplaced beneath them.
   const hiding = !!filter || searchActive;
   const canRearrange = canManageQueue && !hiding && !date;
+  // Pausing is not rearranging. A filter or a search only makes the ORDER of a
+  // column unknowable, and a past date has no clock left to hold — neither says
+  // anything about one patient stepping out, so the card menu survives both.
+  const canUseCardMenu = canManageQueue && !date;
 
   return (
     <div className="gf" ref={rootRef}>
@@ -1597,6 +1619,7 @@ export default function FlowManagerPage() {
               now={boardNow}
               onOpen={(c) => setOpenVisit(c.id)}
               canManage={canRearrange}
+              canMenu={canUseCardMenu}
               drag={drag}
               onDragStart={(card) =>
                 setDrag({

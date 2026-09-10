@@ -1,5 +1,22 @@
 # 33 — Patient schemes: CGHS / ECHS tagging, scheme pricing, daily caps
 
+**Status 2026-09-17: steps 1, 2, 4, 5, 6 and 7 built. Step 3 is gated on D7 —
+ask the desk first. Every price table ships EMPTY, so prices today are exactly
+what they were before; the machinery is in place and waiting for the tariff.**
+
+| Step                          | State               | Notes                                                                                                     |
+| ----------------------------- | ------------------- | --------------------------------------------------------------------------------------------------------- |
+| 1 scheme list as data         | **built**           | `patient_schemes`, `SCHEME_ADMIN`, `/settings/schemes`. ECHS added. Both GHM smoke scripts pass untouched |
+| 2 patient tag + inheritance   | **built**           | `patients.scheme_code` / `scheme_ref` (encrypted), snapshot-at-creation on all three insert paths         |
+| 3 visible where money happens | **blocked (D7)**    | Reception badge and OPD fee shipped with step 6; the rest waits on why the tag has never been used        |
+| 4 daily cap                   | **built**           | `SCHEME_CAP_ENFORCEMENT=off` by default. Ship in `warn`, watch a week, then `strict`                      |
+| 5 scheme test pricing         | **built, unpriced** | `scheme_test_prices` + `pricing.js` + `giniflow_lab_orders.scheme_code`. Table empty                      |
+| 6 OPD fee display             | **built, unpriced** | `scheme_opd_fees`, shown on the reception badge. Table empty                                              |
+| 7 medicine tariff             | **built, unpriced** | `medicine_catalog` seeded with the top 200 by volume (80% of prescriptions), all `source='unpriced'`      |
+
+To turn any of it on: enter rates in `/settings/schemes` and the price tables,
+set a `daily_cap`, then set `SCHEME_CAP_ENFORCEMENT=warn`.
+
 Plan, not built. Revised 2026-09-13 against the code as it stands; the first
 version of this doc was written before the lab payment split (28) and the lab
 billing step (34) landed, and several of its line references had drifted.

@@ -540,6 +540,12 @@ const ABSENTABLE_STATUSES = [...EXPECTED_STATUSES, "checked_in"];
 const ARRIVAL_SELECT = `
   SELECT v.id, v.patient_id, v.current_status, v.appointment_time::text AS appointment_time,
          v.priority, v.blocked_reason, v.paused_at, v.paused_reason,
+         ap.patient_category AS scheme_code,
+         (SELECT f.fee FROM scheme_opd_fees f
+           WHERE f.scheme_code = ap.patient_category
+             AND f.visit_type = ap.visit_type
+             AND (f.doctor_id IS NULL OR f.doctor_id = v.assigned_doctor_id)
+           ORDER BY f.doctor_id NULLS LAST LIMIT 1) AS scheme_opd_fee,
          (v.visit_date + COALESCE(v.appointment_time, '00:00'::time))
            AT TIME ZONE 'Asia/Kolkata' AS slot_at,
          p.name, p.file_no, p.age, p.sex, p.phone,
@@ -643,6 +649,17 @@ const shapeArrival = (r, now) => ({
   // Frozen at the moment they stepped out, so the desk's row holds still like
   // the board's card does rather than counting a break nobody is waiting on.
   sinceMinutes: minutesBetween(r.status_since, r.paused_at ? new Date(r.paused_at) : now),
+  // The scheme this visit is billed under. Shown at the desk because check-in
+  // is the last moment before money is keyed into HealthRay, and because it is
+  // the catch-all entry point: a walk-in reaches no booking form at all.
+  schemeCode: r.scheme_code || null,
+  // What the OPD consultation should cost under that scheme. DISPLAY ONLY —
+  // HealthRay raises the bill and Gini has no write path to it (plan D3) — so
+  // this exists to put the right number in front of whoever keys it in. null
+  // means no rate card for this scheme yet, and the desk sees nothing rather
+  // than a wrong number.
+  schemeOpdFee:
+    r.scheme_opd_fee === null || r.scheme_opd_fee === undefined ? null : Number(r.scheme_opd_fee),
   paused: !!r.paused_at,
   pausedAt: r.paused_at ? new Date(r.paused_at).toISOString() : null,
   pausedReason: r.paused_reason || null,

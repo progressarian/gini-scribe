@@ -31,10 +31,17 @@ export function useMedicineCard(visitId) {
   });
 }
 
-export function useTestPanels() {
+// See useGiniflowMo's copy: the cache key carries the visit because the price
+// list is per patient once a scheme is involved.
+export function useTestPanels(visitId = null) {
   return useQuery({
-    queryKey: ["giniflow", "doctor", "test-panels"],
-    queryFn: async () => (await api.get("/api/giniflow/stations/doctor/test-panels")).data,
+    queryKey: ["giniflow", "doctor", "test-panels", visitId || "base"],
+    queryFn: async () =>
+      (
+        await api.get("/api/giniflow/stations/doctor/test-panels", {
+          params: visitId ? { visitId } : {},
+        })
+      ).data,
     staleTime: 10 * 60_000,
   });
 }
