@@ -388,10 +388,16 @@ export function startCronJobs() {
     );
   }
 
-  // Recovery job every 15 min
-  recoveryIntervalId = setInterval(() => {
-    retryPendingLabCases().catch((e) => console.error("[Cron] Lab recovery failed:", e.message));
-  }, RECOVERY_INTERVAL_MS);
+  // Recovery job every 15 min. Behind the flag with the sync it recovers: a
+  // retry is the same write arriving late, and a case left pending the day the
+  // floor took over is not a case the floor wants finished for it.
+  if (manualFloor()) {
+    console.log("[Cron] Lab pending-case recovery OFF — the bench files its own results");
+  } else {
+    recoveryIntervalId = setInterval(() => {
+      retryPendingLabCases().catch((e) => console.error("[Cron] Lab recovery failed:", e.message));
+    }, RECOVERY_INTERVAL_MS);
+  }
 
   // ── Partial-results recovery (continuous loop, 30–40s break) ─────────────
   // Picks up lab cases stuck at "Gini Lab Partial" (results_synced=TRUE but
@@ -414,18 +420,24 @@ export function startCronJobs() {
   // the first failure, then every 4 h for up to 3 days. We only need to wake
   // up often enough to catch the shortest window — every 15 min is plenty.
   const PDF_RETRY_INTERVAL_MS = 15 * 60 * 1000;
-  console.log("[Cron] Starting lab PDF retry recovery (every 15 min)...");
-  setTimeout(
-    () => {
-      runPdfRetryRecovery().catch((e) => console.error("[Cron] Lab PDF retry failed:", e.message));
-      pdfRetryIntervalId = setInterval(() => {
+  if (manualFloor()) {
+    console.log("[Cron] Lab PDF retry OFF — report PDFs are uploaded at the bench");
+  } else {
+    console.log("[Cron] Starting lab PDF retry recovery (every 15 min)...");
+    setTimeout(
+      () => {
         runPdfRetryRecovery().catch((e) =>
           console.error("[Cron] Lab PDF retry failed:", e.message),
         );
-      }, PDF_RETRY_INTERVAL_MS);
-    },
-    5 * 60 * 1000,
-  ); // start 5 min after boot to let the regular sync settle
+        pdfRetryIntervalId = setInterval(() => {
+          runPdfRetryRecovery().catch((e) =>
+            console.error("[Cron] Lab PDF retry failed:", e.message),
+          );
+        }, PDF_RETRY_INTERVAL_MS);
+      },
+      5 * 60 * 1000,
+    ); // start 5 min after boot to let the regular sync settle
+  }
 
   // ── Blank-PDF safety-net sweep ───────────────────────────────────────────
   // Every 30 min, re-checks stored lab PDFs that are at least 2 hours old.
@@ -434,20 +446,24 @@ export function startCronJobs() {
   // enforced inside sweepBlankStoredLabPdfs, so this interval just needs to
   // be small enough to keep latency on the safety net low.
   const BLANK_SWEEP_INTERVAL_MS = 30 * 60 * 1000;
-  console.log("[Cron] Starting blank lab PDF sweep (every 30 min, 2h age threshold)...");
-  setTimeout(
-    () => {
-      runBlankLabPdfSweep().catch((e) =>
-        console.error("[Cron] Blank lab PDF sweep failed:", e.message),
-      );
-      blankSweepIntervalId = setInterval(() => {
+  if (manualFloor()) {
+    console.log("[Cron] Blank lab PDF sweep OFF — nothing re-downloads a report from HealthRay");
+  } else {
+    console.log("[Cron] Starting blank lab PDF sweep (every 30 min, 2h age threshold)...");
+    setTimeout(
+      () => {
         runBlankLabPdfSweep().catch((e) =>
           console.error("[Cron] Blank lab PDF sweep failed:", e.message),
         );
-      }, BLANK_SWEEP_INTERVAL_MS);
-    },
-    7 * 60 * 1000, // start 7 min after boot, offset from PDF retry (5 min)
-  );
+        blankSweepIntervalId = setInterval(() => {
+          runBlankLabPdfSweep().catch((e) =>
+            console.error("[Cron] Blank lab PDF sweep failed:", e.message),
+          );
+        }, BLANK_SWEEP_INTERVAL_MS);
+      },
+      7 * 60 * 1000, // start 7 min after boot, offset from PDF retry (5 min)
+    );
+  }
 
   // ── Daily OPD re-parse: fixes diagnoses + medicines for today's patients ──
   // Runs 30 min after startup (lets initial sync settle), then every 24 hours.

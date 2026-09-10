@@ -51,6 +51,9 @@ import { readFile } from "fs/promises";
 const cron = await readFile(new URL("../services/cron/index.js", import.meta.url), "utf8");
 for (const [what, marker] of [
   ["the lab sync", "Lab HealthRay sync OFF"],
+  ["pending-case recovery", "Lab pending-case recovery OFF"],
+  ["the PDF retry", "Lab PDF retry OFF"],
+  ["the blank-PDF sweep", "Blank lab PDF sweep OFF"],
   ["status mirroring", "HealthRay status mirroring OFF"],
   ["partial-results recovery", "Partial-results recovery OFF"],
 ]) {
