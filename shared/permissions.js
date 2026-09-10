@@ -84,6 +84,14 @@ export const CAPABILITIES = {
   FLOW_STATION_PHARM: "FLOW_STATION_PHARM",
   FLOW_STATION_REPORTS: "FLOW_STATION_REPORTS",
   FLOW_FLOOR_VIEW: "FLOW_FLOOR_VIEW", // read the live floor board (no management)
+  // The coordinator board page itself (/flow/coordinator). Its own key for the
+  // same reason GINIFLOW_BOARD has one: FLOW_FLOOR_VIEW is the `/api/flow`
+  // prefix gate, so every role that touches the flow module at all holds it —
+  // consultants, MOs and reception included — and gating the board on it opened
+  // the whole floor's management view to fifty-one people. FLOW_COORDINATOR is
+  // no good either: that is the power to move patients, which reception needs at
+  // the desk.
+  FLOW_BOARD: "FLOW_BOARD",
   // A consultant's own worklist + hand-over offers. Consultants only: SD is
   // always a consultant (2,802) or admin (73), never an MO, so an MO's list
   // would always be empty.
@@ -232,9 +240,12 @@ export const ROLE_CAPABILITIES = {
     C.PATIENT_CHART,
     C.LAB_PORTAL,
     C.LAB_REQUESTS,
-    C.FLOW_STATION,
-    C.FLOW_STATION_LAB,
-    C.FLOW_FLOOR_VIEW,
+    // No FLOW_* keys. The lab works the Gini Flow rooms now, and the old flow
+    // module's coordinator board and lab station are not theirs to open —
+    // FLOW_FLOOR_VIEW is what /flow/coordinator gates on, FLOW_STATION_LAB what
+    // /flow/station/lab gates on, and FLOW_STATION only opens a launcher with
+    // nothing left in it. Dropping them also closes /api/flow*, which this role
+    // has no remaining call on.
     C.GINIFLOW_VIEW,
     C.GINIFLOW_BOARD,
     C.GINIFLOW_STATION_LAB,
@@ -253,12 +264,14 @@ export const ROLE_CAPABILITIES = {
     C.PATIENT_CHART,
     C.LAB_PORTAL,
     C.LAB_REQUESTS,
-    C.FLOW_STATION,
-    C.FLOW_STATION_LAB,
-    C.FLOW_FLOOR_VIEW,
     C.GINIFLOW_VIEW,
     C.GINIFLOW_BOARD,
     C.GINIFLOW_STATION_LAB,
+    // Both rooms. It runs the lab, so it works the analyzer bench AND can take a
+    // collection when the other bench is unstaffed — the split is about who is
+    // accountable for each step, not about locking the person who owns the lab
+    // out of half of it.
+    C.GINIFLOW_STATION_LAB_COLLECT,
     C.GINIFLOW_STATION_LAB_PROCESS,
   ],
   [ROLES.TECH]: [
@@ -266,9 +279,8 @@ export const ROLE_CAPABILITIES = {
     C.PATIENT_CHART,
     C.LAB_PORTAL,
     C.LAB_REQUESTS,
-    C.FLOW_STATION,
-    C.FLOW_STATION_LAB,
-    C.FLOW_FLOOR_VIEW,
+    // No FLOW_* keys, for the same reason as the lab role above: the old flow
+    // module's coordinator board and lab station are not this role's to open.
     // GINIFLOW_VIEW is what makes GINIFLOW_STATION_LAB below mean anything.
     // `/api/giniflow*` is prefix-gated on VIEW in middleware/auth.js before any
     // per-route capability runs, so without it a tech held the lab-station
@@ -316,6 +328,7 @@ export const ROLE_CAPABILITIES = {
     C.RECEPTION_OPS,
     C.FLOW_RECEPTION,
     C.FLOW_COORDINATOR,
+    C.FLOW_BOARD,
     C.FLOW_REPORTS,
     C.FLOW_FLOOR_VIEW,
     C.FLOW_STATION,
@@ -329,8 +342,11 @@ export const ROLE_CAPABILITIES = {
     C.GINIFLOW_STATION_VITALS,
     C.GINIFLOW_STATION_RECEPTION,
     C.GINIFLOW_STATION_LAB,
+    // Collection only. The coordinator runs the floor, and calling a patient
+    // over for their bloods is floor work; the analyzer bench is not — it signs
+    // results out onto a chart, which is the lab's own accountability and
+    // belongs to lab_admin alone.
     C.GINIFLOW_STATION_LAB_COLLECT,
-    C.GINIFLOW_STATION_LAB_PROCESS,
     C.GINIFLOW_STATION_MO,
     C.GINIFLOW_TRIAGE,
     C.GINIFLOW_REFERRALS,

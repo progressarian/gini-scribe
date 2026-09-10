@@ -71,8 +71,12 @@ try {
   const ROLES = [
     { role: "tech", room: "collection" },
     { role: "lab", room: "collection" },
-    { role: "lab_admin", room: "processing" },
-    { role: "coordinator", room: "both" },
+    // Both rooms: it runs the lab and may take a collection when the other
+    // bench is unstaffed.
+    { role: "lab_admin", room: "both" },
+    // Collection only. The coordinator runs the floor; the analyzer bench signs
+    // results out onto a chart and belongs to lab_admin alone.
+    { role: "coordinator", room: "collection" },
     { role: "admin", room: "both" },
   ];
 

@@ -58,10 +58,11 @@ const call = async (path, token, init = {}) => {
 
 let fatal = null;
 try {
+  // Single-room roles only. lab_admin holds both benches, so it has nothing to
+  // be refused here — smoke-lab-room-access.mjs covers it in full.
   const ROOMS = [
     { role: "tech", own: "collection", other: "processing" },
     { role: "lab", own: "collection", other: "processing" },
-    { role: "lab_admin", own: "processing", other: "collection" },
   ];
 
   for (const c of ROOMS) {

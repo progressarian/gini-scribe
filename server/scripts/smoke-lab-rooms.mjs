@@ -174,7 +174,6 @@ for (const page of PAGES) {
 const WHO = [
   { role: "tech", opens: "/giniflow/station/lab/collection" },
   { role: "lab", opens: "/giniflow/station/lab/collection" },
-  { role: "lab_admin", opens: "/giniflow/station/lab/processing" },
 ];
 for (const w of WHO) {
   const mine = PAGES.find((p) => p.path === w.opens);
@@ -184,12 +183,39 @@ for (const w of WHO) {
     hasCapability(w.role, mine.cap) && !hasCapability(w.role, theirs.cap),
   );
 }
-for (const role of ["admin", "coordinator"]) {
+// lab_admin runs the lab: the analyzer bench is its own, and it can take a
+// collection when the other bench is unstaffed. The split is about who is
+// accountable for each step, not about locking the lab out of half of it.
+for (const role of ["admin", "lab_admin"]) {
   check(
     `${role} may open both rooms`,
     PAGES.every((p) => hasCapability(role, p.cap)),
   );
 }
+// The old flow module's coordinator board and lab station belong to neither lab
+// role now — they work the Gini Flow rooms.
+for (const role of ["lab", "tech", "lab_admin"]) {
+  check(
+    `${role} cannot reach the retired flow screens`,
+    !hasCapability(role, C.FLOW_FLOOR_VIEW) &&
+      !hasCapability(role, C.FLOW_STATION) &&
+      !hasCapability(role, C.FLOW_STATION_LAB),
+  );
+}
+// The coordinator runs the floor, and calling a patient over for their bloods is
+// floor work. Signing results out onto a chart is not — that is the lab's own
+// accountability and belongs to lab_admin alone.
+check(
+  "the coordinator holds collection only",
+  hasCapability("coordinator", C.GINIFLOW_STATION_LAB_COLLECT) &&
+    !hasCapability("coordinator", C.GINIFLOW_STATION_LAB_PROCESS),
+);
+check(
+  "nobody but admin and lab_admin can work the analyzer bench",
+  ["lab", "tech", "coordinator", "nurse", "reception", "mo", "consultant"].every(
+    (r) => !hasCapability(r, C.GINIFLOW_STATION_LAB_PROCESS),
+  ),
+);
 check(
   "the pre-split path still resolves, so old links land in a room",
   PAGE_CAPABILITIES["/giniflow/station/lab"] === C.GINIFLOW_STATION_LAB,

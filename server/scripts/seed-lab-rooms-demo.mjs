@@ -15,10 +15,12 @@
 import "../loadEnv.js";
 import pool from "../config/db.js";
 import { LAB_RUNGS } from "../../shared/labStages.js";
+import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../config/storage.js";
 
 const FILE_PREFIX = "ZZLAB_";
 const CASE_PREFIX = "ZZLAB-";
 const clean = process.argv.includes("--clean");
+let removedFiles = 0;
 
 const ago = (minutes) => new Date(Date.now() - minutes * 60_000);
 const iso = (minutes) => ago(minutes).toISOString();
@@ -184,15 +186,35 @@ try {
   ]);
   await client.query(`DELETE FROM lab_cases WHERE case_no LIKE $1 || '%'`, [CASE_PREFIX]);
   if (ids.length) {
+    // Reports uploaded against a demo patient during testing land on the CHART,
+    // like any other report — a `documents` row and an object in storage. They
+    // reference the patient, so they go first or the delete below fails on the
+    // foreign key and demo people stay in production. The stored files go too:
+    // a bucket object nothing points at is invisible and permanent.
+    const { rows: docs } = await client.query(
+      `SELECT storage_path FROM documents
+        WHERE patient_id = ANY($1::int[]) AND storage_path IS NOT NULL`,
+      [ids],
+    );
+    for (const d of docs) {
+      await fetch(`${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${d.storage_path}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` },
+      }).catch(() => {});
+    }
+    await client.query(`DELETE FROM documents WHERE patient_id = ANY($1::int[])`, [ids]);
     // giniflow_lab_orders and its children cascade from the visit.
     await client.query(`DELETE FROM giniflow_visits WHERE patient_id = ANY($1::int[])`, [ids]);
     await client.query(`DELETE FROM lab_results WHERE patient_id = ANY($1::int[])`, [ids]);
     await client.query(`DELETE FROM patients WHERE id = ANY($1::int[])`, [ids]);
+    removedFiles = docs.length;
   }
 
   if (clean) {
     await client.query("COMMIT");
-    console.log(`Removed ${ids.length} demo patients and their lab work.`);
+    console.log(
+      `Removed ${ids.length} demo patients, their lab work and ${removedFiles} uploaded report${removedFiles === 1 ? "" : "s"}.`,
+    );
   } else {
     const { rows: docs } = await client.query(
       `SELECT id FROM doctors WHERE COALESCE(is_active, TRUE) ORDER BY id LIMIT 1`,

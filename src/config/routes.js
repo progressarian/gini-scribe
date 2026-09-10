@@ -121,7 +121,7 @@ export const PAGE_CAPABILITIES = {
   "/ci": CAP.ANALYTICS,
   // Patient Flow Management
   "/flow/checkin": CAP.FLOW_RECEPTION,
-  "/flow/coordinator": CAP.FLOW_FLOOR_VIEW,
+  "/flow/coordinator": CAP.FLOW_BOARD,
   "/flow/my-patients": CAP.FLOW_MY_PATIENTS,
   "/flow/consultants": CAP.FLOW_CONSULTANTS,
   // Consultants have no station desk — the bare path redirects them to their
