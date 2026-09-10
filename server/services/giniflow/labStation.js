@@ -11,6 +11,7 @@ import {
 } from "../../../shared/giniflowStatus.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import {
+  LAB_ROOMS,
   LAB_RUNGS,
   LAB_STAGES,
   LAB_RAIL,
@@ -160,6 +161,92 @@ const unifiedFromCase = (r) => ({
 // than being reconstructed on the client.
 export const LAB_GROUPS = FILTER_TO_TARGETS;
 
+// A samples-only patient the lab has no record of.
+//
+// The board draws these from the appointment alone, so it can say "Registered ·
+// no case yet"; both lab rooms are built from work items — a giniflow_lab_order
+// or a HealthRay case — and a patient with neither has no row to draw. The
+// result was the one screen that could act on it being the one screen that could
+// not see it: 11 of 34 samples-only patients over eight days ended the day with
+// no case and no order, four of them on a single day, and nothing on the floor
+// ever said so.
+//
+// They are deliberately NOT folded into the `pending` rung. That bucket means
+// "an order exists, go and collect it", and the sample→upload SLA and the "To
+// call" chip both count it — an order-less patient would corrupt both. This is
+// its own list, the way the vitals station keeps its held patients beside the
+// queue rather than in it.
+async function awaitingRegistration(visitDate, search, db) {
+  const { rows } = await db.query(
+    `SELECT v.id AS visit_id, v.current_status,
+            p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
+            first_ev.occurred_at AS checked_in_at
+       FROM giniflow_visits v
+       JOIN patients p ON p.id = v.patient_id
+       LEFT JOIN LATERAL (
+         SELECT occurred_at FROM giniflow_visit_events e
+          WHERE e.visit_id = v.id AND e.status = 'checked_in'
+          ORDER BY occurred_at LIMIT 1
+       ) first_ev ON TRUE
+      WHERE v.visit_date = $1::date
+        AND NOT COALESCE(p.is_blocked, FALSE)
+        AND v.current_status NOT IN ('no_show', 'cancelled')
+        AND ${labOnlyPredicate("v", "$3")}
+        AND NOT EXISTS (SELECT 1 FROM giniflow_lab_orders o WHERE o.visit_id = v.id)
+        AND NOT EXISTS (
+          SELECT 1 FROM lab_cases lc
+           WHERE lc.case_date = v.visit_date
+             AND (lc.patient_id = v.patient_id
+                  OR (lc.patient_id IS NULL
+                      AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))
+        )
+        AND (
+          $2::text IS NULL
+          OR p.name ILIKE '%' || $2 || '%'
+          OR p.file_no ILIKE '%' || $2 || '%'
+        )
+      ORDER BY first_ev.occurred_at NULLS LAST`,
+    [visitDate, search, LAB_ONLY_DOCTOR],
+  );
+
+  return rows.map((r) => ({
+    key: `visit:${r.visit_id}`,
+    source: "awaiting",
+    visitId: r.visit_id,
+    patientId: r.patient_id,
+    name: r.name,
+    fileNo: r.file_no,
+    age: r.age,
+    sex: r.sex,
+    // Timed from arrival, not from an order — there is no order. That number is
+    // the whole point of the row: two hours on the floor with nothing registered.
+    since: r.checked_in_at ? new Date(r.checked_in_at).toISOString() : null,
+    finished: FINISHED.includes(r.current_status),
+    station: FINISHED.includes(r.current_status)
+      ? STATUS_LABEL[r.current_status] || r.current_status
+      : COLUMN_NAME[columnForStatus(r.current_status)] ||
+        STATUS_LABEL[r.current_status] ||
+        r.current_status,
+    blockedReason: "No case registered in HealthRay and no test ordered here",
+  }));
+}
+
+// What this bench has already finished with today.
+//
+// A room's own rungs are its work in PROGRESS: the moment the next room takes a
+// sample over, the patient leaves the screen entirely, so the collection room
+// ends the day with no record of the tubes it drew and no way back to one it
+// got wrong. Everything past the room's last rung is its output.
+const doneHereFor = (unified, room) => {
+  if (!room) return [];
+  const own = LAB_RUNGS.filter((r) => r.room === room);
+  if (!own.length) return [];
+  const lastOwn = stageIndexOf(own[own.length - 1].key);
+  return unified
+    .filter((u) => stageIndexOf(u.stage) > lastOwn)
+    .sort((a, b) => (b.since || "").localeCompare(a.since || ""));
+};
+
 export async function getLabQueue(
   visitDate,
   q = null,
@@ -168,6 +255,10 @@ export async function getLabQueue(
 ) {
   const search = q && String(q).trim().length >= 2 ? String(q).trim() : null;
   const healthray = await getHealthrayCases(visitDate, search, db, room);
+  // Only the collection room can do anything about an unregistered patient —
+  // there is no sample for the analyzer bench to be missing.
+  const awaiting =
+    !room || room === LAB_ROOMS.COLLECTION ? await awaitingRegistration(visitDate, search, db) : [];
   const { rows } = await db.query(
     `SELECT o.id, o.visit_id, o.sample_status, o.payment_status, o.urgency,
             o.amount_total, o.amount_paid, o.amount_claimed, o.claim_state,
@@ -299,6 +390,8 @@ export async function getLabQueue(
   return {
     group: wanted,
     room,
+    awaiting,
+    doneHere: doneHereFor(unified, room),
     counts: groupCounts,
     bucketCounts,
     ...Object.fromEntries(rungs.map((r) => [r.bucket, keep(r.bucket)])),

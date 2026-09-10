@@ -162,17 +162,24 @@ try {
         `${res.status}`,
       );
     }
-    // Attaching a file to a HealthRay-run case overrides the sync, so it stays
-    // admin-only on top of the room rule.
-    const override = await call(`/api/giniflow/stations/lab/case/${NO_CASE}/report`, h.token, {
-      method: "POST",
-      body: JSON.stringify({}),
-    });
-    check(
-      `${h.role} ${h.role === "admin" ? "may" : "cannot"} override a case report`,
-      h.role === "admin" ? override.status === 400 : override.status === 403,
-      `${override.status}`,
-    );
+    // Attaching a file to a HealthRay-run case overrides the sync that normally
+    // fetches it, so it belongs to the bench that is accountable for the report —
+    // not to the whole floor, and no longer to `admin` alone.
+    for (const [what, path] of [
+      ["attach", `/api/giniflow/stations/lab/case/${NO_CASE}/report`],
+      ["remove", `/api/giniflow/stations/lab/case/${NO_CASE}/report`],
+    ]) {
+      const res = await call(path, h.token, {
+        method: what === "attach" ? "POST" : "DELETE",
+        ...(what === "attach" ? { body: JSON.stringify({}) } : {}),
+      });
+      const want = owns(h, "processing");
+      check(
+        `${h.role} ${want ? "may" : "cannot"} ${what} a report on a hospital case`,
+        want ? res.status !== 403 : res.status === 403,
+        `${res.status}`,
+      );
+    }
   }
 
   console.log("\n── Reading is open to both rooms ────────────────────────────");

@@ -1222,16 +1222,6 @@ const attachLabRoom = (asked) => (req, res, next) => {
 // a matter of which buttons they happened to be shown.
 const benchGate = requireCapability(CAP.GINIFLOW_STATION_LAB_PROCESS);
 
-// Attaching a file to a HealthRay-run case overrides the sync that normally
-// fetches it, so it is admin-only on top of the room rule. A gate, not a check
-// inside the handler: sitting after `validate` it answered 400 before 403, so a
-// coordinator with a malformed body learned the shape of a request they may not
-// make. Authorisation goes first, like every other route here.
-const reportOverrideGate = (req, res, next) =>
-  req.doctor?.role === "admin"
-    ? next()
-    : res.status(403).json({ error: "Only an admin may attach a report to a lab case" });
-
 const labQueryRoom = attachLabRoom((req) => req.query.room);
 
 const labBodyRoom = attachLabRoom((req) => req.body?.room);
@@ -1361,7 +1351,6 @@ router.post(
 router.post(
   "/giniflow/stations/lab/case/:caseNo/report",
   benchGate,
-  reportOverrideGate,
   validate(giniflowReportSchema),
   async (req, res) => {
     try {
@@ -1390,18 +1379,13 @@ router.post(
 // Taking a wrongly-attached report back off a case, while the case is still
 // open. Bench-gated like every other act on a result, and admin-gated like the
 // upload it undoes.
-router.delete(
-  "/giniflow/stations/lab/case/:caseNo/report",
-  benchGate,
-  reportOverrideGate,
-  async (req, res) => {
-    try {
-      res.json(await deleteLabCaseReport(req.params.caseNo));
-    } catch (e) {
-      handleError(res, e, "Gini Flow lab case report delete");
-    }
-  },
-);
+router.delete("/giniflow/stations/lab/case/:caseNo/report", benchGate, async (req, res) => {
+  try {
+    res.json(await deleteLabCaseReport(req.params.caseNo));
+  } catch (e) {
+    handleError(res, e, "Gini Flow lab case report delete");
+  }
+});
 
 router.post(
   "/giniflow/stations/lab/:orderId/advance",

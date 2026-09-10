@@ -15,6 +15,7 @@ import LabResultsForm from "../LabResultsForm";
 import PdfViewerModal from "../../visit/PdfViewerModal";
 import StationNotice from "../StationNotice";
 import useAuthStore from "../../../stores/authStore";
+import { CAPABILITIES as CAP, hasCapability } from "../../../../shared/permissions.js";
 import {
   LAB_RUNGS,
   visibleRungs,
@@ -662,6 +663,71 @@ const blockedReason = (row) => {
   return null;
 };
 
+// A samples-only patient with nothing registered anywhere. There is no order to
+// advance and no case to mark, so the card carries no action at all — it exists
+// to say this person is on the floor and the lab has never heard of them.
+function AwaitingCard({ row }) {
+  const mins = minutesSince(row.since);
+  return (
+    <div className="pt-card hr-case is-unreachable is-readonly" aria-disabled="true">
+      <div className="pc-av" style={{ background: avatarColour(row.patientId) }}>
+        {initials(row.name)}
+      </div>
+      <div className="pc-body">
+        <div className="pc-name">
+          {row.name}
+          {row.fileNo && <span className="badge b-ink">{row.fileNo}</span>}
+        </div>
+        <div className="pc-meta">
+          {[
+            row.age && row.sex ? `${row.age}${row.sex[0]}` : row.age && `${row.age}y`,
+            row.station,
+            row.since && `arrived ${clock(row.since)}`,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </div>
+        <div className="lab-blocked">⏸ {row.blockedReason}</div>
+      </div>
+      <div className="pc-r">
+        <div className="sp sp-process">No case</div>
+        {mins !== null && <div className="pc-since">{mins}m on the floor</div>}
+      </div>
+    </div>
+  );
+}
+
+// The bench's own output: a sample it drew and handed on, which every other list
+// on this screen has already let go of.
+function DoneHereCard({ row }) {
+  const rung = rungFor(row.stage);
+  return (
+    <div className="pt-card hr-case is-readonly" aria-disabled="true">
+      <div className="pc-av" style={{ background: avatarColour(row.patientId) }}>
+        {initials(row.name)}
+      </div>
+      <div className="pc-body">
+        <div className="pc-name">
+          {row.name}
+          {row.fileNo && <span className="badge b-ink">{row.fileNo}</span>}
+        </div>
+        <div className="pc-meta">
+          {[
+            row.caseCount && `${row.caseCount} ${row.caseCount === 1 ? "case" : "cases"}`,
+            row.since && clock(row.since),
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </div>
+        {!!row.tests?.length && <div className="pc-tests">🔬 {row.tests.join(" · ")}</div>}
+      </div>
+      <div className="pc-r">
+        <div className={`sp ${rung?.pill || "sp-process"}`}>{rung?.stageLabel || row.stage}</div>
+      </div>
+    </div>
+  );
+}
+
 function HealthrayCard({ row, onOpen, readOnly = false }) {
   // A row nobody can act on must not be a button: it would take focus, look
   // pressable and do nothing.
@@ -751,7 +817,7 @@ function HealthrayCasePane({
   onDeleteReport,
   onResultsSaved,
   onResultsFailed,
-  isAdmin,
+  canFileReport,
   busy,
   room,
 }) {
@@ -1058,7 +1124,7 @@ function HealthrayCasePane({
                       a tube the floor drew twenty minutes ago has nothing behind
                       it, and offering to upload one there is the screen inviting
                       a fiction. */}
-                  {isAdmin && atTheBench && !c.hasReport && c.canHaveReport && (
+                  {canFileReport && atTheBench && !c.hasReport && c.canHaveReport && (
                     <>
                       <div className="dp-sec-title">Upload report</div>
                       <button
@@ -1191,6 +1257,11 @@ export default function LabRoom({ room = null }) {
   // front of you. A tube already sent to the lab is worked at the bench, so the
   // analyzer room's inbox never holds anybody back for being in a room.
   const gatedOnThePatient = ENTRY_GROUPS.some((g) => g.stageKey === "pending");
+  // Two lists this room has no rung for: the patients registered for samples
+  // that neither system knows about, and the samples this bench has already
+  // handed on. Both are the collection room's, and both are read-only.
+  const awaiting = data?.awaiting || [];
+  const doneHere = data?.doneHere || [];
   // The three-way split of a finished patient — still on the floor, lab-only,
   // gone home — is a statement about who downstream is waiting on the report.
   // The collection room's last column is samples it has SENT, where nothing has
@@ -1308,7 +1379,15 @@ export default function LabRoom({ room = null }) {
   const closeCasePane = useCallback(() => setOpenCaseId(null), []);
   const caseAction = useMarkLabCaseAction();
   const caseUpload = useUploadLabCaseReport();
-  const isAdmin = useAuthStore((st) => st.currentDoctor?.role) === "admin";
+  // Attaching a file to a HealthRay-run case overrides the sync that normally
+  // fetches it, so it is not open to the whole floor. It was pinned to `admin`
+  // when the only lab roles were collection-side; the analyzer bench is now its
+  // own role, and filing the report is the last step of its own ladder — so the
+  // gate is the bench capability, which is what the API enforces too.
+  const canFileReport = hasCapability(
+    useAuthStore((st) => st.currentDoctor?.role),
+    CAP.GINIFLOW_STATION_LAB_PROCESS,
+  );
   const onUploadCase = (caseNo, file, confirmAdditional = false) => {
     if (file.size > 10 * 1024 * 1024) return showToast("File is larger than 10 MB — not uploaded");
     caseUpload.mutate(
@@ -1575,16 +1654,42 @@ export default function LabRoom({ room = null }) {
                         </div>
                       );
                     })}
+
+                    {!!awaiting.length && (
+                      <div>
+                        <div className="grp-lbl grp-sub">
+                          🧾 Here for samples — no case registered
+                          <span className="grp-split">{awaiting.length}</span>
+                        </div>
+                        <div className="grp-hint">
+                          Booked for the test alone, but nothing has been registered in HealthRay
+                          and no test was ordered here — so there is nothing to collect against yet.
+                          They join the queue above the moment either exists.
+                        </div>
+                        <div className="pt-list">
+                          {awaiting.map((row) => (
+                            <AwaitingCard key={row.key} row={row} />
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
                 {(filter === "all" || filter === LAST_GROUP.filterKey) && (
                   <div className="ar-col">
-                    <div className="grp-lbl grp-lbl-sp">
-                      {rooming.lastLabel}
-                      <span className="grp-split">{doneTotal}</span>
-                    </div>
-                    {!doneTotal && <div className="empty-note">{rooming.lastEmpty}</div>}
+                    {/* A heading over nothing, above a list of everything the
+                        bench did today, reads as a broken screen. It appears
+                        when it has samples to name and stays away otherwise. */}
+                    {!!doneTotal && (
+                      <div className="grp-lbl grp-lbl-sp">
+                        {rooming.lastLabel}
+                        <span className="grp-split">{doneTotal}</span>
+                      </div>
+                    )}
+                    {!doneTotal && !doneHere.length && (
+                      <div className="empty-note">{rooming.lastEmpty}</div>
+                    )}
                     {doneSplit.map((part) => {
                       const rows = doneRows.filter(part.holds);
                       if (!rows.length) return null;
@@ -1635,6 +1740,28 @@ export default function LabRoom({ room = null }) {
                         </div>
                       );
                     })}
+
+                    {/* The day's record for this bench. The lists above are work
+                        in progress and empty themselves as the next room takes
+                        each sample over, so without this the collection room
+                        finishes a forty-tube day showing nothing it did. */}
+                    {!!doneHere.length && (
+                      <div>
+                        <div className="grp-lbl grp-sub">
+                          ✅ Done here today — with the lab now
+                          <span className="grp-split">{doneHere.length}</span>
+                        </div>
+                        <div className="grp-hint">
+                          Collected and sent from this bench. The lab room has them — nothing here
+                          is waiting on you.
+                        </div>
+                        <div className="pt-list">
+                          {doneHere.map((row) => (
+                            <DoneHereCard key={row.key} row={row} />
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1687,7 +1814,7 @@ export default function LabRoom({ room = null }) {
         onClose={closeCasePane}
         onAction={onCaseAction}
         onUploadCase={onUploadCase}
-        isAdmin={isAdmin}
+        canFileReport={canFileReport}
         busy={caseAction.isPending || caseUpload.isPending}
       />
 

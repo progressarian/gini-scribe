@@ -712,7 +712,7 @@ that unlocks the button; the TAP is what ends the case.
 - **Replace** is the existing upload, which already handles an existing file.
 - **Remove** (`DELETE /giniflow/stations/lab/case/:caseNo/report`) takes the chart row, the
   case's pointer and the stored object together — leaving any one behind is how a case ends up
-  claiming a report nobody can open. Bench-gated and admin-gated, like the upload it undoes.
+  claiming a report nobody can open. Bench-gated, like the upload it undoes.
 - **After done it refuses**: _"This case is marked done — undo that first if the report needs
   replacing."_ At that point the report is what the MO and the consultant were told about, and
   pulling it out from under them silently is not this screen's to do. Undo "Done" first, which
@@ -721,6 +721,28 @@ that unlocks the button; the TAP is what ends the case.
 Verified across the whole lifecycle: upload → `results`, `canMarkDone: true`, "✓ Mark done"
 offered, `reportDocId` present; mark done → `reported`, no further action; delete refused;
 undo done → delete removes the document row, clears the case pointer and drops the object.
+
+### The analyzer bench could not file a report
+
+Signed in as **Lab Admin**, the hospital-case pane had no "Upload report" section at all —
+so the role that exists to run the analyzer bench could not perform the last step of its own
+ladder. The same case opened as `admin` showed it.
+
+Attaching a file to a HealthRay-run case overrides the sync that normally fetches it, so it
+was deliberately restricted — but the restriction was written as `role === "admin"`, back when
+the only lab roles were collection-side and "admin" was the nearest available stand-in for
+"somebody accountable". `lab_admin` is now that somebody, and "reports ready and uploaded" is
+its third step.
+
+The gate is now the **bench capability** on both sides — `canFileReport` on the screen,
+`benchGate` on the route — and the separate `reportOverrideGate` is gone, because
+`GINIFLOW_STATION_LAB_PROCESS` already means exactly "the room accountable for the report".
+The same rule now covers removing one. Verified over HTTP:
+
+|                              | attach | remove |
+| ---------------------------- | ------ | ------ |
+| `lab_admin`, `admin`         | ✅     | ✅     |
+| `lab`, `tech`, `coordinator` | 403    | 403    |
 
 ## 6. Risks
 
