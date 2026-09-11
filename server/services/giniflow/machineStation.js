@@ -14,6 +14,7 @@ import {
   machineRungFor,
   machineForTest,
   machineFor,
+  machineHandsOver,
   nextMachineStep,
   waitMinutesFor,
   docTypeToMachine,
@@ -289,7 +290,9 @@ export async function getMachineQueue(
             ? finished
               ? "Patient has left the floor"
               : `In the ${(COLUMN_NAME[columnForStatus(r.current_status)] || "").toLowerCase()} room — call once free`
-            : (next?.key === "done" || next?.key === "reported") && !hasEvidence
+            : (next?.key === "done" || next?.key === "reported") &&
+                !hasEvidence &&
+                !machineHandsOver(machineId)
               ? "Type the values in or attach the report to finish this test"
               : null;
 
@@ -618,7 +621,8 @@ export async function advanceMachineTest(
     // result existing are the same moment. Marking a machine test done with
     // nothing captured records a result nobody will go back for.
     const hasEvidence = !!(row.report_doc_id || row.report_file_url || row.has_values || reportUrl);
-    if ((toStage === "done" || toStage === "reported") && !hasEvidence) {
+    const handsOver = machineHandsOver(machineOf(row.names.map((n) => ({ name: n }))));
+    if ((toStage === "done" || toStage === "reported") && !hasEvidence && !handsOver) {
       throw Object.assign(
         new Error(
           "Nothing recorded yet — type the values in, or attach the report, before finishing this test",

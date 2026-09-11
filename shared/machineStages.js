@@ -162,6 +162,11 @@ export const MACHINES = [
     docTypes: ["ecg"],
     tests: ["ECG"],
     values: [],
+    // The strip is printed at the machine and goes home in the patient's hand.
+    // Nothing is filed here, so asking for a report before the test can be
+    // closed asks for a file that does not exist — an ECG could never be
+    // finished on this screen.
+    handover: true,
   },
 ];
 
@@ -188,6 +193,11 @@ export const nextMachineStep = (stageKey) =>
   MACHINE_RUNGS.slice(machineStageIndexOf(stageKey) + 1).find((r) => r.advanceLabel) || null;
 
 export const machineFor = (id) => MACHINES.find((m) => m.id === id) || null;
+
+// A machine whose report is handed straight to the patient. The test being over
+// IS the whole record: there is no file to attach and no value to type, so the
+// evidence gate does not apply to it.
+export const machineHandsOver = (id) => !!machineFor(id)?.handover;
 
 // Which machine a test name belongs to. Matched on a flattened name because the
 // catalogue, the order line and HealthRay all spell the same test differently —

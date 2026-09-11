@@ -17,6 +17,7 @@ import LabResultsForm from "../../components/giniflow/LabResultsForm";
 import PdfViewerModal from "../../components/visit/PdfViewerModal";
 import {
   MACHINES,
+  machineHandsOver,
   MACHINE_RUNGS,
   MACHINE_RAIL,
   machineFor,
@@ -138,7 +139,8 @@ function TestPane({
   // test has actually been run — a number typed against a test nobody has
   // started is a number nobody measured.
   const canEnterValues = !!machine?.values?.length && order.stage !== "ordered";
-  const canUpload = order.stage !== "ordered";
+  const handsOver = machineHandsOver(order.machine);
+  const canUpload = order.stage !== "ordered" && !handsOver;
   const showUploader = canUpload && (!order.hasReport || replacing);
 
   return (
@@ -250,6 +252,16 @@ function TestPane({
                   Replacing attaches a new file and leaves the test closed. Removing takes the
                   report off the patient&apos;s chart and reopens this test at &ldquo;Test
                   done&rdquo;.
+                </div>
+              </div>
+            )}
+
+            {handsOver && order.stage !== "ordered" && !order.hasReport && (
+              <div className="dp-sec">
+                <div className="dp-sec-title">Report</div>
+                <div className="dp-hint">
+                  🤝 The {machine?.name} trace is printed at the machine and handed to the patient —
+                  there is nothing to file here. Marking the test done is the whole record.
                 </div>
               </div>
             )}

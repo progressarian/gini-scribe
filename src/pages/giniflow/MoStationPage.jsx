@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Line, LineChart, ResponsiveContainer, Tooltip, YAxis } from "recharts";
 import { CHAIN } from "../../../shared/giniflowStatus";
 import { rungFor } from "../../../shared/labStages.js";
+import { moActions } from "../../lib/moActions.js";
 import {
   useMoQueue,
   useMoPatient,
@@ -491,6 +492,16 @@ export default function MoStationPage() {
   const takeOver = useTakeOver();
   const close = useCloseWithoutDoctor();
   const review = useReviewReports();
+  const [pendingOutcome, setPendingOutcome] = useState(undefined);
+  useEffect(() => setPendingOutcome(undefined), [activeId]);
+  const chosenOutcome =
+    pendingOutcome === undefined ? (patient?.reportsOutcome ?? null) : pendingOutcome;
+  const acts = moActions({
+    chosenOutcome,
+    plan,
+    canClose: patient?.canClose,
+    reportsReady: patient?.resultsStatus === "ready",
+  });
   const addProposal = useAddProposal();
   const withdrawProposal = useWithdrawProposal();
 
@@ -673,7 +684,12 @@ export default function MoStationPage() {
     );
   };
 
-  const sendToDoctor = () =>
+  const sendToDoctor = async () => {
+    try {
+      await saveOutcomeFirst();
+    } catch (e) {
+      return showToast(e?.response?.data?.error || "Could not record the report review");
+    }
     ready.mutate(activeId, {
       onSuccess: () => {
         showToast(`✓ ${patient.name} is ready for the doctor`);
@@ -681,6 +697,7 @@ export default function MoStationPage() {
       },
       onError: (e) => showToast(e?.response?.data?.error || "Could not hand over"),
     });
+  };
 
   const handOver = () => {
     // Only when NOTHING was ordered for this visit — neither ticked now nor
@@ -725,21 +742,26 @@ export default function MoStationPage() {
       onError: (e) => showToast(e?.response?.data?.error || "Could not put this patient back"),
     });
 
-  const reviewAs = (outcome) =>
-    review.mutate(
-      { visitId: activeId, outcome },
-      {
-        onSuccess: () =>
-          showToast(
-            outcome === "normal"
-              ? "✓ Reports recorded as normal — you can close this patient here"
-              : "→ Recorded — send them on to the consultant",
-          ),
-        onError: (e) => showToast(e?.response?.data?.error || "Could not record that"),
-      },
+  const reviewAs = (outcome) => {
+    setPendingOutcome(outcome);
+    showToast(
+      outcome === "normal"
+        ? "Normal — write the plan, then Close to save it"
+        : "Consultant needed — saved when you hand over",
     );
+  };
 
-  const closePatient = () =>
+  const saveOutcomeFirst = async () => {
+    if (!pendingOutcome || pendingOutcome === patient?.reportsOutcome) return;
+    await review.mutateAsync({ visitId: activeId, outcome: pendingOutcome });
+  };
+
+  const closePatient = async () => {
+    try {
+      await saveOutcomeFirst();
+    } catch (e) {
+      return showToast(e?.response?.data?.error || "Could not record the report review");
+    }
     close.mutate(activeId, {
       onSuccess: () => {
         showToast(`✓ ${patient.name} closed — prescription written, on to the Rx desk`);
@@ -748,6 +770,7 @@ export default function MoStationPage() {
       },
       onError: (e) => showToast(e?.response?.data?.error || "Could not close this patient"),
     });
+  };
 
   const submitProposal = (e) => {
     e.preventDefault();
@@ -1554,38 +1577,65 @@ export default function MoStationPage() {
                         : ""}
                     </div>
                   ) : null}
-                  <div className="mo-review-acts">
-                    <button
-                      className="st-btn st-btn-grn"
-                      disabled={busy || review.isPending}
-                      onClick={() => reviewAs("normal")}
-                    >
-                      Normal — I will prescribe
-                    </button>
-                    <button
-                      className="st-btn st-btn-tl"
-                      disabled={busy || review.isPending}
-                      onClick={() => reviewAs("needs_consultant")}
-                    >
-                      Needs the consultant
-                    </button>
-                  </div>
+                  {(() => {
+                    const chosen = chosenOutcome;
+                    if (chosen) {
+                      return (
+                        <div
+                          className={`mo-review-chosen${chosen === "normal" ? "" : " is-consultant"}`}
+                        >
+                          {chosen === "normal"
+                            ? "✓ Normal — you will prescribe. Write the plan, then Close this patient."
+                            : "→ Consultant needed. Write the plan, then Ready for the doctor."}
+                          <button
+                            type="button"
+                            className="mo-review-undo"
+                            disabled={busy || review.isPending}
+                            onClick={() => setPendingOutcome(null)}
+                          >
+                            change
+                          </button>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="mo-review-acts">
+                        <button
+                          className="st-btn st-btn-grn"
+                          disabled={busy || review.isPending}
+                          onClick={() => reviewAs("normal")}
+                        >
+                          Normal — I will prescribe
+                        </button>
+                        <button
+                          className="st-btn st-btn-tl"
+                          disabled={busy || review.isPending}
+                          onClick={() => reviewAs("needs_consultant")}
+                        >
+                          Needs the consultant
+                        </button>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 
               <div className="mo-actions">
-                <button
-                  className="st-btn st-btn-tl"
-                  disabled={busy || !plan.trim()}
-                  onClick={handOver}
-                  title={!plan.trim() ? "Write a plan first" : undefined}
-                >
-                  Ready for the doctor →
-                </button>
-                {patient.canClose ? (
+                {acts.showHandOver && (
+                  <button
+                    className="st-btn st-btn-tl"
+                    disabled={busy || acts.handOverDisabled}
+                    onClick={handOver}
+                    title={acts.handOverDisabled ? "Write a plan first" : undefined}
+                  >
+                    Ready for the doctor →
+                  </button>
+                )}
+                {acts.showClose && (
                   <button
                     className="st-btn st-btn-grn"
-                    disabled={busy || !plan.trim()}
+                    disabled={busy || acts.closeDisabled}
+                    title={acts.closeDisabled ? "Write a plan first" : undefined}
                     onClick={() =>
                       setConfirm({
                         key: "close",
@@ -1599,15 +1649,8 @@ export default function MoStationPage() {
                   >
                     ✓ Close — no doctor needed
                   </button>
-                ) : (
-                  <span className="mo-close-note">
-                    {patient.reportsOutcome === "needs_consultant"
-                      ? "You marked these reports as needing the consultant"
-                      : !plan.trim()
-                        ? "Write a plan before closing this patient"
-                        : "Review the reports before closing this patient"}
-                  </span>
                 )}
+                {acts.note && <span className="mo-close-note">{acts.note}</span>}
               </div>
             </>
           )}

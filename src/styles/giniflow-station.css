@@ -5198,6 +5198,32 @@
   gap: 8px;
   flex-wrap: wrap;
 }
+.gf .mo-review-chosen {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--grn);
+}
+.gf .mo-review-chosen.is-consultant {
+  color: var(--tl);
+}
+.gf .mo-review-undo {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-weight: 500;
+  color: var(--ink2);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.gf .mo-review-undo:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 
 .gf .ci-panel {
   background: var(--white);
