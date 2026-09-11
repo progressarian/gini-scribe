@@ -58,7 +58,10 @@ const refusal = async (fn) => {
 };
 
 let n = 0;
-const makeOrder = async (testName, { payment = "paid", status = "vitals_done" } = {}) => {
+const makeOrder = async (
+  testName,
+  { payment = "paid", status = "vitals_done", vitals = true } = {},
+) => {
   n += 1;
   const { rows: p } = await client.query(
     `INSERT INTO patients (name, file_no) VALUES ($1, $2) RETURNING id`,
@@ -69,6 +72,16 @@ const makeOrder = async (testName, { payment = "paid", status = "vitals_done" } 
      VALUES ($1, $2::date, $3, 'none') RETURNING id`,
     [p[0].id, today, status],
   );
+  // Vitals, recorded by a person. The machine room will not start a test before
+  // them (39-HYBRID-FLOOR-PLAN.md §3 G1), and this suite is about P1/P2/P3 and
+  // the evidence gate — the vitals gate has its own suite in smoke:routing-gates.
+  if (vitals) {
+    await client.query(
+      `INSERT INTO giniflow_visit_events (visit_id, status, actor_role)
+       VALUES ($1, 'vitals_done', 'vitals')`,
+      [v[0].id],
+    );
+  }
   const { rows: o } = await client.query(
     `INSERT INTO giniflow_lab_orders
        (visit_id, urgency, payment_status, amount_total, amount_paid, sample_status, kind)
@@ -261,6 +274,12 @@ try {
     [today, ["exited", "dispensed", "no_show", "cancelled", "abandoned"]],
   );
   if (onFloor.length) {
+    // The machines are all catalogued now, so the unpriced case has to be
+    // created rather than assumed: take Fundus out of the catalogue, prove the
+    // refusal, put it back. Rolled back with everything else either way.
+    await client.query(
+      `UPDATE giniflow_test_catalog SET is_active = FALSE WHERE UPPER(test_name) = 'FUNDUS'`,
+    );
     const unpriced = await refusal(() =>
       addMachineTest(onFloor[0].id, { machineId: "fundus" }, db),
     );

@@ -10,6 +10,7 @@ import {
   columnForStatus,
 } from "../../../shared/giniflowStatus.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
+import { labStepsAreManual } from "../../../shared/manualFloor.js";
 import {
   LAB_ROOMS,
   LAB_RUNGS,
@@ -523,7 +524,16 @@ const assertRoomOwns = (room, stageKey) => {
 // can trend — and one of the two is what "done" is allowed to mean.
 const hasEvidence = (c) => !!c.hasReport || !!c.hasValues;
 
-const stageIndex = (c) => Math.max(healthrayStage(c), floorStage(c));
+// The ladder. HealthRay wins wherever it is further along — it is authoritative
+// about its own lab, and a case it has already received cannot be un-received.
+//
+// Except on a manual floor, where every step is the bench's own tap
+// (39-HYBRID-FLOOR-PLAN.md §15). The case list still arrives so the patient is
+// visible, but its `phlebotomy_status` would otherwise lift a tube to
+// "collected" that nobody here has drawn — a step from the hospital's record by
+// the back door, and the exact thing the floor asked to stop.
+const stageIndex = (c) =>
+  labStepsAreManual() ? floorStage(c) : Math.max(healthrayStage(c), floorStage(c));
 
 export const isCollected = (c) => stageIndex(c) >= stageIndexOf("collected");
 
@@ -592,6 +602,23 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
          LEFT JOIN patients uid
                 ON uid.file_no = lc.raw_list_json->'patient'->>'healthray_uid'
         WHERE lc.case_date = $1::date
+          -- NO DOUBLE ROWS. Once reception or a doctor raises the same patient's
+          -- tests in Scribe, that order is the one the bench works: it carries
+          -- the payment, the manual ladder and the audit trail. The hospital's
+          -- own case for that patient would otherwise sit beside it as a second
+          -- card for one physical tube (39-HYBRID-FLOOR-PLAN.md §15).
+          --
+          -- So the HealthRay list is exactly what it is for: the patients Scribe
+          -- does NOT already know about.
+          AND NOT EXISTS (
+            SELECT 1
+              FROM giniflow_lab_orders o
+              JOIN giniflow_visits gv ON gv.id = o.visit_id
+             WHERE gv.visit_date = lc.case_date
+               AND o.kind = 'lab'
+               AND o.urgency = 'today'
+               AND gv.patient_id = COALESCE(lc.patient_id, uid.id)
+          )
           AND (
             $2::text IS NULL
             OR lc.raw_list_json->'patient'->>'patient_name' ILIKE '%' || $2 || '%'
@@ -847,6 +874,41 @@ async function assertPatientIsFree(db, visitId, what) {
   }
 }
 
+// Vitals come before the bench (39-HYBRID-FLOOR-PLAN.md §3). On the draw only:
+// a tube already collected must not become un-processable because nobody ticked
+// a box upstream, and the analyzer bench never sees the patient anyway.
+//
+// Samples-only registrations are exempt — they never take vitals and never see a
+// doctor, so requiring the step would strand every one of them.
+async function assertVitalsRecorded(db, visitId) {
+  if (!visitId) return;
+  const { rows } = await db.query(
+    `SELECT p.name,
+            (
+              EXISTS (SELECT 1 FROM giniflow_vitals g WHERE g.visit_id = v.id)
+              OR EXISTS (
+                SELECT 1 FROM giniflow_visit_events e
+                 WHERE e.visit_id = v.id
+                   AND e.status IN ('with_vitals', 'vitals_done')
+                   AND e.actor_role <> 'system'
+              )
+            ) AS vitals_recorded,
+            ${labOnlyPredicate("v", "$2")} AS lab_only
+       FROM giniflow_visits v
+       JOIN patients p ON p.id = v.patient_id
+      WHERE v.id = $1`,
+    [visitId, LAB_ONLY_DOCTOR],
+  );
+  if (!rows.length) return;
+  const { name, vitals_recorded, lab_only } = rows[0];
+  if (!lab_only && !vitals_recorded) {
+    throw Object.assign(
+      new Error(`${name} has no vitals recorded yet — the patient goes to vitals before the draw`),
+      { status: 409 },
+    );
+  }
+}
+
 export async function advanceSample(
   orderId,
   { to, actorId = null, reportUrl = null, room = null },
@@ -904,6 +966,7 @@ export async function advanceSample(
     // no-op rather than becoming an error about where the patient is now.
     if (to === "sample_collected") {
       await assertPatientIsFree(client, visitId, "collect the sample");
+      await assertVitalsRecorded(client, visitId);
     }
 
     await client.query(
@@ -1160,8 +1223,10 @@ export async function markLabCaseAction(
     const want = stageIndexOf(STAGE_FOR_ACTION[action]);
 
     // HealthRay has already carried the case past this point, so recording it
-    // here would only add a name to work somebody else did.
-    if (healthrayStage(c) >= want) {
+    // here would only add a name to work somebody else did. Not on a manual
+    // floor: there, the bench's tap IS the record, and refusing it on the
+    // strength of a clock nobody here set would leave the case unworkable.
+    if (!labStepsAreManual() && healthrayStage(c) >= want) {
       throw Object.assign(
         new Error(`The lab has already taken this case past ${ACTION_NOUN[action]}`),
         { status: 409 },

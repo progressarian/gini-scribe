@@ -1,5 +1,10 @@
 import pool from "../../config/db.js";
-import { manualFloor } from "../../../shared/manualFloor.js";
+import {
+  manualFloor,
+  healthrayMayWrite,
+  healthrayTarget,
+  holdOnUnrecorded,
+} from "../../../shared/manualFloor.js";
 import {
   HEALTHRAY_STATUS_TO_CHAIN,
   EXCEPTION_STATUSES,
@@ -11,6 +16,7 @@ import {
 import { slotStartTime } from "../../../shared/slotHour.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { advanceStatus, IST_TODAY } from "./statusEngine.js";
+import { recordHealthrayObservation, firstUnrecordedStation } from "./observation.js";
 
 // Vitals HealthRay recorded, which its appointment status cannot express.
 //
@@ -311,6 +317,8 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
     created: 0,
     advanced: 0,
     unchanged: 0,
+    refused: 0,
+    held: 0,
     skipped: 0,
     errors: 0,
     vitalsObserved: 0,
@@ -412,10 +420,15 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
       ? 0
       : await sweepPharmacyLeg(client, day, await pharmacyGraceMinutes(client));
     result.labOnlySwept = await sweepLabOnlyExits(client, day);
-    const awaitingMedicines = await patientsAwaitingMedicines(client, day);
+    // Only ever used to choose `rx_pending` over `exited`, and on a manual floor
+    // `exited` is not a target the sync can have — so the query is skipped rather
+    // than run every 30 seconds for an answer nothing reads.
+    const awaitingMedicines = manualFloor()
+      ? new Set()
+      : await patientsAwaitingMedicines(client, day);
 
     for (const appt of appts) {
-      const target = HEALTHRAY_STATUS_TO_CHAIN[appt.status];
+      const target = healthrayTarget(appt.status, HEALTHRAY_STATUS_TO_CHAIN);
       if (!target) {
         result.skipped++;
         continue;
@@ -426,14 +439,13 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
       // BEGIN/COMMIT per appointment over the connection pooler is what made a
       // full day take 20 seconds — and a cancelled patient would otherwise open
       // one on every poll, all day, to write an event nobody wants.
-      // A visit that already exists is the floor's, not HealthRay's. Reception
-      // arrives the patient, and every station after that records its own step —
-      // so the sync's job ends at putting the day's list on the board
-      // (38-MANUAL-FLOOR-PLAN.md). Without this the 30-second poll walks a
-      // patient forward that nobody moved, and undoes a no-show reception marked
-      // by hand.
-      if (appt.visit_id && manualFloor()) {
-        result.unchanged++;
+      // A step that belongs to a station is the floor's to record, not
+      // HealthRay's. The sync may only write the steps nobody works — the
+      // consultation, and the two absences (39-HYBRID-FLOOR-PLAN.md §4).
+      // Without this the 30-second poll walks a patient forward that nobody
+      // moved, and undoes a no-show reception marked by hand.
+      if (appt.visit_id && !healthrayMayWrite(target)) {
+        result.refused++;
         continue;
       }
       if (
@@ -471,16 +483,14 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
           result.created++;
         }
 
-        // The list ends here. A visit is created at `booked` and stays there
-        // until a person arrives the patient — including one HealthRay already
-        // shows as checked in, or seen. The guard above skips visits that
-        // already exist without opening a transaction; this one catches the row
-        // that was just created, which would otherwise be walked forward to
-        // HealthRay's status in the same tick — a step from the sync by the back
-        // door (38-MANUAL-FLOOR-PLAN.md).
-        if (manualFloor()) {
+        // The same rule for the row that was just created, which would
+        // otherwise be walked forward to HealthRay's status in the same tick — a
+        // step from the sync by the back door. A visit is created at `booked` and
+        // stays there until a person arrives the patient, including one HealthRay
+        // already shows as checked in.
+        if (!healthrayMayWrite(target)) {
           await client.query("COMMIT");
-          result.unchanged++;
+          result.refused++;
           continue;
         }
 
@@ -503,8 +513,26 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
           continue;
         }
 
+        // THE HOLD. A step HealthRay reports is only written once every station
+        // before it has recorded its own — otherwise the patient stays exactly
+        // where the floor left them and the desk that owes the step is named on
+        // the board. An absence (`no_show`, `cancelled`) is not a step anybody
+        // performs, so it is never held.
+        if (holdOnUnrecorded() && isChainStatus(target)) {
+          const owed = await firstUnrecordedStation(client, visitId);
+          if (owed) {
+            await client.query("COMMIT");
+            result.held++;
+            continue;
+          }
+        }
+
         let effective = target;
-        if (target === "ready_for_doctor" && (await consultRoomFree(client, day))) {
+        if (
+          target === "ready_for_doctor" &&
+          healthrayMayWrite("with_doctor") &&
+          (await consultRoomFree(client, day))
+        ) {
           effective = "with_doctor";
         }
         if (target === "exited" && awaitingMedicines.has(appt.patient_id)) {
@@ -518,7 +546,14 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
           observed_from: currentStatus,
         };
 
+        // The back-fill, and the one place the allowlist has to be checked on a
+        // status other than the target. Advancing a patient into the consultant's
+        // queue used to imply the arrival that must have happened on the way —
+        // which writes reception's own step for them, and hides the fact that the
+        // desk never recorded it. The arrival is theirs; the chain simply carries
+        // the gap, and the rail is drawn from events so the un-ticked step shows.
         if (
+          healthrayMayWrite("checked_in") &&
           isChainStatus(effective) &&
           chainIndex(effective) > chainIndex("checked_in") &&
           (!isChainStatus(currentStatus) || chainIndex(currentStatus) < chainIndex("checked_in")) &&
@@ -550,7 +585,11 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
       }
     }
 
-    return { date: day, considered: appts.length, ...result };
+    // Last, so it reads the floor AFTER this tick's own advances rather than
+    // reporting a gap the same run just closed.
+    const observed = await recordHealthrayObservation(client, day);
+
+    return { date: day, considered: appts.length, ...result, ...observed };
   } finally {
     client.release();
   }

@@ -266,6 +266,89 @@
   color: var(--red);
   font-weight: 600;
 }
+/* HealthRay is ahead of us — a desk has not recorded its step. Amber, not red:
+   the patient is fine, the record is not. */
+.gf .wait4.behind {
+  color: var(--amb, #9a6700);
+  font-weight: 600;
+}
+
+/* ── BEHIND PANEL ── */
+/* Who the floor has not ticked (39-HYBRID-FLOOR-PLAN.md §5.4). Amber rather
+   than red: the patient is fine, the record is not. */
+.gf .behind-panel {
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+.gf .bp-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  font-family: var(--fb);
+  font-size: 11px;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+.gf .bp-head:hover {
+  background: var(--bg);
+}
+.gf .bp-ico {
+  font-size: 12px;
+}
+.gf .bp-sum {
+  font-size: 10px;
+  color: var(--ink3);
+}
+.gf .bp-chev {
+  margin-left: auto;
+  font-size: 9px;
+  color: var(--ink3);
+}
+.gf .bp-group {
+  padding: 0 10px 6px;
+}
+.gf .bp-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) 48px;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 0;
+  border-top: 1px dashed var(--bd);
+  font-size: 10px;
+}
+.gf .bp-name {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--ink);
+}
+.gf .bp-says {
+  color: var(--ink3);
+  min-width: 0;
+}
+.gf .bp-mins {
+  text-align: right;
+  font-weight: 700;
+  color: var(--amb, #9a6700);
+}
+@media (max-width: 700px) {
+  .gf .bp-row {
+    grid-template-columns: minmax(0, 1fr) 48px;
+  }
+  .gf .bp-says {
+    grid-column: 1 / -1;
+  }
+}
 
 /* ── STATION PERF FOOTER ── */
 .gf .perf {

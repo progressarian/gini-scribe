@@ -22,6 +22,22 @@ export function useGiniflowBoard(date) {
   });
 }
 
+// Who the floor has not ticked, grouped by the desk that owes the step
+// (39-HYBRID-FLOOR-PLAN.md §5.4). Polled on the board's own cadence so the
+// count beside the board and the list inside the panel cannot disagree.
+export function useGiniflowBehind(date, enabled = true) {
+  return useQuery({
+    queryKey: ["giniflow", "behind", date || "today"],
+    queryFn: async () =>
+      (await api.get("/api/giniflow/behind", { params: date ? { date } : {} })).data,
+    refetchInterval: pollInterval,
+    refetchIntervalInBackground: false,
+    placeholderData: (prev) => prev,
+    staleTime: 5_000,
+    enabled,
+  });
+}
+
 // Server-side search. The floor can hold 100+ patients and the board only
 // renders what fits, so filtering the loaded cards would quietly miss people.
 // Debounced by the caller; disabled under 2 characters, which the API also

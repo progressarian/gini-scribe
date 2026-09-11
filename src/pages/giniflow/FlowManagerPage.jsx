@@ -26,6 +26,7 @@ import {
 } from "../../../shared/giniflowStatus";
 import {
   useGiniflowBoard,
+  useGiniflowBehind,
   useGiniflowSearch,
   useGiniflowTimeline,
 } from "../../queries/hooks/useGiniflowBoard";
@@ -492,6 +493,14 @@ function PatientCard({
         {!isLab && card.blockedReason && (
           <div className="wait4 blocked">
             <span className="w-ico">🚫</span> {card.blockedReason}
+          </div>
+        )}
+        {card.behind && (
+          <div className="wait4 behind">
+            <span className="w-ico">⚠</span> HealthRay:{" "}
+            {card.behind.healthrayLabel || card.behind.healthrayStatus} · not ticked at{" "}
+            {card.behind.label}
+            {card.behind.minutes > 0 ? ` · ${card.behind.minutes}m` : ""}
           </div>
         )}
         {isLab && card.lab.hint && (
@@ -1098,6 +1107,67 @@ const STAT_FILTERS = {
   },
 };
 
+// Who the floor has not ticked, and which desk owes it
+// (39-HYBRID-FLOOR-PLAN.md §5.4).
+//
+// A worklist, not a dashboard: one row per patient, ordered worst-wait first,
+// grouped under the desk to chase. Collapsed by default — on a floor that is
+// keeping up this is empty, and a panel that is usually empty must not push the
+// board down the page.
+function BehindPanel({ data, open, onToggle }) {
+  const stations = data?.stations || [];
+  const visits = data?.visits || [];
+  const total = data?.total || 0;
+
+  return (
+    <div className="behind-panel">
+      <button type="button" className="bp-head" onClick={onToggle} aria-expanded={open}>
+        <span className="bp-ico">{total ? "⚠" : "✓"}</span>
+        <strong>
+          {total
+            ? `${total} patient${total === 1 ? "" : "s"} a desk has not ticked`
+            : "Every desk is up to date"}
+        </strong>
+        {stations.length > 0 && (
+          <span className="bp-sum">
+            {stations.map((st) => `${st.label} ${st.visits}`).join(" · ")}
+          </span>
+        )}
+        <span className="bp-chev">{open ? "▲" : "▼"}</span>
+      </button>
+
+      {open && total === 0 && (
+        <div className="empty-note">
+          Nothing outstanding — HealthRay is not ahead of the floor anywhere.
+        </div>
+      )}
+
+      {open &&
+        stations.map((st) => (
+          <div className="bp-group" key={st.station}>
+            <div className="grp-lbl grp-lbl-sp">
+              {st.label} — {st.visits} waiting on a tick · longest {st.worstMinutes}m
+            </div>
+            {visits
+              .filter((v) => v.station === st.station)
+              .map((v) => (
+                <div className="bp-row" key={v.visitId}>
+                  <span className="bp-name">
+                    {v.name} <span className="badge b-ink">{v.fileNo}</span>
+                  </span>
+                  <span className="bp-says">
+                    HealthRay: <strong>{v.healthrayStatus || v.healthrayRaw}</strong> · Scribe:{" "}
+                    <strong>{v.scribeStatus}</strong>
+                  </span>
+                  <span className="bp-mins">{v.minutes}m</span>
+                </div>
+              ))}
+          </div>
+        ))}
+    </div>
+  );
+}
+
 function StatTile({ value, unit, label, sub, colour, dark, filterKey, activeFilter, onFilter }) {
   const clickable = !!filterKey;
   const active = clickable && activeFilter === filterKey;
@@ -1144,6 +1214,9 @@ export default function FlowManagerPage() {
   const [date, setDate] = useState(null);
   const [search, setSearch] = useState("");
   const [toast, setToast] = useState("");
+  // Collapsed until asked for: on a floor that is keeping up the panel is empty,
+  // and an empty panel must not push the board down the page.
+  const [behindOpen, setBehindOpen] = useState(false);
   const [drag, setDrag] = useState(null);
   const [pendingMove, setPendingMove] = useState(null);
   const toastTimer = useRef(null);
@@ -1154,6 +1227,7 @@ export default function FlowManagerPage() {
   const debouncedSearch = useDebounced(search, 250);
   const { data: searchData, isFetching: searching } = useGiniflowSearch(debouncedSearch, date);
   const { data, isLoading, isError, error, dataUpdatedAt } = useGiniflowBoard(date);
+  const { data: behind } = useGiniflowBehind(date);
   const expired = error?.response?.status === 401;
   const pauseVisit = useGiniflowPauseVisit();
   const resumeVisit = useGiniflowResumeVisit();
@@ -1541,6 +1615,8 @@ export default function FlowManagerPage() {
           onFilter={setStatFilter}
         />
       </div>
+
+      <BehindPanel data={behind} open={behindOpen} onToggle={() => setBehindOpen((v) => !v)} />
 
       {(filter || searchActive) && (
         <div className="filter-bar">

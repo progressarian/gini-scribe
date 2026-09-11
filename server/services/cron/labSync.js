@@ -51,7 +51,7 @@ export function getLabSyncStatus() {
 }
 
 // ── Process a single case (list row) ────────────────────────────────────────
-async function processCase(listRow) {
+async function processCase(listRow, { listOnly = false } = {}) {
   const caseNo = listRow.case_no;
   const patientCaseNo = listRow.patient_case_no;
   const caseUid = listRow.case_uid;
@@ -88,6 +88,17 @@ async function processCase(listRow) {
   if (!patientId) {
     patientId = await ensureLabPatient(patient);
   }
+
+  // LIST ONLY (39-HYBRID-FLOOR-PLAN.md §15). The anchor row and the patient
+  // match above are the whole point: they are what puts the patient on the
+  // bench's screen. Everything below — the detail fetch, the results, the report
+  // PDF — is HealthRay telling us what the lab found, and on this floor the
+  // bench files that itself.
+  //
+  // It also stops the two heaviest calls per case (case_detail and the
+  // puppeteer PDF render), which were the bulk of the request volume that
+  // repeatedly tripped HealthRay's WAF.
+  if (listOnly) return { listed: true, written: 0 };
 
   // Step c: fetch case detail
   let detail;
@@ -178,7 +189,7 @@ function todayIST() {
 }
 
 // ── Main sync run ────────────────────────────────────────────────────────────
-export async function runLabSync(dateStr) {
+export async function runLabSync(dateStr, { listOnly = false } = {}) {
   if (status.isRunning) {
     log("Skip", "Already running");
     return;
@@ -202,7 +213,12 @@ export async function runLabSync(dateStr) {
     // Skip cancelled — dedup handled inside processCase via ON CONFLICT
     const newCases = allCases.filter((c) => c.case_status !== "Cancelled");
 
-    log("Fetch", `${date} | ${allCases.length} cases from API | ${newCases.length} to process`);
+    log(
+      "Fetch",
+      `${date} | ${allCases.length} cases from API | ${newCases.length} to process${
+        listOnly ? " | LIST ONLY — the bench files its own results" : ""
+      }`,
+    );
 
     if (newCases.length === 0) {
       status.lastResult = { date, cases: 0, written: 0 };
@@ -215,7 +231,7 @@ export async function runLabSync(dateStr) {
     let errors = 0;
     for (const c of newCases) {
       try {
-        const r = await processCase(c);
+        const r = await processCase(c, { listOnly });
         if (r?.written) written += r.written;
         if (r?.error) errors++;
       } catch (e) {

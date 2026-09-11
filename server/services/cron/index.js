@@ -10,7 +10,7 @@ import {
   forceResyncDate,
   syncAppointmentStatuses,
 } from "./healthraySync.js";
-import { manualFloor } from "../../../shared/manualFloor.js";
+import { manualFloor, labCaseListOnly } from "../../../shared/manualFloor.js";
 import {
   runLabSync,
   retryPendingLabCases,
@@ -227,7 +227,11 @@ function scheduleNextLabSync(delayMs) {
     if (!labLoopRunning) return;
     const startedAt = Date.now();
     try {
-      await withWatchdog(runLabSync(), LAB_WATCHDOG_MS, "Lab sync");
+      await withWatchdog(
+        runLabSync(undefined, { listOnly: labCaseListOnly() }),
+        LAB_WATCHDOG_MS,
+        "Lab sync",
+      );
     } catch (e) {
       console.error("[Cron] Lab sync failed:", e.message);
     }
@@ -258,9 +262,9 @@ function scheduleNextGiniflowSync(delayMs) {
         "Gini Flow appointment sync",
       );
       // Only speak up when something moved — this runs every 30s all day.
-      if (r && (r.created || r.advanced || r.errors)) {
+      if (r && (r.created || r.advanced || r.errors || r.behind)) {
         console.log(
-          `[Cron] Gini Flow sync: ${r.created} created, ${r.advanced} advanced, ${r.errors} errors of ${r.considered} in ${Date.now() - startedAt}ms`,
+          `[Cron] Gini Flow sync: ${r.created} created, ${r.advanced} advanced, ${r.refused} refused (a station's own step), ${r.held} held at an un-recorded step, ${r.behind} behind a desk, ${r.errors} errors of ${r.considered} in ${Date.now() - startedAt}ms`,
         );
       }
     } catch (e) {
@@ -362,9 +366,18 @@ export function startCronJobs() {
   // timer that can drift behind a long-running sync.
   console.log("[Cron] Starting lab sync (continuous loop, 30–40s break between runs)...");
 
-  // The lab's own record is the floor's now: cases, results and report PDFs all
-  // come from somebody at a bench pressing a button (38-MANUAL-FLOOR-PLAN.md).
-  if (manualFloor()) {
+  // The lab's own record is the floor's: results and report PDFs come from
+  // somebody at a bench pressing a button (38-MANUAL-FLOOR-PLAN.md). But the
+  // Chief and the consultants order their tests in HealthRay, so the case LIST
+  // still syncs — otherwise those patients reach no bench at all
+  // (39-HYBRID-FLOOR-PLAN.md §15).
+  if (labCaseListOnly()) {
+    console.log(
+      "[Cron] Lab sync LIST ONLY — HealthRay says who needs a test; the bench records every step",
+    );
+    labLoopRunning = true;
+    scheduleNextLabSync(0);
+  } else if (manualFloor()) {
     console.log("[Cron] Lab HealthRay sync OFF — Scribe is the system of record");
   } else {
     labLoopRunning = true;

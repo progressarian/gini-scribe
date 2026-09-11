@@ -18,6 +18,10 @@ import {
   docTypeToMachine,
   MACHINE_DOC_TYPES,
 } from "../../../shared/machineStages.js";
+import { UNDRAWN_SAMPLE_STATUSES } from "../../../shared/labStages.js";
+import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
+
+const UNDRAWN_LAB = UNDRAWN_SAMPLE_STATUSES.map((v) => `'${v}'`).join(", ");
 
 // The machine room (36-MACHINE-TEST-STATION-PLAN.md).
 //
@@ -134,6 +138,54 @@ async function assertMachineFree(db, machineId, visitDate, exceptOrderId = null)
   }
 }
 
+// The floor's order of operations (39-HYBRID-FLOOR-PLAN.md §3): vitals first,
+// and where a patient is billed for blood as well, the draw before the machine.
+// Enforced on the START of the test only — a test already running must never
+// become unfinishable because of a box nobody ticked upstream.
+async function assertReadyToStart(db, visitId, machineName) {
+  if (!visitId) return;
+  const { rows } = await db.query(
+    `SELECT p.name,
+            (
+              EXISTS (SELECT 1 FROM giniflow_vitals g WHERE g.visit_id = v.id)
+              OR EXISTS (
+                SELECT 1 FROM giniflow_visit_events e
+                 WHERE e.visit_id = v.id
+                   AND e.status IN ('with_vitals', 'vitals_done')
+                   AND e.actor_role <> 'system'
+              )
+            ) AS vitals_recorded,
+            ${labOnlyPredicate("v", "$2")} AS lab_only,
+            EXISTS (
+              SELECT 1 FROM giniflow_lab_orders lo
+               WHERE lo.visit_id = v.id AND lo.urgency = 'today' AND lo.kind = 'lab'
+                 AND lo.sample_status IN (${UNDRAWN_LAB})
+            ) AS blood_not_drawn
+       FROM giniflow_visits v
+       JOIN patients p ON p.id = v.patient_id
+      WHERE v.id = $1`,
+    [visitId, LAB_ONLY_DOCTOR],
+  );
+  if (!rows.length) return;
+  const { name, vitals_recorded, lab_only, blood_not_drawn } = rows[0];
+  if (!lab_only && !vitals_recorded) {
+    throw Object.assign(
+      new Error(
+        `${name} has no vitals recorded yet — the patient goes to vitals before the ${machineName}`,
+      ),
+      { status: 409 },
+    );
+  }
+  if (blood_not_drawn) {
+    throw Object.assign(
+      new Error(
+        `${name} is billed for blood as well — Lab 1 draws the sample before the ${machineName}`,
+      ),
+      { status: 409 },
+    );
+  }
+}
+
 export async function getMachineQueue(
   visitDate,
   q = null,
@@ -153,7 +205,25 @@ export async function getMachineQueue(
             last_ev.occurred_at AS since,
             (SELECT doc.id FROM documents doc WHERE doc.giniflow_lab_order_id = o.id)
               AS report_doc_id,
-            EXISTS (SELECT 1 FROM lab_results lr WHERE lr.lab_order_id = o.id) AS has_values
+            EXISTS (SELECT 1 FROM lab_results lr WHERE lr.lab_order_id = o.id) AS has_values,
+            -- The two sequencing gates (39-HYBRID-FLOOR-PLAN.md §3). Asked of the
+            -- table, not of the screen: a technician with a stale tab must be
+            -- refused by the service, not merely shown no button.
+            (
+              EXISTS (SELECT 1 FROM giniflow_vitals g WHERE g.visit_id = v.id)
+              OR EXISTS (
+                SELECT 1 FROM giniflow_visit_events e
+                 WHERE e.visit_id = v.id
+                   AND e.status IN ('with_vitals', 'vitals_done')
+                   AND e.actor_role <> 'system'
+              )
+            ) AS vitals_recorded,
+            ${labOnlyPredicate("v", "$3")} AS lab_only,
+            EXISTS (
+              SELECT 1 FROM giniflow_lab_orders lo
+               WHERE lo.visit_id = o.visit_id AND lo.urgency = 'today' AND lo.kind = 'lab'
+                 AND lo.sample_status IN (${UNDRAWN_LAB})
+            ) AS blood_not_drawn
        FROM giniflow_lab_orders o
        JOIN giniflow_visits v ON v.id = o.visit_id
        JOIN patients p ON p.id = v.patient_id
@@ -185,7 +255,7 @@ export async function getMachineQueue(
           )
         )
       ORDER BY o.created_at`,
-    [visitDate, search],
+    [visitDate, search, LAB_ONLY_DOCTOR],
   );
 
   const all = rows.map((r) => {
@@ -199,17 +269,27 @@ export async function getMachineQueue(
     const hasEvidence = !!r.report_doc_id || !!r.has_values || !!r.report_file_url;
     // The offer, and every reason it might not be there. Computed once, here,
     // so the screen never shows a button the service would refuse.
+    // Both gates apply to STARTING the test and nothing else. A test already on
+    // the machine must never become unfinishable because of a box nobody ticked
+    // upstream — that would trap a patient mid-test.
+    const starting = next?.advanceTo === "in_progress";
+    const needsVitals = starting && !r.lab_only && !r.vitals_recorded;
+    const needsBloodFirst = starting && r.blood_not_drawn;
     const blockedReason = !paid
       ? r.payment_status === "insurance_claim"
         ? `Insurance claim submitted — waiting for approval (₹${outstandingOf(r)} outstanding)`
         : `Waiting for reception to clear payment — ₹${outstandingOf(r)} outstanding`
-      : next?.needsPatient && !free
-        ? finished
-          ? "Patient has left the floor"
-          : `In the ${(COLUMN_NAME[columnForStatus(r.current_status)] || "").toLowerCase()} room — call once free`
-        : (next?.key === "done" || next?.key === "reported") && !hasEvidence
-          ? "Type the values in or attach the report to finish this test"
-          : null;
+      : needsVitals
+        ? "Vitals not recorded yet — the patient goes to vitals first"
+        : needsBloodFirst
+          ? "Blood not drawn yet — Lab 1 collects before the machine"
+          : next?.needsPatient && !free
+            ? finished
+              ? "Patient has left the floor"
+              : `In the ${(COLUMN_NAME[columnForStatus(r.current_status)] || "").toLowerCase()} room — call once free`
+            : (next?.key === "done" || next?.key === "reported") && !hasEvidence
+              ? "Type the values in or attach the report to finish this test"
+              : null;
 
     return {
       orderId: r.id,
@@ -514,6 +594,11 @@ export async function advanceMachineTest(
       await assertPatientIsFree(client, row.visit_id, rung.actionNoun);
     }
     if (toStage === "in_progress") {
+      await assertReadyToStart(
+        client,
+        row.visit_id,
+        machineFor(machineOf(row.names.map((n) => ({ name: n }))))?.name || "machine",
+      );
       await assertMachineFree(
         client,
         machineOf(row.names.map((n) => ({ name: n }))),

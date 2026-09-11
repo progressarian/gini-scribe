@@ -12,6 +12,7 @@ import {
   giniflowReorderSchema,
   giniflowMoveSchema,
   giniflowNoticeSchema,
+  giniflowBehindQuerySchema,
 } from "../schemas/index.js";
 import { CAPABILITIES as CAP } from "../../shared/permissions.js";
 import { publishNotice, realtimeStatus } from "../services/giniflow/realtimeBus.js";
@@ -26,6 +27,7 @@ import {
   searchDayVisits,
   boardClock,
 } from "../services/giniflow/board.js";
+import { getBehindTheFloor, getBehindVisits } from "../services/giniflow/observation.js";
 import {
   LAB_ONLY_DOCTOR,
   labOnlyPredicate,
@@ -179,6 +181,29 @@ const istToday = async () =>
   (await pool.query(`SELECT (NOW() AT TIME ZONE 'Asia/Kolkata')::date::text AS d`)).rows[0].d;
 
 const resolveDate = async (raw) => (/^\d{4}-\d{2}-\d{2}$/.test(raw || "") ? raw : await istToday());
+
+// Who is behind, and which desk owes the step (39-HYBRID-FLOOR-PLAN.md §5.4).
+//
+// Read-only, and on the board's own capability rather than a new one: it answers
+// the same question the board does — where is everybody — and the answer is only
+// useful to whoever is already responsible for the floor.
+router.get(
+  "/giniflow/behind",
+  requireCapability(CAP.GINIFLOW_BOARD),
+  validateQuery(giniflowBehindQuerySchema),
+  async (req, res) => {
+    try {
+      const date = await resolveDate(req.query.date);
+      const [stations, visits] = await Promise.all([
+        getBehindTheFloor(date, pool),
+        getBehindVisits(date, pool, { station: req.query.station || null }),
+      ]);
+      res.json({ date, stations, visits, total: stations.reduce((n, s) => n + s.visits, 0) });
+    } catch (e) {
+      handleError(res, e, "Gini Flow behind");
+    }
+  },
+);
 
 // Everything the board needs in one request. serverTime lets the client tick its
 // timers against the server rather than a wall display's drifting clock.

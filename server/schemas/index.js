@@ -742,6 +742,13 @@ export const giniflowJourneyOrderSchema = z.object({
   stepIds: z.array(z.string().uuid()).min(1).max(40),
 });
 
+// The Behind panel: a day, and optionally one station to narrow to. The station
+// is validated against the shared list rather than accepted as free text, so a
+// typo is a 400 and never a silently empty panel.
+export const giniflowBehindQuerySchema = giniflowDateQuerySchema.extend({
+  station: z.enum(["reception", "vitals", "lab", "lab_results", "machine"]).optional(),
+});
+
 // Reception's arrivals tab: the same day + optional search shape the board's
 // own search uses, so a receptionist's query behaves identically on both screens.
 export const giniflowArrivalsQuerySchema = giniflowDateQuerySchema.extend({

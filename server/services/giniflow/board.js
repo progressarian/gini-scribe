@@ -15,6 +15,7 @@ import {
   WAIT_SINCE_SQL,
 } from "../../../shared/giniflowStatus.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
+import { BEHIND_STATION_LABEL, healthrayChainStatus } from "./observation.js";
 import { IST_TODAY, budgetColour } from "./statusEngine.js";
 
 export async function getSlaConfig(db = pool) {
@@ -76,6 +77,9 @@ const BOARD_SQL = `
          v.priority_reason,
          v.queue_position,
          v.queue_column,
+         v.healthray_status,
+         v.healthray_status_at,
+         v.behind_station,
          v.appointment_time::text                  AS appointment_time,
          p.name                                    AS patient_name,
          p.file_no,
@@ -393,6 +397,18 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
         row.queue_column && row.queue_column === columnForStatus(row.current_status)
           ? row.queue_position
           : null,
+      // What HealthRay says about this patient, when the floor has not caught up
+      // (39-HYBRID-FLOOR-PLAN.md §5.4). Present only when a desk is actually
+      // behind, so a card carries the warning or nothing at all — never a
+      // reassuring "in agreement" badge nobody needs to read.
+      behind: row.behind_station
+        ? {
+            station: row.behind_station,
+            label: BEHIND_STATION_LABEL[row.behind_station] || row.behind_station,
+            healthrayLabel: STATUS_LABEL[healthrayChainStatus(row.healthray_status)] || null,
+            minutes: minutesSince(row.healthray_status_at, now),
+          }
+        : null,
       labOnly,
       // Nothing left for the lab to do. Used to retire a finished patient from
       // the lab track: a sample that was never collected is still worth showing

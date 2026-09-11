@@ -64,9 +64,14 @@ const sync = await readFile(
   new URL("../services/giniflow/appointmentSync.js", import.meta.url),
   "utf8",
 );
+// Superseded by the per-status allowlist (39-HYBRID-FLOOR-PLAN.md §4): the
+// blanket "write nothing" became "write only the consultation", so the guard is
+// now on the TARGET rather than on the flag. What has to stay true is that a
+// visit which already exists is not walked forward by a poll — asserted here on
+// the shape, and end to end in smoke:hybrid-floor.
 check(
-  "an existing visit is left alone",
-  /if \(appt\.visit_id && manualFloor\(\)\)/.test(sync),
+  "an existing visit is only touched for a step the sync may write",
+  /if \(appt\.visit_id && !healthrayMayWrite\(target\)\)/.test(sync),
   "the 30s poll must not walk a patient forward",
 );
 check(
@@ -80,12 +85,12 @@ check(
   /manualFloor\(\)\s*\?\s*0\s*:\s*await sweepPharmacyLeg/.test(sync),
 );
 // The back door: a brand-new visit is created at `booked`, then the same tick
-// advances it to whatever HealthRay says. Skipping only EXISTING visits leaves
-// that path open, so the guard has to appear twice.
+// advances it to whatever HealthRay says. Guarding only EXISTING visits leaves
+// that path open, so the check has to appear twice.
 check(
   "a newly created visit is not advanced either",
-  (sync.match(/manualFloor\(\)/g) || []).length >= 3,
-  `${(sync.match(/manualFloor\(\)/g) || []).length} guards`,
+  (sync.match(/healthrayMayWrite\(target\)/g) || []).length >= 2,
+  `${(sync.match(/healthrayMayWrite\(target\)/g) || []).length} guards`,
 );
 check(
   "and a visit is only ever created at 'booked'",

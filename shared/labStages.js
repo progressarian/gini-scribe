@@ -290,3 +290,11 @@ export const ACTION_PAST_LABEL = Object.fromEntries(
 );
 
 export const railForStage = LAB_RUNGS.map((r) => r.rail);
+
+// A tube still in the patient — every sample status before the draw. One
+// definition because more than one station now has to ask the question: the
+// machine room will not start a test while blood is still owed, and the
+// observation layer names Lab 1 as the desk behind.
+export const UNDRAWN_SAMPLE_STATUSES = LAB_RUNGS.filter(
+  (r) => stageIndexOf(r.key) < stageIndexOf("collected"),
+).flatMap((r) => r.sampleStatuses);
