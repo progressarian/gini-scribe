@@ -12,7 +12,12 @@ import LiveBadge from "../../components/giniflow/LiveBadge";
 import StationNotice from "../../components/giniflow/StationNotice";
 import LabResultsForm from "../../components/giniflow/LabResultsForm";
 import PdfViewerModal from "../../components/visit/PdfViewerModal";
-import { MACHINES, MACHINE_RUNGS, machineFor } from "../../../shared/machineStages.js";
+import {
+  MACHINES,
+  MACHINE_RUNGS,
+  MACHINE_RAIL,
+  machineFor,
+} from "../../../shared/machineStages.js";
 import "../../styles/giniflow-station.css";
 import "./MachineStationPage.css";
 
@@ -362,7 +367,11 @@ export default function MachineStationPage() {
   const [group, setGroup] = useState("all");
   const [openId, setOpenId] = useState(null);
   const [viewingDoc, setViewingDoc] = useState(null);
-  const [showRecon, setShowRecon] = useState(false);
+  // Open by default. Both halves are the day's record, and on a floor where
+  // the machines are still run outside Scribe the record IS the story — a tap
+  // to reveal it buried the only number worth reading.
+  const [showRecon, setShowRecon] = useState(true);
+  const [showDone, setShowDone] = useState(true);
   const [toast, setToast] = useState("");
   const toastTimer = useRef(null);
 
@@ -390,6 +399,40 @@ export default function MachineStationPage() {
   const machines = data?.machines || MACHINES.map((m) => ({ ...m, total: 0, waiting: 0 }));
   const counts = data?.counts || {};
   const unassigned = data?.unassigned || [];
+
+  // What the queue is showing: everything except the filed tests, which have
+  // their own section. The "All" count has to agree with the rows on screen, or
+  // it reads as a promise the board does not keep.
+  const openTotal = (data?.total ?? 0) - (counts.reported ?? 0);
+
+  // The day's record, both halves grouped by PATIENT. A diabetic foot screen is
+  // an ABI, a VPT and a Fundus on one person, so a row per test listed the same
+  // patient three times and eleven rows read as eleven people.
+  const doneHere = (() => {
+    const byPatient = new Map();
+    for (const o of rowsFor(MACHINE_RUNGS.find((r) => r.key === "reported"))) {
+      if (!byPatient.has(o.patientId)) {
+        byPatient.set(o.patientId, {
+          patientId: o.patientId,
+          name: o.name,
+          fileNo: o.fileNo,
+          age: o.age,
+          sex: o.sex,
+          orderedBy: o.orderedBy,
+          where: o.station,
+          machines: [],
+          at: null,
+        });
+      }
+      const e = byPatient.get(o.patientId);
+      if (o.machine && !e.machines.includes(o.machine)) e.machines.push(o.machine);
+      if (o.uploadedAt && (!e.at || o.uploadedAt > e.at)) e.at = o.uploadedAt;
+    }
+    return [...byPatient.values()].sort((a, b) => (b.at || "").localeCompare(a.at || ""));
+  })();
+
+  // Already one row per patient — the service groups it (machineStation.js).
+  const reconRows = reconciliation.data?.rows || [];
 
   const onAdvance = (order, to) =>
     advance.mutate(
@@ -493,9 +536,15 @@ export default function MachineStationPage() {
                 aria-pressed={group === "all"}
                 onClick={() => setGroup("all")}
               >
-                All<span className="sq-fcount">{data?.total ?? 0}</span>
+                All<span className="sq-fcount">{openTotal}</span>
               </button>
-              {MACHINE_RUNGS.filter((r) => counts[r.filter] || group === r.filter).map((r) => (
+              {/* No `reported` chip: filed tests are not in the queue any more —
+                  they live in "Done here today" at the foot of the page, with
+                  their own count. A chip that filtered the board down to rows
+                  the board no longer draws showed an empty screen. */}
+              {MACHINE_RUNGS.filter(
+                (r) => r.key !== "reported" && (counts[r.filter] || group === r.filter),
+              ).map((r) => (
                 <button
                   key={r.filter}
                   type="button"
@@ -539,13 +588,20 @@ export default function MachineStationPage() {
                         </span>
                         {m.icon} {m.name}
                         <span className="sq-count">
-                          {m.onIt ? `▶ ${m.onIt.name}` : waitLabel(m)} · {mine.length} today
+                          {m.onIt ? `▶ ${m.onIt.name}` : waitLabel(m)} ·{" "}
+                          {mine.filter((o) => o.stage !== "reported").length} open
                         </span>
                       </button>
                     </h2>
                     <div id={`machine-${m.id}`} hidden={!open}>
-                      {!mine.length && <div className="empty-note">Nothing on this machine.</div>}
-                      {MACHINE_RUNGS.map((rung) => {
+                      {!mine.filter((o) => o.stage !== "reported").length && (
+                        <div className="empty-note">Nothing waiting on this machine.</div>
+                      )}
+                      {/* `reported` is left out here on purpose: a filed test is
+                          finished work, and it belongs in the day's record at the
+                          foot of the page rather than padding the queue a
+                          technician is working from. */}
+                      {MACHINE_RUNGS.filter((r) => r.key !== "reported").map((rung) => {
                         const rows = mine.filter((o) => o.stage === rung.key);
                         if (!rows.length) return null;
                         return (
@@ -602,47 +658,168 @@ export default function MachineStationPage() {
             </div>
           )}
 
-          {/* The tests that happened without ever touching this screen. Honest
-              about the gap rather than pretending the queue is the whole story. */}
-          {/* A RECORD of the day, not work to do — collapsed by default and
-              last on the page, because every row is a test that already
-              happened and almost always a patient who has already left. */}
-          {(reconciliation.data?.rows || []).length > 0 && (
-            <div className="mroom__stage mroom__recon">
-              <h2 className="sq-gh">
-                <button
-                  type="button"
-                  className="sq-toggle"
-                  aria-expanded={showRecon}
-                  aria-controls="machine-recon"
-                  onClick={() => setShowRecon((v) => !v)}
-                >
-                  <span className={`sq-chev${showRecon ? " open" : ""}`} aria-hidden="true">
-                    ▸
-                  </span>
-                  📥 Ran today without an order
-                  <span className="sq-count">{reconciliation.data.rows.length}</span>
-                </button>
-              </h2>
-              <div id="machine-recon" hidden={!showRecon}>
-                <div className="grp-hint">
-                  Reports that arrived from the hospital sync for patients with no test ordered
-                  here. Nothing to do with them — the report is already on the chart, and nobody can
-                  say afterwards who ran the test or when. Kept as the day&apos;s record.
+          {/* The day's record, in two halves, side by side: what happened
+              without this room, and what it did itself. Both are finished work —
+              neither is a queue — so they sit together at the foot of the page.
+              The unaccounted half reads first because it is the half with
+              something to say. */}
+          {(reconRows.length > 0 || doneHere.length > 0) && (
+            <div className="mroom__record">
+              <div className="mroom__record-col">
+                <div className="grp-lbl">
+                  <button
+                    type="button"
+                    className="sq-toggle"
+                    aria-expanded={showRecon}
+                    aria-controls="machine-recon"
+                    onClick={() => setShowRecon((v) => !v)}
+                  >
+                    <span className={`sq-chev${showRecon ? " open" : ""}`} aria-hidden="true">
+                      ▸
+                    </span>
+                    📥 Ran today without an order
+                  </button>
+                  <span className="grp-split">{reconRows.length}</span>
                 </div>
-                <div className="mroom__recon-list">
-                  {reconciliation.data.rows.map((r) => (
-                    <div key={r.docId} className="mroom__recon-row">
-                      <span className="badge b-ink">
-                        {machineFor(r.machine)?.icon} {machineFor(r.machine)?.name || r.docType}
-                      </span>
-                      <span className="mroom__recon-name">{r.name}</span>
-                      <span className={`mroom__recon-where${r.gone ? " is-gone" : ""}`}>
-                        {r.where}
-                      </span>
-                      <span className="mroom__recon-at">{clock(r.at)}</span>
-                    </div>
-                  ))}
+                <div id="machine-recon" hidden={!showRecon}>
+                  <div className="grp-hint">
+                    Reports that arrived from the hospital sync for patients with no test ordered
+                    here. Nothing to do with them — the report is already on the chart, and nobody
+                    can say afterwards who ran the test or when. Kept as the day&apos;s record.
+                  </div>
+                  {!reconRows.length && <div className="empty-note">Nothing unaccounted for.</div>}
+                  <div className="pt-list">
+                    {reconRows.map((r) => {
+                      const mins = minutesSince(r.at);
+                      return (
+                        <div
+                          key={r.patientId}
+                          className="pt-card hr-case is-readonly"
+                          aria-disabled="true"
+                        >
+                          <div className="pc-av" style={{ background: avatarColour(r.patientId) }}>
+                            {initials(r.name)}
+                          </div>
+                          <div className="pc-body">
+                            <div className="pc-name">
+                              {r.name}
+                              {r.fileNo && <span className="badge b-ink">{r.fileNo}</span>}
+                            </div>
+                            <div className="pc-meta">
+                              {r.reports.length} report{r.reports.length === 1 ? "" : "s"} · latest{" "}
+                              {clock(r.at)}
+                            </div>
+                            <div className="pc-tests">
+                              {r.reports
+                                .map(
+                                  (rep) =>
+                                    `${machineFor(rep.machine)?.icon || "📄"} ${
+                                      machineFor(rep.machine)?.name || rep.docType
+                                    }`,
+                                )
+                                .join(" · ")}
+                            </div>
+                            <div className="lab-blocked">
+                              ⏸ Ran outside this room — no step can be recorded after the fact
+                            </div>
+                          </div>
+                          <div className="pc-r">
+                            {mins !== null && (
+                              <div className={`pc-time${mins > 120 ? " late" : ""}`}>{mins}m</div>
+                            )}
+                            <div className="pc-tlbl">since the report</div>
+                            <div className="hr-where">
+                              <div className={`sp ${r.gone ? "sp-process" : "sp-ready"}`}>
+                                {r.gone ? "Has left" : "On the floor"}
+                              </div>
+                              <div className="pc-tlbl">{r.where}</div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mroom__record-col">
+                <div className="grp-lbl">
+                  <button
+                    type="button"
+                    className="sq-toggle"
+                    aria-expanded={showDone}
+                    aria-controls="machine-done"
+                    onClick={() => setShowDone((v) => !v)}
+                  >
+                    <span className={`sq-chev${showDone ? " open" : ""}`} aria-hidden="true">
+                      ▸
+                    </span>
+                    ✅ Done here today
+                  </button>
+                  <span className="grp-split">{doneHere.length}</span>
+                </div>
+                <div id="machine-done" hidden={!showDone}>
+                  <div className="grp-hint">
+                    Tests this room ran and filed. One row per patient — a foot screen is three
+                    tests on one person, not three people.
+                  </div>
+                  {!doneHere.length && <div className="empty-note">Nothing filed here yet.</div>}
+                  <div className="pt-list">
+                    {doneHere.map((r) => {
+                      const mins = minutesSince(r.at);
+                      return (
+                        <div key={r.patientId} className="pt-card is-readonly" aria-disabled="true">
+                          <div className="pc-av" style={{ background: avatarColour(r.patientId) }}>
+                            {initials(r.name)}
+                          </div>
+                          <div className="pc-body">
+                            <div className="pc-name">
+                              {r.name}
+                              {r.fileNo && <span className="badge b-ink">{r.fileNo}</span>}
+                            </div>
+                            <div className="pc-meta">
+                              {[
+                                r.age && r.sex ? `${r.age}${r.sex[0]}` : r.age,
+                                r.orderedBy && `Ordered by ${r.orderedBy}`,
+                                `filed ${clock(r.at)}`,
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </div>
+                            <div className="pc-tests">
+                              {r.machines
+                                .map(
+                                  (id) =>
+                                    `${machineFor(id)?.icon || ""} ${machineFor(id)?.name || id}`,
+                                )
+                                .join(" · ")}
+                            </div>
+                            <div className="steps">
+                              {MACHINE_RAIL.map((name, i) => (
+                                <span key={name}>
+                                  <span className="step step-done">{name} ✓</span>
+                                  {i < MACHINE_RAIL.length - 1 && (
+                                    <span className="step-arr">›</span>
+                                  )}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="pc-r">
+                            <div className="sp sp-done">Reported</div>
+                            {mins !== null && <div className="pc-time">{mins}m</div>}
+                            <div className="pc-tlbl">since filing</div>
+                            <div className="hr-where">
+                              <div className="sp sp-ready">
+                                {r.machines.length} test{r.machines.length === 1 ? "" : "s"}
+                              </div>
+                              <div className="pc-tlbl">{r.where}</div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             </div>

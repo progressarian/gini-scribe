@@ -727,19 +727,39 @@ export async function getMachineReconciliation(visitDate, db = pool) {
       LIMIT 200`,
     [visitDate, MACHINE_DOC_TYPES, FINISHED],
   );
-  return rows.map((r) => ({
-    docId: r.id,
-    machine: docTypeToMachine[r.doc_type] || null,
-    docType: r.doc_type,
-    title: r.title,
-    patientId: r.patient_id,
-    name: r.name,
-    fileNo: r.file_no,
-    at: r.created_at ? new Date(r.created_at).toISOString() : null,
-    // Where the patient is now. Almost always gone: a report reaches us after
-    // the test, and the test after the patient has moved on. Shown so nobody
-    // reads this list as work to do.
-    where: whereTheyAre(r.current_status),
-    gone: !r.current_status || FINISHED.includes(r.current_status),
-  }));
+  // One row per PATIENT, not per report. A diabetic foot screen is an ABI, a VPT
+  // and a Fundus, so reporting per document listed the same person three times
+  // and a list of eleven rows was four people.
+  const byPatient = new Map();
+  for (const r of rows) {
+    const key = r.patient_id;
+    if (!byPatient.has(key)) {
+      byPatient.set(key, {
+        patientId: r.patient_id,
+        name: r.name,
+        fileNo: r.file_no,
+        reports: [],
+        // Where the patient is now. Almost always gone: a report reaches us
+        // after the test, and the test after the patient has moved on. Shown so
+        // nobody reads this list as work to do.
+        where: whereTheyAre(r.current_status),
+        gone: !r.current_status || FINISHED.includes(r.current_status),
+        at: null,
+      });
+    }
+    const entry = byPatient.get(key);
+    const at = r.created_at ? new Date(r.created_at).toISOString() : null;
+    entry.reports.push({
+      docId: r.id,
+      machine: docTypeToMachine[r.doc_type] || null,
+      docType: r.doc_type,
+      title: r.title,
+      at,
+    });
+    // The latest report of the set — what the row is timed by, so the list reads
+    // most-recent-first as one patient rather than interleaving their tests.
+    if (at && (!entry.at || at > entry.at)) entry.at = at;
+  }
+
+  return [...byPatient.values()].sort((a, b) => (b.at || "").localeCompare(a.at || ""));
 }
