@@ -443,6 +443,7 @@ export default function MachineStationPage() {
 
   const rowsFor = (rung) => data?.[rung.bucket] || [];
   const allRows = MACHINE_RUNGS.flatMap((r) => rowsFor(r));
+  const running = allRows.filter((o) => o.stage === "in_progress");
   const openOrder = allRows.find((o) => o.orderId === openId) || null;
   const machines = data?.machines || MACHINES.map((m) => ({ ...m, total: 0, waiting: 0 }));
   const counts = data?.counts || {};
@@ -637,6 +638,38 @@ export default function MachineStationPage() {
             </div>
           )}
 
+          {!isLoading && running.length > 0 && (
+            <div className="mroom__now">
+              <div className="grp-lbl">
+                ▶️ On the machine now
+                <span className="grp-split">{running.length}</span>
+              </div>
+              <div className="mroom__now-grid">
+                {MACHINES.filter((m) => running.some((o) => o.machine === m.id)).map((m) => (
+                  <section key={m.id} className="mroom__now-machine">
+                    <h2 className="sq-gh">
+                      {m.icon} {m.name}
+                      <span className="sq-count">{m.fullName}</span>
+                    </h2>
+                    <div className="mroom__list">
+                      {running
+                        .filter((o) => o.machine === m.id)
+                        .map((o) => (
+                          <TestCard
+                            key={o.orderId}
+                            order={o}
+                            busy={busy}
+                            onAdvance={onAdvance}
+                            onOpen={(x) => setOpenId(x.orderId)}
+                          />
+                        ))}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            </div>
+          )}
+
           {isLoading && <div className="empty-note">Loading…</div>}
 
           {!isLoading && (
@@ -686,7 +719,9 @@ export default function MachineStationPage() {
                           finished work, and it belongs in the day's record at the
                           foot of the page rather than padding the queue a
                           technician is working from. */}
-                            {MACHINE_RUNGS.filter((r) => r.key !== "reported").map((rung) => {
+                            {MACHINE_RUNGS.filter(
+                              (r) => r.key !== "reported" && r.key !== "in_progress",
+                            ).map((rung) => {
                               const rows = mine.filter((o) => o.stage === rung.key);
                               if (!rows.length) return null;
                               return (

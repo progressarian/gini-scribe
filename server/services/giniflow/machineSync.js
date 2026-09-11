@@ -10,7 +10,7 @@ const { log, error } = createLogger("Machine Sync");
 const MACHINE_CATEGORY = /machine|radiolog|imaging/i;
 const SCAN_BATCH = Number(process.env.SCRIBE_MACHINE_SCAN_BATCH || 12);
 const RESCAN_MIN = Number(process.env.SCRIBE_MACHINE_RESCAN_MIN || 20);
-const FINISHED = ["dispensed", "exited", "no_show", "cancelled"];
+const NEVER_ARRIVED = ["no_show", "cancelled"];
 
 const flatten = (v) =>
   String(v || "")
@@ -112,7 +112,7 @@ async function scanTargets(visitDate, db, limit) {
         AND (v.machine_scan_at IS NULL OR v.machine_scan_at < NOW() - ($3 || ' minutes')::interval)
       ORDER BY v.machine_scan_at NULLS FIRST, v.created_at
       LIMIT $4`,
-    [visitDate, FINISHED, String(RESCAN_MIN), limit],
+    [visitDate, NEVER_ARRIVED, String(RESCAN_MIN), limit],
   );
   return rows.filter((r) => r.hr_patient_id);
 }
