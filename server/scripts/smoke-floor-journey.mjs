@@ -202,13 +202,64 @@ try {
     after[0].results_status,
   );
 
-  console.log("\n── 6 · The consultant is the step HealthRay drives ─────────");
+  console.log("\n── 5b · No doctor until every report is in ─────────────────");
+  // The floor's rule: "we will wait for both reports to be uploaded then only
+  // pt will proceed to sd consultation". Re-checked with a fresh open order, so
+  // the gate is proven against BOTH doctor steps and against a person, not just
+  // against the sync.
+  const { rows: extra } = await client.query(
+    `INSERT INTO giniflow_lab_orders
+       (visit_id, urgency, payment_status, amount_total, amount_paid, sample_status, kind)
+     VALUES ($1, 'today', 'paid', 400, 400, 'paid', 'lab') RETURNING id`,
+    [vid],
+  );
+  const { advanceStatus } = await import("../services/giniflow/statusEngine.js");
+  for (const step of ["sd_pending", "with_sd", "ready_for_doctor", "with_doctor"]) {
+    const blocked = await refusal(async () => {
+      await client.query("SAVEPOINT g");
+      try {
+        await advanceStatus(client, { visitId: vid, toStatus: step, actorRole: "coordinator" });
+      } finally {
+        await client.query("ROLLBACK TO SAVEPOINT g");
+      }
+    });
+    check(`a person cannot move them to ${step}`, blocked?.status === 409, blocked?.message);
+  }
+  // Report filed → the gate opens.
+  await advanceSample(extra[0].id, { to: "sample_collected" }, db);
+  for (const to of ["sample_sent", "sample_received", "processing", "results_ready", "uploaded"]) {
+    await advanceSample(extra[0].id, { to }, db);
+  }
+  const opened = await refusal(async () => {
+    await client.query("SAVEPOINT g2");
+    try {
+      await advanceStatus(client, {
+        visitId: vid,
+        toStatus: "sd_pending",
+        actorRole: "coordinator",
+      });
+    } finally {
+      await client.query("ROLLBACK TO SAVEPOINT g2");
+    }
+  });
+  // The patient sits at `checked_in` in this suite, so the chain's own
+  // one-step rule still refuses the jump — which is the point: the REPORT is no
+  // longer what is stopping them.
+  check(
+    "and the reports stop being the reason once the last one is filed",
+    opened === null || !/waiting on a report/.test(opened.message),
+    opened?.message || "allowed",
+  );
+
+  console.log("\n── 6 · The doctor steps are what HealthRay drives ──────────");
   await hrSays("in_visit");
   await syncAppointmentsToFlow({ date: day, db });
   const s3 = await statusOf();
+  // The Chief Endocrinologist Station is the floor's first doctor stop, and the
+  // Chief works entirely in HealthRay — so `in_visit` lands there.
   check(
-    "the sync moves the patient to the consultant",
-    ["ready_for_doctor", "with_doctor"].includes(s3.current_status),
+    "the sync moves the patient to the Chief Endocrinologist Station",
+    ["sd_pending", "with_sd"].includes(s3.current_status),
     s3.current_status,
   );
 

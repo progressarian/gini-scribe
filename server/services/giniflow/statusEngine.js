@@ -15,6 +15,8 @@ import {
 
 import { syncFromStatus } from "./journey.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
+import { REPORTED_LAB_STATUSES } from "../../../shared/labStages.js";
+import { MACHINE_RUNGS } from "../../../shared/machineStages.js";
 import pool from "../../config/db.js";
 
 export const IST_TODAY = `(NOW() AT TIME ZONE 'Asia/Kolkata')::date`;
@@ -70,6 +72,72 @@ async function assertNotLabOnly(client, visitId, toStatus) {
   }
 }
 
+// The doctor steps, and the one thing that must be true before a patient may
+// reach either of them (39-HYBRID-FLOOR-PLAN.md §16).
+//
+// The floor's rule, in its own words: "we will wait for both reports to be
+// uploaded then only pt will proceed to sd consultation". So a test that is
+// ordered and not yet reported holds the patient short of the doctor — both the
+// Chief and the Consultant.
+//
+// It cannot block the FIRST visit to the Chief, which is where the tests get
+// ordered in the first place: at that moment the visit has no orders, so the
+// gate does not fire. It bites afterwards, which is exactly when it should.
+//
+// Enforced here rather than on a screen because four different callers move a
+// patient toward a doctor — the board's drag, the MO's "ready for doctor", the
+// consultant claiming a patient, and the sync. One gate covers all of them.
+const DOCTOR_STATUSES = ["sd_pending", "with_sd", "ready_for_doctor", "with_doctor"];
+
+// What "reported" means, from both ladders — the lab's and the machine room's.
+// One order table holds both kinds, so the gate has to accept either room's
+// final rung or it would hold a patient whose machine test is long since filed.
+const REPORTED_SAMPLE_STATUSES = [
+  ...new Set([
+    ...REPORTED_LAB_STATUSES,
+    ...MACHINE_RUNGS.filter((r) => r.key === "reported").flatMap((r) => r.sampleStatuses),
+  ]),
+];
+
+async function assertReportsAreIn(client, visitId, toStatus) {
+  if (!DOCTOR_STATUSES.includes(toStatus)) return;
+  // Only the FIRST arrival at the doctor leg is gated.
+  //
+  // Once a patient has been with the Chief, they are in the Chief's hands for
+  // the rest of the day — and the Chief is who orders the tests. Re-claiming
+  // them after a release, or moving them on to the consultant from inside that
+  // leg, is not "proceeding to consultation"; it is the same care continuing.
+  // Gating it would forbid the exact loop the floor described: chief orders,
+  // patient goes to the lab, comes back, chief reviews.
+  const { rows: been } = await client.query(
+    `SELECT 1 FROM giniflow_visit_events
+      WHERE visit_id = $1 AND status = ANY($2::text[]) LIMIT 1`,
+    [visitId, DOCTOR_STATUSES],
+  );
+  if (been.length) return;
+
+  const { rows } = await client.query(
+    `SELECT count(*)::int AS outstanding,
+            string_agg(DISTINCT t.test_name, ', ') AS tests
+       FROM giniflow_lab_orders o
+       LEFT JOIN giniflow_lab_order_tests t ON t.lab_order_id = o.id
+      WHERE o.visit_id = $1
+        AND o.urgency = 'today'
+        AND o.sample_status <> ALL($2::text[])`,
+    [visitId, REPORTED_SAMPLE_STATUSES],
+  );
+  const { outstanding, tests } = rows[0];
+  if (outstanding > 0) {
+    throw Object.assign(
+      new Error(
+        `${outstanding} test${outstanding === 1 ? "" : "s"} still waiting on a report` +
+          `${tests ? ` (${tests})` : ""} — the patient sees the doctor once every report is in`,
+      ),
+      { status: 409 },
+    );
+  }
+}
+
 // Appends one event and moves the visit's denormalised status. Caller supplies
 // the client so the write joins whatever transaction it belongs to — the fan-out
 // triggers that land with the station screens must be atomic with the status change.
@@ -103,6 +171,16 @@ export async function advanceStatus(
 
   const fromStatus = current.rows[0].current_status;
   await assertNotLabOnly(client, visitId, toStatus);
+  // Only on a forward move: a patient sent BACK to the chief's queue by a
+  // consultant who stepped out must not be trapped by a report that is still
+  // out, and neither must one the floor is correcting.
+  if (
+    !isChainStatus(fromStatus) ||
+    !isChainStatus(toStatus) ||
+    chainIndex(toStatus) > chainIndex(fromStatus)
+  ) {
+    await assertReportsAreIn(client, visitId, toStatus);
+  }
   // `allowSkip` says: the caller knows the patient is HERE, and does not claim
   // to know every step they took to arrive. That is the real rule (CS-12) — an
   // earlier comment here said "never a station screen", which four callers now

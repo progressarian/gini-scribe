@@ -127,6 +127,19 @@ async function consultRoomFree(client, visitDate) {
   return rows.length === 0;
 }
 
+// The same rule for the Chief Endocrinologist's room. One patient at a time:
+// the Chief works in HealthRay, so nobody here will ever move them out of the
+// room, and without this every patient of the day would read as being with the
+// Chief simultaneously.
+async function chiefRoomFree(client, visitDate) {
+  const { rows } = await client.query(
+    `SELECT 1 FROM giniflow_visits
+      WHERE visit_date = $1::date AND current_status = 'with_sd' LIMIT 1`,
+    [visitDate],
+  );
+  return rows.length === 0;
+}
+
 // The pharmacy leg HealthRay cannot see, and the one visit it may not close.
 //
 // A prescription written in Scribe is closed by a station screen or not at all:
@@ -534,6 +547,13 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
           (await consultRoomFree(client, day))
         ) {
           effective = "with_doctor";
+        }
+        if (
+          target === "sd_pending" &&
+          healthrayMayWrite("with_sd") &&
+          (await chiefRoomFree(client, day))
+        ) {
+          effective = "with_sd";
         }
         if (target === "exited" && awaitingMedicines.has(appt.patient_id)) {
           effective = "rx_pending";

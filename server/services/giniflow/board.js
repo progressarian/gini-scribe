@@ -13,6 +13,8 @@ import {
   NOT_A_MARKER_SQL,
   JOURNEY_START_SQL,
   WAIT_SINCE_SQL,
+  isChainStatus,
+  chainIndex,
 } from "../../../shared/giniflowStatus.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { BEHIND_STATION_LABEL, healthrayChainStatus } from "./observation.js";
@@ -80,6 +82,13 @@ const BOARD_SQL = `
          v.healthray_status,
          v.healthray_status_at,
          v.behind_station,
+         -- Tests ordered today whose report is not filed. Derived, never a
+         -- status: the patient has not moved anywhere, and nobody performed a
+         -- step called "waiting". It is a fact about their orders, and the card
+         -- says so rather than leaving them looking idle (39 §16).
+         (SELECT count(*)::int FROM giniflow_lab_orders o
+           WHERE o.visit_id = v.id AND o.urgency = 'today'
+             AND o.sample_status NOT IN ('uploaded', 'reported')) AS reports_outstanding,
          v.appointment_time::text                  AS appointment_time,
          p.name                                    AS patient_name,
          p.file_no,
@@ -409,6 +418,14 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
             minutes: minutesSince(row.healthray_status_at, now),
           }
         : null,
+      // Waiting on the lab, not on a person. Shown only while they are short of
+      // the doctor — past that point the reports are in by definition.
+      awaitingReports:
+        row.reports_outstanding > 0 &&
+        isChainStatus(row.current_status) &&
+        chainIndex(row.current_status) < chainIndex("sd_pending")
+          ? row.reports_outstanding
+          : 0,
       labOnly,
       // Nothing left for the lab to do. Used to retire a finished patient from
       // the lab track: a sample that was never collected is still worth showing

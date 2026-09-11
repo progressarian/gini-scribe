@@ -42,6 +42,12 @@ export const MANUAL_FLOOR_STOPS = [
 // they are the absence of an arrival, and HealthRay is the only thing that knows
 // (39 §7 D2).
 export const HEALTHRAY_MAY_WRITE = [
+  // The Chief Endocrinologist Station — the floor's first doctor stop, and the
+  // one the Chief works entirely in HealthRay. Both rungs, because the sync
+  // parks the patient in the queue and moves them into the room only when the
+  // room is free.
+  "sd_pending",
+  "with_sd",
   "ready_for_doctor",
   "with_doctor",
   "rx_pending",
@@ -80,6 +86,15 @@ export const holdOnUnrecorded = () =>
 // `labStepsAreManual` enforces on the ladder.
 export const labCaseListOnly = () => manualFloor() && process.env.SCRIBE_LAB_CASE_LIST !== "0";
 
+// And whether the lab SCREEN shows them. The two go together on purpose: a
+// station worked manually must not also list work it did not receive — with the
+// case list off, a row the floor never ordered is a patient the bench cannot
+// bill, collect against or close, and the queue stops being a worklist.
+//
+// Historical cases stay on the patient's chart either way. This is only about
+// what the two lab rooms are asked to work today.
+export const labShowsHealthrayCases = () => labCaseListOnly();
+
 // HealthRay's lab clocks are not steps anybody on this floor performed. With the
 // list-only sync there is no detail payload to read them from anyway, but the
 // list row still carries `phlebotomy_status`, which would silently lift a case
@@ -100,5 +115,39 @@ export const labStepsAreManual = () => manualFloor();
 export const healthrayTarget = (healthrayStatus, statusMap) => {
   const target = statusMap[healthrayStatus];
   if (manualFloor() && target === "exited") return "rx_pending";
+  // HealthRay's `in_visit` means "the patient has reached a doctor" and says no
+  // more than that. On this floor the first doctor is the Chief Endocrinologist,
+  // so that is where the patient lands — the raw map's `ready_for_doctor` sent
+  // every one of them to the consultant's queue and left the Chief's screen
+  // permanently empty, which is not what the floor does.
+  if (manualFloor() && target === "ready_for_doctor") return "sd_pending";
   return target;
 };
+
+// The machine room's one exception, and it is the lab's exception exactly
+// (39-HYBRID-FLOOR-PLAN.md §15 applied to §16).
+//
+// The Chief and the consultants raise ABI, VPT, Fundus, TMT and ECG in
+// HealthRay, where they are billed as a "Machine Test" line. With nothing
+// syncing, the station's five machines read "nothing today" while the machines
+// themselves ran all day: 12 tests on 4 patients on 11 Sep 2026, none of them
+// ever on the screen.
+//
+//   in   the patient, and which machines the hospital billed for them
+//   out  HealthRay's reports, its timestamps, and any notion of a step
+//
+// Every rung after the order — start, done, report — is the technician's own
+// tap, which is what `machineShowsHealthrayReports` refuses to do for them.
+export const machineCaseListOnly = () =>
+  manualFloor() && process.env.SCRIBE_MACHINE_CASE_LIST !== "0";
+
+// Whether a report that arrived through the document sync may stand in for work
+// the station never recorded.
+//
+// It may not. The reconciliation list was the only thing the machine screen
+// showed, and it showed finished tests under a heading that read "Done today" —
+// so a station nobody had used looked like a station doing its work. A PDF is
+// evidence that a machine ran; it is not a record of who ran it, when it
+// started, or how long the patient waited, and those are the only things this
+// station exists to record.
+export const machineShowsHealthrayReports = () => !machineCaseListOnly();

@@ -37,7 +37,8 @@ console.log("── What the sync may write ────────────
 await withFlag(true, async ({ healthrayMayWrite, HEALTHRAY_MAY_WRITE }) => {
   check(
     "the consultation, and the two absences",
-    HEALTHRAY_MAY_WRITE.join(",") === "ready_for_doctor,with_doctor,rx_pending,no_show,cancelled",
+    HEALTHRAY_MAY_WRITE.join(",") ===
+      "sd_pending,with_sd,ready_for_doctor,with_doctor,rx_pending,no_show,cancelled",
     HEALTHRAY_MAY_WRITE.join(" "),
   );
   // Every other step on the chain belongs to a station. Asserted over the whole
@@ -46,7 +47,8 @@ await withFlag(true, async ({ healthrayMayWrite, HEALTHRAY_MAY_WRITE }) => {
   check("no other chain step is writable", leaked.length === 0, leaked.join(", ") || "none");
   check("reception's arrival is refused", !healthrayMayWrite("checked_in"));
   check("the vitals station's step is refused", !healthrayMayWrite("vitals_done"));
-  check("the Chief/MO column is refused — it stays manual", !healthrayMayWrite("with_sd"));
+  check("the Chief Endocrinologist Station is writable", healthrayMayWrite("with_sd"));
+  check("and so is its queue", healthrayMayWrite("sd_pending"));
   check("the Rx desk's own step is refused", !healthrayMayWrite("with_rx"));
   check("the pharmacy's steps are refused", !healthrayMayWrite("dispensed"));
   check("and the exit is refused", !healthrayMayWrite("exited"));
@@ -62,8 +64,9 @@ await withFlag(true, async ({ healthrayTarget }) => {
     );
   }
   check(
-    "'in_visit' still parks in the consultant's queue",
-    healthrayTarget("in_visit", HEALTHRAY_STATUS_TO_CHAIN) === "ready_for_doctor",
+    "'in_visit' lands at the Chief Endocrinologist Station, the first doctor stop",
+    healthrayTarget("in_visit", HEALTHRAY_STATUS_TO_CHAIN) === "sd_pending",
+    healthrayTarget("in_visit", HEALTHRAY_STATUS_TO_CHAIN),
   );
   check(
     "'scheduled' still creates the visit at booked",
@@ -76,6 +79,10 @@ await withFlag(false, async ({ healthrayMayWrite, healthrayTarget }) => {
   check(
     "'completed' closes the visit again",
     healthrayTarget("completed", HEALTHRAY_STATUS_TO_CHAIN) === "exited",
+  );
+  check(
+    "and 'in_visit' goes back to the consultant's queue",
+    healthrayTarget("in_visit", HEALTHRAY_STATUS_TO_CHAIN) === "ready_for_doctor",
   );
   check(
     "and every step is writable again",
@@ -214,8 +221,8 @@ try {
 
   const inVisitStatus = await statusOf(inVisit.patientId);
   check(
-    "a patient in the consultation stage reaches the consultant",
-    ["ready_for_doctor", "with_doctor"].includes(inVisitStatus),
+    "a patient in the consultation stage reaches the Chief Endocrinologist",
+    ["sd_pending", "with_sd"].includes(inVisitStatus),
     inVisitStatus,
   );
 

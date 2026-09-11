@@ -135,6 +135,11 @@ export const CAPABILITIES = {
   // because nothing is drawn here — the patient sits at a machine, and the
   // person who runs them is not a phlebotomist.
   GINIFLOW_STATION_MACHINE: "GINIFLOW_STATION_MACHINE",
+  // Taking a wrongly-attached report back off a machine test. Its own key, and
+  // deliberately not in the technician's list: the upload is routine, undoing
+  // one takes a report off a patient's chart. ADMIN is ALL, so it lands there
+  // and nowhere else until somebody grants it.
+  GINIFLOW_MACHINE_REPORT_REMOVE: "GINIFLOW_MACHINE_REPORT_REMOVE",
   GINIFLOW_STATION_DOCTOR: "GINIFLOW_STATION_DOCTOR", // the consultant's queue and consult screen
   GINIFLOW_MO_CLOSE: "GINIFLOW_MO_CLOSE", // end a visit without the consultant, prescription and all
   GINIFLOW_STATION_MO: "GINIFLOW_STATION_MO", // MO/SD workup, order tests, hand over

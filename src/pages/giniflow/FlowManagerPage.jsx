@@ -495,6 +495,12 @@ function PatientCard({
             <span className="w-ico">🚫</span> {card.blockedReason}
           </div>
         )}
+        {!isLab && card.awaitingReports > 0 && (
+          <div className="wait4">
+            <span className="w-ico">⏳</span> Waiting for {card.awaitingReports} report
+            {card.awaitingReports === 1 ? "" : "s"} — the doctor sees them once every one is in
+          </div>
+        )}
         {card.behind && (
           <div className="wait4 behind">
             <span className="w-ico">⚠</span> HealthRay:{" "}

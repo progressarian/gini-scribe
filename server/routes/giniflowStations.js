@@ -140,6 +140,7 @@ import {
   getMachineReconciliation,
   addMachineTest,
   machineCandidates,
+  removeMachineReport,
 } from "../services/giniflow/machineStation.js";
 import {
   getDoctorQueue,
@@ -1629,6 +1630,22 @@ router.post(
         });
       }
       handleError(res, e, "Gini Flow machine report");
+    }
+  },
+);
+
+router.delete(
+  "/giniflow/stations/machine/:orderId/report",
+  requireCapability(CAP.GINIFLOW_MACHINE_REPORT_REMOVE),
+  async (req, res) => {
+    try {
+      res.json(
+        await removeMachineReport(req.params.orderId, {
+          actorId: req.doctor?.doctor_id ?? null,
+        }),
+      );
+    } catch (e) {
+      handleError(res, e, "Gini Flow machine report delete");
     }
   },
 );

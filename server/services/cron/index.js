@@ -10,7 +10,7 @@ import {
   forceResyncDate,
   syncAppointmentStatuses,
 } from "./healthraySync.js";
-import { manualFloor, labCaseListOnly } from "../../../shared/manualFloor.js";
+import { manualFloor, labCaseListOnly, machineCaseListOnly } from "../../../shared/manualFloor.js";
 import {
   runLabSync,
   retryPendingLabCases,
@@ -27,6 +27,7 @@ import { getLoginCooldownMs } from "../healthray/client.js";
 import { BATCH_ENABLED, processBatchQueue } from "../batch/batchQueue.js";
 import { BATCH_HANDLERS } from "../batch/handlers.js";
 import { syncAppointmentsToFlow } from "../giniflow/appointmentSync.js";
+import { runMachineSync } from "../giniflow/machineSync.js";
 import { autoCategoriseDay } from "../giniflow/triage.js";
 
 // ── Sync intervals ─────────────────────────────────────────────────────────
@@ -79,6 +80,7 @@ const GINIFLOW_WATCHDOG_MS = 5 * 60 * 1000;
 // Deliberately slow: tomorrow's list changes on the scale of phone calls, not
 // seconds, and a whole-day sweep is not something to run every 30s.
 const TRIAGE_LOOP_BREAK_MS = Number(process.env.GINIFLOW_TRIAGE_BREAK_MS) || 5 * 60 * 1000;
+const MACHINE_LOOP_BREAK_MS = Number(process.env.GINIFLOW_MACHINE_BREAK_MS) || 90 * 1000;
 
 const LAB_LOOP_MIN_BREAK_MS = Number(process.env.LAB_LOOP_MIN_BREAK_MS) || 120 * 1000;
 const LAB_LOOP_MAX_BREAK_MS = Number(process.env.LAB_LOOP_MAX_BREAK_MS) || 180 * 1000;
@@ -246,6 +248,28 @@ function scheduleNextLabSync(delayMs) {
   }, delayMs);
 }
 
+let machineLoopRunning = false;
+let machineLoopTimeoutId = null;
+
+function scheduleNextMachineSync(delayMs) {
+  if (!machineLoopRunning) return;
+  machineLoopTimeoutId = setTimeout(async () => {
+    machineLoopTimeoutId = null;
+    if (!machineLoopRunning) return;
+    try {
+      const r = await runMachineSync();
+      if (r.raised) {
+        console.log(
+          `[Cron] Machine case list: raised ${r.raised} order(s) from ${r.scanned} visit(s)`,
+        );
+      }
+    } catch (e) {
+      console.error("[Cron] Machine case list failed:", e.message);
+    }
+    scheduleNextMachineSync(MACHINE_LOOP_BREAK_MS);
+  }, delayMs);
+}
+
 let giniflowLoopRunning = false;
 let giniflowLoopTimeoutId = null;
 
@@ -394,6 +418,15 @@ export function startCronJobs() {
     console.log(
       `[Cron] Gini Flow appointment sync every ${Math.round(GINIFLOW_LOOP_BREAK_MS / 1000)}s`,
     );
+    if (machineCaseListOnly()) {
+      machineLoopRunning = true;
+      scheduleNextMachineSync(15_000);
+      console.log(
+        `[Cron] Machine case list ON — HealthRay says who was billed for a machine test; the technician records every step (every ${Math.round(MACHINE_LOOP_BREAK_MS / 1000)}s)`,
+      );
+    } else {
+      console.log("[Cron] Machine case list OFF by SCRIBE_MACHINE_CASE_LIST=0");
+    }
     triageLoopRunning = true;
     scheduleNextTriagePrep(20_000);
     console.log(
@@ -592,6 +625,11 @@ export function startCronJobs() {
 }
 
 export function stopCronJobs() {
+  machineLoopRunning = false;
+  if (machineLoopTimeoutId) {
+    clearTimeout(machineLoopTimeoutId);
+    machineLoopTimeoutId = null;
+  }
   giniflowLoopRunning = false;
   if (giniflowLoopTimeoutId) {
     clearTimeout(giniflowLoopTimeoutId);

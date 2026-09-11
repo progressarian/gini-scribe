@@ -219,6 +219,42 @@ check("claiming a patient who has not had vitals is refused", tooEarly);
 await pool.query(`UPDATE giniflow_visits SET current_status = 'vitals_done' WHERE id = $1`, [
   target.visitId,
 ]);
+
+// The report gate (39-HYBRID-FLOOR-PLAN.md §16). The demo day seeds this
+// patient with tests still out, and the floor's rule is that no doctor step may
+// be reached until every report is filed — so claiming them is refused first,
+// and the suite proves that before clearing the way for the checks below.
+const { rows: openOrders } = await pool.query(
+  `SELECT count(*)::int AS c FROM giniflow_lab_orders
+    WHERE visit_id = $1 AND urgency = 'today'
+      AND sample_status NOT IN ('uploaded', 'reported')`,
+  [target.visitId],
+);
+if (openOrders[0].c > 0) {
+  // Only a patient who has NOT yet been with a doctor is held — the demo day
+  // seeds some of these mid-consultation, and once the Chief has them the loop
+  // "order tests, go to the lab, come back" must not be forbidden. The gate
+  // itself is proven end to end in smoke:floor-journey.
+  const { rows: been } = await pool.query(
+    `SELECT 1 FROM giniflow_visit_events
+      WHERE visit_id = $1
+        AND status IN ('sd_pending','with_sd','ready_for_doctor','with_doctor') LIMIT 1`,
+    [target.visitId],
+  );
+  if (!been.length) {
+    const heldByReports = await startWorkup(target.visitId, null)
+      .then(() => false)
+      .catch((e) => e.status === 409 && /waiting on a report/.test(e.message));
+    check("claiming a patient whose reports are still out is refused", heldByReports);
+  }
+  await pool.query(
+    `UPDATE giniflow_lab_orders SET sample_status = 'uploaded'
+      WHERE visit_id = $1 AND urgency = 'today'
+        AND sample_status NOT IN ('uploaded', 'reported')`,
+    [target.visitId],
+  );
+}
+
 await startWorkup(target.visitId, null);
 const started = await one(`SELECT current_status FROM giniflow_visits WHERE id = $1`, [
   target.visitId,

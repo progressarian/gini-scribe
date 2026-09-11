@@ -291,6 +291,12 @@ export const ACTION_PAST_LABEL = Object.fromEntries(
 
 export const railForStage = LAB_RUNGS.map((r) => r.rail);
 
+// A lab order whose result is filed. The far end of the ladder, named so the
+// chain's own report gate does not have to hardcode it.
+export const REPORTED_LAB_STATUSES = LAB_RUNGS.filter(
+  (r) => stageIndexOf(r.key) >= stageIndexOf("reported"),
+).flatMap((r) => r.sampleStatuses);
+
 // A tube still in the patient — every sample status before the draw. One
 // definition because more than one station now has to ask the question: the
 // machine room will not start a test while blood is still owed, and the

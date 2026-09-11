@@ -103,3 +103,12 @@ export function useUploadMachineReport() {
     onSuccess: () => invalidate(queryClient),
   });
 }
+
+export function useRemoveMachineReport() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ orderId }) =>
+      (await api.delete(`/api/giniflow/stations/machine/${orderId}/report`)).data,
+    onSuccess: () => invalidate(queryClient),
+  });
+}

@@ -2,6 +2,7 @@ import pool from "../../config/db.js";
 import { promoteLabReport, promoteQuietly } from "./promote.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config/storage.js";
 import { advanceStatus } from "./statusEngine.js";
+import { advanceMachineTest } from "./machineStation.js";
 import { opensLabGate, outstandingOf } from "../../../shared/labPayment.js";
 import {
   BOARD_COLUMNS,
@@ -10,7 +11,7 @@ import {
   columnForStatus,
 } from "../../../shared/giniflowStatus.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
-import { labStepsAreManual } from "../../../shared/manualFloor.js";
+import { labStepsAreManual, labShowsHealthrayCases } from "../../../shared/manualFloor.js";
 import {
   LAB_ROOMS,
   LAB_RUNGS,
@@ -255,7 +256,13 @@ export async function getLabQueue(
   { group = "all", room = null } = {},
 ) {
   const search = q && String(q).trim().length >= 2 ? String(q).trim() : null;
-  const healthray = await getHealthrayCases(visitDate, search, db, room);
+  // A fully manual lab works only what Scribe was asked for. With the case list
+  // off, showing the hospital's own cases would put work on the bench's screen
+  // that nobody here ordered and the bench cannot bill, collect against or
+  // close — so the two switch together (39-HYBRID-FLOOR-PLAN.md §15).
+  const healthray = labShowsHealthrayCases()
+    ? await getHealthrayCases(visitDate, search, db, room)
+    : [];
   // Only the collection room can do anything about an unregistered patient —
   // there is no sample for the analyzer bench to be missing.
   const awaiting =
@@ -1106,7 +1113,8 @@ export async function uploadReport(
   }
 
   const { rows } = await db.query(
-    `SELECT o.payment_status, o.sample_status, o.report_file_url, o.uploaded_at, v.patient_id
+    `SELECT o.payment_status, o.sample_status, o.report_file_url, o.uploaded_at, o.kind,
+            v.patient_id
        FROM giniflow_lab_orders o
        JOIN giniflow_visits v ON v.id = o.visit_id
       WHERE o.id = $1`,
@@ -1134,7 +1142,7 @@ export async function uploadReport(
   }
 
   const safeName = String(fileName || "report.pdf").replace(/[^a-zA-Z0-9._-]/g, "_");
-  const storagePath = `giniflow/lab/${rows[0].patient_id}/${Date.now()}_${safeName}`;
+  const storagePath = `giniflow/${rows[0].kind === "machine" ? "machine" : "lab"}/${rows[0].patient_id}/${Date.now()}_${safeName}`;
 
   const resp = await fetch(`${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`, {
     method: "POST",
@@ -1165,7 +1173,11 @@ export async function uploadReport(
   // The file is stored, so now mark it uploaded — which is what notifies the MO.
   // Done through advanceSample so trigger 1 and the event log are the same code
   // path whether or not a file was attached.
-  await advanceSample(orderId, { to: "uploaded", actorId, reportUrl: url }, db);
+  if (rows[0].kind === "machine") {
+    await advanceMachineTest(orderId, { to: "reported", actorId, reportUrl: url }, db);
+  } else {
+    await advanceSample(orderId, { to: "uploaded", actorId, reportUrl: url }, db);
+  }
 
   // Onto the patient's record. `documents` is what the doctor's Labs tab reads
   // and what the patient app reads — a report that stays on the lab order is a

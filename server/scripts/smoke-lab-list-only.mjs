@@ -48,12 +48,22 @@ const refusal = async (fn) => {
   }
 };
 
-console.log("── The switches ────────────────────────────────────────────");
-const { labCaseListOnly, labStepsAreManual, manualFloor } =
+console.log("── The switches, as the floor has them ─────────────────────");
+const { labCaseListOnly, labStepsAreManual, labShowsHealthrayCases, manualFloor } =
   await import("../../shared/manualFloor.js");
 check("the manual floor is on", manualFloor());
-check("the case list syncs", labCaseListOnly(), "HealthRay says who needs a test");
-check("and every lab step is the bench's own", labStepsAreManual());
+check("every lab step is the bench's own", labStepsAreManual());
+// The floor chose a fully manual lab on 11 Sep: the two rooms work only what
+// Scribe was asked for. The list-only path below is still exercised, because it
+// is one environment variable away and has to keep working.
+check(
+  "the lab works only orders raised in Scribe",
+  !labCaseListOnly() && !labShowsHealthrayCases(),
+  "SCRIBE_LAB_CASE_LIST=0",
+);
+process.env.SCRIBE_LAB_CASE_LIST = "1";
+check("turning the list back on is one variable", labCaseListOnly());
+check("which also puts the cases back on the screen", labShowsHealthrayCases());
 
 console.log("\n── The sync fetches the list and stops there ───────────────");
 const labSyncSrc = await (
@@ -196,6 +206,9 @@ try {
 } catch (e) {
   check("the suite ran to the end", false, `threw: ${e.message}`);
 } finally {
+  // Put the floor's own setting back, so a suite cannot leave the lab wired
+  // differently from how the floor runs it.
+  process.env.SCRIBE_LAB_CASE_LIST = "0";
   await client.query("ROLLBACK");
   client.release();
   const { rows: left } = await pool.query(

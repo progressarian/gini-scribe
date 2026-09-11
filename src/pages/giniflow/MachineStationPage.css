@@ -289,3 +289,9 @@
   flex-wrap: wrap;
   gap: 6px;
 }
+
+/* The queue is the working half and carries the wider cards, so it takes the
+   larger share — the reverse of the arrivals split it borrows. */
+.gf.mroom .ar-split {
+  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+}

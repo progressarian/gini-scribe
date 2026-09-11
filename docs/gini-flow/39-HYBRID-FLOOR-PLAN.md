@@ -527,3 +527,61 @@ of it.** Two outcomes, and the number tells you which:
   `SCRIBE_HOLD_ON_UNRECORDED="0"` is the honest response while the staffing is looked at.
 
 Watch it with `node scripts/check-held.mjs`.
+
+---
+
+## 16. The report gate (11 Sep 2026)
+
+The floor's rule, in its own words:
+
+> _"If pt having both blood test as well as machine test then pt will go to blood collection
+> station first then it will proceed to machine station… we will wait for both reports to be
+> uploaded then only pt will proceed to sd consultation… and for both payments clear should be
+> done."_
+
+Most of that was already built — §13's two gates cover the order of the benches and §4's payment
+gate covers the money. One rule was missing, and a test proved it: **with a blood test undrawn
+and a machine test unrun, a person could move the patient straight to the chief.** Only
+HealthRay's auto-advance was held; a human on the board was not.
+
+| Where                             | Change                                                                       |
+| --------------------------------- | ---------------------------------------------------------------------------- |
+| `shared/labStages.js`             | `REPORTED_LAB_STATUSES` — the far end of the ladder, named rather than typed |
+| `giniflow/statusEngine.js`        | `assertReportsAreIn()` — no doctor step while a today-order is unreported    |
+| `giniflow/board.js`               | `awaitingReports` on the card — derived, never a status                      |
+| `FlowManagerPage.jsx`             | the card says who is waiting on the lab rather than looking idle             |
+| `scripts/smoke-floor-journey.mjs` | 5 more checks — 25 total                                                     |
+
+### Where the gate sits, and why there
+
+On **all four** doctor statuses — `sd_pending`, `with_sd`, `ready_for_doctor`, `with_doctor` — at
+the floor's choice of the stricter option. In the status engine rather than on a screen, because
+four callers move a patient toward a doctor: the board's drag, the MO's "ready for doctor", the
+consultant claiming a patient, and the sync. One gate covers all of them.
+
+**It cannot block the first visit to the chief**, which is where the tests get ordered in the
+first place — at that moment the visit has no orders, so the gate does not fire. It bites on the
+way back, which is exactly when the floor wants it.
+
+**Forward moves only.** A consultant who steps out and sends the patient back to the chief's
+queue must not find them trapped by a report that is still out, and neither must a floor manager
+correcting a mistake.
+
+**Both ladders count as reported.** One order table holds lab and machine work, whose final rungs
+are spelled differently (`uploaded` vs `reported`), so the gate accepts either or it would hold a
+patient whose machine test was filed an hour ago.
+
+### The waiting state
+
+Derived on the card, **not** a status write: `⏳ Waiting for 2 reports — the doctor sees them once
+every one is in`. The patient has not moved anywhere and nobody performed a step called
+"waiting", so inventing one would be the same dishonesty the whole plan exists to remove. Shown
+only while they are short of the doctor; past that point the reports are in by definition.
+
+### The risk worth naming
+
+A report that never arrives now strands a patient short of their doctor, where before they simply
+walked through. The escape is the truthful one — the bench files the report, or types the values —
+and there is deliberately no override, because an override is how a gate becomes decoration. If
+the floor hits a case where a report genuinely cannot be produced, that is the moment to add one,
+and it should record who used it.

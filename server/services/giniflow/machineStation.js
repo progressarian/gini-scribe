@@ -1,4 +1,5 @@
 import pool from "../../config/db.js";
+import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config/storage.js";
 import { opensLabGate, outstandingOf } from "../../../shared/labPayment.js";
 import { STATUS_LABEL, BOARD_COLUMNS, columnForStatus } from "../../../shared/giniflowStatus.js";
 import {
@@ -19,6 +20,7 @@ import {
   MACHINE_DOC_TYPES,
 } from "../../../shared/machineStages.js";
 import { UNDRAWN_SAMPLE_STATUSES } from "../../../shared/labStages.js";
+import { machineShowsHealthrayReports } from "../../../shared/manualFloor.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 
 const UNDRAWN_LAB = UNDRAWN_SAMPLE_STATUSES.map((v) => `'${v}'`).join(", ");
@@ -615,7 +617,7 @@ export async function advanceMachineTest(
     // while the patient is still in the chair: the test being over and the
     // result existing are the same moment. Marking a machine test done with
     // nothing captured records a result nobody will go back for.
-    const hasEvidence = !!(row.report_doc_id || row.report_file_url || row.has_values);
+    const hasEvidence = !!(row.report_doc_id || row.report_file_url || row.has_values || reportUrl);
     if ((toStage === "done" || toStage === "reported") && !hasEvidence) {
       throw Object.assign(
         new Error(
@@ -703,9 +705,24 @@ export async function advanceMachineTest(
 // Read-only, deliberately: there is nothing to record after the fact that would
 // be true. Nobody can say at six in the evening who was at the machine at 15:29.
 export async function getMachineReconciliation(visitDate, db = pool) {
+  if (!machineShowsHealthrayReports()) return [];
   const { rows } = await db.query(
     `SELECT d.id, d.doc_type, d.title, d.doc_date::text AS doc_date, d.created_at,
-            p.id AS patient_id, p.name, p.file_no, v.current_status
+            p.id AS patient_id, p.name, p.file_no, v.current_status,
+            -- Who filed the report. HealthRay has no field for it, but it names
+            -- the uploader in the FILENAME — other_beant_kaur_11_09_2026_02_06_
+            -- PM_xxxx.pdf — so the one answer this screen could not give
+            -- ("who ran it?") was in the row all along. Parsed rather than
+            -- guessed: a name that does not match the pattern is left null
+            -- instead of showing a mangled string.
+            NULLIF(
+              initcap(replace(
+                regexp_replace(
+                  d.file_name,
+                  '^other_(.+?)_[0-9]{2}_[0-9]{2}_[0-9]{4}_.*$', '\\1'
+                ), '_', ' ')),
+              initcap(replace(d.file_name, '_', ' '))
+            ) AS filed_by
        FROM documents d
        JOIN patients p ON p.id = d.patient_id
        LEFT JOIN giniflow_visits v
@@ -744,11 +761,14 @@ export async function getMachineReconciliation(visitDate, db = pool) {
         // nobody reads this list as work to do.
         where: whereTheyAre(r.current_status),
         gone: !r.current_status || FINISHED.includes(r.current_status),
+        filedBy: null,
         at: null,
       });
     }
     const entry = byPatient.get(key);
     const at = r.created_at ? new Date(r.created_at).toISOString() : null;
+    // One name per patient: these arrive as a set from one person in one sitting.
+    if (r.filed_by && !entry.filedBy) entry.filedBy = r.filed_by;
     entry.reports.push({
       docId: r.id,
       machine: docTypeToMachine[r.doc_type] || null,
@@ -762,4 +782,59 @@ export async function getMachineReconciliation(visitDate, db = pool) {
   }
 
   return [...byPatient.values()].sort((a, b) => (b.at || "").localeCompare(a.at || ""));
+}
+
+export async function removeMachineReport(orderId, { actorId = null } = {}, db = pool) {
+  const { rows } = await db.query(
+    `SELECT o.kind, o.report_file_url, o.sample_status,
+            (SELECT doc.id FROM documents doc WHERE doc.giniflow_lab_order_id = o.id)
+              AS report_doc_id
+       FROM giniflow_lab_orders o WHERE o.id = $1`,
+    [orderId],
+  );
+  if (!rows.length) throw Object.assign(new Error("Order not found"), { status: 404 });
+  const row = rows[0];
+  if (row.kind !== "machine") {
+    throw Object.assign(new Error("That order belongs to the lab, not the machine room"), {
+      status: 409,
+    });
+  }
+  if (!row.report_file_url && !row.report_doc_id) {
+    throw Object.assign(new Error("There is no report on this test to remove"), { status: 409 });
+  }
+
+  const storagePath = String(row.report_file_url || "").split(`/${STORAGE_BUCKET}/`)[1] || null;
+
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`DELETE FROM documents WHERE giniflow_lab_order_id = $1`, [orderId]);
+    await client.query(
+      `UPDATE giniflow_lab_orders
+          SET report_file_url = NULL, uploaded_at = NULL,
+              sample_status = 'done', updated_at = NOW()
+        WHERE id = $1`,
+      [orderId],
+    );
+    await client.query(
+      `INSERT INTO giniflow_lab_order_events (lab_order_id, track, status, actor_role, actor_id)
+       VALUES ($1, 'sample', 'done', 'machine', $2)`,
+      [orderId, actorId],
+    );
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+
+  if (storagePath) {
+    await fetch(`${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` },
+    }).catch(() => {});
+  }
+
+  return { orderId, removed: storagePath };
 }
