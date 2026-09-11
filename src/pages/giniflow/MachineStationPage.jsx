@@ -370,7 +370,6 @@ export default function MachineStationPage() {
   // Open by default. Both halves are the day's record, and on a floor where
   // the machines are still run outside Scribe the record IS the story — a tap
   // to reveal it buried the only number worth reading.
-  const [showRecon, setShowRecon] = useState(true);
   const [showDone, setShowDone] = useState(true);
   const [toast, setToast] = useState("");
   const toastTimer = useRef(null);
@@ -405,34 +404,49 @@ export default function MachineStationPage() {
   // it reads as a promise the board does not keep.
   const openTotal = (data?.total ?? 0) - (counts.reported ?? 0);
 
-  // The day's record, both halves grouped by PATIENT. A diabetic foot screen is
-  // an ABI, a VPT and a Fundus on one person, so a row per test listed the same
-  // patient three times and eleven rows read as eleven people.
-  const doneHere = (() => {
+  // Everything the machines did today, as ONE list.
+  //
+  // Not two. A test booked on this screen and a test whose report simply arrived
+  // from HealthRay are the same machine, the same technician and the same
+  // patient — the hospital is one place. Splitting them described our own
+  // plumbing rather than the floor's day, so they are merged by patient and the
+  // booking route is not mentioned at all.
+  const doneToday = (() => {
     const byPatient = new Map();
-    for (const o of rowsFor(MACHINE_RUNGS.find((r) => r.key === "reported"))) {
+    const ensure = (o) => {
       if (!byPatient.has(o.patientId)) {
         byPatient.set(o.patientId, {
           patientId: o.patientId,
           name: o.name,
           fileNo: o.fileNo,
-          age: o.age,
-          sex: o.sex,
-          orderedBy: o.orderedBy,
-          where: o.station,
+          age: o.age ?? null,
+          sex: o.sex ?? null,
+          orderedBy: o.orderedBy ?? null,
+          where: o.where ?? o.station ?? "",
+          gone: o.gone ?? false,
           machines: [],
           at: null,
         });
       }
-      const e = byPatient.get(o.patientId);
-      if (o.machine && !e.machines.includes(o.machine)) e.machines.push(o.machine);
-      if (o.uploadedAt && (!e.at || o.uploadedAt > e.at)) e.at = o.uploadedAt;
+      return byPatient.get(o.patientId);
+    };
+    const add = (e, machine, at) => {
+      if (machine && !e.machines.includes(machine)) e.machines.push(machine);
+      if (at && (!e.at || at > e.at)) e.at = at;
+    };
+
+    for (const o of rowsFor(MACHINE_RUNGS.find((r) => r.key === "reported"))) {
+      add(ensure(o), o.machine, o.uploadedAt);
+    }
+    for (const r of reconciliation.data?.rows || []) {
+      const e = ensure(r);
+      for (const rep of r.reports) add(e, rep.machine, rep.at);
+      // Filled in from whichever source knows: an order carries the age and who
+      // asked for it, a bare report carries neither.
+      if (!e.where) e.where = r.where;
     }
     return [...byPatient.values()].sort((a, b) => (b.at || "").localeCompare(a.at || ""));
   })();
-
-  // Already one row per patient — the service groups it (machineStation.js).
-  const reconRows = reconciliation.data?.rows || [];
 
   const onAdvance = (order, to) =>
     advance.mutate(
@@ -528,7 +542,11 @@ export default function MachineStationPage() {
               back; nothing else has to change. */}
           {SHOW_ADD_TEST && <AddTest busy={busy} onAdded={showToast} />}
 
-          {!isLoading && (
+          {/* Hidden while the queue is empty. It filters the tests booked in this
+              room, and reading "All 0" directly above a record listing five
+              patients only invites the question of why it says zero — they are
+              different things, and the bar cannot say so by itself. */}
+          {!isLoading && openTotal > 0 && (
             <div className="sq-filters sq-filters--page" role="group" aria-label="Filter by stage">
               <button
                 type="button"
@@ -658,168 +676,77 @@ export default function MachineStationPage() {
             </div>
           )}
 
-          {/* The day's record, in two halves, side by side: what happened
-              without this room, and what it did itself. Both are finished work —
-              neither is a queue — so they sit together at the foot of the page.
-              The unaccounted half reads first because it is the half with
-              something to say. */}
-          {(reconRows.length > 0 || doneHere.length > 0) && (
-            <div className="mroom__record">
-              <div className="mroom__record-col">
-                <div className="grp-lbl">
-                  <button
-                    type="button"
-                    className="sq-toggle"
-                    aria-expanded={showRecon}
-                    aria-controls="machine-recon"
-                    onClick={() => setShowRecon((v) => !v)}
-                  >
-                    <span className={`sq-chev${showRecon ? " open" : ""}`} aria-hidden="true">
-                      ▸
-                    </span>
-                    📥 Ran today without an order
-                  </button>
-                  <span className="grp-split">{reconRows.length}</span>
-                </div>
-                <div id="machine-recon" hidden={!showRecon}>
-                  <div className="grp-hint">
-                    Reports that arrived from the hospital sync for patients with no test ordered
-                    here. Nothing to do with them — the report is already on the chart, and nobody
-                    can say afterwards who ran the test or when. Kept as the day&apos;s record.
-                  </div>
-                  {!reconRows.length && <div className="empty-note">Nothing unaccounted for.</div>}
-                  <div className="pt-list">
-                    {reconRows.map((r) => {
-                      const mins = minutesSince(r.at);
-                      return (
-                        <div
-                          key={r.patientId}
-                          className="pt-card hr-case is-readonly"
-                          aria-disabled="true"
-                        >
-                          <div className="pc-av" style={{ background: avatarColour(r.patientId) }}>
-                            {initials(r.name)}
-                          </div>
-                          <div className="pc-body">
-                            <div className="pc-name">
-                              {r.name}
-                              {r.fileNo && <span className="badge b-ink">{r.fileNo}</span>}
-                            </div>
-                            <div className="pc-meta">
-                              {r.reports.length} report{r.reports.length === 1 ? "" : "s"} · latest{" "}
-                              {clock(r.at)}
-                            </div>
-                            <div className="pc-tests">
-                              {r.reports
-                                .map(
-                                  (rep) =>
-                                    `${machineFor(rep.machine)?.icon || "📄"} ${
-                                      machineFor(rep.machine)?.name || rep.docType
-                                    }`,
-                                )
-                                .join(" · ")}
-                            </div>
-                            <div className="lab-blocked">
-                              ⏸ Ran outside this room — no step can be recorded after the fact
-                            </div>
-                          </div>
-                          <div className="pc-r">
-                            {mins !== null && (
-                              <div className={`pc-time${mins > 120 ? " late" : ""}`}>{mins}m</div>
-                            )}
-                            <div className="pc-tlbl">since the report</div>
-                            <div className="hr-where">
-                              <div className={`sp ${r.gone ? "sp-process" : "sp-ready"}`}>
-                                {r.gone ? "Has left" : "On the floor"}
-                              </div>
-                              <div className="pc-tlbl">{r.where}</div>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
+          {/* What the machines did today. One list, one row per patient — the
+              same room, the same staff, whichever way the test was booked. */}
+          {doneToday.length > 0 && (
+            <div className="mroom__stage">
+              <div className="grp-lbl">
+                <button
+                  type="button"
+                  className="sq-toggle"
+                  aria-expanded={showDone}
+                  aria-controls="machine-done"
+                  onClick={() => setShowDone((v) => !v)}
+                >
+                  <span className={`sq-chev${showDone ? " open" : ""}`} aria-hidden="true">
+                    ▸
+                  </span>
+                  ✅ Done today
+                </button>
+                <span className="grp-split">{doneToday.length}</span>
               </div>
-
-              <div className="mroom__record-col">
-                <div className="grp-lbl">
-                  <button
-                    type="button"
-                    className="sq-toggle"
-                    aria-expanded={showDone}
-                    aria-controls="machine-done"
-                    onClick={() => setShowDone((v) => !v)}
-                  >
-                    <span className={`sq-chev${showDone ? " open" : ""}`} aria-hidden="true">
-                      ▸
-                    </span>
-                    ✅ Done here today
-                  </button>
-                  <span className="grp-split">{doneHere.length}</span>
+              <div id="machine-done" hidden={!showDone}>
+                <div className="grp-hint">
+                  Every machine test done today. One row per patient — a foot screen is three tests
+                  on one person, not three people.
                 </div>
-                <div id="machine-done" hidden={!showDone}>
-                  <div className="grp-hint">
-                    Tests this room ran and filed. One row per patient — a foot screen is three
-                    tests on one person, not three people.
-                  </div>
-                  {!doneHere.length && <div className="empty-note">Nothing filed here yet.</div>}
-                  <div className="pt-list">
-                    {doneHere.map((r) => {
-                      const mins = minutesSince(r.at);
-                      return (
-                        <div key={r.patientId} className="pt-card is-readonly" aria-disabled="true">
-                          <div className="pc-av" style={{ background: avatarColour(r.patientId) }}>
-                            {initials(r.name)}
+                <div className="pt-list">
+                  {doneToday.map((r) => {
+                    const mins = minutesSince(r.at);
+                    return (
+                      <div key={r.patientId} className="pt-card is-readonly" aria-disabled="true">
+                        <div className="pc-av" style={{ background: avatarColour(r.patientId) }}>
+                          {initials(r.name)}
+                        </div>
+                        <div className="pc-body">
+                          <div className="pc-name">
+                            {r.name}
+                            {r.fileNo && <span className="badge b-ink">{r.fileNo}</span>}
                           </div>
-                          <div className="pc-body">
-                            <div className="pc-name">
-                              {r.name}
-                              {r.fileNo && <span className="badge b-ink">{r.fileNo}</span>}
-                            </div>
-                            <div className="pc-meta">
-                              {[
-                                r.age && r.sex ? `${r.age}${r.sex[0]}` : r.age,
-                                r.orderedBy && `Ordered by ${r.orderedBy}`,
-                                `filed ${clock(r.at)}`,
-                              ]
-                                .filter(Boolean)
-                                .join(" · ")}
-                            </div>
-                            <div className="pc-tests">
-                              {r.machines
-                                .map(
-                                  (id) =>
-                                    `${machineFor(id)?.icon || ""} ${machineFor(id)?.name || id}`,
-                                )
-                                .join(" · ")}
-                            </div>
-                            <div className="steps">
-                              {MACHINE_RAIL.map((name, i) => (
-                                <span key={name}>
-                                  <span className="step step-done">{name} ✓</span>
-                                  {i < MACHINE_RAIL.length - 1 && (
-                                    <span className="step-arr">›</span>
-                                  )}
-                                </span>
-                              ))}
-                            </div>
+                          <div className="pc-meta">
+                            {[
+                              r.age && r.sex ? `${r.age}${r.sex[0]}` : r.age,
+                              r.orderedBy && `Ordered by ${r.orderedBy}`,
+                              `${clock(r.at)}`,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
                           </div>
-                          <div className="pc-r">
-                            <div className="sp sp-done">Reported</div>
-                            {mins !== null && <div className="pc-time">{mins}m</div>}
-                            <div className="pc-tlbl">since filing</div>
-                            <div className="hr-where">
-                              <div className="sp sp-ready">
-                                {r.machines.length} test{r.machines.length === 1 ? "" : "s"}
-                              </div>
-                              <div className="pc-tlbl">{r.where}</div>
-                            </div>
+                          <div className="pc-tests">
+                            {r.machines
+                              .map(
+                                (id) =>
+                                  `${machineFor(id)?.icon || ""} ${machineFor(id)?.name || id}`,
+                              )
+                              .join(" · ")}
                           </div>
                         </div>
-                      );
-                    })}
-                  </div>
+                        <div className="pc-r">
+                          <div className="sp sp-done">
+                            {r.machines.length} test{r.machines.length === 1 ? "" : "s"}
+                          </div>
+                          {mins !== null && <div className="pc-time">{mins}m</div>}
+                          <div className="pc-tlbl">since the report</div>
+                          <div className="hr-where">
+                            <div className={`sp ${r.gone ? "sp-process" : "sp-ready"}`}>
+                              {r.gone ? "Has left" : "On the floor"}
+                            </div>
+                            <div className="pc-tlbl">{r.where}</div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>

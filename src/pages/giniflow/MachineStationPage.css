@@ -162,28 +162,10 @@
   border-bottom: 0;
 }
 
-/* ── Reconciliation ───────────────────────────────────────────────────────── */
-/* The day's record: what this room did, and what happened without it. Side by
-   side because they answer the same question from two directions, and stacked on
-   a narrow screen where two columns would each be too thin to read. */
-.mroom__record {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  align-items: start;
-}
-.mroom__record-col {
-  min-width: 0;
-}
-@media (max-width: 900px) {
-  .mroom__record {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* The record's two headers carry the collapse toggle, so the button has to sit
-   flush inside the group label rather than bringing its own box. */
-.mroom__record-col .grp-lbl .sq-toggle {
+/* ── The day's record ─────────────────────────────────────────────────────── */
+/* The section header carries the collapse toggle, so the button sits flush
+   inside the group label rather than bringing its own box. */
+.mroom__stage .grp-lbl .sq-toggle {
   border: 0;
   background: transparent;
   padding: 0;
@@ -194,24 +176,14 @@
   align-items: center;
   gap: 5px;
 }
-/* Read-only by nature: these are records, not work. No hover lift, and the
-   cursor does not promise a click that does nothing. */
-.mroom__record-col .pt-card.is-readonly {
+/* A record, not work: no hover lift, and the cursor promises no click. */
+.mroom__stage .pt-card.is-readonly {
   cursor: default;
   align-items: flex-start;
 }
-.mroom__record-col .pt-card.is-readonly:hover {
+.mroom__stage .pt-card.is-readonly:hover {
   border-color: var(--bd);
   box-shadow: var(--sh);
-}
-/* Two columns means half the width, so the card's right-hand rail has to stop
-   competing with the name for room. */
-.mroom__record-col .pc-r {
-  flex: 0 0 auto;
-  text-align: right;
-}
-.mroom__record-col .pc-body {
-  min-width: 0;
 }
 
 /* ── Phone ────────────────────────────────────────────────────────────────
@@ -248,10 +220,6 @@
 .mroom__sub:last-child {
   margin-bottom: 0;
 }
-
-/* Where the patient is now, on a reconciliation row. Usually "Exited" — the
-   report reaches us long after they have gone — so it is stated rather than
-   left for somebody to assume the row is actionable. */
 
 /* Raising a test at the machine. Opens in place rather than as a modal — the
    technician has one hand free and a patient in front of them. */
