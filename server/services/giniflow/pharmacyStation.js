@@ -7,6 +7,7 @@ import {
   appointmentFor,
   collectionsFor,
   markCollection,
+  markCollections,
   COLLECTION_STATUSES,
 } from "../medication/collection.js";
 import { sendMedicineCard } from "../msg91.js";
@@ -737,4 +738,138 @@ export async function sendCardToPatient(visitId, { force = false } = {}, db = po
 
   await db.query(`UPDATE giniflow_visits SET card_sent_at = NOW() WHERE id = $1`, [visitId]);
   return { sent: true, phone: visit.phone };
+}
+
+const HANDOVER_MEDS_SQL = `
+  SELECT m.id, m.name, m.dose, m.frequency, m.timing, m.route, m.form,
+         m.instructions, m.for_diagnosis, m.prescriber, m.created_at,
+         c.status, c.reason, c.qty_note, c.marked_by, c.marked_at
+    FROM medications m
+    LEFT JOIN medicine_collections c
+      ON c.medication_id = m.id AND c.collected_date = $2::date
+   WHERE m.patient_id = $1
+     AND (m.created_at AT TIME ZONE 'Asia/Kolkata')::date = $2::date
+     AND m.is_active
+     AND m.external_doctor IS NULL
+   ORDER BY m.name`;
+
+export async function getHandoverPatient(patientId, visitDate, db = pool) {
+  const { rows: who } = await db.query(
+    `SELECT p.id, p.name, p.file_no, p.age, p.sex, v.id AS visit_id, v.current_status
+       FROM patients p
+       LEFT JOIN giniflow_visits v ON v.patient_id = p.id AND v.visit_date = $2::date
+      WHERE p.id = $1`,
+    [patientId, visitDate],
+  );
+  if (!who.length) throw Object.assign(new Error("Patient not found"), { status: 404 });
+
+  const { rows: meds } = await db.query(HANDOVER_MEDS_SQL, [patientId, visitDate]);
+  const items = meds.map((m) => ({
+    medicationId: m.id,
+    name: m.name,
+    dose: m.dose,
+    frequency: m.frequency,
+    timing: m.timing,
+    route: m.route,
+    form: m.form,
+    instructions: m.instructions,
+    forDiagnosis: m.for_diagnosis,
+    prescriber: m.prescriber,
+    status: m.status || null,
+    reason: m.reason || null,
+    qtyNote: m.qty_note || null,
+    markedBy: m.marked_by || null,
+    markedAt: iso(m.marked_at),
+  }));
+
+  const status = who[0].current_status;
+  return {
+    patientId: who[0].id,
+    name: who[0].name,
+    fileNo: who[0].file_no,
+    age: who[0].age,
+    sex: who[0].sex,
+    visitId: who[0].visit_id || null,
+    station: FINISHED.includes(status)
+      ? STATUS_LABEL[status] || status
+      : COLUMN_NAME[columnForStatus(status)] ||
+        STATUS_LABEL[status] ||
+        status ||
+        "Not on the floor",
+    gone: FINISHED.includes(status),
+    items,
+    pending: items.filter((i) => !i.status).length,
+    given: items.filter((i) => i.status === "given").length,
+    notGiven: items.filter((i) => i.status === "not_given").length,
+  };
+}
+
+export async function markHandoverItem(
+  patientId,
+  medicationId,
+  { status = "given", reason = null, qtyNote = null, actorName = null, date },
+  db = pool,
+) {
+  if (!COLLECTION_STATUSES.includes(status)) {
+    throw Object.assign(new Error(`Unknown dispense status: ${status}`), { status: 400 });
+  }
+  if (status === "not_given" && !String(reason || "").trim()) {
+    throw Object.assign(
+      new Error("Say why the medicine was not given — the not-collected report is built on it"),
+      { status: 400 },
+    );
+  }
+  const { rows } = await db.query(
+    `SELECT m.id, m.name FROM medications m
+      WHERE m.id = $1 AND m.patient_id = $2 AND m.is_active AND m.external_doctor IS NULL`,
+    [medicationId, patientId],
+  );
+  if (!rows.length) {
+    throw Object.assign(new Error("That medicine is not on this patient's list"), { status: 404 });
+  }
+
+  const mark = await markCollection(db, {
+    medicationId,
+    patientId,
+    appointmentId: await appointmentFor(db, patientId, date),
+    date,
+    status,
+    reason: reason || null,
+    qtyNote,
+    markedBy: actorName || null,
+  });
+  return {
+    medicationId,
+    name: rows[0].name,
+    status: mark.status,
+    reason: mark.reason,
+    markedAt: iso(mark.marked_at),
+  };
+}
+
+export async function markHandoverAll(patientId, { actorName = null, date }, db = pool) {
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const { rows: meds } = await client.query(HANDOVER_MEDS_SQL, [patientId, date]);
+    const pending = meds.filter((m) => !m.status);
+    if (!pending.length) {
+      await client.query("COMMIT");
+      return { patientId, marked: 0, alreadyDone: true };
+    }
+    await markCollections(client, {
+      patientId,
+      appointmentId: await appointmentFor(client, patientId, date),
+      date,
+      items: pending.map((m) => ({ medicationId: m.id, status: "given" })),
+      markedBy: actorName || null,
+    });
+    await client.query("COMMIT");
+    return { patientId, marked: pending.length, alreadyDone: false };
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
 }

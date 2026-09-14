@@ -177,6 +177,9 @@ import {
 import {
   getPharmacyQueue,
   getPharmacyPatient,
+  getHandoverPatient,
+  markHandoverItem,
+  markHandoverAll,
   dispenseItem,
   dispenseAll,
   endVisit,
@@ -1913,6 +1916,59 @@ router.get(
       res.json({ date, ...data, serverTime: new Date().toISOString() });
     } catch (e) {
       pharmacyError(res, e, "Gini Flow pharmacy queue");
+    }
+  },
+);
+
+router.get("/giniflow/stations/pharmacy/handover/:patientId", pharmacyGate, async (req, res) => {
+  try {
+    const date = await resolveDate(req.query.date);
+    res.json({
+      date,
+      ...(await getHandoverPatient(Number(req.params.patientId), date)),
+      serverTime: new Date().toISOString(),
+    });
+  } catch (e) {
+    pharmacyError(res, e, "Gini Flow pharmacy handover patient");
+  }
+});
+
+router.post(
+  "/giniflow/stations/pharmacy/handover/:patientId/dispense/:medId",
+  pharmacyGate,
+  validate(giniflowDispenseSchema),
+  async (req, res) => {
+    try {
+      const date = await resolveDate(req.query.date);
+      res.json(
+        await markHandoverItem(Number(req.params.patientId), Number(req.params.medId), {
+          status: req.body.status,
+          reason: req.body.reason,
+          qtyNote: req.body.qtyNote,
+          actorName: req.doctor?.doctor_name ?? null,
+          date,
+        }),
+      );
+    } catch (e) {
+      pharmacyError(res, e, "Gini Flow handover dispense");
+    }
+  },
+);
+
+router.post(
+  "/giniflow/stations/pharmacy/handover/:patientId/dispense-all",
+  pharmacyGate,
+  async (req, res) => {
+    try {
+      const date = await resolveDate(req.query.date);
+      res.json(
+        await markHandoverAll(Number(req.params.patientId), {
+          actorName: req.doctor?.doctor_name ?? null,
+          date,
+        }),
+      );
+    } catch (e) {
+      pharmacyError(res, e, "Gini Flow handover dispense all");
     }
   },
 );

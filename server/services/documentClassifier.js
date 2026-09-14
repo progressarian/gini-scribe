@@ -182,6 +182,7 @@ export async function classifyDocumentFile({ base64, mediaType, attempts = 3 }) 
 
   return {
     data: null,
+    status: lastErr?.status || null,
     error:
       lastErr?.name === "AbortError"
         ? `Classifier timeout after ${Math.round(TIMEOUT_MS / 1000)}s`

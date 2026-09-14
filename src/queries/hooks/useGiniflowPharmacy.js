@@ -97,3 +97,42 @@ export function useEndVisit(station) {
     },
   });
 }
+
+export function useHandoverPatient(patientId) {
+  return useQuery({
+    queryKey: ["giniflow", "pharmacy", "handover", patientId],
+    enabled: !!patientId,
+    queryFn: async () =>
+      (await api.get(`/api/giniflow/stations/pharmacy/handover/${patientId}`)).data,
+  });
+}
+
+export function useHandoverDispense() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ patientId, medicationId, status, reason, qtyNote }) =>
+      (
+        await api.post(
+          `/api/giniflow/stations/pharmacy/handover/${patientId}/dispense/${medicationId}`,
+          { status, reason, qtyNote },
+        )
+      ).data,
+    onSuccess: (_data, { patientId }) => {
+      invalidate(queryClient);
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "pharmacy", "handover", patientId] });
+    },
+  });
+}
+
+export function useHandoverDispenseAll() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ patientId }) =>
+      (await api.post(`/api/giniflow/stations/pharmacy/handover/${patientId}/dispense-all`, {}))
+        .data,
+    onSuccess: (_data, { patientId }) => {
+      invalidate(queryClient);
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "pharmacy", "handover", patientId] });
+    },
+  });
+}

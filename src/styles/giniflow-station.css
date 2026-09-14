@@ -7891,7 +7891,11 @@
 }
 .gf .ph-handover-row {
   background: var(--bg);
-  cursor: default;
+  cursor: pointer;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  text-align: left;
 }
 .gf .ph-handover-row.is-gone {
   opacity: 0.55;

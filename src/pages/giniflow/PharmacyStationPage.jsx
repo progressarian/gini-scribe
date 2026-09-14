@@ -6,6 +6,9 @@ import {
   useDispenseAll,
   useEndVisit,
   useSendCard,
+  useHandoverPatient,
+  useHandoverDispense,
+  useHandoverDispenseAll,
 } from "../../queries/hooks/useGiniflowPharmacy";
 import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
 import LiveBadge from "../../components/giniflow/LiveBadge";
@@ -75,12 +78,179 @@ const PRIORITY_CHIP = {
 };
 
 // A patient prescribed on HealthRay: no Gini Flow prescription exists, so there
-// is nothing to open and no dispense flow to run. Rendered as a div, not a
-// button, for that reason — the queue cards above it are clickable and these
-// must not look like they are.
-function HandoverRow({ row }) {
+function HandoverPane({ patientId, onClose, onToast }) {
+  const { data, isLoading } = useHandoverPatient(patientId);
+  const dispense = useHandoverDispense();
+  const dispenseAll = useHandoverDispenseAll();
+  const [reasonFor, setReasonFor] = useState(null);
+  const [reason, setReason] = useState("");
+
+  useEffect(() => {
+    const onKey = (e) => e.key === "Escape" && onClose();
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const busy = dispense.isPending || dispenseAll.isPending;
+
+  const mark = (medicationId, status, why = null) =>
+    dispense.mutate(
+      { patientId, medicationId, status, reason: why },
+      {
+        onSuccess: (r) => {
+          setReasonFor(null);
+          setReason("");
+          onToast(status === "given" ? `✓ ${r.name} dispensed` : `${r.name} — not given`);
+        },
+        onError: (e) => onToast(e?.response?.data?.error || "Could not record that"),
+      },
+    );
+
+  const markAll = () =>
+    dispenseAll.mutate(
+      { patientId },
+      {
+        onSuccess: (r) =>
+          onToast(
+            r.alreadyDone
+              ? "Nothing left to dispense"
+              : `✓ ${r.marked} ${r.marked === 1 ? "medicine" : "medicines"} dispensed`,
+          ),
+        onError: (e) => onToast(e?.response?.data?.error || "Could not dispense those"),
+      },
+    );
+
   return (
-    <div className={`pt-card ph-handover-row${row.gone ? " is-gone" : ""}`}>
+    <div className="detail-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="detail-pane" role="dialog" aria-label="Medicines owed">
+        <div className="dp-head">
+          <div className="dp-name">{data?.name || "Loading…"}</div>
+          <div className="dp-meta">{data?.fileNo}</div>
+          <div className="dp-acts">
+            <button className="rbtn" type="button" onClick={onClose}>
+              ← Back
+            </button>
+          </div>
+        </div>
+        <div className="dp-scroll">
+          <div className="dp-inner">
+            {isLoading && <div className="empty-note">Loading…</div>}
+            {data && (
+              <>
+                <div className="dp-sec">
+                  <div className="dp-hint">
+                    Prescribed on HealthRay, so there is no Gini Flow prescription to close. Marking
+                    a medicine here records the handover only — it does not end the visit.
+                    {data.gone ? " This patient has already left." : ` Currently: ${data.station}.`}
+                  </div>
+                </div>
+                <div className="dp-sec">
+                  <div className="dp-sec-title">
+                    Medicines owed
+                    <span className="cs-sub">
+                      {" "}
+                      · {data.given} given · {data.notGiven} not given · {data.pending} owed
+                    </span>
+                  </div>
+                  <div className="pt-list">
+                    {data.items.map((i) => (
+                      <div key={i.medicationId} className="pt-card">
+                        <div className="pc-body">
+                          <div className="pc-name">{i.name}</div>
+                          <div className="pc-meta">
+                            {[i.dose, i.frequency, i.timing, i.forDiagnosis]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </div>
+                          {i.status && (
+                            <div className="pc-tests">
+                              {i.status === "given" ? "✓ Given" : `✕ Not given`}
+                              {i.reason ? ` — ${i.reason}` : ""}
+                              {i.markedBy ? ` · by ${i.markedBy}` : ""}
+                            </div>
+                          )}
+                        </div>
+                        <div className="pc-r">
+                          {reasonFor === i.medicationId ? (
+                            <form
+                              className="mo-prop-form"
+                              onSubmit={(e) => {
+                                e.preventDefault();
+                                if (reason.trim()) mark(i.medicationId, "not_given", reason.trim());
+                              }}
+                            >
+                              <input
+                                autoFocus
+                                placeholder="Why not?"
+                                value={reason}
+                                onChange={(e) => setReason(e.target.value)}
+                              />
+                              <button
+                                className="st-btn st-btn-tl"
+                                disabled={busy || !reason.trim()}
+                              >
+                                Save
+                              </button>
+                            </form>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                className="st-btn st-btn-grn"
+                                disabled={busy || i.status === "given"}
+                                onClick={() => mark(i.medicationId, "given")}
+                              >
+                                {i.status === "given" ? "Dispensed" : "Dispense"}
+                              </button>
+                              <button
+                                type="button"
+                                className="st-btn st-btn-ghost"
+                                disabled={busy}
+                                onClick={() => {
+                                  setReasonFor(i.medicationId);
+                                  setReason(i.reason || "");
+                                }}
+                              >
+                                Not given
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                {data.pending > 0 && (
+                  <div className="dp-sec">
+                    <button
+                      type="button"
+                      className="st-btn st-btn-grn btn-full"
+                      disabled={busy}
+                      onClick={markAll}
+                    >
+                      ✓ Dispense the remaining {data.pending}
+                    </button>
+                    <div className="dp-hint">
+                      Anything already marked &ldquo;not given&rdquo; is left exactly as it is.
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HandoverRow({ row, onOpen }) {
+  return (
+    <button
+      type="button"
+      className={`pt-card ph-handover-row${row.gone ? " is-gone" : ""}`}
+      onClick={() => onOpen(row)}
+    >
       <div className="pc-av" style={{ background: avatarColour(row.patientId) }}>
         {initials(row.name)}
       </div>
@@ -104,7 +274,7 @@ function HandoverRow({ row }) {
         <div className={`sp ${row.gone ? "sp-done" : "sp-sample"}`}>{row.station}</div>
         <div className="pc-tlbl">{row.gone ? "has left" : "still here"}</div>
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -456,6 +626,7 @@ const PHARMACY_FILTERS = [
 export default function PharmacyStationPage() {
   const [toast, setToast] = useState("");
   const [openVisitId, setOpenVisitId] = useState(null);
+  const [handoverOf, setHandoverOf] = useState(null);
   // Both are day-long records, not today's work, so they default closed —
   // the eye should land on the queue, not scroll past 121 finished rows first.
   const [doneOpen, setDoneOpen] = useState(false);
@@ -688,7 +859,7 @@ export default function PharmacyStationPage() {
                       </div>
                       <div className="pt-list">
                         {onFloor.map((r) => (
-                          <HandoverRow key={r.patientId} row={r} />
+                          <HandoverRow key={r.patientId} row={r} onOpen={setHandoverOf} />
                         ))}
                       </div>
                     </div>
@@ -758,7 +929,7 @@ export default function PharmacyStationPage() {
                       {goneExpanded && (
                         <div className="pt-list">
                           {gone.map((r) => (
-                            <HandoverRow key={r.patientId} row={r} />
+                            <HandoverRow key={r.patientId} row={r} onOpen={setHandoverOf} />
                           ))}
                         </div>
                       )}
@@ -787,6 +958,14 @@ export default function PharmacyStationPage() {
 
       {openCard && (
         <PharmacyPane visitId={openCard.visitId} onClose={closePane} onToast={showToast} />
+      )}
+
+      {handoverOf && (
+        <HandoverPane
+          patientId={handoverOf.patientId}
+          onClose={() => setHandoverOf(null)}
+          onToast={showToast}
+        />
       )}
 
       {toast && <div className="toast show">{toast}</div>}

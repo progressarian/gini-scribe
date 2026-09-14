@@ -257,7 +257,8 @@ async function classifyOne(doc, { dryRun }) {
   const mediaType = detectMediaType(buffer) || resolved.mimeType || "application/pdf";
   const base64 = Buffer.from(buffer).toString("base64");
 
-  const { data, error } = await classifyDocumentFile({ base64, mediaType });
+  const { data, error, status } = await classifyDocumentFile({ base64, mediaType });
+  if (status === 400) return { id: doc.id, status: "unavailable", detail: error };
   if (error || !data) return { id: doc.id, status: "error", detail: error };
 
   if (dryRun) {
@@ -323,7 +324,7 @@ export async function runDocumentClassification(opts = {}) {
               // releasing it, or we re-request an un-fetchable file forever.
               await parkUnavailable(doc);
               summary.unavailable += 1;
-              log(`doc ${r.id} parked (unfetchable) — ${r.detail}`);
+              log(`doc ${r.id} parked — ${r.detail}`);
             } else {
               // A transient classifier/API failure: release so the next sweep
               // retries promptly rather than freezing the row as 'other'.
