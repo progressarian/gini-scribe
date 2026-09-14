@@ -3,7 +3,7 @@ import { getCanonical } from "../../utils/labCanonical.js";
 import { flagForRange } from "../../utils/labFlag.js";
 import { advanceSample, markCaseResultsReady } from "./labStation.js";
 import { advanceMachineTest } from "./machineStation.js";
-import { MACHINES } from "../../../shared/machineStages.js";
+import { machineForTest } from "../../../shared/machineStages.js";
 import { opensLabGate } from "../../../shared/labPayment.js";
 import { syncBiomarkersFromLatestLabs } from "../healthray/db.js";
 
@@ -121,9 +121,6 @@ const flattenName = (name) =>
   String(name || "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "");
-
-const machineForTest = (test) =>
-  MACHINES.find((m) => m.tests.some((t) => t.toLowerCase() === String(test).toLowerCase()));
 
 export async function suggestedRows(orderId, db = pool) {
   const order = await orderContext(orderId, db);

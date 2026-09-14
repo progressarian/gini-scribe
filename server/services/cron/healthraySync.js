@@ -279,6 +279,25 @@ async function fetchClinicalText(appt, healthrayId, doctorId) {
 }
 
 // ── Sync documents for an appointment ───────────────────────────────────────
+const DOCS_IDLE_REFRESH_MS = Number(process.env.HEALTHRAY_DOCS_IDLE_REFRESH_MIN || 30) * 60 * 1000;
+const DOCS_AWAITING_RX_MS = Number(process.env.HEALTHRAY_DOCS_AWAITING_RX_MIN || 10) * 60 * 1000;
+const DOCS_NEVER = ["cancelled", "no_show"];
+const DOCS_EVERY_RUN = ["checkedin", "in_visit"];
+const lastDocsFetch = new Map();
+
+function docsDue(healthrayId, status, storedStatus) {
+  if (DOCS_NEVER.includes(status)) return false;
+  if (DOCS_EVERY_RUN.includes(status)) return true;
+  const since = Date.now() - (lastDocsFetch.get(healthrayId) || 0);
+  if (status === "completed" && storedStatus !== "seen") return since >= DOCS_AWAITING_RX_MS;
+  return since >= DOCS_IDLE_REFRESH_MS;
+}
+
+function markDocsFetched(healthrayId) {
+  if (lastDocsFetch.size > 5000) lastDocsFetch.clear();
+  lastDocsFetch.set(healthrayId, Date.now());
+}
+
 async function syncAppointmentDocs(healthrayId, patientId, apptDate) {
   try {
     const records = await fetchMedicalRecords(healthrayId);
@@ -479,7 +498,10 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
     existing?.healthray_diagnoses?.length > 0 && existing?.healthray_medications?.length > 0;
   if (!force && existing && existing.healthray_clinical_notes && alreadyEnriched) {
     await rememberHealthrayPatientId(existing.id, appt);
-    if (existing.patient_id) await syncAppointmentDocs(healthrayId, existing.patient_id, apptDate);
+    if (existing.patient_id && docsDue(healthrayId, status, existing.status)) {
+      await syncAppointmentDocs(healthrayId, existing.patient_id, apptDate);
+      markDocsFetched(healthrayId);
+    }
     // Propagate live status transitions even on fast-path so checked-in /
     // in_visit moves picked up by HealthRay reach the UI without waiting for
     // a full re-enrichment.

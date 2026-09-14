@@ -168,6 +168,16 @@ export const MACHINES = [
     // finished on this screen.
     handover: true,
   },
+  {
+    id: "echo",
+    name: "2D Echo",
+    fullName: "2D Echocardiogram",
+    icon: "🫀",
+    durationMin: 20,
+    docTypes: ["echo"],
+    tests: ["2D Echo", "Echo", "Echocardiography"],
+    values: ["Ejection Fraction", "Echo Finding"],
+  },
 ];
 
 export const MACHINE_STAGES = MACHINE_RUNGS.map((r) => ({ key: r.key, label: r.stageLabel }));

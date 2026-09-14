@@ -16,6 +16,8 @@ const { log, error } = createLogger("Machine Sync");
 
 const SCAN_BATCH = Number(process.env.SCRIBE_MACHINE_SCAN_BATCH || 12);
 const RESCAN_MIN = Number(process.env.SCRIBE_MACHINE_RESCAN_MIN || 20);
+const BILL_READ_RESCAN_MIN = Number(process.env.SCRIBE_MACHINE_BILL_READ_RESCAN_MIN || 60);
+const NOT_ON_FLOOR = ["booked", "confirmed", "dispensed", "exited"];
 const NEVER_ARRIVED = ["no_show", "cancelled"];
 const FINISHED = ["dispensed", "exited"];
 
@@ -42,8 +44,9 @@ const machineLines = (txns, visit) =>
       date: visit.visit_date,
     })?.billing.items || []
   )
-    .filter((i) => i.category === "machine" || i.category === "imaging")
-    .map((i) => ({ name: i.desc, amount: i.amount || 0, machines: machinesOnLine(i.desc) }));
+    .filter((i) => i.category !== "consultation" && i.category !== "lab")
+    .map((i) => ({ name: i.desc, amount: i.amount || 0, machines: machinesOnLine(i.desc) }))
+    .filter((l) => l.machines.length);
 
 const alreadyRaised = async (client, visitId, machineId) => {
   const { rows } = await client.query(
@@ -131,10 +134,21 @@ async function scanTargets(visitDate, db, limit) {
   const { rows } = await db.query(
     `${TARGET_SELECT}
         AND v.visit_date = $2::date
-        AND (v.machine_scan_at IS NULL OR v.machine_scan_at < NOW() - ($3 || ' minutes')::interval)
+        AND v.current_status <> ALL($5::text[])
+        AND (v.machine_scan_at IS NULL
+             OR v.machine_scan_at < NOW() - ((CASE
+                  WHEN EXISTS (SELECT 1 FROM giniflow_lab_orders o WHERE o.visit_id = v.id)
+                  THEN $6 ELSE $3 END) || ' minutes')::interval)
       ORDER BY v.machine_scan_at NULLS FIRST, v.created_at
       LIMIT $4`,
-    [NEVER_ARRIVED, visitDate, String(RESCAN_MIN), limit],
+    [
+      NEVER_ARRIVED,
+      visitDate,
+      String(RESCAN_MIN),
+      limit,
+      NOT_ON_FLOOR,
+      String(BILL_READ_RESCAN_MIN),
+    ],
   );
   return rows;
 }
@@ -214,6 +228,7 @@ export async function syncMachineOrdersForVisit(visit, db = pool) {
 }
 
 export async function syncBillingForVisitId(visitId, db = pool) {
+  if (await healthrayBlockedUntil(db)) return { raised: 0, lines: 0, labSteps: [], blocked: true };
   const { rows } = await db.query(`${TARGET_SELECT} AND v.id = $2`, [NEVER_ARRIVED, visitId]);
   const visit = rows.find((r) => r.hr_patient_id);
   if (!visit) return { raised: 0, lines: 0, labSteps: [] };
@@ -225,6 +240,10 @@ export async function syncBillingForVisitId(visitId, db = pool) {
 export async function runMachineSync(dateStr, { limit = SCAN_BATCH, db = pool } = {}) {
   if (!machineCaseListOnly()) {
     return { skipped: "SCRIBE_MACHINE_CASE_LIST=0", scanned: 0, raised: 0, failed: 0 };
+  }
+  const blockedUntil = await healthrayBlockedUntil(db);
+  if (blockedUntil) {
+    return { skipped: `HealthRay blocked until ${blockedUntil}`, scanned: 0, raised: 0, failed: 0 };
   }
   const visitDate = dateStr || new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
   const targets = await scanTargets(visitDate, db, limit);
