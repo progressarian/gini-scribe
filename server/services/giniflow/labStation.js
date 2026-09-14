@@ -45,6 +45,7 @@ const COLUMN_NAME = Object.fromEntries(BOARD_COLUMNS.map((c) => [c.key, c.name])
 // The visit is over — the lab is holding a result nobody on the floor is waiting
 // for any more, which is a different problem from a slow sample.
 const FINISHED = ["dispensed", "exited", "no_show", "cancelled"];
+const NEVER_CAME = ["no_show", "cancelled"];
 
 // A patient cannot be in two places. These three statuses mean somebody else has
 // them in a room right now, so the lab cannot draw a sample however overdue it
@@ -56,6 +57,8 @@ const FINISHED = ["dispensed", "exited", "no_show", "cancelled"];
 // means vitals are finished and the MO has not started — the patient is idle,
 // and collectable.
 const IN_A_ROOM = ["with_vitals", "with_sd", "with_doctor"];
+
+const inStationRoom = (r) => IN_A_ROOM.includes(r.current_status) && r.room_source !== "healthray";
 
 // The lab station. Five buckets along one track:
 //
@@ -274,6 +277,8 @@ export async function getLabQueue(
             o.created_at, o.updated_at, o.uploaded_at, o.report_file_url,
             p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
             v.current_status,
+            (SELECT e.meta->>'source' FROM giniflow_visit_events e
+               WHERE e.visit_id = v.id ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1) AS room_source,
             d.short_name AS ordered_by,
             -- The chart row the report landed on, so the pane can open it in the
             -- viewer the rest of the app uses instead of throwing the file at a
@@ -366,7 +371,7 @@ export async function getLabQueue(
         : COLUMN_NAME[columnForStatus(r.current_status)] ||
           STATUS_LABEL[r.current_status] ||
           r.current_status,
-      collectable: !IN_A_ROOM.includes(r.current_status) && !FINISHED.includes(r.current_status),
+      collectable: !inStationRoom(r) && !NEVER_CAME.includes(r.current_status),
     };
   });
 
@@ -647,6 +652,8 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
             COALESCE(p.file_no, max(c.raw_list_json->'patient'->>'healthray_uid')) AS file_no,
             p.age, p.sex,
             v.current_status, v.results_status, v.id IS NOT NULL AS on_floor,
+            (SELECT e.meta->>'source' FROM giniflow_visit_events e
+               WHERE e.visit_id = v.id ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1) AS room_source,
             -- Constant across the group (it depends only on the patient and the
             -- day), so bool_or reads it without widening the GROUP BY.
             bool_or(${labOnlyPredicate("v", "$3")}) AS lab_only,
@@ -820,15 +827,13 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
       // sense: a patient at `vitals_done` has nobody with them either.
       waiting: r.on_floor
         ? WAIT_STATUSES.includes(r.current_status) ||
-          (!IN_A_ROOM.includes(r.current_status) && !FINISHED.includes(r.current_status))
+          (!inStationRoom(r) && !FINISHED.includes(r.current_status))
         : false,
-      inARoom: r.on_floor ? IN_A_ROOM.includes(r.current_status) : false,
+      inARoom: r.on_floor ? inStationRoom(r) : false,
       finished: r.on_floor ? FINISHED.includes(r.current_status) : false,
       // Can the lab physically get to this patient now? Not while another
       // station has them, and not once they have gone home.
-      collectable: r.on_floor
-        ? !IN_A_ROOM.includes(r.current_status) && !FINISHED.includes(r.current_status)
-        : true,
+      collectable: r.on_floor ? !inStationRoom(r) && !NEVER_CAME.includes(r.current_status) : true,
       // The floor is stopped on this sample. `moStation`'s `awaitingResults` and
       // `doctorStation`'s `waitingOnLab` already say so — same rule, same two
       // facts — and this screen was the only one that did not, so one patient
@@ -860,14 +865,17 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
 async function assertPatientIsFree(db, visitId, what) {
   if (!visitId) return;
   const { rows } = await db.query(
-    `SELECT v.current_status, p.name FROM giniflow_visits v
+    `SELECT v.current_status, p.name,
+            (SELECT e.meta->>'source' FROM giniflow_visit_events e
+               WHERE e.visit_id = v.id ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1) AS room_source
+       FROM giniflow_visits v
        JOIN patients p ON p.id = v.patient_id
       WHERE v.id = $1`,
     [visitId],
   );
   if (!rows.length) return;
-  const { current_status: status, name } = rows[0];
-  if (IN_A_ROOM.includes(status)) {
+  const { current_status: status, name, room_source: roomSource } = rows[0];
+  if (IN_A_ROOM.includes(status) && roomSource !== "healthray") {
     throw Object.assign(
       new Error(
         `${name} is with another station right now (${STATUS_LABEL[status] || status}) — ${what} once they are free`,
@@ -875,7 +883,7 @@ async function assertPatientIsFree(db, visitId, what) {
       { status: 409 },
     );
   }
-  if (FINISHED.includes(status)) {
+  if (NEVER_CAME.includes(status)) {
     throw Object.assign(new Error(`${name} has left the floor — ${what} is no longer possible`), {
       status: 409,
     });

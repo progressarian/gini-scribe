@@ -112,3 +112,11 @@ export function useRemoveMachineReport() {
     onSuccess: () => invalidate(queryClient),
   });
 }
+
+export function useMachines() {
+  return useQuery({
+    queryKey: ["giniflow", "machines"],
+    queryFn: async () => (await api.get("/api/giniflow/machines")).data.machines,
+    staleTime: 60 * 1000,
+  });
+}

@@ -5,7 +5,9 @@ import { runMachineSync } from "../services/giniflow/machineSync.js";
 import { machineCaseListOnly, machineShowsHealthrayReports } from "../../shared/manualFloor.js";
 import { getMachineQueue, getMachineReconciliation } from "../services/giniflow/machineStation.js";
 import { machineForTest } from "../../shared/machineStages.js";
+import { getMachines } from "../services/giniflow/machineCatalog.js";
 
+const MACHINES = await getMachines();
 const date = process.argv[2] || new Date().toISOString().slice(0, 10);
 const apply = process.argv.includes("--apply");
 
@@ -45,8 +47,10 @@ if (!apply) {
       found++;
       const ids = String(b.name)
         .split(/[,/+&]/)
-        .map((n) => machineForTest(n.trim())?.id || `UNMATCHED(${n.trim()})`);
-      line(`  ${t.name}: ${b.category_type} | ${b.name} | Rs ${b.net_price ?? b.price} -> ${ids.join(", ")}`);
+        .map((n) => machineForTest(MACHINES, n.trim())?.id || `UNMATCHED(${n.trim()})`);
+      line(
+        `  ${t.name}: ${b.category_type} | ${b.name} | Rs ${b.net_price ?? b.price} -> ${ids.join(", ")}`,
+      );
     }
   }
   line(`\nDRY RUN — ${found} machine line(s) seen. Re-run with --apply to raise orders.`);
@@ -62,7 +66,9 @@ for (const m of queue.machines || []) {
 }
 for (const bucket of ["ordered", "in_progress", "done", "reported"]) {
   for (const row of queue[bucket] || []) {
-    line(`  [${bucket}] ${row.name} · ${row.machine || "?"} · ${row.blockedReason || "ACTIONABLE"}`);
+    line(
+      `  [${bucket}] ${row.name} · ${row.machine || "?"} · ${row.blockedReason || "ACTIONABLE"}`,
+    );
   }
 }
 const recon = await getMachineReconciliation(date);

@@ -4,6 +4,7 @@ import {
   healthrayMayWrite,
   healthrayTarget,
   holdOnUnrecorded,
+  doctorsWaitForTests,
 } from "../../../shared/manualFloor.js";
 import {
   HEALTHRAY_STATUS_TO_CHAIN,
@@ -17,6 +18,7 @@ import { slotStartTime } from "../../../shared/slotHour.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { advanceStatus, IST_TODAY } from "./statusEngine.js";
 import { recordHealthrayObservation, firstUnrecordedStation } from "./observation.js";
+import { TESTS_HOLD_SQL, testsOpenInScribe } from "./testsHold.js";
 
 // Vitals HealthRay recorded, which its appointment status cannot express.
 //
@@ -118,13 +120,21 @@ const revivesException = (currentStatus, target) =>
 // show one doctor seeing four patients at once — the exact bug the older module
 // hit. So the sync parks them in the queue and only moves one patient into the
 // room when the room is free.
-async function consultRoomFree(client, visitDate) {
+const roomFree = async (client, visitDate, roomStatus) => {
   const { rows } = await client.query(
-    `SELECT 1 FROM giniflow_visits
-      WHERE visit_date = $1::date AND current_status = 'with_doctor' LIMIT 1`,
-    [visitDate],
+    `SELECT 1 FROM giniflow_visits v
+       JOIN patients p ON p.id = v.patient_id
+       CROSS JOIN LATERAL (${TESTS_HOLD_SQL("v", "p")}) hold
+      WHERE v.visit_date = $1::date AND v.current_status = $2
+        AND ($3 OR hold.tests_pending = 0)
+      LIMIT 1`,
+    [visitDate, roomStatus, !doctorsWaitForTests()],
   );
   return rows.length === 0;
+};
+
+async function consultRoomFree(client, visitDate) {
+  return roomFree(client, visitDate, "with_doctor");
 }
 
 // The same rule for the Chief Endocrinologist's room. One patient at a time:
@@ -132,12 +142,7 @@ async function consultRoomFree(client, visitDate) {
 // room, and without this every patient of the day would read as being with the
 // Chief simultaneously.
 async function chiefRoomFree(client, visitDate) {
-  const { rows } = await client.query(
-    `SELECT 1 FROM giniflow_visits
-      WHERE visit_date = $1::date AND current_status = 'with_sd' LIMIT 1`,
-    [visitDate],
-  );
-  return rows.length === 0;
+  return roomFree(client, visitDate, "with_sd");
 }
 
 // The pharmacy leg HealthRay cannot see, and the one visit it may not close.
@@ -332,6 +337,7 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
     unchanged: 0,
     refused: 0,
     held: 0,
+    heldForTests: 0,
     skipped: 0,
     errors: 0,
     vitalsObserved: 0,
@@ -432,7 +438,7 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
     result.pharmacySwept = manualFloor()
       ? 0
       : await sweepPharmacyLeg(client, day, await pharmacyGraceMinutes(client));
-    result.labOnlySwept = await sweepLabOnlyExits(client, day);
+    result.labOnlySwept = manualFloor() ? 0 : await sweepLabOnlyExits(client, day);
     // Only ever used to choose `rx_pending` over `exited`, and on a manual floor
     // `exited` is not a target the sync can have — so the query is skipped rather
     // than run every 30 seconds for an answer nothing reads.
@@ -538,6 +544,17 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
             result.held++;
             continue;
           }
+        }
+
+        if (
+          doctorsWaitForTests() &&
+          isChainStatus(target) &&
+          chainIndex(target) >= chainIndex("sd_pending") &&
+          (await testsOpenInScribe(client, visitId)) > 0
+        ) {
+          await client.query("COMMIT");
+          result.heldForTests++;
+          continue;
         }
 
         let effective = target;

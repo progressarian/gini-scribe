@@ -91,7 +91,7 @@ function HandoverPane({ patientId, onClose, onToast }) {
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const busy = dispense.isPending || dispenseAll.isPending;
+  const busy = dispense.isPending || dispenseAll.isPending || !!data?.blockedReason;
 
   const mark = (medicationId, status, why = null) =>
     dispense.mutate(
@@ -143,6 +143,9 @@ function HandoverPane({ patientId, onClose, onToast }) {
                     a medicine here records the handover only — it does not end the visit.
                     {data.gone ? " This patient has already left." : ` Currently: ${data.station}.`}
                   </div>
+                  {data.blockedReason && (
+                    <div className="dp-hint lab-blocked">⏸ {data.blockedReason}</div>
+                  )}
                 </div>
                 <div className="dp-sec">
                   <div className="dp-sec-title">
@@ -272,7 +275,9 @@ function HandoverRow({ row, onOpen }) {
       </div>
       <div className="pc-r">
         <div className={`sp ${row.gone ? "sp-done" : "sp-sample"}`}>{row.station}</div>
-        <div className="pc-tlbl">{row.gone ? "has left" : "still here"}</div>
+        <div className="pc-tlbl">
+          {row.gone ? "has left" : row.blockedReason ? "waiting for Rx explain" : "still here"}
+        </div>
       </div>
     </button>
   );
@@ -336,7 +341,9 @@ function QueueCard({ card, now, onOpen, done }) {
       </div>
 
       <div className="pc-r">
-        <div className={`sp ${done ? "sp-done" : "sp-disp"}`}>{done ? "✓ Done" : "Dispense"}</div>
+        <div className={`sp ${done ? "sp-done" : card.blockedReason ? "sp-sample" : "sp-disp"}`}>
+          {done ? "✓ Done" : card.blockedReason ? "⏳ Rx explain" : "Dispense"}
+        </div>
         {minutes !== null && (
           <>
             <div className={`pc-time${done ? "" : timerTone(minutes, card.waitBudget)}`}>
@@ -458,6 +465,7 @@ function PharmacyPane({ visitId, onClose, onToast }) {
 
   const totals = data?.totals;
   const blocked = !!data?.blockedByNotGiven;
+  const awaitingRx = !!data?.blockedReason;
 
   return (
     <div className="detail-overlay">
@@ -490,7 +498,7 @@ function PharmacyPane({ visitId, onClose, onToast }) {
             {data && !data.finished && (
               <button
                 className="rbtn grn"
-                disabled={busy || !totals.gini}
+                disabled={busy || awaitingRx || !totals.gini}
                 onClick={() => setConfirming(true)}
               >
                 ✓ {blocked ? "Dispense the rest" : "Mark all dispensed"}
@@ -518,6 +526,11 @@ function PharmacyPane({ visitId, onClose, onToast }) {
         <div className="dp-scroll">
           <div className="dp-inner">
             {isLoading && <div className="empty-note">Loading the card…</div>}
+            {awaitingRx && !data.finished && (
+              <div className="dp-sec">
+                <div className="dp-hint lab-blocked">⏸ {data.blockedReason}</div>
+              </div>
+            )}
 
             {data && confirming && (
               <div className="confirm-box">
@@ -600,7 +613,7 @@ function PharmacyPane({ visitId, onClose, onToast }) {
                   card={data.card}
                   onDispense={onDispense}
                   busy={busy}
-                  closed={data.finished}
+                  closed={data.finished || awaitingRx}
                 />
               </div>
             )}

@@ -10,6 +10,7 @@ import { todaysVitals, previousVitals } from "./visitVitals.js";
 import { insertLabStepsForOrder } from "./journey.js";
 import { ALLERGY_NOT_ASKED } from "../../../shared/giniflowAllergy.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
+import { TESTS_HOLD_SQL, chiefWaitClock } from "./testsHold.js";
 
 // The MO / SD station — where the queue forms.
 //
@@ -107,6 +108,8 @@ const QUEUE_SQL = `
          a.pre_visit_compliance,
          first_ev.occurred_at AS checked_in_at,
          last_ev.occurred_at  AS status_since,
+         hold.tests_pending,
+         hold.tests_ready_at,
          (SELECT count(*)::int FROM giniflow_lab_orders o
            WHERE o.visit_id = v.id AND o.sample_status <> 'uploaded'
              AND ${GATING_ORDER_SQL}) AS open_orders,
@@ -155,6 +158,7 @@ const QUEUE_SQL = `
        WHERE e.visit_id = v.id AND ${WAIT_SINCE_SQL("e", "v")}
        ORDER BY occurred_at DESC, id DESC LIMIT 1
     ) last_ev ON TRUE
+    LEFT JOIN LATERAL (${TESTS_HOLD_SQL("v", "p")}) hold ON TRUE
    WHERE v.visit_date = $1::date
      AND v.current_status = ANY($2)
      AND NOT COALESCE(p.is_blocked, FALSE)
@@ -166,10 +170,17 @@ const QUEUE_SQL = `
 // Five groups, not four: "waiting on results" and "no reports at all" need
 // different actions from the MO, so the prototypes count them separately and so
 // do we. Merging them hides the only group an MO can unblock.
-const waitMinutes = (row, now) =>
-  row.status_since
-    ? Math.max(0, Math.round((now.getTime() - new Date(row.status_since).getTime()) / 60000))
+const waitMinutes = (row, now) => {
+  const { since } = chiefWaitClock(row);
+  return since
+    ? Math.max(0, Math.round((now.getTime() - new Date(since).getTime()) / 60000))
     : null;
+};
+
+const waitBudgetFor = (row, budgetFor) =>
+  chiefWaitClock(row).heldForTests
+    ? null
+    : budgetFor(slaKeyForStatus(row.current_status), row.category);
 
 const groupOf = (row, sdId) => {
   const mine = !row.assigned_sd_id || row.assigned_sd_id === sdId;
@@ -213,6 +224,7 @@ export async function getMoQueue(visitDate, sdId = null, q = null, now = new Dat
   const counters = {};
   for (const r of rows) {
     const compliancePct = r.pre_visit_compliance?.pct ?? null;
+    const { since: waitSince } = chiefWaitClock(r);
     const card = {
       visitId: r.id,
       patientId: r.patient_id,
@@ -232,17 +244,14 @@ export async function getMoQueue(visitDate, sdId = null, q = null, now = new Dat
       // time, which is the only useful thing to say about them.
       slot: null,
       checkedInAt: r.checked_in_at ? new Date(r.checked_in_at).toISOString() : null,
-      statusSince: r.status_since ? new Date(r.status_since).toISOString() : null,
+      statusSince: waitSince ? new Date(waitSince).toISOString() : null,
       // The wait is judged against the same budget the board judges it by, so a
       // patient the coordinator sees in red is red at the MO's desk too. The
       // client recomputes the minutes every second; the budget and the colour
       // come from here, where the SLA config lives.
       waitMinutes: waitMinutes(r, now),
-      waitBudget: budgetFor(slaKeyForStatus(r.current_status), r.category),
-      waitColour: budgetColour(
-        waitMinutes(r, now) ?? 0,
-        budgetFor(slaKeyForStatus(r.current_status), r.category),
-      ),
+      waitBudget: waitBudgetFor(r, budgetFor),
+      waitColour: budgetColour(waitMinutes(r, now) ?? 0, waitBudgetFor(r, budgetFor)),
       bios: bioChips(r.biomarkers),
       reports: reportsLine(r.results_status, !!r.biomarkers),
       // v2 shows "74% compliance". Only render when the source has a value —

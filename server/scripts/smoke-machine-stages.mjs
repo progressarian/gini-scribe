@@ -5,13 +5,14 @@
 import {
   MACHINE_RUNGS,
   MACHINE_RAIL,
-  MACHINES,
   MACHINE_SAMPLE_FLOW,
   MACHINE_STATUS_TO_STAGE,
-  MACHINE_DOC_TYPES,
   machineStageIndexOf,
   machineForTest,
+  machinesOnBillLine,
+  machineDocTypes,
   nextMachineStep,
+  shapeMachine,
   waitMinutesFor,
 } from "../../shared/machineStages.js";
 import { CAPABILITIES as C, hasCapability } from "../../shared/permissions.js";
@@ -62,26 +63,38 @@ check(
   ),
 );
 
-console.log("\n── The machines ────────────────────────────────────────────");
-check(
-  "five machines, Echo and X-Ray excluded",
-  MACHINES.map((m) => m.id).join(" ") === "abi vpt fundus tmt ecg",
-  MACHINES.map((m) => m.id).join(" "),
-);
-check(
-  "each has a duration, an icon and a doc type",
-  MACHINES.every((m) => m.durationMin > 0 && m.icon && m.docTypes.length),
+console.log("\n── Matching against a catalogue ────────────────────────────");
+const MACHINES = [
+  ["abi", "ABI", 10, ["ABI"], ["abi"]],
+  ["vpt", "VPT", 5, ["VPT"], ["vpt"]],
+  ["fundus", "Fundus", 10, ["Fundus"], ["eye"]],
+  ["tmt", "TMT", 20, ["TMT"], ["tmt"]],
+  ["ecg", "ECG", 5, ["ECG"], ["ecg"]],
+  ["echo", "2D Echo", 20, ["2D Echo", "Echo", "Echocardiography"], ["echo"]],
+].map(([id, name, minutes, bill, docs]) =>
+  shapeMachine({
+    id,
+    name,
+    default_duration_min: minutes,
+    order_test_name: bill[0],
+    bill_names: bill,
+    report_doc_types: docs,
+    machine_icon: "🩺",
+  }),
 );
 check(
   "no two machines claim the same doc type",
-  new Set(MACHINE_DOC_TYPES).size === MACHINE_DOC_TYPES.length,
+  new Set(machineDocTypes(MACHINES)).size === machineDocTypes(MACHINES).length,
 );
 check(
-  "only ABI and VPT produce values",
-  MACHINES.filter((m) => m.values.length)
-    .map((m) => m.id)
-    .join(" ") === "abi vpt",
+  "a bill line naming two machines raises both, in order",
+  machinesOnBillLine(MACHINES, "ABI,VPT").join(" ") === "abi vpt",
 );
+check(
+  "a multi-word bill name matches as a phrase",
+  machinesOnBillLine(MACHINES, "2D ECHO").join(" ") === "echo",
+);
+check("a lab line raises no machine", machinesOnBillLine(MACHINES, "LIPID PROFILE").length === 0);
 for (const [name, id] of [
   ["ABI", "abi"],
   ["abi test", "abi"],
@@ -90,13 +103,13 @@ for (const [name, id] of [
   ["TMT", "tmt"],
   ["ECG", "ecg"],
 ]) {
-  check(`"${name}" matches ${id}`, machineForTest(name)?.id === id);
+  check(`"${name}" matches ${id}`, machineForTest(MACHINES, name)?.id === id);
 }
 for (const name of ["HbA1c", "Complete Blood Count(CBC)", "Microalbumin / Creatinine Ratio"]) {
-  check(`"${name}" matches no machine`, machineForTest(name) === null);
+  check(`"${name}" matches no machine`, machineForTest(MACHINES, name) === null);
 }
-check("a 3-deep TMT queue is an hour", waitMinutesFor("tmt", 3) === 60);
-check("an unknown machine has no wait", waitMinutesFor("nope", 3) === 0);
+check("a 3-deep TMT queue is an hour", waitMinutesFor(MACHINES, "tmt", 3) === 60);
+check("an unknown machine has no wait", waitMinutesFor(MACHINES, "nope", 3) === 0);
 
 console.log("\n── The step offered next ───────────────────────────────────");
 check("from ordered → start", nextMachineStep("ordered")?.advanceTo === "in_progress");

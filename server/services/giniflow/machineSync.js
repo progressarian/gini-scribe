@@ -6,7 +6,8 @@ import {
   insertMachineStepsForOrders,
   raiseOrdersFromSteps,
 } from "./journey.js";
-import { machineFor, MACHINES } from "../../../shared/machineStages.js";
+import { machineFor, machinesOnBillLine } from "../../../shared/machineStages.js";
+import { getMachines } from "./machineCatalog.js";
 import { machineCaseListOnly } from "../../../shared/manualFloor.js";
 import { createLogger } from "../logger.js";
 import { healthrayBlockedUntil } from "./healthrayRefresh.js";
@@ -21,23 +22,7 @@ const NOT_ON_FLOOR = ["booked", "confirmed", "dispensed", "exited"];
 const NEVER_ARRIVED = ["no_show", "cancelled"];
 const FINISHED = ["dispensed", "exited"];
 
-const flatten = (v) =>
-  String(v || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "");
-
-const MACHINE_BY_TOKEN = new Map(MACHINES.flatMap((m) => m.tests.map((t) => [flatten(t), m.id])));
-
-const machinesOnLine = (name) => {
-  const ids = [];
-  for (const token of String(name || "").split(/[^A-Za-z0-9]+/)) {
-    const id = MACHINE_BY_TOKEN.get(flatten(token));
-    if (id && !ids.includes(id)) ids.push(id);
-  }
-  return ids;
-};
-
-const machineLines = (txns, visit) =>
+const machineLines = (txns, visit, machines) =>
   (
     transactionsToBilling(txns, {
       appointmentId: visit.healthray_id,
@@ -45,16 +30,20 @@ const machineLines = (txns, visit) =>
     })?.billing.items || []
   )
     .filter((i) => i.category !== "consultation" && i.category !== "lab")
-    .map((i) => ({ name: i.desc, amount: i.amount || 0, machines: machinesOnLine(i.desc) }))
+    .map((i) => ({
+      name: i.desc,
+      amount: i.amount || 0,
+      machines: machinesOnBillLine(machines, i.desc),
+    }))
     .filter((l) => l.machines.length);
 
-const alreadyRaised = async (client, visitId, machineId) => {
+const alreadyRaised = async (client, visitId, machine) => {
   const { rows } = await client.query(
     `SELECT 1 FROM giniflow_lab_orders o
        JOIN giniflow_lab_order_tests t ON t.lab_order_id = o.id
       WHERE o.visit_id = $1 AND o.kind = 'machine' AND t.test_name = ANY($2::text[])
       LIMIT 1`,
-    [visitId, machineFor(machineId).tests],
+    [visitId, machine.tests],
   );
   return rows.length > 0;
 };
@@ -68,8 +57,8 @@ const catalogPrice = async (client, testName) => {
   return Number(rows[0]?.price ?? 0);
 };
 
-async function raiseOrder(client, visitId, machineId, { amount }) {
-  const testName = machineFor(machineId).tests[0];
+async function raiseOrder(client, visitId, machine, { amount }) {
+  const testName = machine.tests[0];
   const price = amount > 0 ? amount : await catalogPrice(client, testName);
   const { rows } = await client.query(
     `INSERT INTO giniflow_lab_orders
@@ -178,7 +167,8 @@ const notYetOrdered = async (client, visitId, lines) => {
 
 export async function syncMachineOrdersForVisit(visit, db = pool) {
   const txns = await fetchPatientTransactions(visit.hr_patient_id);
-  const lines = machineLines(txns, visit);
+  const machines = await getMachines(db);
+  const lines = machineLines(txns, visit, machines);
   const labLines = labLinesBilled(txns, visit);
   if (!lines.length && !labLines.length) return { raised: 0, lines: 0, labSteps: [] };
 
@@ -187,6 +177,7 @@ export async function syncMachineOrdersForVisit(visit, db = pool) {
   let labSteps = [];
   try {
     await client.query("BEGIN");
+    await client.query(`SELECT id FROM giniflow_visits WHERE id = $1 FOR UPDATE`, [visit.visit_id]);
     if (labLines.length && !FINISHED.includes(visit.current_status)) {
       const missing = await notYetOrdered(client, visit.visit_id, labLines);
       if (missing.length) {
@@ -202,12 +193,13 @@ export async function syncMachineOrdersForVisit(visit, db = pool) {
     }
     for (const line of lines) {
       for (const machineId of line.machines) {
-        if (await alreadyRaised(client, visit.visit_id, machineId)) continue;
-        await raiseOrder(client, visit.visit_id, machineId, {
+        const machine = machineFor(machines, machineId);
+        if (!machine || (await alreadyRaised(client, visit.visit_id, machine))) continue;
+        await raiseOrder(client, visit.visit_id, machine, {
           amount: line.machines.length > 1 ? 0 : line.amount,
         });
         raised++;
-        log("raise", `${visit.name}: ${machineFor(machineId).name} (${line.name})`);
+        log("raise", `${visit.name}: ${machine.name} (${line.name})`);
       }
     }
     const billedMachines = [...new Set(lines.flatMap((l) => l.machines))];
@@ -299,12 +291,14 @@ export async function healthrayBillSteps(patientId, { date = null, db = pool } =
   const txns = await fetchPatientTransactions(visit.hr_patient_id);
   const labLines = labLinesBilled(txns, visit);
   const labTests = labLines.map((l) => l.name);
-  const machineIds = [...new Set(machineLines(txns, visit).flatMap((l) => l.machines))];
+  const machines = await getMachines(db);
+  const machineIds = [...new Set(machineLines(txns, visit, machines).flatMap((l) => l.machines))];
   const ids = [...(labTests.length ? LAB_STEPS : []), ...machineIds];
   if (!ids.length) return { status: "no_bill", labTests: [], machines: [], steps: [] };
 
   const { rows: catalog } = await db.query(
-    `SELECT id, name, default_duration_min, station, assigned_role, chain_status
+    `SELECT id, name, default_duration_min, station, assigned_role, chain_status,
+            COALESCE(machine, FALSE) AS machine
        FROM flow_step_catalog WHERE id = ANY($1) AND COALESCE(is_active, TRUE)`,
     [ids],
   );
@@ -318,13 +312,14 @@ export async function healthrayBillSteps(patientId, { date = null, db = pool } =
       station: c.station,
       role: c.assigned_role,
       chainStatus: c.chain_status,
+      machine: c.machine,
       billedIn: "healthray",
       ...(c.id === "blood_sample" ? { tests: labTests, billedTests: labLines } : {}),
     }));
   return {
     status: "ok",
     labTests,
-    machines: machineIds.map((id) => machineFor(id).name),
+    machines: machineIds.map((id) => machineFor(machines, id)?.name || id),
     steps,
   };
 }

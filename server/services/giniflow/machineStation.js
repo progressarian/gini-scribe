@@ -3,7 +3,6 @@ import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config
 import { opensLabGate, outstandingOf } from "../../../shared/labPayment.js";
 import { STATUS_LABEL, BOARD_COLUMNS, columnForStatus } from "../../../shared/giniflowStatus.js";
 import {
-  MACHINES,
   MACHINE_RUNGS,
   MACHINE_STAGES,
   MACHINE_SAMPLE_FLOW,
@@ -17,9 +16,10 @@ import {
   machineHandsOver,
   nextMachineStep,
   waitMinutesFor,
-  docTypeToMachine,
-  MACHINE_DOC_TYPES,
+  machineIdForDocType,
+  machineDocTypes,
 } from "../../../shared/machineStages.js";
+import { getMachines } from "./machineCatalog.js";
 import { UNDRAWN_SAMPLE_STATUSES } from "../../../shared/labStages.js";
 import { machineShowsHealthrayReports } from "../../../shared/manualFloor.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
@@ -43,6 +43,7 @@ const COLUMN_NAME = Object.fromEntries(BOARD_COLUMNS.map((c) => [c.key, c.name])
 
 const IN_A_ROOM = ["with_vitals", "with_sd", "with_doctor"];
 const FINISHED = ["dispensed", "exited", "no_show", "cancelled"];
+const NEVER_CAME = ["no_show", "cancelled"];
 
 const stageOf = (sampleStatus) => MACHINE_STATUS_TO_STAGE[sampleStatus] || "ordered";
 
@@ -73,9 +74,9 @@ const railFor = (stageKey) => {
 // raised through the catalogue carries exactly one machine's worth — but a
 // doctor can type a one-off, so the first test that names a machine wins and
 // anything unrecognised is left unassigned rather than guessed at.
-const machineOf = (tests) => {
+const machineOf = (machines, tests) => {
   for (const t of tests || []) {
-    const m = machineForTest(t.name ?? t);
+    const m = machineForTest(machines, t.name ?? t);
     if (m) return m.id;
   }
   return null;
@@ -86,14 +87,17 @@ const machineOf = (tests) => {
 async function assertPatientIsFree(db, visitId, what) {
   if (!visitId) return;
   const { rows } = await db.query(
-    `SELECT v.current_status, p.name FROM giniflow_visits v
+    `SELECT v.current_status, p.name,
+            (SELECT e.meta->>'source' FROM giniflow_visit_events e
+               WHERE e.visit_id = v.id ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1) AS room_source
+       FROM giniflow_visits v
        JOIN patients p ON p.id = v.patient_id
       WHERE v.id = $1`,
     [visitId],
   );
   if (!rows.length) return;
-  const { current_status: status, name } = rows[0];
-  if (IN_A_ROOM.includes(status)) {
+  const { current_status: status, name, room_source: roomSource } = rows[0];
+  if (IN_A_ROOM.includes(status) && roomSource !== "healthray") {
     throw Object.assign(
       new Error(
         `${name} is with another station right now (${STATUS_LABEL[status] || status}) — ${what} once they are free`,
@@ -101,7 +105,7 @@ async function assertPatientIsFree(db, visitId, what) {
       { status: 409 },
     );
   }
-  if (FINISHED.includes(status)) {
+  if (NEVER_CAME.includes(status)) {
     throw Object.assign(
       new Error(`${name} has left the floor — ${what} is no longer possible today`),
       { status: 409 },
@@ -132,9 +136,16 @@ async function assertMachineFree(db, machineId, visitDate, exceptOrderId = null)
     [visitDate, exceptOrderId],
   );
 
-  const busy = rows.find((r) => machineOf(r.names.map((n) => ({ name: n }))) === machineId);
+  const machines = await getMachines(db);
+  const busy = rows.find(
+    (r) =>
+      machineOf(
+        machines,
+        r.names.map((n) => ({ name: n })),
+      ) === machineId,
+  );
   if (busy) {
-    const label = machineFor(machineId)?.name || machineId;
+    const label = machineFor(machines, machineId)?.name || machineId;
     throw Object.assign(new Error(`The ${label} is busy — ${busy.name} is on it right now`), {
       status: 409,
     });
@@ -196,6 +207,7 @@ export async function getMachineQueue(
   { machine = null, group = "all" } = {},
 ) {
   const search = q && String(q).trim().length >= 2 ? String(q).trim() : null;
+  const catalogue = await getMachines(db);
 
   const { rows } = await db.query(
     `SELECT o.id, o.visit_id, o.sample_status, o.payment_status, o.urgency,
@@ -203,6 +215,8 @@ export async function getMachineQueue(
             o.created_at, o.updated_at, o.uploaded_at, o.report_file_url,
             p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
             v.current_status,
+            (SELECT e.meta->>'source' FROM giniflow_visit_events e
+               WHERE e.visit_id = v.id ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1) AS room_source,
             d.short_name AS ordered_by,
             COALESCE(t.tests, '[]'::json) AS tests,
             last_ev.occurred_at AS since,
@@ -264,10 +278,10 @@ export async function getMachineQueue(
   const all = rows.map((r) => {
     const paid = opensLabGate(r.payment_status);
     const stage = stageOf(r.sample_status);
-    const machineId = machineOf(r.tests);
+    const machineId = machineOf(catalogue, r.tests);
     const next = nextMachineStep(stage);
-    const finished = FINISHED.includes(r.current_status);
-    const inARoom = IN_A_ROOM.includes(r.current_status);
+    const finished = NEVER_CAME.includes(r.current_status);
+    const inARoom = IN_A_ROOM.includes(r.current_status) && r.room_source !== "healthray";
     const free = !inARoom && !finished;
     const hasEvidence = !!r.report_doc_id || !!r.has_values || !!r.report_file_url;
     // The offer, and every reason it might not be there. Computed once, here,
@@ -292,7 +306,7 @@ export async function getMachineQueue(
               : `In the ${(COLUMN_NAME[columnForStatus(r.current_status)] || "").toLowerCase()} room — call once free`
             : (next?.key === "done" || next?.key === "reported") &&
                 !hasEvidence &&
-                !machineHandsOver(machineId)
+                !machineHandsOver(catalogue, machineId)
               ? "Type the values in or attach the report to finish this test"
               : null;
 
@@ -341,7 +355,7 @@ export async function getMachineQueue(
   }
   for (const o of all) {
     if (o.stage !== "ordered" || !o.machine || !busyBy.has(o.machine)) continue;
-    const label = machineFor(o.machine)?.name || o.machine;
+    const label = machineFor(catalogue, o.machine)?.name || o.machine;
     o.blockedReason = o.blockedReason || `The ${label} is busy — ${busyBy.get(o.machine)} is on it`;
     o.nextAction = null;
   }
@@ -349,14 +363,14 @@ export async function getMachineQueue(
   // Server-side, both of them: the screen asks for a machine and a group and
   // gets only those rows. Counts are whole-day and computed before any filter,
   // so a chip does not read 0 the moment another chip is pressed.
-  const wantedMachine = MACHINES.some((m) => m.id === machine) ? machine : null;
+  const wantedMachine = catalogue.some((m) => m.id === machine) ? machine : null;
   const wantedGroup = MACHINE_FILTER_TO_STAGE[group] ? group : "all";
 
   const counts = Object.fromEntries(
     MACHINE_RUNGS.map((r) => [r.filter, all.filter((o) => o.stage === r.key).length]),
   );
 
-  const machines = MACHINES.map((m) => {
+  const machines = catalogue.map((m) => {
     const mine = all.filter((o) => o.machine === m.id);
     const onIt = mine.find((o) => o.stage === "in_progress") || null;
     const waiting = mine.filter((o) => o.stage === "ordered");
@@ -366,7 +380,7 @@ export async function getMachineQueue(
       waiting: waiting.length,
       onIt: onIt ? { name: onIt.name, since: onIt.since, orderId: onIt.orderId } : null,
       // What this station can answer that nothing else on the floor can.
-      waitMinutes: waitMinutesFor(m.id, waiting.length) + (onIt ? m.durationMin : 0),
+      waitMinutes: waitMinutesFor(catalogue, m.id, waiting.length) + (onIt ? m.durationMin : 0),
       byStage: Object.fromEntries(
         MACHINE_RUNGS.map((r) => [r.key, mine.filter((o) => o.stage === r.key).length]),
       ),
@@ -415,7 +429,7 @@ export async function getMachineQueue(
 // machine, a patient still on the floor, a price to bill. Two implementations
 // would mean two sets of rules and only one of them enforced.
 export async function addMachineTestOn(client, visitId, { machineId, actorId = null } = {}) {
-  const machine = machineFor(machineId);
+  const machine = machineFor(await getMachines(client), machineId);
   if (!machine) throw Object.assign(new Error(`Unknown machine: ${machineId}`), { status: 400 });
 
   const { rows: visit } = await client.query(
@@ -598,18 +612,18 @@ export async function advanceMachineTest(
     if (rung?.needsPatient) {
       await assertPatientIsFree(client, row.visit_id, rung.actionNoun);
     }
+    const catalogue = await getMachines(client);
+    const orderMachine = machineOf(
+      catalogue,
+      row.names.map((n) => ({ name: n })),
+    );
     if (toStage === "in_progress") {
       await assertReadyToStart(
         client,
         row.visit_id,
-        machineFor(machineOf(row.names.map((n) => ({ name: n }))))?.name || "machine",
+        machineFor(catalogue, orderMachine)?.name || "machine",
       );
-      await assertMachineFree(
-        client,
-        machineOf(row.names.map((n) => ({ name: n }))),
-        row.visit_date,
-        orderId,
-      );
+      await assertMachineFree(client, orderMachine, row.visit_date, orderId);
     }
     // The evidence gate — and here it covers FINISHING the test, not only filing
     // the report.
@@ -621,7 +635,7 @@ export async function advanceMachineTest(
     // result existing are the same moment. Marking a machine test done with
     // nothing captured records a result nobody will go back for.
     const hasEvidence = !!(row.report_doc_id || row.report_file_url || row.has_values || reportUrl);
-    const handsOver = machineHandsOver(machineOf(row.names.map((n) => ({ name: n }))));
+    const handsOver = machineHandsOver(catalogue, orderMachine);
     if ((toStage === "done" || toStage === "reported") && !hasEvidence && !handsOver) {
       throw Object.assign(
         new Error(
@@ -710,6 +724,7 @@ export async function advanceMachineTest(
 // be true. Nobody can say at six in the evening who was at the machine at 15:29.
 export async function getMachineReconciliation(visitDate, db = pool) {
   if (!machineShowsHealthrayReports()) return [];
+  const catalogue = await getMachines(db);
   const { rows } = await db.query(
     `SELECT d.id, d.doc_type, d.title, d.doc_date::text AS doc_date, d.created_at,
             p.id AS patient_id, p.name, p.file_no, v.current_status,
@@ -746,7 +761,7 @@ export async function getMachineReconciliation(visitDate, db = pool) {
         AND COALESCE(v.current_status, '') <> ALL($3::text[])
       ORDER BY d.created_at DESC
       LIMIT 200`,
-    [visitDate, MACHINE_DOC_TYPES, FINISHED],
+    [visitDate, machineDocTypes(catalogue), FINISHED],
   );
   // One row per PATIENT, not per report. A diabetic foot screen is an ABI, a VPT
   // and a Fundus, so reporting per document listed the same person three times
@@ -775,7 +790,7 @@ export async function getMachineReconciliation(visitDate, db = pool) {
     if (r.filed_by && !entry.filedBy) entry.filedBy = r.filed_by;
     entry.reports.push({
       docId: r.id,
-      machine: docTypeToMachine[r.doc_type] || null,
+      machine: machineIdForDocType(catalogue, r.doc_type),
       docType: r.doc_type,
       title: r.title,
       at,

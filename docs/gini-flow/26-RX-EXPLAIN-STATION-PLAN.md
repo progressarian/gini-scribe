@@ -182,3 +182,22 @@ for a day, then grant `nurse`. A chain change that turns out wrong is expensive 
 4. **Billing.** Order 17 in the old catalog, between this desk and pharmacy. Gini Flow has
    `reception_payment` for lab tests only. Whether consultation billing belongs on the chain is a
    separate decision.
+
+## 8. §6.1 reversed on the manual floor (14 Sep 2026)
+
+The free skip stopped matching the floor. Once every station records its own step
+(`38-MANUAL-FLOOR-PLAN.md`), a pharmacy that dispenses from `rx_pending` erases the Rx desk from the
+record: Milan Singla (P_180980) went `rx_pending` 14:47 → `pharmacy_pending` → `dispensed` →
+`exited` at 14:56 by "Dispense all", and his timeline could only say "Prescription Explain — not
+recorded on a station screen".
+
+So on a manual floor the pharmacy **waits for the Rx desk**:
+
+- `doctor_done`, `rx_pending` and `with_rx` still appear in the pharmacy queue, marked
+  "Waiting for Prescription Explain", with no dispense controls.
+- `dispenseItem`, `dispenseAll`, `markHandoverItem` and `markHandoverAll` refuse them with a 409 —
+  the rule is the service's, not the screen's.
+- "Patient left — close visit" is unchanged: a patient who walks out is recorded as leaving early.
+
+The switch is `SCRIBE_PHARMACY_WAITS_FOR_RX="0"` (`shared/manualFloor.js`), which restores §6.1
+exactly if the Rx desk is ever unstaffed.

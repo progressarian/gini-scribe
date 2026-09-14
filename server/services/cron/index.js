@@ -312,7 +312,7 @@ function scheduleNextGiniflowSync(delayMs) {
       // Only speak up when something moved — this runs every 30s all day.
       if (r && (r.created || r.advanced || r.errors || r.behind)) {
         console.log(
-          `[Cron] Gini Flow sync: ${r.created} created, ${r.advanced} advanced, ${r.refused} refused (a station's own step), ${r.held} held at an un-recorded step, ${r.behind} behind a desk, ${r.errors} errors of ${r.considered} in ${Date.now() - startedAt}ms`,
+          `[Cron] Gini Flow sync: ${r.created} created, ${r.advanced} advanced, ${r.refused} refused (a station's own step), ${r.held} held at an un-recorded step, ${r.heldForTests} waiting on tests done in Scribe, ${r.behind} behind a desk, ${r.errors} errors of ${r.considered} in ${Date.now() - startedAt}ms`,
         );
       }
     } catch (e) {

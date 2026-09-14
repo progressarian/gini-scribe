@@ -410,6 +410,30 @@ export function useFlowDeleteVisitType() {
     }
   });
 }
+export function useFlowMachineOptions(enabled = true) {
+  return useQuery({
+    queryKey: [...qk.flow.stepCatalog(), "machine-options"],
+    queryFn: async () => (await api.get("/api/flow/step-catalog/machine-options")).data,
+    enabled,
+    staleTime: 60_000,
+  });
+}
+export function useFlowSaveMachine() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...body }) => {
+      try {
+        return (await api.patch(`/api/flow/step-catalog/${id}`, body)).data;
+      } catch (err) {
+        throw new Error(errMsg(err, "Could not save the machine"));
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.flow.all });
+      qc.invalidateQueries({ queryKey: ["giniflow", "machines"] });
+    },
+  });
+}
 export function useFlowEditCatalog() {
   return useFlowMutation(async ({ id, ...body }) => {
     try {

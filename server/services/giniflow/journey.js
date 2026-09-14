@@ -11,7 +11,8 @@ import { labStepsAreManual } from "../../../shared/manualFloor.js";
 import { genVisitToken } from "../flow/journey.js";
 import { LAB_RUNGS, stageIndexOf, rungFor } from "../../../shared/labStages.js";
 import { machineFor } from "../../../shared/machineStages.js";
-import { testsBeforeDoctors } from "../../../shared/journeyOrder.js";
+import { testsBeforeDoctors, isTestStep } from "../../../shared/journeyOrder.js";
+import { getMachines } from "./machineCatalog.js";
 import { addMachineTestOn } from "./machineStation.js";
 import { testPricesFor, schemeForVisit } from "../pricing.js";
 
@@ -97,6 +98,7 @@ export async function defaultPlan(visitTypeId, db = pool) {
   const { rows } = await db.query(
     `SELECT t.step_order, t.is_default, t.condition_key,
             c.id AS catalog_id, c.name, c.station, c.assigned_role, c.chain_status,
+            COALESCE(c.machine, FALSE) AS machine,
             COALESCE(t.override_duration_min, c.default_duration_min)::int AS minutes
        FROM flow_step_templates t
        JOIN flow_step_catalog c ON c.id = t.step_catalog_id
@@ -113,6 +115,7 @@ export async function defaultPlan(visitTypeId, db = pool) {
   );
   return rows.map((r) => ({
     catalogId: r.catalog_id,
+    machine: r.machine,
     name: r.name,
     minutes: r.minutes,
     station: r.station,
@@ -326,8 +329,9 @@ export async function raiseOrdersFromSteps(client, visitId, steps, actorId = nul
   // One order per machine step, through the machine room's own rules rather than
   // around them — a price to bill, a patient still on the floor, one open test
   // per machine.
+  const machines = steps.some((s) => s.catalogId) ? await getMachines(client) : [];
   for (const step of steps) {
-    const machine = step.catalogId ? machineFor(step.catalogId) : null;
+    const machine = step.catalogId ? machineFor(machines, step.catalogId) : null;
     if (!machine) continue;
     const r = await addMachineTestOn(client, visitId, { machineId: machine.id, actorId });
     raised.machine.push({
@@ -657,14 +661,18 @@ export async function syncFromStatus(client, visitId, toStatus) {
 // stops behind for tests nobody ordered.
 export async function placeTestsBeforeDoctors(client, visitId) {
   const { rows: plan } = await client.query(
-    `SELECT id, step_catalog_id, step_order, status, chain_status
-       FROM giniflow_visit_steps WHERE visit_id = $1 ORDER BY step_order`,
+    `SELECT s.id, s.step_catalog_id, s.step_order, s.status, s.chain_status,
+            COALESCE(c.machine, FALSE) AS machine
+       FROM giniflow_visit_steps s
+       LEFT JOIN flow_step_catalog c ON c.id = s.step_catalog_id
+      WHERE s.visit_id = $1 ORDER BY s.step_order`,
     [visitId],
   );
   const next = testsBeforeDoctors(plan, {
     idOf: (s) => s.step_catalog_id,
     chainOf: (s) => s.chain_status,
     statusOf: (s) => s.status,
+    machineOf: (s) => s.machine,
   });
   if (next === plan) return false;
 
@@ -684,8 +692,10 @@ const firstPendingAfterVitals = (plan) =>
 
 async function insertAutoSteps(client, visitId, wanted, placeIn) {
   const { rows: plan } = await client.query(
-    `SELECT step_catalog_id, step_order, status FROM giniflow_visit_steps
-      WHERE visit_id = $1 ORDER BY step_order`,
+    `SELECT s.step_catalog_id, s.step_order, s.status, COALESCE(c.machine, FALSE) AS machine
+       FROM giniflow_visit_steps s
+       LEFT JOIN flow_step_catalog c ON c.id = s.step_catalog_id
+      WHERE s.visit_id = $1 ORDER BY s.step_order`,
     [visitId],
   );
   if (!plan.length) return { added: [] };
@@ -758,8 +768,8 @@ export async function insertLabStepsForOrder(client, visitId) {
 
 export async function insertMachineStepsForOrders(client, visitId, machineIds) {
   return insertAutoSteps(client, visitId, machineIds, (plan) => {
-    const sample = plan.findLast((s) => s.step_catalog_id === "blood_sample");
-    return sample ? sample.step_order + 1 : firstPendingAfterVitals(plan)?.step_order;
+    const lastTest = plan.findLast((s) => isTestStep(s.step_catalog_id, s.machine));
+    return lastTest ? lastTest.step_order + 1 : firstPendingAfterVitals(plan)?.step_order;
   });
 }
 

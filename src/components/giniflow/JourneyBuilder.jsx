@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useFlowStepCatalog, useFlowStaff } from "../../queries/hooks/useFlow";
 import { useReceptionTestCatalog } from "../../queries/hooks/useGiniflowReception";
-import { machineFor } from "../../../shared/machineStages.js";
 import useAuthStore from "../../stores/authStore";
 import { CONDITIONS } from "../../../shared/giniflowConditions.js";
 
@@ -138,6 +137,7 @@ export default function JourneyBuilder({
         station: c.station,
         role: c.assigned_role,
         chainStatus: c.chain_status,
+        machine: !!c.machine,
         source: "added",
       },
     ]);
@@ -241,7 +241,7 @@ export default function JourneyBuilder({
               ✕
             </button>
           </div>
-          {step.billedIn === "healthray" && !machineFor(step.catalogId) ? (
+          {step.billedIn === "healthray" && !step.machine ? (
             <div className="jb-tests">
               <span className="jb-test-total">
                 {step.tests?.length
@@ -252,11 +252,9 @@ export default function JourneyBuilder({
           ) : step.catalogId === "blood_sample" ? (
             <TestPicker picked={step.tests || []} onChange={(tests) => replace(i, { tests })} />
           ) : null}
-          {step.catalogId && machineFor(step.catalogId) && (
+          {step.catalogId && step.machine && (
             <div className="jb-tests">
-              <span className="jb-test-total">
-                Raises a {machineFor(step.catalogId).name} order for the payment desk
-              </span>
+              <span className="jb-test-total">Raises a {step.name} order for the payment desk</span>
             </div>
           )}
         </div>

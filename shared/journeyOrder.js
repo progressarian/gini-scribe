@@ -1,18 +1,24 @@
-import { MACHINES } from "./machineStages.js";
-
-export const TEST_STEP_IDS = new Set(["lab_billing", "blood_sample", ...MACHINES.map((m) => m.id)]);
+const LAB_STEP_IDS = ["lab_billing", "blood_sample"];
 
 const DOCTOR_COLUMNS = ["with_sd", "ready_for_doctor", "with_doctor"];
 
 const testRank = (id) => (id === "lab_billing" ? 0 : id === "blood_sample" ? 1 : 2);
 
+export const isTestStep = (catalogId, isMachine) => LAB_STEP_IDS.includes(catalogId) || !!isMachine;
+
 export function testsBeforeDoctors(
   steps,
-  { idOf = (s) => s.catalogId, chainOf = (s) => s.chainStatus, statusOf = (s) => s.status } = {},
+  {
+    idOf = (s) => s.catalogId,
+    chainOf = (s) => s.chainStatus,
+    statusOf = (s) => s.status,
+    machineOf = (s) => s.machine,
+  } = {},
 ) {
-  const tests = steps.filter((s) => TEST_STEP_IDS.has(idOf(s)));
+  const isTest = (s) => isTestStep(idOf(s), machineOf(s));
+  const tests = steps.filter(isTest);
   if (!tests.length) return steps;
-  const rest = steps.filter((s) => !TEST_STEP_IDS.has(idOf(s)));
+  const rest = steps.filter((s) => !isTest(s));
   const doctorAt = rest.findIndex((s) => DOCTOR_COLUMNS.includes(chainOf(s)));
   if (doctorAt < 0 || (statusOf(rest[doctorAt]) ?? "pending") !== "pending") return steps;
 

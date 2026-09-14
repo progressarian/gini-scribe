@@ -19,7 +19,8 @@ import {
   addMachineTest,
 } from "../services/giniflow/machineStation.js";
 import { advanceSample } from "../services/giniflow/labStation.js";
-import { MACHINES, machineForTest } from "../../shared/machineStages.js";
+import { machineForTest } from "../../shared/machineStages.js";
+import { getMachines } from "../services/giniflow/machineCatalog.js";
 
 let failures = 0;
 const check = (label, ok, detail = "") => {
@@ -32,6 +33,7 @@ const today = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolk
   .slice(0, 10);
 const TAG = `ZZMACH_${Date.now()}`;
 
+const MACHINES = await getMachines();
 const client = await pool.connect();
 
 // The service's own transaction, nested inside ours.
@@ -117,7 +119,7 @@ try {
   const occupied = new Set(
     busyNow
       .flatMap((r) => r.names)
-      .map((n) => machineForTest(n)?.id)
+      .map((n) => machineForTest(MACHINES, n)?.id)
       .filter(Boolean),
   );
   const free = MACHINES.filter((m) => !occupied.has(m.id));
@@ -133,7 +135,9 @@ try {
   const unpaid = await makeOrder("VPT", { payment: "pending" });
   const claimed = await makeOrder("Fundus", { payment: "insurance_claim" });
   const inRoom = await makeOrder("TMT", { status: "with_doctor" });
-  const gone = await makeOrder("ECG", { status: "exited" });
+  const gone = await makeOrder("ECG", { status: "no_show" });
+  const THIRD = free[2]?.tests[0];
+  const closed = THIRD ? await makeOrder(THIRD, { status: "exited" }) : null;
 
   console.log("\n── P3 · payment gates the start ─────────────────────────────");
   const noPay = await refusal(() => advanceMachineTest(unpaid.orderId, { to: "in_progress" }, db));
@@ -145,7 +149,17 @@ try {
   const busy = await refusal(() => advanceMachineTest(inRoom.orderId, { to: "in_progress" }, db));
   check("a patient another station has cannot be started", busy?.status === 409, busy?.message);
   const left = await refusal(() => advanceMachineTest(gone.orderId, { to: "in_progress" }, db));
-  check("nor one who has gone home", left?.status === 409, left?.message);
+  check("nor one who never came", left?.status === 409, left?.message);
+  if (closed) {
+    const reopened = await refusal(() =>
+      advanceMachineTest(closed.orderId, { to: "in_progress" }, db),
+    );
+    check(
+      `an ordered ${THIRD} still starts after another desk closed the visit`,
+      reopened === null,
+      reopened?.message,
+    );
+  }
 
   console.log("\n── P2 · one patient per machine ────────────────────────────");
   const first = await refusal(() => advanceMachineTest(abi.orderId, { to: "in_progress" }, db));
@@ -225,8 +239,8 @@ try {
   console.log("\n── The machine that is busy, and the wait behind it ────────");
   const q = await getMachineQueue(today, "Probe", client);
   const byId = Object.fromEntries(q.machines.map((m) => [m.id, m]));
-  const mineId = machineForTest(MINE)?.id;
-  const otherId = machineForTest(OTHER)?.id;
+  const mineId = machineForTest(MACHINES, MINE)?.id;
+  const otherId = machineForTest(MACHINES, OTHER)?.id;
   check(`${OTHER} shows who is on it`, !!byId[otherId].onIt?.name, byId[otherId].onIt?.name);
   check(`${MINE} is free again once its test is filed`, byId[mineId].onIt === null);
   check(

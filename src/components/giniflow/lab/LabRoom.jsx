@@ -880,21 +880,23 @@ function HealthrayCasePane({
             <div className="dp-sec">
               <div className="dp-sec-title">Where this patient is</div>
               <div className="dp-hint">
-                {row.labOnly
-                  ? "Booked for the test only — no consultation today, so nobody downstream is waiting on this result. They are checked in, so the lab can call them over."
-                  : row.station
-                    ? row.finished
-                      ? `The visit is over — ${row.station.toLowerCase()}. Any result still running will land on the chart after they have gone home.`
-                      : row.awaitingResults && row.stage.key === "pending"
-                        ? `Nothing has been drawn yet, so there is no report to wait for. They are at ${row.statusLabel || row.station} and still on the floor — collect now, before they leave.`
-                        : row.awaitingResults
-                          ? `Waiting for today's lab reports. On the board they sit at ${row.statusLabel || row.station}, and the result is what releases them.`
-                          : row.waiting
-                            ? `${row.statusLabel || row.station} — queued in the ${row.station} column, nobody has them in a room. Free to call.`
-                            : `${row.statusLabel || row.station} — somebody has them in a room right now. Collect once they are free.`
-                    : row.lastSeenOn
-                      ? `No OPD appointment today — consulted on ${shortDate(row.lastSeenOn)} and back for the sample only.`
-                      : "No OPD visit on record — the sample was taken outside the OPD floor."}
+                {row.labOnly && row.finished
+                  ? "Booked for the test only. The visit is closed in Scribe, so the sample can no longer be taken here."
+                  : row.labOnly
+                    ? "Booked for the test only — no consultation today, so nobody downstream is waiting on this result. They are checked in, so the lab can call them over."
+                    : row.station
+                      ? row.finished
+                        ? `The visit is over — ${row.station.toLowerCase()}. Any result still running will land on the chart after they have gone home.`
+                        : row.awaitingResults && row.stage.key === "pending"
+                          ? `Nothing has been drawn yet, so there is no report to wait for. They are at ${row.statusLabel || row.station} and still on the floor — collect now, before they leave.`
+                          : row.awaitingResults
+                            ? `Waiting for today's lab reports. On the board they sit at ${row.statusLabel || row.station}, and the result is what releases them.`
+                            : row.waiting
+                              ? `${row.statusLabel || row.station} — queued in the ${row.station} column, nobody has them in a room. Free to call.`
+                              : `${row.statusLabel || row.station} — somebody has them in a room right now. Collect once they are free.`
+                      : row.lastSeenOn
+                        ? `No OPD appointment today — consulted on ${shortDate(row.lastSeenOn)} and back for the sample only.`
+                        : "No OPD visit on record — the sample was taken outside the OPD floor."}
               </div>
               {row.awaitingResults && row.stage.key !== "pending" && (
                 <div className="dp-hint">

@@ -201,6 +201,7 @@ import {
 } from "../services/giniflow/journey.js";
 import { sendFlowCheckin } from "../services/msg91.js";
 import { syncBillingForVisitId, healthrayBillSteps } from "../services/giniflow/machineSync.js";
+import { getMachines } from "../services/giniflow/machineCatalog.js";
 import {
   getHealthrayStatus,
   requestHealthrayRefresh,
@@ -1558,6 +1559,14 @@ const moGate = requireCapability(CAP.GINIFLOW_STATION_MO);
 // nothing is drawn here, and the person who runs the machines is not one of the
 // lab's two benches.
 const machineGate = requireCapability(CAP.GINIFLOW_STATION_MACHINE);
+
+router.get("/giniflow/machines", machineGate, async (_req, res) => {
+  try {
+    res.json({ machines: await getMachines() });
+  } catch (e) {
+    handleError(res, e, "Gini Flow machines");
+  }
+});
 
 router.get(
   "/giniflow/stations/machine/queue",

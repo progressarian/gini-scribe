@@ -9,6 +9,7 @@ import {
   useRemoveMachineReport,
   useMachineCandidates,
   useAddMachineTest,
+  useMachines,
 } from "../../queries/hooks/useGiniflowMachine";
 import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
 import LiveBadge from "../../components/giniflow/LiveBadge";
@@ -16,7 +17,6 @@ import StationNotice from "../../components/giniflow/StationNotice";
 import LabResultsForm from "../../components/giniflow/LabResultsForm";
 import PdfViewerModal from "../../components/visit/PdfViewerModal";
 import {
-  MACHINES,
   machineHandsOver,
   MACHINE_RUNGS,
   MACHINE_RAIL,
@@ -66,8 +66,9 @@ const waitLabel = (m) =>
       : "free now";
 
 function TestCard({ order, onAdvance, onOpen, busy }) {
+  const { data: catalogue = [] } = useMachines();
   const mins = minutesSince(order.since);
-  const machine = machineFor(order.machine);
+  const machine = machineFor(catalogue, order.machine);
   return (
     <div className={`mc-card${order.blockedReason ? " is-blocked" : ""}`}>
       <button type="button" className="mc-card__main" onClick={() => onOpen(order)}>
@@ -123,6 +124,7 @@ function TestPane({
   canRemoveReport,
   busy,
 }) {
+  const { data: catalogue = [] } = useMachines();
   const paneRef = useRef(null);
   const fileRef = useRef(null);
   const [replacing, setReplacing] = useState(false);
@@ -134,12 +136,12 @@ function TestPane({
   }, [order, onClose]);
   if (!order) return null;
 
-  const machine = machineFor(order.machine);
+  const machine = machineFor(catalogue, order.machine);
   // Values are only offered where the machine produces them, and only once the
   // test has actually been run — a number typed against a test nobody has
   // started is a number nobody measured.
   const canEnterValues = order.stage !== "ordered";
-  const handsOver = machineHandsOver(order.machine);
+  const handsOver = machineHandsOver(catalogue, order.machine);
   const canUpload = order.stage !== "ordered" && !handsOver;
   const showUploader = canUpload && (!order.hasReport || replacing);
 
@@ -315,6 +317,7 @@ function TestPane({
 const SHOW_ADD_TEST = false;
 
 function AddTest({ onAdded, busy }) {
+  const { data: catalogue = [] } = useMachines();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [picked, setPicked] = useState(null);
@@ -351,7 +354,7 @@ function AddTest({ onAdded, busy }) {
             {picked.name} · {picked.where} — which machine?
           </div>
           <div className="mroom__add-machines">
-            {MACHINES.map((m) => (
+            {catalogue.map((m) => (
               <button
                 key={m.id}
                 type="button"
@@ -418,6 +421,7 @@ function AddTest({ onAdded, busy }) {
 }
 
 export default function MachineStationPage() {
+  const { data: catalogue = [] } = useMachines();
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
   const [machineFilter, setMachineFilter] = useState(null);
@@ -457,7 +461,7 @@ export default function MachineStationPage() {
   const allRows = MACHINE_RUNGS.flatMap((r) => rowsFor(r));
   const running = allRows.filter((o) => o.stage === "in_progress");
   const openOrder = allRows.find((o) => o.orderId === openId) || null;
-  const machines = data?.machines || MACHINES.map((m) => ({ ...m, total: 0, waiting: 0 }));
+  const machines = data?.machines || catalogue.map((m) => ({ ...m, total: 0, waiting: 0 }));
   const counts = data?.counts || {};
   const unassigned = data?.unassigned || [];
 
@@ -657,27 +661,29 @@ export default function MachineStationPage() {
                 <span className="grp-split">{running.length}</span>
               </div>
               <div className="mroom__now-grid">
-                {MACHINES.filter((m) => running.some((o) => o.machine === m.id)).map((m) => (
-                  <section key={m.id} className="mroom__now-machine">
-                    <h2 className="sq-gh">
-                      {m.icon} {m.name}
-                      <span className="sq-count">{m.fullName}</span>
-                    </h2>
-                    <div className="mroom__list">
-                      {running
-                        .filter((o) => o.machine === m.id)
-                        .map((o) => (
-                          <TestCard
-                            key={o.orderId}
-                            order={o}
-                            busy={busy}
-                            onAdvance={onAdvance}
-                            onOpen={(x) => setOpenId(x.orderId)}
-                          />
-                        ))}
-                    </div>
-                  </section>
-                ))}
+                {catalogue
+                  .filter((m) => running.some((o) => o.machine === m.id))
+                  .map((m) => (
+                    <section key={m.id} className="mroom__now-machine">
+                      <h2 className="sq-gh">
+                        {m.icon} {m.name}
+                        <span className="sq-count">{m.fullName}</span>
+                      </h2>
+                      <div className="mroom__list">
+                        {running
+                          .filter((o) => o.machine === m.id)
+                          .map((o) => (
+                            <TestCard
+                              key={o.orderId}
+                              order={o}
+                              busy={busy}
+                              onAdvance={onAdvance}
+                              onOpen={(x) => setOpenId(x.orderId)}
+                            />
+                          ))}
+                      </div>
+                    </section>
+                  ))}
               </div>
             </div>
           )}
@@ -861,7 +867,7 @@ export default function MachineStationPage() {
                                 {r.machines
                                   .map(
                                     (id) =>
-                                      `${machineFor(id)?.icon || ""} ${machineFor(id)?.name || id}`,
+                                      `${machineFor(catalogue, id)?.icon || ""} ${machineFor(catalogue, id)?.name || id}`,
                                   )
                                   .join(" · ")}
                               </div>

@@ -1,5 +1,6 @@
 import pool from "../../config/db.js";
 import { advanceStatus, budgetColour } from "./statusEngine.js";
+import { pharmacyWaitsForRx } from "../../../shared/manualFloor.js";
 import { getSlaConfig, budgetLookup } from "./board.js";
 import { buildCard } from "./medicineCard.js";
 import { buildCounsellingNote } from "./counsellingNote.js";
@@ -42,6 +43,25 @@ const FINISHED = ["dispensed", "exited", "no_show", "cancelled"];
 // sit there, so the counter must be able to see and serve them.
 const QUEUE_STATUSES = ["doctor_done", "rx_pending", "with_rx", "pharmacy_pending"];
 const DONE_STATUSES = ["dispensed", "exited"];
+const AWAITING_RX = ["doctor_done", "rx_pending", "with_rx"];
+const RX_WAIT_REASON =
+  "Waiting for Prescription Explain — the Rx desk marks it explained before the pharmacy dispenses";
+
+const rxBlock = (status) =>
+  pharmacyWaitsForRx() && AWAITING_RX.includes(status) ? RX_WAIT_REASON : null;
+
+const assertExplained = (status) => {
+  const reason = rxBlock(status);
+  if (reason) throw Object.assign(new Error(reason), { status: 409, awaitingRx: true });
+};
+
+const assertPatientExplained = async (db, patientId, visitDate) => {
+  const { rows } = await db.query(
+    `SELECT current_status FROM giniflow_visits WHERE patient_id = $1 AND visit_date = $2::date`,
+    [patientId, visitDate],
+  );
+  if (rows[0]) assertExplained(rows[0].current_status);
+};
 
 const minutesSince = (from, now) =>
   from ? Math.max(0, Math.round((now.getTime() - new Date(from).getTime()) / 60000)) : null;
@@ -147,6 +167,7 @@ export async function getPharmacyQueue(
       age: r.age,
       sex: r.sex,
       status: r.current_status,
+      blockedReason: rxBlock(r.current_status),
       doctor: r.doctor_name,
       priority: r.priority || "normal",
       priorityReason: r.priority_reason,
@@ -291,6 +312,7 @@ async function getPendingHandover(visitDate, db = pool) {
         STATUS_LABEL[r.current_status] ||
         r.current_status,
     gone: FINISHED.includes(r.current_status),
+    blockedReason: rxBlock(r.current_status),
     prescribedAt: iso(r.prescribed_at),
   }));
 }
@@ -420,6 +442,7 @@ export async function getPharmacyPatient(visitId, db = pool) {
     phone: visit.phone,
     doctor: visit.doctor_name,
     status: visit.current_status,
+    blockedReason: rxBlock(visit.current_status),
     visitDate: visit.visit_date,
     finalizedAt: iso(visit.finalized_at),
     cardSentAt: iso(visit.card_sent_at),
@@ -478,6 +501,7 @@ export async function dispenseItem(
       { status: 409 },
     );
   }
+  assertExplained(visit.current_status);
 
   const { rows } = await db.query(
     `SELECT id, name, external_doctor FROM medications
@@ -545,6 +569,7 @@ export async function dispenseAll(visitId, { actorId = null, actorName = null } 
     if (DONE_STATUSES.includes(visit.current_status)) {
       throw Object.assign(new Error("This patient has already been dispensed"), { status: 409 });
     }
+    assertExplained(visit.current_status);
     if (!QUEUE_STATUSES.includes(visit.current_status)) {
       throw Object.assign(
         new Error("The consultation is not finalized yet — nothing to dispense"),
@@ -797,6 +822,7 @@ export async function getHandoverPatient(patientId, visitDate, db = pool) {
         status ||
         "Not on the floor",
     gone: FINISHED.includes(status),
+    blockedReason: rxBlock(status),
     items,
     pending: items.filter((i) => !i.status).length,
     given: items.filter((i) => i.status === "given").length,
@@ -819,6 +845,7 @@ export async function markHandoverItem(
       { status: 400 },
     );
   }
+  await assertPatientExplained(db, patientId, date);
   const { rows } = await db.query(
     `SELECT m.id, m.name FROM medications m
       WHERE m.id = $1 AND m.patient_id = $2 AND m.is_active AND m.external_doctor IS NULL`,
@@ -851,6 +878,7 @@ export async function markHandoverAll(patientId, { actorName = null, date }, db 
   const client = await db.connect();
   try {
     await client.query("BEGIN");
+    await assertPatientExplained(client, patientId, date);
     const { rows: meds } = await client.query(HANDOVER_MEDS_SQL, [patientId, date]);
     const pending = meds.filter((m) => !m.status);
     if (!pending.length) {

@@ -39,6 +39,7 @@ import { seedDemoDay, cleanDemoDay, demoAllowed } from "../services/giniflow/dem
 import { addClient, removeClient, hubStatus } from "../services/giniflow/eventHub.js";
 import { trackByToken } from "../services/giniflow/journey.js";
 import { getMachineTrack } from "../services/giniflow/machineStation.js";
+import { getTestsHold } from "../services/giniflow/testsHold.js";
 
 const router = Router();
 
@@ -281,7 +282,7 @@ router.get("/giniflow/visits/:id/timeline", async (req, res) => {
           },
           now,
         );
-    const labReported = labTrack.find((m) => m.status === "lab_reported");
+    const testsHold = labOnly ? null : await getTestsHold(req.params.id);
     const steps = labOnly
       ? await getLabOnlyTimeline(
           pool,
@@ -296,8 +297,8 @@ router.get("/giniflow/visits/:id/timeline", async (req, res) => {
       : await getStationTimes(pool, req.params.id, budgetMap(sla), now, {
           slaConfig: sla,
           category: visit.rows[0].category,
-          labReadyAt: labReported ? new Date(labReported.enteredAt) : null,
-          labPending: labTrack.length > 0 && !labReported,
+          labReadyAt: testsHold.pending ? null : testsHold.readyAt,
+          labPending: testsHold.pending,
         });
 
     const machineTrack = await getMachineTrack(pool, req.params.id, now);

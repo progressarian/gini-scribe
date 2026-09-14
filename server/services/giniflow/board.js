@@ -19,6 +19,7 @@ import {
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { BEHIND_STATION_LABEL, healthrayChainStatus } from "./observation.js";
 import { IST_TODAY, budgetColour } from "./statusEngine.js";
+import { TESTS_HOLD_SQL, chiefWaitClock } from "./testsHold.js";
 
 export async function getSlaConfig(db = pool) {
   const { rows } = await db.query(
@@ -106,6 +107,8 @@ const BOARD_SQL = `
          tests.reported                            AS lab_all_reported,
          first_ev.occurred_at                      AS journey_started_at,
          last_ev.occurred_at                       AS status_since,
+         hold.tests_pending,
+         hold.tests_ready_at,
          lab.sample_status                         AS lab_sample_status,
          lab.payment_status                        AS lab_payment_status,
          lab.test_count                            AS lab_test_count,
@@ -158,6 +161,7 @@ const BOARD_SQL = `
        WHERE e.visit_id = v.id AND ${WAIT_SINCE_SQL("e", "v")}
        ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1
     ) last_ev ON TRUE
+    LEFT JOIN LATERAL (${TESTS_HOLD_SQL("v", "p")}) hold ON TRUE
     LEFT JOIN LATERAL (
       SELECT o.sample_status, o.payment_status, o.updated_at AS since,
              (SELECT COUNT(*)::int FROM giniflow_lab_order_tests t WHERE t.lab_order_id = o.id) AS test_count
@@ -364,9 +368,12 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
     const paused = !!row.paused_at;
     const clock = finished && row.status_since ? new Date(row.status_since) : now;
     const liveClock = paused ? new Date(row.paused_at) : now;
-    const statusMinutes = finished ? null : minutesSince(row.status_since, liveClock);
+    const { heldForTests, since: waitSince } = chiefWaitClock(row);
+    const statusMinutes = finished ? null : minutesSince(waitSince, liveClock);
     const totalMinutes = minutesSince(row.journey_started_at, paused ? liveClock : clock);
-    const budget = budgetFor(slaKeyForStatus(row.current_status), row.category);
+    const budget = heldForTests
+      ? null
+      : budgetFor(slaKeyForStatus(row.current_status), row.category);
     // Settled entirely in SQL by labOnlyPredicate, so this board and the lab
     // station cannot drift apart on who counts as samples-only.
     const labOnly = !!row.lab_only;
@@ -436,10 +443,11 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
       assignedDoctorId: labOnly ? null : row.assigned_doctor_id,
       assignedDoctorName: labOnly ? null : row.doctor_name || row.doctor_full_name || null,
       subtitle: subtitleFor(row),
-      hint: hintFor(row),
-      hintIcon: hintIconFor(row),
+      hint: heldForTests ? "Waiting for lab / machine reports" : hintFor(row),
+      hintIcon: heldForTests ? "🧪" : hintIconFor(row),
+      heldForTests,
       finished,
-      statusSince: row.status_since ? new Date(row.status_since).toISOString() : null,
+      statusSince: waitSince ? new Date(waitSince).toISOString() : null,
       journeyStartedAt: row.journey_started_at
         ? new Date(row.journey_started_at).toISOString()
         : null,
@@ -566,7 +574,7 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
     // Blocked patients are excluded from the average: they are stuck on missing
     // reports, not on this station's throughput, and letting them skew it points
     // the bottleneck banner at the wrong station.
-    const timedCards = items.filter((c) => !c.blockedReason);
+    const timedCards = items.filter((c) => !c.blockedReason && !c.heldForTests);
     const timed =
       col.key === "lab"
         ? timedCards.filter((c) => c.lab.budget).map((c) => c.lab.minutes ?? 0)
@@ -662,7 +670,7 @@ export function getBottleneck(columns) {
   if (!candidates.length) return null;
 
   const { column } = candidates[0];
-  const longest = [...column.cards.filter((c) => !c.blockedReason)].sort(
+  const longest = [...column.cards.filter((c) => !c.blockedReason && !c.heldForTests)].sort(
     (a, b) => (b.statusMinutes ?? 0) - (a.statusMinutes ?? 0),
   )[0];
 

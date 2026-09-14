@@ -401,7 +401,7 @@ export async function getStationTimes(
 
   // The MO cannot see a patient whose bloods are still at the lab, so the wait
   // before the reports land is judged against nothing, not against the MO queue.
-  const AWAITING_LAB_LABEL = "Waiting for lab reports";
+  const AWAITING_LAB_LABEL = "Waiting for lab / machine reports";
   const blockedByLab = (entry) =>
     entry.isWait && slaKeyForStatus(entry.status) === "wait_sd" && !entry.unrecorded;
 
@@ -466,6 +466,7 @@ export async function getStationTimes(
       timestampOnly: !!entry.timestampOnly,
       label: entry.label,
       unrecorded: !!entry.unrecorded,
+      awaitingLab: !!entry.awaitingLab,
       actorRole: entry.actorRole,
       meta: entry.meta,
       enteredAt: (wait?.enteredAt ?? entry.enteredAt).toISOString(),
@@ -593,7 +594,7 @@ export async function getStationTimes(
   const merged = [];
   for (const step of collapsed) {
     const prev = merged[merged.length - 1];
-    if (!prev || prev.status !== step.status) {
+    if (!prev || prev.status !== step.status || prev.awaitingLab !== step.awaitingLab) {
       merged.push({ ...step, visits: 1 });
       continue;
     }

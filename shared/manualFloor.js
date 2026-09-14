@@ -72,6 +72,12 @@ export const healthrayMayWrite = (status) => !manualFloor() || HEALTHRAY_MAY_WRI
 export const holdOnUnrecorded = () =>
   manualFloor() && process.env.SCRIBE_HOLD_ON_UNRECORDED !== "0";
 
+export const doctorsWaitForTests = () =>
+  manualFloor() && process.env.SCRIBE_DOCTORS_WAIT_FOR_TESTS !== "0";
+
+export const pharmacyWaitsForRx = () =>
+  manualFloor() && process.env.SCRIBE_PHARMACY_WAITS_FOR_RX !== "0";
+
 // The lab's one exception (39-HYBRID-FLOOR-PLAN.md §15).
 //
 // The Chief and the consultants order lab tests in HealthRay, not here, so with

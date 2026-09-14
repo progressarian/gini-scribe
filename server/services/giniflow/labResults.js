@@ -4,6 +4,7 @@ import { flagForRange } from "../../utils/labFlag.js";
 import { advanceSample, markCaseResultsReady } from "./labStation.js";
 import { advanceMachineTest } from "./machineStation.js";
 import { machineForTest } from "../../../shared/machineStages.js";
+import { getMachines } from "./machineCatalog.js";
 import { opensLabGate } from "../../../shared/labPayment.js";
 import { syncBiomarkersFromLatestLabs } from "../healthray/db.js";
 
@@ -126,8 +127,9 @@ export async function suggestedRows(orderId, db = pool) {
   const order = await orderContext(orderId, db);
   const groups = await suggestionsForTests(order.tests || [], db);
   if (order.kind !== "machine") return groups;
+  const machines = await getMachines(db);
   return groups.map((group) => {
-    const presets = machineForTest(group.test)?.values || [];
+    const presets = machineForTest(machines, group.test)?.values || [];
     if (!presets.length) return group;
     const taken = new Set([flattenName(group.test), ...presets.map(flattenName)]);
     return {

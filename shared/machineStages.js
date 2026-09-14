@@ -1,16 +1,3 @@
-// The machine room's ladder, and the machines on it
-// (docs/gini-flow/36-MACHINE-TEST-STATION-PLAN.md).
-//
-// Shaped like `shared/labStages.js` deliberately: one table that every screen,
-// route and schema derives from. Four separate enum-drift bugs came out of the
-// lab station being written the other way round, and each one read as a
-// malformed request rather than as the missing step it was.
-//
-// What it is NOT is a copy of the lab ladder. A machine test has no specimen:
-// nothing leaves the patient, nothing travels, nothing waits on a bench. The
-// patient IS the sample, which is why there is no handoff here and why the
-// patient must be present for two rungs rather than one.
-
 export const MACHINE_ROOM = "machine";
 
 export const MACHINE_RAIL = ["Ordered", "On the machine", "Done", "Report"];
@@ -35,8 +22,6 @@ export const MACHINE_RUNGS = [
     advanceLabel: null,
     actionNoun: "the order",
     actionHint: null,
-    // R1, as in the lab: the rung a test arrives on is never something anybody
-    // clicks. It is a state, not an act.
     needsPatient: false,
   },
   {
@@ -58,8 +43,6 @@ export const MACHINE_RUNGS = [
     advanceLabel: "▶️ Start test",
     actionNoun: "starting the test",
     actionHint: "Mark that the patient is at the machine and the test has begun.",
-    // P1: unlike a blood draw, the patient is needed for the whole test — so
-    // both this rung and the next refuse to move while somebody else has them.
     needsPatient: true,
   },
   {
@@ -106,80 +89,6 @@ export const MACHINE_RUNGS = [
   },
 ];
 
-// The machines themselves. Durations come from `flow_step_catalog`, so the SLA
-// this station shows and the journey the patient is given cannot disagree.
-//
-// `docTypes` is how a report that arrived through the HealthRay sync is
-// recognised — these tests produce no lab case, only a document, so the document
-// is the only evidence the test happened at all.
-export const MACHINES = [
-  {
-    id: "abi",
-    name: "ABI",
-    fullName: "Ankle–Brachial Index",
-    icon: "🦵",
-    durationMin: 10,
-    docTypes: ["abi"],
-    tests: ["ABI"],
-    values: ["ABI Right", "ABI Left"],
-  },
-  {
-    id: "vpt",
-    name: "VPT",
-    fullName: "Vibration Perception Threshold",
-    icon: "🦶",
-    durationMin: 5,
-    docTypes: ["vpt"],
-    tests: ["VPT"],
-    values: ["VPT Right", "VPT Left"],
-  },
-  {
-    id: "fundus",
-    name: "Fundus",
-    fullName: "Fundus photography",
-    icon: "👁️",
-    durationMin: 10,
-    docTypes: ["eye"],
-    tests: ["Fundus"],
-    values: ["Fundus Right Eye", "Fundus Left Eye"],
-  },
-  {
-    id: "tmt",
-    name: "TMT",
-    fullName: "Treadmill test",
-    icon: "🏃",
-    durationMin: 20,
-    docTypes: ["tmt"],
-    tests: ["TMT"],
-    values: ["TMT Result", "METs Achieved", "Max Heart Rate", "Exercise Duration"],
-  },
-  {
-    id: "ecg",
-    name: "ECG",
-    fullName: "Electrocardiogram",
-    icon: "💓",
-    durationMin: 5,
-    docTypes: ["ecg"],
-    tests: ["ECG"],
-    values: ["ECG Finding"],
-    // The strip is printed at the machine and goes home in the patient's hand.
-    // Nothing is filed here, so asking for a report before the test can be
-    // closed asks for a file that does not exist — an ECG could never be
-    // finished on this screen.
-    handover: true,
-  },
-  {
-    id: "echo",
-    name: "2D Echo",
-    fullName: "2D Echocardiogram",
-    icon: "🫀",
-    durationMin: 20,
-    docTypes: ["echo"],
-    tests: ["2D Echo", "Echo", "Echocardiography"],
-    values: ["Ejection Fraction", "Echo Finding"],
-  },
-];
-
 export const MACHINE_STAGES = MACHINE_RUNGS.map((r) => ({ key: r.key, label: r.stageLabel }));
 
 export const machineStageIndexOf = (key) => MACHINE_RUNGS.findIndex((r) => r.key === key);
@@ -196,46 +105,85 @@ export const MACHINE_FILTER_TO_STAGE = Object.fromEntries(
   MACHINE_RUNGS.map((r) => [r.filter, r.key]),
 );
 
-// The next step this room can offer from where a test is now. Rungs with no
-// label of their own are stepped over, the same way the lab's upload steps over
-// a rung nobody clicks.
 export const nextMachineStep = (stageKey) =>
   MACHINE_RUNGS.slice(machineStageIndexOf(stageKey) + 1).find((r) => r.advanceLabel) || null;
 
-export const machineFor = (id) => MACHINES.find((m) => m.id === id) || null;
-
-// A machine whose report is handed straight to the patient. The test being over
-// IS the whole record: there is no file to attach and no value to type, so the
-// evidence gate does not apply to it.
-export const machineHandsOver = (id) => !!machineFor(id)?.handover;
-
-// Which machine a test name belongs to. Matched on a flattened name because the
-// catalogue, the order line and HealthRay all spell the same test differently —
-// "ABI", "ABI Test", "abi" are one machine.
 const flatten = (name) =>
   String(name || "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "");
 
-export const machineForTest = (testName) => {
+const uniqueNames = (names) => {
+  const seen = new Set();
+  return names.filter((n) => {
+    const key = String(n || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+export const shapeMachine = (row) => ({
+  id: row.id,
+  name: row.machine_short_name || row.name,
+  fullName: row.machine_full_name || row.name,
+  icon: row.machine_icon || "🩺",
+  durationMin: Number(row.default_duration_min) || 0,
+  tests: uniqueNames([row.order_test_name, ...(row.bill_names || [])]),
+  values: row.value_fields || [],
+  docTypes: row.report_doc_types || [],
+  handover: !!row.hands_over,
+});
+
+export const machineFor = (machines, id) => (machines || []).find((m) => m.id === id) || null;
+
+export const machineHandsOver = (machines, id) => !!machineFor(machines, id)?.handover;
+
+export const machineForTest = (machines, testName) => {
   const flat = flatten(testName);
   if (!flat) return null;
+  const list = machines || [];
   return (
-    MACHINES.find((m) => m.tests.some((t) => flatten(t) === flat)) ||
-    MACHINES.find((m) => m.tests.some((t) => flat.includes(flatten(t)))) ||
+    list.find((m) => m.tests.some((t) => flatten(t) === flat)) ||
+    list.find((m) => m.tests.some((t) => flat.includes(flatten(t)))) ||
     null
   );
 };
 
-export const MACHINE_DOC_TYPES = MACHINES.flatMap((m) => m.docTypes);
+const escapeRegex = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-export const docTypeToMachine = Object.fromEntries(
-  MACHINES.flatMap((m) => m.docTypes.map((d) => [d, m.id])),
-);
+const phraseMatcher = (name) => {
+  const words = String(name || "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  if (!words.length) return null;
+  return new RegExp(`(^|[^a-z0-9])${words.map(escapeRegex).join("[^a-z0-9]+")}($|[^a-z0-9])`, "i");
+};
 
-// How long the queue in front of a machine will take, in minutes. The only
-// question this station can answer that nothing else on the floor can.
-export const waitMinutesFor = (machineId, aheadCount) => {
-  const m = machineFor(machineId);
+export const machinesOnBillLine = (machines, lineName) => {
+  const line = String(lineName || "");
+  const found = [];
+  for (const m of machines || []) {
+    let at = -1;
+    for (const test of m.tests) {
+      const hit = phraseMatcher(test)?.exec(line);
+      if (hit && (at < 0 || hit.index < at)) at = hit.index;
+    }
+    if (at >= 0) found.push([at, m.id]);
+  }
+  return found.sort((a, b) => a[0] - b[0]).map(([, id]) => id);
+};
+
+export const machineDocTypes = (machines) => (machines || []).flatMap((m) => m.docTypes);
+
+export const machineIdForDocType = (machines, docType) =>
+  (machines || []).find((m) => m.docTypes.includes(docType))?.id || null;
+
+export const waitMinutesFor = (machines, machineId, aheadCount) => {
+  const m = machineFor(machines, machineId);
   return m ? aheadCount * m.durationMin : 0;
 };

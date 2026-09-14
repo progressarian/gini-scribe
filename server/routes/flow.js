@@ -29,6 +29,14 @@ import {
 } from "../services/flow/journey.js";
 import { fetchPatientTransactions } from "../services/healthray/client.js";
 import { transactionsToBilling } from "../services/healthray/billingExtractor.js";
+import { CLASSIFIER_TYPES } from "../services/documentClassifier.js";
+import {
+  assertMachineCanStop,
+  clearMachineCache,
+  machineOptions,
+  saveMachineSettings,
+  touchesMachineSettings,
+} from "../services/giniflow/machineCatalog.js";
 
 // Blocked patients are hidden from working lists — nobody should be calling,
 // booking or preparing for them. They stay findable in /find and on the admin
@@ -745,10 +753,22 @@ router.delete("/flow/visit-types/:id", requireCapability(CAP.ADMIN), async (req,
 
 // ── Step catalog CRUD (ADMIN only) — manage the master list of journey steps ──
 // Update any field of a catalog step.
+router.get("/flow/step-catalog/machine-options", requireCapability(CAP.ADMIN), async (req, res) => {
+  try {
+    res.json(await machineOptions(CLASSIFIER_TYPES));
+  } catch (e) {
+    handleError(res, e, "Flow machine options");
+  }
+});
+
 router.patch("/flow/step-catalog/:id", requireCapability(CAP.ADMIN), async (req, res) => {
   try {
     const { default_duration_min, name, station, assigned_role, display_order, is_active } =
       req.body || {};
+    if (is_active === false) await assertMachineCanStop(req.params.id);
+    if (touchesMachineSettings(req.body || {})) {
+      await saveMachineSettings(req.params.id, req.body, { reportTypes: CLASSIFIER_TYPES });
+    }
     const r = await pool.query(
       `UPDATE flow_step_catalog
           SET default_duration_min = COALESCE($2, default_duration_min),
@@ -769,6 +789,7 @@ router.patch("/flow/step-catalog/:id", requireCapability(CAP.ADMIN), async (req,
       ],
     );
     if (!r.rows.length) return res.status(404).json({ error: "Catalog step not found" });
+    clearMachineCache();
     res.json(r.rows[0]);
   } catch (e) {
     handleError(res, e, "Flow edit catalog");

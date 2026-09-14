@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { toast } from "../../stores/uiStore";
 import ConfirmModal from "../../components/ui/ConfirmModal.jsx";
 import {
@@ -12,6 +12,7 @@ import {
   useFlowDeleteCatalogStep,
 } from "../../queries/hooks/useFlow";
 import JourneyTemplateEditor from "../../components/flow/JourneyTemplateEditor";
+import MachineSettings from "../../components/flow/MachineSettings";
 import "../../styles/flow.css";
 import "./FlowSettings.css";
 
@@ -40,6 +41,7 @@ export default function FlowAdminPage() {
   const [newStep, setNewStep] = useState({ name: "", min: "", station: "", role: "" });
   // Catalog step pending delete-confirmation (drives ConfirmModal).
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [machineStepId, setMachineStepId] = useState(null);
 
   // Distinct stations / roles already in the catalog — for the add-step dropdowns.
   const stationOptions = useMemo(
@@ -267,44 +269,65 @@ export default function FlowAdminPage() {
                 </thead>
                 <tbody>
                   {catalog.map((c) => (
-                    <tr key={c.id} className={c.is_active ? undefined : "fset__row--off"}>
-                      <td>
-                        <b>{c.name}</b>
-                        <div className="flow-muted">
-                          {c.station} · {c.assigned_role}
-                        </div>
-                      </td>
-                      <td>
-                        <input
-                          className="jb-dur"
-                          type="number"
-                          min="0"
-                          defaultValue={c.default_duration_min}
-                          onBlur={(e) => {
-                            const v = parseInt(e.target.value);
-                            if (Number.isInteger(v) && v !== c.default_duration_min)
-                              saveStep(c.id, { default_duration_min: v }, `${c.name} → ${v} min`);
-                          }}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="checkbox"
-                          defaultChecked={c.is_active}
-                          onChange={(e) => saveStep(c.id, { is_active: e.target.checked }, "Saved")}
-                        />
-                      </td>
-                      <td>
-                        <button
-                          className="jb-remove"
-                          title="Delete step"
-                          disabled={deleteStep.isPending}
-                          onClick={() => setDeleteTarget(c)}
-                        >
-                          ✕
-                        </button>
-                      </td>
-                    </tr>
+                    <Fragment key={c.id}>
+                      <tr className={c.is_active ? undefined : "fset__row--off"}>
+                        <td>
+                          <b>{c.name}</b>
+                          <div className="flow-muted">
+                            {c.station} · {c.assigned_role}
+                          </div>
+                          <button
+                            type="button"
+                            className="fset__machine-tag"
+                            aria-expanded={machineStepId === c.id}
+                            onClick={() => setMachineStepId(machineStepId === c.id ? null : c.id)}
+                          >
+                            {c.machine
+                              ? `${c.machine_icon || "🩺"} Machine test · edit`
+                              : "+ Machine test"}
+                          </button>
+                        </td>
+                        <td>
+                          <input
+                            className="jb-dur"
+                            type="number"
+                            min="0"
+                            defaultValue={c.default_duration_min}
+                            onBlur={(e) => {
+                              const v = parseInt(e.target.value);
+                              if (Number.isInteger(v) && v !== c.default_duration_min)
+                                saveStep(c.id, { default_duration_min: v }, `${c.name} → ${v} min`);
+                            }}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="checkbox"
+                            defaultChecked={c.is_active}
+                            onChange={(e) =>
+                              saveStep(c.id, { is_active: e.target.checked }, "Saved")
+                            }
+                          />
+                        </td>
+                        <td>
+                          <button
+                            className="jb-remove"
+                            title="Delete step"
+                            disabled={deleteStep.isPending}
+                            onClick={() => setDeleteTarget(c)}
+                          >
+                            ✕
+                          </button>
+                        </td>
+                      </tr>
+                      {machineStepId === c.id && (
+                        <tr>
+                          <td colSpan={4}>
+                            <MachineSettings step={c} onClose={() => setMachineStepId(null)} />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
