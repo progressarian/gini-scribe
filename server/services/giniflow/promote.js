@@ -1,4 +1,5 @@
 import pool from "../../config/db.js";
+import { t as clipText } from "../../utils/helpers.js";
 
 // Promotion — copying a Gini Flow reading or report forward into the shared
 // clinical record.
@@ -135,8 +136,8 @@ export async function promoteLabReport(orderId, db = pool) {
      RETURNING id`,
     [
       r.patient_id,
-      r.tests ? `Lab report — ${r.tests}` : "Lab report",
-      fileName,
+      clipText(r.tests ? `Lab report — ${r.tests}` : "Lab report", 200),
+      clipText(fileName, 200),
       storagePath,
       mime,
       r.visit_date,

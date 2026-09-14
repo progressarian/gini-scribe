@@ -1,4 +1,5 @@
 import pool from "../../config/db.js";
+import { t as clipText } from "../../utils/helpers.js";
 import { promoteLabReport, promoteQuietly } from "./promote.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config/storage.js";
 import { advanceStatus } from "./statusEngine.js";
@@ -1523,8 +1524,8 @@ export async function uploadLabCaseReport(
      ON CONFLICT DO NOTHING`,
     [
       c.patient_id,
-      c.tests ? `Lab Report - ${caseNo} — ${c.tests}` : `Lab Report - ${caseNo}`,
-      safeName,
+      clipText(c.tests ? `Lab Report - ${caseNo} — ${c.tests}` : `Lab Report - ${caseNo}`, 200),
+      clipText(safeName, 200),
       storagePath,
       mediaType,
       c.case_date,

@@ -138,7 +138,7 @@ function TestPane({
   // Values are only offered where the machine produces them, and only once the
   // test has actually been run — a number typed against a test nobody has
   // started is a number nobody measured.
-  const canEnterValues = !!machine?.values?.length && order.stage !== "ordered";
+  const canEnterValues = order.stage !== "ordered";
   const handsOver = machineHandsOver(order.machine);
   const canUpload = order.stage !== "ordered" && !handsOver;
   const showUploader = canUpload && (!order.hasReport || replacing);

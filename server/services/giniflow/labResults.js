@@ -2,6 +2,8 @@ import pool from "../../config/db.js";
 import { getCanonical } from "../../utils/labCanonical.js";
 import { flagForRange } from "../../utils/labFlag.js";
 import { advanceSample, markCaseResultsReady } from "./labStation.js";
+import { advanceMachineTest } from "./machineStation.js";
+import { MACHINES } from "../../../shared/machineStages.js";
 import { opensLabGate } from "../../../shared/labPayment.js";
 import { syncBiomarkersFromLatestLabs } from "../healthray/db.js";
 
@@ -27,7 +29,7 @@ const trimmed = (v, max = 200) =>
 
 const orderContext = async (orderId, db) => {
   const { rows } = await db.query(
-    `SELECT o.id, o.sample_status, o.report_file_url, o.payment_status,
+    `SELECT o.id, o.kind, o.sample_status, o.report_file_url, o.payment_status,
             v.id AS visit_id, v.visit_date::text AS visit_date,
             v.patient_id, v.appointment_id,
             COALESCE(json_agg(t.test_name ORDER BY t.test_name)
@@ -120,9 +122,32 @@ const flattenName = (name) =>
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "");
 
+const machineForTest = (test) =>
+  MACHINES.find((m) => m.tests.some((t) => t.toLowerCase() === String(test).toLowerCase()));
+
 export async function suggestedRows(orderId, db = pool) {
   const order = await orderContext(orderId, db);
-  return suggestionsForTests(order.tests || [], db);
+  const groups = await suggestionsForTests(order.tests || [], db);
+  if (order.kind !== "machine") return groups;
+  return groups.map((group) => {
+    const presets = machineForTest(group.test)?.values || [];
+    if (!presets.length) return group;
+    const taken = new Set([flattenName(group.test), ...presets.map(flattenName)]);
+    return {
+      test: group.test,
+      params: [
+        ...presets.map((name) => ({
+          testName: name,
+          canonicalName: null,
+          unit: null,
+          refRange: null,
+          panelName: group.test,
+          seen: 0,
+        })),
+        ...group.params.filter((p) => !taken.has(flattenName(p.testName))),
+      ],
+    };
+  });
 }
 
 // A hospital case carries its panels in `lab_cases.test_names`, an order carries
@@ -442,7 +467,11 @@ export async function saveResults(
   // Typed values finish the order exactly as a file does — same call, so the MO
   // is notified by one code path whether the result arrived as numbers or as a
   // scan, and a document can still be attached afterwards.
-  if (order.sample_status !== "uploaded") {
+  if (order.kind === "machine") {
+    if (order.sample_status !== "reported") {
+      await advanceMachineTest(orderId, { to: "reported", actorId }, db);
+    }
+  } else if (order.sample_status !== "uploaded") {
     await advanceSample(orderId, { to: "uploaded", actorId }, db);
   }
   await syncBiomarkers(order.patient_id, order.appointment_id);

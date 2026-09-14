@@ -141,7 +141,7 @@ export const MACHINES = [
     durationMin: 10,
     docTypes: ["eye"],
     tests: ["Fundus"],
-    values: [],
+    values: ["Fundus Right Eye", "Fundus Left Eye"],
   },
   {
     id: "tmt",
@@ -151,7 +151,7 @@ export const MACHINES = [
     durationMin: 20,
     docTypes: ["tmt"],
     tests: ["TMT"],
-    values: [],
+    values: ["TMT Result", "METs Achieved", "Max Heart Rate", "Exercise Duration"],
   },
   {
     id: "ecg",
@@ -161,7 +161,7 @@ export const MACHINES = [
     durationMin: 5,
     docTypes: ["ecg"],
     tests: ["ECG"],
-    values: [],
+    values: ["ECG Finding"],
     // The strip is printed at the machine and goes home in the patient's hand.
     // Nothing is filed here, so asking for a report before the test can be
     // closed asks for a file that does not exist — an ECG could never be
