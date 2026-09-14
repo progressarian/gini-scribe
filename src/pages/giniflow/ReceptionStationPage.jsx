@@ -6,7 +6,11 @@ import {
   useArrivalAction,
   useWalkInSearch,
   useCheckInWalkIn,
+  useReceptionHealthray,
+  useReceptionHealthrayRefresh,
+  useHealthrayBill,
 } from "../../queries/hooks/useGiniflowReception";
+import { useQueryClient } from "@tanstack/react-query";
 import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
 import {
   useGiniflowPauseVisit,
@@ -78,6 +82,26 @@ const identity = (p) =>
   `${p.age ?? "—"}${(p.sex || "")[0] || ""} · ${p.fileNo || "no file no"}${
     p.phone ? ` · ${p.phone}` : ""
   }`;
+
+const visitCategory = (a) => {
+  const booked = a.bookingType || "";
+  if (/tele|online|video/i.test(booked)) return { label: "Online", cls: "b-pu" };
+  if (a.walkIn) return { label: "Walk-in", cls: "b-amb" };
+  if (/investigat|lab|test/i.test(booked)) return { label: "Tests only", cls: "b-tl" };
+  if (/follow|f\/?u|review/i.test(booked)) return { label: "Follow-up", cls: "b-blu" };
+  if (/^\s*new\b/i.test(booked)) return { label: "New", cls: "b-grn" };
+  return booked ? { label: booked, cls: "b-ink" } : null;
+};
+
+function VisitCategory({ arrival }) {
+  const category = visitCategory(arrival);
+  if (!category) return null;
+  return (
+    <div className="dp-cat">
+      <span className={`badge ${category.cls}`}>{category.label}</span>
+    </div>
+  );
+}
 
 const CHIP = {
   pending: { cls: "sp-pay", text: "⚠ Payment pending" },
@@ -455,6 +479,40 @@ export function PaymentsTab({ data, isLoading, onClear, pending, actorId }) {
 // A walk-in has no visit yet when this opens: it is created by the same press
 // that plans it, so backing out of the panel leaves the patient exactly as they
 // were found, with nothing on the floor to undo.
+const withBilledSteps = (list, billed = []) => {
+  if (!billed.length) return list;
+  const ids = new Set(billed.map((b) => b.catalogId));
+  const rest = list.filter((s) => !ids.has(s.catalogId));
+  const merged = billed.map((b) => {
+    const existing = list.find((s) => s.catalogId === b.catalogId);
+    return existing
+      ? {
+          ...existing,
+          billedIn: b.billedIn,
+          ...(b.tests ? { tests: b.tests, billedTests: b.billedTests } : {}),
+        }
+      : { ...b, source: "auto" };
+  });
+  const at = rest.findIndex((s) => s.catalogId === "vitals") + 1;
+  return [...rest.slice(0, at), ...merged, ...rest.slice(at)];
+};
+
+const billNote = (bill, loading) => {
+  if (loading) return "Checking the HealthRay bill for lab and machine tests…";
+  if (!bill) return null;
+  if (bill.status === "ok") {
+    const parts = [];
+    if (bill.labTests.length) parts.push(`${bill.labTests.length} lab test(s)`);
+    if (bill.machines.length) parts.push(bill.machines.join(", "));
+    return `✓ Added from the HealthRay bill: ${parts.join(" + ")} — mark the payment on the Payments tab before the lab can start`;
+  }
+  if (bill.status === "blocked")
+    return `HealthRay is not reachable until ${clock(bill.blockedUntil)} — add tests by hand if the patient has any`;
+  if (bill.status === "no_bill") return "No lab or machine tests on today's HealthRay bill yet";
+  if (bill.status === "no_patient") return "This patient is not linked to HealthRay yet";
+  return "Could not read the HealthRay bill — add tests by hand if the patient has any";
+};
+
 function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   const { data: visitTypes = [] } = useFlowVisitTypes();
   const [visitTypeId, setVisitTypeId] = useState(arrival.suggestedVisitTypeId || null);
@@ -468,6 +526,13 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   const checkIn = useCheckIn();
   const checkInWalkIn = useCheckInWalkIn();
   const saving = checkIn.isPending || checkInWalkIn.isPending;
+  const { data: bill, isLoading: billLoading } = useHealthrayBill(arrival.patientId);
+  const billedSteps = useRef([]);
+  billedSteps.current = bill?.steps || [];
+
+  useEffect(() => {
+    if (bill?.steps?.length) setSteps((current) => current && withBilledSteps(current, bill.steps));
+  }, [bill]);
 
   const askable = useMemo(
     () => [...new Set((plan || []).filter((p) => p.conditionKey).map((p) => p.conditionKey))],
@@ -513,13 +578,16 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
             ? { ...base, minutes: prev.minutes, staffId: prev.staffId, staffName: prev.staffName }
             : base;
         });
-      return [
-        ...template,
-        // Steps the desk added by hand survive a change of type: retyping an
-        // X-Ray because they corrected the visit type is how a screen gets
-        // abandoned.
-        ...(current || []).filter((s) => s.source === "added" || s.source === "custom"),
-      ];
+      return withBilledSteps(
+        [
+          ...template,
+          // Steps the desk added by hand survive a change of type: retyping an
+          // X-Ray because they corrected the visit type is how a screen gets
+          // abandoned.
+          ...(current || []).filter((s) => s.source === "added" || s.source === "custom"),
+        ],
+        billedSteps.current,
+      );
     });
   }, [plan, answerKey, arrival, conditions]);
 
@@ -562,6 +630,7 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
         <div className="dp-head">
           <div className="dp-name">{arrival.name}</div>
           <div className="dp-meta">{identity(arrival)}</div>
+          <VisitCategory arrival={arrival} />
           <div className="dp-acts">
             <button className="rbtn" onClick={onClose}>
               ← Back
@@ -574,6 +643,9 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
             <div className="wi-head">
               <strong>What is this visit?</strong>
             </div>
+            {billNote(bill, billLoading) && (
+              <div className="dp-hint">{billNote(bill, billLoading)}</div>
+            )}
 
             <JourneyBuilder
               steps={list}
@@ -649,6 +721,7 @@ function JourneyPanel({ arrival, onClose }) {
             {arrival.slot ? ` · ${arrival.slot}` : ""}
             {doctorName ? ` · ${doctorName}` : ""}
           </div>
+          <VisitCategory arrival={arrival} />
           <div className="dp-acts">
             <button className="rbtn" onClick={onClose}>
               ← Back
@@ -962,6 +1035,7 @@ export function ArrivalsTab({
               patientId: patient.patientId,
               appointmentId: patient.appointmentId,
               suggestedVisitTypeId: patient.suggestedVisitTypeId,
+              walkIn: true,
               name: patient.name,
               fileNo: patient.fileNo,
               age: patient.age,
@@ -1121,6 +1195,83 @@ export function ArrivalsTab({
   );
 }
 
+const syncedAt = (iso) => {
+  if (!iso) return "never";
+  const d = new Date(iso);
+  const sameDay =
+    d.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" }) ===
+    new Date().toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" });
+  return sameDay
+    ? clock(iso)
+    : `${d.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" })} ${clock(iso)}`;
+};
+
+const REFRESH_REFUSED = {
+  blocked: (s) =>
+    `HealthRay is blocking Scribe right now — it retries at ${clock(s.blockedUntil)}. Check patients in by hand meanwhile.`,
+  running: () => "A HealthRay refresh is already running — the list updates when it finishes",
+  too_soon: (s) =>
+    `Refreshed a moment ago — you can refresh again at ${clock(s.refresh?.nextAllowedAt)}`,
+};
+
+function HealthraySync({ onNote }) {
+  const queryClient = useQueryClient();
+  const { data } = useReceptionHealthray();
+  const refresh = useReceptionHealthrayRefresh();
+  const running = !!(data?.refresh?.running || data?.refresh?.queued);
+  const workerLate = !!data?.refresh?.workerLate;
+  const wasRunning = useRef(false);
+
+  useEffect(() => {
+    if (wasRunning.current && !running) {
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "reception", "arrivals"] });
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "board"] });
+      const r = data?.refresh;
+      if (r?.error) onNote(`HealthRay refresh failed — ${r.error}`);
+      else if (r?.outcome?.alreadyRunning)
+        onNote("HealthRay was already syncing — the list updates as soon as that finishes");
+      else if (r?.outcome)
+        onNote(`✓ Refreshed from HealthRay · ${r.outcome.addedToFloor} new on the list`);
+    }
+    wasRunning.current = running;
+  }, [running, data, queryClient, onNote]);
+
+  const onRefresh = () =>
+    refresh.mutate(undefined, {
+      onSuccess: (r) =>
+        onNote(
+          r.started
+            ? "Refreshing from HealthRay — new bookings appear in a minute or two"
+            : REFRESH_REFUSED[r.reason](r),
+        ),
+      onError: (e) => onNote(e?.response?.data?.error || "Could not start a HealthRay refresh"),
+    });
+
+  const blocked = !!data?.blockedUntil;
+  return (
+    <>
+      <span
+        className={`tr-live${blocked || workerLate ? " is-stale" : ""}`}
+        title={blocked ? data.blockedReason || "" : "Last appointment data received from HealthRay"}
+      >
+        {blocked
+          ? `HealthRay blocked · retry ${clock(data.blockedUntil)}`
+          : workerLate
+            ? "Refresh waiting — the background sync is not responding"
+            : `HealthRay synced ${syncedAt(data?.lastSyncedAt)}`}
+      </span>
+      <button
+        type="button"
+        className="rbtn"
+        disabled={running || refresh.isPending || blocked}
+        onClick={onRefresh}
+      >
+        {running ? "Refreshing…" : "⟳ Refresh"}
+      </button>
+    </>
+  );
+}
+
 export default function ReceptionStationPage() {
   const [tab, setTab] = useState("arrivals");
   const [search, setSearch] = useState("");
@@ -1262,6 +1413,7 @@ export default function ReceptionStationPage() {
         </span>
         <div className="rr">
           <LiveBadge live={live} className="tr-live" />
+          <HealthraySync onNote={showToast} />
           <a className="rbtn" href="/giniflow/stations">
             ← Stations
           </a>

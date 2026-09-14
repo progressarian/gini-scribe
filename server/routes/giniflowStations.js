@@ -55,6 +55,7 @@ import {
   giniflowDispenseSchema,
   giniflowDispenseAllSchema,
   giniflowArrivalsQuerySchema,
+  giniflowHealthrayBillQuerySchema,
   giniflowCancelSchema,
   giniflowWalkInSchema,
   giniflowSearchQuerySchema,
@@ -199,7 +200,11 @@ import {
   syncLabStepsFromLab,
 } from "../services/giniflow/journey.js";
 import { sendFlowCheckin } from "../services/msg91.js";
-import { syncBillingForVisitId } from "../services/giniflow/machineSync.js";
+import { syncBillingForVisitId, healthrayBillSteps } from "../services/giniflow/machineSync.js";
+import {
+  getHealthrayStatus,
+  requestHealthrayRefresh,
+} from "../services/giniflow/healthrayRefresh.js";
 import { machineCaseListOnly } from "../../shared/manualFloor.js";
 import {
   suggestedRows,
@@ -906,6 +911,37 @@ router.get("/giniflow/stations/reception/catalog", receptionGate, async (req, re
 // parameterised ones — `/reception/:orderId/clear` already lives on this prefix,
 // and the consultant station shipped this exact bug once (`GET /doctor/medicines`
 // swallowed by `/doctor/:visitId`).
+router.get("/giniflow/stations/reception/healthray", receptionGate, async (_req, res) => {
+  try {
+    res.json(await getHealthrayStatus());
+  } catch (e) {
+    handleError(res, e, "Gini Flow reception HealthRay status");
+  }
+});
+
+router.get(
+  "/giniflow/stations/reception/healthray/bill",
+  receptionGate,
+  validateQuery(giniflowHealthrayBillQuerySchema),
+  async (req, res) => {
+    try {
+      res.json(await healthrayBillSteps(req.query.patientId));
+    } catch (e) {
+      console.error("Gini Flow reception HealthRay bill:", e.message);
+      res.json({ status: "error", error: e.message, labTests: [], machines: [], steps: [] });
+    }
+  },
+);
+
+router.post("/giniflow/stations/reception/healthray/refresh", receptionGate, async (_req, res) => {
+  try {
+    const result = await requestHealthrayRefresh();
+    res.status(result.started ? 202 : 200).json(result);
+  } catch (e) {
+    handleError(res, e, "Gini Flow reception HealthRay refresh");
+  }
+});
+
 router.get(
   "/giniflow/stations/reception/arrivals",
   receptionGate,

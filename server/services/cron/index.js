@@ -28,6 +28,7 @@ import { BATCH_ENABLED, processBatchQueue } from "../batch/batchQueue.js";
 import { BATCH_HANDLERS } from "../batch/handlers.js";
 import { syncAppointmentsToFlow } from "../giniflow/appointmentSync.js";
 import { runMachineSync } from "../giniflow/machineSync.js";
+import { runRequestedHealthrayRefresh } from "../giniflow/healthrayRefresh.js";
 import { autoCategoriseDay } from "../giniflow/triage.js";
 
 // ── Sync intervals ─────────────────────────────────────────────────────────
@@ -251,6 +252,29 @@ function scheduleNextLabSync(delayMs) {
 let machineLoopRunning = false;
 let machineLoopTimeoutId = null;
 
+const REFRESH_POLL_MS = Number(process.env.RECEPTION_REFRESH_POLL_MS) || 10 * 1000;
+let refreshLoopRunning = false;
+let refreshLoopTimeoutId = null;
+
+function scheduleNextReceptionRefresh(delayMs) {
+  if (!refreshLoopRunning) return;
+  refreshLoopTimeoutId = setTimeout(async () => {
+    refreshLoopTimeoutId = null;
+    if (!refreshLoopRunning) return;
+    try {
+      const r = await runRequestedHealthrayRefresh({
+        syncToday: () =>
+          withWatchdog(syncTodayWalkingAppointments(), HEALTHRAY_WATCHDOG_MS, "Reception refresh"),
+        syncFlow: () => syncAppointmentsToFlow(),
+      });
+      if (r) console.log(`[Cron] Reception HealthRay refresh: ${JSON.stringify(r)}`);
+    } catch (e) {
+      console.error("[Cron] Reception HealthRay refresh failed:", e.message);
+    }
+    scheduleNextReceptionRefresh(REFRESH_POLL_MS);
+  }, delayMs);
+}
+
 function scheduleNextMachineSync(delayMs) {
   if (!machineLoopRunning) return;
   machineLoopTimeoutId = setTimeout(async () => {
@@ -354,6 +378,8 @@ export function startCronJobs() {
     );
 
     healthrayLoopRunning = true;
+    refreshLoopRunning = true;
+    scheduleNextReceptionRefresh(REFRESH_POLL_MS);
 
     // Run initial full sync on startup, then enter the continuous today-sync loop
     (async () => {
@@ -625,6 +651,11 @@ export function startCronJobs() {
 }
 
 export function stopCronJobs() {
+  refreshLoopRunning = false;
+  if (refreshLoopTimeoutId) {
+    clearTimeout(refreshLoopTimeoutId);
+    refreshLoopTimeoutId = null;
+  }
   machineLoopRunning = false;
   if (machineLoopTimeoutId) {
     clearTimeout(machineLoopTimeoutId);

@@ -7,6 +7,7 @@ import {
   isTerminalStatus,
 } from "../../../shared/giniflowStatus.js";
 import { advanceStatus } from "./statusEngine.js";
+import { labStepsAreManual } from "../../../shared/manualFloor.js";
 import { genVisitToken } from "../flow/journey.js";
 import { LAB_RUNGS, stageIndexOf, rungFor } from "../../../shared/labStages.js";
 import { machineFor } from "../../../shared/machineStages.js";
@@ -69,9 +70,14 @@ const HR_LAB_EVIDENCE_SQL = `
       AND (lc.patient_id = v.patient_id
            OR (lc.patient_id IS NULL
                AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))) AS hr_cases,
-  (SELECT bool_or(lc.raw_list_json->>'phlebotomy_status' = 'Completed'
-                  OR (COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'collected_on') IS NOT NULL
-                  OR (COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'reported_on') IS NOT NULL)
+  (SELECT bool_or(${
+    labStepsAreManual()
+      ? `EXISTS (SELECT 1 FROM giniflow_lab_case_actions ca
+                  WHERE ca.case_no = lc.case_no AND ca.action = 'sample_taken')`
+      : `lc.raw_list_json->>'phlebotomy_status' = 'Completed'
+         OR (COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'collected_on') IS NOT NULL
+         OR (COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'reported_on') IS NOT NULL`
+  })
      FROM lab_cases lc
     WHERE lc.case_date = v.visit_date
       AND (lc.patient_id = v.patient_id
@@ -122,14 +128,21 @@ export async function defaultPlan(visitTypeId, db = pool) {
 // ONLINE, a deactivated one, or a floor that has not filled the flags in — means
 // no preselection, and reception picks. A type with no template rows is also fine: the builder
 // opens empty and they add what the patient needs.
-export async function suggestVisitType({ isFollowUp, isWalkIn, isTests = false }, db = pool) {
+export async function suggestVisitType(
+  { isFollowUp, isWalkIn, isTests = false, isOnline = false },
+  db = pool,
+) {
   const { rows } = await db.query(
     `SELECT id FROM flow_visit_types
-      WHERE for_followup = $1 AND for_walkin = $2
-        AND COALESCE(for_tests, FALSE) = $3
-        AND is_active = TRUE
+      WHERE is_active = TRUE
+        AND CASE
+              WHEN $4 THEN for_online
+              ELSE NOT for_online
+                   AND for_followup = $1 AND for_walkin = $2
+                   AND COALESCE(for_tests, FALSE) = $3
+            END
       ORDER BY max_time_min, id LIMIT 1`,
-    [!!isFollowUp, !!isWalkIn, !!isTests],
+    [!!isFollowUp, !!isWalkIn, !!isTests, !!isOnline],
   );
   return rows[0]?.id || null;
 }
@@ -212,22 +225,59 @@ const UNCOLLECTED = rungFor("pending").sampleStatuses;
 const labTestsOf = (steps) => [
   ...new Set(
     steps
-      .filter((s) => s.catalogId === "blood_sample")
+      .filter((s) => s.catalogId === "blood_sample" && s.billedIn !== "healthray")
       .flatMap((s) => (Array.isArray(s.tests) ? s.tests : []))
       .map((t) => trimmed(t))
       .filter(Boolean),
   ),
 ];
 
+const billedLabTestsOf = (steps) => {
+  const byName = new Map();
+  for (const step of steps) {
+    if (step.catalogId !== "blood_sample" || step.billedIn !== "healthray") continue;
+    for (const t of step.billedTests || []) {
+      const name = trimmed(t?.name);
+      if (name && !byName.has(name)) byName.set(name, Math.max(0, Number(t.amount) || 0));
+    }
+  }
+  return byName;
+};
+
+const benchAlreadyStarted = async (client, visitId) => {
+  const { rows } = await client.query(
+    `SELECT EXISTS (
+       SELECT 1
+         FROM giniflow_visits v
+         JOIN patients p ON p.id = v.patient_id
+         JOIN lab_cases lc
+           ON lc.case_date = v.visit_date
+          AND (lc.patient_id = v.patient_id
+               OR (lc.patient_id IS NULL
+                   AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))
+        WHERE v.id = $1
+          AND EXISTS (SELECT 1 FROM giniflow_lab_case_actions a WHERE a.case_no = lc.case_no)
+     ) AS started`,
+    [visitId],
+  );
+  return rows[0].started;
+};
+
 export async function raiseOrdersFromSteps(client, visitId, steps, actorId = null) {
   const raised = { labOrderId: null, labTests: [], machine: [] };
-  const wantedTests = labTestsOf(steps);
+  const billed = billedLabTestsOf(steps);
+  if (billed.size && (await benchAlreadyStarted(client, visitId))) billed.clear();
+  const picked = labTestsOf(steps).filter((n) => !billed.has(n));
+  const wantedTests = [...picked, ...billed.keys()];
 
   if (wantedTests.length) {
     // Priced the way every other order is: the scheme is snapshotted onto the
     // row, so a card corrected next week cannot re-price a settled order.
     const schemeCode = await schemeForVisit(visitId, client);
-    const priceOf = await testPricesFor(wantedTests, schemeCode, client);
+    const priceOf = {
+      ...(picked.length ? await testPricesFor(picked, schemeCode, client) : {}),
+      ...Object.fromEntries(billed),
+    };
     const unknown = wantedTests.filter((n) => priceOf[n] === undefined);
     if (unknown.length) {
       throw Object.assign(new Error(`Not in the test catalogue: ${unknown.join(", ")}`), {
@@ -442,6 +492,7 @@ export async function ensurePlan(visitId, db = pool) {
               ELSE NULL
             END AS booked_as_followup,
             (a.visit_type ~* '(investigat|lab|test)') AS booked_for_tests,
+            (a.visit_type ~* '(tele|online|video)') AS booked_online,
             (SELECT COUNT(*)::int FROM giniflow_visit_steps s WHERE s.visit_id = v.id) AS steps
        FROM giniflow_visits v
        LEFT JOIN appointments a ON a.id = v.appointment_id
@@ -459,6 +510,7 @@ export async function ensurePlan(visitId, db = pool) {
         isFollowUp: visit.booked_as_followup ?? visit.prior_visits > 0,
         isWalkIn: false,
         isTests: !!visit.booked_for_tests,
+        isOnline: !!visit.booked_online,
       },
       db,
     ));
@@ -601,7 +653,11 @@ export async function syncFromStatus(client, visitId, toStatus) {
 //
 // Runs inside the caller's transaction: an order that rolls back must not leave
 // stops behind for tests nobody ordered.
-export async function insertLabStepsForOrder(client, visitId) {
+const firstPendingAfterVitals = (plan) =>
+  plan.find((s) => s.status === "pending" && s.step_catalog_id !== "vitals") ||
+  plan.find((s) => s.status === "pending");
+
+async function insertAutoSteps(client, visitId, wanted, placeIn) {
   const { rows: plan } = await client.query(
     `SELECT step_catalog_id, step_order, status FROM giniflow_visit_steps
       WHERE visit_id = $1 ORDER BY step_order`,
@@ -609,9 +665,7 @@ export async function insertLabStepsForOrder(client, visitId) {
   );
   if (!plan.length) return { added: [] };
 
-  const missing = ["lab_billing", "blood_sample"].filter(
-    (id) => !plan.some((s) => s.step_catalog_id === id),
-  );
+  const missing = wanted.filter((id) => !plan.some((s) => s.step_catalog_id === id));
   if (!missing.length) return { added: [] };
 
   const { rows: catalog } = await client.query(
@@ -619,30 +673,18 @@ export async function insertLabStepsForOrder(client, visitId) {
        FROM flow_step_catalog WHERE id = ANY($1) AND COALESCE(is_active, TRUE)`,
     [missing],
   );
-  if (!catalog.length) return { added: [] };
+  const ordered = missing.map((id) => catalog.find((c) => c.id === id)).filter(Boolean);
+  if (!ordered.length) return { added: [] };
 
-  // In front of what the patient has not done yet. A journey whose every stop is
-  // finished takes them at the end, which is still the next thing that happens.
-  // A plan that already holds the sample puts the counter in front of THAT: the
-  // lab cannot draw until the money is settled, wherever the rest of the journey
-  // has got to.
-  const pendingSample = plan.find(
-    (s) => s.step_catalog_id === "blood_sample" && s.status === "pending",
-  );
-  const firstPending =
-    pendingSample ||
-    plan.find((s) => s.status === "pending" && s.step_catalog_id !== "vitals") ||
-    plan.find((s) => s.status === "pending");
-  const at = firstPending ? firstPending.step_order : plan[plan.length - 1].step_order + 1;
+  const at = placeIn(plan) ?? plan[plan.length - 1].step_order + 1;
 
   await client.query(`SET CONSTRAINTS giniflow_visit_steps_order DEFERRED`);
   await client.query(
     `UPDATE giniflow_visit_steps SET step_order = step_order + $3
       WHERE visit_id = $1 AND step_order >= $2`,
-    [visitId, at, missing.length],
+    [visitId, at, ordered.length],
   );
 
-  const ordered = missing.map((id) => catalog.find((c) => c.id === id)).filter(Boolean);
   for (let i = 0; i < ordered.length; i++) {
     const c = ordered[i];
     await client.query(
@@ -669,6 +711,27 @@ export async function insertLabStepsForOrder(client, visitId) {
     [visitId, ordered.reduce((sum, c) => sum + (c.default_duration_min || 0), 0)],
   );
   return { added: ordered.map((c) => c.id) };
+}
+
+export async function insertLabStepsForOrder(client, visitId) {
+  // In front of what the patient has not done yet. A journey whose every stop is
+  // finished takes them at the end, which is still the next thing that happens.
+  // A plan that already holds the sample puts the counter in front of THAT: the
+  // lab cannot draw until the money is settled, wherever the rest of the journey
+  // has got to.
+  return insertAutoSteps(client, visitId, ["lab_billing", "blood_sample"], (plan) => {
+    const pendingSample = plan.find(
+      (s) => s.step_catalog_id === "blood_sample" && s.status === "pending",
+    );
+    return (pendingSample || firstPendingAfterVitals(plan))?.step_order;
+  });
+}
+
+export async function insertMachineStepsForOrders(client, visitId, machineIds) {
+  return insertAutoSteps(client, visitId, machineIds, (plan) => {
+    const sample = plan.findLast((s) => s.step_catalog_id === "blood_sample");
+    return sample ? sample.step_order + 1 : firstPendingAfterVitals(plan)?.step_order;
+  });
 }
 
 export async function insertLabStepsIfHealthrayCase(client, visitId) {

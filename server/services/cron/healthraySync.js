@@ -442,6 +442,23 @@ async function reextractLastPrescription(patientId, ctx) {
 }
 
 // ── Sync a single appointment ───────────────────────────────────────────────
+const healthrayPatientIdOf = (appt) =>
+  appt.patient?.id != null
+    ? String(appt.patient.id)
+    : appt.self_user_id != null
+      ? String(appt.self_user_id)
+      : null;
+
+async function rememberHealthrayPatientId(localApptId, appt) {
+  const hrPatientId = healthrayPatientIdOf(appt);
+  if (!localApptId || !hrPatientId) return;
+  await pool.query(
+    `UPDATE appointments SET healthray_patient_id = $2
+      WHERE id = $1 AND healthray_patient_id IS DISTINCT FROM $2`,
+    [localApptId, hrPatientId],
+  );
+}
+
 async function syncAppointment(appt, localDoctorName, opts = {}) {
   const force = !!opts.force;
   const healthrayId = String(appt.id);
@@ -461,6 +478,7 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
   const alreadyEnriched =
     existing?.healthray_diagnoses?.length > 0 && existing?.healthray_medications?.length > 0;
   if (!force && existing && existing.healthray_clinical_notes && alreadyEnriched) {
+    await rememberHealthrayPatientId(existing.id, appt);
     if (existing.patient_id) await syncAppointmentDocs(healthrayId, existing.patient_id, apptDate);
     // Propagate live status transitions even on fast-path so checked-in /
     // in_visit moves picked up by HealthRay reach the UI without waiting for
@@ -763,6 +781,7 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
     healthrayFollowUpWith: clinical.healthrayFollowUpWith,
     familyMemberId: patientData.healthId,
   });
+  await rememberHealthrayPatientId(localApptId, appt);
   // ── Sync to normalized tables + documents ──
   await syncVitals(patientId, localApptId, apptDate, opdVitals);
   // Propagate "vitals taken" into the Flow board so /flow/checkin and
@@ -1798,12 +1817,7 @@ export async function syncAppointmentStatuses(date) {
           // HealthRay patient id — needed to pull billing transactions
           // (get_transactions is keyed by patient_id, which scribe otherwise
           // doesn't store). Comes free in this payload.
-          const hrPatientId =
-            appt.patient?.id != null
-              ? String(appt.patient.id)
-              : appt.self_user_id != null
-                ? String(appt.self_user_id)
-                : null;
+          const hrPatientId = healthrayPatientIdOf(appt);
           if (billPaid != null || billCreated != null || hrPatientId != null) {
             await pool.query(
               `UPDATE appointments

@@ -49,8 +49,6 @@ const PUBLIC_PATHS = [
   "/api/auth/logout",
   "/api/auth/me",
   "/api/convert-heic",
-  "/api/sync/healthray/full",
-  "/api/sync/healthray/today",
   // Patient auth — all of these are pre-auth by design.
   "/api/patient/auth/check",
   "/api/patient/auth/send-otp",

@@ -105,3 +105,41 @@ export function useCheckInWalkIn() {
     },
   });
 }
+
+export function useReceptionHealthray() {
+  return useQuery({
+    queryKey: ["giniflow", "reception", "healthray"],
+    queryFn: async () => (await api.get("/api/giniflow/stations/reception/healthray")).data,
+    refetchInterval: (query) =>
+      query.state.data?.refresh?.running || query.state.data?.refresh?.queued ? 5000 : 60000,
+    refetchIntervalInBackground: false,
+    placeholderData: (prev) => prev,
+  });
+}
+
+export function useReceptionHealthrayRefresh() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () =>
+      (await api.post("/api/giniflow/stations/reception/healthray/refresh")).data,
+    onSuccess: (data) => {
+      queryClient.setQueryData(["giniflow", "reception", "healthray"], data);
+    },
+  });
+}
+
+export function useHealthrayBill(patientId) {
+  return useQuery({
+    queryKey: ["giniflow", "reception", "healthray-bill", patientId],
+    queryFn: async () =>
+      (
+        await api.get("/api/giniflow/stations/reception/healthray/bill", {
+          params: { patientId },
+        })
+      ).data,
+    enabled: !!patientId,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+}

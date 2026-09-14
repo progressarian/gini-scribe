@@ -689,6 +689,20 @@ const giniflowStepSchema = z.object({
   // catalogue — the service prices them and refuses any it cannot find, so an
   // unknown name is a 400 and never a silent ₹0 order.
   tests: z.array(z.string().trim().min(1).max(120)).max(30).optional(),
+  billedIn: z.literal("healthray").optional(),
+  billedTests: z
+    .array(
+      z.object({
+        name: z.string().trim().min(1).max(120),
+        amount: z.coerce.number().min(0).max(1000000).default(0),
+      }),
+    )
+    .max(30)
+    .optional(),
+});
+
+export const giniflowHealthrayBillQuerySchema = z.object({
+  patientId: z.coerce.number().int().positive(),
 });
 
 // Results the lab types in. A value is a number or a word ("Positive"), and a

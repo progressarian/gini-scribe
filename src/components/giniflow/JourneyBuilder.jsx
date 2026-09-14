@@ -241,9 +241,17 @@ export default function JourneyBuilder({
               ✕
             </button>
           </div>
-          {step.catalogId === "blood_sample" && (
+          {step.billedIn === "healthray" && !machineFor(step.catalogId) ? (
+            <div className="jb-tests">
+              <span className="jb-test-total">
+                {step.tests?.length
+                  ? `From the HealthRay bill: ${step.tests.join(", ")} — raises a payment card on the Payments tab`
+                  : "From the HealthRay bill — clears when payment is marked on the Payments tab"}
+              </span>
+            </div>
+          ) : step.catalogId === "blood_sample" ? (
             <TestPicker picked={step.tests || []} onChange={(tests) => replace(i, { tests })} />
-          )}
+          ) : null}
           {step.catalogId && machineFor(step.catalogId) && (
             <div className="jb-tests">
               <span className="jb-test-total">

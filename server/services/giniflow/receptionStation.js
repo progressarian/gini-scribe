@@ -550,6 +550,8 @@ const ARRIVAL_SELECT = `
   SELECT v.id, v.patient_id, v.current_status, v.appointment_time::text AS appointment_time,
          v.priority, v.blocked_reason, v.paused_at, v.paused_reason,
          ap.patient_category AS scheme_code,
+         ap.visit_type AS booking_type,
+         (v.appointment_id IS NULL OR COALESCE(checkin_ev.walk_in, FALSE)) AS walk_in,
          (SELECT f.fee FROM scheme_opd_fees f
            WHERE f.scheme_code = ap.patient_category
              AND f.visit_type = ap.visit_type
@@ -595,17 +597,21 @@ const ARRIVAL_SELECT = `
       -- reading as classifyAppointment() in src/lib/flowAppointmentType.js, so
       -- the two screens cannot disagree about who is a follow-up.
       SELECT t.id FROM flow_visit_types t
-       WHERE t.for_followup = (
-               CASE
-                 WHEN ap.visit_type ~* '(follow|f/?u|review)' THEN TRUE
-                 WHEN ap.visit_type ~* '^\s*new\b' THEN FALSE
-                 ELSE seq.prior > 0
-               END)
-         AND t.for_walkin = FALSE
-         -- A booking HealthRay calls an investigation is a patient coming to
-         -- GIVE samples and go, booked against Dr. Hospital Admin. They should
-         -- not be offered an hour of consultation they are not here for.
-         AND COALESCE(t.for_tests, FALSE) = (ap.visit_type ~* '(investigat|lab|test)')
+       WHERE CASE
+               WHEN ap.visit_type ~* '(tele|online|video)' THEN t.for_online
+               ELSE NOT t.for_online
+                    AND t.for_followup = (
+                          CASE
+                            WHEN ap.visit_type ~* '(follow|f/?u|review)' THEN TRUE
+                            WHEN ap.visit_type ~* '^\s*new\b' THEN FALSE
+                            ELSE seq.prior > 0
+                          END)
+                    AND t.for_walkin = FALSE
+                    -- A booking HealthRay calls an investigation is a patient coming to
+                    -- GIVE samples and go, booked against Dr. Hospital Admin. They should
+                    -- not be offered an hour of consultation they are not here for.
+                    AND COALESCE(t.for_tests, FALSE) = (ap.visit_type ~* '(investigat|lab|test)')
+             END
          -- A type an admin has switched off is not offered again; visits already
          -- on it keep running, since the id still resolves everywhere else.
          AND t.is_active = TRUE
@@ -622,7 +628,7 @@ const ARRIVAL_SELECT = `
        ORDER BY s.step_order LIMIT 1
     ) nxt ON TRUE
     LEFT JOIN LATERAL (
-      SELECT occurred_at FROM giniflow_visit_events e
+      SELECT occurred_at, (e.meta->>'walkIn')::boolean AS walk_in FROM giniflow_visit_events e
        WHERE e.visit_id = v.id AND e.status = 'checked_in'
        ORDER BY occurred_at LIMIT 1
     ) checkin_ev ON TRUE
@@ -662,6 +668,8 @@ const shapeArrival = (r, now) => ({
   // is the last moment before money is keyed into HealthRay, and because it is
   // the catch-all entry point: a walk-in reaches no booking form at all.
   schemeCode: r.scheme_code || null,
+  bookingType: r.booking_type || null,
+  walkIn: !!r.walk_in,
   // What the OPD consultation should cost under that scheme. DISPLAY ONLY —
   // HealthRay raises the bill and Gini has no write path to it (plan D3) — so
   // this exists to put the right number in front of whoever keys it in. null
