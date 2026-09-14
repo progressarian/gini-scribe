@@ -10,6 +10,7 @@ import {
   STATUS_LABEL,
   WAIT_STATUSES,
   columnForStatus,
+  NOT_A_MARKER_SQL,
 } from "../../../shared/giniflowStatus.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { labStepsAreManual, labShowsHealthrayCases } from "../../../shared/manualFloor.js";
@@ -278,7 +279,8 @@ export async function getLabQueue(
             p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
             v.current_status,
             (SELECT e.meta->>'source' FROM giniflow_visit_events e
-               WHERE e.visit_id = v.id ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1) AS room_source,
+               WHERE e.visit_id = v.id AND ${NOT_A_MARKER_SQL("e.status")}
+               ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1) AS room_source,
             d.short_name AS ordered_by,
             -- The chart row the report landed on, so the pane can open it in the
             -- viewer the rest of the app uses instead of throwing the file at a
@@ -653,7 +655,8 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
             p.age, p.sex,
             v.current_status, v.results_status, v.id IS NOT NULL AS on_floor,
             (SELECT e.meta->>'source' FROM giniflow_visit_events e
-               WHERE e.visit_id = v.id ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1) AS room_source,
+               WHERE e.visit_id = v.id AND ${NOT_A_MARKER_SQL("e.status")}
+               ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1) AS room_source,
             -- Constant across the group (it depends only on the patient and the
             -- day), so bool_or reads it without widening the GROUP BY.
             bool_or(${labOnlyPredicate("v", "$3")}) AS lab_only,
@@ -867,14 +870,26 @@ async function assertPatientIsFree(db, visitId, what) {
   const { rows } = await db.query(
     `SELECT v.current_status, p.name,
             (SELECT e.meta->>'source' FROM giniflow_visit_events e
-               WHERE e.visit_id = v.id ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1) AS room_source
+               WHERE e.visit_id = v.id AND ${NOT_A_MARKER_SQL("e.status")}
+               ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1) AS room_source,
+            (SELECT string_agg(t.test_name, ', ' ORDER BY t.test_name)
+               FROM giniflow_lab_orders mo
+               JOIN giniflow_lab_order_tests t ON t.lab_order_id = mo.id
+              WHERE mo.visit_id = v.id AND mo.kind = 'machine' AND mo.urgency = 'today'
+                AND mo.sample_status = 'in_progress') AS on_machine
        FROM giniflow_visits v
        JOIN patients p ON p.id = v.patient_id
       WHERE v.id = $1`,
     [visitId],
   );
   if (!rows.length) return;
-  const { current_status: status, name, room_source: roomSource } = rows[0];
+  const { current_status: status, name, room_source: roomSource, on_machine: onMachine } = rows[0];
+  if (onMachine) {
+    throw Object.assign(
+      new Error(`${name} is on the ${onMachine} right now — ${what} once the test is finished`),
+      { status: 409 },
+    );
+  }
   if (IN_A_ROOM.includes(status) && roomSource !== "healthray") {
     throw Object.assign(
       new Error(
@@ -1307,7 +1322,19 @@ export async function markLabCaseAction(
         LIMIT 1`,
       [caseNo],
     );
-    await assertPatientIsFree(db, visit[0]?.id, "collect the sample");
+    const { rows: sameDay } = visit.length
+      ? { rows: [] }
+      : await db.query(
+          `SELECT v.id FROM lab_cases lc
+             JOIN patients p ON p.file_no = lc.raw_list_json->'patient'->>'healthray_uid'
+             JOIN giniflow_visits v ON v.visit_date = lc.case_date AND v.patient_id = p.id
+            WHERE lc.case_no = $1 AND lc.patient_id IS NULL
+            LIMIT 2`,
+          [caseNo],
+        );
+    const visitId = visit[0]?.id || (sameDay.length === 1 ? sameDay[0].id : null);
+    await assertPatientIsFree(db, visitId, "collect the sample");
+    await assertVitalsRecorded(db, visitId);
   }
 
   if (undo) {

@@ -13,19 +13,8 @@ import { findEarliestStartDates, resolveStartedDate } from "../medication/histor
 import { markMedicationVisitStatus } from "../medication/visitStatus.js";
 import { savePrescriptionForVisit, buildVisitPayloadFromDb } from "../prescriptionAutoSave.js";
 import { normalizeWhenToTake } from "../../schemas/index.js";
-
-// Build the visit payload from current DB state and persist a prescription
-// PDF document for an appointment that has just been marked as seen. Always
-// invoked outside the transaction in markAppointmentAsSeen so a slow PDF
-// render or storage upload doesn't hold DB locks.
 async function autoSavePrescriptionAfterSeen(patientId, appointmentId, consultationId) {
   if (!patientId) return;
-
-  // Defer auto-save until the HealthRay (or local OPD) clinical extraction
-  // has actually populated medications/diagnoses on the appointment. If we
-  // generate now with empty/stale meds, the PDF gets written with last
-  // visit's data and never refreshes. A later sync pass (after clinical
-  // extraction) re-invokes this function via maybeAutoSavePrescription().
   if (appointmentId) {
     const { rows } = await pool.query(
       `SELECT
@@ -58,9 +47,6 @@ async function autoSavePrescriptionAfterSeen(patientId, appointmentId, consultat
   });
 }
 
-// Re-invokable form: call after a later sync pass populates clinical data.
-// Looks up the consultation id and only writes/overwrites the prescription
-// when the gating data is present.
 export async function maybeAutoSavePrescription(appointmentId) {
   if (!appointmentId) return;
   const { rows } = await pool.query(
@@ -75,8 +61,6 @@ export async function maybeAutoSavePrescription(appointmentId) {
   );
 }
 const { log, error } = createLogger("HealthRay Sync");
-
-// ── Download HealthRay file and store in Supabase ───────────────────────────
 export async function downloadAndStore(
   patientId,
   docId,
@@ -92,15 +76,13 @@ export async function downloadAndStore(
   }
 
   let buffer, contentType;
-
-  // 1. Try the actual PDF download endpoint (not thumbnail)
   if (attachmentId) {
     try {
       const { downloadMedicalRecordFile } = await import("./client.js");
       const result = await downloadMedicalRecordFile(
         attachmentId,
         recordType || "Prescription/Rx",
-        medicalRecordId || null, // null = omit medical_record_id from URL; attachment ID in path is primary key
+        medicalRecordId || null,
       );
       if (result?.buffer?.length > 0) {
         buffer = result.buffer;
@@ -132,13 +114,11 @@ export async function downloadAndStore(
 
   if (!buffer || buffer.length === 0) return null;
 
-  // Reject JSON responses — HealthRay returns HTTP 200 with JSON error body when auth/params fail
   if (contentType === "application/json" || buffer.slice(0, 1).toString() === "{") {
     log("DB", `downloadAndStore: rejecting JSON response for doc ${docId} (HealthRay error body)`);
     return null;
   }
 
-  // Detect MIME from actual content or filename when S3 returns generic type
   if (!contentType || contentType === "application/octet-stream") {
     const urlPath = (fileUrl || "").split("?")[0];
     const urlExt = urlPath.split(".").pop().toLowerCase();
@@ -251,13 +231,6 @@ export async function ensureSyncColumns() {
       ON medications(parent_medication_id);
   `);
 
-  // Stops TOCTOU duplicates from sheets sync, walk-in clicks, and no-show
-  // placeholders inserting a second row for the same booking. Two rows with
-  // the same (file_no, date, time, doctor) but different `status` are kept
-  // (e.g. a cancelled stub + the real seen visit), so status is part of the
-  // dedup key. Different time_slot OR different doctor still creates a new
-  // row (a patient seeing two doctors back-to-back is allowed). Run separately
-  // so any leftover duplicates don't abort the whole bootstrap.
   try {
     await pool.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS idx_appt_patient_day_slot_doc_status
@@ -277,8 +250,6 @@ export async function ensureSyncColumns() {
   columnsReady = true;
 }
 
-// ── Find previous appointment with clinical notes for same patient ──────────
-// Matches by file_no only — phone is shared across family members.
 export async function findAppointmentWithNotes(fileNo, _phone, excludeHealthrayId) {
   if (!fileNo) return { rows: [] };
   return pool.query(
@@ -291,10 +262,6 @@ export async function findAppointmentWithNotes(fileNo, _phone, excludeHealthrayI
   );
 }
 
-// ── Return JSONB array lengths for prescription fields on an appointment ──
-// Used by the sync flow to detect whether an appointment already carries a
-// prior good enrichment, so a flaky re-parse (AI returns null / empty) cannot
-// silently overwrite it with blank arrays.
 export async function getAppointmentEnrichmentCounts(appointmentId) {
   if (!appointmentId) return null;
   const { rows } = await pool.query(
@@ -309,7 +276,6 @@ export async function getAppointmentEnrichmentCounts(appointmentId) {
   return rows[0] || null;
 }
 
-// ── Persist ONLY the HealthRay follow-up date onto an appointment ───────────
 export async function syncFollowUpDate(appointmentId, followUpDate) {
   if (!appointmentId || !followUpDate) return false;
   const { rowCount } = await pool.query(
@@ -323,7 +289,6 @@ export async function syncFollowUpDate(appointmentId, followUpDate) {
   return rowCount > 0;
 }
 
-// ── Find existing appointment by healthray_id, or by file_no + date (sheet import) ──
 export async function findAppointment(healthrayId, fileNo, apptDate) {
   // First try exact healthray_id match
   const { rows } = await pool.query(
@@ -346,12 +311,6 @@ export async function findAppointment(healthrayId, fileNo, apptDate) {
   return null;
 }
 
-// ── Patient identity helpers ────────────────────────────────────────────────
-
-// A UHID (file_no) belongs to exactly one person at a time in HealthRay. When it
-// is reassigned, the new owner must claim it — null it out on any other row so
-// lookups don't resolve to the previous owner. Their history stays intact, keyed
-// by their own health_id and their appointments' own file_no.
 async function releaseFileNoFromOthers(fileNo, keepPatientId) {
   if (!fileNo) return;
   if (keepPatientId) {
@@ -374,13 +333,6 @@ const normName = (s) =>
     .replace(/\s+/g, " ")
     .trim();
 
-// Best-effort "is this the same person?" check, used only when adopting a legacy
-// row that has no health_id yet (so we cannot match definitively). Different sex
-// is a hard no — that is the signature of a reassigned UHID (see the 102
-// conflicting-sex collisions). Names must be empty or share a given name; a
-// clearly different name means a different person and we create a new record
-// rather than overwrite (a duplicate person is a far safer error than merging
-// two people's clinical data).
 function personLooksSame(existing, incomingName, incomingSex) {
   if (existing.sex && incomingSex && existing.sex !== incomingSex) return false;
   const a = normName(existing.name);
@@ -415,12 +367,6 @@ async function matchIdentitylessByPhone(phone, name, sex) {
   return row.id;
 }
 
-// ── Upsert patient ──────────────────────────────────────────────────────────
-// Identity is keyed on health_id (HealthRay family_member id) — a stable
-// PER-PERSON id. file_no (patient_case_id / UHID) is NOT stable: HealthRay
-// reuses/reassigns a UHID to a different person over time, so matching on file_no
-// alone silently merges two people onto one record and freezes the name captured
-// at first insert (the P_180848 incident). See migrations/2026-07-14_patient_identity_health_id.sql.
 export async function upsertPatient({
   name,
   phone,
@@ -435,25 +381,18 @@ export async function upsertPatient({
   healthId,
 }) {
   if (!healthId) {
-    // No stable person id on this payload — we cannot detect a reassignment.
-    // Fall back to file_no matching (better than nothing) but flag it.
     log(
       "DB",
       `upsertPatient: no health_id for file_no=${fileNo || "?"} (${name}) — file_no match only`,
     );
   }
 
-  // 1) Match by PERSON (health_id). Same person → refresh demographics in place.
-  //    This also applies genuine HealthRay name/typo corrections.
   if (healthId) {
     const byHealth = await pool.query(`SELECT id FROM patients WHERE health_id = $1 LIMIT 1`, [
       healthId,
     ]);
     if (byHealth.rows[0]) {
       const id = byHealth.rows[0].id;
-      // Release the UHID from any previous owner FIRST — file_no is unique among
-      // current owners, so setting it on this row while another row still holds
-      // it would violate the unique index.
       if (fileNo) await releaseFileNoFromOthers(fileNo, id);
       await pool.query(
         `UPDATE patients SET
@@ -474,11 +413,6 @@ export async function upsertPatient({
       return id;
     }
   }
-
-  // 2) No person match. Try file_no, but only ADOPT the row when it is either a
-  //    legacy row without a health_id (and looks like the same person) or the
-  //    incoming payload has no health_id at all. A file_no row that already
-  //    belongs to a DIFFERENT person is a reassignment → fall through to insert.
   if (fileNo) {
     const byFile = await pool.query(
       `SELECT id, health_id, name, sex FROM patients WHERE file_no = $1 ORDER BY id LIMIT 1`,
@@ -581,7 +515,6 @@ export async function upsertPatient({
         const r = await pool.query(`SELECT id FROM patients WHERE file_no = $1 LIMIT 1`, [fileNo]);
         if (r.rows[0]) return r.rows[0].id;
       }
-      // abha_id collision (rare — family members sharing an ABHA) — retry without it.
       const res2 = await pool
         .query(
           `INSERT INTO patients (name, phone, file_no, age, sex, address, dob, email, blood_group, health_id)
@@ -595,11 +528,6 @@ export async function upsertPatient({
     throw e;
   }
 }
-
-// ── Sync doctors ────────────────────────────────────────────────────────────
-// Optimization: we used to issue up to 3 SELECTs per HealthRay doctor. For a
-// 50-doctor sync that was ~150 round-trips. Now we pull the local doctor table
-// once and match in memory; only missing rows produce an INSERT.
 export async function syncDoctors(rayDoctors) {
   const mapping = new Map();
 
@@ -848,7 +776,6 @@ export async function upsertAppointment(existingId, data) {
   return rows[0].id;
 }
 
-// Source priority — lower number wins
 const SOURCE_PRIORITY = {
   opd: 1,
   report_extract: 2,
@@ -862,9 +789,6 @@ function normalizeCanonicalName(name) {
   return normalizeTestName(name);
 }
 
-// Vitals and demographics that the extractor occasionally lists among "labs".
-// They belong in appointments.opd_vitals, never in lab_results — a stray "BP 122"
-// row renders as a lab result and pollutes the biomarker trend charts.
 const NON_LAB_CANONICALS = new Set(
   [
     "BP",
@@ -887,12 +811,6 @@ const NON_LAB_CANONICALS = new Set(
     "Age",
   ].map((s) => s.toLowerCase()),
 );
-
-// ── Sync parsed labs → lab_results table ────────────────────────────────────
-// rawText is the clinical note the labs were extracted from. When supplied, every
-// lab date must be either the appointment date or a full calendar date that
-// literally appears in that note — anything else was assembled by the extractor
-// rather than read, and must not become a stored measurement.
 export async function syncLabResults(patientId, apptId, apptDate, labs, rawText = null) {
   if (!patientId || labs.length === 0) return;
 
@@ -902,10 +820,6 @@ export async function syncLabResults(patientId, apptId, apptDate, labs, rawText 
   await pool.query(`DELETE FROM lab_results WHERE appointment_id = $1 AND source = 'healthray'`, [
     apptId,
   ]);
-
-  // Deduplicate: when the same test+value appears multiple times (e.g. once in
-  // OBSERVATIONS with no date and once under FOLLOW UP with a specific date),
-  // keep only the entry with the specific date to avoid duplicate rows.
   const seen = new Map();
   const dedupedLabs = [];
   for (const lab of labs) {
@@ -925,15 +839,6 @@ export async function syncLabResults(patientId, apptId, apptDate, labs, rawText 
     // If prev already has a specific date, keep it (skip current)
   }
 
-  // Resolve each lab to its final (canonical, date) slot before touching the DB.
-  // Two entries can collide on that slot when a cumulative note carries a stale
-  // block: the doctor keeps ONE note and appends a dated block per visit, so the
-  // enrollment-time OBSERVATION values sit above the genuine current ones. If the
-  // parser mis-dates that baseline to the visit date, both land on the same slot.
-  // Document order in these notes is chronological, so the LAST occurrence is the
-  // newer measurement — it must win. (Before this, first-writer-won and the
-  // baseline buried the real reading: P_179877 appt 41538 stored FBS 171.4 from
-  // the May baseline while the genuine 29/7 value of 82.3 was silently dropped.)
   const bySlot = new Map();
   for (const lab of dedupedLabs) {
     const val = parseFloat(lab.value);
@@ -946,12 +851,6 @@ export async function syncLabResults(patientId, apptId, apptDate, labs, rawText 
       );
       continue;
     }
-    // Only accept labs with an explicit date in the notes. Clinical notes often
-    // carry forward historical sections (e.g. "PATIENT VISITED TODAY HBA1C: 11.5"
-    // copied from an earlier visit) — anchoring those undated values to the
-    // current appointment date makes stale readings look like today's labs and
-    // overwrites the genuine current reading. P_137100 (appt 31150): the
-    // undated 11.5 was old text while the dated "LABS (19/4/26) HBA1C-7.9" was
     // the real recent value.
     if (!lab.date) continue;
     const labDate = parseLabDate(lab.date, apptDate);
@@ -978,12 +877,6 @@ export async function syncLabResults(patientId, apptId, apptDate, labs, rawText 
   }
 
   for (const { lab, val, canonicalName, labDate } of bySlot.values()) {
-    // One reading per (patient, canonical test, date). Higher-priority sources
-    // (opd, report_extract, lab_healthray, …) always win — never overwrite them.
-    // A pre-existing 'healthray' row for the same slot IS corrected, though: it
-    // came from an earlier parse of this same cumulative note, so when the value
-    // now differs the newer parse is the better witness and a stale reading left
-    // by the old first-writer-wins behaviour gets healed on the next sync.
     const existing = await pool.query(
       `SELECT id, source, result FROM lab_results
        WHERE patient_id = $1 AND canonical_name = $2 AND test_date IS NOT DISTINCT FROM $3::date
@@ -1032,21 +925,13 @@ export async function syncLabResults(patientId, apptId, apptDate, labs, rawText 
   }
 }
 
-// ── Sync parsed medications → medications table ─────────────────────────────
-// ── Normalize diagnosis name → canonical ID to prevent duplicates ───────────
 function normalizeDiagnosisId(name) {
-  // Check full name (with parentheticals) first, for conditions whose qualifier may be inside parens
   const fullLower = name.toLowerCase().trim();
-
-  // Defensive: a diagnosis name with no alphabetic characters is never a real
-  // condition — signal "skip" so the caller doesn't insert it.
   if (!/[a-z]/.test(fullLower)) return null;
 
-  // MNG with retrosternal extension — qualifier sometimes in parens: "MNG(With retristernal extension...)"
   if (/\bmng\b|multinodular goiter/.test(fullLower) && /retrosternal|retristernal/.test(fullLower))
     return "mng_with_retrosternal_extension";
 
-  // Strip parenthetical qualifiers before matching — "(Since 1998)", "(Seronegative)", etc.
   const n = fullLower
     .replace(/\([^)]*\)/g, "")
     .trim()
@@ -1186,8 +1071,6 @@ function normalizeDiagnosisId(name) {
     .slice(0, 100);
 }
 
-// ── Sync diagnoses from HealthRay clinical notes ────────────────────────────
-// Detect negative/absent findings that should not be stored as diagnoses
 function isAbsentFinding(dx) {
   // Explicit status field set by AI
   if (dx.status === "Absent") return true;
@@ -1210,7 +1093,6 @@ function stripPlusSuffix(name) {
   return (name || "").replace(/\s*\+\s*$/, "").trim();
 }
 
-// Old diagnosis_id values that were renamed — deactivate stale rows before upserting canonical
 const DIAGNOSIS_ID_RENAMES = {
   type_2_dm: "type_2_diabetes_mellitus",
   t2dm: "type_2_diabetes_mellitus",
@@ -1278,8 +1160,6 @@ export async function syncDiagnoses(patientId, healthrayId, diagnoses, options =
     // Strip "+" suffix the AI may leave on condition names (e.g. "NEUROPATHY+" → "NEUROPATHY")
     const cleanName = stripPlusSuffix(dx.name);
     if (!cleanName) continue;
-    // Reject names with no alphabetic chars (e.g. stray numeric tokens like "24009"
-    // that the AI sometimes lifts out of dates/IDs/lab values in the DIAGNOSIS block).
     if (!/[a-zA-Z]/.test(cleanName)) continue;
     const diagId = normalizeDiagnosisId(dx.id || cleanName);
     if (!diagId) continue; // null = non-medical descriptor, skip
@@ -1310,13 +1190,6 @@ export async function syncDiagnoses(patientId, healthrayId, diagnoses, options =
         ),
       );
   }
-
-  // Opt-in stale sweep — used by the prescription re-extraction path so the
-  // latest prescription becomes the sole source of truth for the patient's
-  // diagnoses. HealthRay cron path leaves sweepStale=false (additive-only).
-  // Only touches auto-synced rows (notes prefixed 'healthray:'); manually
-  // added or consultation-scoped diagnoses (different notes prefix) are
-  // preserved.
   if (sweepStale && keptIds.length > 0) {
     await pool
       .query(
@@ -1389,10 +1262,6 @@ export async function syncStoppedMedications(
   currentMeds = [],
 ) {
   if (!patientId || !stoppedMeds || stoppedMeds.length === 0) return;
-
-  // Build set of current prescription pharmacy_match keys so we don't accidentally
-  // stop a medication that changed frequency/dose but is still being prescribed
-  // e.g. "CCM OD" in previous + "CCM BD" in current → don't stop CCM
   const currentMatchKeys = new Set(
     currentMeds.map((m) => normalizeMedName(m.name || "")).filter(Boolean),
   );
@@ -1404,10 +1273,6 @@ export async function syncStoppedMedications(
     if (currentMatchKeys.has(normalizeMedName(med.name))) continue;
 
     const reason = `healthray:${healthrayId}${med.reason ? " — " + med.reason : med.status || ""}`;
-
-    // Always compare on the canonical key, never on the raw name. Once the
-    // one-time normalize-medication-names.js migration has run, every row has
-    // pharmacy_match set and the brand name stripped, so this match is exact.
     const cleanMedName = stripFormPrefix(med.name).name || med.name;
     const matchKey = normalizeMedName(med.name);
 
@@ -1432,10 +1297,6 @@ export async function syncStoppedMedications(
         );
         return { rowCount: 0 };
       });
-
-    // If no existing active medicine found, insert as a new stopped entry (for dose changes).
-    // Use ON CONFLICT DO NOTHING so duplicate canonical names (patient_inactive_name_uniq)
-    // are silently skipped — avoids a flawed check-then-insert that breaks on NULL dose.
     if (updateRes.rowCount === 0) {
       await pool
         .query(
@@ -1463,25 +1324,12 @@ export async function syncStoppedMedications(
     }
   }
 }
-
-// Canonical key delegated to the shared medication normaliser.
-// See server/services/medication/normalize.js for the full contract.
 const normalizeMedName = canonicalMedKey;
 
 export async function syncMedications(patientId, healthrayId, apptDate, meds) {
   if (!patientId || meds.length === 0) return;
 
-  // Capture sync start so we can identify rows tagged with the same
-  // healthrayId that were NOT touched by this run — those belong to an
-  // older extraction of the same prescription and should be demoted to
-  // `visit_status = 'previous'`. (HealthRay sometimes returns a partial
-  // prescription first, then the full one a few minutes later; without
-  // this, the dropped meds stay marked 'current'.)
   const syncStart = new Date();
-
-  // Historical started_date lookup — if the patient was already on this drug
-  // in an earlier prescription, backdate started_date to the first known
-  // occurrence instead of stamping it with the current apptDate.
   const canonicalKeys = meds
     .filter((m) => m?.name)
     .map((m) => {
@@ -1493,23 +1341,14 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
 
   for (const rawMed of meds) {
     if (!rawMed.name) continue;
-    // Default weekly meds' day-of-week to the prescription weekday when the
-    // source text doesn't pin a specific day. Also normalises the frequency
-    // string to include the canonical "· Mon, Wed" suffix.
     const med = enrichMedWithDays(rawMed, apptDate);
     const daysOfWeek =
       Array.isArray(med.days_of_week) && med.days_of_week.length ? med.days_of_week : null;
-    // Strip dosage-form prefix so the stored `name` is the clean brand — the
-    // prefix becomes the route (Oral/SC/Topical/...) and never survives in
-    // `name`, which is what the stop-medicine matcher reads.
     const { name: cleanName, form: detectedForm } = stripFormPrefix(med.name);
     const storedName = cleanName || med.name;
     const pharmacyMatch = normalizeMedName(storedName);
     const storedRoute = med.route || routeForForm(detectedForm) || "Oral";
     const startedDate = resolveStartedDate(earliestByKey, pharmacyMatch, apptDate);
-    // Common side effects extracted by the AI parser. Capped at 3 entries and
-    // serialised as JSON so the DB column (jsonb) round-trips cleanly even
-    // when downstream callers pass a literal JS array.
     const sideEffectsJson = Array.isArray(med.common_side_effects)
       ? JSON.stringify(med.common_side_effects.slice(0, 3))
       : null;
@@ -1534,17 +1373,6 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
       instructions,
       detectedForm || null, // $15
     ];
-
-    // Step 1: reactivate any existing inactive row with the same name first.
-    // Without this, syncMedications creates a duplicate active row (because the
-    // ON CONFLICT below can't match the partial inactive index), and the next
-    // reconcile then fails with a unique constraint violation when it tries to
-    // stop both rows.
-    // Also clear consultation_id/document_id so HealthRay takes ownership —
-    // otherwise old consultation-linked rows stay filtered out by latest_cons.
-    // Step 1: reactivate any existing inactive row with the same canonical name.
-    // Note: use a separate param array without med.name ($2 in the INSERT params)
-    // so PostgreSQL doesn't complain about an untyped unused parameter.
     const updateParams = [
       patientId, // $1
       pharmacyMatch, // $2
@@ -1559,8 +1387,8 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
       daysOfWeek, // $11 — int[] (0..6) weekday(s) for weekly meds, or null
       typeof med.instructions === "string" && med.instructions.trim()
         ? med.instructions.trim()
-        : null, // $12 — extra administration directive
-      detectedForm || null, // $13 — dosage form (Tablet, Capsule, Injection, …)
+        : null, 
+      detectedForm || null, 
     ];
     await pool
       .query(
@@ -1639,11 +1467,6 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
         ),
       );
   }
-
-  // Step 3: dedup — remove older active healthray rows that are superseded.
-  // First pass: rows WITH pharmacy_match — keep newest per canonical name.
-  // Second pass: rows WITHOUT pharmacy_match whose name normalises to the same
-  //   value as an existing active row that HAS pharmacy_match (old pre-normalisation rows).
   await pool
     .query(
       `DELETE FROM medications
@@ -1666,9 +1489,6 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
         `dedup pass 1 (pharmacy_match) DELETE failed for patient=${patientId}: ${e.message}`,
       ),
     );
-
-  // Remove old null-pharmacy_match rows whose normalised name matches a row that
-  // now has pharmacy_match set (i.e. the canonical version already exists).
   await pool
     .query(
       `DELETE FROM medications old
@@ -1697,10 +1517,6 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
       ),
     );
 
-  // Pass 3: pharmacy_match prefix dedup — when HealthRay sends both a short name
-  // ("CRESAR AM") and a longer one with dose appended ("CRESAR AM 5+40"), both get
-  // synced with the same healthray ID so stopStaleHealthrayMeds won't clean them up.
-  // Keep the longer/newer entry; remove the shorter one that is a leading prefix of it.
   await pool
     .query(
       `DELETE FROM medications short_entry
@@ -1727,29 +1543,13 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
         `dedup pass 3 (prefix match) DELETE failed for patient=${patientId}: ${e.message}`,
       ),
     );
-
-  // Pass 4: link support / conditional medications to their parent.
-  // Each med with `support_for: "<parent brand>"` becomes a child row
-  // pointing at the parent's id, with `support_condition` set.
   await linkSupportMedications(patientId, meds);
-
-  // Pass 5: stamp visit_status on every active row so consumers can filter
-  // on the column instead of re-deriving "current vs previous visit" from
-  // last_prescribed_date at render time.
   await markMedicationVisitStatus(patientId).catch((e) =>
     error(
       "syncMedications",
       `markMedicationVisitStatus failed for patient=${patientId}: ${e.message}`,
     ),
   );
-
-  // Pass 6: demote same-healthrayId rows not touched in this sync.
-  // When HealthRay re-emits the same prescription (same healthray ID) with
-  // fewer meds, the previously-synced ones keep `notes = healthray:<id>` so
-  // stopStaleHealthrayMeds won't deactivate them, and they share the same
-  // last_prescribed_date so markMedicationVisitStatus keeps them 'current'.
-  // The only signal we have is `updated_at` — anything tagged with this id
-  // whose `updated_at` predates this sync run is from an older extraction.
   await pool
     .query(
       `UPDATE medications
@@ -1771,16 +1571,9 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
     );
 }
 
-// ── Resolve `support_for` hints into real parent_medication_id links ────────
-// Called from syncMedications after all parent rows are guaranteed to exist.
-// Looks up each support med's parent by canonical pharmacy_match key on the
-// same patient, then UPDATEs parent_medication_id + support_condition.
 async function linkSupportMedications(patientId, meds) {
   const supportMeds = (meds || []).filter((m) => m?.support_for && m?.name);
   if (supportMeds.length === 0) {
-    // Clear any stale links for this patient when no support meds are extracted
-    // for this prescription? No — leave existing links untouched, since they may
-    // belong to a previous prescription that didn't ship support meds again.
     return;
   }
 
@@ -1842,18 +1635,8 @@ async function linkSupportMedications(patientId, meds) {
   }
 }
 
-// ── Stop stale HealthRay meds not in the current prescription ───────────────
-// After syncing current meds (which sets notes = 'healthray:ID'), deactivate
-// any other HealthRay-sourced active meds that weren't updated by this sync.
-// This handles meds that were prescribed before but dropped from the current note.
 export async function stopStaleHealthrayMeds(patientId, healthrayId, apptDate, currentMeds) {
   if (!patientId || !healthrayId) return;
-
-  // Build the survival set from the current prescription's medication list.
-  // Anything active that isn't in this set will be deactivated. We match on
-  // pharmacy_match (canonical name) when available, else uppercase name.
-  // Without this list, note-based criteria miss rows whose notes were re-
-  // stamped to the current healthrayId by an earlier sync pass.
   const keepKeys = new Set();
   if (Array.isArray(currentMeds)) {
     for (const m of currentMeds) {
@@ -1864,12 +1647,6 @@ export async function stopStaleHealthrayMeds(patientId, healthrayId, apptDate, c
     }
   }
 
-  // Guard: only sweep when this prescription IS the patient's latest one with
-  // medications. If a newer appointment exists, deactivating "everything not
-  // tagged $healthrayId" would wipe the newer prescription's meds — exactly
-  // the bug that left stale meds active when the cron processed appointments
-  // out of order, or when a re-sync of an older appointment ran after the
-  // newer one had already been written.
   if (apptDate) {
     const { rows: newer } = await pool.query(
       `SELECT 1 FROM appointments
@@ -1889,10 +1666,6 @@ export async function stopStaleHealthrayMeds(patientId, healthrayId, apptDate, c
       return;
     }
   }
-
-  // Skip when nothing got tagged with this healthrayId — that means the current
-  // prescription was empty. Running the "stale" sweep in that state matches
-  // every active HealthRay med for the patient and wipes prior visits' data.
   const { rows: tagged } = await pool.query(
     `SELECT 1 FROM medications
       WHERE patient_id = $1
@@ -1908,16 +1681,6 @@ export async function stopStaleHealthrayMeds(patientId, healthrayId, apptDate, c
     );
     return;
   }
-
-  // Two-statement approach so the UPDATE sees the effects of the DELETE:
-  //
-  // Problem A: a pre-existing inactive row with the same canonical as a stale
-  //   active row → flipping the active row to inactive creates a duplicate.
-  // Problem B: two active rows share the same canonical (no unique constraint on
-  //   active rows) → deactivating both creates two inactive rows that collide.
-  //
-  // Fix: one DELETE removes both kinds of conflict rows, then the UPDATE runs
-  // clean against a de-duped set.
   await pool
     .query(
       `DELETE FROM medications
@@ -2022,10 +1785,6 @@ export async function syncVitals(patientId, apptId, apptDate, opdVitals) {
     );
 }
 
-// ── Sync vitals from extracted lab report data ────────────────────────────────
-// Scans extracted panels for vital-sign values (Weight, Height, BMI, BP) and
-// writes them to the vitals table — same pattern as HealthRay's syncVitals().
-// Called after lab extraction from any upload path.
 export async function syncVitalsFromExtraction(patientId, extractedData, recordedAt) {
   if (!patientId || !extractedData?.panels) return;
 
@@ -2059,10 +1818,8 @@ export async function syncVitalsFromExtraction(patientId, extractedData, recorde
     }
   }
 
-  // Nothing vital-like found
   if (!vitals.weight && !vitals.bp_sys && !vitals.height && !vitals.bmi) return;
 
-  // Auto-calculate BMI if weight and height present but BMI missing
   if (vitals.weight && vitals.height && !vitals.bmi) {
     const hm = vitals.height / 100;
     if (hm > 0) vitals.bmi = Math.round((vitals.weight / (hm * hm)) * 10) / 10;
@@ -2112,10 +1869,6 @@ export async function syncVitalsFromExtraction(patientId, extractedData, recorde
   }
 }
 
-// ── Sync appointments.biomarkers from latest lab_results ─────────────────────
-// Reads the most recent lab result per canonical for each OPD biomarker field
-// and merges into appointments.biomarkers. Only overwrites a key when lab_results
-// has a more-recent value than whatever is currently stored.
 export async function syncBiomarkersFromLatestLabs(patientId, apptId) {
   if (!patientId || !apptId) return;
 
@@ -2137,7 +1890,6 @@ export async function syncBiomarkersFromLatestLabs(patientId, apptId) {
   };
 
   try {
-    // Get latest result per canonical_name for this patient
     const { rows } = await pool.query(
       `SELECT DISTINCT ON (canonical_name)
          canonical_name, result, test_date
@@ -2164,10 +1916,6 @@ export async function syncBiomarkersFromLatestLabs(patientId, apptId) {
     }
 
     if (Object.keys(updates).length === 0) return;
-
-    // Build a JSONB patch of only the new values, but only overwrite a key when
-    // the lab_results date is >= the date already stored in biomarkers._dates
-    // Use a simple approach: read current biomarkers, compare dates, merge
     const { rows: apptRows } = await pool.query(
       `SELECT biomarkers FROM appointments WHERE id = $1`,
       [apptId],
@@ -2228,12 +1976,6 @@ export async function syncDocuments(patientId, records, fallbackDate, healthrayA
       const needsNoteUpdate =
         !existingNotes.includes("healthray_mrid:") || !existingNotes.includes("healthray_appt:");
       if (freshUrl || needsNoteUpdate) {
-        // `notes` is rebuilt from scratch here, so anything else living in the
-        // column has to be carried over explicitly. The document classifier
-        // (services/cron/documentClassification.js) stores its `autoclass:`
-        // marker here, and that marker is what stops it re-classifying — and
-        // re-billing — the same document on every sweep. Dropping it made the
-        // sweep re-process docs forever, since this sync runs every 2-3 min.
         const carried = existingNotes.match(/autoclass:[^|]*/)?.[0];
         const mergedNotes = carried ? `${notes}|${carried}` : notes;
         await pool
@@ -2246,7 +1988,6 @@ export async function syncDocuments(patientId, records, fallbackDate, healthrayA
           )
           .catch(() => {});
       }
-      // Download actual PDF to Supabase if not stored or only has blurry thumbnail
       const hasStorage = await pool.query(
         `SELECT storage_path, mime_type FROM documents WHERE id=$1`,
         [dup.rows[0].id],
@@ -2333,17 +2074,11 @@ export async function markAppointmentAsCheckedIn(appointmentId) {
   }
 }
 
-// ── Auto-mark a completed HealthRay appointment as "seen" ──────────────────
-// Creates a consultation and links all OPD records, mirroring the manual
-// "mark as seen" flow in /api/appointments/:id PATCH.
-// `finalStatus` lets callers land on 'completed' instead of 'seen' — used
-// when HealthRay reports checkout/completed (prescription printed there).
 export async function markAppointmentAsSeen(appointmentId, finalStatus = "seen") {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
 
-    // ── Auto-assign category based on HbA1c (mirrors frontend AI suggestion) ──
     const autoCategory = (bio, visitType) => {
       const hba1c = parseFloat(bio?.hba1c);
       if (!isNaN(hba1c)) {
@@ -2362,9 +2097,6 @@ export async function markAppointmentAsSeen(appointmentId, finalStatus = "seen")
       await client.query("ROLLBACK");
       return null;
     }
-
-    // Update status if not already at the target. Never downgrade a
-    // 'completed' appointment back to 'seen' — completed is terminal.
     const currentStatus = rows[0].status;
     const shouldUpdate =
       currentStatus !== finalStatus && !(finalStatus === "seen" && currentStatus === "completed");
@@ -2524,13 +2256,6 @@ export async function markAppointmentAsSeen(appointmentId, finalStatus = "seen")
     }
     if (notes.length) transcriptParts.push("COMPLIANCE:\n" + notes.join("\n"));
     const conTranscript = transcriptParts.filter(Boolean).join("\n\n");
-
-    // Upsert by (patient_id, visit_date::date, doctor). Done as explicit
-    // SELECT-then-UPDATE-or-INSERT instead of ON CONFLICT because the prod
-    // DB has legacy duplicate consultations and we don't want to delete
-    // them to add the unique index. If a row already exists for this
-    // patient/day/doctor we preserve its richer fields (mo_transcript,
-    // plan_edits, exam_data) and only fill missing pieces from HealthRay.
     const moData = JSON.stringify({
       compliance,
       coordinator_notes: appt.coordinator_notes || [],
@@ -2564,13 +2289,6 @@ export async function markAppointmentAsSeen(appointmentId, finalStatus = "seen")
     });
     const transcriptArg = conTranscript || null;
     const docName = appt.doctor_name || null;
-
-    // Pick the richest existing row for this patient/day. We don't filter by
-    // doctor because the HealthRay insert below leaves both doctor FKs NULL,
-    // so the original ON CONFLICT effectively grouped any same-day rows
-    // missing doctor FKs together. Picking the richest mirrors the dedup
-    // migration's winner-selection score so we update the same row the UI
-    // already considers canonical.
     const existingConRes = await client.query(
       `SELECT id FROM consultations
         WHERE patient_id = $1
@@ -2626,11 +2344,6 @@ export async function markAppointmentAsSeen(appointmentId, finalStatus = "seen")
       consultationId,
       appt.id,
     ]);
-    // Attach only meds belonging to THIS appointment's healthray batch (matched by
-    // `notes = healthray:<id>`). The previous broad sweep over all NULL-consultation
-    // rows was first-come-first-served: the oldest appointment to be marked-seen would
-    // grab every orphaned med across every Rx, so newer prescriptions ended up tied to
-    // the oldest visit_date and got nuked by the visit-page reconcile sweep.
     if (appt.healthray_id != null) {
       await client.query(
         `UPDATE medications SET consultation_id = $1
@@ -2673,10 +2386,6 @@ export async function markAppointmentAsSeen(appointmentId, finalStatus = "seen")
       "DB",
       `Auto-marked appointment ${appointmentId} as ${finalStatus} → consultation ${consultationId}`,
     );
-
-    // Fire-and-log auto Rx save. Idempotency lives inside the helper so
-    // repeated calls (e.g. stuck-status recovery, manual PATCH that lands
-    // on an already-seen row) do not write duplicate prescriptions.
     autoSavePrescriptionAfterSeen(appt.patient_id, appt.id, consultationId).catch((e) =>
       console.warn("[markAppointmentAsSeen] Rx auto-save failed:", e.message),
     );

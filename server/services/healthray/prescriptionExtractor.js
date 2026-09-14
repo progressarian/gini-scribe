@@ -1,9 +1,3 @@
-// ── Prescription PDF/image extractor using Claude vision ─────────────────────
-// Uses the SAME unified clinical-extraction prompt as the HealthRay text parser
-// (see parser.js) so an uploaded prescription and a HealthRay-synced clinical
-// note produce identical schemas: diagnoses, symptoms, medications,
-// previous_medications, labs, vitals, follow_up, advice, investigations, etc.
-
 import { createLogger } from "../logger.js";
 import { CLINICAL_EXTRACTION_PROMPT, repairAndParseJSON } from "./parser.js";
 const { error } = createLogger("PrescriptionExtract");
@@ -63,10 +57,6 @@ export async function extractFromFile(base64, buffer) {
       model: "claude-sonnet-4-6",
       max_tokens: 24000,
       temperature: 0,
-      // Cache the static extraction prompt. The document (image/PDF) sits in the
-      // user turn after `system`, so this prefix is identical across every
-      // extraction and is re-read at ~0.1x cost when docs are processed in a
-      // burst (e.g. during a cron sync) within the 5-minute cache window.
       system: [
         { type: "text", text: CLINICAL_EXTRACTION_PROMPT, cache_control: { type: "ephemeral" } },
       ],

@@ -15,6 +15,7 @@ import {
   giniflowBehindQuerySchema,
 } from "../schemas/index.js";
 import { CAPABILITIES as CAP } from "../../shared/permissions.js";
+import { STATUS_LABEL } from "../../shared/giniflowStatus.js";
 import { publishNotice, realtimeStatus } from "../services/giniflow/realtimeBus.js";
 import { getStationTimes, pauseVisit, resumeVisit } from "../services/giniflow/statusEngine.js";
 import {
@@ -26,6 +27,9 @@ import {
   getStationAverages,
   searchDayVisits,
   boardClock,
+  getTestsOrderedAt,
+  getTestSegments,
+  getScribeLabMarks,
 } from "../services/giniflow/board.js";
 import { getBehindTheFloor, getBehindVisits } from "../services/giniflow/observation.js";
 import {
@@ -245,6 +249,7 @@ router.get("/giniflow/visits/:id/timeline", async (req, res) => {
       `SELECT v.id, v.patient_id, v.current_status, v.category, v.blocked_reason,
               v.visit_date::text AS visit_date,
               p.name, p.age, p.sex, p.file_no,
+              COALESCE(vt.for_online, FALSE) AS online, vt.max_time_min AS journey_max_minutes,
               ${labOnlyPredicate("v", "$2")} AS lab_only,
               -- The same count the board's own query uses. Counting
               -- giniflow_visits instead made the modal say "Visit 1" beside a
@@ -255,8 +260,16 @@ router.get("/giniflow/visits/:id/timeline", async (req, res) => {
                   AND pa.appointment_date < v.visit_date
                   AND pa.status = 'completed') AS visit_number
          FROM giniflow_visits v JOIN patients p ON p.id = v.patient_id
+         LEFT JOIN flow_visit_types vt ON vt.id = v.visit_type_id
         WHERE v.id = $1`,
       [req.params.id, LAB_ONLY_DOCTOR],
+    );
+    const { rows: journeySteps } = await pool.query(
+      `SELECT id, step_name AS label, planned_duration_min AS budget, status
+         FROM giniflow_visit_steps
+        WHERE visit_id = $1
+        ORDER BY step_order`,
+      [req.params.id],
     );
     if (!visit.rows.length) return res.status(404).json({ error: "Visit not found" });
     const labOnly = !!visit.rows[0].lab_only;
@@ -283,6 +296,13 @@ router.get("/giniflow/visits/:id/timeline", async (req, res) => {
           now,
         );
     const testsHold = labOnly ? null : await getTestsHold(req.params.id);
+    const [labOrderedAt, tests, scribeLabMarks] = labOnly
+      ? [null, { segments: [], orderTimes: [] }, []]
+      : await Promise.all([
+          getTestsOrderedAt(req.params.id),
+          getTestSegments(req.params.id, now),
+          getScribeLabMarks(req.params.id),
+        ]);
     const steps = labOnly
       ? await getLabOnlyTimeline(
           pool,
@@ -299,14 +319,67 @@ router.get("/giniflow/visits/:id/timeline", async (req, res) => {
           category: visit.rows[0].category,
           labReadyAt: testsHold.pending ? null : testsHold.readyAt,
           labPending: testsHold.pending,
+          labOrderedAt,
+          segments: tests.segments,
+          orderTimes: tests.orderTimes,
         });
 
     const machineTrack = await getMachineTrack(pool, req.params.id, now);
+    const reportsPending = !labOnly && testsHold.pending;
+    const reportsReadyAt = !labOnly && !testsHold.pending ? testsHold.readyAt : null;
+    const timeline = labOnly
+      ? steps
+      : [
+          ...steps.filter((s) => s.status !== "results_received"),
+          ...(reportsReadyAt
+            ? [
+                {
+                  status: "results_received",
+                  timestampOnly: true,
+                  label: STATUS_LABEL.results_received,
+                  actorRole: null,
+                  meta: null,
+                  enteredAt: reportsReadyAt.toISOString(),
+                  leftAt: null,
+                  waitMinutes: 0,
+                  waitBudget: null,
+                  stationMinutes: 0,
+                  stationBudget: null,
+                  totalMinutes: 0,
+                  budgetMinutes: null,
+                  overBy: 0,
+                  colour: "neutral",
+                  isCurrent: false,
+                  visits: 1,
+                },
+              ]
+            : []),
+        ].sort(
+          (a, b) =>
+            new Date(a.enteredAt) - new Date(b.enteredAt) ||
+            Number(!!b.timestampOnly) - Number(!!a.timestampOnly),
+        );
 
     res.json({
       visit: { ...visit.rows[0], labOnly },
-      steps,
-      labTrack,
+      steps: timeline,
+      journeySteps,
+      reportsPending,
+      labTrack: [...labTrack, ...scribeLabMarks]
+        .sort((a, b) => new Date(a.enteredAt) - new Date(b.enteredAt))
+        .map((m, i, all) => {
+          const scribe = all.filter((x) => x.status.startsWith("lab:"));
+          const firstPartial = scribe.find((x) => x.partial);
+          const current = reportsReadyAt
+            ? null
+            : firstPartial ||
+              (scribe.some((x) => x.label === "Report uploaded") ? null : scribe.at(-1)) ||
+              (scribe.length ? null : all.at(-1));
+          return {
+            ...m,
+            isCurrent: current === m && m.status !== "lab_reported",
+          };
+        }),
       machineTrack,
       serverTime: now.toISOString(),
     });

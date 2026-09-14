@@ -282,13 +282,14 @@ async function fetchClinicalText(appt, healthrayId, doctorId) {
 const DOCS_IDLE_REFRESH_MS = Number(process.env.HEALTHRAY_DOCS_IDLE_REFRESH_MIN || 30) * 60 * 1000;
 const DOCS_AWAITING_RX_MS = Number(process.env.HEALTHRAY_DOCS_AWAITING_RX_MIN || 10) * 60 * 1000;
 const DOCS_NEVER = ["cancelled", "no_show"];
-const DOCS_EVERY_RUN = ["checkedin", "in_visit"];
+const DOCS_LIVE_REFRESH_MS = Number(process.env.HEALTHRAY_DOCS_LIVE_REFRESH_MIN || 5) * 60 * 1000;
+const DOCS_LIVE = ["checkedin", "in_visit"];
 const lastDocsFetch = new Map();
 
 function docsDue(healthrayId, status, storedStatus) {
   if (DOCS_NEVER.includes(status)) return false;
-  if (DOCS_EVERY_RUN.includes(status)) return true;
   const since = Date.now() - (lastDocsFetch.get(healthrayId) || 0);
+  if (DOCS_LIVE.includes(status)) return since >= DOCS_LIVE_REFRESH_MS;
   if (status === "completed" && storedStatus !== "seen") return since >= DOCS_AWAITING_RX_MS;
   return since >= DOCS_IDLE_REFRESH_MS;
 }
@@ -1874,8 +1875,9 @@ export async function syncAppointmentStatuses(date) {
           // HealthRay has it but we don't, so we don't have to wait for the
           // 5-min full sync to discover the prescription.
           let hasRxPdf = await hasReceivedPrescriptionPdf(healthrayId, existing.patient_id);
-          if (!hasRxPdf) {
+          if (!hasRxPdf && docsDue(healthrayId, newStatus, existing.status)) {
             await syncAppointmentDocs(healthrayId, existing.patient_id, apptDate);
+            markDocsFetched(healthrayId);
             rxFetched++;
             hasRxPdf = await hasReceivedPrescriptionPdf(healthrayId, existing.patient_id);
           }

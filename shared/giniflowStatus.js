@@ -163,6 +163,7 @@ export const BOARD_COLUMNS = [
     statuses: ["pharmacy_pending"],
   },
   { key: "lab", name: "Lab track", icon: "🧪", slaKey: "lab_total", statuses: null },
+  { key: "machine", name: "Machine Room", icon: "🩺", slaKey: null, statuses: null },
   {
     key: "done",
     name: "Done today",
@@ -316,6 +317,7 @@ export const COLUMN_ENTRY_STATUS = {
   rx: "rx_pending",
   pharmacy: "pharmacy_pending",
   lab: null,
+  machine: null,
   done: "dispensed",
 };
 

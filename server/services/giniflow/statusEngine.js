@@ -9,9 +9,12 @@ import {
   isKnownStatus,
   isWaitStatus,
   isTerminalStatus,
+  isExceptionStatus,
   slaKeyForStatus,
   STATUS_LABEL,
 } from "../../../shared/giniflowStatus.js";
+import { doctorsWaitForTests } from "../../../shared/manualFloor.js";
+import { TESTS_HOLD_SQL } from "./testsHold.js";
 
 import { syncFromStatus } from "./journey.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
@@ -138,6 +141,30 @@ async function assertReportsAreIn(client, visitId, toStatus) {
   }
 }
 
+const SYNC_MAY_MOVE_WITH_TESTS_OPEN = ["checked_in", "vitals_done"];
+
+async function assertSyncLeavesTestsAlone(client, visitId, toStatus, meta) {
+  if (meta?.source !== "healthray" || !doctorsWaitForTests()) return;
+  if (isExceptionStatus(toStatus) || SYNC_MAY_MOVE_WITH_TESTS_OPEN.includes(toStatus)) return;
+  const { rows } = await client.query(
+    `SELECT h.tests_pending
+       FROM giniflow_visits v
+       JOIN patients p ON p.id = v.patient_id
+       CROSS JOIN LATERAL (${TESTS_HOLD_SQL("v", "p")}) h
+      WHERE v.id = $1`,
+    [visitId],
+  );
+  const pending = rows[0]?.tests_pending ?? 0;
+  if (pending > 0) {
+    throw Object.assign(
+      new Error(
+        `HealthRay may not move this patient to ${toStatus}: ${pending} test${pending === 1 ? "" : "s"} still open in Scribe`,
+      ),
+      { status: 409 },
+    );
+  }
+}
+
 // Appends one event and moves the visit's denormalised status. Caller supplies
 // the client so the write joins whatever transaction it belongs to — the fan-out
 // triggers that land with the station screens must be atomic with the status change.
@@ -181,6 +208,7 @@ export async function advanceStatus(
   ) {
     await assertReportsAreIn(client, visitId, toStatus);
   }
+  await assertSyncLeavesTestsAlone(client, visitId, toStatus, meta);
   // `allowSkip` says: the caller knows the patient is HERE, and does not claim
   // to know every step they took to arrive. That is the real rule (CS-12) — an
   // earlier comment here said "never a station screen", which four callers now
@@ -315,6 +343,9 @@ export async function getStationTimes(
     unbudgeted = false,
     labReadyAt = null,
     labPending = false,
+    labOrderedAt = null,
+    segments = [],
+    orderTimes = [],
   } = {},
 ) {
   // `slaConfig` here is the flat station→minutes map every existing caller
@@ -342,7 +373,11 @@ export async function getStationTimes(
           (st) => chainIndex(st) > chainIndex(from) && chainIndex(st) < chainIndex(to),
         )
       : [];
-  const skipsAStation = (from, to) => stationsSkipped(from, to).length > 0;
+  const skippedBetween = (row, next) =>
+    stationsSkipped(row.status, next.status).filter(
+      (st) =>
+        !(st === "with_vitals" && next.status === "vitals_done" && next.actor_role !== "system"),
+    );
 
   // Markers are pulled out before the walk below, not skipped inside it. Left in
   // the sequence, a report arriving at 10:20 became `rows[i + 1]` for the wait
@@ -372,7 +407,7 @@ export async function getStationTimes(
       // all of it, filed under whatever queue was recorded last. Judging that
       // against the queue's budget invented a 230-minute overrun for a station
       // nobody sat in. Unrecorded time is judged against nothing.
-      unrecorded: !!next && minutes >= 1 && skipsAStation(row.status, next.status),
+      unrecorded: !!next && minutes >= 1 && skippedBetween(row, next).length > 0,
       status: row.status,
       label:
         (unbudgeted ? LAB_ONLY_LABEL[row.status] : null) || STATUS_LABEL[row.status] || row.status,
@@ -401,35 +436,88 @@ export async function getStationTimes(
 
   // The MO cannot see a patient whose bloods are still at the lab, so the wait
   // before the reports land is judged against nothing, not against the MO queue.
-  const AWAITING_LAB_LABEL = "Waiting for lab / machine reports";
+  const AWAITING_LAB_LABEL = "Waiting for test reports";
   const blockedByLab = (entry) =>
     entry.isWait && slaKeyForStatus(entry.status) === "wait_sd" && !entry.unrecorded;
 
-  const withLabSplit = raw.flatMap((entry) => {
+  const ROOMS_THAT_ORDER = ["with_sd", "with_doctor"];
+  const cut = (intervals, holes) =>
+    holes.reduce(
+      (acc, [hs, he]) =>
+        acc.flatMap(([s, e]) =>
+          he <= s || hs >= e
+            ? [[s, e]]
+            : [...(hs > s ? [[s, hs]] : []), ...(he < e ? [[he, e]] : [])],
+        ),
+      intervals,
+    );
+  const consults = raw.flatMap((entry) => {
+    if (!ROOMS_THAT_ORDER.includes(entry.status) || entry.timestampOnly) return [];
+    const end = entry.leftAt || now;
+    const ordered = orderTimes.filter((t) => t > entry.enteredAt && t <= end);
+    return ordered.length ? [[entry.enteredAt, new Date(Math.max(...ordered))]] : [];
+  });
+  const awaySteps = segments.flatMap((seg) =>
+    cut([[seg.from, seg.to || now]], consults)
+      .filter(([a, b]) => b > a)
+      .map(([a, b]) => ({
+        timestampOnly: false,
+        unrecorded: false,
+        status: seg.status,
+        label: seg.label,
+        actorRole: null,
+        meta: null,
+        enteredAt: a,
+        leftAt: seg.to && b >= seg.to ? seg.to : b < now ? b : null,
+        minutes: minutesBetween(a, b),
+        isCurrent: !seg.to && b >= now,
+        isWait: !!seg.isWait,
+        budgetMinutes: seg.budgetMinutes ?? null,
+      })),
+  );
+  const awayIntervals = awaySteps.map((a) => [a.enteredAt, a.leftAt || now]);
+  const withAway = [
+    ...raw.flatMap((entry) => {
+      if (entry.timestampOnly || !awayIntervals.length) return [entry];
+      const end = entry.leftAt || now;
+      return cut([[entry.enteredAt, end]], awayIntervals)
+        .filter(([a, b]) => b > a)
+        .map(([a, b]) => ({
+          ...entry,
+          enteredAt: a,
+          leftAt: b >= end ? entry.leftAt : b,
+          minutes: minutesBetween(a, b),
+          isCurrent: b >= end ? entry.isCurrent : false,
+        }));
+    }),
+    ...awaySteps,
+  ].sort((a, b) => a.enteredAt - b.enteredAt);
+
+  const withLabSplit = withAway.flatMap((entry) => {
     if (!blockedByLab(entry)) return [entry];
+    if (!labPending && !labReadyAt) return [entry];
     const endsAt = entry.leftAt || now;
-    if (labPending && !labReadyAt)
-      return [{ ...entry, label: AWAITING_LAB_LABEL, budgetMinutes: null, awaitingLab: true }];
-    if (!labReadyAt) return [entry];
-    if (labReadyAt >= endsAt)
-      return [{ ...entry, label: AWAITING_LAB_LABEL, budgetMinutes: null, awaitingLab: true }];
-    if (labReadyAt <= entry.enteredAt) return [entry];
+    const holdFrom =
+      labOrderedAt && labOrderedAt > entry.enteredAt ? labOrderedAt : entry.enteredAt;
+    const holdTo = labPending ? endsAt : labReadyAt < endsAt ? labReadyAt : endsAt;
+    if (holdFrom >= endsAt || holdTo <= holdFrom) return [entry];
+    const piece = (from, to, extra = {}) => ({
+      ...entry,
+      enteredAt: from,
+      leftAt: to >= endsAt ? entry.leftAt : to,
+      minutes: minutesBetween(from, to),
+      isCurrent: to >= endsAt ? entry.isCurrent : false,
+      ...extra,
+    });
     return [
-      {
-        ...entry,
+      holdFrom > entry.enteredAt ? piece(entry.enteredAt, holdFrom) : null,
+      piece(holdFrom, holdTo, {
         label: AWAITING_LAB_LABEL,
         budgetMinutes: null,
         awaitingLab: true,
-        leftAt: labReadyAt,
-        minutes: minutesBetween(entry.enteredAt, labReadyAt),
-        isCurrent: false,
-      },
-      {
-        ...entry,
-        enteredAt: labReadyAt,
-        minutes: minutesBetween(labReadyAt, endsAt),
-      },
-    ];
+      }),
+      holdTo < endsAt ? piece(holdTo, endsAt) : null,
+    ].filter(Boolean);
   });
 
   // Pair each queue with the station it fed, so the timeline reads
@@ -519,6 +607,7 @@ export async function getStationTimes(
       if (
         wait &&
         (QUEUE_FEEDS[wait.status] !== QUEUE_FEEDS[entry.status] ||
+          !QUEUE_FEEDS[entry.status] ||
           !!wait.awaitingLab !== !!entry.awaitingLab)
       ) {
         const pending = wait;
@@ -535,7 +624,7 @@ export async function getStationTimes(
       continue;
     }
     // Nothing to pair with: the wait stands as its own step, named for itself.
-    if (wait && QUEUE_FEEDS[wait.status] !== entry.status) {
+    if (wait && (QUEUE_FEEDS[wait.status] !== entry.status || wait.awaitingLab)) {
       const pending = wait;
       wait = null;
       emit({ ...pending, isCurrent: false, leftAt: entry.enteredAt });
@@ -619,7 +708,7 @@ export async function getStationTimes(
   const skipped = statusRows.flatMap((row, i) => {
     const next = statusRows[i + 1];
     if (!next) return [];
-    return stationsSkipped(row.status, next.status).map((station) => ({
+    return skippedBetween(row, next).map((station) => ({
       status: `skipped:${station}`,
       timestampOnly: true,
       skipped: true,
@@ -641,8 +730,36 @@ export async function getStationTimes(
     }));
   });
 
+  const vitalsSavedDirectly = statusRows.flatMap((row, i) => {
+    const next = statusRows[i + 1];
+    if (!next || next.status !== "vitals_done" || next.actor_role === "system") return [];
+    if (!stationsSkipped(row.status, next.status).includes("with_vitals")) return [];
+    return [
+      {
+        status: "vitals_recorded",
+        timestampOnly: true,
+        label: "Vitals recorded",
+        actorRole: next.actor_role,
+        meta: next.meta,
+        enteredAt: new Date(next.occurred_at).toISOString(),
+        leftAt: null,
+        waitMinutes: 0,
+        waitBudget: null,
+        stationMinutes: 0,
+        stationBudget: null,
+        totalMinutes: 0,
+        budgetMinutes: null,
+        overBy: 0,
+        colour: "neutral",
+        isCurrent: false,
+        visits: 1,
+      },
+    ];
+  });
+
   const withMarkers = [
     ...skipped,
+    ...vitalsSavedDirectly,
     ...merged,
     ...markerRows.map((row) => ({
       status: row.status,
@@ -663,7 +780,11 @@ export async function getStationTimes(
       isCurrent: false,
       visits: 1,
     })),
-  ].sort((a, b) => new Date(a.enteredAt) - new Date(b.enteredAt));
+  ].sort(
+    (a, b) =>
+      new Date(a.enteredAt) - new Date(b.enteredAt) ||
+      Number(!!b.timestampOnly) - Number(!!a.timestampOnly),
+  );
 
   return withMarkers;
 }

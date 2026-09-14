@@ -34,34 +34,6 @@ function pullText(obj, bag) {
   }
 }
 
-// ── Printed-page furniture ───────────────────────────────────────────────────
-// Some HealthRay notes are assembled from a printed prescription, so the clinic
-// letterhead lands *inside* the note — often between a dated section header and
-// its own values:
-//
-//   FOLLOW UP TODAY:9/11/25
-//   GINI ADVANCED CARE HOSPITAL
-//   Gini Health India Pvt.Ltd, Shivalik Hospital, 2nd Floor Sector 69, Mohali, Punjab,
-//   India
-//   01724120100
-//   Dr. Anil Bhansali
-//   DM - Endocrinology
-//   Page | 1
-//   FBG 128.4
-//
-// Six lines of letterhead sever the header from FBG 128.4, and the extractor
-// then fails to attribute the value to that visit — it falls back to the
-// enrolment OBSERVATION block instead. Stripping the furniture restores the
-// adjacency the block-attribution rules depend on.
-//
-// Everything here is matched as an exact literal. A loose "line contains
-// HOSPITAL" rule would delete real clinical history — "ADMITTED IN HOLY BASIL
-// HOSPITAL", "COURSE IN HOSPITAL-(11/07/24)", "REFER TO DR SHIKHA VERMA
-// (SHIVALIK HOSPITAL)" all legitimately appear in these notes.
-
-// Letterhead fragments that can also appear glued to the end of a clinical line
-// with no newline ("GOITREGINI ADVANCED CARE HOSPITAL") — removed in place so
-// the clinical text before them survives.
 const FURNITURE_PHRASES = [
   /GINI\s+ADVANCED\s+CARE\s+HOSPITAL/gi,
   /GINI\s+HEALTH\s+INDIA\s+PVT\.?\s*LTD,?\s*SHIVALIK\s+HOSPITAL,?\s*2ND\s+FLOOR\s+SECTOR\s+69,?\s*MOHALI,?\s*PUNJAB,?(\s*INDIA)?,?/gi,
@@ -77,8 +49,6 @@ const FURNITURE_LINES = [
   /^dr\.?\s+[a-z]+(?:\s+[a-z]+){0,2}$/i, // standalone signature line, e.g. "Dr. Anil Bhansali"
 ];
 
-// Only notes that actually carry the letterhead are touched, so the doctor-name
-// rule can never fire on a note where "Dr. X" means something else.
 const HAS_LETTERHEAD =
   /GINI\s+ADVANCED\s+CARE\s+HOSPITAL|page\s*\|\s*\d|SHIVALIK\s+HOSPITAL,\s*2ND\s+FLOOR/i;
 
@@ -113,11 +83,6 @@ export function extractClinicalText(clinicalData) {
 
         for (const ans of topic.dynamic_answers || []) pullText(ans, texts);
         pullText(topic, texts);
-
-        // Some visits expose structured diagnosis/item rows on the topic —
-        // each row can carry its own name + long details text (this is how
-        // "INTENSIVE DIABETES MANAGEMENT PROGRAM ( … TREATMENT: … )" lands
-        // when there is no prescription section).
         for (const key of ["diagnoses", "items", "rows", "entries"]) {
           const arr = topic[key];
           if (!Array.isArray(arr)) continue;
@@ -153,13 +118,6 @@ export function extractVitalsFromAnswers(clinicalData) {
     const label = (a.label || "").toLowerCase().trim();
     const alias = (a.alias || "").toLowerCase();
     const raw = a.value;
-
-    // Path 2 — leaner answer shape from get_previous_appt_data's
-    // "Observation / Vitals" category: no form_type / column_name, just a short
-    // label (H / W / BMI / PR / BP) and a self-describing value
-    // (e.g. {"method":"cm","height":168}, {"measured":"kg","weight":68.6}).
-    // medical_clinical_notes vitals carry form_type="vital_sign" + column_name
-    // and are handled by Path 1 below; this branch covers the rows that don't.
     if (a.form_type !== "vital_sign" && !col) {
       const p = safeParse(raw);
       if (p && typeof p === "object" && !Array.isArray(p)) {
@@ -835,9 +793,6 @@ export const PrescriptionSchema = z.object({
       name: z.string(),
       details: z.string(),
       since: z.string(),
-      // .catch() so a rare off-enum value from the model defaults to "Present"
-      // instead of throwing and discarding the ENTIRE parsed note (all
-      // diagnoses + meds). A single mislabelled status beats losing everything.
       status: z.enum(["Present", "Absent"]).catch("Present"),
     }),
   ),
@@ -895,8 +850,6 @@ export const PrescriptionSchema = z.object({
       form: z.string(),
       dose: z.string(),
       frequency: z.string(),
-      // .catch() — same rationale as diagnoses.status: never let one bad enum
-      // value discard the whole parsed note.
       status: z.enum(["stopped", "changed"]).catch("stopped"),
       reason: z.string(),
     }),
@@ -940,9 +893,6 @@ export async function parsePrescriptionWithAi(rawText, visitDate = null) {
       model: "claude-haiku-4-5",
       max_tokens: 12000,
       temperature: 0,
-      // Cache the static extraction prompt. This parser runs once per appointment
-      // during the HealthRay sync loop, so the identical prefix is re-read at
-      // ~0.1x cost across the burst of appointments within the 5-minute window.
       system: [
         {
           type: "text",
@@ -969,10 +919,6 @@ export async function parsePrescriptionWithAi(rawText, visitDate = null) {
   }
 }
 
-// ── Batch path helpers ──────────────────────────────────────────────────────
-// Build the raw Messages API request for the batch queue. Mirrors
-// parsePrescriptionWithAi exactly (same model, prompt, schema) so a batched
-// parse is identical to the inline one — only the transport differs.
 export function buildHealthrayParseRequest(rawText, visitDate = null) {
   const clean = stripPageFurniture(rawText);
   const userContent = visitDate ? `Visit date: ${visitDate}\n\n${clean}` : clean;
@@ -988,9 +934,6 @@ export function buildHealthrayParseRequest(rawText, visitDate = null) {
   };
 }
 
-// Extract + validate the structured prescription from a completed batch result
-// message. Returns the parsed object, or null if absent/invalid (treated as a
-// parse failure by the caller, same as the inline null return).
 export function extractPrescriptionFromMessage(message) {
   try {
     const text = (message?.content || [])

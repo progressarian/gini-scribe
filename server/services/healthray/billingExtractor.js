@@ -1,11 +1,3 @@
-// ── OPD bill (PDF) → structured values via Claude ───────────────────────────
-// Reads a billing PDF *in memory* and returns the line items + totals + payment
-// status. Nothing is downloaded or stored — the caller passes the PDF bytes, we
-// hand them to Claude as a document block, and return the parsed object.
-//
-// Each line item is also classified (consultation / lab / imaging / procedure)
-// so the caller can map it to a journey step (lab → Blood Sample, etc.).
-
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
@@ -99,16 +91,6 @@ export async function parseBillingPdfWithAi(pdfBuffer, mimeType = "application/p
   }
 }
 
-// Map HealthRay get_transactions rows → { billing, steps }. This is the primary
-// path (structured JSON, no PDF/AI): each billing_item's category_type tells us
-// the journey step. Uses the transaction(s) for `appointmentId`; if none match,
-// falls back to same-day (`date`) bills only, else returns null — never an older
-// visit's bill (that would auto-add stale tests). PATHOLOGY → one "Blood Sample"
-// step (tests listed); RADIOLOGY → one step per imaging item; OPD → consultation.
-
-// Normalise a date-ish value to "YYYY-MM-DD" for same-day comparison. Handles
-// ISO instants ("2025-08-22T…") and HealthRay's day-first display dates
-// ("22-08-2025" / "22/08/2025"); returns "" if it can't parse a calendar day.
 function ymd(v) {
   const s = String(v || "").trim();
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
@@ -121,9 +103,6 @@ export function transactionsToBilling(rows, { appointmentId, date } = {}) {
   let txns = appointmentId
     ? rows.filter((r) => String(r.appointment_id) === String(appointmentId))
     : [];
-  // No transaction linked to this appointment (the normal state at check-in,
-  // before today's bill is generated). Fall back ONLY to same-day bills — never
-  // a prior visit's bill, which would auto-add stale tests (e.g. an old 2D Echo).
   if (!txns.length && date) {
     const day = ymd(date);
     txns = day ? rows.filter((r) => ymd(r.billing_date) === day) : [];
@@ -177,12 +156,6 @@ export function transactionsToBilling(rows, { appointmentId, date } = {}) {
     },
   };
 }
-
-// Map an extracted bill to suggested journey steps. Lab lines collapse into a
-// single "Blood Sample" step carrying the test names; imaging/procedures each
-// suggest their own step. Consultation/other never add steps (the consult step
-// already exists; "other" isn't a floor step). The caller injects these as
-// removable suggestions at check-in and stamps the Billing step with the total.
 export function billingToStepSuggestions(billing) {
   if (!billing?.items?.length) return { steps: [], billing: null };
 

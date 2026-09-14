@@ -26,7 +26,6 @@ import {
 } from "../../../shared/giniflowStatus";
 import {
   useGiniflowBoard,
-  useGiniflowBehind,
   useGiniflowSearch,
   useGiniflowTimeline,
 } from "../../queries/hooks/useGiniflowBoard";
@@ -362,9 +361,28 @@ function PatientCard({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
-  const isLab = !!card.lab && card.column === "lab";
-  const isLabOnly = isLab && !!card.labOnly;
-  const anchor = isLab ? card.lab.since : card.statusSince;
+  const isMachine = !!card.machine && card.column === "machine";
+  const trackData = isMachine
+    ? card.machine
+    : !!card.lab && card.column === "lab"
+      ? card.lab
+      : null;
+  const isLab = !!trackData;
+  const isLabOnly = isLab && !isMachine && !!card.labOnly;
+  const anchor = isLab ? trackData.since : card.statusSince;
+  const machineNow = now - offsetMs;
+  const machineTests = isMachine
+    ? card.machine.tests.map((t) => ({
+        ...t,
+        live:
+          t.stage !== "in_progress"
+            ? null
+            : card.paused
+              ? t.minutesOnMachine
+              : (minutesSince(t.startedAt, machineNow) ?? t.minutesOnMachine),
+      }))
+    : [];
+  const machineRunningOver = machineTests.some((t) => t.budget && t.live > t.budget);
   // Only a patient still in the building is timed against the present moment.
   // The server already stops the clock at the exit; recomputing it here from the
   // anchor ignored that and started it again, so a patient who left at 09:21 was
@@ -373,12 +391,17 @@ function PatientCard({
   // numbers, and recomputing them here from `now` would undo that a second
   // later — the same class of bug the exit clock had.
   const live = card.finished || card.paused ? null : minutesSince(anchor, now - offsetMs);
-  const minutes = live ?? (isLab ? card.lab.minutes : card.statusMinutes);
-  const budget = isLab ? card.lab.budget : card.statusBudget;
+  const minutes = live ?? (isLab ? trackData.minutes : card.statusMinutes);
+  const budget = isLab ? trackData.budget : card.statusBudget;
   // A finished visit's timer counts up from the exit, and no budget covers
   // "time since exit" — the server marks those green deliberately. Only a LIVE
   // clock with no budget behind it goes grey, which is the lab track.
-  const colour = card.finished || card.paused ? "green" : budgetColour(minutes, budget);
+  const colour =
+    card.finished || card.paused
+      ? "green"
+      : machineRunningOver
+        ? "red"
+        : budgetColour(minutes, budget);
   const totalMinutes =
     card.finished || card.paused
       ? card.totalMinutes
@@ -429,7 +452,7 @@ function PatientCard({
               {PRIORITY_ICON[card.priority]} {PRIORITY_LABEL[card.priority]}
             </span>
           )}
-          {isLabOnly && (
+          {card.labOnly && (
             <span className="pc-lo" title="Registered for samples only — no consultation booked">
               LAB ONLY
             </span>
@@ -447,7 +470,30 @@ function PatientCard({
             {card.labTests.join(" · ")}
           </div>
         )}
-        <div className="pc-mid">{isLab ? card.lab.subtitle : card.subtitle}</div>
+        {isMachine && (
+          <div className="pc-tests">
+            {machineTests
+              .map((t) =>
+                t.stage === "in_progress"
+                  ? `▶️ ${t.label} ${t.live ?? 0}m${t.budget ? ` of ${t.budget}m` : ""}`
+                  : t.stage === "done"
+                    ? `✅ ${t.label}`
+                    : `⏳ ${t.label}${t.budget ? ` · ${t.budget}m` : ""}`,
+              )
+              .join(" · ")}
+          </div>
+        )}
+        <div className="pc-mid">
+          {isMachine
+            ? card.machine.running
+              ? "On the machine"
+              : machineTests.every((t) => t.stage === "done")
+                ? "Test done — report pending"
+                : "Waiting for the machine"
+            : isLab
+              ? card.lab.subtitle
+              : card.subtitle}
+        </div>
         {/* What this patient still has left of their own journey — the columns
             say where they are, not how much of it is done. */}
         {!isLab && card.journey && (
@@ -476,12 +522,12 @@ function PatientCard({
             {card.pausedReason ? ` · ${card.pausedReason}` : ""}
           </div>
         )}
-        {isLab && card.finished && !card.lab.collected && (
+        {isLab && !isMachine && card.finished && !card.lab.collected && (
           <div className="wait4 blocked">
             <span className="w-ico">🚫</span> Left without giving a sample
           </div>
         )}
-        {isLab && (
+        {isLab && !isMachine && (
           <div className="pc-parallel">
             {isLabOnly
               ? "Samples only · not in the consultation queue"
@@ -509,7 +555,7 @@ function PatientCard({
             {card.behind.minutes > 0 ? ` · ${card.behind.minutes}m` : ""}
           </div>
         )}
-        {isLab && card.lab.hint && (
+        {isLab && !isMachine && card.lab.hint && (
           <div className={`wait4${card.lab.blocking ? " blocked" : ""}`}>
             <span className="w-ico">{card.lab.hintIcon}</span> {card.lab.hint}
           </div>
@@ -614,7 +660,7 @@ function PatientCard({
 // Columns the manager can rearrange by hand. The lab track is ordered by its own
 // timers rather than by the chain, and "Done today" is a record of what already
 // happened — neither has a queue to arrange.
-const ORDERABLE = (key) => key !== "lab" && key !== "done";
+const ORDERABLE = (key) => !["lab", "machine", "done"].includes(key);
 
 function Column({
   canAssign,
@@ -712,7 +758,11 @@ function Column({
       </div>
       {column.budgetMinutes && (
         <div className="col-sla" style={column.hot ? { color: "var(--red)" } : undefined}>
-          {column.key === "lab" ? "Sample→upload budget: " : "Budget: "}
+          {column.key === "lab"
+            ? "Sample→upload budget: "
+            : column.key === "machine"
+              ? "Journey budget: "
+              : "Budget: "}
           <strong>{column.budgetMinutes} min</strong>
           {column.hot ? ` · avg now ${column.avgMinutes}m ⚠` : ""}
         </div>
@@ -901,6 +951,28 @@ function SlaDrawer({ open, slaConfig, canEdit, onClose, onSave, saving, error })
   );
 }
 
+const vitalsNote = (v) => {
+  const parts = [
+    v.bp && `BP ${v.bp}`,
+    v.weight && `${v.weight} kg`,
+    v.pulse && `Pulse ${v.pulse}`,
+    v.spo2 && `SpO₂ ${v.spo2}%`,
+    v.temp && `${v.temp}°`,
+  ].filter(Boolean);
+  const missing = [!v.bp && "BP", !v.weight && "weight"].filter(Boolean);
+  return [parts.join(" · "), missing.length ? `${missing.join(" and ")} not entered` : ""]
+    .filter(Boolean)
+    .join(" — ");
+};
+
+const TEST_STEP_STATUSES = new Set([
+  "payment_wait",
+  "lab_room",
+  "machine_wait",
+  "machine_room",
+  "reports_wait",
+]);
+
 function TimelineModal({ visitId, onClose, slaConfig }) {
   const { data, isLoading } = useGiniflowTimeline(visitId);
   const tick = useTick();
@@ -940,31 +1012,63 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
   // A lab-only visit walks to the lab and goes home. Projecting the rest of the
   // chain listed With SD / MO, Waiting for consultant and At pharmacy as "still
   // to come" for a patient no consultant is going to see.
+  const awayForTests = steps.some((s) => s.isCurrent && TEST_STEP_STATUSES.has(s.status));
+  const chiefReview =
+    awayForTests && doneStatuses.has("with_sd") && !visit?.labOnly
+      ? [
+          {
+            status: "chief_review",
+            label: "Back to Chief Endocrinologist for review",
+            budget: budgetFor("with_sd"),
+          },
+        ]
+      : [];
+  const onlineJourney = visit?.online && (data?.journeySteps || []).length > 0;
   const projected =
     !onChain || visit?.labOnly
       ? []
-      : CHAIN.slice(CHAIN.indexOf("checked_in"))
-          .filter(
-            (status) =>
-              chainIndex(status) > chainIndex(visit.current_status) &&
-              !doneStatuses.has(status) &&
-              !WAIT_ONLY.has(status),
-          )
-          .map((status) => ({
-            status,
-            label: STATUS_LABEL[status] || status,
-            budget: budgetFor(status),
-          }));
+      : onlineJourney
+        ? data.journeySteps
+            .filter((s) => s.status === "pending" || s.status === "in_progress")
+            .map((s) => ({ status: s.id, label: s.label, budget: s.budget }))
+        : CHAIN.slice(CHAIN.indexOf("checked_in"))
+            .filter(
+              (status) =>
+                chainIndex(status) > chainIndex(visit.current_status) &&
+                !doneStatuses.has(status) &&
+                !WAIT_ONLY.has(status),
+            )
+            .map((status) => ({
+              status,
+              label: STATUS_LABEL[status] || status,
+              budget: budgetFor(status),
+            }));
+  const reportsToCome = data?.reportsPending
+    ? [{ status: "reports_pending", label: STATUS_LABEL.results_received, budget: null }]
+    : [];
+  const stillToCome = [...reportsToCome, ...chiefReview, ...projected];
   const journeySoFar = steps.reduce((sum, st) => sum + liveTotal(st), 0);
   const journeyTarget =
-    slaConfig?.find((c) => c.station === "total_journey")?.budgetMinutes ?? null;
+    (onlineJourney && visit.journey_max_minutes) ||
+    slaConfig?.find((c) => c.station === "total_journey")?.budgetMinutes ||
+    null;
 
   return (
     <div className="tmodal open" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="tbox">
         <div className="tb-hd">
           <div>
-            <div className="tb-name">{visit?.name || "Patient"}</div>
+            <div className="tb-name">
+              {visit?.name || "Patient"}{" "}
+              {visit?.labOnly && (
+                <span
+                  className="pc-lo"
+                  title="Registered for samples only — no consultation booked"
+                >
+                  LAB ONLY
+                </span>
+              )}
+            </div>
             <div className="tb-meta">
               {visit
                 ? `${visit.age}${(visit.sex || "")[0] || ""} · ${visit.file_no} · Visit ${visit.visit_number}`
@@ -1015,15 +1119,15 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
                     {step.meta.reason ? ` — ${step.meta.reason}` : ""}
                   </div>
                 )}
-                {step.meta?.vitals && (
-                  <div className="ts-note">
-                    BP {step.meta.vitals.bp} · {step.meta.vitals.weight} kg
-                  </div>
-                )}
+                {step.meta?.vitals &&
+                  (step.status === "vitals_recorded" ||
+                    (!step.awaitingLab && !steps.some((x) => x.status === "vitals_recorded"))) && (
+                    <div className="ts-note">{vitalsNote(step.meta.vitals)}</div>
+                  )}
               </div>
             </div>
           ))}
-          {projected.map((step) => (
+          {stillToCome.map((step) => (
             <div className="tstep" key={step.status}>
               <div className="ts-dot tsd-next">○</div>
               <div className="ts-body">
@@ -1106,8 +1210,8 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
               {journeyTarget && !visit?.labOnly ? ` of a ${journeyTarget}m target` : ""}
               {finished
                 ? " · journey complete"
-                : projected.length
-                  ? ` · ${projected.length} step${projected.length === 1 ? "" : "s"} left`
+                : stillToCome.length
+                  ? ` · ${stillToCome.length} step${stillToCome.length === 1 ? "" : "s"} left`
                   : ""}
             </div>
           )}
@@ -1158,67 +1262,6 @@ const STAT_FILTERS = {
   },
 };
 
-// Who the floor has not ticked, and which desk owes it
-// (39-HYBRID-FLOOR-PLAN.md §5.4).
-//
-// A worklist, not a dashboard: one row per patient, ordered worst-wait first,
-// grouped under the desk to chase. Collapsed by default — on a floor that is
-// keeping up this is empty, and a panel that is usually empty must not push the
-// board down the page.
-function BehindPanel({ data, open, onToggle }) {
-  const stations = data?.stations || [];
-  const visits = data?.visits || [];
-  const total = data?.total || 0;
-
-  return (
-    <div className="behind-panel">
-      <button type="button" className="bp-head" onClick={onToggle} aria-expanded={open}>
-        <span className="bp-ico">{total ? "⚠" : "✓"}</span>
-        <strong>
-          {total
-            ? `${total} patient${total === 1 ? "" : "s"} a desk has not ticked`
-            : "Every desk is up to date"}
-        </strong>
-        {stations.length > 0 && (
-          <span className="bp-sum">
-            {stations.map((st) => `${st.label} ${st.visits}`).join(" · ")}
-          </span>
-        )}
-        <span className="bp-chev">{open ? "▲" : "▼"}</span>
-      </button>
-
-      {open && total === 0 && (
-        <div className="empty-note">
-          Nothing outstanding — HealthRay is not ahead of the floor anywhere.
-        </div>
-      )}
-
-      {open &&
-        stations.map((st) => (
-          <div className="bp-group" key={st.station}>
-            <div className="grp-lbl grp-lbl-sp">
-              {st.label} — {st.visits} waiting on a tick · longest {st.worstMinutes}m
-            </div>
-            {visits
-              .filter((v) => v.station === st.station)
-              .map((v) => (
-                <div className="bp-row" key={v.visitId}>
-                  <span className="bp-name">
-                    {v.name} <span className="badge b-ink">{v.fileNo}</span>
-                  </span>
-                  <span className="bp-says">
-                    HealthRay: <strong>{v.healthrayStatus || v.healthrayRaw}</strong> · Scribe:{" "}
-                    <strong>{v.scribeStatus}</strong>
-                  </span>
-                  <span className="bp-mins">{v.minutes}m</span>
-                </div>
-              ))}
-          </div>
-        ))}
-    </div>
-  );
-}
-
 function StatTile({ value, unit, label, sub, colour, dark, filterKey, activeFilter, onFilter }) {
   const clickable = !!filterKey;
   const active = clickable && activeFilter === filterKey;
@@ -1265,9 +1308,6 @@ export default function FlowManagerPage() {
   const [date, setDate] = useState(null);
   const [search, setSearch] = useState("");
   const [toast, setToast] = useState("");
-  // Collapsed until asked for: on a floor that is keeping up the panel is empty,
-  // and an empty panel must not push the board down the page.
-  const [behindOpen, setBehindOpen] = useState(false);
   const [drag, setDrag] = useState(null);
   const [pendingMove, setPendingMove] = useState(null);
   const toastTimer = useRef(null);
@@ -1278,7 +1318,6 @@ export default function FlowManagerPage() {
   const debouncedSearch = useDebounced(search, 250);
   const { data: searchData, isFetching: searching } = useGiniflowSearch(debouncedSearch, date);
   const { data, isLoading, isError, error, dataUpdatedAt } = useGiniflowBoard(date);
-  const { data: behind } = useGiniflowBehind(date);
   const expired = error?.response?.status === 401;
   const pauseVisit = useGiniflowPauseVisit();
   const resumeVisit = useGiniflowResumeVisit();
@@ -1343,6 +1382,7 @@ export default function FlowManagerPage() {
     // reception's, an uncollected sample is the lab's — and the column does not
     // say which. Both are told rather than guessing and telling the wrong one.
     lab: ["lab", "reception"],
+    machine: ["machine"],
     // `done` is not a queue and has no desk, so it falls through to the refusal
     // below rather than being silently mapped somewhere.
   };
@@ -1530,7 +1570,8 @@ export default function FlowManagerPage() {
           return { ...col, cards, count: cards.length };
         })
       : columns;
-  const filteredCount = filter || searchIds ? shownColumns.reduce((sum, c) => sum + c.count, 0) : 0;
+  const filteredCount =
+    filter || searchIds ? new Set(shownColumns.flatMap((c) => c.cards.map((x) => x.id))).size : 0;
   // A reorder sends the column's whole order, so it can only be done against the
   // whole column. Dragging a filtered column would write positions for the cards
   // that happen to be visible and leave everyone else unplaced beneath them.
@@ -1602,7 +1643,10 @@ export default function FlowManagerPage() {
         </div>
       </div>
 
-      <div className="stats" aria-label="Day totals — select one to filter the board">
+      <div
+        className="stats stats--compact"
+        aria-label="Day totals — select one to filter the board"
+      >
         <StatTile
           value={stats.inBuilding ?? 0}
           label="In building now"
@@ -1667,8 +1711,6 @@ export default function FlowManagerPage() {
         />
       </div>
 
-      <BehindPanel data={behind} open={behindOpen} onToggle={() => setBehindOpen((v) => !v)} />
-
       {(filter || searchActive) && (
         <div className="filter-bar">
           <span className="fb-t">
@@ -1731,8 +1773,8 @@ export default function FlowManagerPage() {
       <div className="too-narrow">
         <strong>The floor board needs a wider screen.</strong>
         <span>
-          Eight columns of live timers do not survive a phone. Open Gini Flow on the floor display
-          or a desktop (900px or wider).
+          A board of live timers do not survive a phone. Open Gini Flow on the floor display or a
+          desktop (900px or wider).
         </span>
       </div>
 

@@ -71,7 +71,7 @@ const sync = await readFile(
 // the shape, and end to end in smoke:hybrid-floor.
 check(
   "an existing visit is only touched for a step the sync may write",
-  /if \(appt\.visit_id && !healthrayMayWrite\(target\)\)/.test(sync),
+  /appt\.visit_id &&\s*\(?!mayWrite\(target\)/.test(sync),
   "the 30s poll must not walk a patient forward",
 );
 check(
@@ -89,8 +89,8 @@ check(
 // that path open, so the check has to appear twice.
 check(
   "a newly created visit is not advanced either",
-  (sync.match(/healthrayMayWrite\(target\)/g) || []).length >= 2,
-  `${(sync.match(/healthrayMayWrite\(target\)/g) || []).length} guards`,
+  (sync.match(/!mayWrite\(target\)/g) || []).length >= 2,
+  `${(sync.match(/!mayWrite\(target\)/g) || []).length} guards`,
 );
 check(
   "and a visit is only ever created at 'booked'",

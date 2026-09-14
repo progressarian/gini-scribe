@@ -199,6 +199,12 @@ What shipped:
 | Board and MO queue pause the wait clock with "Waiting for lab / machine reports" for any doctor-leg status                                                                                                                                          | `testsHold.js` `chiefWaitClock`      |
 | Switch: `SCRIBE_DOCTORS_WAIT_FOR_TESTS="0"`                                                                                                                                                                                                         | `shared/manualFloor.js`              |
 
+Board override for machine tests (plan 43): a patient with a paid, today, not-yet-reported machine
+test is shown only in the board's "Machine Room" column, not in any chain column, unless vitals are
+not saved yet or a Scribe desk has them in `with_sd` / `with_doctor` / `with_rx`. The "Waiting for
+lab / machine reports" hint in the Chief column now applies to lab tests only on the board. The sync
+hold and `testsHold.js` are unchanged.
+
 Known limit: an untouched HealthRay lab case (the bench never tapped "report uploaded") holds the
 doctors step until someone records it in Scribe — that is the manual floor's rule, and the switch
 above releases it.

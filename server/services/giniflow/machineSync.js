@@ -219,6 +219,12 @@ export async function syncMachineOrdersForVisit(visit, db = pool) {
   return { raised, lines: lines.length, labSteps };
 }
 
+export async function canReadBill(visitId, db = pool) {
+  if (await healthrayBlockedUntil(db)) return false;
+  const { rows } = await db.query(`${TARGET_SELECT} AND v.id = $2`, [NEVER_ARRIVED, visitId]);
+  return rows.some((r) => r.hr_patient_id);
+}
+
 export async function syncBillingForVisitId(visitId, db = pool) {
   if (await healthrayBlockedUntil(db)) return { raised: 0, lines: 0, labSteps: [], blocked: true };
   const { rows } = await db.query(`${TARGET_SELECT} AND v.id = $2`, [NEVER_ARRIVED, visitId]);

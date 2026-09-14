@@ -30,7 +30,7 @@ const restore = (queryClient, date, previous) => {
 // Matches the board service: Done is a record rather than a queue, and the lab
 // track runs on its own clock, so neither is sorted by compareQueue (BQ-04).
 const resort = (column) =>
-  column.key === "done" || column.key === "lab"
+  ["done", "lab", "machine"].includes(column.key)
     ? column.cards
     : [...column.cards].sort(compareQueue);
 
@@ -169,7 +169,7 @@ export function useGiniflowMove(date, slaConfig = []) {
               // chain, once on the parallel lab track. The lab copy stays in its
               // column, but it is the same patient and must not keep showing the
               // status they have just left (BQ-11).
-              if (col.key === "lab") {
+              if (col.key === "lab" || col.key === "machine") {
                 return {
                   ...col,
                   cards: col.cards.map((c) => (c.id === visitId ? { ...c, ...arrived } : c)),

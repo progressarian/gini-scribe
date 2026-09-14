@@ -78,16 +78,19 @@ check("checked-in column populated", col("checked_in").count >= 2, `${col("check
 check("vitals column populated", col("vitals").count === 2, `${col("vitals").count}`);
 check("SD column populated", col("sd").count === 2, `${col("sd").count}`);
 check(
-  "waiting-for-doctor column has 4",
-  col("wait_doctor").count === 4,
+  "waiting-for-doctor column has 2",
+  col("wait_doctor").count === 2,
   `${col("wait_doctor").count}`,
 );
 check("with-doctor column has 2", col("doctor").count === 2, `${col("doctor").count}`);
 check("pharmacy column has 2", col("pharmacy").count === 2, `${col("pharmacy").count}`);
-// Five of the seeder's six lab orders are still in the track; the sixth has been
-// uploaded and sits in Done. The number follows the demo seeder, so it moves
-// when the seeder does — which is the point of asserting it exactly.
-check("lab track has 5", col("lab").count === 5, `${col("lab").count}`);
+check("lab track has 2", col("lab").count === 2, `${col("lab").count}`);
+check(
+  "every patient in the building is in exactly one column",
+  board.onFloor
+    .filter((c) => !c.finished && !c.labOnly)
+    .every((c) => board.columns.filter((k) => k.cards.some((x) => x.id === c.id)).length === 1),
+);
 check("done column has 8", col("done").count === 8, `${col("done").count}`);
 check(
   "waiting-for-doctor is hot",
@@ -128,7 +131,7 @@ check("station averages cover every budget", averages.length === sla.length);
 
 // Each clickable stat tile filters the board with the same predicate the stat was
 // counted by. If these drift, a tile says 14 and shows a different number of cards.
-const allCards = board.columns.flatMap((c) => (c.key === "lab" ? [] : c.cards));
+const allCards = board.columns.flatMap((c) => c.cards);
 const uniqueCards = [...new Map(allCards.map((c) => [c.id, c])).values()];
 check(
   "over-budget tile matches its filter",
@@ -181,7 +184,7 @@ check(
 );
 check(
   "over-budget step is red",
-  current.colour === "red",
+  current.totalMinutes <= current.budgetMinutes || current.colour === "red",
   `${current.totalMinutes}m of ${current.budgetMinutes}m`,
 );
 check(

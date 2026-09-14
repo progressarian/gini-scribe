@@ -43,13 +43,6 @@ export function mapVisitType(reason) {
   if (r.includes("invest")) return "Investigation";
   return "OPD";
 }
-
-// HealthRay status → our appointments.status
-//   Checkout / Completed → completed (prescription printed; doctor finished)
-//   Engaged              → in_visit (doctor is currently seeing the patient)
-//   Waiting              → checkedin (patient has arrived and is waiting)
-//   Cancelled / NoShow   → cancelled / no_show
-//   Anything else        → scheduled
 export function mapStatus(rayStatus) {
   if (!rayStatus) return "scheduled";
   const s = rayStatus.toLowerCase();
@@ -85,10 +78,6 @@ export function mapRecordType(recordType, fileName) {
 
   if (rt.includes("prescription") || rt.includes("rx")) return "prescription";
   if (rt.includes("lab report")) return "blood";
-
-  // Imaging modalities — match on the file name FIRST. HealthRay files echo,
-  // TMT, ECG, MRI, USG etc. all under the generic "X-Rays" record_type, so
-  // trusting the record_type here would mislabel (e.g.) an echo as an x-ray.
   if (fn.includes("echo")) return "echo";
   if (fn.includes("tmt") || fn.includes("treadmill") || fn.includes("stress test")) return "tmt";
   if (fn.includes("ecg") || fn.includes("ekg")) return "ecg";

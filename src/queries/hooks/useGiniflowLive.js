@@ -53,6 +53,7 @@ const INVALIDATES = {
   lab_order: [
     ["giniflow", "reception"],
     ["giniflow", "lab"],
+    ["giniflow", "machine"],
     ["giniflow", "mo"],
     ["giniflow", "doctor"],
     ["giniflow", "board"],

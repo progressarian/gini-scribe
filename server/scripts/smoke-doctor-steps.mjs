@@ -209,6 +209,59 @@ try {
     !(await getTestsHold(e.visitId, client)).pending,
   );
 
+  console.log("\n── Online journey: Chief Consultation only ─────────────────");
+  const o = await patient({ vitals: false });
+  await client.query(`UPDATE giniflow_visits SET visit_type_id = 'ONLINE' WHERE id = $1`, [
+    o.visitId,
+  ]);
+  const { rows: os } = await client.query(
+    `INSERT INTO giniflow_visit_steps
+       (visit_id, step_order, step_catalog_id, step_name, planned_duration_min, station,
+        assigned_role, chain_status, status, source)
+     VALUES ($1, 1, 'chief_consult', 'Chief Consultation', 50, 'Chief Room', 'chief',
+             'with_doctor', 'pending', 'template')
+     RETURNING id`,
+    [o.visitId],
+  );
+  await o.hr("in_visit");
+  await sync();
+  check(
+    "HealthRay Engaged takes an online patient to the Chief without vitals",
+    ["sd_pending", "with_sd"].includes(await o.status()),
+    await o.status(),
+  );
+  const { rows: stamp } = await client.query(
+    `UPDATE appointments a
+        SET biomarkers = COALESCE(a.biomarkers, '{}'::jsonb)
+                         || jsonb_build_object('engagedEnd', to_jsonb(clock_timestamp()))
+       FROM giniflow_visits v
+      WHERE v.id = $1 AND a.patient_id = v.patient_id AND a.appointment_date = v.visit_date
+      RETURNING (a.biomarkers->>'engagedEnd')::timestamptz AS at`,
+    [o.visitId],
+  );
+  await new Promise((r) => setTimeout(r, 1500));
+  await o.hr("completed");
+  await sync();
+  check(
+    "HealthRay Checkout ends the online visit",
+    (await o.status()) === "exited",
+    await o.status(),
+  );
+  const { rows: ostep } = await client.query(
+    `SELECT status FROM giniflow_visit_steps WHERE id = $1`,
+    [os[0].id],
+  );
+  const { rows: exitEv } = await client.query(
+    `SELECT occurred_at FROM giniflow_visit_events WHERE visit_id = $1 AND status = 'exited'`,
+    [o.visitId],
+  );
+  check(
+    "the exit is stamped at HealthRay's checkout time, not the sync's",
+    exitEv[0] && new Date(exitEv[0].occurred_at).getTime() === new Date(stamp[0].at).getTime(),
+    `${exitEv[0]?.occurred_at?.toISOString?.()} vs ${stamp[0].at.toISOString()}`,
+  );
+  check("Chief Consultation is ticked done", ostep[0].status === "done", ostep[0].status);
+
   console.log("\n── Absences and the switch ─────────────────────────────────");
   const f = await patient();
   await f.hr("in_visit");
@@ -217,9 +270,71 @@ try {
   await f.hr("no_show");
   await sync();
   check(
-    "a no-show is still written while a test is open",
-    (await f.status()) === "no_show",
+    "HealthRay's no-show does not take a checked-in patient off the floor",
+    ["sd_pending", "with_sd"].includes(await f.status()),
     await f.status(),
+  );
+  await f.hr("cancelled");
+  await sync();
+  check(
+    "nor does HealthRay's cancellation",
+    ["sd_pending", "with_sd"].includes(await f.status()),
+    await f.status(),
+  );
+
+  seq++;
+  const { rows: np } = await client.query(
+    `INSERT INTO patients (name, file_no) VALUES ($1, $2) RETURNING id`,
+    [`Probe Doctor ${seq}`, `${TAG}_${seq}`],
+  );
+  await client.query(
+    `INSERT INTO appointments (patient_id, appointment_date, status, time_slot, doctor_name)
+     VALUES ($1, $2::date, 'no_show', '10:00', 'Dr. Anil Bhansali')`,
+    [np[0].id, day],
+  );
+  await sync();
+  const { rows: nv } = await client.query(
+    `SELECT current_status FROM giniflow_visits WHERE patient_id = $1 AND visit_date = $2::date`,
+    [np[0].id, day],
+  );
+  check(
+    "a patient never checked in is still marked no-show",
+    nv[0]?.current_status === "no_show",
+    nv[0]?.current_status,
+  );
+
+  seq++;
+  const { rows: lp } = await client.query(
+    `INSERT INTO patients (name, file_no) VALUES ($1, $2) RETURNING id`,
+    [`Probe Doctor ${seq}`, `${TAG}_${seq}`],
+  );
+  await client.query(
+    `INSERT INTO appointments (patient_id, appointment_date, status, time_slot, doctor_name)
+     VALUES ($1, $2::date, 'checkedin', '10:00', 'Dr. Hospital Admin')`,
+    [lp[0].id, day],
+  );
+  await sync();
+  const { rows: lv } = await client.query(
+    `SELECT id FROM giniflow_visits WHERE patient_id = $1 AND visit_date = $2::date`,
+    [lp[0].id, day],
+  );
+  await markArrived(lv[0].id, null, db);
+  await client.query(
+    `INSERT INTO lab_cases (case_no, patient_case_no, case_uid, lab_case_id, case_date, patient_id,
+                            test_names, raw_list_json, results_synced)
+     VALUES ($1, $1, $1, 900000004, $2::date, $3, ARRAY['HBA1C'],
+             jsonb_build_object('reported_on', (NOW() - interval '2 hours')::text), FALSE)`,
+    [`${TAG}_CASE4`, day, lp[0].id],
+  );
+  await sync();
+  const { rows: ls } = await client.query(
+    `SELECT current_status FROM giniflow_visits WHERE id = $1`,
+    [lv[0].id],
+  );
+  check(
+    "a lab-only patient is not closed because HealthRay reported the case",
+    ls[0].current_status === "checked_in",
+    ls[0].current_status,
   );
 
   const g = await patient();

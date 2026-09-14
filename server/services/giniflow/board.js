@@ -1,6 +1,7 @@
 import pool from "../../config/db.js";
 import { toLocal10 } from "../../../shared/phone.js";
-import { LAB_RUNGS } from "../../../shared/labStages.js";
+import { LAB_RUNGS, UNDRAWN_SAMPLE_STATUSES } from "../../../shared/labStages.js";
+import { labStepsAreManual } from "../../../shared/manualFloor.js";
 import {
   BOARD_COLUMNS,
   OFF_BOARD_STATUSES,
@@ -9,7 +10,6 @@ import {
   STATUS_LABEL,
   slaKeyForStatus,
   TERMINAL_STATUSES,
-  STATION_STATUSES,
   NOT_A_MARKER_SQL,
   JOURNEY_START_SQL,
   WAIT_SINCE_SQL,
@@ -20,6 +20,8 @@ import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { BEHIND_STATION_LABEL, healthrayChainStatus } from "./observation.js";
 import { IST_TODAY, budgetColour } from "./statusEngine.js";
 import { TESTS_HOLD_SQL, chiefWaitClock } from "./testsHold.js";
+import { getMachines } from "./machineCatalog.js";
+import { machineForTest } from "../../../shared/machineStages.js";
 
 export async function getSlaConfig(db = pool) {
   const { rows } = await db.query(
@@ -62,6 +64,85 @@ export const budgetLookup = (slaConfig) => {
     return Number.isFinite(override) && override > 0 ? override : (row.budgetMinutes ?? null);
   };
 };
+
+const UNDRAWN_LAB_SQL = UNDRAWN_SAMPLE_STATUSES.map((s) => `'${s}'`).join(", ");
+
+const TODAY_CASES = (v, p) => `
+           FROM lab_cases lc
+          WHERE lc.case_date = ${v}.visit_date
+            AND (lc.patient_id = ${v}.patient_id
+                 OR (lc.patient_id IS NULL
+                     AND lc.raw_list_json->'patient'->>'healthray_uid' = ${p}.file_no))
+            AND NOT EXISTS (SELECT 1 FROM giniflow_lab_orders lo
+                             WHERE lo.visit_id = ${v}.id AND lo.urgency = 'today' AND lo.kind = 'lab')`;
+
+const CASE_ACTION = (action) =>
+  `EXISTS (SELECT 1 FROM giniflow_lab_case_actions a
+            WHERE a.case_no = lc.case_no AND a.action IN (${action}))`;
+
+const MACHINE_HOLD_SQL = (v, p, manualParam) => `
+      SELECT
+        (SELECT count(*)::int FROM giniflow_lab_orders o
+          WHERE o.visit_id = ${v}.id AND o.urgency = 'today' AND o.kind = 'lab'
+            AND o.payment_status IN ('paid', 'claim_approved')
+            AND o.sample_status IN (${UNDRAWN_LAB_SQL}))
+        + (SELECT count(*)::int ${TODAY_CASES(v, p)}
+            AND NOT ${CASE_ACTION("'sample_taken', 'report_uploaded'")}
+            AND (${manualParam}
+                 OR (lc.raw_list_json->>'phlebotomy_status' IS DISTINCT FROM 'Completed'
+                     AND COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'collected_on' IS NULL)))
+          AS lab_undrawn,
+        (SELECT count(*)::int FROM giniflow_lab_orders o
+          WHERE o.visit_id = ${v}.id AND o.urgency = 'today' AND o.kind = 'lab'
+            AND o.payment_status IN ('paid', 'claim_approved')
+            AND o.sample_status NOT IN ('uploaded', 'reported'))
+        + (SELECT count(*)::int ${TODAY_CASES(v, p)}
+            AND NOT ${CASE_ACTION("'report_uploaded'")}) AS lab_open,
+        GREATEST(
+          (SELECT max(e.occurred_at) FROM giniflow_lab_order_events e
+             JOIN giniflow_lab_orders o ON o.id = e.lab_order_id
+            WHERE o.visit_id = ${v}.id AND o.urgency = 'today' AND o.kind = 'lab'
+              AND e.track = 'sample' AND e.status = 'sample_collected'),
+          (SELECT max(a.created_at) FROM giniflow_lab_case_actions a
+            WHERE a.action = 'sample_taken'
+              AND a.case_no IN (SELECT lc.case_no ${TODAY_CASES(v, p)}))
+        ) AS lab_drawn_at,
+        LEAST(
+          (SELECT min(o.created_at) FROM giniflow_lab_orders o
+            WHERE o.visit_id = ${v}.id AND o.urgency = 'today' AND o.kind = 'lab'),
+          (SELECT min((COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'registered_at')::timestamptz)
+             ${TODAY_CASES(v, p)})
+        ) AS lab_ordered_at,
+        (SELECT json_agg(json_build_object(
+                  'orderId', o.id,
+                  'tests', (SELECT array_agg(t.test_name ORDER BY t.test_name)
+                              FROM giniflow_lab_order_tests t WHERE t.lab_order_id = o.id),
+                  'sampleStatus', o.sample_status,
+                  'paidAt', COALESCE(
+                    (SELECT min(e.occurred_at) FROM giniflow_lab_order_events e
+                      WHERE e.lab_order_id = o.id AND e.track = 'payment'
+                        AND e.status IN ('paid', 'claim_approved')),
+                    o.created_at),
+                  'startedAt', (SELECT max(e.occurred_at) FROM giniflow_lab_order_events e
+                                 WHERE e.lab_order_id = o.id AND e.track = 'sample'
+                                   AND e.status = 'in_progress')
+                ) ORDER BY o.created_at)
+           FROM giniflow_lab_orders o
+          WHERE o.visit_id = ${v}.id AND o.kind = 'machine' AND o.urgency = 'today'
+            AND o.payment_status IN ('paid', 'claim_approved')
+            AND o.sample_status <> 'reported') AS orders,
+        (SELECT json_agg(json_build_object(
+                  'catalogId', s.step_catalog_id, 'plannedMin', s.planned_duration_min))
+           FROM giniflow_visit_steps s WHERE s.visit_id = ${v}.id) AS steps,
+        LEAST(
+          (SELECT min(g.recorded_at) FROM giniflow_vitals g WHERE g.visit_id = ${v}.id),
+          (SELECT min(e.occurred_at) FROM giniflow_visit_events e
+            WHERE e.visit_id = ${v}.id AND e.status IN ('with_vitals', 'vitals_done')
+              AND e.actor_role <> 'system')
+        ) AS vitals_at,
+        (SELECT e.meta->>'source' FROM giniflow_visit_events e
+          WHERE e.visit_id = ${v}.id AND ${NOT_A_MARKER_SQL("e.status")}
+          ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1) AS room_source`;
 
 // One round trip for the whole day. The lateral joins keep it to a single query
 // no matter how many visits the day has — the board polls every 10s and a
@@ -109,6 +190,14 @@ const BOARD_SQL = `
          last_ev.occurred_at                       AS status_since,
          hold.tests_pending,
          hold.tests_ready_at,
+         machine.orders                            AS machine_orders,
+         machine.steps                             AS machine_steps,
+         machine.vitals_at                         AS machine_vitals_at,
+         machine.room_source                       AS room_source,
+         machine.lab_undrawn,
+         machine.lab_open,
+         machine.lab_drawn_at,
+         machine.lab_ordered_at,
          lab.sample_status                         AS lab_sample_status,
          lab.payment_status                        AS lab_payment_status,
          lab.test_count                            AS lab_test_count,
@@ -162,6 +251,7 @@ const BOARD_SQL = `
        ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1
     ) last_ev ON TRUE
     LEFT JOIN LATERAL (${TESTS_HOLD_SQL("v", "p")}) hold ON TRUE
+    LEFT JOIN LATERAL (${MACHINE_HOLD_SQL("v", "p", "$3")}) machine ON TRUE
     LEFT JOIN LATERAL (
       SELECT o.sample_status, o.payment_status, o.updated_at AS since,
              (SELECT COUNT(*)::int FROM giniflow_lab_order_tests t WHERE t.lab_order_id = o.id) AS test_count
@@ -350,14 +440,542 @@ export const boardClock = (visitDate, now = new Date()) => {
   return now < end ? now : end;
 };
 
-const PRE_MO_COLUMNS = ["checked_in", "vitals", "sd"];
+const NOT_YET_FOR_MACHINES = ["with_vitals", "blocked_reports"];
+const MACHINE_BLOCKING_ROOMS = ["with_sd", "with_doctor", "with_rx"];
+
+const testStage = (sampleStatus) =>
+  sampleStatus === "in_progress" ? "in_progress" : sampleStatus === "done" ? "done" : "waiting";
+
+export function machineCardFor({ orders, steps, vitalsAt, drawnAt = null }, machines, now) {
+  if (!orders?.length) return null;
+  const plannedFor = (machineId) =>
+    (steps || []).find((s) => s.catalogId === machineId && s.plannedMin > 0)?.plannedMin ?? null;
+
+  const tests = orders.flatMap((o) => {
+    const stage = testStage(o.sampleStatus);
+    const seen = new Set();
+    const entries = (o.tests?.length ? o.tests : ["Machine test"]).flatMap((name) => {
+      const m = machineForTest(machines, name);
+      const key = m?.id || name;
+      if (seen.has(key)) return [];
+      seen.add(key);
+      const budget = m ? (plannedFor(m.id) ?? m.durationMin ?? null) : null;
+      return [
+        {
+          orderId: o.orderId,
+          machine: m?.id || null,
+          label: m?.name || name,
+          stage,
+          budget,
+          startedAt: stage === "in_progress" ? o.startedAt : null,
+          minutesOnMachine: stage === "in_progress" ? minutesSince(o.startedAt, now) : null,
+        },
+      ];
+    });
+    return entries.map((t) => ({ ...t, paidAt: o.paidAt }));
+  });
+
+  const ms = (value) => (value ? new Date(value).getTime() : null);
+  const paidMs = Math.min(...tests.map((t) => ms(t.paidAt)).filter((x) => x !== null));
+  const sinceMs = Math.max(
+    ...[Number.isFinite(paidMs) ? paidMs : null, ms(vitalsAt), ms(drawnAt)].filter(
+      (x) => x !== null,
+    ),
+  );
+  const since = Number.isFinite(sinceMs) ? new Date(sinceMs) : null;
+  const minutes = minutesSince(since, now);
+  const budgets = tests.map((t) => t.budget).filter((b) => b > 0);
+  const budget = budgets.length ? budgets.reduce((a, b) => a + b, 0) : null;
+  const running = tests.filter((t) => t.stage === "in_progress");
+  const waiting = tests.filter((t) => t.stage === "waiting");
+  const runningOver = running.some((t) => t.budget && t.minutesOnMachine > t.budget);
+
+  const subtitle = running.length
+    ? `▶️ On ${running
+        .map((t) => (t.budget ? `${t.label} · ${t.minutesOnMachine}m of ${t.budget}m` : t.label))
+        .join(", ")}`
+    : waiting.length
+      ? `⏳ Waiting for ${waiting.map((t) => t.label).join(", ")}`
+      : "✅ Test done — report pending";
+
+  return {
+    tests: tests.map(({ paidAt: _paidAt, ...t }) => t),
+    running: running.length > 0,
+    subtitle,
+    since: since ? since.toISOString() : null,
+    minutes,
+    budget,
+    colour: runningOver ? "red" : budgetColour(minutes ?? 0, budget),
+  };
+}
+
+export const placementFor = (
+  card,
+  { roomSource = null, vitalsAt = null, labUndrawn = 0, labOpen = 0 } = {},
+) => {
+  if (card.finished) return "chain";
+  if ((!vitalsAt && !card.labOnly) || NOT_YET_FOR_MACHINES.includes(card.status)) return "chain";
+  if (MACHINE_BLOCKING_ROOMS.includes(card.status) && roomSource !== "healthray") return "chain";
+  if (labUndrawn > 0) return "lab";
+  if (card.machine) return "machine";
+  if (labOpen > 0 && !card.labOnly) return "lab";
+  return "chain";
+};
+
+export const ownedByMachineRoom = (card, facts = {}) => placementFor(card, facts) === "machine";
+
+const labTrackFor = (card, { labUndrawn, labOrderedAt, labDrawnAt }, now) => {
+  const since = labUndrawn > 0 ? labOrderedAt : labDrawnAt || labOrderedAt;
+  const minutes = minutesSince(since, now);
+  const base = card.lab || { source: "healthray", testCount: card.labTests?.length || 0 };
+  return {
+    ...base,
+    since: since ? new Date(since).toISOString() : base.since,
+    minutes: minutes ?? base.minutes ?? 0,
+    budget: base.budget ?? null,
+    colour: base.colour ?? "grey",
+    subtitle:
+      labUndrawn > 0
+        ? base.subtitle || "Awaiting collection"
+        : "⏳ Sample collected — waiting for lab reports",
+    hint: labUndrawn > 0 ? (base.hint ?? null) : null,
+    collected: labUndrawn === 0,
+  };
+};
+
+const onTrackClock = (card) => {
+  const track =
+    card.placement === "machine" ? card.machine : card.placement === "lab" ? card.lab : null;
+  if (!track) return card;
+  return {
+    ...card,
+    statusSince: track.since,
+    statusMinutes: track.minutes,
+    statusBudget: track.budget ?? null,
+    statusColour:
+      card.placement === "machine" ? track.colour : budgetColour(track.minutes ?? 0, track.budget),
+    hint: null,
+    hintIcon: null,
+  };
+};
+
+export async function getTestsOrderedAt(visitId, db = pool) {
+  const { rows } = await db.query(
+    `SELECT LEAST(
+              (SELECT min(o.created_at) FROM giniflow_lab_orders o
+                WHERE o.visit_id = v.id AND o.urgency = 'today'),
+              (SELECT min((COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'registered_at')::timestamptz)
+                 ${TODAY_CASES("v", "p")})
+            ) AS ordered_at
+       FROM giniflow_visits v JOIN patients p ON p.id = v.patient_id
+      WHERE v.id = $1`,
+    [visitId],
+  );
+  return rows[0]?.ordered_at ? new Date(rows[0].ordered_at) : null;
+}
+
+const placeCard = (card, row, machines, now) => {
+  const clock = card.paused && row.paused_at ? new Date(row.paused_at) : now;
+  const facts = {
+    roomSource: row.room_source,
+    vitalsAt: row.machine_vitals_at,
+    labUndrawn: row.lab_undrawn ?? 0,
+    labOpen: row.lab_open ?? 0,
+    labOrderedAt: row.lab_ordered_at,
+    labDrawnAt: row.lab_drawn_at,
+  };
+  const machine = machineCardFor(
+    {
+      orders: row.machine_orders,
+      steps: row.machine_steps,
+      vitalsAt: row.machine_vitals_at,
+      drawnAt: row.lab_drawn_at,
+    },
+    machines,
+    clock,
+  );
+  const withMachine = { ...card, machine };
+  const placement = placementFor(withMachine, facts);
+  return onTrackClock({
+    ...withMachine,
+    lab: placement === "lab" ? labTrackFor(withMachine, facts, clock) : card.lab,
+    placement,
+    machineOwned: placement === "machine",
+  });
+};
+
+export async function getTestsPlacement(visitId, now = new Date(), db = pool) {
+  const [{ rows }, machines] = await Promise.all([
+    db.query(
+      `SELECT v.current_status, v.paused_at,
+              ${labOnlyPredicate("v", "$2")} AS lab_only,
+              m.orders AS machine_orders, m.steps AS machine_steps,
+              m.vitals_at AS machine_vitals_at, m.room_source,
+              m.lab_undrawn, m.lab_open, m.lab_drawn_at, m.lab_ordered_at
+         FROM giniflow_visits v
+         JOIN patients p ON p.id = v.patient_id
+         CROSS JOIN LATERAL (${MACHINE_HOLD_SQL("v", "p", "$3")}) m
+        WHERE v.id = $1`,
+      [visitId, LAB_ONLY_DOCTOR, labStepsAreManual()],
+    ),
+    getMachines(db),
+  ]);
+  const row = rows[0];
+  if (!row) return null;
+  const placed = placeCard(
+    {
+      status: row.current_status,
+      finished: TERMINAL_STATUSES.includes(row.current_status),
+      labOnly: !!row.lab_only,
+      paused: !!row.paused_at,
+      lab: null,
+    },
+    row,
+    machines,
+    now,
+  );
+  if (placed.placement === "machine") {
+    return {
+      kind: "machine",
+      since: placed.machine.since,
+      budget: placed.machine.budget,
+      label: `Machine Room — ${placed.machine.tests.map((t) => t.label).join(", ")}`,
+      machine: placed.machine,
+    };
+  }
+  if (placed.placement === "lab") {
+    return {
+      kind: "lab",
+      since: placed.lab.since,
+      budget: null,
+      label: row.lab_undrawn > 0 ? "At the lab — sample to collect" : "Waiting for lab reports",
+    };
+  }
+  return null;
+}
+
+const latest = (...values) => {
+  const times = values.filter(Boolean).map((v) => new Date(v).getTime());
+  return times.length ? new Date(Math.max(...times)) : null;
+};
+
+const earliest = (...values) => {
+  const times = values.filter(Boolean).map((v) => new Date(v).getTime());
+  return times.length ? new Date(Math.min(...times)) : null;
+};
+
+export function testSegmentsFor(f, now = new Date()) {
+  if (!f || (!f.vitalsAt && !f.labOnly)) return [];
+  const base = f.vitalsAt ? new Date(f.vitalsAt) : null;
+  const hasLab = !!f.labOrderedAt;
+  const machines = f.machineOrders || [];
+  const hasMachine = machines.length > 0;
+  if (!hasLab && !hasMachine) return [];
+  const cap = f.endAt ? new Date(f.endAt) : null;
+  const segments = [];
+  const push = (seg) => {
+    if (!seg.from) return;
+    let to = seg.to ? new Date(seg.to) : null;
+    if (cap) {
+      if (seg.from >= cap) return;
+      to = to && to < cap ? to : cap;
+    }
+    if (to && to <= seg.from) return;
+    if (!to && seg.from >= now) return;
+    segments.push({ ...seg, to });
+  };
+  const payment = (from, to, what) =>
+    push({
+      status: "payment_wait",
+      label: `Waiting for payment at reception — ${what}`,
+      from,
+      to,
+      isWait: true,
+    });
+
+  let labDrawn = null;
+  if (hasLab) {
+    const ordered = latest(base, f.labOrderedAt);
+    const paid = latest(base, f.labPaidAt || f.labOrderedAt);
+    if (paid > ordered) payment(ordered, paid, "lab tests");
+    labDrawn = f.labUndrawn > 0 ? null : latest(f.labDrawnAt) || paid;
+    push({ status: "lab_room", label: "At the lab", from: paid, to: labDrawn });
+  }
+
+  let machineDone = null;
+  if (hasMachine && (!hasLab || labDrawn)) {
+    const free = hasLab ? latest(base, labDrawn) : base;
+    const ordered = latest(free, earliest(...machines.map((m) => m.createdAt)));
+    const paid = latest(free, earliest(...machines.map((m) => m.paidAt)));
+    if (paid > ordered) payment(ordered, paid, f.machineLabel || "machine tests");
+    const runs = machines
+      .filter((m) => m.startedAt)
+      .map((m) => ({
+        from: new Date(m.startedAt),
+        to: m.doneAt ? new Date(m.doneAt) : null,
+        label: m.label || "machine test",
+      }))
+      .sort((a, b) => a.from - b.from);
+    const waitingFor = (list) => list.map((m) => m.label || "machine test").join(", ");
+    const allDone = machines.every((m) => m.doneAt);
+    let cursor = paid;
+    for (const run of runs) {
+      if (!cursor) break;
+      if (run.from > cursor) {
+        push({
+          status: "machine_wait",
+          label: `Waiting for the Machine Room — ${waitingFor(
+            machines.filter((m) => !m.startedAt || new Date(m.startedAt) >= run.from),
+          )}`,
+          from: cursor,
+          to: run.from,
+          isWait: true,
+        });
+      }
+      const from = run.from > cursor ? run.from : cursor;
+      push({
+        status: "machine_room",
+        label: `On the machine — ${run.label}`,
+        from,
+        to: run.to,
+        budgetMinutes: machines.find((m) => m.label === run.label)?.budget ?? null,
+      });
+      cursor = run.to && run.to > cursor ? run.to : run.to ? cursor : null;
+    }
+    if (cursor && !allDone) {
+      push({
+        status: "machine_wait",
+        label: `Waiting for the Machine Room — ${waitingFor(machines.filter((m) => !m.doneAt))}`,
+        from: cursor,
+        to: null,
+        isWait: true,
+      });
+    }
+    machineDone = allDone ? latest(...machines.map((m) => m.doneAt)) : null;
+  }
+
+  const testsDone = (!hasLab || labDrawn) && (!hasMachine || machineDone);
+  if (testsDone) {
+    const from = latest(labDrawn, machineDone);
+    const labIn = !hasLab || f.labOpen === 0;
+    const machineIn = machines.every((m) => m.reportedAt);
+    const to =
+      labIn && machineIn
+        ? latest(hasLab ? f.labReportedAt : null, ...machines.map((m) => m.reportedAt))
+        : null;
+    const labPending = hasLab && f.labOpen > 0;
+    const machinePending = machines.some((m) => !m.reportedAt);
+    push({
+      status: "reports_wait",
+      label:
+        labPending && machinePending
+          ? "Waiting for lab and machine reports"
+          : labPending
+            ? "Waiting for lab reports"
+            : machinePending
+              ? "Waiting for machine reports"
+              : "Waiting for reports",
+      from,
+      to: to && to > from ? to : labIn && machineIn ? from : null,
+      isWait: true,
+    });
+  }
+  segments.sort((a, b) => a.from - b.from);
+  segments.forEach((seg, i) => {
+    const next = segments[i + 1];
+    if (next && seg.to && next.from > seg.to) seg.to = next.from;
+  });
+  return segments;
+}
+
+export async function getTestSegments(visitId, now = new Date(), db = pool) {
+  const [{ rows }, machines] = await Promise.all([
+    db.query(
+      `SELECT ${labOnlyPredicate("v", "$2")} AS lab_only,
+              CASE WHEN v.current_status IN ('dispensed', 'exited', 'no_show', 'cancelled')
+                   THEN (SELECT max(e.occurred_at) FROM giniflow_visit_events e
+                          WHERE e.visit_id = v.id AND e.status = v.current_status)
+              END AS end_at,
+              m.steps AS machine_steps, m.vitals_at, m.lab_undrawn, m.lab_open,
+              m.lab_drawn_at, m.lab_ordered_at,
+              (SELECT min(e.occurred_at) FROM giniflow_lab_order_events e
+                 JOIN giniflow_lab_orders o ON o.id = e.lab_order_id
+                WHERE o.visit_id = v.id AND o.urgency = 'today' AND o.kind = 'lab'
+                  AND e.track = 'payment' AND e.status IN ('paid', 'claim_approved')) AS lab_order_paid_at,
+              EXISTS (SELECT 1 FROM giniflow_lab_orders o
+                       WHERE o.visit_id = v.id AND o.urgency = 'today' AND o.kind = 'lab') AS has_lab_order,
+              GREATEST(
+                (SELECT max(e.occurred_at) FROM giniflow_lab_order_events e
+                   JOIN giniflow_lab_orders o ON o.id = e.lab_order_id
+                  WHERE o.visit_id = v.id AND o.urgency = 'today' AND o.kind = 'lab'
+                    AND e.track = 'sample' AND e.status IN ('uploaded', 'reported')),
+                (SELECT max(a.created_at) FROM giniflow_lab_case_actions a
+                  WHERE a.action = 'report_uploaded'
+                    AND a.case_no IN (SELECT lc.case_no ${TODAY_CASES("v", "p")}))
+              ) AS lab_reported_at,
+              (SELECT min(o.created_at) FROM giniflow_lab_orders o
+                WHERE o.visit_id = v.id AND o.urgency = 'today') AS orders_created_at,
+              (SELECT array_agg(o.created_at) FROM giniflow_lab_orders o
+                WHERE o.visit_id = v.id AND o.urgency = 'today') AS order_times,
+              (SELECT json_agg(json_build_object(
+                        'tests', (SELECT array_agg(t.test_name) FROM giniflow_lab_order_tests t
+                                   WHERE t.lab_order_id = o.id),
+                        'sampleStatus', o.sample_status,
+                        'paidAt', (SELECT min(e.occurred_at) FROM giniflow_lab_order_events e
+                                    WHERE e.lab_order_id = o.id AND e.track = 'payment'
+                                      AND e.status IN ('paid', 'claim_approved')),
+                        'createdAt', o.created_at,
+                        'startedAt', (SELECT min(e.occurred_at) FROM giniflow_lab_order_events e
+                                       WHERE e.lab_order_id = o.id AND e.track = 'sample'
+                                         AND e.status = 'in_progress'),
+                        'doneAt', (SELECT min(e.occurred_at) FROM giniflow_lab_order_events e
+                                    WHERE e.lab_order_id = o.id AND e.track = 'sample'
+                                      AND e.status IN ('done', 'reported')),
+                        'reportedAt', (SELECT min(e.occurred_at) FROM giniflow_lab_order_events e
+                                        WHERE e.lab_order_id = o.id AND e.track = 'sample'
+                                          AND e.status = 'reported')))
+                 FROM giniflow_lab_orders o
+                WHERE o.visit_id = v.id AND o.urgency = 'today' AND o.kind = 'machine'
+                  AND o.payment_status IN ('paid', 'claim_approved')) AS machine_all
+         FROM giniflow_visits v
+         JOIN patients p ON p.id = v.patient_id
+         CROSS JOIN LATERAL (${MACHINE_HOLD_SQL("v", "p", "$3")}) m
+        WHERE v.id = $1`,
+      [visitId, LAB_ONLY_DOCTOR, labStepsAreManual()],
+    ),
+    getMachines(db),
+  ]);
+  const r = rows[0];
+  if (!r) return { segments: [], orderTimes: [] };
+  const plannedFor = (id) =>
+    (r.machine_steps || []).find((st) => st.catalogId === id && st.plannedMin > 0)?.plannedMin;
+  const machineOrders = (r.machine_all || []).map((o) => {
+    const names = [
+      ...new Set(
+        (o.tests || []).map((n) => machineForTest(machines, n)?.name || n).filter(Boolean),
+      ),
+    ];
+    const ids = (o.tests || []).map((n) => machineForTest(machines, n)).filter(Boolean);
+    return {
+      ...o,
+      label: names.join(", ") || "machine test",
+      budget: ids.reduce((sum, m) => sum + (plannedFor(m.id) ?? m.durationMin ?? 0), 0) || null,
+      doneAt: o.doneAt || (o.sampleStatus === "reported" ? o.reportedAt : null),
+      reportedAt: o.reportedAt || (o.sampleStatus === "reported" ? o.doneAt : null),
+    };
+  });
+  const card = machineOrders.length
+    ? machineCardFor(
+        {
+          orders: machineOrders.map((o, i) => ({ ...o, orderId: `m${i}` })),
+          steps: r.machine_steps,
+          vitalsAt: r.vitals_at,
+        },
+        machines,
+        now,
+      )
+    : null;
+  const segments = testSegmentsFor(
+    {
+      labOnly: !!r.lab_only,
+      endAt: r.end_at,
+      vitalsAt: r.vitals_at,
+      testsOrderedAt: earliest(r.orders_created_at, r.lab_ordered_at),
+      labOrderedAt: r.lab_ordered_at,
+      labPaidAt: r.has_lab_order ? r.lab_order_paid_at : r.lab_ordered_at,
+      labUndrawn: r.lab_undrawn ?? 0,
+      labOpen: r.lab_open ?? 0,
+      labDrawnAt: r.lab_drawn_at,
+      labReportedAt: r.lab_reported_at,
+      machineOrders,
+      machineLabel: card ? card.tests.map((t) => t.label).join(", ") : null,
+      machineBudget: card?.budget ?? null,
+    },
+    now,
+  );
+  return { segments, orderTimes: (r.order_times || []).map((t) => new Date(t)) };
+}
+
+export async function getScribeLabMarks(visitId, db = pool) {
+  const LABEL = {
+    paid: "Lab payment cleared",
+    sample_collected: "Sample collected",
+    sample_sent: "Sample sent to the lab",
+    sample_received: "Sample received at the lab",
+    processing: "Processing",
+    results_ready: "Results ready",
+    uploaded: "Report uploaded",
+  };
+  const ACTION = {
+    sample_taken: "Sample collected",
+    sample_sent: "Sample sent to the lab",
+    sample_received: "Sample received at the lab",
+    processing: "Processing",
+    results_ready: "Results ready",
+    report_uploaded: "Report uploaded",
+  };
+  const { rows } = await db.query(
+    `SELECT e.status AS key, e.occurred_at AS at, 'order' AS src, o.id::text AS ref,
+            (SELECT array_agg(t.test_name ORDER BY t.test_name)
+               FROM giniflow_lab_order_tests t WHERE t.lab_order_id = o.id) AS tests
+       FROM giniflow_lab_order_events e
+       JOIN giniflow_lab_orders o ON o.id = e.lab_order_id
+      WHERE o.visit_id = $1 AND o.urgency = 'today' AND o.kind = 'lab'
+        AND ((e.track = 'sample' AND e.status <> 'paid') OR (e.track = 'payment' AND e.status = 'paid'))
+     UNION ALL
+     SELECT a.action AS key, a.created_at AS at, 'case' AS src, a.case_no AS ref,
+            (SELECT lc2.test_names FROM lab_cases lc2 WHERE lc2.case_no = a.case_no LIMIT 1) AS tests
+       FROM giniflow_lab_case_actions a
+       JOIN giniflow_visits v ON v.id = $1
+       JOIN patients p ON p.id = v.patient_id
+      WHERE a.case_no IN (SELECT lc.case_no ${TODAY_CASES("v", "p")})
+     ORDER BY at`,
+    [visitId],
+  );
+  const refs = new Set(rows.map((r) => r.ref));
+  const order = [
+    "Lab payment cleared",
+    "Sample collected",
+    "Sample sent to the lab",
+    "Sample received at the lab",
+    "Processing",
+    "Results ready",
+    "Report uploaded",
+  ];
+  const reached = new Map();
+  for (const r of rows) {
+    const label = (r.src === "order" ? LABEL : ACTION)[r.key];
+    if (!label) continue;
+    const byRef = reached.get(label) || new Map();
+    const at = new Date(r.at);
+    if (!byRef.has(r.ref) || byRef.get(r.ref) < at) byRef.set(r.ref, at);
+    reached.set(label, byRef);
+  }
+  return order
+    .filter((label) => reached.has(label))
+    .map((label) => {
+      const byRef = reached.get(label);
+      const done = byRef.size >= refs.size;
+      return {
+        status: `lab:${label}`,
+        label: done || refs.size < 2 ? label : `${label} (${byRef.size} of ${refs.size})`,
+        enteredAt: new Date(Math.max(...[...byRef.values()].map((d) => d.getTime()))).toISOString(),
+        partial: !done,
+      };
+    });
+}
 
 export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDate), db = pool) {
   const budgets = budgetMap(slaConfig);
   const budgetFor = budgetLookup(slaConfig);
-  const { rows } = await db.query(BOARD_SQL, [visitDate, LAB_ONLY_DOCTOR]);
+  const [{ rows }, machines] = await Promise.all([
+    db.query(BOARD_SQL, [visitDate, LAB_ONLY_DOCTOR, labStepsAreManual()]),
+    getMachines(db),
+  ]);
 
-  const cards = rows.map((row) => {
+  const cards = rows.map((row) => placeCard(buildCard(row), row, machines, now));
+
+  function buildCard(row) {
     // A finished visit's clock stopped when it exited; only a patient still in
     // the building is timed against the present moment.
     const finished = TERMINAL_STATUSES.includes(row.current_status);
@@ -438,12 +1056,14 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
       // the lab track: a sample that was never collected is still worth showing
       // after they leave, a report that is already back is not.
       labSettled:
-        labOnly && (row.lab_all_cases ?? 0) > 0 && (row.lab_all_reported ?? 0) >= row.lab_all_cases,
+        (row.lab_all_cases ?? 0) > 0 &&
+        (row.lab_all_reported ?? 0) >= row.lab_all_cases &&
+        !row.lab_sample_status,
       labTests: row.lab_test_names || [],
       assignedDoctorId: labOnly ? null : row.assigned_doctor_id,
       assignedDoctorName: labOnly ? null : row.doctor_name || row.doctor_full_name || null,
       subtitle: subtitleFor(row),
-      hint: heldForTests ? "Waiting for lab / machine reports" : hintFor(row),
+      hint: heldForTests ? "Waiting for test reports" : hintFor(row),
       hintIcon: heldForTests ? "🧪" : hintIconFor(row),
       heldForTests,
       finished,
@@ -533,7 +1153,7 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
               }
             : null,
     };
-  });
+  }
 
   const onFloor = cards.filter((c) => !OFF_BOARD_STATUSES.includes(c.status));
 
@@ -550,36 +1170,39 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
           // holds something of theirs. Once the reports are back and they have
           // gone home there is nothing to work, and leaving them here is what
           // kept an exited patient sitting in the column all day.
-          onFloor.filter((c) => c.lab && !(c.finished && c.labSettled))
-        : // "Done today" is a record of who finished, and a samples-only patient
-          // who exited did finish — it is only the consultation queues they do
-          // not belong in. Without this they had nowhere to go but the lab track.
-          // A patient whose sample is with the lab cannot be worked up until the
-          // reports are back, so they wait on the lab track rather than in a
-          // queue nobody can move. Only the columns before the MO: a hand-over
-          // to a consultant is an assignment, and hiding it loses the patient.
-          // A station physically holding them is exempt either way.
           onFloor.filter(
             (c) =>
-              (!c.labOnly || col.key === "done") &&
-              col.statuses.includes(c.status) &&
-              !(
-                PRE_MO_COLUMNS.includes(col.key) &&
-                !!c.lab &&
-                !c.finished &&
-                !STATION_STATUSES.includes(c.status)
-              ),
-          );
-    const budget = budgets[col.slaKey] ?? null;
+              c.placement === "lab" ||
+              (c.labOnly && c.lab && !(c.finished && c.labSettled)) ||
+              (c.finished && !c.labOnly && c.lab && !c.labSettled),
+          )
+        : col.key === "machine"
+          ? onFloor.filter((c) => c.placement === "machine")
+          : onFloor.filter(
+              (c) =>
+                (!c.labOnly || col.key === "done") &&
+                c.placement === "chain" &&
+                col.statuses.includes(c.status),
+            );
+    const machineTimed = col.key === "machine" ? items.filter((c) => c.machine.budget) : [];
+    const mean = (xs) => (xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : 0);
+    const budget =
+      col.key === "machine"
+        ? machineTimed.length
+          ? mean(machineTimed.map((c) => c.machine.budget))
+          : null
+        : (budgets[col.slaKey] ?? null);
     // Blocked patients are excluded from the average: they are stuck on missing
     // reports, not on this station's throughput, and letting them skew it points
     // the bottleneck banner at the wrong station.
     const timedCards = items.filter((c) => !c.blockedReason && !c.heldForTests);
     const timed =
-      col.key === "lab"
-        ? timedCards.filter((c) => c.lab.budget).map((c) => c.lab.minutes ?? 0)
-        : timedCards.map((c) => c.statusMinutes ?? 0);
-    const avg = timed.length ? Math.round(timed.reduce((a, b) => a + b, 0) / timed.length) : 0;
+      col.key === "machine"
+        ? machineTimed.map((c) => c.machine.minutes ?? 0)
+        : col.key === "lab"
+          ? timedCards.filter((c) => c.lab.budget).map((c) => c.lab.minutes ?? 0)
+          : timedCards.map((c) => c.statusMinutes ?? 0);
+    const avg = mean(timed);
     return {
       ...col,
       budgetMinutes: budget,
@@ -593,7 +1216,7 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
       // compareQueue's last tiebreak — statusMinutes — would order it by how long
       // the patient has been waiting somewhere else entirely (BQ-04). It keeps
       // the SQL's ordering, as Done does.
-      cards: col.key === "done" || col.key === "lab" ? items : [...items].sort(compareQueue),
+      cards: ["done", "lab", "machine"].includes(col.key) ? items : [...items].sort(compareQueue),
     };
   });
 
@@ -670,9 +1293,12 @@ export function getBottleneck(columns) {
   if (!candidates.length) return null;
 
   const { column } = candidates[0];
-  const longest = [...column.cards.filter((c) => !c.blockedReason && !c.heldForTests)].sort(
-    (a, b) => (b.statusMinutes ?? 0) - (a.statusMinutes ?? 0),
-  )[0];
+  const minutesOf = (c) => (column.key === "machine" ? c.machine?.minutes : c.statusMinutes) ?? 0;
+  const longest = [
+    ...column.cards.filter(
+      (c) => !c.blockedReason && (column.key === "machine" || !c.heldForTests),
+    ),
+  ].sort((a, b) => minutesOf(b) - minutesOf(a))[0];
 
   const greenWaiting =
     column.key === "wait_doctor" &&
@@ -684,9 +1310,7 @@ export function getBottleneck(columns) {
     count: column.count,
     avgMinutes: column.avgMinutes,
     budgetMinutes: column.budgetMinutes,
-    longest: longest
-      ? { id: longest.id, name: longest.name, minutes: longest.statusMinutes }
-      : null,
+    longest: longest ? { id: longest.id, name: longest.name, minutes: minutesOf(longest) } : null,
     suggestion: greenWaiting
       ? "SD closes green-category patients directly."
       : `Add capacity at ${column.name.toLowerCase()} or hold new check-ins.`,
@@ -825,7 +1449,7 @@ export async function getStationAverages(visitDate, slaConfig, db = pool) {
            SELECT EXTRACT(EPOCH FROM (o.uploaded_at - o.created_at)) / 60 AS mins
              FROM giniflow_lab_orders o
              JOIN giniflow_visits v ON v.id = o.visit_id AND v.visit_date = $1::date
-            WHERE o.uploaded_at IS NOT NULL
+            WHERE o.uploaded_at IS NOT NULL AND o.kind = 'lab'
            UNION ALL
            SELECT EXTRACT(
                     EPOCH FROM (

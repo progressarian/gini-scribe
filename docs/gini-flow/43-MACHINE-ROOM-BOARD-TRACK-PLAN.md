@@ -1,6 +1,6 @@
 # 43 — The Machine Room on the Flow Manager board
 
-Status: **PLAN — not started.** Written 14 Sep 2026 against `main` @ `e279036` plus the uncommitted
+Status: **W1–W9 built 14 Sep 2026** (`npm run smoke:giniflow-machine-board`). Review pass: ownership follows the Machine Room start gate (vitals recorded, not status); a Machine Room patient is judged on the machine clock in stats and filters; the timeline ends the current step when the Machine Room takes the patient and shows "Machine Room — <tests>" against the journey budget; the lab-report wait starts when tests were ordered, not at the start of the queue. Written 14 Sep 2026 against `main` @ `e279036` plus the uncommitted
 working tree of plans 40 and 41. Follows `36-MACHINE-TEST-STATION-PLAN.md`,
 `39-HYBRID-FLOOR-PLAN.md` (§15/§16 the case lists), `40-ORDERED-TESTS-HOLD-PLAN.md`,
 `41-MACHINE-CATALOG-PLAN.md` and `42-SYNC-COMPLETION-GATES-PLAN.md` (§ `showAt: lab|machine`).
@@ -311,3 +311,27 @@ Build order: W1 + W3 together (the server throws otherwise) → W2 → W4 → W5
    as plan 41 D2 intended.
 8. Four different definitions of "tests outstanding" (`reports_outstanding`, `testsHold`,
    `assertReportsAreIn`, the lab lateral) disagree on kinds, urgency and HealthRay cases.
+
+---
+
+## 10. One station at a time (floor rule, 14 Sep 2026)
+
+A patient is in exactly one place on the board. `placementFor` in `board.js` decides it, in order:
+
+| #   | Situation                                                                              | Place                                 |
+| --- | -------------------------------------------------------------------------------------- | ------------------------------------- |
+| 1   | Visit finished                                                                         | Done                                  |
+| 2   | Vitals not recorded (samples-only patients exempt), or at the vitals desk              | Their chain column                    |
+| 3   | Physically in the Chief's, consultant's or Rx room (a room Scribe wrote, not the sync) | That room's column                    |
+| 4   | A paid lab test with the sample not yet collected                                      | Lab track                             |
+| 5   | A paid machine test not yet reported                                                   | Machine Room                          |
+| 6   | Lab reports still outstanding                                                          | Lab track ("waiting for lab reports") |
+| 7   | Nothing open                                                                           | Their chain column (the Chief, etc.)  |
+
+So after vitals: lab first until the sample is collected, then the machine, then back to the Chief once every
+report is in. When the Chief orders tests the same order applies, and the Chief's step is not completed by the
+HealthRay sync while any test is open (sync hold, sweep filters and the `advanceStatus` backstop).
+
+The stations enforce the same order: the lab refuses to collect from a patient who is on a machine, and the
+Machine Room refuses to start while blood is undrawn — including a HealthRay lab case with no floor collection
+recorded. The timeline ends the current step when the Lab or Machine Room takes the patient.

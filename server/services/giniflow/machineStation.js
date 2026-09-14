@@ -1,7 +1,12 @@
 import pool from "../../config/db.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config/storage.js";
 import { opensLabGate, outstandingOf } from "../../../shared/labPayment.js";
-import { STATUS_LABEL, BOARD_COLUMNS, columnForStatus } from "../../../shared/giniflowStatus.js";
+import {
+  STATUS_LABEL,
+  BOARD_COLUMNS,
+  columnForStatus,
+  NOT_A_MARKER_SQL,
+} from "../../../shared/giniflowStatus.js";
 import {
   MACHINE_RUNGS,
   MACHINE_STAGES,
@@ -21,10 +26,37 @@ import {
 } from "../../../shared/machineStages.js";
 import { getMachines } from "./machineCatalog.js";
 import { UNDRAWN_SAMPLE_STATUSES } from "../../../shared/labStages.js";
-import { machineShowsHealthrayReports } from "../../../shared/manualFloor.js";
+import { machineShowsHealthrayReports, labStepsAreManual } from "../../../shared/manualFloor.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 
 const UNDRAWN_LAB = UNDRAWN_SAMPLE_STATUSES.map((v) => `'${v}'`).join(", ");
+
+const BLOOD_NOT_DRAWN_SQL = (manualParam) => `
+            (
+              EXISTS (
+                SELECT 1 FROM giniflow_lab_orders lo
+                 WHERE lo.visit_id = v.id AND lo.urgency = 'today' AND lo.kind = 'lab'
+                   AND lo.sample_status IN (${UNDRAWN_LAB})
+              )
+              OR EXISTS (
+                SELECT 1 FROM lab_cases lc
+                 WHERE lc.case_date = v.visit_date
+                   AND (lc.patient_id = v.patient_id
+                        OR (lc.patient_id IS NULL
+                            AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))
+                   AND NOT EXISTS (
+                     SELECT 1 FROM giniflow_lab_orders lo
+                      WHERE lo.visit_id = v.id AND lo.urgency = 'today' AND lo.kind = 'lab'
+                   )
+                   AND NOT EXISTS (
+                     SELECT 1 FROM giniflow_lab_case_actions a
+                      WHERE a.case_no = lc.case_no
+                        AND a.action IN ('sample_taken', 'report_uploaded')
+                   )
+                   AND (${manualParam}
+                        OR (lc.raw_list_json->>'phlebotomy_status' IS DISTINCT FROM 'Completed'
+                            AND COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'collected_on' IS NULL))
+              ))`;
 
 // The machine room (36-MACHINE-TEST-STATION-PLAN.md).
 //
@@ -89,7 +121,8 @@ async function assertPatientIsFree(db, visitId, what) {
   const { rows } = await db.query(
     `SELECT v.current_status, p.name,
             (SELECT e.meta->>'source' FROM giniflow_visit_events e
-               WHERE e.visit_id = v.id ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1) AS room_source
+               WHERE e.visit_id = v.id AND ${NOT_A_MARKER_SQL("e.status")}
+               ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1) AS room_source
        FROM giniflow_visits v
        JOIN patients p ON p.id = v.patient_id
       WHERE v.id = $1`,
@@ -170,15 +203,11 @@ async function assertReadyToStart(db, visitId, machineName) {
               )
             ) AS vitals_recorded,
             ${labOnlyPredicate("v", "$2")} AS lab_only,
-            EXISTS (
-              SELECT 1 FROM giniflow_lab_orders lo
-               WHERE lo.visit_id = v.id AND lo.urgency = 'today' AND lo.kind = 'lab'
-                 AND lo.sample_status IN (${UNDRAWN_LAB})
-            ) AS blood_not_drawn
+            ${BLOOD_NOT_DRAWN_SQL("$3")} AS blood_not_drawn
        FROM giniflow_visits v
        JOIN patients p ON p.id = v.patient_id
       WHERE v.id = $1`,
-    [visitId, LAB_ONLY_DOCTOR],
+    [visitId, LAB_ONLY_DOCTOR, labStepsAreManual()],
   );
   if (!rows.length) return;
   const { name, vitals_recorded, lab_only, blood_not_drawn } = rows[0];
@@ -216,7 +245,8 @@ export async function getMachineQueue(
             p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
             v.current_status,
             (SELECT e.meta->>'source' FROM giniflow_visit_events e
-               WHERE e.visit_id = v.id ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1) AS room_source,
+               WHERE e.visit_id = v.id AND ${NOT_A_MARKER_SQL("e.status")}
+               ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1) AS room_source,
             d.short_name AS ordered_by,
             COALESCE(t.tests, '[]'::json) AS tests,
             last_ev.occurred_at AS since,
@@ -236,11 +266,7 @@ export async function getMachineQueue(
               )
             ) AS vitals_recorded,
             ${labOnlyPredicate("v", "$3")} AS lab_only,
-            EXISTS (
-              SELECT 1 FROM giniflow_lab_orders lo
-               WHERE lo.visit_id = o.visit_id AND lo.urgency = 'today' AND lo.kind = 'lab'
-                 AND lo.sample_status IN (${UNDRAWN_LAB})
-            ) AS blood_not_drawn
+            ${BLOOD_NOT_DRAWN_SQL("$4")} AS blood_not_drawn
        FROM giniflow_lab_orders o
        JOIN giniflow_visits v ON v.id = o.visit_id
        JOIN patients p ON p.id = v.patient_id
@@ -272,7 +298,7 @@ export async function getMachineQueue(
           )
         )
       ORDER BY o.created_at`,
-    [visitDate, search, LAB_ONLY_DOCTOR],
+    [visitDate, search, LAB_ONLY_DOCTOR, labStepsAreManual()],
   );
 
   const all = rows.map((r) => {
@@ -870,7 +896,7 @@ export async function getMachineTrack(db, visitId, now = new Date()) {
               WHERE e.lab_order_id = o.id AND e.track = 'sample' AND e.status IN ('done', 'reported'))
               AS done_at
        FROM giniflow_lab_orders o
-      WHERE o.visit_id = $1 AND o.kind = 'machine'
+      WHERE o.visit_id = $1 AND o.kind = 'machine' AND o.urgency = 'today'
       ORDER BY o.created_at, tests, o.id`,
     [visitId],
   );

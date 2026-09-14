@@ -46,6 +46,7 @@
     "smoke:machine-access": "node scripts/smoke-machine-access.mjs",
     "smoke:machine-steps": "node scripts/smoke-machine-steps.mjs",
     "smoke:machine-catalog": "node scripts/smoke-machine-catalog.mjs",
+    "smoke:giniflow-machine-board": "node scripts/smoke-giniflow-machine-board.mjs",
     "smoke:lab-steps": "node scripts/smoke-lab-steps.mjs",
     "smoke:lab-room-access": "node scripts/smoke-lab-room-access.mjs",
     "smoke:lab-room-gate": "node scripts/smoke-lab-room-gate.mjs",

@@ -19,6 +19,7 @@ import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { advanceStatus, IST_TODAY } from "./statusEngine.js";
 import { recordHealthrayObservation, firstUnrecordedStation } from "./observation.js";
 import { TESTS_HOLD_SQL, testsOpenInScribe } from "./testsHold.js";
+import { canReadBill, syncBillingForVisitId } from "./machineSync.js";
 
 // Vitals HealthRay recorded, which its appointment status cannot express.
 //
@@ -98,6 +99,9 @@ async function observeHealthrayVitals(client, day) {
 // data, shared by both, which is the one thing the separation decision allows.
 
 const SYNCABLE = Object.keys(HEALTHRAY_STATUS_TO_CHAIN);
+const BILL_RECHECK_MS = 2 * 60 * 1000;
+const BILL_RECHECK_IN_FLIGHT = 2;
+const billRechecks = new Map();
 
 // A visit the floor deliberately took OFF the day must not be put back on it by
 // a poll. `booked` is where every day starts, so it is never evidence of
@@ -114,6 +118,14 @@ const SYNCABLE = Object.keys(HEALTHRAY_STATUS_TO_CHAIN);
 // observation, so it stays with the desk's own Undo button.
 const revivesException = (currentStatus, target) =>
   isExceptionStatus(currentStatus) && target === "booked";
+
+const NOT_ARRIVED = ["booked", "confirmed"];
+
+const absentAfterArrival = (currentStatus, target) =>
+  manualFloor() &&
+  isExceptionStatus(target) &&
+  !NOT_ARRIVED.includes(currentStatus) &&
+  !isExceptionStatus(currentStatus);
 
 // HealthRay reports `in_visit` when the patient reaches the consultation stage,
 // not when a doctor starts. Advancing everyone straight into `with_doctor` would
@@ -167,8 +179,11 @@ async function chiefRoomFree(client, visitDate) {
 // evidence is a prescription with no dispensing record.
 const PHARMACY_LEG = ["doctor_done", "rx_pending", "with_rx", "pharmacy_pending", "dispensed"];
 
-const atPharmacyLeg = (currentStatus, target) =>
-  target === "exited" && PHARMACY_LEG.includes(currentStatus);
+const atPharmacyLeg = (currentStatus, target, online = false) =>
+  target === "exited" && !online && PHARMACY_LEG.includes(currentStatus);
+
+const onlineTarget = (appt, target) =>
+  appt.online_journey && manualFloor() && target === "rx_pending" ? "exited" : target;
 
 async function patientsAwaitingMedicines(client, day) {
   const { rows } = await client.query(
@@ -212,6 +227,7 @@ async function sweepPharmacyLeg(client, day, graceMinutes) {
   const { rows } = await client.query(
     `SELECT v.id
        FROM giniflow_visits v
+       JOIN patients p ON p.id = v.patient_id
        JOIN LATERAL (
          SELECT occurred_at FROM giniflow_visit_events e
           WHERE e.visit_id = v.id AND e.status = ANY($3)
@@ -220,6 +236,7 @@ async function sweepPharmacyLeg(client, day, graceMinutes) {
       WHERE v.visit_date = $1::date
         AND v.current_status = ANY($3)
         AND leg.occurred_at < NOW() - ($2 || ' minutes')::interval
+        AND (SELECT h.tests_pending FROM (${TESTS_HOLD_SQL("v", "p")}) h) = 0
         AND NOT EXISTS (
           SELECT 1 FROM giniflow_visit_events e2
            WHERE e2.visit_id = v.id AND e2.meta->>'source' = 'consult_finalize'
@@ -287,6 +304,7 @@ export async function sweepLabOnlyExits(client, day, graceMinutes = LAB_ONLY_EXI
         AND lab.cases > 0
         AND lab.pending = 0
         AND lab.last_report < NOW() - ($2 || ' minutes')::interval
+        AND (SELECT h.tests_pending FROM (${TESTS_HOLD_SQL("v", "p")}) h) = 0
         AND ${labOnlyPredicate("v", "$4")}`,
     [day, graceMinutes, [...EXCEPTION_STATUSES, ...TERMINAL_STATUSES], LAB_ONLY_DOCTOR],
   );
@@ -318,6 +336,26 @@ export async function sweepLabOnlyExits(client, day, graceMinutes = LAB_ONLY_EXI
     }
   }
   return swept;
+}
+
+const ENGAGED_ROOMS = ["with_sd", "with_doctor"];
+
+async function healthrayEventTime(client, visitId, appt, toStatus) {
+  const stamp =
+    appt.status === "completed"
+      ? appt.engaged_end
+      : appt.status === "in_visit" && ENGAGED_ROOMS.includes(toStatus)
+        ? appt.engaged_start
+        : null;
+  if (!stamp) return null;
+  const { rows } = await client.query(
+    `SELECT GREATEST(
+              LEAST($2::timestamptz, clock_timestamp()),
+              (SELECT max(occurred_at) FROM giniflow_visit_events WHERE visit_id = $1)
+            ) AS at`,
+    [visitId, stamp],
+  );
+  return rows[0].at;
 }
 
 async function hasCheckedInEvent(client, visitId) {
@@ -361,10 +399,15 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
       `SELECT DISTINCT ON (a.patient_id)
               a.id, a.patient_id, a.status, a.time_slot,
               v.id AS visit_id, v.current_status, v.assigned_doctor_id,
+              v.machine_scan_at,
+              a.biomarkers->>'engagedStart' AS engaged_start,
+              a.biomarkers->>'engagedEnd' AS engaged_end,
+              COALESCE(vt.for_online, FALSE) AS online_journey,
               doc.id AS booked_doctor_id
          FROM appointments a
          LEFT JOIN giniflow_visits v
                 ON v.patient_id = a.patient_id AND v.visit_date = a.appointment_date
+         LEFT JOIN flow_visit_types vt ON vt.id = v.visit_type_id
          -- The consultant the patient booked with. HealthRay records it as free
          -- text on the appointment (doctor_name), never as an id, so it is
          -- resolved here against the roster — exactly, and only for someone who
@@ -446,12 +489,18 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
       ? new Set()
       : await patientsAwaitingMedicines(client, day);
 
+    for (const [visitId, recheck] of billRechecks) {
+      if (recheck.done && recheck.day < day) billRechecks.delete(visitId);
+    }
+
     for (const appt of appts) {
-      const target = healthrayTarget(appt.status, HEALTHRAY_STATUS_TO_CHAIN);
+      const target = onlineTarget(appt, healthrayTarget(appt.status, HEALTHRAY_STATUS_TO_CHAIN));
       if (!target) {
         result.skipped++;
         continue;
       }
+      const mayWrite = (status) =>
+        healthrayMayWrite(status) || (appt.online_journey && status === "exited");
 
       // Nothing to do for a visit already at or past the target, or for one the
       // floor took off the day: skip it without opening a transaction. A
@@ -463,7 +512,7 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
       // consultation, and the two absences (39-HYBRID-FLOOR-PLAN.md §4).
       // Without this the 30-second poll walks a patient forward that nobody
       // moved, and undoes a no-show reception marked by hand.
-      if (appt.visit_id && !healthrayMayWrite(target)) {
+      if (appt.visit_id && (!mayWrite(target) || absentAfterArrival(appt.current_status, target))) {
         result.refused++;
         continue;
       }
@@ -471,13 +520,50 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
         appt.visit_id &&
         (appt.current_status === target ||
           revivesException(appt.current_status, target) ||
-          atPharmacyLeg(appt.current_status, target) ||
+          atPharmacyLeg(appt.current_status, target, appt.online_journey) ||
           (isChainStatus(appt.current_status) &&
             isChainStatus(target) &&
             chainIndex(appt.current_status) >= chainIndex(target)))
       ) {
         result.unchanged++;
         continue;
+      }
+
+      if (
+        appt.visit_id &&
+        (target === "rx_pending" || (appt.online_journey && target === "exited")) &&
+        doctorsWaitForTests()
+      ) {
+        const scannedAt = appt.machine_scan_at ? new Date(appt.machine_scan_at).getTime() : 0;
+        const recheck = billRechecks.get(appt.visit_id);
+        if (
+          !recheck &&
+          Date.now() - scannedAt > BILL_RECHECK_MS &&
+          (await canReadBill(appt.visit_id, db))
+        ) {
+          const inFlight = [...billRechecks.values()].filter((r) => !r.done).length;
+          if (inFlight >= BILL_RECHECK_IN_FLIGHT) {
+            result.heldForTests++;
+            continue;
+          }
+          const entry = { done: false, day };
+          billRechecks.set(appt.visit_id, entry);
+          syncBillingForVisitId(appt.visit_id, db)
+            .catch((e) =>
+              console.error(
+                `giniflow appointment sync: bill recheck ${appt.visit_id}: ${e.message}`,
+              ),
+            )
+            .finally(() => {
+              entry.done = true;
+            });
+          result.heldForTests++;
+          continue;
+        }
+        if (recheck && !recheck.done) {
+          result.heldForTests++;
+          continue;
+        }
       }
 
       try {
@@ -507,7 +593,7 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
         // step from the sync by the back door. A visit is created at `booked` and
         // stays there until a person arrives the patient, including one HealthRay
         // already shows as checked in.
-        if (!healthrayMayWrite(target)) {
+        if (!mayWrite(target) || absentAfterArrival(currentStatus, target)) {
           await client.query("COMMIT");
           result.refused++;
           continue;
@@ -521,7 +607,7 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
         const alreadyThere =
           currentStatus === target ||
           revivesException(currentStatus, target) ||
-          atPharmacyLeg(currentStatus, target) ||
+          atPharmacyLeg(currentStatus, target, appt.online_journey) ||
           (isChainStatus(currentStatus) &&
             isChainStatus(target) &&
             chainIndex(currentStatus) >= chainIndex(target));
@@ -610,6 +696,7 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
           toStatus: effective,
           actorRole: "system",
           allowSkip: true,
+          occurredAt: await healthrayEventTime(client, visitId, appt, effective),
           meta,
         });
         await client.query("COMMIT");

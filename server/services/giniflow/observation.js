@@ -81,7 +81,7 @@ export async function firstUnrecordedStation(db, visitId) {
   const { rows } = await db.query(
     `SELECT CASE
               WHEN NOT s.arrived THEN 'reception'
-              WHEN NOT s.lab_only AND NOT s.vitals_recorded THEN 'vitals'
+              WHEN NOT s.lab_only AND NOT s.online AND NOT s.vitals_recorded THEN 'vitals'
               WHEN s.lab_undrawn THEN 'lab'
               WHEN s.lab_unreported THEN 'lab_results'
               WHEN s.machine_open THEN 'machine'
@@ -103,6 +103,10 @@ export async function firstUnrecordedStation(db, visitId) {
                   )
                 ) AS vitals_recorded,
                 ${labOnlyPredicate("v", "$2")} AS lab_only,
+                EXISTS (
+                  SELECT 1 FROM flow_visit_types vt
+                   WHERE vt.id = v.visit_type_id AND vt.for_online
+                ) AS online,
                 EXISTS (
                   SELECT 1 FROM giniflow_lab_orders o
                    WHERE o.visit_id = v.id AND o.urgency = 'today' AND o.kind = 'lab'
@@ -171,6 +175,10 @@ export async function recordHealthrayObservation(client, day) {
               -- doctor, so that station cannot be behind for them.
               ${labOnlyPredicate("v", "$2")} AS lab_only,
               EXISTS (
+                SELECT 1 FROM flow_visit_types vt
+                 WHERE vt.id = v.visit_type_id AND vt.for_online
+              ) AS online,
+              EXISTS (
                 SELECT 1 FROM giniflow_lab_orders o
                  WHERE o.visit_id = v.id AND o.urgency = 'today' AND o.kind = 'lab'
                    AND o.sample_status IN (${quoted(UNDRAWN)})
@@ -196,7 +204,7 @@ export async function recordHealthrayObservation(client, day) {
               CASE
                 WHEN NOT s.ahead THEN NULL
                 WHEN NOT s.arrived THEN 'reception'
-                WHEN NOT s.lab_only AND NOT s.vitals_recorded THEN 'vitals'
+                WHEN NOT s.lab_only AND NOT s.online AND NOT s.vitals_recorded THEN 'vitals'
                 WHEN s.lab_undrawn THEN 'lab'
                 WHEN s.lab_unreported THEN 'lab_results'
                 WHEN s.machine_open THEN 'machine'
