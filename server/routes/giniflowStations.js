@@ -199,6 +199,8 @@ import {
   syncLabStepsFromLab,
 } from "../services/giniflow/journey.js";
 import { sendFlowCheckin } from "../services/msg91.js";
+import { syncBillingForVisitId } from "../services/giniflow/machineSync.js";
+import { machineCaseListOnly } from "../../shared/manualFloor.js";
 import {
   suggestedRows,
   searchTestNames,
@@ -1120,6 +1122,11 @@ router.post(
         }
       }
       res.json({ ...result, whatsappSent });
+      if (machineCaseListOnly()) {
+        syncBillingForVisitId(req.params.visitId).catch((billErr) =>
+          console.error("Gini Flow check-in billing sync failed:", billErr.message),
+        );
+      }
     } catch (e) {
       handleError(res, e, "Gini Flow check-in");
     }

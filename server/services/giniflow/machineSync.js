@@ -1,5 +1,7 @@
 import pool from "../../config/db.js";
 import { fetchPatientTransactions } from "../healthray/client.js";
+import { transactionsToBilling } from "../healthray/billingExtractor.js";
+import { insertLabStepsForOrder, syncLabStepsFromLab } from "./journey.js";
 import { machineFor, MACHINES } from "../../../shared/machineStages.js";
 import { machineCaseListOnly } from "../../../shared/manualFloor.js";
 import { PAYMENT_STATUS } from "../../../shared/labPayment.js";
@@ -90,9 +92,9 @@ async function raiseOrder(client, visitId, machineId, { payment, amount }) {
   return orderId;
 }
 
-async function scanTargets(visitDate, db, limit) {
-  const { rows } = await db.query(
-    `SELECT v.id AS visit_id,
+const TARGET_SELECT = `
+     SELECT v.id AS visit_id,
+            v.visit_date,
             a.healthray_id,
             COALESCE(a.healthray_patient_id, prior.healthray_patient_id) AS hr_patient_id,
             p.name
@@ -105,27 +107,49 @@ async function scanTargets(visitDate, db, limit) {
           WHERE a2.patient_id = v.patient_id AND a2.healthray_patient_id IS NOT NULL
           ORDER BY a2.appointment_date DESC LIMIT 1
        ) prior ON TRUE
-      WHERE v.visit_date = $1::date
-        AND NOT COALESCE(p.is_blocked, FALSE)
-        AND v.current_status <> ALL($2::text[])
-        AND a.healthray_id IS NOT NULL
+      WHERE NOT COALESCE(p.is_blocked, FALSE)
+        AND v.current_status <> ALL($1::text[])
+        AND a.healthray_id IS NOT NULL`;
+
+async function scanTargets(visitDate, db, limit) {
+  const { rows } = await db.query(
+    `${TARGET_SELECT}
+        AND v.visit_date = $2::date
         AND (v.machine_scan_at IS NULL OR v.machine_scan_at < NOW() - ($3 || ' minutes')::interval)
       ORDER BY v.machine_scan_at NULLS FIRST, v.created_at
       LIMIT $4`,
-    [visitDate, NEVER_ARRIVED, String(RESCAN_MIN), limit],
+    [NEVER_ARRIVED, visitDate, String(RESCAN_MIN), limit],
   );
   return rows.filter((r) => r.hr_patient_id);
 }
 
+const labTestsBilled = (txns, visit) =>
+  transactionsToBilling(txns, {
+    appointmentId: visit.healthray_id,
+    date: visit.visit_date,
+  })?.steps.find((s) => s.step_catalog_id === "blood_sample")?.tests || [];
+
 export async function syncMachineOrdersForVisit(visit, db = pool) {
   const txns = await fetchPatientTransactions(visit.hr_patient_id);
   const lines = machineLines(txns, visit.healthray_id);
-  if (!lines.length) return { raised: 0, lines: 0 };
+  const labTests = labTestsBilled(txns, visit);
+  if (!lines.length && !labTests.length) return { raised: 0, lines: 0, labSteps: [] };
 
   const client = await db.connect();
   let raised = 0;
+  let labSteps = [];
   try {
     await client.query("BEGIN");
+    if (labTests.length) {
+      labSteps = (await insertLabStepsForOrder(client, visit.visit_id)).added;
+      if (labSteps.length) {
+        await syncLabStepsFromLab(client, visit.visit_id);
+        log(
+          "lab",
+          `${visit.name}: added ${labSteps.join(", ")} for ${labTests.length} billed test(s)`,
+        );
+      }
+    }
     for (const line of lines) {
       for (const machineId of line.machines) {
         if (await alreadyRaised(client, visit.visit_id, machineId)) continue;
@@ -144,7 +168,16 @@ export async function syncMachineOrdersForVisit(visit, db = pool) {
   } finally {
     client.release();
   }
-  return { raised, lines: lines.length };
+  return { raised, lines: lines.length, labSteps };
+}
+
+export async function syncBillingForVisitId(visitId, db = pool) {
+  const { rows } = await db.query(`${TARGET_SELECT} AND v.id = $2`, [NEVER_ARRIVED, visitId]);
+  const visit = rows.find((r) => r.hr_patient_id);
+  if (!visit) return { raised: 0, lines: 0, labSteps: [] };
+  const result = await syncMachineOrdersForVisit(visit, db);
+  await db.query(`UPDATE giniflow_visits SET machine_scan_at = NOW() WHERE id = $1`, [visitId]);
+  return result;
 }
 
 export async function runMachineSync(dateStr, { limit = SCAN_BATCH, db = pool } = {}) {

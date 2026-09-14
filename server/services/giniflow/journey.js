@@ -357,6 +357,7 @@ export async function checkInWithJourney(
       // Guarded by `alreadyPlanned` for the same reason the steps are — a second
       // press at a busy counter must not bill the patient twice.
       raised = await raiseOrdersFromSteps(client, visitId, steps, actorId);
+      await insertLabStepsIfHealthrayCase(client, visitId);
     }
 
     // Assigning a doctor on the journey has to mean what it looks like it
@@ -496,6 +497,7 @@ export async function ensurePlan(visitId, db = pool) {
     // The patient may already be halfway down the floor, so the plan they were
     // given retrospectively has to agree with where they actually are.
     await syncFromStatus(client, visitId, visit.current_status);
+    await insertLabStepsIfHealthrayCase(client, visitId);
     await client.query("COMMIT");
     return { seeded: true, visitTypeId };
   } catch (e) {
@@ -627,7 +629,10 @@ export async function insertLabStepsForOrder(client, visitId) {
   const pendingSample = plan.find(
     (s) => s.step_catalog_id === "blood_sample" && s.status === "pending",
   );
-  const firstPending = pendingSample || plan.find((s) => s.status === "pending");
+  const firstPending =
+    pendingSample ||
+    plan.find((s) => s.status === "pending" && s.step_catalog_id !== "vitals") ||
+    plan.find((s) => s.status === "pending");
   const at = firstPending ? firstPending.step_order : plan[plan.length - 1].step_order + 1;
 
   await client.query(`SET CONSTRAINTS giniflow_visit_steps_order DEFERRED`);
@@ -664,6 +669,17 @@ export async function insertLabStepsForOrder(client, visitId) {
     [visitId, ordered.reduce((sum, c) => sum + (c.default_duration_min || 0), 0)],
   );
   return { added: ordered.map((c) => c.id) };
+}
+
+export async function insertLabStepsIfHealthrayCase(client, visitId) {
+  const { rows } = await client.query(
+    `SELECT ${HR_LAB_EVIDENCE_SQL}
+       FROM giniflow_visits v JOIN patients p ON p.id = v.patient_id
+      WHERE v.id = $1`,
+    [visitId],
+  );
+  if (!(rows[0]?.hr_cases > 0)) return { added: [] };
+  return insertLabStepsForOrder(client, visitId);
 }
 
 // The lab's own record, read back onto the journey. Lab Billing and Blood Sample
