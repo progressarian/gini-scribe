@@ -910,6 +910,10 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
   const visit = data?.visit;
   const steps = data?.steps || [];
   const labTrack = data?.labTrack || [];
+  const machineTrack = data?.machineTrack || [];
+  const machineLive = (m) =>
+    m.state === "running" ? (minutesSince(m.startedAt, now) ?? m.minutes) : m.minutes;
+  const machineMinutes = machineTrack.reduce((sum, m) => sum + (machineLive(m) || 0), 0);
 
   // The step the patient is standing in keeps counting while the modal is open;
   // finished steps are already fixed (GF-24).
@@ -1041,6 +1045,47 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
                   <div className="ts-body">
                     <div className="ts-name">{step.label}</div>
                     <div className="ts-time">{clockAt(step.enteredAt)}</div>
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+          {machineTrack.length > 0 && (
+            <>
+              <div className="ts-track-hd">
+                🩺 Machine tests — {machineMinutes}m on the machines
+              </div>
+              {machineTrack.map((m) => (
+                <div className="tstep" key={m.orderId}>
+                  <div
+                    className={`ts-dot ${
+                      m.state === "done"
+                        ? "tsd-done"
+                        : m.state === "running"
+                          ? "tsd-now"
+                          : "tsd-next"
+                    }`}
+                  >
+                    {m.state === "done" ? "✓" : m.state === "running" ? "●" : "○"}
+                  </div>
+                  <div className="ts-body">
+                    <div className={`ts-name${m.state === "waiting" ? " dim" : ""}`}>{m.label}</div>
+                    <div className="ts-time">
+                      {m.state === "done"
+                        ? m.startedAt
+                          ? `${clockAt(m.startedAt)} → ${clockAt(m.doneAt)}`
+                          : `Done ${clockAt(m.doneAt)}`
+                        : m.state === "running"
+                          ? `Since ${clockAt(m.startedAt)}`
+                          : `Ordered ${clockAt(m.orderedAt)}`}
+                    </div>
+                    <span className={`ts-dur ${m.state === "waiting" ? "tsd-next-dur" : "tsd-n"}`}>
+                      {m.state === "waiting"
+                        ? "not started yet"
+                        : m.state === "done" && !m.startedAt
+                          ? "start was not recorded"
+                          : `${machineLive(m) ?? 0}m on the machine`}
+                    </span>
                   </div>
                 </div>
               ))}

@@ -11,6 +11,7 @@ import { labStepsAreManual } from "../../../shared/manualFloor.js";
 import { genVisitToken } from "../flow/journey.js";
 import { LAB_RUNGS, stageIndexOf, rungFor } from "../../../shared/labStages.js";
 import { machineFor } from "../../../shared/machineStages.js";
+import { testsBeforeDoctors } from "../../../shared/journeyOrder.js";
 import { addMachineTestOn } from "./machineStation.js";
 import { testPricesFor, schemeForVisit } from "../pricing.js";
 
@@ -408,6 +409,7 @@ export async function checkInWithJourney(
       // press at a busy counter must not bill the patient twice.
       raised = await raiseOrdersFromSteps(client, visitId, steps, actorId);
       await insertLabStepsIfHealthrayCase(client, visitId);
+      await placeTestsBeforeDoctors(client, visitId);
     }
 
     // Assigning a doctor on the journey has to mean what it looks like it
@@ -653,6 +655,29 @@ export async function syncFromStatus(client, visitId, toStatus) {
 //
 // Runs inside the caller's transaction: an order that rolls back must not leave
 // stops behind for tests nobody ordered.
+export async function placeTestsBeforeDoctors(client, visitId) {
+  const { rows: plan } = await client.query(
+    `SELECT id, step_catalog_id, step_order, status, chain_status
+       FROM giniflow_visit_steps WHERE visit_id = $1 ORDER BY step_order`,
+    [visitId],
+  );
+  const next = testsBeforeDoctors(plan, {
+    idOf: (s) => s.step_catalog_id,
+    chainOf: (s) => s.chain_status,
+    statusOf: (s) => s.status,
+  });
+  if (next === plan) return false;
+
+  await client.query(`SET CONSTRAINTS giniflow_visit_steps_order DEFERRED`);
+  await client.query(
+    `UPDATE giniflow_visit_steps s SET step_order = x.ord
+       FROM unnest($1::uuid[], $2::int[]) AS x(id, ord)
+      WHERE s.id = x.id`,
+    [next.map((s) => s.id), next.map((_, i) => i + 1)],
+  );
+  return true;
+}
+
 const firstPendingAfterVitals = (plan) =>
   plan.find((s) => s.status === "pending" && s.step_catalog_id !== "vitals") ||
   plan.find((s) => s.status === "pending");
@@ -666,7 +691,10 @@ async function insertAutoSteps(client, visitId, wanted, placeIn) {
   if (!plan.length) return { added: [] };
 
   const missing = wanted.filter((id) => !plan.some((s) => s.step_catalog_id === id));
-  if (!missing.length) return { added: [] };
+  if (!missing.length) {
+    await placeTestsBeforeDoctors(client, visitId);
+    return { added: [] };
+  }
 
   const { rows: catalog } = await client.query(
     `SELECT id, name, default_duration_min, station, assigned_role, chain_status
@@ -710,6 +738,7 @@ async function insertAutoSteps(client, visitId, wanted, placeIn) {
       WHERE id = $1`,
     [visitId, ordered.reduce((sum, c) => sum + (c.default_duration_min || 0), 0)],
   );
+  await placeTestsBeforeDoctors(client, visitId);
   return { added: ordered.map((c) => c.id) };
 }
 

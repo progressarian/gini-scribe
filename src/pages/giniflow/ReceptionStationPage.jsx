@@ -24,6 +24,7 @@ import JourneyBuilder from "../../components/giniflow/JourneyBuilder";
 import { useFlowVisitTypes } from "../../queries/hooks/useFlow";
 import { stepPassesConditions } from "../../../shared/giniflowConditions.js";
 import { hasNotStarted } from "../../../shared/giniflowStatus.js";
+import { testsBeforeDoctors } from "../../../shared/journeyOrder.js";
 import { categoryColor, categoryLabel } from "../../../shared/patientCategories.js";
 import {
   useJourneyPlan,
@@ -480,7 +481,7 @@ export function PaymentsTab({ data, isLoading, onClear, pending, actorId }) {
 // that plans it, so backing out of the panel leaves the patient exactly as they
 // were found, with nothing on the floor to undo.
 const withBilledSteps = (list, billed = []) => {
-  if (!billed.length) return list;
+  if (!billed.length) return testsBeforeDoctors(list);
   const ids = new Set(billed.map((b) => b.catalogId));
   const rest = list.filter((s) => !ids.has(s.catalogId));
   const merged = billed.map((b) => {
@@ -494,7 +495,7 @@ const withBilledSteps = (list, billed = []) => {
       : { ...b, source: "auto" };
   });
   const at = rest.findIndex((s) => s.catalogId === "vitals") + 1;
-  return [...rest.slice(0, at), ...merged, ...rest.slice(at)];
+  return testsBeforeDoctors([...rest.slice(0, at), ...merged, ...rest.slice(at)]);
 };
 
 const billNote = (bill, loading) => {

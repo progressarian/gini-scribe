@@ -38,6 +38,7 @@ import { setPriority, reorderColumn, moveToColumn } from "../services/giniflow/q
 import { seedDemoDay, cleanDemoDay, demoAllowed } from "../services/giniflow/demo.js";
 import { addClient, removeClient, hubStatus } from "../services/giniflow/eventHub.js";
 import { trackByToken } from "../services/giniflow/journey.js";
+import { getMachineTrack } from "../services/giniflow/machineStation.js";
 
 const router = Router();
 
@@ -299,10 +300,13 @@ router.get("/giniflow/visits/:id/timeline", async (req, res) => {
           labPending: labTrack.length > 0 && !labReported,
         });
 
+    const machineTrack = await getMachineTrack(pool, req.params.id, now);
+
     res.json({
       visit: { ...visit.rows[0], labOnly },
       steps,
       labTrack,
+      machineTrack,
       serverTime: now.toISOString(),
     });
   } catch (e) {

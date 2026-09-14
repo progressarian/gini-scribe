@@ -842,3 +842,42 @@ export async function removeMachineReport(orderId, { actorId = null } = {}, db =
 
   return { orderId, removed: storagePath };
 }
+
+export async function getMachineTrack(db, visitId, now = new Date()) {
+  const { rows } = await db.query(
+    `SELECT o.id, o.sample_status, o.created_at,
+            (SELECT string_agg(t.test_name, ', ' ORDER BY t.test_name)
+               FROM giniflow_lab_order_tests t WHERE t.lab_order_id = o.id) AS tests,
+            (SELECT min(e.occurred_at) FROM giniflow_lab_order_events e
+              WHERE e.lab_order_id = o.id AND e.track = 'sample' AND e.status = 'in_progress')
+              AS started_at,
+            (SELECT min(e.occurred_at) FROM giniflow_lab_order_events e
+              WHERE e.lab_order_id = o.id AND e.track = 'sample' AND e.status IN ('done', 'reported'))
+              AS done_at
+       FROM giniflow_lab_orders o
+      WHERE o.visit_id = $1 AND o.kind = 'machine'
+      ORDER BY o.created_at, tests, o.id`,
+    [visitId],
+  );
+  const minutes = (from, to) =>
+    from
+      ? Math.max(0, Math.round((new Date(to).getTime() - new Date(from).getTime()) / 60000))
+      : null;
+  return rows.map((r) => {
+    const done = !!r.done_at || r.sample_status === "reported";
+    const running = !done && !!r.started_at;
+    return {
+      orderId: r.id,
+      label: r.tests || "Machine test",
+      state: done ? "done" : running ? "running" : "waiting",
+      orderedAt: new Date(r.created_at).toISOString(),
+      startedAt: r.started_at ? new Date(r.started_at).toISOString() : null,
+      doneAt: r.done_at ? new Date(r.done_at).toISOString() : null,
+      minutes: done
+        ? minutes(r.started_at, r.done_at)
+        : running
+          ? minutes(r.started_at, now)
+          : null,
+    };
+  });
+}
