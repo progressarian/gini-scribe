@@ -61,6 +61,20 @@ const STATIONS = [
     href: "/giniflow/station/machine",
   },
   {
+    key: "echo",
+    icon: "❤️",
+    name: "Echo Station",
+    desc: "2D Echo — call the patient, run the scan, file the report",
+    href: "/giniflow/station/echo",
+  },
+  {
+    key: "xray",
+    icon: "🩻",
+    name: "X-Ray Station",
+    desc: "X-Ray — call the patient, run the scan, file the report",
+    href: "/giniflow/station/xray",
+  },
+  {
     key: "mo_sd",
     icon: "👨‍⚕️",
     name: "Chief Endocrinologist",

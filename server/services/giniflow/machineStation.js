@@ -23,11 +23,13 @@ import {
   waitMinutesFor,
   machineIdForDocType,
   machineDocTypes,
+  machinesForStation,
 } from "../../../shared/machineStages.js";
 import { getMachines } from "./machineCatalog.js";
 import { UNDRAWN_SAMPLE_STATUSES } from "../../../shared/labStages.js";
 import { machineShowsHealthrayReports, labStepsAreManual } from "../../../shared/manualFloor.js";
-import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
+import { LAB_ONLY_DOCTOR, labOnlyPredicate, labOnlyHiddenPredicate } from "./labOnlyVisits.js";
+import { hideLabOnlyPatients } from "./floorSettings.js";
 
 const UNDRAWN_LAB = UNDRAWN_SAMPLE_STATUSES.map((v) => `'${v}'`).join(", ");
 
@@ -114,6 +116,23 @@ const machineOf = (machines, tests) => {
   return null;
 };
 
+// Refused in the service, not just hidden on the screen — the same shape as
+// P1/P2/P3 below. A capability gates the route; this is what actually stops an
+// echo_tech acting on an ABI order (or a machine_tech on an Echo one) reached
+// through a stale tab or a hand-built request.
+const assertMachineInStation = (catalogue, machineId, station) => {
+  if (!station) return;
+  // A one-off test name that matches no catalogue machine stays the default
+  // station's problem, exactly as the queue filter treats it — a dedicated
+  // station like Echo never inherits ambiguous work.
+  if (!machineId) {
+    if (station === "machine_room") return;
+  } else if (machinesForStation(catalogue, station).some((m) => m.id === machineId)) {
+    return;
+  }
+  throw Object.assign(new Error("That test does not belong to this station"), { status: 403 });
+};
+
 // P1. Copied in meaning from the lab's own rule, not shared with it: the lab
 // applies this to collection alone, and here it governs two rungs.
 async function assertPatientIsFree(db, visitId, what) {
@@ -189,8 +208,10 @@ async function assertMachineFree(db, machineId, visitDate, exceptOrderId = null)
 // and where a patient is billed for blood as well, the draw before the machine.
 // Enforced on the START of the test only — a test already running must never
 // become unfinishable because of a box nobody ticked upstream.
-async function assertReadyToStart(db, visitId, machineName) {
+async function assertReadyToStart(db, visitId, catalogue, machineId) {
   if (!visitId) return;
+  const machine = machineFor(catalogue, machineId);
+  const machineName = machine?.name || "machine";
   const { rows } = await db.query(
     `SELECT p.name,
             (
@@ -227,16 +248,46 @@ async function assertReadyToStart(db, visitId, machineName) {
       { status: 409 },
     );
   }
+  // A machine can require another one done first — today only Echo, which
+  // requires X-ray (46-XRAY-STATION-PLAN.md). Generic rather than hardcoded:
+  // any machine row can carry `requiresBefore`.
+  if (machine?.requiresBefore) {
+    const blocker = machineFor(catalogue, machine.requiresBefore);
+    if (blocker) {
+      const { rows: openRows } = await db.query(
+        `SELECT array_agg(t.test_name) AS names
+           FROM giniflow_lab_orders o
+           JOIN giniflow_lab_order_tests t ON t.lab_order_id = o.id
+          WHERE o.visit_id = $1 AND o.kind = 'machine' AND o.sample_status <> 'reported'`,
+        [visitId],
+      );
+      const stillOpen = (openRows[0]?.names || []).some(
+        (n) => machineForTest(catalogue, n)?.id === blocker.id,
+      );
+      if (stillOpen) {
+        throw Object.assign(
+          new Error(`${name}'s ${blocker.name} must be done before the ${machineName}`),
+          { status: 409 },
+        );
+      }
+    }
+  }
 }
 
 export async function getMachineQueue(
   visitDate,
   q = null,
   db = pool,
-  { machine = null, group = "all" } = {},
+  { machine = null, group = "all", station = null } = {},
 ) {
   const search = q && String(q).trim().length >= 2 ? String(q).trim() : null;
+  const hideLabOnly = await hideLabOnlyPatients(db);
   const catalogue = await getMachines(db);
+  // Additive to the `machine` filter below, not a replacement: a station's
+  // screen always calls with its own `station` and never sees another
+  // station's machines, whether or not it also asked for one machine's tab.
+  const stationMachines = station ? machinesForStation(catalogue, station) : catalogue;
+  const stationIds = new Set(stationMachines.map((m) => m.id));
 
   const { rows } = await db.query(
     `SELECT o.id, o.visit_id, o.sample_status, o.payment_status, o.urgency,
@@ -287,6 +338,10 @@ export async function getMachineQueue(
         AND NOT COALESCE(p.is_blocked, FALSE)
         AND o.urgency = 'today'
         AND v.current_status NOT IN ('no_show', 'cancelled')
+        -- Samples-only patients don't show on any station screen while the
+        -- floor has that toggled on (settings/flow) — see
+        -- awaitingRegistration() in labStation.js for where this started.
+        AND NOT ${labOnlyHiddenPredicate("v", "$3", "$5")}
         AND (
           $2::text IS NULL
           OR p.name ILIKE '%' || $2 || '%'
@@ -298,10 +353,10 @@ export async function getMachineQueue(
           )
         )
       ORDER BY o.created_at`,
-    [visitDate, search, LAB_ONLY_DOCTOR, labStepsAreManual()],
+    [visitDate, search, LAB_ONLY_DOCTOR, labStepsAreManual(), hideLabOnly],
   );
 
-  const all = rows.map((r) => {
+  let all = rows.map((r) => {
     const paid = opensLabGate(r.payment_status);
     const stage = stageOf(r.sample_status);
     const machineId = machineOf(catalogue, r.tests);
@@ -370,6 +425,40 @@ export async function getMachineQueue(
     };
   });
 
+  // A machine can require another one done first — today only Echo, which
+  // requires X-ray (46-XRAY-STATION-PLAN.md). Cross-station and computed
+  // BEFORE the station filter below, since the blocker (X-ray) usually lives
+  // on a different screen than the row it blocks (Echo) — the button must
+  // still not be offered here even though the blocking order is invisible on
+  // this screen.
+  const openMachinesByVisit = new Map();
+  for (const o of all) {
+    if (o.stage !== "reported" && o.machine) {
+      if (!openMachinesByVisit.has(o.visitId)) openMachinesByVisit.set(o.visitId, new Set());
+      openMachinesByVisit.get(o.visitId).add(o.machine);
+    }
+  }
+  for (const o of all) {
+    if (o.stage !== "ordered" || !o.machine) continue;
+    const requiresBefore = machineFor(catalogue, o.machine)?.requiresBefore;
+    if (!requiresBefore) continue;
+    if (openMachinesByVisit.get(o.visitId)?.has(requiresBefore)) {
+      const blocker = machineFor(catalogue, requiresBefore);
+      o.blockedReason =
+        o.blockedReason || `${blocker?.name || requiresBefore} must be done before this test`;
+      o.nextAction = null;
+    }
+  }
+
+  all = all.filter((o) => {
+    if (!station) return true;
+    // An order whose test name matches no machine at all stays the default
+    // station's problem, the same way it always has — a dedicated station like
+    // Echo only ever sees its own, unambiguous work.
+    if (!o.machine) return station === "machine_room";
+    return stationIds.has(o.machine);
+  });
+
   // P2, on the screen as well as in the service. A machine with somebody on it
   // cannot take a second patient, so the queue behind it must not be offered a
   // Start button — the service would refuse the tap, and a button that answers
@@ -389,14 +478,14 @@ export async function getMachineQueue(
   // Server-side, both of them: the screen asks for a machine and a group and
   // gets only those rows. Counts are whole-day and computed before any filter,
   // so a chip does not read 0 the moment another chip is pressed.
-  const wantedMachine = catalogue.some((m) => m.id === machine) ? machine : null;
+  const wantedMachine = stationMachines.some((m) => m.id === machine) ? machine : null;
   const wantedGroup = MACHINE_FILTER_TO_STAGE[group] ? group : "all";
 
   const counts = Object.fromEntries(
     MACHINE_RUNGS.map((r) => [r.filter, all.filter((o) => o.stage === r.key).length]),
   );
 
-  const machines = catalogue.map((m) => {
+  const machines = stationMachines.map((m) => {
     const mine = all.filter((o) => o.machine === m.id);
     const onIt = mine.find((o) => o.stage === "in_progress") || null;
     const waiting = mine.filter((o) => o.stage === "ordered");
@@ -454,9 +543,15 @@ export async function getMachineQueue(
 // check-in panel, and every rule here has to hold there too — one open test per
 // machine, a patient still on the floor, a price to bill. Two implementations
 // would mean two sets of rules and only one of them enforced.
-export async function addMachineTestOn(client, visitId, { machineId, actorId = null } = {}) {
-  const machine = machineFor(await getMachines(client), machineId);
+export async function addMachineTestOn(
+  client,
+  visitId,
+  { machineId, actorId = null, station = null } = {},
+) {
+  const catalogue = await getMachines(client);
+  const machine = machineFor(catalogue, machineId);
   if (!machine) throw Object.assign(new Error(`Unknown machine: ${machineId}`), { status: 400 });
+  assertMachineInStation(catalogue, machineId, station);
 
   const { rows: visit } = await client.query(
     `SELECT v.id, v.visit_date, v.current_status, p.name
@@ -527,11 +622,15 @@ export async function addMachineTestOn(client, visitId, { machineId, actorId = n
   return { orderId, machine: machine.id, name: visit[0].name, alreadyThere: false, price };
 }
 
-export async function addMachineTest(visitId, { machineId, actorId = null } = {}, db = pool) {
+export async function addMachineTest(
+  visitId,
+  { machineId, actorId = null, station = null } = {},
+  db = pool,
+) {
   const client = await db.connect();
   try {
     await client.query("BEGIN");
-    const result = await addMachineTestOn(client, visitId, { machineId, actorId });
+    const result = await addMachineTestOn(client, visitId, { machineId, actorId, station });
     await client.query("COMMIT");
     return result;
   } catch (e) {
@@ -545,8 +644,39 @@ export async function addMachineTest(visitId, { machineId, actorId = null } = {}
 // Who is on the floor right now and could be walked to a machine. Anybody not
 // finished — a machine test is a detour, not a step in the chain, so it does not
 // matter which station currently holds them.
+// Which machine (if any) an existing order is for — used by the route layer to
+// guard the report upload path, which is shared with the lab and so cannot
+// itself take a `station` argument without also constraining lab uploads.
+export async function assertOrderInStation(orderId, station, db = pool) {
+  if (!station) return;
+  const { rows } = await db.query(
+    `SELECT o.kind, COALESCE(t.names, ARRAY[]::text[]) AS names
+       FROM giniflow_lab_orders o
+       LEFT JOIN LATERAL (
+         SELECT array_agg(lt.test_name) AS names
+           FROM giniflow_lab_order_tests lt WHERE lt.lab_order_id = o.id
+       ) t ON TRUE
+      WHERE o.id = $1`,
+    [orderId],
+  );
+  if (!rows.length) throw Object.assign(new Error("Order not found"), { status: 404 });
+  const row = rows[0];
+  if (row.kind !== "machine") {
+    throw Object.assign(new Error("That order belongs to the lab, not the machine room"), {
+      status: 409,
+    });
+  }
+  const catalogue = await getMachines(db);
+  const orderMachine = machineOf(
+    catalogue,
+    row.names.map((n) => ({ name: n })),
+  );
+  assertMachineInStation(catalogue, orderMachine, station);
+}
+
 export async function machineCandidates(visitDate, q = null, db = pool) {
   const search = q && String(q).trim().length >= 2 ? String(q).trim() : null;
+  const hideLabOnly = await hideLabOnlyPatients(db);
   const { rows } = await db.query(
     `SELECT v.id AS visit_id, p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
             v.current_status
@@ -555,6 +685,7 @@ export async function machineCandidates(visitDate, q = null, db = pool) {
       WHERE v.visit_date = $1::date
         AND NOT COALESCE(p.is_blocked, FALSE)
         AND v.current_status <> ALL($3::text[])
+        AND NOT ${labOnlyHiddenPredicate("v", "$4", "$5")}
         AND (
           $2::text IS NULL
           OR p.name ILIKE '%' || $2 || '%'
@@ -562,7 +693,7 @@ export async function machineCandidates(visitDate, q = null, db = pool) {
         )
       ORDER BY p.name
       LIMIT 40`,
-    [visitDate, search, FINISHED],
+    [visitDate, search, FINISHED, LAB_ONLY_DOCTOR, hideLabOnly],
   );
   return rows.map((r) => ({
     visitId: r.visit_id,
@@ -577,7 +708,7 @@ export async function machineCandidates(visitDate, q = null, db = pool) {
 
 export async function advanceMachineTest(
   orderId,
-  { to, actorId = null, reportUrl = null },
+  { to, actorId = null, reportUrl = null, station = null },
   db = pool,
 ) {
   if (!MACHINE_SAMPLE_FLOW.includes(to)) {
@@ -643,12 +774,9 @@ export async function advanceMachineTest(
       catalogue,
       row.names.map((n) => ({ name: n })),
     );
+    assertMachineInStation(catalogue, orderMachine, station);
     if (toStage === "in_progress") {
-      await assertReadyToStart(
-        client,
-        row.visit_id,
-        machineFor(catalogue, orderMachine)?.name || "machine",
-      );
+      await assertReadyToStart(client, row.visit_id, catalogue, orderMachine);
       await assertMachineFree(client, orderMachine, row.visit_date, orderId);
     }
     // The evidence gate — and here it covers FINISHING the test, not only filing
@@ -748,9 +876,14 @@ export async function advanceMachineTest(
 //
 // Read-only, deliberately: there is nothing to record after the fact that would
 // be true. Nobody can say at six in the evening who was at the machine at 15:29.
-export async function getMachineReconciliation(visitDate, db = pool) {
+export async function getMachineReconciliation(visitDate, db = pool, station = null) {
   if (!machineShowsHealthrayReports()) return [];
-  const catalogue = await getMachines(db);
+  const fullCatalogue = await getMachines(db);
+  // Scoped the same way the queue is: Echo's reconciliation must not show an
+  // unmatched ABI report, and Machine Room's must not show an unmatched Echo
+  // or X-ray one — each station's "what arrived with no order" is its own.
+  const catalogue = station ? machinesForStation(fullCatalogue, station) : fullCatalogue;
+  if (station && !catalogue.length) return [];
   const { rows } = await db.query(
     `SELECT d.id, d.doc_type, d.title, d.doc_date::text AS doc_date, d.created_at,
             p.id AS patient_id, p.name, p.file_no, v.current_status,
@@ -829,12 +962,22 @@ export async function getMachineReconciliation(visitDate, db = pool) {
   return [...byPatient.values()].sort((a, b) => (b.at || "").localeCompare(a.at || ""));
 }
 
-export async function removeMachineReport(orderId, { actorId = null } = {}, db = pool) {
+export async function removeMachineReport(
+  orderId,
+  { actorId = null, station = null } = {},
+  db = pool,
+) {
   const { rows } = await db.query(
     `SELECT o.kind, o.report_file_url, o.sample_status,
+            COALESCE(t.names, ARRAY[]::text[]) AS names,
             (SELECT doc.id FROM documents doc WHERE doc.giniflow_lab_order_id = o.id)
               AS report_doc_id
-       FROM giniflow_lab_orders o WHERE o.id = $1`,
+       FROM giniflow_lab_orders o
+       LEFT JOIN LATERAL (
+         SELECT array_agg(lt.test_name) AS names
+           FROM giniflow_lab_order_tests lt WHERE lt.lab_order_id = o.id
+       ) t ON TRUE
+      WHERE o.id = $1`,
     [orderId],
   );
   if (!rows.length) throw Object.assign(new Error("Order not found"), { status: 404 });
@@ -844,6 +987,12 @@ export async function removeMachineReport(orderId, { actorId = null } = {}, db =
       status: 409,
     });
   }
+  const catalogue = await getMachines(db);
+  const orderMachine = machineOf(
+    catalogue,
+    row.names.map((n) => ({ name: n })),
+  );
+  assertMachineInStation(catalogue, orderMachine, station);
   if (!row.report_file_url && !row.report_doc_id) {
     throw Object.assign(new Error("There is no report on this test to remove"), { status: 409 });
   }

@@ -868,6 +868,10 @@ export const giniflowCatalogTestPatchSchema = z
     message: "Nothing to change",
   });
 
+export const giniflowFloorSettingSchema = z.object({
+  value: z.boolean(),
+});
+
 // A test this patient needs that the clinic list does not have. It rides on the
 // ORDER, not the catalogue: one patient's ultrasound is not a test every other
 // patient should be offered.

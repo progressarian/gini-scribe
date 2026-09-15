@@ -10,6 +10,8 @@ import { syncLabStepsFromLab, suggestVisitType } from "./journey.js";
 import { searchDayVisits } from "./board.js";
 import { blockDetail } from "../patientBlockView.js";
 import { createWalkinBooking } from "../walkinBooking.js";
+import { LAB_ONLY_DOCTOR, labOnlyHiddenPredicate } from "./labOnlyVisits.js";
+import { hideLabOnlyPatients } from "./floorSettings.js";
 import {
   CLAIM_STATE,
   collectiblePaise,
@@ -70,7 +72,12 @@ const ORDER_SELECT = `
      -- taking.
      AND o.urgency = 'today'
      -- A patient who never arrived or has gone home is not at the counter.
-     AND v.current_status NOT IN ('no_show', 'cancelled')`;
+     AND v.current_status NOT IN ('no_show', 'cancelled')
+     -- Samples-only patients don't show on any station screen while the
+     -- floor has that toggled on (settings/flow) — see awaitingRegistration()
+     -- in labStation.js for where this started. Their billing runs through
+     -- HealthRay directly, not this queue.
+     AND NOT ${labOnlyHiddenPredicate("v", "$2", "$3")}`;
 
 // An order written before amount_total existed carries the price only on its
 // test lines. The card falls back to their sum, so the money maths has to use
@@ -123,7 +130,11 @@ const shape = (r) => ({
 });
 
 export async function getPaymentQueue(visitDate, db = pool) {
-  const { rows } = await db.query(`${ORDER_SELECT} ORDER BY o.created_at`, [visitDate]);
+  const { rows } = await db.query(`${ORDER_SELECT} ORDER BY o.created_at`, [
+    visitDate,
+    LAB_ONLY_DOCTOR,
+    await hideLabOnlyPatients(db),
+  ]);
   const orders = rows.map(shape);
 
   // Anything not settled is still reception's work: an untouched order, one
@@ -639,6 +650,12 @@ const ARRIVAL_SELECT = `
    WHERE v.visit_date = $1::date
      AND NOT COALESCE(p.is_blocked, FALSE)
      AND v.merged_into_visit_id IS NULL
+     -- Samples-only patients don't show on any station screen while the
+     -- floor has that toggled on (settings/flow) — see awaitingRegistration()
+     -- in labStation.js for where this started. Their check-in status is set
+     -- automatically by the HealthRay sync regardless of what this screen
+     -- shows, so hiding them here doesn't stop that.
+     AND NOT ${labOnlyHiddenPredicate("v", "$2", "$3")}
    ORDER BY v.appointment_time NULLS LAST, p.name`;
 
 const minutesBetween = (from, now) =>
@@ -696,7 +713,11 @@ const shapeArrival = (r, now) => ({
 });
 
 export async function getArrivals(visitDate, q = "", now = new Date(), db = pool) {
-  const { rows } = await db.query(ARRIVAL_SELECT, [visitDate]);
+  const { rows } = await db.query(ARRIVAL_SELECT, [
+    visitDate,
+    LAB_ONLY_DOCTOR,
+    await hideLabOnlyPatients(db),
+  ]);
 
   // Server-side, and the board's own search rather than a second implementation:
   // it already normalises phone numbers the way the rest of the repo does, and a

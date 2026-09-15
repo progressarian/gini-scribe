@@ -17,6 +17,7 @@ import {
   chainIndex,
 } from "../../../shared/giniflowStatus.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
+import { hideLabOnlyPatients } from "./floorSettings.js";
 import { BEHIND_STATION_LABEL, healthrayChainStatus } from "./observation.js";
 import { IST_TODAY, budgetColour } from "./statusEngine.js";
 import { TESTS_HOLD_SQL, chiefWaitClock } from "./testsHold.js";
@@ -332,6 +333,8 @@ const BOARD_SQL = `
       SELECT count(DISTINCT lc.id)::int                                       AS cases,
              count(DISTINCT lc.id) FILTER (
                WHERE COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'reported_on' IS NOT NULL
+                  OR EXISTS (SELECT 1 FROM giniflow_lab_case_actions a
+                              WHERE a.case_no = lc.case_no AND a.action = 'report_uploaded')
              )::int                                                            AS reported,
              array_remove(array_agg(DISTINCT t), NULL)                         AS names
         FROM lab_cases lc
@@ -973,6 +976,7 @@ export async function getScribeLabMarks(visitId, db = pool) {
 export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDate), db = pool) {
   const budgets = budgetMap(slaConfig);
   const budgetFor = budgetLookup(slaConfig);
+  const hideLabOnly = await hideLabOnlyPatients(db);
   const [{ rows }, machines] = await Promise.all([
     db.query(BOARD_SQL, [visitDate, LAB_ONLY_DOCTOR, labStepsAreManual()]),
     getMachines(db),
@@ -1170,13 +1174,14 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
 
   const onFloor = cards.filter((c) => !OFF_BOARD_STATUSES.includes(c.status));
 
+  // Admin-toggleable (floorSettings.js, /settings/flow): whether samples-only
+  // patients show on this board at all. Off by default. When it's back on,
+  // this restores exactly where they used to live — the lab track while
+  // active, the Done column once exited, reachable for a coordinator to
+  // assign a real consultant — not a redesigned version of it.
+  const chainAllowsLabOnly = (col) => !hideLabOnly && col.key === "done";
+
   const columns = BOARD_COLUMNS.map((col) => {
-    // Samples-only patients are kept out of the consultation columns entirely.
-    // They never reach a doctor, so leaving them in Checked-in and With SD / MO
-    // filled both with a queue nobody was working — on 5 Sep three of the seven
-    // patients on the floor were sitting in SD / MO for exactly that reason.
-    // The lab track keeps them reachable, which is what the coordinator needs to
-    // assign one to a consultant.
     const items =
       col.key === "lab"
         ? // A finished patient stays in the lab track only while the lab still
@@ -1186,14 +1191,14 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
           onFloor.filter(
             (c) =>
               c.placement === "lab" ||
-              (c.labOnly && c.lab && !(c.finished && c.labSettled)) ||
+              (!hideLabOnly && c.labOnly && c.lab && !(c.finished && c.labSettled)) ||
               (c.finished && !c.labOnly && c.lab && !c.labSettled),
           )
         : col.key === "machine"
           ? onFloor.filter((c) => c.placement === "machine")
           : onFloor.filter(
               (c) =>
-                (!c.labOnly || col.key === "done") &&
+                (!c.labOnly || chainAllowsLabOnly(col)) &&
                 c.placement === "chain" &&
                 col.statuses.includes(c.status),
             );
@@ -1348,11 +1353,16 @@ export async function getDayStats(visitDate, board, slaConfig, db = pool) {
   );
   const appts = rows[0] || { booked: 0, no_show: 0, cancelled: 0 };
 
-  const inBuilding = board.onFloor.filter((c) => !["dispensed", "exited"].includes(c.status));
-  const done = board.cards.filter((c) => ["dispensed", "exited"].includes(c.status));
-  // Lab-only visits are excluded here for the same reason they are excluded from
-  // every station average: a give-a-sample-and-go visit is not a consultation
-  // journey, and averaging the two answers neither question.
+  // Admin-toggleable (floorSettings.js): while samples-only patients are
+  // hidden from the board's columns, these tiles hide them too, so a count
+  // here never says "14" while every card on screen adds up to fewer.
+  const hideLabOnly = await hideLabOnlyPatients(db);
+  const inBuilding = board.onFloor.filter(
+    (c) => (!hideLabOnly || !c.labOnly) && !["dispensed", "exited"].includes(c.status),
+  );
+  const done = board.cards.filter(
+    (c) => (!hideLabOnly || !c.labOnly) && ["dispensed", "exited"].includes(c.status),
+  );
   const journeys = done
     .filter((c) => !c.labOnly)
     .map((c) => c.totalMinutes)
@@ -1368,7 +1378,7 @@ export async function getDayStats(visitDate, board, slaConfig, db = pool) {
   // nothing. Their lab clock is the one that matters and it is timed separately.
   const overBudget = inBuilding.filter((c) => !c.labOnly && c.statusColour === "red").length;
   const blocked = board.onFloor.filter(
-    (c) => c.status === "blocked_reports" || c.blockedReason,
+    (c) => !c.labOnly && (c.status === "blocked_reports" || c.blockedReason),
   ).length;
   // GF-21: this counted live cards, not transitions. Measure what the label says
   // — completed station-to-station hops today that finished inside their budget.

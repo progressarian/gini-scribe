@@ -19,6 +19,8 @@ import {
   columnForStatus,
   slaKeyForStatus,
 } from "../../../shared/giniflowStatus.js";
+import { LAB_ONLY_DOCTOR, labOnlyHiddenPredicate } from "./labOnlyVisits.js";
+import { hideLabOnlyPatients } from "./floorSettings.js";
 
 // The board's column name, not the raw status — `vitals_done` means the patient
 // is with the SD, and printing the status made the lab screen claim otherwise.
@@ -134,7 +136,13 @@ const QUEUE_SQL = `
     ) col ON TRUE
    WHERE v.visit_date = $1::date
      AND v.current_status = ANY($2)
-     AND NOT COALESCE(p.is_blocked, FALSE)`;
+     AND NOT COALESCE(p.is_blocked, FALSE)
+     -- Samples-only patients don't show on any station screen while the
+     -- floor has that toggled on (settings/flow) — see awaitingRegistration()
+     -- in labStation.js for where this started. They reach 'exited' through
+     -- sweepLabOnlyExits (appointmentSync.js), not through this counter, so
+     -- without this they leaked into "dispensed".
+     AND NOT ${labOnlyHiddenPredicate("v", "$3", "$4")}`;
 
 // The groups the counter's two columns split into, and the only values `group`
 // accepts. pendingHandover is one list holding both onFloor and gone.
@@ -149,10 +157,11 @@ export async function getPharmacyQueue(
   // Resolved per row, not once: the pharmacy budget can be overridden per
   // category, and this queue holds every category at the same moment.
   const budgetFor = budgetLookup(await getSlaConfig(db));
+  const hideLabOnly = await hideLabOnlyPatients(db);
 
   const [{ rows: waiting }, { rows: finished }] = await Promise.all([
-    db.query(QUEUE_SQL, [visitDate, QUEUE_STATUSES]),
-    db.query(QUEUE_SQL, [visitDate, DONE_STATUSES]),
+    db.query(QUEUE_SQL, [visitDate, QUEUE_STATUSES, LAB_ONLY_DOCTOR, hideLabOnly]),
+    db.query(QUEUE_SQL, [visitDate, DONE_STATUSES, LAB_ONLY_DOCTOR, hideLabOnly]),
   ]);
 
   const card = (r) => {
@@ -287,13 +296,17 @@ async function getPendingHandover(visitDate, db = pool) {
         AND m.is_active
         AND m.external_doctor IS NULL
         AND NOT COALESCE(p.is_blocked, FALSE)
+        -- Samples-only patients don't show on any station screen while the
+        -- floor has that toggled on (settings/flow) — see
+        -- awaitingRegistration() in labStation.js for where this started.
+        AND NOT ${labOnlyHiddenPredicate("v", "$2", "$3")}
         AND NOT EXISTS (
           SELECT 1 FROM medicine_collections c
            WHERE c.medication_id = m.id AND c.collected_date = $1::date
         )
       GROUP BY p.id, p.name, p.file_no, p.age, p.sex, v.current_status
       ORDER BY min(m.created_at)`,
-    [visitDate],
+    [visitDate, LAB_ONLY_DOCTOR, await hideLabOnlyPatients(db)],
   );
 
   return rows.map((r) => ({

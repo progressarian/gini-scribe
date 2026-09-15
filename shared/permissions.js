@@ -38,6 +38,8 @@ export const ROLES = {
   LAB: "lab",
   LAB_ADMIN: "lab_admin",
   MACHINE_TECH: "machine_tech",
+  ECHO_TECH: "echo_tech",
+  XRAY_TECH: "xray_tech",
   TECH: "tech",
   RECEPTION: "reception",
   COORDINATOR: "coordinator",
@@ -140,6 +142,14 @@ export const CAPABILITIES = {
   // one takes a report off a patient's chart. ADMIN is ALL, so it lands there
   // and nowhere else until somebody grants it.
   GINIFLOW_MACHINE_REPORT_REMOVE: "GINIFLOW_MACHINE_REPORT_REMOVE",
+  // Echo Station (45-ECHO-STATION-PLAN.md): 2D Echo, split out of the machine
+  // room into its own screen for its own person — same shape as the pair
+  // above, one key to open the station, one to undo a wrongly-attached report.
+  GINIFLOW_STATION_ECHO: "GINIFLOW_STATION_ECHO",
+  GINIFLOW_ECHO_REPORT_REMOVE: "GINIFLOW_ECHO_REPORT_REMOVE",
+  // X-Ray Station (46-XRAY-STATION-PLAN.md) — same shape again.
+  GINIFLOW_STATION_XRAY: "GINIFLOW_STATION_XRAY",
+  GINIFLOW_XRAY_REPORT_REMOVE: "GINIFLOW_XRAY_REPORT_REMOVE",
   GINIFLOW_STATION_DOCTOR: "GINIFLOW_STATION_DOCTOR", // the consultant's queue and consult screen
   GINIFLOW_MO_CLOSE: "GINIFLOW_MO_CLOSE", // end a visit without the consultant, prescription and all
   GINIFLOW_STATION_MO: "GINIFLOW_STATION_MO", // MO/SD workup, order tests, hand over
@@ -309,6 +319,35 @@ export const ROLE_CAPABILITIES = {
     C.GINIFLOW_VIEW,
     C.GINIFLOW_BOARD,
     C.GINIFLOW_STATION_MACHINE,
+  ],
+  // Echo Station (45-ECHO-STATION-PLAN.md) — same shape as machine_tech above,
+  // scoped to Echo alone. Deliberately its own role rather than widening
+  // machine_tech: Echo is run by its own person, and this is a different
+  // accountability, the same reasoning that kept the machine room separate
+  // from the lab's two benches.
+  //
+  // No GINIFLOW_BOARD: a single-station technician has no reason to open the
+  // floor coordinator's board, and holding it put "Flow Coordinator" on their
+  // launcher next to their own station's tile. Their station's own screen
+  // needs only GINIFLOW_STATION_ECHO — none of its calls are board-gated.
+  [ROLES.ECHO_TECH]: [
+    C.PATIENT_READ,
+    C.PATIENT_CHART,
+    C.LAB_PORTAL,
+    C.LAB_REQUESTS,
+    C.GINIFLOW_VIEW,
+    C.GINIFLOW_STATION_ECHO,
+  ],
+  // X-Ray Station (46-XRAY-STATION-PLAN.md) — same shape as echo_tech, its
+  // own role rather than the existing tech accounts (blood collection). Same
+  // reasoning for leaving GINIFLOW_BOARD out.
+  [ROLES.XRAY_TECH]: [
+    C.PATIENT_READ,
+    C.PATIENT_CHART,
+    C.LAB_PORTAL,
+    C.LAB_REQUESTS,
+    C.GINIFLOW_VIEW,
+    C.GINIFLOW_STATION_XRAY,
   ],
   [ROLES.TECH]: [
     C.PATIENT_READ,

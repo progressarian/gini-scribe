@@ -108,6 +108,8 @@ const GiniFlowLabProcessingPage = lazyWithRetry(
   () => import("./pages/giniflow/LabProcessingStationPage"),
 );
 const GiniFlowMachinePage = lazyWithRetry(() => import("./pages/giniflow/MachineStationPage"));
+const GiniFlowEchoPage = lazyWithRetry(() => import("./pages/giniflow/EchoStationPage"));
+const GiniFlowXrayPage = lazyWithRetry(() => import("./pages/giniflow/XrayStationPage"));
 const GiniFlowMoPage = lazyWithRetry(() => import("./pages/giniflow/MoStationPage"));
 const GiniFlowDoctorPage = lazyWithRetry(() => import("./pages/giniflow/DoctorStationPage"));
 const GiniFlowConsultPage = lazyWithRetry(() => import("./pages/giniflow/DoctorConsultPage"));
@@ -273,6 +275,8 @@ const router = createBrowserRouter([
                 element: lazyEl(GiniFlowLabProcessingPage),
               },
               { path: "/giniflow/station/machine", element: lazyEl(GiniFlowMachinePage) },
+              { path: "/giniflow/station/echo", element: lazyEl(GiniFlowEchoPage) },
+              { path: "/giniflow/station/xray", element: lazyEl(GiniFlowXrayPage) },
               { path: "/giniflow/station/mo", element: lazyEl(GiniFlowMoPage) },
               { path: "/giniflow/station/doctor", element: lazyEl(GiniFlowDoctorPage) },
               {

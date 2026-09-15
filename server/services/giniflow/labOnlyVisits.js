@@ -48,6 +48,13 @@ export const labOnlyPredicate = (visit, param) => `(
   )
 )`;
 
+// Wraps `labOnlyPredicate` with the admin toggle (floorSettings.js): true
+// (exclude this row) only when the patient is samples-only AND the floor has
+// chosen to hide them. `hideParam` is the boolean placeholder carrying
+// `hideLabOnlyPatients()`'s result — fetched once per request, not per row.
+export const labOnlyHiddenPredicate = (visit, doctorParam, hideParam) =>
+  `(${hideParam}::boolean AND ${labOnlyPredicate(visit, doctorParam)})`;
+
 // The timeline for a lab-only visit, built only from clocks that exist.
 //
 // The chain timeline could not tell the truth about these patients. It read the

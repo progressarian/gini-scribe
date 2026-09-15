@@ -12,7 +12,8 @@ import {
   columnForStatus,
   NOT_A_MARKER_SQL,
 } from "../../../shared/giniflowStatus.js";
-import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
+import { LAB_ONLY_DOCTOR, labOnlyPredicate, labOnlyHiddenPredicate } from "./labOnlyVisits.js";
+import { hideLabOnlyPatients } from "./floorSettings.js";
 import { syncLabStepsFromLab } from "./journey.js";
 import { labStepsAreManual, labShowsHealthrayCases } from "../../../shared/manualFloor.js";
 import {
@@ -184,7 +185,11 @@ export const LAB_GROUPS = FILTER_TO_TARGETS;
 // call" chip both count it — an order-less patient would corrupt both. This is
 // its own list, the way the vitals station keeps its held patients beside the
 // queue rather than in it.
+// Admin-toggleable (floorSettings.js, /settings/flow): the floor can turn
+// samples-only patients back on for this list — and every other station —
+// without a deploy. Off by default, matching the decision this shipped with.
 async function awaitingRegistration(visitDate, search, db) {
+  if (await hideLabOnlyPatients(db)) return [];
   const { rows } = await db.query(
     `SELECT v.id AS visit_id, v.current_status,
             p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
@@ -226,8 +231,6 @@ async function awaitingRegistration(visitDate, search, db) {
     fileNo: r.file_no,
     age: r.age,
     sex: r.sex,
-    // Timed from arrival, not from an order — there is no order. That number is
-    // the whole point of the row: two hours on the floor with nothing registered.
     since: r.checked_in_at ? new Date(r.checked_in_at).toISOString() : null,
     finished: FINISHED.includes(r.current_status),
     station: FINISHED.includes(r.current_status)
@@ -262,6 +265,7 @@ export async function getLabQueue(
   { group = "all", room = null } = {},
 ) {
   const search = q && String(q).trim().length >= 2 ? String(q).trim() : null;
+  const hideLabOnly = await hideLabOnlyPatients(db);
   // A fully manual lab works only what Scribe was asked for. With the case list
   // off, showing the hospital's own cases would put work on the bench's screen
   // that nobody here ordered and the bench cannot bill, collect against or
@@ -318,6 +322,10 @@ export async function getLabQueue(
         AND o.urgency = 'today'
         -- No sample to take from a patient who never arrived or has gone home.
         AND v.current_status NOT IN ('no_show', 'cancelled')
+        -- Samples-only patients don't show on any station screen, this one
+        -- included, while the floor has that toggled on (settings/flow) — see
+        -- awaitingRegistration() above.
+        AND NOT ${labOnlyHiddenPredicate("v", "$3", "$4")}
         AND (
           $2::text IS NULL
           OR p.name ILIKE '%' || $2 || '%'
@@ -329,7 +337,7 @@ export async function getLabQueue(
           )
         )
       ORDER BY o.created_at`,
-    [visitDate, search],
+    [visitDate, search, LAB_ONLY_DOCTOR, hideLabOnly],
   );
 
   const orders = rows.map((r) => {
@@ -594,6 +602,7 @@ const labSteps = (stage) => {
 };
 
 async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
+  const hideLabOnly = await hideLabOnlyPatients(db);
   const { rows } = await db.query(
     `WITH cases AS (
        SELECT lc.*,
@@ -743,8 +752,11 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
       WHERE NOT COALESCE(p.is_blocked, FALSE)
       GROUP BY c.grp, c.pid, p.id, p.name, p.file_no, p.age, p.sex, v.current_status,
                v.results_status, v.id
+      -- Samples-only patients don't show on any station screen, this one
+      -- included — see awaitingRegistration() above.
+      HAVING NOT bool_or(${labOnlyHiddenPredicate("v", "$3", "$4")})
       ORDER BY (count(*) FILTER (WHERE NOT c.results_synced)) DESC, min(c.fetched_at)`,
-    [visitDate, q, LAB_ONLY_DOCTOR],
+    [visitDate, q, LAB_ONLY_DOCTOR, hideLabOnly],
   );
 
   return rows.map((r) => {

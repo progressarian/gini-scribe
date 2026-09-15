@@ -238,6 +238,15 @@
   background: var(--bg2, #eef1f5);
   color: var(--ink4);
 }
+/* Finished card: the floor total is the chip, not the footnote. */
+.gf .tmr-t {
+  background: var(--bg2, #eef1f5);
+  color: var(--ink2);
+}
+.gf .tmr-t.over {
+  background: var(--red-l);
+  color: var(--red);
+}
 .gf .tot {
   font-family: var(--fm);
   font-size: 9px;

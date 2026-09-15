@@ -136,9 +136,20 @@ export const shapeMachine = (row) => ({
   values: row.value_fields || [],
   docTypes: row.report_doc_types || [],
   handover: !!row.hands_over,
+  station: row.machine_station || "machine_room",
+  // Another machine's id this one can't start until it's reported — Echo
+  // requires X-ray (46-XRAY-STATION-PLAN.md). Set by migration only, not
+  // admin-editable; see assertReadyToStart in machineStation.js.
+  requiresBefore: row.machine_requires_before || null,
 });
 
 export const machineFor = (machines, id) => (machines || []).find((m) => m.id === id) || null;
+
+// Which machines a station may see/operate. Additive to the per-machine
+// `machine` filter, not a replacement — a station's screen always calls with
+// its own `station` and the catalogue is narrowed before anything else runs.
+export const machinesForStation = (machines, station) =>
+  (machines || []).filter((m) => (m.station || "machine_room") === station);
 
 export const machineHandsOver = (machines, id) => !!machineFor(machines, id)?.handover;
 

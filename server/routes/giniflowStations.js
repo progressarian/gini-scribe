@@ -47,6 +47,7 @@ import {
   giniflowOrderTestsSchema,
   giniflowCatalogTestSchema,
   giniflowCatalogTestPatchSchema,
+  giniflowFloorSettingSchema,
   giniflowPlanSchema,
   giniflowPlanExtractSchema,
   giniflowProposalSchema,
@@ -142,6 +143,7 @@ import {
   addMachineTest,
   machineCandidates,
   removeMachineReport,
+  assertOrderInStation,
 } from "../services/giniflow/machineStation.js";
 import {
   getDoctorQueue,
@@ -202,6 +204,8 @@ import {
 import { sendFlowCheckin } from "../services/msg91.js";
 import { syncBillingForVisitId, healthrayBillSteps } from "../services/giniflow/machineSync.js";
 import { getMachines } from "../services/giniflow/machineCatalog.js";
+import { getFloorSettings, setFloorSetting } from "../services/giniflow/floorSettings.js";
+import { machinesForStation } from "../../shared/machineStages.js";
 import {
   getHealthrayStatus,
   requestHealthrayRefresh,
@@ -456,6 +460,35 @@ router.patch(
       res.json(await updateCatalogTest(req.params.id, req.body));
     } catch (e) {
       handleError(res, e, "Gini Flow test catalogue update");
+    }
+  },
+);
+
+// Admin-toggleable floor behaviour (floorSettings.js) — one flag so far:
+// whether samples-only patients show on the station screens and the board.
+router.get("/giniflow/floor-settings", requireCapability(CAP.ADMIN), async (_req, res) => {
+  try {
+    res.json({ settings: await getFloorSettings() });
+  } catch (e) {
+    handleError(res, e, "Gini Flow floor settings");
+  }
+});
+
+router.patch(
+  "/giniflow/floor-settings/:key",
+  requireCapability(CAP.ADMIN),
+  validate(giniflowFloorSettingSchema),
+  async (req, res) => {
+    try {
+      res.json({
+        settings: await setFloorSetting(
+          req.params.key,
+          req.body.value,
+          req.doctor?.doctor_id ?? null,
+        ),
+      });
+    } catch (e) {
+      handleError(res, e, "Gini Flow floor setting update");
     }
   },
 );
@@ -851,6 +884,8 @@ const STATION_CAPS = {
   lab_collect: CAP.GINIFLOW_STATION_LAB_COLLECT,
   lab_process: CAP.GINIFLOW_STATION_LAB_PROCESS,
   machine: CAP.GINIFLOW_STATION_MACHINE,
+  echo: CAP.GINIFLOW_STATION_ECHO,
+  xray: CAP.GINIFLOW_STATION_XRAY,
   mo_sd: CAP.GINIFLOW_STATION_MO,
   doctor: CAP.GINIFLOW_STATION_DOCTOR,
   rx: CAP.GINIFLOW_STATION_RX,
@@ -1556,156 +1591,212 @@ const moGate = requireCapability(CAP.GINIFLOW_STATION_MO);
 // "this is a proposal" is a property of which station wrote it rather than a
 // flag the browser sends. A consultant's row and an MO's row must not be
 // distinguishable only by something the client can set.
-// ── Machine room ────────────────────────────────────────────────────────────
+// ── Machine room, and Echo's own station ───────────────────────────────────
 // ABI, VPT, Fundus, TMT, ECG (36-MACHINE-TEST-STATION-PLAN.md). Its own gate:
 // nothing is drawn here, and the person who runs the machines is not one of the
 // lab's two benches.
+//
+// Echo (45-ECHO-STATION-PLAN.md) is the same engine, scoped to one machine and
+// gated by its own capability, so an echo_tech never sees or touches the other
+// five and a machine_tech never sees or touches Echo — mounted twice rather
+// than duplicated, since the two stations differ only in which capability
+// guards them and which machines `station` scopes them to.
 const machineGate = requireCapability(CAP.GINIFLOW_STATION_MACHINE);
+const echoGate = requireCapability(CAP.GINIFLOW_STATION_ECHO);
+const xrayGate = requireCapability(CAP.GINIFLOW_STATION_XRAY);
+
+function mountMachineStationRoutes(router, { prefix, gate, station, reportRemoveCap }) {
+  router.get(
+    `/giniflow/stations/${prefix}/queue`,
+    gate,
+    validateQuery(giniflowMachineQuerySchema),
+    async (req, res) => {
+      try {
+        const date = await resolveDate(req.query.date);
+        // Every filter is applied in the service, against the whole day, so the
+        // screen never receives rows it is going to throw away.
+        const data = await getMachineQueue(date, req.query.q ?? null, undefined, {
+          machine: req.query.machine ?? null,
+          group: req.query.group ?? "all",
+          station,
+        });
+        res.json({ date, ...data, serverTime: new Date().toISOString() });
+      } catch (e) {
+        handleError(res, e, `Gini Flow ${prefix} queue`);
+      }
+    },
+  );
+
+  // The tests that happened without ever touching this screen — a report on the
+  // chart with no order behind it. Read-only: there is nothing to record after
+  // the fact that would be true.
+  router.get(
+    `/giniflow/stations/${prefix}/reconciliation`,
+    gate,
+    validateQuery(giniflowDateQuerySchema),
+    async (req, res) => {
+      try {
+        const date = await resolveDate(req.query.date);
+        res.json({ date, rows: await getMachineReconciliation(date, undefined, station) });
+      } catch (e) {
+        handleError(res, e, `Gini Flow ${prefix} reconciliation`);
+      }
+    },
+  );
+
+  // Who is on the floor and could be walked to a machine, and raising the test
+  // for them. Both behind the station's own capability.
+  router.get(
+    `/giniflow/stations/${prefix}/candidates`,
+    gate,
+    validateQuery(giniflowStationQuerySchema),
+    async (req, res) => {
+      try {
+        const date = await resolveDate(req.query.date);
+        res.json({ date, rows: await machineCandidates(date, req.query.q ?? null) });
+      } catch (e) {
+        handleError(res, e, `Gini Flow ${prefix} candidates`);
+      }
+    },
+  );
+
+  router.post(
+    `/giniflow/stations/${prefix}/add`,
+    gate,
+    validate(giniflowMachineAddSchema),
+    async (req, res) => {
+      try {
+        res.json(
+          await addMachineTest(req.body.visitId, {
+            machineId: req.body.machine,
+            actorId: req.doctor?.doctor_id ?? null,
+            station,
+          }),
+        );
+      } catch (e) {
+        handleError(res, e, `Gini Flow add ${prefix} test`);
+      }
+    },
+  );
+
+  router.post(
+    `/giniflow/stations/${prefix}/:orderId/advance`,
+    gate,
+    validate(giniflowMachineAdvanceSchema),
+    async (req, res) => {
+      try {
+        res.json(
+          await advanceMachineTest(req.params.orderId, {
+            to: req.body.to,
+            reportUrl: req.body.reportUrl ?? null,
+            actorId: req.doctor?.doctor_id ?? null,
+            station,
+          }),
+        );
+      } catch (e) {
+        handleError(res, e, `Gini Flow ${prefix} advance`);
+      }
+    },
+  );
+
+  // Uploading is one call — the file is stored and the test closed together —
+  // the same shape the lab's order upload has, and for the same reason: a file
+  // in storage with the test still open is a report nobody is told about.
+  // `uploadReport` is shared with the lab and cannot itself take a `station`,
+  // so the guard runs here first.
+  router.post(
+    `/giniflow/stations/${prefix}/:orderId/report`,
+    gate,
+    validate(giniflowReportSchema),
+    async (req, res) => {
+      try {
+        await assertOrderInStation(req.params.orderId, station);
+        res.json(
+          await uploadReport(req.params.orderId, {
+            base64: req.body.base64,
+            fileName: req.body.fileName,
+            mediaType: req.body.mediaType || "application/pdf",
+            actorId: req.doctor?.doctor_id ?? null,
+            confirmAdditional: req.body.confirmAdditional === true,
+          }),
+        );
+      } catch (e) {
+        if (e.needsConfirmation) {
+          return res.status(409).json({
+            error: e.message,
+            needsConfirmation: e.needsConfirmation,
+            existingSource: e.existingSource ?? null,
+          });
+        }
+        handleError(res, e, `Gini Flow ${prefix} report`);
+      }
+    },
+  );
+
+  router.delete(
+    `/giniflow/stations/${prefix}/:orderId/report`,
+    requireCapability(reportRemoveCap),
+    async (req, res) => {
+      try {
+        res.json(
+          await removeMachineReport(req.params.orderId, {
+            actorId: req.doctor?.doctor_id ?? null,
+            station,
+          }),
+        );
+      } catch (e) {
+        handleError(res, e, `Gini Flow ${prefix} report delete`);
+      }
+    },
+  );
+}
 
 router.get("/giniflow/machines", machineGate, async (_req, res) => {
   try {
-    res.json({ machines: await getMachines() });
+    res.json({ machines: machinesForStation(await getMachines(), "machine_room") });
   } catch (e) {
     handleError(res, e, "Gini Flow machines");
   }
 });
 
-router.get(
-  "/giniflow/stations/machine/queue",
-  machineGate,
-  validateQuery(giniflowMachineQuerySchema),
-  async (req, res) => {
-    try {
-      const date = await resolveDate(req.query.date);
-      // Both filters are applied in the service, against the whole day, so the
-      // screen never receives rows it is going to throw away.
-      const data = await getMachineQueue(date, req.query.q ?? null, undefined, {
-        machine: req.query.machine ?? null,
-        group: req.query.group ?? "all",
-      });
-      res.json({ date, ...data, serverTime: new Date().toISOString() });
-    } catch (e) {
-      handleError(res, e, "Gini Flow machine queue");
-    }
-  },
-);
+// The Echo / X-Ray screens read the same machine list, narrowed to their own
+// machine, so neither needs to know the others exist.
+router.get("/giniflow/machines/echo", echoGate, async (_req, res) => {
+  try {
+    res.json({ machines: machinesForStation(await getMachines(), "echo") });
+  } catch (e) {
+    handleError(res, e, "Gini Flow echo machines");
+  }
+});
 
-// The tests that happened without ever touching this screen — a report on the
-// chart with no order behind it. Read-only: there is nothing to record after the
-// fact that would be true.
-router.get(
-  "/giniflow/stations/machine/reconciliation",
-  machineGate,
-  validateQuery(giniflowDateQuerySchema),
-  async (req, res) => {
-    try {
-      const date = await resolveDate(req.query.date);
-      res.json({ date, rows: await getMachineReconciliation(date) });
-    } catch (e) {
-      handleError(res, e, "Gini Flow machine reconciliation");
-    }
-  },
-);
+router.get("/giniflow/machines/xray", xrayGate, async (_req, res) => {
+  try {
+    res.json({ machines: machinesForStation(await getMachines(), "xray") });
+  } catch (e) {
+    handleError(res, e, "Gini Flow x-ray machines");
+  }
+});
 
-// Who is on the floor and could be walked to a machine, and raising the test for
-// them. Both behind the machine room's own capability.
-router.get(
-  "/giniflow/stations/machine/candidates",
-  machineGate,
-  validateQuery(giniflowStationQuerySchema),
-  async (req, res) => {
-    try {
-      const date = await resolveDate(req.query.date);
-      res.json({ date, rows: await machineCandidates(date, req.query.q ?? null) });
-    } catch (e) {
-      handleError(res, e, "Gini Flow machine candidates");
-    }
-  },
-);
+mountMachineStationRoutes(router, {
+  prefix: "machine",
+  gate: machineGate,
+  station: "machine_room",
+  reportRemoveCap: CAP.GINIFLOW_MACHINE_REPORT_REMOVE,
+});
 
-router.post(
-  "/giniflow/stations/machine/add",
-  machineGate,
-  validate(giniflowMachineAddSchema),
-  async (req, res) => {
-    try {
-      res.json(
-        await addMachineTest(req.body.visitId, {
-          machineId: req.body.machine,
-          actorId: req.doctor?.doctor_id ?? null,
-        }),
-      );
-    } catch (e) {
-      handleError(res, e, "Gini Flow add machine test");
-    }
-  },
-);
+mountMachineStationRoutes(router, {
+  prefix: "echo",
+  gate: echoGate,
+  station: "echo",
+  reportRemoveCap: CAP.GINIFLOW_ECHO_REPORT_REMOVE,
+});
 
-router.post(
-  "/giniflow/stations/machine/:orderId/advance",
-  machineGate,
-  validate(giniflowMachineAdvanceSchema),
-  async (req, res) => {
-    try {
-      res.json(
-        await advanceMachineTest(req.params.orderId, {
-          to: req.body.to,
-          reportUrl: req.body.reportUrl ?? null,
-          actorId: req.doctor?.doctor_id ?? null,
-        }),
-      );
-    } catch (e) {
-      handleError(res, e, "Gini Flow machine advance");
-    }
-  },
-);
-
-// Uploading is one call — the file is stored and the test closed together — the
-// same shape the lab's order upload has, and for the same reason: a file in
-// storage with the test still open is a report nobody is told about.
-router.post(
-  "/giniflow/stations/machine/:orderId/report",
-  machineGate,
-  validate(giniflowReportSchema),
-  async (req, res) => {
-    try {
-      res.json(
-        await uploadReport(req.params.orderId, {
-          base64: req.body.base64,
-          fileName: req.body.fileName,
-          mediaType: req.body.mediaType || "application/pdf",
-          actorId: req.doctor?.doctor_id ?? null,
-          confirmAdditional: req.body.confirmAdditional === true,
-        }),
-      );
-    } catch (e) {
-      if (e.needsConfirmation) {
-        return res.status(409).json({
-          error: e.message,
-          needsConfirmation: e.needsConfirmation,
-          existingSource: e.existingSource ?? null,
-        });
-      }
-      handleError(res, e, "Gini Flow machine report");
-    }
-  },
-);
-
-router.delete(
-  "/giniflow/stations/machine/:orderId/report",
-  requireCapability(CAP.GINIFLOW_MACHINE_REPORT_REMOVE),
-  async (req, res) => {
-    try {
-      res.json(
-        await removeMachineReport(req.params.orderId, {
-          actorId: req.doctor?.doctor_id ?? null,
-        }),
-      );
-    } catch (e) {
-      handleError(res, e, "Gini Flow machine report delete");
-    }
-  },
-);
+mountMachineStationRoutes(router, {
+  prefix: "xray",
+  gate: xrayGate,
+  station: "xray",
+  reportRemoveCap: CAP.GINIFLOW_XRAY_REPORT_REMOVE,
+});
 
 router.get("/giniflow/stations/mo/:visitId/prescription", moGate, async (req, res) => {
   try {

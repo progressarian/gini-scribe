@@ -40,6 +40,8 @@
     "smoke:doctor-steps": "node scripts/smoke-doctor-steps.mjs",
     "smoke:lab-list-only": "node scripts/smoke-lab-list-only.mjs",
     "seed:machine-room": "node scripts/seed-machine-room-demo.mjs",
+    "seed:echo": "node scripts/seed-echo-demo.mjs",
+    "seed:xray": "node scripts/seed-xray-demo.mjs",
     "seed:lab-rooms": "node scripts/seed-lab-rooms-demo.mjs",
     "smoke:manual-floor": "node scripts/smoke-manual-floor.mjs",
     "smoke:machine-stages": "node scripts/smoke-machine-stages.mjs",

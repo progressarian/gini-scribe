@@ -14,7 +14,8 @@ async function load(db) {
   try {
     const { rows } = await db.query(
       `SELECT id, name, default_duration_min, machine_short_name, machine_full_name, machine_icon,
-              order_test_name, bill_names, value_fields, report_doc_types, hands_over
+              order_test_name, bill_names, value_fields, report_doc_types, hands_over,
+              machine_station, machine_requires_before
          FROM flow_step_catalog
         WHERE machine AND COALESCE(is_active, TRUE)
         ORDER BY machine_order NULLS LAST, name`,
@@ -105,6 +106,30 @@ export async function openMachineOrders(stepId, db = pool) {
     [machine.tests.map(flatName)],
   );
   return rows[0].open;
+}
+
+// Waiting / running / unreported counts for a set of machines, scoped by test
+// name the way `openMachineOrders` scopes a single machine — reused by the
+// station launcher tiles to split one combined "machine" count into one per
+// station without duplicating the flatName matching.
+export async function stationOrderCounts(machines, visitDate, db = pool) {
+  const names = machines.flatMap((m) => m.tests.map(flatName));
+  if (!names.length) return { waiting: 0, running: 0, unreported: 0 };
+  const { rows } = await db.query(
+    `SELECT
+       count(DISTINCT o.id) FILTER (
+         WHERE o.sample_status IN ('ordered', 'payment_pending', 'paid'))::int AS waiting,
+       count(DISTINCT o.id) FILTER (WHERE o.sample_status = 'in_progress')::int AS running,
+       count(DISTINCT o.id) FILTER (WHERE o.sample_status = 'done')::int AS unreported
+       FROM giniflow_lab_orders o
+       JOIN giniflow_visits v ON v.id = o.visit_id
+       JOIN giniflow_lab_order_tests t ON t.lab_order_id = o.id
+      WHERE o.kind = 'machine'
+        AND v.visit_date = $1::date
+        AND lower(regexp_replace(t.test_name, '[^a-zA-Z0-9]+', '', 'g')) = ANY($2::text[])`,
+    [visitDate, names],
+  );
+  return rows[0];
 }
 
 export async function assertMachineCanStop(stepId, db = pool) {

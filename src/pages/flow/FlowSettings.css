@@ -18,6 +18,24 @@
   align-items: start;
 }
 
+/* A full-width card above the grid, for a setting that is one line and would
+   otherwise sit as an odd, undersized third column next to the two tables. */
+.fset__section {
+  margin-bottom: 14px;
+}
+
+.fset__toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-weight: 600;
+}
+.fset__toggle input {
+  width: 16px;
+  height: 16px;
+}
+
 .fset .flow-card {
   padding: 16px;
   min-width: 0; /* a grid item defaults to min-content: without this the table wins */
@@ -61,6 +79,20 @@
 }
 .fset__scroll--wide > .flow-table {
   min-width: 720px;
+}
+
+/* The step catalog runs to 19+ rows and otherwise pushes the whole page down
+   with it — this caps the table's own box instead, with the header pinned so
+   a long scroll never loses track of which column is which. */
+.fset__scroll--tall {
+  max-height: 420px;
+  overflow-y: auto;
+}
+.fset__scroll--tall .flow-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--fbg);
+  z-index: 1;
 }
 
 .fset .flow-table th,

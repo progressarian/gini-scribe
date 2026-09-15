@@ -150,6 +150,8 @@ export const PAGE_CAPABILITIES = {
   "/giniflow/station/lab/collection": CAP.GINIFLOW_STATION_LAB_COLLECT,
   "/giniflow/station/lab/processing": CAP.GINIFLOW_STATION_LAB_PROCESS,
   "/giniflow/station/machine": CAP.GINIFLOW_STATION_MACHINE,
+  "/giniflow/station/echo": CAP.GINIFLOW_STATION_ECHO,
+  "/giniflow/station/xray": CAP.GINIFLOW_STATION_XRAY,
   "/giniflow/station/mo": CAP.GINIFLOW_STATION_MO,
   // capForPath prefix-matches, so this key also covers /giniflow/station/doctor/<visitId>.
   "/giniflow/station/doctor": CAP.GINIFLOW_STATION_DOCTOR,
@@ -166,11 +168,21 @@ export const ROLE_NAV_ALLOWLIST = {
   // manager board. The allowlist keeps the nav to the launcher, which shows
   // them the one station they can open.
   [ROLES.RX]: ["/giniflow/stations"],
+  // Echo and X-Ray Station: same reasoning as RX above, plus they hold
+  // PATIENT_READ/LAB_PORTAL for their own station's use (looking a patient
+  // up, viewing a report) — a plain capability nav would still offer them
+  // Home, Patient and Lab Portal as their own pages. The allowlist keeps
+  // them to the launcher, which (46-XRAY-STATION-PLAN.md) already shows only
+  // their one station tile.
+  [ROLES.ECHO_TECH]: ["/giniflow/stations"],
+  [ROLES.XRAY_TECH]: ["/giniflow/stations"],
 };
 
 export const ROLE_HOME = {
   [ROLES.OBT]: "/obt-dashboard",
   [ROLES.RX]: "/giniflow/station/rx",
+  [ROLES.ECHO_TECH]: "/giniflow/station/echo",
+  [ROLES.XRAY_TECH]: "/giniflow/station/xray",
 };
 
 export function navAllowlistForRole(role) {

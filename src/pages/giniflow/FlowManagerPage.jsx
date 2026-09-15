@@ -434,7 +434,7 @@ function PatientCard({
         onDragStart(card);
       }}
       onDragEnd={onDragEnd}
-      style={card.finished && !isLab ? { opacity: 0.6 } : undefined}
+      style={card.finished && !isLab ? { opacity: 0.78 } : undefined}
     >
       <button type="button" className="pc-open" onClick={() => onOpen(card)}>
         <div className="pc-top">
@@ -503,9 +503,21 @@ function PatientCard({
           </div>
         )}
         <div className="pc-bot">
-          <span className={`tmr ${colourClass(colour)}`}>⏱ {minutes ?? 0}m</span>
-          {!isLab && totalMinutes !== null && (
-            <span className={`tot${totalOver ? " over" : ""}`}>{totalMinutes}m total</span>
+          {/* A finished card's station clock is always 0m — the floor time is the
+              only number left worth reading, so it takes the chip. */}
+          {card.finished && !isLab ? (
+            totalMinutes !== null && (
+              <span className={`tmr tmr-t${totalOver ? " over" : ""}`}>
+                ⏱ {totalMinutes}m on the floor
+              </span>
+            )
+          ) : (
+            <>
+              <span className={`tmr ${colourClass(colour)}`}>⏱ {minutes ?? 0}m</span>
+              {!isLab && totalMinutes !== null && (
+                <span className={`tot${totalOver ? " over" : ""}`}>{totalMinutes}m total</span>
+              )}
+            </>
           )}
           {!isLab && card.queuePosition != null && (
             <span className="pc-pos" title="Manually placed in this queue">
@@ -965,6 +977,9 @@ const vitalsNote = (v) => {
     .join(" — ");
 };
 
+const hoursMins = (m) =>
+  m >= 60 ? `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ""}` : `${m}m`;
+
 const TEST_STEP_STATUSES = new Set([
   "payment_wait",
   "lab_room",
@@ -980,7 +995,23 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
   useDismissable(!!visitId, onClose);
   if (!visitId) return null;
   const visit = data?.visit;
-  const steps = data?.steps || [];
+  const allSteps = data?.steps || [];
+  // Samples given in the morning and a consultation checked in hours later are
+  // two trips, not one journey. The timeline sorts every step by timestamp, so
+  // the test legs of the first trip sort above "Checked in" and the modal reads
+  // as if the patient waited for reports before arriving. They get their own leg.
+  const checkedInAt = allSteps.find((s) => s.status === "checked_in")?.enteredAt || null;
+  // Finished before check-in, not merely started before it: a report wait still
+  // running when the patient arrives belongs to today's journey, not to the
+  // earlier trip.
+  const preArrival = checkedInAt
+    ? allSteps.filter(
+        (s) =>
+          new Date(s.enteredAt) < new Date(checkedInAt) &&
+          (s.timestampOnly || (s.leftAt && new Date(s.leftAt) <= new Date(checkedInAt))),
+      )
+    : [];
+  const steps = preArrival.length ? allSteps.filter((s) => !preArrival.includes(s)) : allSteps;
   const labTrack = data?.labTrack || [];
   const machineTrack = data?.machineTrack || [];
   const machineLive = (m) =>
@@ -1047,11 +1078,82 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
     ? [{ status: "reports_pending", label: STATUS_LABEL.results_received, budget: null }]
     : [];
   const stillToCome = [...reportsToCome, ...chiefReview, ...projected];
-  const journeySoFar = steps.reduce((sum, st) => sum + liveTotal(st), 0);
+  // Elapsed since check-in, not the sum of the step durations. Summing counted
+  // a pre-arrival report wait the floor never owned and silently dropped the
+  // hours between the reports being ready and the patient coming back, so the
+  // figure matched neither clock and was still judged against the journey SLA.
+  const endedAt = finished ? steps.at(-1)?.enteredAt : null;
+  const journeySoFar =
+    (checkedInAt ? minutesSince(checkedInAt, endedAt ? new Date(endedAt).getTime() : now) : null) ??
+    steps.reduce((sum, st) => sum + liveTotal(st), 0);
+  // Measured from when the last pre-arrival step happened, not from its leftAt:
+  // the segment stitcher stretches a segment's end to the next step, which here
+  // is check-in itself, so leftAt would always report a zero gap.
+  const reportsBeforeArrival = preArrival.some((s) => s.status === "results_received");
+  const preArrivalGap =
+    preArrival.length && checkedInAt
+      ? minutesSince(preArrival.at(-1).enteredAt, new Date(checkedInAt).getTime())
+      : null;
   const journeyTarget =
     (onlineJourney && visit.journey_max_minutes) ||
     slaConfig?.find((c) => c.station === "total_journey")?.budgetMinutes ||
     null;
+
+  // On a leg that finished before the patient checked in, "Waiting for reports"
+  // reads as still pending. The wait is over and the reports are in — say so.
+  const labelBeforeArrival = (step) => {
+    if (step.status !== "reports_wait") return step;
+    const what = step.label.replace(/^Waiting for /, "");
+    const label = `${what === "reports" ? "lab reports" : what} done`;
+    return { ...step, label: label[0].toUpperCase() + label.slice(1) };
+  };
+
+  const stepRow = (step, i) => (
+    <div className="tstep" key={`${step.status}-${i}`}>
+      <div className={`ts-dot ${step.isCurrent ? "tsd-now" : "tsd-done"}`}>
+        {step.isCurrent ? "●" : "✓"}
+      </div>
+      <div className="ts-body">
+        <div className="ts-name">
+          {step.label}
+          {step.visits > 1 && <span className="ts-visits">· {step.visits} visits</span>}
+        </div>
+        <div className="ts-time">
+          {step.isCurrent ? `Since ${clockAt(step.enteredAt)}` : clockAt(step.enteredAt)}
+        </div>
+        {!step.timestampOnly && (
+          <span
+            className={`ts-dur ${
+              liveColour(step) === "red"
+                ? "tsd-r"
+                : liveColour(step) === "amber"
+                  ? "tsd-a"
+                  : liveColour(step) === "green"
+                    ? "tsd-g"
+                    : "tsd-n"
+            }`}
+          >
+            {step.unrecorded
+              ? `${step.totalMinutes}m — no station screen was used, so what happened in here was never recorded`
+              : `${liveWait(step)}m wait + ${step.stationMinutes}m station${
+                  liveOver(step) ? ` — ${liveOver(step)}m OVER budget` : ""
+                }`}
+          </span>
+        )}
+        {step.meta?.correction && (
+          <div className="ts-note">
+            Reopened after the visit was closed
+            {step.meta.reason ? ` — ${step.meta.reason}` : ""}
+          </div>
+        )}
+        {step.meta?.vitals &&
+          (step.status === "vitals_recorded" ||
+            (!step.awaitingLab && !steps.some((x) => x.status === "vitals_recorded"))) && (
+            <div className="ts-note">{vitalsNote(step.meta.vitals)}</div>
+          )}
+      </div>
+    </div>
+  );
 
   return (
     <div className="tmodal open" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -1081,52 +1183,17 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
         </div>
         <div className="tb-body">
           {isLoading && <div className="ts-note">Loading…</div>}
-          {steps.map((step, i) => (
-            <div className="tstep" key={`${step.status}-${i}`}>
-              <div className={`ts-dot ${step.isCurrent ? "tsd-now" : "tsd-done"}`}>
-                {step.isCurrent ? "●" : "✓"}
-              </div>
-              <div className="ts-body">
-                <div className="ts-name">
-                  {step.label}
-                  {step.visits > 1 && <span className="ts-visits">· {step.visits} visits</span>}
-                </div>
-                <div className="ts-time">
-                  {step.isCurrent ? `Since ${clockAt(step.enteredAt)}` : clockAt(step.enteredAt)}
-                </div>
-                {!step.timestampOnly && (
-                  <span
-                    className={`ts-dur ${
-                      liveColour(step) === "red"
-                        ? "tsd-r"
-                        : liveColour(step) === "amber"
-                          ? "tsd-a"
-                          : liveColour(step) === "green"
-                            ? "tsd-g"
-                            : "tsd-n"
-                    }`}
-                  >
-                    {step.unrecorded
-                      ? `${step.totalMinutes}m — no station screen was used, so what happened in here was never recorded`
-                      : `${liveWait(step)}m wait + ${step.stationMinutes}m station${
-                          liveOver(step) ? ` — ${liveOver(step)}m OVER budget` : ""
-                        }`}
-                  </span>
-                )}
-                {step.meta?.correction && (
-                  <div className="ts-note">
-                    Reopened after the visit was closed
-                    {step.meta.reason ? ` — ${step.meta.reason}` : ""}
-                  </div>
-                )}
-                {step.meta?.vitals &&
-                  (step.status === "vitals_recorded" ||
-                    (!step.awaitingLab && !steps.some((x) => x.status === "vitals_recorded"))) && (
-                    <div className="ts-note">{vitalsNote(step.meta.vitals)}</div>
-                  )}
-              </div>
+          {preArrival.length > 0 && (
+            <div className="ts-track-hd">
+              ⏳ Before check-in at {clockAt(checkedInAt)} — lab work already done on today's
+              HealthRay case
             </div>
-          ))}
+          )}
+          {preArrival.map((step, i) => stepRow(labelBeforeArrival(step), `pre-${i}`))}
+          {preArrival.length > 0 && (
+            <div className="ts-track-hd">🏥 The consultation journey — from check-in</div>
+          )}
+          {steps.map(stepRow)}
           {stillToCome.map((step) => (
             <div className="tstep" key={step.status}>
               <div className="ts-dot tsd-next">○</div>
@@ -1208,6 +1275,11 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
             <div className="ts-summary">
               {journeySoFar}m in the building
               {journeyTarget && !visit?.labOnly ? ` of a ${journeyTarget}m target` : ""}
+              {preArrivalGap !== null
+                ? ` · ${reportsBeforeArrival ? "reports ready" : "tests done"} ${hoursMins(
+                    preArrivalGap,
+                  )} before check-in`
+                : ""}
               {finished
                 ? " · journey complete"
                 : stillToCome.length

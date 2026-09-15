@@ -2,16 +2,27 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "../../services/api";
 import { pollInterval } from "./giniflowPolling";
 
+// Both the machine room and Echo Station (45-ECHO-STATION-PLAN.md) run on this
+// same engine, mounted twice server-side under "machine" and "echo" — `station`
+// picks the URL prefix and folds into every query key, so the two screens never
+// share a cache entry.
+const DEFAULT_STATION = "machine";
+
 // The machine room. Every filter is a query parameter, never a client-side
 // `.filter()`: the server holds the whole day and returns the rows asked for, so
 // a phone is not sent 200 orders to throw 195 of them away.
-export function useMachineQueue({ machine = null, group = "all", q = "" } = {}) {
+export function useMachineQueue({
+  machine = null,
+  group = "all",
+  q = "",
+  station = DEFAULT_STATION,
+} = {}) {
   const search = q.trim().length >= 2 ? q.trim() : "";
   return useQuery({
-    queryKey: ["giniflow", "machine", "queue", machine || "all", group, search],
+    queryKey: ["giniflow", station, "queue", machine || "all", group, search],
     queryFn: async () =>
       (
-        await api.get("/api/giniflow/stations/machine/queue", {
+        await api.get(`/api/giniflow/stations/${station}/queue`, {
           params: {
             ...(machine ? { machine } : {}),
             ...(group && group !== "all" ? { group } : {}),
@@ -27,31 +38,31 @@ export function useMachineQueue({ machine = null, group = "all", q = "" } = {}) 
 
 // Tests whose report landed with no order behind them — the work that happened
 // without touching this screen. Slower poll: it is a reconciliation, not a queue.
-export function useMachineReconciliation() {
+export function useMachineReconciliation(station = DEFAULT_STATION) {
   return useQuery({
-    queryKey: ["giniflow", "machine", "reconciliation"],
-    queryFn: async () => (await api.get("/api/giniflow/stations/machine/reconciliation")).data,
+    queryKey: ["giniflow", station, "reconciliation"],
+    queryFn: async () => (await api.get(`/api/giniflow/stations/${station}/reconciliation`)).data,
     refetchInterval: 120_000,
     refetchIntervalInBackground: false,
     placeholderData: (prev) => prev,
   });
 }
 
-const invalidate = (queryClient) => {
-  queryClient.invalidateQueries({ queryKey: ["giniflow", "machine"] });
+const invalidate = (queryClient, station) => {
+  queryClient.invalidateQueries({ queryKey: ["giniflow", station] });
   // Closing a test can turn the patient green for the MO and the consultant.
   queryClient.invalidateQueries({ queryKey: ["giniflow", "board"] });
   queryClient.invalidateQueries({ queryKey: ["giniflow", "mo"] });
 };
 
 // Who is on the floor and could be walked to a machine. Searched server-side.
-export function useMachineCandidates(q) {
+export function useMachineCandidates(q, station = DEFAULT_STATION) {
   const search = q.trim().length >= 2 ? q.trim() : "";
   return useQuery({
-    queryKey: ["giniflow", "machine", "candidates", search],
+    queryKey: ["giniflow", station, "candidates", search],
     queryFn: async () =>
       (
-        await api.get("/api/giniflow/stations/machine/candidates", {
+        await api.get(`/api/giniflow/stations/${station}/candidates`, {
           params: search ? { q: search } : {},
         })
       ).data,
@@ -61,27 +72,27 @@ export function useMachineCandidates(q) {
 }
 
 // Raising a test at the machine, for the patient standing there.
-export function useAddMachineTest() {
+export function useAddMachineTest(station = DEFAULT_STATION) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ visitId, machine }) =>
-      (await api.post("/api/giniflow/stations/machine/add", { visitId, machine })).data,
-    onSuccess: () => invalidate(queryClient),
+      (await api.post(`/api/giniflow/stations/${station}/add`, { visitId, machine })).data,
+    onSuccess: () => invalidate(queryClient, station),
   });
 }
 
-export function useAdvanceMachineTest() {
+export function useAdvanceMachineTest(station = DEFAULT_STATION) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ orderId, to }) =>
-      (await api.post(`/api/giniflow/stations/machine/${orderId}/advance`, { to })).data,
-    onSuccess: () => invalidate(queryClient),
+      (await api.post(`/api/giniflow/stations/${station}/${orderId}/advance`, { to })).data,
+    onSuccess: () => invalidate(queryClient, station),
   });
 }
 
 // One call: the file is stored and the test closed together, so a report can
 // never sit in storage with the test still open.
-export function useUploadMachineReport() {
+export function useUploadMachineReport(station = DEFAULT_STATION) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ orderId, file, confirmAdditional = false }) => {
@@ -92,7 +103,7 @@ export function useUploadMachineReport() {
         reader.readAsDataURL(file);
       });
       return (
-        await api.post(`/api/giniflow/stations/machine/${orderId}/report`, {
+        await api.post(`/api/giniflow/stations/${station}/${orderId}/report`, {
           base64,
           confirmAdditional,
           fileName: file.name,
@@ -100,23 +111,30 @@ export function useUploadMachineReport() {
         })
       ).data;
     },
-    onSuccess: () => invalidate(queryClient),
+    onSuccess: () => invalidate(queryClient, station),
   });
 }
 
-export function useRemoveMachineReport() {
+export function useRemoveMachineReport(station = DEFAULT_STATION) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ orderId }) =>
-      (await api.delete(`/api/giniflow/stations/machine/${orderId}/report`)).data,
-    onSuccess: () => invalidate(queryClient),
+      (await api.delete(`/api/giniflow/stations/${station}/${orderId}/report`)).data,
+    onSuccess: () => invalidate(queryClient, station),
   });
 }
 
-export function useMachines() {
+export function useMachines(station = DEFAULT_STATION) {
   return useQuery({
-    queryKey: ["giniflow", "machines"],
-    queryFn: async () => (await api.get("/api/giniflow/machines")).data.machines,
+    queryKey: ["giniflow", "machines", station],
+    queryFn: async () =>
+      (
+        await api.get(
+          station === DEFAULT_STATION
+            ? "/api/giniflow/machines"
+            : `/api/giniflow/machines/${station}`,
+        )
+      ).data.machines,
     staleTime: 60 * 1000,
   });
 }

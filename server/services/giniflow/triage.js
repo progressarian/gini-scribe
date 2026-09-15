@@ -11,6 +11,8 @@ import { syncAppointmentsToFlow } from "./appointmentSync.js";
 import { classifyMarker, MARKER_LABEL } from "./consultBrief.js";
 import { BIO_TARGET, STABILITY } from "../analytics/biomarkerTargets.js";
 import { LAB_ONLY_DOCTOR } from "../../../shared/labOnly.js";
+import { labOnlyHiddenPredicate } from "./labOnlyVisits.js";
+import { hideLabOnlyPatients } from "./floorSettings.js";
 import { IST_TODAY } from "./statusEngine.js";
 
 // The day BEFORE the day: are the reports in, what do the numbers say, who
@@ -334,6 +336,11 @@ const DAY_SQL = `
    WHERE v.visit_date = $1::date
      AND NOT COALESCE(p.is_blocked, FALSE)
      AND v.merged_into_visit_id IS NULL
+     -- Samples-only patients don't show on any station screen, this
+     -- pre-day triage list included, while the floor has that toggled on
+     -- (settings/flow) — see awaitingRegistration() in labStation.js for
+     -- where this started.
+     AND NOT ${labOnlyHiddenPredicate("v", "$3", "$4")}
    ORDER BY v.appointment_time NULLS LAST, p.name`;
 
 const iso = (ts) => (ts ? new Date(ts).toISOString() : null);
@@ -470,7 +477,12 @@ export async function getTriageDay(
     await autoCategoriseDay(visitDate, { db });
   }
 
-  const { rows } = await db.query(DAY_SQL, [visitDate, AUTO_SOURCES]);
+  const { rows } = await db.query(DAY_SQL, [
+    visitDate,
+    AUTO_SOURCES,
+    LAB_ONLY_DOCTOR,
+    await hideLabOnlyPatients(db),
+  ]);
   const cards = rows.map(buildCard);
   const pipeline = pipelineCounts(cards);
 
@@ -767,7 +779,9 @@ export async function getTriageSummary(db = pool) {
        JOIN patients p ON p.id = v.patient_id
       WHERE v.visit_date IN (${IST_TODAY}, ${IST_TODAY} + 1)
         AND NOT COALESCE(p.is_blocked, FALSE)
-        AND v.merged_into_visit_id IS NULL`,
+        AND v.merged_into_visit_id IS NULL
+        AND NOT ${labOnlyHiddenPredicate("v", "$1", "$2")}`,
+    [LAB_ONLY_DOCTOR, await hideLabOnlyPatients(db)],
   );
   return rows[0] || { today_total: 0, today_uncategorised: 0, total: 0, uncategorised: 0 };
 }

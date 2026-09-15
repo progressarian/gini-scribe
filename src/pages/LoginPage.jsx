@@ -12,6 +12,8 @@ const ROLE_GROUPS = [
   { role: "lab", label: "Laboratory", showSpecialty: false },
   { role: "lab_admin", label: "Lab Admin", showSpecialty: false },
   { role: "machine_tech", label: "Machine Test Station", showSpecialty: false },
+  { role: "echo_tech", label: "Echo Station", showSpecialty: false },
+  { role: "xray_tech", label: "X-Ray Station", showSpecialty: false },
   { role: "tech", label: "Technicians", showSpecialty: false },
   { role: "pharmacy", label: "Pharmacy", showSpecialty: false },
   { role: "rx", label: "Prescription Explainer", showSpecialty: false },

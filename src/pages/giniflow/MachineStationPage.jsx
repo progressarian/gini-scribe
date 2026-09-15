@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import useAuthStore from "../../stores/authStore";
 import { CAPABILITIES as C, hasCapability } from "../../../shared/permissions.js";
 import {
@@ -26,12 +26,28 @@ import "../../styles/giniflow-station.css";
 import "./MachineStationPage.css";
 
 // The machine room: ABI, VPT, Fundus, TMT, ECG
-// (docs/gini-flow/36-MACHINE-TEST-STATION-PLAN.md).
+// (docs/gini-flow/36-MACHINE-TEST-STATION-PLAN.md) — and, given `station="echo"`,
+// Echo Station (docs/gini-flow/45-ECHO-STATION-PLAN.md), the same screen scoped
+// to one machine on its own capability-gated route. `StationContext` carries
+// which one down through the sub-components below rather than prop-drilling it
+// through every one of them.
 //
 // A section per machine, not one flat queue. A bench runs twenty tubes at once;
 // a treadmill takes one patient for twenty minutes, so the question this screen
 // exists to answer is "how long until the TMT is free" — which needs the queues
 // kept apart.
+
+const StationContext = createContext("machine");
+const useStation = () => useContext(StationContext);
+
+// Undoing a wrongly-attached report is its own capability per station
+// (45-ECHO-STATION-PLAN.md, 46-XRAY-STATION-PLAN.md) — deliberately not in
+// the technician's own list, so ADMIN is the only one who holds it until
+// granted. Machine Room's is the fallback for the `station="machine"` default.
+const REPORT_REMOVE_CAP = {
+  echo: C.GINIFLOW_ECHO_REPORT_REMOVE,
+  xray: C.GINIFLOW_XRAY_REPORT_REMOVE,
+};
 
 const clock = (iso) =>
   iso
@@ -66,7 +82,7 @@ const waitLabel = (m) =>
       : "free now";
 
 function TestCard({ order, onAdvance, onOpen, busy }) {
-  const { data: catalogue = [] } = useMachines();
+  const { data: catalogue = [] } = useMachines(useStation());
   const mins = minutesSince(order.since);
   const machine = machineFor(catalogue, order.machine);
   return (
@@ -124,7 +140,7 @@ function TestPane({
   canRemoveReport,
   busy,
 }) {
-  const { data: catalogue = [] } = useMachines();
+  const { data: catalogue = [] } = useMachines(useStation());
   const paneRef = useRef(null);
   const fileRef = useRef(null);
   const [replacing, setReplacing] = useState(false);
@@ -317,12 +333,13 @@ function TestPane({
 const SHOW_ADD_TEST = false;
 
 function AddTest({ onAdded, busy }) {
-  const { data: catalogue = [] } = useMachines();
+  const station = useStation();
+  const { data: catalogue = [] } = useMachines(station);
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [picked, setPicked] = useState(null);
-  const { data, isFetching } = useMachineCandidates(q);
-  const add = useAddMachineTest();
+  const { data, isFetching } = useMachineCandidates(q, station);
+  const add = useAddMachineTest(station);
 
   if (!open) {
     return (
@@ -420,8 +437,8 @@ function AddTest({ onAdded, busy }) {
   );
 }
 
-export default function MachineStationPage() {
-  const { data: catalogue = [] } = useMachines();
+export default function MachineStationPage({ station = "machine", label = "Machine Room" } = {}) {
+  const { data: catalogue = [] } = useMachines(station);
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
   const [machineFilter, setMachineFilter] = useState(null);
@@ -441,14 +458,22 @@ export default function MachineStationPage() {
     return () => clearTimeout(t);
   }, [search]);
 
-  const { data, isLoading } = useMachineQueue({ machine: machineFilter, group, q: debounced });
-  const reconciliation = useMachineReconciliation();
+  const { data, isLoading } = useMachineQueue({
+    machine: machineFilter,
+    group,
+    q: debounced,
+    station,
+  });
+  const reconciliation = useMachineReconciliation(station);
   const live = useGiniflowLive({ date: data?.date });
-  const advance = useAdvanceMachineTest();
+  const advance = useAdvanceMachineTest(station);
   const role = useAuthStore((s) => s.currentDoctor?.role);
-  const canRemoveReport = hasCapability(role, C.GINIFLOW_MACHINE_REPORT_REMOVE);
-  const upload = useUploadMachineReport();
-  const removeReport = useRemoveMachineReport();
+  const canRemoveReport = hasCapability(
+    role,
+    REPORT_REMOVE_CAP[station] || C.GINIFLOW_MACHINE_REPORT_REMOVE,
+  );
+  const upload = useUploadMachineReport(station);
+  const removeReport = useRemoveMachineReport(station);
   const busy = advance.isPending || upload.isPending;
 
   const showToast = (msg) => {
@@ -459,6 +484,12 @@ export default function MachineStationPage() {
 
   const rowsFor = (rung) => data?.[rung.bucket] || [];
   const allRows = MACHINE_RUNGS.flatMap((r) => rowsFor(r));
+  // Test done, report not filed yet — already grouped under each machine on
+  // the left, and repeated here across every machine so it is visible without
+  // opening a collapsed machine section. Still open work, so it sits above
+  // "Done today" rather than inside it.
+  const doneRung = MACHINE_RUNGS.find((r) => r.key === "done");
+  const awaitingReport = rowsFor(doneRung);
   const running = allRows.filter((o) => o.stage === "in_progress");
   const openOrder = allRows.find((o) => o.orderId === openId) || null;
   const machines = data?.machines || catalogue.map((m) => ({ ...m, total: 0, waiting: 0 }));
@@ -554,362 +585,397 @@ export default function MachineStationPage() {
     );
 
   return (
-    <div className="gf mroom">
-      <StationNotice station="machine" />
-      <div className="rail">
-        <div className="rl">Machine Room</div>
-        <div className="rsep" />
-        <span className="rail-title">
-          ABI · VPT · Fundus · TMT · ECG ·{" "}
-          {new Date().toLocaleDateString("en-IN", {
-            weekday: "short",
-            day: "numeric",
-            month: "short",
-          })}
-        </span>
-        <div className="rr">
-          <input
-            className="rail-search"
-            type="search"
-            value={search}
-            placeholder="Search name, file no, test…"
-            aria-label="Search today's machine tests"
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <LiveBadge live={live} className="tr-live" />
-          <a className="rbtn" href="/giniflow/stations">
-            ← Stations
-          </a>
+    <StationContext.Provider value={station}>
+      <div className="gf mroom">
+        <StationNotice station={station} />
+        <div className="rail">
+          <div className="rl">{label}</div>
+          <div className="rsep" />
+          <span className="rail-title">
+            {catalogue.map((m) => m.name).join(" · ") || label} ·{" "}
+            {new Date().toLocaleDateString("en-IN", {
+              weekday: "short",
+              day: "numeric",
+              month: "short",
+            })}
+          </span>
+          <div className="rr">
+            <input
+              className="rail-search"
+              type="search"
+              value={search}
+              placeholder="Search name, file no, test…"
+              aria-label="Search today's machine tests"
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <LiveBadge live={live} className="tr-live" />
+            <a className="rbtn" href="/giniflow/stations">
+              ← Stations
+            </a>
+          </div>
         </div>
-      </div>
 
-      <div className="scroll">
-        <div className="inner">
-          {/* One tile per machine: what is on it now, and how long the queue
+        <div className="scroll">
+          <div className="inner">
+            {/* One tile per machine: what is on it now, and how long the queue
               behind it will take. The only question this station can answer that
               nothing else on the floor can. */}
-          <div className="mroom__machines">
-            {machines.map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                className={`mroom__machine${machineFilter === m.id ? " on" : ""}`}
-                aria-pressed={machineFilter === m.id}
-                onClick={() => setMachineFilter(machineFilter === m.id ? null : m.id)}
-              >
-                <span className="mroom__top">
-                  <span className="mroom__icon" aria-hidden="true">
-                    {m.icon}
-                  </span>
-                  <span className="mroom__mname">{m.name}</span>
-                </span>
-                <span className={`mroom__busy${m.onIt ? " is-busy" : ""}`}>
-                  {m.onIt ? `▶ ${m.onIt.name}` : waitLabel(m)}
-                </span>
-                <span className="mroom__queue">
-                  {m.total ? `${m.waiting} waiting · ${m.total} today` : "nothing today"}
-                </span>
-              </button>
-            ))}
-          </div>
-
-          {/* Raising a test at the machine is built and tested, but off until the
-              floor decides it wants it — a mistap here creates a real order and
-              a real charge against a real patient. Flip to true to bring it
-              back; nothing else has to change. */}
-          {SHOW_ADD_TEST && <AddTest busy={busy} onAdded={showToast} />}
-
-          {/* Hidden while the queue is empty. It filters the tests booked in this
-              room, and reading "All 0" directly above a record listing five
-              patients only invites the question of why it says zero — they are
-              different things, and the bar cannot say so by itself. */}
-          {!isLoading && openTotal > 0 && (
-            <div className="sq-filters sq-filters--page" role="group" aria-label="Filter by stage">
-              <button
-                type="button"
-                className={group === "all" ? "on" : ""}
-                aria-pressed={group === "all"}
-                onClick={() => setGroup("all")}
-              >
-                All<span className="sq-fcount">{openTotal}</span>
-              </button>
-              {/* No `reported` chip: filed tests are not in the queue any more —
-                  they live in "Done here today" at the foot of the page, with
-                  their own count. A chip that filtered the board down to rows
-                  the board no longer draws showed an empty screen. */}
-              {MACHINE_RUNGS.filter(
-                (r) => r.key !== "reported" && (counts[r.filter] || group === r.filter),
-              ).map((r) => (
+            <div className="mroom__machines">
+              {machines.map((m) => (
                 <button
-                  key={r.filter}
+                  key={m.id}
                   type="button"
-                  className={group === r.filter ? "on" : ""}
-                  aria-pressed={group === r.filter}
-                  onClick={() => setGroup(group === r.filter ? "all" : r.filter)}
+                  className={`mroom__machine${machineFilter === m.id ? " on" : ""}`}
+                  aria-pressed={machineFilter === m.id}
+                  onClick={() => setMachineFilter(machineFilter === m.id ? null : m.id)}
                 >
-                  {r.filterLabel}
-                  <span className="sq-fcount">{counts[r.filter] ?? 0}</span>
+                  <span className="mroom__top">
+                    <span className="mroom__icon" aria-hidden="true">
+                      {m.icon}
+                    </span>
+                    <span className="mroom__mname">{m.name}</span>
+                  </span>
+                  <span className={`mroom__busy${m.onIt ? " is-busy" : ""}`}>
+                    {m.onIt ? `▶ ${m.onIt.name}` : waitLabel(m)}
+                  </span>
+                  <span className="mroom__queue">
+                    {m.total ? `${m.waiting} waiting · ${m.total} today` : "nothing today"}
+                  </span>
                 </button>
               ))}
             </div>
-          )}
 
-          {!isLoading && running.length > 0 && (
-            <div className="mroom__now">
-              <div className="grp-lbl">
-                ▶️ On the machine now
-                <span className="grp-split">{running.length}</span>
+            {/* Raising a test at the machine is built and tested, but off until the
+              floor decides it wants it — a mistap here creates a real order and
+              a real charge against a real patient. Flip to true to bring it
+              back; nothing else has to change. */}
+            {SHOW_ADD_TEST && <AddTest busy={busy} onAdded={showToast} />}
+
+            {/* Hidden while the queue is empty. It filters the tests booked in this
+              room, and reading "All 0" directly above a record listing five
+              patients only invites the question of why it says zero — they are
+              different things, and the bar cannot say so by itself. */}
+            {!isLoading && openTotal > 0 && (
+              <div
+                className="sq-filters sq-filters--page"
+                role="group"
+                aria-label="Filter by stage"
+              >
+                <button
+                  type="button"
+                  className={group === "all" ? "on" : ""}
+                  aria-pressed={group === "all"}
+                  onClick={() => setGroup("all")}
+                >
+                  All<span className="sq-fcount">{openTotal}</span>
+                </button>
+                {/* No `reported` chip: filed tests are not in the queue any more —
+                  they live in "Done here today" at the foot of the page, with
+                  their own count. A chip that filtered the board down to rows
+                  the board no longer draws showed an empty screen. */}
+                {MACHINE_RUNGS.filter(
+                  (r) => r.key !== "reported" && (counts[r.filter] || group === r.filter),
+                ).map((r) => (
+                  <button
+                    key={r.filter}
+                    type="button"
+                    className={group === r.filter ? "on" : ""}
+                    aria-pressed={group === r.filter}
+                    onClick={() => setGroup(group === r.filter ? "all" : r.filter)}
+                  >
+                    {r.filterLabel}
+                    <span className="sq-fcount">{counts[r.filter] ?? 0}</span>
+                  </button>
+                ))}
               </div>
-              <div className="mroom__now-grid">
-                {catalogue
-                  .filter((m) => running.some((o) => o.machine === m.id))
-                  .map((m) => (
-                    <section key={m.id} className="mroom__now-machine">
-                      <h2 className="sq-gh">
-                        {m.icon} {m.name}
-                        <span className="sq-count">{m.fullName}</span>
-                      </h2>
-                      <div className="mroom__list">
-                        {running
-                          .filter((o) => o.machine === m.id)
-                          .map((o) => (
-                            <TestCard
-                              key={o.orderId}
-                              order={o}
-                              busy={busy}
-                              onAdvance={onAdvance}
-                              onOpen={(x) => setOpenId(x.orderId)}
-                            />
-                          ))}
-                      </div>
-                    </section>
-                  ))}
-              </div>
-            </div>
-          )}
+            )}
 
-          {isLoading && <div className="empty-note">Loading…</div>}
-
-          {!isLoading && (
-            <div className="ar-split mroom__split">
-              <div className="ar-col">
+            {!isLoading && running.length > 0 && (
+              <div className="mroom__now">
                 <div className="grp-lbl">
-                  ⏳ Pending
-                  <span className="grp-split">{openTotal}</span>
+                  ▶️ On the machine now
+                  <span className="grp-split">{running.length}</span>
                 </div>
-                {/* Grouped by MACHINE, not by stage — the machine is the category
+                <div className="mroom__now-grid">
+                  {catalogue
+                    .filter((m) => running.some((o) => o.machine === m.id))
+                    .map((m) => (
+                      <section key={m.id} className="mroom__now-machine">
+                        <h2 className="sq-gh">
+                          {m.icon} {m.name}
+                          <span className="sq-count">{m.fullName}</span>
+                        </h2>
+                        <div className="mroom__list">
+                          {running
+                            .filter((o) => o.machine === m.id)
+                            .map((o) => (
+                              <TestCard
+                                key={o.orderId}
+                                order={o}
+                                busy={busy}
+                                onAdvance={onAdvance}
+                                onOpen={(x) => setOpenId(x.orderId)}
+                              />
+                            ))}
+                        </div>
+                      </section>
+                    ))}
+                </div>
+              </div>
+            )}
+
+            {isLoading && <div className="empty-note">Loading…</div>}
+
+            {!isLoading && (
+              <div className="ar-split mroom__split">
+                <div className="ar-col">
+                  <div className="grp-lbl">
+                    ⏳ Pending
+                    <span className="grp-split">{openTotal}</span>
+                  </div>
+                  {/* Grouped by MACHINE, not by stage — the machine is the category
               here, and the whole premise of this station is that each one is its
               own queue. Inside a machine the tests read in ladder order, so the
               technician sees who is on it, then who is next, then what is still
               waiting on a report. Collapsible like every other station's
               sections, and a machine with nothing today folds away. */}
-                {!isLoading &&
-                  machines
-                    .filter((m) => m.total > 0 || machineFilter === m.id)
-                    .map((m) => {
-                      const mine = allRows.filter((o) => o.machine === m.id);
-                      const open = openMachines[m.id] ?? true;
-                      return (
-                        <div key={m.id} className="mroom__stage">
-                          <h2 className="sq-gh">
-                            <button
-                              type="button"
-                              className="sq-toggle"
-                              aria-expanded={open}
-                              aria-controls={`machine-${m.id}`}
-                              onClick={() => setOpenMachines((v) => ({ ...v, [m.id]: !open }))}
-                            >
-                              <span className={`sq-chev${open ? " open" : ""}`} aria-hidden="true">
-                                ▸
-                              </span>
-                              {m.icon} {m.name}
-                              <span className="sq-count">
-                                {m.onIt ? `▶ ${m.onIt.name}` : waitLabel(m)} ·{" "}
-                                {mine.filter((o) => o.stage !== "reported").length} open
-                              </span>
-                            </button>
-                          </h2>
-                          <div id={`machine-${m.id}`} hidden={!open}>
-                            {!mine.filter((o) => o.stage !== "reported").length && (
-                              <div className="empty-note">Nothing waiting on this machine.</div>
-                            )}
-                            {/* `reported` is left out here on purpose: a filed test is
+                  {!isLoading &&
+                    machines
+                      .filter((m) => m.total > 0 || machineFilter === m.id)
+                      .map((m) => {
+                        const mine = allRows.filter((o) => o.machine === m.id);
+                        const open = openMachines[m.id] ?? true;
+                        return (
+                          <div key={m.id} className="mroom__stage">
+                            <h2 className="sq-gh">
+                              <button
+                                type="button"
+                                className="sq-toggle"
+                                aria-expanded={open}
+                                aria-controls={`machine-${m.id}`}
+                                onClick={() => setOpenMachines((v) => ({ ...v, [m.id]: !open }))}
+                              >
+                                <span
+                                  className={`sq-chev${open ? " open" : ""}`}
+                                  aria-hidden="true"
+                                >
+                                  ▸
+                                </span>
+                                {m.icon} {m.name}
+                                <span className="sq-count">
+                                  {m.onIt ? `▶ ${m.onIt.name}` : waitLabel(m)} ·{" "}
+                                  {mine.filter((o) => o.stage !== "reported").length} open
+                                </span>
+                              </button>
+                            </h2>
+                            <div id={`machine-${m.id}`} hidden={!open}>
+                              {!mine.some((o) => o.stage === "ordered") && (
+                                <div className="empty-note">Nothing waiting on this machine.</div>
+                              )}
+                              {/* `reported` is left out here on purpose: a filed test is
                           finished work, and it belongs in the day's record at the
                           foot of the page rather than padding the queue a
-                          technician is working from. */}
-                            {MACHINE_RUNGS.filter(
-                              (r) => r.key !== "reported" && r.key !== "in_progress",
-                            ).map((rung) => {
-                              const rows = mine.filter((o) => o.stage === rung.key);
-                              if (!rows.length) return null;
-                              return (
-                                <div key={rung.key} className="mroom__sub">
-                                  <div className="grp-lbl grp-sub">
-                                    {rung.sectionLabel}
-                                    <span className="grp-split">{rows.length}</span>
+                          technician is working from. `done` (test finished, report not
+                          filed) is left out too — it has its own section at the top of
+                          the right column across every machine, so a technician reads
+                          it there once rather than per machine here. */}
+                              {MACHINE_RUNGS.filter((r) => r.key === "ordered").map((rung) => {
+                                const rows = mine.filter((o) => o.stage === rung.key);
+                                if (!rows.length) return null;
+                                return (
+                                  <div key={rung.key} className="mroom__sub">
+                                    <div className="grp-lbl grp-sub">
+                                      {rung.sectionLabel}
+                                      <span className="grp-split">{rows.length}</span>
+                                    </div>
+                                    <div className="mroom__list">
+                                      {rows.map((o) => (
+                                        <TestCard
+                                          key={o.orderId}
+                                          order={o}
+                                          busy={busy}
+                                          onAdvance={onAdvance}
+                                          onOpen={(x) => setOpenId(x.orderId)}
+                                        />
+                                      ))}
+                                    </div>
                                   </div>
-                                  <div className="mroom__list">
-                                    {rows.map((o) => (
-                                      <TestCard
-                                        key={o.orderId}
-                                        order={o}
-                                        busy={busy}
-                                        onAdvance={onAdvance}
-                                        onOpen={(x) => setOpenId(x.orderId)}
-                                      />
-                                    ))}
-                                  </div>
-                                </div>
-                              );
-                            })}
+                                );
+                              })}
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
 
-                {!isLoading && !allRows.length && !unassigned.length && (
-                  <div className="empty-note">
-                    No machine tests ordered today. A test reaches this screen when the consultant
-                    bills it in HealthRay, or when you add one here — every step after that is yours
-                    to record.
-                  </div>
-                )}
-
-                {unassigned.length > 0 && (
-                  <div className="mroom__stage">
-                    <h2 className="sq-gh">
-                      ❓ Not matched to a machine
-                      <span className="sq-count">{unassigned.length}</span>
-                    </h2>
-                    <div className="grp-hint">
-                      Ordered as machine tests, but the test name matches none of the five machines.
+                  {!isLoading && !allRows.length && !unassigned.length && (
+                    <div className="empty-note">
+                      No machine tests ordered today. A test reaches this screen when the consultant
+                      bills it in HealthRay, or when you add one here — every step after that is
+                      yours to record.
                     </div>
-                    <div className="mroom__list">
-                      {unassigned.map((o) => (
-                        <TestCard
-                          key={o.orderId}
-                          order={o}
-                          busy={busy}
-                          onAdvance={onAdvance}
-                          onOpen={(x) => setOpenId(x.orderId)}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
+                  )}
 
-              {/* The day's record, kept beside the queue rather than under it —
-                the same split the lab rooms use, so a technician reads what is
-                still to do on the left and what is finished on the right. */}
-              <div className="ar-col">
-                <div className="grp-lbl grp-lbl-sp">
-                  <button
-                    type="button"
-                    className="sq-toggle"
-                    aria-expanded={showDone}
-                    aria-controls="machine-done"
-                    onClick={() => setShowDone((v) => !v)}
-                  >
-                    <span className={`sq-chev${showDone ? " open" : ""}`} aria-hidden="true">
-                      ▸
-                    </span>
-                    ✅ Done today
-                  </button>
-                  <span className="grp-split">{doneToday.length}</span>
-                </div>
-                {!doneToday.length ? (
-                  <div className="empty-note">Nothing filed from the machines yet today.</div>
-                ) : (
-                  <div className="mroom__stage">
-                    <div id="machine-done" hidden={!showDone}>
+                  {unassigned.length > 0 && (
+                    <div className="mroom__stage">
+                      <h2 className="sq-gh">
+                        ❓ Not matched to a machine
+                        <span className="sq-count">{unassigned.length}</span>
+                      </h2>
                       <div className="grp-hint">
-                        Finished — the reports are on the patients&apos; charts and there is nothing
-                        to action here. One row per patient: a foot screen is three tests on one
-                        person, not three people. &ldquo;Uploaded by&rdquo; is the login that filed
-                        the PDF, not who ran the test — that is only recorded when the technician
-                        works this screen.
+                        Ordered as machine tests, but the test name matches none of the five
+                        machines.
                       </div>
-                      <div className="pt-list">
-                        {doneToday.map((r) => (
-                          <div
-                            key={r.patientId}
-                            className="pt-card is-readonly"
-                            aria-disabled="true"
-                          >
-                            <div
-                              className="pc-av"
-                              style={{ background: avatarColour(r.patientId) }}
-                            >
-                              {initials(r.name)}
-                            </div>
-                            <div className="pc-body">
-                              <div className="pc-name">
-                                {r.name}
-                                {r.fileNo && <span className="badge b-ink">{r.fileNo}</span>}
-                              </div>
-                              <div className="pc-meta">
-                                {[
-                                  r.age && r.sex ? `${r.age}${r.sex[0]}` : r.age,
-                                  // The login that uploaded the PDF, which is the
-                                  // ORDERING doctor's — HealthRay names it in the
-                                  // filename. It is emphatically not who stood at the
-                                  // machine: nothing records that unless the
-                                  // technician works this screen.
-                                  r.filedBy && `Uploaded by Dr. ${r.filedBy}`,
-                                  r.orderedBy && `Ordered by ${r.orderedBy}`,
-                                  clock(r.at),
-                                ]
-                                  .filter(Boolean)
-                                  .join(" · ")}
-                              </div>
-                              <div className="pc-tests">
-                                {r.machines
-                                  .map(
-                                    (id) =>
-                                      `${machineFor(catalogue, id)?.icon || ""} ${machineFor(catalogue, id)?.name || id}`,
-                                  )
-                                  .join(" · ")}
-                              </div>
-                            </div>
-                            <div className="pc-r">
-                              <div className="sp sp-done">✓ {r.machines.length} done</div>
-                              <div className="pc-tlbl">reported {clock(r.at)}</div>
-                              <div className="hr-where">
-                                <div className={`sp ${r.gone ? "sp-process" : "sp-ready"}`}>
-                                  {r.gone ? "Has left" : "On the floor"}
-                                </div>
-                                <div className="pc-tlbl">{r.where}</div>
-                              </div>
-                            </div>
-                          </div>
+                      <div className="mroom__list">
+                        {unassigned.map((o) => (
+                          <TestCard
+                            key={o.orderId}
+                            order={o}
+                            busy={busy}
+                            onAdvance={onAdvance}
+                            onOpen={(x) => setOpenId(x.orderId)}
+                          />
                         ))}
                       </div>
                     </div>
+                  )}
+                </div>
+
+                {/* The day's record, kept beside the queue rather than under it —
+                the same split the lab rooms use, so a technician reads what is
+                still to do on the left and what is finished on the right. */}
+                <div className="ar-col">
+                  {awaitingReport.length > 0 && (
+                    <div className="mroom__stage">
+                      <div className="grp-lbl">
+                        {doneRung.sectionLabel}
+                        <span className="grp-split">{awaitingReport.length}</span>
+                      </div>
+                      <div className="mroom__list">
+                        {awaitingReport.map((o) => (
+                          <TestCard
+                            key={o.orderId}
+                            order={o}
+                            busy={busy}
+                            onAdvance={onAdvance}
+                            onOpen={(x) => setOpenId(x.orderId)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grp-lbl grp-lbl-sp">
+                    <button
+                      type="button"
+                      className="sq-toggle"
+                      aria-expanded={showDone}
+                      aria-controls="machine-done"
+                      onClick={() => setShowDone((v) => !v)}
+                    >
+                      <span className={`sq-chev${showDone ? " open" : ""}`} aria-hidden="true">
+                        ▸
+                      </span>
+                      ✅ Done today
+                    </button>
+                    <span className="grp-split">{doneToday.length}</span>
                   </div>
-                )}
+                  {!doneToday.length ? (
+                    <div className="empty-note">Nothing filed from the machines yet today.</div>
+                  ) : (
+                    <div className="mroom__stage">
+                      <div id="machine-done" hidden={!showDone}>
+                        <div className="grp-hint">
+                          Finished — the reports are on the patients&apos; charts and there is
+                          nothing to action here. One row per patient: a foot screen is three tests
+                          on one person, not three people. &ldquo;Uploaded by&rdquo; is the login
+                          that filed the PDF, not who ran the test — that is only recorded when the
+                          technician works this screen.
+                        </div>
+                        <div className="pt-list">
+                          {doneToday.map((r) => (
+                            <div
+                              key={r.patientId}
+                              className="pt-card is-readonly"
+                              aria-disabled="true"
+                            >
+                              <div
+                                className="pc-av"
+                                style={{ background: avatarColour(r.patientId) }}
+                              >
+                                {initials(r.name)}
+                              </div>
+                              <div className="pc-body">
+                                <div className="pc-name">
+                                  {r.name}
+                                  {r.fileNo && <span className="badge b-ink">{r.fileNo}</span>}
+                                </div>
+                                <div className="pc-meta">
+                                  {[
+                                    r.age && r.sex ? `${r.age}${r.sex[0]}` : r.age,
+                                    // The login that uploaded the PDF, which is the
+                                    // ORDERING doctor's — HealthRay names it in the
+                                    // filename. It is emphatically not who stood at the
+                                    // machine: nothing records that unless the
+                                    // technician works this screen.
+                                    r.filedBy && `Uploaded by Dr. ${r.filedBy}`,
+                                    r.orderedBy && `Ordered by ${r.orderedBy}`,
+                                    clock(r.at),
+                                  ]
+                                    .filter(Boolean)
+                                    .join(" · ")}
+                                </div>
+                                <div className="pc-tests">
+                                  {r.machines
+                                    .map(
+                                      (id) =>
+                                        `${machineFor(catalogue, id)?.icon || ""} ${machineFor(catalogue, id)?.name || id}`,
+                                    )
+                                    .join(" · ")}
+                                </div>
+                              </div>
+                              <div className="pc-r">
+                                <div className="sp sp-done">✓ {r.machines.length} done</div>
+                                <div className="pc-tlbl">reported {clock(r.at)}</div>
+                                <div className="hr-where">
+                                  <div className={`sp ${r.gone ? "sp-process" : "sp-ready"}`}>
+                                    {r.gone ? "Has left" : "On the floor"}
+                                  </div>
+                                  <div className="pc-tlbl">{r.where}</div>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
+
+        {viewingDoc && <PdfViewerModal doc={viewingDoc} onClose={() => setViewingDoc(null)} />}
+
+        <TestPane
+          order={openOrder}
+          busy={busy}
+          onClose={() => setOpenId(null)}
+          onAdvance={onAdvance}
+          onUpload={onUpload}
+          onRemoveReport={onRemoveReport}
+          canRemoveReport={canRemoveReport}
+          onView={(o) =>
+            setViewingDoc({
+              id: o.reportDocId,
+              title: "Machine test report",
+              doc_type: "lab_report",
+            })
+          }
+        />
+
+        {toast && <div className="toast show">{toast}</div>}
       </div>
-
-      {viewingDoc && <PdfViewerModal doc={viewingDoc} onClose={() => setViewingDoc(null)} />}
-
-      <TestPane
-        order={openOrder}
-        busy={busy}
-        onClose={() => setOpenId(null)}
-        onAdvance={onAdvance}
-        onUpload={onUpload}
-        onRemoveReport={onRemoveReport}
-        canRemoveReport={canRemoveReport}
-        onView={(o) =>
-          setViewingDoc({ id: o.reportDocId, title: "Machine test report", doc_type: "lab_report" })
-        }
-      />
-
-      {toast && <div className="toast show">{toast}</div>}
-    </div>
+    </StationContext.Provider>
   );
 }

@@ -13,6 +13,10 @@ import {
 } from "../../queries/hooks/useFlow";
 import JourneyTemplateEditor from "../../components/flow/JourneyTemplateEditor";
 import MachineSettings from "../../components/flow/MachineSettings";
+import {
+  useGiniflowFloorSettings,
+  useSetGiniflowFloorSetting,
+} from "../../queries/hooks/useGiniflowFloorSettings";
 import "../../styles/flow.css";
 import "./FlowSettings.css";
 
@@ -32,6 +36,8 @@ export default function FlowAdminPage() {
   const editStep = useFlowEditCatalog();
   const createStep = useFlowCreateCatalogStep();
   const deleteStep = useFlowDeleteCatalogStep();
+  const { data: floorSettings = {} } = useGiniflowFloorSettings();
+  const setFloorSetting = useSetGiniflowFloorSetting();
 
   // "+ Add visit type" form for the benchmarks table.
   const [newType, setNewType] = useState({ label: "", min: "" });
@@ -132,6 +138,45 @@ export default function FlowAdminPage() {
   return (
     <div className="flow-root fset">
       <div className="flow-wrap">
+        {/* Floor behaviour — admin-toggleable flags (server/services/giniflow/floorSettings.js).
+            Its own full-width section, not a grid cell: a one-line toggle squeezed
+            beside the benchmarks table read as an odd, undersized third column. */}
+        <div className="flow-card fset__section">
+          <div className="fset__cardhead">
+            <div className="flow-sec-title">Samples-only patients</div>
+          </div>
+          <div className="fset__cardsub">
+            Patients booked for lab samples alone, no consultation. Hidden by default from every
+            Gini Flow station screen and the coordinator board.
+          </div>
+          <label
+            className="fset__toggle"
+            title="Show samples-only patients on station screens and the board again"
+          >
+            <input
+              type="checkbox"
+              checked={floorSettings.hide_lab_only_patients !== false}
+              onChange={(e) => {
+                const hide = e.target.checked;
+                setFloorSetting.mutate(
+                  { key: "hide_lab_only_patients", value: hide },
+                  {
+                    onSuccess: () =>
+                      toast(
+                        hide
+                          ? "Samples-only patients hidden again"
+                          : "Samples-only patients are visible again on every station",
+                        "success",
+                      ),
+                    onError: (e) => toast(e?.response?.data?.error || "Could not save", "error"),
+                  },
+                );
+              }}
+            />
+            Hide samples-only patients from stations and the board
+          </label>
+        </div>
+
         <div className="fset__grid">
           {/* Benchmarks — add / edit / delete */}
           <div className="flow-card">
@@ -257,7 +302,7 @@ export default function FlowAdminPage() {
               Every stop that can appear in a journey. Switching one off keeps it out of new
               journeys without disturbing visits already running.
             </div>
-            <div className="fset__scroll">
+            <div className="fset__scroll fset__scroll--tall">
               <table className="flow-table" style={{ border: "none" }}>
                 <thead>
                   <tr>

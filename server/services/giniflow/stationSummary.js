@@ -1,6 +1,8 @@
 import pool from "../../config/db.js";
 import { getSlaConfig, getDayBoard, getBottleneck, boardClock } from "./board.js";
 import { getTriageSummary } from "./triage.js";
+import { getMachines, stationOrderCounts } from "./machineCatalog.js";
+import { machinesForStation } from "../../../shared/machineStages.js";
 
 // The counts on the launcher tiles. One query set for the whole floor, so the
 // landing screen costs the same whether a coordinator holds one station or all
@@ -95,6 +97,43 @@ export async function getStationSummary(visitDate, db = pool) {
   const floor = live[0];
   const toDispense = col("pharmacy");
 
+  // Every machine split out of its own station (Echo, X-Ray, …) gets its own
+  // tile with its own numbers, and the Machine Room tile below stops counting
+  // their work as its own — generic over however many side stations the
+  // catalogue currently has (45-ECHO-STATION-PLAN.md, 46-XRAY-STATION-PLAN.md)
+  // rather than one hardcoded split per station.
+  const catalogue = await getMachines(db);
+  const sideStationIds = [
+    ...new Set(catalogue.map((m) => m.station).filter((s) => s && s !== "machine_room")),
+  ];
+  const sideCounts = Object.fromEntries(
+    await Promise.all(
+      sideStationIds.map(async (id) => [
+        id,
+        await stationOrderCounts(machinesForStation(catalogue, id), visitDate, db),
+      ]),
+    ),
+  );
+  const sideTotal = (key) => sideStationIds.reduce((sum, id) => sum + sideCounts[id][key], 0);
+  const machineRoomWaiting = orders.machine_waiting - sideTotal("waiting");
+  const machineRoomRunning = orders.machine_running - sideTotal("running");
+  const machineRoomUnreported = orders.machine_unreported - sideTotal("unreported");
+  const sideTile = (id) => {
+    const c = sideCounts[id];
+    const label = machinesForStation(catalogue, id)[0]?.name || id;
+    return {
+      count: c.waiting + c.running + c.unreported,
+      label: c.running
+        ? `${c.running} in progress · ${c.waiting} waiting`
+        : c.waiting
+          ? `${c.waiting} waiting`
+          : c.unreported
+            ? `${c.unreported} awaiting a report`
+            : `no ${label.toLowerCase()} today`,
+      tone: c.waiting ? "blue" : "teal",
+    };
+  };
+
   return {
     // Today first — the tile sits beside eight stations all counting today — with
     // tomorrow's unsorted backlog appended, since that is what the screen opens on.
@@ -171,16 +210,17 @@ export async function getStationSummary(visitDate, db = pool) {
     // unlike the lab tiles this one has no HealthRay fallback to count — a test
     // nobody ordered through Gini Flow leaves no trace until its report lands.
     machine: {
-      count: orders.machine_waiting + orders.machine_running + orders.machine_unreported,
-      label: orders.machine_running
-        ? `${orders.machine_running} on a machine · ${orders.machine_waiting} waiting`
-        : orders.machine_waiting
-          ? `${orders.machine_waiting} waiting`
-          : orders.machine_unreported
-            ? `${orders.machine_unreported} awaiting a report`
+      count: machineRoomWaiting + machineRoomRunning + machineRoomUnreported,
+      label: machineRoomRunning
+        ? `${machineRoomRunning} on a machine · ${machineRoomWaiting} waiting`
+        : machineRoomWaiting
+          ? `${machineRoomWaiting} waiting`
+          : machineRoomUnreported
+            ? `${machineRoomUnreported} awaiting a report`
             : "no machine tests today",
-      tone: orders.machine_waiting ? "blue" : "teal",
+      tone: machineRoomWaiting ? "blue" : "teal",
     },
+    ...Object.fromEntries(sideStationIds.map((id) => [id, sideTile(id)])),
     mo_sd: { count: col("sd"), label: `${col("sd")} in workup`, tone: "blue" },
     doctor: { count: col("wait_doctor"), label: `${col("wait_doctor")} waiting`, tone: "red" },
     // `to_hand_over` counts patients prescribed today with nothing recorded as
