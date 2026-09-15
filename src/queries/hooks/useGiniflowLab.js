@@ -69,6 +69,7 @@ export function useLabResults(target) {
     queryKey: ["giniflow", "lab", "results", key],
     queryFn: async () => (await api.get(resultsPath(target))).data,
     enabled: !!key,
+    staleTime: 5 * 60_000,
   });
 }
 

@@ -2,11 +2,14 @@ import pool from "../../config/db.js";
 import { getCanonical } from "../../utils/labCanonical.js";
 import { flagForRange } from "../../utils/labFlag.js";
 import { advanceSample, markCaseResultsReady } from "./labStation.js";
+import { syncLabStepsFromLab } from "./journey.js";
 import { advanceMachineTest } from "./machineStation.js";
 import { machineForTest } from "../../../shared/machineStages.js";
 import { getMachines } from "./machineCatalog.js";
 import { opensLabGate } from "../../../shared/labPayment.js";
 import { syncBiomarkersFromLatestLabs } from "../healthray/db.js";
+import { catalogRowsFor, catalogTestsByIds, patientFor } from "./labCatalog.js";
+import { computeFormulas, formulaInputs, rangeText, flagFor } from "../../../shared/labFormula.js";
 
 // Results the lab types in, rather than scans.
 // docs/gini-flow/32-LAB-TYPED-RESULTS-PLAN.md
@@ -125,7 +128,7 @@ const flattenName = (name) =>
 
 export async function suggestedRows(orderId, db = pool) {
   const order = await orderContext(orderId, db);
-  const groups = await suggestionsForTests(order.tests || [], db);
+  const groups = await suggestionsForTests(order.tests || [], db, order.patient_id);
   if (order.kind !== "machine") return groups;
   const machines = await getMachines(db);
   return groups.map((group) => {
@@ -154,10 +157,29 @@ export async function suggestedRows(orderId, db = pool) {
 // under these panels — is identical, so it is asked once.
 export async function suggestedCaseRows(caseNo, db = pool) {
   const c = await caseContext(caseNo, db);
-  return suggestionsForTests(c.tests || [], db);
+  return suggestionsForTests(c.tests || [], db, c.patient_id);
 }
 
-async function suggestionsForTests(tests, db = pool) {
+// The catalogue built from HealthRay's own lab master (44-LAB-TEST-CATALOG-PLAN.md)
+// answers first: its fields are the ones the hospital prints, in print order,
+// with the unit, the formula and the range for THIS patient. Only a test the
+// catalogue has never seen falls through to the guess below.
+async function suggestionsForTests(tests, db = pool, patientId = null) {
+  if (!tests.length) return [];
+
+  const patient = patientId ? await patientFor(patientId, db) : {};
+  const fromCatalog = await catalogRowsFor(tests, patient, db);
+  const missing = tests.filter((t) => !fromCatalog.get(t)?.length);
+  const guessed = missing.length ? await guessedRowsForTests(missing, db) : [];
+  const byGuess = new Map(guessed.map((g) => [g.test, g.params]));
+
+  return tests.map((test) => ({
+    test,
+    params: fromCatalog.get(test)?.length ? fromCatalog.get(test) : byGuess.get(test) || [],
+  }));
+}
+
+async function guessedRowsForTests(tests, db = pool) {
   if (!tests.length) return [];
 
   const { rows } = await db.query(
@@ -309,6 +331,7 @@ const normalise = (rows, panelName) =>
       const numeric = typeof raw === "number" ? raw : null;
       const worded = typeof raw === "string" && raw.trim() !== "" ? raw.trim() : null;
       return {
+        testId: /^\d+$/.test(String(r.testId ?? "")) ? String(r.testId) : null,
         testName: trimmed(r.testName, 120),
         value: numeric,
         valueText: trimmed(r.valueText, 120) || (worded ? worded.slice(0, 120) : null),
@@ -317,7 +340,49 @@ const normalise = (rows, panelName) =>
         panelName: trimmed(r.panelName, 120) || trimmed(panelName, 120),
       };
     })
-    .filter((r) => r.testName && (Number.isFinite(r.value) || r.valueText));
+    .filter(
+      (r) => r.testName && (Number.isFinite(r.value) || r.valueText || r.calculatedPlaceholder),
+    );
+
+// The catalogue has the last word on a calculated value, its range and its flag.
+// A browser can send anything; VLDL is Triglyceride ÷ 5 whatever arrives, and a
+// value is high or low against HealthRay's range for THIS patient or not at all
+// (44-LAB-TEST-CATALOG-PLAN.md D4, D5).
+async function applyCatalog(entries, patientId, db) {
+  const ids = entries.map((e) => e.testId).filter(Boolean);
+  if (!ids.length) return entries;
+
+  const patient = patientId ? await patientFor(patientId, db) : {};
+  const direct = await catalogTestsByIds(ids, patient, db);
+  const inputIds = direct.flatMap((t) => formulaInputs(t.formula)).map(String);
+  const extra = inputIds.filter((id) => !ids.includes(id));
+  const catalog = [...direct, ...(extra.length ? await catalogTestsByIds(extra, patient, db) : [])];
+  const byId = new Map(catalog.map((t) => [t.id, t]));
+
+  const typed = {};
+  for (const e of entries) if (e.testId) typed[e.testId] = e.value ?? e.valueText;
+  const computed = computeFormulas(catalog, typed);
+
+  return entries
+    .map((e) => {
+      const test = e.testId ? byId.get(e.testId) : null;
+      if (!test) return e;
+      const value = test.formula ? computed[test.id] : e.value;
+      if (test.formula && value === null) return null;
+      const { flag, critical } = flagFor(value ?? e.valueText, test.range);
+      return {
+        ...e,
+        testName: test.name || e.testName,
+        value: test.formula ? value : e.value,
+        valueText: test.formula ? null : e.valueText,
+        unit: test.unit ?? e.unit,
+        refRange: rangeText(test.range) || null,
+        flag,
+        isCritical: critical,
+      };
+    })
+    .filter(Boolean);
+}
 
 // The write itself, identical for an order and for a hospital case — only the
 // column that links a row back to what produced it differs. `column` is one of
@@ -331,7 +396,8 @@ async function writeEntries(db, ctx, entries, column) {
     await client.query("BEGIN");
     for (const e of entries) {
       const canonical = getCanonical(e.testName) || e.testName.toLowerCase().replace(/\s+/g, "_");
-      const flag = e.value === null ? null : flagForRange(e.value, e.refRange);
+      const flag =
+        e.flag !== undefined ? e.flag : e.value === null ? null : flagForRange(e.value, e.refRange);
 
       // uq_lab_results_per_date is a partial unique index over
       // (patient_id, canonical_name, test_date) that covers 'manual', so a
@@ -341,7 +407,7 @@ async function writeEntries(db, ctx, entries, column) {
         `UPDATE lab_results
             SET test_name = $4, result = $5, result_text = $6, unit = $7,
                 ref_range = $8, flag = $9, panel_name = COALESCE($10, panel_name),
-                ${column} = $11, source = $12
+                ${column} = $11, source = $12, is_critical = $13
           WHERE patient_id = $1 AND canonical_name = $2 AND test_date::date = $3::date
             AND (source = $12 OR ${column} = $11)`,
         [
@@ -357,6 +423,7 @@ async function writeEntries(db, ctx, entries, column) {
           e.panelName,
           link,
           SOURCE,
+          e.isCritical === true,
         ],
       );
       if (updated.rowCount) {
@@ -386,8 +453,8 @@ async function writeEntries(db, ctx, entries, column) {
       const inserted = await client.query(
         `INSERT INTO lab_results
            (patient_id, appointment_id, ${column}, test_date, test_name, canonical_name,
-            result, result_text, unit, ref_range, flag, panel_name, source)
-         VALUES ($1,$2,$3,$4::date,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+            result, result_text, unit, ref_range, flag, panel_name, source, is_critical)
+         VALUES ($1,$2,$3,$4::date,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
          ON CONFLICT DO NOTHING`,
         [
           ctx.patient_id,
@@ -403,6 +470,7 @@ async function writeEntries(db, ctx, entries, column) {
           flag,
           e.panelName,
           SOURCE,
+          e.isCritical === true,
         ],
       );
       // Saying "3 results saved" when one of them was dropped is the worst of
@@ -459,7 +527,7 @@ export async function saveResults(
   const { written, skipped } = await writeEntries(
     db,
     { ...order, id: orderId },
-    entries,
+    await applyCatalog(entries, order.patient_id, db),
     "lab_order_id",
   );
 
@@ -487,9 +555,11 @@ export async function saveResults(
 
 // The same, for a case the hospital raised on HealthRay.
 //
-// No payment gate: a HealthRay case is billed in HealthRay and this system has no
-// say in it — the lab station has never gated one, and inventing a gate here
-// would block the values for a bill we cannot read.
+// No payment gate here: the gate belongs at collection, not at typing in
+// results — advanceCaseAction()'s sample_taken step in labStation.js now
+// refuses to draw a HealthRay-ordered sample until reception has cleared Lab
+// Billing on the journey, so a case with results to save already cleared that
+// gate on the way in.
 //
 // Nothing is written back to HealthRay, so the case is finished the only way this
 // system can finish one: the floor's own `results_ready` step, which is what moves
@@ -503,7 +573,12 @@ export async function saveCaseResults(
   if (!entries.length) throw bad("Nothing to save — every row needs a test and a value");
 
   const c = await caseContext(caseNo, db);
-  const { written, skipped } = await writeEntries(db, c, entries, "lab_case_no");
+  const { written, skipped } = await writeEntries(
+    db,
+    c,
+    await applyCatalog(entries, c.patient_id, db),
+    "lab_case_no",
+  );
 
   // Both only when something actually landed. A save whose every row was already
   // owned by another source has written nothing, and the results-ready check
@@ -525,6 +600,7 @@ export async function saveCaseResults(
     });
   }
   if (written) await syncBiomarkers(c.patient_id, c.appointment_id);
+  if (written && c.visit_id) await syncLabStepsFromLab(db, c.visit_id);
 
   return {
     caseNo,

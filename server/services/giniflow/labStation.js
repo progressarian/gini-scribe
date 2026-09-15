@@ -13,6 +13,7 @@ import {
   NOT_A_MARKER_SQL,
 } from "../../../shared/giniflowStatus.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
+import { syncLabStepsFromLab } from "./journey.js";
 import { labStepsAreManual, labShowsHealthrayCases } from "../../../shared/manualFloor.js";
 import {
   LAB_ROOMS,
@@ -940,6 +941,64 @@ async function assertVitalsRecorded(db, visitId) {
   }
 }
 
+// No sample is drawn before payment, whoever ordered the test. A Scribe order
+// is already gated in advanceSample() below via opensLabGate(); a HealthRay
+// case has no such gate because HealthRay never sends payment data through
+// the sync — case 19918 (15 Sep) proved every payment field lab_cases carries
+// is null, always, not just when unpaid. So a HealthRay case is billed only
+// once reception ticks the Lab Billing stop on the journey by hand; nothing
+// here may take their word for it and nothing may auto-tick it from HealthRay
+// evidence (see journey.js — auto-ticking on hr_cases alone was the hole this
+// closes).
+// Only lc.patient_id. The fallback matches patients.file_no against
+// HealthRay's UHID, and HealthRay REASSIGNS a UHID to a different person over
+// time — so on a case whose patient was never linked, matching by UHID alone
+// could find somebody else's visit. A caller that cannot identify the patient
+// does not guess at one: it gets null and steps aside.
+async function resolveVisitForCase(db, caseNo) {
+  const { rows: visit } = await db.query(
+    `SELECT v.id FROM lab_cases lc
+       JOIN giniflow_visits v
+         ON v.visit_date = lc.case_date AND v.patient_id = lc.patient_id
+      WHERE lc.case_no = $1 AND lc.patient_id IS NOT NULL
+      LIMIT 1`,
+    [caseNo],
+  );
+  if (visit.length) return visit[0].id;
+  const { rows: sameDay } = await db.query(
+    `SELECT v.id FROM lab_cases lc
+       JOIN patients p ON p.file_no = lc.raw_list_json->'patient'->>'healthray_uid'
+       JOIN giniflow_visits v ON v.visit_date = lc.case_date AND v.patient_id = p.id
+      WHERE lc.case_no = $1 AND lc.patient_id IS NULL
+      LIMIT 2`,
+    [caseNo],
+  );
+  return sameDay.length === 1 ? sameDay[0].id : null;
+}
+
+async function assertLabBillingCleared(db, visitId) {
+  if (!visitId) return;
+  const { rows } = await db.query(
+    `SELECT p.name, s.status AS billing_status
+       FROM giniflow_visits v
+       JOIN patients p ON p.id = v.patient_id
+       LEFT JOIN giniflow_visit_steps s
+         ON s.visit_id = v.id AND s.step_catalog_id = 'lab_billing'
+      WHERE v.id = $1`,
+    [visitId],
+  );
+  if (!rows.length) return;
+  const { name, billing_status } = rows[0];
+  if (billing_status && !["done", "skipped"].includes(billing_status)) {
+    throw Object.assign(
+      new Error(
+        `${name}'s lab payment is not cleared — reception must clear Lab Billing before the sample`,
+      ),
+      { status: 409 },
+    );
+  }
+}
+
 export async function advanceSample(
   orderId,
   { to, actorId = null, reportUrl = null, room = null },
@@ -1307,34 +1366,12 @@ export async function markLabCaseAction(
     }
   }
 
+  const resolvedVisitId = await resolveVisitForCase(db, caseNo);
+
   if (action === "sample_taken" && !undo) {
-    // Only lc.patient_id. The fallback matched patients.file_no against
-    // HealthRay's UHID, and HealthRay REASSIGNS a UHID to a different person
-    // over time — so on a case whose patient was never linked, this could find
-    // somebody else's visit and refuse a legitimate collection while naming the
-    // wrong patient. A guard that cannot identify the patient does not guess at
-    // one: it steps aside, and the desk's own eyes are the check.
-    const { rows: visit } = await db.query(
-      `SELECT v.id FROM lab_cases lc
-         JOIN giniflow_visits v
-           ON v.visit_date = lc.case_date AND v.patient_id = lc.patient_id
-        WHERE lc.case_no = $1 AND lc.patient_id IS NOT NULL
-        LIMIT 1`,
-      [caseNo],
-    );
-    const { rows: sameDay } = visit.length
-      ? { rows: [] }
-      : await db.query(
-          `SELECT v.id FROM lab_cases lc
-             JOIN patients p ON p.file_no = lc.raw_list_json->'patient'->>'healthray_uid'
-             JOIN giniflow_visits v ON v.visit_date = lc.case_date AND v.patient_id = p.id
-            WHERE lc.case_no = $1 AND lc.patient_id IS NULL
-            LIMIT 2`,
-          [caseNo],
-        );
-    const visitId = visit[0]?.id || (sameDay.length === 1 ? sameDay[0].id : null);
-    await assertPatientIsFree(db, visitId, "collect the sample");
-    await assertVitalsRecorded(db, visitId);
+    await assertPatientIsFree(db, resolvedVisitId, "collect the sample");
+    await assertVitalsRecorded(db, resolvedVisitId);
+    await assertLabBillingCleared(db, resolvedVisitId);
   }
 
   if (undo) {
@@ -1360,6 +1397,14 @@ export async function markLabCaseAction(
      RETURNING action, created_at`,
     [caseNo, action, actorRole, actorId, note],
   );
+
+  // The card and the lab track come from two different tables (the journey's
+  // own steps vs. this case's own action log) and nothing else kept them in
+  // step — the desk was reading "next: Lab Billing" on a patient whose sample
+  // was already reported (P_161750, 15 Sep 2026) because only the action log
+  // got written. Every action re-reads the lab's evidence onto the journey so
+  // the card never lags behind what the lab just did.
+  if (resolvedVisitId) await syncLabStepsFromLab(db, resolvedVisitId);
 
   // Closing the case is what tells the floor. Recording "done" and leaving the
   // visit alone would clear the lab's own board while the MO and the consultant

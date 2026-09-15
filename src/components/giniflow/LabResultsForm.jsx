@@ -4,6 +4,7 @@ import {
   useTestNameSearch,
   useSaveLabResults,
 } from "../../queries/hooks/useGiniflowLab";
+import { computeFormulas, flagFor as flagAgainstRange } from "../../../shared/labFormula";
 
 // Typing the results in, instead of scanning them.
 // docs/gini-flow/32-LAB-TYPED-RESULTS-PLAN.md
@@ -13,9 +14,27 @@ import {
 // be deleted or edited. The values land in lab_results, so the doctor sees them
 // as ordinary labs: trended, flagged, comparable.
 
+// A catalogue row is judged against HealthRay's own numbers; a hand-typed one
+// still has only its printed range to go on.
+const flagOf = (row) => {
+  if (row.range) {
+    const { flag, critical } = flagAgainstRange(row.value, row.range);
+    return flag === "H"
+      ? critical
+        ? "CRITICAL"
+        : "HIGH"
+      : flag === "L"
+        ? critical
+          ? "CRITICAL"
+          : "LOW"
+        : null;
+  }
+  return flagFromText(row.value, row.refRange);
+};
+
 // The same rule the server applies, so the technician sees the flag their value
 // will carry before they commit it to a patient's record — not afterwards.
-const flagFor = (value, refRange) => {
+const flagFromText = (value, refRange) => {
   const n = parseFloat(value);
   if (!Number.isFinite(n)) return null;
   const raw = String(refRange || "").trim();
@@ -89,6 +108,36 @@ function AddRow({ onAdd }) {
 // the lab types the handful it has values for, not every line it might.
 const VISIBLE_ROWS = 10;
 
+function splitCatalogRows(rows) {
+  const required = [];
+  const optional = [];
+  let i = 0;
+  while (i < rows.length) {
+    const row = rows[i];
+    if (row.depth > 0) {
+      optional.push(row);
+      i++;
+      continue;
+    }
+    let j = i + 1;
+    while (j < rows.length && rows[j].depth > 0) j++;
+    const children = rows.slice(i + 1, j);
+    if (row.isGroup) {
+      const requiredChildren = children.filter((c) => c.required);
+      if (requiredChildren.length) {
+        required.push(row, ...requiredChildren);
+      }
+      optional.push(...children.filter((c) => !c.required));
+    } else if (row.required) {
+      required.push(row, ...children);
+    } else {
+      optional.push(row, ...children);
+    }
+    i = j;
+  }
+  return [required, optional];
+}
+
 export default function LabResultsForm({ orderId, caseNo, onSaved, onFailed }) {
   const { data, isLoading } = useLabResults({ orderId, caseNo });
   const save = useSaveLabResults();
@@ -114,25 +163,59 @@ export default function LabResultsForm({ orderId, caseNo, onSaved, onFailed }) {
     }
     const suggested = (data.suggestions || []).flatMap((group) =>
       group.params.map((p) => ({
+        testId: p.testId || null,
         testName: p.testName,
         value: "",
         valueText: "",
         unit: p.unit || "",
         refRange: p.refRange || "",
+        range: p.range || null,
+        formula: p.formula || null,
+        calculated: !!p.calculated,
+        isGroup: !!p.isGroup,
+        depth: p.depth || 0,
+        locked: !!p.fromCatalog,
+        required: p.required !== false,
         panelName: group.test,
       })),
     );
+    const fromCatalog = suggested.filter((r) => r.locked);
+    if (fromCatalog.length) {
+      const [required, optional] = splitCatalogRows(fromCatalog);
+      setRows(required);
+      setRest(optional);
+      return;
+    }
     setRows(suggested.slice(0, VISIBLE_ROWS));
     setRest(suggested.slice(VISIBLE_ROWS));
   }, [data, rows]);
 
   const list = rows || [];
-  const filled = list.filter((r) => String(r.value).trim() !== "" || r.valueText.trim() !== "");
+  const calculated = computeFormulas(
+    list.filter((r) => r.testId).map((r) => ({ id: r.testId, formula: r.formula })),
+    Object.fromEntries(list.filter((r) => r.testId && !r.formula).map((r) => [r.testId, r.value])),
+  );
+  const shown = list.map((r) => (r.formula ? { ...r, value: calculated[r.testId] ?? "" } : r));
+  const filled = shown.filter(
+    (r) => !r.isGroup && (String(r.value).trim() !== "" || r.valueText.trim() !== ""),
+  );
   const patch = (i, next) => setRows(list.map((r, idx) => (idx === i ? { ...r, ...next } : r)));
 
   const submit = () =>
     save.mutate(
-      { orderId, caseNo, rows: filled },
+      {
+        orderId,
+        caseNo,
+        rows: filled.map((r) => ({
+          testId: r.testId,
+          testName: r.testName,
+          value: r.value,
+          valueText: r.valueText,
+          unit: r.unit,
+          refRange: r.refRange,
+          panelName: r.panelName,
+        })),
+      },
       { onSuccess: (r) => onSaved?.(r), onError: (e) => onFailed?.(e) },
     );
 
@@ -148,35 +231,58 @@ export default function LabResultsForm({ orderId, caseNo, onSaved, onFailed }) {
         <span />
       </div>
 
-      {list.map((row, i) => {
-        const flag = flagFor(row.value, row.refRange);
+      {shown.map((row, i) => {
+        const flag = flagOf(row);
+        if (row.isGroup) {
+          return (
+            <div className="lr-group" key={`${row.testName}-${i}`}>
+              {row.testName}
+            </div>
+          );
+        }
         return (
           <div className="lr-row" key={`${row.testName}-${i}`}>
-            <span className="lr-name">{row.testName}</span>
+            <span className="lr-name" style={row.depth ? { paddingLeft: 12 } : undefined}>
+              {row.testName}
+              {row.calculated && (
+                <span className="lr-calc" title={row.formula}>
+                  auto
+                </span>
+              )}
+            </span>
             <span className="lr-val">
               <input
                 className="ar-reason-input"
-                inputMode="decimal"
-                placeholder="—"
+                inputMode={row.inputType === "text" ? "text" : "decimal"}
+                placeholder={row.calculated ? "worked out" : "—"}
                 value={row.value}
+                readOnly={row.calculated}
                 onChange={(e) => patch(i, { value: e.target.value })}
               />
               {/* Shown as they type: a value about to go on a patient's record
                   as HIGH should say so before it is saved, not after. */}
               {flag && <span className={`lr-flag lr-${flag.toLowerCase()}`}>{flag}</span>}
             </span>
-            <input
-              className="ar-reason-input lr-unit"
-              placeholder="unit"
-              value={row.unit}
-              onChange={(e) => patch(i, { unit: e.target.value })}
-            />
-            <input
-              className="ar-reason-input lr-ref"
-              placeholder="range"
-              value={row.refRange}
-              onChange={(e) => patch(i, { refRange: e.target.value })}
-            />
+            {row.locked ? (
+              <span className="lr-unit lr-fixed">{row.unit || "—"}</span>
+            ) : (
+              <input
+                className="ar-reason-input lr-unit"
+                placeholder="unit"
+                value={row.unit}
+                onChange={(e) => patch(i, { unit: e.target.value })}
+              />
+            )}
+            {row.locked ? (
+              <span className="lr-ref lr-fixed">{row.refRange || "no range"}</span>
+            ) : (
+              <input
+                className="ar-reason-input lr-ref"
+                placeholder="range"
+                value={row.refRange}
+                onChange={(e) => patch(i, { refRange: e.target.value })}
+              />
+            )}
             <button
               type="button"
               className="jb-remove"

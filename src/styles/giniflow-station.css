@@ -5084,6 +5084,35 @@
   background: var(--amb-l);
   color: var(--amb);
 }
+.gf .lr-critical {
+  background: var(--red);
+  color: #fff;
+}
+.gf .lr-group {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--ink2);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 6px 2px 2px;
+}
+.gf .lr-calc {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--ink3);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 0 5px;
+  margin-left: 5px;
+}
+.gf .lr-fixed {
+  font-size: 11px;
+  color: var(--ink3);
+  padding: 4px 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .gf .lr-add {
   position: relative;
   margin-top: 6px;

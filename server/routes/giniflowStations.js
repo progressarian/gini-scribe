@@ -1313,10 +1313,11 @@ const assertOwnsOrder = async (req, orderId) => {
 
 router.get("/giniflow/lab/:orderId/results", resultsGate, async (req, res) => {
   try {
-    res.json({
-      results: await getResults(req.params.orderId),
-      suggestions: await suggestedRows(req.params.orderId),
-    });
+    const [results, suggestions] = await Promise.all([
+      getResults(req.params.orderId),
+      suggestedRows(req.params.orderId),
+    ]);
+    res.json({ results, suggestions });
   } catch (e) {
     handleError(res, e, "Gini Flow lab results");
   }
@@ -1327,10 +1328,11 @@ router.get("/giniflow/lab/:orderId/results", resultsGate, async (req, res) => {
 // the `/giniflow/lab/:orderId/results` pattern above.
 router.get("/giniflow/lab/case/:caseNo/results", labGate, async (req, res) => {
   try {
-    res.json({
-      results: await getCaseResults(req.params.caseNo),
-      suggestions: await suggestedCaseRows(req.params.caseNo),
-    });
+    const [results, suggestions] = await Promise.all([
+      getCaseResults(req.params.caseNo),
+      suggestedCaseRows(req.params.caseNo),
+    ]);
+    res.json({ results, suggestions });
   } catch (e) {
     handleError(res, e, "Gini Flow lab case results");
   }

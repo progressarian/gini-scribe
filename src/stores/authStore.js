@@ -66,14 +66,21 @@ const useAuthStore = create((set, get) => ({
         if (doctor.role === "mo") set({ moName: doctor.short_name });
         else set({ conName: doctor.short_name });
       } else {
-        // Token invalid or expired — clear it
+        // Server responded but says the token isn't valid — clear it
         set({ authToken: "", currentDoctor: null, authReady: true });
         localStorage.removeItem("gini_auth_token");
       }
-    } catch {
-      // Network error — clear auth state
-      set({ authToken: "", currentDoctor: null, authReady: true });
-      localStorage.removeItem("gini_auth_token");
+    } catch (e) {
+      if (e.response?.status === 401) {
+        // Token genuinely rejected by the server — clear it
+        set({ authToken: "", currentDoctor: null, authReady: true });
+        localStorage.removeItem("gini_auth_token");
+      } else {
+        // Network/server error (timeout, deploy restart, offline) — the token
+        // may still be valid, so keep it in localStorage for the next retry
+        // instead of forcing a re-login.
+        set({ authReady: true });
+      }
     }
   },
 

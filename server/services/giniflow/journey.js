@@ -784,12 +784,22 @@ export async function insertLabStepsIfHealthrayCase(client, visitId) {
   return insertLabStepsForOrder(client, visitId);
 }
 
-// The lab's own record, read back onto the journey. Lab Billing and Blood Sample
-// are stops nobody here works: the money is taken at a counter and the sample is
-// drawn by the lab, and both leave evidence — a settled order, or a HealthRay
-// case that was collected and reported. A lab that reported results was paid for
-// and drawn, whatever this side was told, so the journey says so rather than
-// asking the desk to tick what already happened.
+// The lab's own record, read back onto the journey. Blood Sample is a stop
+// nobody here works: the sample is drawn by the lab, and a HealthRay case that
+// was collected is evidence the journey can trust on its own.
+//
+// Lab Billing is different. HealthRay never sends payment data through the
+// sync — every payment field on lab_cases (payment_status, balance_amount,
+// amount_received, payment_history) comes back null on every case, paid or
+// not (confirmed 15 Sep 2026) — so a HealthRay case existing is NOT evidence
+// it was paid for. Ticking it from hr_cases alone let the lab draw and report
+// an unpaid HealthRay-ordered sample with no payment recorded anywhere in
+// Scribe (P_161750, case 19918). Lab Billing for a HealthRay case is now only
+// ever ticked by reception's own hand (setStepStatus) — this function marks
+// it billed by inferring it from the draw itself: assertLabBillingCleared()
+// in labStation.js already refuses to collect a HealthRay sample until Lab
+// Billing is done, so a sample that WAS collected proves billing already
+// happened; that lets the journey catch up rather than pretend to establish it.
 //
 // `skipped` is included deliberately: the exit sweep strikes through whatever is
 // still pending when a patient leaves, and evidence from the lab beats a guess
@@ -814,8 +824,8 @@ export async function syncLabStepsFromLab(db, visitId) {
   const e = rows[0];
   if (!e) return { billed: false, drawn: false };
 
-  const billed = e.orders > 0 ? e.unsettled === 0 : e.hr_cases > 0;
   const drawn = e.orders > 0 ? e.drawn > 0 : !!e.hr_collected;
+  const billed = e.orders > 0 ? e.unsettled === 0 : drawn;
 
   const tick = async (catalogId) =>
     db.query(

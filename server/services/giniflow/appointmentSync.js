@@ -288,16 +288,20 @@ export async function sweepLabOnlyExits(client, day, graceMinutes = LAB_ONLY_EXI
        JOIN patients p ON p.id = v.patient_id
        JOIN LATERAL (
          SELECT count(*)::int AS cases,
-                count(*) FILTER (
-                  WHERE COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'reported_on' IS NULL
-                )::int AS pending,
-                max((COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'reported_on')::timestamptz)
-                  AS last_report
-           FROM lab_cases lc
-          WHERE lc.case_date = v.visit_date
-            AND (lc.patient_id = v.patient_id
-                 OR (lc.patient_id IS NULL
-                     AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))
+                count(*) FILTER (WHERE c.reported_at IS NULL)::int AS pending,
+                max(c.reported_at) AS last_report
+           FROM (
+             SELECT COALESCE(
+                      (COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'reported_on')::timestamptz,
+                      (SELECT max(a.created_at) FROM giniflow_lab_case_actions a
+                        WHERE a.case_no = lc.case_no AND a.action = 'report_uploaded')
+                    ) AS reported_at
+               FROM lab_cases lc
+              WHERE lc.case_date = v.visit_date
+                AND (lc.patient_id = v.patient_id
+                     OR (lc.patient_id IS NULL
+                         AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))
+           ) c
        ) lab ON TRUE
       WHERE v.visit_date = $1::date
         AND v.current_status <> ALL($3)
@@ -481,7 +485,12 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
     result.pharmacySwept = manualFloor()
       ? 0
       : await sweepPharmacyLeg(client, day, await pharmacyGraceMinutes(client));
-    result.labOnlySwept = manualFloor() ? 0 : await sweepLabOnlyExits(client, day);
+    // Not gated with the pharmacy sweep above: a samples-only patient never
+    // reaches the pharmacy or Rx leg, so the counter's End visit button — the
+    // only manual close on this floor — can never be pressed for them. Gating
+    // this too is what left them in "In building now" all day with no station
+    // able to end it. The reports being in IS the floor's own record here.
+    result.labOnlySwept = await sweepLabOnlyExits(client, day);
     // Only ever used to choose `rx_pending` over `exited`, and on a manual floor
     // `exited` is not a target the sync can have — so the query is skipped rather
     // than run every 30 seconds for an answer nothing reads.

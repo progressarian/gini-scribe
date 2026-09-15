@@ -1066,7 +1066,7 @@ function HealthrayCasePane({
                               key={a.action}
                               type="button"
                               className="st-btn is-done"
-                              disabled={busy}
+                              disabled={busy || !next}
                               onClick={() => onAction(c.caseNo, a.action, true)}
                             >
                               ✓ {a.doneLabel}

@@ -84,15 +84,18 @@ async function kvSet(key, value) {
 
 // Pull a cooldown another process/restart may have already established (once;
 // promise-singleton so concurrent callers don't each hit the DB).
+const COOLDOWN_RECHECK_MS = 15_000;
+let cooldownCheckedAt = 0;
+
 function loadPersistedCooldown() {
-  if (!cooldownLoadPromise) {
+  if (!cooldownLoadPromise || Date.now() - cooldownCheckedAt > COOLDOWN_RECHECK_MS) {
+    cooldownCheckedAt = Date.now();
     cooldownLoadPromise = (async () => {
       const c = await kvGet(KV_LAB_COOLDOWN);
-      if (c?.until && c.until > blockBackoffUntil) {
-        blockBackoffUntil = c.until;
-        blockFailCount = c.failCount || 0;
-        wafBlockCount = c.blockCount || 0;
-      }
+      if (!c) return;
+      blockBackoffUntil = c.until || 0;
+      blockFailCount = c.failCount || 0;
+      wafBlockCount = c.blockCount || 0;
     })();
   }
   return cooldownLoadPromise;

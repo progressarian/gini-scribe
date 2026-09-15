@@ -147,6 +147,20 @@ export async function markLabCaseSynced(caseNo, { patientId, appointmentId, rawD
   );
 }
 
+// The case-to-patient link, on its own. LIST ONLY never reaches
+// markLabCaseSynced (39-HYBRID-FLOOR-PLAN.md §15), so without this the match
+// made in labSync is computed and discarded, and every screen falls back to
+// matching HealthRay's UHID against patients.file_no — a UHID HealthRay
+// reassigns to other people over time.
+export async function linkLabCasePatient(caseNo, patientId) {
+  if (!patientId) return;
+  await pool.query(
+    `UPDATE lab_cases SET patient_id = $2
+      WHERE case_no = $1 AND patient_id IS DISTINCT FROM $2 AND patient_id IS NULL`,
+    [caseNo, patientId],
+  );
+}
+
 // ── Download lab report PDF and store in Supabase ──────────────────────────
 // `caseDetail` (optional) is the live HealthRay detail payload — when
 // provided, the printable check verifies every in-house test has a result.

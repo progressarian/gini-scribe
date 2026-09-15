@@ -13,6 +13,7 @@ import {
   ensureLabCasesTable,
   insertLabCase,
   markLabCaseSynced,
+  linkLabCasePatient,
   getPendingLabCases,
   getPartialLabCases,
   getPdfPendingCases,
@@ -98,7 +99,10 @@ async function processCase(listRow, { listOnly = false } = {}) {
   // It also stops the two heaviest calls per case (case_detail and the
   // puppeteer PDF render), which were the bulk of the request volume that
   // repeatedly tripped HealthRay's WAF.
-  if (listOnly) return { listed: true, written: 0 };
+  if (listOnly) {
+    await linkLabCasePatient(caseNo, patientId);
+    return { listed: true, written: 0 };
+  }
 
   // Step c: fetch case detail
   let detail;

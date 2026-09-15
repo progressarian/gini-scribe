@@ -174,8 +174,59 @@ export async function downloadAndStore(
 
 // ── Ensure sync columns exist ───────────────────────────────────────────────
 let columnsReady = false;
+
+const SYNC_COLUMNS = [
+  ["appointments", "healthray_id"],
+  ["appointments", "healthray_clinical_notes"],
+  ["appointments", "healthray_diagnoses"],
+  ["appointments", "healthray_medications"],
+  ["appointments", "healthray_previous_medications"],
+  ["appointments", "healthray_labs"],
+  ["appointments", "healthray_advice"],
+  ["appointments", "healthray_investigations"],
+  ["appointments", "healthray_follow_up"],
+  ["appointments", "bill_paid"],
+  ["appointments", "bill_created"],
+  ["appointments", "healthray_patient_id"],
+  ["doctors", "healthray_id"],
+  ["vitals", "appointment_id"],
+  ["vitals", "waist"],
+  ["vitals", "body_fat"],
+  ["vitals", "muscle_mass"],
+  ["vitals", "pulse"],
+  ["vitals", "bp_standing_sys"],
+  ["vitals", "bp_standing_dia"],
+  ["vitals", "source"],
+  ["medications", "parent_medication_id"],
+  ["medications", "support_condition"],
+];
+const SYNC_INDEXES = [
+  "idx_appt_healthray",
+  "idx_doc_healthray",
+  "idx_medications_parent",
+  "idx_appt_patient_day_slot_doc_status",
+];
+
+async function syncSchemaPresent() {
+  const { rows } = await pool.query(
+    `SELECT
+       (SELECT count(*)::int FROM information_schema.columns c
+         JOIN unnest($1::text[], $2::text[]) AS want(t, col)
+           ON c.table_schema = 'public' AND c.table_name = want.t AND c.column_name = want.col)
+         AS columns,
+       (SELECT count(*)::int FROM pg_indexes
+         WHERE schemaname = 'public' AND indexname = ANY($3::text[])) AS indexes`,
+    [SYNC_COLUMNS.map(([t]) => t), SYNC_COLUMNS.map(([, c]) => c), SYNC_INDEXES],
+  );
+  return rows[0].columns === SYNC_COLUMNS.length && rows[0].indexes === SYNC_INDEXES.length;
+}
+
 export async function ensureSyncColumns() {
   if (columnsReady) return;
+  if (await syncSchemaPresent()) {
+    columnsReady = true;
+    return;
+  }
   await pool.query(`
     ALTER TABLE appointments
       ADD COLUMN IF NOT EXISTS healthray_id TEXT;
@@ -1387,8 +1438,8 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
       daysOfWeek, // $11 — int[] (0..6) weekday(s) for weekly meds, or null
       typeof med.instructions === "string" && med.instructions.trim()
         ? med.instructions.trim()
-        : null, 
-      detectedForm || null, 
+        : null,
+      detectedForm || null,
     ];
     await pool
       .query(

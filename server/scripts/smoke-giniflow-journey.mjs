@@ -529,6 +529,16 @@ await pool.query(
            '{"phlebotomy_status":"Completed"}'::jsonb, '{"reported_on":"2019-01-04 11:00"}'::jsonb)`,
   [v5row.patient_id, v5row.visit_date],
 );
+// HealthRay never sends payment data through the sync (every payment field on
+// lab_cases comes back null, always — confirmed 15 Sep 2026, case 19918), so a
+// case existing is not evidence it was billed. The floor's OWN sample_taken
+// action is the evidence: assertLabBillingCleared() in labStation.js refuses
+// to record it on a HealthRay case until reception has ticked Lab Billing, so
+// this action existing already proves billing happened.
+await pool.query(
+  `INSERT INTO giniflow_lab_case_actions (case_no, action, actor_role, actor_id)
+   VALUES ('ZZJRN-LAB', 'sample_taken', 'lab', 20)`,
+);
 const hrEvidence = await syncLabStepsFromLab(pool, v5.id);
 check("a HealthRay case counts as billed and drawn", hrEvidence.billed && hrEvidence.drawn);
 const hrJourney = await getJourney(v5.id);
@@ -536,6 +546,7 @@ const hrBill = hrJourney.steps.find((s) => s.catalogId === "lab_billing");
 const hrSample = hrJourney.steps.find((s) => s.catalogId === "blood_sample");
 check("so the counter is not left for the desk to tick", hrBill.status === "done");
 check("and neither is the sample the lab already drew", hrSample.status === "done");
+await pool.query(`DELETE FROM giniflow_lab_case_actions WHERE case_no = 'ZZJRN-LAB'`);
 await pool.query(`DELETE FROM lab_cases WHERE case_no = 'ZZJRN-LAB'`);
 
 // The exit sweep strikes through what is still pending; lab evidence outranks it.

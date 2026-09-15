@@ -22,6 +22,7 @@ const healthrayLimiter = createRateLimiter({
 });
 
 const BLOCK_CHECK_MS = 15_000;
+const IGNORE_SHARED_BLOCK = process.env.HEALTHRAY_IGNORE_SHARED_BLOCK === "1";
 const COUNT_LOG_MS = 10 * 60_000;
 let blockCheckedAt = 0;
 let sharedBlockUntil = 0;
@@ -54,10 +55,15 @@ function countRequest(url) {
 }
 
 async function assertNotBlocked() {
-  if (Date.now() - blockCheckedAt > BLOCK_CHECK_MS) {
+  if (!IGNORE_SHARED_BLOCK && Date.now() - blockCheckedAt > BLOCK_CHECK_MS) {
     blockCheckedAt = Date.now();
     const shared = await kvGet(KV_COOLDOWN);
     sharedBlockUntil = String(shared?.reason || "").includes("blocked") ? shared.until || 0 : 0;
+    blockCount = shared?.blockCount || 0;
+    if (!sharedBlockUntil) {
+      blockedLocallyUntil = 0;
+      loginBackoffUntil = Math.min(loginBackoffUntil, shared?.until || 0);
+    }
   }
   const until = Math.max(sharedBlockUntil, blockedLocallyUntil);
   if (Date.now() < until) {
@@ -71,10 +77,26 @@ async function assertNotBlocked() {
 }
 
 async function tripBlock(status, url) {
-  blockCount += 1;
+  if (IGNORE_SHARED_BLOCK) {
+    blockedLocallyUntil = Date.now() + BLOCK_COOLDOWN_MS;
+    loginBackoffUntil = Math.max(loginBackoffUntil, blockedLocallyUntil);
+    log(
+      "Auth",
+      `⚠ BLOCKED by HealthRay (http=${status} on ${endpointOf(url)}) — this process pauses ${Math.round(BLOCK_COOLDOWN_MS / 60000)}min (shared cooldown not written)`,
+    );
+    return;
+  }
+  const shared = await kvGet(KV_COOLDOWN);
+  if (shared?.until > Date.now() && String(shared.reason || "").includes("blocked")) {
+    sharedBlockUntil = shared.until;
+    return;
+  }
+  blockCount = (shared?.blockCount || 0) + 1;
   const backoff = Math.min(BLOCK_COOLDOWN_MAX_MS, BLOCK_COOLDOWN_MS * 2 ** (blockCount - 1));
   blockedLocallyUntil = Date.now() + backoff;
   loginBackoffUntil = Math.max(loginBackoffUntil, blockedLocallyUntil);
+  sharedBlockUntil = blockedLocallyUntil;
+  blockCheckedAt = Date.now();
   await kvSet(KV_COOLDOWN, {
     until: blockedLocallyUntil,
     failCount: loginFailCount,
@@ -145,6 +167,7 @@ function loadPersistedState() {
         authToken = s.authToken || "";
       }
       if (s?.orgDoctorId && !orgDoctorId) orgDoctorId = String(s.orgDoctorId);
+      if (IGNORE_SHARED_BLOCK) return;
       const c = await kvGet(KV_COOLDOWN);
       if (c?.until) {
         loginBackoffUntil = c.until;
@@ -180,7 +203,7 @@ async function doLogin() {
   }
 
   await loadPersistedState();
-  const shared = await kvGet(KV_COOLDOWN);
+  const shared = IGNORE_SHARED_BLOCK ? null : await kvGet(KV_COOLDOWN);
   const until = Math.max(loginBackoffUntil, shared?.until || 0);
   if (Date.now() < until) {
     loginBackoffUntil = until;
@@ -248,12 +271,14 @@ async function doLogin() {
     }
     loginBackoffUntil = Date.now() + backoff;
     const reason = blocked ? `IP likely blocked (http=${res.status})` : "";
-    await kvSet(KV_COOLDOWN, {
-      until: loginBackoffUntil,
-      failCount: loginFailCount,
-      blockCount,
-      reason,
-    });
+    if (!IGNORE_SHARED_BLOCK) {
+      await kvSet(KV_COOLDOWN, {
+        until: loginBackoffUntil,
+        failCount: loginFailCount,
+        blockCount,
+        reason,
+      });
+    }
     if (blocked) {
       log(
         "Auth",

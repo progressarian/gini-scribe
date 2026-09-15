@@ -11,7 +11,12 @@ import { loginLimiter } from "../middleware/rateLimit.js";
 import { requireCapability } from "../middleware/auth.js";
 import { CAPABILITIES } from "../../shared/permissions.js";
 
-const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString("hex");
+if (!process.env.JWT_SECRET) {
+  throw new Error(
+    "JWT_SECRET is not set — a random per-process secret would silently invalidate every session on restart",
+  );
+}
+const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "24h";
 
 const router = Router();

@@ -1,4 +1,3 @@
-import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import pool from "../config/db.js";
 import {
@@ -7,7 +6,14 @@ import {
   canViewAnalytics,
 } from "../../shared/permissions.js";
 
-const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString("hex");
+function getJwtSecret() {
+  if (!process.env.JWT_SECRET) {
+    throw new Error(
+      "JWT_SECRET is not set — a random per-process secret would silently invalidate every session on restart",
+    );
+  }
+  return process.env.JWT_SECRET;
+}
 
 export const authMiddleware = async (req, res, next) => {
   const authHeader = req.headers["authorization"] || req.headers["Authorization"];
@@ -18,7 +24,7 @@ export const authMiddleware = async (req, res, next) => {
     (typeof req.query?.token === "string" ? req.query.token : null);
   if (!token) return next();
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, getJwtSecret());
     const session = await pool.query(
       "SELECT 1 FROM auth_sessions WHERE token=$1 AND expires_at > NOW()",
       [decoded.jti],

@@ -171,6 +171,10 @@ const BOARD_SQL = `
          (SELECT count(*)::int FROM giniflow_lab_orders o
            WHERE o.visit_id = v.id AND o.urgency = 'today'
              AND o.sample_status NOT IN ('uploaded', 'reported')) AS reports_outstanding,
+         -- Whether the floor's OWN pipeline had any today orders at all, so
+         -- reports_outstanding = 0 can be told apart from "never had one".
+         (SELECT count(*)::int FROM giniflow_lab_orders o
+           WHERE o.visit_id = v.id AND o.urgency = 'today') AS lab_orders_today,
          v.appointment_time::text                  AS appointment_time,
          p.name                                    AS patient_name,
          p.file_no,
@@ -389,11 +393,12 @@ const hintIconFor = (row) =>
 
 // What the lab card is waiting on, distinct from the main journey's hints (GF-19).
 // Everything from the moment the tube leaves the patient to the moment the
-// report is filed. Derived, so the two rungs the room split added cannot be
-// missed here — a sample sent to the lab and not yet received had neither
-// `collected` nor `atLab`, which is the card claiming the patient left without
-// giving a sample.
-const DRAWN_STATUSES = LAB_RUNGS.filter((r) => r.key !== "pending" && r.key !== "reported").flatMap(
+// report is filed — including "reported" itself, since a filed report cannot
+// exist without a drawn sample. Derived, so the two rungs the room split added
+// cannot be missed here — a sample sent to the lab and not yet received had
+// neither `collected` nor `atLab`, which is the card claiming the patient left
+// without giving a sample.
+const DRAWN_STATUSES = LAB_RUNGS.filter((r) => r.key !== "pending").flatMap(
   (r) => r.sampleStatuses,
 );
 
@@ -996,6 +1001,11 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
     // station cannot drift apart on who counts as samples-only.
     const labOnly = !!row.lab_only;
     const labOnlyLine = labOnly ? labOnlySummary(row) : null;
+    // Trust the floor's own pipeline once it is done, rather than falling
+    // back to HealthRay's mirrored case (`hrlab`/`tests`) which only updates
+    // as the HealthRay sync polls — paused sync leaves it looking permanently
+    // unreported even after the report has actually been uploaded locally.
+    const locallySettled = (row.lab_orders_today ?? 0) > 0 && (row.reports_outstanding ?? 0) === 0;
     return {
       id: row.id,
       patientId: row.patient_id,
@@ -1054,11 +1064,14 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
       labOnly,
       // Nothing left for the lab to do. Used to retire a finished patient from
       // the lab track: a sample that was never collected is still worth showing
-      // after they leave, a report that is already back is not.
+      // after they leave, a report that is already back is not. Covers both the
+      // HealthRay-only path (hrlab has dropped them, no active local record) and
+      // Gini Flow's own lab pipeline (all of today's local orders are uploaded).
       labSettled:
-        (row.lab_all_cases ?? 0) > 0 &&
-        (row.lab_all_reported ?? 0) >= row.lab_all_cases &&
-        !row.lab_sample_status,
+        ((row.lab_all_cases ?? 0) > 0 &&
+          (row.lab_all_reported ?? 0) >= row.lab_all_cases &&
+          !row.lab_sample_status) ||
+        locallySettled,
       labTests: row.lab_test_names || [],
       assignedDoctorId: labOnly ? null : row.assigned_doctor_id,
       assignedDoctorName: labOnly ? null : row.doctor_name || row.doctor_full_name || null,
@@ -1094,7 +1107,7 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
             collected: DRAWN_STATUSES.includes(row.lab_sample_status),
             atLab: DRAWN_STATUSES.includes(row.lab_sample_status),
           }
-        : row.hr_lab_cases
+        : row.hr_lab_cases && !locallySettled
           ? {
               since: row.hr_lab_since ? new Date(row.hr_lab_since).toISOString() : null,
               sampleStatus: row.hr_lab_at_lab

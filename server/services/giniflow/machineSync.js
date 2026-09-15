@@ -18,7 +18,8 @@ const { log, error } = createLogger("Machine Sync");
 const SCAN_BATCH = Number(process.env.SCRIBE_MACHINE_SCAN_BATCH || 12);
 const RESCAN_MIN = Number(process.env.SCRIBE_MACHINE_RESCAN_MIN || 20);
 const BILL_READ_RESCAN_MIN = Number(process.env.SCRIBE_MACHINE_BILL_READ_RESCAN_MIN || 60);
-const NOT_ON_FLOOR = ["booked", "confirmed", "dispensed", "exited"];
+const EXIT_GRACE_MIN = Number(process.env.SCRIBE_MACHINE_EXIT_GRACE_MIN || 240);
+const NEVER_ON_FLOOR = ["booked", "confirmed"];
 const NEVER_ARRIVED = ["no_show", "cancelled"];
 const FINISHED = ["dispensed", "exited"];
 
@@ -124,6 +125,8 @@ async function scanTargets(visitDate, db, limit) {
     `${TARGET_SELECT}
         AND v.visit_date = $2::date
         AND v.current_status <> ALL($5::text[])
+        AND (v.current_status <> ALL($7::text[])
+             OR v.updated_at > NOW() - ($8 || ' minutes')::interval)
         AND (v.machine_scan_at IS NULL
              OR v.machine_scan_at < NOW() - ((CASE
                   WHEN EXISTS (SELECT 1 FROM giniflow_lab_orders o WHERE o.visit_id = v.id)
@@ -135,8 +138,10 @@ async function scanTargets(visitDate, db, limit) {
       visitDate,
       String(RESCAN_MIN),
       limit,
-      NOT_ON_FLOOR,
+      NEVER_ON_FLOOR,
       String(BILL_READ_RESCAN_MIN),
+      FINISHED,
+      String(EXIT_GRACE_MIN),
     ],
   );
   return rows;

@@ -374,7 +374,7 @@ export function startCronJobs() {
     console.log("[Cron] HealthRay credentials not set — walking appointment sync disabled");
   } else {
     console.log(
-      "[Cron] Starting walking appointment sync (continuous loop, 10–15s break between runs)...",
+      `[Cron] Starting walking appointment sync (continuous loop, ${HEALTHRAY_LOOP_MIN_BREAK_MS / 1000}–${HEALTHRAY_LOOP_MAX_BREAK_MS / 1000}s break between runs)...`,
     );
 
     healthrayLoopRunning = true;
@@ -399,7 +399,9 @@ export function startCronJobs() {
   // promote to `seen` immediately. Independent of the heavy enrichment loop
   // above, so a slow AI parse never blocks status updates.
   if (process.env.HEALTHRAY_MOBILE || process.env.HEALTHRAY_SESSION) {
-    console.log("[Cron] Starting HealthRay status sync (continuous loop, 10–12s break)...");
+    console.log(
+      `[Cron] Starting HealthRay status sync (continuous loop, ${STATUS_LOOP_MIN_BREAK_MS / 1000}–${STATUS_LOOP_MAX_BREAK_MS / 1000}s break)...`,
+    );
     if (manualFloor()) {
       console.log("[Cron] HealthRay status mirroring OFF — the floor moves its own patients");
     } else {
@@ -414,7 +416,9 @@ export function startCronJobs() {
   // off the next one. This avoids stacked runs and keeps lab cases /
   // results / PDFs flowing in near real-time without depending on a fixed
   // timer that can drift behind a long-running sync.
-  console.log("[Cron] Starting lab sync (continuous loop, 30–40s break between runs)...");
+  console.log(
+    `[Cron] Starting lab sync (continuous loop, ${LAB_LOOP_MIN_BREAK_MS / 1000}–${LAB_LOOP_MAX_BREAK_MS / 1000}s break between runs)...`,
+  );
 
   // The lab's own record is the floor's: results and report PDFs come from
   // somebody at a bench pressing a button (38-MANUAL-FLOOR-PLAN.md). But the
@@ -478,7 +482,9 @@ export function startCronJobs() {
   // runLabSync / HealthRay sync. Per-row throttle inside getPartialLabCases
   // (30s on last_retry_at) keeps each case to ~one fetch per loop tick.
   // Distinct from retryPendingLabCases (which only handles results_synced=FALSE).
-  console.log("[Cron] Starting lab partial-results recovery (continuous loop, 30–40s break)...");
+  console.log(
+    `[Cron] Starting lab partial-results recovery (continuous loop, ${PARTIAL_LOOP_MIN_BREAK_MS / 1000}–${PARTIAL_LOOP_MAX_BREAK_MS / 1000}s break)...`,
+  );
   if (manualFloor()) {
     console.log("[Cron] Partial-results recovery OFF — no results arrive from HealthRay");
   } else {

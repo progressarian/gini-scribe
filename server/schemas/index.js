@@ -713,6 +713,7 @@ export const giniflowLabResultsSchema = z.object({
   rows: z
     .array(
       z.object({
+        testId: z.union([z.string().regex(/^\d{1,18}$/), z.number().int().positive()]).nullish(),
         testName: z.string().trim().min(1).max(120),
         // One box on the form, two kinds of result. A number is a number; a
         // blank is nothing; anything else is a word ("Positive", "Non-reactive")
