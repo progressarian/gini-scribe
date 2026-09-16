@@ -68,6 +68,26 @@ environment that refuses event triggers.
 
 ## Operating it
 
+### A note on PINs
+
+All 37 staff PINs are bcrypt-hashed. They were not: `routes/auth.js:85` has
+always accepted both forms, so 30 accounts created before hashing existed still
+held their PIN in the clear — readable by anyone with database access.
+Converted 2026-10-05 with `server/scripts/hash-plaintext-pins.mjs`, which
+verifies every hash against its own plaintext *inside the transaction* and
+aborts the whole run on a single mismatch, because the plaintext is gone the
+moment it commits.
+
+The plaintext branch in `auth.js` is now dead code for this database. Leave it
+until you are sure no other environment relies on it, then remove it.
+
+A PIN cannot be recovered, only replaced:
+
+```sh
+railway run -s gini-scribe -e production -- node server/scripts/crm-onboard-user.mjs \
+  --name "Virender Satija" --role head_of_growth --pin <new> --commit
+```
+
 ### Onboard a growth team member
 
 Four things must line up across three places. One command does all four in a
