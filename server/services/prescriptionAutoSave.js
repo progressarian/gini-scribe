@@ -37,6 +37,7 @@ async function findExistingPrescription(client, pid, consultationId, source) {
        FROM documents
       WHERE patient_id = $1
         AND consultation_id IS NOT DISTINCT FROM $2
+        AND ($2::int IS NOT NULL OR doc_date = CURRENT_DATE)
         AND doc_type = 'prescription'
         AND source = $3
       ORDER BY created_at DESC
@@ -58,15 +59,21 @@ export async function savePrescriptionForVisit(pid, payload, opts = {}) {
   if (!pid) throw new Error("savePrescriptionForVisit: missing patient id");
   let data = payload || {};
 
-  // Resolve consultation id: explicit override → latest consultation for patient.
   let consultationId = consultationIdOverride;
   if (consultationId == null) {
-    const latestCon = await pool.query(
-      `SELECT id FROM consultations WHERE patient_id = $1
-        ORDER BY visit_date DESC, created_at DESC LIMIT 1`,
-      [pid],
+    const con = await pool.query(
+      `SELECT COALESCE(
+                (SELECT consultation_id FROM appointments WHERE id = $2::int AND patient_id = $1),
+                (SELECT c.id FROM consultations c
+                  WHERE c.patient_id = $1
+                    AND c.visit_date::date = COALESCE(
+                          (SELECT appointment_date FROM appointments WHERE id = $2::int),
+                          CURRENT_DATE)
+                  ORDER BY c.created_at DESC LIMIT 1)
+              ) AS id`,
+      [pid, appointmentId],
     );
-    consultationId = latestCon.rows[0]?.id || null;
+    consultationId = con.rows[0]?.id || null;
   }
 
   // Idempotency — skip if a prescription already exists for this consultation+source,

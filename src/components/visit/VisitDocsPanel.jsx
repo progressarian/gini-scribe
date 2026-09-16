@@ -95,7 +95,7 @@ const VisitDocsPanel = memo(function VisitDocsPanel({
   );
 
   const visibleDocuments = documents.filter(
-    (d) => d.storage_path || d.file_url || d.source === "healthray",
+    (d) => d.storage_path || d.file_url || d.source === "healthray" || d.source === "visit",
   );
 
   // Imaging / specialist report types — kept in sync with VisitLabsPanel's
@@ -127,7 +127,12 @@ const VisitDocsPanel = memo(function VisitDocsPanel({
 
   const openDoc = useCallback((doc) => {
     if (!doc.storage_path && doc.source !== "healthray") {
-      toast("No file attached to this document", "warn");
+      toast(
+        doc.source === "visit"
+          ? "PDF was not stored — click ↻ Regen to rebuild it"
+          : "No file attached to this document",
+        "warn",
+      );
       return;
     }
     setViewingDoc(doc);

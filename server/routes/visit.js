@@ -3634,12 +3634,13 @@ router.post("/visit/:patientId/complete", async (req, res) => {
   const pid = Number(req.params.patientId);
   if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
   try {
-    const payload = req.body || {};
+    const { appointmentId, ...payload } = req.body || {};
     if (!payload.doctor?.name && req.doctor?.name) {
       payload.doctor = { ...(payload.doctor || {}), name: req.doctor.name };
     }
     const result = await savePrescriptionForVisit(pid, payload, {
       source: "visit",
+      appointmentId: Number(appointmentId) || null,
       clientInitiated: true,
     });
     res.json({

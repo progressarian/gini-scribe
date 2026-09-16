@@ -1361,21 +1361,6 @@ export default function VisitPage() {
     // Generate + save the prescription PDF as a patient document before
     // wrapping up. If this fails the visit still completes — the doctor
     // can re-print/save manually.
-    if (visitPayload && (dbPatientId || data?.patient?.id)) {
-      try {
-        const visitSummaryText = pickVisitSummaryText();
-        const { data: saved } = await api.post(
-          `/api/visit/${dbPatientId || data.patient.id}/complete`,
-          { ...visitPayload, visitSummaryText },
-        );
-        toast(`Prescription saved: ${saved?.file_name || "PDF"}`, "success");
-      } catch (e) {
-        console.warn("[Visit] Save prescription on complete failed:", e?.message);
-        toast("Couldn't save prescription PDF — visit still completed.", "warn");
-      }
-    }
-
-    // Mark appointment as "seen" in OPD (creates consultation record)
     const apptId = sessionStorage.getItem("gini_opd_appt_id");
     if (apptId) {
       try {
@@ -1384,6 +1369,23 @@ export default function VisitPage() {
       } catch {
         // non-critical — OPD will still show correct state on refresh
       }
+    }
+
+    if (visitPayload && (dbPatientId || data?.patient?.id)) {
+      try {
+        const visitSummaryText = pickVisitSummaryText();
+        const { data: saved } = await api.post(
+          `/api/visit/${dbPatientId || data.patient.id}/complete`,
+          { ...visitPayload, visitSummaryText, appointmentId: apptId || null },
+        );
+        toast(`Prescription saved: ${saved?.file_name || "PDF"}`, "success");
+      } catch (e) {
+        console.warn("[Visit] Save prescription on complete failed:", e?.message);
+        toast("Couldn't save prescription PDF — visit still completed.", "warn");
+      }
+    }
+
+    if (apptId) {
       sessionStorage.removeItem("gini_opd_appt_id");
       sessionStorage.removeItem("gini_visit_start");
     }
@@ -1396,7 +1398,7 @@ export default function VisitPage() {
   const tabBadges = useMemo(() => {
     if (!data) return {};
     const visibleDocs = data.documents.filter(
-      (d) => d.storage_path || d.file_url || d.source === "healthray",
+      (d) => d.storage_path || d.file_url || d.source === "healthray" || d.source === "visit",
     );
     // Mirror VisitLabsPanel: every uploaded doc except prescriptions and
     // radiology sub-categories is shown under the Labs tab.
