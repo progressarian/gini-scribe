@@ -10,6 +10,7 @@ import {
   isExceptionStatus,
 } from "../../../shared/giniflowStatus.js";
 import { advanceStatus } from "./statusEngine.js";
+import { rxBlock } from "./pharmacyStation.js";
 
 // Columns the manager can rearrange by hand. The lab track is ordered by its own
 // clock rather than by the chain, and "Done today" is a record of what already
@@ -113,6 +114,13 @@ export async function moveToColumn(visitId, columnKey, actorId, db = pool) {
     if (nextColumn(fromColumn) !== columnKey) {
       throw new Error("Move one station at a time");
     }
+
+    // The board's drop is the same transition a station screen makes — which is
+    // why it cannot be the one that passes the Rx desk. Dragging a card out of
+    // the Rx column would record the prescription as explained by a manager who
+    // was not the person explaining it, and every patient goes through that desk.
+    const blocked = rxBlock(fromStatus);
+    if (blocked) throw new Error(blocked);
 
     const event = await advanceStatus(client, {
       visitId,

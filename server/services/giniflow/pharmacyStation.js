@@ -49,7 +49,7 @@ const AWAITING_RX = ["doctor_done", "rx_pending", "with_rx"];
 const RX_WAIT_REASON =
   "Waiting for Prescription Explain — the Rx desk marks it explained before the pharmacy dispenses";
 
-const rxBlock = (status) =>
+export const rxBlock = (status) =>
   pharmacyWaitsForRx() && AWAITING_RX.includes(status) ? RX_WAIT_REASON : null;
 
 const assertExplained = (status) => {
@@ -695,7 +695,7 @@ export async function dispenseAll(visitId, { actorId = null, actorName = null } 
 // is what the medicine reports count.
 export async function endVisit(
   visitId,
-  { actorId = null, actorRole = "pharmacy" } = {},
+  { actorId = null, actorRole = "pharmacy", explained = false } = {},
   db = pool,
 ) {
   const client = await db.connect();
@@ -716,6 +716,30 @@ export async function endVisit(
       return { visitId, currentStatus: from, unchanged: true };
     }
 
+    // The Rx desk's own button reads "Explained — patient leaving", so pressing it
+    // IS the explanation: it records that step rather than being asked why it is
+    // missing. Same statement as markRxExplained (rxStation.js), written here so
+    // it shares this transaction with the exit.
+    const explainedNow = explained && !!rxBlock(from);
+    if (explainedNow) {
+      await advanceStatus(client, {
+        visitId,
+        toStatus: "pharmacy_pending",
+        actorRole,
+        actorId,
+        allowSkip: true,
+        meta: { source: "rx_station", explained: true, onExit: true },
+      });
+    }
+
+    // Every patient goes through the Rx desk. The counter could always close a
+    // visit still sitting in the Rx queue, and that is how ~9 in 10 of them left
+    // with no explanation on record — the dispense gate held, this door was open
+    // beside it. Now the only close that passes the Rx desk is the Rx desk's own.
+    if (!explainedNow && rxBlock(from)) {
+      throw Object.assign(new Error(RX_WAIT_REASON), { status: 409, awaitingRx: true });
+    }
+
     // allowSkip, because a patient who leaves from the consultant's room never
     // passes through rx or pharmacy and the chain would refuse the jump. The
     // rail on every screen is drawn from the EVENTS, not from the current
@@ -728,7 +752,11 @@ export async function endVisit(
       actorRole,
       actorId,
       allowSkip: true,
-      meta: { source: "counter_end_visit", from },
+      meta: {
+        source: "counter_end_visit",
+        from,
+        ...(explainedNow ? { explained: true } : {}),
+      },
     });
 
     await client.query("COMMIT");

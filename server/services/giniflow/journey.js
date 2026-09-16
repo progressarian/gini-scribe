@@ -580,7 +580,27 @@ const ABANDONED = ["cancelled", "no_show"];
 // plain UPDATEs against its own table — no inserts, no foreign keys, nothing
 // that can raise and take a nurse's "vitals done" down with it. A visit with no
 // plan matches no rows and costs one cheap statement.
-export async function syncFromStatus(client, visitId, toStatus) {
+// Which of these stops the events can vouch for. A stop counts when its own
+// status was stamped, or the status that MARKS IT FINISHED was: a nurse who
+// writes `vitals_done` straight from `checked_in` did take the vitals, and the
+// readings are in that event's meta, so the vitals stop is real even though
+// `with_vitals` was never written.
+//
+// `exited` is never evidence. It follows `dispensed` in the chain, so counting it
+// would tick the pharmacy stop for every patient the counter closed without
+// dispensing — the one claim endVisit exists to avoid making.
+async function evidencedStatuses(client, visitId, statuses) {
+  const { rows } = await client.query(
+    `SELECT DISTINCT status FROM giniflow_visit_events
+      WHERE visit_id = $1 AND status <> 'exited'`,
+    [visitId],
+  );
+  const stamped = new Set(rows.map((r) => r.status).filter(isChainStatus));
+  return statuses.filter((st) => stamped.has(st) || stamped.has(CHAIN[chainIndex(st) + 1]));
+}
+
+export async function syncFromStatus(client, visitId, toStatus, meta = null) {
+  const counterEnded = toStatus === "exited" && meta?.source === "counter_end_visit";
   if (ABANDONED.includes(toStatus)) {
     // Never 'done': the tracker must not claim an X-Ray happened because the
     // patient went home.
@@ -599,16 +619,37 @@ export async function syncFromStatus(client, visitId, toStatus) {
 
   // Everything the patient has passed is done — "at or behind", not "equal", so
   // a status the floor skipped (allowSkip) cannot strand a step as pending.
+  //
+  // Except when the counter ended the visit. "Patient left — close visit" says
+  // one thing, that they have gone, and it is the one exit no other system
+  // vouches for: a HealthRay checkout means the consultation happened, this
+  // means only that somebody at the pharmacy pressed a button. Ticking every
+  // stop behind it had the tracker claim Prescription Explain and Pharmacy were
+  // done on visits where neither status was ever stamped — the very claim
+  // endVisit refuses to make when it writes `exited` and never `dispensed`.
   if (behind.length) {
-    await client.query(
-      `UPDATE giniflow_visit_steps
-          SET status = 'done',
-              started_at = COALESCE(started_at, NOW()),
-              completed_at = COALESCE(completed_at, NOW())
-        WHERE visit_id = $1 AND chain_status = ANY($2::text[])
-          AND status IN ('pending', 'in_progress')`,
-      [visitId, behind],
-    );
+    const evidenced = counterEnded ? await evidencedStatuses(client, visitId, behind) : behind;
+    if (evidenced.length) {
+      await client.query(
+        `UPDATE giniflow_visit_steps
+            SET status = 'done',
+                started_at = COALESCE(started_at, NOW()),
+                completed_at = COALESCE(completed_at, NOW())
+          WHERE visit_id = $1 AND chain_status = ANY($2::text[])
+            AND status IN ('pending', 'in_progress')`,
+        [visitId, evidenced],
+      );
+    }
+    const jumped = behind.filter((st) => !evidenced.includes(st));
+    if (jumped.length) {
+      await client.query(
+        `UPDATE giniflow_visit_steps
+            SET status = 'skipped'
+          WHERE visit_id = $1 AND chain_status = ANY($2::text[])
+            AND status IN ('pending', 'in_progress')`,
+        [visitId, jumped],
+      );
+    }
   }
 
   // Where they are now. Several steps can share one column — an SD consultation

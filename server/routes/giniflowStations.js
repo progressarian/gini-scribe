@@ -2167,6 +2167,10 @@ router.post(
         await endVisit(req.params.visitId, {
           actorId: req.doctor?.doctor_id ?? null,
           actorRole: req.params.station === "rx" ? "rx" : "pharmacy",
+          // The Rx desk's button declares the prescription explained and records
+          // that step. The pharmacy's cannot: it may only close a patient the Rx
+          // desk has already passed on.
+          explained: req.params.station === "rx",
         }),
       );
     } catch (e) {

@@ -277,7 +277,9 @@ export async function advanceStatus(
   // plan and the board can never disagree about where someone is. It only ever
   // UPDATEs giniflow_visit_steps for this visit and matches no rows when the
   // visit has no plan (29-RECEPTION-JOURNEY-PLAN.md).
-  await syncFromStatus(client, visitId, toStatus);
+  // meta travels with it: an exit the pharmacy counter wrote is not evidence the
+  // stops behind it happened, and only the meta says which exit this is.
+  await syncFromStatus(client, visitId, toStatus, meta);
 
   return { from: fromStatus, ...event.rows[0] };
 }

@@ -169,6 +169,15 @@ try {
      VALUES ($1, (NOW() AT TIME ZONE 'Asia/Kolkata')::date, 'with_doctor', 'none') RETURNING id`,
     [p2[0].id],
   );
+  // The stops ahead of them, so the close has a plan to write on. A counter exit
+  // must not tick these: nobody explained a prescription or dispensed anything.
+  await client2.query(
+    `INSERT INTO giniflow_visit_steps
+       (visit_id, step_order, step_name, chain_status, status, planned_duration_min, source)
+     VALUES ($1, 1, 'Prescription Explain', 'with_rx', 'pending', 5, 'template'),
+            ($1, 2, 'Pharmacy / Exit', 'dispensed', 'pending', 10, 'template')`,
+    [v2[0].id],
+  );
   const nested2 = {
     query: (t, params) => {
       const sql = String(t).trim().toUpperCase();
@@ -204,6 +213,91 @@ try {
     "and never claims a dispense that did not happen",
     ev[0]?.status === "exited",
     "dispensed is what the medicine reports count",
+  );
+
+  const { rows: steps2 } = await client2.query(
+    `SELECT step_name, status FROM giniflow_visit_steps WHERE visit_id = $1 ORDER BY step_order`,
+    [v2[0].id],
+  );
+  check(
+    "and the journey does not tick the stops they never reached",
+    steps2.every((st) => st.status === "skipped"),
+    steps2.map((st) => `${st.step_name}: ${st.status}`).join(" · "),
+  );
+
+  // The same close, on a patient the Rx desk has not cleared: allowed, but no
+  // longer silent. This is the whole reason the button stays enabled.
+  // Their own patient: one visit per patient per day is a constraint, not a hint.
+  const { rows: p3 } = await client2.query(
+    `INSERT INTO patients (name, file_no) VALUES ('Probe End Unexplained', $1) RETURNING id`,
+    [`ZZEV_${Date.now()}_2`],
+  );
+  const { rows: v3 } = await client2.query(
+    `INSERT INTO giniflow_visits (patient_id, visit_date, current_status, results_status)
+     VALUES ($1, (NOW() AT TIME ZONE 'Asia/Kolkata')::date, 'rx_pending', 'none') RETURNING id`,
+    [p3[0].id],
+  );
+  let refused = null;
+  try {
+    await endVisit(v3[0].id, { actorRole: "pharmacy" }, db2);
+  } catch (e) {
+    refused = e;
+  }
+  check(
+    "THE COUNTER CANNOT CLOSE A PATIENT THE RX DESK HAS NOT PASSED ON",
+    refused?.status === 409 && refused?.awaitingRx === true,
+    refused?.message,
+  );
+  const { rows: stillHere } = await client2.query(
+    `SELECT current_status FROM giniflow_visits WHERE id = $1`,
+    [v3[0].id],
+  );
+  check(
+    "so they stay in the Rx queue rather than leaving the floor",
+    stillHere[0]?.current_status === "rx_pending",
+    stillHere[0]?.current_status,
+  );
+
+  // And the desk they are waiting for can see them — a rule that stranded them
+  // on a screen nobody opens would be worse than the gap it closes.
+  const { rows: inQueue } = await client2.query(
+    `SELECT count(*)::int n FROM giniflow_visits
+      WHERE id = $1 AND current_status = ANY($2::text[])`,
+    [v3[0].id, ["doctor_done", "rx_pending", "with_rx"]],
+  );
+  check("and the Rx desk's own queue is where they are", inQueue[0]?.n === 1);
+
+  const byDesk = await endVisit(v3[0].id, { actorRole: "rx", explained: true }, db2);
+  check("the Rx desk closes the same patient", byDesk.currentStatus === "exited", byDesk.from);
+
+  // The Rx desk's own close. Its button says "Explained — patient leaving", so it
+  // needs no reason and the stop it names comes out done, not skipped.
+  const { rows: p4 } = await client2.query(
+    `INSERT INTO patients (name, file_no) VALUES ('Probe End Explained', $1) RETURNING id`,
+    [`ZZEV_${Date.now()}_3`],
+  );
+  const { rows: v4 } = await client2.query(
+    `INSERT INTO giniflow_visits (patient_id, visit_date, current_status, results_status)
+     VALUES ($1, (NOW() AT TIME ZONE 'Asia/Kolkata')::date, 'rx_pending', 'none') RETURNING id`,
+    [p4[0].id],
+  );
+  await client2.query(
+    `INSERT INTO giniflow_visit_steps
+       (visit_id, step_order, step_name, chain_status, status, planned_duration_min, source)
+     VALUES ($1, 1, 'Prescription Explain', 'with_rx', 'pending', 5, 'template'),
+            ($1, 2, 'Pharmacy / Exit', 'dispensed', 'pending', 10, 'template')`,
+    [v4[0].id],
+  );
+  const byRx = await endVisit(v4[0].id, { actorRole: "rx", explained: true }, db2);
+  check("and its close is the explanation, not a skip", byRx.currentStatus === "exited", byRx.from);
+  const { rows: rxSteps } = await client2.query(
+    `SELECT step_name, status FROM giniflow_visit_steps WHERE visit_id = $1 ORDER BY step_order`,
+    [v4[0].id],
+  );
+  check(
+    "and the stop it just did is ticked, while the pharmacy's is not",
+    rxSteps[0]?.status === "done" && rxSteps[1]?.status === "skipped",
+    rxSteps.map((st) => `${st.step_name}: ${st.status}`).join(" · "),
   );
 
   const twice = await endVisit(v2[0].id, { actorRole: "rx" }, db2);

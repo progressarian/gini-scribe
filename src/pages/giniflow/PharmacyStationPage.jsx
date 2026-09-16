@@ -512,9 +512,13 @@ function PharmacyPane({ visitId, onClose, onToast }) {
             {data && !data.finished && canEndVisit && (
               <button
                 className="rbtn"
-                disabled={busy}
+                disabled={busy || awaitingRx}
                 onClick={() => onEndVisit(visitId, data.name)}
-                title="The patient has gone without collecting medicines here"
+                title={
+                  awaitingRx
+                    ? "The Rx desk marks the prescription explained before this counter can close the visit"
+                    : "The patient has gone without collecting medicines here"
+                }
               >
                 🚪 Patient left — close visit
               </button>
