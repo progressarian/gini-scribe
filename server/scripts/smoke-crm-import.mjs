@@ -65,6 +65,30 @@ eq(
   "'Transcription Confidence' maps itself",
 );
 
+// The real transcribed list uses compound header names. Both were dropped
+// silently on the first run through, which is exactly the data loss the
+// mapping step exists to prevent — so they are pinned here.
+const compound = suggestMapping([
+  "name",
+  "territory",
+  "area",
+  "city",
+  "qualification_notes",
+  "other_notes",
+  "transcription_confidence",
+]);
+eq(
+  compound["qualification_notes"],
+  "qualifications",
+  "'qualification_notes' maps to qualifications",
+);
+eq(compound["other_notes"], "notes", "'other_notes' maps to notes");
+eq(
+  Object.keys(compound).length,
+  7,
+  "every column of the transcribed list maps with no manual work",
+);
+
 console.log("\nConfidence flagging");
 eq(needsVerification("check spelling"), true, "'check spelling' needs verification");
 eq(needsVerification("CHECK - area unclear"), true, "'CHECK - area unclear' needs verification");

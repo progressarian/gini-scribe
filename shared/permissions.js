@@ -49,6 +49,14 @@ export const ROLES = {
   // nothing else on the floor is theirs.
   RX: "rx",
   OBT: "obt", // outbound booking / call team — works tomorrow's appointment list
+  // Physician-relations team (docs/CRM_PLAN.md). They are hospital staff but
+  // not clinical staff: they never open a chart, and these roles deliberately
+  // carry no patient capability at all. A growth executive who could read
+  // patient records would defeat the point of the CRM's row-level security,
+  // which exists precisely to keep referral work away from clinical content.
+  HEAD_OF_GROWTH: "head_of_growth",
+  GROWTH_MANAGER: "growth_manager",
+  GROWTH_EXECUTIVE: "growth_executive",
   GUEST: "guest",
 };
 
@@ -465,6 +473,14 @@ export const ROLE_CAPABILITIES = {
   // everything the screen shows, so the chart never has to open here.
   [ROLES.RX]: [C.GINIFLOW_VIEW, C.GINIFLOW_STATION_RX, C.GINIFLOW_END_VISIT, C.GINIFLOW_PRINT_RX],
   [ROLES.OBT]: [C.PATIENT_READ, C.OBT_OPS],
+  // The three growth roles hold exactly one capability. Which doctors, visits
+  // and referrals they can actually see is decided inside the CRM by their
+  // crm.users role and enforced by RLS — a route capability cannot express
+  // "only the doctors assigned to me", so it does not try.
+  [ROLES.HEAD_OF_GROWTH]: [C.CRM_ACCESS],
+  [ROLES.GROWTH_MANAGER]: [C.CRM_ACCESS],
+  [ROLES.GROWTH_EXECUTIVE]: [C.CRM_ACCESS],
+
   [ROLES.GUEST]: [],
 };
 
