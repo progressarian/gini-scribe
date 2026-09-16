@@ -43,6 +43,7 @@ const lazyWithRetry = (importer) =>
 // shell (AppLayout, ProtectedRoute, LoginPage) eager because they render on
 // every route and gate navigation.
 const Companion = lazyWithRetry(() => import("./Companion"));
+const DoctorImportPage = lazyWithRetry(() => import("./pages/crm/DoctorImportPage.jsx"));
 const HomeScreen = lazyWithRetry(() => import("./companion/HomeScreen"));
 const PatientScreen = lazyWithRetry(() => import("./companion/PatientScreen"));
 const CaptureScreen = lazyWithRetry(() => import("./companion/CaptureScreen"));
@@ -286,6 +287,7 @@ const router = createBrowserRouter([
               { path: "/giniflow/station/rx", element: lazyEl(GiniFlowRxPage) },
               { path: "/giniflow/station/pharmacy", element: lazyEl(GiniFlowPharmacyPage) },
               { path: "/giniflow/station/referrals", element: lazyEl(GiniFlowReferralsPage) },
+              { path: "/crm/import", element: lazyEl(DoctorImportPage) },
               { path: "/flow/my-patients", element: lazyEl(FlowMyPatientsPage) },
               { path: "/flow/consultants", element: lazyEl(FlowConsultantsPage) },
               { path: "/flow/station", element: lazyEl(FlowStationPage) },

@@ -1,40 +1,49 @@
 #!/bin/bash
-# Rehearses the production migration path end to end on a scratch database:
-# build the schema exactly as production has it today (the enum version, taken
-# from git), run the dated migration chain over it, then prove the result with
-# the full behavioural suite.
+# Runs the full dated CRM migration chain against a fresh scratch database, in
+# the same order apply_supabase.sh uses on production, then proves the result
+# with the behavioural suite.
 #
-# This is what caught DROP ROLE failing on a role with grants in another
-# database, which would have left production half-migrated.
+# This is not rebuild.sh. That applies the two phase-1 files and stops;
+# this walks every migration, so an ALTER that works on a fresh CREATE TABLE
+# but breaks against the shipped schema is caught here.
+#
+# It was originally seeded from git so the enum conversion could be replayed
+# against the schema production actually had. That baseline is gone now that
+# production matches these files — but the chain still has to survive being run
+# in order over its own output, which is what this checks.
 #
 #   ./rehearse_migration.sh [container] [db]
 set -euo pipefail
 cd "$(dirname "$0")"
 C=${1:-gini-crm-17}
 DB=${2:-rehearsal}
-BASE=${CRM_BASE_REF:-origin/main}
 
-echo "== building production-as-is schema from $BASE =="
-tmp=$(mktemp -d)
-for f in 000_scribe_stub 001_crm_phase1 002_crm_phase1_rls; do
-  git show "$BASE:server/migrations/crm/$f.sql" > "$tmp/$f.sql"
-done
+CHAIN=(
+  2026-09-16_crm_phase1
+  2026-09-16_crm_phase1_rls
+  2026-09-30_crm_enums_to_text
+  2026-10-01_crm_registration
+  2026-10-03_crm_registration_record_fn
+  2026-10-02_crm_inbound_attribution_comments
+  2026-10-04_crm_doctor_skeleton_records
+)
+
+echo "== fresh database =="
 docker exec "$C" psql -U postgres -d postgres -q -c "drop database if exists $DB" -c "create database $DB" >/dev/null 2>&1
-for f in 000_scribe_stub 001_crm_phase1 002_crm_phase1_rls; do
-  docker exec -i "$C" psql -U postgres -d "$DB" -q -v ON_ERROR_STOP=1 < "$tmp/$f.sql" >/dev/null
-done
-rm -rf "$tmp"
-echo "   enums present: $(docker exec -i "$C" psql -U postgres -d "$DB" -tA -c "select count(*) from pg_type t join pg_namespace n on n.oid=t.typnamespace where n.nspname='crm' and t.typtype='e'")"
+docker exec -i "$C" psql -U postgres -d "$DB" -q -v ON_ERROR_STOP=1 < _scratch_scribe_stub.sql >/dev/null
 
-echo "== running the dated migration chain =="
-for f in 2026-09-30_crm_enums_to_text 2026-09-16_crm_phase1 2026-09-16_crm_phase1_rls \
-         2026-10-01_crm_registration 2026-10-03_crm_registration_record_fn \
-         2026-10-02_crm_inbound_attribution_comments; do
-  printf "   %-48s " "$f"
+echo "== migration chain =="
+for f in "${CHAIN[@]}"; do
+  printf "   %-46s " "$f"
   docker exec -i "$C" psql -U postgres -d "$DB" -q -v ON_ERROR_STOP=1 < "../$f.sql" >/dev/null
   echo "ok"
 done
-echo "   enums remaining: $(docker exec -i "$C" psql -U postgres -d "$DB" -tA -c "select count(*) from pg_type t join pg_namespace n on n.oid=t.typnamespace where n.nspname='crm' and t.typtype='e'")"
+
+echo "== re-running the whole chain (idempotency) =="
+for f in "${CHAIN[@]}"; do
+  docker exec -i "$C" psql -U postgres -d "$DB" -q -v ON_ERROR_STOP=1 < "../$f.sql" >/dev/null
+done
+echo "   every migration re-ran cleanly"
 
 echo "== seeding fixtures and verifying =="
 docker exec -i "$C" psql -U postgres -d "$DB" -q -v ON_ERROR_STOP=1 < _scratch_fixtures.sql >/dev/null

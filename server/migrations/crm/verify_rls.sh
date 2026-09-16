@@ -207,6 +207,22 @@ echo "$got" | grep -qi "Unknown referral answer type" && ok "…and an unknown a
 got=$(as_registration "select string_agg(a.attname, ',' order by a.attnum) from pg_proc p join pg_namespace n on n.oid=p.pronamespace, unnest(p.proargnames) with ordinality as a(attname, attnum) where n.nspname='crm' and p.proname='search_doctors_for_registration' and a.attname not like 'p_%';" | tr -d '[:space:]')
 [ "$got" = "doctor_id,full_name,specialty,clinic_name,area" ] && ok "the picker returns identity and location only, 5 columns" || bad "picker column set" "$got"
 
+echo "(k) Skeleton doctors — no mobile number yet"
+as_owner "insert into crm.doctors (hospital_id, full_name, specialty, area, needs_verification, verification_note) select id, 'Dr No Number', 'Cardiology', 'Zirakpur', true, 'check spelling' from crm.hospitals;" >/dev/null
+expect_count "$HOG" "select count(*) from crm.doctors where full_name='Dr No Number';" 1 "a doctor can be created with no mobile"
+expect_count "$HOG" "select profile_complete from crm.doctors where full_name='Dr No Number';" "f" "…and is flagged profile_complete = false"
+expect_count "$HOG" "select profile_complete from crm.doctors where full_name='Dr Owned By A';" "t" "…while a doctor with a number is complete"
+expect_count "$HOG" "select array_to_string(missing_fields,',') from crm.doctors where full_name='Dr No Number';" "mobile,clinic" "missing_fields names what a rep must find out"
+as_owner "insert into crm.doctors (hospital_id, full_name, area) select id, 'Dr Second Blank', 'Kharar' from crm.hospitals;" >/dev/null
+expect_count "$HOG" "select count(*) from crm.doctors where mobile is null;" 2 "two doctors with no number coexist — uniqueness does not collapse them"
+expect_owner_error "insert into crm.doctors (hospital_id, full_name, mobile) select id,'Dr Dup','+919876500011' from crm.hospitals;" \
+  "doctors_mobile_uniq" "…but a duplicate real number is still rejected"
+expect_owner_error "insert into crm.doctors (hospital_id, full_name, mobile) select id,'Dr Junk','not-a-phone' from crm.hospitals;" \
+  "doctors_mobile_valid" "…and an unparseable number is still rejected"
+expect_count "$HOG" "select count(*) from crm.v_doctors_needing_details;" 2 "the rep task list surfaces the two doctors with no number"
+expect_count "$HOG" "select needs_verification from crm.doctors where full_name='Dr No Number';" "t" "a transcription-uncertain doctor carries the flag"
+expect_count "$EXA" "select count(*) from crm.v_doctors_needing_details;" 0 "…and the task list still respects RLS"
+
 echo
 printf '  %s passed, %s failed\n\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

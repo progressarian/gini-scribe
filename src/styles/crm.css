@@ -1,0 +1,272 @@
+/* Doctor import wizard — src/pages/crm/DoctorImportPage.jsx.
+   The CRM is a separate surface from Scribe's clinical screens and from Gini
+   Flow's station UI, so it starts its own stylesheet rather than borrowing
+   either one's vocabulary. */
+
+.dimp {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px 20px 64px;
+  color: #0f172a;
+}
+
+.dimp__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.dimp__title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.dimp__steps {
+  display: flex;
+  gap: 18px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  flex-wrap: wrap;
+}
+.dimp__step {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: #94a3b8;
+}
+.dimp__step-n {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  font-size: 11px;
+  font-weight: 700;
+}
+.dimp__step--on {
+  color: #1e40af;
+  font-weight: 600;
+}
+.dimp__step--done {
+  color: #15803d;
+}
+
+.dimp__panel {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 20px;
+}
+.dimp__lede {
+  margin: 0 0 16px;
+  max-width: 78ch;
+  font-size: 14px;
+  line-height: 1.55;
+  color: #475569;
+}
+.dimp__err {
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  font-size: 13px;
+}
+.dimp__warn {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: #92400e;
+}
+
+.dimp__drop {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  padding: 40px;
+  border: 2px dashed #cbd5e1;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1e40af;
+}
+.dimp__drop:hover {
+  border-color: #1e40af;
+  background: #f8fafc;
+}
+.dimp__drop input {
+  display: none;
+}
+
+.dimp__scroller {
+  overflow-x: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+.dimp__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.dimp__table th,
+.dimp__table td {
+  padding: 9px 12px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid #f1f5f9;
+}
+.dimp__table thead th {
+  background: #f8fafc;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #64748b;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.dimp__table tbody tr:last-child td {
+  border-bottom: none;
+}
+.dimp__table select {
+  width: 100%;
+  min-width: 170px;
+  padding: 5px 8px;
+  font-size: 13px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+}
+.dimp__mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+.dimp__muted {
+  color: #94a3b8;
+}
+.dimp__sub {
+  display: block;
+  font-size: 12px;
+  color: #64748b;
+}
+.dimp__row--off {
+  opacity: 0.45;
+}
+
+.dimp__pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.dimp__pill--ok {
+  background: #dcfce7;
+  color: #166534;
+}
+.dimp__pill--warn {
+  background: #fef3c7;
+  color: #92400e;
+}
+.dimp__pill--dup {
+  background: #e2e8f0;
+  color: #475569;
+}
+.dimp__pill--err {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.dimp__flag {
+  display: block;
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.45;
+}
+.dimp__flag--warn {
+  color: #92400e;
+}
+.dimp__flag--err {
+  color: #b91c1c;
+  font-weight: 600;
+}
+
+.dimp__counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.dimp__count {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+.dimp__count-n {
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.dimp__count-l {
+  font-size: 12px;
+  color: #64748b;
+}
+.dimp__count--ok {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+.dimp__count--warn {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+.dimp__count--err {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.dimp__actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+}
+.dimp__btn {
+  min-height: 40px;
+  padding: 9px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #1e293b;
+  cursor: pointer;
+}
+.dimp__btn:hover:not(:disabled) {
+  border-color: #94a3b8;
+}
+.dimp__btn--primary {
+  background: #1e40af;
+  border-color: #1e40af;
+  color: #fff;
+}
+.dimp__btn--primary:hover:not(:disabled) {
+  background: #1e3a8a;
+}
+.dimp__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.dimp__btn:focus-visible {
+  outline: 2px solid #1e40af;
+  outline-offset: 2px;
+}

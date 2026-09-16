@@ -75,7 +75,8 @@ jobs:
           for f in 2026-09-16_crm_phase1.sql 2026-09-16_crm_phase1_rls.sql \
                    2026-10-01_crm_registration.sql \
                    2026-10-03_crm_registration_record_fn.sql \
-                   2026-10-02_crm_inbound_attribution_comments.sql; do
+                   2026-10-02_crm_inbound_attribution_comments.sql \
+                   2026-10-04_crm_doctor_skeleton_records.sql; do
             echo "== $f"
             psql "$CRM_DSN" -v ON_ERROR_STOP=1 -q -f "$f"
           done
@@ -88,7 +89,8 @@ jobs:
                    2026-09-30_crm_enums_to_text.sql \
                    2026-10-01_crm_registration.sql \
                    2026-10-03_crm_registration_record_fn.sql \
-                   2026-10-02_crm_inbound_attribution_comments.sql; do
+                   2026-10-02_crm_inbound_attribution_comments.sql \
+                   2026-10-04_crm_doctor_skeleton_records.sql; do
             psql "$CRM_DSN" -v ON_ERROR_STOP=1 -q -f "$f"
           done
           echo "every migration re-ran cleanly" 

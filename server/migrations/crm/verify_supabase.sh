@@ -123,6 +123,15 @@ REG=$(printf "set role crm_registration;\nselect count(*) from crm.search_doctor
 expect "$REG" 0 "…but can run the picker (empty universe, so no matches)"
 
 echo
+echo "Skeleton doctor records"
+expect "$(as_owner "select is_nullable from information_schema.columns where table_schema='crm' and table_name='doctors' and column_name='mobile';")" "YES" "mobile is nullable"
+expect "$(as_owner "select count(*) from pg_index i join pg_class c on c.oid=i.indexrelid where c.relname='doctors_mobile_uniq' and pg_get_expr(i.indpred, i.indrelid) like '%mobile_e164 IS NOT NULL%';")" 1 "the unique index is partial on mobile present"
+expect "$(as_owner "select count(*) from information_schema.columns where table_schema='crm' and table_name='doctors' and column_name in ('profile_complete','missing_fields','needs_verification','verification_note','import_batch_id');")" 5 "the five new doctor columns exist"
+expect "$(as_owner "select count(*) from information_schema.views where table_schema='crm' and table_name='v_doctors_needing_details';")" 1 "the rep task-list view exists"
+expect_err "$(as_owner "begin; insert into crm.doctors (hospital_id, full_name, mobile) select id,'Junk','xyz' from crm.hospitals; rollback;")" "doctors_mobile_valid" "an unparseable mobile is still rejected"
+expect "$(as_owner "select count(*) from crm.doctors;")" 0 "the doctor universe is still empty — nothing imported yet"
+
+echo
 echo "Helpers"
 expect "$(as_owner "select crm.normalize_phone('98765 00011');")" "+919876500011" "phone normalisation works"
 

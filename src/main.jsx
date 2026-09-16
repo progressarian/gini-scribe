@@ -9,6 +9,7 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ToastProvider, useToast } from "./components/Toast";
 import { setToastFn } from "./stores/uiStore";
 import "./styles/global.css";
+import "./styles/crm.css";
 
 // Global unhandled promise rejection handler
 window.addEventListener("unhandledrejection", (e) => {
