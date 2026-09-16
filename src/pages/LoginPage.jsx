@@ -19,7 +19,17 @@ const ROLE_GROUPS = [
   { role: "rx", label: "Prescription Explainer", showSpecialty: false },
   { role: "reception", label: "Reception", showSpecialty: false },
   { role: "obt", label: "OBT Team", showSpecialty: false },
+  // One heading for the physician-relations team. A group may cover several
+  // roles so the three growth tiers do not produce three identical headings.
+  {
+    roles: ["head_of_growth", "growth_manager", "growth_executive"],
+    label: "Growth",
+    showSpecialty: false,
+  },
 ];
+
+const rolesOf = (g) => g.roles ?? [g.role];
+const GROUPED_ROLES = new Set(ROLE_GROUPS.flatMap(rolesOf));
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -95,10 +105,11 @@ export default function LoginPage() {
             </option>
             {!doctorsLoading &&
               ROLE_GROUPS.map((g) => {
-                const docs = doctorsList.filter((d) => d.role === g.role);
+                const roles = rolesOf(g);
+                const docs = doctorsList.filter((d) => roles.includes(d.role));
                 if (!docs.length) return null;
                 return (
-                  <optgroup key={g.role} label={g.label}>
+                  <optgroup key={g.label} label={g.label}>
                     {docs.map((d) => (
                       <option key={d.id} value={d.id}>
                         {d.name}
@@ -110,7 +121,13 @@ export default function LoginPage() {
               })}
             {!doctorsLoading &&
               (() => {
-                const others = doctorsList.filter((d) => ["guest", "longevity"].includes(d.role));
+                // Anything this list does not know about, rather than a second
+                // hardcoded allowlist. The growth roles existed, were active,
+                // and were returned by the API — but no group matched them, so
+                // they rendered as nothing and the person simply could not log
+                // in. A role that is new should be merely ungrouped here, never
+                // invisible.
+                const others = doctorsList.filter((d) => !GROUPED_ROLES.has(d.role));
                 if (!others.length) return null;
                 return (
                   <optgroup label="Other">
