@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import api from "../../services/api.js";
 import ReferralStatusControl from "../../components/crm/ReferralStatusControl.jsx";
 import {
@@ -28,6 +28,11 @@ const when = (iso) =>
 export default function Doctor360Page() {
   const { doctorId } = useParams();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  // Arriving from a visit card: scroll that entry into view and mark it, so the
+  // tap lands on the thing it promised rather than the top of a long timeline.
+  const focusVisitId = params.get("visit");
+  const focusRef = useRef(null);
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -44,6 +49,11 @@ export default function Doctor360Page() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (!data || !focusVisitId || !focusRef.current) return;
+    focusRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [data, focusVisitId]);
 
   const setPriority = async (priority) => {
     setSaving(true);
@@ -176,7 +186,13 @@ export default function Doctor360Page() {
         )}
         <ol className="d360__timeline">
           {data.timeline.map((e, i) => (
-            <li key={`${e.kind}-${e.id || i}`} className={`d360__event d360__event--${e.kind}`}>
+            <li
+              key={`${e.kind}-${e.id || i}`}
+              ref={e.id === focusVisitId ? focusRef : null}
+              className={`d360__event d360__event--${e.kind} ${
+                e.id === focusVisitId ? "d360__event--focus" : ""
+              }`}
+            >
               <div className="d360__event-head">
                 <span className="d360__event-date">{when(e.at)}</span>
                 <span className="d360__event-kind">{labelFor(e)}</span>

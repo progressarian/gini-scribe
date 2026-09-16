@@ -228,6 +228,22 @@ const others = await pool.query(
 );
 eq(others.rows[0].n, 0, "…every doctor in it now carries the new band");
 
+console.log("\nA visit card can find its own entry");
+// The Today card links to /crm/doctor/:doctorId?visit=:id, so the home payload
+// must carry both ids and the 360 timeline must contain that same visit id —
+// otherwise the tap lands on a page that cannot show what was tapped.
+const homeForLink = await repHome(EXEC);
+const anyVisit = homeForLink.todays_visits[0];
+eq(Boolean(anyVisit), true, "today's visits are returned");
+eq(Boolean(anyVisit?.doctor_id), true, "…each carries the doctor id the link needs");
+eq(Boolean(anyVisit?.id), true, "…and its own visit id");
+const linked = await doctor360(EXEC, anyVisit.doctor_id);
+eq(
+  linked.timeline.some((e) => e.kind === "visit" && e.id === anyVisit.id),
+  true,
+  "…and that visit is on the doctor's timeline, so the link resolves",
+);
+
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
 await pool.end();
 process.exit(fail === 0 ? 0 : 1);

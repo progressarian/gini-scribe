@@ -956,3 +956,49 @@
   align-items: stretch;
   gap: 4px;
 }
+
+/* A whole row as a tap target. Reset the button so it still reads as a card. */
+.rep__row--tap {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.rep__row--tap:hover {
+  border-color: #94a3b8;
+}
+.rep__row--tap:focus-visible {
+  outline: 2px solid #1e40af;
+  outline-offset: 2px;
+}
+.rep__chev {
+  flex: none;
+  font-size: 20px;
+  line-height: 1;
+  color: #94a3b8;
+}
+
+/* The entry a tap arrived at. Fades rather than blinks — it marks where you
+   landed, then gets out of the way of reading. */
+.d360__event--focus {
+  border-color: #1e40af;
+  border-left-color: #1e40af;
+  background: #eff6ff;
+  animation: d360-land 2.4s ease-out forwards;
+}
+@keyframes d360-land {
+  0%,
+  55% {
+    background: #dbeafe;
+  }
+  100% {
+    background: #fff;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .d360__event--focus {
+    animation: none;
+    background: #eff6ff;
+  }
+}

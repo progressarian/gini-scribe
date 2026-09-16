@@ -223,18 +223,29 @@ export default function RepHomePage() {
         <ul className="rep__list">
           {data.todays_visits.length === 0 && <Empty>No visits logged yet today.</Empty>}
           {data.todays_visits.map((v) => (
-            <li key={v.id} className="rep__row">
-              <div className="rep__row-main">
-                <strong>{v.full_name}</strong>
-                <span className="rep__row-sub">
-                  {new Date(v.occurred_at).toLocaleTimeString([], {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                  {v.outcome ? ` · ${v.outcome.replace(/_/g, " ")}` : ""}
-                  {v.area ? ` · ${v.area}` : ""}
+            // The whole card is the target, not a link inside it. A logged
+            // visit is a thing you want to re-read — what did they say? — and
+            // hunting for a small link on a phone is the wrong ask.
+            <li key={v.id}>
+              <button
+                className="rep__row rep__row--tap"
+                onClick={() => navigate(`/crm/doctor/${v.doctor_id}?visit=${v.id}`)}
+              >
+                <div className="rep__row-main">
+                  <strong>{v.full_name}</strong>
+                  <span className="rep__row-sub">
+                    {new Date(v.occurred_at).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                    {v.outcome ? ` · ${v.outcome.replace(/_/g, " ")}` : ""}
+                    {v.area ? ` · ${v.area}` : ""}
+                  </span>
+                </div>
+                <span className="rep__chev" aria-hidden="true">
+                  ›
                 </span>
-              </div>
+              </button>
             </li>
           ))}
         </ul>
