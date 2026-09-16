@@ -914,3 +914,21 @@
   line-height: 1.5;
   color: #475569;
 }
+
+.rep__disclose {
+  align-self: flex-start;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  background: none;
+  font-size: 13px;
+  font-weight: 600;
+  color: #475569;
+  cursor: pointer;
+}
+.rep__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}

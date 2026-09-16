@@ -150,16 +150,40 @@ eq(three60.doctor.full_name, "Dr Owned By A", "the header names the doctor");
 eq(three60.counts.visits >= 1, true, "visit count present");
 eq(three60.kpis !== null, true, "KPI row present even with no revenue");
 const firstVisit = three60.timeline.find((e) => e.kind === "visit");
-// The replay test above deliberately edited this visit's notes, so the value
-// here is that correction — the stronger claim anyway: the timeline shows what
-// the record currently says, in full.
-eq(
-  firstVisit.discussion_notes,
-  "corrected on another device",
-  "the timeline carries the visit notes in full",
-);
-eq(firstVisit.purpose, "Intro call", "…its purpose");
-eq(firstVisit.outcome, "positive", "…and its outcome");
+// Asserted against a visit this test logs itself, rather than against the one
+// the replay test above deliberately edited. A literal that only holds because
+// an earlier test mutated a row is not really testing anything — it breaks
+// when that test changes, for reasons that have nothing to do with the 360.
+//
+// The note is deliberately long and multi-line: "in full" is the claim, so a
+// silent truncation somewhere in the stack has to be able to fail this.
+const LONG_NOTE = [
+  "Met at 9am before OPD. Interested in the ICU tie-up but wants to know",
+  "turnaround on the 2am admissions specifically.",
+  "Asked twice about who covers nights — this is the objection to solve.",
+].join("\n");
+const noteVisitId = crypto.randomUUID();
+await logVisit(EXEC, {
+  id: noteVisitId,
+  doctor_id: DOC_A,
+  visit_type: "in_person",
+  purpose: "Relationship",
+  outcome: "positive",
+  discussion_notes: LONG_NOTE,
+  doctor_requirements: "Night intensivist cover",
+  objections: "Unsure about 2am response",
+  commitments: "Will send the ICU protocol by Friday",
+  occurred_at: new Date().toISOString(),
+});
+const withNotes = await doctor360(EXEC, DOC_A);
+const logged = withNotes.timeline.find((e) => e.kind === "visit" && e.id === noteVisitId);
+eq(Boolean(logged), true, "a freshly logged visit reaches the timeline");
+eq(logged.discussion_notes, LONG_NOTE, "the timeline carries the visit notes in full, unmodified");
+eq(logged.discussion_notes.split("\n").length, 3, "…including the line breaks the rep typed");
+eq(logged.purpose, "Relationship", "…its purpose");
+eq(logged.outcome, "positive", "…its outcome");
+eq(logged.objections, "Unsure about 2am response", "…and the objection, which is the useful part");
+eq(logged.commitments, "Will send the ICU protocol by Friday", "…and what was promised");
 // Not "a visit is first" — the fixture's stage change is genuinely newer than a
 // 40-day-old visit. The claim worth testing is that the ordering holds.
 const times = three60.timeline.map((e) => new Date(e.at).getTime());
@@ -197,7 +221,7 @@ await pool.query(
     WHERE full_name IN ('Dr Owned By A', 'Dr Gap Test')`,
 );
 const bulk = await setPriority(EXEC, { territory: "Mohali", priority: "A" });
-eq(bulk.updated >= 1, true, `a whole territory reclassifies (${bulk.updated} doctors)`);
+eq(bulk.updated, 2, "a whole territory reclassifies in one call");
 const others = await pool.query(
   `SELECT count(*)::int n FROM crm.doctors d JOIN crm.territories t ON t.id=d.territory_id
     WHERE lower(t.name)='mohali' AND d.priority <> 'A' AND d.deleted_at IS NULL`,

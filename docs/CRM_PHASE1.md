@@ -20,8 +20,22 @@ distinguish inbound from outbound referrals.
 roles: crm_app, crm_registration
 ```
 
-Live data today: **47 doctors** (all skeleton records — no phone numbers yet),
-9 flagged for transcription verification, 1 CRM user, 0 visits, 0 assignments.
+**Live data:**
+
+| | |
+|---|---:|
+| Doctors | **273** |
+| — with a mobile | 219 |
+| — skeleton (no mobile yet) | 54 |
+| — on a shared clinic line | 8 |
+| — flagged `needs_verification` | 9 |
+| CRM users | 2 (Gurjot `ceo_admin`, Virender `head_of_growth`) |
+| Assignments | 47 (Virender owns the original transcribed list) |
+
+Per territory: Chandigarh 88, Mohali 82, Patiala 44, Panchkula 30, Kharar 18,
+Zirakpur 6, Ropar 5. Every doctor resolved to a territory.
+
+By source: `Dr List_vrender3.xls` 226, `virender_doctor_list_transcribed.csv` 47.
 
 ### The one thing to understand before touching this
 
@@ -85,10 +99,25 @@ railway run -s gini-scribe -e production -- \
   node server/scripts/crm-import-doctors.mjs <file.csv> --commit
 ```
 
-Dedup is two-tier on purpose. A matching normalised **mobile is the same
-doctor** and is skipped. A matching **name in the same territory is only a
-suspicion** — "Dr Sharma, Mohali" is not rare — so it is surfaced for a human
-and imports unless they say otherwise.
+Dedup is three-tier, and the tiers were learned from real files:
+
+- A matching normalised **mobile on the same name** is the same doctor — skipped.
+- A matching mobile on **different names** is the clinic's line, not identity.
+  Those rows import as distinct doctors with the number on `clinic_phone`.
+  Treating it as identity silently dropped three real Kalanwali doctors.
+- A matching **name in the same territory is only a suspicion** — "Dr Sharma,
+  Mohali" is not rare — so it is surfaced for a human and imports unless they
+  say otherwise.
+
+Two more things a real list taught the importer: a **patch is not a territory**
+(`TERRITORY_ALIASES` in `server/crm/importDoctors.js` holds the confirmed
+mappings; anything unlisted resolves only on an exact name match rather than
+being guessed into the wrong rep's list), and **division codes are not clinical
+vocabulary** (`Pedia_1`/`Pedia_2` → Pediatrics).
+
+`--only-territory` imports the in-catchment rows and leaves the rest `pending`,
+so a list covering more ground than the hospital does can be taken in stages
+without re-uploading.
 
 ### Apply a migration
 
@@ -115,13 +144,60 @@ Migrations follow the house convention (`YYYY-MM-DD_name.sql` in
 2026-10-04_crm_doctor_skeleton_records doctors without a phone number
 ```
 
+### Screens
+
+| Path | Capability | What it is |
+|---|---|---|
+| `/crm/home` | `CRM_ACCESS` | Rep home — To visit / Today / My doctors / Tasks. Landing page for all three growth roles. |
+| `/crm/doctor/:doctorId` | `CRM_ACCESS` | Doctor 360 — header, 8 KPI cards, A/B/C selector, full timeline |
+| `/crm/visit/:doctorId` | `CRM_ACCESS` | Log a visit — chips, optional GPS, offline-first |
+| `/crm/import` | `CRM_ACCESS` | Import wizard — upload, map, preview, commit |
+
+Production: **https://scribe.ginihealth.com**
+
+API, all under `CRM_ACCESS` except the registration picker, which rides on
+`PATIENT_READ` so front-desk staff need no CRM identity:
+
+```
+GET   /api/crm/home                              rep home, one round trip
+GET   /api/crm/doctors/:id                       Doctor 360
+GET   /api/crm/doctors/:id/next-visit            cadence suggestion
+PATCH /api/crm/doctors/:id                       fill a gap (mobile, specialty…)
+POST  /api/crm/doctors/priority                  A/B/C, one doctor or a territory
+POST  /api/crm/visits                            log a visit (idempotent on client id)
+GET   /api/crm/import/fields                     column vocabulary
+POST  /api/crm/import/parse                      read a file, suggest a mapping
+POST  /api/crm/import/batches                    stage rows
+GET   /api/crm/import/batches/:id/preview        resolve, dedup, flag — writes nothing
+POST  /api/crm/import/batches/:id/commit         the only call that creates doctors
+GET   /api/crm/registration/referring-doctors    the "who referred you?" picker
+```
+
+### The held-back 297 rows
+
+`Dr List_vrender3.xls` covered far more ground than the hospital does — Sirsa,
+Ambala, Karnal, Yamunanagar, Kurukshetra, Fatehabad, Shimla and a dozen smaller
+Haryana patches. The in-catchment 226 were imported; the rest are **still
+staged** rather than discarded:
+
+```
+batch 23f70ee3-842b-4868-8f94-037f5b7567fc
+  created           226
+  skipped_duplicate   5
+  pending           297   <- waiting on a decision about coverage
+```
+
+To take them later, re-run the import with those territories added to
+`--only-territory` (creating the territories first). Nothing needs re-uploading
+— the raw rows and their interpreted form are both still in `crm.import_rows`.
+
 ### Testing
 
 ```sh
 server/migrations/crm/rehearse_migration.sh        # full chain + 85 assertions
 cd server && node scripts/smoke-crm-offline-queue.mjs   # 22, no database needed
-DATABASE_URL=<scratch> node scripts/smoke-crm-visits.mjs    # 23
-DATABASE_URL=<scratch> node scripts/smoke-crm-import.mjs    # 34
+DATABASE_URL=<scratch> node scripts/smoke-crm-visits.mjs    # 42
+DATABASE_URL=<scratch> node scripts/smoke-crm-import.mjs    # 64
 ```
 
 The database suites need a **fresh** scratch database — they assert on dedup
@@ -235,11 +311,17 @@ view distinguishes verified from claimed attribution.
 
 ### Carried-over items
 
-- **Territory assignment.** All 47 doctors are currently **unassigned** —
-  leadership sees them, no executive owns any. Decide the split and run the
-  onboarding command per person.
-- **Virender's login is inactive.** Activate with the onboarding command when
-  ready.
+- **226 of 273 doctors are unassigned.** Virender owns the original 47; the
+  imported list has no owner yet. Leadership sees everything either way
+  (`head_of_growth` and `ceo_admin` see the whole universe), but no executive
+  has a patch until the split is decided and the onboarding command is run per
+  person.
+- **Everything is A/B/C `unclassified`.** The selector is on the Doctor 360 and
+  the bulk action is on the My Doctors tab — pick a territory, set the band.
+  Until that happens, cadence treats every doctor as `unclassified` (60 days).
+- **54 doctors still have no mobile.** They surface in
+  `crm.v_doctors_needing_details` and as one-tap prompts during visit entry, so
+  the gap closes through fieldwork rather than a data-cleaning session.
 - **`verify-rbac.mjs` has 2 pre-existing failures** on `nurse` and two
   `/api/flow` routes. Unrelated to the CRM, present before this work, not fixed.
 - **Potential score** is manual (A/B/C plus an estimated monthly figure). The

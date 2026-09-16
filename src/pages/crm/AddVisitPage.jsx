@@ -49,6 +49,13 @@ export default function AddVisitPage() {
   const [gapValue, setGapValue] = useState("");
   const [openGap, setOpenGap] = useState(null);
   const [gapSaved, setGapSaved] = useState([]);
+  const [detail, setDetail] = useState({
+    doctor_requirements: "",
+    objections: "",
+    opportunities_identified: "",
+    commitments: "",
+  });
+  const [showDetail, setShowDetail] = useState(false);
   const [err, setErr] = useState(null);
 
   // Minted here, not on the server. This is the whole basis of the offline
@@ -83,6 +90,8 @@ export default function AddVisitPage() {
       alive = false;
     };
   }, [doctorId, params]);
+
+  const filledDetail = Object.values(detail).filter((v) => v.trim()).length;
 
   const gaps = (doctor?.missing_fields || []).filter(
     (g) => !gapSaved.includes(g) && GAP_PROMPTS[g],
@@ -139,6 +148,7 @@ export default function AddVisitPage() {
       purpose,
       outcome,
       discussion_notes: notes.trim() || null,
+      ...Object.fromEntries(Object.entries(detail).map(([k, v]) => [k, v.trim() || null])),
       follow_up_required: followUp,
       next_visit_date: nextVisit || null,
       occurred_at: nowIso,
@@ -267,6 +277,39 @@ export default function AddVisitPage() {
             {dictation.caption && <span className="rep__caption">{dictation.caption}</span>}
           </div>
         </Field>
+
+        {/* Behind a disclosure, not on the fast path. These are the four fields
+            a manager reads a visit for, but a rep in a corridor should not have
+            to scroll past them to reach Save. */}
+        <section className="rep__field">
+          <button
+            type="button"
+            className="rep__disclose"
+            onClick={() => setShowDetail((v) => !v)}
+            aria-expanded={showDetail}
+          >
+            {showDetail ? "− Less detail" : "+ Add detail"}
+            {!showDetail && filledDetail > 0 && <span className="rep__badge">{filledDetail}</span>}
+          </button>
+          {showDetail && (
+            <div className="rep__detail">
+              {[
+                ["doctor_requirements", "What do they need?"],
+                ["objections", "Any objection or concern?"],
+                ["opportunities_identified", "Opportunity spotted?"],
+                ["commitments", "What did you promise?"],
+              ].map(([key, placeholder]) => (
+                <input
+                  key={key}
+                  className="rep__input"
+                  value={detail[key]}
+                  onChange={(e) => setDetail((d) => ({ ...d, [key]: e.target.value }))}
+                  placeholder={placeholder}
+                />
+              ))}
+            </div>
+          )}
+        </section>
 
         <Field label="Follow-up">
           <label className="rep__check">

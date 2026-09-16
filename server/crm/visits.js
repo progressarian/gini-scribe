@@ -32,6 +32,13 @@ export async function logVisit(crmUser, visit) {
     purpose,
     occurred_at,
     discussion_notes,
+    // The four fields a manager actually reads a visit for (brief §5). They
+    // were in the table and on the Doctor 360 but never in the write path, so
+    // they came back null however carefully a rep filled them in.
+    doctor_requirements,
+    objections,
+    opportunities_identified,
+    commitments,
     outcome,
     follow_up_required = false,
     next_visit_date,
@@ -51,10 +58,12 @@ export async function logVisit(crmUser, visit) {
     const { rows: inserted } = await sql(
       `INSERT INTO crm.visits
          (id, hospital_id, doctor_id, executive_id, visit_type, purpose, occurred_at,
-          discussion_notes, outcome, follow_up_required, next_visit_date,
+          discussion_notes, doctor_requirements, objections, opportunities_identified,
+          commitments, outcome, follow_up_required, next_visit_date,
           gps_latitude, gps_longitude, gps_accuracy_m, gps_captured_at,
           client_created_at, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7, now()),$8,$9,$10,$11,$12,$13,$14,$15,$16,$4)
+       VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7, now()),$8,$9,$10,$11,$12,$13,$14,$15,
+               $16,$17,$18,$19,$20,$4)
        ON CONFLICT (id) DO NOTHING
        RETURNING id, occurred_at, synced_at`,
       [
@@ -66,6 +75,10 @@ export async function logVisit(crmUser, visit) {
         purpose ?? null,
         occurred_at ?? null,
         discussion_notes ?? null,
+        doctor_requirements ?? null,
+        objections ?? null,
+        opportunities_identified ?? null,
+        commitments ?? null,
         outcome ?? null,
         Boolean(follow_up_required),
         next_visit_date ?? null,
