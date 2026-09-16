@@ -32,6 +32,7 @@ const Companion = lazyWithRetry(() => import("./Companion"));
 const DoctorImportPage = lazyWithRetry(() => import("./pages/crm/DoctorImportPage.jsx"));
 const RepHomePage = lazyWithRetry(() => import("./pages/crm/RepHomePage.jsx"));
 const AddVisitPage = lazyWithRetry(() => import("./pages/crm/AddVisitPage.jsx"));
+const Doctor360Page = lazyWithRetry(() => import("./pages/crm/Doctor360Page.jsx"));
 const HomeScreen = lazyWithRetry(() => import("./companion/HomeScreen"));
 const PatientScreen = lazyWithRetry(() => import("./companion/PatientScreen"));
 const CaptureScreen = lazyWithRetry(() => import("./companion/CaptureScreen"));
@@ -265,6 +266,7 @@ const router = createBrowserRouter([
               { path: "/giniflow/station/referrals", element: lazyEl(GiniFlowReferralsPage) },
               { path: "/crm/home", element: lazyEl(RepHomePage) },
               { path: "/crm/visit/:doctorId", element: lazyEl(AddVisitPage) },
+              { path: "/crm/doctor/:doctorId", element: lazyEl(Doctor360Page) },
               { path: "/crm/import", element: lazyEl(DoctorImportPage) },
               { path: "/flow/my-patients", element: lazyEl(FlowMyPatientsPage) },
               { path: "/flow/consultants", element: lazyEl(FlowConsultantsPage) },

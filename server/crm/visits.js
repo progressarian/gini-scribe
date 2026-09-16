@@ -222,6 +222,132 @@ export async function repHome(crmUser, { limit = 25 } = {}) {
 }
 
 /**
+ * Set A/B/C on many doctors at once, scoped to a territory (brief §2).
+ *
+ * Classifying 273 doctors one at a time is how a universe stays Unclassified
+ * forever, so the bulk path is the point rather than a convenience. It writes
+ * through the same RLS as everything else: an executive can only reclassify
+ * doctors they already own, and the row count returned says how many actually
+ * moved rather than how many were asked for.
+ */
+export async function setPriority(crmUser, { doctorIds, territory, priority }) {
+  if (!DOCTOR_PRIORITY_VALUES.includes(priority)) {
+    throw new Error(`Unknown priority: ${priority}`);
+  }
+  const ids = Array.isArray(doctorIds) ? doctorIds.filter(Boolean) : [];
+  if (ids.length === 0 && !territory) throw new Error("Pick doctors or a territory");
+
+  return withCrmContext(crmUser, async (sql) => {
+    const { rows } = await sql(
+      `UPDATE crm.doctors d
+          SET priority = $1, updated_by = $2
+        WHERE d.deleted_at IS NULL
+          AND d.priority IS DISTINCT FROM $1
+          AND (
+            ($3::uuid[] IS NOT NULL AND cardinality($3::uuid[]) > 0 AND d.id = ANY($3::uuid[]))
+            OR ($4::text IS NOT NULL AND d.territory_id = (
+                  SELECT id FROM crm.territories
+                   WHERE lower(name) = lower($4::text) AND deleted_at IS NULL))
+          )
+        RETURNING d.id`,
+      [priority, crmUser.id, ids.length ? ids : null, territory ?? null],
+    );
+    return { updated: rows.length, priority };
+  });
+}
+
+/**
+ * Doctor 360 (brief §8): the header, the KPI cards, and one chronological
+ * record of everything that has happened with this doctor.
+ *
+ * The timeline is assembled here rather than read from crm.v_doctor_timeline
+ * because that view summarises a visit to its purpose — and the thing a rep
+ * actually needs six weeks later is what was *said*. Notes, purpose and outcome
+ * all travel.
+ */
+export async function doctor360(crmUser, doctorId) {
+  return withCrmContext(crmUser, async (sql) => {
+    const [doc, kpis, visits, referrals, tasks, stages] = await Promise.all([
+      sql(
+        `SELECT d.id, d.full_name, d.specialty, d.sub_specialty, d.qualifications,
+                d.clinic_name, d.address_line, d.area, d.city, d.mobile, d.clinic_phone,
+                d.whatsapp, d.email, d.priority, d.relationship_stage, d.notes,
+                d.estimated_monthly_potential_inr, d.profile_complete, d.missing_fields,
+                d.needs_verification, d.verification_note,
+                t.name AS territory_name,
+                a.executive_id, ex.full_name AS executive_name,
+                vd.due_state, vd.last_visit_at, vd.next_due_on, vd.interval_days
+           FROM crm.doctors d
+           LEFT JOIN crm.territories t ON t.id = d.territory_id
+           LEFT JOIN crm.doctor_assignments a
+                  ON a.doctor_id = d.id AND a.effective_to IS NULL
+           LEFT JOIN crm.users ex ON ex.id = a.executive_id
+           LEFT JOIN crm.v_doctor_visit_due vd ON vd.doctor_id = d.id
+          WHERE d.id = $1 AND d.deleted_at IS NULL`,
+        [doctorId],
+      ),
+      sql(`SELECT * FROM crm.v_doctor_kpis WHERE doctor_id = $1`, [doctorId]),
+      sql(
+        `SELECT v.id, v.occurred_at, v.visit_type, v.purpose, v.outcome,
+                v.discussion_notes, v.doctor_requirements, v.objections,
+                v.opportunities_identified, v.commitments,
+                v.follow_up_required, v.next_visit_date,
+                (v.gps_latitude IS NOT NULL) AS has_gps,
+                v.client_created_at, v.synced_at,
+                u.full_name AS executive_name
+           FROM crm.visits v
+           LEFT JOIN crm.users u ON u.id = v.executive_id
+          WHERE v.doctor_id = $1 AND v.deleted_at IS NULL
+          ORDER BY v.occurred_at DESC`,
+        [doctorId],
+      ),
+      sql(
+        `SELECT r.id, r.referral_code, r.referred_at, r.status, r.attribution_status,
+                r.patient_name_raw, r.urgency
+           FROM crm.doctor_referrals r
+          WHERE r.referring_doctor_id = $1 AND r.deleted_at IS NULL
+          ORDER BY r.referred_at DESC`,
+        [doctorId],
+      ),
+      sql(
+        `SELECT id, title, due_date, priority, status, completed_at
+           FROM crm.tasks
+          WHERE doctor_id = $1 AND deleted_at IS NULL
+          ORDER BY due_date NULLS LAST`,
+        [doctorId],
+      ),
+      sql(
+        `SELECT from_stage, to_stage, reason, changed_at
+           FROM crm.doctor_stage_history
+          WHERE doctor_id = $1 ORDER BY changed_at DESC`,
+        [doctorId],
+      ),
+    ]);
+
+    if (!doc.rows[0]) throw new Error("Doctor not found, or not yours");
+
+    // One list, newest first. Each entry keeps its own shape so the page can
+    // render a visit differently from a referral without re-querying.
+    const timeline = [
+      ...visits.rows.map((v) => ({ kind: "visit", at: v.occurred_at, ...v })),
+      ...referrals.rows.map((r) => ({ kind: "referral", at: r.referred_at, ...r })),
+      ...tasks.rows
+        .filter((t) => t.completed_at)
+        .map((t) => ({ kind: "task", at: t.completed_at, ...t })),
+      ...stages.rows.map((h) => ({ kind: "stage", at: h.changed_at, ...h })),
+    ].sort((a, b) => new Date(b.at) - new Date(a.at));
+
+    return {
+      doctor: doc.rows[0],
+      kpis: kpis.rows[0] ?? null,
+      timeline,
+      open_tasks: tasks.rows.filter((t) => !t.completed_at),
+      counts: { visits: visits.rows.length, referrals: referrals.rows.length },
+    };
+  });
+}
+
+/**
  * The next visit date the cadence policy implies, so the rep confirms a date
  * rather than choosing one. A/B doctors every 15 days, C every 45.
  */

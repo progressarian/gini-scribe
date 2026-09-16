@@ -9,7 +9,7 @@ import {
   commitBatch,
 } from "../crm/importDoctors.js";
 import { crmContext } from "../crm/db.js";
-import { logVisit, fillDoctorGap, repHome, suggestedNextVisit } from "../crm/visits.js";
+import { logVisit, fillDoctorGap, repHome, suggestedNextVisit, doctor360 } from "../crm/visits.js";
 import { handleError } from "../utils/errorHandler.js";
 
 const router = express.Router();
@@ -41,6 +41,14 @@ router.get("/crm/home", crm, async (req, res) => {
   }
 });
 
+router.get("/crm/doctors/:id", crm, async (req, res) => {
+  try {
+    res.json(await doctor360(req.crmUser, req.params.id));
+  } catch (e) {
+    handleError(res, e, "Doctor 360");
+  }
+});
+
 router.get("/crm/doctors/:id/next-visit", crm, async (req, res) => {
   try {
     res.json((await suggestedNextVisit(req.crmUser, req.params.id)) || {});
@@ -58,6 +66,16 @@ router.post("/crm/visits", crm, express.json({ limit: "1mb" }), async (req, res)
     res.json(await logVisit(req.crmUser, req.body));
   } catch (e) {
     handleError(res, e, "Log visit");
+  }
+});
+
+// Bulk A/B/C. Separate from PATCH /crm/doctors/:id because it is a different
+// action with a different blast radius — one doctor versus a whole territory.
+router.post("/crm/doctors/priority", crm, express.json(), async (req, res) => {
+  try {
+    res.json(await setPriority(req.crmUser, req.body));
+  } catch (e) {
+    handleError(res, e, "Set priority");
   }
 });
 

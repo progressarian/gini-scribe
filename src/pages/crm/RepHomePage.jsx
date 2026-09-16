@@ -2,7 +2,11 @@ import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import api from "../../services/api.js";
 import { startAutoDrain, pendingCount } from "../../crm/offlineQueue.js";
-import { visitDueStateMeta, doctorPriorityMeta } from "../../../shared/crmVocab.js";
+import {
+  visitDueStateMeta,
+  doctorPriorityMeta,
+  DOCTOR_PRIORITIES,
+} from "../../../shared/crmVocab.js";
 
 // The rep's home screen (brief §13). Opened one-handed, in a corridor.
 //
@@ -25,6 +29,8 @@ export default function RepHomePage() {
   const [query, setQuery] = useState("");
   const [territory, setTerritory] = useState("all");
   const [pending, setPending] = useState(pendingCount());
+  const [classifying, setClassifying] = useState(false);
+  const [bulkMsg, setBulkMsg] = useState(null);
   const [err, setErr] = useState(null);
 
   const justLogged = params.get("logged");
@@ -72,6 +78,25 @@ export default function RepHomePage() {
     }
     return list;
   }, [data, territory, query]);
+
+  // Classifying 273 doctors one at a time is how a universe stays Unclassified
+  // forever, so the bulk action sits on the filter the rep is already using.
+  const classifyTerritory = async (priority) => {
+    if (territory === "all") return;
+    setClassifying(true);
+    setBulkMsg(null);
+    try {
+      const { data: r } = await api.post("/api/crm/doctors/priority", { territory, priority });
+      setBulkMsg(
+        `${r.updated} doctor${r.updated === 1 ? "" : "s"} in ${territory} set to ${priority}`,
+      );
+      await load();
+    } catch (e) {
+      setBulkMsg(e?.response?.data?.error || "Could not update");
+    } finally {
+      setClassifying(false);
+    }
+  };
 
   if (err)
     return (
@@ -187,6 +212,24 @@ export default function RepHomePage() {
                 </button>
               ))}
             </div>
+            {territory !== "all" && (
+              <div className="rep__bulk">
+                <span className="rep__hint">
+                  Set all {doctors.length} in {territory} to
+                </span>
+                {DOCTOR_PRIORITIES.filter((p) => p.value !== "unclassified").map((p) => (
+                  <button
+                    key={p.value}
+                    className="rep__btn rep__btn--sm"
+                    disabled={classifying}
+                    onClick={() => classifyTerritory(p.value)}
+                  >
+                    {p.short}
+                  </button>
+                ))}
+                {bulkMsg && <span className="rep__saved">{bulkMsg}</span>}
+              </div>
+            )}
           </div>
           <ul className="rep__list">
             {doctors.length === 0 && <Empty>No doctors match.</Empty>}
@@ -233,7 +276,9 @@ function DoctorRow({ d, navigate, showDue }) {
     <li className="rep__row">
       <div className="rep__row-main">
         <strong>
-          {d.full_name}
+          <button className="rep__name" onClick={() => navigate(`/crm/doctor/${d.doctor_id}`)}>
+            {d.full_name}
+          </button>
           {pri && d.priority !== "unclassified" && (
             <span className={`rep__pri rep__pri--${pri.tone}`}>{pri.short}</span>
           )}

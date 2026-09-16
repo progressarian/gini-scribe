@@ -750,3 +750,167 @@
   border: 1px dashed #e2e8f0;
   border-radius: 8px;
 }
+
+/* ---- Doctor 360 — src/pages/crm/Doctor360Page.jsx ----
+   The timeline carries full field notes, so it is set for reading rather than
+   scanning: wider measure, real paragraph spacing, and the note itself given
+   more weight than the metadata around it. */
+
+.rep__name {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: #1e40af;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.rep__bulk {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 10px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.d360__meta {
+  font-size: 13px;
+  color: #64748b;
+  margin-bottom: 10px;
+}
+.d360__contact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.d360__flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 18px;
+}
+.d360__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.d360__kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  gap: 6px;
+  margin-bottom: 22px;
+}
+.d360__kpi {
+  padding: 10px 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  text-align: center;
+}
+.d360__kpi-v {
+  display: block;
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.d360__kpi-l {
+  display: block;
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.d360__timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.d360__event {
+  border: 1px solid #e2e8f0;
+  border-left: 3px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px 14px;
+}
+.d360__event--visit {
+  border-left-color: #1e40af;
+}
+.d360__event--referral {
+  border-left-color: #15803d;
+}
+.d360__event--stage {
+  border-left-color: #a16207;
+}
+.d360__event-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.d360__event-date {
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f172a;
+}
+.d360__event-kind {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+.d360__event-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 7px;
+}
+.d360__tag {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 600;
+}
+.d360__tag--grn {
+  background: #dcfce7;
+  color: #166534;
+}
+.d360__tag--red {
+  background: #fee2e2;
+  color: #991b1b;
+}
+.d360__tag--amb {
+  background: #fef3c7;
+  color: #92400e;
+}
+.d360__notes {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: #0f172a;
+  white-space: pre-wrap;
+}
+.d360__notes--none {
+  color: #94a3b8;
+  font-style: italic;
+  font-size: 13px;
+}
+.d360__extra {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #475569;
+}

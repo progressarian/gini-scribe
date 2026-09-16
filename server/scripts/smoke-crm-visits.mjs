@@ -16,7 +16,8 @@ if (!/localhost|127\.0\.0\.1|host\.docker\.internal/.test(dsn)) {
   process.exit(1);
 }
 
-const { logVisit, fillDoctorGap, repHome, suggestedNextVisit } = await import("../crm/visits.js");
+const { logVisit, fillDoctorGap, repHome, suggestedNextVisit, doctor360, setPriority } =
+  await import("../crm/visits.js");
 const pool = (await import("../config/db.js")).default;
 
 const EXEC = {
@@ -142,6 +143,66 @@ eq(typeof home.performance.doctors_incomplete, "number", "incomplete count prese
 ok(
   `home returns ${home.my_doctors.length} doctors, ${home.due_visits.length} due, ${home.tasks.length} tasks`,
 );
+
+console.log("\nDoctor 360");
+const three60 = await doctor360(EXEC, DOC_A);
+eq(three60.doctor.full_name, "Dr Owned By A", "the header names the doctor");
+eq(three60.counts.visits >= 1, true, "visit count present");
+eq(three60.kpis !== null, true, "KPI row present even with no revenue");
+const firstVisit = three60.timeline.find((e) => e.kind === "visit");
+// The replay test above deliberately edited this visit's notes, so the value
+// here is that correction — the stronger claim anyway: the timeline shows what
+// the record currently says, in full.
+eq(
+  firstVisit.discussion_notes,
+  "corrected on another device",
+  "the timeline carries the visit notes in full",
+);
+eq(firstVisit.purpose, "Intro call", "…its purpose");
+eq(firstVisit.outcome, "positive", "…and its outcome");
+// Not "a visit is first" — the fixture's stage change is genuinely newer than a
+// 40-day-old visit. The claim worth testing is that the ordering holds.
+const times = three60.timeline.map((e) => new Date(e.at).getTime());
+eq(
+  times.every((t, i) => i === 0 || times[i - 1] >= t),
+  true,
+  "the timeline is strictly newest-first",
+);
+const stageEntry = three60.timeline.find((e) => e.kind === "stage");
+eq(Boolean(stageEntry), true, "a stage change appears on the timeline too");
+
+console.log("\nA/B/C priority");
+const one = await setPriority(EXEC, { doctorIds: [DOC_A], priority: "B" });
+eq(one.updated, 1, "a single doctor is reclassified");
+eq((await doctor360(EXEC, DOC_A)).doctor.priority, "B", "…and it sticks");
+const again = await setPriority(EXEC, { doctorIds: [DOC_A], priority: "B" });
+eq(again.updated, 0, "setting the same value again changes nothing");
+try {
+  await setPriority(EXEC, { doctorIds: [DOC_A], priority: "Z" });
+  bad("bad priority", "accepted");
+} catch {
+  ok("an unknown priority is refused");
+}
+try {
+  await setPriority(EXEC, {});
+  bad("no target", "accepted");
+} catch {
+  ok("a call with neither doctors nor a territory is refused");
+}
+
+// Fixture doctors carry an area but no territory_id, so give them one before
+// testing a territory-scoped write.
+await pool.query(
+  `UPDATE crm.doctors SET territory_id = (SELECT id FROM crm.territories WHERE name='Mohali')
+    WHERE full_name IN ('Dr Owned By A', 'Dr Gap Test')`,
+);
+const bulk = await setPriority(EXEC, { territory: "Mohali", priority: "A" });
+eq(bulk.updated >= 1, true, `a whole territory reclassifies (${bulk.updated} doctors)`);
+const others = await pool.query(
+  `SELECT count(*)::int n FROM crm.doctors d JOIN crm.territories t ON t.id=d.territory_id
+    WHERE lower(t.name)='mohali' AND d.priority <> 'A' AND d.deleted_at IS NULL`,
+);
+eq(others.rows[0].n, 0, "…every doctor in it now carries the new band");
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
 await pool.end();
