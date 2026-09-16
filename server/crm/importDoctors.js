@@ -99,6 +99,29 @@ export const IMPORT_FIELDS = [
   },
 ];
 
+// A field-sales patch is not always a territory. These are the mappings a
+// human has confirmed; anything not listed resolves only if it matches a
+// territory name outright, so an unknown patch stays unassigned rather than
+// being guessed into the wrong rep's list.
+export const TERRITORY_ALIASES = {
+  "mohali sohana": "Mohali",
+  "chandigarh trade": "Chandigarh",
+  // Every row in this patch names a Panchkula landmark — sector numbering,
+  // Paras, Alchemist, Civil Hospital — and none names a Zirakpur one
+  // (Dhakoli, VIP Road, Baltana). It is a Panchkula patch with Zirakpur in
+  // the label, not a mixed one.
+  "panchkula zirakpur": "Panchkula",
+};
+
+// Division codes from a field-force sheet are segmentation, not clinical
+// vocabulary. Pedia_1/Pedia_2 are two halves of one speciality.
+export const SPECIALTY_ALIASES = {
+  pedia_1: "Pediatrics",
+  pedia_2: "Pediatrics",
+  pedia1: "Pediatrics",
+  pedia2: "Pediatrics",
+};
+
 const FIELD_KEYS = new Set(IMPORT_FIELDS.map((f) => f.key));
 const norm = (s) =>
   String(s ?? "")
@@ -155,6 +178,19 @@ function normalisePriority(v) {
   return DOCTOR_PRIORITY_VALUES.includes(t) ? t : "unclassified";
 }
 
+/** The territory a patch resolves to, or null if it resolves to none. */
+export function resolveTerritoryName(value) {
+  const raw = clean(value);
+  if (!raw) return null;
+  return TERRITORY_ALIASES[raw.trim().toLowerCase()] ?? raw;
+}
+
+function normaliseSpecialty(v) {
+  const t = clean(v);
+  if (!t) return null;
+  return SPECIALTY_ALIASES[t.trim().toLowerCase()] ?? t;
+}
+
 /** Apply a mapping to one raw row, returning the shape crm.doctors wants. */
 export function interpretRow(raw, mapping) {
   const out = {};
@@ -163,6 +199,7 @@ export function interpretRow(raw, mapping) {
     out[field] = clean(raw[header]);
   }
   out.priority = normalisePriority(out.priority);
+  out.specialty = normaliseSpecialty(out.specialty);
   out.needs_verification = needsVerification(out.transcription_confidence);
   out.verification_note = out.needs_verification ? out.transcription_confidence : null;
   return out;
@@ -269,6 +306,27 @@ export async function previewBatch(crmUser, batchId) {
       byNameTerritory.set(nameKey(d.full_name, d.territory || d.area), d);
     }
 
+    // A number that appears against two different doctors in one list is not a
+    // personal mobile — it is the clinic's line. Treating it as identity would
+    // silently drop real doctors as duplicates, which is exactly what happened
+    // to three consecutive Kalanwali entries. Counted first, so classification
+    // below can tell a shared line from a genuine repeat.
+    //
+    // The distinction that matters is the NAME. Two different doctors on one
+    // number is a clinic line; the SAME doctor on one number is one person
+    // listed twice under two patches — "KANWALJIT SINGH" appears under both
+    // Kharar and Zirakpur on the same number. Counting distinct names per
+    // number separates the two cases.
+    const mobileCounts = new Map();
+    const mobileNames = new Map();
+    for (const r of rows) {
+      if (!r.mobile_e164) continue;
+      mobileCounts.set(r.mobile_e164, (mobileCounts.get(r.mobile_e164) || 0) + 1);
+      const names = mobileNames.get(r.mobile_e164) ?? new Set();
+      names.add(norm(r.normalized?.full_name));
+      mobileNames.set(r.mobile_e164, names);
+    }
+
     const seenMobile = new Map();
     const seenName = new Map();
     const out = [];
@@ -280,8 +338,23 @@ export async function previewBatch(crmUser, batchId) {
       let status = "create";
       let matched = null;
 
+      const sameNumber = r.mobile_e164 && mobileCounts.get(r.mobile_e164) > 1;
+      const shared = sameNumber && (mobileNames.get(r.mobile_e164)?.size ?? 0) > 1;
+      if (shared) {
+        // Move it off `mobile` so it is not treated as identity: no unique-index
+        // collision, no false merge, and the number is still reachable.
+        v.clinic_phone = v.mobile;
+        v.mobile = null;
+        flags.push(
+          `Shared with ${mobileCounts.get(r.mobile_e164) - 1} other doctor(s) in this file — recorded as a clinic line, not a personal mobile`,
+        );
+      }
+
       if (errors.length) {
         status = "error";
+      } else if (shared) {
+        // Distinct doctors who happen to share a clinic line.
+        status = "create";
       } else if (r.mobile_e164 && byMobile.has(r.mobile_e164)) {
         status = "duplicate";
         matched = byMobile.get(r.mobile_e164);
@@ -323,6 +396,7 @@ export async function previewBatch(crmUser, batchId) {
         row_number: r.row_number,
         raw: r.raw,
         values: v,
+        resolved_territory: resolveTerritoryName(v.territory || v.area),
         status,
         flags,
         errors,
@@ -339,9 +413,17 @@ export async function previewBatch(crmUser, batchId) {
  * Write the approved rows. `skipRows` is the set of row numbers the operator
  * chose to leave out; hard duplicates and errored rows are never written.
  */
-export async function commitBatch(crmUser, batchId, skipRows = []) {
+export async function commitBatch(crmUser, batchId, skipRows = [], options = {}) {
   const preview = await previewBatch(crmUser, batchId);
   const skip = new Set(skipRows.map(Number));
+  // Import only the rows inside a named set of territories, leaving the rest
+  // staged. A list can cover more ground than the hospital does, and the
+  // out-of-catchment rows are not wrong — just not wanted yet. They keep their
+  // `pending` status so a later run can pick them up without re-uploading.
+  const only = options.onlyTerritories?.length
+    ? new Set(options.onlyTerritories.map((t) => norm(t)))
+    : null;
+  let heldOut = 0;
 
   return withCrmContext(crmUser, async (sql) => {
     const { rows: hos } = await sql("SELECT id FROM crm.hospitals WHERE code = 'GACH'");
@@ -364,6 +446,10 @@ export async function commitBatch(crmUser, batchId, skipRows = []) {
         ]);
         continue;
       }
+      if (only && !only.has(norm(row.resolved_territory))) {
+        heldOut++;
+        continue; // left `pending`, deliberately
+      }
       if (row.status === "duplicate" || skip.has(row.row_number)) {
         skipped++;
         await sql(
@@ -378,10 +464,10 @@ export async function commitBatch(crmUser, batchId, skipRows = []) {
       const { rows: ins } = await sql(
         `INSERT INTO crm.doctors
            (hospital_id, full_name, specialty, sub_specialty, qualifications, clinic_name,
-            mobile, whatsapp, email, area, address_line, city, district, state, pin_code,
+            mobile, clinic_phone, whatsapp, email, area, address_line, city, district, state, pin_code,
             territory_id, priority, notes, needs_verification, verification_note,
             import_batch_id, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
          RETURNING id`,
         [
           hospitalId,
@@ -391,6 +477,7 @@ export async function commitBatch(crmUser, batchId, skipRows = []) {
           v.qualifications,
           v.clinic_name,
           v.mobile,
+          v.clinic_phone,
           v.whatsapp,
           v.email,
           v.area,
@@ -399,7 +486,7 @@ export async function commitBatch(crmUser, batchId, skipRows = []) {
           v.district,
           v.state,
           v.pin_code,
-          territoryId(v.territory || v.area),
+          territoryId(resolveTerritoryName(v.territory || v.area)),
           v.priority,
           v.notes,
           v.needs_verification,
@@ -416,13 +503,15 @@ export async function commitBatch(crmUser, batchId, skipRows = []) {
       );
     }
 
+    // A partially imported batch stays `previewing`: rows are still pending and
+    // the file is not finished with.
     await sql(
       `UPDATE crm.import_batches
-          SET status='completed', created_count=$2, skipped_count=$3, error_count=$4,
-              completed_at=now()
+          SET status=$5, created_count=$2, skipped_count=$3, error_count=$4,
+              completed_at=CASE WHEN $5='completed' THEN now() ELSE NULL END
         WHERE id=$1`,
-      [batchId, created, skipped, errored],
+      [batchId, created, skipped, errored, heldOut > 0 ? "previewing" : "completed"],
     );
-    return { created, skipped, errored };
+    return { created, skipped, errored, heldOut };
   });
 }

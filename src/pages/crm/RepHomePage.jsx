@@ -107,7 +107,7 @@ export default function RepHomePage() {
       )}
 
       <div className="rep__stats">
-        <Stat n={data.due_visits.length} label="To visit" tone="warn" />
+        <Stat n={data.due_summary?.total ?? data.due_visits.length} label="To visit" tone="warn" />
         <Stat n={p.visits_today} label="Today" />
         <Stat n={p.visits_month} label="This month" />
         <Stat
@@ -125,8 +125,8 @@ export default function RepHomePage() {
             onClick={() => setTab(t.key)}
           >
             {t.label}
-            {t.key === "due" && data.due_visits.length > 0 && (
-              <span className="rep__badge">{data.due_visits.length}</span>
+            {t.key === "due" && (data.due_summary?.total ?? 0) > 0 && (
+              <span className="rep__badge">{data.due_summary.total}</span>
             )}
           </button>
         ))}
@@ -138,6 +138,11 @@ export default function RepHomePage() {
           {data.due_visits.map((d) => (
             <DoctorRow key={d.doctor_id} d={d} navigate={navigate} showDue />
           ))}
+          {data.due_summary && data.due_summary.showing < data.due_summary.total && (
+            <li className="rep__more">
+              Showing the {data.due_summary.showing} most urgent of {data.due_summary.total} waiting
+            </li>
+          )}
         </ul>
       )}
 

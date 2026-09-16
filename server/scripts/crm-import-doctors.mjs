@@ -12,6 +12,9 @@
 //   --owner "Full Name"   the CRM user the import is attributed to
 //   --role  head_of_growth
 //   --skip  4,17          row numbers to leave out
+//   --only-territory Mohali,Chandigarh
+//                         import only rows resolving to these territories;
+//                         everything else stays staged for a later run
 //   --commit              actually write
 
 import "../loadEnv.js";
@@ -34,6 +37,10 @@ if (!file || !fs.existsSync(file)) {
 const OWNER = flag("owner", "Virender Satija");
 const ROLE = flag("role", "head_of_growth");
 const SKIP = (flag("skip", "") || "").split(",").filter(Boolean).map(Number);
+const ONLY = (flag("only-territory", "") || "")
+  .split(",")
+  .map((t) => t.trim())
+  .filter(Boolean);
 const COMMIT = has("commit");
 
 const { parseSheet, suggestMapping, createBatch, previewBatch, commitBatch } =
@@ -112,6 +119,44 @@ const { batchId } = await createBatch(user, {
 });
 const pv = await previewBatch(user, batchId);
 console.log(`\npreview: ${JSON.stringify(pv.counts)}`);
+
+const norm = (t) =>
+  String(t ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+const inScope = ONLY.length
+  ? pv.rows.filter((r) => ONLY.some((t) => norm(t) === norm(r.resolved_territory)))
+  : pv.rows;
+if (ONLY.length) {
+  const byTerr = {};
+  for (const r of inScope) byTerr[r.resolved_territory] = (byTerr[r.resolved_territory] || 0) + 1;
+  console.log(`scope:   ${ONLY.join(", ")}`);
+  Object.entries(byTerr)
+    .sort((a, b) => b[1] - a[1])
+    .forEach(([t, n]) => console.log(`           ${String(n).padStart(4)}  ${t}`));
+  // Mirror commitBatch exactly: it skips errors, hard duplicates and anything
+  // explicitly excluded. Counting them as importable would mean the number
+  // approved is not the number that lands.
+  const willCreate = inScope.filter(
+    (r) => r.status !== "error" && r.status !== "duplicate" && !SKIP.includes(r.row_number),
+  ).length;
+  const dupInScope = inScope.filter((r) => r.status === "duplicate").length;
+  const maybeInScope = inScope.filter((r) => r.status === "possible_duplicate");
+  const shared = inScope.filter((r) => r.flags.some((f) => /clinic line/.test(f))).length;
+  console.log(
+    `in scope: ${inScope.length} rows -> ${willCreate} would import` +
+      ` (${shared} share a clinic line, ${dupInScope} skipped as duplicates)`,
+  );
+  for (const r of maybeInScope) {
+    console.log(
+      `   REVIEW row ${r.row_number}: ${r.values.full_name} (${r.resolved_territory}) — ` +
+        (r.matched_doctor
+          ? `matches existing "${r.matched_doctor.full_name}"`
+          : r.flags.join("; ")),
+    );
+  }
+  console.log(`held:    ${pv.rows.length - inScope.length} rows stay staged`);
+}
 console.log(`batch:   ${batchId}`);
 
 const staged = (await pool.query("SELECT count(*)::int n FROM crm.doctors")).rows[0].n;
@@ -129,7 +174,7 @@ if (!COMMIT) {
 }
 
 console.log(`\ncommitting${SKIP.length ? `, skipping rows ${SKIP.join(", ")}` : ""}…`);
-const result = await commitBatch(user, batchId, SKIP);
+const result = await commitBatch(user, batchId, SKIP, { onlyTerritories: ONLY });
 const after = (await pool.query("SELECT count(*)::int n FROM crm.doctors")).rows[0].n;
 
 console.log(`\nresult: ${JSON.stringify(result)}`);

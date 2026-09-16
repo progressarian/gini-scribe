@@ -228,6 +228,100 @@ const terr = await pool.query(
 );
 eq(terr.rows[0].n, 5, "each one resolved to a real territory");
 
+console.log("\nField-force rules: patches, shared lines, division codes");
+const FF = `Doctor Name,Area/Patch,Division Speciality,Mobile Number,Clinic Name,Clinic Address
+DR ONE,MOHALI SOHANA,Pedia_1,9811100001,Clinic A,Sohana
+DR TWO,CHANDIGARH TRADE,Pedia_2,9811100002,Clinic B,Sec 17
+DR THREE,Panchkula Zirakpur,Chest,9811100003,Paras,Sec 6
+DR FOUR,AMBALA,Chest,9811100004,Clinic D,Ambala cantt
+DR FIVE,Kalanwali,Consulting physician,9811100005,Shared Clinic,Kalanwali
+DR SIX,Kalanwali,Consulting physician,9811100005,Shared Clinic,Kalanwali
+`;
+const ffRows = parseSheet(Buffer.from(FF, "utf8"), "ff.csv").rows;
+const ffMap = suggestMapping(Object.keys(ffRows[0]));
+const ffBatch = await createBatch(CRM_USER, {
+  fileName: "ff.csv",
+  headers: Object.keys(ffRows[0]),
+  rows: ffRows,
+  mapping: ffMap,
+});
+const ffPv = await previewBatch(CRM_USER, ffBatch.batchId);
+const byName = (n) => ffPv.rows.find((r) => r.values.full_name === n);
+
+eq(byName("DR ONE").resolved_territory, "Mohali", "MOHALI SOHANA resolves to Mohali");
+eq(byName("DR TWO").resolved_territory, "Chandigarh", "CHANDIGARH TRADE resolves to Chandigarh");
+eq(byName("DR THREE").resolved_territory, "Panchkula", "Panchkula Zirakpur resolves to Panchkula");
+eq(
+  byName("DR FOUR").resolved_territory,
+  "AMBALA",
+  "an unknown patch resolves to itself, not a guess",
+);
+eq(byName("DR ONE").values.specialty, "Pediatrics", "Pedia_1 normalises to Pediatrics");
+eq(byName("DR TWO").values.specialty, "Pediatrics", "Pedia_2 normalises to Pediatrics");
+eq(byName("DR THREE").values.specialty, "Chest", "other division codes are preserved verbatim");
+
+const five = byName("DR FIVE"),
+  six = byName("DR SIX");
+eq(five.status, "create", "the first of a shared-line pair imports");
+eq(six.status, "create", "…and so does the second — not skipped as a duplicate");
+eq(six.values.mobile ?? "null", "null", "…with the number off the mobile field");
+eq(six.values.clinic_phone, "9811100005", "…and onto clinic_phone");
+eq(
+  six.flags.some((f) => /clinic line/.test(f)),
+  true,
+  "…and the preview says why",
+);
+
+// Same number AND same name is one doctor under two patches, not a shared line.
+const SAME = `Doctor Name,Area/Patch,Mobile Number
+KANWALJIT SINGH,KHARAR,9779903277
+KANWALJIT SINGH,ZIRAKPUR,9779903277
+`;
+const sameRows = parseSheet(Buffer.from(SAME, "utf8"), "same.csv").rows;
+const sameBatch = await createBatch(CRM_USER, {
+  fileName: "same.csv",
+  headers: Object.keys(sameRows[0]),
+  rows: sameRows,
+  mapping: suggestMapping(Object.keys(sameRows[0])),
+});
+const samePv = await previewBatch(CRM_USER, sameBatch.batchId);
+eq(samePv.rows[0].status, "create", "the first listing of a doctor imports");
+eq(
+  samePv.rows[1].status,
+  "duplicate",
+  "the same name on the same number is a duplicate, not a clinic line",
+);
+eq(samePv.rows[1].values.clinic_phone ?? "null", "null", "…and is not rewritten as a clinic line");
+
+console.log("\nTerritory scoping holds the rest back");
+const ffBefore = (await pool.query("SELECT count(*)::int n FROM crm.doctors")).rows[0].n;
+const ffCommit = await commitBatch(CRM_USER, ffBatch.batchId, [], {
+  onlyTerritories: ["Mohali", "Chandigarh", "Panchkula"],
+});
+eq(ffCommit.created, 3, "only the three in-catchment rows import");
+eq(ffCommit.heldOut, 3, "three rows held back");
+const ffAfter = (await pool.query("SELECT count(*)::int n FROM crm.doctors")).rows[0].n;
+eq(ffAfter - ffBefore, 3, "the universe grew by exactly three");
+const stillPending = await pool.query(
+  "SELECT count(*)::int n FROM crm.import_rows WHERE batch_id=$1 AND status='pending'",
+  [ffBatch.batchId],
+);
+eq(stillPending.rows[0].n, 3, "the held rows stay staged for a later run");
+const batchStatus = await pool.query("SELECT status FROM crm.import_batches WHERE id=$1", [
+  ffBatch.batchId,
+]);
+eq(batchStatus.rows[0].status, "previewing", "…and the batch is not marked finished");
+const terrCheck = await pool.query(
+  `SELECT d.full_name, t.name terr, d.clinic_phone, d.mobile FROM crm.doctors d
+     LEFT JOIN crm.territories t ON t.id=d.territory_id WHERE d.import_batch_id=$1 ORDER BY t.name`,
+  [ffBatch.batchId],
+);
+eq(
+  terrCheck.rows.map((r) => r.terr).join(","),
+  "Chandigarh,Mohali,Panchkula",
+  "each landed in its resolved territory",
+);
+
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
 await pool.end();
 process.exit(fail === 0 ? 0 : 1);

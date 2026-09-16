@@ -127,7 +127,7 @@ export async function fillDoctorGap(crmUser, doctorId, patch) {
  */
 export async function repHome(crmUser, { limit = 25 } = {}) {
   return withCrmContext(crmUser, async (sql) => {
-    const [todays, due, doctors, tasks, performance] = await Promise.all([
+    const [todays, due, dueTotal, doctors, tasks, performance] = await Promise.all([
       sql(
         `SELECT v.id, v.doctor_id, d.full_name, d.area, v.visit_type, v.outcome, v.occurred_at
            FROM crm.visits v JOIN crm.doctors d ON d.id = v.doctor_id
@@ -152,6 +152,17 @@ export async function repHome(crmUser, { limit = 25 } = {}) {
                    vd.last_visit_at NULLS FIRST
           LIMIT $1`,
         [clamp(Number(limit) || 25, 1, 100)],
+      ),
+      // The list is paged; the COUNT is not. Without this the home screen
+      // showed the page size as the workload — "To visit 25" when 46 doctors
+      // were waiting — which is the one number on that screen a rep plans
+      // their day around.
+      sql(
+        `SELECT count(*)::int AS total,
+                count(*) FILTER (WHERE due_state = 'overdue')::int AS overdue,
+                count(*) FILTER (WHERE due_state = 'never_visited')::int AS never_visited
+           FROM crm.v_doctor_visit_due
+          WHERE due_state IN ('overdue', 'due', 'never_visited')`,
       ),
       sql(
         `SELECT d.id AS doctor_id, d.full_name, d.specialty, d.area, d.city, d.priority,
@@ -193,6 +204,10 @@ export async function repHome(crmUser, { limit = 25 } = {}) {
       user: { id: crmUser.id, name: crmUser.full_name, role: crmUser.role },
       todays_visits: todays.rows,
       due_visits: due.rows,
+      due_summary: {
+        ...dueTotal.rows[0],
+        showing: due.rows.length,
+      },
       my_doctors: myDoctors,
       tasks: tasks.rows,
       performance: {
