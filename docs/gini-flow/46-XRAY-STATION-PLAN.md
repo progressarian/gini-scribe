@@ -75,7 +75,13 @@ call, the same way Echo's own exclusion got reversed later.
 - Samples-only patient hiding (`floorSettings.js`) needed no changes — it's
   already wired generically into the queue/candidates queries X-ray reuses.
 
-## 4. Still needs a person
+## 4. On the Flow Manager board
+
+X-ray has its own **X-Ray** column on `/giniflow/manager`, placed before Echo. See
+`47-XRAY-ECHO-BOARD-COLUMNS-PLAN.md`. The same `requiresBefore` rule decides the column: a patient
+with X-ray and Echo both open stays in X-Ray until the X-ray is reported.
+
+## 5. Still needs a person
 
 - An admin sets X-ray's real price on `/settings/tests` (₹500 placeholder
   ships with the migration).

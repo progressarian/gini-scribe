@@ -5,6 +5,7 @@ import {
   STATUS_LABEL,
   compareQueue,
   slaKeyForStatus,
+  SIDE_TRACK_COLUMNS,
 } from "../../../shared/giniflowStatus";
 
 const boardKey = (date) => ["giniflow", "board", date || "today"];
@@ -30,7 +31,7 @@ const restore = (queryClient, date, previous) => {
 // Matches the board service: Done is a record rather than a queue, and the lab
 // track runs on its own clock, so neither is sorted by compareQueue (BQ-04).
 const resort = (column) =>
-  ["done", "lab", "machine"].includes(column.key)
+  column.key === "done" || SIDE_TRACK_COLUMNS.includes(column.key)
     ? column.cards
     : [...column.cards].sort(compareQueue);
 
@@ -169,7 +170,7 @@ export function useGiniflowMove(date, slaConfig = []) {
               // chain, once on the parallel lab track. The lab copy stays in its
               // column, but it is the same patient and must not keep showing the
               // status they have just left (BQ-11).
-              if (col.key === "lab" || col.key === "machine") {
+              if (SIDE_TRACK_COLUMNS.includes(col.key)) {
                 return {
                   ...col,
                   cards: col.cards.map((c) => (c.id === visitId ? { ...c, ...arrived } : c)),

@@ -52,6 +52,7 @@ const PUBLIC_PATHS = [
   "/api/health",
   "/api/doctors",
   "/api/auth/login",
+  "/api/auth/refresh",
   "/api/auth/logout",
   "/api/auth/me",
   "/api/convert-heic",
@@ -61,6 +62,7 @@ const PUBLIC_PATHS = [
   "/api/patient/auth/verify-otp",
   "/api/patient/auth/set-password",
   "/api/patient/auth/login",
+  "/api/patient/auth/refresh",
 ];
 
 const PUBLIC_PREFIXES = ["/api/sync/debug/", "/api/sync/backfill/"];

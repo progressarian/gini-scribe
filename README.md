@@ -261,7 +261,10 @@ Both the API and the worker load the **repo-root `.env`** (`server/loadEnv.js` r
 |---|---|---|
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
 | `PORT` | No | API port (default 3001); also the Vite dev port (default 3000) |
-| `JWT_SECRET` / `JWT_EXPIRES_IN` | Yes | Session token signing |
+| `JWT_SECRET` | Yes | Session token signing |
+| `JWT_ACCESS_EXPIRES_IN` | No | Access token TTL (default `15m`), both doctor and patient sessions |
+| `JWT_REFRESH_EXPIRES_IN_DOCTOR` | No | Refresh token TTL, doctor sessions (default `7d`) |
+| `JWT_REFRESH_EXPIRES_IN_PATIENT` | No | Refresh token TTL, patient sessions (default `30d`) |
 | `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` | Yes | File storage |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `DEEPGRAM_API_KEY` | Yes | Server-side AI and transcription |
 | `VITE_ANTHROPIC_KEY`, `VITE_DEEPGRAM_KEY`, `VITE_OPENAI_KEY` | Yes | Browser-side extraction and transcription |

@@ -54,6 +54,8 @@ const INVALIDATES = {
     ["giniflow", "reception"],
     ["giniflow", "lab"],
     ["giniflow", "machine"],
+    ["giniflow", "xray"],
+    ["giniflow", "echo"],
     ["giniflow", "mo"],
     ["giniflow", "doctor"],
     ["giniflow", "board"],

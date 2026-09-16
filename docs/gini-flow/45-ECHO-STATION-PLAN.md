@@ -19,6 +19,9 @@ and blood-drawn-before-machine (`assertReadyToStart` in `machineStation.js`)
 already applied to Echo the same as any other machine. There is no ordering
 between machines (ABI before Echo, say) — every open machine-category test just
 has to be done, in any order, before Chief.
+_(Changed by plan 46: Echo now requires X-ray reported first, via
+`flow_step_catalog.machine_requires_before`. Every other pair of machines is
+still unordered.)_
 
 **Changed:** who can see and operate which machine.
 
@@ -58,16 +61,19 @@ everywhere a machine list needs narrowing:
 
 ### Access
 
-| | |
-|---|---|
-| Capability | `GINIFLOW_STATION_ECHO` |
-| Route | `/giniflow/station/echo` |
-| Roles | **`echo_tech`** (new) and `admin` |
-| Tile | ❤️ Echo Station |
-| Summary key | `echo` |
+|             |                                   |
+| ----------- | --------------------------------- |
+| Capability  | `GINIFLOW_STATION_ECHO`           |
+| Route       | `/giniflow/station/echo`          |
+| Roles       | **`echo_tech`** (new) and `admin` |
+| Tile        | ❤️ Echo Station                   |
+| Summary key | `echo`                            |
 
 `echo_tech` is modelled on `machine_tech`: `PATIENT_READ, PATIENT_CHART,
-LAB_PORTAL, LAB_REQUESTS, GINIFLOW_VIEW, GINIFLOW_BOARD, GINIFLOW_STATION_ECHO`.
+LAB_PORTAL, LAB_REQUESTS, GINIFLOW_VIEW, GINIFLOW_STATION_ECHO`.
+`GINIFLOW_BOARD` was removed after this plan was first written (see
+`shared/permissions.js`): a single-station technician has no reason to open the
+coordinator's board. `xray_tech` (plan 46) has the same shape.
 `machine_tech` does not get `GINIFLOW_STATION_ECHO`, and `echo_tech` does not
 get `GINIFLOW_STATION_MACHINE` — each is confined to its own screen. `admin`
 holds both through `ALL`.
@@ -79,6 +85,9 @@ holds both through `ALL`.
   other machine.
 
 ## 4. Explicitly out of scope
+
+> **Superseded 16 Sep 2026:** the floor asked for it, and `47-XRAY-ECHO-BOARD-COLUMNS-PLAN.md`
+> added Echo and X-Ray columns to the board. The text below is kept as the original decision.
 
 The coordinator board keeps labelling any open machine-category order,
 Echo included, as **"Machine Room — …"**. Splitting Echo into its own board

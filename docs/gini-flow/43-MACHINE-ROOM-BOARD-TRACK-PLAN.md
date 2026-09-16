@@ -15,6 +15,12 @@ working tree of plans 40 and 41. Follows `36-MACHINE-TEST-STATION-PLAN.md`,
 
 ---
 
+> **Follow-up (16 Sep 2026):** the single Machine Room column is now three: Machine Room, X-Ray
+> and Echo. See `47-XRAY-ECHO-BOARD-COLUMNS-PLAN.md`. `placement === "machine"` is unchanged;
+> `card.machine.column` picks the column.
+> **16 Sep 2026:** D2's payment filter was lifted for _placement_. An unpaid machine test now puts the
+> patient in its machine column, marked 💳. Tests still can't start unpaid (47 §13).
+
 ## 1. What was asked
 
 > Make the Machine test floor also appear in `/giniflow/manager` and wire it correctly.

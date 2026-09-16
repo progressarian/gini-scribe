@@ -11,7 +11,11 @@ import { labStepsAreManual } from "../../../shared/manualFloor.js";
 import { genVisitToken } from "../flow/journey.js";
 import { LAB_RUNGS, stageIndexOf, rungFor } from "../../../shared/labStages.js";
 import { machineFor } from "../../../shared/machineStages.js";
-import { testsBeforeDoctors, isTestStep } from "../../../shared/journeyOrder.js";
+import {
+  testsBeforeDoctors,
+  requiredStepsFirst,
+  isTestStep,
+} from "../../../shared/journeyOrder.js";
 import { getMachines } from "./machineCatalog.js";
 import { addMachineTestOn } from "./machineStation.js";
 import { testPricesFor, schemeForVisit } from "../pricing.js";
@@ -700,20 +704,39 @@ export async function syncFromStatus(client, visitId, toStatus, meta = null) {
 //
 // Runs inside the caller's transaction: an order that rolls back must not leave
 // stops behind for tests nobody ordered.
+export const JOURNEY_STEPS_SQL = (v) => `
+  SELECT json_agg(json_build_object(
+           'name', s.step_name,
+           'status', s.status,
+           'chain', s.chain_status,
+           'order', s.step_order,
+           'background', COALESCE(c.is_background, FALSE),
+           'test', s.step_catalog_id IN ('lab_billing', 'blood_sample') OR COALESCE(c.machine, FALSE)
+         ) ORDER BY s.step_order) AS steps
+    FROM giniflow_visit_steps s
+    LEFT JOIN flow_step_catalog c ON c.id = s.step_catalog_id
+   WHERE s.visit_id = ${v}.id`;
+
 export async function placeTestsBeforeDoctors(client, visitId) {
   const { rows: plan } = await client.query(
     `SELECT s.id, s.step_catalog_id, s.step_order, s.status, s.chain_status,
-            COALESCE(c.machine, FALSE) AS machine
+            COALESCE(c.machine, FALSE) AS machine,
+            c.machine_requires_before
        FROM giniflow_visit_steps s
        LEFT JOIN flow_step_catalog c ON c.id = s.step_catalog_id
       WHERE s.visit_id = $1 ORDER BY s.step_order`,
     [visitId],
   );
-  const next = testsBeforeDoctors(plan, {
+  const ranked = testsBeforeDoctors(plan, {
     idOf: (s) => s.step_catalog_id,
     chainOf: (s) => s.chain_status,
     statusOf: (s) => s.status,
     machineOf: (s) => s.machine,
+  });
+  const next = requiredStepsFirst(ranked, {
+    idOf: (s) => s.step_catalog_id,
+    requiresOf: (s) => s.machine_requires_before,
+    statusOf: (s) => s.status,
   });
   if (next === plan) return false;
 

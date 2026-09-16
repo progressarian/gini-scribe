@@ -17,6 +17,22 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// ── Silent access-token renewal ──────────────────────────────────────────
+// Access tokens are short-lived (15 min); a refresh token exchanges for a
+// new one without forcing the user back to /login. Two triggers:
+//   1. Reactive — this 401 handler, below, for any request that lands after
+//      the access token has already expired.
+//   2. Proactive — a timer in authStore.js that refreshes ~60s before the
+//      access token's own expiry, so most requests never see a 401 at all,
+//      and so long-lived SSE connections (which re-read localStorage fresh
+//      on every reconnect — see useGiniflowLive.js) always find a live
+//      token waiting.
+// authStore's refreshAccessToken() is itself single-flight (shared with the
+// proactive timer that lives there), so this just has to reach it.
+function doRefresh() {
+  return import("../stores/authStore.js").then((m) => m.default.getState().refreshAccessToken());
+}
+
 // Blocked-patient refusal. A write against a blocked patient is rejected
 // server-side with 409 { reason: "patient_blocked" }
 // (server/middleware/blockWriteGuard.js). Surfacing it here means every write
@@ -44,24 +60,52 @@ export function notifyIfBlocked(body) {
   return true;
 }
 
-// Response interceptor: on 401 clear auth and redirect to login
+// Exported so authStore.js's proactive refresh timer can call it directly —
+// see the note there for why a failed proactive refresh can't just swallow
+// the error the way this file's own reactive 401 path used to.
+export function forceLogout() {
+  localStorage.removeItem("gini_auth_token");
+  localStorage.removeItem("gini_refresh_token");
+  // Lazy-import to avoid circular dependency
+  import("../stores/authStore.js").then((m) => {
+    m.default.getState().setCurrentDoctor(null);
+    m.default.getState().setAuthToken("");
+    m.default.getState().setRefreshToken("");
+    m.default.getState().clearProactiveRefresh();
+  });
+  // Session expiry leaves the same residue as an explicit logout.
+  import("../queries/client.js").then((m) => m.default.clear());
+  import("../stores/patientStore.js").then((m) => m.default.getState().resetPatientContext());
+  if (window.location.pathname !== "/login") {
+    window.location.replace("/login");
+  }
+}
+
+const REFRESH_PATHS = ["/api/auth/refresh", "/api/patient/auth/refresh"];
+
+// Response interceptor: on 401, try one silent refresh before giving up.
 api.interceptors.response.use(
   (res) => res,
-  (err) => {
+  async (err) => {
     if (err.response?.status === 409) notifyIfBlocked(err.response.data);
-    if (err.response?.status === 401) {
-      localStorage.removeItem("gini_auth_token");
-      // Lazy-import to avoid circular dependency
-      import("../stores/authStore.js").then((m) => {
-        m.default.getState().setCurrentDoctor(null);
-        m.default.getState().setAuthToken("");
-      });
-      // Session expiry leaves the same residue as an explicit logout.
-      import("../queries/client.js").then((m) => m.default.clear());
-      import("../stores/patientStore.js").then((m) => m.default.getState().resetPatientContext());
-      if (window.location.pathname !== "/login") {
-        window.location.replace("/login");
+
+    const config = err.config || {};
+    const isRefreshCall = REFRESH_PATHS.some((p) => config.url?.includes(p));
+
+    if (err.response?.status === 401 && !isRefreshCall && !config._retriedAfterRefresh) {
+      const hasRefreshToken = !!localStorage.getItem("gini_refresh_token");
+      if (hasRefreshToken) {
+        try {
+          await doRefresh();
+          config._retriedAfterRefresh = true;
+          return api.request(config);
+        } catch {
+          // Refresh itself failed (expired/revoked/reused) — fall through
+          // to the full logout below, same as if there were no refresh
+          // token at all.
+        }
       }
+      forceLogout();
     }
     return Promise.reject(err);
   },

@@ -528,18 +528,22 @@ export default function MachineStationPage({ station = "machine", label = "Machi
       }
       return byPatient.get(o.patientId);
     };
-    const add = (e, machine, at) => {
-      if (machine && !e.machines.includes(machine)) e.machines.push(machine);
+    const add = (e, machine, at, docId = null) => {
+      if (machine) {
+        const already = e.machines.find((m) => m.id === machine);
+        if (!already) e.machines.push({ id: machine, docId });
+        else if (!already.docId && docId) already.docId = docId;
+      }
       if (at && (!e.at || at > e.at)) e.at = at;
     };
 
     for (const o of rowsFor(MACHINE_RUNGS.find((r) => r.key === "reported"))) {
-      add(ensure(o), o.machine, o.uploadedAt);
+      add(ensure(o), o.machine, o.uploadedAt, o.reportDocId);
     }
     for (const r of reconciliation.data?.rows || []) {
       const e = ensure(r);
       if (!e.filedBy && r.filedBy) e.filedBy = r.filedBy;
-      for (const rep of r.reports) add(e, rep.machine, rep.at);
+      for (const rep of r.reports) add(e, rep.machine, rep.at, rep.docId);
       // Filled in from whichever source knows: an order carries the age and who
       // asked for it, a bare report carries neither.
       if (!e.where) e.where = r.where;
@@ -924,13 +928,32 @@ export default function MachineStationPage({ station = "machine", label = "Machi
                                     .filter(Boolean)
                                     .join(" · ")}
                                 </div>
-                                <div className="pc-tests">
-                                  {r.machines
-                                    .map(
-                                      (id) =>
-                                        `${machineFor(catalogue, id)?.icon || ""} ${machineFor(catalogue, id)?.name || id}`,
-                                    )
-                                    .join(" · ")}
+                                <div className="pc-tests pc-tests--filed">
+                                  {r.machines.map((m) => {
+                                    const name = machineFor(catalogue, m.id)?.name || m.id;
+                                    return (
+                                      <span key={m.id} className="pc-test">
+                                        {`${machineFor(catalogue, m.id)?.icon || ""} ${name}`}
+                                        {m.docId && (
+                                          <button
+                                            type="button"
+                                            className="pc-recheck"
+                                            title="Recheck submitted report"
+                                            aria-label={`Recheck ${name} report for ${r.name}`}
+                                            onClick={() =>
+                                              setViewingDoc({
+                                                id: m.docId,
+                                                title: `${name} report`,
+                                                doc_type: "lab_report",
+                                              })
+                                            }
+                                          >
+                                            🔍
+                                          </button>
+                                        )}
+                                      </span>
+                                    );
+                                  })}
                                 </div>
                               </div>
                               <div className="pc-r">

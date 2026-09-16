@@ -23,6 +23,8 @@ import {
   STATION_STATUSES,
   TERMINAL_STATUSES,
   hasNotStarted,
+  isMachineColumn,
+  SIDE_TRACK_COLUMNS,
 } from "../../../shared/giniflowStatus";
 import {
   useGiniflowBoard,
@@ -361,7 +363,7 @@ function PatientCard({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
-  const isMachine = !!card.machine && card.column === "machine";
+  const isMachine = !!card.machine && isMachineColumn(card.column);
   const trackData = isMachine
     ? card.machine
     : !!card.lab && card.column === "lab"
@@ -478,7 +480,11 @@ function PatientCard({
                   ? `▶️ ${t.label} ${t.live ?? 0}m${t.budget ? ` of ${t.budget}m` : ""}`
                   : t.stage === "done"
                     ? `✅ ${t.label}`
-                    : `⏳ ${t.label}${t.budget ? ` · ${t.budget}m` : ""}`,
+                    : t.unpaid
+                      ? `💳 ${t.label} — pay at reception`
+                      : t.heldBy
+                        ? `⏳ ${t.label} — ${t.heldBy.label} ${t.heldBy.unpaid ? "to be paid and done first" : "first"}`
+                        : `⏳ ${t.label}${t.budget ? ` · ${t.budget}m` : ""}`,
               )
               .join(" · ")}
           </div>
@@ -487,9 +493,11 @@ function PatientCard({
           {isMachine
             ? card.machine.running
               ? "On the machine"
-              : machineTests.every((t) => t.stage === "done")
-                ? "Test done — report pending"
-                : "Waiting for the machine"
+              : card.machine.awaitingPayment
+                ? "Payment pending at reception"
+                : machineTests.every((t) => t.stage === "done")
+                  ? "Test done — report pending"
+                  : "Waiting for the machine"
             : isLab
               ? card.lab.subtitle
               : card.subtitle}
@@ -674,7 +682,7 @@ function PatientCard({
 // Columns the manager can rearrange by hand. The lab track is ordered by its own
 // timers rather than by the chain, and "Done today" is a record of what already
 // happened — neither has a queue to arrange.
-const ORDERABLE = (key) => !["lab", "machine", "done"].includes(key);
+const ORDERABLE = (key) => key !== "done" && !SIDE_TRACK_COLUMNS.includes(key);
 
 function Column({
   canAssign,
@@ -774,7 +782,7 @@ function Column({
         <div className="col-sla" style={column.hot ? { color: "var(--red)" } : undefined}>
           {column.key === "lab"
             ? "Sample→upload budget: "
-            : column.key === "machine"
+            : isMachineColumn(column.key)
               ? "Journey budget: "
               : "Budget: "}
           <strong>{column.budgetMinutes} min</strong>
@@ -1019,6 +1027,7 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
   const machineLive = (m) =>
     m.state === "running" ? (minutesSince(m.startedAt, now) ?? m.minutes) : m.minutes;
   const machineMinutes = machineTrack.reduce((sum, m) => sum + (machineLive(m) || 0), 0);
+  const machineRooms = [...new Set(machineTrack.map((m) => m.room).filter(Boolean))];
 
   // The step the patient is standing in keeps counting while the modal is open;
   // finished steps are already fixed (GF-24).
@@ -1136,17 +1145,17 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
             }`}
           >
             {step.unrecorded ? (
-  <span className="ts-unrecorded">
-    <strong>⚠ {step.totalMinutes}m — UNRECORDED</strong>
-    <span className="ts-unrecorded-detail">
-      No station screen was used, so what happened in here was never recorded.
-    </span>
-  </span>
-) : (
-  `${liveWait(step)}m wait + ${step.stationMinutes}m station${
-    liveOver(step) ? ` — ${liveOver(step)}m OVER budget` : ""
-  }`
-)}
+              <span className="ts-unrecorded">
+                <strong>⚠ {step.totalMinutes}m — UNRECORDED</strong>
+                <span className="ts-unrecorded-detail">
+                  No station screen was used, so what happened in here was never recorded.
+                </span>
+              </span>
+            ) : (
+              `${liveWait(step)}m wait + ${step.stationMinutes}m station${
+                liveOver(step) ? ` — ${liveOver(step)}m OVER budget` : ""
+              }`
+            )}
           </span>
         )}
         {step.meta?.correction && (
@@ -1233,7 +1242,8 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
           {machineTrack.length > 0 && (
             <>
               <div className="ts-track-hd">
-                🩺 Machine tests — {machineMinutes}m on the machines
+                🩺 {machineRooms.length > 1 ? `${machineRooms.join(", ")} tests` : "Machine tests"}{" "}
+                — {machineMinutes}m on the machines
               </div>
               {machineTrack.map((m) => (
                 <div className="tstep" key={m.orderId}>
@@ -1249,7 +1259,9 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
                     {m.state === "done" ? "✓" : m.state === "running" ? "●" : "○"}
                   </div>
                   <div className="ts-body">
-                    <div className={`ts-name${m.state === "waiting" ? " dim" : ""}`}>{m.label}</div>
+                    <div className={`ts-name${m.state === "waiting" ? " dim" : ""}`}>
+                      {m.room ? `${m.room} · ${m.label}` : m.label}
+                    </div>
                     <div className="ts-time">
                       {m.state === "done"
                         ? m.startedAt
@@ -1463,7 +1475,9 @@ export default function FlowManagerPage() {
     // reception's, an uncollected sample is the lab's — and the column does not
     // say which. Both are told rather than guessing and telling the wrong one.
     lab: ["lab", "reception"],
-    machine: ["machine"],
+    machine: ["machine", "reception"],
+    xray: ["xray", "reception"],
+    echo: ["echo", "reception"],
     // `done` is not a queue and has no desk, so it falls through to the refusal
     // below rather than being silently mapped somewhere.
   };

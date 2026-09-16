@@ -164,6 +164,8 @@ export const BOARD_COLUMNS = [
   },
   { key: "lab", name: "Lab track", icon: "🧪", slaKey: "lab_total", statuses: null },
   { key: "machine", name: "Machine Room", icon: "🩺", slaKey: null, statuses: null },
+  { key: "xray", name: "X-Ray", icon: "🩻", slaKey: null, statuses: null },
+  { key: "echo", name: "Echo", icon: "❤️", slaKey: null, statuses: null },
   {
     key: "done",
     name: "Done today",
@@ -318,8 +320,21 @@ export const COLUMN_ENTRY_STATUS = {
   pharmacy: "pharmacy_pending",
   lab: null,
   machine: null,
+  xray: null,
+  echo: null,
   done: "dispensed",
 };
+
+export const MACHINE_STATION_COLUMN = { machine_room: "machine", xray: "xray", echo: "echo" };
+
+export const MACHINE_COLUMNS = Object.values(MACHINE_STATION_COLUMN);
+
+export const SIDE_TRACK_COLUMNS = ["lab", ...MACHINE_COLUMNS];
+
+export const isMachineColumn = (key) => MACHINE_COLUMNS.includes(key);
+
+export const machineColumnFor = (station) =>
+  MACHINE_STATION_COLUMN[station] || MACHINE_STATION_COLUMN.machine_room;
 
 export const ORDERED_COLUMNS = [
   "checked_in",

@@ -6,6 +6,7 @@ import {
   BOARD_COLUMNS,
   columnForStatus,
   NOT_A_MARKER_SQL,
+  machineColumnFor,
 } from "../../../shared/giniflowStatus.js";
 import {
   MACHINE_RUNGS,
@@ -258,7 +259,8 @@ async function assertReadyToStart(db, visitId, catalogue, machineId) {
         `SELECT array_agg(t.test_name) AS names
            FROM giniflow_lab_orders o
            JOIN giniflow_lab_order_tests t ON t.lab_order_id = o.id
-          WHERE o.visit_id = $1 AND o.kind = 'machine' AND o.sample_status <> 'reported'`,
+          WHERE o.visit_id = $1 AND o.kind = 'machine' AND o.urgency = 'today'
+            AND o.sample_status <> 'reported'`,
         [visitId],
       );
       const stillOpen = (openRows[0]?.names || []).some(
@@ -1034,10 +1036,13 @@ export async function removeMachineReport(
 }
 
 export async function getMachineTrack(db, visitId, now = new Date()) {
+  const catalogue = await getMachines(db);
   const { rows } = await db.query(
     `SELECT o.id, o.sample_status, o.created_at,
             (SELECT string_agg(t.test_name, ', ' ORDER BY t.test_name)
                FROM giniflow_lab_order_tests t WHERE t.lab_order_id = o.id) AS tests,
+            (SELECT array_agg(t.test_name ORDER BY t.test_name)
+               FROM giniflow_lab_order_tests t WHERE t.lab_order_id = o.id) AS test_names,
             (SELECT min(e.occurred_at) FROM giniflow_lab_order_events e
               WHERE e.lab_order_id = o.id AND e.track = 'sample' AND e.status = 'in_progress')
               AS started_at,
@@ -1056,9 +1061,13 @@ export async function getMachineTrack(db, visitId, now = new Date()) {
   return rows.map((r) => {
     const done = !!r.done_at || r.sample_status === "reported";
     const running = !done && !!r.started_at;
+    const station = (r.test_names || [])
+      .map((n) => machineForTest(catalogue, n)?.station)
+      .find(Boolean);
     return {
       orderId: r.id,
       label: r.tests || "Machine test",
+      room: COLUMN_NAME[machineColumnFor(station)],
       state: done ? "done" : running ? "running" : "waiting",
       orderedAt: new Date(r.created_at).toISOString(),
       startedAt: r.started_at ? new Date(r.started_at).toISOString() : null,

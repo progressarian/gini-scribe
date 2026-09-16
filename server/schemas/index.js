@@ -90,6 +90,12 @@ export const loginSchema = z.object({
   pin: z.string({ required_error: "PIN is required" }).min(1, "PIN is required"),
 });
 
+export const refreshTokenSchema = z.object({
+  refresh_token: z
+    .string({ required_error: "refresh_token is required" })
+    .min(1, "refresh_token is required"),
+});
+
 // ---- Patients ----
 // A phone with letters in it is not a number anyone can ring — it is a typo or
 // a paste of something else. Kept to that one rule rather than the strict
@@ -776,7 +782,9 @@ export const giniflowJourneyOrderSchema = z.object({
 // is validated against the shared list rather than accepted as free text, so a
 // typo is a 400 and never a silently empty panel.
 export const giniflowBehindQuerySchema = giniflowDateQuerySchema.extend({
-  station: z.enum(["reception", "vitals", "lab", "lab_results", "machine"]).optional(),
+  station: z
+    .enum(["reception", "vitals", "lab", "lab_results", "machine", "xray", "echo"])
+    .optional(),
 });
 
 // Reception's arrivals tab: the same day + optional search shape the board's

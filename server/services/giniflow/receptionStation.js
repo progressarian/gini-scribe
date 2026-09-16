@@ -6,7 +6,8 @@ import {
   isExceptionStatus,
 } from "../../../shared/giniflowStatus.js";
 import { advanceStatus, IST_TODAY } from "./statusEngine.js";
-import { syncLabStepsFromLab, suggestVisitType } from "./journey.js";
+import { JOURNEY_STEPS_SQL, syncLabStepsFromLab, suggestVisitType } from "./journey.js";
+import { journeyProgress } from "../../../shared/journeyOrder.js";
 import { searchDayVisits } from "./board.js";
 import { blockDetail } from "../patientBlockView.js";
 import { createWalkinBooking } from "../walkinBooking.js";
@@ -577,7 +578,7 @@ const ARRIVAL_SELECT = `
          v.assigned_sd_id, v.assigned_doctor_id,
          COALESCE(asd.short_name, asd.name) AS assigned_sd_name,
          COALESCE(adoc.short_name, adoc.name) AS assigned_doctor_name,
-         jr.total AS journey_total, jr.done AS journey_done, nxt.step_name AS journey_next
+         jr.steps AS journey_steps
     FROM giniflow_visits v
     JOIN patients p ON p.id = v.patient_id
     LEFT JOIN appointments ap ON ap.id = v.appointment_id
@@ -628,16 +629,7 @@ const ARRIVAL_SELECT = `
          AND t.is_active = TRUE
        ORDER BY t.max_time_min, t.id LIMIT 1
     ) sugg ON TRUE
-    LEFT JOIN LATERAL (
-      SELECT count(*)::int AS total,
-             count(*) FILTER (WHERE s.status = 'done')::int AS done
-        FROM giniflow_visit_steps s WHERE s.visit_id = v.id
-    ) jr ON TRUE
-    LEFT JOIN LATERAL (
-      SELECT s.step_name FROM giniflow_visit_steps s
-       WHERE s.visit_id = v.id AND s.status IN ('in_progress', 'pending')
-       ORDER BY s.step_order LIMIT 1
-    ) nxt ON TRUE
+    LEFT JOIN LATERAL (${JOURNEY_STEPS_SQL("v")}) jr ON TRUE
     LEFT JOIN LATERAL (
       SELECT occurred_at, (e.meta->>'walkIn')::boolean AS walk_in FROM giniflow_visit_events e
        WHERE e.visit_id = v.id AND e.status = 'checked_in'
@@ -707,9 +699,7 @@ const shapeArrival = (r, now) => ({
   assignedSdName: r.assigned_sd_name || null,
   assignedDoctorId: r.assigned_doctor_id || null,
   assignedDoctorName: r.assigned_doctor_name || null,
-  journey: r.journey_total
-    ? { done: r.journey_done, total: r.journey_total, next: r.journey_next || null }
-    : null,
+  journey: journeyProgress(r.journey_steps, r.current_status, r.resume_status),
 });
 
 export async function getArrivals(visitDate, q = "", now = new Date(), db = pool) {

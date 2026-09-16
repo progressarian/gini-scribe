@@ -6,10 +6,18 @@ import pool from "../config/db.js";
 import { dbUrl, needsSsl } from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
 import { validate } from "../middleware/validate.js";
-import { loginSchema } from "../schemas/index.js";
+import { loginSchema, refreshTokenSchema } from "../schemas/index.js";
 import { loginLimiter } from "../middleware/rateLimit.js";
 import { requireCapability } from "../middleware/auth.js";
 import { CAPABILITIES } from "../../shared/permissions.js";
+import {
+  issueDoctorRefreshToken,
+  lookupRefreshToken,
+  revokeFamily,
+  revokeToken,
+  rotateRefreshToken,
+  ttlToMs,
+} from "../services/refreshTokens.js";
 
 if (!process.env.JWT_SECRET) {
   throw new Error(
@@ -17,7 +25,9 @@ if (!process.env.JWT_SECRET) {
   );
 }
 const JWT_SECRET = process.env.JWT_SECRET;
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "24h";
+// Access tokens are short-lived; a refresh token (server/services/refreshTokens.js)
+// silently renews them without forcing re-login. See docs/ACCESS_REFRESH_TOKEN_AUTH_PLAN.md.
+const JWT_EXPIRES_IN = process.env.JWT_ACCESS_EXPIRES_IN || "15m";
 
 const router = Router();
 
@@ -94,11 +104,19 @@ router.post("/auth/login", loginLimiter, validate(loginSchema), async (req, res)
       { expiresIn: JWT_EXPIRES_IN },
     );
 
-    // Store jti in auth_sessions for revocation support on logout
-    await pool.query("INSERT INTO auth_sessions (doctor_id, token) VALUES ($1, $2)", [
-      doctor_id,
-      jti,
-    ]);
+    // Store jti in auth_sessions for revocation support on logout. expires_at
+    // matches the access token's own TTL — the JWT's exp claim is the real
+    // gate, this just keeps the table from holding stale rows for longer
+    // than the token they guard is even valid.
+    await pool.query(
+      "INSERT INTO auth_sessions (doctor_id, token, expires_at) VALUES ($1, $2, $3)",
+      [doctor_id, jti, new Date(Date.now() + ttlToMs(JWT_EXPIRES_IN))],
+    );
+
+    const refresh_token = await issueDoctorRefreshToken(doctor_id, {
+      userAgent: req.headers["user-agent"],
+      ip: req.ip,
+    });
 
     // Audit
     await pool.query(
@@ -106,16 +124,101 @@ router.post("/auth/login", loginLimiter, validate(loginSchema), async (req, res)
       [doctor_id, JSON.stringify({ ip: req.ip })],
     );
 
-    res.json({ token, doctor });
+    // `token` kept alongside `access_token` for one deploy cycle so a tab
+    // still open on the old client code doesn't break — see rollout plan.
+    res.json({
+      token,
+      access_token: token,
+      refresh_token,
+      expires_in: Math.floor(ttlToMs(JWT_EXPIRES_IN) / 1000),
+      doctor,
+    });
   } catch (e) {
     handleError(res, e, "Login");
   }
 });
 
-// Logout — revoke the JWT by removing its jti from auth_sessions
+// Refresh — exchange a still-valid refresh token for a new access+refresh
+// pair. Rotates on every use; reusing an already-rotated token revokes the
+// whole rotation family and forces a full re-login (signature of a stolen
+// token in play). See docs/ACCESS_REFRESH_TOKEN_AUTH_PLAN.md §4b.
+router.post("/auth/refresh", loginLimiter, validate(refreshTokenSchema), async (req, res) => {
+  try {
+    const { refresh_token } = req.body;
+    const result = await lookupRefreshToken(refresh_token);
+
+    if (!result.ok) {
+      if (result.reason === "reused") {
+        await revokeFamily(result.row.family_id);
+        // A rotated-out token reused long after the fact (not the brief
+        // legitimate-race grace window — see refreshTokens.js) is the
+        // signature of a stolen refresh token. Killing the family stops it
+        // minting any MORE access tokens, but doesn't touch one already
+        // live — pull those too instead of leaving up to 15 minutes of
+        // access on the table.
+        await pool
+          .query("DELETE FROM auth_sessions WHERE doctor_id=$1", [result.row.doctor_id])
+          .catch(() => {});
+      }
+      return res
+        .status(401)
+        .json({ error: "Refresh token invalid or expired", code: "refresh_invalid" });
+    }
+    if (result.row.kind !== "doctor") {
+      return res
+        .status(401)
+        .json({ error: "Refresh token invalid or expired", code: "refresh_invalid" });
+    }
+
+    const doc = await pool.query("SELECT * FROM doctors WHERE id=$1 AND is_active=true", [
+      result.row.doctor_id,
+    ]);
+    if (doc.rows.length === 0) {
+      await revokeFamily(result.row.family_id);
+      return res.status(401).json({ error: "Account inactive", code: "refresh_invalid" });
+    }
+    const doctor = doc.rows[0];
+
+    const jti = crypto.randomBytes(16).toString("hex");
+    const access_token = jwt.sign(
+      {
+        doctor_id: doctor.id,
+        doctor_name: doctor.name,
+        short_name: doctor.short_name,
+        specialty: doctor.specialty,
+        role: doctor.role,
+        jti,
+      },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN },
+    );
+    await pool.query(
+      "INSERT INTO auth_sessions (doctor_id, token, expires_at) VALUES ($1, $2, $3)",
+      [doctor.id, jti, new Date(Date.now() + ttlToMs(JWT_EXPIRES_IN))],
+    );
+
+    const new_refresh_token = await rotateRefreshToken(result.row);
+
+    res.json({
+      access_token,
+      refresh_token: new_refresh_token,
+      expires_in: Math.floor(ttlToMs(JWT_EXPIRES_IN) / 1000),
+    });
+  } catch (e) {
+    handleError(res, e, "Refresh");
+  }
+});
+
+// Logout — revoke the JWT by removing its jti from auth_sessions, and revoke
+// the whole refresh-token family so a stolen refresh token dies with it too.
 router.post("/auth/logout", async (req, res) => {
   if (req.doctor?.jti) {
     await pool.query("DELETE FROM auth_sessions WHERE token=$1", [req.doctor.jti]).catch(() => {});
+  }
+  if (req.body?.refresh_token) {
+    const result = await lookupRefreshToken(req.body.refresh_token).catch(() => null);
+    if (result?.row) await revokeFamily(result.row.family_id).catch(() => {});
+    else await revokeToken(req.body.refresh_token).catch(() => {});
   }
   res.json({ ok: true });
 });

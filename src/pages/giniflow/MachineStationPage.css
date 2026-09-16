@@ -20,7 +20,7 @@
   padding: 6px 8px;
   border-radius: 8px;
   border: 1px solid var(--bd, #e2e8f0);
-  background: var(--card, #fff);
+  background: var(--white);
   cursor: pointer;
   min-width: 0;
 }
@@ -78,7 +78,7 @@
 .mc-card {
   border: 1px solid var(--bd, #e2e8f0);
   border-radius: 10px;
-  background: var(--card, #fff);
+  background: var(--white);
   overflow: hidden;
 }
 .mc-card.is-blocked {
@@ -229,7 +229,7 @@
 .mroom__add {
   border: 1px solid var(--bd, #e2e8f0);
   border-radius: 10px;
-  background: var(--card, #fff);
+  background: var(--white);
   padding: 10px;
   display: flex;
   flex-direction: column;
@@ -312,7 +312,7 @@
   border-left: 3px solid var(--gf-accent, #0f766e);
   border-radius: 10px;
   padding: 10px 12px 12px;
-  background: var(--card, #fff);
+  background: var(--white);
 }
 
 .mroom__now-machine .sq-gh {
@@ -327,4 +327,28 @@
   .mroom__now-grid {
     grid-template-columns: 1fr;
   }
+}
+
+.mroom__stage .pc-tests--filed {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+.mroom__stage .pc-test {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.mroom__stage .pc-recheck {
+  border: 1px solid var(--bd);
+  background: var(--white);
+  border-radius: 999px;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 16px;
+  cursor: pointer;
+  color: inherit;
+}
+.mroom__stage .pc-recheck:hover {
+  border-color: var(--blu);
 }

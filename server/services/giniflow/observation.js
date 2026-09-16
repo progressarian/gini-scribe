@@ -24,7 +24,15 @@ import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 // Pharmacy are absent deliberately: they come AFTER the steps HealthRay knows
 // about, so HealthRay can never be ahead of them — a slow counter is an SLA
 // question, which the board already times.
-export const BEHIND_STATIONS = ["reception", "vitals", "lab", "lab_results", "machine"];
+export const BEHIND_STATIONS = [
+  "reception",
+  "vitals",
+  "lab",
+  "lab_results",
+  "machine",
+  "xray",
+  "echo",
+];
 
 export const BEHIND_STATION_LABEL = {
   reception: "Reception",
@@ -32,7 +40,32 @@ export const BEHIND_STATION_LABEL = {
   lab: "Lab 1 — collection",
   lab_results: "Lab 2 — results",
   machine: "Machine Room",
+  xray: "X-Ray",
+  echo: "Echo",
 };
+
+const FLAT = (expr) => `regexp_replace(lower(${expr}), '[^a-z0-9]+', '', 'g')`;
+
+const MACHINE_BEHIND_SQL = `(
+  SELECT CASE
+           WHEN bool_or(COALESCE(m.station, 'machine_room') = 'machine_room') THEN 'machine'
+           WHEN bool_or(m.station = 'xray') THEN 'xray'
+           WHEN bool_or(m.station = 'echo') THEN 'echo'
+         END
+    FROM giniflow_lab_orders o
+    JOIN giniflow_lab_order_tests t ON t.lab_order_id = o.id
+    LEFT JOIN LATERAL (
+      SELECT c.machine_station AS station
+        FROM flow_step_catalog c
+       WHERE c.machine AND COALESCE(c.is_active, TRUE)
+         AND ${FLAT("t.test_name")} IN (
+               SELECT ${FLAT("n")}
+                 FROM unnest(array_append(COALESCE(c.bill_names, '{}'), c.order_test_name)) n)
+       LIMIT 1
+    ) m ON TRUE
+   WHERE o.visit_id = v.id AND o.urgency = 'today' AND o.kind = 'machine'
+     AND o.sample_status <> 'reported'
+)`;
 
 const quoted = (values) => values.map((v) => `'${v}'`).join(", ");
 
@@ -84,8 +117,7 @@ export async function firstUnrecordedStation(db, visitId) {
               WHEN NOT s.lab_only AND NOT s.online AND NOT s.vitals_recorded THEN 'vitals'
               WHEN s.lab_undrawn THEN 'lab'
               WHEN s.lab_unreported THEN 'lab_results'
-              WHEN s.machine_open THEN 'machine'
-              ELSE NULL
+              ELSE s.machine_behind
             END AS behind
        FROM (
          SELECT EXISTS (
@@ -117,11 +149,7 @@ export async function firstUnrecordedStation(db, visitId) {
                    WHERE o.visit_id = v.id AND o.urgency = 'today' AND o.kind = 'lab'
                      AND o.sample_status IN (${quoted(UNREPORTED)})
                 ) AS lab_unreported,
-                EXISTS (
-                  SELECT 1 FROM giniflow_lab_orders o
-                   WHERE o.visit_id = v.id AND o.urgency = 'today' AND o.kind = 'machine'
-                     AND o.sample_status <> 'reported'
-                ) AS machine_open
+                ${MACHINE_BEHIND_SQL} AS machine_behind
            FROM giniflow_visits v WHERE v.id = $1
        ) s`,
     [visitId, LAB_ONLY_DOCTOR],
@@ -188,11 +216,7 @@ export async function recordHealthrayObservation(client, day) {
                  WHERE o.visit_id = v.id AND o.urgency = 'today' AND o.kind = 'lab'
                    AND o.sample_status IN (${quoted(UNREPORTED)})
               ) AS lab_unreported,
-              EXISTS (
-                SELECT 1 FROM giniflow_lab_orders o
-                 WHERE o.visit_id = v.id AND o.urgency = 'today' AND o.kind = 'machine'
-                   AND o.sample_status <> 'reported'
-              ) AS machine_open
+              ${MACHINE_BEHIND_SQL} AS machine_behind
          FROM giniflow_visits v
          JOIN obs ON obs.patient_id = v.patient_id
         WHERE v.visit_date = $1::date
@@ -207,8 +231,7 @@ export async function recordHealthrayObservation(client, day) {
                 WHEN NOT s.lab_only AND NOT s.online AND NOT s.vitals_recorded THEN 'vitals'
                 WHEN s.lab_undrawn THEN 'lab'
                 WHEN s.lab_unreported THEN 'lab_results'
-                WHEN s.machine_open THEN 'machine'
-                ELSE NULL
+                ELSE s.machine_behind
               END AS behind
          FROM state s
      )

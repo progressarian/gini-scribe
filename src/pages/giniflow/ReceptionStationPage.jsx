@@ -21,10 +21,10 @@ import "../../styles/giniflow-station.css";
 import useAuthStore from "../../stores/authStore";
 import StationNotice from "../../components/giniflow/StationNotice";
 import JourneyBuilder from "../../components/giniflow/JourneyBuilder";
-import { useFlowVisitTypes } from "../../queries/hooks/useFlow";
+import { useFlowStepCatalog, useFlowVisitTypes } from "../../queries/hooks/useFlow";
 import { stepPassesConditions } from "../../../shared/giniflowConditions.js";
 import { hasNotStarted } from "../../../shared/giniflowStatus.js";
-import { testsBeforeDoctors } from "../../../shared/journeyOrder.js";
+import { requiredStepsFirst, testsBeforeDoctors } from "../../../shared/journeyOrder.js";
 import { categoryColor, categoryLabel } from "../../../shared/patientCategories.js";
 import {
   useJourneyPlan,
@@ -480,8 +480,13 @@ export function PaymentsTab({ data, isLoading, onClear, pending, actorId }) {
 // A walk-in has no visit yet when this opens: it is created by the same press
 // that plans it, so backing out of the panel leaves the patient exactly as they
 // were found, with nothing on the floor to undo.
-const withBilledSteps = (list, billed = []) => {
-  if (!billed.length) return testsBeforeDoctors(list);
+const inJourneyOrder = (list, requires = {}) =>
+  requiredStepsFirst(testsBeforeDoctors(list), {
+    requiresOf: (s) => requires[s.catalogId] || null,
+  });
+
+const withBilledSteps = (list, billed = [], requires = {}) => {
+  if (!billed.length) return inJourneyOrder(list, requires);
   const ids = new Set(billed.map((b) => b.catalogId));
   const rest = list.filter((s) => !ids.has(s.catalogId));
   const merged = billed.map((b) => {
@@ -495,7 +500,7 @@ const withBilledSteps = (list, billed = []) => {
       : { ...b, source: "auto" };
   });
   const at = rest.findIndex((s) => s.catalogId === "vitals") + 1;
-  return testsBeforeDoctors([...rest.slice(0, at), ...merged, ...rest.slice(at)]);
+  return inJourneyOrder([...rest.slice(0, at), ...merged, ...rest.slice(at)], requires);
 };
 
 const billNote = (bill, loading) => {
@@ -532,9 +537,15 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   const { data: bill, isLoading: billLoading } = useHealthrayBill(arrival.patientId);
   const billedSteps = useRef([]);
   billedSteps.current = bill?.steps || [];
+  const { data: catalog = [] } = useFlowStepCatalog();
+  const requires = useRef({});
+  requires.current = Object.fromEntries(
+    catalog.filter((c) => c.machine_requires_before).map((c) => [c.id, c.machine_requires_before]),
+  );
 
   useEffect(() => {
-    if (bill?.steps?.length) setSteps((current) => current && withBilledSteps(current, bill.steps));
+    if (bill?.steps?.length)
+      setSteps((current) => current && withBilledSteps(current, bill.steps, requires.current));
   }, [bill]);
 
   const askable = useMemo(
@@ -606,6 +617,7 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
           ...(current || []).filter((s) => s.source === "added" || s.source === "custom"),
         ],
         billedSteps.current,
+        requires.current,
       );
     });
   }, [plan, answerKey, arrival, conditions]);
@@ -662,46 +674,46 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
             <div className="wi-head">
               <strong>What is this visit?</strong>
             </div>
-           {!isOnline && (
-  <div className="dp-hint" style={{ marginBottom: "8px" }}>
-    <strong className="consultation-type-label">Consultation Type:</strong>
+            {!isOnline && (
+              <div className="dp-hint" style={{ marginBottom: "8px" }}>
+                <strong className="consultation-type-label">Consultation Type:</strong>
 
-   <div className="consultation-options">
-  <label>
-    <input
-      type="radio"
-      name="consultChoice"
-      value="chief"
-      checked={consultChoice === "chief"}
-      onChange={() => setConsultChoice("chief")}
-    />
-    Chief Consultant Only
-  </label>
+                <div className="consultation-options">
+                  <label>
+                    <input
+                      type="radio"
+                      name="consultChoice"
+                      value="chief"
+                      checked={consultChoice === "chief"}
+                      onChange={() => setConsultChoice("chief")}
+                    />
+                    Chief Consultant Only
+                  </label>
 
-  <label>
-    <input
-      type="radio"
-      name="consultChoice"
-      value="consultant"
-      checked={consultChoice === "consultant"}
-      onChange={() => setConsultChoice("consultant")}
-    />
-    Consultant Only
-  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="consultChoice"
+                      value="consultant"
+                      checked={consultChoice === "consultant"}
+                      onChange={() => setConsultChoice("consultant")}
+                    />
+                    Consultant Only
+                  </label>
 
-  <label>
-    <input
-      type="radio"
-      name="consultChoice"
-      value="both"
-      checked={consultChoice === "both"}
-      onChange={() => setConsultChoice("both")}
-    />
-    Both
-  </label>
-</div>
-  </div>
-)}
+                  <label>
+                    <input
+                      type="radio"
+                      name="consultChoice"
+                      value="both"
+                      checked={consultChoice === "both"}
+                      onChange={() => setConsultChoice("both")}
+                    />
+                    Both
+                  </label>
+                </div>
+              </div>
+            )}
 
             <JourneyBuilder
               steps={list}

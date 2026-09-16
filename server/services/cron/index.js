@@ -21,6 +21,7 @@ import {
   backfillLabRanges,
   backfillLabPdfs,
 } from "./labSync.js";
+import { runAuthTokenCleanup } from "./authTokenCleanup.js";
 import { runDocumentRecovery } from "./documentRecovery.js";
 import { runDocumentClassification } from "./documentClassification.js";
 import { getLoginCooldownMs } from "../healthray/client.js";
@@ -368,6 +369,7 @@ let missingMedsIntervalId = null;
 let pdfRetryIntervalId = null;
 let blankSweepIntervalId = null;
 let batchQueueIntervalId = null;
+let authTokenCleanupIntervalId = null;
 
 export function startCronJobs() {
   if (!process.env.HEALTHRAY_MOBILE && !process.env.HEALTHRAY_SESSION) {
@@ -632,6 +634,24 @@ export function startCronJobs() {
     3 * 60 * 1000,
   );
 
+  // ── Auth token cleanup: delete long-expired auth_sessions/refresh_tokens ──
+  // Access/refresh rotation writes far more rows than the old single-login
+  // auth_sessions ever did (docs/ACCESS_REFRESH_TOKEN_AUTH_PLAN.md). Runs 20
+  // min after startup, then once a day — nothing time-sensitive about it, it
+  // only ever touches rows already a week past being useful.
+  const AUTH_TOKEN_CLEANUP_DELAY_MS = 20 * 60 * 1000;
+  const AUTH_TOKEN_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+  setTimeout(() => {
+    runAuthTokenCleanup().catch((e) =>
+      console.error("[Cron] Auth token cleanup failed:", e.message),
+    );
+    authTokenCleanupIntervalId = setInterval(() => {
+      runAuthTokenCleanup().catch((e) =>
+        console.error("[Cron] Auth token cleanup failed:", e.message),
+      );
+    }, AUTH_TOKEN_CLEANUP_INTERVAL_MS);
+  }, AUTH_TOKEN_CLEANUP_DELAY_MS);
+
   // ── AI batch queue: submit pending + poll/apply results ──────────────────
   // Only when AI_BATCH_ENABLED=true. Submits queued med-side-effects and
   // OPD-parse requests to Anthropic's Message Batches API (50% cheaper, async)
@@ -754,6 +774,11 @@ export function stopCronJobs() {
     }
     console.log("[Cron] Lab partial-results recovery stopped");
   }
+  if (authTokenCleanupIntervalId) {
+    clearInterval(authTokenCleanupIntervalId);
+    authTokenCleanupIntervalId = null;
+    console.log("[Cron] Auth token cleanup stopped");
+  }
 }
 
 // Manual trigger exports
@@ -777,4 +802,5 @@ export {
   runDocumentClassification,
   forceResyncDate,
   syncAppointmentStatuses,
+  runAuthTokenCleanup,
 };

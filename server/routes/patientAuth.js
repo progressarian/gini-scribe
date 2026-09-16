@@ -27,9 +27,21 @@ import { handleError } from "../utils/errorHandler.js";
 import { loginLimiter } from "../middleware/rateLimit.js";
 import { sendOtpSms } from "../services/msg91.js";
 import { getGenieDb, autoMigrateGeniePatient } from "../services/genieImport.js";
+import {
+  issuePatientRefreshToken,
+  lookupRefreshToken,
+  revokeFamily,
+  revokePatientRefreshTokens,
+  revokeToken,
+  rotateRefreshToken,
+  ttlToMs,
+} from "../services/refreshTokens.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "";
-const JWT_PATIENT_EXPIRES_IN = "30d";
+// Access token is short-lived; issueSession() also mints a refresh token
+// (server/services/refreshTokens.js) that silently renews it. See
+// docs/ACCESS_REFRESH_TOKEN_AUTH_PLAN.md.
+const JWT_PATIENT_EXPIRES_IN = process.env.JWT_ACCESS_EXPIRES_IN || "15m";
 const OTP_TTL_MS = 10 * 60 * 1000;
 const OTP_RESEND_COOLDOWN_MS = 60 * 1000;
 const OTP_MAX_ATTEMPTS = 5;
@@ -219,11 +231,16 @@ export async function propagateToAllRows(phone, fields) {
 
 // ── JWT minting ─────────────────────────────────────────────────────────────
 
-async function issueSession(db, patient) {
+// Mints an access token only — no refresh token. Used both by issueSession()
+// (a fresh login/upgrade, which also mints a new refresh token below it) and
+// by /patient/auth/refresh (which rotates the existing refresh token instead
+// of minting a second one — see the refresh route below).
+async function mintPatientAccessToken(db, patient) {
   // A blocked patient gets no session. Every way into the app — login,
-  // set-password, verify-otp completion and the app→hospital upgrade — mints
-  // its session here, so one check closes all of them. /patient/auth/* is in
-  // PUBLIC_PATHS, so no middleware runs; the check has to live in the handler.
+  // set-password, verify-otp completion, the app→hospital upgrade, and
+  // refresh — mints its access token here, so one check closes all of them.
+  // /patient/auth/* is in PUBLIC_PATHS, so no middleware runs; the check has
+  // to live in the handler.
   if (db === "hospital" && (await isPatientBlocked(patient?.id))) {
     const err = new Error("Your account is not active. Please contact the hospital reception.");
     err.status = 403;
@@ -244,12 +261,23 @@ async function issueSession(db, patient) {
     JWT_SECRET,
     { expiresIn: JWT_PATIENT_EXPIRES_IN },
   );
+  // expires_at matches the access token's own TTL — the JWT's exp claim is
+  // the real gate, this just keeps the table from holding stale rows longer
+  // than the token they guard is even valid.
   await pool.query(
     `INSERT INTO auth_sessions (kind, patient_db, patient_ref, token, expires_at)
-     VALUES ('patient', $1, $2, $3, NOW() + INTERVAL '30 days')`,
-    [db, String(patient.id), jti],
+     VALUES ('patient', $1, $2, $3, $4)`,
+    [db, String(patient.id), jti, new Date(Date.now() + ttlToMs(JWT_PATIENT_EXPIRES_IN))],
   );
   return token;
+}
+
+// Fresh login/upgrade session: an access token plus a brand-new refresh
+// token in a brand-new rotation family.
+async function issueSession(db, patient) {
+  const token = await mintPatientAccessToken(db, patient);
+  const refresh_token = await issuePatientRefreshToken(db, patient.id);
+  return { token, refresh_token };
 }
 
 function stripSensitive(p) {
@@ -457,10 +485,12 @@ router.post("/patient/auth/set-password", async (req, res) => {
     // Re-read so we issue a session from the canonical row.
     const refreshed =
       db === "hospital" ? await findHospitalPatient(phone) : await findAppPatient(phone);
-    const token = await issueSession(db, refreshed);
+    const { token, refresh_token } = await issueSession(db, refreshed);
     const linkedPatients = await listLinkedPatients(db, phone);
     res.json({
       token,
+      access_token: token,
+      refresh_token,
       db,
       patient: stripSensitive(refreshed),
       linkedPatients,
@@ -495,10 +525,12 @@ router.post("/patient/auth/login", loginLimiter, async (req, res) => {
     const ok = await bcrypt.compare(password, patient.password_hash);
     if (!ok) return res.status(401).json({ error: "Invalid credentials" });
 
-    const token = await issueSession(db, patient);
+    const { token, refresh_token } = await issueSession(db, patient);
     const linkedPatients = await listLinkedPatients(db, phone);
     res.json({
       token,
+      access_token: token,
+      refresh_token,
       db,
       patient: stripSensitive(patient),
       linkedPatients,
@@ -509,10 +541,95 @@ router.post("/patient/auth/login", loginLimiter, async (req, res) => {
   }
 });
 
+// ── POST /patient/auth/refresh ──────────────────────────────────────────────
+// Exchange a still-valid refresh token for a new access+refresh pair. Same
+// rotate-on-use + family-revoke-on-reuse pattern as the doctor side
+// (server/routes/auth.js). Re-checks isPatientBlocked() via issueSession() so
+// a patient blocked mid-session can't refresh their way past it.
+router.post("/patient/auth/refresh", loginLimiter, async (req, res) => {
+  try {
+    const refresh_token = String(req.body?.refresh_token || "");
+    if (!refresh_token) return res.status(400).json({ error: "refresh_token is required" });
+
+    const result = await lookupRefreshToken(refresh_token);
+    if (!result.ok) {
+      if (result.reason === "reused") {
+        await revokeFamily(result.row.family_id);
+        // See the doctor-side comment in server/routes/auth.js — a stolen
+        // refresh token replayed beyond the legitimate-race grace window
+        // should also pull any access token already live, not just stop
+        // future ones.
+        await pool
+          .query(
+            "DELETE FROM auth_sessions WHERE kind='patient' AND patient_db=$1 AND patient_ref=$2",
+            [result.row.patient_db, result.row.patient_ref],
+          )
+          .catch(() => {});
+      }
+      return res
+        .status(401)
+        .json({ error: "Refresh token invalid or expired", code: "refresh_invalid" });
+    }
+    if (result.row.kind !== "patient") {
+      return res
+        .status(401)
+        .json({ error: "Refresh token invalid or expired", code: "refresh_invalid" });
+    }
+
+    // Same by-id lookup shape as GET /patient/auth/me above.
+    const db = result.row.patient_db || "hospital";
+    let patient;
+    if (db === "hospital") {
+      const { rows } = await pool.query("SELECT * FROM patients WHERE id=$1", [
+        result.row.patient_ref,
+      ]);
+      patient = rows[0];
+    } else {
+      const sb = getGenieDb();
+      if (!sb) return res.status(503).json({ error: "App DB not configured" });
+      const { data } = await sb
+        .from("patients")
+        .select("*")
+        .eq("id", result.row.patient_ref)
+        .maybeSingle();
+      patient = data;
+    }
+    if (!patient) {
+      await revokeFamily(result.row.family_id);
+      return res.status(401).json({ error: "Account not found", code: "refresh_invalid" });
+    }
+
+    let access_token;
+    try {
+      access_token = await mintPatientAccessToken(db, patient);
+    } catch (e) {
+      if (e.code === "account_blocked") {
+        await revokeFamily(result.row.family_id);
+        return res.status(403).json({ error: e.message, code: e.code });
+      }
+      throw e;
+    }
+
+    const new_refresh_token = await rotateRefreshToken(result.row);
+    res.json({
+      access_token,
+      refresh_token: new_refresh_token,
+      expires_in: Math.floor(ttlToMs(JWT_PATIENT_EXPIRES_IN) / 1000),
+    });
+  } catch (e) {
+    handleError(res, e, "Patient refresh");
+  }
+});
+
 // ── POST /patient/auth/logout ───────────────────────────────────────────────
 router.post("/patient/auth/logout", async (req, res) => {
   if (req.patient?.jti) {
     await pool.query("DELETE FROM auth_sessions WHERE token=$1", [req.patient.jti]).catch(() => {});
+  }
+  if (req.body?.refresh_token) {
+    const result = await lookupRefreshToken(req.body.refresh_token).catch(() => null);
+    if (result?.row) await revokeFamily(result.row.family_id).catch(() => {});
+    else await revokeToken(req.body.refresh_token).catch(() => {});
   }
   res.json({ ok: true });
 });
@@ -543,17 +660,23 @@ router.get("/patient/auth/me", async (req, res) => {
     if (db === "app" && patient.migrated_to_gini) {
       const hospital = await findHospitalPatient(patient.phone);
       if (hospital) {
-        const token = await issueSession("hospital", hospital);
-        // Revoke the superseded app session.
+        const { token, refresh_token } = await issueSession("hospital", hospital);
+        // Revoke the superseded app session — both the access token and
+        // every live refresh token under the old app-DB identity (the
+        // client's held refresh token isn't in this request, a GET, so it
+        // can't be rotated directly; revoke by identity instead).
         if (req.patient.jti) {
           await pool
             .query("DELETE FROM auth_sessions WHERE token=$1", [req.patient.jti])
             .catch(() => {});
         }
+        await revokePatientRefreshTokens("app", patient.id).catch(() => {});
         const linkedPatients = await listLinkedPatients("hospital", hospital.phone);
         return res.json({
           db: "hospital",
           token, // rotated — client persists it and carries on seamlessly
+          access_token: token,
+          refresh_token,
           patient: stripSensitive(hospital),
           linkedPatients,
           force_password_reset: !!hospital.force_password_reset,
@@ -633,6 +756,12 @@ router.post("/patient/auth/change-password", async (req, res) => {
         [db, String(patient.id), req.patient.jti],
       )
       .catch(() => {});
+
+    // Refresh tokens have no equivalent "current one" to spare here (the
+    // client doesn't send its refresh token to this endpoint) — revoke all
+    // of them. The caller's access token keeps working until its own short
+    // TTL lapses, same as it always has; after that, one more login.
+    await revokePatientRefreshTokens(db, patient.id).catch(() => {});
 
     res.json({ ok: true });
   } catch (e) {
