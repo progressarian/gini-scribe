@@ -228,8 +228,17 @@ try {
   }
 
   await client.query("COMMIT");
+  // Whether they can actually sign in depends on the account's real state, not
+  // on whether this run supplied a PIN — linking an existing admin who already
+  // has one must not report "once a PIN is set".
+  const { rows: login } = await client.query(
+    `SELECT is_active, (pin IS NOT NULL) AS has_pin FROM public.doctors WHERE id = $1`,
+    [scribe?.id ?? null],
+  );
+  const canSignIn = login[0]?.is_active && login[0]?.has_pin;
   console.log(
-    `\nDone. ${NAME} can sign in${PIN ? " now" : " once a PIN is set"} and owns ${assignedTotal} doctors.\n`,
+    `\nDone. ${NAME} ${canSignIn ? "can sign in now" : "needs a PIN and an active login before they can sign in"}` +
+      ` and owns ${assignedTotal} doctors.\n`,
   );
 } catch (e) {
   await client.query("ROLLBACK").catch(() => {});
