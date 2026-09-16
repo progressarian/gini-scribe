@@ -89,6 +89,25 @@ eq(
   "every column of the transcribed list maps with no manual work",
 );
 
+// The second real list (a field-force export) uses different header shapes
+// again. Four of its six columns were dropped on the first pass — including
+// Mobile Number, which would have thrown away 510 real phone numbers and
+// imported every doctor as a skeleton.
+const fieldForce = suggestMapping([
+  "Doctor Name",
+  "Area/Patch",
+  "Division Speciality",
+  "Mobile Number",
+  "Clinic Name",
+  "Clinic Address",
+]);
+eq(fieldForce["Mobile Number"], "mobile", "'Mobile Number' maps to mobile");
+eq(fieldForce["Division Speciality"], "specialty", "'Division Speciality' maps to specialty");
+eq(fieldForce["Area/Patch"], "area", "'Area/Patch' maps to area");
+eq(fieldForce["Clinic Name"], "clinic_name", "'Clinic Name' maps to clinic");
+eq(fieldForce["Clinic Address"], "address_line", "'Clinic Address' maps to address");
+eq(Object.keys(fieldForce).length, 6, "no column of the field-force list is dropped");
+
 console.log("\nConfidence flagging");
 eq(needsVerification("check spelling"), true, "'check spelling' needs verification");
 eq(needsVerification("CHECK - area unclear"), true, "'CHECK - area unclear' needs verification");
@@ -106,6 +125,31 @@ eq(first.full_name, "Dr Amrit Kaur", "name carried through");
 eq(first.priority, "unclassified", "no priority column means unclassified, not null");
 eq(first.mobile ?? "null", "null", "a blank mobile stays null");
 eq(rowErrors(interpretRow(rows[5], mapping)).length, 1, "the nameless row reports one error");
+
+console.log("\nA list large enough to need chunking");
+// 528 rows meant 528 sequential inserts and the pooler dropped the connection
+// mid-batch. The staging insert is chunked now; this proves a batch larger than
+// one chunk stages completely.
+const bigRows = Array.from({ length: 250 }, (_, i) => ({
+  "Doctor Name": `Dr Bulk ${i}`,
+  Territory: "Mohali",
+  "Mobile Number": `98${String(70000000 + i)}`,
+}));
+const bigMapping = suggestMapping(Object.keys(bigRows[0]));
+const big = await createBatch(CRM_USER, {
+  fileName: "bulk.csv",
+  headers: Object.keys(bigRows[0]),
+  rows: bigRows,
+  mapping: bigMapping,
+});
+const bigStaged = await pool.query(
+  "SELECT count(*)::int AS n FROM crm.import_rows WHERE batch_id=$1",
+  [big.batchId],
+);
+eq(bigStaged.rows[0].n, 250, "all 250 rows stage across chunk boundaries");
+const bigPreview = await previewBatch(CRM_USER, big.batchId);
+eq(bigPreview.rows.length, 250, "…and the preview covers every one");
+eq(bigPreview.counts.create, 250, "…all importable");
 
 console.log("\nStaging and preview");
 const { batchId } = await createBatch(CRM_USER, {

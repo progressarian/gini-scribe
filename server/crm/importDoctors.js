@@ -24,7 +24,18 @@ export const IMPORT_FIELDS = [
     required: true,
     aliases: ["name", "doctor", "doctorname", "drname", "fullname"],
   },
-  { key: "specialty", label: "Specialty", aliases: ["speciality", "dept", "department", "field"] },
+  {
+    key: "specialty",
+    label: "Specialty",
+    aliases: [
+      "speciality",
+      "dept",
+      "department",
+      "field",
+      "divisionspeciality",
+      "divisionspecialty",
+    ],
+  },
   { key: "sub_specialty", label: "Sub-specialty", aliases: ["subspeciality", "subspecialty"] },
   {
     key: "qualifications",
@@ -34,12 +45,33 @@ export const IMPORT_FIELDS = [
   {
     key: "clinic_name",
     label: "Clinic / hospital",
-    aliases: ["clinic", "hospital", "practice", "clinichospital"],
+    aliases: ["clinic", "hospital", "practice", "clinichospital", "clinicname", "hospitalname"],
   },
-  { key: "mobile", label: "Mobile", aliases: ["phone", "mobileno", "contact", "cell", "number"] },
+  {
+    key: "mobile",
+    label: "Mobile",
+    aliases: [
+      "phone",
+      "mobileno",
+      "mobilenumber",
+      "phonenumber",
+      "contact",
+      "contactnumber",
+      "cell",
+      "number",
+    ],
+  },
   { key: "whatsapp", label: "WhatsApp", aliases: ["whatsappno", "wa"] },
   { key: "email", label: "Email", aliases: ["mail", "emailid"] },
-  { key: "area", label: "Area", aliases: ["locality", "location", "sector"] },
+  // "Area/Patch" on a field-sales sheet is the rep's patch, which is not always
+  // one of the seeded territories. It maps to the free-text area either way, and
+  // territory resolution matches it only when a real territory shares the name.
+  { key: "area", label: "Area", aliases: ["locality", "location", "sector", "areapatch", "patch"] },
+  {
+    key: "address_line",
+    label: "Address",
+    aliases: ["clinicaddress", "address", "addressline", "street"],
+  },
   { key: "city", label: "City", aliases: ["town"] },
   { key: "district", label: "District" },
   { key: "state", label: "State" },
@@ -159,20 +191,37 @@ export async function createBatch(crmUser, { fileName, headers, rows, mapping })
     );
     const batchId = created[0].id;
 
-    for (let i = 0; i < rows.length; i++) {
-      const interpreted = interpretRow(rows[i], mapping);
-      await sql(
-        `INSERT INTO crm.import_rows
-           (batch_id, row_number, raw, normalized, mobile_e164, status, error_message)
-         VALUES ($1, $2, $3, $4, crm.normalize_phone($5), 'pending', $6)`,
-        [
+    // Multi-row inserts, not one statement per row. A 528-row list meant 528
+    // sequential round trips to the Supabase pooler, which took long enough for
+    // the connection to be torn out from under it (EADDRNOTAVAIL) — the 47-row
+    // first file was small enough to hide that. Chunked, the same list is a
+    // handful of statements.
+    const CHUNK = 100;
+    for (let start = 0; start < rows.length; start += CHUNK) {
+      const slice = rows.slice(start, start + CHUNK);
+      const values = [];
+      const params = [];
+      slice.forEach((raw, i) => {
+        const interpreted = interpretRow(raw, mapping);
+        const b = params.length;
+        // +2: spreadsheet rows are 1-based and row 1 is the header
+        params.push(
           batchId,
-          i + 2, // +2: spreadsheet rows are 1-based and row 1 is the header
-          JSON.stringify(rows[i]),
+          start + i + 2,
+          JSON.stringify(raw),
           JSON.stringify(interpreted),
           interpreted.mobile,
           rowErrors(interpreted).join("; ") || null,
-        ],
+        );
+        values.push(
+          `($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, crm.normalize_phone($${b + 5}), 'pending', $${b + 6})`,
+        );
+      });
+      await sql(
+        `INSERT INTO crm.import_rows
+           (batch_id, row_number, raw, normalized, mobile_e164, status, error_message)
+         VALUES ${values.join(", ")}`,
+        params,
       );
     }
     return { batchId, headers, totalRows: rows.length };
@@ -329,9 +378,10 @@ export async function commitBatch(crmUser, batchId, skipRows = []) {
       const { rows: ins } = await sql(
         `INSERT INTO crm.doctors
            (hospital_id, full_name, specialty, sub_specialty, qualifications, clinic_name,
-            mobile, whatsapp, email, area, city, district, state, pin_code, territory_id,
-            priority, notes, needs_verification, verification_note, import_batch_id, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+            mobile, whatsapp, email, area, address_line, city, district, state, pin_code,
+            territory_id, priority, notes, needs_verification, verification_note,
+            import_batch_id, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
          RETURNING id`,
         [
           hospitalId,
@@ -344,6 +394,7 @@ export async function commitBatch(crmUser, batchId, skipRows = []) {
           v.whatsapp,
           v.email,
           v.area,
+          v.address_line,
           v.city,
           v.district,
           v.state,
