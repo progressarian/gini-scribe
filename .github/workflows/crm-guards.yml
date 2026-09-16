@@ -1,0 +1,85 @@
+name: CRM guards
+
+# Runs on every commit. Three guards, in cost order:
+#
+#   1. role-switch    — no CRM file may reach the database outside withCrmContext
+#   2. compliance     — no incentive/commission/payout object may exist in `crm`
+#   3. rls            — the full 57-assertion access-control suite
+#
+# Guard 2 matters most on Supabase. CREATE EVENT TRIGGER requires superuser,
+# which Supabase does not grant, so the in-database guard may be absent there.
+# This job is the backstop that makes the NMC fee-splitting rule enforced
+# regardless of what the database will accept.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  role-switch-guard:
+    name: CRM queries go through crm_app
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: node server/crm/checkNoDirectPool.mjs
+
+  crm-schema:
+    name: Compliance + RLS suite (pg${{ matrix.pg }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # 17 is what Supabase runs in production (17.6 as of this commit).
+        # 15 is kept so the schema stays portable.
+        pg: ["17", "15"]
+
+    services:
+      postgres:
+        image: postgres:${{ matrix.pg }}
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: crmtest
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      CRM_DSN: postgresql://postgres:postgres@localhost:5432/crmtest
+      PGPASSWORD: postgres
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install psql client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -yqq postgresql-client
+
+      - name: Apply the CRM migration
+        working-directory: server/migrations/crm
+        run: |
+          set -e
+          for f in 000_scribe_stub.sql 001_crm_phase1.sql 002_crm_phase1_rls.sql; do
+            echo "== $f"
+            psql "$CRM_DSN" -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+
+      - name: NMC compliance check
+        working-directory: server/migrations/crm
+        run: ./ci_compliance_check.sh "$CRM_DSN"
+
+      - name: Seed fixtures
+        working-directory: server/migrations/crm
+        run: psql "$CRM_DSN" -v ON_ERROR_STOP=1 -q -f 003_test_seed.sql
+
+      - name: RLS verification suite
+        working-directory: server/migrations/crm
+        run: ./verify_rls.sh
