@@ -538,7 +538,10 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   }, [bill]);
 
   const askable = useMemo(
-    () => [...new Set((plan || []).filter((p) => p.conditionKey).map((p) => p.conditionKey))].filter(k => k !== 'needs_chief'),
+    () =>
+      [...new Set((plan || []).filter((p) => p.conditionKey).map((p) => p.conditionKey))].filter(
+        (k) => k !== "needs_chief",
+      ),
     [plan],
   );
 
@@ -575,8 +578,16 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
       const template = plan
         .filter((p) => p.included && stepPassesConditions(p, conditions))
         .filter((p) => {
-          if (consultChoice === "chief" && (p.catalogId === "wait_sd" || p.catalogId === "sd_consult")) return false;
-          if (consultChoice === "consultant" && (p.catalogId === "wait_chief" || p.catalogId === "chief_consult")) return false;
+          if (
+            consultChoice === "chief" &&
+            (p.catalogId === "wait_sd" || p.catalogId === "sd_consult")
+          )
+            return false;
+          if (
+            consultChoice === "consultant" &&
+            (p.catalogId === "wait_chief" || p.catalogId === "chief_consult")
+          )
+            return false;
           return true;
         })
         .map((p) => {
@@ -651,44 +662,46 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
             <div className="wi-head">
               <strong>What is this visit?</strong>
             </div>
-            {billNote(bill, billLoading) && (
-              <div className="dp-hint">{billNote(bill, billLoading)}</div>
-            )}
+           {!isOnline && (
+  <div className="dp-hint" style={{ marginBottom: "8px" }}>
+    <strong className="consultation-type-label">Consultation Type:</strong>
 
-            {!isOnline && (
-              <div className="dp-hint" style={{ marginBottom: "16px" }}>
-                <strong>Consultation Type:</strong>
-                <div style={{ display: "flex", gap: "16px", marginTop: "8px" }}>
-                  <label>
-                    <input
-                      type="radio"
-                      name="consultChoice"
-                      value="chief"
-                      checked={consultChoice === "chief"}
-                      onChange={() => setConsultChoice("chief")}
-                    /> Chief Consultant Only
-                  </label>
-                  <label>
-                    <input
-                      type="radio"
-                      name="consultChoice"
-                      value="consultant"
-                      checked={consultChoice === "consultant"}
-                      onChange={() => setConsultChoice("consultant")}
-                    /> Consultant Only
-                  </label>
-                  <label>
-                    <input
-                      type="radio"
-                      name="consultChoice"
-                      value="both"
-                      checked={consultChoice === "both"}
-                      onChange={() => setConsultChoice("both")}
-                    /> Both
-                  </label>
-                </div>
-              </div>
-            )}
+   <div className="consultation-options">
+  <label>
+    <input
+      type="radio"
+      name="consultChoice"
+      value="chief"
+      checked={consultChoice === "chief"}
+      onChange={() => setConsultChoice("chief")}
+    />
+    Chief Consultant Only
+  </label>
+
+  <label>
+    <input
+      type="radio"
+      name="consultChoice"
+      value="consultant"
+      checked={consultChoice === "consultant"}
+      onChange={() => setConsultChoice("consultant")}
+    />
+    Consultant Only
+  </label>
+
+  <label>
+    <input
+      type="radio"
+      name="consultChoice"
+      value="both"
+      checked={consultChoice === "both"}
+      onChange={() => setConsultChoice("both")}
+    />
+    Both
+  </label>
+</div>
+  </div>
+)}
 
             <JourneyBuilder
               steps={list}
@@ -724,7 +737,7 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
 
         <div className="dp-foot">
           <button
-            className="st-btn st-btn-grn btn-full"
+            className="btn-full st-btn st-btn-grn"
             disabled={saving || !list.length}
             onClick={() => submit(false)}
           >

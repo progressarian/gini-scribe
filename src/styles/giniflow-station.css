@@ -8210,3 +8210,31 @@
   cursor: pointer;
   accent-color: var(--blu);
 }
+
+.consultation-type-label {
+  display: block;
+  font-size: 16px;
+  font-weight: 700;
+  color: #111827;
+  margin-bottom: 8px;
+}
+
+.consultation-options {
+  display: flex;
+  align-items: center;
+  font-weight: 300;
+  font-size: 12px;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.consultation-options label {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.consultation-options input[type="radio"] {
+  margin: 0;
+}

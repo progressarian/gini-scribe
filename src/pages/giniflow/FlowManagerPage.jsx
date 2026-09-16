@@ -1135,11 +1135,18 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
                     : "tsd-n"
             }`}
           >
-            {step.unrecorded
-              ? `${step.totalMinutes}m — no station screen was used, so what happened in here was never recorded`
-              : `${liveWait(step)}m wait + ${step.stationMinutes}m station${
-                  liveOver(step) ? ` — ${liveOver(step)}m OVER budget` : ""
-                }`}
+            {step.unrecorded ? (
+  <span className="ts-unrecorded">
+    <strong>⚠ {step.totalMinutes}m — UNRECORDED</strong>
+    <span className="ts-unrecorded-detail">
+      No station screen was used, so what happened in here was never recorded.
+    </span>
+  </span>
+) : (
+  `${liveWait(step)}m wait + ${step.stationMinutes}m station${
+    liveOver(step) ? ` — ${liveOver(step)}m OVER budget` : ""
+  }`
+)}
           </span>
         )}
         {step.meta?.correction && (

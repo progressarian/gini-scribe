@@ -5,14 +5,6 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import RequireCapability from "./components/RequireCapability";
 import RoleHome from "./components/RoleHome";
 import LoginPage from "./pages/LoginPage";
-
-// After a deploy, the user's already-loaded index-*.js still references the
-// PREVIOUS hashed chunk filenames (e.g. OPD-oBuNrVUz.js). Those files no
-// longer exist on the server, so `import()` rejects with "Failed to fetch
-// dynamically imported module". Recover by forcing one hard reload so the
-// browser pulls the fresh index.html with new chunk hashes. The
-// sessionStorage guard prevents an infinite reload loop if the failure is a
-// genuine network/server problem rather than a stale-chunk mismatch.
 const lazyWithRetry = (importer) =>
   lazy(async () => {
     try {
@@ -29,8 +21,6 @@ const lazyWithRetry = (importer) =>
         if (Date.now() - last > 10000) {
           sessionStorage.setItem(KEY, String(Date.now()));
           window.location.reload();
-          // Return a never-resolving promise so React doesn't surface the
-          // error UI in the split-second before reload kicks in.
           return new Promise(() => {});
         }
       }
@@ -38,10 +28,6 @@ const lazyWithRetry = (importer) =>
     }
   });
 
-// Route-level code-splitting. Each page becomes its own async chunk so a user
-// who only visits /opd doesn't download /lab-portal, /fu-gen, etc. Kept the
-// shell (AppLayout, ProtectedRoute, LoginPage) eager because they render on
-// every route and gate navigation.
 const Companion = lazyWithRetry(() => import("./Companion"));
 const DoctorImportPage = lazyWithRetry(() => import("./pages/crm/DoctorImportPage.jsx"));
 const HomeScreen = lazyWithRetry(() => import("./companion/HomeScreen"));
@@ -123,10 +109,6 @@ const FlowStationPage = lazyWithRetry(() => import("./pages/flow/FlowStationPage
 const PatientJourneyPage = lazyWithRetry(() => import("./pages/PatientJourneyPage"));
 const FlowReportsPage = lazyWithRetry(() => import("./pages/flow/FlowReportsPage"));
 const FlowAdminPage = lazyWithRetry(() => import("./pages/flow/FlowAdminPage"));
-
-// Minimal fallback — matches the visual tone of the app without pulling in
-// extra CSS. Each page typically fetches data on mount anyway, so this only
-// shows for the few hundred ms of chunk download on first visit.
 const RouteFallback = () => (
   <div
     style={{
@@ -227,15 +209,10 @@ const router = createBrowserRouter([
               { path: "/opd", element: lazyEl(OPD) },
               // Visit view
               { path: "/visit", element: lazyEl(VisitPage) },
-              // GHM Operations — single unified page
               { path: "/ghm", element: lazyEl(GHMPage) },
               { path: "/obt-dashboard", element: lazyEl(OBTDashboardPage) },
-              // Doctor availability / leave / reassignment management
               { path: "/doctor-management", element: lazyEl(DoctorManagementPage) },
               { path: "/admin/blocklist", element: lazyEl(PatientBlocklistPage) },
-              // Settings — one section, one tab per area. /flow/admin and
-              // /admin/prescription-footer were their own pages before this and
-              // are still linked from elsewhere, so both redirect in.
               {
                 path: "/settings",
                 element: lazyEl(SettingsLayout),
@@ -255,12 +232,9 @@ const router = createBrowserRouter([
                 path: "/admin/test-catalog",
                 element: <Navigate to="/settings/tests" replace />,
               },
-              // Pharmacy: mark which medicines each patient collected
               { path: "/medicine-collection", element: lazyEl(MedicineCollectionPage) },
-              // Patient Flow Management
               { path: "/flow/checkin", element: lazyEl(FlowCheckinPage) },
               { path: "/flow/coordinator", element: lazyEl(FlowCoordinatorPage) },
-              // Gini Flow — the replacement floor board (docs/gini-flow/).
               { path: "/giniflow/stations", element: lazyEl(GiniFlowStationsPage) },
               { path: "/giniflow/manager", element: lazyEl(GiniFlowManagerPage) },
               { path: "/giniflow/triage", element: lazyEl(GiniFlowTriagePage) },

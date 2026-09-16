@@ -589,6 +589,29 @@
   background: var(--red-l);
   color: var(--red);
 }
+
+/* Unrecorded step — make missing station activity highly visible. */
+.gf .ts-unrecorded {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 3px;
+  /* margin-top: 4px; */
+  padding: 6px 9px;
+  color: var(--red);
+  font-weight: 700;
+}
+
+.gf .ts-unrecorded strong {
+  font-size: 9px;
+  letter-spacing: 0.2px;
+}
+
+.gf .ts-unrecorded-detail {
+  font-size: 9px;
+  font-weight: 500;
+  line-height: 1;
+}
+
 .gf .ts-note {
   font-size: 10px;
   color: var(--ink3);
