@@ -187,6 +187,7 @@ const BOARD_SQL = `
          doc.name                                  AS doctor_full_name,
          seq.visit_number,
          jr.total AS journey_total, jr.done AS journey_done, nxt.step_name AS journey_next,
+         nxt.status AS journey_next_status,
          ${labOnlyPredicate("v", "$2")}            AS lab_only,
          tests.names                               AS lab_test_names,
          tests.cases                               AS lab_all_cases,
@@ -226,8 +227,12 @@ const BOARD_SQL = `
              count(*) FILTER (WHERE s.status = 'done')::int AS done
         FROM giniflow_visit_steps s WHERE s.visit_id = v.id
     ) jr ON TRUE
+    -- Its status as well as its name: the stop a patient is STANDING IN is not
+    -- the stop they are going to next, and the card called both "next" — so a
+    -- patient whose prescription was being written read "next: Prescription to
+    -- prepare", which the floor took to mean nobody had started it (P_175941).
     LEFT JOIN LATERAL (
-      SELECT s.step_name FROM giniflow_visit_steps s
+      SELECT s.step_name, s.status FROM giniflow_visit_steps s
        WHERE s.visit_id = v.id AND s.status IN ('in_progress', 'pending')
        ORDER BY s.step_order LIMIT 1
     ) nxt ON TRUE
@@ -1019,7 +1024,12 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
       sex: row.sex,
       visitNumber: row.visit_number,
       journey: row.journey_total
-        ? { done: row.journey_done, total: row.journey_total, next: row.journey_next || null }
+        ? {
+            done: row.journey_done,
+            total: row.journey_total,
+            next: row.journey_next || null,
+            nextStarted: row.journey_next_status === "in_progress",
+          }
         : null,
       status: row.current_status,
       statusLabel: STATUS_LABEL[row.current_status] || row.current_status,

@@ -1113,6 +1113,15 @@ export async function advanceSample(
       );
     }
 
+    // The journey's own stops, re-read from what the lab just did — the same
+    // catch-up markLabCaseAction does for a HealthRay case. Without it only the
+    // HealthRay path and the payment desk ever ticked them, so a Scribe order
+    // drawn, run and reported here left Blood Sample pending and the card read
+    // "next: Blood Sample" to a floor whose sample was already in the machine
+    // (P_179439 and P_181741, 16 Sep 2026). Inside the transaction, so the tick
+    // and the rung it is drawn from can never disagree.
+    if (visitId) await syncLabStepsFromLab(client, visitId);
+
     await client.query("COMMIT");
     return { orderId, sampleStatus: to, unchanged: false };
   } catch (e) {

@@ -518,6 +518,8 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   const { data: visitTypes = [] } = useFlowVisitTypes();
   const [visitTypeId, setVisitTypeId] = useState(arrival.suggestedVisitTypeId || null);
   const [steps, setSteps] = useState(null);
+  const [consultChoice, setConsultChoice] = useState("both");
+  const isOnline = visitCategory(arrival)?.label === "Online";
   // Answers to the template's conditions. Only the keys this type's template
   // actually uses ever appear, and every one starts true: the journey a desk
   // sees on open is the journey they saw before this gate existed, and saying
@@ -536,7 +538,7 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   }, [bill]);
 
   const askable = useMemo(
-    () => [...new Set((plan || []).filter((p) => p.conditionKey).map((p) => p.conditionKey))],
+    () => [...new Set((plan || []).filter((p) => p.conditionKey).map((p) => p.conditionKey))].filter(k => k !== 'needs_chief'),
     [plan],
   );
 
@@ -549,7 +551,7 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   // panel causes, would otherwise throw away everything reception had edited and
   // check the patient in on a journey they did not build.
   const loadedFor = useRef(null);
-  const answerKey = `${visitTypeId}|${askable.map((k) => `${k}:${conditions[k] !== false}`).join(",")}`;
+  const answerKey = `${visitTypeId}|${askable.map((k) => `${k}:${conditions[k] !== false}`).join(",")}|${consultChoice}`;
   useEffect(() => {
     if (!plan || loadedFor.current === answerKey) return;
     loadedFor.current = answerKey;
@@ -572,6 +574,11 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
       );
       const template = plan
         .filter((p) => p.included && stepPassesConditions(p, conditions))
+        .filter((p) => {
+          if (consultChoice === "chief" && (p.catalogId === "wait_sd" || p.catalogId === "sd_consult")) return false;
+          if (consultChoice === "consultant" && (p.catalogId === "wait_chief" || p.catalogId === "chief_consult")) return false;
+          return true;
+        })
         .map((p) => {
           const base = { ...p, ...(preassigned(p) || {}) };
           const prev = kept.get(p.catalogId);
@@ -646,6 +653,41 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
             </div>
             {billNote(bill, billLoading) && (
               <div className="dp-hint">{billNote(bill, billLoading)}</div>
+            )}
+
+            {!isOnline && (
+              <div className="dp-hint" style={{ marginBottom: "16px" }}>
+                <strong>Consultation Type:</strong>
+                <div style={{ display: "flex", gap: "16px", marginTop: "8px" }}>
+                  <label>
+                    <input
+                      type="radio"
+                      name="consultChoice"
+                      value="chief"
+                      checked={consultChoice === "chief"}
+                      onChange={() => setConsultChoice("chief")}
+                    /> Chief Consultant Only
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="consultChoice"
+                      value="consultant"
+                      checked={consultChoice === "consultant"}
+                      onChange={() => setConsultChoice("consultant")}
+                    /> Consultant Only
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="consultChoice"
+                      value="both"
+                      checked={consultChoice === "both"}
+                      onChange={() => setConsultChoice("both")}
+                    /> Both
+                  </label>
+                </div>
+              </div>
             )}
 
             <JourneyBuilder

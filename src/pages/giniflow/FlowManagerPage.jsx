@@ -499,7 +499,9 @@ function PatientCard({
         {!isLab && card.journey && (
           <div className="pc-journey">
             {card.journey.done}/{card.journey.total}
-            {card.journey.next ? ` · next: ${card.journey.next}` : " · all stops done"}
+            {card.journey.next
+              ? `${card.journey.nextStarted ? " · now: " : " · next: "}${card.journey.next}`
+              : " · all stops done"}
           </div>
         )}
         <div className="pc-bot">
