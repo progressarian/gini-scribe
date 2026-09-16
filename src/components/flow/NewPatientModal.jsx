@@ -10,6 +10,7 @@
 // check-in form receives a real patient id and skips its own upsert.
 import { useState } from "react";
 import api from "../../services/api";
+import ReferralSourcePicker, { referralSourcePayload } from "../ReferralSourcePicker.jsx";
 import { toast } from "../../stores/uiStore";
 
 const SEXES = ["Male", "Female", "Other"]; // patientCreateSchema is a strict enum
@@ -32,6 +33,7 @@ const EMPTY = {
 
 export default function NewPatientModal({ onClose, onCreated, initial = {} }) {
   const [f, setF] = useState({ ...EMPTY, ...initial });
+  const [referralSource, setReferralSource] = useState(null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
   // { patient } when a likely-existing record was found — reception confirms or
@@ -41,7 +43,8 @@ export default function NewPatientModal({ onClose, onCreated, initial = {} }) {
 
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
   const phoneOk = !f.phone || /^[6-9]\d{9}$/.test(f.phone);
-  const canSave = f.name.trim() && phoneOk && (f.age || f.dob) && f.sex;
+  const referral = referralSourcePayload(referralSource);
+  const canSave = f.name.trim() && phoneOk && (f.age || f.dob) && f.sex && referral;
 
   // Duplicate patient records are the expensive mistake here: the chart splits
   // in two and the history never rejoins. Check both identifiers we can —
@@ -95,6 +98,7 @@ export default function NewPatientModal({ onClose, onCreated, initial = {} }) {
         aadhaar: f.aadhaar.trim() || undefined,
         govt_id: f.govt_id.trim() || undefined,
         govt_id_type: f.govt_id_type.trim() || undefined,
+        referral_source: referral,
       };
       const { data } = await api.post("/api/patients", body);
       toast(
@@ -288,6 +292,10 @@ export default function NewPatientModal({ onClose, onCreated, initial = {} }) {
               </div>
             </div>
           )}
+
+          <div style={{ marginTop: 14 }}>
+            <ReferralSourcePicker value={referralSource} onChange={setReferralSource} />
+          </div>
 
           <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
             <button

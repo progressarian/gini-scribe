@@ -119,6 +119,21 @@ export const patientCreateSchema = z
     // string is meaningful here and must not be coerced to null.
     scheme_code: z.string().trim().max(32).optional().nullable(),
     scheme_ref: z.string().trim().max(64).optional().nullable(),
+    // "Who referred you?" — written to crm.patient_referral_sources, never to
+    // a column on patients. `none_self` is a real answer; an absent object
+    // means nobody was asked, which is a different thing and lands the patient
+    // in crm.v_attribution_unknown.
+    referral_source: z
+      .object({
+        answer_type: z.enum(["doctor", "free_text", "none_self"]),
+        doctor_id: z.string().uuid().optional().nullable(),
+        free_text: z.string().trim().max(200).optional().nullable(),
+      })
+      .optional()
+      .nullable(),
+    // The one sanctioned way to create a patient without asking. Flow check-in
+    // resolves-or-creates mid-queue and must not stop to run a doctor picker.
+    allow_unattributed: z.boolean().optional(),
   })
   .passthrough();
 

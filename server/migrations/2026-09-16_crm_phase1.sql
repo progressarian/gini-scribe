@@ -57,42 +57,15 @@ grant usage on schema crm to crm_app;
 -- ---------------------------------------------------------------------
 -- 2. ENUMS
 -- ---------------------------------------------------------------------
-create type crm.user_role as enum (
-  'ceo_admin','head_of_growth','growth_manager','growth_executive',
-  'clinical_team','operations');
-
-create type crm.doctor_priority as enum ('A','B','C','unclassified');
-
-create type crm.relationship_stage as enum (
-  'prospect','contacted','met','engaged','trial_referrer',
-  'active_referrer','high_value_referrer','dormant','lost');
-
-create type crm.visit_type as enum (
-  'in_person','phone','whatsapp','video','event','other');
-
-create type crm.visit_outcome as enum (
-  'positive','neutral','negative','doctor_unavailable','rescheduled');
-
-create type crm.referral_source as enum (
-  'direct_doctor','phone','whatsapp','gini_scribe','opd','emergency','ipd',
-  'website','patient_self_report','growth_executive','other');
-
-create type crm.attribution_status as enum ('claimed','verified','disputed','rejected');
-
-create type crm.referral_status as enum (
-  'new','contact_attempted','contacted','appointment_booked','no_show',
-  'consulted','investigation','admission_advised','admitted',
-  'procedure_completed','discharged','follow_up','closed','lost');
-
-create type crm.urgency as enum ('routine','soon','urgent','emergency');
-create type crm.task_status as enum ('open','in_progress','done','cancelled');
-create type crm.task_priority as enum ('low','normal','high','critical');
-create type crm.consent_status as enum ('granted','denied','revoked');
-create type crm.revenue_source as enum ('manual_ops','scribe_billing');
-create type crm.import_row_status as enum (
-  'pending','created','updated','skipped_duplicate','error');
-create type crm.referral_answer_type as enum ('doctor','free_text','none_self');
-create type crm.visit_due_state as enum ('ok','upcoming','due','overdue','never_visited');
+-- Vocabularies are TEXT + CHECK, not Postgres enums. That is the house rule
+-- (shared/giniflowReferrals.js states it): a vocabulary must be able to grow
+-- without a migration, and a CRM whose relationship-stage list needs DDL to
+-- change is the CRM nobody updates. The CHECK is the integrity floor; the
+-- labels, ordering and tones live in shared/crmVocab.js, which the UI renders.
+-- Adding a value means editing both.
+--
+-- Each constrained column below carries its vocabulary as a trailing comment
+-- so the column is readable without opening the shared file.
 
 -- ---------------------------------------------------------------------
 -- 3. UTILITY FUNCTIONS
@@ -135,7 +108,7 @@ end $$;
 -- ---------------------------------------------------------------------
 -- 4. TENANCY & PEOPLE
 -- ---------------------------------------------------------------------
-create table crm.hospitals (
+create table if not exists crm.hospitals (
   id          uuid primary key default gen_random_uuid(),
   name        text not null,
   code        text not null unique,
@@ -147,13 +120,13 @@ create table crm.hospitals (
   deleted_at  timestamptz
 );
 
-create table crm.users (
+create table if not exists crm.users (
   id                uuid primary key default gen_random_uuid(),
   full_name         text not null,
   email             text,
   mobile            text,
   mobile_e164       text generated always as (crm.normalize_phone(mobile)) stored,
-  role              crm.user_role not null,
+  role              text not null check (role in ('ceo_admin', 'head_of_growth', 'growth_manager', 'growth_executive', 'clinical_team', 'operations')), -- ceo_admin | head_of_growth | growth_manager | growth_executive | clinical_team | operations
   manager_id        uuid references crm.users(id),
   -- Identity anchors: Scribe's PIN login today, Supabase Auth later.
   scribe_doctor_id  integer references public.doctors(id),
@@ -166,19 +139,19 @@ create table crm.users (
     check (scribe_doctor_id is not null or supabase_user_id is not null),
   constraint users_not_own_manager check (manager_id is null or manager_id <> id)
 );
-create unique index users_email_uniq on crm.users (lower(email)) where deleted_at is null and email is not null;
-create unique index users_scribe_uniq on crm.users (scribe_doctor_id) where deleted_at is null and scribe_doctor_id is not null;
-create index users_manager_idx on crm.users (manager_id);
+create unique index if not exists users_email_uniq on crm.users (lower(email)) where deleted_at is null and email is not null;
+create unique index if not exists users_scribe_uniq on crm.users (scribe_doctor_id) where deleted_at is null and scribe_doctor_id is not null;
+create index if not exists users_manager_idx on crm.users (manager_id);
 
 -- A user can be attached to more than one hospital (brief §5, multi-hospital future)
-create table crm.user_hospitals (
+create table if not exists crm.user_hospitals (
   user_id     uuid not null references crm.users(id),
   hospital_id uuid not null references crm.hospitals(id),
   created_at  timestamptz not null default now(),
   primary key (user_id, hospital_id)
 );
 
-create table crm.territories (
+create table if not exists crm.territories (
   id          uuid primary key default gen_random_uuid(),
   hospital_id uuid not null references crm.hospitals(id),
   name        text not null,
@@ -189,9 +162,9 @@ create table crm.territories (
   updated_at  timestamptz not null default now(),
   deleted_at  timestamptz
 );
-create unique index territories_name_uniq on crm.territories (hospital_id, lower(name)) where deleted_at is null;
+create unique index if not exists territories_name_uniq on crm.territories (hospital_id, lower(name)) where deleted_at is null;
 
-create table crm.service_lines (
+create table if not exists crm.service_lines (
   id          uuid primary key default gen_random_uuid(),
   hospital_id uuid not null references crm.hospitals(id),
   name        text not null,
@@ -202,12 +175,12 @@ create table crm.service_lines (
   updated_at  timestamptz not null default now(),
   deleted_at  timestamptz
 );
-create unique index service_lines_code_uniq on crm.service_lines (hospital_id, code) where deleted_at is null;
+create unique index if not exists service_lines_code_uniq on crm.service_lines (hospital_id, code) where deleted_at is null;
 
 -- ---------------------------------------------------------------------
 -- 6. DOCTOR UNIVERSE (§1, §2, §3)
 -- ---------------------------------------------------------------------
-create table crm.doctors (
+create table if not exists crm.doctors (
   id                    uuid primary key default gen_random_uuid(),
   hospital_id           uuid not null references crm.hospitals(id),
 
@@ -241,8 +214,8 @@ create table crm.doctors (
   preferred_contact     text,
 
   -- Segmentation (§2)
-  priority              crm.doctor_priority not null default 'unclassified',
-  relationship_stage    crm.relationship_stage not null default 'prospect',
+  priority              text not null default 'unclassified' check (priority in ('A', 'B', 'C', 'unclassified')), -- A | B | C | unclassified
+  relationship_stage    text not null default 'prospect' check (relationship_stage in ('prospect', 'contacted', 'met', 'engaged', 'trial_referrer', 'active_referrer', 'high_value_referrer', 'dormant', 'lost')), -- prospect | contacted | met | engaged | trial_referrer | active_referrer | high_value_referrer | dormant | lost
   estimated_monthly_potential_inr numeric(14,2),
   -- Phase 3 will compute a score; the manual override must always exist.
   potential_score_computed  numeric(6,2),
@@ -273,17 +246,17 @@ create table crm.doctors (
 );
 
 -- "Never allow two doctor records with the same normalized mobile" (§1)
-create unique index doctors_mobile_uniq
+create unique index if not exists doctors_mobile_uniq
   on crm.doctors (hospital_id, mobile_e164) where deleted_at is null;
-create index doctors_search_idx    on crm.doctors using gin (search_vector);
-create index doctors_name_trgm_idx on crm.doctors using gin (full_name gin_trgm_ops);
-create index doctors_priority_idx  on crm.doctors (hospital_id, priority) where deleted_at is null;
-create index doctors_stage_idx     on crm.doctors (hospital_id, relationship_stage) where deleted_at is null;
-create index doctors_territory_idx on crm.doctors (territory_id);
+create index if not exists doctors_search_idx    on crm.doctors using gin (search_vector);
+create index if not exists doctors_name_trgm_idx on crm.doctors using gin (full_name gin_trgm_ops);
+create index if not exists doctors_priority_idx  on crm.doctors (hospital_id, priority) where deleted_at is null;
+create index if not exists doctors_stage_idx     on crm.doctors (hospital_id, relationship_stage) where deleted_at is null;
+create index if not exists doctors_territory_idx on crm.doctors (territory_id);
 
 -- Practice intelligence is split out so its visibility can be configured
 -- separately from the basic contact record (brief §4 "configurable visibility").
-create table crm.doctor_practice (
+create table if not exists crm.doctor_practice (
   doctor_id                     uuid primary key references crm.doctors(id),
   hospital_id                   uuid not null references crm.hospitals(id),
   opd_per_day                   integer,
@@ -304,7 +277,7 @@ create table crm.doctor_practice (
   updated_at  timestamptz not null default now()
 );
 
-create table crm.doctor_service_opportunities (
+create table if not exists crm.doctor_service_opportunities (
   id                  uuid primary key default gen_random_uuid(),
   hospital_id         uuid not null references crm.hospitals(id),
   doctor_id           uuid not null references crm.doctors(id),
@@ -320,20 +293,20 @@ create table crm.doctor_service_opportunities (
   updated_at  timestamptz not null default now(),
   deleted_at  timestamptz
 );
-create unique index dso_uniq on crm.doctor_service_opportunities (doctor_id, service_line_id) where deleted_at is null;
+create unique index if not exists dso_uniq on crm.doctor_service_opportunities (doctor_id, service_line_id) where deleted_at is null;
 
 -- Stage history (§2 "Store stage history")
-create table crm.doctor_stage_history (
+create table if not exists crm.doctor_stage_history (
   id          uuid primary key default gen_random_uuid(),
   hospital_id uuid not null references crm.hospitals(id),
   doctor_id   uuid not null references crm.doctors(id),
-  from_stage  crm.relationship_stage,
-  to_stage    crm.relationship_stage not null,
+  from_stage  text check (from_stage is null or from_stage in ('prospect', 'contacted', 'met', 'engaged', 'trial_referrer', 'active_referrer', 'high_value_referrer', 'dormant', 'lost')), -- prospect | contacted | met | engaged | trial_referrer | active_referrer | high_value_referrer | dormant | lost
+  to_stage    text not null check (to_stage in ('prospect', 'contacted', 'met', 'engaged', 'trial_referrer', 'active_referrer', 'high_value_referrer', 'dormant', 'lost')), -- prospect | contacted | met | engaged | trial_referrer | active_referrer | high_value_referrer | dormant | lost
   reason      text,
   changed_by  uuid references crm.users(id),
   changed_at  timestamptz not null default now()
 );
-create index dsh_doctor_idx on crm.doctor_stage_history (doctor_id, changed_at desc);
+create index if not exists dsh_doctor_idx on crm.doctor_stage_history (doctor_id, changed_at desc);
 
 create or replace function crm.log_stage_change()
 returns trigger language plpgsql security definer
@@ -354,7 +327,7 @@ end $$;
 -- Assignment is effective-dated, never overwritten, so relationship history
 -- survives a rep change. The exclusion constraint makes overlapping
 -- ownership of the same doctor impossible.
-create table crm.doctor_assignments (
+create table if not exists crm.doctor_assignments (
   id             uuid primary key default gen_random_uuid(),
   hospital_id    uuid not null references crm.hospitals(id),
   doctor_id      uuid not null references crm.doctors(id),
@@ -373,14 +346,14 @@ create table crm.doctor_assignments (
     tstzrange(effective_from, effective_to) with &&
   )
 );
-create index da_exec_idx    on crm.doctor_assignments (executive_id) where effective_to is null;
-create index da_manager_idx on crm.doctor_assignments (manager_id)   where effective_to is null;
+create index if not exists da_exec_idx    on crm.doctor_assignments (executive_id) where effective_to is null;
+create index if not exists da_manager_idx on crm.doctor_assignments (manager_id)   where effective_to is null;
 
 -- Visit cadence (§5): A/B ~ twice a month, C ~ every 45 days, configurable.
-create table crm.visit_cadence_policies (
+create table if not exists crm.visit_cadence_policies (
   id            uuid primary key default gen_random_uuid(),
   hospital_id   uuid not null references crm.hospitals(id),
-  priority      crm.doctor_priority not null,
+  priority      text not null check (priority in ('A', 'B', 'C', 'unclassified')), -- A | B | C | unclassified
   interval_days integer not null check (interval_days > 0),
   grace_days    integer not null default 3,
   created_at    timestamptz not null default now(),
@@ -393,13 +366,13 @@ create table crm.visit_cadence_policies (
 -- ---------------------------------------------------------------------
 -- id is client-generatable (uuid) so an offline phone can mint it locally and
 -- re-send safely; the PK makes sync idempotent with no dedupe logic.
-create table crm.visits (
+create table if not exists crm.visits (
   id                uuid primary key default gen_random_uuid(),
   hospital_id       uuid not null references crm.hospitals(id),
   doctor_id         uuid not null references crm.doctors(id),
   executive_id      uuid not null references crm.users(id),
 
-  visit_type        crm.visit_type not null default 'in_person',
+  visit_type        text not null default 'in_person' check (visit_type in ('in_person', 'phone', 'whatsapp', 'video', 'event', 'other')), -- in_person | phone | whatsapp | video | event | other
   purpose           text,
   occurred_at       timestamptz not null,
 
@@ -408,8 +381,7 @@ create table crm.visits (
   objections              text,
   opportunities_identified text,
   commitments             text,
-  outcome           crm.visit_outcome,
-
+  outcome           text check (outcome is null or outcome in ('positive', 'neutral', 'negative', 'doctor_unavailable', 'rescheduled')), -- positive | neutral | negative | doctor_unavailable | rescheduled
   follow_up_required boolean not null default false,
   next_visit_date    date,
 
@@ -428,17 +400,17 @@ create table crm.visits (
   updated_at        timestamptz not null default now(),
   deleted_at        timestamptz
 );
-create index visits_doctor_idx on crm.visits (doctor_id, occurred_at desc) where deleted_at is null;
-create index visits_exec_idx   on crm.visits (executive_id, occurred_at desc) where deleted_at is null;
-create index visits_hosp_idx   on crm.visits (hospital_id, occurred_at desc) where deleted_at is null;
+create index if not exists visits_doctor_idx on crm.visits (doctor_id, occurred_at desc) where deleted_at is null;
+create index if not exists visits_exec_idx   on crm.visits (executive_id, occurred_at desc) where deleted_at is null;
+create index if not exists visits_hosp_idx   on crm.visits (hospital_id, occurred_at desc) where deleted_at is null;
 
-create table crm.visit_service_lines (
+create table if not exists crm.visit_service_lines (
   visit_id        uuid not null references crm.visits(id),
   service_line_id uuid not null references crm.service_lines(id),
   primary key (visit_id, service_line_id)
 );
 
-create table crm.visit_attachments (
+create table if not exists crm.visit_attachments (
   id          uuid primary key default gen_random_uuid(),
   hospital_id uuid not null references crm.hospitals(id),
   visit_id    uuid not null references crm.visits(id),
@@ -450,7 +422,7 @@ create table crm.visit_attachments (
   created_at  timestamptz not null default now(),
   deleted_at  timestamptz
 );
-create index va_visit_idx on crm.visit_attachments (visit_id);
+create index if not exists va_visit_idx on crm.visit_attachments (visit_id);
 
 -- ---------------------------------------------------------------------
 -- 9. PATIENT BRIDGE — the only Scribe coupling
@@ -476,11 +448,11 @@ grant select on crm.v_referral_patients to crm_app;
 -- "Who referred you here?" captured at Scribe registration (§6 rule 1).
 -- Stored here rather than as a column on public.patients so no Scribe table
 -- is altered; Scribe's registration form writes one row.
-create table crm.patient_referral_sources (
+create table if not exists crm.patient_referral_sources (
   id            uuid primary key default gen_random_uuid(),
   hospital_id   uuid not null references crm.hospitals(id),
   patient_id    integer not null references public.patients(id),
-  answer_type   crm.referral_answer_type not null,
+  answer_type   text not null check (answer_type in ('doctor', 'free_text', 'none_self')), -- doctor | free_text | none_self
   doctor_id     uuid references crm.doctors(id),
   free_text     text,
   captured_at   timestamptz not null default now(),
@@ -493,14 +465,14 @@ create table crm.patient_referral_sources (
     (answer_type = 'none_self')
   )
 );
-create unique index prs_patient_uniq on crm.patient_referral_sources (patient_id);
+create unique index if not exists prs_patient_uniq on crm.patient_referral_sources (patient_id);
 
 -- ---------------------------------------------------------------------
 -- 10. REFERRALS & ATTRIBUTION (§6)
 -- ---------------------------------------------------------------------
-create sequence crm.referral_code_seq;
+create sequence if not exists crm.referral_code_seq;
 
-create table crm.doctor_referrals (
+create table if not exists crm.doctor_referrals (
   id                 uuid primary key default gen_random_uuid(),
   referral_code      text not null unique
                        default 'REF-' || to_char(now(),'YYYY') || '-' ||
@@ -516,21 +488,21 @@ create table crm.doctor_referrals (
 
   referring_doctor_id uuid references crm.doctors(id),
   is_self_referral    boolean not null default false,
-  source              crm.referral_source not null,
+  source              text not null check (source in ('direct_doctor', 'phone', 'whatsapp', 'gini_scribe', 'opd', 'emergency', 'ipd', 'website', 'patient_self_report', 'growth_executive', 'other')), -- direct_doctor | phone | whatsapp | gini_scribe | opd | emergency | ipd | website | patient_self_report | growth_executive | other
   referred_at         timestamptz not null default now(),
 
   -- Non-clinical only. Anything clinical goes in referral_clinical_notes.
   reason_category     text,
   service_line_id     uuid references crm.service_lines(id),
   expected_action     text,
-  urgency             crm.urgency not null default 'routine',
+  urgency             text not null default 'routine' check (urgency in ('routine', 'soon', 'urgent', 'emergency')), -- routine | soon | urgent | emergency
   responsible_executive_id uuid references crm.users(id),
 
-  status              crm.referral_status not null default 'new',
+  status              text not null default 'new' check (status in ('new', 'contact_attempted', 'contacted', 'appointment_booked', 'no_show', 'consulted', 'investigation', 'admission_advised', 'admitted', 'procedure_completed', 'discharged', 'follow_up', 'closed', 'lost')), -- new | contact_attempted | contacted | appointment_booked | no_show | consulted | investigation | admission_advised | admitted | procedure_completed | discharged | follow_up | closed | lost
   status_changed_at   timestamptz not null default now(),
   lost_reason         text,
 
-  attribution_status  crm.attribution_status not null default 'claimed',
+  attribution_status  text not null default 'claimed' check (attribution_status in ('claimed', 'verified', 'disputed', 'rejected')), -- claimed | verified | disputed | rejected
   verified_at         timestamptz,
   verified_by         uuid references crm.users(id),
 
@@ -549,11 +521,11 @@ create table crm.doctor_referrals (
   constraint doctor_referral_patient_identifiable
     check (patient_id is not null or patient_phone_raw is not null or patient_name_raw is not null)
 );
-create index doctor_referrals_doctor_idx  on crm.doctor_referrals (referring_doctor_id, referred_at desc) where deleted_at is null;
-create index doctor_referrals_patient_idx on crm.doctor_referrals (patient_id) where deleted_at is null;
-create index doctor_referrals_phone_idx   on crm.doctor_referrals (hospital_id, patient_phone_e164) where deleted_at is null;
-create index doctor_referrals_status_idx  on crm.doctor_referrals (hospital_id, status) where deleted_at is null;
-create index doctor_referrals_exec_idx    on crm.doctor_referrals (responsible_executive_id) where deleted_at is null;
+create index if not exists doctor_referrals_doctor_idx  on crm.doctor_referrals (referring_doctor_id, referred_at desc) where deleted_at is null;
+create index if not exists doctor_referrals_patient_idx on crm.doctor_referrals (patient_id) where deleted_at is null;
+create index if not exists doctor_referrals_phone_idx   on crm.doctor_referrals (hospital_id, patient_phone_e164) where deleted_at is null;
+create index if not exists doctor_referrals_status_idx  on crm.doctor_referrals (hospital_id, status) where deleted_at is null;
+create index if not exists doctor_referrals_exec_idx    on crm.doctor_referrals (responsible_executive_id) where deleted_at is null;
 
 comment on table crm.doctor_referrals is
   'INBOUND referral: a patient sent TO Gini BY an external referring doctor. '
@@ -578,15 +550,15 @@ end $$;
 
 -- One row per claim. Two doctors claiming one patient = two rows = the
 -- resolution queue (§6 rule 5). The winner is is_primary + verified.
-create table crm.referral_attributions (
+create table if not exists crm.referral_attributions (
   id                uuid primary key default gen_random_uuid(),
   hospital_id       uuid not null references crm.hospitals(id),
   referral_id       uuid not null references crm.doctor_referrals(id),
   claimed_doctor_id uuid not null references crm.doctors(id),
   claimed_by        uuid references crm.users(id),
-  claim_source      crm.referral_source not null,
+  claim_source      text not null check (claim_source in ('direct_doctor', 'phone', 'whatsapp', 'gini_scribe', 'opd', 'emergency', 'ipd', 'website', 'patient_self_report', 'growth_executive', 'other')), -- direct_doctor | phone | whatsapp | gini_scribe | opd | emergency | ipd | website | patient_self_report | growth_executive | other
   claimed_at        timestamptz not null default now(),
-  status            crm.attribution_status not null default 'claimed',
+  status            text not null default 'claimed' check (status in ('claimed', 'verified', 'disputed', 'rejected')), -- claimed | verified | disputed | rejected
   is_primary        boolean not null default false,
   resolved_by       uuid references crm.users(id),
   resolved_at       timestamptz,
@@ -600,12 +572,12 @@ create table crm.referral_attributions (
            or (resolved_by is not null and resolved_at is not null
                and nullif(btrim(coalesce(resolution_reason,'')), '') is not null))
 );
-create unique index ra_claim_uniq on crm.referral_attributions (referral_id, claimed_doctor_id);
-create unique index ra_primary_uniq on crm.referral_attributions (referral_id) where is_primary;
-create index ra_open_conflicts_idx on crm.referral_attributions (hospital_id, status) where status = 'disputed';
+create unique index if not exists ra_claim_uniq on crm.referral_attributions (referral_id, claimed_doctor_id);
+create unique index if not exists ra_primary_uniq on crm.referral_attributions (referral_id) where is_primary;
+create index if not exists ra_open_conflicts_idx on crm.referral_attributions (hospital_id, status) where status = 'disputed';
 
 -- Clinical detail about a referral, quarantined away from growth roles.
-create table crm.referral_clinical_notes (
+create table if not exists crm.referral_clinical_notes (
   id          uuid primary key default gen_random_uuid(),
   hospital_id uuid not null references crm.hospitals(id),
   referral_id uuid not null references crm.doctor_referrals(id),
@@ -614,16 +586,16 @@ create table crm.referral_clinical_notes (
   created_at  timestamptz not null default now(),
   deleted_at  timestamptz
 );
-create index rcn_referral_idx on crm.referral_clinical_notes (referral_id);
+create index if not exists rcn_referral_idx on crm.referral_clinical_notes (referral_id);
 
 -- ---------------------------------------------------------------------
 -- 11. PATIENT JOURNEY (§7) — manual in Phase 1, Scribe-driven in Phase 2
 -- ---------------------------------------------------------------------
-create table crm.referral_journey_events (
+create table if not exists crm.referral_journey_events (
   id          uuid primary key default gen_random_uuid(),
   hospital_id uuid not null references crm.hospitals(id),
   referral_id uuid not null references crm.doctor_referrals(id),
-  status      crm.referral_status not null,
+  status      text not null check (status in ('new', 'contact_attempted', 'contacted', 'appointment_booked', 'no_show', 'consulted', 'investigation', 'admission_advised', 'admitted', 'procedure_completed', 'discharged', 'follow_up', 'closed', 'lost')), -- new | contact_attempted | contacted | appointment_booked | no_show | consulted | investigation | admission_advised | admitted | procedure_completed | discharged | follow_up | closed | lost
   occurred_at timestamptz not null default now(),
   notes       text,                       -- operational, non-clinical
   lost_reason text,
@@ -633,7 +605,7 @@ create table crm.referral_journey_events (
   constraint rje_lost_reason_required
     check (status <> 'lost' or nullif(btrim(coalesce(lost_reason,'')), '') is not null)
 );
-create index rje_referral_idx on crm.referral_journey_events (referral_id, occurred_at desc);
+create index if not exists rje_referral_idx on crm.referral_journey_events (referral_id, occurred_at desc);
 
 create or replace function crm.apply_journey_event()
 returns trigger language plpgsql security definer
@@ -652,13 +624,13 @@ end $$;
 -- ---------------------------------------------------------------------
 -- 12. CONSENT (DPDP Act 2023 — compliance note in brief)
 -- ---------------------------------------------------------------------
-create table crm.patient_consents (
+create table if not exists crm.patient_consents (
   id           uuid primary key default gen_random_uuid(),
   hospital_id  uuid not null references crm.hospitals(id),
   patient_id   integer not null references public.patients(id),
   referral_id  uuid references crm.doctor_referrals(id),
   purpose      text not null default 'share_clinical_updates_with_referring_doctor',
-  status       crm.consent_status not null,
+  status       text not null check (status in ('granted', 'denied', 'revoked')), -- granted | denied | revoked
   granted_at   timestamptz,
   revoked_at   timestamptz,
   evidence_url text,
@@ -667,7 +639,7 @@ create table crm.patient_consents (
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now()
 );
-create index pc_patient_idx on crm.patient_consents (patient_id, purpose, created_at desc);
+create index if not exists pc_patient_idx on crm.patient_consents (patient_id, purpose, created_at desc);
 
 -- Phase 2's communication loop gates every send on this.
 create or replace function crm.has_consent(p_patient_id integer, p_purpose text)
@@ -690,7 +662,7 @@ $$;
 -- COMPLIANCE: this table records revenue the HOSPITAL collected, attributed
 -- to a referral for internal analytics. It has no payee, no payable amount,
 -- no rate and no settlement state. It must never acquire one.
-create table crm.revenue_records (
+create table if not exists crm.revenue_records (
   id                 uuid primary key default gen_random_uuid(),
   hospital_id        uuid not null references crm.hospitals(id),
   referral_id        uuid references crm.doctor_referrals(id),
@@ -699,7 +671,7 @@ create table crm.revenue_records (
   service_line_id    uuid references crm.service_lines(id),
   amount_collected_inr numeric(14,2) not null,
   amount_billed_inr    numeric(14,2),
-  source             crm.revenue_source not null default 'manual_ops',
+  source             text not null default 'manual_ops' check (source in ('manual_ops', 'scribe_billing')), -- manual_ops | scribe_billing
   is_manual          boolean generated always as (source = 'manual_ops') stored,
   encounter_ref      text,                -- Phase 2: Scribe billing encounter id
   period_month       date not null,       -- first day of the month
@@ -712,8 +684,8 @@ create table crm.revenue_records (
   constraint revenue_manual_needs_no_encounter
     check (source = 'manual_ops' or encounter_ref is not null)
 );
-create index rev_doctor_idx   on crm.revenue_records (referring_doctor_id, period_month) where deleted_at is null;
-create index rev_referral_idx on crm.revenue_records (referral_id) where deleted_at is null;
+create index if not exists rev_doctor_idx   on crm.revenue_records (referring_doctor_id, period_month) where deleted_at is null;
+create index if not exists rev_referral_idx on crm.revenue_records (referral_id) where deleted_at is null;
 
 comment on table crm.revenue_records is
   'Hospital revenue attributed to a referral for internal targeting and '
@@ -723,7 +695,7 @@ comment on table crm.revenue_records is
 -- ---------------------------------------------------------------------
 -- 14. TASKS (§9), SAVED LISTS (§12), IMPORT (§10)
 -- ---------------------------------------------------------------------
-create table crm.tasks (
+create table if not exists crm.tasks (
   id           uuid primary key default gen_random_uuid(),
   hospital_id  uuid not null references crm.hospitals(id),
   title        text not null,
@@ -733,8 +705,8 @@ create table crm.tasks (
   referral_id  uuid references crm.doctor_referrals(id),
   visit_id     uuid references crm.visits(id),
   due_date     date,
-  priority     crm.task_priority not null default 'normal',
-  status       crm.task_status not null default 'open',
+  priority     text not null default 'normal' check (priority in ('low', 'normal', 'high', 'critical')), -- low | normal | high | critical
+  status       text not null default 'open' check (status in ('open', 'in_progress', 'done', 'cancelled')), -- open | in_progress | done | cancelled
   completed_at timestamptz,
   completed_by uuid references crm.users(id),
   created_by   uuid references crm.users(id),
@@ -743,11 +715,11 @@ create table crm.tasks (
   deleted_at   timestamptz,
   constraint task_done_shape check (status <> 'done' or completed_at is not null)
 );
-create index tasks_owner_idx   on crm.tasks (owner_id, status, due_date) where deleted_at is null;
-create index tasks_overdue_idx on crm.tasks (hospital_id, due_date) where deleted_at is null and status in ('open','in_progress');
-create index tasks_doctor_idx  on crm.tasks (doctor_id) where deleted_at is null;
+create index if not exists tasks_owner_idx   on crm.tasks (owner_id, status, due_date) where deleted_at is null;
+create index if not exists tasks_overdue_idx on crm.tasks (hospital_id, due_date) where deleted_at is null and status in ('open','in_progress');
+create index if not exists tasks_doctor_idx  on crm.tasks (doctor_id) where deleted_at is null;
 
-create table crm.saved_views (
+create table if not exists crm.saved_views (
   id          uuid primary key default gen_random_uuid(),
   hospital_id uuid not null references crm.hospitals(id),
   owner_id    uuid not null references crm.users(id),
@@ -760,7 +732,7 @@ create table crm.saved_views (
   deleted_at  timestamptz
 );
 
-create table crm.import_batches (
+create table if not exists crm.import_batches (
   id             uuid primary key default gen_random_uuid(),
   hospital_id    uuid not null references crm.hospitals(id),
   uploaded_by    uuid not null references crm.users(id),
@@ -780,40 +752,40 @@ create table crm.import_batches (
   updated_at     timestamptz not null default now()
 );
 
-create table crm.import_rows (
+create table if not exists crm.import_rows (
   id                uuid primary key default gen_random_uuid(),
   batch_id          uuid not null references crm.import_batches(id),
   row_number        integer not null,
   raw               jsonb not null,
   normalized        jsonb,
   mobile_e164       text,
-  status            crm.import_row_status not null default 'pending',
+  status            text not null default 'pending' check (status in ('pending', 'created', 'updated', 'skipped_duplicate', 'error')), -- pending | created | updated | skipped_duplicate | error
   matched_doctor_id uuid references crm.doctors(id),
   error_message     text,
   created_at        timestamptz not null default now(),
   unique (batch_id, row_number)
 );
-create index import_rows_status_idx on crm.import_rows (batch_id, status);
-create index import_rows_phone_idx  on crm.import_rows (batch_id, mobile_e164);
+create index if not exists import_rows_status_idx on crm.import_rows (batch_id, status);
+create index if not exists import_rows_phone_idx  on crm.import_rows (batch_id, mobile_e164);
 
 -- ---------------------------------------------------------------------
 -- 15. AUDIT (§6 "Timestamps and audit history on all core entities")
 -- ---------------------------------------------------------------------
-create table crm.audit_log (
+create table if not exists crm.audit_log (
   id             bigint generated always as identity primary key,
   hospital_id    uuid,
   table_name     text not null,
   record_id      text not null,
   operation      text not null check (operation in ('INSERT','UPDATE','DELETE')),
   actor_id       uuid,
-  actor_role     crm.user_role,
+  actor_role     text check (actor_role is null or actor_role in ('ceo_admin', 'head_of_growth', 'growth_manager', 'growth_executive', 'clinical_team', 'operations')), -- ceo_admin | head_of_growth | growth_manager | growth_executive | clinical_team | operations
   changed_fields text[],
   old_data       jsonb,
   new_data       jsonb,
   changed_at     timestamptz not null default now()
 );
-create index audit_record_idx on crm.audit_log (table_name, record_id, changed_at desc);
-create index audit_actor_idx  on crm.audit_log (actor_id, changed_at desc);
+create index if not exists audit_record_idx on crm.audit_log (table_name, record_id, changed_at desc);
+create index if not exists audit_actor_idx  on crm.audit_log (actor_id, changed_at desc);
 
 create or replace function crm.audit_row()
 returns trigger language plpgsql security definer

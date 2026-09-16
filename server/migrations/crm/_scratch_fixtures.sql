@@ -28,7 +28,7 @@ select u.id, h.id from crm.users u, crm.hospitals h where h.code='GACH';
 
 -- Three doctors: one owned by Exec A, one by Exec B, one unassigned.
 insert into crm.doctors (id, hospital_id, full_name, specialty, area, mobile, priority, relationship_stage)
-select x.id, h.id, x.nm, x.sp, x.ar, x.mo, x.pr::crm.doctor_priority, 'prospect'
+select x.id, h.id, x.nm, x.sp, x.ar, x.mo, x.pr, 'prospect'
 from crm.hospitals h,
  (values ('aaaaaaaa-0000-0000-0000-000000000001'::uuid,'Dr Owned By A','Orthopedics','Mohali','98765 00011','A'),
          ('aaaaaaaa-0000-0000-0000-000000000002'::uuid,'Dr Owned By B','Neurology','Kharar','+91 9876500012','B'),
@@ -97,7 +97,7 @@ from crm.hospitals h where h.code='GACH';
 insert into crm.doctor_referrals (hospital_id, patient_id, patient_name_raw, patient_phone_raw,
                            referring_doctor_id, source, status, status_changed_at)
 select h.id, 1, 'Fanout Patient', '9876500099',
-       'aaaaaaaa-0000-0000-0000-000000000003', 'direct_doctor', x.st::crm.referral_status, now()
+       'aaaaaaaa-0000-0000-0000-000000000003', 'direct_doctor', x.st, now()
 from crm.hospitals h, (values ('new'),('consulted'),('admitted')) as x(st)
 where h.code='GACH';
 

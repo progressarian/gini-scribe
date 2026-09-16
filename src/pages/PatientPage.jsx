@@ -6,6 +6,9 @@ import useUiStore from "../stores/uiStore.js";
 import AudioInput from "../components/AudioInput.jsx";
 import Err from "../components/Err.jsx";
 import api from "../services/api.js";
+import ReferralSourcePicker, {
+  referralSourcePayload,
+} from "../components/ReferralSourcePicker.jsx";
 import { PATIENT_CATEGORIES, categoryLabel } from "../../shared/patientCategories.js";
 import "./PatientPage.css";
 
@@ -26,6 +29,7 @@ export default function PatientPage() {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState(null);
   const [fieldErrors, setFieldErrors] = useState({});
+  const [referralSource, setReferralSource] = useState(null);
   const [resettingPw, setResettingPw] = useState(false);
   const [tempPassword, setTempPassword] = useState(null);
   const [resetError, setResetError] = useState(null);
@@ -55,6 +59,8 @@ export default function PatientPage() {
   const handleSave = async () => {
     const errs = {};
     if (!patient.name?.trim()) errs.name = true;
+    const referral = referralSourcePayload(referralSource);
+    if (!dbPatientId && !referral) errs.referralSource = true;
     if (Object.keys(errs).length) {
       setFieldErrors(errs);
       setSaveMsg({ type: "error", text: "Please fill required fields" });
@@ -63,7 +69,7 @@ export default function PatientPage() {
     setFieldErrors({});
     setSaving(true);
     setSaveMsg(null);
-    const result = await savePatient();
+    const result = await savePatient(referral);
     setSaving(false);
     if (result.error) {
       setSaveMsg({ type: "error", text: result.error });
@@ -132,6 +138,20 @@ export default function PatientPage() {
           </div>
         </div>
       </div>
+
+      {!dbPatientId && (
+        <div className="patient-page__refsrc">
+          <ReferralSourcePicker
+            value={referralSource}
+            onChange={(v) => {
+              setReferralSource(v);
+              if (fieldErrors.referralSource)
+                setFieldErrors((p) => ({ ...p, referralSource: false }));
+            }}
+            error={fieldErrors.referralSource ? "Please record who referred this patient" : null}
+          />
+        </div>
+      )}
 
       {!dbPatientId && duplicateWarning && (
         <div className="patient-page__dup-warning">

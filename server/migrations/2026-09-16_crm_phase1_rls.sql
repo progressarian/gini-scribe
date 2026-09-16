@@ -42,7 +42,7 @@ begin
 end $$;
 
 create or replace function crm.current_user_role()
-returns crm.user_role language sql stable security definer
+returns text language sql stable security definer
 set search_path = crm, public, pg_temp as $$
   select u.role from crm.users u
   where u.id = crm.current_user_id() and u.deleted_at is null and u.is_active;
@@ -102,6 +102,8 @@ begin
     where n.nspname = 'crm' and c.relkind = 'r'
   loop
     execute format(
+      'drop trigger if exists trg_%1$s_updated on crm.%1$I', t);
+    execute format(
       'create trigger trg_%1$s_updated before update on crm.%1$I
          for each row execute function crm.set_updated_at()', t);
   end loop;
@@ -114,15 +116,19 @@ begin
       and c.relname not in ('audit_log','schema_migrations')
   loop
     execute format(
+      'drop trigger if exists trg_%1$s_no_delete on crm.%1$I', t);
+    execute format(
       'create trigger trg_%1$s_no_delete before delete on crm.%1$I
          for each row execute function crm.block_hard_delete()', t);
   end loop;
 end $$;
 
+drop trigger if exists trg_doctors_stage_history on crm.doctors;
 create trigger trg_doctors_stage_history
   after update of relationship_stage on crm.doctors
   for each row execute function crm.log_stage_change();
 
+drop trigger if exists trg_journey_apply on crm.referral_journey_events;
 create trigger trg_journey_apply
   after insert on crm.referral_journey_events
   for each row execute function crm.apply_journey_event();
@@ -137,6 +143,8 @@ begin
     'patient_consents','patient_referral_sources','revenue_records','tasks',
     'users','user_hospitals','territories','service_lines','visit_cadence_policies']
   loop
+    execute format(
+      'drop trigger if exists trg_%1$s_audit on crm.%1$I', t);
     execute format(
       'create trigger trg_%1$s_audit after insert or update or delete on crm.%1$I
          for each row execute function crm.audit_row()', t);
@@ -224,8 +232,10 @@ create or replace function crm.is_ops() returns boolean language sql stable as $
 $$;
 
 -- ---- hospitals -------------------------------------------------------
+drop policy if exists hospitals_read on crm.hospitals;
 create policy hospitals_read on crm.hospitals for select
   using (crm.in_my_hospital(id));
+drop policy if exists hospitals_write on crm.hospitals;
 create policy hospitals_write on crm.hospitals for all
   using (crm.is_admin() and crm.in_my_hospital(id))
   with check (crm.is_admin() and crm.in_my_hospital(id));
@@ -233,6 +243,7 @@ create policy hospitals_write on crm.hospitals for all
 -- ---- users -----------------------------------------------------------
 -- Self, own reporting tree, or leadership. visible_user_ids() is
 -- SECURITY DEFINER so this policy does not recurse into itself.
+drop policy if exists users_read on crm.users;
 create policy users_read on crm.users for select
   using (
     crm.is_growth_lead()
@@ -242,39 +253,50 @@ create policy users_read on crm.users for select
                  and crm.in_my_hospital(uh.hospital_id)
                  and crm.current_user_role() = 'operations')
   );
+drop policy if exists users_write on crm.users;
 create policy users_write on crm.users for all
   using (crm.is_growth_lead()) with check (crm.is_growth_lead());
 
+drop policy if exists user_hospitals_read on crm.user_hospitals;
 create policy user_hospitals_read on crm.user_hospitals for select
   using (crm.is_growth_lead() or user_id = any (crm.visible_user_ids()));
+drop policy if exists user_hospitals_write on crm.user_hospitals;
 create policy user_hospitals_write on crm.user_hospitals for all
   using (crm.is_growth_lead()) with check (crm.is_growth_lead());
 
 -- ---- reference data (readable by all roles in the hospital) -----------
+drop policy if exists territories_read on crm.territories;
 create policy territories_read on crm.territories for select
   using (crm.in_my_hospital(hospital_id));
+drop policy if exists territories_write on crm.territories;
 create policy territories_write on crm.territories for all
   using (crm.is_growth_lead() and crm.in_my_hospital(hospital_id))
   with check (crm.is_growth_lead() and crm.in_my_hospital(hospital_id));
 
+drop policy if exists service_lines_read on crm.service_lines;
 create policy service_lines_read on crm.service_lines for select
   using (crm.in_my_hospital(hospital_id));
+drop policy if exists service_lines_write on crm.service_lines;
 create policy service_lines_write on crm.service_lines for all
   using (crm.is_growth_lead() and crm.in_my_hospital(hospital_id))
   with check (crm.is_growth_lead() and crm.in_my_hospital(hospital_id));
 
+drop policy if exists cadence_read on crm.visit_cadence_policies;
 create policy cadence_read on crm.visit_cadence_policies for select
   using (crm.in_my_hospital(hospital_id));
+drop policy if exists cadence_write on crm.visit_cadence_policies;
 create policy cadence_write on crm.visit_cadence_policies for all
   using (crm.is_growth_lead() and crm.in_my_hospital(hospital_id))
   with check (crm.is_growth_lead() and crm.in_my_hospital(hospital_id));
 
 -- ---- doctors ---------------------------------------------------------
 -- Executives and managers see only their assigned universe.
+drop policy if exists doctors_read on crm.doctors;
 create policy doctors_read on crm.doctors for select
   using (crm.in_my_hospital(hospital_id) and crm.can_access_doctor(id));
 
 -- Anyone in growth can add a doctor (field discovery); it lands unassigned.
+drop policy if exists doctors_insert on crm.doctors;
 create policy doctors_insert on crm.doctors for insert
   with check (
     crm.in_my_hospital(hospital_id)
@@ -282,33 +304,41 @@ create policy doctors_insert on crm.doctors for insert
         ('ceo_admin','head_of_growth','growth_manager','growth_executive','operations')
   );
 
+drop policy if exists doctors_update on crm.doctors;
 create policy doctors_update on crm.doctors for update
   using (crm.in_my_hospital(hospital_id) and crm.can_access_doctor(id))
   with check (crm.in_my_hospital(hospital_id) and crm.can_access_doctor(id));
 
+drop policy if exists doctor_practice_read on crm.doctor_practice;
 create policy doctor_practice_read on crm.doctor_practice for select
   using (crm.in_my_hospital(hospital_id) and crm.can_access_doctor(doctor_id));
+drop policy if exists doctor_practice_write on crm.doctor_practice;
 create policy doctor_practice_write on crm.doctor_practice for all
   using (crm.in_my_hospital(hospital_id) and crm.can_access_doctor(doctor_id))
   with check (crm.in_my_hospital(hospital_id) and crm.can_access_doctor(doctor_id));
 
+drop policy if exists dso_read on crm.doctor_service_opportunities;
 create policy dso_read on crm.doctor_service_opportunities for select
   using (crm.in_my_hospital(hospital_id) and crm.can_access_doctor(doctor_id));
+drop policy if exists dso_write on crm.doctor_service_opportunities;
 create policy dso_write on crm.doctor_service_opportunities for all
   using (crm.in_my_hospital(hospital_id) and crm.can_access_doctor(doctor_id))
   with check (crm.in_my_hospital(hospital_id) and crm.can_access_doctor(doctor_id));
 
+drop policy if exists dsh_read on crm.doctor_stage_history;
 create policy dsh_read on crm.doctor_stage_history for select
   using (crm.in_my_hospital(hospital_id) and crm.can_access_doctor(doctor_id));
 -- written only by trigger (SECURITY DEFINER path); no insert policy for crm_app
 
 -- ---- assignments -----------------------------------------------------
 -- Reps can see who owns what; only managers and above can (re)assign.
+drop policy if exists assignments_read on crm.doctor_assignments;
 create policy assignments_read on crm.doctor_assignments for select
   using (crm.in_my_hospital(hospital_id)
          and (crm.sees_whole_universe()
               or executive_id = any (crm.visible_user_ids())
               or manager_id   = any (crm.visible_user_ids())));
+drop policy if exists assignments_write on crm.doctor_assignments;
 create policy assignments_write on crm.doctor_assignments for all
   using (crm.in_my_hospital(hospital_id)
          and crm.current_user_role() in ('ceo_admin','head_of_growth','growth_manager'))
@@ -316,6 +346,7 @@ create policy assignments_write on crm.doctor_assignments for all
          and crm.current_user_role() in ('ceo_admin','head_of_growth','growth_manager'));
 
 -- ---- visits ----------------------------------------------------------
+drop policy if exists visits_read on crm.visits;
 create policy visits_read on crm.visits for select
   using (crm.in_my_hospital(hospital_id)
          and (crm.sees_whole_universe()
@@ -323,12 +354,14 @@ create policy visits_read on crm.visits for select
               or crm.can_access_doctor(doctor_id)));
 
 -- A rep may only log a visit as themselves, against a doctor they own.
+drop policy if exists visits_insert on crm.visits;
 create policy visits_insert on crm.visits for insert
   with check (crm.in_my_hospital(hospital_id)
               and crm.can_access_doctor(doctor_id)
               and (executive_id = crm.current_user_id() or crm.is_growth_lead()));
 
 -- Reps can correct their own visit for 24h; leads can always edit.
+drop policy if exists visits_update on crm.visits;
 create policy visits_update on crm.visits for update
   using (crm.in_my_hospital(hospital_id)
          and (crm.is_growth_lead()
@@ -336,15 +369,19 @@ create policy visits_update on crm.visits for update
                   and created_at > now() - interval '24 hours')))
   with check (crm.in_my_hospital(hospital_id));
 
+drop policy if exists visit_sl_read on crm.visit_service_lines;
 create policy visit_sl_read on crm.visit_service_lines for select
   using (exists (select 1 from crm.visits v where v.id = visit_id));
+drop policy if exists visit_sl_write on crm.visit_service_lines;
 create policy visit_sl_write on crm.visit_service_lines for all
   using (exists (select 1 from crm.visits v where v.id = visit_id))
   with check (exists (select 1 from crm.visits v where v.id = visit_id));
 
+drop policy if exists visit_att_read on crm.visit_attachments;
 create policy visit_att_read on crm.visit_attachments for select
   using (crm.in_my_hospital(hospital_id)
          and exists (select 1 from crm.visits v where v.id = visit_id));
+drop policy if exists visit_att_write on crm.visit_attachments;
 create policy visit_att_write on crm.visit_attachments for all
   using (crm.in_my_hospital(hospital_id)
          and exists (select 1 from crm.visits v where v.id = visit_id))
@@ -355,6 +392,7 @@ create policy visit_att_write on crm.visit_attachments for all
 -- Growth executives reach referrals through their doctor or their own
 -- ownership. What they see is status-level: this table holds no clinical
 -- content, and crm.referral_clinical_notes is closed to them below.
+drop policy if exists doctor_referrals_read on crm.doctor_referrals;
 create policy doctor_referrals_read on crm.doctor_referrals for select
   using (crm.in_my_hospital(hospital_id)
          and (crm.is_ops()
@@ -363,12 +401,14 @@ create policy doctor_referrals_read on crm.doctor_referrals for select
               or (referring_doctor_id is not null
                   and crm.can_access_doctor(referring_doctor_id))));
 
+drop policy if exists doctor_referrals_insert on crm.doctor_referrals;
 create policy doctor_referrals_insert on crm.doctor_referrals for insert
   with check (crm.in_my_hospital(hospital_id)
               and crm.current_user_role() in
                   ('ceo_admin','head_of_growth','growth_manager','growth_executive','operations'));
 
 -- Verification and attribution changes are leadership-only (§6 rule 5).
+drop policy if exists doctor_referrals_update on crm.doctor_referrals;
 create policy doctor_referrals_update on crm.doctor_referrals for update
   using (crm.in_my_hospital(hospital_id)
          and (crm.is_ops()
@@ -377,23 +417,28 @@ create policy doctor_referrals_update on crm.doctor_referrals for update
                   and crm.can_access_doctor(referring_doctor_id))))
   with check (crm.in_my_hospital(hospital_id));
 
+drop policy if exists attributions_read on crm.referral_attributions;
 create policy attributions_read on crm.referral_attributions for select
   using (crm.in_my_hospital(hospital_id)
          and (crm.is_ops() or crm.can_access_doctor(claimed_doctor_id)));
+drop policy if exists attributions_insert on crm.referral_attributions;
 create policy attributions_insert on crm.referral_attributions for insert
   with check (crm.in_my_hospital(hospital_id)
               and crm.can_access_doctor(claimed_doctor_id)
               and is_primary = false
               and status = 'claimed');
 -- Only the Head of Growth (or CEO) resolves conflicts and marks the winner.
+drop policy if exists attributions_resolve on crm.referral_attributions;
 create policy attributions_resolve on crm.referral_attributions for update
   using (crm.in_my_hospital(hospital_id) and crm.is_growth_lead())
   with check (crm.in_my_hospital(hospital_id) and crm.is_growth_lead());
 
 -- Clinical notes: growth roles have NO policy here, so they get zero rows.
+drop policy if exists rcn_read on crm.referral_clinical_notes;
 create policy rcn_read on crm.referral_clinical_notes for select
   using (crm.in_my_hospital(hospital_id)
          and crm.current_user_role() in ('ceo_admin','clinical_team','operations'));
+drop policy if exists rcn_write on crm.referral_clinical_notes;
 create policy rcn_write on crm.referral_clinical_notes for all
   using (crm.in_my_hospital(hospital_id)
          and crm.current_user_role() in ('ceo_admin','clinical_team'))
@@ -401,25 +446,31 @@ create policy rcn_write on crm.referral_clinical_notes for all
          and crm.current_user_role() in ('ceo_admin','clinical_team'));
 
 -- ---- journey ---------------------------------------------------------
+drop policy if exists journey_read on crm.referral_journey_events;
 create policy journey_read on crm.referral_journey_events for select
   using (crm.in_my_hospital(hospital_id)
          and exists (select 1 from crm.doctor_referrals r where r.id = referral_id));
+drop policy if exists journey_insert on crm.referral_journey_events;
 create policy journey_insert on crm.referral_journey_events for insert
   with check (crm.in_my_hospital(hospital_id)
               and crm.current_user_role() in
                   ('ceo_admin','head_of_growth','operations','clinical_team'));
 
 -- ---- patient bridge, consent ----------------------------------------
+drop policy if exists prs_read on crm.patient_referral_sources;
 create policy prs_read on crm.patient_referral_sources for select
   using (crm.in_my_hospital(hospital_id));
+drop policy if exists prs_write on crm.patient_referral_sources;
 create policy prs_write on crm.patient_referral_sources for all
   using (crm.in_my_hospital(hospital_id) and crm.is_ops())
   with check (crm.in_my_hospital(hospital_id) and crm.is_ops());
 
+drop policy if exists consents_read on crm.patient_consents;
 create policy consents_read on crm.patient_consents for select
   using (crm.in_my_hospital(hospital_id)
          and crm.current_user_role() in
              ('ceo_admin','head_of_growth','operations','clinical_team'));
+drop policy if exists consents_write on crm.patient_consents;
 create policy consents_write on crm.patient_consents for all
   using (crm.in_my_hospital(hospital_id)
          and crm.current_user_role() in ('ceo_admin','operations','clinical_team'))
@@ -428,21 +479,25 @@ create policy consents_write on crm.patient_consents for all
 
 -- ---- revenue ---------------------------------------------------------
 -- Executives see revenue for their own doctors only; ops enters it.
+drop policy if exists revenue_read on crm.revenue_records;
 create policy revenue_read on crm.revenue_records for select
   using (crm.in_my_hospital(hospital_id)
          and (crm.is_ops()
               or (referring_doctor_id is not null
                   and crm.can_access_doctor(referring_doctor_id))));
+drop policy if exists revenue_write on crm.revenue_records;
 create policy revenue_write on crm.revenue_records for all
   using (crm.in_my_hospital(hospital_id) and crm.is_ops())
   with check (crm.in_my_hospital(hospital_id) and crm.is_ops());
 
 -- ---- tasks, saved views, import -------------------------------------
+drop policy if exists tasks_read on crm.tasks;
 create policy tasks_read on crm.tasks for select
   using (crm.in_my_hospital(hospital_id)
          and (crm.sees_whole_universe()
               or owner_id   = any (crm.visible_user_ids())
               or created_by = crm.current_user_id()));
+drop policy if exists tasks_write on crm.tasks;
 create policy tasks_write on crm.tasks for all
   using (crm.in_my_hospital(hospital_id)
          and (crm.sees_whole_universe()
@@ -450,25 +505,30 @@ create policy tasks_write on crm.tasks for all
               or created_by = crm.current_user_id()))
   with check (crm.in_my_hospital(hospital_id));
 
+drop policy if exists saved_views_read on crm.saved_views;
 create policy saved_views_read on crm.saved_views for select
   using (crm.in_my_hospital(hospital_id)
          and (is_shared or owner_id = crm.current_user_id()));
+drop policy if exists saved_views_write on crm.saved_views;
 create policy saved_views_write on crm.saved_views for all
   using (owner_id = crm.current_user_id() or crm.is_growth_lead())
   with check (crm.in_my_hospital(hospital_id)
               and (owner_id = crm.current_user_id() or crm.is_growth_lead()));
 
+drop policy if exists import_batches_rw on crm.import_batches;
 create policy import_batches_rw on crm.import_batches for all
   using (crm.in_my_hospital(hospital_id)
          and (crm.is_growth_lead() or uploaded_by = crm.current_user_id()))
   with check (crm.in_my_hospital(hospital_id)
          and (crm.is_growth_lead() or uploaded_by = crm.current_user_id()));
 
+drop policy if exists import_rows_rw on crm.import_rows;
 create policy import_rows_rw on crm.import_rows for all
   using (exists (select 1 from crm.import_batches b where b.id = batch_id))
   with check (exists (select 1 from crm.import_batches b where b.id = batch_id));
 
 -- ---- audit -----------------------------------------------------------
+drop policy if exists audit_read on crm.audit_log;
 create policy audit_read on crm.audit_log for select
   using (crm.is_growth_lead() and crm.in_my_hospital(hospital_id));
 
@@ -501,7 +561,7 @@ select d.id as doctor_id, d.hospital_id, d.full_name, d.priority,
          when now() >= lv.last_visit_at + make_interval(days => p.interval_days) then 'due'
          when now() >= lv.last_visit_at + make_interval(days => p.interval_days - 3) then 'upcoming'
          else 'ok'
-       end::crm.visit_due_state as due_state
+       end::text as due_state
 from crm.doctors d
 left join last_visit lv on lv.doctor_id = d.id
 left join crm.visit_cadence_policies p
@@ -683,7 +743,8 @@ end $$;
 -- 22. SEED — Gini Advanced Care, territories, service lines, cadence
 -- ---------------------------------------------------------------------
 insert into crm.hospitals (name, code, city, state)
-values ('Gini Advanced Care Hospital', 'GACH', 'Mohali', 'Punjab');
+values ('Gini Advanced Care Hospital', 'GACH', 'Mohali', 'Punjab')
+on conflict do nothing;
 
 insert into crm.territories (hospital_id, name, code)
 select h.id, t.name, t.code
@@ -691,7 +752,8 @@ from crm.hospitals h,
      (values ('Mohali','MOH'),('Chandigarh','CHD'),('Panchkula','PKL'),
              ('Kharar','KHR'),('Zirakpur','ZRK'),('Derabassi','DBS'),
              ('Ropar','RPR'),('Patiala','PTA')) as t(name, code)
-where h.code = 'GACH';
+where h.code = 'GACH'
+on conflict do nothing;
 
 insert into crm.service_lines (hospital_id, name, code, sort_order)
 select h.id, s.name, s.code, s.ord
@@ -704,14 +766,18 @@ from crm.hospitals h,
              ('Cardiology','CARD',11),('Nephrology','NEPH',12),
              ('Diagnostics','DIAG',13),('Day Care','DAYC',14),
              ('Emergency','EMER',15),('Other','OTHER',16)) as s(name, code, ord)
-where h.code = 'GACH';
+where h.code = 'GACH'
+on conflict do nothing;
 
 insert into crm.visit_cadence_policies (hospital_id, priority, interval_days)
-select h.id, p.priority::crm.doctor_priority, p.days
+select h.id, p.priority::text, p.days
 from crm.hospitals h,
      (values ('A',15),('B',15),('C',45),('unclassified',60)) as p(priority, days)
-where h.code = 'GACH';
+where h.code = 'GACH'
+on conflict do nothing;
 
-insert into crm.schema_migrations (version) values ('001_crm_phase1'), ('002_crm_phase1_rls');
+insert into crm.schema_migrations (version)
+values ('2026-09-16_crm_phase1'), ('2026-09-16_crm_phase1_rls')
+on conflict do nothing;
 
 commit;

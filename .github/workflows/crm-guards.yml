@@ -3,8 +3,11 @@ name: CRM guards
 # Runs on every commit. Three guards, in cost order:
 #
 #   1. role-switch    — no CRM file may reach the database outside withCrmContext
-#   2. compliance     — no incentive/commission/payout object may exist in `crm`
-#   3. rls            — the full 57-assertion access-control suite
+#   2. vocab-drift    — shared/crmVocab.js and the CHECK constraints must agree
+#   3. compliance     — no incentive/commission/payout object may exist in `crm`
+#   4. rls            — the full 72-assertion access-control suite, run twice:
+#                       once on a fresh database, once as a rehearsal of the
+#                       production migration path
 #
 # Guard 2 matters most on Supabase. CREATE EVENT TRIGGER requires superuser,
 # which Supabase does not grant, so the in-database guard may be absent there.
@@ -18,7 +21,7 @@ on:
 
 jobs:
   role-switch-guard:
-    name: CRM queries go through crm_app
+    name: Static CRM guards
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,6 +29,7 @@ jobs:
         with:
           node-version: "20"
       - run: node server/crm/checkNoDirectPool.mjs
+      - run: node server/crm/checkVocabSync.mjs
 
   crm-schema:
     name: Compliance + RLS suite (pg${{ matrix.pg }})
@@ -63,14 +67,31 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -yqq postgresql-client
 
-      - name: Apply the CRM migration
-        working-directory: server/migrations/crm
+      - name: Apply the CRM migration chain
+        working-directory: server/migrations
         run: |
           set -e
-          for f in 000_scribe_stub.sql 001_crm_phase1.sql 002_crm_phase1_rls.sql; do
+          psql "$CRM_DSN" -v ON_ERROR_STOP=1 -q -f crm/_scratch_scribe_stub.sql
+          for f in 2026-09-16_crm_phase1.sql 2026-09-16_crm_phase1_rls.sql \
+                   2026-10-01_crm_registration.sql \
+                   2026-10-03_crm_registration_record_fn.sql \
+                   2026-10-02_crm_inbound_attribution_comments.sql; do
             echo "== $f"
             psql "$CRM_DSN" -v ON_ERROR_STOP=1 -q -f "$f"
           done
+
+      - name: Migrations are idempotent
+        working-directory: server/migrations
+        run: |
+          set -e
+          for f in 2026-09-16_crm_phase1.sql 2026-09-16_crm_phase1_rls.sql \
+                   2026-09-30_crm_enums_to_text.sql \
+                   2026-10-01_crm_registration.sql \
+                   2026-10-03_crm_registration_record_fn.sql \
+                   2026-10-02_crm_inbound_attribution_comments.sql; do
+            psql "$CRM_DSN" -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+          echo "every migration re-ran cleanly" 
 
       - name: NMC compliance check
         working-directory: server/migrations/crm
@@ -78,7 +99,7 @@ jobs:
 
       - name: Seed fixtures
         working-directory: server/migrations/crm
-        run: psql "$CRM_DSN" -v ON_ERROR_STOP=1 -q -f 003_test_seed.sql
+        run: psql "$CRM_DSN" -v ON_ERROR_STOP=1 -q -f _scratch_fixtures.sql
 
       - name: RLS verification suite
         working-directory: server/migrations/crm

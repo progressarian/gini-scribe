@@ -32,7 +32,7 @@ bad() { FAIL=$((FAIL+1)); printf '  \033[31mFAIL\033[0m  %s\n       got: %s\n' "
 # Role switching happens in-statement rather than via startup parameters,
 # because the connection may be multiplexed. SET tags are filtered out.
 sql() {
-  docker run --rm -i -e SESSION_DSN postgres:15 \
+  docker run --rm -i -e SESSION_DSN postgres:17 \
     psql "$SESSION_DSN" -tA -q -v ON_ERROR_STOP=1 2>&1 | grep -vE '^(SET|RESET)$'
 }
 as_owner() { echo "$1" | sql; }
@@ -104,6 +104,23 @@ case "$OUTBOUND" in
   absent) ok "public.referrals does not exist yet — nothing to label" ;;
   *)      bad "public.referrals should be labelled OUTBOUND" "$OUTBOUND" ;;
 esac
+
+echo
+echo "Vocabulary is TEXT + CHECK"
+expect "$(as_owner "select count(*) from pg_type t join pg_namespace n on n.oid=t.typnamespace where n.nspname='crm' and t.typtype='e';")" 0 "no Postgres enum types remain in crm"
+expect "$(as_owner "select count(*) from pg_constraint c join pg_namespace n on n.oid=c.connamespace where n.nspname='crm' and c.contype='c';")" 40 "40 CHECK constraints carry the vocabularies"
+expect_err "$(as_owner "begin; insert into crm.doctors (hospital_id, full_name, mobile, priority) select id,'Bad','9990000001','Z' from crm.hospitals; rollback;")" "priority_check" "an unknown priority is rejected"
+
+echo
+echo "Registration capability"
+expect "$(as_owner "select count(*) from pg_roles where rolname='crm_registration' and not rolbypassrls and not rolcanlogin;")" 1 "crm_registration exists, cannot log in, cannot bypass RLS"
+expect "$(as_owner "select count(*) from information_schema.role_table_grants where grantee='crm_registration';")" 0 "it holds no table privileges at all"
+expect "$(as_owner "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='crm' and p.proname in ('search_doctors_for_registration','record_referral_source');")" 2 "…only the right to ask two questions"
+expect_err "$(as_owner "begin; set local role crm_registration; select crm.record_referral_source(1,'doctor',null); rollback;")" "needs a doctor" "the write function validates its answer shape"
+REG=$(printf "set role crm_registration;\nselect count(*) from crm.doctors;\n" | sql)
+echo "$REG" | grep -qi "permission denied" && ok "front desk cannot read crm.doctors directly" || bad "crm.doctors should be denied" "$(echo "$REG"|head -1)"
+REG=$(printf "set role crm_registration;\nselect count(*) from crm.search_doctors_for_registration('zzz');\n" | sql | tail -1)
+expect "$REG" 0 "…but can run the picker (empty universe, so no matches)"
 
 echo
 echo "Helpers"

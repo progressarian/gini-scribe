@@ -704,6 +704,12 @@ export default function FlowCheckinPage() {
           // patientCreateSchema takes a strict Male|Female|Other enum; a GHM
           // row's "M"/"male" would 400 the whole check-in.
           sex: normalizeSex(form.sex) || undefined,
+          // Check-in resolves-or-creates mid-queue, so it does not stop to ask
+          // "who referred you?". The patient lands in crm.v_attribution_unknown
+          // for the growth team to chase, rather than holding up the desk.
+          // Registration proper — /patient, /opd, and the new-patient modal —
+          // does ask, and the server requires it there.
+          allow_unattributed: true,
         });
         dbId = pt.id;
         fileNo = pt.file_no;

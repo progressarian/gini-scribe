@@ -41,6 +41,12 @@ as_owner() {
 $1
 EOF
 }
+# Front-desk registration: no crm.users row, no CRM identity, just the role.
+as_registration() {
+  psql_run "-c role=crm_registration" <<EOF
+$1
+EOF
+}
 
 ok()   { PASS=$((PASS+1)); printf '  \033[32mPASS\033[0m  %s\n' "$1"; }
 bad()  { FAIL=$((FAIL+1)); printf '  \033[31mFAIL\033[0m  %s\n       got: %s\n' "$1" "$2"; }
@@ -159,6 +165,47 @@ as_owner "create table if not exists public.referrals (id serial primary key, pa
 as_owner "do \$\$ begin if to_regclass('public.referrals') is not null then execute \$c\$comment on table public.referrals is 'OUTBOUND referral: a Gini doctor referring a patient OUT to an external specialist. Scribe clinical workflow. The inbound counterpart -- doctors sending patients TO Gini -- is crm.doctor_referrals.'\$c\$; end if; end \$\$;" >/dev/null
 got=$(as_owner "select obj_description('public.referrals'::regclass) ~ 'OUTBOUND';" | tr -d '[:space:]')
 [ "$got" = "t" ] && ok "public.referrals is labelled OUTBOUND" || bad "outbound comment" "$got"
+
+echo "(i) Vocabulary is TEXT + CHECK, not Postgres enums"
+expect_count "$HOG" "select count(*) from pg_type t join pg_namespace n on n.oid=t.typnamespace where n.nspname='crm' and t.typtype='e';" 0 "no enum types remain in the crm schema"
+expect_owner_error "update crm.doctors set priority='Z' where full_name='Dr Owned By A';" \
+  "doctors_priority_check" "an unknown priority is rejected by CHECK"
+expect_owner_error "update crm.doctors set relationship_stage='befriended' where full_name='Dr Owned By A';" \
+  "relationship_stage_check" "an unknown relationship stage is rejected"
+expect_owner_error "insert into crm.tasks (hospital_id, title, owner_id, priority) select id,'x','$EXA','urgent-ish' from crm.hospitals;" \
+  "priority_check" "an unknown task priority is rejected"
+expect_owner_error "insert into crm.referral_journey_events (hospital_id, referral_id, status) select id,'bbbbbbbb-0000-0000-0000-000000000001','teleported' from crm.hospitals;" \
+  "status_check" "an unknown journey status is rejected"
+as_owner "update crm.doctors set relationship_stage='dormant' where full_name='Dr Owned By A';" >/dev/null
+expect_count "$HOG" "select to_stage from crm.doctor_stage_history where to_stage='dormant';" "dormant" "a valid new stage still writes, and history records it"
+
+echo "(j) Registration capability — front desk, no CRM identity"
+got=$(as_registration "select full_name from crm.search_doctors_for_registration('Owned By A');" | tr -d '[:space:]')
+[ "$got" = "DrOwnedByA" ] && ok "the picker finds a doctor by name" || bad "picker by name" "$got"
+got=$(as_registration "select count(*) from crm.search_doctors_for_registration('9876500011');" | tr -d '[:space:]')
+[ "$got" = "1" ] && ok "…and by phone number" || bad "picker by phone" "$got"
+got=$(as_registration "select count(*) from crm.search_doctors_for_registration('a');" | tr -d '[:space:]')
+[ "$got" = "0" ] && ok "…and refuses a one-character query" || bad "min query length" "$got"
+got=$(as_registration "select count(*) from crm.doctors;")
+echo "$got" | grep -qi "permission denied" && ok "front desk cannot read crm.doctors directly" || bad "crm.doctors should be denied to crm_registration" "$(echo "$got"|head -1)"
+got=$(as_registration "select count(*) from crm.doctor_referrals;")
+echo "$got" | grep -qi "permission denied" && ok "…nor referrals" || bad "referrals should be denied" "$(echo "$got"|head -1)"
+got=$(as_registration "select count(*) from crm.revenue_records;")
+echo "$got" | grep -qi "permission denied" && ok "…nor revenue" || bad "revenue should be denied" "$(echo "$got"|head -1)"
+got=$(as_registration "select count(*) from crm.doctor_practice;")
+echo "$got" | grep -qi "permission denied" && ok "…nor practice intelligence" || bad "practice should be denied" "$(echo "$got"|head -1)"
+got=$(as_registration "select count(*) from crm.patient_referral_sources;")
+echo "$got" | grep -qi "permission denied" && ok "…and holds no table privileges at all" || bad "table access should be denied" "$(echo "$got"|head -1)"
+# Patient 1 already answered in the fixtures, so the round-trip needs its own.
+as_owner "insert into public.patients (id, name, phone) values (2, 'Picker Test', '9876500002') on conflict do nothing;" >/dev/null
+got=$(as_registration "select crm.record_referral_source(2, 'none_self');" | tr -d '[:space:]')
+[ "$got" = "t" ] && ok "…but can record an answer through the definer function" || bad "record_referral_source" "$got"
+got=$(as_registration "select crm.record_referral_source(2, 'none_self');" | tr -d '[:space:]')
+[ "$got" = "f" ] && ok "…and a second answer does not overwrite the first" || bad "duplicate answer" "$got"
+got=$(as_registration "select crm.record_referral_source(2, 'nonsense');")
+echo "$got" | grep -qi "Unknown referral answer type" && ok "…and an unknown answer type is refused" || bad "bad answer type" "$(echo "$got"|head -1)"
+got=$(as_registration "select string_agg(a.attname, ',' order by a.attnum) from pg_proc p join pg_namespace n on n.oid=p.pronamespace, unnest(p.proargnames) with ordinality as a(attname, attnum) where n.nspname='crm' and p.proname='search_doctors_for_registration' and a.attname not like 'p_%';" | tr -d '[:space:]')
+[ "$got" = "doctor_id,full_name,specialty,clinic_name,area" ] && ok "the picker returns identity and location only, 5 columns" || bad "picker column set" "$got"
 
 echo
 printf '  %s passed, %s failed\n\n' "$PASS" "$FAIL"

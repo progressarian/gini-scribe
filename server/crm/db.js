@@ -50,6 +50,32 @@ export async function withCrmContext(crmUser, fn) {
 }
 
 /**
+ * Run `fn` as crm_registration — the front desk's role.
+ *
+ * Reception staff are not growth-team members and deliberately have no
+ * crm.users row: the narrowest CRM role that can browse doctors is
+ * `operations`, which can also read revenue. This role can do exactly two
+ * things, both granted in 2026-10-01_crm_registration.sql: execute the picker
+ * search, and write the patient's answer. There is no CRM identity to set,
+ * because none of its two powers consult one.
+ */
+export async function withRegistrationContext(fn) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SET LOCAL ROLE crm_registration");
+    const result = await fn((sql, params) => client.query(sql, params));
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
  * Map a Scribe login (public.doctors.id, carried in the existing JWT) to the
  * crm.users row that CRM policies key on.
  *

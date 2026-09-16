@@ -152,6 +152,12 @@ const ROUTE_CAPABILITIES = [
   ["/api/giniflow", CAP.GINIFLOW_VIEW],
   ["/api/obt-dashboard", CAP.OBT_OPS],
   ["/api/diabetes-champions", CAP.RECEPTION_OPS],
+  // The registration doctor picker. Listed before /api/crm so the growth CRM's
+  // own capability does not swallow it: front-desk staff answer "who referred
+  // you?" without being CRM users, so this rides on the same capability as the
+  // registration form it sits in.
+  ["/api/crm/registration", CAP.PATIENT_READ],
+  ["/api/crm", CAP.CRM_ACCESS],
   ["/api/patients", CAP.PATIENT_READ],
   ["/api/patients/directory-export", CAP.ADMIN],
   ["/api/documents", CAP.PATIENT_CHART],
