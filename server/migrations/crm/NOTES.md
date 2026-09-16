@@ -1,4 +1,8 @@
-# Gini Doctor Growth CRM — Phase 1 schema proposal
+# Gini Doctor Growth CRM — Phase 1 schema
+
+> This file is the design record — why the schema is shaped as it is, and what
+> went wrong while building it. For operating the system, see
+> **`docs/CRM_PHASE1.md`**.
 
 Status: **proposal, validated locally, awaiting approval.** Nothing has been
 applied to the live Supabase project (`vuukipgdegewpwucdgxa`) and nothing has

@@ -1,5 +1,8 @@
 # CRM Phase 1 — applied to production
 
+> Operating guide and Phase 2 backlog: **`docs/CRM_PHASE1.md`**.
+> Airplane-mode device test: **`docs/CRM_OFFLINE_TEST.md`**.
+
 **Applied 2026-09-16** to the Supabase project shared with Gini Scribe
 (`aws-1-ap-south-1.pooler.supabase.com`, PostgreSQL 17.6).
 
