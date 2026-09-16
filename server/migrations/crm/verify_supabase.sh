@@ -129,7 +129,12 @@ expect "$(as_owner "select count(*) from pg_index i join pg_class c on c.oid=i.i
 expect "$(as_owner "select count(*) from information_schema.columns where table_schema='crm' and table_name='doctors' and column_name in ('profile_complete','missing_fields','needs_verification','verification_note','import_batch_id');")" 5 "the five new doctor columns exist"
 expect "$(as_owner "select count(*) from information_schema.views where table_schema='crm' and table_name='v_doctors_needing_details';")" 1 "the rep task-list view exists"
 expect_err "$(as_owner "begin; insert into crm.doctors (hospital_id, full_name, mobile) select id,'Junk','xyz' from crm.hospitals; rollback;")" "doctors_mobile_valid" "an unparseable mobile is still rejected"
-expect "$(as_owner "select count(*) from crm.doctors;")" 0 "the doctor universe is still empty — nothing imported yet"
+# Was "the universe is still empty" while nothing had been imported. Now that
+# the first list is in, the durable claim is the invariant, not the count:
+# profile_complete is generated, so it can never disagree with the data.
+expect "$(as_owner "select count(*) from crm.doctors where profile_complete <> (crm.normalize_phone(mobile) is not null);")" 0 "profile_complete agrees with every doctor's mobile"
+expect "$(as_owner "select count(*) from crm.doctors d where d.deleted_at is null and d.territory_id is null;")" 0 "every doctor resolved to a territory"
+expect "$(as_owner "select count(*) from crm.doctors d left join crm.import_batches b on b.id=d.import_batch_id where d.import_batch_id is not null and b.id is null;")" 0 "every imported doctor points at a real batch"
 
 echo
 echo "Helpers"

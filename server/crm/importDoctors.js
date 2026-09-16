@@ -29,7 +29,7 @@ export const IMPORT_FIELDS = [
   {
     key: "qualifications",
     label: "Qualifications",
-    aliases: ["qualification", "degree", "degrees"],
+    aliases: ["qualification", "degree", "degrees", "qualificationnotes", "qualifications"],
   },
   {
     key: "clinic_name",
@@ -49,7 +49,16 @@ export const IMPORT_FIELDS = [
   {
     key: "notes",
     label: "Notes",
-    aliases: ["note", "remark", "remarks", "comment", "comments", "intelligence"],
+    aliases: [
+      "note",
+      "remark",
+      "remarks",
+      "comment",
+      "comments",
+      "intelligence",
+      "othernotes",
+      "otherdetails",
+    ],
   },
   {
     key: "transcription_confidence",
@@ -249,7 +258,17 @@ export async function previewBatch(crmUser, batchId) {
       }
       if (!r.mobile_e164 && status !== "error")
         flags.push("No mobile — imports as a skeleton record");
-      if (v.needs_verification) flags.push(`Transcription uncertain: ${v.verification_note}`);
+      if (v.needs_verification) {
+        flags.push(`Transcription uncertain: ${v.verification_note}`);
+      } else if (
+        v.transcription_confidence &&
+        !/^(high|confident|certain)$/i.test(v.transcription_confidence.trim())
+      ) {
+        // Not a "check", so it does not set needs_verification — but a note the
+        // transcriber bothered to write is not nothing, and the operator should
+        // see it while deciding.
+        flags.push(`Note from transcriber: ${v.transcription_confidence}`);
+      }
 
       out.push({
         row_number: r.row_number,
