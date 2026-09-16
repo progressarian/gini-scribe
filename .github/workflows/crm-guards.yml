@@ -30,6 +30,9 @@ jobs:
           node-version: "20"
       - run: node server/crm/checkNoDirectPool.mjs
       - run: node server/crm/checkVocabSync.mjs
+      # The offline queue needs no database — it is plain JS over localStorage,
+      # which the script stubs. Runs here so a regression is caught in seconds.
+      - run: node server/scripts/smoke-crm-offline-queue.mjs
 
   crm-schema:
     name: Compliance + RLS suite (pg${{ matrix.pg }})
@@ -106,3 +109,9 @@ jobs:
       - name: RLS verification suite
         working-directory: server/migrations/crm
         run: ./verify_rls.sh
+
+      - name: Visit logging and rep home
+        working-directory: server
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/crmtest
+        run: node scripts/smoke-crm-visits.mjs

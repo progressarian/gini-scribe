@@ -9,6 +9,7 @@ import {
   commitBatch,
 } from "../crm/importDoctors.js";
 import { crmContext } from "../crm/db.js";
+import { logVisit, fillDoctorGap, repHome, suggestedNextVisit } from "../crm/visits.js";
 import { handleError } from "../utils/errorHandler.js";
 
 const router = express.Router();
@@ -30,6 +31,43 @@ router.get("/crm/registration/referring-doctors", async (req, res) => {
 // Everything below is a CRM operation, so it runs as a CRM user through
 // withCrmContext. crmContext() refuses a caller with no crm.users row.
 const crm = crmContext();
+
+// ---- Rep home and visit logging (brief §5, §13) -------------------------
+router.get("/crm/home", crm, async (req, res) => {
+  try {
+    res.json(await repHome(req.crmUser));
+  } catch (e) {
+    handleError(res, e, "Rep home");
+  }
+});
+
+router.get("/crm/doctors/:id/next-visit", crm, async (req, res) => {
+  try {
+    res.json((await suggestedNextVisit(req.crmUser, req.params.id)) || {});
+  } catch (e) {
+    handleError(res, e, "Cadence lookup");
+  }
+});
+
+// Idempotent on the client-generated id, which is what lets the offline queue
+// retry without thinking. A replay returns 200 with duplicate:true rather than
+// a conflict, so a queue draining after a flaky send does not see an error and
+// keep the item forever.
+router.post("/crm/visits", crm, express.json({ limit: "1mb" }), async (req, res) => {
+  try {
+    res.json(await logVisit(req.crmUser, req.body));
+  } catch (e) {
+    handleError(res, e, "Log visit");
+  }
+});
+
+router.patch("/crm/doctors/:id", crm, express.json(), async (req, res) => {
+  try {
+    res.json(await fillDoctorGap(req.crmUser, req.params.id, req.body));
+  } catch (e) {
+    handleError(res, e, "Update doctor");
+  }
+});
 
 router.get("/crm/import/fields", crm, (_req, res) => res.json(IMPORT_FIELDS));
 

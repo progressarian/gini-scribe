@@ -158,6 +158,8 @@ export const PAGE_CAPABILITIES = {
   "/giniflow/station/rx": CAP.GINIFLOW_STATION_RX,
   "/giniflow/station/pharmacy": CAP.GINIFLOW_STATION_PHARMACY,
   "/giniflow/station/referrals": CAP.GINIFLOW_REFERRALS,
+  "/crm/home": CAP.CRM_ACCESS,
+  "/crm/visit/:doctorId": CAP.CRM_ACCESS,
   "/crm/import": CAP.CRM_ACCESS,
   "/flow/admin": CAP.ADMIN,
 };
@@ -177,6 +179,12 @@ export const ROLE_NAV_ALLOWLIST = {
   // their one station tile.
   [ROLES.ECHO_TECH]: ["/giniflow/stations"],
   [ROLES.XRAY_TECH]: ["/giniflow/stations"],
+  // The growth team hold CRM_ACCESS and nothing else, so a capability-driven
+  // nav would already be short — but it would still offer them the import
+  // wizard beside their home. A rep needs one door.
+  [ROLES.GROWTH_EXECUTIVE]: ["/crm/home"],
+  [ROLES.GROWTH_MANAGER]: ["/crm/home", "/crm/import"],
+  [ROLES.HEAD_OF_GROWTH]: ["/crm/home", "/crm/import"],
 };
 
 export const ROLE_HOME = {
@@ -184,6 +192,9 @@ export const ROLE_HOME = {
   [ROLES.RX]: "/giniflow/station/rx",
   [ROLES.ECHO_TECH]: "/giniflow/station/echo",
   [ROLES.XRAY_TECH]: "/giniflow/station/xray",
+  [ROLES.GROWTH_EXECUTIVE]: "/crm/home",
+  [ROLES.GROWTH_MANAGER]: "/crm/home",
+  [ROLES.HEAD_OF_GROWTH]: "/crm/home",
 };
 
 export function navAllowlistForRole(role) {

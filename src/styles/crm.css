@@ -270,3 +270,473 @@
   outline: 2px solid #1e40af;
   outline-offset: 2px;
 }
+
+/* ---- Rep screens — src/pages/crm/RepHomePage.jsx, AddVisitPage.jsx ----
+   Built for a phone held one-handed in a corridor, so: a single column, 44px
+   minimum touch targets throughout, and the primary action of every row on the
+   right thumb's side. Nothing here depends on hover. */
+
+.rep {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 12px 14px 96px;
+  color: #0f172a;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.rep__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.rep__eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+.rep__title {
+  margin: 2px 0 0;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.rep__pending {
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.rep__toast {
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #dcfce7;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+  font-size: 14px;
+  font-weight: 600;
+}
+.rep__err {
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  font-size: 13px;
+}
+.rep__loading {
+  padding: 40px 0;
+  text-align: center;
+  color: #94a3b8;
+}
+
+.rep__stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.rep__stat {
+  padding: 10px 6px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  text-align: center;
+}
+.rep__stat--warn {
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+.rep__stat-n {
+  display: block;
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.rep__stat-l {
+  display: block;
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.rep__tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #e2e8f0;
+  overflow-x: auto;
+}
+.rep__tab {
+  flex: 1 0 auto;
+  min-height: 44px;
+  padding: 10px 12px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  font-size: 14px;
+  font-weight: 600;
+  color: #64748b;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.rep__tab--on {
+  color: #1e40af;
+  border-bottom-color: #1e40af;
+}
+.rep__badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 11px;
+}
+
+.rep__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rep__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+}
+.rep__row-main {
+  flex: 1;
+  min-width: 0;
+}
+.rep__row-main strong {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+}
+.rep__row-sub {
+  display: block;
+  font-size: 12.5px;
+  color: #64748b;
+  margin-top: 1px;
+}
+.rep__row-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 5px;
+}
+.rep__row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+.rep__pri {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  vertical-align: middle;
+}
+.rep__pri--red {
+  background: #fee2e2;
+  color: #991b1b;
+}
+.rep__pri--amb {
+  background: #fef3c7;
+  color: #92400e;
+}
+.rep__pri--ink {
+  background: #e2e8f0;
+  color: #475569;
+}
+.rep__due,
+.rep__flag {
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.rep__due--red {
+  background: #fee2e2;
+  color: #991b1b;
+}
+.rep__due--amb {
+  background: #fef3c7;
+  color: #92400e;
+}
+.rep__due--grn {
+  background: #dcfce7;
+  color: #166534;
+}
+.rep__due--ink {
+  background: #e2e8f0;
+  color: #475569;
+}
+.rep__flag {
+  background: #f1f5f9;
+  color: #475569;
+}
+.rep__call {
+  min-height: 44px;
+  display: grid;
+  place-items: center;
+  padding: 0 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+  text-decoration: none;
+}
+.rep__empty {
+  padding: 28px 12px;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 14px;
+}
+
+.rep__filters {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.rep__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.rep__chips--scroll {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.rep__chip {
+  min-height: 40px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1.5px solid #cbd5e1;
+  background: #fff;
+  font-size: 14px;
+  color: #1e293b;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.rep__chip--on {
+  border-color: #1e40af;
+  background: #eff6ff;
+  color: #1e40af;
+  font-weight: 600;
+}
+.rep__chip--gap {
+  border-style: dashed;
+  border-color: #f59e0b;
+  color: #92400e;
+}
+
+.rep__bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #e2e8f0;
+  margin-bottom: 14px;
+}
+.rep__back {
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 18px;
+  cursor: pointer;
+}
+.rep__bar-title strong {
+  display: block;
+  font-size: 17px;
+  font-weight: 700;
+}
+.rep__bar-title span {
+  display: block;
+  font-size: 12.5px;
+  color: #64748b;
+}
+
+.rep__form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.rep__field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rep__label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #475569;
+}
+.rep__label em {
+  font-style: normal;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #94a3b8;
+}
+.rep__input,
+.rep__notes {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  font-size: 16px; /* 16px stops iOS zooming the viewport on focus */
+  border: 1.5px solid #cbd5e1;
+  border-radius: 8px;
+  font-family: inherit;
+}
+.rep__notes {
+  resize: vertical;
+}
+.rep__input:focus,
+.rep__notes:focus {
+  outline: none;
+  border-color: #1e40af;
+}
+.rep__gap {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.rep__saved {
+  font-size: 12px;
+  color: #166534;
+}
+.rep__dictate {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.rep__caption {
+  font-size: 12.5px;
+  color: #64748b;
+  font-style: italic;
+}
+.rep__hint {
+  font-size: 12px;
+  color: #94a3b8;
+}
+.rep__hint--center {
+  display: block;
+  text-align: center;
+  margin-top: 6px;
+}
+.rep__check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  font-size: 15px;
+}
+.rep__check input {
+  width: 20px;
+  height: 20px;
+}
+.rep__next {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rep__next-label {
+  font-size: 13px;
+  color: #475569;
+}
+
+.rep__btn {
+  min-height: 44px;
+  padding: 10px 18px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1e293b;
+  cursor: pointer;
+}
+.rep__btn--sm {
+  min-height: 40px;
+  padding: 8px 14px;
+  font-size: 13px;
+}
+.rep__btn--lg {
+  width: 100%;
+  min-height: 52px;
+  font-size: 16px;
+}
+.rep__btn--primary {
+  background: #1e40af;
+  border-color: #1e40af;
+  color: #fff;
+}
+.rep__btn--ghost {
+  background: none;
+  border-color: transparent;
+  color: #64748b;
+}
+.rep__btn--rec {
+  background: #fee2e2;
+  border-color: #fecaca;
+  color: #991b1b;
+}
+.rep__btn:disabled {
+  opacity: 0.5;
+}
+.rep__btn:focus-visible,
+.rep__tab:focus-visible,
+.rep__chip:focus-visible {
+  outline: 2px solid #1e40af;
+  outline-offset: 2px;
+}
+
+.rep__save {
+  position: sticky;
+  bottom: 0;
+  margin-top: 20px;
+  padding: 12px 0 max(12px, env(safe-area-inset-bottom));
+  background: linear-gradient(to top, #fff 70%, rgba(255, 255, 255, 0));
+}
+.rep__perf {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px solid #e2e8f0;
+  font-size: 12.5px;
+  color: #64748b;
+}
+.rep__link {
+  color: #1e40af;
+  font-weight: 600;
+}
