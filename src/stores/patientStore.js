@@ -118,7 +118,7 @@ const usePatientStore = create((set, get) => ({
   },
 
   // ── savePatient: create or update patient in DB ──
-  savePatient: async () => {
+  savePatient: async (referralSource = null) => {
     const { patient, dbPatientId } = get();
     if (!patient.name?.trim()) return { error: "Patient name is required" };
 
@@ -140,6 +140,11 @@ const usePatientStore = create((set, get) => ({
       govt_id_type: patient.govtIdType || null,
       address: patient.address || null,
     };
+
+    // Only on create. An existing patient already has their answer recorded,
+    // and crm.patient_referral_sources holds one row per patient — asking again
+    // on an edit would be a second, conflicting answer.
+    if (!dbPatientId && referralSource) payload.referral_source = referralSource;
 
     try {
       let result;

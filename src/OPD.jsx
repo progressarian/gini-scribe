@@ -8,6 +8,7 @@ import { SLOT_CATALOG, SLOT_REASON, isClinicalDoctor } from "./lib/slotAvailabil
 import { MOBILE_HINT, PHONE_DIGITS, isValidMobile, toEntryDigits } from "../shared/phone.js";
 import usePatientStore from "./stores/patientStore.js";
 import PdfViewerModal from "./components/visit/PdfViewerModal.jsx";
+import ReferralSourcePicker, { referralSourcePayload } from "./components/ReferralSourcePicker.jsx";
 import LiveDashboard from "./components/opd/LiveDashboard.jsx";
 import CohortDashboard from "./components/opd/CohortDashboard.jsx";
 import OpdRangeReport from "./components/opd/OpdRangeReport.jsx";
@@ -5105,6 +5106,7 @@ function NewPatientForm({ onCreated, onBack, showToast }) {
   const [showIds, setShowIds] = useState(false);
   const [saving, setSaving] = useState(false);
   const [errs, setErrs] = useState({});
+  const [referralSource, setReferralSource] = useState(null);
   const [p, setP] = useState({
     name: "",
     dob: "",
@@ -5167,10 +5169,19 @@ function NewPatientForm({ onCreated, onBack, showToast }) {
       showToast(p.phone ? MOBILE_HINT : "Phone number is required", "err");
       return;
     }
+    const referral = referralSourcePayload(referralSource);
+    if (!referral) {
+      setErrs({ referralSource: true });
+      showToast("Please record who referred this patient", "err");
+      return;
+    }
     setErrs({});
     setSaving(true);
     try {
-      const r = await apiFetch("/api/patients", { method: "POST", body: JSON.stringify(p) });
+      const r = await apiFetch("/api/patients", {
+        method: "POST",
+        body: JSON.stringify({ ...p, referral_source: referral }),
+      });
       const data = await r.json();
       if (data.id) {
         onCreated(data);
@@ -5410,6 +5421,17 @@ function NewPatientForm({ onCreated, onBack, showToast }) {
             </div>
           </div>
         )}
+      </div>
+
+      <div style={{ marginBottom: 14 }}>
+        <ReferralSourcePicker
+          value={referralSource}
+          onChange={(v) => {
+            setReferralSource(v);
+            if (errs.referralSource) setErrs((e) => ({ ...e, referralSource: false }));
+          }}
+          error={errs.referralSource ? "Please record who referred this patient" : null}
+        />
       </div>
 
       <div style={{ display: "flex", gap: 9 }}>

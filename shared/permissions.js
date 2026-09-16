@@ -72,6 +72,16 @@ export const CAPABILITIES = {
   DOSE_REVIEWS: "DOSE_REVIEWS", // dose change requests
   SIDE_EFFECTS: "SIDE_EFFECTS", // patient-reported side effects
   RECEPTION_OPS: "RECEPTION_OPS", // OPD queue, appointments, GHM ops, walk-ins
+  // The Doctor Growth CRM (docs/CRM_PLAN.md) — the physician-relations system
+  // in the `crm` schema. This gates the pages and API; which *rows* a person
+  // sees inside them is a separate question answered by their crm.users role
+  // and enforced by row-level security, because a route capability cannot
+  // express "only the doctors assigned to me".
+  //
+  // The registration doctor picker is deliberately NOT behind this. Front-desk
+  // staff answer "who referred you?" without being CRM users at all, so
+  // /api/crm/registration sits on PATIENT_READ alongside /api/patients.
+  CRM_ACCESS: "CRM_ACCESS",
   ANALYTICS: "ANALYTICS", // reports, clinical intelligence, dashboards
   MED_COLLECTION: "MED_COLLECTION", // pharmacy: mark medicine collection at the counter
   ADMIN: "ADMIN", // manage doctors/roles

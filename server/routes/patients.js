@@ -10,6 +10,7 @@ import { encryptAadhaar, decryptAadhaar, decryptAadhaarFull } from "../utils/aad
 import { isKnownScheme } from "../services/patientSchemes.js";
 import { validate } from "../middleware/validate.js";
 import { patientCreateSchema } from "../schemas/index.js";
+import { recordReferralSource } from "../crm/registration.js";
 import { requireDoctor, requireCapability } from "../middleware/auth.js";
 import { CAPABILITIES as CAP } from "../../shared/permissions.js";
 import { patientDirectory } from "../services/patientDirectory.js";
@@ -544,6 +545,19 @@ router.post("/patients", validate(patientCreateSchema), async (req, res) => {
       existing = (await pool.query("SELECT id FROM patients WHERE abha_id=$1", [p.abha_id]))
         .rows[0];
 
+    // Attribution is mandatory at registration. A rep-logged referral stays
+    // *claimed* until something confirms it, and this answer is what confirms
+    // it — a desk that skips the question leaves the Doctor 360 revenue figures
+    // unusable. Flow check-in is the one exemption: it resolves-or-creates
+    // mid-queue and must not stop to run a doctor picker, so those patients
+    // land in crm.v_attribution_unknown like every unattended path.
+    if (!existing && !p.referral_source && !p.allow_unattributed) {
+      return res.status(400).json({
+        error: "Please record who referred this patient",
+        field: "referral_source",
+      });
+    }
+
     // Auto-generate file_no if not provided and creating a new patient
     if (!existing && !n(p.file_no)) {
       const seq = await pool.query(
@@ -602,6 +616,9 @@ router.post("/patients", validate(patientCreateSchema), async (req, res) => {
       );
       const row = result.rows[0];
       if (row.aadhaar) row.aadhaar = decryptAadhaar(row.aadhaar);
+      if (p.referral_source) {
+        await recordReferralSource(row.id, p.referral_source, req.doctor?.doctor_id ?? null);
+      }
       res.json({ ...row, _isNew: true });
     }
   } catch (e) {
