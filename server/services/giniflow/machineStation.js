@@ -28,7 +28,19 @@ import {
 } from "../../../shared/machineStages.js";
 import { getMachines } from "./machineCatalog.js";
 import { UNDRAWN_SAMPLE_STATUSES } from "../../../shared/labStages.js";
-import { machineShowsHealthrayReports, labStepsAreManual } from "../../../shared/manualFloor.js";
+import {
+  machineShowsHealthrayReports,
+  labStepsAreManual,
+  bloodBeforeMachine,
+} from "../../../shared/manualFloor.js";
+import {
+  assertStationFree,
+  busyStations,
+  busyElsewhere,
+  busyReason,
+  revertStart,
+} from "./stationLock.js";
+import { publish } from "./eventHub.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate, labOnlyHiddenPredicate } from "./labOnlyVisits.js";
 import { hideLabOnlyPatients } from "./floorSettings.js";
 
@@ -241,7 +253,7 @@ async function assertReadyToStart(db, visitId, catalogue, machineId) {
       { status: 409 },
     );
   }
-  if (blood_not_drawn) {
+  if (bloodBeforeMachine() && blood_not_drawn) {
     throw Object.assign(
       new Error(
         `${name} is billed for blood as well — Lab 1 draws the sample before the ${machineName}`,
@@ -358,6 +370,11 @@ export async function getMachineQueue(
     [visitDate, search, LAB_ONLY_DOCTOR, labStepsAreManual(), hideLabOnly],
   );
 
+  const busy = await busyStations(
+    db,
+    rows.map((r) => r.visit_id),
+  );
+
   let all = rows.map((r) => {
     const paid = opensLabGate(r.payment_status);
     const stage = stageOf(r.sample_status);
@@ -374,7 +391,9 @@ export async function getMachineQueue(
     // upstream — that would trap a patient mid-test.
     const starting = next?.advanceTo === "in_progress";
     const needsVitals = starting && !r.lab_only && !r.vitals_recorded;
-    const needsBloodFirst = starting && r.blood_not_drawn;
+    const needsBloodFirst = starting && bloodBeforeMachine() && r.blood_not_drawn;
+    const ownStation = machineFor(catalogue, machineId)?.station || "machine_room";
+    const elsewhere = starting ? busyElsewhere(busy, r.visit_id, ownStation) : null;
     const blockedReason = !paid
       ? r.payment_status === "insurance_claim"
         ? `Insurance claim submitted — waiting for approval (₹${outstandingOf(r)} outstanding)`
@@ -383,15 +402,17 @@ export async function getMachineQueue(
         ? "Vitals not recorded yet — the patient goes to vitals first"
         : needsBloodFirst
           ? "Blood not drawn yet — Lab 1 collects before the machine"
-          : next?.needsPatient && !free
-            ? finished
-              ? "Patient has left the floor"
-              : `In the ${(COLUMN_NAME[columnForStatus(r.current_status)] || "").toLowerCase()} room — call once free`
-            : (next?.key === "done" || next?.key === "reported") &&
-                !hasEvidence &&
-                !machineHandsOver(catalogue, machineId)
-              ? "Type the values in or attach the report to finish this test"
-              : null;
+          : elsewhere
+            ? busyReason(elsewhere)
+            : next?.needsPatient && !free
+              ? finished
+                ? "Patient has left the floor"
+                : `In the ${(COLUMN_NAME[columnForStatus(r.current_status)] || "").toLowerCase()} room — call once free`
+              : (next?.key === "done" || next?.key === "reported") &&
+                  !hasEvidence &&
+                  !machineHandsOver(catalogue, machineId)
+                ? "Type the values in or attach the report to finish this test"
+                : null;
 
     return {
       orderId: r.id,
@@ -412,6 +433,7 @@ export async function getMachineQueue(
       steps: railFor(stage),
       nextAction: next && !blockedReason ? { to: next.advanceTo, label: next.advanceLabel } : null,
       blockedReason,
+      heldElsewhere: paid && !needsVitals && !needsBloodFirst && !!elsewhere,
       hasReport: !!r.report_doc_id || !!r.report_file_url,
       hasValues: !!r.has_values,
       canMarkDone: hasEvidence,
@@ -708,6 +730,63 @@ export async function machineCandidates(visitDate, q = null, db = pool) {
   }));
 }
 
+export async function cancelMachineStart(
+  orderId,
+  { actorId = null, actorRole = "machine", reason = null, station = null },
+  db = pool,
+) {
+  const client = await db.connect();
+  let visitId = null;
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query(
+      `SELECT o.sample_status, o.visit_id, o.kind,
+              COALESCE(t.names, ARRAY[]::text[]) AS names
+         FROM giniflow_lab_orders o
+         LEFT JOIN LATERAL (
+           SELECT array_agg(lt.test_name) AS names
+             FROM giniflow_lab_order_tests lt WHERE lt.lab_order_id = o.id
+         ) t ON TRUE
+        WHERE o.id = $1 FOR UPDATE OF o`,
+      [orderId],
+    );
+    if (!rows.length) throw Object.assign(new Error("Order not found"), { status: 404 });
+    const row = rows[0];
+    visitId = row.visit_id;
+    if (row.kind !== "machine") {
+      throw Object.assign(new Error("That order belongs to the lab, not the machine room"), {
+        status: 409,
+      });
+    }
+    const catalogue = await getMachines(client);
+    assertMachineInStation(
+      catalogue,
+      machineOf(
+        catalogue,
+        row.names.map((n) => ({ name: n })),
+      ),
+      station,
+    );
+    if (row.sample_status !== "in_progress") {
+      await client.query("COMMIT");
+      return { orderId, sampleStatus: row.sample_status, unchanged: true };
+    }
+    const back = await revertStart(client, orderId, "in_progress", {
+      actorId,
+      actorRole,
+      reason,
+    });
+    await client.query("COMMIT");
+    publish({ kind: "lab_order", visitId, orderId, status: "start_cancelled" });
+    return { orderId, sampleStatus: back, cancelled: true };
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 export async function advanceMachineTest(
   orderId,
   { to, actorId = null, reportUrl = null, station = null },
@@ -778,6 +857,13 @@ export async function advanceMachineTest(
     );
     assertMachineInStation(catalogue, orderMachine, station);
     if (toStage === "in_progress") {
+      const machine = machineFor(catalogue, orderMachine);
+      await assertStationFree(
+        client,
+        row.visit_id,
+        machine?.station || "machine_room",
+        `start the ${machine?.name || "test"}`,
+      );
       await assertReadyToStart(client, row.visit_id, catalogue, orderMachine);
       await assertMachineFree(client, orderMachine, row.visit_date, orderId);
     }

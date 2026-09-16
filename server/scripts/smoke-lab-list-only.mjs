@@ -85,6 +85,14 @@ check(
 
 try {
   await client.query("BEGIN");
+  await client.query(
+    await (
+      await import("fs/promises")
+    ).readFile(
+      new URL("../migrations/2026-10-06_lab_collection_started.sql", import.meta.url),
+      "utf8",
+    ),
+  );
   const { rows: d } = await client.query(
     `SELECT ((NOW() AT TIME ZONE 'Asia/Kolkata')::date + 124)::text AS day`,
   );
@@ -132,7 +140,7 @@ try {
   );
   check(
     "so the bench is offered the draw",
-    mine?.caseList?.[0]?.nextAction?.action === "sample_taken",
+    mine?.caseList?.[0]?.nextAction?.action === "drawing_started",
     mine?.caseList?.[0]?.nextAction?.label || "no action offered",
   );
   check(
@@ -195,9 +203,10 @@ try {
     ],
   );
   const { markLabCaseAction } = await import("../services/giniflow/labStation.js");
-  const tapped = await refusal(() =>
-    markLabCaseAction(stampedNo, { action: "sample_taken", actorId: null }, db),
-  );
+  const tapped = await refusal(async () => {
+    await markLabCaseAction(stampedNo, { action: "drawing_started", actorId: null }, db);
+    await markLabCaseAction(stampedNo, { action: "sample_taken", actorId: null }, db);
+  });
   check(
     "the bench may record the draw even on a case HealthRay has clocked",
     tapped === null,

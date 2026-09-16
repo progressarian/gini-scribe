@@ -34,6 +34,7 @@ import {
 import {
   useGiniflowPauseVisit,
   useGiniflowResumeVisit,
+  useGiniflowReleaseStation,
   useGiniflowSetPriority,
   useGiniflowReorder,
   useGiniflowMove,
@@ -305,6 +306,62 @@ function CardMenu({
   );
 }
 
+function ReleaseControl({ card, onRelease }) {
+  const ref = useRef(null);
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const close = useCallback(() => setOpen(false), []);
+  useDismissable(open, close, ref);
+  const ready = reason.trim().length >= 3;
+  const submit = () => {
+    if (!ready) return;
+    setOpen(false);
+    onRelease(reason.trim());
+    setReason("");
+  };
+
+  return (
+    <div className="pc-acts" ref={ref}>
+      <button
+        type="button"
+        className="pc-hold pc-release"
+        data-gf-toggle
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title="A station started a test and has not marked it done — free this patient for the other stations"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+      >
+        <span aria-hidden="true">🔓</span>
+        <span className="pc-hold-t">Release</span>
+      </button>
+      {open && (
+        <div className="pc-menu" role="dialog" aria-label={`Release ${card.name} from the station`}>
+          <div className="pcm-hd">Release from station</div>
+          <div className="pcm-reason">
+            <label htmlFor={`release-${card.id}`}>Why?</label>
+            <input
+              id={`release-${card.id}`}
+              type="text"
+              maxLength={160}
+              value={reason}
+              autoFocus
+              placeholder="e.g. started by mistake, machine down"
+              onChange={(e) => setReason(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && submit()}
+            />
+            <button type="button" className="pcm-apply" disabled={!ready} onClick={submit}>
+              Release
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Handing a samples-only patient to a consultant. It reuses the triage board's
 // own assign endpoint rather than adding a second way to write the same column —
 // which is also why an assignment made here shows up there, and why the board
@@ -357,6 +414,7 @@ function PatientCard({
   onMove,
   onPause,
   onResume,
+  onRelease,
   canAssign,
   staff,
   onAssign,
@@ -425,7 +483,7 @@ function PatientCard({
     <div
       className={`pc${flagged ? " flagged" : ""}${dragging ? " dragging" : ""}${
         card.priority && card.priority !== "normal" ? ` pri-${card.priority}` : ""
-      }`}
+      }${canMenu && isLab && card.heldByStation ? " pc-held" : ""}`}
       data-card-id={card.id}
       draggable={draggable}
       onDragStart={(e) => {
@@ -486,6 +544,7 @@ function PatientCard({
                         ? `⏳ ${t.label} — ${t.heldBy.label} ${t.heldBy.unpaid ? "to be paid and done first" : "first"}`
                         : `⏳ ${t.label}${t.budget ? ` · ${t.budget}m` : ""}`,
               )
+              .concat(card.labStillToCollect ? ["🩸 Lab 1 still to collect"] : [])
               .join(" · ")}
           </div>
         )}
@@ -640,6 +699,9 @@ function PatientCard({
           </button>
         </div>
       )}
+      {canMenu && isLab && card.heldByStation && (
+        <ReleaseControl card={card} onRelease={onRelease} />
+      )}
       {canAssign && isLabOnly && (
         <button
           type="button"
@@ -702,6 +764,7 @@ function Column({
   onPriority,
   onPause,
   onResume,
+  onRelease,
 }) {
   const bodyRef = useRef(null);
   const [dropIndex, setDropIndex] = useState(null);
@@ -811,6 +874,7 @@ function Column({
               onMove={(key) => onMove(card.id, key, card.name)}
               onPause={() => onPause(card.id, card.name)}
               onResume={() => onResume(card.id, card.name)}
+              onRelease={(reason) => onRelease(card.id, card.name, reason)}
               canAssign={canAssign}
               staff={staff}
               onAssign={onAssign}
@@ -1413,6 +1477,7 @@ export default function FlowManagerPage() {
   const { data, isLoading, isError, error, dataUpdatedAt } = useGiniflowBoard(date);
   const expired = error?.response?.status === 401;
   const pauseVisit = useGiniflowPauseVisit();
+  const releaseStation = useGiniflowReleaseStation();
   const resumeVisit = useGiniflowResumeVisit();
   const setPriorityMutation = useGiniflowSetPriority(date);
   const reorderMutation = useGiniflowReorder(date);
@@ -1548,6 +1613,15 @@ export default function FlowManagerPage() {
       {
         onSuccess: () =>
           showToast(`▶ ${name} resumed — the break is left out of their waiting time`),
+        onError: pauseErr,
+      },
+    );
+
+  const onRelease = (visitId, name, reason) =>
+    releaseStation.mutate(
+      { visitId, reason },
+      {
+        onSuccess: () => showToast(`🔓 ${name} released — any station can take them now`),
         onError: pauseErr,
       },
     );
@@ -1900,6 +1974,7 @@ export default function FlowManagerPage() {
               onPriority={onPriority}
               onPause={onPause}
               onResume={onResume}
+              onRelease={onRelease}
               canAssign={canAssign}
               staff={staff}
               onAssign={onAssign}

@@ -1,6 +1,6 @@
 import pool from "../../config/db.js";
 import { OPEN_LAB_CASES_SQL } from "./labStation.js";
-import { LAB_SAMPLE_FLOW, rungFor } from "../../../shared/labStages.js";
+import { LAB_SAMPLE_FLOW, UNDRAWN_SAMPLE_STATUSES } from "../../../shared/labStages.js";
 import { finalizeConsult } from "./finalize.js";
 import { advanceStatus, budgetColour } from "./statusEngine.js";
 import { getSlaConfig, budgetLookup } from "./board.js";
@@ -45,7 +45,7 @@ const GATING_ORDER_SQL = `o.urgency = 'today'`;
 const gatingOrders = (orders = []) => orders.filter((o) => o.urgency === "today").length;
 
 // Lab-track statuses that mean the sample has not been taken yet.
-const UNCOLLECTED = rungFor("pending").sampleStatuses;
+const UNCOLLECTED = UNDRAWN_SAMPLE_STATUSES;
 
 const LAB_STAGE_ORDER_SQL = LAB_SAMPLE_FLOW.filter((v) => v !== "uploaded")
   .map((v) => `'${v}'`)

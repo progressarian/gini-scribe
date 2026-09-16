@@ -60,6 +60,19 @@ function usePauseMutation(action) {
 export const useGiniflowPauseVisit = () => usePauseMutation("pause");
 export const useGiniflowResumeVisit = () => usePauseMutation("resume");
 
+export function useGiniflowReleaseStation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ visitId, reason }) =>
+      (await api.post(`/api/giniflow/stations/release/${visitId}`, { reason })).data,
+    onSettled: () => {
+      for (const key of ["board", "lab", "machine", "xray", "echo"]) {
+        queryClient.invalidateQueries({ queryKey: ["giniflow", key] });
+      }
+    },
+  });
+}
+
 export function useGiniflowSetPriority(date) {
   const queryClient = useQueryClient();
   return useMutation({

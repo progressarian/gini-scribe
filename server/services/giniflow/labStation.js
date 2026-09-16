@@ -1,4 +1,14 @@
 import pool from "../../config/db.js";
+import {
+  LAB_STATION,
+  assertStationFree,
+  busyStations,
+  busyElsewhere,
+  busyReason,
+  withVisitLock,
+  revertStart,
+} from "./stationLock.js";
+import { publish } from "./eventHub.js";
 import { t as clipText } from "../../utils/helpers.js";
 import { promoteLabReport, promoteQuietly } from "./promote.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config/storage.js";
@@ -340,8 +350,15 @@ export async function getLabQueue(
     [visitDate, search, LAB_ONLY_DOCTOR, hideLabOnly],
   );
 
+  const busy = await busyStations(
+    db,
+    rows.map((r) => r.visit_id),
+  );
   const orders = rows.map((r) => {
     const paid = opensLabGate(r.payment_status);
+    const elsewhere = busyElsewhere(busy, r.visit_id, LAB_STATION);
+    const next = paid ? roomAction(r.sample_status, room) : null;
+    const startHeld = next?.to === "drawing" && !!elsewhere;
     return {
       orderId: r.id,
       visitId: r.visit_id,
@@ -362,12 +379,16 @@ export async function getLabQueue(
       // Room-scoped as well: the collection room sees a sample it has sent, and
       // its next step belongs to the analyzer bench. Offering a button that
       // answers 403 is worse than offering none.
-      nextAction: paid ? roomAction(r.sample_status, room) : null,
-      blockedReason: paid
-        ? null
-        : r.payment_status === "insurance_claim"
+      nextAction: startHeld ? null : next,
+      blockedReason: !paid
+        ? r.payment_status === "insurance_claim"
           ? `Insurance claim submitted — waiting for approval (₹${outstandingOf(r)} outstanding)`
-          : `Waiting for reception to clear payment — ₹${outstandingOf(r)} outstanding`,
+          : `Waiting for reception to clear payment — ₹${outstandingOf(r)} outstanding`
+        : startHeld
+          ? busyReason(elsewhere)
+          : null,
+      heldElsewhere: startHeld,
+      canCancelStart: r.sample_status === "drawing" && (!room || room === LAB_ROOMS.COLLECTION),
       orderedAt: r.created_at ? new Date(r.created_at).toISOString() : null,
       since:
         r.since || r.updated_at || r.created_at
@@ -382,7 +403,8 @@ export async function getLabQueue(
         : COLUMN_NAME[columnForStatus(r.current_status)] ||
           STATUS_LABEL[r.current_status] ||
           r.current_status,
-      collectable: !inStationRoom(r) && !NEVER_CAME.includes(r.current_status),
+      collectable: !inStationRoom(r) && !NEVER_CAME.includes(r.current_status) && !elsewhere,
+      busyAt: elsewhere ? busyReason(elsewhere) : null,
     };
   });
 
@@ -664,6 +686,7 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
             COALESCE(p.file_no, max(c.raw_list_json->'patient'->>'healthray_uid')) AS file_no,
             p.age, p.sex,
             v.current_status, v.results_status, v.id IS NOT NULL AS on_floor,
+            v.id AS visit_id,
             (SELECT e.meta->>'source' FROM giniflow_visit_events e
                WHERE e.visit_id = v.id AND ${NOT_A_MARKER_SQL("e.status")}
                ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1) AS room_source,
@@ -759,8 +782,13 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
     [visitDate, q, LAB_ONLY_DOCTOR, hideLabOnly],
   );
 
+  const busy = await busyStations(
+    db,
+    rows.map((r) => r.visit_id),
+  );
   return rows.map((r) => {
     const counts = { pending: r.pending, partial: r.partial, reported: r.reported };
+    const elsewhere = r.on_floor ? busyElsewhere(busy, r.visit_id, LAB_STATION) : null;
     // The LEAST advanced case is the patient's stage: with three samples out, the
     // one nobody has collected is what the floor is waiting on, not the one that
     // has already reported.
@@ -849,7 +877,10 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
       finished: r.on_floor ? FINISHED.includes(r.current_status) : false,
       // Can the lab physically get to this patient now? Not while another
       // station has them, and not once they have gone home.
-      collectable: r.on_floor ? !inStationRoom(r) && !NEVER_CAME.includes(r.current_status) : true,
+      collectable: r.on_floor
+        ? !inStationRoom(r) && !NEVER_CAME.includes(r.current_status) && !elsewhere
+        : true,
+      busyAt: elsewhere ? busyReason(elsewhere) : null,
       // The floor is stopped on this sample. `moStation`'s `awaitingResults` and
       // `doctorStation`'s `waitingOnLab` already say so — same rule, same two
       // facts — and this screen was the only one that did not, so one patient
@@ -1011,6 +1042,47 @@ async function assertLabBillingCleared(db, visitId) {
   }
 }
 
+export async function cancelDrawing(
+  orderId,
+  { actorId = null, actorRole = "lab", reason = null, room = null },
+  db = pool,
+) {
+  assertRoomOwns(room, "drawing");
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query(
+      `SELECT sample_status, visit_id, kind FROM giniflow_lab_orders WHERE id = $1 FOR UPDATE`,
+      [orderId],
+    );
+    if (!rows.length) throw Object.assign(new Error("Order not found"), { status: 404 });
+    const { sample_status: status, visit_id: visitId, kind } = rows[0];
+    if (kind !== "lab") {
+      throw Object.assign(new Error("That order belongs to the machine room, not the lab"), {
+        status: 409,
+      });
+    }
+    if (status !== "drawing") {
+      await client.query("COMMIT");
+      return { orderId, sampleStatus: status, unchanged: true };
+    }
+    const back = await revertStart(client, orderId, "drawing", {
+      actorId,
+      actorRole,
+      reason,
+      syncTests: true,
+    });
+    await client.query("COMMIT");
+    publish({ kind: "lab_order", visitId, orderId, status: "start_cancelled" });
+    return { orderId, sampleStatus: back, cancelled: true };
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 export async function advanceSample(
   orderId,
   { to, actorId = null, reportUrl = null, room = null },
@@ -1066,7 +1138,20 @@ export async function advanceSample(
 
     // After the no-op check, so re-tapping a sample already collected stays a
     // no-op rather than becoming an error about where the patient is now.
+    if (to === "drawing") {
+      await assertPatientIsFree(client, visitId, "start the collection");
+      await assertVitalsRecorded(client, visitId);
+      await assertStationFree(client, visitId, LAB_STATION, "start the collection");
+    }
     if (to === "sample_collected") {
+      if (from !== "drawing") {
+        throw Object.assign(
+          new Error(
+            "Start the collection first — tap ▶ Start collection when the patient is at the bench",
+          ),
+          { status: 409 },
+        );
+      }
       await assertPatientIsFree(client, visitId, "collect the sample");
       await assertVitalsRecorded(client, visitId);
     }
@@ -1389,8 +1474,9 @@ export async function markLabCaseAction(
 
   const resolvedVisitId = await resolveVisitForCase(db, caseNo);
 
-  if (action === "sample_taken" && !undo) {
-    await assertPatientIsFree(db, resolvedVisitId, "collect the sample");
+  if ((action === "sample_taken" || action === "drawing_started") && !undo) {
+    const what = action === "drawing_started" ? "start the collection" : "collect the sample";
+    await assertPatientIsFree(db, resolvedVisitId, what);
     await assertVitalsRecorded(db, resolvedVisitId);
     await assertLabBillingCleared(db, resolvedVisitId);
   }
@@ -1404,20 +1490,30 @@ export async function markLabCaseAction(
         WHERE case_no = $1 AND action = ANY($2::text[])`,
       [caseNo, CASE_ACTIONS.slice(CASE_ACTIONS.indexOf(action))],
     );
+    if (resolvedVisitId) publish({ kind: "lab_order", visitId: resolvedVisitId, status: action });
     return { caseNo, action, undone: true };
   }
 
   // One row per case per action: tapping twice is the same statement, not two.
-  const { rows } = await db.query(
-    `INSERT INTO giniflow_lab_case_actions (case_no, action, actor_role, actor_id, note)
-     VALUES ($1, $2, $3, $4, $5)
-     ON CONFLICT (case_no, action) DO UPDATE
-       SET actor_role = EXCLUDED.actor_role,
-           actor_id   = EXCLUDED.actor_id,
-           note       = COALESCE(EXCLUDED.note, giniflow_lab_case_actions.note)
-     RETURNING action, created_at`,
-    [caseNo, action, actorRole, actorId, note],
-  );
+  const recordAction = (conn) =>
+    conn.query(
+      `INSERT INTO giniflow_lab_case_actions (case_no, action, actor_role, actor_id, note)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (case_no, action) DO UPDATE
+         SET actor_role = EXCLUDED.actor_role,
+             actor_id   = EXCLUDED.actor_id,
+             note       = COALESCE(EXCLUDED.note, giniflow_lab_case_actions.note)
+       RETURNING action, created_at`,
+      [caseNo, action, actorRole, actorId, note],
+    );
+  const { rows } =
+    action === "drawing_started" && resolvedVisitId
+      ? await withVisitLock(db, async (client) => {
+          await assertStationFree(client, resolvedVisitId, LAB_STATION, "start the collection");
+          return recordAction(client);
+        })
+      : await recordAction(db);
+  if (resolvedVisitId) publish({ kind: "lab_order", visitId: resolvedVisitId, status: action });
 
   // The card and the lab track come from two different tables (the journey's
   // own steps vs. this case's own action log) and nothing else kept them in

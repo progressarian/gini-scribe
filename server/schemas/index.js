@@ -630,6 +630,15 @@ export const giniflowMachineAdvanceSchema = z.object({
   reportUrl: z.string().url().max(2000).nullish(),
 });
 
+export const giniflowStartCancelSchema = z.object({
+  reason: z.string().trim().max(160).nullish(),
+  room: z.enum(["collection", "processing"]).nullish(),
+});
+
+export const giniflowStationReleaseSchema = z.object({
+  reason: z.string().trim().min(3, "Say why the patient is being released").max(160),
+});
+
 export const giniflowStationQuerySchema = z.object({
   group: stationGroup,
   room: z.enum(["collection", "processing"]).optional(),
@@ -808,6 +817,7 @@ export const giniflowWalkInSchema = z.object({
 export const giniflowSampleSchema = z.object({
   to: z.enum([
     "paid",
+    "drawing",
     "sample_collected",
     "sample_sent",
     "sample_received",

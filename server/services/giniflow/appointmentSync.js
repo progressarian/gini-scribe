@@ -99,7 +99,7 @@ async function observeHealthrayVitals(client, day) {
 // data, shared by both, which is the one thing the separation decision allows.
 
 const SYNCABLE = Object.keys(HEALTHRAY_STATUS_TO_CHAIN);
-const BILL_RECHECK_MS = 2 * 60 * 1000;
+const BILL_RECHECK_MS = 60 * 60 * 1000;
 const BILL_RECHECK_IN_FLIGHT = 2;
 const billRechecks = new Map();
 

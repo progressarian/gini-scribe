@@ -98,14 +98,16 @@ function ymd(v) {
   return m ? `${m[3]}-${m[2]}-${m[1]}` : "";
 }
 
-export function transactionsToBilling(rows, { appointmentId, date } = {}) {
+export function transactionsToBilling(rows, { appointmentId, date, wholeDay = false } = {}) {
   if (!Array.isArray(rows) || !rows.length) return null;
-  let txns = appointmentId
-    ? rows.filter((r) => String(r.appointment_id) === String(appointmentId))
-    : [];
-  if (!txns.length && date) {
-    const day = ymd(date);
-    txns = day ? rows.filter((r) => ymd(r.billing_date) === day) : [];
+  const day = ymd(date);
+  const sameAppointment = (r) =>
+    !!appointmentId && String(r.appointment_id) === String(appointmentId);
+  let txns = wholeDay
+    ? rows.filter((r) => sameAppointment(r) || (day && ymd(r.billing_date) === day))
+    : rows.filter(sameAppointment);
+  if (!txns.length && day && !wholeDay) {
+    txns = rows.filter((r) => ymd(r.billing_date) === day);
   }
   if (!txns.length) return null;
 

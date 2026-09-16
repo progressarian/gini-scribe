@@ -55,7 +55,7 @@ const refusal = async (fn) => {
 console.log("── The shared vocabulary ───────────────────────────────────");
 check(
   "one definition of a tube still in the patient",
-  UNDRAWN_SAMPLE_STATUSES.join(",") === "ordered,payment_pending,paid",
+  UNDRAWN_SAMPLE_STATUSES.join(",") === "ordered,payment_pending,paid,drawing",
   UNDRAWN_SAMPLE_STATUSES.join(" "),
 );
 
@@ -169,10 +169,10 @@ try {
   console.log("\n── G1 · the lab draw waits for vitals too ──────────────────");
   const labNoVitals = await make("LABNOVIT");
   const lOrder = await order(labNoVitals.visitId, "lab");
-  const r3 = await refusal(() => advanceSample(lOrder, { to: "sample_collected" }, db));
+  const r3 = await refusal(() => advanceSample(lOrder, { to: "drawing" }, db));
   check("the draw is refused", r3?.status === 409, r3?.message);
   await recordVitals(labNoVitals.visitId);
-  const ok2 = await refusal(() => advanceSample(lOrder, { to: "sample_collected" }, db));
+  const ok2 = await refusal(() => advanceSample(lOrder, { to: "drawing" }, db));
   check("and allowed once vitals are in", ok2 === null, ok2?.message);
 
   console.log("\n── G1 · samples-only patients are exempt ───────────────────");
@@ -180,10 +180,11 @@ try {
   // strand every one of them — 7 of 15 walk-ins on the day this was written.
   const labOnly = await make("LABONLY", { doctor: "Dr. Hospital Admin", status: "checked_in" });
   const loOrder = await order(labOnly.visitId, "lab");
-  const ok3 = await refusal(() => advanceSample(loOrder, { to: "sample_collected" }, db));
+  const ok3 = await refusal(() => advanceSample(loOrder, { to: "drawing" }, db));
   check("a samples-only draw goes ahead with no vitals", ok3 === null, ok3?.message);
 
-  console.log("\n── G2 · blood before the machine ───────────────────────────");
+  console.log("\n── G2 · blood before the machine (SCRIBE_BLOOD_BEFORE_MACHINE=1) ─");
+  process.env.SCRIBE_BLOOD_BEFORE_MACHINE = "1";
   const both = await make("BOTH");
   await recordVitals(both.visitId);
   const bothLab = await order(both.visitId, "lab");
@@ -204,11 +205,14 @@ try {
   check("the service refuses the start", r4?.status === 409, r4?.message);
 
   console.log("\n── G2 · once the tube is drawn, the machine opens ──────────");
+  await advanceSample(bothLab, { to: "drawing" }, db);
   await advanceSample(bothLab, { to: "sample_collected" }, db);
   const card4 = await machineCard(both.visitId);
   check("the Start button appears", card4?.nextAction?.to === "in_progress", card4?.blockedReason);
   const ok4 = await refusal(() => advanceMachineTest(bothMachine, { to: "in_progress" }, db));
   check("and the service accepts it", ok4 === null, ok4?.message);
+
+  delete process.env.SCRIBE_BLOOD_BEFORE_MACHINE;
 
   console.log("\n── G2 · a machine-only patient is never gated on blood ─────");
   const machineOnly = await make("MACHONLY");

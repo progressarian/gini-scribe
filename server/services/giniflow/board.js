@@ -100,6 +100,13 @@ const MACHINE_HOLD_SQL = (v, p, manualParam) => `
           AS lab_undrawn,
         (SELECT count(*)::int FROM giniflow_lab_orders o
           WHERE o.visit_id = ${v}.id AND o.urgency = 'today' AND o.kind = 'lab'
+            AND o.sample_status = 'drawing')
+        + (SELECT count(*)::int ${TODAY_CASES(v, p)}
+            AND ${CASE_ACTION("'drawing_started'")}
+            AND NOT ${CASE_ACTION("'sample_taken', 'report_uploaded'")})
+          AS lab_drawing,
+        (SELECT count(*)::int FROM giniflow_lab_orders o
+          WHERE o.visit_id = ${v}.id AND o.urgency = 'today' AND o.kind = 'lab'
             AND o.sample_status NOT IN ('uploaded', 'reported'))
         + (SELECT count(*)::int ${TODAY_CASES(v, p)}
             AND NOT ${CASE_ACTION("'report_uploaded'")}) AS lab_open,
@@ -226,6 +233,7 @@ const BOARD_SQL = `
          machine.vitals_at                         AS machine_vitals_at,
          machine.room_source                       AS room_source,
          machine.lab_undrawn,
+         machine.lab_drawing,
          machine.lab_open,
          machine.lab_drawn_at,
          machine.lab_ordered_at,
@@ -429,6 +437,7 @@ const LAB_HINT = {
   sample_received: null,
   sample_sent: "Waiting: lab to receive the sample",
   sample_collected: null,
+  drawing: null,
   paid: "Waiting: sample collection",
   ordered: "Waiting: payment request",
 };
@@ -448,6 +457,7 @@ const LAB_SUBTITLE = {
   ordered: "Ordered",
   payment_pending: "💰 Payment pending at reception",
   paid: "Paid · awaiting collection",
+  drawing: "🩸 Collecting now at Lab 1",
   sample_collected: "Sample collected",
   sample_sent: "📤 Sent to the lab",
   sample_received: "📥 Received at the lab",
@@ -584,6 +594,7 @@ export const placementFor = (
   if (card.finished) return "chain";
   if ((!vitalsAt && !card.labOnly) || NOT_YET_FOR_MACHINES.includes(card.status)) return "chain";
   if (MACHINE_BLOCKING_ROOMS.includes(card.status) && roomSource !== "healthray") return "chain";
+  if (card.machine?.running) return "machine";
   if (labUndrawn > 0) return "lab";
   if (card.machine) return "machine";
   if (labOpen > 0 && !card.labOnly) return "lab";
@@ -592,7 +603,7 @@ export const placementFor = (
 
 export const ownedByMachineRoom = (card, facts = {}) => placementFor(card, facts) === "machine";
 
-const labTrackFor = (card, { labUndrawn, labOrderedAt, labDrawnAt }, now) => {
+const labTrackFor = (card, { labUndrawn, labDrawing, labOrderedAt, labDrawnAt }, now) => {
   const since = labUndrawn > 0 ? labOrderedAt : labDrawnAt || labOrderedAt;
   const minutes = minutesSince(since, now);
   const base = card.lab || { source: "healthray", testCount: card.labTests?.length || 0 };
@@ -603,9 +614,19 @@ const labTrackFor = (card, { labUndrawn, labOrderedAt, labDrawnAt }, now) => {
     budget: base.budget ?? null,
     colour: base.colour ?? "grey",
     subtitle:
-      labUndrawn > 0
-        ? base.subtitle || "Awaiting collection"
-        : "⏳ Sample collected — waiting for lab reports",
+      labDrawing > 0
+        ? "🩸 Collecting now at Lab 1"
+        : labUndrawn > 0
+          ? [
+              base.subtitle || "Awaiting collection",
+              ...(card.machine?.tests || [])
+                .filter((t) => t.stage === "waiting")
+                .map((t) => t.label)
+                .filter((l, i, all) => all.indexOf(l) === i)
+                .slice(0, 3)
+                .map((l, i) => (i === 0 ? `also due: ${l}` : l)),
+            ].join(" · ")
+          : "⏳ Sample collected — waiting for lab reports",
     hint: labUndrawn > 0 ? (base.hint ?? null) : null,
     collected: labUndrawn === 0,
   };
@@ -648,6 +669,7 @@ const placeCard = (card, row, machines, now) => {
     roomSource: row.room_source,
     vitalsAt: row.machine_vitals_at,
     labUndrawn: row.lab_undrawn ?? 0,
+    labDrawing: row.lab_drawing ?? 0,
     labOpen: row.lab_open ?? 0,
     labOrderedAt: row.lab_ordered_at,
     labDrawnAt: row.lab_drawn_at,
@@ -670,6 +692,9 @@ const placeCard = (card, row, machines, now) => {
     lab: placement === "lab" ? labTrackFor(withMachine, facts, clock) : card.lab,
     placement,
     machineOwned: placement === "machine",
+    labStillToCollect: placement === "machine" && facts.labUndrawn > 0,
+    heldByStation:
+      placement === "machine" ? !!machine?.running : placement === "lab" && facts.labDrawing > 0,
   });
 };
 
@@ -684,7 +709,8 @@ export async function getTestsPlacement(visitId, now = new Date(), db = pool) {
               m.orders AS machine_orders, m.open_tests AS machine_open_tests,
               m.steps AS machine_steps,
               m.vitals_at AS machine_vitals_at, m.room_source,
-              m.lab_undrawn, m.lab_open, m.lab_unpaid, m.lab_drawn_at, m.lab_ordered_at
+              m.lab_undrawn, m.lab_drawing, m.lab_open, m.lab_unpaid, m.lab_drawn_at,
+              m.lab_ordered_at
          FROM giniflow_visits v
          JOIN patients p ON p.id = v.patient_id
          CROSS JOIN LATERAL (${MACHINE_HOLD_SQL("v", "p", "$3")}) m
@@ -1004,6 +1030,7 @@ export async function getTestSegments(visitId, now = new Date(), db = pool) {
 export async function getScribeLabMarks(visitId, db = pool) {
   const LABEL = {
     paid: "Lab payment cleared",
+    drawing: "Collection started",
     sample_collected: "Sample collected",
     sample_sent: "Sample sent to the lab",
     sample_received: "Sample received at the lab",
@@ -1012,6 +1039,7 @@ export async function getScribeLabMarks(visitId, db = pool) {
     uploaded: "Report uploaded",
   };
   const ACTION = {
+    drawing_started: "Collection started",
     sample_taken: "Sample collected",
     sample_sent: "Sample sent to the lab",
     sample_received: "Sample received at the lab",
@@ -1040,6 +1068,7 @@ export async function getScribeLabMarks(visitId, db = pool) {
   const refs = new Set(rows.map((r) => r.ref));
   const order = [
     "Lab payment cleared",
+    "Collection started",
     "Sample collected",
     "Sample sent to the lab",
     "Sample received at the lab",

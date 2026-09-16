@@ -78,6 +78,8 @@ export const doctorsWaitForTests = () =>
 export const pharmacyWaitsForRx = () =>
   manualFloor() && process.env.SCRIBE_PHARMACY_WAITS_FOR_RX !== "0";
 
+export const bloodBeforeMachine = () => process.env.SCRIBE_BLOOD_BEFORE_MACHINE === "1";
+
 // The lab's one exception (39-HYBRID-FLOOR-PLAN.md §15).
 //
 // The Chief and the consultants order lab tests in HealthRay, not here, so with

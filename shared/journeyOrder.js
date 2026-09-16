@@ -119,3 +119,20 @@ export function journeyProgress(steps, currentStatus, resumeStatus = null) {
     nextStarted: !!next && (next === here || next.status === "in_progress"),
   };
 }
+
+export const LAB_TEST_STEP_IDS = LAB_STEP_IDS;
+
+export function dropUnbilledTestSteps(
+  steps,
+  billedIds,
+  {
+    idOf = (s) => s.catalogId,
+    machineOf = (s) => s.machine,
+    keep = (s) => s.source !== "template" || s.billedIn === "healthray",
+  } = {},
+) {
+  const next = steps.filter(
+    (s) => keep(s) || !isTestStep(idOf(s), machineOf(s)) || billedIds.has(idOf(s)),
+  );
+  return next.length === steps.length ? steps : next;
+}

@@ -1430,6 +1430,9 @@
   margin-top: 4px;
   font-weight: 600;
 }
+.gf .lab-blocked.is-held {
+  color: var(--amb);
+}
 
 /* An uploaded order is a record, not a worklist item. */
 .gf .pt-card.is-uploaded {
@@ -8211,30 +8214,36 @@
   accent-color: var(--blu);
 }
 
-.consultation-type-label {
+.gf .consultation-type-label {
   display: block;
-  font-size: 16px;
-  font-weight: 700;
-  color: #111827;
-  margin-bottom: 8px;
-}
-
-.consultation-options {
-  display: flex;
-  align-items: center;
-  font-weight: 300;
   font-size: 12px;
-  gap: 16px;
-  margin-top: 8px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 6px;
 }
 
-.consultation-options label {
-  display: inline-flex !important;
+.gf .consultation-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  font-size: 12px;
+  color: var(--ink2);
+}
+
+.gf .consultation-options label {
+  display: inline-flex;
   align-items: center;
   gap: 6px;
-  white-space: nowrap;
+  cursor: pointer;
 }
 
-.consultation-options input[type="radio"] {
+.gf .consultation-options input[type="radio"] {
   margin: 0;
+  accent-color: var(--blu);
+}
+
+.gf .consultation-options label.is-disabled {
+  color: var(--ink4);
+  cursor: not-allowed;
 }

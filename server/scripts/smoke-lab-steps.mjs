@@ -43,14 +43,14 @@ try {
     `SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint
       WHERE conname = 'giniflow_lab_case_actions_action_check'`,
   );
-  const migrated = (con[0]?.def || "").includes("sample_sent");
+  const migrated = (con[0]?.def || "").includes("drawing_started");
   console.log(
     migrated
       ? "  --   the room-split migration is applied on this database"
       : "  ⚠️   the room-split migration is NOT applied — applying it inside this\n" +
           "       rolled-back transaction so the steps below can still be verified.\n" +
           "       Run it for real: node migrations/_runOne.mjs \\\n" +
-          "         migrations/2026-09-18_lab_room_split_actions.sql",
+          "         migrations/2026-10-06_lab_collection_started.sql",
   );
   if (!migrated) {
     await client.query(
@@ -60,8 +60,9 @@ try {
     await client.query(
       `ALTER TABLE giniflow_lab_case_actions
          ADD CONSTRAINT giniflow_lab_case_actions_action_check
-         CHECK (action IN ('chased', 'sample_taken', 'sample_sent', 'sample_received',
-                           'processing', 'results_ready', 'report_uploaded'))`,
+         CHECK (action IN ('chased', 'drawing_started', 'sample_taken', 'sample_sent',
+                           'sample_received', 'processing', 'results_ready',
+                           'report_uploaded'))`,
     );
   }
 
@@ -109,6 +110,8 @@ try {
   }
 
   console.log("\n── The collection room, in order ────────────────────────────");
+  const start = await refusal(() => mark("drawing_started", LAB_ROOMS.COLLECTION));
+  check("collection may start the draw", start === null, start?.message);
   const collect = await refusal(() => mark("sample_taken", LAB_ROOMS.COLLECTION));
   check("collection may record the sample", collect === null, collect?.message);
 

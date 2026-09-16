@@ -5,6 +5,7 @@ import {
   useMachineQueue,
   useMachineReconciliation,
   useAdvanceMachineTest,
+  useCancelMachineStart,
   useUploadMachineReport,
   useRemoveMachineReport,
   useMachineCandidates,
@@ -106,7 +107,11 @@ function TestCard({ order, onAdvance, onOpen, busy }) {
               .filter(Boolean)
               .join(" · ")}
           </span>
-          {order.blockedReason && <span className="mc-blocked">⏸ {order.blockedReason}</span>}
+          {order.blockedReason && (
+            <span className="mc-blocked">
+              {order.heldElsewhere ? "🔒" : "⏸"} {order.blockedReason}
+            </span>
+          )}
         </span>
         <span className="mc-right">
           <span className={`sp ${MACHINE_RUNGS.find((r) => r.key === order.stage)?.pill || ""}`}>
@@ -134,6 +139,7 @@ function TestPane({
   order,
   onClose,
   onAdvance,
+  onCancelStart,
   onUpload,
   onView,
   onRemoveReport,
@@ -204,7 +210,9 @@ function TestPane({
             <div className="dp-sec">
               <div className="dp-sec-title">Update status</div>
               {order.blockedReason ? (
-                <div className="dp-hint lab-blocked">⏸ {order.blockedReason}</div>
+                <div className="dp-hint lab-blocked">
+                  {order.heldElsewhere ? "🔒" : "⏸"} {order.blockedReason}
+                </div>
               ) : order.nextAction ? (
                 <>
                   <div className="dp-hint">
@@ -223,6 +231,16 @@ function TestPane({
                 <div className="dp-hint">
                   ✓ Report filed — this patient reads “Results ready” on every dashboard.
                 </div>
+              )}
+              {order.stage === "in_progress" && (
+                <button
+                  type="button"
+                  className="st-btn st-btn-g btn-full"
+                  disabled={busy}
+                  onClick={() => onCancelStart(order)}
+                >
+                  ↩ Cancel start — free the patient for other stations
+                </button>
               )}
             </div>
 
@@ -474,7 +492,8 @@ export default function MachineStationPage({ station = "machine", label = "Machi
   );
   const upload = useUploadMachineReport(station);
   const removeReport = useRemoveMachineReport(station);
-  const busy = advance.isPending || upload.isPending;
+  const cancelStart = useCancelMachineStart(station);
+  const busy = advance.isPending || upload.isPending || cancelStart.isPending;
 
   const showToast = (msg) => {
     setToast(msg);
@@ -562,6 +581,21 @@ export default function MachineStationPage({ station = "machine", label = "Machi
               : to === "reported"
                 ? `📤 ${order.name}'s report filed — the MO has been told`
                 : `✓ ${order.name} — ${to.replace(/_/g, " ")}`,
+          ),
+        onError: (e) =>
+          showToast(e?.response?.data?.error || "Could not update — nothing was changed"),
+      },
+    );
+
+  const onCancelStart = (order) =>
+    cancelStart.mutate(
+      { orderId: order.orderId },
+      {
+        onSuccess: (r) =>
+          showToast(
+            r.unchanged
+              ? `${order.name}'s test had already moved on`
+              : `↩ ${order.name} — start cancelled, other stations can call them`,
           ),
         onError: (e) =>
           showToast(e?.response?.data?.error || "Could not update — nothing was changed"),
@@ -985,6 +1019,7 @@ export default function MachineStationPage({ station = "machine", label = "Machi
           busy={busy}
           onClose={() => setOpenId(null)}
           onAdvance={onAdvance}
+          onCancelStart={onCancelStart}
           onUpload={onUpload}
           onRemoveReport={onRemoveReport}
           canRemoveReport={canRemoveReport}

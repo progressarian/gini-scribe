@@ -109,6 +109,18 @@ export function useAdvanceSample() {
   });
 }
 
+export function useCancelLabStart() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ orderId }) =>
+      (await api.post(`/api/giniflow/stations/lab/${orderId}/cancel-start`, {})).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "lab"] });
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "board"] });
+    },
+  });
+}
+
 // Confirm-and-attribute on a hospital-lab case. Nothing reaches HealthRay — this
 // records who chased the sample — so only the lab queries need refreshing.
 export function useMarkLabCaseAction() {

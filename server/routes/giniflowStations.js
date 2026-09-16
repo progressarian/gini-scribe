@@ -70,6 +70,8 @@ import {
   giniflowReferralCompleteSchema,
   giniflowInteractionAckSchema,
   giniflowRxPasteSchema,
+  giniflowStartCancelSchema,
+  giniflowStationReleaseSchema,
 } from "../schemas/index.js";
 import {
   getVitalsQueue,
@@ -99,7 +101,9 @@ import {
   deleteLabCaseReport,
   uploadReport,
   fetchStoredReport,
+  cancelDrawing,
 } from "../services/giniflow/labStation.js";
+import { releaseVisit } from "../services/giniflow/stationRelease.js";
 import {
   getReferrals,
   searchReferralPatients,
@@ -144,6 +148,7 @@ import {
   machineCandidates,
   removeMachineReport,
   assertOrderInStation,
+  cancelMachineStart,
 } from "../services/giniflow/machineStation.js";
 import {
   getDoctorQueue,
@@ -1508,6 +1513,44 @@ router.delete("/giniflow/stations/lab/case/:caseNo/report", benchGate, async (re
 });
 
 router.post(
+  "/giniflow/stations/lab/:orderId/cancel-start",
+  labGate,
+  validate(giniflowStartCancelSchema),
+  labBodyRoom,
+  async (req, res) => {
+    try {
+      res.json(
+        await cancelDrawing(req.params.orderId, {
+          actorId: req.doctor?.doctor_id ?? null,
+          reason: req.body.reason ?? null,
+          room: req.labRoom,
+        }),
+      );
+    } catch (e) {
+      handleError(res, e, "Gini Flow lab cancel start");
+    }
+  },
+);
+
+router.post(
+  "/giniflow/stations/release/:visitId",
+  requireCapability(CAP.GINIFLOW_MANAGE_QUEUE),
+  validate(giniflowStationReleaseSchema),
+  async (req, res) => {
+    try {
+      res.json(
+        await releaseVisit(req.params.visitId, {
+          actorId: req.doctor?.doctor_id ?? null,
+          reason: req.body.reason,
+        }),
+      );
+    } catch (e) {
+      handleError(res, e, "Gini Flow station release");
+    }
+  },
+);
+
+router.post(
   "/giniflow/stations/lab/:orderId/advance",
   labGate,
   validate(giniflowSampleSchema),
@@ -1675,6 +1718,25 @@ function mountMachineStationRoutes(router, { prefix, gate, station, reportRemove
         );
       } catch (e) {
         handleError(res, e, `Gini Flow add ${prefix} test`);
+      }
+    },
+  );
+
+  router.post(
+    `/giniflow/stations/${prefix}/:orderId/cancel-start`,
+    gate,
+    validate(giniflowStartCancelSchema),
+    async (req, res) => {
+      try {
+        res.json(
+          await cancelMachineStart(req.params.orderId, {
+            actorId: req.doctor?.doctor_id ?? null,
+            reason: req.body.reason ?? null,
+            station,
+          }),
+        );
+      } catch (e) {
+        handleError(res, e, `Gini Flow ${prefix} cancel start`);
       }
     },
   );

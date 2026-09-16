@@ -24,7 +24,11 @@ import JourneyBuilder from "../../components/giniflow/JourneyBuilder";
 import { useFlowStepCatalog, useFlowVisitTypes } from "../../queries/hooks/useFlow";
 import { stepPassesConditions } from "../../../shared/giniflowConditions.js";
 import { hasNotStarted } from "../../../shared/giniflowStatus.js";
-import { requiredStepsFirst, testsBeforeDoctors } from "../../../shared/journeyOrder.js";
+import {
+  dropUnbilledTestSteps,
+  requiredStepsFirst,
+  testsBeforeDoctors,
+} from "../../../shared/journeyOrder.js";
 import { categoryColor, categoryLabel } from "../../../shared/patientCategories.js";
 import {
   useJourneyPlan,
@@ -53,6 +57,7 @@ const SAMPLE_LABEL = {
   ordered: "Lab notified",
   payment_pending: "Lab notified",
   paid: "Lab collecting",
+  drawing: "Being drawn now",
   sample_collected: "Sample taken",
   processing: "In analyzer",
   results_ready: "Results ready",
@@ -485,9 +490,13 @@ const inJourneyOrder = (list, requires = {}) =>
     requiresOf: (s) => requires[s.catalogId] || null,
   });
 
-const withBilledSteps = (list, billed = [], requires = {}) => {
-  if (!billed.length) return inJourneyOrder(list, requires);
+const BILL_SETTLED = ["ok", "no_tests"];
+
+const withBilledSteps = (planned, bill = null, requires = {}) => {
+  const billed = bill?.steps || [];
   const ids = new Set(billed.map((b) => b.catalogId));
+  const list = BILL_SETTLED.includes(bill?.status) ? dropUnbilledTestSteps(planned, ids) : planned;
+  if (!billed.length) return inJourneyOrder(list, requires);
   const rest = list.filter((s) => !ids.has(s.catalogId));
   const merged = billed.map((b) => {
     const existing = list.find((s) => s.catalogId === b.catalogId);
@@ -510,13 +519,39 @@ const billNote = (bill, loading) => {
     const parts = [];
     if (bill.labTests.length) parts.push(`${bill.labTests.length} lab test(s)`);
     if (bill.machines.length) parts.push(bill.machines.join(", "));
-    return `✓ Added from the HealthRay bill: ${parts.join(" + ")} — mark the payment on the Payments tab before the lab can start`;
+    return `✓ Added from the HealthRay bill: ${parts.join(" + ")} — tests not on the bill were left out; mark the payment on the Payments tab before the lab can start`;
   }
+  if (bill.status === "no_tests")
+    return "Today's HealthRay bill has no lab or machine tests — test steps were left out of the journey";
   if (bill.status === "blocked")
     return `HealthRay is not reachable until ${clock(bill.blockedUntil)} — add tests by hand if the patient has any`;
-  if (bill.status === "no_bill") return "No lab or machine tests on today's HealthRay bill yet";
+  if (bill.status === "no_bill")
+    return "No HealthRay bill for today yet — test steps are kept and checked once the bill is in";
   if (bill.status === "no_patient") return "This patient is not linked to HealthRay yet";
   return "Could not read the HealthRay bill — add tests by hand if the patient has any";
+};
+
+const CONSULT_CHAIN = ["with_sd", "with_doctor"];
+
+const CONSULT_CHOICES = [
+  { value: "chief", label: "Chief Consultant Only" },
+  { value: "consultant", label: "Consultant Only" },
+  { value: "both", label: "Both" },
+];
+
+const consultSide = (step) => {
+  if (step.catalogId === "wait_sd") return "consultant";
+  if (step.catalogId === "wait_chief") return "chief";
+  if (step.catalogId === "rx_ready") return null;
+  if (step.role === "sd") return "consultant";
+  if (step.role === "chief" || step.role === "mo") return "chief";
+  return null;
+};
+
+const keepsForChoice = (step, choice) => {
+  if (choice === "both") return true;
+  const side = consultSide(step);
+  return !side || side === choice;
 };
 
 function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
@@ -524,7 +559,6 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   const [visitTypeId, setVisitTypeId] = useState(arrival.suggestedVisitTypeId || null);
   const [steps, setSteps] = useState(null);
   const [consultChoice, setConsultChoice] = useState("both");
-  const isOnline = visitCategory(arrival)?.label === "Online";
   // Answers to the template's conditions. Only the keys this type's template
   // actually uses ever appear, and every one starts true: the journey a desk
   // sees on open is the journey they saw before this gate existed, and saying
@@ -535,8 +569,8 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   const checkInWalkIn = useCheckInWalkIn();
   const saving = checkIn.isPending || checkInWalkIn.isPending;
   const { data: bill, isLoading: billLoading } = useHealthrayBill(arrival.patientId);
-  const billedSteps = useRef([]);
-  billedSteps.current = bill?.steps || [];
+  const billRef = useRef(null);
+  billRef.current = bill || null;
   const { data: catalog = [] } = useFlowStepCatalog();
   const requires = useRef({});
   requires.current = Object.fromEntries(
@@ -544,8 +578,7 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   );
 
   useEffect(() => {
-    if (bill?.steps?.length)
-      setSteps((current) => current && withBilledSteps(current, bill.steps, requires.current));
+    if (bill) setSteps((current) => current && withBilledSteps(current, bill, requires.current));
   }, [bill]);
 
   const askable = useMemo(
@@ -588,19 +621,7 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
       );
       const template = plan
         .filter((p) => p.included && stepPassesConditions(p, conditions))
-        .filter((p) => {
-          if (
-            consultChoice === "chief" &&
-            (p.catalogId === "wait_sd" || p.catalogId === "sd_consult")
-          )
-            return false;
-          if (
-            consultChoice === "consultant" &&
-            (p.catalogId === "wait_chief" || p.catalogId === "chief_consult")
-          )
-            return false;
-          return true;
-        })
+        .filter((p) => keepsForChoice(p, consultChoice))
         .map((p) => {
           const base = { ...p, ...(preassigned(p) || {}) };
           const prev = kept.get(p.catalogId);
@@ -616,11 +637,24 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
           // abandoned.
           ...(current || []).filter((s) => s.source === "added" || s.source === "custom"),
         ],
-        billedSteps.current,
+        billRef.current,
         requires.current,
       );
     });
   }, [plan, answerKey, arrival, conditions]);
+
+  const consultSteps = useMemo(
+    () => (plan || []).filter((p) => p.included && CONSULT_CHAIN.includes(p.chainStatus)),
+    [plan],
+  );
+  const choiceKeepsConsult = (choice) => consultSteps.some((p) => keepsForChoice(p, choice));
+  const visitType = (visitTypes || []).find((t) => t.id === visitTypeId) || null;
+  const showConsultChoice = !visitType?.for_online && consultSteps.length > 0;
+
+  useEffect(() => {
+    if (consultChoice !== "both" && consultSteps.length && !choiceKeepsConsult(consultChoice))
+      setConsultChoice("both");
+  }, [consultSteps]);
 
   const list = steps || [];
   const minutes = list.reduce((sum, s) => sum + (Number(s.minutes) || 0), 0);
@@ -674,43 +708,27 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
             <div className="wi-head">
               <strong>What is this visit?</strong>
             </div>
-            {!isOnline && (
+            {showConsultChoice && (
               <div className="dp-hint" style={{ marginBottom: "8px" }}>
                 <strong className="consultation-type-label">Consultation Type:</strong>
 
                 <div className="consultation-options">
-                  <label>
-                    <input
-                      type="radio"
-                      name="consultChoice"
-                      value="chief"
-                      checked={consultChoice === "chief"}
-                      onChange={() => setConsultChoice("chief")}
-                    />
-                    Chief Consultant Only
-                  </label>
-
-                  <label>
-                    <input
-                      type="radio"
-                      name="consultChoice"
-                      value="consultant"
-                      checked={consultChoice === "consultant"}
-                      onChange={() => setConsultChoice("consultant")}
-                    />
-                    Consultant Only
-                  </label>
-
-                  <label>
-                    <input
-                      type="radio"
-                      name="consultChoice"
-                      value="both"
-                      checked={consultChoice === "both"}
-                      onChange={() => setConsultChoice("both")}
-                    />
-                    Both
-                  </label>
+                  {CONSULT_CHOICES.map((c) => {
+                    const unavailable = !choiceKeepsConsult(c.value);
+                    return (
+                      <label key={c.value} className={unavailable ? "is-disabled" : undefined}>
+                        <input
+                          type="radio"
+                          name="consultChoice"
+                          value={c.value}
+                          checked={consultChoice === c.value}
+                          disabled={unavailable}
+                          onChange={() => setConsultChoice(c.value)}
+                        />
+                        {c.label}
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
             )}

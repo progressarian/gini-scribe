@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   useLabQueue,
   useAdvanceSample,
+  useCancelLabStart,
   useUploadReport,
   useMarkLabCaseAction,
   useUploadLabCaseReport,
@@ -312,7 +313,12 @@ function LabCard({ order, group, onAdvance, onUpload, onOpen, busy }) {
             </span>
           ))}
         </div>
-        {order.blockedReason && <div className="lab-blocked">💰 {order.blockedReason}</div>}
+        {order.blockedReason && (
+          <div className={`lab-blocked${order.heldElsewhere ? " is-held" : ""}`}>
+            {order.paid ? (order.heldElsewhere ? "🔒 " : "") : "💰 "}
+            {order.blockedReason}
+          </div>
+        )}
       </div>
       <div className="pc-r">
         {order.nextAction?.to === "uploaded" ? (
@@ -364,6 +370,7 @@ function LabCard({ order, group, onAdvance, onUpload, onOpen, busy }) {
 const TEST_STATUS_LABEL = {
   ordered: "Ordered",
   paid: "Ordered",
+  drawing: "Collecting",
   sample_collected: "Sample taken",
   processing: "In analyzer",
   results_ready: "Result ready",
@@ -404,6 +411,7 @@ function LabDetailPane({
   onViewReport,
   onClose,
   onAdvance,
+  onCancelStart,
   onUpload,
   onResultsSaved,
   onResultsFailed,
@@ -475,7 +483,10 @@ function LabDetailPane({
             <div className="dp-sec">
               <div className="dp-sec-title">Update status</div>
               {order.blockedReason ? (
-                <div className="dp-hint lab-blocked">💰 {order.blockedReason}</div>
+                <div className={`dp-hint lab-blocked${order.heldElsewhere ? " is-held" : ""}`}>
+                  {order.paid ? (order.heldElsewhere ? "🔒 " : "") : "💰 "}
+                  {order.blockedReason}
+                </div>
               ) : order.nextAction && order.nextAction.to !== "uploaded" ? (
                 <>
                   {/* The hint belongs to the step the button performs, so it is
@@ -495,6 +506,16 @@ function LabDetailPane({
                   >
                     {order.nextAction.label}
                   </button>
+                  {order.canCancelStart && (
+                    <button
+                      type="button"
+                      className="st-btn st-btn-g btn-full"
+                      disabled={busy}
+                      onClick={() => onCancelStart(order)}
+                    >
+                      ↩ Cancel start — free the patient for other stations
+                    </button>
+                  )}
                 </>
               ) : (
                 <div className="dp-hint">
@@ -657,6 +678,7 @@ const cannotBeWorked = (row) => stillNeedsThePatient(row) && !row.collectable;
 
 const blockedReason = (row) => {
   if (row.stage.key !== "pending") return null;
+  if (row.busyAt) return row.busyAt;
   if (row.inARoom) return `In the ${(row.station || "").toLowerCase()} room — collect once free`;
   if (row.finished) return "Patient has left — sample can no longer be taken";
   return null;
@@ -777,7 +799,11 @@ function HealthrayCard({ row, onOpen, readOnly = false }) {
             .join(" · ")}
         </div>
         <div className="pc-tests">🔬 {row.tests.join(" · ") || "No tests listed"}</div>
-        {blocked && <div className="lab-blocked">⏸ {blocked}</div>}
+        {blocked && (
+          <div className={`lab-blocked${row.busyAt ? " is-held" : ""}`}>
+            {row.busyAt ? "🔒" : "⏸"} {blocked}
+          </div>
+        )}
         <div className="steps">
           {row.steps.map((step, i) => (
             <span key={step.name}>
@@ -1055,7 +1081,8 @@ function HealthrayCasePane({
                         ? next.hint
                         : row.finished
                           ? "This patient has left the floor — the sample can no longer be taken."
-                          : `This patient is in the ${(row.station || "").toLowerCase()} room right now. Collect once they are free.`;
+                          : (row.busyAt && `🔒 ${row.busyAt}`) ||
+                            `This patient is in the ${(row.station || "").toLowerCase()} room right now. Collect once they are free.`;
                     return (
                       <>
                         <div className="dp-sec-title">Update status</div>
@@ -1230,6 +1257,7 @@ export default function LabRoom({ room = null }) {
   const rooming = ROOM_COPY[inRoom] || ROOM_COPY.all;
   const live = useGiniflowLive({ date: data?.date });
   const advance = useAdvanceSample();
+  const cancelStart = useCancelLabStart();
   const upload = useUploadReport();
   const [openOrderId, setOpenOrderId] = useState(null);
   const [openCaseId, setOpenCaseId] = useState(null);
@@ -1327,6 +1355,21 @@ export default function LabRoom({ room = null }) {
               : to === "uploaded"
                 ? `📤 ${order.name}'s report uploaded — MO and doctor now see "Results ready"`
                 : `✓ ${order.name} — ${to.replace(/_/g, " ")}`,
+          ),
+        onError: (e) =>
+          showToast(e?.response?.data?.error || "Could not update — nothing was changed"),
+      },
+    );
+
+  const onCancelStart = (order) =>
+    cancelStart.mutate(
+      { orderId: order.orderId },
+      {
+        onSuccess: (r) =>
+          showToast(
+            r.unchanged
+              ? `${order.name}'s collection had already moved on`
+              : `↩ ${order.name} — collection start cancelled, other stations can call them`,
           ),
         onError: (e) =>
           showToast(e?.response?.data?.error || "Could not update — nothing was changed"),
@@ -1807,9 +1850,10 @@ export default function LabRoom({ room = null }) {
         onViewReport={setViewingDoc}
         order={openOrder}
         group={openGroup}
-        busy={advance.isPending || upload.isPending}
+        busy={advance.isPending || upload.isPending || cancelStart.isPending}
         onClose={closePane}
         onAdvance={onAdvance}
+        onCancelStart={onCancelStart}
         onUpload={onUpload}
         onResultsSaved={onResultsSaved}
         onResultsFailed={onResultsFailed}

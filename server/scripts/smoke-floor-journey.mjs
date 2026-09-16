@@ -147,9 +147,7 @@ try {
     [lab[0].id, mach[0].id],
   );
 
-  const noVitalsDraw = await refusal(() =>
-    advanceSample(lab[0].id, { to: "sample_collected" }, db),
-  );
+  const noVitalsDraw = await refusal(() => advanceSample(lab[0].id, { to: "drawing" }, db));
   check("before vitals, Lab 1 cannot draw", noVitalsDraw?.status === 409, noVitalsDraw?.message);
   const noVitalsMachine = await refusal(() =>
     advanceMachineTest(mach[0].id, { to: "in_progress" }, db),
@@ -162,16 +160,29 @@ try {
     [vid],
   );
 
-  const stillBlood = await refusal(() => advanceMachineTest(mach[0].id, { to: "in_progress" }, db));
-  check(
-    "after vitals the machine STILL waits — blood is billed too",
-    stillBlood?.status === 409 && /lab 1|blood/i.test(stillBlood.message),
-    stillBlood?.message,
+  const machineFirst = await refusal(() =>
+    advanceMachineTest(mach[0].id, { to: "in_progress" }, db),
   );
+  check(
+    "after vitals the machine may start before the blood is drawn",
+    machineFirst === null,
+    machineFirst?.message,
+  );
+  const labWaits = await refusal(() => advanceSample(lab[0].id, { to: "drawing" }, db));
+  check(
+    "and Lab 1 waits while the machine has the patient",
+    labWaits?.status === 409,
+    labWaits?.message,
+  );
+  await client.query(
+    `INSERT INTO lab_results (lab_order_id, patient_id, test_name, result, test_date)
+     VALUES ($1, $2, 'ABI Left', 1.0, CURRENT_DATE)`,
+    [mach[0].id, patientId],
+  );
+  await advanceMachineTest(mach[0].id, { to: "done" }, db);
+  await advanceSample(lab[0].id, { to: "drawing" }, db);
   const drawn = await refusal(() => advanceSample(lab[0].id, { to: "sample_collected" }, db));
-  check("Lab 1 draws the sample", drawn === null, drawn?.message);
-  const started = await refusal(() => advanceMachineTest(mach[0].id, { to: "in_progress" }, db));
-  check("and only then does the machine open", started === null, started?.message);
+  check("once the machine is done, Lab 1 draws the sample", drawn === null, drawn?.message);
 
   console.log("\n── 5 · The patient waits for the reports ───────────────────");
   const { rows: before } = await client.query(
@@ -226,6 +237,7 @@ try {
     check(`a person cannot move them to ${step}`, blocked?.status === 409, blocked?.message);
   }
   // Report filed → the gate opens.
+  await advanceSample(extra[0].id, { to: "drawing" }, db);
   await advanceSample(extra[0].id, { to: "sample_collected" }, db);
   for (const to of ["sample_sent", "sample_received", "processing", "results_ready", "uploaded"]) {
     await advanceSample(extra[0].id, { to }, db);

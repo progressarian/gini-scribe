@@ -1029,6 +1029,19 @@
 .gf .pc-open .pc-top {
   padding-right: 46px;
 }
+.gf .pc-held .pc-open .pc-top {
+  padding-right: 66px;
+}
+.gf .pc-hold.pc-release,
+.gf .pc:hover .pc-hold.pc-release {
+  opacity: 1;
+  color: var(--amb, #d97706);
+  background: var(--amb-l, #fffbeb);
+  border-color: currentColor;
+}
+.gf .pc-hold.pc-release .pc-hold-t {
+  display: inline;
+}
 
 /* Priority: a chip on the card and a matching left edge, so an urgent patient
    is findable from the doorway as well as readable up close (GF-16 — the colour

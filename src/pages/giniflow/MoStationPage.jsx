@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Line, LineChart, ResponsiveContainer, Tooltip, YAxis } from "recharts";
 import { CHAIN } from "../../../shared/giniflowStatus";
-import { rungFor } from "../../../shared/labStages.js";
+import { UNDRAWN_SAMPLE_STATUSES } from "../../../shared/labStages.js";
 import { moActions } from "../../lib/moActions.js";
 import {
   useMoQueue,
@@ -169,7 +169,7 @@ function GroupHead({ icon, title, sub, count, open, onToggle, id }) {
 
 // Lab-track statuses that mean the sample has not been taken yet — the server
 // refuses a repeat of any test still sitting in one of them.
-const UNCOLLECTED = new Set(rungFor("pending").sampleStatuses);
+const UNCOLLECTED = new Set(UNDRAWN_SAMPLE_STATUSES);
 
 const URGENCY = [
   { key: "today", label: "Today → lab now" },
@@ -284,6 +284,7 @@ const LAB_STAGE = {
   ordered: "ordered — not paid yet",
   payment_pending: "waiting on payment",
   paid: "paid — sample not drawn yet",
+  drawing: "being drawn at Lab 1 now",
   sample_collected: "sample taken, not sent yet",
   sample_sent: "sent to the lab",
   sample_received: "received at the lab",

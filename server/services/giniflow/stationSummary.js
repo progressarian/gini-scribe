@@ -3,6 +3,9 @@ import { getSlaConfig, getDayBoard, getBottleneck, boardClock } from "./board.js
 import { getTriageSummary } from "./triage.js";
 import { getMachines, stationOrderCounts } from "./machineCatalog.js";
 import { machinesForStation } from "../../../shared/machineStages.js";
+import { UNDRAWN_SAMPLE_STATUSES } from "../../../shared/labStages.js";
+
+const UNDRAWN_SQL = UNDRAWN_SAMPLE_STATUSES.map((s) => `'${s}'`).join(",");
 
 // The counts on the launcher tiles. One query set for the whole floor, so the
 // landing screen costs the same whether a coordinator holds one station or all
@@ -28,7 +31,7 @@ export async function getStationSummary(visitDate, db = pool) {
          AS payment_pending,
        count(*) FILTER (WHERE o.kind = 'lab'
                           AND o.payment_status IN ('paid','claim_approved')
-                          AND o.sample_status IN ('ordered','payment_pending','paid'))::int AS to_collect,
+                          AND o.sample_status IN (${UNDRAWN_SQL}))::int AS to_collect,
        count(*) FILTER (WHERE o.kind = 'machine'
                           AND o.sample_status IN ('ordered','payment_pending','paid'))::int
          AS machine_waiting,

@@ -9,7 +9,7 @@ import {
 import { advanceStatus } from "./statusEngine.js";
 import { labStepsAreManual } from "../../../shared/manualFloor.js";
 import { genVisitToken } from "../flow/journey.js";
-import { LAB_RUNGS, stageIndexOf, rungFor } from "../../../shared/labStages.js";
+import { LAB_RUNGS, stageIndexOf, UNDRAWN_SAMPLE_STATUSES } from "../../../shared/labStages.js";
 import { machineFor } from "../../../shared/machineStages.js";
 import {
   testsBeforeDoctors,
@@ -19,6 +19,7 @@ import {
 import { getMachines } from "./machineCatalog.js";
 import { addMachineTestOn } from "./machineStation.js";
 import { testPricesFor, schemeForVisit } from "../pricing.js";
+import { storedBill, stepsAllowedByBill } from "./patientBill.js";
 
 const DRAWN_STATUS_SQL = LAB_RUNGS.filter((r) => stageIndexOf(r.key) >= stageIndexOf("collected"))
   .flatMap((r) => r.sampleStatuses)
@@ -228,7 +229,7 @@ const insertSteps = async (client, visitId, steps) => {
 // clearing in one breath would make the billing gate a formality — so these
 // land on the payment queue like a doctor's order, and Lab 1 and the machine
 // room refuse to start until the money is recorded.
-const UNCOLLECTED = rungFor("pending").sampleStatuses;
+const UNCOLLECTED = UNDRAWN_SAMPLE_STATUSES;
 
 const labTestsOf = (steps) => [
   ...new Set(
@@ -366,19 +367,24 @@ const uniqueToken = async (client) => {
 // never cost the check-in.
 export async function checkInWithJourney(
   visitId,
-  { visitTypeId = null, steps = [], actorId = null, actorRole = "reception" },
+  { visitTypeId = null, steps: askedSteps = [], actorId = null, actorRole = "reception" },
   db = pool,
 ) {
   const client = await db.connect();
   try {
     await client.query("BEGIN");
     const existing = await client.query(
-      `SELECT v.current_status,
+      `SELECT v.current_status, v.patient_id, v.visit_date,
               (SELECT count(*)::int FROM giniflow_visit_steps s WHERE s.visit_id = v.id) AS steps
          FROM giniflow_visits v WHERE v.id = $1 FOR UPDATE`,
       [visitId],
     );
     if (!existing.rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
+    const steps = stepsAllowedByBill(
+      askedSteps,
+      await storedBill(existing.rows[0].patient_id, existing.rows[0].visit_date, client),
+      await getMachines(client),
+    );
     const current = existing.rows[0].current_status;
     // A second press at a busy counter must not give the patient two journeys.
     const alreadyPlanned = existing.rows[0].steps > 0;
@@ -488,7 +494,7 @@ export async function checkInWithJourney(
 // a feature only the patients reception happened to press a button for ever got.
 export async function ensurePlan(visitId, db = pool) {
   const { rows } = await db.query(
-    `SELECT v.id, v.visit_type_id, v.current_status,
+    `SELECT v.id, v.visit_type_id, v.current_status, v.patient_id, v.visit_date,
             -- Completed bookings only, and never appointments.is_walkin — the
             -- reasons are on ARRIVAL_SELECT in receptionStation.js, with the
             -- numbers in src/lib/flowAppointmentType.js.
@@ -526,7 +532,11 @@ export async function ensurePlan(visitId, db = pool) {
     ));
   if (!visitTypeId) return { seeded: false };
 
-  const plan = (await defaultPlan(visitTypeId, db)).filter((s) => s.included);
+  const plan = stepsAllowedByBill(
+    (await defaultPlan(visitTypeId, db)).filter((s) => s.included),
+    await storedBill(visit.patient_id, visit.visit_date, db),
+    await getMachines(db),
+  );
   if (!plan.length) return { seeded: false };
 
   const client = await db.connect();
@@ -547,7 +557,7 @@ export async function ensurePlan(visitId, db = pool) {
     await insertSteps(
       client,
       visitId,
-      plan.map((s) => ({ ...s, source: "auto" })),
+      plan.map((s) => ({ ...s, source: "template" })),
     );
     await client.query(
       `UPDATE giniflow_visits
