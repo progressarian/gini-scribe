@@ -65,10 +65,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - name: Install psql client
         run: |
           sudo apt-get update -qq
           sudo apt-get install -yqq postgresql-client
+
+      # The visit suite runs the real server modules, so it needs the server's
+      # own dependencies — the repo keeps two separate node_modules trees.
+      - name: Install server dependencies
+        working-directory: server
+        run: npm install --no-audit --no-fund
 
       - name: Apply the CRM migration chain
         working-directory: server/migrations
