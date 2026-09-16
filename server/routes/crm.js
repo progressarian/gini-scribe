@@ -9,6 +9,13 @@ import {
   commitBatch,
 } from "../crm/importDoctors.js";
 import { crmContext } from "../crm/db.js";
+import {
+  createReferral,
+  advanceReferral,
+  openReferrals,
+  referralDetail,
+  serviceLines,
+} from "../crm/referrals.js";
 import { logVisit, fillDoctorGap, repHome, suggestedNextVisit, doctor360 } from "../crm/visits.js";
 import { handleError } from "../utils/errorHandler.js";
 
@@ -38,6 +45,49 @@ router.get("/crm/home", crm, async (req, res) => {
     res.json(await repHome(req.crmUser));
   } catch (e) {
     handleError(res, e, "Rep home");
+  }
+});
+
+// ---- Referral capture and the patient journey (brief §6, §7) ------------
+router.get("/crm/service-lines", crm, async (req, res) => {
+  try {
+    res.json(await serviceLines(req.crmUser));
+  } catch (e) {
+    handleError(res, e, "Service lines");
+  }
+});
+
+router.get("/crm/referrals", crm, async (req, res) => {
+  try {
+    res.json(await openReferrals(req.crmUser, { limit: req.query.limit }));
+  } catch (e) {
+    handleError(res, e, "Open referrals");
+  }
+});
+
+router.post("/crm/referrals", crm, express.json(), async (req, res) => {
+  try {
+    res.json(await createReferral(req.crmUser, req.body));
+  } catch (e) {
+    handleError(res, e, "Log referral");
+  }
+});
+
+router.get("/crm/referrals/:id", crm, async (req, res) => {
+  try {
+    res.json(await referralDetail(req.crmUser, req.params.id));
+  } catch (e) {
+    handleError(res, e, "Referral");
+  }
+});
+
+// The journey control. `lost` without a reason is refused by the database, not
+// just by this handler.
+router.post("/crm/referrals/:id/status", crm, express.json(), async (req, res) => {
+  try {
+    res.json(await advanceReferral(req.crmUser, req.params.id, req.body));
+  } catch (e) {
+    handleError(res, e, "Advance referral");
   }
 });
 

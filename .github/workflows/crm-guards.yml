@@ -89,7 +89,8 @@ jobs:
                    2026-10-01_crm_registration.sql \
                    2026-10-03_crm_registration_record_fn.sql \
                    2026-10-02_crm_inbound_attribution_comments.sql \
-                   2026-10-04_crm_doctor_skeleton_records.sql; do
+                   2026-10-04_crm_doctor_skeleton_records.sql \
+                   2026-10-05_crm_referral_capture.sql; do
             echo "== $f"
             psql "$CRM_DSN" -v ON_ERROR_STOP=1 -q -f "$f"
           done
@@ -103,7 +104,8 @@ jobs:
                    2026-10-01_crm_registration.sql \
                    2026-10-03_crm_registration_record_fn.sql \
                    2026-10-02_crm_inbound_attribution_comments.sql \
-                   2026-10-04_crm_doctor_skeleton_records.sql; do
+                   2026-10-04_crm_doctor_skeleton_records.sql \
+                   2026-10-05_crm_referral_capture.sql; do
             psql "$CRM_DSN" -v ON_ERROR_STOP=1 -q -f "$f"
           done
           echo "every migration re-ran cleanly" 
@@ -119,6 +121,12 @@ jobs:
       - name: RLS verification suite
         working-directory: server/migrations/crm
         run: ./verify_rls.sh
+
+      - name: Referral capture and attribution
+        working-directory: server
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/crmtest
+        run: node scripts/smoke-crm-referrals.mjs
 
       - name: Visit logging and rep home
         working-directory: server

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import api from "../../services/api.js";
+import ReferralStatusControl from "../../components/crm/ReferralStatusControl.jsx";
 import {
   DOCTOR_PRIORITIES,
   RELATIONSHIP_STAGES,
@@ -105,6 +106,12 @@ export default function Doctor360Page() {
           <span className="rep__flag">No number yet</span>
         )}
         <button
+          className="rep__btn rep__btn--sm"
+          onClick={() => navigate(`/crm/referral/${d.id}?name=${encodeURIComponent(d.full_name)}`)}
+        >
+          Add referral
+        </button>
+        <button
           className="rep__btn rep__btn--primary rep__btn--sm"
           onClick={() => navigate(`/crm/visit/${d.id}?name=${encodeURIComponent(d.full_name)}`)}
         >
@@ -175,7 +182,7 @@ export default function Doctor360Page() {
                 <span className="d360__event-kind">{labelFor(e)}</span>
               </div>
               {e.kind === "visit" && <VisitBody v={e} />}
-              {e.kind === "referral" && <ReferralBody r={e} />}
+              {e.kind === "referral" && <ReferralBody r={e} onChanged={load} />}
               {e.kind === "task" && <div className="d360__event-body">{e.title}</div>}
               {e.kind === "stage" && (
                 <div className="d360__event-body">
@@ -237,7 +244,7 @@ function VisitBody({ v }) {
   );
 }
 
-function ReferralBody({ r }) {
+function ReferralBody({ r, onChanged }) {
   const attr = attributionStatusMeta(r.attribution_status);
   return (
     <div className="d360__event-body">
@@ -247,6 +254,9 @@ function ReferralBody({ r }) {
         {attr && <span className={`d360__tag d360__tag--${attr.tone}`}>{attr.short}</span>}
       </div>
       {r.patient_name_raw && <p className="d360__notes">{r.patient_name_raw}</p>}
+      {r.status !== "closed" && r.status !== "lost" && (
+        <ReferralStatusControl referral={r} onChanged={onChanged} />
+      )}
     </div>
   );
 }

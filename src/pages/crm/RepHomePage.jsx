@@ -2,6 +2,8 @@ import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import api from "../../services/api.js";
 import { startAutoDrain, pendingCount } from "../../crm/offlineQueue.js";
+import ReferralStatusControl from "../../components/crm/ReferralStatusControl.jsx";
+import { urgencyLabel, referralStatusLabel } from "../../../shared/crmVocab.js";
 import {
   visitDueStateMeta,
   doctorPriorityMeta,
@@ -16,6 +18,9 @@ import {
 
 const TABS = [
   { key: "due", label: "To visit" },
+  // Open leads sit beside the visit list, not behind a doctor. A referral
+  // nobody can see is a referral nobody chases (§6).
+  { key: "referrals", label: "Referrals" },
   { key: "today", label: "Today" },
   { key: "doctors", label: "My doctors" },
   { key: "tasks", label: "Tasks" },
@@ -30,16 +35,21 @@ export default function RepHomePage() {
   const [territory, setTerritory] = useState("all");
   const [pending, setPending] = useState(pendingCount());
   const [classifying, setClassifying] = useState(false);
+  const [referrals, setReferrals] = useState(null);
   const [bulkMsg, setBulkMsg] = useState(null);
   const [err, setErr] = useState(null);
 
   const justLogged = params.get("logged");
+  const justReferred = params.get("referral");
 
   const load = () =>
-    api
-      .get("/api/crm/home")
-      .then(({ data }) => setData(data))
-      .catch((e) => setErr(e?.response?.data?.error || "Could not load your doctors"));
+    Promise.all([
+      api.get("/api/crm/home").then(({ data }) => setData(data)),
+      api
+        .get("/api/crm/referrals")
+        .then(({ data }) => setReferrals(data))
+        .catch(() => setReferrals({ referrals: [], summary: {} })),
+    ]).catch((e) => setErr(e?.response?.data?.error || "Could not load your doctors"));
 
   useEffect(() => {
     load();
@@ -57,10 +67,10 @@ export default function RepHomePage() {
   }, []);
 
   useEffect(() => {
-    if (!justLogged) return;
+    if (!justLogged && !justReferred) return;
     const t = setTimeout(() => setParams({}, { replace: true }), 4000);
     return () => clearTimeout(t);
-  }, [justLogged, setParams]);
+  }, [justLogged, justReferred, setParams]);
 
   const territories = useMemo(() => {
     const names = new Set((data?.my_doctors || []).map((d) => d.territory_name).filter(Boolean));
@@ -130,11 +140,20 @@ export default function RepHomePage() {
       {justLogged && (
         <div className="rep__toast">Visit logged{justLogged ? ` — ${justLogged}` : ""}</div>
       )}
+      {justReferred && (
+        <div className="rep__toast">
+          Referral {justReferred} logged — claimed until the patient confirms at registration
+        </div>
+      )}
 
       <div className="rep__stats">
         <Stat n={data.due_summary?.total ?? data.due_visits.length} label="To visit" tone="warn" />
         <Stat n={p.visits_today} label="Today" />
-        <Stat n={p.visits_month} label="This month" />
+        <Stat
+          n={referrals?.summary?.open ?? 0}
+          label="Open leads"
+          tone={referrals?.summary?.untouched ? "warn" : null}
+        />
         <Stat
           n={p.doctors_incomplete}
           label="Need details"
@@ -153,6 +172,9 @@ export default function RepHomePage() {
             {t.key === "due" && (data.due_summary?.total ?? 0) > 0 && (
               <span className="rep__badge">{data.due_summary.total}</span>
             )}
+            {t.key === "referrals" && (referrals?.summary?.open ?? 0) > 0 && (
+              <span className="rep__badge">{referrals.summary.open}</span>
+            )}
           </button>
         ))}
       </nav>
@@ -168,6 +190,32 @@ export default function RepHomePage() {
               Showing the {data.due_summary.showing} most urgent of {data.due_summary.total} waiting
             </li>
           )}
+        </ul>
+      )}
+
+      {tab === "referrals" && (
+        <ul className="rep__list">
+          {(referrals?.referrals?.length ?? 0) === 0 && (
+            <Empty>No open referrals. Log one from a doctor's page.</Empty>
+          )}
+          {referrals?.referrals?.map((r) => (
+            <li key={r.id} className="rep__row rep__row--stack">
+              <div className="rep__row-main">
+                <strong>{r.patient_name_raw || r.patient_phone_raw || "Unnamed patient"}</strong>
+                <span className="rep__row-sub">
+                  {r.referral_code} · from {r.doctor_name || "—"}
+                  {r.service_line_name ? ` · ${r.service_line_name}` : ""}
+                </span>
+                <span className="rep__row-flags">
+                  {r.urgency !== "routine" && (
+                    <span className="rep__due rep__due--red">{urgencyLabel(r.urgency)}</span>
+                  )}
+                  <span className="rep__flag">{referralStatusLabel(r.status)}</span>
+                </span>
+              </div>
+              <ReferralStatusControl referral={r} onChanged={load} />
+            </li>
+          ))}
         </ul>
       )}
 
@@ -298,6 +346,14 @@ function DoctorRow({ d, navigate, showDue }) {
             Call
           </a>
         )}
+        <button
+          className="rep__btn rep__btn--sm"
+          onClick={() =>
+            navigate(`/crm/referral/${d.doctor_id}?name=${encodeURIComponent(d.full_name)}`)
+          }
+        >
+          Referral
+        </button>
         <button
           className="rep__btn rep__btn--primary rep__btn--sm"
           onClick={() =>

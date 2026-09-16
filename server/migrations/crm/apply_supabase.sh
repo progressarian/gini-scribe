@@ -52,7 +52,8 @@ for f in 2026-09-30_crm_enums_to_text.sql \
          2026-10-01_crm_registration.sql \
          2026-10-03_crm_registration_record_fn.sql \
          2026-10-02_crm_inbound_attribution_comments.sql \
-         2026-10-04_crm_doctor_skeleton_records.sql; do
+         2026-10-04_crm_doctor_skeleton_records.sql \
+         2026-10-05_crm_referral_capture.sql; do
   echo "== applying $f =="
   psql_run -v ON_ERROR_STOP=1 -q -f "$f" 2>&1 | sed 's/^/    /'
   echo "    applied"

@@ -617,7 +617,11 @@ router.post("/patients", validate(patientCreateSchema), async (req, res) => {
       const row = result.rows[0];
       if (row.aadhaar) row.aadhaar = decryptAadhaar(row.aadhaar);
       if (p.referral_source) {
-        await recordReferralSource(row.id, p.referral_source, req.doctor?.doctor_id ?? null);
+        await recordReferralSource(
+          row.id,
+          { ...p.referral_source, patient_phone: n(p.phone) },
+          req.doctor?.doctor_id ?? null,
+        );
       }
       res.json({ ...row, _isNew: true });
     }

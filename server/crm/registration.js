@@ -34,6 +34,13 @@ export async function searchReferringDoctors(query, limit = 10) {
  * (appointment booking, consultation save, HealthRay and Sheets sync) leave
  * behind, and what crm.v_attribution_unknown exists to surface.
  */
+/**
+ * @param capturedBy a Scribe doctors.id — resolved here to the crm.users row if
+ *   one exists. The desk clerk usually has none, and that is fine: the answer is
+ *   the patient's, not the clerk's. Passing the integer straight through was a
+ *   type error against a uuid column that failed silently, so attribution never
+ *   recorded for any logged-in user.
+ */
 export async function recordReferralSource(patientId, answer, capturedBy = null) {
   if (!patientId || !answer?.answer_type) return false;
   if (!REFERRAL_ANSWER_TYPE_VALUES.includes(answer.answer_type)) {
@@ -45,11 +52,28 @@ export async function recordReferralSource(patientId, answer, capturedBy = null)
   if (answer.answer_type === "doctor" && !doctorId) throw new Error("Pick a doctor");
   if (answer.answer_type === "free_text" && !freeText) throw new Error("Say who referred them");
 
+  let capturedByCrmId = null;
+  if (capturedBy) {
+    try {
+      const { resolveCrmUser } = await import("./db.js");
+      capturedByCrmId = (await resolveCrmUser(capturedBy))?.id ?? null;
+    } catch {
+      capturedByCrmId = null;
+    }
+  }
+
   try {
     return await withRegistrationContext(async (sql) => {
       const { rows } = await sql(
-        "SELECT crm.record_referral_source($1, $2, $3, $4, $5) AS recorded",
-        [patientId, answer.answer_type, doctorId, freeText, capturedBy],
+        `SELECT crm.record_referral_source($1, $2, $3, $4, $5, 'GACH', $6) AS recorded`,
+        [
+          patientId,
+          answer.answer_type,
+          doctorId,
+          freeText,
+          capturedByCrmId,
+          answer.patient_phone ?? null,
+        ],
       );
       return rows[0]?.recorded === true;
     });

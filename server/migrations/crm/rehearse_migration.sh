@@ -26,6 +26,7 @@ CHAIN=(
   2026-10-03_crm_registration_record_fn
   2026-10-02_crm_inbound_attribution_comments
   2026-10-04_crm_doctor_skeleton_records
+  2026-10-05_crm_referral_capture
 )
 
 echo "== fresh database =="
