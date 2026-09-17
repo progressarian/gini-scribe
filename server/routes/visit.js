@@ -42,6 +42,7 @@ import { markMedicationVisitStatus } from "../services/medication/visitStatus.js
 import { backfillCommonSideEffectsForMed } from "../services/medication/commonSideEffectsAI.js";
 import { enrichMedWithDays } from "../services/medication/daysOfWeek.js";
 import { blockWriteGuard } from "../middleware/blockWriteGuard.js";
+import { datedFollowUp } from "../../shared/followUp.js";
 
 const require = createRequire(import.meta.url);
 // Outbound Genie sync removed 2026-05-01 — dual-DB routing replaces it.
@@ -836,9 +837,8 @@ router.get("/visit/:patientId", async (req, res) => {
     // healthray_follow_up may be `{date:null, notes:..., timing:null}` even when
     // biomarkers.followup carries the real date — only honour it when it has a
     // date, otherwise fall through to the biomarkers fallback.
-    const withDate = (fu) => (fu && fu.date ? fu : null);
     const followUpDate =
-      withDate(apptPlan?.healthray_follow_up) ||
+      datedFollowUp(apptPlan?.healthray_follow_up) ||
       (apptBiomarkers.followup
         ? {
             date: apptBiomarkers.followup,
@@ -846,7 +846,7 @@ router.get("/visit/:patientId", async (req, res) => {
             timing: apptPlan?.healthray_follow_up?.timing || null,
           }
         : null) ||
-      withDate(followupApptRow?.healthray_follow_up) ||
+      datedFollowUp(followupApptRow?.healthray_follow_up) ||
       (followupApptBio.followup
         ? {
             date: followupApptBio.followup,

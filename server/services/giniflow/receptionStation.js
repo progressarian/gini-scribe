@@ -8,11 +8,13 @@ import {
 import { advanceStatus, IST_TODAY } from "./statusEngine.js";
 import { JOURNEY_STEPS_SQL, syncLabStepsFromLab, suggestVisitType } from "./journey.js";
 import { journeyProgress } from "../../../shared/journeyOrder.js";
+import { PHONE_DIGITS, toLocal10 } from "../../../shared/phone.js";
 import { searchDayVisits } from "./board.js";
+import { getMachines } from "./machineCatalog.js";
+import { billDiscountOn } from "./patientBill.js";
 import { blockDetail } from "../patientBlockView.js";
 import { createWalkinBooking } from "../walkinBooking.js";
 import { LAB_ONLY_DOCTOR, labOnlyHiddenPredicate } from "./labOnlyVisits.js";
-import { hideLabOnlyPatients } from "./floorSettings.js";
 import {
   CLAIM_STATE,
   collectiblePaise,
@@ -42,11 +44,15 @@ const ORDER_SELECT = `
          COALESCE(cs.short_name, cs.name) AS claim_submitted_by_name,
          COALESCE(ca.short_name, ca.name) AS claim_approved_by_name,
          paid_ev.occurred_at AS paid_at,
+         bill.items AS bill_items,
          COALESCE(t.tests, '[]'::json) AS tests
     FROM giniflow_lab_orders o
     JOIN giniflow_visits v ON v.id = o.visit_id
     JOIN patients p ON p.id = v.patient_id
     LEFT JOIN doctors d ON d.id = o.ordered_by
+    LEFT JOIN giniflow_patient_bills bill
+      ON bill.patient_id = v.patient_id AND bill.bill_date = v.visit_date
+     AND bill.status = 'billed'
     LEFT JOIN LATERAL (
       SELECT json_agg(json_build_object('name', lt.test_name, 'price', lt.price)
                       ORDER BY lt.test_name) AS tests
@@ -54,9 +60,11 @@ const ORDER_SELECT = `
     ) t ON TRUE
     LEFT JOIN LATERAL (
       SELECT occurred_at FROM giniflow_lab_order_events e
-       WHERE e.lab_order_id = o.id AND e.track = 'payment'
-         AND e.status IN ('paid', 'part_paid', 'insurance_claim', 'claim_approved')
-       ORDER BY occurred_at DESC LIMIT 1
+       WHERE e.lab_order_id = o.id
+         AND ((e.track = 'payment'
+               AND e.status IN ('paid', 'part_paid', 'insurance_claim', 'claim_approved'))
+              OR (e.track = 'sample' AND e.status = 'paid'))
+       ORDER BY e.track = 'payment' DESC, occurred_at DESC LIMIT 1
     ) paid_ev ON TRUE
     LEFT JOIN LATERAL (
       SELECT actor_id FROM giniflow_lab_order_events e
@@ -84,6 +92,8 @@ const ORDER_SELECT = `
 // test lines. The card falls back to their sum, so the money maths has to use
 // the same figure — reading the raw column there would call such an order
 // settled while the card still shows what it is worth.
+const HIDE_LAB_ONLY_AT_RECEPTION = false;
+
 const totalOf = (r) =>
   Number(r.amount_total) || (r.tests || []).reduce((s, t) => s + Number(t.price || 0), 0);
 
@@ -130,24 +140,45 @@ const shape = (r) => ({
   paidAt: r.paid_at ? new Date(r.paid_at).toISOString() : null,
 });
 
-export async function getPaymentQueue(visitDate, db = pool) {
+const isAwaitingSample = (o) =>
+  opensLabGate(o.paymentStatus) && ["ordered", "payment_pending", "paid"].includes(o.sampleStatus);
+
+const paymentCounts = (orders) => {
+  const pending = orders.filter((o) => !opensLabGate(o.paymentStatus)).length;
+  const awaitingSample = orders.filter(isAwaitingSample).length;
+  return { pending, awaitingSample, cleared: orders.length - pending - awaitingSample };
+};
+
+export async function getPaymentQueue(visitDate, db = pool, { q = "" } = {}) {
   const { rows } = await db.query(`${ORDER_SELECT} ORDER BY o.created_at`, [
     visitDate,
     LAB_ONLY_DOCTOR,
-    await hideLabOnlyPatients(db),
+    HIDE_LAB_ONLY_AT_RECEPTION,
   ]);
-  const orders = rows.map(shape);
+  const machines = await getMachines(db);
+  const allOrders = rows.map((r) => {
+    const discountOn = billDiscountOn({ items: r.bill_items || [] }, machines);
+    return {
+      ...shape(r),
+      billDiscount: discountOn(
+        r.kind,
+        (r.tests || []).map((t) => t.name),
+      ),
+    };
+  });
+  const query = String(q || "").trim();
+  let orders = allOrders;
+  if (query.length >= 2) {
+    const hits = new Set((await searchDayVisits(visitDate, query, db)).map((r) => r.visitId));
+    orders = allOrders.filter((o) => hits.has(o.visitId));
+  }
 
   // Anything not settled is still reception's work: an untouched order, one
   // part paid, and a submitted claim somebody has to chase the approval for.
   const pending = orders.filter((o) => !opensLabGate(o.paymentStatus));
   // Paid, but the lab has not taken the sample yet — reception's own "did my
   // clearing actually reach the lab" check.
-  const awaitingSample = orders.filter(
-    (o) =>
-      opensLabGate(o.paymentStatus) &&
-      ["ordered", "payment_pending", "paid"].includes(o.sampleStatus),
-  );
+  const awaitingSample = orders.filter(isAwaitingSample);
   const cleared = orders.filter(
     (o) => opensLabGate(o.paymentStatus) && !awaitingSample.includes(o),
   );
@@ -165,6 +196,8 @@ export async function getPaymentQueue(visitDate, db = pool) {
     pending,
     awaitingSample,
     cleared,
+    counts: paymentCounts(allOrders),
+    query,
     pricesArePlaceholders: placeholder[0].placeholder,
   };
 }
@@ -307,8 +340,8 @@ export async function clearPayment(
           await client.query(
             `INSERT INTO giniflow_lab_order_events
                (lab_order_id, track, status, actor_role, actor_id)
-             VALUES ($1, 'sample', 'paid', $3, $2)`,
-            [orderId, actorId, actorRole],
+             VALUES ($1, 'payment', $4, $3, $2), ($1, 'sample', 'paid', $3, $2)`,
+            [orderId, actorId, actorRole, derived],
           );
         }
         // The journey's counter follows the money here too. An order the
@@ -702,11 +735,47 @@ const shapeArrival = (r, now) => ({
   journey: journeyProgress(r.journey_steps, r.current_status, r.resume_status),
 });
 
+const firstName = (name) =>
+  (name || "")
+    .toLowerCase()
+    .replace(/\b(mr|mrs|ms|dr|master|baby|smt|shri|km|kumari)\b\.?/g, "")
+    .replace(/[^a-z ]/g, " ")
+    .trim()
+    .split(/\s+/)[0] || null;
+
+const knownSex = (sex) => (sex && sex !== "Other" ? sex[0].toUpperCase() : null);
+
+const samePerson = (a, b) => {
+  const phone = toLocal10(a.phone);
+  if (phone.length !== PHONE_DIGITS || phone !== toLocal10(b.phone)) return false;
+  const name = firstName(a.name);
+  if (!name || name !== firstName(b.name)) return false;
+  const [sa, sb] = [knownSex(a.sex), knownSex(b.sex)];
+  return !sa || !sb || sa === sb;
+};
+
+const alreadyOnFloorAs = (row, rows) => {
+  const twin = rows.find(
+    (r) =>
+      r.patient_id !== row.patient_id &&
+      !EXPECTED_STATUSES.includes(r.current_status) &&
+      !NOT_COMING_STATUSES.includes(r.current_status) &&
+      samePerson(row, r),
+  );
+  return twin
+    ? {
+        name: twin.name,
+        fileNo: twin.file_no,
+        statusLabel: STATUS_LABEL[twin.current_status] || twin.current_status,
+      }
+    : null;
+};
+
 export async function getArrivals(visitDate, q = "", now = new Date(), db = pool) {
   const { rows } = await db.query(ARRIVAL_SELECT, [
     visitDate,
     LAB_ONLY_DOCTOR,
-    await hideLabOnlyPatients(db),
+    HIDE_LAB_ONLY_AT_RECEPTION,
   ]);
 
   // Server-side, and the board's own search rather than a second implementation:
@@ -719,7 +788,12 @@ export async function getArrivals(visitDate, q = "", now = new Date(), db = pool
     visible = rows.filter((r) => hits.has(r.id));
   }
 
-  const arrivals = visible.map((r) => shapeArrival(r, now));
+  const arrivals = visible.map((r) => ({
+    ...shapeArrival(r, now),
+    alreadyOnFloorAs: EXPECTED_STATUSES.includes(r.current_status)
+      ? alreadyOnFloorAs(r, rows)
+      : null,
+  }));
 
   // The two lists are ordered by different clocks, because they answer
   // different questions. Expected keeps the booked slot — it is the day as

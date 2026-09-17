@@ -7,6 +7,7 @@ import { extractDiagnosisGrade } from "../utils/diagnosisGrade.js";
 import { buildVisitLabContext } from "../services/visitLabContext.js";
 import { computeCarePhase } from "../utils/carePhase.js";
 import { blockWriteGuard } from "../middleware/blockWriteGuard.js";
+import { datedFollowUp } from "../../shared/followUp.js";
 
 const router = Router();
 
@@ -770,9 +771,8 @@ router.get("/patients/:id/summary", async (req, res) => {
     const apptBiomarkers = apptRow?.biomarkers || {};
     const followupApptRow = followupApptR.rows[0] || null;
     const followupApptBio = followupApptRow?.biomarkers || {};
-    const _withDate = (fu) => (fu && fu.date ? fu : null);
     const resolvedFollowUp =
-      _withDate(apptRow?.healthray_follow_up) ||
+      datedFollowUp(apptRow?.healthray_follow_up) ||
       (apptBiomarkers.followup
         ? {
             date: apptBiomarkers.followup,
@@ -780,7 +780,7 @@ router.get("/patients/:id/summary", async (req, res) => {
             timing: apptRow?.healthray_follow_up?.timing || null,
           }
         : null) ||
-      _withDate(followupApptRow?.healthray_follow_up) ||
+      datedFollowUp(followupApptRow?.healthray_follow_up) ||
       (followupApptBio.followup
         ? {
             date: followupApptBio.followup,

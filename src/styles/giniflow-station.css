@@ -4878,6 +4878,12 @@
   color: var(--amb);
   margin-top: 2px;
 }
+.gf .ar-dup {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--red);
+  margin-top: 3px;
+}
 .gf .ar-acts {
   display: flex;
   align-items: center;

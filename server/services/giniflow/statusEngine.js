@@ -12,6 +12,7 @@ import {
   isExceptionStatus,
   slaKeyForStatus,
   STATUS_LABEL,
+  TERMINAL_STATUSES,
 } from "../../../shared/giniflowStatus.js";
 import { doctorsWaitForTests } from "../../../shared/manualFloor.js";
 import { TESTS_HOLD_SQL } from "./testsHold.js";
@@ -143,9 +144,7 @@ async function assertReportsAreIn(client, visitId, toStatus) {
 
 const SYNC_MAY_MOVE_WITH_TESTS_OPEN = ["checked_in", "vitals_done"];
 
-async function assertSyncLeavesTestsAlone(client, visitId, toStatus, meta) {
-  if (meta?.source !== "healthray" || !doctorsWaitForTests()) return;
-  if (isExceptionStatus(toStatus) || SYNC_MAY_MOVE_WITH_TESTS_OPEN.includes(toStatus)) return;
+const openTestCount = async (client, visitId) => {
   const { rows } = await client.query(
     `SELECT h.tests_pending
        FROM giniflow_visits v
@@ -154,7 +153,26 @@ async function assertSyncLeavesTestsAlone(client, visitId, toStatus, meta) {
       WHERE v.id = $1`,
     [visitId],
   );
-  const pending = rows[0]?.tests_pending ?? 0;
+  return rows[0]?.tests_pending ?? 0;
+};
+
+async function assertNoExitWithTestsOpen(client, visitId, toStatus, actorRole) {
+  if (!TERMINAL_STATUSES.includes(toStatus) || actorRole === "system") return;
+  const pending = await openTestCount(client, visitId);
+  if (pending > 0) {
+    throw Object.assign(
+      new Error(
+        `${pending} test${pending === 1 ? "" : "s"} still open — finish or remove ${pending === 1 ? "it" : "them"} before the patient leaves`,
+      ),
+      { status: 409, testsOpen: pending },
+    );
+  }
+}
+
+async function assertSyncLeavesTestsAlone(client, visitId, toStatus, meta) {
+  if (meta?.source !== "healthray" || !doctorsWaitForTests()) return;
+  if (isExceptionStatus(toStatus) || SYNC_MAY_MOVE_WITH_TESTS_OPEN.includes(toStatus)) return;
+  const pending = await openTestCount(client, visitId);
   if (pending > 0) {
     throw Object.assign(
       new Error(
@@ -209,6 +227,7 @@ export async function advanceStatus(
     await assertReportsAreIn(client, visitId, toStatus);
   }
   await assertSyncLeavesTestsAlone(client, visitId, toStatus, meta);
+  await assertNoExitWithTestsOpen(client, visitId, toStatus, actorRole);
   // `allowSkip` says: the caller knows the patient is HERE, and does not claim
   // to know every step they took to arrive. That is the real rule (CS-12) — an
   // earlier comment here said "never a station screen", which four callers now

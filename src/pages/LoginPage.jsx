@@ -18,6 +18,7 @@ const ROLE_GROUPS = [
   { role: "pharmacy", label: "Pharmacy", showSpecialty: false },
   { role: "rx", label: "Prescription Explainer", showSpecialty: false },
   { role: "reception", label: "Reception", showSpecialty: false },
+  { role: "reception_admin", label: "Reception Admin", showSpecialty: false },
   { role: "obt", label: "OBT Team", showSpecialty: false },
   // One heading for the physician-relations team. A group may cover several
   // roles so the three growth tiers do not produce three identical headings.
@@ -64,6 +65,7 @@ export default function LoginPage() {
     lab: "/lab-portal",
     tech: "/lab-portal",
     reception: "/opd",
+    reception_admin: "/opd",
     coordinator: "/opd",
     pharmacy: "/refills",
     rx: "/giniflow/station/rx",

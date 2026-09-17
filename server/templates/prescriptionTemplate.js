@@ -286,7 +286,7 @@ const CSS = `
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:var(--fb);color:var(--ink);background:var(--white);font-size:13px}
 
-.rx-page{background:var(--white);border:1px solid var(--bd);border-radius:var(--r);margin-bottom:16px;overflow:hidden}
+.rx-page{background:var(--white);border:1px solid var(--bd);border-radius:var(--r);margin-bottom:16px;overflow:hidden;-webkit-box-decoration-break:clone;box-decoration-break:clone}
 .rx-header{background:var(--nv);padding:16px 22px}
 .rx-header-top{display:flex;align-items:center;justify-content:space-between;gap:16px}
 .rx-hosp{flex:1 1 0;min-width:0}
@@ -361,13 +361,14 @@ body{font-family:var(--fb);color:var(--ink);background:var(--white);font-size:13
 .rx-sub-cond{font-size:10px;color:var(--ink3);margin-top:1px;font-style:italic}
 
 .rx-ref-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.rx-ref{background:var(--skl);border-radius:6px;padding:9px 11px;border-left:3px solid var(--sk)}
+.rx-ref{background:var(--skl);border-radius:6px;padding:9px 11px;border-left:3px solid var(--sk);break-inside:avoid}
 .rx-ref-title{font-size:10px;font-weight:700;color:var(--sk);margin-bottom:4px}
 .rx-ref-body{font-size:12px;color:var(--ink);line-height:1.5}
-.rx-test{background:var(--aml);border-radius:6px;padding:9px 11px;border-left:3px solid var(--am)}
+.rx-test{background:var(--aml);border-radius:6px;padding:9px 11px;border-left:3px solid var(--am);break-inside:avoid}
 .rx-test-title{font-size:10px;font-weight:700;color:var(--am);margin-bottom:4px}
 .rx-test-item{font-size:12px;color:var(--ink);padding:2px 0;display:flex;gap:6px}
 
+.rx-close{break-inside:avoid}
 .rx-footer{background:var(--bg);border-top:1px solid var(--bd);padding:10px 22px;display:flex;justify-content:space-between;align-items:center}
 .rx-sig{font-size:11px;color:var(--ink3)}
 .rx-next{font-size:11px;font-weight:700;color:var(--nv)}
@@ -454,7 +455,7 @@ function buildPrescriptionHtml(data = {}) {
   const followUpWith =
     [latestCon.follow_up_with, appt_plan?.follow_up_with]
       .map((v) => (typeof v === "string" ? v.trim() : ""))
-      .find(Boolean) || "";
+      .find((v) => /[\p{L}\p{N}]/u.test(v) && v.toLowerCase() !== "null") || "";
   // Prefer the explicit visit summary the client passes in (current doctor's
   // summary or visit-level synopsis) over anything found on the consultation
   // record. Falls back to summary.summary so old callers still work.
@@ -861,7 +862,8 @@ function buildPrescriptionHtml(data = {}) {
   // upcoming is on file, which printed a next visit dated before the visit
   // itself on the patient's own copy. A date that has already passed is not a
   // next visit — say it is unscheduled instead of naming a wrong day.
-  const nextVisitDate = followUp.date && followUp.date >= today ? followUp.date : "";
+  const nextVisitDate =
+    /^\d{4}-\d{2}-\d{2}/.test(followUp.date || "") && followUp.date >= today ? followUp.date : "";
   const nextVisitText = nextVisitDate
     ? `📅 Next visit: ${fmtDateLong(nextVisitDate)}${labTests.length > 0 ? " · Come with all reports above" : ""}`
     : "📅 Next visit: To be scheduled";
@@ -945,6 +947,7 @@ function buildPrescriptionHtml(data = {}) {
     ${followUpWithHtml}
   </div>
 
+  <div class="rx-close">
   <div class="rx-footer">
     <div class="rx-sig">
       <div style="font-weight:700">${escape(doctor.name || "Doctor")}</div>
@@ -956,6 +959,7 @@ function buildPrescriptionHtml(data = {}) {
   </div>
 
   ${promoHtml(data.rx_footer, data.rx_logo || DEFAULT_LOGO_DATA_URI)}
+  </div>
 </div>
 </body>
 </html>`;

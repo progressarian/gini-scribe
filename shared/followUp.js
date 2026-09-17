@@ -5,6 +5,10 @@ const clean = (v) => {
   return ISO_DATE.test(s) ? s : "";
 };
 
+export function datedFollowUp(fu) {
+  return fu && clean(fu.date) ? fu : null;
+}
+
 export function effectiveFollowUpDate(row) {
   if (!row) return "";
   return (

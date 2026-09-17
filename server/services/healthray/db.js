@@ -405,7 +405,7 @@ async function matchIdentitylessByPhone(phone, name, sex) {
   const { rows } = await pool.query(
     `SELECT id, name, sex FROM patients
       WHERE health_id IS NULL
-        AND file_no IS NULL
+        AND (file_no IS NULL OR file_no ~ '^GNI-[0-9]+$')
         AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
       LIMIT 2`,
     [local10],
@@ -510,7 +510,8 @@ export async function upsertPatient({
     await pool.query(
       `UPDATE patients SET
          health_id = COALESCE(health_id, $2),
-         file_no = COALESCE(file_no, $3),
+         file_no = CASE WHEN file_no IS NULL OR file_no ~ '^GNI-[0-9]+$'
+                        THEN COALESCE($3, file_no) ELSE file_no END,
          name = COALESCE($4, name),
          phone = COALESCE(phone, $5),
          age = COALESCE($6, age),

@@ -881,6 +881,25 @@ export const PrescriptionSchema = z.object({
   advice: z.string(),
 });
 
+const textOrNull = (v) => {
+  const s = typeof v === "string" ? v.trim() : "";
+  return s && s.toLowerCase() !== "null" ? s : null;
+};
+
+function normalizeFollowUp(parsed) {
+  if (!parsed) return null;
+  const fu = parsed.follow_up || {};
+  return {
+    ...parsed,
+    follow_up: {
+      date: /^\d{4}-\d{2}-\d{2}$/.test(fu.date || "") ? fu.date : null,
+      timing: textOrNull(fu.timing),
+      notes: textOrNull(fu.notes),
+    },
+    follow_up_with: textOrNull(parsed.follow_up_with),
+  };
+}
+
 export async function parsePrescriptionWithAi(rawText, visitDate = null) {
   if (!anthropic) return null;
   if (!rawText || rawText.trim().length < 10) return null;
@@ -912,7 +931,7 @@ export async function parsePrescriptionWithAi(rawText, visitDate = null) {
       );
     }
 
-    return response.parsed_output ?? null;
+    return normalizeFollowUp(response.parsed_output);
   } catch (e) {
     error("Parser", "messages.parse failed:", e?.message || e);
     return null;
@@ -942,7 +961,7 @@ export function extractPrescriptionFromMessage(message) {
       .trim();
     if (!text) return null;
     const validated = PrescriptionSchema.safeParse(JSON.parse(text));
-    return validated.success ? validated.data : null;
+    return validated.success ? normalizeFollowUp(validated.data) : null;
   } catch {
     return null;
   }

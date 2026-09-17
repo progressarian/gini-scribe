@@ -2,7 +2,7 @@ import pool from "../../config/db.js";
 import { fetchPatientTransactions } from "../healthray/client.js";
 import { transactionsToBilling } from "../healthray/billingExtractor.js";
 import { healthrayBlockedUntil } from "./healthrayRefresh.js";
-import { machineForTest, machinesOnBillLine } from "../../../shared/machineStages.js";
+import { machineFor, machineForTest, machinesOnBillLine } from "../../../shared/machineStages.js";
 import {
   LAB_TEST_STEP_IDS,
   dropUnbilledTestSteps,
@@ -39,8 +39,12 @@ const itemKey = (i) =>
     .toLowerCase()}`;
 
 export const keepEverySeenItem = (before = [], now = []) => {
+  const latest = new Map((now || []).map((i) => [itemKey(i), i]));
   const seen = new Set((before || []).map(itemKey));
-  return [...(before || []), ...(now || []).filter((i) => !seen.has(itemKey(i)))];
+  return [
+    ...(before || []).map((i) => latest.get(itemKey(i)) || i),
+    ...(now || []).filter((i) => !seen.has(itemKey(i))),
+  ];
 };
 
 const ageMinutes = (bill) =>
@@ -91,9 +95,13 @@ export async function readPatientBill(
 export const billedLabLines = (bill) => {
   const byName = new Map();
   for (const i of bill?.items || []) {
-    if (i.category === "lab" && i.desc && !byName.has(i.desc)) byName.set(i.desc, i.amount || 0);
+    if (i.category === "lab" && i.desc && !byName.has(i.desc)) byName.set(i.desc, i);
   }
-  return [...byName].map(([name, amount]) => ({ name, amount }));
+  return [...byName].map(([name, i]) => ({
+    name,
+    amount: i.amount || 0,
+    discount: i.discount || 0,
+  }));
 };
 
 export const billedMachineLines = (bill, machines) =>
@@ -102,6 +110,7 @@ export const billedMachineLines = (bill, machines) =>
     .map((i) => ({
       name: i.desc,
       amount: i.amount || 0,
+      discount: i.discount || 0,
       machines: machinesOnBillLine(machines, i.desc),
     }))
     .filter((l) => l.machines.length);
@@ -113,7 +122,76 @@ export const billedStepIds = (bill, machines) =>
   ]);
 
 export const stepsAllowedByBill = (steps, bill, machines) =>
-  bill?.status === "billed" ? dropUnbilledTestSteps(steps, billedStepIds(bill, machines)) : steps;
+  bill?.status === "billed"
+    ? dropUnbilledTestSteps(steps, billedStepIds(bill, machines), {
+        machineOf: (s) => s.machine ?? !!machineFor(machines, s.catalogId),
+      })
+    : steps;
+
+const nameKey = (v) =>
+  String(v || "")
+    .trim()
+    .toLowerCase();
+
+const billLineFor = (bill, machines) => {
+  const lab = new Map(billedLabLines(bill).map((l) => [nameKey(l.name), l]));
+  const machine = new Map(
+    billedMachineLines(bill, machines)
+      .filter((l) => l.machines.length === 1)
+      .map((l) => [l.machines[0], l]),
+  );
+  return (kind, testName) =>
+    kind === "lab"
+      ? lab.get(nameKey(testName))
+      : machine.get(machineForTest(machines, testName)?.id);
+};
+
+export const billDiscountOn = (bill, machines) => {
+  const lineOf = billLineFor(bill, machines);
+  return (kind, testNames) =>
+    testNames.reduce((sum, name) => sum + (lineOf(kind, name)?.discount || 0), 0);
+};
+
+export async function priceOrdersFromBill(client, visitId, bill, machines) {
+  if (bill?.status !== "billed") return 0;
+  const lineOf = billLineFor(bill, machines);
+  const { rows: orders } = await client.query(
+    `SELECT o.id, o.kind,
+            json_agg(json_build_object('id', t.id, 'name', t.test_name, 'price', t.price)) AS tests
+       FROM giniflow_lab_orders o
+       JOIN giniflow_lab_order_tests t ON t.lab_order_id = o.id
+      WHERE o.visit_id = $1 AND o.urgency = 'today'
+        AND o.payment_status = 'pending'
+        AND COALESCE(o.amount_paid, 0) = 0
+        AND COALESCE(o.claim_state, 'none') = 'none'
+      GROUP BY o.id`,
+    [visitId],
+  );
+  let repriced = 0;
+  for (const order of orders) {
+    const changed = order.tests
+      .map((t) => ({ ...t, billed: lineOf(order.kind, t.name)?.amount }))
+      .filter((t) => t.billed !== undefined && Number(t.billed) !== Number(t.price));
+    if (!changed.length) continue;
+    await client.query(
+      `UPDATE giniflow_lab_order_tests AS t SET price = c.price
+         FROM UNNEST($1::uuid[], $2::numeric[]) AS c(id, price)
+        WHERE t.id = c.id`,
+      [changed.map((t) => t.id), changed.map((t) => t.billed)],
+    );
+    await client.query(
+      `UPDATE giniflow_lab_orders
+          SET amount_total = (SELECT COALESCE(sum(price), 0) FROM giniflow_lab_order_tests
+                               WHERE lab_order_id = $1),
+              version = version + 1,
+              updated_at = NOW()
+        WHERE id = $1`,
+      [order.id],
+    );
+    repriced++;
+  }
+  return repriced;
+}
 
 export async function reconcileTestSteps(client, visitId, bill, machines) {
   if (bill?.status !== "billed") return { removedSteps: 0, removedOrders: 0 };

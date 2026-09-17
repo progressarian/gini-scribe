@@ -39,6 +39,10 @@ const ROUTE_CASES = [
   ["/api/flow/queue/vitals_associate", "obt", false],
   ["/api/flow/reports", "coordinator", true],
   ["/api/flow/reports", "reception", false],
+  ["/api/flow/checkin", "reception_admin", true],
+  ["/api/flow/reports", "reception_admin", false],
+  ["/api/appointments", "reception_admin", true],
+  ["/api/admin/backfill-healthray-docs", "reception_admin", false],
   ["/api/flow/demo/seed", "coordinator", false],
   ["/api/flow/visit-types", "reception", true], // GET reference data for check-in
   // Admin backfills — previously reachable with no token at all.

@@ -9,7 +9,7 @@ import { validate } from "../middleware/validate.js";
 import { loginSchema, refreshTokenSchema } from "../schemas/index.js";
 import { loginLimiter } from "../middleware/rateLimit.js";
 import { requireCapability } from "../middleware/auth.js";
-import { CAPABILITIES } from "../../shared/permissions.js";
+import { CAPABILITIES, normalizeRole } from "../../shared/permissions.js";
 import {
   issueDoctorRefreshToken,
   lookupRefreshToken,
@@ -243,8 +243,11 @@ router.get("/auth/me", async (req, res) => {
 // per-route rather than via the prefix map.
 router.post("/doctors", requireCapability(CAPABILITIES.ADMIN), async (req, res) => {
   try {
-    const { name, short_name, specialty, role, pin, phone, license_no } = req.body;
+    const { name, short_name, specialty, pin, phone, license_no } = req.body;
     if (!name || !pin) return res.status(400).json({ error: "Name and PIN are required" });
+    const role = typeof req.body.role === "string" ? req.body.role.trim().toLowerCase() : "";
+    if (role && normalizeRole(role) !== role)
+      return res.status(400).json({ error: `Unknown role: ${req.body.role}` });
 
     const pinHash = await bcrypt.hash(pin, 10);
     const result = await pool.query(

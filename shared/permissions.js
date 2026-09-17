@@ -42,6 +42,7 @@ export const ROLES = {
   XRAY_TECH: "xray_tech",
   TECH: "tech",
   RECEPTION: "reception",
+  RECEPTION_ADMIN: "reception_admin",
   COORDINATOR: "coordinator",
   PHARMACY: "pharmacy",
   // Prescription explainer. Its own role rather than a nurse account: the desk
@@ -200,6 +201,29 @@ const C = CAPABILITIES;
 
 // Wildcard sentinel — a role holding "*" passes every capability check.
 export const ALL = "*";
+
+const RECEPTION_CAPABILITIES = [
+  C.PATIENT_READ,
+  C.PATIENT_CHART,
+  C.LAB_REQUESTS,
+  C.REFILLS,
+  C.RECEPTION_OPS,
+  C.MED_COLLECTION,
+  C.FLOW_RECEPTION,
+  C.FLOW_COORDINATOR,
+  C.FLOW_FLOOR_VIEW,
+  C.FLOW_CONSULTANTS,
+  C.FLOW_STATION,
+  C.FLOW_STATION_VITALS,
+  C.OBT_OPS,
+  C.GINIFLOW_VIEW,
+  C.GINIFLOW_BOARD,
+  // No GINIFLOW_MANAGE_QUEUE: rearranging the floor is the coordinator's job.
+  // The payment desk clearing a lab bill has no reason to be able to move any
+  // patient to any station, and no plan asked for it (BQ-10).
+  C.GINIFLOW_STATION_RECEPTION,
+  C.GINIFLOW_PRINT_RX,
+];
 
 // ── The matrix ──────────────────────────────────────────────────────────────
 // role -> array of capabilities (or ALL for everything). This is the one place
@@ -386,28 +410,8 @@ export const ROLE_CAPABILITIES = {
     C.GINIFLOW_STATION_LAB,
     C.GINIFLOW_STATION_LAB_COLLECT,
   ],
-  [ROLES.RECEPTION]: [
-    C.PATIENT_READ,
-    C.PATIENT_CHART,
-    C.LAB_REQUESTS,
-    C.REFILLS,
-    C.RECEPTION_OPS,
-    C.MED_COLLECTION,
-    C.FLOW_RECEPTION,
-    C.FLOW_COORDINATOR,
-    C.FLOW_FLOOR_VIEW,
-    C.FLOW_CONSULTANTS,
-    C.FLOW_STATION,
-    C.FLOW_STATION_VITALS,
-    C.OBT_OPS,
-    C.GINIFLOW_VIEW,
-    C.GINIFLOW_BOARD,
-    // No GINIFLOW_MANAGE_QUEUE: rearranging the floor is the coordinator's job.
-    // The payment desk clearing a lab bill has no reason to be able to move any
-    // patient to any station, and no plan asked for it (BQ-10).
-    C.GINIFLOW_STATION_RECEPTION,
-    C.GINIFLOW_PRINT_RX,
-  ],
+  [ROLES.RECEPTION]: RECEPTION_CAPABILITIES,
+  [ROLES.RECEPTION_ADMIN]: [...RECEPTION_CAPABILITIES],
   // Coordinators run GHM ops/calling and need Genie Chats with patients.
   // The GDA works two desks: Vitals and the Assistant Station. Dietitian was
   // never theirs — 4 steps ever, none worked by hand, no dietitian accounts —

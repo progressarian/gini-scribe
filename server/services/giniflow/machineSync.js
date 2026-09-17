@@ -3,6 +3,7 @@ import {
   insertLabStepsForOrder,
   insertMachineStepsForOrders,
   raiseOrdersFromSteps,
+  sampleTakenBeforeVisit,
 } from "./journey.js";
 import { machineFor } from "../../../shared/machineStages.js";
 import { getMachines } from "./machineCatalog.js";
@@ -14,6 +15,7 @@ import {
   billedLabLines,
   billedMachineLines,
   billedStepIds,
+  priceOrdersFromBill,
   readPatientBill,
   reconcileTestSteps,
 } from "./patientBill.js";
@@ -91,13 +93,20 @@ const TARGET_SELECT = `
             v.patient_id,
             v.visit_date,
             v.current_status,
-            a.healthray_id,
-            COALESCE(a.healthray_patient_id, prior.healthray_patient_id, lab.healthray_patient_id)
-              AS hr_patient_id,
+            COALESCE(a.healthray_id, sameday.healthray_id) AS healthray_id,
+            COALESCE(a.healthray_patient_id, sameday.healthray_patient_id,
+                     prior.healthray_patient_id, lab.healthray_patient_id) AS hr_patient_id,
             p.name
        FROM giniflow_visits v
        JOIN patients p ON p.id = v.patient_id
        LEFT JOIN appointments a ON a.id = v.appointment_id
+       LEFT JOIN LATERAL (
+         SELECT a1.healthray_id, a1.healthray_patient_id
+           FROM appointments a1
+          WHERE a1.patient_id = v.patient_id AND a1.appointment_date = v.visit_date
+            AND a1.healthray_id IS NOT NULL
+          ORDER BY a1.id DESC LIMIT 1
+       ) sameday ON TRUE
        LEFT JOIN LATERAL (
          SELECT a2.healthray_patient_id
            FROM appointments a2
@@ -107,9 +116,8 @@ const TARGET_SELECT = `
        ${LAB_CASE_PATIENT_ID("v.visit_date", "v.patient_id", "p.file_no")}
       WHERE NOT COALESCE(p.is_blocked, FALSE)
         AND v.current_status <> ALL($1::text[])
-        AND a.healthray_id IS NOT NULL
-        AND COALESCE(a.healthray_patient_id, prior.healthray_patient_id, lab.healthray_patient_id)
-            IS NOT NULL`;
+        AND COALESCE(a.healthray_patient_id, sameday.healthray_patient_id,
+                     prior.healthray_patient_id, lab.healthray_patient_id) IS NOT NULL`;
 
 async function scanTargets(visitDate, db, limit) {
   const { rows } = await db.query(
@@ -173,7 +181,11 @@ export async function syncMachineOrdersForVisit(visit, db = pool) {
   try {
     await client.query("BEGIN");
     await client.query(`SELECT id FROM giniflow_visits WHERE id = $1 FOR UPDATE`, [visit.visit_id]);
-    if (labLines.length && !FINISHED.includes(visit.current_status)) {
+    if (
+      labLines.length &&
+      !FINISHED.includes(visit.current_status) &&
+      !(await sampleTakenBeforeVisit(client, visit.visit_id))
+    ) {
       const missing = await notYetOrdered(client, visit.visit_id, labLines);
       if (missing.length) {
         const r = await raiseOrdersFromSteps(client, visit.visit_id, [
@@ -205,6 +217,9 @@ export async function syncMachineOrdersForVisit(visit, db = pool) {
       ];
     }
     if (!FINISHED.includes(visit.current_status)) {
+      const repriced = await priceOrdersFromBill(client, visit.visit_id, bill, machines);
+      if (repriced)
+        log("price", `${visit.name}: ${repriced} order(s) repriced to the HealthRay bill`);
       removed = await reconcileTestSteps(client, visit.visit_id, bill, machines);
       if (removed.removedSteps || removed.removedOrders) {
         log(
@@ -270,6 +285,15 @@ export async function runMachineSync(dateStr, { limit = SCAN_BATCH, db = pool } 
 
 const LAB_STEPS = ["lab_billing", "blood_sample"];
 
+const labDoneEarlierToday = async (patientId, date, db) => {
+  const { rows } = await db.query(
+    `SELECT id FROM giniflow_visits WHERE patient_id = $1 AND visit_date = $2::date
+      ORDER BY merged_into_visit_id NULLS FIRST LIMIT 1`,
+    [patientId, date],
+  );
+  return rows.length > 0 && sampleTakenBeforeVisit(db, rows[0].id);
+};
+
 export async function healthrayBillSteps(patientId, { date = null, db = pool } = {}) {
   const { rows } = await db.query(
     `SELECT a.healthray_id, me.patient_id,
@@ -308,7 +332,9 @@ export async function healthrayBillSteps(patientId, { date = null, db = pool } =
     return { ...empty, status: "blocked", blockedUntil: await healthrayBlockedUntil(db) };
   }
   if (bill.status === "no_bill") return { ...empty, status: "no_bill" };
-  const labLines = billedLabLines(bill);
+  const labLines = (await labDoneEarlierToday(visit.patient_id, visit.visit_date, db))
+    ? []
+    : billedLabLines(bill);
   const labTests = labLines.map((l) => l.name);
   const machines = await getMachines(db);
   const machineIds = [...billedStepIds(bill, machines)].filter((id) => !LAB_STEPS.includes(id));

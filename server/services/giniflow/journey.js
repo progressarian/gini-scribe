@@ -15,11 +15,13 @@ import {
   testsBeforeDoctors,
   requiredStepsFirst,
   isTestStep,
+  LAB_TEST_STEP_IDS,
 } from "../../../shared/journeyOrder.js";
 import { getMachines } from "./machineCatalog.js";
 import { addMachineTestOn } from "./machineStation.js";
 import { testPricesFor, schemeForVisit } from "../pricing.js";
-import { storedBill, stepsAllowedByBill } from "./patientBill.js";
+import { caseSampledBeforeVisit } from "./testsHold.js";
+import { priceOrdersFromBill, storedBill, stepsAllowedByBill } from "./patientBill.js";
 
 const DRAWN_STATUS_SQL = LAB_RUNGS.filter((r) => stageIndexOf(r.key) >= stageIndexOf("collected"))
   .flatMap((r) => r.sampleStatuses)
@@ -90,6 +92,24 @@ const HR_LAB_EVIDENCE_SQL = `
       AND (lc.patient_id = v.patient_id
            OR (lc.patient_id IS NULL
                AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))) AS hr_collected`;
+
+export const SAMPLE_TAKEN_BEFORE_VISIT_SQL = (v = "v", p = "p") => `EXISTS (
+  SELECT 1 FROM lab_cases lc
+   WHERE lc.case_date = ${v}.visit_date
+     AND (lc.patient_id = ${v}.patient_id
+          OR (lc.patient_id IS NULL
+              AND lc.raw_list_json->'patient'->>'healthray_uid' = ${p}.file_no))
+     AND ${caseSampledBeforeVisit(v)})`;
+
+export async function sampleTakenBeforeVisit(db, visitId) {
+  const { rows } = await db.query(
+    `SELECT ${SAMPLE_TAKEN_BEFORE_VISIT_SQL()} AS earlier
+       FROM giniflow_visits v JOIN patients p ON p.id = v.patient_id
+      WHERE v.id = $1`,
+    [visitId],
+  );
+  return !!rows[0]?.earlier;
+}
 
 const trimmed = (v, max = 120) =>
   typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null;
@@ -269,7 +289,7 @@ const benchAlreadyStarted = async (client, visitId) => {
      ) AS started`,
     [visitId],
   );
-  return rows[0].started;
+  return rows[0].started || (await sampleTakenBeforeVisit(client, visitId));
 };
 
 export async function raiseOrdersFromSteps(client, visitId, steps, actorId = null) {
@@ -352,6 +372,11 @@ export async function raiseOrdersFromSteps(client, visitId, steps, actorId = nul
   return raised;
 }
 
+const isEarlierLabStep = (s) =>
+  LAB_TEST_STEP_IDS.includes(s.catalogId) &&
+  s.source !== "added" &&
+  !(s.billedIn !== "healthray" && s.tests?.length);
+
 const uniqueToken = async (client) => {
   for (let i = 0; i < 5; i++) {
     const token = genVisitToken();
@@ -380,10 +405,11 @@ export async function checkInWithJourney(
       [visitId],
     );
     if (!existing.rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
-    const steps = stepsAllowedByBill(
-      askedSteps,
-      await storedBill(existing.rows[0].patient_id, existing.rows[0].visit_date, client),
-      await getMachines(client),
+    const labAlreadyDone = await sampleTakenBeforeVisit(client, visitId);
+    const bill = await storedBill(existing.rows[0].patient_id, existing.rows[0].visit_date, client);
+    const machines = await getMachines(client);
+    const steps = stepsAllowedByBill(askedSteps, bill, machines).filter(
+      (s) => !(labAlreadyDone && isEarlierLabStep(s)),
     );
     const current = existing.rows[0].current_status;
     // A second press at a busy counter must not give the patient two journeys.
@@ -422,6 +448,7 @@ export async function checkInWithJourney(
       // Guarded by `alreadyPlanned` for the same reason the steps are — a second
       // press at a busy counter must not bill the patient twice.
       raised = await raiseOrdersFromSteps(client, visitId, steps, actorId);
+      await priceOrdersFromBill(client, visitId, bill, machines);
       await insertLabStepsIfHealthrayCase(client, visitId);
       await placeTestsBeforeDoctors(client, visitId);
     }
@@ -883,7 +910,9 @@ export async function insertLabStepsIfHealthrayCase(client, visitId) {
       WHERE v.id = $1`,
     [visitId],
   );
-  if (!(rows[0]?.hr_cases > 0)) return { added: [] };
+  if (!(rows[0]?.hr_cases > 0) || (await sampleTakenBeforeVisit(client, visitId))) {
+    return { added: [] };
+  }
   return insertLabStepsForOrder(client, visitId);
 }
 

@@ -13,12 +13,15 @@ export function useReceptionTestCatalog() {
   });
 }
 
-export function useReceptionQueue(date) {
+export function useReceptionQueue(date, q = "") {
   return useQuery({
-    queryKey: ["giniflow", "reception", "queue", date || "today"],
+    queryKey: ["giniflow", "reception", "queue", date || "today", q],
     queryFn: async () =>
-      (await api.get("/api/giniflow/stations/reception/queue", { params: date ? { date } : {} }))
-        .data,
+      (
+        await api.get("/api/giniflow/stations/reception/queue", {
+          params: { ...(date ? { date } : {}), ...(q ? { q } : {}) },
+        })
+      ).data,
     refetchInterval: pollInterval,
     refetchIntervalInBackground: false,
     placeholderData: (prev) => prev,

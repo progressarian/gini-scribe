@@ -98,6 +98,23 @@ function ymd(v) {
   return m ? `${m[3]}-${m[2]}-${m[1]}` : "";
 }
 
+const paise = (v) => Math.round(v * 100);
+
+export function discountShares(nets, discount) {
+  const base = nets.reduce((s, n) => s + paise(n), 0);
+  const total = Math.min(paise(discount), base);
+  if (total <= 0 || base <= 0) return nets.map(() => 0);
+  const shares = nets.map((n) => Math.floor((paise(n) * total) / base));
+  let left = total - shares.reduce((s, x) => s + x, 0);
+  for (let i = nets.length - 1; left > 0 && i >= 0; i--) {
+    if (paise(nets[i]) > shares[i]) {
+      shares[i]++;
+      left--;
+    }
+  }
+  return shares.map((p) => p / 100);
+}
+
 export function transactionsToBilling(rows, { appointmentId, date, wholeDay = false } = {}) {
   if (!Array.isArray(rows) || !rows.length) return null;
   const day = ymd(date);
@@ -114,11 +131,15 @@ export function transactionsToBilling(rows, { appointmentId, date, wholeDay = fa
   const num = (v) => Number(v) || 0;
   const items = [];
   for (const t of txns) {
-    for (const b of t.billing_items || []) {
+    const lines = t.billing_items || [];
+    const netOf = (b) => num(b.net_price ?? b.price);
+    const shares = discountShares(lines.map(netOf), num(t.global_discount));
+    lines.forEach((b, i) => {
       const cat = (b.category_type || b.charge_category || "").toUpperCase();
       items.push({
         desc: b.name,
-        amount: num(b.net_price ?? b.price),
+        amount: (paise(netOf(b)) - paise(shares[i])) / 100,
+        ...(shares[i] > 0 ? { gross: netOf(b), discount: shares[i] } : {}),
         category:
           cat === "OPD"
             ? "consultation"
@@ -130,7 +151,7 @@ export function transactionsToBilling(rows, { appointmentId, date, wholeDay = fa
                   ? "machine"
                   : "other",
       });
-    }
+    });
   }
 
   const total = txns.reduce((s, t) => s + num(t.net_paid_amount ?? t.payable_amount), 0);

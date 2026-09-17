@@ -744,6 +744,8 @@ function PatientCard({
 // Columns the manager can rearrange by hand. The lab track is ordered by its own
 // timers rather than by the chain, and "Done today" is a record of what already
 // happened — neither has a queue to arrange.
+const BOOKING_STATUSES = new Set(["booked", "confirmed", "no_show", "cancelled"]);
+
 const ORDERABLE = (key) => key !== "done" && !SIDE_TRACK_COLUMNS.includes(key);
 
 function Column({
@@ -1081,6 +1083,7 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
   const preArrival = checkedInAt
     ? allSteps.filter(
         (s) =>
+          !BOOKING_STATUSES.has(s.status) &&
           new Date(s.enteredAt) < new Date(checkedInAt) &&
           (s.timestampOnly || (s.leftAt && new Date(s.leftAt) <= new Date(checkedInAt))),
       )

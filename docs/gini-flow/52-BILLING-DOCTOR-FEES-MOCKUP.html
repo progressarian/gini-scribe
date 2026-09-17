@@ -1,0 +1,675 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Doctor Fees Management — mockup</title>
+<style>
+  :root {
+    --bg: #F6F5F1; --surface: #FFFFFF; --line: #E3E0D8; --line-strong: #C9C5BA;
+    --ink: #1C2426; --muted: #5B6568; --muted-2: #4F595C; --head: #F1EFE9;
+    --teal: #0F6E66; --teal-dark: #0A4F49; --teal-soft: #E6F2F0; --teal-line: #B9DAD5;
+    --amber-soft: #FBEFDD; --amber-line: #E5B877; --amber-ink: #6B3A06; --amber: #9A4B08;
+    --red-soft: #FBE7E4; --red-line: #E7A69E; --red-ink: #7E231C; --red: #A8322A;
+    --grey-soft: #EFEDE7;
+    --serif: Georgia, "Times New Roman", serif;
+    --sans: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 14px; }
+  button, input, select { font-family: inherit; font-size: inherit; color: inherit; }
+  .topbar { display: flex; align-items: center; gap: 20px; padding: 0 28px; height: 58px; background: var(--ink); color: var(--bg); }
+  .brand { font-family: var(--serif); font-size: 20px; font-weight: 700; }
+  .topbar small { color: #C9D1D2; font-size: 13px; }
+  .spacer { flex-grow: 1; }
+  .tabs { display: flex; gap: 2px; padding: 0 28px; background: var(--surface); border-bottom: 1px solid var(--line); overflow-x: auto; }
+  .tab { padding: 14px 14px; border: none; background: none; cursor: pointer; font-size: 14px; color: var(--ink); border-bottom: 3px solid transparent; white-space: nowrap; }
+  .tab[aria-selected="true"] { color: var(--teal); font-weight: 600; border-bottom-color: var(--teal); }
+  main { padding: 24px 28px 40px; min-width: 1180px; }
+  h1 { margin: 0; font-family: var(--serif); font-size: 28px; }
+  h2 { margin: 0; font-family: var(--serif); font-size: 21px; }
+  .sub { margin: 4px 0 0; color: var(--muted); }
+  .pagehead { display: flex; align-items: flex-end; gap: 12px; margin-bottom: 16px; }
+  .pagehead .grow { flex-grow: 1; }
+  .chip { display: inline-block; padding: 3px 9px; border-radius: 999px; background: var(--grey-soft); color: var(--muted-2); font-size: 12px; font-weight: 600; vertical-align: middle; }
+  .btn { height: 42px; padding: 0 16px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--surface); cursor: pointer; font-weight: 500; }
+  .btn.primary { background: var(--teal); border-color: var(--teal); color: #fff; font-weight: 600; }
+  .btn:disabled { background: var(--grey-soft); color: var(--muted); cursor: not-allowed; border-color: var(--line-strong); }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+  .layout { display: flex; gap: 20px; align-items: flex-start; }
+  .layout > .grow { flex-grow: 1; min-width: 0; overflow: hidden; }
+  .panel { width: 400px; flex-shrink: 0; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+  .eyebrow { font-size: 12px; font-weight: 600; color: var(--teal); text-transform: uppercase; letter-spacing: .04em; }
+  label.field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 500; }
+  .input { height: 42px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: #fff; }
+  .mono { font-family: var(--mono); }
+  .seg { display: grid; gap: 6px; }
+  .seg button { height: 42px; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; cursor: pointer; font-size: 13px; }
+  .seg button[aria-pressed="true"] { background: var(--teal); border-color: var(--teal); color: #fff; font-weight: 600; }
+  .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .grid4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  .preview { padding: 14px; border-radius: 10px; background: var(--teal-soft); border: 1px solid var(--teal-line); display: flex; flex-direction: column; gap: 10px; }
+  .preview .k { font-size: 12px; color: #2F5753; }
+  .preview .v { font-family: var(--mono); font-size: 18px; }
+  .msg { padding: 10px 12px; border-radius: 8px; font-size: 13px; }
+  .msg.ok { background: var(--teal-soft); border: 1px solid var(--teal-line); color: var(--teal-dark); }
+  .msg.bad { background: var(--red-soft); border: 1px solid var(--red-line); color: var(--red-ink); }
+  .msg.info { background: var(--bg); border: 1px solid var(--line); color: var(--muted-2); }
+  .filters { display: flex; align-items: flex-end; gap: 12px; margin-bottom: 14px; }
+  .legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); }
+  .legend i { display: inline-block; width: 14px; height: 14px; border-radius: 3px; margin-right: 6px; vertical-align: -2px; }
+  .fees-grid { display: grid; grid-template-columns: 200px repeat(6, minmax(0, 1fr)); }
+  .fees-grid .hd { padding: 10px 12px; background: var(--head); border-bottom: 1px solid var(--line); border-left: 1px solid var(--line); font-size: 13px; font-weight: 600; }
+  .fees-grid .hd small { display: block; font-weight: 400; color: var(--muted); font-size: 11px; min-height: 14px; }
+  .fees-grid .hd:first-child { border-left: none; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .fees-grid .doc { padding: 12px 14px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; justify-content: center; gap: 3px; }
+  .fees-grid .doc b { font-size: 14px; }
+  .fees-grid .doc span { font-size: 12px; color: var(--muted); }
+  .cell { min-height: 66px; padding: 10px 12px; text-align: left; border: none; border-left: 1px solid var(--line); border-bottom: 1px solid var(--line); background: #fff; cursor: pointer; display: flex; flex-direction: column; justify-content: center; gap: 3px; }
+  .cell .a { font-family: var(--mono); font-size: 14px; }
+  .cell .b { font-size: 12px; color: var(--muted-2); }
+  .cell.inherit { background: var(--grey-soft); outline: 1px dashed #A9A498; outline-offset: -6px; }
+  .cell.missing { background: var(--amber-soft); }
+  .cell[aria-pressed="true"] { box-shadow: inset 0 0 0 3px var(--teal); }
+  .banner { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: var(--amber-soft); border-top: 1px solid var(--amber-line); color: var(--amber-ink); font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; padding: 10px 14px; background: var(--head); font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--line); }
+  td { padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  tr.row-click { cursor: pointer; }
+  tr.row-click:hover td { background: #FAF9F6; }
+  tr.selected td { background: var(--teal-soft); }
+  tr.selected td:first-child { box-shadow: inset 4px 0 0 var(--teal); }
+  .code { display: inline-block; padding: 3px 8px; border-radius: 6px; background: var(--teal-soft); color: var(--teal-dark); font-family: var(--mono); font-size: 13px; }
+  .code.auto { background: var(--grey-soft); color: var(--muted-2); font-family: var(--sans); font-weight: 600; font-size: 12px; }
+  .tiny { font-size: 11px; color: var(--muted); display: block; margin-top: 3px; }
+  .bar { height: 8px; border-radius: 4px; background: var(--grey-soft); overflow: hidden; margin-top: 6px; }
+  .bar > span { display: block; height: 8px; }
+  .pill { display: inline-block; padding: 6px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .pill.on { background: var(--teal); color: #fff; }
+  .pill.off { background: #fff; color: var(--muted-2); border: 1px solid var(--line-strong); font-weight: 400; }
+  .pill.pending { background: var(--amber-soft); color: var(--amber-ink); border: 1px solid var(--amber-line); }
+  .pill.cleared { background: var(--teal-soft); color: var(--teal-dark); border: 1px solid var(--teal-line); }
+  .pill.grey { background: var(--grey-soft); color: var(--muted-2); }
+  .stat { padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
+  .stat span { font-size: 12px; color: var(--muted); }
+  .stat b { font-family: var(--serif); font-size: 26px; }
+  .stat.amber { background: var(--amber-soft); border-color: var(--amber-line); }
+  .stat.amber span, .stat.amber b { color: var(--amber-ink); }
+  .stat.teal { background: var(--teal-soft); border-color: var(--teal-line); }
+  .stat.teal span, .stat.teal b { color: var(--teal-dark); }
+  .kv { display: flex; justify-content: space-between; font-size: 13px; padding: 2px 0; }
+  .kv span:last-child { color: var(--muted-2); }
+  .notes3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; padding: 16px; background: var(--bg); border-top: 1px solid var(--line); font-size: 13px; color: var(--muted-2); }
+  .notes3 b { display: block; color: var(--ink); margin-bottom: 4px; }
+  .flow { display: flex; align-items: stretch; }
+  .flow .box { width: 270px; padding: 18px; border-radius: 14px; display: flex; flex-direction: column; gap: 8px; }
+  .flow .box.dark { background: var(--ink); color: #DDE3E3; }
+  .flow .box.dark .eyebrow { color: #9FD3CC; }
+  .flow .box.dark strong { color: #fff; }
+  .flow .box.light { background: #fff; border: 1px solid var(--line); }
+  .flow .box.tealbox { background: var(--teal-soft); border: 1px solid var(--teal-line); flex-grow: 1; width: auto; }
+  .flow .arrow { align-self: center; flex-shrink: 0; }
+  .rule { padding: 8px 10px; border-radius: 8px; background: var(--bg); font-size: 13px; }
+  .steps { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+  .steps .s { padding: 8px 12px; border-radius: 8px; background: var(--bg); border: 1px solid var(--line); }
+  .hidden { display: none !important; }
+  .counter-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
+  .counter-cols section { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+  .lines { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .lines .r { display: grid; grid-template-columns: minmax(0, 2.2fr) 90px minmax(0, 1fr) 100px; gap: 10px; padding: 12px 14px; align-items: center; }
+  .lines .r.h { background: var(--head); font-size: 12px; font-weight: 600; color: var(--muted); padding: 10px 14px; }
+  .box3 { padding: 12px; border-radius: 10px; background: var(--bg); display: flex; flex-direction: column; gap: 2px; }
+  .box3 span { font-size: 12px; color: var(--muted); }
+  .box3 b { font-family: var(--mono); font-size: 20px; font-weight: 500; }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">Gini Scribe</div>
+  <small>Doctor fees management · design mockup</small>
+  <div class="spacer"></div>
+  <small id="whoami">Signed in as Reception Admin</small>
+</header>
+<nav class="tabs" role="tablist" aria-label="Screens">
+  <button class="tab" role="tab" data-view="fees" aria-selected="true">Consultant fees</button>
+  <button class="tab" role="tab" data-view="coupons" aria-selected="false">Discounts &amp; coupons</button>
+  <button class="tab" role="tab" data-view="register" aria-selected="false">CGHS register</button>
+  <button class="tab" role="tab" data-view="counter" aria-selected="false">Billing Counter (reception)</button>
+  <button class="tab" role="tab" data-view="flow" aria-selected="false">How it fits together</button>
+</nav>
+
+<main>
+  <section id="view-fees">
+    <div class="pagehead">
+      <div class="grow">
+        <h1>Consultant fees</h1>
+        <p class="sub">Each doctor's fee in every category, and what the patient pays at the counter. Changes apply to new bills only.</p>
+      </div>
+      <button class="btn" type="button">Copy column to…</button>
+      <button class="btn" type="button">Download sheet</button>
+      <button class="btn primary" type="button">Upload sheet</button>
+    </div>
+    <div class="filters">
+      <label class="field">Doctor<input class="input" type="search" placeholder="Search doctor" style="width:220px"></label>
+      <label class="field">Category<select class="input" style="width:210px"><option>All categories</option><option>CGHS › CGHS Paid</option><option>CGHS › CGHS Referral</option><option>CGHS › Pensioner</option></select></label>
+      <label class="field">Visit type<select class="input" style="width:170px"><option>All visit types</option><option>New</option><option>Follow Up</option><option>Investigation</option></select></label>
+      <div class="spacer"></div>
+      <div class="legend">
+        <span><i style="background:#fff;border:1px solid var(--line-strong)"></i>Set for this doctor</span>
+        <span><i style="background:var(--grey-soft);border:1px dashed #A9A498"></i>Inherited</span>
+        <span><i style="background:var(--amber-soft);border:1px solid var(--amber-line)"></i>Not priced</span>
+      </div>
+    </div>
+    <div class="layout">
+      <div class="grow card">
+        <div class="fees-grid" id="feesGrid"></div>
+        <div class="banner">
+          <b>1 doctor has no consultation fee yet</b>
+          <span>[Doctor name] can't be billed until a fee is set.</span>
+          <div class="spacer"></div>
+          <button class="btn" type="button" style="height:36px">Create consultation item</button>
+        </div>
+      </div>
+      <aside class="card panel" aria-label="Edit fee" id="feeEditor"></aside>
+    </div>
+  </section>
+
+  <section id="view-coupons" class="hidden">
+    <div class="pagehead">
+      <div class="grow">
+        <h1>Discounts &amp; coupons <span class="chip">Example codes and figures</span></h1>
+        <p class="sub">Codes reception types at the counter, and discounts that apply automatically. Reception can never type a discount amount.</p>
+      </div>
+      <button class="btn" type="button">Test a code</button>
+      <button class="btn primary" type="button">New coupon</button>
+    </div>
+    <div class="layout">
+      <div class="grow card">
+        <table>
+          <thead><tr><th style="width:140px">Code</th><th>Name</th><th style="width:90px">Discount</th><th>Covers</th><th>Limits</th><th style="width:180px">Used today</th></tr></thead>
+          <tbody id="couponRows"></tbody>
+        </table>
+        <div class="notes3">
+          <div><b>When limits are checked</b>When the code is typed, and again when the bill is finalised — two desks can't both take the last use.</div>
+          <div><b>What a "day" is</b>The calendar day in India time. Only final bills count; a cancelled bill gives its use back.</div>
+          <div><b>When two discounts match</b>Billing settings decide: only the best one, or stack the ones marked stackable.</div>
+        </div>
+      </div>
+      <aside class="card panel" aria-label="Edit coupon" id="couponEditor" style="width:420px"></aside>
+    </div>
+  </section>
+
+  <section id="view-register" class="hidden">
+    <div class="pagehead">
+      <div class="grow">
+        <h1>CGHS pending register <span class="chip">Example bills</span></h1>
+        <p class="sub">Only Admin and Reception Admin see this. Bills stay Pending until CGHS pays into the hospital account.</p>
+      </div>
+      <button class="btn" type="button">Print pending list</button>
+      <button class="btn" type="button">Export to Excel</button>
+    </div>
+    <div class="grid4" id="regStats" style="margin-bottom:16px"></div>
+    <div class="layout">
+      <div class="grow card">
+        <div style="display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line)">
+          <div class="seg" style="grid-template-columns:repeat(2,auto)" id="regTabs"></div>
+          <div class="spacer"></div>
+          <select class="input" aria-label="Sub-category"><option>All sub-categories</option><option>CGHS › CGHS Paid</option><option>CGHS › CGHS Referral</option><option>CGHS › Pensioner</option></select>
+          <select class="input" aria-label="Doctor"><option>All doctors</option><option>Dr Banshali</option><option>Dr Rahul</option><option>Dr Beant</option></select>
+          <input class="input" type="search" placeholder="Bill no. or UTR" aria-label="Search" style="width:170px">
+        </div>
+        <table>
+          <thead><tr><th style="width:44px"></th><th>Bill</th><th>Patient</th><th>Sub-category</th><th>Doctor</th><th>Claim</th><th id="regLastHead">Status</th></tr></thead>
+          <tbody id="regRows"></tbody>
+        </table>
+        <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--bg);font-size:13px;color:var(--muted-2)">
+          <button class="btn" type="button" id="selectAll" style="height:36px">Select all pending</button>
+          <span>Cancelling a pending bill removes it from this list. A cleared bill can't be cancelled.</span>
+        </div>
+      </div>
+      <aside class="card panel" aria-label="Record CGHS payment" id="payPanel"></aside>
+    </div>
+  </section>
+
+  <section id="view-counter" class="hidden">
+    <div class="pagehead">
+      <div class="grow">
+        <h1>What reception sees once the admin has set it up</h1>
+        <p class="sub">The fee, bill code and patient share come from the admin's settings. Reception never types a price or a discount amount.</p>
+      </div>
+    </div>
+    <div class="counter-cols">
+      <section class="card">
+        <div style="display:flex;gap:12px;align-items:flex-start">
+          <div class="grow" style="flex-grow:1">
+            <div class="eyebrow" style="color:var(--muted)">Example 1 · pays nothing</div>
+            <h2 style="font-family:var(--sans);font-size:19px">Patient A · [UHID] · 68 years</h2>
+            <div class="sub">Follow Up with Dr Banshali</div>
+          </div>
+          <span class="pill cleared">CGHS › Pensioner</span>
+        </div>
+        <label class="field">CGHS card number<input class="input mono" value="••••••4821" readonly></label>
+        <div class="lines">
+          <div class="r h"><span>Line on the bill</span><span>Fee</span><span>Rule used</span><span>Patient pays</span></div>
+          <div class="r"><span><b>Consultant meet with Dr Banshali CC02</b><span class="tiny">added automatically from the appointment</span></span><span class="mono">₹700</span><span style="color:var(--muted-2);font-size:13px">Pensioner · pays nothing</span><b class="mono">₹0</b></div>
+        </div>
+        <div class="grid3">
+          <div class="box3"><span>Bill amount</span><b>₹700</b></div>
+          <div class="box3"><span>Collect from patient</span><b>₹0</b></div>
+          <div class="box3" style="background:var(--amber-soft)"><span style="color:var(--amber-ink)">Claimed from CGHS</span><b style="color:var(--amber-ink)">₹700</b></div>
+        </div>
+        <div class="msg info">No payment is taken. The patient gets the printout; the bill goes to the CGHS register as Pending.</div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <button class="btn primary" type="button">Finalise &amp; print</button>
+          <span class="sub" style="margin:0">After printing:</span>
+          <span class="pill pending">CGHS pending</span>
+          <span class="sub" style="margin:0">→ later</span>
+          <span class="pill cleared">Cleared on [date]</span>
+        </div>
+      </section>
+      <section class="card">
+        <div style="display:flex;gap:12px;align-items:flex-start">
+          <div style="flex-grow:1">
+            <div class="eyebrow" style="color:var(--muted)">Example 2 · coupon and daily limit</div>
+            <h2 style="font-family:var(--sans);font-size:19px">Patient G · [UHID] · 45 years</h2>
+            <div class="sub">New visit with Dr Banshali</div>
+          </div>
+          <span class="pill grey">General</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <label for="demoCode" style="font-size:13px;font-weight:500">Discount code — try BANSHALI20, RB100 or XYZ</label>
+          <div style="display:flex;gap:8px">
+            <input id="demoCode" class="input mono" value="BANSHALI20" style="flex-grow:1">
+            <button class="btn" type="button" id="demoApply" style="color:var(--teal);border-color:var(--teal);font-weight:600">Apply</button>
+          </div>
+          <div id="demoMsg" role="status"></div>
+        </div>
+        <div class="lines">
+          <div class="r h"><span>Line on the bill</span><span>Fee</span><span>Discount</span><span>Patient pays</span></div>
+          <div class="r"><b>Consultant meet — Dr Banshali (New)</b><span class="mono">₹1,500</span><span id="demoDisc" style="color:var(--muted-2);font-size:13px"></span><b class="mono" id="demoPays"></b></div>
+        </div>
+        <div class="grid3">
+          <label class="field">Mode<select class="input"><option>UPI</option><option>Card</option><option>Cash</option></select></label>
+          <label class="field">Amount<input class="input mono" id="demoAmount" readonly></label>
+          <label class="field">Reference<input class="input" placeholder="[UPI reference]"></label>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <button class="btn primary" type="button">Finalise &amp; print</button>
+          <button class="btn" type="button">Print receipt</button>
+          <span class="sub" style="margin:0">The daily limit is checked again at this click.</span>
+        </div>
+      </section>
+    </div>
+  </section>
+
+  <section id="view-flow" class="hidden">
+    <div class="pagehead"><div class="grow"><h1>How doctor fees flow from settings to the bill</h1><p class="sub">Admin and Reception Admin set everything once. Reception only picks the patient, confirms the category and types a code.</p></div></div>
+    <div class="flow">
+      <div class="box dark">
+        <span class="eyebrow">1 · Admin sets up</span>
+        <h2 style="color:#fff">Settings · Billing</h2>
+        <span><strong>Categories</strong> — CGHS › CGHS Paid, CGHS Referral, Pensioner</span>
+        <span><strong>Consultant fees</strong> — each doctor's fee in each category, and what the patient pays</span>
+        <span><strong>Bill codes</strong> — e.g. CC02 printed for CGHS</span>
+        <span><strong>Coupons</strong> — code, %, ₹ or fixed price, doctors, limits per day and per doctor</span>
+        <span><strong>Bulk import</strong> — the same from one Excel file</span>
+      </div>
+      <svg class="arrow" width="56" height="40" viewBox="0 0 56 40" fill="none" stroke="#0F6E66" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 20h40"/><path d="M38 12l8 8-8 8"/></svg>
+      <div class="box light">
+        <span class="eyebrow">2 · Stored as rules</span>
+        <h2>One row per decision</h2>
+        <div class="rule"><span class="mono">Dr Banshali × Pensioner</span><br>fee ₹700 · bill code CC02</div>
+        <div class="rule"><span class="mono">Pensioner · Dr Banshali</span><br>patient pays nothing · rest claimed</div>
+        <div class="rule"><span class="mono">RB100</span><br>Dr Rahul, Dr Beant · 5 a day per doctor</div>
+        <span class="tiny">Every change is logged. Old bills keep their old price.</span>
+      </div>
+      <svg class="arrow" width="56" height="40" viewBox="0 0 56 40" fill="none" stroke="#0F6E66" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 20h40"/><path d="M38 12l8 8-8 8"/></svg>
+      <div class="box light">
+        <span class="eyebrow">3 · Reception bills</span>
+        <h2>Billing Counter</h2>
+        <span>Opens the patient's visit</span>
+        <span>Confirms the sub-category (e.g. Pensioner)</span>
+        <span>Consultation line is added from the appointment</span>
+        <span>Types a coupon code, if any</span>
+        <span style="color:var(--red-ink)">Can't type a price or a discount amount</span>
+      </div>
+      <svg class="arrow" width="56" height="40" viewBox="0 0 56 40" fill="none" stroke="#0F6E66" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 20h40"/><path d="M38 12l8 8-8 8"/></svg>
+      <div class="box tealbox">
+        <span class="eyebrow" style="color:var(--teal-dark)">4 · The server prices it</span>
+        <h2>Same steps every time</h2>
+        <ol style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:7px">
+          <li>Fee for this doctor in this category</li>
+          <li>Coupon checked: doctor, category, dates, limits for today</li>
+          <li>What the patient pays (full, ₹, % or nothing)</li>
+          <li>The rest → claim from CGHS, or write off</li>
+          <li>Limits checked again when the bill is finalised</li>
+        </ol>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;padding:10px 140px 10px 0"><svg width="40" height="44" viewBox="0 0 40 44" fill="none" stroke="#0F6E66" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 4v34"/><path d="M12 30l8 8 8-8"/></svg></div>
+    <div class="grid2" style="gap:22px">
+      <div class="card" style="padding:20px;display:flex;flex-direction:column;gap:12px">
+        <span class="eyebrow">Patient pays something</span>
+        <h2>General, CGHS Paid, coupon bills</h2>
+        <div class="steps"><span class="s">Take cash / card / UPI</span>→<span class="s">Finalise, print bill + receipt</span>→<span class="pill cleared">Paid</span></div>
+        <span class="sub">A CGHS Paid bill also has a claimed part (e.g. ₹800 of a ₹1,500 fee): that part goes to the CGHS register too.</span>
+      </div>
+      <div class="card" style="padding:20px;display:flex;flex-direction:column;gap:12px;border-color:var(--amber-line)">
+        <span class="eyebrow" style="color:var(--amber)">Patient pays ₹0</span>
+        <h2>CGHS Referral and Pensioner</h2>
+        <div class="steps"><span class="s">Finalise &amp; print only</span>→<span class="pill pending">Pending in CGHS register</span>→<span class="s">CGHS pays the bank</span>→<span class="pill cleared">Cleared (one or many bills)</span></div>
+        <span class="sub">Today's figures: ₹350 for Dr Rahul and Dr Beant, ₹700 for Dr Banshali. CGHS always pays the full amount.</span>
+      </div>
+    </div>
+    <div style="display:flex;gap:12px;margin-top:18px;flex-wrap:wrap">
+      <span class="pill off">Admin + Reception Admin: settings, CGHS register</span>
+      <span class="pill off">Reception: Billing Counter only</span>
+      <span class="pill off">Admin only: billing settings, undo a clear</span>
+    </div>
+  </section>
+</main>
+
+<script>
+const money = (n) => "₹" + Number(n).toLocaleString("en-IN");
+const $ = (id) => document.getElementById(id);
+
+const views = ["fees", "coupons", "register", "counter", "flow"];
+document.querySelectorAll(".tab").forEach((tab) => {
+  tab.addEventListener("click", () => {
+    views.forEach((v) => $("view-" + v).classList.toggle("hidden", v !== tab.dataset.view));
+    document.querySelectorAll(".tab").forEach((t) => t.setAttribute("aria-selected", String(t === tab)));
+    $("whoami").textContent = tab.dataset.view === "counter" ? "Signed in as Reception" : "Signed in as Reception Admin";
+  });
+});
+
+const feeCols = [
+  { key: "general", parent: "", name: "General" },
+  { key: "paid", parent: "CGHS ›", name: "CGHS Paid" },
+  { key: "referral", parent: "CGHS ›", name: "CGHS Referral" },
+  { key: "pensioner", parent: "CGHS ›", name: "Pensioner" },
+  { key: "echs", parent: "", name: "ECHS" },
+  { key: "senior", parent: "", name: "Senior Citizen" },
+];
+const inherit = { inherit: true };
+const feeRows = [
+  { id: "ban-new", doctor: "Dr Banshali", visit: "New", cells: { general: { fee: 1500, mode: "full" }, paid: { fee: 1500, mode: "amount", value: 700, code: "CC02" }, referral: { fee: 700, mode: "nothing", code: "CC02" }, pensioner: { fee: 700, mode: "nothing", code: "CC02" }, echs: inherit, senior: inherit } },
+  { id: "ban-fu", doctor: "Dr Banshali", visit: "Follow Up", cells: { general: { fee: 1000, mode: "full" }, paid: { fee: 1000, mode: "amount", value: 700, code: "CC02" }, referral: { fee: 700, mode: "nothing", code: "CC02" }, pensioner: { fee: 700, mode: "nothing", code: "CC02" }, echs: inherit, senior: inherit } },
+  { id: "rahul", doctor: "Dr Rahul", visit: "All visit types", cells: { general: { placeholder: true }, paid: { placeholder: true }, referral: { fee: 350, mode: "nothing" }, pensioner: { fee: 350, mode: "nothing" }, echs: inherit, senior: inherit } },
+  { id: "beant", doctor: "Dr Beant", visit: "All visit types", cells: { general: { placeholder: true }, paid: { placeholder: true }, referral: { fee: 350, mode: "nothing" }, pensioner: { fee: 350, mode: "nothing" }, echs: inherit, senior: inherit } },
+  { id: "missing", doctor: "[Doctor name]", visit: "No fee set", missing: true, cells: Object.fromEntries(feeCols.map((c) => [c.key, { missing: true }])) },
+];
+const feeState = { sel: "ban-new|pensioner", edits: {} };
+
+function cellValue(row, key) {
+  return { ...row.cells[key], ...(feeState.edits[row.id + "|" + key] || {}) };
+}
+function paysText(c) {
+  if (c.mode === "nothing") return "pays nothing";
+  if (c.mode === "amount") return "pays " + money(c.value || 0);
+  if (c.mode === "percent") return "pays " + (c.value || 0) + "%";
+  return "pays full fee";
+}
+function setFeeEdit(patch) {
+  feeState.edits[feeState.sel] = { ...(feeState.edits[feeState.sel] || {}), ...patch };
+  renderFees();
+}
+
+function renderFees() {
+  let html = '<div class="hd">Doctor · visit type</div>';
+  html += feeCols.map((c) => `<div class="hd"><small>${c.parent}</small>${c.name}</div>`).join("");
+  for (const row of feeRows) {
+    html += `<div class="doc"><b>${row.doctor}</b><span style="${row.missing ? "color:var(--amber-ink)" : ""}">${row.visit}</span></div>`;
+    for (const col of feeCols) {
+      const id = row.id + "|" + col.key;
+      const c = cellValue(row, col.key);
+      let cls = "", a, b;
+      if (c.missing) { cls = "missing"; a = "—"; b = "not priced"; }
+      else if (c.inherit) { cls = "inherit"; const g = cellValue(row, "general"); a = g.placeholder ? "[₹ fee]" : money(g.fee); b = "inherits General"; }
+      else if (c.placeholder) { a = "[₹ fee]"; b = "set by admin"; }
+      else { a = money(c.fee); b = paysText(c); }
+      html += `<button type="button" class="cell ${cls}" data-id="${id}" aria-pressed="${id === feeState.sel}"><span class="a">${a}</span><span class="b">${b}</span></button>`;
+    }
+  }
+  $("feesGrid").innerHTML = html;
+  $("feesGrid").querySelectorAll(".cell").forEach((el) => el.addEventListener("click", () => { feeState.sel = el.dataset.id; renderFees(); }));
+
+  const [rowId, colKey] = feeState.sel.split("|");
+  const row = feeRows.find((r) => r.id === rowId);
+  const col = feeCols.find((k) => k.key === colKey);
+  const c = cellValue(row, colKey);
+  const fee = typeof c.fee === "number" ? c.fee : null;
+  const mode = c.mode || "full";
+  const value = c.value || 0;
+  const remainder = c.remainder || (colKey === "general" ? "adjustment" : "claim");
+  let pays = fee;
+  if (fee !== null) {
+    if (mode === "nothing") pays = 0;
+    if (mode === "amount") pays = Math.min(value, fee);
+    if (mode === "percent") pays = Math.round((fee * value) / 100);
+  }
+  const rest = fee === null ? null : fee - pays;
+  const payer = col.parent ? "CGHS" : col.name;
+  let note = "Nothing to claim.";
+  if (fee === null) note = "Enter a fee to see the preview.";
+  else if (rest > 0 && remainder === "claim") note = `The bill is printed and stays Pending in the CGHS register until ${payer} pays ${money(rest)}.`;
+  else if (rest > 0) note = `${money(rest)} is written off as a category adjustment.`;
+  const warn = mode === "amount" && fee !== null && value > fee;
+  const seg = (items, current, attr) => items.map(([k, l]) => `<button type="button" data-${attr}="${k}" aria-pressed="${k === current}">${l}</button>`).join("");
+  const bill = c.code ? `Consultant meet with ${row.doctor} ${c.code}` : `Consultant meet with ${row.doctor}`;
+
+  $("feeEditor").innerHTML = `
+    <div><div class="eyebrow">Editing</div><h2>${row.doctor} · ${row.visit}</h2><div class="sub">${col.parent ? col.parent + " " : ""}${col.name}</div></div>
+    <label class="field">Fee for this doctor in this category (₹)<input class="input mono" id="feeInput" inputmode="numeric" value="${fee === null ? "" : fee}" placeholder="enter fee"></label>
+    <div><div style="font-size:13px;font-weight:500;margin-bottom:6px">What the patient pays at the counter</div>
+      <div class="seg" style="grid-template-columns:repeat(4,minmax(0,1fr))">${seg([["full","Full fee"],["amount","Fixed ₹"],["percent","Percent"],["nothing","Nothing"]], mode, "mode")}</div></div>
+    ${mode === "amount" || mode === "percent" ? `<label class="field">${mode === "percent" ? "Patient pays this percent of the fee" : "Patient pays this amount (₹)"}<input class="input mono" id="valueInput" inputmode="numeric" value="${value}"></label>` : ""}
+    <div><div style="font-size:13px;font-weight:500;margin-bottom:6px">The rest (fee − patient pays) goes to</div>
+      <div class="seg" style="grid-template-columns:repeat(2,minmax(0,1fr))">${seg([["claim","Claim from payer"],["adjustment","Write off"]], remainder, "rem")}</div></div>
+    <div class="grid2">
+      <label class="field">Bill name<input class="input" value="${bill}" readonly></label>
+      <label class="field">Bill code<input class="input mono" value="${c.code || "—"}" readonly></label>
+      <label class="field">Valid from<input class="input" value="[date]" readonly></label>
+      <label class="field">Valid to<input class="input" value="No end date" readonly></label>
+    </div>
+    <div class="preview"><span class="eyebrow" style="color:var(--teal-dark)">Preview on the bill</span>
+      <div class="grid3">
+        <div><div class="k">Fee</div><div class="v">${fee === null ? "—" : money(fee)}</div></div>
+        <div><div class="k">Patient pays</div><div class="v">${fee === null ? "—" : money(pays)}</div></div>
+        <div><div class="k">${remainder === "claim" ? "Claimed from " + payer : "Written off"}</div><div class="v">${rest === null ? "—" : money(rest)}</div></div>
+      </div>
+      <div class="k">${note}</div>
+    </div>
+    ${warn ? `<div class="msg bad" role="alert">Refused: the patient amount (${money(value)}) is higher than the fee (${money(fee)}).</div>` : ""}
+    <div style="display:flex;gap:8px"><button class="btn primary" type="button" style="flex-grow:1">Save</button><button class="btn" type="button">Use inherited</button></div>
+    <div class="tiny">Every save is logged with who changed it. Old bills keep the price they were made with.</div>`;
+
+  $("feeInput").addEventListener("change", (e) => {
+    const v = e.target.value.replace(/[^0-9.]/g, "");
+    setFeeEdit({ fee: v === "" ? null : Number(v), placeholder: false, inherit: false, missing: false, mode: mode });
+  });
+  const vi = $("valueInput");
+  if (vi) vi.addEventListener("change", (e) => setFeeEdit({ value: Number(e.target.value.replace(/[^0-9.]/g, "")) || 0 }));
+  $("feeEditor").querySelectorAll("[data-mode]").forEach((b) => b.addEventListener("click", () => setFeeEdit({ mode: b.dataset.mode, ...(fee === null ? {} : { fee }) })));
+  $("feeEditor").querySelectorAll("[data-rem]").forEach((b) => b.addEventListener("click", () => setFeeEdit({ remainder: b.dataset.rem })));
+}
+
+const coupons = [
+  { code: "BANSHALI20", method: "code", name: "Dr Banshali consultation 20% off", discount: "20%", cap: "₹300", doctors: ["Dr Banshali"], covers: "OPD consultations", who: "General patients only · any age", limits: { day: "10", doctorDay: "—", patient: "1", total: "No limit" }, today: [{ label: "All uses", used: 7, limit: 10 }], valid: "[from] – [to]", stackable: "No", scheme: "No", roles: "Reception, Reception Admin" },
+  { code: "RB100", method: "code", name: "₹100 off Dr Rahul and Dr Beant", discount: "₹100", cap: "—", doctors: ["Dr Rahul", "Dr Beant"], covers: "OPD consultations", who: "General patients only", limits: { day: "—", doctorDay: "5", patient: "No limit", total: "500" }, today: [{ label: "Dr Rahul", used: 5, limit: 5 }, { label: "Dr Beant", used: 2, limit: 5 }], valid: "[from] – [to]", stackable: "No", scheme: "No", roles: "Reception Admin only" },
+  { code: "CC50", method: "code", name: "Consultation 50% off", discount: "50%", cap: "₹750", doctors: [], covers: "OPD consultations, all doctors", who: "Any category except CGHS", limits: { day: "20", doctorDay: "4", patient: "1", total: "No limit" }, today: [{ label: "All uses", used: 12, limit: 20 }], valid: "No end date", stackable: "No", scheme: "No", roles: "Reception, Reception Admin" },
+  { code: "LAB10", method: "code", name: "Lab tests 10% off", discount: "10%", cap: "₹500", doctors: [], covers: "Lab group (all tests)", who: "Any category", limits: { day: "30", doctorDay: "—", patient: "No limit", total: "No limit" }, today: [{ label: "All uses", used: 3, limit: 30 }], valid: "No end date", stackable: "Yes", scheme: "No", roles: "Reception, Reception Admin" },
+  { code: "Automatic", method: "auto", name: "Age 70+ consultation discount", discount: "[%]", cap: "—", doctors: [], covers: "OPD consultations, all doctors", who: "Age 70 and over · General", limits: { day: "No limit", doctorDay: "No limit", patient: "No limit", total: "No limit" }, today: [{ label: "Applied", used: 9, limit: 0 }], valid: "No end date", stackable: "No", scheme: "No", roles: "Applied by the system" },
+];
+let couponSel = "BANSHALI20";
+function usageBar(used, limit) {
+  if (!limit) return { text: used + " times", color: "var(--ink)", bar: "" };
+  const pct = Math.min(100, Math.round((used / limit) * 100));
+  const full = used >= limit;
+  const color = full ? "var(--red)" : pct >= 70 ? "#B45309" : "var(--teal)";
+  return { text: (full ? "Limit reached · " : "") + used + " of " + limit, color: full ? "var(--red)" : "var(--ink)", bar: `<div class="bar"><span style="width:${pct}%;background:${color}"></span></div>` };
+}
+function renderCoupons() {
+  $("couponRows").innerHTML = coupons.map((c) => {
+    const worst = c.today.reduce((a, t) => (t.limit && t.used / t.limit > (a.limit ? a.used / a.limit : -1) ? t : a), c.today[0]);
+    const u = usageBar(worst.used, worst.limit);
+    const parts = [];
+    if (!["—", "No limit"].includes(c.limits.day)) parts.push(c.limits.day + " a day");
+    if (!["—", "No limit"].includes(c.limits.doctorDay)) parts.push(c.limits.doctorDay + " a day per doctor");
+    if (c.limits.patient !== "No limit") parts.push(c.limits.patient + " per patient");
+    if (c.limits.total !== "No limit") parts.push(c.limits.total + " in total");
+    return `<tr class="row-click ${c.code === couponSel ? "selected" : ""}" data-code="${c.code}" tabindex="0">
+      <td><span class="code ${c.method === "auto" ? "auto" : ""}">${c.code}</span><span class="tiny">${c.method === "auto" ? "applies by itself" : "typed at counter"}</span></td>
+      <td><b>${c.name}</b><span class="tiny">${c.valid}</span></td>
+      <td class="mono">${c.discount}</td>
+      <td>${c.doctors.length ? c.doctors.join(", ") : c.covers}</td>
+      <td>${parts.length ? parts.join(" · ") : "No limits"}</td>
+      <td><b style="color:${u.color}">${worst.limit ? worst.label + ": " : ""}${u.text}</b>${u.bar}</td></tr>`;
+  }).join("");
+  $("couponRows").querySelectorAll("tr").forEach((tr) => {
+    const pick = () => { couponSel = tr.dataset.code; renderCoupons(); };
+    tr.addEventListener("click", pick);
+    tr.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+  });
+  const c = coupons.find((x) => x.code === couponSel);
+  const docs = ["Dr Banshali", "Dr Rahul", "Dr Beant", "[Doctor name]"].map((d) => {
+    const on = c.doctors.length === 0 || c.doctors.includes(d);
+    return `<span class="pill ${on ? "on" : "off"}">${c.doctors.length === 0 ? d + " (all)" : d}</span>`;
+  }).join(" ");
+  const lim = [["Uses per day (all doctors)", c.limits.day], ["Uses per day, per doctor", c.limits.doctorDay], ["Uses per patient", c.limits.patient], ["Uses in total", c.limits.total]];
+  $("couponEditor").innerHTML = `
+    <div><div class="eyebrow">Editing</div><h2>${c.name}</h2></div>
+    <div class="grid2">
+      <label class="field">Code reception types<input class="input mono" value="${c.method === "auto" ? "No code — automatic" : c.code}" readonly></label>
+      <label class="field">How it applies<input class="input" value="${c.method === "auto" ? "Automatically" : "Reception types the code"}" readonly></label>
+      <label class="field">Discount<input class="input mono" value="${c.discount}" readonly></label>
+      <label class="field">Maximum discount<input class="input mono" value="${c.cap}" readonly></label>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <b style="font-size:13px">Doctors</b><div style="display:flex;flex-wrap:wrap;gap:6px">${docs}</div>
+      <b style="font-size:13px">Covers</b><span class="sub" style="margin:0">${c.covers}</span>
+      <b style="font-size:13px">Patients</b><span class="sub" style="margin:0">${c.who}</span>
+    </div>
+    <div><b style="font-size:13px">Usage limits</b><div class="grid2" style="margin-top:8px">${lim.map(([l, v]) => `<label class="field" style="font-size:12px;color:var(--muted-2)">${l}<input class="input mono" value="${v}" readonly></label>`).join("")}</div></div>
+    <div class="card" style="padding:12px;background:var(--bg);display:flex;flex-direction:column;gap:10px"><span class="eyebrow" style="color:var(--muted-2)">Used today</span>
+      ${c.today.map((t) => { const u = usageBar(t.used, t.limit); return `<div><div class="kv"><span>${t.label}</span><b style="color:${u.color}">${u.text}</b></div>${u.bar}</div>`; }).join("")}
+    </div>
+    <div>
+      <div class="kv"><span>Valid</span><span>${c.valid}</span></div>
+      <div class="kv"><span>Can combine with other discounts</span><span>${c.stackable}</span></div>
+      <div class="kv"><span>Also on CGHS / scheme lines</span><span>${c.scheme}</span></div>
+      <div class="kv"><span>Who can use it</span><span>${c.roles}</span></div>
+    </div>
+    <div style="display:flex;gap:8px"><button class="btn primary" type="button" style="flex-grow:1">Save</button><button class="btn" type="button">Deactivate</button></div>`;
+}
+
+const bills = [
+  { id: "b1", no: "GAC/26-27/000101", patient: "Patient A", referral: "••••4821", sub: "CGHS › Pensioner", doctor: "Dr Banshali", amount: 700, days: 3 },
+  { id: "b2", no: "GAC/26-27/000102", patient: "Patient B", referral: "••••1937", sub: "CGHS › CGHS Referral", doctor: "Dr Rahul", amount: 350, days: 3 },
+  { id: "b3", no: "GAC/26-27/000108", patient: "Patient C", referral: "—", sub: "CGHS › Pensioner", doctor: "Dr Beant", amount: 350, days: 9 },
+  { id: "b4", no: "GAC/26-27/000115", patient: "Patient D", referral: "—", sub: "CGHS › CGHS Paid", doctor: "Dr Banshali", amount: 800, days: 14 },
+  { id: "b5", no: "GAC/26-27/000121", patient: "Patient E", referral: "••••7710", sub: "CGHS › CGHS Referral", doctor: "Dr Banshali", amount: 700, days: 21 },
+  { id: "b6", no: "GAC/26-27/000130", patient: "Patient F", referral: "—", sub: "CGHS › Pensioner", doctor: "Dr Rahul", amount: 350, days: 34 },
+];
+const reg = { tab: "pending", picked: ["b1", "b2"], cleared: {}, reference: "", amount: "1050" };
+function regTotal(ids) { return bills.filter((b) => ids.includes(b.id) && !reg.cleared[b.id]).reduce((s, b) => s + b.amount, 0); }
+function renderRegister() {
+  const pending = bills.filter((b) => !reg.cleared[b.id]);
+  const done = bills.filter((b) => reg.cleared[b.id]);
+  const showPending = reg.tab === "pending";
+  const picked = reg.picked.filter((id) => !reg.cleared[id]);
+  $("regStats").innerHTML = `
+    <div class="card stat"><span>Pending bills</span><b>${pending.length}</b></div>
+    <div class="card stat amber"><span>Amount pending from CGHS</span><b>${money(pending.reduce((s, b) => s + b.amount, 0))}</b></div>
+    <div class="card stat"><span>Oldest pending</span><b>${pending.length ? Math.max(...pending.map((b) => b.days)) + " days" : "—"}</b></div>
+    <div class="card stat teal"><span>Cleared in this session</span><b>${done.length}</b></div>`;
+  $("regTabs").innerHTML = `<button type="button" data-tab="pending" aria-pressed="${showPending}" style="padding:0 14px">Pending (${pending.length})</button><button type="button" data-tab="cleared" aria-pressed="${!showPending}" style="padding:0 14px">Cleared (${done.length})</button>`;
+  $("regTabs").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => { reg.tab = b.dataset.tab; renderRegister(); }));
+  $("regLastHead").textContent = showPending ? "Status" : "Cleared";
+  const rows = showPending ? pending : done;
+  $("regRows").innerHTML = rows.length ? rows.map((b) => {
+    const isPicked = picked.includes(b.id);
+    const aging = b.days > 30 ? "var(--red)" : b.days > 14 ? "var(--amber)" : "var(--muted-2)";
+    const first = showPending
+      ? `<input type="checkbox" data-bill="${b.id}" ${isPicked ? "checked" : ""} aria-label="Select bill ${b.no}" style="width:20px;height:20px;accent-color:#0F6E66">`
+      : `<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#0F6E66" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-label="Cleared"><path d="M4 10.5l4 4 8-9"/></svg>`;
+    const last = showPending ? `<b style="color:${aging};font-size:12px">Pending · ${b.days} days</b>` : `<b style="color:var(--teal-dark);font-size:12px">Cleared · ${reg.cleared[b.id]}</b>`;
+    return `<tr class="${isPicked && showPending ? "selected" : ""}"><td>${first}</td><td><span class="mono">${b.no}</span><span class="tiny">[date]</span></td><td><b>${b.patient}</b><span class="tiny">Referral ${b.referral}</span></td><td>${b.sub}</td><td>${b.doctor}</td><td class="mono"><b>${money(b.amount)}</b></td><td>${last}</td></tr>`;
+  }).join("") : `<tr><td colspan="7" style="color:var(--muted);text-align:center;padding:28px">${showPending ? "Nothing pending." : "Nothing cleared yet — tick bills on the Pending tab and record a payment."}</td></tr>`;
+  $("regRows").querySelectorAll("input[type=checkbox]").forEach((cb) => cb.addEventListener("change", () => {
+    const id = cb.dataset.bill;
+    reg.picked = reg.picked.includes(id) ? reg.picked.filter((x) => x !== id) : [...reg.picked, id];
+    reg.amount = String(regTotal(reg.picked));
+    renderRegister();
+  }));
+
+  const sel = bills.filter((b) => picked.includes(b.id));
+  const total = sel.reduce((s, b) => s + b.amount, 0);
+  const received = Number(String(reg.amount).replace(/[^0-9.]/g, "")) || 0;
+  const diff = received - total;
+  const ready = sel.length > 0 && diff === 0 && reg.reference.trim() !== "";
+  let check = ["info", "Tick at least one pending bill."];
+  if (sel.length) {
+    if (diff > 0) check = ["bad", `Difference ${money(diff)} more than the selected bills — select the missing bills.`];
+    else if (diff < 0) check = ["bad", `Difference ${money(-diff)} less than the selected bills — untick bills this payment doesn't cover.`];
+    else if (!reg.reference.trim()) check = ["info", "Amount matches. Enter the UTR / bank reference."];
+    else check = ["ok", "Amount matches the selected bills."];
+  }
+  $("payPanel").innerHTML = `
+    <div><div class="eyebrow">Record a CGHS payment</div><h2>Clear ${sel.length} bill${sel.length === 1 ? "" : "s"}</h2><div class="sub">Tick one bill, or many bills paid by one transfer.</div></div>
+    <div class="card" style="padding:12px;background:var(--bg);display:flex;flex-direction:column;gap:6px">
+      ${sel.length ? sel.map((b) => `<div class="kv"><span>${b.no} · ${b.doctor}</span><span class="mono">${money(b.amount)}</span></div>`).join("") : `<div class="kv"><span>No bills selected</span><span>—</span></div>`}
+      <div class="kv" style="border-top:1px solid var(--line);padding-top:6px;font-weight:600"><span>Total of selected bills</span><span class="mono" style="color:var(--ink)">${money(total)}</span></div>
+    </div>
+    <label class="field">Date the money reached the bank<input class="input" type="date"></label>
+    <label class="field">UTR / bank reference<input class="input mono" id="payRef" value="${reg.reference}" placeholder="e.g. the UTR on the bank statement"></label>
+    <label class="field">Amount received (₹)<input class="input mono" id="payAmt" inputmode="numeric" value="${reg.amount}"></label>
+    <div class="msg ${check[0]}" role="status">${check[1]}</div>
+    <button class="btn primary" type="button" id="paySave" ${ready ? "" : "disabled"} style="height:48px">${ready ? `Mark ${sel.length} as cleared` : "Mark as cleared"}</button>
+    <div class="tiny">CGHS always pays the full amount, so the amount must equal the total. Only an admin can undo a clear, with a reason.</div>`;
+  $("payRef").addEventListener("input", (e) => { reg.reference = e.target.value; refreshPay(); });
+  $("payAmt").addEventListener("input", (e) => { reg.amount = e.target.value; refreshPay(); });
+  $("paySave").addEventListener("click", () => {
+    if (!ready) return;
+    sel.forEach((b) => { reg.cleared[b.id] = "UTR " + reg.reference.trim(); });
+    reg.picked = []; reg.reference = ""; reg.amount = "0";
+    renderRegister();
+  });
+}
+function refreshPay() {
+  const focus = document.activeElement && document.activeElement.id;
+  const pos = document.activeElement && document.activeElement.selectionStart;
+  renderRegister();
+  if (focus) { const el = $(focus); if (el) { el.focus(); try { el.setSelectionRange(pos, pos); } catch (e) {} } }
+}
+$("selectAll").addEventListener("click", () => {
+  reg.picked = bills.filter((b) => !reg.cleared[b.id]).map((b) => b.id);
+  reg.amount = String(regTotal(reg.picked));
+  reg.tab = "pending";
+  renderRegister();
+});
+
+const demoCoupons = {
+  BANSHALI20: { ok: true, text: "BANSHALI20 applied — 20% off Dr Banshali's consultation, capped at ₹300 (8 of 10 used today after this bill).", disc: 300 },
+  RB100: { ok: false, text: "Not for this doctor — RB100 covers Dr Rahul and Dr Beant only." },
+};
+function applyDemo() {
+  const code = $("demoCode").value.trim().toUpperCase();
+  const r = demoCoupons[code] || { ok: false, text: code ? `Unknown code "${code}".` : "Type a code." };
+  $("demoMsg").className = "msg " + (r.ok ? "ok" : "bad");
+  $("demoMsg").textContent = r.text;
+  const disc = r.ok ? r.disc : 0;
+  $("demoDisc").textContent = r.ok ? `${code} −${money(disc)} (capped)` : "—";
+  $("demoPays").textContent = money(1500 - disc);
+  $("demoAmount").value = money(1500 - disc);
+}
+$("demoApply").addEventListener("click", applyDemo);
+
+renderFees();
+renderCoupons();
+renderRegister();
+applyDemo();
+</script>
+</body>
+</html>

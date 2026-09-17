@@ -802,6 +802,8 @@ export const giniflowArrivalsQuerySchema = giniflowDateQuerySchema.extend({
   q: z.string().trim().max(60).optional(),
 });
 
+export const giniflowReceptionQueueQuerySchema = giniflowArrivalsQuerySchema;
+
 // Cancelling is visible to every other station, so it has to say why — the same
 // rule blocking a visit has.
 export const giniflowCancelSchema = z.object({

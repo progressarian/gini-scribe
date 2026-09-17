@@ -56,6 +56,7 @@ import {
   giniflowDispenseSchema,
   giniflowDispenseAllSchema,
   giniflowArrivalsQuerySchema,
+  giniflowReceptionQueueQuerySchema,
   giniflowHealthrayBillQuerySchema,
   giniflowCancelSchema,
   giniflowWalkInSchema,
@@ -928,11 +929,11 @@ const receptionGate = requireCapability(CAP.GINIFLOW_STATION_RECEPTION);
 router.get(
   "/giniflow/stations/reception/queue",
   receptionGate,
-  validateQuery(giniflowDateQuerySchema),
+  validateQuery(giniflowReceptionQueueQuerySchema),
   async (req, res) => {
     try {
       const date = await resolveDate(req.query.date);
-      const data = await getPaymentQueue(date);
+      const data = await getPaymentQueue(date, undefined, { q: req.query.q || "" });
       res.json({ date, ...data, serverTime: new Date().toISOString() });
     } catch (e) {
       handleError(res, e, "Gini Flow reception queue");

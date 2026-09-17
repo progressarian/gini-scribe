@@ -6,6 +6,7 @@ import { extractDiagnosisGrade } from "../utils/diagnosisGrade.js";
 import { buildVisitLabContext } from "../services/visitLabContext.js";
 import { computeCarePhase, deriveBiomarkerPriorityStatus } from "../utils/carePhase.js";
 import { blockWriteGuard } from "../middleware/blockWriteGuard.js";
+import { datedFollowUp } from "../../shared/followUp.js";
 
 const router = Router();
 
@@ -698,15 +699,14 @@ router.get("/patients/:id/post-visit-summary", async (req, res) => {
     // ── Resolve follow-up (4-tier, mirrors visit.js) ──
     const apptPlanRow = apptPlanR.rows[0] || null;
     const fuApptRow = followupApptR.rows[0] || null;
-    const _withDate = (fu) => (fu && fu.date ? fu : null);
     const apptBio = apptPlanRow?.biomarkers || {};
     const fuBio = fuApptRow?.biomarkers || {};
     const resolvedFollowUp =
-      _withDate(apptPlanRow?.healthray_follow_up) ||
+      datedFollowUp(apptPlanRow?.healthray_follow_up) ||
       (apptBio.followup
         ? { date: apptBio.followup, notes: apptPlanRow?.healthray_follow_up?.notes || null }
         : null) ||
-      _withDate(fuApptRow?.healthray_follow_up) ||
+      datedFollowUp(fuApptRow?.healthray_follow_up) ||
       (fuBio.followup
         ? { date: fuBio.followup, notes: fuApptRow?.healthray_follow_up?.notes || null }
         : null);

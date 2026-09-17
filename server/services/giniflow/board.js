@@ -24,7 +24,12 @@ import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { hideLabOnlyPatients } from "./floorSettings.js";
 import { BEHIND_STATION_LABEL, healthrayChainStatus } from "./observation.js";
 import { IST_TODAY, budgetColour } from "./statusEngine.js";
-import { TESTS_HOLD_SQL, chiefWaitClock } from "./testsHold.js";
+import {
+  TESTS_HOLD_SQL,
+  caseReportedBeforeVisit,
+  caseSampledBeforeVisit,
+  chiefWaitClock,
+} from "./testsHold.js";
 import { getMachines } from "./machineCatalog.js";
 import { JOURNEY_STEPS_SQL } from "./journey.js";
 import { journeyProgress } from "../../../shared/journeyOrder.js";
@@ -81,7 +86,8 @@ const TODAY_CASES = (v, p) => `
                  OR (lc.patient_id IS NULL
                      AND lc.raw_list_json->'patient'->>'healthray_uid' = ${p}.file_no))
             AND NOT EXISTS (SELECT 1 FROM giniflow_lab_orders lo
-                             WHERE lo.visit_id = ${v}.id AND lo.urgency = 'today' AND lo.kind = 'lab')`;
+                             WHERE lo.visit_id = ${v}.id AND lo.urgency = 'today' AND lo.kind = 'lab')
+            AND NOT ${caseReportedBeforeVisit(v)}`;
 
 const CASE_ACTION = (action) =>
   `EXISTS (SELECT 1 FROM giniflow_lab_case_actions a
@@ -94,6 +100,7 @@ const MACHINE_HOLD_SQL = (v, p, manualParam) => `
             AND o.sample_status IN (${UNDRAWN_LAB_SQL}))
         + (SELECT count(*)::int ${TODAY_CASES(v, p)}
             AND NOT ${CASE_ACTION("'sample_taken', 'report_uploaded'")}
+            AND NOT ${caseSampledBeforeVisit(v)}
             AND (${manualParam}
                  OR (lc.raw_list_json->>'phlebotomy_status' IS DISTINCT FROM 'Completed'
                      AND COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'collected_on' IS NULL)))

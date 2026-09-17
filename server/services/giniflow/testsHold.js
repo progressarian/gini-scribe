@@ -17,6 +17,20 @@ const caseMatches = (v, p) =>
 const caseDoneAt = `(SELECT min(a.created_at) FROM giniflow_lab_case_actions a
                       WHERE a.case_no = lc.case_no AND a.action = 'report_uploaded')`;
 
+const caseTime = (field) =>
+  `(COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'${field}')::timestamptz`;
+
+const visitArrival = (v) =>
+  `COALESCE((SELECT min(fe.occurred_at) FROM giniflow_visit_events fe
+              WHERE fe.visit_id = ${v}.id), NOW())`;
+
+export const caseReportedBeforeVisit = (v) =>
+  `COALESCE(${caseTime("reported_on")} < ${visitArrival(v)}, FALSE)`;
+
+export const caseSampledBeforeVisit = (v) =>
+  `COALESCE(LEAST(${caseTime("collected_on")}, ${caseTime("received_on")}, ${caseTime("reported_on")})
+            < ${visitArrival(v)}, FALSE)`;
+
 const caseWorkedAsOrder = (v) =>
   `EXISTS (SELECT 1 FROM giniflow_lab_orders lo
             WHERE lo.visit_id = ${v}.id AND lo.urgency = 'today' AND lo.kind = 'lab')`;
@@ -29,6 +43,7 @@ export const TESTS_HOLD_SQL = (v = "v", p = "p") => `
     + (SELECT count(*)::int FROM lab_cases lc
         WHERE ${caseMatches(v, p)}
           AND NOT ${caseWorkedAsOrder(v)}
+          AND NOT ${caseReportedBeforeVisit(v)}
           AND ${caseDoneAt} IS NULL) AS tests_pending,
     GREATEST(
       (SELECT max(e.occurred_at) FROM giniflow_lab_order_events e

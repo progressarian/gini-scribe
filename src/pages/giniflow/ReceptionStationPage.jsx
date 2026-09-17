@@ -191,6 +191,9 @@ function OrderCard({ order, onClear, pending, actorId }) {
           turns red. */}
       <div className="toc-total">
         <span className="amt">Total: {rupees(order.total)}</span>
+        {order.billDiscount > 0 && (
+          <span className="toc-part">{rupees(order.billDiscount)} HealthRay discount</span>
+        )}
         {order.paid > 0 && <span className="toc-part">Collected {rupees(order.paid)}</span>}
         {order.claimed > 0 && (
           <span className="toc-part">
@@ -393,18 +396,48 @@ const settledAs = (o) => {
   const claim = o.claimState === "approved" ? Number(o.claimed) || 0 : 0;
   if (cash && claim) return `Cash ${rupees(cash)} + claim ${rupees(claim)} approved`;
   if (claim) return `Insurance claim ${rupees(claim)} approved`;
+  if (!cash && !Number(o.total)) return "No charge";
   return `Paid ${rupees(cash || o.total)}`;
 };
+
+const byVisit = (orders) => {
+  const groups = new Map();
+  for (const o of orders) {
+    const group = groups.get(o.visitId) || { visitId: o.visitId, name: o.name, orders: [] };
+    group.orders.push(o);
+    groups.set(o.visitId, group);
+  }
+  return [...groups.values()].map((g) => ({
+    ...g,
+    paidAt:
+      g.orders
+        .map((o) => o.paidAt)
+        .filter(Boolean)
+        .sort()
+        .at(-1) || null,
+  }));
+};
+
+const testNames = (o) => (o.tests || []).map((t) => t.name).join(", ");
 
 // How many of the day's cleared orders the tab shows before it is asked.
 const CLEARED_PREVIEW = 8;
 
 // Exported so the render smoke can execute the payments branch too — only one
 // tab is mounted at a time, and the tab that is not showing still has to render.
-export function PaymentsTab({ data, isLoading, onClear, pending, actorId }) {
+export function PaymentsTab({
+  data,
+  isLoading,
+  onClear,
+  pending,
+  actorId,
+  search = "",
+  setSearch = () => {},
+}) {
   const queue = data?.pending || [];
-  const cleared = data?.cleared || [];
+  const cleared = byVisit(data?.cleared || []);
   const [showAllCleared, setShowAllCleared] = useState(false);
+  const searching = (data?.query || "").length >= 2;
 
   return (
     <>
@@ -426,11 +459,28 @@ export function PaymentsTab({ data, isLoading, onClear, pending, actorId }) {
         </div>
       )}
 
+      <div className="ar-controls">
+        <div className="sq-search">
+          <input
+            value={search}
+            placeholder="Search payments — name, file no or phone"
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          {search && (
+            <button type="button" className="st-btn st-btn-g" onClick={() => setSearch("")}>
+              Clear
+            </button>
+          )}
+        </div>
+      </div>
+
       <div>
         <div className="grp-lbl grp-lbl-sp">🔴 Payment pending — collect and clear</div>
         {isLoading && <div className="empty-note">Loading…</div>}
         {!isLoading && queue.length === 0 && (
-          <div className="empty-note">Nothing waiting for payment.</div>
+          <div className="empty-note">
+            {searching ? "No pending payment matches that search." : "Nothing waiting for payment."}
+          </div>
         )}
         {queue.map((order) => (
           <OrderCard
@@ -446,17 +496,19 @@ export function PaymentsTab({ data, isLoading, onClear, pending, actorId }) {
       {cleared.length > 0 && (
         <div>
           <div className="grp-lbl grp-lbl-sp">✅ Cleared today — lab notified</div>
-          {(showAllCleared ? cleared : cleared.slice(0, CLEARED_PREVIEW)).map((o) => (
-            <div className="test-order-card is-cleared" key={o.orderId}>
+          {(showAllCleared ? cleared : cleared.slice(0, CLEARED_PREVIEW)).map((g) => (
+            <div className="test-order-card is-cleared" key={g.visitId}>
               <div className="toc-head">
                 <div className="toc-cleared">
-                  {o.name} ·{" "}
-                  <span className="tc-detail">
-                    {settledAs(o)} ·{" "}
-                    {SAMPLE_LABEL[o.sampleStatus] || o.sampleStatus.replace(/_/g, " ")}
-                  </span>
+                  {g.name}
+                  {g.orders.map((o) => (
+                    <div className="tc-detail" key={o.orderId}>
+                      {testNames(o) || "Tests"} · {settledAs(o)} ·{" "}
+                      {SAMPLE_LABEL[o.sampleStatus] || o.sampleStatus.replace(/_/g, " ")}
+                    </div>
+                  ))}
                 </div>
-                <div className="sp sp-paid">✓ Cleared {clock(o.paidAt)}</div>
+                <div className="sp sp-paid">✓ Cleared {clock(g.paidAt)}</div>
               </div>
             </div>
           ))}
@@ -468,8 +520,8 @@ export function PaymentsTab({ data, isLoading, onClear, pending, actorId }) {
               onClick={() => setShowAllCleared((v) => !v)}
             >
               {showAllCleared
-                ? `Show fewer — ${cleared.length} cleared today`
-                : `+ ${cleared.length - CLEARED_PREVIEW} more cleared today — show all`}
+                ? `Show fewer — ${cleared.length} patients cleared today`
+                : `+ ${cleared.length - CLEARED_PREVIEW} more patients cleared today — show all`}
             </button>
           )}
         </div>
@@ -912,7 +964,7 @@ function LateChip({ minutesLate }) {
   return <span className={`ar-late${tone}`}>{minutesLate}m past slot</span>;
 }
 
-function ArrivalRow({ arrival, children, note, wide }) {
+function ArrivalRow({ arrival, children, note, warning, wide }) {
   return (
     <div className="ar-row">
       <div className="ar-slot">{arrival.slot || "—"}</div>
@@ -923,6 +975,11 @@ function ArrivalRow({ arrival, children, note, wide }) {
         </div>
         <div className="ar-meta">{identity(arrival)}</div>
         {note && <div className="ar-note">{note}</div>}
+        {warning && (
+          <div className="ar-dup" role="alert">
+            {warning}
+          </div>
+        )}
       </div>
       <div className={`ar-acts${wide ? " ar-acts-wide" : ""}`}>{children}</div>
     </div>
@@ -962,8 +1019,15 @@ function ExpectedRow({ arrival, onAct, onCheckIn, busy }) {
     );
   }
 
+  const twin = arrival.alreadyOnFloorAs;
   return (
-    <ArrivalRow arrival={arrival}>
+    <ArrivalRow
+      arrival={arrival}
+      warning={
+        twin &&
+        `⚠ Same name and phone as ${twin.name} (${twin.fileNo}), already on the floor — ${twin.statusLabel}. Check it is not the same person before marking arrived.`
+      }
+    >
       <LateChip minutesLate={arrival.minutesLate} />
       {/* Arriving is no longer one click: reception says what the patient is
           here for first, so the floor and the patient both know. */}
@@ -1362,6 +1426,8 @@ export default function ReceptionStationPage() {
   const [tab, setTab] = useState("arrivals");
   const [search, setSearch] = useState("");
   const [term, setTerm] = useState("");
+  const [paySearch, setPaySearch] = useState("");
+  const [payTerm, setPayTerm] = useState("");
   const [toast, setToast] = useState("");
   const toastTimer = useRef(null);
 
@@ -1372,8 +1438,12 @@ export default function ReceptionStationPage() {
     const t = setTimeout(() => setTerm(search.trim()), 250);
     return () => clearTimeout(t);
   }, [search]);
+  useEffect(() => {
+    const t = setTimeout(() => setPayTerm(paySearch.trim()), 250);
+    return () => clearTimeout(t);
+  }, [paySearch]);
 
-  const { data, isLoading } = useReceptionQueue();
+  const { data, isLoading } = useReceptionQueue(undefined, payTerm);
   const { data: arrivals, isLoading: arrivalsLoading } = useArrivals(undefined, term);
   const live = useGiniflowLive({ date: data?.date });
   const pauseVisit = useGiniflowPauseVisit();
@@ -1419,6 +1489,11 @@ export default function ReceptionStationPage() {
   const pending = data?.pending || [];
   const awaitingSample = data?.awaitingSample || [];
   const cleared = data?.cleared || [];
+  const payCounts = data?.counts || {
+    pending: pending.length,
+    awaitingSample: awaitingSample.length,
+    cleared: cleared.length,
+  };
   const counts = arrivals?.counts || { expected: 0, onFloor: 0, notComing: 0 };
 
   const showToast = (msg) => {
@@ -1523,7 +1598,7 @@ export default function ReceptionStationPage() {
               className={`st-tab${tab === "payments" ? " on" : ""}`}
               onClick={() => setTab("payments")}
             >
-              Payments <span className="st-tab-n">{pending.length}</span>
+              Payments <span className="st-tab-n">{payCounts.pending}</span>
             </button>
           </div>
 
@@ -1558,21 +1633,21 @@ export default function ReceptionStationPage() {
             ) : (
               <>
                 <div className="stat">
-                  <div className="sv sv-red">{pending.length}</div>
+                  <div className="sv sv-red">{payCounts.pending}</div>
                   <div>
                     <div className="sl">Payment pending</div>
                     <div className="ss">tests ordered today</div>
                   </div>
                 </div>
                 <div className="stat">
-                  <div className="sv sv-tl">{awaitingSample.length}</div>
+                  <div className="sv sv-tl">{payCounts.awaitingSample}</div>
                   <div>
                     <div className="sl">Sample pending</div>
                     <div className="ss">payment done, lab waiting</div>
                   </div>
                 </div>
                 <div className="stat">
-                  <div className="sv sv-grn">{cleared.length}</div>
+                  <div className="sv sv-grn">{payCounts.cleared}</div>
                   <div>
                     <div className="sl">Cleared</div>
                     <div className="ss">lab collecting</div>
@@ -1603,6 +1678,8 @@ export default function ReceptionStationPage() {
               onClear={onClear}
               pending={clearPayment.isPending}
               actorId={actorId}
+              search={paySearch}
+              setSearch={setPaySearch}
             />
           )}
         </div>

@@ -24,6 +24,7 @@ import { getCanonical } from "../utils/labCanonical.js";
 import { computeCarePhase } from "../utils/carePhase.js";
 import { sortDiagnoses } from "../utils/diagnosisSort.js";
 import { generatePatientSummary } from "./patientSummaryAI.js";
+import { datedFollowUp } from "../../shared/followUp.js";
 
 const require = createRequire(import.meta.url);
 // Outbound Genie sync removed 2026-05-01 — dual-DB routing replaces it.
@@ -412,9 +413,8 @@ export async function buildVisitPayloadFromDb(pid, { appointmentId } = {}) {
   const fuInvestigations = (fuRow?.healthray_investigations || []).map((t) =>
     typeof t === "string" ? { name: t, urgency: "routine" } : t,
   );
-  const withDate = (fu) => (fu && fu.date ? fu : null);
   const followUpDate =
-    withDate(fuRow?.healthray_follow_up) ||
+    datedFollowUp(fuRow?.healthray_follow_up) ||
     (fuBio.followup
       ? {
           date: fuBio.followup,
