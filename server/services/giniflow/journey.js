@@ -847,6 +847,35 @@ export async function insertMachineStepsForOrders(client, visitId, machineIds) {
   });
 }
 
+export async function addLabStepsForArrivedLabCase(patientId, caseDate, db = pool) {
+  if (!patientId || !caseDate) return { added: [] };
+  const { rows } = await db.query(
+    `SELECT id FROM giniflow_visits
+      WHERE patient_id = $1 AND visit_date = $2::date
+        AND current_status <> ALL($3::text[])
+      ORDER BY created_at DESC LIMIT 1`,
+    [
+      patientId,
+      caseDate,
+      ["booked", "confirmed", "no_show", "cancelled", "abandoned", "dispensed", "exited"],
+    ],
+  );
+  if (!rows.length) return { added: [] };
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`SELECT id FROM giniflow_visits WHERE id = $1 FOR UPDATE`, [rows[0].id]);
+    const result = await insertLabStepsForOrder(client, rows[0].id);
+    await client.query("COMMIT");
+    return result;
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 export async function insertLabStepsIfHealthrayCase(client, visitId) {
   const { rows } = await client.query(
     `SELECT ${HR_LAB_EVIDENCE_SQL}
@@ -868,12 +897,8 @@ export async function insertLabStepsIfHealthrayCase(client, visitId) {
 // not (confirmed 15 Sep 2026) — so a HealthRay case existing is NOT evidence
 // it was paid for. Ticking it from hr_cases alone let the lab draw and report
 // an unpaid HealthRay-ordered sample with no payment recorded anywhere in
-// Scribe (P_161750, case 19918). Lab Billing for a HealthRay case is now only
-// ever ticked by reception's own hand (setStepStatus) — this function marks
-// it billed by inferring it from the draw itself: assertLabBillingCleared()
-// in labStation.js already refuses to collect a HealthRay sample until Lab
-// Billing is done, so a sample that WAS collected proves billing already
-// happened; that lets the journey catch up rather than pretend to establish it.
+// Scribe (P_161750, case 19918). Lab Billing for a HealthRay case is only ever
+// ticked by reception's own hand (setStepStatus), never inferred from the draw.
 //
 // `skipped` is included deliberately: the exit sweep strikes through whatever is
 // still pending when a patient leaves, and evidence from the lab beats a guess
@@ -899,7 +924,7 @@ export async function syncLabStepsFromLab(db, visitId) {
   if (!e) return { billed: false, drawn: false };
 
   const drawn = e.orders > 0 ? e.drawn > 0 : !!e.hr_collected;
-  const billed = e.orders > 0 ? e.unsettled === 0 : drawn;
+  const billed = e.orders > 0 && e.unsettled === 0;
 
   const tick = async (catalogId) =>
     db.query(

@@ -31,6 +31,7 @@ import {
   touchLabCaseRetryAt,
 } from "../lab/db.js";
 import { isLabCasePrintable } from "../lab/labHealthrayParser.js";
+import { addLabStepsForArrivedLabCase } from "../giniflow/journey.js";
 import { createLogger } from "../logger.js";
 import { tryAcquireCronLock, yieldToApp, CRON_LOCK_KEYS } from "./lowPriority.js";
 
@@ -88,6 +89,14 @@ async function processCase(listRow, { listOnly = false } = {}) {
   let patientId = await matchLabPatient(patient.healthray_uid, patientCaseNo, patient);
   if (!patientId) {
     patientId = await ensureLabPatient(patient);
+  }
+
+  try {
+    const { added } = await addLabStepsForArrivedLabCase(patientId, caseDate);
+    if (added.length)
+      log("Journey", `case ${caseNo}: Lab Billing added for a patient already checked in`);
+  } catch (e) {
+    log("Journey", `case ${caseNo}: could not add Lab Billing — ${e.message}`);
   }
 
   // LIST ONLY (39-HYBRID-FLOOR-PLAN.md §15). The anchor row and the patient

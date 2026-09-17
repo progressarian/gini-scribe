@@ -1020,7 +1020,12 @@ async function resolveVisitForCase(db, caseNo) {
 }
 
 async function assertLabBillingCleared(db, visitId) {
-  if (!visitId) return;
+  if (!visitId) {
+    throw Object.assign(
+      new Error("Lab payment is not cleared — reception must clear Lab Billing before the sample"),
+      { status: 409 },
+    );
+  }
   const { rows } = await db.query(
     `SELECT p.name, s.status AS billing_status
        FROM giniflow_visits v
@@ -1032,7 +1037,7 @@ async function assertLabBillingCleared(db, visitId) {
   );
   if (!rows.length) return;
   const { name, billing_status } = rows[0];
-  if (billing_status && !["done", "skipped"].includes(billing_status)) {
+  if (billing_status !== "done") {
     throw Object.assign(
       new Error(
         `${name}'s lab payment is not cleared — reception must clear Lab Billing before the sample`,
