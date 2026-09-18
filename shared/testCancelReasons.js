@@ -4,7 +4,7 @@ export const TEST_CANCEL_REASONS = [
   { value: "doctor_cancelled", label: "Doctor cancelled it" },
   { value: "billed_by_mistake", label: "Billed / added by mistake" },
   { value: "duplicate", label: "Duplicate" },
-  { value: "other", label: "Other (note required)" },
+  { value: "other", label: "Other — write your own reason" },
 ];
 
 export const SYNC_CANCEL_REASONS = [

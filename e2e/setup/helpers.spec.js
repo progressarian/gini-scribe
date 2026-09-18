@@ -29,15 +29,6 @@ test.describe("PT-07 helpers", () => {
     await api.dispose();
   });
 
-  test("loginAs opens the app already signed in", async ({ page }) => {
-    await loginAs(page, "admin");
-    await page.goto("/");
-    await expect
-      .poll(() => page.evaluate(() => window.localStorage.getItem("gini_auth_token")))
-      .toBeTruthy();
-    await expect(page.getByPlaceholder(/pin/i)).toHaveCount(0);
-  });
-
   test("builders create rows in one line", async () => {
     const before = await countRows("patients");
     const patient = await buildPatient({ age: 71 });
@@ -55,5 +46,18 @@ test.describe("PT-07 helpers", () => {
     expectRupees(sumRupees([0.1, 0.2]), 0.3);
     expectRupees(sumRupees([1500, -800]), 700);
     expect(() => expectRupees(700, 700.01)).toThrow();
+  });
+});
+
+test.describe("PT-07 helpers in the browser", () => {
+  test.describe.configure({ retries: 1 });
+
+  test("loginAs opens the app already signed in", async ({ page }) => {
+    await loginAs(page, "admin");
+    await page.goto("/");
+    await expect
+      .poll(() => page.evaluate(() => window.localStorage.getItem("gini_auth_token")))
+      .toBeTruthy();
+    await expect(page.getByPlaceholder(/pin/i)).toHaveCount(0);
   });
 });

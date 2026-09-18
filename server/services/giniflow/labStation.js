@@ -386,6 +386,8 @@ export async function getLabQueue(
       orderedBy: r.ordered_by,
       urgency: r.urgency,
       tests: r.tests || [],
+      amountTotal: Number(r.amount_total) || 0,
+      amountPaid: Number(r.amount_paid) || 0,
       paymentStatus: r.payment_status,
       sampleStatus: r.sample_status,
       paid,

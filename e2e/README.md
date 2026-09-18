@@ -108,3 +108,13 @@ docker run --rm --network host -e DUMP_URL="<session-pooler URL, port 5432>" pos
 ```
 
 Then run `npm run test:e2e:setup` and the whole suite.
+
+## Browser tests retry once
+
+The few tests that open the app in Chrome (the login-screen tests in P1-01,
+`setup/smoke.spec.js`, and the browser helper test in `setup/helpers.spec.js`)
+are allowed **one retry**. On this machine Chrome sometimes reports
+`net::ERR_NETWORK_CHANGED` while loading the app's files (a network adapter —
+Wi-Fi, VPN or a Docker bridge — changed mid-request); the app then can't start
+and the page stays blank. A retry that passes is reported as **flaky**, not
+hidden; a real failure still fails. Every other test has no retries.

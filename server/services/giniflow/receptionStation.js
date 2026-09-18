@@ -12,7 +12,7 @@ import { PHONE_DIGITS, toLocal10 } from "../../../shared/phone.js";
 import { searchDayVisits } from "./board.js";
 import { getMachines } from "./machineCatalog.js";
 import { CASE_CANCELLABLE_SQL, ORDER_CANCELLABLE_SQL } from "./testsHold.js";
-import { billDiscountOn, isLiveBillItem } from "./patientBill.js";
+import { billDiscountOn, combinedBillLineOf, isLiveBillItem } from "./patientBill.js";
 import { machineForTest, machinesOnBillLine } from "../../../shared/machineStages.js";
 import { blockDetail } from "../patientBlockView.js";
 import { createWalkinBooking } from "../walkinBooking.js";
@@ -293,9 +293,12 @@ export async function getPaymentQueue(visitDate, db = pool, { q = "" } = {}) {
   ]);
   const machines = await getMachines(db);
   const allOrders = rows.map((r) => {
-    const discountOn = billDiscountOn({ items: r.bill_items || [] }, machines);
+    const bill = { items: r.bill_items || [] };
+    const discountOn = billDiscountOn(bill, machines);
     return {
       ...shape(r),
+      billLine:
+        r.kind === "machine" ? combinedBillLineOf(bill, machines)(r.tests?.[0]?.name) : null,
       billDiscount: discountOn(
         r.kind,
         (r.tests || []).map((t) => t.name),

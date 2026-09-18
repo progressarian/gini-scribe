@@ -21,24 +21,76 @@ export const SCHEME_CAP_ENFORCEMENT = (process.env.SCHEME_CAP_ENFORCEMENT || "of
 // the cap counter and every other screen agree on what counts.
 const ACTIVE = `status NOT IN ('cancelled','no_show')`;
 
+async function capScopes(schemeCode, client) {
+  const { rows } = await client.query(
+    `WITH me AS (SELECT code, label, daily_cap, parent_code FROM patient_schemes WHERE code = $1)
+     SELECT me.code AS scope_code, me.label AS scope_label, me.daily_cap AS cap,
+            ARRAY(SELECT me.code UNION SELECT c.code FROM patient_schemes c
+                   WHERE c.parent_code = me.code) AS codes,
+            0 AS depth
+       FROM me
+     UNION ALL
+     SELECT p.code, p.label, p.daily_cap,
+            ARRAY(SELECT p.code UNION SELECT c.code FROM patient_schemes c
+                   WHERE c.parent_code = p.code),
+            1
+       FROM me JOIN patient_schemes p ON p.code = me.parent_code
+      ORDER BY depth`,
+    [schemeCode],
+  );
+  return rows.map((r) => ({
+    scope_code: r.scope_code,
+    scope_label: r.scope_label,
+    cap: r.cap === null ? null : Number(r.cap),
+    codes: r.codes,
+  }));
+}
+
+async function bookedByCategory(codes, fromDate, toDate, client) {
+  const { rows } = await client.query(
+    `SELECT appointment_date::text AS date, patient_category AS code, COUNT(*)::int AS n
+       FROM appointments
+      WHERE appointment_date BETWEEN $2::date AND $3::date
+        AND patient_category = ANY($1::text[])
+        AND ${ACTIVE}
+      GROUP BY 1, 2`,
+    [codes, fromDate, toDate],
+  );
+  return rows;
+}
+
+function bindingState(scopes, counts, date) {
+  const states = scopes.map((scope) => ({
+    ...scope,
+    booked: counts
+      .filter((c) => c.date === date && scope.codes.includes(c.code))
+      .reduce((sum, c) => sum + c.n, 0),
+  }));
+  const capped = states.filter((s) => s.cap !== null);
+  const pick = capped.length
+    ? capped.reduce((tight, s) => (s.cap - s.booked < tight.cap - tight.booked ? s : tight))
+    : states[0];
+  return {
+    cap: pick.cap,
+    booked: pick.booked,
+    scope_code: pick.scope_code,
+    scope_label: pick.scope_label,
+    includes_sub_categories: pick.codes.length > 1,
+  };
+}
+
+const allCodes = (scopes) => [...new Set(scopes.flatMap((s) => s.codes))];
+
 // How many of this scheme are already booked that day, and the ceiling.
 // `client` matters: the caller passes its transaction so the count is taken
 // under the same lock as the insert — two bookings racing at 9/10 would both
 // pass an unlocked count.
 export async function schemeDayCount(schemeCode, date, client = pool) {
-  const { rows } = await client.query(
-    `SELECT s.daily_cap,
-            (SELECT COUNT(*)::int FROM appointments a
-              WHERE a.appointment_date = $2::date
-                AND a.patient_category = $1
-                AND ${ACTIVE}) AS booked
-       FROM patient_schemes s
-      WHERE s.code = $1`,
-    [schemeCode, date],
-  );
-  if (!rows.length) return null;
-  const cap = rows[0].daily_cap === null ? null : Number(rows[0].daily_cap);
-  return { cap, booked: Number(rows[0].booked) };
+  const scopes = await capScopes(schemeCode, client);
+  if (!scopes.length) return null;
+  const counts = await bookedByCategory(allCodes(scopes), date, date, client);
+  const day = (await client.query(`SELECT $1::date::text AS d`, [date])).rows[0].d;
+  return bindingState(scopes, counts, day);
 }
 
 // The next few dates that still have room, so a refusal is never a dead end
@@ -50,30 +102,19 @@ export async function nextDatesWithRoom(
   { days = 14, want = 3 } = {},
   client = pool,
 ) {
-  const { rows } = await client.query(
-    `WITH cap AS (SELECT daily_cap FROM patient_schemes WHERE code = $1),
-     days AS (
-       SELECT ($2::date + n)::date AS d
-         FROM generate_series(1, $3::int) AS n
-     )
-     SELECT d::text AS date,
-            (SELECT COUNT(*)::int FROM appointments a
-              WHERE a.appointment_date = days.d
-                AND a.patient_category = $1
-                AND ${ACTIVE}) AS booked,
-            (SELECT daily_cap FROM cap) AS cap
-       FROM days
-      ORDER BY d`,
-    [schemeCode, fromDate, days],
+  const scopes = await capScopes(schemeCode, client);
+  if (!scopes.length) return [];
+  const { rows: dates } = await client.query(
+    `SELECT ($1::date + n)::date::text AS date FROM generate_series(1, $2::int) AS n ORDER BY 1`,
+    [fromDate, days],
   );
-  return rows
-    .filter((r) => r.cap === null || Number(r.booked) < Number(r.cap))
+  if (!dates.length) return [];
+  const counts = await bookedByCategory(allCodes(scopes), dates[0].date, dates.at(-1).date, client);
+  return dates
+    .map(({ date }) => ({ date, ...bindingState(scopes, counts, date) }))
+    .filter((d) => d.cap === null || d.booked < d.cap)
     .slice(0, want)
-    .map((r) => ({
-      date: r.date,
-      booked: Number(r.booked),
-      cap: r.cap === null ? null : Number(r.cap),
-    }));
+    .map(({ date, booked, cap }) => ({ date, booked, cap }));
 }
 
 // Returns null when the booking is allowed. Otherwise the same two shapes
@@ -92,7 +133,7 @@ export async function checkSchemeCap({ schemeCode, date, force, role }, client =
   if (!state || state.cap === null || state.booked < state.cap) return null;
 
   const alternatives = await nextDatesWithRoom(schemeCode, date, {}, client);
-  const detail = `${schemeCode.toUpperCase()} is full for ${date} — ${state.booked}/${state.cap} booked`;
+  const detail = `${state.scope_label} is full for ${date} — ${state.booked}/${state.cap} booked${state.includes_sub_categories ? ", counting its sub-categories" : ""}`;
 
   if (SCHEME_CAP_ENFORCEMENT === "warn") {
     return { warn: true, reason: "scheme_cap_full", detail, alternatives, ...state };

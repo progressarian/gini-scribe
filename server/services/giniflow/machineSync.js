@@ -199,7 +199,6 @@ export async function syncMachineOrdersForVisit(visit, db = pool) {
     const liveLines = lines
       .map((l) => ({
         ...l,
-        onLine: l.machines.length,
         machines: l.machines.filter((m) => !skip({ kind: "machine", machineId: m, line: l.line })),
       }))
       .filter((l) => l.machines.length);
@@ -225,7 +224,7 @@ export async function syncMachineOrdersForVisit(visit, db = pool) {
         const machine = machineFor(machines, machineId);
         if (!machine || (await alreadyRaised(client, visit.visit_id, machine))) continue;
         await raiseOrder(client, visit.visit_id, machine, {
-          amount: line.onLine > 1 ? 0 : line.amount,
+          amount: line.amountOf[machineId],
         });
         raised++;
         log("raise", `${visit.name}: ${machine.name} (${line.name})`);

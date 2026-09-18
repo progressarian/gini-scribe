@@ -428,6 +428,8 @@ export async function getMachineQueue(
       orderedBy: r.ordered_by,
       machine: machineId,
       tests: (r.tests || []).map((t) => t.name),
+      amountTotal: Number(r.amount_total) || 0,
+      amountPaid: Number(r.amount_paid) || 0,
       paymentStatus: r.payment_status,
       sampleStatus: r.sample_status,
       paid,

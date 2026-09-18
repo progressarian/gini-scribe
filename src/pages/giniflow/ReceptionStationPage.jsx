@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   useReceptionQueue,
   useClearPayment,
@@ -29,6 +29,8 @@ import JourneyBuilder from "../../components/giniflow/JourneyBuilder";
 import { useFlowStepCatalog, useFlowVisitTypes } from "../../queries/hooks/useFlow";
 import { stepPassesConditions } from "../../../shared/giniflowConditions.js";
 import { hasNotStarted } from "../../../shared/giniflowStatus.js";
+import { paise, refundOnTestCancel, rupeesFromPaise } from "../../../shared/labPayment.js";
+import { amountLeft, cleanAmount } from "../../utils/amountInput.js";
 import {
   dropUnbilledTestSteps,
   requiredStepsFirst,
@@ -137,12 +139,39 @@ function OrderCard({ order, onClear, pending, actorId, onCancelTest, canCancelTe
   const collectible = Number(order.collectible ?? due);
 
   const field = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const cashField = (e) => {
+    const cash = cleanAmount(e.target.value, collectible);
+    setForm((f) => ({
+      ...f,
+      amountPaid: cash,
+      amountClaimed: cash === "" ? f.amountClaimed : String(amountLeft(collectible, cash)),
+    }));
+  };
+  const claimField = (e) =>
+    setForm((f) => ({
+      ...f,
+      amountClaimed: cleanAmount(
+        e.target.value,
+        f.kind === "split" ? amountLeft(collectible, f.amountPaid) : collectible,
+      ),
+    }));
   const send = (method, body) => {
     onClear(order, method, body);
     setForm(null);
   };
+  const positive = (v) => Number(v) > 0;
+  const cashCoversAll =
+    form?.kind === "split" && form.amountPaid !== "" && Number(form.amountPaid) >= collectible;
+  const amountsOk =
+    !form ||
+    (form.kind === "split"
+      ? positive(form.amountPaid) && positive(form.amountClaimed)
+      : form.kind === "claim"
+        ? form.amountClaimed === "" || positive(form.amountClaimed)
+        : true);
   const submit = (e) => {
     e.preventDefault();
+    if (!amountsOk) return;
     if (form.kind === "claim") {
       send("insurance_claim", {
         insurer: form.insurer,
@@ -202,6 +231,8 @@ function OrderCard({ order, onClear, pending, actorId, onCancelTest, canCancelTe
                 cases={
                   order.kind === "lab" && order.tests.length === 1 ? order.cancellableCases : []
                 }
+                amount={t.price}
+                refund={refundOnCancel(order, t)}
                 onCancel={(body, done) => onCancelTest(order, t, body, done)}
               />
             ))}
@@ -251,26 +282,24 @@ function OrderCard({ order, onClear, pending, actorId, onCancelTest, canCancelTe
               <input
                 autoFocus
                 required
-                type="number"
-                min="1"
-                step="0.01"
+                inputMode="decimal"
                 className="ar-reason-input toc-amt-input"
-                placeholder="Cash ₹"
+                placeholder={`Cash ₹ (max ${collectible})`}
+                aria-label="Cash collected"
                 value={form.amountPaid}
-                onChange={field("amountPaid")}
+                onChange={cashField}
               />
             )}
             {form.kind !== "reject" && (
               <input
                 autoFocus={form.kind === "claim"}
                 required={form.kind === "split"}
-                type="number"
-                min="1"
-                step="0.01"
+                inputMode="decimal"
                 className="ar-reason-input toc-amt-input"
-                placeholder={form.kind === "split" ? "Claim ₹" : `Claim ₹ (default ${due})`}
+                placeholder={form.kind === "split" ? "Claim ₹" : `Claim ₹ (default ${collectible})`}
+                aria-label="Amount claimed"
                 value={form.amountClaimed}
-                onChange={field("amountClaimed")}
+                onChange={claimField}
               />
             )}
             {form.kind !== "reject" && (
@@ -299,10 +328,15 @@ function OrderCard({ order, onClear, pending, actorId, onCancelTest, canCancelTe
                 onChange={field("note")}
               />
             )}
+            {cashCoversAll && (
+              <span className="dp-hint">
+                Cash covers the full {rupees(collectible)} — use “received” instead of a split
+              </span>
+            )}
             <button
               className={`st-btn ${form.kind === "reject" ? "st-btn-red" : "st-btn-blu"}`}
               type="submit"
-              disabled={pending}
+              disabled={pending || !amountsOk}
             >
               {form.kind === "split"
                 ? "Take cash + claim rest"
@@ -440,7 +474,219 @@ const byVisit = (orders) => {
   }));
 };
 
+const refundOnCancel = (order, test) =>
+  refundOnTestCancel({ amountPaid: order.paid, amountTotal: order.total }, test.price);
+
 const testNames = (o) => (o.tests || []).map((t) => t.name).join(", ");
+
+const placeOnLine = (o) => {
+  const at = o.billLine.toLowerCase().indexOf(testNames(o).toLowerCase());
+  return at < 0 ? Infinity : at;
+};
+
+const sumOf = (orders, field) => rupeesFromPaise(orders.reduce((s, o) => s + paise(o[field]), 0));
+
+const collectibleOf = (o) => o.collectible ?? o.outstanding ?? o.total;
+
+const collectibleSum = (orders) =>
+  rupeesFromPaise(orders.reduce((s, o) => s + paise(collectibleOf(o)), 0));
+
+const mergedSettlement = (orders) => ({
+  paid: sumOf(orders, "paid"),
+  total: sumOf(orders, "total"),
+  claimed: 0,
+  claimState: "none",
+});
+
+const isCashOnly = (o) => !(Number(o.claimed) > 0) && (o.claimState || "none") === "none";
+
+const statusOf = (o) =>
+  o.kind === "charge"
+    ? "HealthRay charge"
+    : SAMPLE_LABEL[o.sampleStatus] || String(o.sampleStatus || "").replace(/_/g, " ");
+
+const byBillLine = (orders) => {
+  const rows = [];
+  const lines = new Map();
+  for (const o of orders) {
+    const row = o.billLine && lines.get(o.billLine);
+    if (row) {
+      row.orders.push(o);
+      continue;
+    }
+    const fresh = { key: o.orderId, orders: [o] };
+    if (o.billLine) lines.set(o.billLine, fresh);
+    rows.push(fresh);
+  }
+  return rows.map((r) => {
+    const sorted =
+      r.orders.length > 1
+        ? [...r.orders].sort((a, b) => placeOnLine(a) - placeOnLine(b))
+        : r.orders;
+    return {
+      key: r.key,
+      orders: sorted,
+      label: sorted.map(testNames).join(" + ") || "Tests",
+    };
+  });
+};
+
+const clearedRows = (orders) =>
+  byBillLine(orders)
+    .flatMap((row) =>
+      row.orders.length > 1 && !row.orders.every(isCashOnly)
+        ? row.orders.map((o) => ({ key: o.orderId, orders: [o], label: testNames(o) || "Tests" }))
+        : [row],
+    )
+    .map((row) => ({
+      ...row,
+      settled: settledAs(row.orders.length > 1 ? mergedSettlement(row.orders) : row.orders[0]),
+      status: [...new Set(row.orders.map(statusOf))].join(" / "),
+    }));
+
+const pendingRows = (orders) =>
+  byBillLine(orders).flatMap((row) =>
+    row.orders.length > 1
+      ? [{ key: row.key, label: row.label, price: sumOf(row.orders, "total") }]
+      : row.orders[0].tests.map((t) => ({
+          key: `${row.key}:${t.name}`,
+          label: t.name,
+          price: t.price,
+        })),
+  );
+
+const isPlainPending = (o) =>
+  o.paymentStatus === "pending" &&
+  (o.claimState || "none") === "none" &&
+  !(Number(o.paid) > 0) &&
+  !(Number(o.claimed) > 0);
+
+const byPatient = (orders) => {
+  const groups = new Map();
+  for (const o of orders) {
+    const group = groups.get(o.visitId) || [];
+    group.push(o);
+    groups.set(o.visitId, group);
+  }
+  return [...groups.values()];
+};
+
+function VisitPaymentCard({ orders, onClearAll, pending, onCancelTest, canCancelTest, children }) {
+  const [perTest, setPerTest] = useState(false);
+  const [collecting, setCollecting] = useState(false);
+  const [first] = orders;
+  const total = sumOf(orders, "total");
+  const discount = sumOf(orders, "billDiscount");
+  const collectible = collectibleSum(orders);
+  const busy = pending || collecting;
+  const collectAll = async () => {
+    setCollecting(true);
+    try {
+      await onClearAll(orders);
+    } finally {
+      setCollecting(false);
+    }
+  };
+  const orderedAt = orders
+    .map((o) => o.orderedAt)
+    .filter(Boolean)
+    .sort()[0];
+  const orderedBy = [...new Set(orders.map((o) => o.orderedBy).filter(Boolean))].join(", ");
+
+  return (
+    <div className="test-order-card">
+      <div className="toc-head">
+        <div className="toc-av" style={{ background: avatarColour(first.patientId) }}>
+          {initials(first.name)}
+        </div>
+        <div className="toc-who">
+          <div className="toc-name">
+            {first.name} <span className="badge b-ink">{first.fileNo}</span>
+            {orders.some((o) => o.kind === "machine") && (
+              <span className="badge b-ink">Machine Room</span>
+            )}
+          </div>
+          <div className="toc-meta">
+            {first.age}
+            {(first.sex || "")[0] || ""}
+            {orderedBy ? ` · Ordered by ${orderedBy}` : ""} at {clock(orderedAt)} · Urgency:{" "}
+            <strong>{first.urgency}</strong>
+          </div>
+        </div>
+        <div className={`sp ${CHIP.pending.cls}`}>{CHIP.pending.text}</div>
+      </div>
+
+      <div className="toc-body">
+        {pendingRows(orders).map((row) => (
+          <span className="toc-test" key={row.key}>
+            {row.label} <span className="tp">{rupees(row.price)}</span>
+          </span>
+        ))}
+      </div>
+
+      {canCancelTest && !perTest && orders.some((o) => o.canCancel) && (
+        <div className="toc-body">
+          {orders
+            .filter((o) => o.canCancel)
+            .flatMap((o) =>
+              o.tests
+                .filter((t) => t.id)
+                .map((t) => (
+                  <CancelTestControl
+                    key={t.id}
+                    what={t.name}
+                    busy={busy}
+                    cases={o.kind === "lab" && o.tests.length === 1 ? o.cancellableCases : []}
+                    amount={t.price}
+                    refund={refundOnCancel(o, t)}
+                    onCancel={(body, done) => onCancelTest(o, t, body, done)}
+                  />
+                )),
+            )}
+        </div>
+      )}
+
+      <div className="toc-total">
+        <span className="amt">Total: {rupees(total)}</span>
+        {discount > 0 && <span className="toc-part">{rupees(discount)} HealthRay discount</span>}
+        <span className={collectible > 0 ? "toc-due" : "toc-settled"}>
+          {collectible > 0 ? `Outstanding ${rupees(collectible)}` : "✓ Settled"}
+        </span>
+        <span className="toc-ins">Insurance: None</span>
+      </div>
+
+      {perTest ? (
+        <>
+          <div className="toc-foot">
+            <button type="button" className="st-btn st-btn-g" onClick={() => setPerTest(false)}>
+              ← Back to one payment
+            </button>
+          </div>
+          {children}
+        </>
+      ) : (
+        <div className="toc-foot">
+          <button type="button" className="st-btn st-btn-grn" disabled={busy} onClick={collectAll}>
+            {collecting
+              ? "Recording payment…"
+              : collectible > 0
+                ? `✓ ${rupees(collectible)} received — notify lab`
+                : "✓ Nothing to collect — notify lab"}
+          </button>
+          <button
+            type="button"
+            className="st-btn st-btn-g"
+            disabled={busy}
+            onClick={() => setPerTest(true)}
+          >
+            Insurance or split per test
+          </button>
+          <span className="toc-age">{sinceLabel(orderedAt)}</span>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // How many of the day's cleared orders the tab shows before it is asked.
 const CLEARED_PREVIEW = 8;
@@ -483,6 +729,7 @@ function ChargeCard({ charge, onClearCharge, pending, onCancelCharge, canCancelT
           <CancelTestControl
             what={charge.item}
             busy={pending}
+            amount={charge.amount}
             onCancel={(body, done) => onCancelCharge(charge, body, done)}
           />
         )}
@@ -558,6 +805,7 @@ export function PaymentsTab({
   data,
   isLoading,
   onClear,
+  onClearAll = () => {},
   pending,
   actorId,
   search = "",
@@ -622,17 +870,33 @@ export function PaymentsTab({
             {searching ? "No pending payment matches that search." : "Nothing waiting for payment."}
           </div>
         )}
-        {queue.map((order) => (
-          <OrderCard
-            key={order.orderId}
-            order={order}
-            onClear={onClear}
-            pending={pending}
-            actorId={actorId}
-            onCancelTest={onCancelTest}
-            canCancelTest={canCancelTest}
-          />
-        ))}
+        {byPatient(queue).map((orders) => {
+          const cards = orders.map((order) => (
+            <OrderCard
+              key={order.orderId}
+              order={order}
+              onClear={onClear}
+              pending={pending}
+              actorId={actorId}
+              onCancelTest={onCancelTest}
+              canCancelTest={canCancelTest}
+            />
+          ));
+          if (orders.length < 2 || !orders.every(isPlainPending))
+            return <Fragment key={orders[0].visitId}>{cards}</Fragment>;
+          return (
+            <VisitPaymentCard
+              key={orders[0].visitId}
+              orders={orders}
+              onClearAll={onClearAll}
+              pending={pending}
+              onCancelTest={onCancelTest}
+              canCancelTest={canCancelTest}
+            >
+              {cards}
+            </VisitPaymentCard>
+          );
+        })}
       </div>
 
       {refundChecks.length > 0 && (
@@ -674,12 +938,9 @@ export function PaymentsTab({
               <div className="toc-head">
                 <div className="toc-cleared">
                   {g.name}
-                  {g.orders.map((o) => (
-                    <div className="tc-detail" key={o.orderId}>
-                      {testNames(o) || "Tests"} · {settledAs(o)} ·{" "}
-                      {o.kind === "charge"
-                        ? "HealthRay charge"
-                        : SAMPLE_LABEL[o.sampleStatus] || o.sampleStatus.replace(/_/g, " ")}
+                  {clearedRows(g.orders).map((row) => (
+                    <div className="tc-detail" key={row.key}>
+                      {row.label} · {row.settled} · {row.status}
                     </div>
                   ))}
                 </div>
@@ -1741,6 +2002,29 @@ export default function ReceptionStationPage() {
       },
     );
 
+  const onClearAll = async (orders) => {
+    const name = orders[0].name;
+    const amount = collectibleSum(orders);
+    let cleared = 0;
+    try {
+      for (const order of orders) {
+        await clearPayment.mutateAsync({
+          orderId: order.orderId,
+          method: "paid",
+          version: order.version,
+        });
+        cleared++;
+      }
+      showToast(`✓ ${rupees(amount)} received from ${name} — lab can collect now`);
+    } catch (e) {
+      if (cleared)
+        showToast(
+          `Cleared ${cleared} of ${orders.length} payments for ${name} — the rest are still pending`,
+        );
+      else failed(e, "Could not clear this — nothing was changed");
+    }
+  };
+
   const ACTION_DONE = {
     arrived: (name) => `✓ ${name} checked in — they are on the floor now`,
     "no-show": (name) => `${name} marked as a no-show — their timer has stopped`,
@@ -1900,6 +2184,7 @@ export default function ReceptionStationPage() {
               data={data}
               isLoading={isLoading}
               onClear={onClear}
+              onClearAll={onClearAll}
               pending={clearPayment.isPending || cancelTest.isPending}
               actorId={actorId}
               search={paySearch}

@@ -58,13 +58,32 @@ Change the checkbox and the status word together.
 - Money is calculated in integer paise with the helpers in
   `shared/labPayment.js` (`paise`, `rupeesFromPaise`). No float arithmetic on
   rupees.
-- Every create / update / delete / cancel writes a `billing_audit` row.
+- Every create / update / delete / cancel writes a `billing_audit` row with
+  `writeAudit` (P1-13) inside the same transaction; routes pass
+  `auditContext(req)` down to the service. The P1-13 test fails if a billing
+  service writes without it. Never pass decrypted card or Aadhaar numbers on
+  purpose; `writeAudit` masks them anyway.
 - **Codes** on new billing tables are unique ignoring case (unique index on
   `lower(code)`), non-blank and without spaces (plan §5, decided in the P1-04
   review). Lookups compare `lower(code)`; upserts use
   `ON CONFLICT ((lower(code)))`. Store the code as typed.
+- **Inputs are strict.** Services use `cleanActive` (only `true`/`false`)
+  and `readNumber` (numbers or number-like text; blank means "not set") from
+  `common.js`, never `Number(x)` or truthiness on raw input (P1-16 review).
+- **Services join an outer transaction.** Every billing service uses
+  `inTransaction` from `server/services/billing/transaction.js`: given the
+  pool it opens its own transaction; given a connection already inside a
+  transaction it joins it with a savepoint. The Excel import calls the same
+  service functions instead of repeating their rules (P1-15 review).
 - **Every update sets `updated_at = NOW()` and `updated_by`** — there is no
   database trigger for it.
+- **Anything that points at a group, subgroup, item, tax code or category is
+  a "use"** and must be added to `USAGE_KINDS` in `server/services/billing/usage.js`
+  — whether it is a database link, a text copy of a code, or an array of ids.
+  The P1-14 tests fail automatically for a new database link or a new column
+  named `scheme_code` / `patient_category` / `parent_code`; arrays of ids
+  (e.g. discount rules' `group_ids`) are not caught and must be added by hand
+  (P1-14 review).
 - **Dates are India dates.** A `DATE` default is
   `(NOW() AT TIME ZONE 'Asia/Kolkata')::date`, never `CURRENT_DATE` (the
   database clock is UTC, so between midnight and 5:30 am IST `CURRENT_DATE`
@@ -740,7 +759,7 @@ today's lab prices keep working.
   - **E2E test:** `e2e/billing/phase1/P1-11-migration-file-billing-settings-bill-series.spec.js` — asserts: the migration runs twice on a fresh test database without error; the new tables, columns and indexes exist; RLS is on; no business rows are inserted; `billing_settings` has exactly one row with the safe defaults.
   - **Result:** Done 2026-09-18. One settings row, guaranteed by a `TRUE`-only primary key, with the safe defaults (best-only stacking, pay-later off, GST off). Extra checks: a GSTIN must be a valid 15-character GSTIN whose first two digits equal `state_code`; GST can only be switched on once GSTIN, state code and legal name are filled; `max_codes_per_bill` ≥ 1 when set. `bill_series`: `fy` like `2026-27` (consecutive years), `next_no` ≥ 1, plus a `number_width` column (default 6, e.g. `000001`) so the padding is admin-set rather than hardcoded. `billing_audit` is append-only (a trigger refuses update and delete), indexed by entity, time and actor. Review (2026-09-18): the settings row can't be deleted (trigger); `billing_audit.actor_id` refuses deleting a user who appears in the log (was `SET NULL`, which the append-only trigger itself blocked); the financial-year check only does its arithmetic when the format matches. Emptying the whole log (TRUNCATE) is not blocked, because the e2e reset needs it; audit rows are kept as financial records. Not yet applied to production (P1-12).
 
-- [ ] **P1-12 · Apply the categories migration** — `Pending`
+- [x] **P1-12 · Apply the categories migration** — `Done`
   - **Steps:** review, run, confirm the new columns, tables and the single
     settings row. Two files, in order: `2026-10-09_billing_categories.sql`,
     then `2026-10-10_billing_settings_audit.sql`. Neither drops anything (the
@@ -748,18 +767,20 @@ today's lab prices keep working.
   - **Done when:** everything exists in production; `patient_schemes` data is
     unchanged.
   - **E2E test:** No new spec — after applying, rebuild the test database and run the whole billing suite.
+  - **Result:** Done 2026-09-18. Pre-check: none of the new tables, columns or functions existed; `patient_schemes` structure matched the tested version. Applied both files in one transaction (`lock_timeout = 3s`) by a check-and-apply script run by the team. Checked before commit: the 6 existing categories were byte-for-byte unchanged (same fingerprint before and after); 6 new columns; 5 new tables with RLS on and forced and no anon/authenticated grants; `billing_settings` has its one row (best-only, pay-later off, GST off). Verified read-only afterwards from a fresh connection: 14 indexes, 49 constraints, 69 columns, 3 triggers and 3 functions identical to the tested migrations; the app login (`postgres`) bypasses RLS and has full access. Test database rebuilt and the whole suite re-run green.
 
 ### 1D. Server services
 
-- [ ] **P1-13 · Audit helper** — `Pending`
+- [x] **P1-13 · Audit helper** — `Done`
   - **Where:** `server/services/billing/audit.js`.
   - **What:** `writeAudit(client, { entity, entityId, action, before, after, actorId, ip })`,
     always inside the caller's transaction.
   - **Done when:** every later service uses it, and a rolled-back transaction
     leaves no audit row.
   - **E2E test:** `e2e/billing/phase1/P1-13-audit-helper.spec.js` — asserts: every later service uses it, and a rolled-back transaction leaves no audit row.
+  - **Result:** Done 2026-09-18. `server/services/billing/audit.js`: `writeAudit(client, {...})` refuses the pool (it must be the transaction's own client), requires `entity`, `entityId` and `action`, stores the id as text and empty snapshots as `NULL`. `auditContext(req)` returns `{ actorId: req.doctor.doctor_id, ip: req.ip }` for routes to pass down. The e2e test scans `server/services/billing/` and fails if any file writes SQL without calling `writeAudit`, so later services are held to it automatically. Review (2026-09-18): it opens a savepoint first, so a connection without an open transaction is refused with a clear message (the first version accepted it and saved the row on its own); sensitive keys (`scheme_ref`, `aadhaar*`, `card_no`, `card_number`, `pin`, `password`, `token`, `access_token`, `refresh_token`, any case, any depth) are stored as `[redacted]`, because the log can never be edited or deleted; actions must be one of `AUDIT_ACTIONS` (extend the list when a task needs a new one); the scan also catches `UPDATE ${table} SET` and `UPDATE public.x SET`. The scan checks files, not each individual write.
 
-- [ ] **P1-14 · "Where is it used" helper** — `Pending`
+- [x] **P1-14 · "Where is it used" helper** — `Done`
   - **Where:** `server/services/billing/usage.js`.
   - **What:** given a group, subgroup, item, tax code or category, return every
     place that still uses it, so deletes can be blocked with a clear message.
@@ -770,8 +791,9 @@ today's lab prices keep working.
   - **Done when:** it returns an empty list for an unused row and a readable
     list, e.g. "3 sub-categories under CGHS", for a used one.
   - **E2E test:** `e2e/billing/phase1/P1-14-where-is-it-used-helper.spec.js` — asserts: it returns an empty list for an unused row and a readable list, e.g. "3 sub-categories under CGHS", for a used one.
+  - **Result:** Done 2026-09-18. `server/services/billing/usage.js`: `whereUsed(kind, key, db)` for `group`, `subgroup`, `item`, `taxCode`, `category` returns `{ name, uses: [{ table, column, count, text }] }` with texts like "3 sub-categories under CGHS", "4 appointments are booked as CGHS"; an unknown row is a 404. `assertUnused(kind, key, db)` throws 409 with the list and "Deactivate it instead." Category uses: sub-categories, rules, rates, patients, appointments (appointments have no database link, so they are listed by hand). Price history and the old `scheme_*` tables are not "uses": they are deleted along with the row. The e2e test reads every blocking database link into these tables and fails if the usage list misses one, so a later table that links to them (e.g. Phase 4 bill lines) must be added here before its tests pass. Review (2026-09-18): a second test finds every column named `scheme_code` / `patient_category` / `parent_code` in any table; it immediately found two uses the first version missed — `giniflow_lab_orders.scheme_code` ("3 test orders are priced as CGHS") and `scheme_cap_overrides.scheme_code` ("1 daily-limit override is recorded for CGHS") — both now counted. Unknown kinds, including `constructor` / `toString`, are refused. P1-15, P3-02 and P4-01 carry the follow-up steps. A category ever used on an appointment can only be deactivated, never deleted (D9).
 
-- [ ] **P1-15 · Service groups and subgroups service** — `Pending`
+- [x] **P1-15 · Service groups and subgroups service** — `Done`
   - **Where:** `server/services/billing/serviceGroups.js`.
   - **What:** list (with item counts), create, update (name, code, order),
     deactivate, delete.
@@ -780,13 +802,18 @@ today's lab prices keep working.
        `LAB` exists) returns 409 with a message. Find by code with
        `lower(code) = lower($1)`.
     2. Delete calls `usage.js` and returns 409 with the list when the row is
-       used.
+       used. If something starts using the row between that check and the
+       delete, the database refuses with a foreign-key error (`23503`): catch
+       it, call `whereUsed` again, and return the same 409 with the list — never
+       a raw database error (P1-14 review). The same applies to every later
+       delete.
     3. Every write is audited, and every update sets `updated_at = NOW()` and
        `updated_by`.
   - **Done when:** all operations work and a used group can't be deleted.
   - **E2E test:** `e2e/billing/phase1/P1-15-service-groups-and-subgroups-service.spec.js` — asserts: all operations work and a used group can't be deleted.
+  - **Result:** Done 2026-09-18. `server/services/billing/serviceGroups.js` (`listGroups`, `create/update/setActive/delete` for groups and subgroups) plus a shared `server/services/billing/transaction.js` (`inTransaction`, `httpError`). Every function takes `ctx` from `auditContext(req)` and an optional `db`. Codes are trimmed, unique ignoring case (409), no spaces (400); names can't be blank; sort order is a whole number; update changes only the fields sent. A subgroup can only be created under, moved to or reactivated under an **active** group. **Deactivating a group or subgroup is refused while it still has active subgroups / items** (409 naming them) — no silent cascade. Delete locks the row, calls `assertUnused`, and turns a late foreign-key error into the same 409 with the list; an item added while a delete runs is caught (tested with two connections). Every write stamps `created_by`/`updated_by` and writes an audit row in the same transaction; a failed write leaves neither. Review (2026-09-18): handed a connection that is already inside a transaction, every billing service now **joins** it (a savepoint) instead of opening its own, so the Excel import (P2-08) can call the same functions all-or-nothing; a connection with no open transaction is refused. Only `actorId` and `ip` are taken from `ctx`. Names are unique ignoring case among groups, and among subgroups of the same group (409 "A subgroup called "Biochemistry" already exists in Lab"); a subgroup can't be moved into a group that already has one with that name. Deactivating a parent that still has active children stays **refused** (decided 2026-09-18).
 
-- [ ] **P1-16 · Tax codes service** — `Pending`
+- [x] **P1-16 · Tax codes service** — `Done`
   - **Where:** `server/services/billing/taxCodes.js`.
   - **What:** list, create, update, deactivate, delete (blocked when used).
     `rate_pct` must be 0–100.
@@ -794,8 +821,9 @@ today's lab prices keep working.
     with 409 and the list of those items (P1-05 review).
   - **Done when:** as P1-15.
   - **E2E test:** `e2e/billing/phase1/P1-16-tax-codes-service.spec.js` — asserts: create, update, deactivate and delete tax codes through the API; `rate_pct` outside 0–100 is refused; deleting a used tax code returns 409 with the "used in" list; deactivating a tax code used by an active item returns 409 with those items.
+  - **Result:** Done 2026-09-18. `server/services/billing/taxCodes.js` (`listTaxCodes` with item counts, lowest rate first; `createTaxCode`, `updateTaxCode`, `setTaxCodeActive`, `deleteTaxCode`). Rate 0–100 with at most 2 decimals (checked without floating-point error, so 0.29 is accepted); SAC/HSN blank or exactly 4, 6 or 8 digits; codes unique ignoring case. Deactivating is refused while active items use it, naming them; delete is refused while any item uses it. Tested at the service level; the HTTP routes (and their 403 checks) come in P1-27. Shared helpers moved from P1-15 into `server/services/billing/common.js` (`cleanCode`, `cleanName`, `cleanOrder`, `assertCodeFree`, `lockRow`, `deleteUnused`, `auditFields`) for every later service. Review (2026-09-18): on/off must be a real `true`/`false` — the text `"false"` used to skip the "still used by active items" check and still switch the code off (also true of P1-15's groups and subgroups); numbers must be numbers or number-like text (`true` used to become 1%). Both are now shared checks in `common.js` (`cleanActive`, `readNumber`) with tests in P1-15 and P1-16.
 
-- [ ] **P1-17 · Service items service** — `Pending`
+- [x] **P1-17 · Service items service** — `Done`
   - **Where:** `server/services/billing/serviceItems.js`.
   - **What:** list with search (name/code) and filters (group, subgroup, kind,
     active, consultant), create, update, deactivate, delete.
@@ -808,19 +836,30 @@ today's lab prices keep working.
     3. A base price change requires a reason and writes
        `service_item_price_history` in the same transaction.
     4. Delete is blocked when used.
+    5. Creating, moving or reactivating an item locks its subgroup
+       (`FOR SHARE`) and requires it to be active, so an item can't slip into
+       a subgroup that is being deactivated at the same moment (P1-15 review).
+    6. Item names are unique within their subgroup, ignoring case, like
+       group and subgroup names.
+    7. An item can only be given an **active** tax code, locked `FOR SHARE`
+       while checking, so it can't be switched off at the same moment
+       (P1-16).
+    8. Use the shared helpers in `common.js` rather than repeating them.
   - **Done when:** all operations work and each rule is refused with a clear
     message.
   - **E2E test:** `e2e/billing/phase1/P1-17-service-items-service.spec.js` — asserts: all operations work and each rule is refused with a clear message.
+  - **Result:** Done 2026-09-18. `server/services/billing/serviceItems.js`: `listItems` (search by name/code with `%`/`_` taken literally; filters group, subgroup, kind, doctor, active; paging with a total; group/subgroup/tax code/doctor/test names joined in), `createItem`, `updateItem`, `setItemActive`, `priceHistory`, `deleteItem`. Kinds and visit types come from `ITEM_KINDS` / `CONSULTATION_VISIT_TYPES` in `importColumns.js`. Rules: a consultation needs `New`/`Follow Up` (a doctor, or none for the hospital default), other kinds have no doctor or visit type; a test item links to one active catalogue test and each test has one item; one active consultation per doctor + visit type and one default per visit type — the friendly check first, and the database's unique index mapped to the same kind of 409 when two creates race (tested deterministically); subgroup and tax code must be active and are locked `FOR SHARE`; the doctor must be active and not the lab-only provider; names unique within the subgroup; money ≥ 0 with at most 2 decimals; strict true/false and numbers. Reactivating re-checks everything. A price change needs a reason and writes `service_item_price_history`; **creating an item also writes a first history row (reason "Created")**, so the history is complete from day one. Delete is refused while category rates use the item; an unused item's history goes with it. Shared `cleanMoney` / `cleanFlag` added to `common.js`. Review (2026-09-18): "price includes tax" is refused unless the item has a tax code (also when the tax code is removed on edit); the first "Created" price-history row is kept (confirmed).
 
-- [ ] **P1-18 · "Not priced" list** — `Pending`
+- [x] **P1-18 · "Not priced" list** — `Done`
   - **Where:** `serviceItems.js`.
   - **What:** every active catalogue test (lab, machine, ECHO, X-ray) that has
     no service item yet, and every active consultant missing a New or Follow Up
     item.
   - **Done when:** creating the missing item removes it from the list.
   - **E2E test:** `e2e/billing/phase1/P1-18-not-priced-list.spec.js` — asserts: creating the missing item removes it from the list.
+  - **Result:** Done 2026-09-18. `notPricedList(db)` in `serviceItems.js` returns three lists: **tests** — active catalogue tests with no item (`no_item`) or only a deactivated one (`item_deactivated`, with its id and code), grouped by category, with the catalogue's current price; **reportsNotInCatalogue** — active lab report catalogue entries (name or alias) with no active test-catalogue match (`not_in_catalogue` / `retired_in_catalogue`), which can't be priced until an admin adds them to the test catalogue (P1-06 finding); **consultants** — one row per active consultant per missing visit type (`New` / `Follow Up`), `no_item` or `item_deactivated`, with `default_covers` saying whether the hospital default fee bills them meanwhile. Medical officers, inactive consultants and the lab-only provider are never listed. `normalizeTestName` moved to `server/services/billing/testNames.js` so this doesn't load the Excel library. Review (2026-09-18): each report row also lists `possibly_same_as` — active catalogue tests that look like the same test (the P0-03 matching: "Complete Blood Count (CBC)" → "CBC", "Vitamin B12" → "Vit B12"), so the screen can suggest adding an alias instead of a duplicate catalogue test that could be billed twice. `looksLikeSameTest` moved to `testNames.js` alongside `normalizeTestName`. The admin screen (P1-3x) should show that suggestion first.
 
-- [ ] **P1-19 · Categories and sub-categories service (extend `patientSchemes.js`)** — `Pending`
+- [x] **P1-19 · Categories and sub-categories service (extend `patientSchemes.js`)** — `Done`
   - **Where:** `server/services/patientSchemes.js`.
   - **Steps:**
     1. Accept and return the new columns.
@@ -852,8 +891,9 @@ today's lab prices keep working.
     created, and the GHM smoke scripts still pass (see P1-36).
   - **Also:** refuse the reserved code `general`.
   - **E2E test:** `e2e/billing/phase1/P1-19-categories-and-sub-categories-service-extend.spec.js` — asserts: CGHS › CGHS Paid / CGHS Referral / Pensioner can be created, and the GHM smoke scripts still pass (see P1-36); with a CGHS cap of 2, one Pensioner and one CGHS Paid booking fill it and a third CGHS-family booking is refused; a sub-category's own cap is enforced as well; the list shows "CGHS › Pensioner".
+  - **Result:** Done 2026-09-18. `server/services/patientSchemes.js`: `listSchemes` now returns the new columns plus `parent_label` and `display_label` ("CGHS › Pensioner"), ordered parent then its sub-categories, and hides sub-categories of a retired parent from the active list; `listSchemeTree` nests them; `createScheme` / `updateScheme` accept the new fields with strict checks (booleans, payer text, `allow_pay_later` true/false/blank), refuse the reserved code `general`, a third level (clear 409 whether added or moved, including the database trigger's refusal), a duplicate label under the same parent, a retired or missing parent, retiring a parent that still has active sub-categories, and bringing a sub-category back under a retired parent; adding the first sub-category to a category that has rules returns `rules_to_move`; `deleteScheme` refuses while anything uses the category (the P1-14 list) and is audited. Every write is audited and joins an outer transaction. Existing callers keep working: the two `/api/patient-schemes` write routes now pass `auditContext(req)`. `server/services/schemeCap.js`: a booking is checked against its own category's cap and, for a sub-category, the parent's cap counting the parent and all sub-categories; the tightest is reported (`scope_label`, "…, counting its sub-categories" in the refusal message), and `nextDatesWithRoom` respects both. `shared/patientCategories.js` uses `display_label`, so drop-downs and pills show "CGHS › Pensioner". `smoke:ghm-categories` passes against the test database (5 seeded appointments; it writes to appointments, so never run it against production). `deleteUnused` in `common.js` now takes a `key` column. Note: the server-side GHM count pills still use the seed list in `shared/patientCategories.js` (as for any scheme added after the seed) — unchanged here. Review (2026-09-18): `daily_cap` now only takes a whole number ≥ 0 or blank — before, `true` became 1 and `[]` became **0 (no bookings that day)**; `isKnownScheme` also requires the parent to be active; P1-21 never auto-applies a rule left on a category that has sub-categories.
 
-- [ ] **P1-20 · Category rules service** — `Pending`
+- [x] **P1-20 · Category rules service** — `Done`
   - **Where:** `server/services/billing/categoryRules.js`.
   - **What:** list by category or sub-category, create, update, deactivate,
     delete. `min_age <= max_age`; names are unique per category, ignoring
@@ -863,8 +903,9 @@ today's lab prices keep working.
     the sub-category (P1-09 review).
   - **Done when:** all operations work.
   - **E2E test:** `e2e/billing/phase1/P1-20-category-rules-service.spec.js` — asserts: all operations work; a rule on a category that has sub-categories is refused.
+  - **Result:** Done 2026-09-18. `server/services/billing/categoryRules.js`: `listRules` (by category, active only, ordered by priority; shows "CGHS › Pensioner"), `createRule`, `updateRule` (re-checks the whole rule), `setRuleActive` (reactivating re-checks the category), `deleteRule`. Gender and mode come from `GENDERS` / `CATEGORY_RULE_MODES`. Refused: a rule on a category that has sub-categories (409, "put the rule on one of its sub-categories"), a retired or missing category, a rule with no condition, min > max, ages outside 0–150 or not whole, unknown gender/mode, non-boolean card flag, negative priority, a name already used in that category ignoring case. Every write audited; joins an outer transaction. **Race found and fixed while testing:** if a sub-category was being created at the same moment, a new rule waited for the category's lock but then checked for sub-categories with a snapshot taken before it waited, so it slipped through; the sub-category check now runs as its own query after the lock (test 9 failed before the fix, passes after). Review (2026-09-18): an **automatic** rule for a category that needs a card number (on it or its parent) must itself require a card, otherwise it can only be a suggestion (409) — so an age rule can't silently bill non-cardholders as CGHS; the list returns `category_active` so rules of a retired category show as such; deleting a rule that something refers to gives a friendly 409 (future-proof for bills that record the rule).
 
-- [ ] **P1-21 · Category resolver** — `Pending`
+- [x] **P1-21 · Category resolver** — `Done`
   - **Where:** `server/services/billing/categoryResolver.js`.
   - **What:** `resolveCategory({ patient, appointment, date })` returns
     `{ category, parent, source, suggestions }`.
@@ -878,10 +919,20 @@ today's lab prices keep working.
        `id`). Compare gender after normalising the patient's sex with
        `mapGender` (`server/services/healthray/mappers.js`), never raw text
        (P1-09 review).
+       A rule whose category has sub-categories (left behind when the
+       category gained them) is never applied automatically: it is returned
+       as a suggestion flagged "move this rule to a sub-category" (P1-19
+       review).
+       Rules whose category (or its parent) is retired are ignored. An
+       automatic rule never puts a patient into a category that needs a card
+       number (`requires_ref` on it or its parent) unless the patient has a
+       card saved — even if the rule was saved before the category started
+       needing a card (P1-20 review).
     3. Matching `suggest` rules are returned as suggestions.
     4. Otherwise General (no category).
   - **Done when:** each of the four cases returns the expected result.
   - **E2E test:** `e2e/billing/phase1/P1-21-category-resolver.spec.js` — asserts: each of the four cases returns the expected result.
+  - **Result:** Done 2026-09-18. `server/services/billing/categoryResolver.js`: `resolveCategory({ patient, appointment, date }, data)` is a pure function over `loadResolverData(db)` (all categories with display name, active flag, "needs a card" and "has active sub-categories", plus active rules by priority then id); `resolveCategoryFor(input, db)` does both. Returns `{ category, parent, source: appointment | patient | rule | general, rule, suggestions: [{ category, rule, reason }], needs_sub_category, age, age_source, warnings }`. Order: the appointment's category, else the patient's — only if active; a retired or unknown recorded category is skipped with a warning; a recorded bare parent (e.g. CGHS) is returned with `needs_sub_category` and its active sub-categories as `choose_sub_category` suggestions. Then automatic rules (first match; ties by id); a rule on a category with sub-categories only suggests (`move_rule_to_sub_category`); a card category is never applied without a saved card (`needs_card`); retired categories' rules are ignored; other matching rules become suggestions (`suggest_rule` / `lower_priority_auto_rule`), in priority order, one per category. Age is from the date of birth on the billing date (India date by default), falling back to the recorded age; no age means age rules don't match. **Deviation:** gender is normalised with the resolver's own `normalizeGender` (`M`/`male` → Male, `F`/`female` → Female, blank → unknown, anything else → Other) instead of `mapGender`, which turns `"M"` and blank into "Other". Categories load in `sort_order`, then name, so the sub-categories offered for a bare parent always come in the same order (the full suite caught them arriving in a random order).
 
 - [ ] **P1-22 · Category rates service** — `Pending`
   - **Where:** `server/services/billing/categoryRates.js`.
@@ -977,6 +1028,9 @@ today's lab prices keep working.
     `SCHEME_ADMIN`, which only admin holds, so extending them would lock
     reception_admin out of categories (plan §10).
   - **Steps:** a delete that is blocked returns 409 with the "used in" list.
+    Query-string filters arrive as text: convert `active=true/false` to a real
+    boolean (and reject anything else with 400) before calling the service,
+    whose checks are strict (P1-17 review). Numbers may be passed as text.
   - **Done when:** each endpoint works and returns 403 without the capability.
   - **E2E test:** `e2e/billing/phase1/P1-26-master-data-routes.spec.js` — asserts: each endpoint works and returns 403 without the capability.
 
@@ -1192,6 +1246,10 @@ and saves it all at once or not at all.
     - no second consultation item for the same doctor + visit type, and at
       most one active hospital default (blank doctor) per visit type;
     - no second item for the same test;
+    - **warning** (not an error) when a test's catalogue category doesn't
+      match its item's group — e.g. a lab test filed under a Machine or OPD
+      subgroup, which would count its revenue in the wrong place on the
+      dashboards (P1-17 review);
     - a test name that isn't in the Gini Flow test catalogue is refused with:
       "This test isn't in the test catalogue yet — ask an admin to add it
       (Settings › Test catalogue), then upload again". A test that exists only
@@ -1218,6 +1276,11 @@ and saves it all at once or not at all.
 - [ ] **P2-07 · Row status and preview** — `Pending`
   - **What:** each row is marked new / update / unchanged / error by comparing
     with the database, using the key columns.
+  - **Also (P1-15 review):** a "new" row whose code doesn't exist but whose
+    name matches an existing row (same parent, ignoring case) gets a
+    **warning**: "Looks like LAB-HBA1C, which now has code LAB-A1C — was the
+    code changed on the admin screen?" A code changed on screen would
+    otherwise make an older copy of the sheet create a duplicate.
   - **Done when:** the preview returns counts per sheet and the error rows.
   - **E2E test:** `e2e/billing/phase2/P2-07-row-status-and-preview.spec.js` — asserts: the preview returns counts per sheet and the error rows.
 
@@ -1339,6 +1402,12 @@ manage payment rules and discount codes.
   - **Done when:** the SQL is reviewed.
   - **Also:** `max_uses_per_day` and `max_uses_per_doctor_per_day` (both
     nullable integers ≥ 1), for doctor coupons (R15).
+  - **Also (P1-14 review):** add the target arrays to `USAGE_KINDS` in
+    `usage.js` — `group_ids` (group), `subgroup_ids` (subgroup),
+    `service_item_ids` (item), `scheme_codes` (category) — matched with
+    `$1 = ANY(column)`, so a group or category a discount rule targets can't be
+    deleted. The P1-14 tests don't catch arrays, so this step is manual; add a
+    test case for each.
   - **E2E test:** `e2e/billing/phase3/P3-02-migration-discount-rules.spec.js` — asserts: the migration runs twice on a fresh test database without error; the new tables, columns and indexes exist; RLS is on; no business rows are inserted.
 
 - [ ] **P3-03 · Apply the rules migration** — `Pending`
@@ -1705,6 +1774,10 @@ floor. Nothing about the existing "Clear payment" changes.
   - **Also:** `bills.claim_status` (`none` / `pending` / `cleared`, default
     `none`) and `bills.claim_settlement_id`; an index on
     `(claim_status, bill_date)` for the register.
+  - **Also (P1-14 review):** `bills.scheme_code` is a text copy of the category,
+    so add it to the category uses in `usage.js` ("N bills are billed as
+    CGHS"); the P1-14 category-column test fails until it is. Any bill-line
+    column that links to an item is caught the same way.
   - **E2E test:** `e2e/billing/phase4/P4-01-migration-bills-and-requests.spec.js` — asserts: the migration runs twice on a fresh test database without error; the new tables, columns and indexes exist; RLS is on; no business rows are inserted.
 
 - [ ] **P4-02 · Migration: lines and discounts** — `Pending`

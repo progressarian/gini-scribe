@@ -42,7 +42,7 @@ export function hydrateCategories(rows) {
   if (!Array.isArray(rows)) return PATIENT_CATEGORIES;
   const next = rows
     .filter((r) => r && r.code && r.label)
-    .map((r) => ({ value: r.code, label: r.label, color: r.color || "gray" }));
+    .map((r) => ({ value: r.code, label: r.display_label || r.label, color: r.color || "gray" }));
   if (!next.length) return PATIENT_CATEGORIES;
   PATIENT_CATEGORIES.length = 0;
   PATIENT_CATEGORIES.push(GENERAL, ...next);

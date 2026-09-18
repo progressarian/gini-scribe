@@ -849,6 +849,7 @@
 }
 .gf .toc-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   margin-bottom: 7px;
@@ -867,6 +868,7 @@
 }
 .gf .toc-who {
   flex: 1;
+  min-width: 160px;
 }
 .gf .toc-name {
   font-size: 12px;
@@ -882,9 +884,13 @@
 }
 .gf .toc-body {
   display: flex;
+  align-items: flex-start;
   gap: 8px;
   flex-wrap: wrap;
   margin-bottom: 8px;
+}
+.gf .toc-body > .ar-reason {
+  flex-basis: 100%;
 }
 .gf .toc-test {
   font-size: 10px;
@@ -918,6 +924,7 @@
 }
 .gf .toc-foot {
   display: flex;
+  flex-wrap: wrap;
   gap: 7px;
   align-items: center;
 }
@@ -971,6 +978,7 @@
 }
 .gf .toc-age {
   margin-left: auto;
+  white-space: nowrap;
   font-size: 10px;
   color: var(--ink4);
   font-family: var(--fm);

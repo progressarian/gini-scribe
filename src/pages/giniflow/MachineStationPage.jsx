@@ -251,6 +251,8 @@ function TestPane({
                   what={order.tests.join(", ") || "test"}
                   full
                   busy={busy}
+                  amount={order.amountTotal}
+                  refund={order.amountPaid}
                   onCancel={(body, done) => onCancelTest(order, body, done)}
                 />
               )}

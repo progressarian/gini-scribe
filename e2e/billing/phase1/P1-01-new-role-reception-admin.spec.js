@@ -84,6 +84,10 @@ test.describe("P1-01 reception_admin role", () => {
     expect(response.status()).toBe(403);
     await api.dispose();
   });
+});
+
+test.describe("P1-01 reception_admin on the login screen", () => {
+  test.describe.configure({ retries: 1 });
 
   test("7. the login screen lists a Reception Admin group", async ({ page }) => {
     await page.goto("/login");

@@ -1320,6 +1320,7 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
   // active, the Done column once exited, reachable for a coordinator to
   // assign a real consultant — not a redesigned version of it.
   const chainAllowsLabOnly = (col) => !hideLabOnly && col.key === "done";
+  const shown = hideLabOnly ? onFloor.filter((c) => !c.labOnly) : onFloor;
 
   const columns = BOARD_COLUMNS.map((col) => {
     const items =
@@ -1328,14 +1329,14 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
           // holds something of theirs. Once the reports are back and they have
           // gone home there is nothing to work, and leaving them here is what
           // kept an exited patient sitting in the column all day.
-          onFloor.filter(
+          shown.filter(
             (c) =>
               c.placement === "lab" ||
               (!hideLabOnly && c.labOnly && c.lab && !(c.finished && c.labSettled)) ||
               (c.finished && !c.labOnly && c.lab && !c.labSettled),
           )
         : isMachineColumn(col.key)
-          ? onFloor.filter((c) => c.placement === "machine" && c.machine.column === col.key)
+          ? shown.filter((c) => c.placement === "machine" && c.machine.column === col.key)
           : onFloor.filter(
               (c) =>
                 (!c.labOnly || chainAllowsLabOnly(col)) &&

@@ -20,6 +20,7 @@ import StationNotice from "../StationNotice";
 import CancelTestControl from "../CancelTestControl";
 import useAuthStore from "../../../stores/authStore";
 import { CAPABILITIES as CAP, hasCapability } from "../../../../shared/permissions.js";
+import { refundOnTestCancel } from "../../../../shared/labPayment.js";
 import {
   LAB_RUNGS,
   visibleRungs,
@@ -485,6 +486,8 @@ function LabDetailPane({
                       what={t.name}
                       busy={busy}
                       cases={order.tests.length === 1 ? order.cancellableCases : []}
+                      amount={t.price}
+                      refund={refundOnTestCancel(order, t.price)}
                       onCancel={(body, done) => onCancelTest(order, t, body, done)}
                     />
                   )}

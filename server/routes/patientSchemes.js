@@ -3,6 +3,7 @@ import { handleError } from "../utils/errorHandler.js";
 import { requireCapability } from "../middleware/auth.js";
 import { CAPABILITIES as CAP } from "../../shared/permissions.js";
 import { listSchemes, createScheme, updateScheme } from "../services/patientSchemes.js";
+import { auditContext } from "../services/billing/audit.js";
 
 const router = Router();
 
@@ -21,7 +22,7 @@ router.get("/patient-schemes", async (req, res) => {
 
 router.post("/patient-schemes", requireCapability(CAP.SCHEME_ADMIN), async (req, res) => {
   try {
-    res.status(201).json(await createScheme(req.body || {}));
+    res.status(201).json(await createScheme(req.body || {}, undefined, auditContext(req)));
   } catch (e) {
     handleError(res, e, "Patient scheme create");
   }
@@ -29,7 +30,7 @@ router.post("/patient-schemes", requireCapability(CAP.SCHEME_ADMIN), async (req,
 
 router.patch("/patient-schemes/:code", requireCapability(CAP.SCHEME_ADMIN), async (req, res) => {
   try {
-    res.json(await updateScheme(req.params.code, req.body || {}));
+    res.json(await updateScheme(req.params.code, req.body || {}, undefined, auditContext(req)));
   } catch (e) {
     handleError(res, e, "Patient scheme update");
   }

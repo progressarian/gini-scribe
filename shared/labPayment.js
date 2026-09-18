@@ -58,6 +58,12 @@ export const outstandingPaise = (order) =>
 
 export const outstandingOf = (order) => rupeesFromPaise(outstandingPaise(order));
 
+export const refundOnTestCancel = (order, price) => {
+  const paid = paise(order.amountPaid ?? order.amount_paid);
+  const rest = Math.max(0, paise(order.amountTotal ?? order.amount_total) - paise(price));
+  return rupeesFromPaise(paid - Math.min(paid, rest));
+};
+
 // A claim that is still standing has money spoken for even though nothing has
 // arrived: the desk cannot also take that ₹900 in cash, or the order would be
 // collected twice over and the invariant the table enforces would break. What is

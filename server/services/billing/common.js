@@ -1,0 +1,105 @@
+import { writeAudit } from "./audit.js";
+import { assertUnused, whereUsed } from "./usage.js";
+import { httpError } from "./transaction.js";
+
+export const hasField = (input, key) =>
+  Boolean(input) && Object.prototype.hasOwnProperty.call(input, key);
+
+export function cleanCode(value) {
+  const code = typeof value === "string" ? value.trim() : "";
+  if (!code || /\s/.test(code)) throw httpError(400, "Code can't be blank or contain spaces");
+  return code;
+}
+
+export function cleanName(value) {
+  const name = typeof value === "string" ? value.trim() : "";
+  if (!name) throw httpError(400, "Name can't be blank");
+  return name;
+}
+
+const NUMBER_TEXT = /^-?\d+(\.\d+)?$/;
+
+export function readNumber(value, message) {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (!text) return undefined;
+    if (!NUMBER_TEXT.test(text)) throw httpError(400, message);
+    return Number(text);
+  }
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  throw httpError(400, message);
+}
+
+export function cleanOrder(value) {
+  const order = readNumber(value, "Sort order must be a whole number");
+  if (order === undefined) return 0;
+  if (!Number.isInteger(order)) throw httpError(400, "Sort order must be a whole number");
+  return order;
+}
+
+export function cleanMoney(value, label) {
+  const amount = readNumber(value, `${label} must be an amount in rupees`);
+  if (amount === undefined) throw httpError(400, `${label} is required`);
+  if (amount < 0) throw httpError(400, `${label} can't be negative`);
+  if (Number(amount.toFixed(2)) !== amount) {
+    throw httpError(400, `${label} can have at most 2 decimals (paise)`);
+  }
+  return amount;
+}
+
+export function cleanFlag(value, label) {
+  if (typeof value !== "boolean") throw httpError(400, `${label} must be true or false`);
+  return value;
+}
+
+export function cleanActive(value) {
+  if (typeof value !== "boolean") throw httpError(400, "Active must be true or false");
+  return value;
+}
+
+export const auditFields = (ctx) => ({ actorId: ctx?.actorId ?? null, ip: ctx?.ip ?? null });
+
+export async function assertCodeFree(client, { table, noun }, code, exceptId = null) {
+  const { rows } = await client.query(
+    `SELECT code FROM ${table} WHERE lower(code) = lower($1) AND id IS DISTINCT FROM $2`,
+    [code, exceptId],
+  );
+  if (rows.length) throw httpError(409, `A ${noun} with code "${rows[0].code}" already exists`);
+}
+
+export const duplicateCodeError = (noun, error) =>
+  error?.code === "23505" ? httpError(409, `A ${noun} with that code already exists`) : error;
+
+export async function lockRow(client, { table, noun, columns }, id) {
+  const { rows } = await client.query(`SELECT ${columns} FROM ${table} WHERE id = $1 FOR UPDATE`, [
+    id,
+  ]);
+  if (!rows.length) throw httpError(404, `That ${noun} no longer exists`);
+  return rows[0];
+}
+
+export async function deleteUnused(client, { table, key = "id", kind, id, label, before, ctx }) {
+  await assertUnused(kind, id, client);
+  await client.query("SAVEPOINT billing_delete");
+  try {
+    await client.query(`DELETE FROM ${table} WHERE ${key} = $1`, [id]);
+  } catch (error) {
+    if (error.code !== "23503") throw error;
+    await client.query("ROLLBACK TO SAVEPOINT billing_delete");
+    const { uses } = await whereUsed(kind, id, client);
+    throw httpError(
+      409,
+      `${label} can't be deleted because it is still used: ${uses.map((u) => u.text).join("; ")}. Deactivate it instead.`,
+      { uses },
+    );
+  }
+  await writeAudit(client, {
+    entity: table,
+    entityId: id,
+    action: "delete",
+    before,
+    ...auditFields(ctx),
+  });
+  return { deleted: true, id };
+}

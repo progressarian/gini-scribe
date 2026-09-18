@@ -1,9 +1,12 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { cleanAmount } from "../../utils/amountInput.js";
 import {
   NOTE_REQUIRED_CANCEL_REASON,
   REFUND_REASON,
   TEST_CANCEL_REASONS,
 } from "../../../shared/testCancelReasons.js";
+
+const rupees = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
 export default function CancelTestControl({
   what = "test",
@@ -11,8 +14,16 @@ export default function CancelTestControl({
   busy = false,
   cases = [],
   full = false,
+  amount = null,
+  refund = 0,
 }) {
   const [form, setForm] = useState(null);
+  const noteRef = useRef(null);
+  const reason = form?.reason;
+
+  useEffect(() => {
+    if (reason === NOTE_REQUIRED_CANCEL_REASON) noteRef.current?.focus();
+  }, [reason]);
 
   if (!form) {
     return (
@@ -29,6 +40,8 @@ export default function CancelTestControl({
     );
   }
 
+  const priced = amount != null;
+  const showAmount = priced && (Number(amount) > 0 || refund > 0);
   const needsNote = form.reason === NOTE_REQUIRED_CANCEL_REASON;
   const ready = !!form.reason && (!needsNote || form.note.trim().length >= 3);
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
@@ -45,8 +58,13 @@ export default function CancelTestControl({
       {
         reason: form.reason,
         note: form.note.trim() || undefined,
-        refundAmount:
-          form.reason === REFUND_REASON && form.refund !== "" ? Number(form.refund) : undefined,
+        refundAmount: priced
+          ? refund > 0
+            ? refund
+            : undefined
+          : form.reason === REFUND_REASON && form.refund !== ""
+            ? Number(form.refund)
+            : undefined,
         caseNos: cases.length ? form.cases : undefined,
       },
       () => setForm(null),
@@ -70,22 +88,29 @@ export default function CancelTestControl({
           </option>
         ))}
       </select>
-      {form.reason === REFUND_REASON && (
+      {showAmount && (
+        <span className="dp-hint">
+          {refund > 0
+            ? `${rupees(refund)} to refund · ${rupees(amount)} comes off the bill`
+            : `${rupees(amount)} comes off the bill`}
+        </span>
+      )}
+      {!priced && form.reason === REFUND_REASON && (
         <input
-          type="number"
-          min="0"
-          step="0.01"
+          inputMode="decimal"
           className="ar-reason-input"
           placeholder="Refund ₹ (optional)"
           value={form.refund}
-          onChange={set("refund")}
+          onChange={(e) => setForm((f) => ({ ...f, refund: cleanAmount(e.target.value) }))}
           aria-label="Refund amount"
         />
       )}
       <input
         className="ar-reason-input"
         maxLength={160}
-        placeholder={needsNote ? "Say why (required)" : "Note (optional)"}
+        ref={noteRef}
+        required={needsNote}
+        placeholder={needsNote ? "Write the reason (required)" : "Note (optional)"}
         value={form.note}
         onChange={set("note")}
         aria-label="Note"

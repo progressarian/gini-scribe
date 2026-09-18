@@ -8,6 +8,7 @@ import {
   dropUnbilledTestSteps,
   isTestStep,
 } from "../../../shared/journeyOrder.js";
+import { paise, rupeesFromPaise } from "../../../shared/labPayment.js";
 
 export const BILL_MAX_AGE_MIN = Number(process.env.SCRIBE_BILL_MAX_AGE_MIN || 60);
 export const NO_BILL_MAX_AGE_MIN = Number(process.env.SCRIBE_NO_BILL_MAX_AGE_MIN || 20);
@@ -151,16 +152,37 @@ export const billedLabLines = (bill, opts = {}) => {
   }));
 };
 
+export const splitBillAmount = (amount, count) => {
+  const total = paise(amount);
+  const unit = total % 100 === 0 ? 100 : 1;
+  const units = total / unit;
+  const base = Math.floor(units / count);
+  const extra = units - base * count;
+  return Array.from({ length: count }, (_, i) =>
+    rupeesFromPaise((base + (i < extra ? 1 : 0)) * unit),
+  );
+};
+
+const sharesByMachine = (machineIds, amount) => {
+  const parts = splitBillAmount(amount, machineIds.length);
+  return Object.fromEntries(machineIds.map((id, i) => [id, parts[i]]));
+};
+
 export const billedMachineLines = (bill, machines, opts) =>
   itemsOf(bill, opts)
     .filter((i) => i.category !== "consultation" && i.category !== "lab")
-    .map((i) => ({
-      name: i.desc,
-      amount: i.amount || 0,
-      discount: i.discount || 0,
-      machines: machinesOnBillLine(machines, i.desc),
-      line: billLineRef(i),
-    }))
+    .map((i) => {
+      const onLine = machinesOnBillLine(machines, i.desc);
+      return {
+        name: i.desc,
+        amount: i.amount || 0,
+        discount: i.discount || 0,
+        machines: onLine,
+        amountOf: sharesByMachine(onLine, i.amount || 0),
+        discountOf: sharesByMachine(onLine, i.discount || 0),
+        line: billLineRef(i),
+      };
+    })
     .filter((l) => l.machines.length);
 
 const CHARGE_CATEGORIES = ["imaging", "machine"];
@@ -215,13 +237,26 @@ const billLineFor = (bill, machines) => {
   const lab = new Map(billedLabLines(bill).map((l) => [nameKey(l.name), l]));
   const machine = new Map(
     billedMachineLines(bill, machines)
-      .filter((l) => l.machines.length === 1)
-      .map((l) => [l.machines[0], l]),
+      .sort((a, b) => b.machines.length - a.machines.length)
+      .flatMap((l) =>
+        l.machines.map((id) => [id, { amount: l.amountOf[id], discount: l.discountOf[id] }]),
+      ),
   );
   return (kind, testName) =>
     kind === "lab"
       ? lab.get(nameKey(testName))
       : machine.get(machineForTest(machines, testName)?.id);
+};
+
+export const combinedBillLineOf = (bill, machines) => {
+  const lines = billedMachineLines(bill, machines);
+  const ownLine = new Set(lines.filter((l) => l.machines.length === 1).map((l) => l.machines[0]));
+  const byMachine = new Map(
+    lines
+      .filter((l) => l.machines.length > 1)
+      .flatMap((l) => l.machines.filter((id) => !ownLine.has(id)).map((id) => [id, l.name])),
+  );
+  return (testName) => byMachine.get(machineForTest(machines, testName)?.id) || null;
 };
 
 export const billDiscountOn = (bill, machines) => {
