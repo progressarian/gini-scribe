@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   useReceptionQueue,
   useClearPayment,
+  useClearCharge,
+  useCancelReceptionTest,
+  useCancelCharge,
   useArrivals,
   useArrivalAction,
   useWalkInSearch,
@@ -19,6 +22,8 @@ import {
 import LiveBadge from "../../components/giniflow/LiveBadge";
 import "../../styles/giniflow-station.css";
 import useAuthStore from "../../stores/authStore";
+import { CAPABILITIES as CAPS, hasCapability } from "../../../shared/permissions.js";
+import CancelTestControl from "../../components/giniflow/CancelTestControl";
 import StationNotice from "../../components/giniflow/StationNotice";
 import JourneyBuilder from "../../components/giniflow/JourneyBuilder";
 import { useFlowStepCatalog, useFlowVisitTypes } from "../../queries/hooks/useFlow";
@@ -121,7 +126,7 @@ const CLAIM_LINE = {
   rejected: "rejected by the insurer",
 };
 
-function OrderCard({ order, onClear, pending, actorId }) {
+function OrderCard({ order, onClear, pending, actorId, onCancelTest, canCancelTest }) {
   const claimed = order.claimState === "submitted";
   const [form, setForm] = useState(null);
   const ownClaim = claimed && actorId != null && order.claimSubmittedBy === actorId;
@@ -185,6 +190,23 @@ function OrderCard({ order, onClear, pending, actorId }) {
         ))}
         {order.tests.length === 0 && <span className="toc-test">No tests listed</span>}
       </div>
+      {canCancelTest && order.canCancel && (
+        <div className="toc-body">
+          {order.tests
+            .filter((t) => t.id)
+            .map((t) => (
+              <CancelTestControl
+                key={t.id}
+                what={t.name}
+                busy={pending}
+                cases={
+                  order.kind === "lab" && order.tests.length === 1 ? order.cancellableCases : []
+                }
+                onCancel={(body, done) => onCancelTest(order, t, body, done)}
+              />
+            ))}
+        </div>
+      )}
 
       {/* What has actually been collected against what was quoted. The
           outstanding figure is the one the desk acts on, so it is the one that
@@ -425,6 +447,113 @@ const CLEARED_PREVIEW = 8;
 
 // Exported so the render smoke can execute the payments branch too — only one
 // tab is mounted at a time, and the tab that is not showing still has to render.
+function ChargeCard({ charge, onClearCharge, pending, onCancelCharge, canCancelTest }) {
+  return (
+    <div className="test-order-card">
+      <div className="toc-head">
+        <div className="toc-av" style={{ background: avatarColour(charge.patientId) }}>
+          {initials(charge.name)}
+        </div>
+        <div className="toc-who">
+          <div className="toc-name">
+            {charge.name} <span className="badge b-ink">{charge.fileNo}</span>
+          </div>
+          <div className="toc-meta">
+            {charge.age}
+            {(charge.sex || "")[0] || ""} · On the HealthRay bill · no floor step
+          </div>
+        </div>
+        <div className={`sp ${CHIP.pending.cls}`}>{CHIP.pending.text}</div>
+      </div>
+      <div className="toc-body">
+        <span className="toc-test">
+          {charge.item} <span className="tp">{rupees(charge.amount)}</span>
+        </span>
+      </div>
+      <div className="toc-foot">
+        <button
+          type="button"
+          className="st-btn st-btn-grn"
+          disabled={pending}
+          onClick={() => onClearCharge(charge)}
+        >
+          ✓ {rupees(charge.amount)} received
+        </button>
+        {canCancelTest && (
+          <CancelTestControl
+            what={charge.item}
+            busy={pending}
+            onCancel={(body, done) => onCancelCharge(charge, body, done)}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+const refundCheckText = (it) =>
+  it.kind === "part"
+    ? `${rupees(it.refunded)} of ${rupees(it.amount)} refunded on ${it.line} in HealthRay — which test was refunded?`
+    : it.kind === "paid_charge"
+      ? `${it.line} refunded in HealthRay, but ${rupees(it.amount)} was collected in Scribe`
+      : `${it.line} refunded in HealthRay, but ${it.tests.map((t) => t.name).join(", ")} is already under way or done`;
+
+function RefundCheckCard({ check, onCancelTest, canCancelTest, pending }) {
+  return (
+    <div className="test-order-card">
+      <div className="toc-head">
+        <div className="toc-av" style={{ background: avatarColour(check.patientId) }}>
+          {initials(check.name)}
+        </div>
+        <div className="toc-who">
+          <div className="toc-name">
+            {check.name} <span className="badge b-ink">{check.fileNo}</span>
+          </div>
+          <div className="toc-meta">Refund recorded in HealthRay — check the floor</div>
+        </div>
+      </div>
+      {check.items.map((it, i) => (
+        <div className="toc-body" key={`${it.kind}-${it.line}-${i}`}>
+          <span className="toc-test">{refundCheckText(it)}</span>
+          {it.kind === "part" &&
+            canCancelTest &&
+            it.tests
+              .filter((t) => t.canCancel)
+              .map((t) => (
+                <CancelTestControl
+                  key={t.testId}
+                  what={t.name}
+                  busy={pending}
+                  onCancel={(body, done) =>
+                    onCancelTest(
+                      { orderId: t.orderId, name: check.name },
+                      { id: t.testId, name: t.name },
+                      body,
+                      done,
+                    )
+                  }
+                />
+              ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const chargeAsOrder = (c) => ({
+  orderId: c.chargeId,
+  visitId: c.visitId,
+  name: c.name,
+  kind: "charge",
+  tests: [{ name: c.item }],
+  paid: c.amount,
+  total: c.amount,
+  claimed: 0,
+  claimState: "none",
+  sampleStatus: null,
+  paidAt: c.paidAt,
+});
+
 export function PaymentsTab({
   data,
   isLoading,
@@ -433,9 +562,20 @@ export function PaymentsTab({
   actorId,
   search = "",
   setSearch = () => {},
+  onClearCharge = () => {},
+  chargePending = false,
+  onCancelTest = () => {},
+  onCancelCharge = () => {},
+  canCancelTest = false,
 }) {
   const queue = data?.pending || [];
-  const cleared = byVisit(data?.cleared || []);
+  const chargeQueue = data?.charges?.pending || [];
+  const refundChecks = data?.refundChecks || [];
+  const cleared = byVisit([
+    ...(data?.awaitingSample || []),
+    ...(data?.cleared || []),
+    ...(data?.charges?.cleared || []).map(chargeAsOrder),
+  ]);
   const [showAllCleared, setShowAllCleared] = useState(false);
   const searching = (data?.query || "").length >= 2;
 
@@ -489,9 +629,42 @@ export function PaymentsTab({
             onClear={onClear}
             pending={pending}
             actorId={actorId}
+            onCancelTest={onCancelTest}
+            canCancelTest={canCancelTest}
           />
         ))}
       </div>
+
+      {refundChecks.length > 0 && (
+        <div>
+          <div className="grp-lbl grp-lbl-sp">↩ Refunds to check</div>
+          {refundChecks.map((check) => (
+            <RefundCheckCard
+              key={check.visitId}
+              check={check}
+              onCancelTest={onCancelTest}
+              canCancelTest={canCancelTest}
+              pending={pending}
+            />
+          ))}
+        </div>
+      )}
+
+      {chargeQueue.length > 0 && (
+        <div>
+          <div className="grp-lbl grp-lbl-sp">🧾 Billed in HealthRay — collect only</div>
+          {chargeQueue.map((charge) => (
+            <ChargeCard
+              key={charge.chargeId}
+              charge={charge}
+              onClearCharge={onClearCharge}
+              pending={chargePending}
+              onCancelCharge={onCancelCharge}
+              canCancelTest={canCancelTest}
+            />
+          ))}
+        </div>
+      )}
 
       {cleared.length > 0 && (
         <div>
@@ -504,7 +677,9 @@ export function PaymentsTab({
                   {g.orders.map((o) => (
                     <div className="tc-detail" key={o.orderId}>
                       {testNames(o) || "Tests"} · {settledAs(o)} ·{" "}
-                      {SAMPLE_LABEL[o.sampleStatus] || o.sampleStatus.replace(/_/g, " ")}
+                      {o.kind === "charge"
+                        ? "HealthRay charge"
+                        : SAMPLE_LABEL[o.sampleStatus] || o.sampleStatus.replace(/_/g, " ")}
                     </div>
                   ))}
                 </div>
@@ -1484,15 +1659,26 @@ export default function ReceptionStationPage() {
   // tell whose claim it was showing.
   const actorId = useAuthStore((st) => st.currentDoctor?.id ?? st.currentDoctor?.doctor_id);
   const clearPayment = useClearPayment();
+  const clearCharge = useClearCharge();
+  const cancelTest = useCancelReceptionTest();
+  const cancelCharge = useCancelCharge();
+  const canCancelTest = hasCapability(
+    useAuthStore((st) => st.currentDoctor?.role),
+    CAPS.GINIFLOW_TEST_CANCEL,
+  );
   const arrivalAction = useArrivalAction();
 
   const pending = data?.pending || [];
   const awaitingSample = data?.awaitingSample || [];
   const cleared = data?.cleared || [];
-  const payCounts = data?.counts || {
+  const baseCounts = data?.counts || {
     pending: pending.length,
     awaitingSample: awaitingSample.length,
     cleared: cleared.length,
+  };
+  const payCounts = {
+    ...baseCounts,
+    pending: baseCounts.pending + (baseCounts.charges || 0) + (baseCounts.refundChecks || 0),
   };
   const counts = arrivals?.counts || { expected: 0, onFloor: 0, notComing: 0 };
 
@@ -1508,6 +1694,44 @@ export default function ReceptionStationPage() {
 
   // Every write carries the version the card was rendered from, so a second tap
   // on a stale card is refused by the server instead of charging twice.
+  const onCancelTest = (order, test, body, done) =>
+    cancelTest.mutate(
+      { orderId: order.orderId, testId: test.id, ...body },
+      {
+        onSuccess: () => {
+          done();
+          showToast(`✕ ${test.name} cancelled for ${order.name}`);
+        },
+        onError: (e) => failed(e, "Could not cancel — nothing was changed"),
+      },
+    );
+
+  const onCancelCharge = (charge, body, done) =>
+    cancelCharge.mutate(
+      { chargeId: charge.chargeId, ...body },
+      {
+        onSuccess: () => {
+          done();
+          showToast(`✕ ${charge.item} cancelled for ${charge.name}`);
+        },
+        onError: (e) => failed(e, "Could not cancel — nothing was changed"),
+      },
+    );
+
+  const onClearCharge = (charge) =>
+    clearCharge.mutate(
+      { chargeId: charge.chargeId },
+      {
+        onSuccess: (r) =>
+          showToast(
+            r.unchanged
+              ? `${charge.item} was already cleared`
+              : `✓ ${rupees(charge.amount)} received from ${charge.name} for ${charge.item}`,
+          ),
+        onError: (e) => failed(e, "Could not clear this — nothing was changed"),
+      },
+    );
+
   const onClear = (order, method, body = {}) =>
     clearPayment.mutate(
       { orderId: order.orderId, method, version: order.version, ...body },
@@ -1676,10 +1900,15 @@ export default function ReceptionStationPage() {
               data={data}
               isLoading={isLoading}
               onClear={onClear}
-              pending={clearPayment.isPending}
+              pending={clearPayment.isPending || cancelTest.isPending}
               actorId={actorId}
               search={paySearch}
               setSearch={setPaySearch}
+              onClearCharge={onClearCharge}
+              chargePending={clearCharge.isPending || cancelCharge.isPending}
+              onCancelTest={onCancelTest}
+              onCancelCharge={onCancelCharge}
+              canCancelTest={canCancelTest}
             />
           )}
         </div>

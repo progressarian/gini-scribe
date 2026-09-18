@@ -98,9 +98,16 @@ const DOCTOR_ONLY_PREFIXES = [
   "/api/dose-change-requests",
   "/api/refills",
   "/api/flow",
+  "/api/billing",
 ];
 
 const ROUTE_CAPABILITIES = [
+  ["/api/billing", CAP.BILLING_DESK],
+  ["/api/billing/master", CAP.BILLING_MASTER],
+  ["/api/billing/import", CAP.BILLING_MASTER],
+  ["/api/billing/settings", CAP.BILLING_SETTINGS],
+  ["/api/billing/claims", CAP.BILLING_CLAIMS],
+  ["/api/billing/reports", CAP.BILLING_REPORTS],
   ["/api/home-stats", null],
   ["/api/reports", CAP.ANALYTICS],
   ["/api/analytics", CAP.ANALYTICS],

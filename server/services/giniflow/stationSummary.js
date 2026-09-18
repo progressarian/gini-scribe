@@ -1,4 +1,5 @@
 import pool from "../../config/db.js";
+import { LIVE_LAB_CASE_SQL } from "./testsHold.js";
 import { getSlaConfig, getDayBoard, getBottleneck, boardClock } from "./board.js";
 import { getTriageSummary } from "./triage.js";
 import { getMachines, stationOrderCounts } from "./machineCatalog.js";
@@ -59,14 +60,16 @@ export async function getStationSummary(visitDate, db = pool) {
     `SELECT
        (SELECT count(*)::int FROM giniflow_visits
          WHERE visit_date = $1::date AND current_status = 'booked') AS to_check_in,
-       (SELECT count(*)::int FROM lab_cases WHERE case_date = $1::date) AS lab_today,
+       (SELECT count(*)::int FROM lab_cases lc
+         WHERE lc.case_date = $1::date AND ${LIVE_LAB_CASE_SQL("lc")}) AS lab_today,
        -- Outstanding is pending AND partial, the same rule labStation.js and
        -- the OPD chips use: results_synced flips on the first panel, so a
        -- synced case with no reported_on is still being worked on.
        (SELECT count(*) FILTER (
                  WHERE NOT results_synced
                     OR raw_detail_json->>'reported_on' IS NULL)::int
-          FROM lab_cases WHERE case_date = $1::date) AS lab_awaiting,
+          FROM lab_cases lc
+         WHERE lc.case_date = $1::date AND ${LIVE_LAB_CASE_SQL("lc")}) AS lab_awaiting,
        (SELECT count(DISTINCT m.patient_id)::int
           FROM medications m
           JOIN giniflow_visits v ON v.patient_id = m.patient_id AND v.visit_date = $1::date

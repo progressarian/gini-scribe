@@ -1617,6 +1617,16 @@ async function runPrescriptionExtraction(docId) {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    const savepoint = async (work) => {
+      await client.query("SAVEPOINT med_row");
+      try {
+        await work();
+        await client.query("RELEASE SAVEPOINT med_row");
+      } catch (e) {
+        await client.query("ROLLBACK TO SAVEPOINT med_row");
+        throw e;
+      }
+    };
 
     await client.query(`UPDATE documents SET extracted_data = $1::jsonb WHERE id = $2`, [
       JSON.stringify(extracted),
@@ -1765,8 +1775,9 @@ async function runPrescriptionExtraction(docId) {
         failCur = 0;
       for (const [, m] of currentByKey) {
         try {
-          await client.query(
-            `INSERT INTO medications
+          await savepoint(async () => {
+            await client.query(
+              `INSERT INTO medications
                  (patient_id, document_id, consultation_id, name, pharmacy_match, dose, frequency, timing, when_to_take, route, form, is_new, is_active, source, started_date)
                VALUES ($1, $2, $10, $3, $4, $5, $6, $7, $11::when_to_take_pill[], $8, $12, false, true, 'report_extract', $9)
                ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
@@ -1783,22 +1794,23 @@ async function runPrescriptionExtraction(docId) {
                  source = EXCLUDED.source,
                  started_date = LEAST(medications.started_date, EXCLUDED.started_date),
                  updated_at = NOW()`,
-            [
-              doc.patient_id,
-              docId,
-              m.storedName,
-              m.canonical,
-              m.dose.slice(0, 100),
-              m.frequency.slice(0, 100),
-              m.timing.slice(0, 100),
-              m.route,
-              resolveStarted(m.canonical),
-              latestConsId,
-              normalizeWhenToTake(m.when_to_take),
-              m.form || null,
-            ],
-          );
-          okCur += 1;
+              [
+                doc.patient_id,
+                docId,
+                m.storedName,
+                m.canonical,
+                m.dose.slice(0, 100),
+                m.frequency.slice(0, 100),
+                m.timing.slice(0, 100),
+                m.route,
+                resolveStarted(m.canonical),
+                latestConsId,
+                normalizeWhenToTake(m.when_to_take),
+                m.form || null,
+              ],
+            );
+            okCur += 1;
+          });
         } catch (e) {
           failCur += 1;
           console.error(
@@ -1842,8 +1854,9 @@ async function runPrescriptionExtraction(docId) {
             continue;
           }
           try {
-            const r = await client.query(
-              `UPDATE medications
+            await savepoint(async () => {
+              const r = await client.query(
+                `UPDATE medications
                   SET parent_medication_id = $1,
                       support_condition = COALESCE($2, support_condition),
                       updated_at = NOW()
@@ -1851,9 +1864,10 @@ async function runPrescriptionExtraction(docId) {
                   AND is_active = true
                   AND UPPER(COALESCE(pharmacy_match, name)) = $4
                   AND id <> $1`,
-              [parentId, m.support_condition || null, doc.patient_id, childKey],
-            );
-            if (r.rowCount) supportLinked += r.rowCount;
+                [parentId, m.support_condition || null, doc.patient_id, childKey],
+              );
+              if (r.rowCount) supportLinked += r.rowCount;
+            });
           } catch (e) {
             console.error(
               `[extract-prescription] support link UPDATE failed doc=${docId} child="${m.storedName}" parent="${m.support_for}": ${e.message}`,
@@ -1869,13 +1883,14 @@ async function runPrescriptionExtraction(docId) {
           m.reason ? " — " + m.reason : m.status ? " — " + m.status : ""
         }`;
         try {
-          // Deactivate any currently-active row with the same canonical (in
-          // case a prior extraction had marked it active), then insert the
-          // inactive doc-scoped row. DO NOTHING on conflict with the
-          // inactive partial unique index so we never crash — the UPDATE
-          // branch above already handled the live side.
-          await client.query(
-            `UPDATE medications
+          await savepoint(async () => {
+            // Deactivate any currently-active row with the same canonical (in
+            // case a prior extraction had marked it active), then insert the
+            // inactive doc-scoped row. DO NOTHING on conflict with the
+            // inactive partial unique index so we never crash — the UPDATE
+            // branch above already handled the live side.
+            await client.query(
+              `UPDATE medications
                   SET is_active = false,
                       stopped_date = CURRENT_DATE,
                       stop_reason = $3,
@@ -1883,10 +1898,10 @@ async function runPrescriptionExtraction(docId) {
                 WHERE patient_id = $1
                   AND UPPER(COALESCE(pharmacy_match, name)) = $2
                   AND is_active = true`,
-            [doc.patient_id, m.canonical || m.storedName.toUpperCase(), stopReason],
-          );
-          await client.query(
-            `INSERT INTO medications
+              [doc.patient_id, m.canonical || m.storedName.toUpperCase(), stopReason],
+            );
+            await client.query(
+              `INSERT INTO medications
                  (patient_id, document_id, consultation_id, name, pharmacy_match, dose, frequency, timing, when_to_take, route, form,
                   is_new, is_active, source, started_date, stopped_date, stop_reason)
                VALUES ($1, $2, $11, $3, $4, $5, $6, $7, $12, $8, $13,
@@ -1897,7 +1912,7 @@ async function runPrescriptionExtraction(docId) {
                  dose = COALESCE(NULLIF(EXCLUDED.dose, ''), medications.dose),
                  frequency = COALESCE(NULLIF(EXCLUDED.frequency, ''), medications.frequency),
                  timing = COALESCE(NULLIF(EXCLUDED.timing, ''), medications.timing),
-                 when_to_take = COALESCE(NULLIF(EXCLUDED.when_to_take, ''), medications.when_to_take),
+                 when_to_take = COALESCE(EXCLUDED.when_to_take, medications.when_to_take),
                  route = COALESCE(NULLIF(EXCLUDED.route, ''), medications.route),
                  form = COALESCE(EXCLUDED.form, medications.form),
                  name = EXCLUDED.name,
@@ -1905,23 +1920,24 @@ async function runPrescriptionExtraction(docId) {
                  stop_reason = EXCLUDED.stop_reason,
                  stopped_date = EXCLUDED.stopped_date,
                  updated_at = NOW()`,
-            [
-              doc.patient_id,
-              docId,
-              m.storedName,
-              m.canonical,
-              m.dose.slice(0, 100),
-              m.frequency.slice(0, 100),
-              m.timing.slice(0, 100),
-              m.route,
-              resolveStarted(m.canonical),
-              stopReason,
-              latestConsId,
-              normalizeWhenToTake(m.when_to_take),
-              m.form || null,
-            ],
-          );
-          okPrev += 1;
+              [
+                doc.patient_id,
+                docId,
+                m.storedName,
+                m.canonical,
+                m.dose.slice(0, 100),
+                m.frequency.slice(0, 100),
+                m.timing.slice(0, 100),
+                m.route,
+                resolveStarted(m.canonical),
+                stopReason,
+                latestConsId,
+                normalizeWhenToTake(m.when_to_take),
+                m.form || null,
+              ],
+            );
+            okPrev += 1;
+          });
         } catch (e) {
           failPrev += 1;
           console.error(

@@ -1,6 +1,7 @@
 import { getMachines } from "./machineCatalog.js";
 import { machineForTest } from "../../../shared/machineStages.js";
 import { labStepsAreManual } from "../../../shared/manualFloor.js";
+import { LIVE_LAB_CASE_SQL } from "./testsHold.js";
 
 export const LAB_STATION = "lab_collection";
 
@@ -36,6 +37,7 @@ const BUSY_SQL = `
                   WHERE a.case_no = lc.case_no AND a.action = 'drawing_started')
      AND NOT EXISTS (SELECT 1 FROM giniflow_lab_case_actions a
                       WHERE a.case_no = lc.case_no AND a.action = 'sample_taken')
+     AND ${LIVE_LAB_CASE_SQL("lc")}
      AND ($2::boolean
           OR (lc.raw_list_json->>'phlebotomy_status' IS DISTINCT FROM 'Completed'
               AND COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'collected_on' IS NULL))`;

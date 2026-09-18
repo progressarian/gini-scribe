@@ -5,6 +5,7 @@
 
 import { Router } from "express";
 import pool from "../config/db.js";
+import { LIVE_LAB_CASE_SQL } from "../services/giniflow/testsHold.js";
 import { handleError } from "../utils/errorHandler.js";
 import { fetchBlockRow, resolvePatientId } from "../services/patientBlockGuard.js";
 import { redactBlock } from "../services/patientBlockView.js";
@@ -3269,9 +3270,10 @@ async function attachLabPanel(visits) {
     const date = visits[0].visit_date;
     const [cases, docs, results] = await Promise.all([
       pool.query(
-        `SELECT patient_id, case_no, test_names, results_synced, case_date
-           FROM lab_cases WHERE patient_id = ANY($1::int[]) AND case_date::date = $2
-           ORDER BY case_date ASC`,
+        `SELECT lc.patient_id, lc.case_no, lc.test_names, lc.results_synced, lc.case_date
+           FROM lab_cases lc WHERE lc.patient_id = ANY($1::int[]) AND lc.case_date::date = $2
+            AND ${LIVE_LAB_CASE_SQL("lc")}
+           ORDER BY lc.case_date ASC`,
         [ids, date],
       ),
       pool.query(

@@ -26,6 +26,7 @@ import { BEHIND_STATION_LABEL, healthrayChainStatus } from "./observation.js";
 import { IST_TODAY, budgetColour } from "./statusEngine.js";
 import {
   TESTS_HOLD_SQL,
+  LIVE_LAB_CASE_SQL,
   caseReportedBeforeVisit,
   caseSampledBeforeVisit,
   chiefWaitClock,
@@ -87,7 +88,8 @@ const TODAY_CASES = (v, p) => `
                      AND lc.raw_list_json->'patient'->>'healthray_uid' = ${p}.file_no))
             AND NOT EXISTS (SELECT 1 FROM giniflow_lab_orders lo
                              WHERE lo.visit_id = ${v}.id AND lo.urgency = 'today' AND lo.kind = 'lab')
-            AND NOT ${caseReportedBeforeVisit(v)}`;
+            AND NOT ${caseReportedBeforeVisit(v)}
+            AND ${LIVE_LAB_CASE_SQL("lc")}`;
 
 const CASE_ACTION = (action) =>
   `EXISTS (SELECT 1 FROM giniflow_lab_case_actions a
@@ -354,6 +356,7 @@ const BOARD_SQL = `
                   AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))
          AND lc.raw_detail_json->>'reported_on' IS NULL
          AND lc.pdf_storage_path IS NULL
+         AND ${LIVE_LAB_CASE_SQL("lc")}
       HAVING count(*) > 0
     ) hrlab ON TRUE
     LEFT JOIN LATERAL (
@@ -375,6 +378,7 @@ const BOARD_SQL = `
          AND (lc.patient_id = v.patient_id
               OR (lc.patient_id IS NULL
                   AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))
+         AND ${LIVE_LAB_CASE_SQL("lc")}
       HAVING count(*) > 0
     ) tests ON TRUE
    WHERE v.visit_date = $1::date

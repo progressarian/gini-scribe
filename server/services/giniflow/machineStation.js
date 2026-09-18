@@ -1,4 +1,6 @@
+import { CANCELLABLE_ORDER_STATUSES } from "../../../shared/testCancelReasons.js";
 import pool from "../../config/db.js";
+import { LIVE_LAB_CASE_SQL } from "./testsHold.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config/storage.js";
 import { opensLabGate, outstandingOf } from "../../../shared/labPayment.js";
 import {
@@ -68,6 +70,7 @@ const BLOOD_NOT_DRAWN_SQL = (manualParam) => `
                       WHERE a.case_no = lc.case_no
                         AND a.action IN ('sample_taken', 'report_uploaded')
                    )
+                   AND ${LIVE_LAB_CASE_SQL("lc")}
                    AND (${manualParam}
                         OR (lc.raw_list_json->>'phlebotomy_status' IS DISTINCT FROM 'Completed'
                             AND COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'collected_on' IS NULL))
@@ -437,6 +440,11 @@ export async function getMachineQueue(
       hasReport: !!r.report_doc_id || !!r.report_file_url,
       hasValues: !!r.has_values,
       canMarkDone: hasEvidence,
+      canCancel:
+        CANCELLABLE_ORDER_STATUSES.includes(r.sample_status) &&
+        !r.report_doc_id &&
+        !r.report_file_url &&
+        !r.has_values,
       reportDocId: r.report_doc_id || null,
       reportUrl: r.report_file_url || null,
       orderedAt: r.created_at ? new Date(r.created_at).toISOString() : null,

@@ -134,11 +134,25 @@ export function transactionsToBilling(rows, { appointmentId, date, wholeDay = fa
     const lines = t.billing_items || [];
     const netOf = (b) => num(b.net_price ?? b.price);
     const shares = discountShares(lines.map(netOf), num(t.global_discount));
+    const txnCancelled = !!num(t.is_cancelled);
+    const txnNet = lines.reduce((s, b) => s + netOf(b), 0) - num(t.global_discount);
+    const txnRefundedAll = txnNet > 0 && num(t.refunded_amount) >= txnNet;
     lines.forEach((b, i) => {
       const cat = (b.category_type || b.charge_category || "").toUpperCase();
+      const amount = (paise(netOf(b)) - paise(shares[i])) / 100;
       items.push({
         desc: b.name,
-        amount: (paise(netOf(b)) - paise(shares[i])) / 100,
+        amount,
+        ...(b.id != null ? { itemId: b.id } : {}),
+        ...(t.invoice_no ? { invoice: t.invoice_no } : {}),
+        ...(num(b.refunded_amount) > 0 || txnRefundedAll
+          ? {
+              refunded: txnRefundedAll
+                ? Math.max(amount, num(b.refunded_amount))
+                : num(b.refunded_amount),
+            }
+          : {}),
+        ...(txnCancelled || num(b.is_cancelled) ? { cancelled: true } : {}),
         ...(shares[i] > 0 ? { gross: netOf(b), discount: shares[i] } : {}),
         category:
           cat === "OPD"
@@ -156,14 +170,17 @@ export function transactionsToBilling(rows, { appointmentId, date, wholeDay = fa
 
   const total = txns.reduce((s, t) => s + num(t.net_paid_amount ?? t.payable_amount), 0);
   const due = txns.reduce((s, t) => s + num(t.due_amount), 0);
-  const labs = items.filter((i) => i.category === "lab").map((i) => i.desc);
+  const live = items.filter(
+    (i) => !i.cancelled && !(Number(i.amount) > 0 && Number(i.refunded || 0) >= Number(i.amount)),
+  );
+  const labs = live.filter((i) => i.category === "lab").map((i) => i.desc);
   const steps = [];
   if (labs.length) {
     steps.push({ step_catalog_id: "blood_sample", step_name: "Blood Sample", tests: labs });
   }
   // Imaging (RADIOLOGY) and machine tests (ABI/VPT/ECG-type) each get their own
   // step so they're not silently dropped.
-  for (const i of items.filter((i) => i.category === "imaging" || i.category === "machine")) {
+  for (const i of live.filter((i) => i.category === "imaging" || i.category === "machine")) {
     steps.push({ step_catalog_id: null, step_name: i.desc });
   }
 

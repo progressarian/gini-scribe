@@ -16,8 +16,9 @@ test.describe("P1-01 reception_admin role", () => {
     expect(ROLES.RECEPTION_ADMIN).toBe("reception_admin");
     expect(normalizeRole("reception_admin")).toBe("reception_admin");
     expect(normalizeRole(" Reception_Admin ")).toBe("reception_admin");
-    expect(ROLE_CAPABILITIES[ROLES.RECEPTION_ADMIN]).toEqual(ROLE_CAPABILITIES[ROLES.RECEPTION]);
-    expect(ROLE_CAPABILITIES[ROLES.RECEPTION_ADMIN]).not.toBe(ROLE_CAPABILITIES[ROLES.RECEPTION]);
+    expect(ROLE_CAPABILITIES[ROLES.RECEPTION_ADMIN]).toEqual(
+      expect.arrayContaining(ROLE_CAPABILITIES[ROLES.RECEPTION]),
+    );
     expect(hasCapability("reception_admin", CAPABILITIES.ADMIN)).toBe(false);
   });
 

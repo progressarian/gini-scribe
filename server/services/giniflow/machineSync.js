@@ -7,6 +7,8 @@ import {
 } from "./journey.js";
 import { machineFor } from "../../../shared/machineStages.js";
 import { getMachines } from "./machineCatalog.js";
+import { billSuppressor, cancelDeadBillTests } from "./testCancel.js";
+import { CANCELLABLE_ORDER_STATUSES } from "../../../shared/testCancelReasons.js";
 import { machineCaseListOnly } from "../../../shared/manualFloor.js";
 import { createLogger } from "../logger.js";
 import { healthrayBlockedUntil } from "./healthrayRefresh.js";
@@ -14,9 +16,9 @@ import { IST_TODAY } from "./statusEngine.js";
 import {
   billedLabLines,
   billedMachineLines,
-  billedStepIds,
   priceOrdersFromBill,
   readPatientBill,
+  syncBillCharges,
   reconcileTestSteps,
 } from "./patientBill.js";
 
@@ -25,6 +27,14 @@ const { log, error } = createLogger("Machine Sync");
 const SCAN_BATCH = Number(process.env.SCRIBE_MACHINE_SCAN_BATCH || 12);
 const RESCAN_MIN = Number(process.env.SCRIBE_MACHINE_RESCAN_MIN || 20);
 const BILL_READ_RESCAN_MIN = Number(process.env.SCRIBE_MACHINE_BILL_READ_RESCAN_MIN || 60);
+const OPEN_TESTS_RESCAN_MIN = Number(process.env.SCRIBE_BILL_OPEN_TESTS_RESCAN_MIN || 15);
+
+const REFUNDABLE_OPEN_SQL = `(
+  EXISTS (SELECT 1 FROM giniflow_lab_orders ro
+           WHERE ro.visit_id = v.id AND ro.urgency = 'today'
+             AND ro.sample_status = ANY(ARRAY[${CANCELLABLE_ORDER_STATUSES.map((st) => `'${st}'`).join(", ")}]))
+  OR EXISTS (SELECT 1 FROM giniflow_bill_charges rc
+              WHERE rc.visit_id = v.id AND rc.payment_status = 'pending'))`;
 const EXIT_GRACE_MIN = Number(process.env.SCRIBE_MACHINE_EXIT_GRACE_MIN || 0);
 const NEVER_ON_FLOOR = ["booked", "confirmed"];
 const NEVER_ARRIVED = ["no_show", "cancelled"];
@@ -96,6 +106,7 @@ const TARGET_SELECT = `
             COALESCE(a.healthray_id, sameday.healthray_id) AS healthray_id,
             COALESCE(a.healthray_patient_id, sameday.healthray_patient_id,
                      prior.healthray_patient_id, lab.healthray_patient_id) AS hr_patient_id,
+            ${REFUNDABLE_OPEN_SQL} AS refundable_open,
             p.name
        FROM giniflow_visits v
        JOIN patients p ON p.id = v.patient_id
@@ -131,7 +142,8 @@ async function scanTargets(visitDate, db, limit) {
                   WHEN EXISTS (SELECT 1 FROM giniflow_patient_bills b
                                 WHERE b.patient_id = v.patient_id AND b.bill_date = v.visit_date
                                   AND b.status = 'billed')
-                  THEN $6 ELSE $3 END) || ' minutes')::interval)
+                  THEN (CASE WHEN ${REFUNDABLE_OPEN_SQL} THEN $9 ELSE $6 END)
+                  ELSE $3 END) || ' minutes')::interval)
       ORDER BY v.machine_scan_at NULLS FIRST, v.created_at
       LIMIT $4`,
     [
@@ -143,6 +155,7 @@ async function scanTargets(visitDate, db, limit) {
       String(BILL_READ_RESCAN_MIN),
       FINISHED,
       String(EXIT_GRACE_MIN),
+      String(OPEN_TESTS_RESCAN_MIN),
     ],
   );
   return rows;
@@ -168,11 +181,11 @@ export async function syncMachineOrdersForVisit(visit, db = pool) {
       date: visit.visit_date,
     },
     db,
+    visit.refundable_open ? { maxAgeMin: OPEN_TESTS_RESCAN_MIN } : undefined,
   );
   if (bill.status !== "billed") return { raised: 0, lines: 0, labSteps: [], removed: null };
   const machines = await getMachines(db);
   const lines = billedMachineLines(bill, machines);
-  const labLines = billedLabLines(bill);
 
   const client = await db.connect();
   let raised = 0;
@@ -181,12 +194,21 @@ export async function syncMachineOrdersForVisit(visit, db = pool) {
   try {
     await client.query("BEGIN");
     await client.query(`SELECT id FROM giniflow_visits WHERE id = $1 FOR UPDATE`, [visit.visit_id]);
+    const skip = await billSuppressor(client, visit.visit_id);
+    const liveLabLines = billedLabLines(bill, { skip });
+    const liveLines = lines
+      .map((l) => ({
+        ...l,
+        onLine: l.machines.length,
+        machines: l.machines.filter((m) => !skip({ kind: "machine", machineId: m, line: l.line })),
+      }))
+      .filter((l) => l.machines.length);
     if (
-      labLines.length &&
+      liveLabLines.length &&
       !FINISHED.includes(visit.current_status) &&
       !(await sampleTakenBeforeVisit(client, visit.visit_id))
     ) {
-      const missing = await notYetOrdered(client, visit.visit_id, labLines);
+      const missing = await notYetOrdered(client, visit.visit_id, liveLabLines);
       if (missing.length) {
         const r = await raiseOrdersFromSteps(client, visit.visit_id, [
           { catalogId: "blood_sample", billedIn: "healthray", billedTests: missing },
@@ -198,18 +220,18 @@ export async function syncMachineOrdersForVisit(visit, db = pool) {
       }
       labSteps = (await insertLabStepsForOrder(client, visit.visit_id)).added;
     }
-    for (const line of lines) {
+    for (const line of liveLines) {
       for (const machineId of line.machines) {
         const machine = machineFor(machines, machineId);
         if (!machine || (await alreadyRaised(client, visit.visit_id, machine))) continue;
         await raiseOrder(client, visit.visit_id, machine, {
-          amount: line.machines.length > 1 ? 0 : line.amount,
+          amount: line.onLine > 1 ? 0 : line.amount,
         });
         raised++;
         log("raise", `${visit.name}: ${machine.name} (${line.name})`);
       }
     }
-    const billedMachines = [...new Set(lines.flatMap((l) => l.machines))];
+    const billedMachines = [...new Set(liveLines.flatMap((l) => l.machines))];
     if (billedMachines.length && !FINISHED.includes(visit.current_status)) {
       labSteps = [
         ...labSteps,
@@ -220,6 +242,19 @@ export async function syncMachineOrdersForVisit(visit, db = pool) {
       const repriced = await priceOrdersFromBill(client, visit.visit_id, bill, machines);
       if (repriced)
         log("price", `${visit.name}: ${repriced} order(s) repriced to the HealthRay bill`);
+      if (await syncBillCharges(client, visit.visit_id, bill, machines, skip)) {
+        log("charge", `${visit.name}: HealthRay charge(s) waiting at reception`);
+      }
+      const dead = await cancelDeadBillTests(client, visit.visit_id, bill, machines);
+      if (dead.cancelled) {
+        log("cancel", `${visit.name}: ${dead.cancelled} test(s) refunded or removed in HealthRay`);
+      }
+      for (const w of dead.wouldCancel) {
+        log("cancel-dry", `${visit.name}: would cancel ${w.test} (${w.line}, ${w.reason})`);
+      }
+      for (const f of dead.failed) {
+        error("cancel", `${visit.name}: could not cancel ${f.test} (${f.line}): ${f.error}`);
+      }
       removed = await reconcileTestSteps(client, visit.visit_id, bill, machines);
       if (removed.removedSteps || removed.removedOrders) {
         log(
@@ -285,13 +320,18 @@ export async function runMachineSync(dateStr, { limit = SCAN_BATCH, db = pool } 
 
 const LAB_STEPS = ["lab_billing", "blood_sample"];
 
-const labDoneEarlierToday = async (patientId, date, db) => {
+const visitIdFor = async (patientId, date, db) => {
   const { rows } = await db.query(
     `SELECT id FROM giniflow_visits WHERE patient_id = $1 AND visit_date = $2::date
       ORDER BY merged_into_visit_id NULLS FIRST LIMIT 1`,
     [patientId, date],
   );
-  return rows.length > 0 && sampleTakenBeforeVisit(db, rows[0].id);
+  return rows[0]?.id ?? null;
+};
+
+const labDoneEarlierToday = async (patientId, date, db) => {
+  const visitId = await visitIdFor(patientId, date, db);
+  return !!visitId && sampleTakenBeforeVisit(db, visitId);
 };
 
 export async function healthrayBillSteps(patientId, { date = null, db = pool } = {}) {
@@ -332,12 +372,20 @@ export async function healthrayBillSteps(patientId, { date = null, db = pool } =
     return { ...empty, status: "blocked", blockedUntil: await healthrayBlockedUntil(db) };
   }
   if (bill.status === "no_bill") return { ...empty, status: "no_bill" };
+  const visitId = await visitIdFor(visit.patient_id, visit.visit_date, db);
+  const skip = visitId ? await billSuppressor(db, visitId) : () => false;
   const labLines = (await labDoneEarlierToday(visit.patient_id, visit.visit_date, db))
     ? []
-    : billedLabLines(bill);
+    : billedLabLines(bill, { skip });
   const labTests = labLines.map((l) => l.name);
   const machines = await getMachines(db);
-  const machineIds = [...billedStepIds(bill, machines)].filter((id) => !LAB_STEPS.includes(id));
+  const machineIds = [
+    ...new Set(
+      billedMachineLines(bill, machines).flatMap((l) =>
+        l.machines.filter((m) => !skip({ kind: "machine", machineId: m, line: l.line })),
+      ),
+    ),
+  ];
   const ids = [...(labTests.length ? LAB_STEPS : []), ...machineIds];
   if (!ids.length) return { ...empty, status: "no_tests" };
 

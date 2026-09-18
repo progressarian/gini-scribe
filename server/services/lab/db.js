@@ -1,6 +1,7 @@
 // ── Lab HealthRay Sync — DB operations ──────────────────────────────────────
 
 import pool from "../../config/db.js";
+import { LIVE_LAB_CASE_SQL } from "../giniflow/testsHold.js";
 import { isNonTest } from "../../utils/nonTests.js";
 import { inflateSync } from "zlib";
 import { extractInvestigationSummary, isLabCasePrintable } from "./labHealthrayParser.js";
@@ -669,8 +670,9 @@ export async function touchLabCaseRetryAt(caseNo) {
 // 10 minutes to avoid hammering the API.
 export async function getPendingLabCases() {
   const { rows } = await pool.query(
-    `SELECT * FROM lab_cases
-     WHERE results_synced = FALSE
+    `SELECT lc.* FROM lab_cases lc
+     WHERE lc.results_synced = FALSE
+       AND ${LIVE_LAB_CASE_SQL("lc")}
        AND COALESCE(retry_abandoned, FALSE) = FALSE
        AND (case_source IS NULL OR case_source IN ('inhouse', 'mixed', 'unknown'))
        AND (last_retry_at IS NULL OR last_retry_at < NOW() - INTERVAL '10 minutes')

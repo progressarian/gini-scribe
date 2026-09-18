@@ -72,6 +72,8 @@ import {
   giniflowInteractionAckSchema,
   giniflowRxPasteSchema,
   giniflowStartCancelSchema,
+  giniflowTestCancelSchema,
+  giniflowCaseCancelSchema,
   giniflowStationReleaseSchema,
 } from "../schemas/index.js";
 import {
@@ -85,6 +87,7 @@ import {
 import {
   getPaymentQueue,
   clearPayment,
+  clearCharge,
   getTestCatalog,
   getArrivals,
   markArrived,
@@ -209,6 +212,7 @@ import {
 } from "../services/giniflow/journey.js";
 import { sendFlowCheckin } from "../services/msg91.js";
 import { syncBillingForVisitId, healthrayBillSteps } from "../services/giniflow/machineSync.js";
+import { cancelTest } from "../services/giniflow/testCancel.js";
 import { getMachines } from "../services/giniflow/machineCatalog.js";
 import { getFloorSettings, setFloorSetting } from "../services/giniflow/floorSettings.js";
 import { machinesForStation } from "../../shared/machineStages.js";
@@ -925,6 +929,29 @@ router.get(
 
 // ── Reception ───────────────────────────────────────────────────────────────
 const receptionGate = requireCapability(CAP.GINIFLOW_STATION_RECEPTION);
+const cancelGate = requireCapability(CAP.GINIFLOW_TEST_CANCEL);
+
+const cancelRoute =
+  (label, targetOf, { source = "station", expectKind = null, before = null } = {}) =>
+  async (req, res) => {
+    try {
+      if (before) await before(req);
+      res.json(
+        await cancelTest({
+          target: targetOf(req),
+          reason: req.body.reason,
+          note: req.body.note,
+          refundAmount: req.body.refundAmount ?? null,
+          source,
+          expectKind,
+          actorId: req.doctor?.doctor_id ?? null,
+          actorRole: req.doctor?.role || null,
+        }),
+      );
+    } catch (e) {
+      handleError(res, e, label);
+    }
+  };
 
 router.get(
   "/giniflow/stations/reception/queue",
@@ -1084,6 +1111,40 @@ router.post("/giniflow/stations/reception/:visitId/undo", receptionGate, async (
     handleError(res, e, "Gini Flow undo arrival");
   }
 });
+
+router.post(
+  "/giniflow/stations/reception/charges/:chargeId/cancel",
+  receptionGate,
+  cancelGate,
+  validate(giniflowTestCancelSchema),
+  cancelRoute("Gini Flow cancel HealthRay charge", (req) => ({ chargeId: req.params.chargeId }), {
+    source: "reception",
+  }),
+);
+
+router.post(
+  "/giniflow/stations/reception/:orderId/cancel-test",
+  receptionGate,
+  cancelGate,
+  validate(giniflowTestCancelSchema),
+  cancelRoute(
+    "Gini Flow reception cancel test",
+    (req) => ({ orderId: req.params.orderId, testId: req.body.testId, caseNos: req.body.caseNos }),
+    { source: "reception" },
+  ),
+);
+
+router.post(
+  "/giniflow/stations/reception/charges/:chargeId/clear",
+  receptionGate,
+  async (req, res) => {
+    try {
+      res.json(await clearCharge(req.params.chargeId, { actorId: req.doctor?.doctor_id ?? null }));
+    } catch (e) {
+      handleError(res, e, "Gini Flow clear HealthRay charge");
+    }
+  },
+);
 
 router.post(
   "/giniflow/stations/reception/:orderId/clear",
@@ -1446,6 +1507,30 @@ router.get(
   },
 );
 
+router.post(
+  "/giniflow/stations/lab/case/cancel-test",
+  labGate,
+  cancelGate,
+  validate(giniflowCaseCancelSchema),
+  cancelRoute("Gini Flow cancel HealthRay lab case", (req) => ({
+    caseNos: req.body.caseNos,
+    patientId: req.body.patientId,
+    date: req.body.date,
+  })),
+);
+
+router.post(
+  "/giniflow/stations/lab/:orderId/cancel-test",
+  labGate,
+  cancelGate,
+  validate(giniflowTestCancelSchema),
+  cancelRoute(
+    "Gini Flow cancel lab test",
+    (req) => ({ orderId: req.params.orderId, testId: req.body.testId, caseNos: req.body.caseNos }),
+    { expectKind: "lab" },
+  ),
+);
+
 // Literal path BEFORE the parameterised ones on this prefix — `/lab/:orderId/...`
 // would otherwise swallow it, which is the bug this file already warns about.
 router.post(
@@ -1721,6 +1806,17 @@ function mountMachineStationRoutes(router, { prefix, gate, station, reportRemove
         handleError(res, e, `Gini Flow add ${prefix} test`);
       }
     },
+  );
+
+  router.post(
+    `/giniflow/stations/${prefix}/:orderId/cancel-test`,
+    gate,
+    cancelGate,
+    validate(giniflowTestCancelSchema),
+    cancelRoute(`Gini Flow ${prefix} cancel test`, (req) => ({ orderId: req.params.orderId }), {
+      expectKind: "machine",
+      before: (req) => assertOrderInStation(req.params.orderId, station),
+    }),
   );
 
   router.post(

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import api, { forceLogout } from "../services/api.js";
+import api, { forceLogout, isRefreshRejected } from "../services/api.js";
 import queryClient from "../queries/client.js";
 import { normalizeRole } from "../../shared/permissions.js";
 
@@ -40,8 +40,24 @@ function scheduleProactiveRefresh(accessToken, refresh) {
     // there — never redirected to /login until their next click happened to
     // fire a request. So a failed proactive refresh has to force the logout
     // itself instead of swallowing the error.
-    refresh().catch(() => forceLogout());
+    refresh().catch((e) => {
+      if (isRefreshRejected(e)) forceLogout();
+      else scheduleRetry(accessToken, refresh);
+    });
   }, delay);
+}
+
+const REFRESH_RETRY_MS = 10_000;
+
+function scheduleRetry(accessToken, refresh) {
+  if (refreshTimer) clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(() => {
+    if (localStorage.getItem("gini_auth_token") !== accessToken) return;
+    refresh().catch((e) => {
+      if (isRefreshRejected(e)) forceLogout();
+      else scheduleRetry(accessToken, refresh);
+    });
+  }, REFRESH_RETRY_MS);
 }
 
 // Single-flight guard for refreshAccessToken — both the proactive timer above
@@ -113,7 +129,15 @@ const useAuthStore = create((set, get) => ({
     }
     scheduleProactiveRefresh(authToken, get().refreshAccessToken);
     try {
-      const { data } = await api.get("/api/auth/me");
+      let { data } = await api.get("/api/auth/me");
+      if (!data.authenticated && get().refreshToken) {
+        try {
+          await get().refreshAccessToken();
+          ({ data } = await api.get("/api/auth/me"));
+        } catch (refreshErr) {
+          if (!isRefreshRejected(refreshErr)) throw refreshErr;
+        }
+      }
       if (data.authenticated && data.doctor) {
         const doctor = withNormalizedRole(data.doctor);
         set({ currentDoctor: doctor, authReady: true });
@@ -150,7 +174,7 @@ const useAuthStore = create((set, get) => ({
   // concurrent callers share one in-flight request (see inFlightRefresh above).
   refreshAccessToken: () => {
     if (inFlightRefresh) return inFlightRefresh;
-    const { refreshToken } = get();
+    const refreshToken = localStorage.getItem("gini_refresh_token") || get().refreshToken;
     if (!refreshToken) return Promise.reject(new Error("No refresh token"));
     inFlightRefresh = api
       .post("/api/auth/refresh", { refresh_token: refreshToken })
@@ -254,5 +278,18 @@ const useAuthStore = create((set, get) => ({
     }
   },
 }));
+
+window.addEventListener("storage", (e) => {
+  if (e.key !== "gini_auth_token" && e.key !== "gini_refresh_token") return;
+  const authToken = localStorage.getItem("gini_auth_token") || "";
+  const refreshToken = localStorage.getItem("gini_refresh_token") || "";
+  const state = useAuthStore.getState();
+  if (!authToken) {
+    if (state.authToken) forceLogout();
+    return;
+  }
+  useAuthStore.setState({ authToken, refreshToken });
+  scheduleProactiveRefresh(authToken, state.refreshAccessToken);
+});
 
 export default useAuthStore;

@@ -1,3 +1,4 @@
+import { CANCELLABLE_ORDER_STATUSES } from "../../../shared/testCancelReasons.js";
 import pool from "../../config/db.js";
 
 export const DOCTOR_LEG_STATUSES = [
@@ -7,6 +8,44 @@ export const DOCTOR_LEG_STATUSES = [
   "ready_for_doctor",
   "with_doctor",
 ];
+
+export const LIVE_LAB_CASE_SQL = (lc = "lc") =>
+  `(NOT EXISTS (SELECT 1 FROM giniflow_lab_case_actions cx
+                 WHERE cx.case_no = ${lc}.case_no AND cx.action = 'cancelled')
+    AND lower(COALESCE(${lc}.case_status, ${lc}.raw_list_json->>'case_status', '')) <> 'cancelled')`;
+
+const CASE_STARTED_ACTIONS = [
+  "drawing_started",
+  "sample_taken",
+  "sample_sent",
+  "sample_received",
+  "processing",
+  "results_ready",
+  "report_uploaded",
+];
+
+export const ORDER_OUTPUT_SQL = (o) => `(
+  ${o}.report_file_url IS NOT NULL
+  OR EXISTS (SELECT 1 FROM documents d WHERE d.giniflow_lab_order_id = ${o}.id)
+  OR EXISTS (SELECT 1 FROM lab_results r WHERE r.lab_order_id = ${o}.id))`;
+
+export const CASE_STARTED_SQL = (lc) => `COALESCE((
+  EXISTS (SELECT 1 FROM giniflow_lab_case_actions a
+           WHERE a.case_no = ${lc}.case_no
+             AND a.action = ANY(ARRAY[${CASE_STARTED_ACTIONS.map((a) => `'${a}'`).join(", ")}]))
+  OR ${lc}.raw_list_json->>'phlebotomy_status' = 'Completed'
+  OR COALESCE(${lc}.raw_detail_json, ${lc}.raw_list_json)->>'collected_on' IS NOT NULL
+  OR COALESCE(${lc}.raw_detail_json, ${lc}.raw_list_json)->>'received_on' IS NOT NULL
+  OR COALESCE(${lc}.raw_detail_json, ${lc}.raw_list_json)->>'reported_on' IS NOT NULL
+  OR COALESCE(${lc}.results_synced, FALSE)
+  OR EXISTS (SELECT 1 FROM lab_results r WHERE r.lab_case_no = ${lc}.case_no)), FALSE)`;
+
+export const ORDER_CANCELLABLE_SQL = (o) =>
+  `(${o}.sample_status = ANY(ARRAY[${CANCELLABLE_ORDER_STATUSES.map((s) => `'${s}'`).join(", ")}])
+    AND NOT ${ORDER_OUTPUT_SQL(o)})`;
+
+export const CASE_CANCELLABLE_SQL = (lc) =>
+  `(${LIVE_LAB_CASE_SQL(lc)} AND NOT ${CASE_STARTED_SQL(lc)})`;
 
 const caseMatches = (v, p) =>
   `lc.case_date = ${v}.visit_date
@@ -44,6 +83,7 @@ export const TESTS_HOLD_SQL = (v = "v", p = "p") => `
         WHERE ${caseMatches(v, p)}
           AND NOT ${caseWorkedAsOrder(v)}
           AND NOT ${caseReportedBeforeVisit(v)}
+          AND ${LIVE_LAB_CASE_SQL("lc")}
           AND ${caseDoneAt} IS NULL) AS tests_pending,
     GREATEST(
       (SELECT max(e.occurred_at) FROM giniflow_lab_order_events e
@@ -51,7 +91,8 @@ export const TESTS_HOLD_SQL = (v = "v", p = "p") => `
         WHERE o.visit_id = ${v}.id AND o.urgency = 'today'
           AND e.track = 'sample' AND e.status IN ('uploaded', 'reported')),
       (SELECT max(${caseDoneAt}) FROM lab_cases lc
-        WHERE ${caseMatches(v, p)} AND NOT ${caseWorkedAsOrder(v)})
+        WHERE ${caseMatches(v, p)} AND NOT ${caseWorkedAsOrder(v)}
+          AND ${LIVE_LAB_CASE_SQL("lc")})
     ) AS tests_ready_at`;
 
 export const chiefWaitClock = (row) => {

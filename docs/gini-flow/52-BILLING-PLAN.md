@@ -199,6 +199,15 @@ All tables are new except where marked **(extend)**. Every table has
 brevity). Every table has RLS enabled and anon access revoked, the same as
 `giniflow_patient_bills` (see the Supabase lockdown memory).
 
+**Codes (decided 2026-09-18, P1-04 review):** on every new billing table with
+a `code` column, the code is unique **ignoring case** (a unique index on
+`lower(code)`, so `LAB` and `lab` can't both exist), can't be blank and has no
+spaces. Every lookup compares `lower(code)`, and every "update if it exists"
+matches on `lower(code)` (`ON CONFLICT ((lower(code)))`), never on plain
+`code`. The code is stored as the admin typed it. The database does not set
+`updated_at` / `updated_by` by itself: every update sets `updated_at = NOW()`
+and `updated_by` to the signed-in user.
+
 ### 5.1 Service master
 
 ```sql
@@ -288,7 +297,8 @@ Example layout (entered by the admin, not seeded):
 **Consultant fee.** One consultation item per consultant per visit type, e.g.
 "Consultant meet — Dr Banshali (New)" and "… (Follow Up)". A hospital-default
 consultation item (`doctor_id` NULL) covers consultants with no item of their
-own.
+own. There is at most **one active default per visit type** (enforced by the
+database, P1-06).
 
 **A doctor's fee differs by category (R14).** The item's `base_price` is the
 General fee. The fee for that doctor in any category or sub-category is a
@@ -314,6 +324,16 @@ ALTER TABLE patient_schemes
   ADD print_category_on_bill BOOLEAN NOT NULL DEFAULT FALSE,
   ADD allow_pay_later BOOLEAN;     -- NULL = follow billing_settings.allow_pay_later
 
+```
+
+**Sub-categories and existing features (decided 2026-09-18, P1-08 review):**
+a parent's daily cap counts the parent and all its sub-categories together; a
+sub-category may have its own cap as well, and a booking must pass both.
+Wherever categories are listed, a sub-category shows as "CGHS › Pensioner".
+Only two levels exist; the database refuses a third, even under simultaneous
+edits.
+
+```sql
 category_rules                     -- who falls into a category (admin-defined)
   id            SERIAL PK
   scheme_code   TEXT NOT NULL REFERENCES patient_schemes(code) ON DELETE CASCADE
@@ -383,7 +403,7 @@ category_item_rates
   -- rows for sub-categories override the parent's row for the same item
   bill_name        TEXT      -- 'Consultant meet with Dr Banshali CC02'; NULL = item's own name
   bill_code        TEXT      -- 'CC02'; printed on the bill and on the claim
-  valid_from       DATE NOT NULL DEFAULT CURRENT_DATE
+  valid_from       DATE NOT NULL DEFAULT (NOW() AT TIME ZONE 'Asia/Kolkata')::date
   valid_to         DATE
   PRIMARY KEY (scheme_code, service_item_id, valid_from)
 ```
@@ -395,13 +415,20 @@ When the patient is CGHS, the line is added under the CGHS name and code
 automatically.
 
 `scheme_test_prices`, `scheme_opd_fees` and `scheme_medicine_prices` are empty
-(plan 33), so they are dropped in the same migration and `pricing.js` reads
-`category_item_rates` instead. `medicine_catalog` stays as it is until Pharmacy
+(plan 33). `pricing.js` and the Reception station query are moved to
+`category_item_rates` first (P1-24); the three tables are dropped by a
+separate migration only after that code is live (P1-10, reordered
+2026-09-18), because the current code still reads them. `medicine_catalog` stays as it is until Pharmacy
 billing (Phase 6).
 
 `valid_from` / `valid_to` exist because CGHS revises its rates. A new rate
 card is loaded with a future `valid_from` and nobody has to switch it on at
-midnight.
+midnight. Two rates for the same category and item never cover the same day:
+when a new rate is saved, the current open-ended rate is ended automatically
+on the day before the new one starts (decided 2026-09-18, P1-09 review).
+Every date default uses the India date,
+`(NOW() AT TIME ZONE 'Asia/Kolkata')::date`, never `CURRENT_DATE` (the
+database clock is UTC).
 
 ### 5.3a Category payment rules: what the patient pays (added 2026-09-17)
 
@@ -425,7 +452,7 @@ category_payment_rules
   patient_value    NUMERIC(12,2)            -- admin-entered: ₹ for amount, % for percent; NULL otherwise
   -- where the rest (actual − patient payable) goes
   remainder        TEXT NOT NULL DEFAULT 'claim' CHECK (remainder IN ('claim','adjustment'))
-  valid_from       DATE NOT NULL DEFAULT CURRENT_DATE
+  valid_from       DATE NOT NULL DEFAULT (NOW() AT TIME ZONE 'Asia/Kolkata')::date
   valid_to         DATE
   priority         INT NOT NULL DEFAULT 100 -- tie-break between rules at the same level
   is_active        BOOLEAN NOT NULL DEFAULT TRUE
@@ -529,7 +556,7 @@ limit.
 
 ```sql
 bill_series                                   -- numbering, one row per financial year (Q12: one series)
-  series  TEXT, fy TEXT, prefix TEXT, next_no INT, PRIMARY KEY (series, fy)
+  series  TEXT, fy TEXT, prefix TEXT, number_width INT DEFAULT 6, next_no BIGINT, PRIMARY KEY (series, fy)
   -- e.g. ('MAIN','2026-27','GAC/26-27/', 1) → GAC/26-27/000001
   -- receipts use their own series ('RCPT'); credit notes, if and when built, get 'CN'
 
@@ -710,7 +737,9 @@ For each line:
    it:
    - taxable = actual − discount (or back-calculated when `price_includes_tax`);
    - always CGST + SGST, half each; no IGST (Q9).
-   - While switched off, the tax fields are written as 0 with the exempt code.
+   - While switched off, or when the item has no tax code, the line is saved
+     with **no tax code**, a 0% rate and 0 tax (decided in the P1-05 review:
+     no exempt code is seeded or hardcoded; an admin may still create 0% codes).
      With GST on, tax is worked out on the line's net actual amount. The same
      payment rule then decides who pays the tax-inclusive total.
 6. **Patient payable.** Find the most specific **category payment rule**
@@ -805,7 +834,15 @@ from what the visit already contains:
 | Machine orders                       | One line per test: ABI, VPT, Fundus, ECG, TMT                                                                                                           |
 | ECHO / X-ray orders                  | One line per study: 2D Echo, Chest X-ray PA, …                                                                                                          |
 | Pharmacy (Phase 6)                   | Medicine items from the dispense                                                                                                                        |
-| Desk adds manually                   | Any **active** service item from the master, by search. Never free text                                                                                 |
+
+**Visit type on the appointment → billing visit type (decided 2026-09-18, P1-06
+review).** Appointments carry HealthRay's spellings (`New Patient`,
+`Follow-Up`, `OPD`, `Tele`, `Investigation`) and reception's (`New`,
+`Follow-up`); billing uses `New` / `Follow Up`. One shared function in
+`shared/` converts them: **Investigation → no consultation fee**; a type that
+`isNewVisitType` (`shared/patientLists.js`) calls new → **New**; everything
+else, including **Tele** and **OPD** → **Follow Up**.
+| Desk adds manually | Any **active** service item from the master, by search. Never free text |
 
 - The draft bill is created at check-in, holding the consultation line. If
   the visit has no consultant yet (a walk-in, or a lab-only patient), the draft
@@ -1088,6 +1125,27 @@ and other roles get no billing access; access can be widened later.
 Refund and credit-note permissions will be added when refunds are designed
 (Q14).
 
+**Where the endpoints live (decided 2026-09-18):** every billing endpoint is
+under `/api/billing`, which is staff-only (a patient-app login is refused) and
+gated in `server/middleware/auth.js`:
+
+| Path                               | Needs              |
+| ---------------------------------- | ------------------ |
+| `/api/billing/master`              | `BILLING_MASTER`   |
+| `/api/billing/import`              | `BILLING_MASTER`   |
+| `/api/billing/settings`            | `BILLING_SETTINGS` |
+| `/api/billing/claims`              | `BILLING_CLAIMS`   |
+| `/api/billing/reports`             | `BILLING_REPORTS`  |
+| anything else under `/api/billing` | `BILLING_DESK`     |
+
+The server lets any logged-in account reach an address missing from its
+permission map, so no billing endpoint is ever added outside `/api/billing`.
+Actions stricter than their path (approving desk requests, undo clear) also
+check their permission on the route itself. Category create/update/delete
+lives at `/api/billing/master/categories`; the existing
+`/api/patient-schemes` write routes need `SCHEME_ADMIN` (admin only) and stay
+as they are.
+
 **R12 enforcement:**
 
 - No endpoint used by the desk accepts `rate`, `price`, `bill_name`,
@@ -1108,8 +1166,9 @@ Refund and credit-note permissions will be added when refunds are designed
 - `tax_codes`, `service_items.tax_code_id`, the tax columns on `bill_lines` and
   `bills`, and a `billing_settings` row (`gst_enabled`, `gstin`, `state_code`,
   `legal_name`) exist from Phase 1.
-- While `gst_enabled = FALSE`, every line is written with the exempt code and 0
-  tax. The bill layout hides tax columns.
+- While `gst_enabled = FALSE`, every line is saved with no tax code, a 0% rate
+  and 0 tax; an item with no tax code is treated the same way when GST is on.
+  No exempt code is seeded or hardcoded. The bill layout hides tax columns.
 - When switched on, only **new** bills are taxed. Old bills keep their saved
   values (D4).
 - The hospital **has a GSTIN** (Q9). The admin enters it in billing settings,

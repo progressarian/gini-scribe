@@ -81,6 +81,10 @@ export function forceLogout() {
   }
 }
 
+export function isRefreshRejected(e) {
+  return e?.response?.status === 401 || e?.message === "No refresh token";
+}
+
 const REFRESH_PATHS = ["/api/auth/refresh", "/api/patient/auth/refresh"];
 
 // Response interceptor: on 401, try one silent refresh before giving up.
@@ -99,10 +103,8 @@ api.interceptors.response.use(
           await doRefresh();
           config._retriedAfterRefresh = true;
           return api.request(config);
-        } catch {
-          // Refresh itself failed (expired/revoked/reused) — fall through
-          // to the full logout below, same as if there were no refresh
-          // token at all.
+        } catch (refreshErr) {
+          if (!isRefreshRejected(refreshErr)) return Promise.reject(refreshErr);
         }
       }
       forceLogout();

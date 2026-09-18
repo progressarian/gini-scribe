@@ -20,8 +20,14 @@ import {
 import { getMachines } from "./machineCatalog.js";
 import { addMachineTestOn } from "./machineStation.js";
 import { testPricesFor, schemeForVisit } from "../pricing.js";
-import { caseSampledBeforeVisit } from "./testsHold.js";
-import { priceOrdersFromBill, storedBill, stepsAllowedByBill } from "./patientBill.js";
+import { LIVE_LAB_CASE_SQL, caseSampledBeforeVisit } from "./testsHold.js";
+import { billSuppressor } from "./testCancel.js";
+import {
+  priceOrdersFromBill,
+  storedBill,
+  stepsAllowedByBill,
+  syncBillCharges,
+} from "./patientBill.js";
 
 const DRAWN_STATUS_SQL = LAB_RUNGS.filter((r) => stageIndexOf(r.key) >= stageIndexOf("collected"))
   .flatMap((r) => r.sampleStatuses)
@@ -78,7 +84,8 @@ const HR_LAB_EVIDENCE_SQL = `
     WHERE lc.case_date = v.visit_date
       AND (lc.patient_id = v.patient_id
            OR (lc.patient_id IS NULL
-               AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))) AS hr_cases,
+               AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))
+      AND ${LIVE_LAB_CASE_SQL("lc")}) AS hr_cases,
   (SELECT bool_or(${
     labStepsAreManual()
       ? `EXISTS (SELECT 1 FROM giniflow_lab_case_actions ca
@@ -91,7 +98,8 @@ const HR_LAB_EVIDENCE_SQL = `
     WHERE lc.case_date = v.visit_date
       AND (lc.patient_id = v.patient_id
            OR (lc.patient_id IS NULL
-               AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))) AS hr_collected`;
+               AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))
+      AND ${LIVE_LAB_CASE_SQL("lc")}) AS hr_collected`;
 
 export const SAMPLE_TAKEN_BEFORE_VISIT_SQL = (v = "v", p = "p") => `EXISTS (
   SELECT 1 FROM lab_cases lc
@@ -99,6 +107,7 @@ export const SAMPLE_TAKEN_BEFORE_VISIT_SQL = (v = "v", p = "p") => `EXISTS (
      AND (lc.patient_id = ${v}.patient_id
           OR (lc.patient_id IS NULL
               AND lc.raw_list_json->'patient'->>'healthray_uid' = ${p}.file_no))
+     AND ${LIVE_LAB_CASE_SQL("lc")}
      AND ${caseSampledBeforeVisit(v)})`;
 
 export async function sampleTakenBeforeVisit(db, visitId) {
@@ -449,6 +458,7 @@ export async function checkInWithJourney(
       // press at a busy counter must not bill the patient twice.
       raised = await raiseOrdersFromSteps(client, visitId, steps, actorId);
       await priceOrdersFromBill(client, visitId, bill, machines);
+      await syncBillCharges(client, visitId, bill, machines, await billSuppressor(client, visitId));
       await insertLabStepsIfHealthrayCase(client, visitId);
       await placeTestsBeforeDoctors(client, visitId);
     }

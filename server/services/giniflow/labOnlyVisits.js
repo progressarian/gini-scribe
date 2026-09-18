@@ -1,4 +1,5 @@
 import { LAB_ONLY_DOCTOR } from "../../../shared/labOnly.js";
+import { LIVE_LAB_CASE_SQL } from "./testsHold.js";
 
 export { LAB_ONLY_DOCTOR };
 
@@ -84,7 +85,8 @@ async function labMarks(db, { visitDate, patientId, fileNo }) {
        FROM lab_cases lc
       WHERE lc.case_date = $1::date
         AND (lc.patient_id = $2
-             OR (lc.patient_id IS NULL AND lc.raw_list_json->'patient'->>'healthray_uid' = $3))`,
+             OR (lc.patient_id IS NULL AND lc.raw_list_json->'patient'->>'healthray_uid' = $3))
+        AND ${LIVE_LAB_CASE_SQL("lc")}`,
     [visitDate, patientId, fileNo],
   );
 

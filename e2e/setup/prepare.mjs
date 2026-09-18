@@ -1,10 +1,12 @@
-import { buildSchema } from "./buildSchema.mjs";
+import { buildSchema, schemaFingerprint } from "./buildSchema.mjs";
 import { closePool, one } from "../helpers/db.mjs";
 
 export async function schemaReady() {
   try {
-    const row = await one(`SELECT to_regclass('public.e2e_reference_snapshot') AS t`);
-    return Boolean(row?.t);
+    const row = await one(
+      `SELECT obj_description(to_regclass('public.e2e_reference_snapshot'), 'pg_class') AS built`,
+    );
+    return row?.built === schemaFingerprint();
   } catch {
     return false;
   } finally {

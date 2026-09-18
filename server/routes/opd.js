@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { createRequire } from "module";
 import pool from "../config/db.js";
+import { LIVE_LAB_CASE_SQL } from "../services/giniflow/testsHold.js";
 import { handleError } from "../utils/errorHandler.js";
 import { normalizeWhenToTake } from "../schemas/index.js";
 import { sortDiagnoses } from "../utils/diagnosisSort.js";
@@ -595,8 +596,9 @@ router.get("/opd/appointments", async (req, res) => {
                )
            )::int AS partial_labs
          FROM lab_cases lc
-         WHERE lc.patient_id = ANY($1::int[])
-            OR (lc.patient_id IS NULL AND lc.raw_list_json->'patient'->>'healthray_uid' = ANY($2::text[]))
+         WHERE (lc.patient_id = ANY($1::int[])
+            OR (lc.patient_id IS NULL AND lc.raw_list_json->'patient'->>'healthray_uid' = ANY($2::text[])))
+           AND ${LIVE_LAB_CASE_SQL("lc")}
          GROUP BY lc.patient_id, lc.raw_list_json->'patient'->>'healthray_uid'`,
         [patientIds, fileNos],
       );

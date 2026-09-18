@@ -32,6 +32,7 @@ import {
 } from "../lab/db.js";
 import { isLabCasePrintable } from "../lab/labHealthrayParser.js";
 import { addLabStepsForArrivedLabCase } from "../giniflow/journey.js";
+import { markCasesCancelledInHealthray } from "../giniflow/testCancel.js";
 import { createLogger } from "../logger.js";
 import { tryAcquireCronLock, yieldToApp, CRON_LOCK_KEYS } from "./lowPriority.js";
 
@@ -225,6 +226,15 @@ export async function runLabSync(dateStr, { listOnly = false } = {}) {
 
     // Skip cancelled — dedup handled inside processCase via ON CONFLICT
     const newCases = allCases.filter((c) => c.case_status !== "Cancelled");
+
+    const cancelledThere = allCases
+      .filter((c) => c.case_status === "Cancelled")
+      .map((c) => c.case_no);
+    const nowCancelled = await markCasesCancelledInHealthray(cancelledThere).catch((e) => {
+      log("Cancel", `could not mark HealthRay cancellations: ${e.message}`);
+      return 0;
+    });
+    if (nowCancelled) log("Cancel", `${nowCancelled} case(s) cancelled in HealthRay`);
 
     log(
       "Fetch",

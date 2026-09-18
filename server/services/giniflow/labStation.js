@@ -1,4 +1,5 @@
 import pool from "../../config/db.js";
+import { CASE_CANCELLABLE_SQL, LIVE_LAB_CASE_SQL, ORDER_CANCELLABLE_SQL } from "./testsHold.js";
 import {
   LAB_STATION,
   assertStationFree,
@@ -129,7 +130,8 @@ export const OPEN_LAB_CASES_SQL = `
            OR (lc.patient_id IS NULL
                AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))
       AND lc.raw_detail_json->>'reported_on' IS NULL
-      AND lc.pdf_storage_path IS NULL)`;
+      AND lc.pdf_storage_path IS NULL
+      AND ${LIVE_LAB_CASE_SQL("lc")})`;
 
 const unifiedFromOrder = (o) => ({
   key: `giniflow:${o.orderId}`,
@@ -302,6 +304,19 @@ export async function getLabQueue(
             -- new browser tab.
             (SELECT doc.id FROM documents doc WHERE doc.giniflow_lab_order_id = o.id)
               AS report_doc_id,
+            ${ORDER_CANCELLABLE_SQL("o")} AS can_cancel,
+            COALESCE((SELECT json_agg(json_build_object('caseNo', lc.case_no, 'tests', lc.test_names)
+                                      ORDER BY lc.case_no)
+                        FROM lab_cases lc
+                       WHERE lc.case_date = v.visit_date
+                         AND (lc.patient_id = v.patient_id
+                              OR (lc.patient_id IS NULL
+                                  AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))
+                         AND ${CASE_CANCELLABLE_SQL("lc")}
+                         AND NOT EXISTS (SELECT 1 FROM giniflow_lab_orders o2
+                                          WHERE o2.visit_id = o.visit_id AND o2.id <> o.id
+                                            AND o2.urgency = 'today' AND o2.kind = 'lab')),
+                     '[]'::json) AS cancellable_cases,
             COALESCE(t.tests, '[]'::json) AS tests,
             last_ev.occurred_at AS since
        FROM giniflow_lab_orders o
@@ -310,7 +325,8 @@ export async function getLabQueue(
        LEFT JOIN doctors d ON d.id = o.ordered_by
        LEFT JOIN LATERAL (
          SELECT json_agg(
-                  json_build_object('name', lt.test_name, 'price', lt.price, 'status', lt.status)
+                  json_build_object('id', lt.id, 'name', lt.test_name, 'price', lt.price,
+                                    'status', lt.status)
                   ORDER BY lt.test_name) AS tests
            FROM giniflow_lab_order_tests lt WHERE lt.lab_order_id = o.id
        ) t ON TRUE
@@ -389,6 +405,9 @@ export async function getLabQueue(
           : null,
       heldElsewhere: startHeld,
       canCancelStart: r.sample_status === "drawing" && (!room || room === LAB_ROOMS.COLLECTION),
+      canCancel: !!r.can_cancel,
+      cancellableCases: r.cancellable_cases || [],
+      claimState: r.claim_state || "none",
       orderedAt: r.created_at ? new Date(r.created_at).toISOString() : null,
       since:
         r.since || r.updated_at || r.created_at
@@ -649,6 +668,7 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
          LEFT JOIN patients uid
                 ON uid.file_no = lc.raw_list_json->'patient'->>'healthray_uid'
         WHERE lc.case_date = $1::date
+          AND ${LIVE_LAB_CASE_SQL("lc")}
           -- NO DOUBLE ROWS. Once reception or a doctor raises the same patient's
           -- tests in Scribe, that order is the one the bench works: it carries
           -- the payment, the manual ladder and the audit trail. The hospital's
@@ -723,6 +743,7 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
               json_build_object(
                 'caseNo', c.case_no,
                 'tests', COALESCE(c.test_names, ARRAY[]::text[]),
+                'canCancel', ${CASE_CANCELLABLE_SQL("c")},
                 'synced', c.results_synced,
                 'reported', c.raw_detail_json->>'reported_on' IS NOT NULL,
                 'hasReport', c.pdf_storage_path IS NOT NULL,
@@ -1397,10 +1418,16 @@ export async function markLabCaseAction(
   if (!CASE_ACTIONS.includes(action)) throw new Error(`Unknown lab case action: ${action}`);
   assertRoomOwns(room, STAGE_FOR_ACTION[action]);
 
-  const { rows: known } = await db.query(`SELECT 1 FROM lab_cases WHERE case_no = $1 LIMIT 1`, [
-    caseNo,
-  ]);
+  const { rows: known } = await db.query(
+    `SELECT ${LIVE_LAB_CASE_SQL("lc")} AS live FROM lab_cases lc WHERE lc.case_no = $1 LIMIT 1`,
+    [caseNo],
+  );
   if (!known.length) throw Object.assign(new Error(`No such lab case: ${caseNo}`), { status: 404 });
+  if (!known[0].live) {
+    throw Object.assign(new Error(`Case ${caseNo} was cancelled — nothing more to record`), {
+      status: 409,
+    });
+  }
 
   if (!undo) {
     // Where HealthRay and the floor each think this case is. A screen open since
@@ -1642,6 +1669,7 @@ export async function markCaseResultsReady(db, { patientId, caseDate, caseNo, uh
                       AND o.raw_list_json->'patient'->>'healthray_uid' = $4))
              AND o.raw_detail_json->>'reported_on' IS NULL
              AND o.pdf_storage_path IS NULL
+             AND ${LIVE_LAB_CASE_SQL("o")}
              AND NOT EXISTS (
                SELECT 1 FROM lab_results lr WHERE lr.lab_case_no = o.case_no
              )

@@ -28,6 +28,33 @@ export function useReceptionQueue(date, q = "") {
   });
 }
 
+export function useCancelReceptionTest() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ orderId, ...body }) =>
+      (await api.post(`/api/giniflow/stations/reception/${orderId}/cancel-test`, body)).data,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["giniflow"] }),
+  });
+}
+
+export function useCancelCharge() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ chargeId, ...body }) =>
+      (await api.post(`/api/giniflow/stations/reception/charges/${chargeId}/cancel`, body)).data,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["giniflow"] }),
+  });
+}
+
+export function useClearCharge() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ chargeId }) =>
+      (await api.post(`/api/giniflow/stations/reception/charges/${chargeId}/clear`)).data,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["giniflow", "reception"] }),
+  });
+}
+
 export function useClearPayment() {
   const queryClient = useQueryClient();
   return useMutation({

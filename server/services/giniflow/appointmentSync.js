@@ -13,6 +13,7 @@ import {
   chainIndex,
   isChainStatus,
   isExceptionStatus,
+  NOT_A_MARKER_SQL,
 } from "../../../shared/giniflowStatus.js";
 import { slotStartTime } from "../../../shared/slotHour.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
@@ -355,7 +356,8 @@ async function healthrayEventTime(client, visitId, appt, toStatus) {
   const { rows } = await client.query(
     `SELECT GREATEST(
               LEAST($2::timestamptz, clock_timestamp()),
-              (SELECT max(occurred_at) FROM giniflow_visit_events WHERE visit_id = $1)
+              (SELECT max(occurred_at) FROM giniflow_visit_events
+                WHERE visit_id = $1 AND ${NOT_A_MARKER_SQL("status")})
             ) AS at`,
     [visitId, stamp],
   );

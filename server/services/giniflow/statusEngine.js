@@ -15,6 +15,7 @@ import {
   TERMINAL_STATUSES,
 } from "../../../shared/giniflowStatus.js";
 import { doctorsWaitForTests } from "../../../shared/manualFloor.js";
+import { testCancelReasonLabel } from "../../../shared/testCancelReasons.js";
 import { TESTS_HOLD_SQL } from "./testsHold.js";
 
 import { syncFromStatus } from "./journey.js";
@@ -353,6 +354,15 @@ const SKIPPED_STATION_NAME = {
   with_rx: "Prescription Explain",
 };
 
+const markerLabel = (row) => {
+  const base = STATUS_LABEL[row.status] || row.status;
+  if (row.status !== "test_cancelled") return base;
+  const what = [...(row.meta?.tests || []), ...(row.meta?.cases || []).map((c) => `case ${c}`)];
+  const reason = testCancelReasonLabel(row.meta?.reason);
+  const head = what.length ? `${base} — ${what.join(", ")}` : base;
+  return reason ? `${head} · ${reason}` : head;
+};
+
 export async function getStationTimes(
   db,
   visitId,
@@ -381,7 +391,7 @@ export async function getStationTimes(
     `SELECT status, actor_role, occurred_at, meta
        FROM giniflow_visit_events
       WHERE visit_id = $1
-      ORDER BY occurred_at, id`,
+      ORDER BY date_trunc('milliseconds', occurred_at), seq`,
     [visitId],
   );
 
@@ -730,6 +740,7 @@ export async function getStationTimes(
     const next = statusRows[i + 1];
     if (!next) return [];
     return skippedBetween(row, next).map((station) => ({
+      rank: i + 0.5,
       status: `skipped:${station}`,
       timestampOnly: true,
       skipped: true,
@@ -757,6 +768,7 @@ export async function getStationTimes(
     if (!stationsSkipped(row.status, next.status).includes("with_vitals")) return [];
     return [
       {
+        rank: i + 0.5,
         status: "vitals_recorded",
         timestampOnly: true,
         label: "Vitals recorded",
@@ -778,6 +790,12 @@ export async function getStationTimes(
     ];
   });
 
+  const eventRank = new Map(
+    statusRows.map((row, i) => [`${row.status}|${new Date(row.occurred_at).getTime()}`, i]),
+  );
+  const rankOf = (entry) =>
+    entry.rank ?? eventRank.get(`${entry.status}|${new Date(entry.enteredAt).getTime()}`) ?? null;
+
   const withMarkers = [
     ...skipped,
     ...vitalsSavedDirectly,
@@ -785,7 +803,7 @@ export async function getStationTimes(
     ...markerRows.map((row) => ({
       status: row.status,
       timestampOnly: true,
-      label: STATUS_LABEL[row.status] || row.status,
+      label: markerLabel(row),
       actorRole: row.actor_role,
       meta: row.meta,
       enteredAt: new Date(row.occurred_at).toISOString(),
@@ -801,11 +819,15 @@ export async function getStationTimes(
       isCurrent: false,
       visits: 1,
     })),
-  ].sort(
-    (a, b) =>
-      new Date(a.enteredAt) - new Date(b.enteredAt) ||
-      Number(!!b.timestampOnly) - Number(!!a.timestampOnly),
-  );
+  ]
+    .sort((a, b) => {
+      const byTime = new Date(a.enteredAt) - new Date(b.enteredAt);
+      if (byTime) return byTime;
+      const [ra, rb] = [rankOf(a), rankOf(b)];
+      if (ra !== null && rb !== null && ra !== rb) return ra - rb;
+      return Number(!!b.timestampOnly) - Number(!!a.timestampOnly);
+    })
+    .map(({ rank, ...entry }) => entry);
 
   return withMarkers;
 }

@@ -38,14 +38,43 @@ const itemKey = (i) =>
     .trim()
     .toLowerCase()}`;
 
-export const keepEverySeenItem = (before = [], now = []) => {
-  const latest = new Map((now || []).map((i) => [itemKey(i), i]));
-  const seen = new Set((before || []).map(itemKey));
-  return [
-    ...(before || []).map((i) => latest.get(itemKey(i)) || i),
-    ...(now || []).filter((i) => !seen.has(itemKey(i))),
-  ];
+const lineKey = (i) => (i.itemId != null ? `id:${i.itemId}` : `key:${itemKey(i)}`);
+
+const stampDeath = (item, previous, at) => {
+  if (isLiveBillItem(item)) {
+    if (!item.deadSince) return item;
+    const { deadSince, ...alive } = item;
+    return alive;
+  }
+  const since = previous && !isLiveBillItem(previous) ? previous.deadSince : null;
+  return { ...item, deadSince: since || item.deadSince || at };
 };
+
+export const mergeBillItems = (before = [], now = [], at = new Date().toISOString()) => {
+  const current = now || [];
+  const invoicesRead = new Set(current.map((i) => i.invoice).filter(Boolean));
+  const byKey = new Map(current.map((i) => [lineKey(i), i]));
+  const byName = new Map();
+  for (const i of current) if (!byName.has(itemKey(i))) byName.set(itemKey(i), i);
+  const used = new Set();
+  const merged = [];
+  for (const old of before || []) {
+    const legacy = old.itemId == null && old.invoice == null;
+    const match = byKey.get(lineKey(old)) || (legacy ? byName.get(itemKey(old)) : null);
+    if (match && !used.has(lineKey(match))) {
+      used.add(lineKey(match));
+      merged.push(stampDeath(match, old, at));
+    } else if (old.invoice && invoicesRead.has(old.invoice)) {
+      merged.push(stampDeath({ ...old, removed: true }, old, at));
+    } else if (!match) {
+      merged.push(old);
+    }
+  }
+  for (const i of current) if (!used.has(lineKey(i))) merged.push(stampDeath(i, null, at));
+  return merged;
+};
+
+export const keepEverySeenItem = mergeBillItems;
 
 const ageMinutes = (bill) =>
   bill?.readAt ? (Date.now() - new Date(bill.readAt).getTime()) / 60000 : Infinity;
@@ -72,7 +101,7 @@ export async function readPatientBill(
     date,
     wholeDay: true,
   })?.billing;
-  const items = keepEverySeenItem(stored?.items, billing?.items);
+  const items = mergeBillItems(stored?.items, billing?.items);
   const billed = !!billing || stored?.status === "billed";
   const { rows } = await db.query(
     `INSERT INTO giniflow_patient_bills (patient_id, bill_date, status, items, invoice_no, read_at)
@@ -92,33 +121,82 @@ export async function readPatientBill(
   return shape(rows[0]);
 }
 
-export const billedLabLines = (bill) => {
+export const isLiveBillItem = (i) =>
+  !i.cancelled &&
+  !i.removed &&
+  !(Number(i.amount) > 0 && Number(i.refunded || 0) >= Number(i.amount));
+
+export const billLineRef = (i) => ({
+  itemId: i.itemId ?? null,
+  invoice: i.invoice ?? null,
+  desc: i.desc,
+  amount: Number(i.amount) || 0,
+});
+
+const itemsOf = (bill, { includeDead = false } = {}) =>
+  (bill?.items || []).filter((i) => includeDead || isLiveBillItem(i));
+
+export const billedLabLines = (bill, opts = {}) => {
   const byName = new Map();
-  for (const i of bill?.items || []) {
-    if (i.category === "lab" && i.desc && !byName.has(i.desc)) byName.set(i.desc, i);
+  for (const i of itemsOf(bill, opts)) {
+    if (i.category !== "lab" || !i.desc || byName.has(i.desc)) continue;
+    if (opts.skip?.({ kind: "lab", testName: i.desc, line: billLineRef(i) })) continue;
+    byName.set(i.desc, i);
   }
   return [...byName].map(([name, i]) => ({
     name,
     amount: i.amount || 0,
     discount: i.discount || 0,
+    line: billLineRef(i),
   }));
 };
 
-export const billedMachineLines = (bill, machines) =>
-  (bill?.items || [])
+export const billedMachineLines = (bill, machines, opts) =>
+  itemsOf(bill, opts)
     .filter((i) => i.category !== "consultation" && i.category !== "lab")
     .map((i) => ({
       name: i.desc,
       amount: i.amount || 0,
       discount: i.discount || 0,
       machines: machinesOnBillLine(machines, i.desc),
+      line: billLineRef(i),
     }))
     .filter((l) => l.machines.length);
 
-export const billedStepIds = (bill, machines) =>
+const CHARGE_CATEGORIES = ["imaging", "machine"];
+
+export const billedChargeLines = (bill, machines) => {
+  const byName = new Map();
+  for (const i of itemsOf(bill)) {
+    if (!CHARGE_CATEGORIES.includes(i.category) || !i.desc) continue;
+    if (machinesOnBillLine(machines, i.desc).length) continue;
+    byName.set(i.desc, i);
+  }
+  return [...byName].map(([name, i]) => ({ name, amount: i.amount || 0, line: billLineRef(i) }));
+};
+
+export async function syncBillCharges(client, visitId, bill, machines, skip = () => false) {
+  if (bill?.status !== "billed") return 0;
+  const lines = billedChargeLines(bill, machines).filter(
+    (l) => !skip({ kind: "charge", testName: l.name, line: l.line }),
+  );
+  if (!lines.length) return 0;
+  const { rowCount } = await client.query(
+    `INSERT INTO giniflow_bill_charges (visit_id, item_name, amount)
+     SELECT $1, * FROM UNNEST($2::text[], $3::numeric[])
+     ON CONFLICT (visit_id, item_name) DO UPDATE
+        SET amount = EXCLUDED.amount, updated_at = NOW()
+      WHERE giniflow_bill_charges.payment_status = 'pending'
+        AND giniflow_bill_charges.amount <> EXCLUDED.amount`,
+    [visitId, lines.map((l) => l.name), lines.map((l) => l.amount)],
+  );
+  return rowCount;
+}
+
+export const billedStepIds = (bill, machines, opts) =>
   new Set([
-    ...(billedLabLines(bill).length ? LAB_TEST_STEP_IDS : []),
-    ...billedMachineLines(bill, machines).flatMap((l) => l.machines),
+    ...(billedLabLines(bill, opts).length ? LAB_TEST_STEP_IDS : []),
+    ...billedMachineLines(bill, machines, opts).flatMap((l) => l.machines),
   ]);
 
 export const stepsAllowedByBill = (steps, bill, machines) =>
@@ -195,8 +273,8 @@ export async function priceOrdersFromBill(client, visitId, bill, machines) {
 
 export async function reconcileTestSteps(client, visitId, bill, machines) {
   if (bill?.status !== "billed") return { removedSteps: 0, removedOrders: 0 };
-  const billed = billedStepIds(bill, machines);
-  const labBilled = billedLabLines(bill).length > 0;
+  const billed = billedStepIds(bill, machines, { includeDead: true });
+  const labBilled = billedLabLines(bill, { includeDead: true }).length > 0;
 
   const { rows: orders } = await client.query(
     `SELECT o.id, o.kind, o.payment_status, o.sample_status,

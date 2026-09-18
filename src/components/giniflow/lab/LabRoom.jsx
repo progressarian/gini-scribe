@@ -3,6 +3,8 @@ import {
   useLabQueue,
   useAdvanceSample,
   useCancelLabStart,
+  useCancelLabTest,
+  useCancelLabCase,
   useUploadReport,
   useMarkLabCaseAction,
   useUploadLabCaseReport,
@@ -15,6 +17,7 @@ import "../../../styles/giniflow-station.css";
 import LabResultsForm from "../LabResultsForm";
 import PdfViewerModal from "../../visit/PdfViewerModal";
 import StationNotice from "../StationNotice";
+import CancelTestControl from "../CancelTestControl";
 import useAuthStore from "../../../stores/authStore";
 import { CAPABILITIES as CAP, hasCapability } from "../../../../shared/permissions.js";
 import {
@@ -415,6 +418,8 @@ function LabDetailPane({
   onUpload,
   onResultsSaved,
   onResultsFailed,
+  onCancelTest,
+  canCancelTest,
   busy,
 }) {
   // Same rule as the hospital-case pane: results belong to the analyzer bench.
@@ -475,6 +480,14 @@ function LabDetailPane({
                       {TEST_STATUS_LABEL[t.status] || t.status || "Ordered"}
                     </span>
                   </div>
+                  {canCancelTest && order.canCancel && t.id && (
+                    <CancelTestControl
+                      what={t.name}
+                      busy={busy}
+                      cases={order.tests.length === 1 ? order.cancellableCases : []}
+                      onCancel={(body, done) => onCancelTest(order, t, body, done)}
+                    />
+                  )}
                 </div>
               ))}
               {order.tests.length === 0 && <div className="dp-hint">No tests on this order.</div>}
@@ -843,6 +856,8 @@ function HealthrayCasePane({
   onResultsSaved,
   onResultsFailed,
   canFileReport,
+  onCancelCase,
+  canCancelTest,
   busy,
   room,
 }) {
@@ -967,6 +982,14 @@ function HealthrayCasePane({
                     </div>
                   ))}
                   {c.tests.length === 0 && <div className="dp-hint">No tests listed.</div>}
+                  {canCancelTest && c.canCancel && row.patientId && (
+                    <CancelTestControl
+                      what={`case ${c.caseNo}`}
+                      full
+                      busy={busy}
+                      onCancel={(body, done) => onCancelCase(row, c, body, done)}
+                    />
+                  )}
                   {c.orderedBy && (
                     <div className="dp-hint">
                       Ordered by <strong>{c.orderedBy}</strong>
@@ -1258,6 +1281,12 @@ export default function LabRoom({ room = null }) {
   const live = useGiniflowLive({ date: data?.date });
   const advance = useAdvanceSample();
   const cancelStart = useCancelLabStart();
+  const cancelLabTest = useCancelLabTest();
+  const cancelLabCase = useCancelLabCase();
+  const canCancelTest = hasCapability(
+    useAuthStore((st) => st.currentDoctor?.role),
+    CAP.GINIFLOW_TEST_CANCEL,
+  );
   const upload = useUploadReport();
   const [openOrderId, setOpenOrderId] = useState(null);
   const [openCaseId, setOpenCaseId] = useState(null);
@@ -1358,6 +1387,35 @@ export default function LabRoom({ room = null }) {
           ),
         onError: (e) =>
           showToast(e?.response?.data?.error || "Could not update — nothing was changed"),
+      },
+    );
+
+  const cancelFailed = (e) =>
+    showToast(e?.response?.data?.error || "Could not cancel — nothing was changed");
+
+  const onCancelTest = (order, test, body, done) =>
+    cancelLabTest.mutate(
+      { orderId: order.orderId, testId: test.id, ...body },
+      {
+        onSuccess: (r) => {
+          done();
+          if (r.wholeOrder) closePane();
+          showToast(`✕ ${test.name} cancelled for ${order.name}`);
+        },
+        onError: cancelFailed,
+      },
+    );
+
+  const onCancelCase = (row, c, body, done) =>
+    cancelLabCase.mutate(
+      { ...body, caseNos: [c.caseNo], patientId: row.patientId, date: data?.date },
+      {
+        onSuccess: () => {
+          done();
+          if ((row.caseList || []).length <= 1) closeCasePane();
+          showToast(`✕ Case ${c.caseNo} cancelled for ${row.name}`);
+        },
+        onError: cancelFailed,
       },
     );
 
@@ -1842,7 +1900,9 @@ export default function LabRoom({ room = null }) {
         onAction={onCaseAction}
         onUploadCase={onUploadCase}
         canFileReport={canFileReport}
-        busy={caseAction.isPending || caseUpload.isPending}
+        onCancelCase={onCancelCase}
+        canCancelTest={canCancelTest}
+        busy={caseAction.isPending || caseUpload.isPending || cancelLabCase.isPending}
       />
 
       <LabDetailPane
@@ -1850,13 +1910,17 @@ export default function LabRoom({ room = null }) {
         onViewReport={setViewingDoc}
         order={openOrder}
         group={openGroup}
-        busy={advance.isPending || upload.isPending || cancelStart.isPending}
+        busy={
+          advance.isPending || upload.isPending || cancelStart.isPending || cancelLabTest.isPending
+        }
         onClose={closePane}
         onAdvance={onAdvance}
         onCancelStart={onCancelStart}
         onUpload={onUpload}
         onResultsSaved={onResultsSaved}
         onResultsFailed={onResultsFailed}
+        onCancelTest={onCancelTest}
+        canCancelTest={canCancelTest}
       />
 
       {confirmUpload && (

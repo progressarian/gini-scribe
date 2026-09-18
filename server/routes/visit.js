@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { createRequire } from "module";
 import pool from "../config/db.js";
+import { LIVE_LAB_CASE_SQL } from "../services/giniflow/testsHold.js";
 import { handleError } from "../utils/errorHandler.js";
 import { n, num, t } from "../utils/helpers.js";
 import { normalizeWhenToTake } from "../schemas/index.js";
@@ -535,7 +536,8 @@ router.get("/visit/:patientId", async (req, res) => {
                         SELECT file_no FROM patients WHERE id = $1
                       )))
                 AND lc.results_synced = FALSE
-                AND COALESCE(lc.retry_abandoned, FALSE) = FALSE) AS pending_labs,
+                AND COALESCE(lc.retry_abandoned, FALSE) = FALSE
+                AND ${LIVE_LAB_CASE_SQL("lc")}) AS pending_labs,
            (SELECT COUNT(*)::int FROM lab_cases lc
               WHERE (lc.patient_id = $1
                   OR (lc.patient_id IS NULL
@@ -563,6 +565,7 @@ router.get("/visit/:patientId", async (req, res) => {
                 AND lc.results_synced = TRUE
                 AND lc.case_date >= CURRENT_DATE - INTERVAL '7 days'
                 AND lc.raw_detail_json->>'reported_on' IS NULL
+                AND ${LIVE_LAB_CASE_SQL("lc")}
                 AND NOT EXISTS (
                   SELECT 1 FROM lab_cases lc2
                    WHERE (lc2.patient_id = $1
@@ -583,6 +586,7 @@ router.get("/visit/:patientId", async (req, res) => {
                 AND lc.results_synced = TRUE
                 AND lc.case_date >= CURRENT_DATE - INTERVAL '7 days'
                 AND lc.raw_detail_json->>'reported_on' IS NULL
+                AND ${LIVE_LAB_CASE_SQL("lc")}
                 AND NOT EXISTS (
                   SELECT 1 FROM lab_cases lc2
                    WHERE (lc2.patient_id = $1

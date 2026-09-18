@@ -105,12 +105,12 @@ check(
     .join(",") === "CONSULTATION,ABI",
 );
 const firstItems = [
-  { desc: "ABI", category: "machine", amount: 500 },
-  { desc: "CONSULTATION", category: "consultation", amount: 800 },
+  { desc: "ABI", category: "machine", amount: 500, itemId: 1, invoice: "INV-1" },
+  { desc: "CONSULTATION", category: "consultation", amount: 800, itemId: 2, invoice: "INV-1" },
 ];
 const secondRead = [
-  { desc: "2D ECHO", category: "imaging", amount: 1100 },
-  { desc: "abi ", category: "machine", amount: 0 },
+  { desc: "2D ECHO", category: "imaging", amount: 1100, itemId: 3, invoice: "INV-2" },
+  { desc: "abi ", category: "machine", amount: 0, itemId: 4, invoice: "INV-2" },
 ];
 const merged = keepEverySeenItem(firstItems, secondRead);
 check(
@@ -119,9 +119,8 @@ check(
   merged.map((i) => i.desc).join(","),
 );
 check(
-  "a duplicate does not overwrite the first saved copy",
-  merged.filter((i) => i.category === "machine").length === 1 &&
-    merged.find((i) => i.category === "machine").amount === 500,
+  "a same-name line on another invoice does not overwrite the first bill's line",
+  merged.find((i) => i.itemId === 1)?.amount === 500,
 );
 check(
   "so both ABI and Echo count as billed",

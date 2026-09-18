@@ -83,6 +83,7 @@ export const STATUS_LABEL = {
   // timestamp, not a place the patient stood. Without a label here the timeline
   // rendered the raw key.
   reports_reviewed: "Reports read by the MO",
+  test_cancelled: "Test cancelled",
   doctor_done: "Waiting for Prescription Explain",
   rx_pending: "Waiting for Prescription Explain",
   with_rx: "Prescription being explained",
@@ -206,7 +207,13 @@ export const isKnownStatus = (status) => isChainStatus(status) || isExceptionSta
 // they are facts, not places. Without this the `paused` row became the newest
 // wait event and the card's timer reset to 0 at the moment it should have
 // frozen — the opposite of what pausing means.
-export const MARKER_STATUSES = ["results_received", "reports_reviewed", "paused", "resumed"];
+export const MARKER_STATUSES = [
+  "results_received",
+  "reports_reviewed",
+  "paused",
+  "resumed",
+  "test_cancelled",
+];
 
 // A patient who stepped out — lunch, a phone call, the bank — and came back.
 // Recorded as its own event rather than a second 'checked_in' so the timeline

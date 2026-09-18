@@ -169,6 +169,7 @@ export const CAPABILITIES = {
   // X-Ray Station (46-XRAY-STATION-PLAN.md) — same shape again.
   GINIFLOW_STATION_XRAY: "GINIFLOW_STATION_XRAY",
   GINIFLOW_XRAY_REPORT_REMOVE: "GINIFLOW_XRAY_REPORT_REMOVE",
+  GINIFLOW_TEST_CANCEL: "GINIFLOW_TEST_CANCEL",
   GINIFLOW_STATION_DOCTOR: "GINIFLOW_STATION_DOCTOR", // the consultant's queue and consult screen
   GINIFLOW_MO_CLOSE: "GINIFLOW_MO_CLOSE", // end a visit without the consultant, prescription and all
   GINIFLOW_STATION_MO: "GINIFLOW_STATION_MO", // MO/SD workup, order tests, hand over
@@ -195,6 +196,11 @@ export const CAPABILITIES = {
   // Care plan's chips, so they must be able to write one.
   GINIFLOW_REFERRALS: "GINIFLOW_REFERRALS",
   OBT_OPS: "OBT_OPS", // OBT outbound call team: tomorrow's appointment call list (/api/obt-status)
+  BILLING_DESK: "BILLING_DESK",
+  BILLING_MASTER: "BILLING_MASTER",
+  BILLING_SETTINGS: "BILLING_SETTINGS",
+  BILLING_CLAIMS: "BILLING_CLAIMS",
+  BILLING_REPORTS: "BILLING_REPORTS",
 };
 
 const C = CAPABILITIES;
@@ -223,6 +229,8 @@ const RECEPTION_CAPABILITIES = [
   // patient to any station, and no plan asked for it (BQ-10).
   C.GINIFLOW_STATION_RECEPTION,
   C.GINIFLOW_PRINT_RX,
+  C.BILLING_DESK,
+  C.GINIFLOW_TEST_CANCEL,
 ];
 
 // ── The matrix ──────────────────────────────────────────────────────────────
@@ -320,6 +328,7 @@ export const ROLE_CAPABILITIES = {
     C.GINIFLOW_BOARD,
     C.GINIFLOW_STATION_LAB,
     C.GINIFLOW_STATION_LAB_COLLECT,
+    C.GINIFLOW_TEST_CANCEL,
   ],
   // The analyzer bench. Everything `lab` has, minus the collection room and plus
   // the processing room — the split is the point, so this role deliberately
@@ -343,6 +352,7 @@ export const ROLE_CAPABILITIES = {
     // out of half of it.
     C.GINIFLOW_STATION_LAB_COLLECT,
     C.GINIFLOW_STATION_LAB_PROCESS,
+    C.GINIFLOW_TEST_CANCEL,
   ],
   // The machine room — ABI, VPT, Fundus, TMT and ECG. Modelled on the lab role,
   // because the shape of the job is the same: one desk, one queue, reports that
@@ -361,6 +371,7 @@ export const ROLE_CAPABILITIES = {
     C.GINIFLOW_VIEW,
     C.GINIFLOW_BOARD,
     C.GINIFLOW_STATION_MACHINE,
+    C.GINIFLOW_TEST_CANCEL,
   ],
   // Echo Station (45-ECHO-STATION-PLAN.md) — same shape as machine_tech above,
   // scoped to Echo alone. Deliberately its own role rather than widening
@@ -379,6 +390,7 @@ export const ROLE_CAPABILITIES = {
     C.LAB_REQUESTS,
     C.GINIFLOW_VIEW,
     C.GINIFLOW_STATION_ECHO,
+    C.GINIFLOW_TEST_CANCEL,
   ],
   // X-Ray Station (46-XRAY-STATION-PLAN.md) — same shape as echo_tech, its
   // own role rather than the existing tech accounts (blood collection). Same
@@ -390,6 +402,7 @@ export const ROLE_CAPABILITIES = {
     C.LAB_REQUESTS,
     C.GINIFLOW_VIEW,
     C.GINIFLOW_STATION_XRAY,
+    C.GINIFLOW_TEST_CANCEL,
   ],
   [ROLES.TECH]: [
     C.PATIENT_READ,
@@ -409,9 +422,15 @@ export const ROLE_CAPABILITIES = {
     C.GINIFLOW_BOARD,
     C.GINIFLOW_STATION_LAB,
     C.GINIFLOW_STATION_LAB_COLLECT,
+    C.GINIFLOW_TEST_CANCEL,
   ],
   [ROLES.RECEPTION]: RECEPTION_CAPABILITIES,
-  [ROLES.RECEPTION_ADMIN]: [...RECEPTION_CAPABILITIES],
+  [ROLES.RECEPTION_ADMIN]: [
+    ...RECEPTION_CAPABILITIES,
+    C.BILLING_MASTER,
+    C.BILLING_CLAIMS,
+    C.BILLING_REPORTS,
+  ],
   // Coordinators run GHM ops/calling and need Genie Chats with patients.
   // The GDA works two desks: Vitals and the Assistant Station. Dietitian was
   // never theirs — 4 steps ever, none worked by hand, no dietitian accounts —
@@ -449,6 +468,7 @@ export const ROLE_CAPABILITIES = {
     C.GINIFLOW_REFERRALS,
     C.GINIFLOW_STATION_RX,
     C.GINIFLOW_PRINT_RX,
+    C.GINIFLOW_TEST_CANCEL,
   ],
   [ROLES.PHARMACY]: [
     C.PATIENT_READ,

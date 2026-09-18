@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,8 +23,7 @@ function docker(args, input) {
   return result;
 }
 
-function runSqlFile(filePath) {
-  const sql = fs.readFileSync(filePath, "utf8");
+function runSql(sql, label) {
   const result = docker(
     [
       "exec",
@@ -42,12 +42,14 @@ function runSqlFile(filePath) {
     sql,
   );
   if (result.status !== 0) {
-    const error = new Error(
-      `Failed applying ${path.relative(repoRoot, filePath)}\n${result.stderr.trim()}`,
-    );
-    error.file = path.relative(repoRoot, filePath);
+    const error = new Error(`Failed applying ${label}\n${result.stderr.trim()}`);
+    error.file = label;
     throw error;
   }
+}
+
+function runSqlFile(filePath) {
+  runSql(fs.readFileSync(filePath, "utf8"), path.relative(repoRoot, filePath));
 }
 
 export function baselineMigrations() {
@@ -86,19 +88,36 @@ export function recreateDatabase() {
   if (create.status !== 0) throw new Error(`createdb failed: ${create.stderr.trim()}`);
 }
 
+function schemaFiles() {
+  return [path.join(here, "init.sql"), path.join(here, "schema-baseline.sql"), ...migrationFiles()];
+}
+
+export function schemaFingerprint() {
+  const hash = crypto.createHash("sha256");
+  for (const file of [
+    ...schemaFiles(),
+    path.join(here, "snapshot.sql"),
+    path.join(here, "baseline-migrations.txt"),
+  ]) {
+    hash.update(path.basename(file));
+    hash.update(fs.readFileSync(file));
+  }
+  return hash.digest("hex");
+}
+
 export function buildSchema({ log = console.log } = {}) {
   recreateDatabase();
-  const files = [
-    path.join(here, "init.sql"),
-    path.join(here, "schema-baseline.sql"),
-    ...migrationFiles(),
-  ];
+  const files = schemaFiles();
   for (const file of files) {
     runSqlFile(file);
     log(`applied ${path.relative(repoRoot, file)}`);
   }
   runSqlFile(path.join(here, "snapshot.sql"));
   log("saved reference data snapshot");
+  runSql(
+    `COMMENT ON TABLE e2e_reference_snapshot IS '${schemaFingerprint()}';`,
+    "schema fingerprint",
+  );
   return files.length;
 }
 

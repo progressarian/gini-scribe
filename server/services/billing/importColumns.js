@@ -137,7 +137,7 @@ export const IMPORT_SHEETS = [
       ),
       text(
         "test_name",
-        "Test items only (required for them): the test's name exactly as in the test catalogue list you were given.",
+        "Test items only (required for them): the test's name exactly as in Scribe's test catalogue. A test that is only in the lab report catalogue must be added to the test catalogue by an admin first.",
         "HbA1c",
         { blank: blank(null, "not a test item") },
       ),
@@ -434,6 +434,42 @@ export const IMPORT_SHEETS = [
     ],
   },
 ];
+
+export const CATEGORY_DB_COLUMNS = {
+  category_code: "code",
+  label: "label",
+  parent_code: "parent_code",
+  payer_name: "payer_name",
+  requires_ref: "requires_ref",
+  requires_referral: "requires_referral",
+  requires_referral_doc: "requires_referral_doc",
+  print_on_bill: "print_category_on_bill",
+  allow_pay_later: "allow_pay_later",
+  daily_cap: "daily_cap",
+  active: "is_active",
+};
+
+export const CATEGORY_RULE_DB_COLUMNS = {
+  category_code: "scheme_code",
+  rule_name: "name",
+  min_age: "min_age",
+  max_age: "max_age",
+  gender: "gender",
+  requires_card: "requires_card",
+  mode: "mode",
+  priority: "priority",
+  active: "is_active",
+};
+
+export const CATEGORY_RATE_DB_COLUMNS = {
+  category_code: "scheme_code",
+  item_code: "service_item_id",
+  valid_from: "valid_from",
+  rate: "rate",
+  bill_name: "bill_name",
+  bill_code: "bill_code",
+  valid_to: "valid_to",
+};
 
 export const README_SHEET = "Read me";
 

@@ -99,6 +99,15 @@ export function useCancelMachineStart(station = DEFAULT_STATION) {
   });
 }
 
+export function useCancelMachineTest(station = DEFAULT_STATION) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ orderId, ...body }) =>
+      (await api.post(`/api/giniflow/stations/${station}/${orderId}/cancel-test`, body)).data,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["giniflow"] }),
+  });
+}
+
 // One call: the file is stored and the test closed together, so a report can
 // never sit in storage with the test still open.
 export function useUploadMachineReport(station = DEFAULT_STATION) {

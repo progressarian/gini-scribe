@@ -67,7 +67,23 @@ const STREAMS = [
            WHERE e.seq > $1 ORDER BY e.seq LIMIT ${BATCH}`,
     map: (r) => ({ kind: "triage", visitId: r.visit_id, status: r.action, date: r.date }),
   },
+  {
+    kind: "lab_order",
+    key: "cancellation",
+    sql: `SELECT c.seq, c.visit_id, c.order_id, c.visit_date::text AS date
+            FROM giniflow_test_cancellations c
+           WHERE c.seq > $1 ORDER BY c.seq LIMIT ${BATCH}`,
+    map: (r) => ({
+      kind: "lab_order",
+      visitId: r.visit_id,
+      orderId: r.order_id,
+      status: "cancelled",
+      date: r.date,
+    }),
+  },
 ];
+
+const streamKey = (s) => s.key || s.kind;
 
 let timer = null;
 let running = false;
@@ -80,9 +96,10 @@ async function primeWatermarks(db) {
     `SELECT COALESCE((SELECT max(seq) FROM giniflow_visit_events), 0)     AS visit,
             COALESCE((SELECT max(seq) FROM giniflow_lab_order_events), 0) AS lab_order,
             COALESCE((SELECT max(seq) FROM giniflow_vitals), 0)           AS vitals,
-            COALESCE((SELECT max(seq) FROM giniflow_triage_events), 0)    AS triage`,
+            COALESCE((SELECT max(seq) FROM giniflow_triage_events), 0)    AS triage,
+            COALESCE((SELECT max(seq) FROM giniflow_test_cancellations), 0) AS cancellation`,
   );
-  for (const s of STREAMS) watermarks.set(s.kind, Number(rows[0][s.kind]));
+  for (const s of STREAMS) watermarks.set(streamKey(s), Number(rows[0][streamKey(s)]));
 }
 
 async function tick(db) {
@@ -90,7 +107,7 @@ async function tick(db) {
   running = true;
   try {
     for (const stream of STREAMS) {
-      const from = watermarks.get(stream.kind) ?? 0;
+      const from = watermarks.get(streamKey(stream)) ?? 0;
       const { rows } = await db.query(stream.sql, [from]);
       if (!rows.length) continue;
       const envelopes = rows.map(stream.map);
@@ -102,7 +119,7 @@ async function tick(db) {
       // ten, and it already hears the worker's HealthRay sync, which write-site
       // publishing in the API process would miss entirely.
       publishEvents(envelopes);
-      watermarks.set(stream.kind, Number(rows[rows.length - 1].seq));
+      watermarks.set(streamKey(stream), Number(rows[rows.length - 1].seq));
     }
   } catch (e) {
     // A blip must not kill the loop; the next tick picks up from the same

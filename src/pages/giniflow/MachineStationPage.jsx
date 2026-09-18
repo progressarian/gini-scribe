@@ -6,6 +6,7 @@ import {
   useMachineReconciliation,
   useAdvanceMachineTest,
   useCancelMachineStart,
+  useCancelMachineTest,
   useUploadMachineReport,
   useRemoveMachineReport,
   useMachineCandidates,
@@ -15,6 +16,7 @@ import {
 import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
 import LiveBadge from "../../components/giniflow/LiveBadge";
 import StationNotice from "../../components/giniflow/StationNotice";
+import CancelTestControl from "../../components/giniflow/CancelTestControl";
 import LabResultsForm from "../../components/giniflow/LabResultsForm";
 import PdfViewerModal from "../../components/visit/PdfViewerModal";
 import {
@@ -144,6 +146,8 @@ function TestPane({
   onView,
   onRemoveReport,
   canRemoveReport,
+  onCancelTest,
+  canCancelTest,
   busy,
 }) {
   const { data: catalogue = [] } = useMachines(useStation());
@@ -241,6 +245,14 @@ function TestPane({
                 >
                   ↩ Cancel start — free the patient for other stations
                 </button>
+              )}
+              {canCancelTest && order.canCancel && (
+                <CancelTestControl
+                  what={order.tests.join(", ") || "test"}
+                  full
+                  busy={busy}
+                  onCancel={(body, done) => onCancelTest(order, body, done)}
+                />
               )}
             </div>
 
@@ -493,7 +505,10 @@ export default function MachineStationPage({ station = "machine", label = "Machi
   const upload = useUploadMachineReport(station);
   const removeReport = useRemoveMachineReport(station);
   const cancelStart = useCancelMachineStart(station);
-  const busy = advance.isPending || upload.isPending || cancelStart.isPending;
+  const cancelTest = useCancelMachineTest(station);
+  const canCancelTest = hasCapability(role, C.GINIFLOW_TEST_CANCEL);
+  const busy =
+    advance.isPending || upload.isPending || cancelStart.isPending || cancelTest.isPending;
 
   const showToast = (msg) => {
     setToast(msg);
@@ -599,6 +614,20 @@ export default function MachineStationPage({ station = "machine", label = "Machi
           ),
         onError: (e) =>
           showToast(e?.response?.data?.error || "Could not update — nothing was changed"),
+      },
+    );
+
+  const onCancelTest = (order, body, done) =>
+    cancelTest.mutate(
+      { orderId: order.orderId, ...body },
+      {
+        onSuccess: () => {
+          done();
+          setOpenId(null);
+          showToast(`✕ ${order.tests.join(", ")} cancelled for ${order.name}`);
+        },
+        onError: (e) =>
+          showToast(e?.response?.data?.error || "Could not cancel — nothing was changed"),
       },
     );
 
@@ -1023,6 +1052,8 @@ export default function MachineStationPage({ station = "machine", label = "Machi
           onUpload={onUpload}
           onRemoveReport={onRemoveReport}
           canRemoveReport={canRemoveReport}
+          onCancelTest={onCancelTest}
+          canCancelTest={canCancelTest}
           onView={(o) =>
             setViewingDoc({
               id: o.reportDocId,

@@ -121,6 +121,24 @@ export function useCancelLabStart() {
   });
 }
 
+export function useCancelLabTest() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ orderId, ...body }) =>
+      (await api.post(`/api/giniflow/stations/lab/${orderId}/cancel-test`, body)).data,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["giniflow"] }),
+  });
+}
+
+export function useCancelLabCase() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (body) =>
+      (await api.post(`/api/giniflow/stations/lab/case/cancel-test`, body)).data,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["giniflow"] }),
+  });
+}
+
 // Confirm-and-attribute on a hospital-lab case. Nothing reaches HealthRay — this
 // records who chased the sample — so only the lab queries need refreshing.
 export function useMarkLabCaseAction() {

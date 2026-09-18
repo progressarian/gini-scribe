@@ -39,6 +39,23 @@ const ROUTE_CASES = [
   ["/api/flow/queue/vitals_associate", "obt", false],
   ["/api/flow/reports", "coordinator", true],
   ["/api/flow/reports", "reception", false],
+  ["/api/billing/bills", "reception", true],
+  ["/api/billing/master/items", "reception", false],
+  ["/api/billing/import/upload", "reception", false],
+  ["/api/billing/settings", "reception", false],
+  ["/api/billing/claims/pending", "reception", false],
+  ["/api/billing/reports/daily", "reception", false],
+  ["/api/billing/bills", "reception_admin", true],
+  ["/api/billing/master/items", "reception_admin", true],
+  ["/api/billing/import/upload", "reception_admin", true],
+  ["/api/billing/settings", "reception_admin", false],
+  ["/api/billing/claims/pending", "reception_admin", true],
+  ["/api/billing/reports/daily", "reception_admin", true],
+  ["/api/billing/settings", "admin", true],
+  ["/api/billing/bills", "coordinator", false],
+  ["/api/billing/master/items", "coordinator", false],
+  ["/api/billing/bills", "lab", false],
+  ["/api/billing/bills", "consultant", false],
   ["/api/flow/checkin", "reception_admin", true],
   ["/api/flow/reports", "reception_admin", false],
   ["/api/appointments", "reception_admin", true],
@@ -151,6 +168,8 @@ const AUTH_CASES = [
   ["/api/admin/backfill-healthray-docs", undefined, 401],
   ["/api/health", undefined, "allow"],
   ["/api/doctors", undefined, "allow"], // login picker stays public
+  ["/api/billing/bills", undefined, 403],
+  ["/api/billing/master/items", undefined, 403],
 ];
 
 const runAuth = (path, doctor) => {

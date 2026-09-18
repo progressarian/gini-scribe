@@ -5,6 +5,7 @@ import { SPECIALTY_VALUES, URGENCY_VALUES } from "../../shared/giniflowReferrals
 import { CASE_ACTION_VERBS } from "../../shared/labStages.js";
 import { CATEGORIES as TEST_CATEGORIES } from "../services/giniflow/testCatalog.js";
 import { MACHINE_SAMPLE_FLOW } from "../../shared/machineStages.js";
+import { TEST_CANCEL_REASON_VALUES } from "../../shared/testCancelReasons.js";
 
 // Canonical patient-facing "when to take" vocabulary. Must stay in sync
 // with src/config/medicationTimings.js and the Postgres when_to_take_pill
@@ -628,6 +629,25 @@ export const giniflowMachineAddSchema = z.object({
 export const giniflowMachineAdvanceSchema = z.object({
   to: z.enum(MACHINE_SAMPLE_FLOW),
   reportUrl: z.string().url().max(2000).nullish(),
+});
+
+const cancelRefundAmount = z.preprocess(
+  (v) => (v === "" || v === null || v === undefined ? undefined : v),
+  z.coerce.number().min(0).max(1000000).optional(),
+);
+
+export const giniflowTestCancelSchema = z.object({
+  reason: z.enum(TEST_CANCEL_REASON_VALUES),
+  note: z.string().trim().max(160).optional(),
+  refundAmount: cancelRefundAmount,
+  testId: z.string().uuid().optional(),
+  caseNos: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
+});
+
+export const giniflowCaseCancelSchema = giniflowTestCancelSchema.extend({
+  caseNos: z.array(z.string().trim().min(1).max(40)).min(1).max(20),
+  patientId: z.coerce.number().int().positive(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD"),
 });
 
 export const giniflowStartCancelSchema = z.object({
