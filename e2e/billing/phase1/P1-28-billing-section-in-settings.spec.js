@@ -32,6 +32,8 @@ const expectTurnedAway = async (page) => {
   await expect(page).not.toHaveURL(/\/settings|\/login/);
   await expect(page.locator(".tabs")).toBeVisible();
 };
+const gridOf = (page, category) =>
+  page.getByRole("heading", { level: 2, name: category.label, exact: true });
 const settingsNav = (page) => page.locator(".tabs").getByRole("link", { name: /Settings/ });
 
 const endpointsOf = (source, base) =>
@@ -188,7 +190,7 @@ test.describe("P1-28 billing section in settings — screens", () => {
     const picker = page.getByLabel("Category");
     await expect(picker.locator("option", { hasText: CATEGORY.label })).toHaveCount(1);
     await picker.selectOption(CATEGORY.code);
-    await expect(page.getByRole("columnheader", { name: "Bill code" })).toBeVisible();
+    await expect(gridOf(page, CATEGORY)).toBeVisible();
   });
 
   test("9. the billing settings tab shows the saved settings to admin", async ({ page }) => {
@@ -205,7 +207,7 @@ test.describe("P1-28 billing section in settings — screens", () => {
     await gotoReady(page, "/settings/category-rates", () => page.getByLabel("Category"));
     const picker = page.getByLabel("Category");
     await picker.selectOption(CATEGORY.code);
-    await expect(page.getByRole("columnheader", { name: "Bill code" })).toBeVisible();
+    await expect(gridOf(page, CATEGORY)).toBeVisible();
     let release;
     const held = new Promise((resolve) => (release = resolve));
     await page.route(
@@ -217,9 +219,9 @@ test.describe("P1-28 billing section in settings — screens", () => {
     );
     await picker.selectOption(OTHER_CATEGORY.code);
     await expect(page.getByText("Loading…")).toBeVisible();
-    await expect(page.getByRole("columnheader", { name: "Bill code" })).toHaveCount(0);
+    await expect(gridOf(page, CATEGORY)).toHaveCount(0);
     release();
-    await expect(page.getByRole("columnheader", { name: "Bill code" })).toBeVisible();
+    await expect(gridOf(page, OTHER_CATEGORY)).toBeVisible();
   });
 
   test("11. a failed load says so instead of loading forever", async ({ page }) => {
