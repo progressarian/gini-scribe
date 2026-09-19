@@ -81,6 +81,9 @@ const DoctorManagementPage = lazyWithRetry(() => import("./pages/DoctorManagemen
 const PatientBlocklistPage = lazyWithRetry(() => import("./pages/PatientBlocklistPage"));
 const PrescriptionFooterPage = lazyWithRetry(() => import("./pages/PrescriptionFooterPage"));
 const SchemesSettingsPage = lazyWithRetry(() => import("./pages/SchemesSettingsPage"));
+const ServicesSettingsPage = lazyWithRetry(() => import("./pages/billing/ServicesSettingsPage"));
+const CategoryRatesPage = lazyWithRetry(() => import("./pages/billing/CategoryRatesPage"));
+const BillingSettingsPage = lazyWithRetry(() => import("./pages/billing/BillingSettingsPage"));
 const TestCatalogPage = lazyWithRetry(() => import("./pages/TestCatalogPage"));
 const SettingsLayout = lazyWithRetry(() => import("./pages/SettingsLayout"));
 const MedicineCollectionPage = lazyWithRetry(() => import("./pages/MedicineCollectionPage"));
@@ -221,11 +224,13 @@ const router = createBrowserRouter([
                 path: "/settings",
                 element: lazyEl(SettingsLayout),
                 children: [
-                  { index: true, element: <Navigate to="/settings/flow" replace /> },
                   { path: "flow", element: lazyEl(FlowAdminPage) },
                   { path: "prescription", element: lazyEl(PrescriptionFooterPage) },
                   { path: "tests", element: lazyEl(TestCatalogPage) },
                   { path: "schemes", element: lazyEl(SchemesSettingsPage) },
+                  { path: "services", element: lazyEl(ServicesSettingsPage) },
+                  { path: "category-rates", element: lazyEl(CategoryRatesPage) },
+                  { path: "billing", element: lazyEl(BillingSettingsPage) },
                 ],
               },
               {

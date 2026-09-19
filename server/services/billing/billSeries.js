@@ -6,6 +6,8 @@ import { auditFields, hasField, readNumber } from "./common.js";
 
 const FY = /^([0-9]{4})-([0-9]{2})$/;
 
+export const BILL_SERIES = ["MAIN", "RCPT"];
+
 export function financialYear(date = indiaToday()) {
   const [year, month] = date.split("-").map(Number);
   const start = month >= 4 ? year : year - 1;
@@ -17,7 +19,9 @@ export const formatNumber = ({ prefix, number_width: width }, number) =>
 
 function cleanSeries(value) {
   const series = typeof value === "string" ? value.trim().toUpperCase() : "";
-  if (!series || /\s/.test(series)) throw httpError(400, "Series can't be blank or contain spaces");
+  if (!BILL_SERIES.includes(series)) {
+    throw httpError(400, `Series must be one of: ${BILL_SERIES.join(", ")}`);
+  }
   return series;
 }
 
@@ -106,6 +110,8 @@ export async function saveSeries(input, ctx, db = pool) {
     } else {
       const keys = Object.keys(values);
       if (!keys.length) throw httpError(400, "Nothing to change");
+      const changed = keys.filter((k) => String(values[k]) !== String(before[k]));
+      if (!changed.length) return shape(before);
       const { rows } = await client.query(
         `UPDATE bill_series
             SET ${keys.map((k, i) => `${k} = $${i + 3}`).join(", ")},

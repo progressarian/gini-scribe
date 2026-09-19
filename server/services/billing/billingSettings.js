@@ -124,7 +124,8 @@ export async function updateSettings(patch, ctx, db = pool) {
         );
       }
     }
-    const keys = Object.keys(values);
+    const keys = Object.keys(values).filter((k) => values[k] !== before[k]);
+    if (!keys.length) return before;
     const { rows: saved } = await client.query(
       `UPDATE billing_settings
           SET ${keys.map((k, i) => `${k} = $${i + 1}`).join(", ")},

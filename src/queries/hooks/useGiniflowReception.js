@@ -170,6 +170,7 @@ export function useHealthrayBill(patientId) {
     enabled: !!patientId,
     staleTime: Infinity,
     refetchOnWindowFocus: false,
+    refetchInterval: (query) => (query.state.data?.status === "loading" ? 5_000 : false),
     retry: false,
   });
 }

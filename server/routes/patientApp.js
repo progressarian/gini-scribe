@@ -7,9 +7,13 @@
 //   POST /api/patient/app/avatar                { image_base64, mime }
 //   POST /api/patient/app/ensure-scribe-patient {}
 //   POST /api/patient/app/link-file-no          { file_no }
+//   GET  /api/patient/app/gini-db-token
 //
 import { Router } from "express";
+import jwt from "jsonwebtoken";
 import pool from "../config/db.js";
+import { isPatientBlocked } from "../services/patientBlockGuard.js";
+import { listLinkedPatients } from "./patientAuth.js";
 import { handleError } from "../utils/errorHandler.js";
 import { getGenieDb, importGenieHistoryToScribePatient } from "../services/genieImport.js";
 
@@ -251,6 +255,43 @@ router.post("/patient/app/link-file-no", async (req, res) => {
     });
   } catch (e) {
     handleError(res, e, "Link file number");
+  }
+});
+
+const GINI_DB_TOKEN_TTL_S = 3600;
+
+router.get("/patient/app/gini-db-token", async (req, res) => {
+  try {
+    const patient = requirePatient(req, res);
+    if (!patient) return;
+    if (patient.db !== "hospital") return res.json({ enabled: false });
+
+    const secret = process.env.SUPABASE_JWT_SECRET;
+    if (!secret) return res.status(503).json({ error: "Hospital DB token not configured" });
+
+    if (await isPatientBlocked(patient.id)) {
+      return res
+        .status(403)
+        .json({ error: "Your account is not active.", code: "account_blocked" });
+    }
+
+    const linked = await listLinkedPatients("hospital", patient.phone || "");
+    const ids = [...new Set([Number(patient.id), ...linked.map((p) => Number(p.id))])].filter(
+      Number.isInteger,
+    );
+
+    const token = jwt.sign(
+      {
+        role: "authenticated",
+        aud: "authenticated",
+        app_patient_ids: ids,
+      },
+      secret,
+      { expiresIn: GINI_DB_TOKEN_TTL_S },
+    );
+    res.json({ enabled: true, token, patient_ids: ids, expiresIn: GINI_DB_TOKEN_TTL_S });
+  } catch (e) {
+    handleError(res, e, "Gini DB token");
   }
 });
 

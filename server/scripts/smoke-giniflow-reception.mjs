@@ -60,7 +60,7 @@ check(
 check("who ordered it is shown", "orderedBy" in order);
 
 // Clearing is what lets the lab collect.
-const cleared = await clearPayment(order.orderId, { method: "paid" });
+const cleared = await clearPayment(order.orderId, { method: "paid", confirmNotOnBill: true });
 check("clearing marks the order paid", cleared.paymentStatus === "paid");
 const afterRow = await one(
   `SELECT payment_status, sample_status FROM giniflow_lab_orders WHERE id = $1`,
@@ -89,7 +89,7 @@ check(
 );
 
 // A double-tap at a busy counter must not read as paying twice.
-const again = await clearPayment(order.orderId, { method: "paid" });
+const again = await clearPayment(order.orderId, { method: "paid", confirmNotOnBill: true });
 check("clearing twice is a no-op", again.alreadySettled === true);
 const paymentEvents = await one(
   `SELECT count(*)::int AS c FROM giniflow_lab_order_events
@@ -115,7 +115,10 @@ check(
       [order.visitId],
     )
   ).id;
-  const nameless = await clearPayment(claimed, { method: "insurance_claim" })
+  const nameless = await clearPayment(claimed, {
+    method: "insurance_claim",
+    confirmNotOnBill: true,
+  })
     .then(() => false)
     .catch(() => true);
   check("a claim with no insurer is refused — nobody could chase it", nameless);
@@ -124,6 +127,7 @@ check(
   const CHECKER = 26;
   const claim = await clearPayment(claimed, {
     method: "insurance_claim",
+    confirmNotOnBill: true,
     actorId: MAKER,
     actorRole: "reception",
     insurer: "  Star Health  ",
@@ -144,7 +148,7 @@ check(
 
   // The money is with the insurer, so it cannot also be taken at the counter —
   // the desk has to settle the claim one way or the other first.
-  const cashOverClaim = await clearPayment(claimed, { method: "paid" })
+  const cashOverClaim = await clearPayment(claimed, { method: "paid", confirmNotOnBill: true })
     .then(() => false)
     .catch((e) => e.status === 409);
   check("cash cannot be taken while the claim stands", cashOverClaim);
@@ -213,13 +217,18 @@ const newOrder = async (total) =>
   const CHECKER = 26;
   const split = await newOrder(1250);
 
-  const overpay = await clearPayment(split, { method: "paid", amountPaid: 2000 })
+  const overpay = await clearPayment(split, {
+    method: "paid",
+    confirmNotOnBill: true,
+    amountPaid: 2000,
+  })
     .then(() => false)
     .catch((e) => e.status === 400);
   check("collecting more than the order is worth is refused", overpay);
 
   const overSplit = await clearPayment(split, {
     method: "split",
+    confirmNotOnBill: true,
     amountPaid: 350,
     amountClaimed: 1500,
     insurer: "Star Health",
@@ -230,6 +239,7 @@ const newOrder = async (total) =>
 
   const done = await clearPayment(split, {
     method: "split",
+    confirmNotOnBill: true,
     actorId: MAKER,
     amountPaid: 350,
     amountClaimed: 900,
@@ -264,6 +274,7 @@ const newOrder = async (total) =>
 
   const second = await clearPayment(split, {
     method: "insurance_claim",
+    confirmNotOnBill: true,
     insurer: "Star Health",
     amountClaimed: 100,
   })
@@ -306,6 +317,7 @@ const newOrder = async (total) =>
   const refused = await newOrder(1000);
   const submitted = await clearPayment(refused, {
     method: "split",
+    confirmNotOnBill: true,
     actorId: MAKER,
     amountPaid: 200,
     amountClaimed: 800,
@@ -338,6 +350,7 @@ const newOrder = async (total) =>
   const collected = await newOrder(500);
   const c1 = await clearPayment(collected, {
     method: "insurance_claim",
+    confirmNotOnBill: true,
     actorId: MAKER,
     insurer: "Care Health",
   });
@@ -359,6 +372,7 @@ const newOrder = async (total) =>
   const again = await newOrder(1000);
   const claim2 = await clearPayment(again, {
     method: "split",
+    confirmNotOnBill: true,
     actorId: MAKER,
     amountPaid: 200,
     amountClaimed: 800,
@@ -387,7 +401,7 @@ const newOrder = async (total) =>
     backOnList.pending.some((o) => o.orderId === again),
   );
 
-  const balance = await clearPayment(again, { method: "paid" });
+  const balance = await clearPayment(again, { method: "paid", confirmNotOnBill: true });
   check("collecting the balance settles it in one tap", balance.outstanding === 0);
   check("with the full amount recorded as cash", Number(balance.amountPaid) === 1000);
   check("and the order reads as paid", balance.paymentStatus === "paid");
@@ -398,7 +412,10 @@ const bad = await clearPayment(order.orderId, { method: "waived" })
   .catch(() => true);
 check("an unknown settlement method is rejected", bad);
 
-const missing = await clearPayment("00000000-0000-0000-0000-000000000000", { method: "paid" })
+const missing = await clearPayment("00000000-0000-0000-0000-000000000000", {
+  method: "paid",
+  confirmNotOnBill: true,
+})
   .then(() => false)
   .catch(() => true);
 check("an unknown order is rejected", missing);

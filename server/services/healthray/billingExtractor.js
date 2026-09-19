@@ -145,6 +145,8 @@ export function transactionsToBilling(rows, { appointmentId, date, wholeDay = fa
         amount,
         ...(b.id != null ? { itemId: b.id } : {}),
         ...(t.invoice_no ? { invoice: t.invoice_no } : {}),
+        ...(t.due_amount != null ? { invoiceDue: num(t.due_amount) } : {}),
+        ...(t.refunded_amount != null ? { invoiceRefunded: num(t.refunded_amount) } : {}),
         ...(num(b.refunded_amount) > 0 || txnRefundedAll
           ? {
               refunded: txnRefundedAll

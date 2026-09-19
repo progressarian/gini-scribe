@@ -1,0 +1,335 @@
+import { useState } from "react";
+import {
+  useBillingGroups,
+  useBillingItemChoices,
+  useBillingItems,
+  useBillingTaxCodeOptions,
+  useDeleteBillingItem,
+  useSetBillingItemActive,
+} from "../../queries/hooks/useBillingMaster";
+import { toast } from "../../stores/uiStore";
+import GroupPanel from "../../components/billing/GroupPanel";
+import ItemDialog from "../../components/billing/ItemDialog";
+import PriceHistoryDialog from "../../components/billing/PriceHistoryDialog";
+import UsedInDialog from "../../components/billing/UsedInDialog";
+import { errorOf, rupees, usesOf } from "../../components/billing/format";
+import "../../styles/flow.css";
+import "../flow/FlowSettings.css";
+import "./billing.css";
+
+const STATUS_FILTER = { active: "true", inactive: "false", all: undefined };
+
+const linkOf = (item) => {
+  if (item.kind === "consultation") {
+    return `${item.doctor_name ?? "Hospital default"} · ${item.visit_type}`;
+  }
+  if (item.kind === "test") return item.test_name ?? "—";
+  return "—";
+};
+
+function ItemRow({ item, showPath, onEdit, onHistory, onBlocked }) {
+  const [confirming, setConfirming] = useState(false);
+  const setActive = useSetBillingItemActive();
+  const remove = useDeleteBillingItem();
+
+  const toggle = async () => {
+    try {
+      await setActive.mutateAsync({ id: item.id, is_active: !item.is_active });
+      toast(`${item.name} ${item.is_active ? "deactivated" : "activated"}`, "success");
+    } catch (e) {
+      toast(errorOf(e), "error");
+    }
+  };
+
+  const destroy = async () => {
+    setConfirming(false);
+    try {
+      await remove.mutateAsync(item.id);
+      toast(`Deleted ${item.name}`, "success");
+    } catch (e) {
+      const uses = usesOf(e);
+      if (!uses) return toast(errorOf(e), "error");
+      onBlocked({
+        name: item.name,
+        uses,
+        canDeactivate: item.is_active,
+        deactivate: () => setActive.mutateAsync({ id: item.id, is_active: false }),
+      });
+    }
+  };
+
+  return (
+    <tr className={item.is_active ? "" : "fset__row--off"}>
+      <td>{item.code}</td>
+      <td>
+        {item.name}
+        {showPath ? (
+          <div className="flow-muted bill-items__sub">
+            {item.group_name} › {item.subgroup_name}
+          </div>
+        ) : null}
+      </td>
+      <td>{item.kind}</td>
+      <td>{rupees(item.base_price)}</td>
+      <td>
+        {item.unit}
+        {item.allow_quantity ? ` · up to ${item.max_quantity ?? "any"}` : ""}
+      </td>
+      <td>{item.tax_code ?? "—"}</td>
+      <td>{linkOf(item)}</td>
+      <td>{item.is_active ? "Yes" : "No"}</td>
+      <td className="bill-items__actions">
+        <button
+          type="button"
+          className="flow-btn flow-btn-ghost flow-btn-mini"
+          aria-label={`Edit ${item.name}`}
+          onClick={onEdit}
+        >
+          Edit
+        </button>
+        <button
+          type="button"
+          className="flow-btn flow-btn-ghost flow-btn-mini"
+          aria-label={`Price history of ${item.name}`}
+          onClick={onHistory}
+        >
+          History
+        </button>
+        <button
+          type="button"
+          className="flow-btn flow-btn-ghost flow-btn-mini"
+          aria-label={`${item.is_active ? "Deactivate" : "Activate"} ${item.name}`}
+          onClick={toggle}
+        >
+          {item.is_active ? "Deactivate" : "Activate"}
+        </button>
+        {confirming ? (
+          <>
+            <button
+              type="button"
+              className="flow-btn flow-btn-red flow-btn-mini"
+              aria-label={`Confirm delete ${item.name}`}
+              onClick={destroy}
+            >
+              Confirm delete
+            </button>
+            <button
+              type="button"
+              className="flow-btn flow-btn-ghost flow-btn-mini"
+              onClick={() => setConfirming(false)}
+            >
+              Keep
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            className="flow-btn flow-btn-ghost flow-btn-mini"
+            aria-label={`Delete ${item.name}`}
+            onClick={() => setConfirming(true)}
+          >
+            Delete
+          </button>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+export default function ServicesSettingsPage() {
+  const [selected, setSelected] = useState(null);
+  const [q, setQ] = useState("");
+  const [kind, setKind] = useState("");
+  const [status, setStatus] = useState("all");
+  const [editing, setEditing] = useState(null);
+  const [history, setHistory] = useState(null);
+  const [blocked, setBlocked] = useState(null);
+  const [deactivating, setDeactivating] = useState(false);
+  const [deactivateError, setDeactivateError] = useState("");
+
+  const groups = useBillingGroups();
+  const choices = useBillingItemChoices();
+  const taxCodes = useBillingTaxCodeOptions();
+  const items = useBillingItems({
+    q: q.trim(),
+    kind,
+    active: STATUS_FILTER[status],
+    groupId: selected?.level === "group" ? String(selected.id) : undefined,
+    subgroupId: selected?.level === "subgroup" ? String(selected.id) : undefined,
+  });
+  const rows = items.data?.items ?? [];
+  const total = items.data?.total ?? 0;
+
+  const closeEditor = (message) => {
+    setEditing(null);
+    if (message) toast(message, "success");
+  };
+
+  const deactivateBlocked = async () => {
+    setDeactivating(true);
+    setDeactivateError("");
+    try {
+      await blocked.deactivate();
+      toast(`${blocked.name} deactivated`, "success");
+      setBlocked(null);
+    } catch (e) {
+      setDeactivateError(errorOf(e, "Could not deactivate it"));
+    } finally {
+      setDeactivating(false);
+    }
+  };
+
+  const selectedGroup = groups.data?.find((g) =>
+    selected?.level === "group"
+      ? g.id === selected.id
+      : g.subgroups.some((s) => s.id === selected?.id),
+  );
+  const selectedNode =
+    selected?.level === "subgroup"
+      ? selectedGroup?.subgroups.find((s) => s.id === selected.id)
+      : selectedGroup;
+  const heading = !selectedNode
+    ? "All items"
+    : selected.level === "subgroup"
+      ? `${selectedGroup.name} › ${selectedNode.name}`
+      : selectedNode.name;
+  const canAdd = selected?.level === "subgroup" && Boolean(selectedNode?.is_active);
+  const addHint =
+    selected?.level !== "subgroup"
+      ? "Choose a subgroup first"
+      : canAdd
+        ? ""
+        : "This subgroup is off; activate it to add items";
+
+  return (
+    <div className="flow-root fset">
+      <div className="bill-services">
+        {groups.isLoading ? (
+          <div className="flow-card fset__cardsub">Loading…</div>
+        ) : groups.isError ? (
+          <div className="flow-card fset__cardsub">Could not load the services.</div>
+        ) : (
+          <GroupPanel
+            groups={groups.data}
+            selected={selected}
+            onSelect={setSelected}
+            onBlocked={setBlocked}
+          />
+        )}
+
+        <section className="flow-card bill-items" aria-label="Items">
+          <div className="fset__cardhead">
+            <h2 className="flow-sec-title">{heading}</h2>
+            <span className="fset__count">{total}</span>
+            <button
+              type="button"
+              className="flow-btn flow-btn-primary flow-btn-mini bill-items__add"
+              disabled={!canAdd}
+              title={addHint}
+              onClick={() => setEditing({ item: null })}
+            >
+              + Add item
+            </button>
+          </div>
+          <div className="bill-items__filters">
+            <input
+              className="jb-assign"
+              type="search"
+              aria-label="Search items"
+              placeholder="Search name or code"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+            <select
+              className="jb-assign"
+              aria-label="Kind"
+              value={kind}
+              onChange={(e) => setKind(e.target.value)}
+            >
+              <option value="">All kinds</option>
+              {(choices.data?.kinds ?? []).map((k) => (
+                <option key={k} value={k}>
+                  {k}
+                </option>
+              ))}
+            </select>
+            <select
+              className="jb-assign"
+              aria-label="Status"
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+            >
+              <option value="all">Active and off</option>
+              <option value="active">Active only</option>
+              <option value="inactive">Off only</option>
+            </select>
+          </div>
+          {items.isError ? (
+            <div className="fset__cardsub">Could not load the items.</div>
+          ) : items.isLoading ? (
+            <div className="fset__cardsub">Loading…</div>
+          ) : !rows.length ? (
+            <div className="fset__cardsub">No items here yet.</div>
+          ) : (
+            <div className="fset__scroll fset__scroll--wide">
+              <table className="flow-table" aria-label="Items">
+                <thead>
+                  <tr>
+                    <th>Code</th>
+                    <th>Name</th>
+                    <th>Kind</th>
+                    <th>Price</th>
+                    <th>Unit</th>
+                    <th>Tax</th>
+                    <th>Consultant / test</th>
+                    <th>Active</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((item) => (
+                    <ItemRow
+                      key={item.id}
+                      item={item}
+                      showPath={selected?.level !== "subgroup"}
+                      onEdit={() => setEditing({ item })}
+                      onHistory={() => setHistory(item)}
+                      onBlocked={setBlocked}
+                    />
+                  ))}
+                </tbody>
+              </table>
+              {total > rows.length ? (
+                <p className="fset__hint">
+                  Showing {rows.length} of {total}. Search or pick a subgroup to narrow the list.
+                </p>
+              ) : null}
+            </div>
+          )}
+        </section>
+      </div>
+
+      {editing ? (
+        <ItemDialog
+          item={editing.item}
+          subgroupId={selected?.level === "subgroup" ? selected.id : ""}
+          groups={groups.data ?? []}
+          choices={choices.data}
+          taxCodes={taxCodes.data ?? []}
+          onClose={closeEditor}
+        />
+      ) : null}
+      <PriceHistoryDialog item={history} onClose={() => setHistory(null)} />
+      <UsedInDialog
+        blocked={blocked}
+        error={deactivateError}
+        busy={deactivating}
+        onClose={() => {
+          setBlocked(null);
+          setDeactivateError("");
+        }}
+        onDeactivate={deactivateBlocked}
+      />
+    </div>
+  );
+}

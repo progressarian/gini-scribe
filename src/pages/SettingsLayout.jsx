@@ -1,4 +1,7 @@
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
+import useAuthStore from "../stores/authStore";
+import { PAGE_CAPABILITIES } from "../config/routes";
+import { hasAnyCapability } from "../../shared/permissions";
 import "./SettingsLayout.css";
 
 // One place for the clinic's settings instead of a page per setting. The tabs
@@ -26,14 +29,38 @@ export const SETTINGS_TABS = [
   },
   {
     to: "/settings/schemes",
-    label: "Patient schemes",
+    label: "Categories",
     blurb: "CGHS, ECHS and the rest — their labels, their card requirement, and the daily cap",
+  },
+  {
+    to: "/settings/services",
+    label: "Services",
+    blurb: "Groups, subgroups and the items the hospital bills for, with their prices",
+  },
+  {
+    to: "/settings/category-rates",
+    label: "Category rates",
+    blurb: "What each category pays for each service, and the code printed on its bill",
+  },
+  {
+    to: "/settings/billing",
+    label: "Billing settings",
+    blurb: "Discount stacking, pay later, GST and the bill number series",
   },
 ];
 
+export const visibleSettingsTabs = (role) =>
+  SETTINGS_TABS.filter((t) => hasAnyCapability(role, PAGE_CAPABILITIES[t.to]));
+
 export default function SettingsLayout() {
   const { pathname } = useLocation();
-  const active = SETTINGS_TABS.find((t) => pathname.startsWith(t.to));
+  const role = useAuthStore((s) => s.currentDoctor?.role);
+  const tabs = visibleSettingsTabs(role);
+  const active = tabs.find((t) => pathname.startsWith(t.to));
+
+  if (pathname.replace(/\/$/, "") === "/settings") {
+    return tabs.length ? <Navigate to={tabs[0].to} replace /> : <Navigate to="/" replace />;
+  }
 
   return (
     <div className="set">
@@ -43,7 +70,7 @@ export default function SettingsLayout() {
       </header>
 
       <nav className="set__tabs" aria-label="Settings sections">
-        {SETTINGS_TABS.map((t) => (
+        {tabs.map((t) => (
           <NavLink
             key={t.to}
             to={t.to}

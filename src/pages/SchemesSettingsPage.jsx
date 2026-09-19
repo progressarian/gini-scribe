@@ -168,7 +168,7 @@ export default function SchemesSettingsPage() {
     <div className="flow-root fset">
       <div className="flow-card">
         <div className="fset__cardhead">
-          <div className="flow-sec-title">Patient schemes</div>
+          <div className="flow-sec-title">Categories</div>
           <span className="fset__count">{schemes.length}</span>
         </div>
         <div className="fset__cardsub">

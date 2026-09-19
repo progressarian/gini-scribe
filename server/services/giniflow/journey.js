@@ -23,6 +23,7 @@ import { testPricesFor, schemeForVisit } from "../pricing.js";
 import { LIVE_LAB_CASE_SQL, caseSampledBeforeVisit } from "./testsHold.js";
 import { billSuppressor } from "./testCancel.js";
 import {
+  billedLabLines,
   priceOrdersFromBill,
   storedBill,
   stepsAllowedByBill,
@@ -651,7 +652,9 @@ async function evidencedStatuses(client, visitId, statuses) {
 }
 
 export async function syncFromStatus(client, visitId, toStatus, meta = null) {
-  const counterEnded = toStatus === "exited" && meta?.source === "counter_end_visit";
+  const counterEnded =
+    toStatus === "exited" &&
+    (meta?.source === "counter_end_visit" || meta?.reason === "lab_only_reports_complete");
   if (ABANDONED.includes(toStatus)) {
     // Never 'done': the tracker must not claim an X-Ray happened because the
     // patient went home.
@@ -902,7 +905,9 @@ export async function addLabStepsForArrivedLabCase(patientId, caseDate, db = poo
   try {
     await client.query("BEGIN");
     await client.query(`SELECT id FROM giniflow_visits WHERE id = $1 FOR UPDATE`, [rows[0].id]);
-    const result = await insertLabStepsForOrder(client, rows[0].id);
+    const result = (await billHasNoLab(client, rows[0].id))
+      ? { added: [] }
+      : await insertLabStepsForOrder(client, rows[0].id);
     await client.query("COMMIT");
     return result;
   } catch (e) {
@@ -913,6 +918,18 @@ export async function addLabStepsForArrivedLabCase(patientId, caseDate, db = poo
   }
 }
 
+async function billHasNoLab(client, visitId) {
+  const { rows } = await client.query(
+    `SELECT patient_id, visit_date::text AS visit_date FROM giniflow_visits WHERE id = $1`,
+    [visitId],
+  );
+  if (!rows.length) return false;
+  const bill = await storedBill(rows[0].patient_id, rows[0].visit_date, client);
+  if (bill?.status !== "billed") return false;
+  const skip = await billSuppressor(client, visitId);
+  return billedLabLines(bill, { skip }).length === 0;
+}
+
 export async function insertLabStepsIfHealthrayCase(client, visitId) {
   const { rows } = await client.query(
     `SELECT ${HR_LAB_EVIDENCE_SQL}
@@ -920,7 +937,11 @@ export async function insertLabStepsIfHealthrayCase(client, visitId) {
       WHERE v.id = $1`,
     [visitId],
   );
-  if (!(rows[0]?.hr_cases > 0) || (await sampleTakenBeforeVisit(client, visitId))) {
+  if (
+    !(rows[0]?.hr_cases > 0) ||
+    (await sampleTakenBeforeVisit(client, visitId)) ||
+    (await billHasNoLab(client, visitId))
+  ) {
     return { added: [] };
   }
   return insertLabStepsForOrder(client, visitId);
@@ -946,12 +967,12 @@ export async function syncLabStepsFromLab(db, visitId) {
   const { rows } = await db.query(
     `SELECT
        (SELECT count(*)::int FROM giniflow_lab_orders o
-         WHERE o.visit_id = v.id AND o.urgency = 'today') AS orders,
+         WHERE o.visit_id = v.id AND o.urgency = 'today' AND o.kind = 'lab') AS orders,
        (SELECT count(*)::int FROM giniflow_lab_orders o
-         WHERE o.visit_id = v.id AND o.urgency = 'today'
+         WHERE o.visit_id = v.id AND o.urgency = 'today' AND o.kind = 'lab'
            AND o.payment_status NOT IN ('paid', 'claim_approved')) AS unsettled,
        (SELECT count(*)::int FROM giniflow_lab_orders o
-         WHERE o.visit_id = v.id AND o.urgency = 'today'
+         WHERE o.visit_id = v.id AND o.urgency = 'today' AND o.kind = 'lab'
            AND o.sample_status IN (${DRAWN_STATUS_SQL}))
          AS drawn,
        ${HR_LAB_EVIDENCE_SQL}

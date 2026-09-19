@@ -6,8 +6,10 @@ import {
   keepEverySeenItem,
   billedStepIds,
   reconcileTestSteps,
+  repricePaidOrdersFromBill,
   stepsAllowedByBill,
 } from "../services/giniflow/patientBill.js";
+import { billSuppressor } from "../services/giniflow/testCancel.js";
 
 let failures = 0;
 const check = (label, ok, detail = "") => {
@@ -177,6 +179,7 @@ const { rows: visits } = await pool.query(
       AND EXISTS (SELECT 1 FROM giniflow_visit_steps s
                    WHERE s.visit_id = v.id AND s.source = 'template' AND s.status = 'pending')
       AND NOT EXISTS (SELECT 1 FROM giniflow_lab_orders o WHERE o.visit_id = v.id)
+      AND NOT EXISTS (SELECT 1 FROM giniflow_test_cancellations c WHERE c.visit_id = v.id)
     LIMIT 1`,
   [today],
 );
@@ -214,6 +217,13 @@ const stepsOf = async (client, visitId) =>
   ).rows.map((r) => r.step_catalog_id);
 const orderExists = async (client, id) =>
   (await client.query(`SELECT 1 FROM giniflow_lab_orders WHERE id = $1`, [id])).rows.length > 0;
+const stepStatus = async (client, visitId, catalogId) =>
+  (
+    await client.query(
+      `SELECT status FROM giniflow_visit_steps WHERE visit_id = $1 AND step_catalog_id = $2`,
+      [visitId, catalogId],
+    )
+  ).rows.map((r) => r.status);
 
 for (const visit of visits) {
   const client = await pool.connect();
@@ -234,12 +244,47 @@ for (const visit of visits) {
       [vptOrder],
     );
 
+    process.env.SCRIBE_BILL_AUTO_CANCEL = "dry";
+    const dry = await reconcileTestSteps(client, visit.id, bill([consult, echoLine]), machines);
+    delete process.env.SCRIBE_BILL_AUTO_CANCEL;
+    check(
+      "dry run: lists what it would cancel and changes nothing",
+      dry.wouldCancel.length >= 2 &&
+        dry.removedOrders === 0 &&
+        (await orderExists(client, abiOrder)) &&
+        (await stepsOf(client, visit.id)).includes("fundus"),
+      JSON.stringify(dry.wouldCancel),
+    );
+
     const result = await reconcileTestSteps(client, visit.id, bill([consult, echoLine]), machines);
     const left = await stepsOf(client, visit.id);
 
     check(
-      `${visit.name}: unpaid check-in ABI order removed`,
+      `${visit.name}: unpaid check-in ABI order taken off the floor`,
       !(await orderExists(client, abiOrder)),
+    );
+    const { rows: record } = await client.query(
+      `SELECT reason, source, test_name FROM giniflow_test_cancellations
+        WHERE visit_id = $1 AND order_id = $2`,
+      [visit.id, abiOrder],
+    );
+    check(
+      "…with a cancellation record (reason not_on_bill), not a silent delete",
+      record.length === 1 && record[0].reason === "not_on_bill" && record[0].source === "healthray",
+      JSON.stringify(record),
+    );
+    check(
+      "hand-added Fundus step with no order is marked skipped, not deleted",
+      (await stepStatus(client, visit.id, "fundus")).includes("skipped"),
+    );
+    const suppressed = await billSuppressor(client, visit.id);
+    check(
+      "a not_on_bill cancel does not stop ABI being raised if HealthRay bills it later",
+      !suppressed({
+        kind: "machine",
+        machineId: "abi",
+        line: { desc: "ABI", itemId: 999001 },
+      }),
     );
     check(
       "paid VPT order kept, and its step kept",
@@ -257,7 +302,7 @@ for (const visit of visits) {
     check("billed Echo step kept", left.includes("echo"));
     check(
       "counts reported",
-      result.removedOrders === 1 && result.removedSteps >= 2,
+      result.removedOrders === 1 && result.removedSteps >= 1 && result.failed.length === 0,
       JSON.stringify(result),
     );
 
@@ -272,6 +317,138 @@ for (const visit of visits) {
   }
 }
 if (!visits.length) console.log("  ·  no suitable visit today to try");
+
+console.log("\npaid orders follow the bill (rolled back)");
+
+const paidOrder = async (client, visitId, test) => {
+  const { rows } = await client.query(
+    `INSERT INTO giniflow_lab_orders
+       (visit_id, urgency, payment_status, amount_total, amount_paid, sample_status, kind)
+     VALUES ($1, 'today', 'paid', 500, 500, 'paid', 'machine') RETURNING id`,
+    [visitId],
+  );
+  await client.query(
+    `INSERT INTO giniflow_lab_order_tests (lab_order_id, test_name, price) VALUES ($1, $2, 500)`,
+    [rows[0].id, test],
+  );
+  return rows[0].id;
+};
+const amounts = async (client, ids) =>
+  (
+    await client.query(
+      `SELECT o.id, o.amount_total::numeric AS total, o.amount_paid::numeric AS paid,
+              (SELECT sum(price) FROM giniflow_lab_order_tests t WHERE t.lab_order_id = o.id) AS tests
+         FROM giniflow_lab_orders o WHERE o.id = ANY($1::uuid[]) ORDER BY o.id`,
+      [ids],
+    )
+  ).rows;
+const combined = (extra = {}) =>
+  bill([
+    consult,
+    {
+      desc: "ABI,VPT,Fundus",
+      category: "machine",
+      amount: 800,
+      invoice: "OPD/TEST-1",
+      itemId: 990001,
+      invoiceDue: 0,
+      invoiceRefunded: 0,
+      ...extra,
+    },
+  ]);
+
+for (const visit of visits) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const byName = (id) => machines.find((m) => m.id === id).tests[0];
+    const ids = [];
+    for (const id of ["abi", "vpt", "fundus"])
+      ids.push(await paidOrder(client, visit.id, byName(id)));
+
+    const dry = await repricePaidOrdersFromBill(client, visit.id, combined(), machines);
+    const untouched = await amounts(client, ids);
+    check(
+      "default is dry: lists ₹1,500 → ₹800 and changes nothing",
+      dry.wouldReprice.length === 3 &&
+        dry.repriced.length === 0 &&
+        untouched.every((r) => Number(r.total) === 500 && Number(r.paid) === 500),
+      dry.wouldReprice.map((r) => r.tests).join(" | "),
+    );
+
+    process.env.SCRIBE_BILL_AUTO_REPRICE = "dry";
+    for (const [label, extra] of [
+      ["invoice has a refund (Mukesh's ₹200)", { invoiceRefunded: 200 }],
+      ["invoice not fully paid", { invoiceDue: 300 }],
+      ["bill does not say whether paid", { invoiceDue: undefined }],
+      ["line has a refund", { refunded: 100 }],
+    ]) {
+      const r = await repricePaidOrdersFromBill(client, visit.id, combined(extra), machines);
+      check(
+        `refused: ${label}`,
+        r.wouldReprice.length === 0 && r.refused.length === 3,
+        r.refused[0]?.reason,
+      );
+    }
+
+    process.env.SCRIBE_BILL_AUTO_REPRICE = "1";
+    const done = await repricePaidOrdersFromBill(client, visit.id, combined(), machines);
+    const after = await amounts(client, ids);
+    const total = after.reduce((sum, r) => sum + Number(r.total), 0);
+    check(
+      "acting: three orders repriced to the ₹800 line, paid follows, tests match",
+      done.repriced.length === 3 &&
+        total === 800 &&
+        after.every(
+          (r) => Number(r.paid) === Number(r.total) && Number(r.tests) === Number(r.total),
+        ),
+      after.map((r) => r.total).join(" + "),
+    );
+    const { rows: audit } = await client.query(
+      `SELECT count(*)::int n FROM billing_audit
+        WHERE entity = 'giniflow_lab_order' AND entity_id = ANY($1::text[])`,
+      [ids],
+    );
+    const { rows: events } = await client.query(
+      `SELECT count(*)::int n FROM giniflow_lab_order_events
+        WHERE lab_order_id = ANY($1::uuid[]) AND track = 'payment' AND status = 'repriced'`,
+      [ids],
+    );
+    check(
+      "each change has an audit row and a repriced payment event",
+      audit[0].n === 3 && events[0].n === 3,
+    );
+    const again = await repricePaidOrdersFromBill(client, visit.id, combined(), machines);
+    check(
+      "a second read changes nothing",
+      again.repriced.length === 0 && again.refused.length === 0,
+    );
+
+    await client.query(
+      `UPDATE giniflow_lab_orders SET claim_state = 'submitted', amount_claimed = 100, amount_paid = amount_total - 100
+        WHERE id = $1`,
+      [ids[0]],
+    );
+    const claimed = await repricePaidOrdersFromBill(
+      client,
+      visit.id,
+      bill([
+        consult,
+        { desc: "ABI", category: "machine", amount: 300, invoiceDue: 0, invoiceRefunded: 0 },
+      ]),
+      machines,
+    );
+    check(
+      "an order with an insurance claim is never repriced",
+      claimed.repriced.every((r) => r.orderId !== ids[0]) &&
+        claimed.refused.some((r) => r.reason === "not a plain full payment"),
+    );
+  } finally {
+    delete process.env.SCRIBE_BILL_AUTO_REPRICE;
+    await client.query("ROLLBACK");
+    client.release();
+  }
+}
 
 await pool.end();
 console.log(failures ? `\n${failures} check(s) failed` : "\nall checks passed");

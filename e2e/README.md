@@ -118,3 +118,8 @@ are allowed **one retry**. On this machine Chrome sometimes reports
 Wi-Fi, VPN or a Docker bridge — changed mid-request); the app then can't start
 and the page stays blank. A retry that passes is reported as **flaky**, not
 hidden; a real failure still fails. Every other test has no retries.
+
+Screen tests (P1-28 onward) also open pages with `gotoReady(page, url, ready)`
+from `helpers/browser.mjs`: if the page doesn't become ready **and** Chrome
+reported `net::ERR_NETWORK_CHANGED`, it reloads (up to 3 tries). Any other
+failure is thrown straight away, so a real bug is never retried away.

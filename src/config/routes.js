@@ -106,11 +106,14 @@ export const PAGE_CAPABILITIES = {
   "/admin/prescription-footer": CAP.ADMIN,
   // Settings — one section, tab per area. Each tab is listed so a deep link is
   // gated the same as the section itself.
-  "/settings": CAP.ADMIN,
+  "/settings": [CAP.ADMIN, CAP.BILLING_MASTER, CAP.BILLING_SETTINGS],
   "/settings/flow": CAP.ADMIN,
   "/settings/prescription": CAP.ADMIN,
   "/settings/tests": CAP.ADMIN,
   "/settings/schemes": CAP.SCHEME_ADMIN,
+  "/settings/services": CAP.BILLING_MASTER,
+  "/settings/category-rates": CAP.BILLING_MASTER,
+  "/settings/billing": CAP.BILLING_SETTINGS,
   "/medicine-collection": CAP.MED_COLLECTION,
   "/reception-inbox": CAP.RECEPTION_OPS,
   // Appointment search + Quick Book (it POSTs /api/appointments — not read-only).

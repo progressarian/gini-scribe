@@ -9,10 +9,33 @@ export const DOCTOR_LEG_STATUSES = [
   "with_doctor",
 ];
 
+const LIVE_BILL_ITEM_SQL = (i) =>
+  `(NOT COALESCE((${i}->>'cancelled')::boolean, FALSE)
+    AND NOT COALESCE((${i}->>'removed')::boolean, FALSE)
+    AND NOT (COALESCE((${i}->>'amount')::numeric, 0) > 0
+             AND COALESCE((${i}->>'refunded')::numeric, 0) >= (${i}->>'amount')::numeric))`;
+
+const CASE_NOT_ON_BILL_SQL = (lc) =>
+  `(NOT ${CASE_STARTED_SQL(lc)}
+    AND NOT EXISTS (SELECT 1 FROM giniflow_visits vx
+                      JOIN giniflow_visit_steps sx ON sx.visit_id = vx.id
+                     WHERE vx.patient_id = ${lc}.patient_id
+                       AND vx.visit_date = ${lc}.case_date
+                       AND sx.step_catalog_id = 'lab_billing'
+                       AND sx.status = 'done')
+    AND EXISTS (SELECT 1 FROM giniflow_patient_bills bx
+                 WHERE bx.patient_id = ${lc}.patient_id
+                   AND bx.bill_date = ${lc}.case_date
+                   AND bx.status = 'billed'
+                   AND bx.read_at > (COALESCE(${lc}.raw_detail_json, ${lc}.raw_list_json)->>'registered_at')::timestamptz
+                   AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(bx.items, '[]'::jsonb)) bi
+                                    WHERE bi->>'category' = 'lab' AND ${LIVE_BILL_ITEM_SQL("bi")})))`;
+
 export const LIVE_LAB_CASE_SQL = (lc = "lc") =>
   `(NOT EXISTS (SELECT 1 FROM giniflow_lab_case_actions cx
                  WHERE cx.case_no = ${lc}.case_no AND cx.action = 'cancelled')
-    AND lower(COALESCE(${lc}.case_status, ${lc}.raw_list_json->>'case_status', '')) <> 'cancelled')`;
+    AND lower(COALESCE(${lc}.case_status, ${lc}.raw_list_json->>'case_status', '')) <> 'cancelled'
+    AND NOT ${CASE_NOT_ON_BILL_SQL(lc)})`;
 
 const CASE_STARTED_ACTIONS = [
   "drawing_started",

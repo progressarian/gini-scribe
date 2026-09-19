@@ -452,7 +452,11 @@ await pool.query(`UPDATE giniflow_lab_orders SET payment_status = 'paid' WHERE v
 await pool.query(`UPDATE giniflow_lab_orders SET payment_status = 'pending' WHERE id = $1`, [
   drifted.id,
 ]);
-const settled = await clearPayment(drifted.id, { method: "paid", actorId: 20 });
+const settled = await clearPayment(drifted.id, {
+  method: "paid",
+  confirmNotOnBill: true,
+  actorId: 20,
+});
 check("a drifted order reconciles rather than dead-ending", settled.alreadySettled === true);
 const afterDrift = (await getJourney(v3.id)).steps.find((s) => s.catalogId === "lab_billing");
 check("and the counter is ticked on that path too", afterDrift.status === "done");

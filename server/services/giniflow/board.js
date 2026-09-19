@@ -91,6 +91,8 @@ const TODAY_CASES = (v, p) => `
             AND NOT ${caseReportedBeforeVisit(v)}
             AND ${LIVE_LAB_CASE_SQL("lc")}`;
 
+const CASE_REPORTED = `(COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'reported_on') IS NOT NULL`;
+
 const CASE_ACTION = (action) =>
   `EXISTS (SELECT 1 FROM giniflow_lab_case_actions a
             WHERE a.case_no = lc.case_no AND a.action IN (${action}))`;
@@ -102,6 +104,7 @@ const MACHINE_HOLD_SQL = (v, p, manualParam) => `
             AND o.sample_status IN (${UNDRAWN_LAB_SQL}))
         + (SELECT count(*)::int ${TODAY_CASES(v, p)}
             AND NOT ${CASE_ACTION("'sample_taken', 'report_uploaded'")}
+            AND NOT ${CASE_REPORTED}
             AND NOT ${caseSampledBeforeVisit(v)}
             AND (${manualParam}
                  OR (lc.raw_list_json->>'phlebotomy_status' IS DISTINCT FROM 'Completed'
@@ -112,7 +115,8 @@ const MACHINE_HOLD_SQL = (v, p, manualParam) => `
             AND o.sample_status = 'drawing')
         + (SELECT count(*)::int ${TODAY_CASES(v, p)}
             AND ${CASE_ACTION("'drawing_started'")}
-            AND NOT ${CASE_ACTION("'sample_taken', 'report_uploaded'")})
+            AND NOT ${CASE_ACTION("'sample_taken', 'report_uploaded'")}
+            AND NOT ${CASE_REPORTED})
           AS lab_drawing,
         (SELECT count(*)::int FROM giniflow_lab_orders o
           WHERE o.visit_id = ${v}.id AND o.urgency = 'today' AND o.kind = 'lab'
@@ -122,7 +126,11 @@ const MACHINE_HOLD_SQL = (v, p, manualParam) => `
         (SELECT count(*)::int FROM giniflow_lab_orders o
           WHERE o.visit_id = ${v}.id AND o.urgency = 'today' AND o.kind = 'lab'
             AND o.payment_status NOT IN ('paid', 'claim_approved')
-            AND o.sample_status NOT IN ('uploaded', 'reported')) AS lab_unpaid,
+            AND o.sample_status NOT IN ('uploaded', 'reported'))
+        + (SELECT count(*)::int ${TODAY_CASES(v, p)}
+            AND NOT EXISTS (SELECT 1 FROM giniflow_visit_steps lb
+                             WHERE lb.visit_id = ${v}.id AND lb.step_catalog_id = 'lab_billing'
+                               AND lb.status = 'done')) AS lab_unpaid,
         GREATEST(
           (SELECT max(e.occurred_at) FROM giniflow_lab_order_events e
              JOIN giniflow_lab_orders o ON o.id = e.lab_order_id
@@ -130,7 +138,10 @@ const MACHINE_HOLD_SQL = (v, p, manualParam) => `
               AND e.track = 'sample' AND e.status = 'sample_collected'),
           (SELECT max(a.created_at) FROM giniflow_lab_case_actions a
             WHERE a.action = 'sample_taken'
-              AND a.case_no IN (SELECT lc.case_no ${TODAY_CASES(v, p)}))
+              AND a.case_no IN (SELECT lc.case_no ${TODAY_CASES(v, p)})),
+          (SELECT max((COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'reported_on')::timestamptz)
+             ${TODAY_CASES(v, p)}
+             AND NOT ${CASE_ACTION("'sample_taken'")})
         ) AS lab_drawn_at,
         LEAST(
           (SELECT min(o.created_at) FROM giniflow_lab_orders o
@@ -938,7 +949,10 @@ export async function getTestSegments(visitId, now = new Date(), db = pool) {
                           WHERE e.visit_id = v.id AND e.status = v.current_status)
               END AS end_at,
               m.steps AS machine_steps, m.vitals_at, m.lab_undrawn, m.lab_open,
-              m.lab_drawn_at, m.lab_ordered_at,
+              m.lab_drawn_at, m.lab_ordered_at, m.lab_unpaid,
+              (SELECT max(lb.completed_at) FROM giniflow_visit_steps lb
+                WHERE lb.visit_id = v.id AND lb.step_catalog_id = 'lab_billing'
+                  AND lb.status = 'done') AS lab_billing_done_at,
               (SELECT min(e.occurred_at) FROM giniflow_lab_order_events e
                  JOIN giniflow_lab_orders o ON o.id = e.lab_order_id
                 WHERE o.visit_id = v.id AND o.urgency = 'today' AND o.kind = 'lab'
@@ -1023,8 +1037,10 @@ export async function getTestSegments(visitId, now = new Date(), db = pool) {
       vitalsAt: r.vitals_at,
       testsOrderedAt: earliest(r.orders_created_at, r.lab_ordered_at),
       labOrderedAt: r.lab_ordered_at,
-      labPaidAt: r.has_lab_order ? r.lab_order_paid_at : r.lab_ordered_at,
-      labUnpaid: r.has_lab_order && !r.lab_order_paid_at,
+      labPaidAt: r.has_lab_order
+        ? r.lab_order_paid_at
+        : latest(r.lab_ordered_at, r.lab_billing_done_at),
+      labUnpaid: r.has_lab_order ? !r.lab_order_paid_at : r.lab_unpaid > 0,
       labUndrawn: r.lab_undrawn ?? 0,
       labOpen: r.lab_open ?? 0,
       labDrawnAt: r.lab_drawn_at,

@@ -1,4 +1,3 @@
-import crypto from "node:crypto";
 import { test, expect } from "@playwright/test";
 import { query } from "../../helpers/db.mjs";
 import { getPool } from "../../helpers/db.mjs";
@@ -11,7 +10,6 @@ const series = await import("../../../server/services/billing/billSeries.js");
 
 const db = getPool();
 const ctx = { actorId: USERS.admin.id, ip: "10.7.7.7" };
-const tag = crypto.randomBytes(2).toString("hex").toUpperCase();
 const failure = (promise) => promise.then(() => null).catch((e) => e);
 const VALID_GSTIN = "27AAPFU0939F1ZV";
 const OTHER_VALID = "29AAGCB7383J1Z4";
@@ -157,64 +155,64 @@ test.describe.serial("P1-23 billing settings and bill series services", () => {
 
   test("6. a bill series is created with its prefix and shows the next number", async () => {
     const main = await series.saveSeries(
-      { series: `main${tag}`, fy: "2026-27", prefix: "GAC/26-27/" },
+      { series: "main", fy: "2031-32", prefix: "GAC/26-27/" },
       ctx,
       db,
     );
     expect(main).toMatchObject({
-      series: `MAIN${tag}`,
-      fy: "2026-27",
+      series: "MAIN",
+      fy: "2031-32",
       prefix: "GAC/26-27/",
       number_width: 6,
       next_no: 1,
       next_number: "GAC/26-27/000001",
     });
     const again = await series.saveSeries(
-      { series: `Main${tag}`, fy: "2026-27", prefix: "GAC/2627/" },
+      { series: "Main", fy: "2031-32", prefix: "GAC/2627/" },
       ctx,
       db,
     );
     expect(again.prefix, "the same series in another case updates it").toBe("GAC/2627/");
     const receipt = await series.saveSeries(
-      { series: `RCPT${tag}`, fy: "2026-27", prefix: "R/", number_width: 4 },
+      { series: "RCPT", fy: "2031-32", prefix: "R/", number_width: 4 },
       ctx,
       db,
     );
     expect(receipt.next_number).toBe("R/0001");
-    const list = (await series.listSeries(db)).filter((s) => s.series.endsWith(tag));
-    expect(list.map((s) => s.series)).toEqual([`MAIN${tag}`, `RCPT${tag}`]);
+    const list = (await series.listSeries(db)).filter((s) => s.fy === "2031-32");
+    expect(list.map((s) => s.series)).toEqual(["MAIN", "RCPT"]);
     const audit = await query(
       `SELECT action FROM billing_audit WHERE entity = 'bill_series' AND entity_id = $1 ORDER BY id`,
-      [`MAIN${tag}:2026-27`],
+      ["MAIN:2031-32"],
     );
     expect(audit.rows.map((r) => r.action)).toEqual(["create", "update"]);
   });
 
   test("7. the next number can only go up, and must fit its width", async () => {
     const raised = await series.saveSeries(
-      { series: `MAIN${tag}`, fy: "2026-27", next_no: 14413 },
+      { series: "MAIN", fy: "2031-32", next_no: 14413 },
       ctx,
       db,
     );
     expect(raised).toMatchObject({ next_no: 14413, next_number: "GAC/2627/014413" });
     await refused(
-      series.saveSeries({ series: `MAIN${tag}`, fy: "2026-27", next_no: 100 }, ctx, db),
+      series.saveSeries({ series: "MAIN", fy: "2031-32", next_no: 100 }, ctx, db),
       409,
       /can only go up \(it is 14413\)/,
     );
     await refused(
-      series.saveSeries({ series: `RCPT${tag}`, fy: "2026-27", next_no: 10000 }, ctx, db),
+      series.saveSeries({ series: "RCPT", fy: "2031-32", next_no: 10000 }, ctx, db),
       400,
       /doesn't fit in 4 digits/,
     );
     const wider = await series.saveSeries(
-      { series: `RCPT${tag}`, fy: "2026-27", number_width: 5, next_no: 10000 },
+      { series: "RCPT", fy: "2031-32", number_width: 5, next_no: 10000 },
       ctx,
       db,
     );
     expect(wider.next_number).toBe("R/10000");
     await refused(
-      series.saveSeries({ series: `MAIN${tag}`, fy: "2026-27" }, ctx, db),
+      series.saveSeries({ series: "MAIN", fy: "2031-32" }, ctx, db),
       400,
       /Nothing to change/,
     );
@@ -222,15 +220,16 @@ test.describe.serial("P1-23 billing settings and bill series services", () => {
 
   test("8. bad series input is refused", async () => {
     const cases = [
-      [{ series: "", fy: "2026-27" }, /blank or contain spaces/],
-      [{ series: "MA IN", fy: "2026-27" }, /blank or contain spaces/],
-      [{ series: `X${tag}`, fy: "2026-28" }, /like 2026-27/],
-      [{ series: `X${tag}`, fy: "26-27" }, /like 2026-27/],
-      [{ series: `X${tag}`, fy: "2026-27", prefix: "GAC 26/" }, /can't contain spaces/],
-      [{ series: `X${tag}`, fy: "2026-27", prefix: 5 }, /must be text/],
-      [{ series: `X${tag}`, fy: "2026-27", number_width: 0 }, /from 1 to 12/],
-      [{ series: `X${tag}`, fy: "2026-27", next_no: 0 }, /whole number from 1/],
-      [{ series: `X${tag}`, fy: "2026-27", next_no: "1.5" }, /whole number/],
+      [{ series: "", fy: "2031-32" }, /must be one of: MAIN, RCPT/],
+      [{ series: "MIAN", fy: "2031-32" }, /must be one of: MAIN, RCPT/],
+      [{ series: "MA IN", fy: "2031-32" }, /must be one of: MAIN, RCPT/],
+      [{ series: "MAIN", fy: "2026-28" }, /like 2026-27/],
+      [{ series: "MAIN", fy: "26-27" }, /like 2026-27/],
+      [{ series: "MAIN", fy: "2031-32", prefix: "GAC 26/" }, /can't contain spaces/],
+      [{ series: "MAIN", fy: "2031-32", prefix: 5 }, /must be text/],
+      [{ series: "MAIN", fy: "2031-32", number_width: 0 }, /from 1 to 12/],
+      [{ series: "MAIN", fy: "2031-32", next_no: 0 }, /whole number from 1/],
+      [{ series: "MAIN", fy: "2031-32", next_no: "1.5" }, /whole number/],
     ];
     for (const [input, message] of cases) {
       await refused(series.saveSeries(input, ctx, db), 400, message, JSON.stringify(input));
@@ -242,5 +241,35 @@ test.describe.serial("P1-23 billing settings and bill series services", () => {
     expect(series.financialYear("2026-04-01")).toBe("2026-27");
     expect(series.financialYear("2099-06-01")).toBe("2099-00");
     expect(series.formatNumber({ prefix: "GAC/", number_width: 6 }, 42)).toBe("GAC/000042");
+  });
+
+  test("10. saving without changing anything writes no audit row", async () => {
+    const count = async (entity) =>
+      (await query(`SELECT count(*)::int AS n FROM billing_audit WHERE entity = $1`, [entity]))
+        .rows[0].n;
+    const current = await settings.getSettings(db);
+    const settingsBefore = await count("billing_settings");
+    const same = await settings.updateSettings(
+      { discount_stacking: current.discount_stacking, allow_pay_later: current.allow_pay_later },
+      ctx,
+      db,
+    );
+    expect(same.discount_stacking).toBe(current.discount_stacking);
+    expect(await count("billing_settings")).toBe(settingsBefore);
+    await settings.updateSettings({ allow_pay_later: !current.allow_pay_later }, ctx, db);
+    expect(await count("billing_settings"), "a real change is still logged").toBe(
+      settingsBefore + 1,
+    );
+    const seriesBefore = await count("bill_series");
+    const row = (await series.listSeries(db)).find(
+      (s) => s.series === "MAIN" && s.fy === "2031-32",
+    );
+    const unchanged = await series.saveSeries(
+      { series: "MAIN", fy: "2031-32", prefix: row.prefix, next_no: row.next_no },
+      ctx,
+      db,
+    );
+    expect(unchanged.next_number).toBe(row.next_number);
+    expect(await count("bill_series")).toBe(seriesBefore);
   });
 });

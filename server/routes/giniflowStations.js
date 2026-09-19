@@ -1164,6 +1164,7 @@ router.post(
           claimNo: req.body.claimNo,
           note: req.body.note,
           version: req.body.version,
+          confirmNotOnBill: req.body.confirmNotOnBill === true,
         }),
       );
     } catch (e) {

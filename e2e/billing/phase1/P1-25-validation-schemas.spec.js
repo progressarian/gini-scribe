@@ -259,8 +259,8 @@ test.describe("P1-25 validation schemas", () => {
     expect(deleted.deleted).toBe(true);
     const saved = await series.saveSeries(
       parsed("billingSeriesSaveSchema", {
-        series: `v${tag}`,
-        fy: "2026-27",
+        series: "RCPT",
+        fy: "2051-52",
         prefix: "V/",
         number_width: "4",
         next_no: "",

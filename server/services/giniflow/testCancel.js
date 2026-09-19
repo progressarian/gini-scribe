@@ -6,6 +6,7 @@ import {
   NOTE_REQUIRED_CANCEL_REASON,
   TEST_CANCEL_REASON_VALUES,
   SYNC_CANCEL_REASONS,
+  NOT_ON_BILL_REASON,
 } from "../../../shared/testCancelReasons.js";
 import { getMachines } from "./machineCatalog.js";
 import {
@@ -68,8 +69,8 @@ export async function billSuppressor(db, visitId) {
   const { rows } = await db.query(
     `SELECT kind, test_name, machine_id, bill_line
        FROM giniflow_test_cancellations
-      WHERE visit_id = $1`,
-    [visitId],
+      WHERE visit_id = $1 AND reason <> $2`,
+    [visitId, NOT_ON_BILL_REASON],
   );
   return ({ kind, testName, machineId, line }) =>
     rows.some(
@@ -669,7 +670,8 @@ const refundOf = (line, parts = 1) =>
     ? money(Number(line.refunded) / Math.max(1, parts))
     : null;
 
-const autoCancelMode = () => String(process.env.SCRIBE_BILL_AUTO_CANCEL ?? "1").toLowerCase();
+export const autoCancelMode = () =>
+  String(process.env.SCRIBE_BILL_AUTO_CANCEL ?? "1").toLowerCase();
 
 const orderedBeforeDeath = (createdAt, line) =>
   !line.deadSince || !createdAt || new Date(createdAt) <= new Date(line.deadSince);

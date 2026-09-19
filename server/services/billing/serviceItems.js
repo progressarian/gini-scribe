@@ -525,3 +525,24 @@ export async function notPricedList(db = pool) {
       .map(({ item_active, ...row }) => ({ ...row, status: status(row) })),
   };
 }
+
+export async function itemChoices(db = pool) {
+  const { rows: tests } = await db.query(
+    `SELECT c.id, c.test_name, c.category, i.id AS item_id, i.code AS item_code
+       FROM giniflow_test_catalog c
+       LEFT JOIN service_items i ON i.test_catalog_id = c.id
+      WHERE c.is_active
+      ORDER BY c.test_name`,
+  );
+  const { rows: consultants } = await db.query(
+    `SELECT id, name, short_name FROM doctors
+      WHERE role = 'consultant' AND COALESCE(is_active, TRUE)
+      ORDER BY name, id`,
+  );
+  return {
+    kinds: ITEM_KINDS,
+    visitTypes: CONSULTATION_VISIT_TYPES,
+    tests,
+    consultants: consultants.filter((d) => !isLabOnlyDoctor(d.name)),
+  };
+}

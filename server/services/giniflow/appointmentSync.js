@@ -284,7 +284,7 @@ export const LAB_ONLY_EXIT_GRACE_MINUTES = 15;
 
 export async function sweepLabOnlyExits(client, day, graceMinutes = LAB_ONLY_EXIT_GRACE_MINUTES) {
   const { rows } = await client.query(
-    `SELECT v.id, lab.last_report
+    `SELECT v.id, GREATEST(lab.last_report, step.last_at) AS exit_at
        FROM giniflow_visits v
        JOIN patients p ON p.id = v.patient_id
        JOIN LATERAL (
@@ -304,14 +304,28 @@ export async function sweepLabOnlyExits(client, day, graceMinutes = LAB_ONLY_EXI
                          AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))
            ) c
        ) lab ON TRUE
+       CROSS JOIN LATERAL (
+         SELECT max(e.occurred_at) AS last_at FROM giniflow_visit_events e
+          WHERE e.visit_id = v.id AND ${NOT_A_MARKER_SQL("e.status")}
+       ) step
       WHERE v.visit_date = $1::date
         AND v.current_status <> ALL($3)
         AND lab.cases > 0
         AND lab.pending = 0
-        AND lab.last_report < NOW() - ($2 || ' minutes')::interval
+        AND GREATEST(lab.last_report, step.last_at) < NOW() - ($2 || ' minutes')::interval
         AND (SELECT h.tests_pending FROM (${TESTS_HOLD_SQL("v", "p")}) h) = 0
+        AND NOT EXISTS (
+          SELECT 1 FROM giniflow_visit_steps s
+           WHERE s.visit_id = v.id AND s.chain_status = ANY($5)
+        )
         AND ${labOnlyPredicate("v", "$4")}`,
-    [day, graceMinutes, [...EXCEPTION_STATUSES, ...TERMINAL_STATUSES], LAB_ONLY_DOCTOR],
+    [
+      day,
+      graceMinutes,
+      [...EXCEPTION_STATUSES, ...TERMINAL_STATUSES],
+      LAB_ONLY_DOCTOR,
+      ["sd_pending", "with_sd", "ready_for_doctor", "with_doctor"],
+    ],
   );
 
   let swept = 0;
@@ -326,7 +340,7 @@ export async function sweepLabOnlyExits(client, day, graceMinutes = LAB_ONLY_EXI
         // Dated when the patient actually finished — the last report — not when
         // the sweep happened to notice. Stamping NOW would give a visit closed
         // days later a journey of several thousand minutes.
-        occurredAt: row.last_report,
+        occurredAt: row.exit_at,
         meta: {
           source: "giniflow",
           reason: "lab_only_reports_complete",
@@ -460,6 +474,26 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
     // Assignment stays even on a manual floor: who the patient is booked with is
     // part of the list reception is given, not a step anybody performs. Still a
     // COALESCE — a consultant who has claimed them keeps them.
+    result.repointed = (
+      await client.query(
+        `UPDATE giniflow_visits v
+            SET appointment_id = consult.id, updated_at = NOW()
+           FROM appointments cur
+           CROSS JOIN LATERAL (
+             SELECT a.id FROM appointments a
+              WHERE a.patient_id = cur.patient_id
+                AND a.appointment_date = cur.appointment_date
+                AND a.status NOT IN ('cancelled', 'no_show')
+                AND lower(COALESCE(btrim(a.doctor_name), '')) <> lower($2)
+              ORDER BY a.id DESC LIMIT 1
+           ) consult
+          WHERE cur.id = v.appointment_id
+            AND v.visit_date = $1::date
+            AND lower(btrim(cur.doctor_name)) = lower($2)`,
+        [day, LAB_ONLY_DOCTOR],
+      )
+    ).rowCount;
+
     const assigned = await client.query(
       `UPDATE giniflow_visits v
           SET assigned_doctor_id = doc.id, updated_at = NOW()

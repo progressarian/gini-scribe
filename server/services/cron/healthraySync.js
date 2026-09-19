@@ -36,6 +36,7 @@ import {
   upsertPatient,
   syncDoctors,
   upsertAppointment,
+  findUnlinkedBooking,
   syncLabResults,
   syncMedications,
   syncDiagnoses,
@@ -51,7 +52,13 @@ import {
 } from "../healthray/db.js";
 import { createLogger } from "../logger.js";
 import { WAITING_ROLE } from "../flow/journey.js";
-import { tryAcquireCronLock, yieldToApp, CRON_LOCK_KEYS } from "./lowPriority.js";
+import {
+  tryAcquireCronLock,
+  tryAcquireCronLease,
+  cronLeaseEnabled,
+  yieldToApp,
+  CRON_LOCK_KEYS,
+} from "./lowPriority.js";
 const { log, error } = createLogger("HealthRay Sync");
 
 // Pause between items so user HTTP requests get event-loop time between
@@ -773,7 +780,8 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
   }
 
   // ── Save appointment ──
-  const localApptId = await upsertAppointment(existing?.id || null, {
+  const bookingId = existing ? null : await findUnlinkedBooking(patientId, apptDate);
+  const localApptId = await upsertAppointment(existing?.id || bookingId, {
     patientId,
     name: appt.patient_name || patientData.name,
     fileNo: patientData.fileNo,
@@ -1236,7 +1244,8 @@ async function runSync(date, prefetched = null, opts = {}) {
   // caller's lock — otherwise a long range backfill would starve itself.
   let releaseLock = null;
   if (!prefetched) {
-    releaseLock = await tryAcquireCronLock(`HealthRay Sync ${date}`, CRON_LOCK_KEYS.HEALTHRAY_SYNC);
+    const acquire = cronLeaseEnabled() ? tryAcquireCronLease : tryAcquireCronLock;
+    releaseLock = await acquire(`HealthRay Sync ${date}`, CRON_LOCK_KEYS.HEALTHRAY_SYNC);
     if (!releaseLock) return { date, skippedRun: true };
   }
 

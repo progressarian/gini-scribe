@@ -11,7 +11,10 @@ export const SYNC_CANCEL_REASONS = [
   { value: "refunded_in_healthray", label: "Refunded in HealthRay" },
   { value: "cancelled_in_healthray", label: "Cancelled in HealthRay" },
   { value: "removed_from_bill", label: "Removed from the HealthRay bill" },
+  { value: "not_on_bill", label: "Not on the HealthRay bill" },
 ];
+
+export const NOT_ON_BILL_REASON = "not_on_bill";
 
 export const TEST_CANCEL_REASON_VALUES = TEST_CANCEL_REASONS.map((r) => r.value);
 

@@ -173,10 +173,63 @@ async function clearBillBlock() {
   log("Auth", "Bill reads working again — bill block cleared");
 }
 
-async function gatedFetch(url, options, timeoutMs) {
+export const BILL_MIN_GAP_MS = Number(process.env.HEALTHRAY_BILL_MIN_GAP_MS) || 15_000;
+const KV_BILL_SLOT = "healthray_bill_last_read_at";
+const BILL_SLOT_SQL = `
+  INSERT INTO app_kv (key, value, updated_at) VALUES ($1, to_jsonb($2::bigint), NOW())
+  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+   WHERE jsonb_typeof(app_kv.value) <> 'number'
+      OR (app_kv.value #>> '{}')::numeric <= $2::numeric - $3::numeric
+  RETURNING 1`;
+let billLastLocal = 0;
+
+const billSlotBusy = (nextAt) =>
+  Object.assign(
+    new Error(
+      `Bill read deferred — the next HealthRay bill read is due ${new Date(nextAt).toISOString()}`,
+    ),
+    { billSlotBusy: true },
+  );
+
+async function tryBillSlot(now) {
+  if (IGNORE_SHARED_BLOCK) {
+    if (now - billLastLocal < BILL_MIN_GAP_MS) return billLastLocal + BILL_MIN_GAP_MS;
+    billLastLocal = now;
+    return 0;
+  }
+  const taken = await pool.query(BILL_SLOT_SQL, [KV_BILL_SLOT, now, BILL_MIN_GAP_MS]);
+  if (taken.rowCount) return 0;
+  const last = Number((await kvGet(KV_BILL_SLOT)) || now);
+  return last + BILL_MIN_GAP_MS;
+}
+
+async function takeBillSlot(waitMs) {
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    let nextAt;
+    try {
+      nextAt = await tryBillSlot(Date.now());
+    } catch {
+      throw billSlotBusy(Date.now() + BILL_MIN_GAP_MS);
+    }
+    if (!nextAt) return;
+    if (nextAt > deadline) throw billSlotBusy(nextAt);
+    await new Promise((r) => setTimeout(r, Math.max(50, nextAt - Date.now())));
+  }
+}
+
+async function gatedFetch(
+  url,
+  options,
+  timeoutMs,
+  { slotWaitMs = BILL_MIN_GAP_MS, slotTaken = false } = {},
+) {
   const billRead = isBillRead(url);
   await assertNotBlocked();
-  if (billRead) await assertBillReadsAllowed();
+  if (billRead) {
+    await assertBillReadsAllowed();
+    if (!slotTaken) await takeBillSlot(slotWaitMs);
+  }
   const release = await healthrayLimiter.acquire();
   try {
     await assertNotBlocked();
@@ -462,7 +515,7 @@ export function fetchPatientRecentVisits(patientId, doctorId, perPage = 5) {
 
 export async function fetchPatientTransactions(
   patientId,
-  { txnType = "OPD", limit = 25 } = {},
+  { txnType = "OPD", limit = 25, slotWaitMs = BILL_MIN_GAP_MS } = {},
   isRetry = false,
 ) {
   if (!sessionCookie) await loadPersistedState();
@@ -478,6 +531,7 @@ export async function fetchPatientTransactions(
       body: JSON.stringify({ startRow: 0, endRow: limit }),
     },
     HEALTHRAY_TIMEOUT_MS,
+    { slotWaitMs, slotTaken: isRetry },
   );
   const contentType = res.headers.get("content-type") || "";
   if (res.status === 429 || (res.status === 403 && !contentType.includes("json"))) {

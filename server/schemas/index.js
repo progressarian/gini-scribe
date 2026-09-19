@@ -709,6 +709,7 @@ export const giniflowPaymentSchema = z.object({
   // a retried request) collects the same amount again, which is the whole reason
   // the column exists.
   version: z.coerce.number().int().min(0).optional(),
+  confirmNotOnBill: z.boolean().optional(),
 });
 
 export const giniflowPaymentSchemaChecked = giniflowPaymentSchema.superRefine((v, ctx) => {

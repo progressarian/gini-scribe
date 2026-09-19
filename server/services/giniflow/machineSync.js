@@ -11,6 +11,7 @@ import { getMachines } from "./machineCatalog.js";
 import { billSuppressor, cancelDeadBillTests } from "./testCancel.js";
 import { CANCELLABLE_ORDER_STATUSES } from "../../../shared/testCancelReasons.js";
 import { machineCaseListOnly } from "../../../shared/manualFloor.js";
+import { LAB_TEST_STEP_IDS } from "../../../shared/journeyOrder.js";
 import { createLogger } from "../logger.js";
 import { billReadsBlockedUntil } from "./healthrayRefresh.js";
 import { IST_TODAY } from "./statusEngine.js";
@@ -19,6 +20,7 @@ import {
   billedMachineLines,
   priceOrdersFromBill,
   readPatientBill,
+  repricePaidOrdersFromBill,
   syncBillCharges,
   reconcileTestSteps,
 } from "./patientBill.js";
@@ -29,6 +31,7 @@ const SCAN_BATCH = Number(process.env.SCRIBE_MACHINE_SCAN_BATCH || 12);
 const RESCAN_MIN = Number(process.env.SCRIBE_MACHINE_RESCAN_MIN || 20);
 const BILL_READ_RESCAN_MIN = Number(process.env.SCRIBE_MACHINE_BILL_READ_RESCAN_MIN || 60);
 const OPEN_TESTS_RESCAN_MIN = Number(process.env.SCRIBE_BILL_OPEN_TESTS_RESCAN_MIN || 15);
+const UNCONFIRMED_TESTS_RESCAN_MIN = Number(process.env.SCRIBE_BILL_TESTS_RESCAN_MIN || 5);
 
 const REFUNDABLE_OPEN_SQL = `(
   EXISTS (SELECT 1 FROM giniflow_lab_orders ro
@@ -36,6 +39,20 @@ const REFUNDABLE_OPEN_SQL = `(
              AND ro.sample_status = ANY(ARRAY[${CANCELLABLE_ORDER_STATUSES.map((st) => `'${st}'`).join(", ")}]))
   OR EXISTS (SELECT 1 FROM giniflow_bill_charges rc
               WHERE rc.visit_id = v.id AND rc.payment_status = 'pending'))`;
+const BILLED_SQL = `EXISTS (SELECT 1 FROM giniflow_patient_bills b
+                             WHERE b.patient_id = v.patient_id AND b.bill_date = v.visit_date
+                               AND b.status = 'billed')`;
+const UNCONFIRMED_TESTS_SQL = `EXISTS (
+  SELECT 1 FROM giniflow_visit_steps us
+    LEFT JOIN flow_step_catalog uc ON uc.id = us.step_catalog_id
+   WHERE us.visit_id = v.id AND us.status = 'pending' AND us.source IN ('template', 'added')
+     AND (us.step_catalog_id = ANY(ARRAY[${LAB_TEST_STEP_IDS.map((id) => `'${id}'`).join(", ")}])
+          OR COALESCE(uc.machine, FALSE)))`;
+const BILL_TIER_SQL = `(CASE
+  WHEN NOT ${BILLED_SQL} AND ${UNCONFIRMED_TESTS_SQL} THEN 'A'
+  WHEN NOT ${BILLED_SQL} THEN 'B'
+  WHEN ${REFUNDABLE_OPEN_SQL} THEN 'C'
+  ELSE 'D' END)`;
 const EXIT_GRACE_MIN = Number(process.env.SCRIBE_MACHINE_EXIT_GRACE_MIN || 0);
 const NEVER_ON_FLOOR = ["booked", "confirmed"];
 const NEVER_ARRIVED = ["no_show", "cancelled"];
@@ -100,7 +117,9 @@ const TARGET_SELECT = `
             COALESCE(a.healthray_patient_id, sameday.healthray_patient_id,
                      prior.healthray_patient_id, lab.healthray_patient_id) AS hr_patient_id,
             ${REFUNDABLE_OPEN_SQL} AS refundable_open,
-            p.name
+            p.name,
+            v.machine_scan_at,
+            v.created_at AS visit_created_at
        FROM giniflow_visits v
        JOIN patients p ON p.id = v.patient_id
        LEFT JOIN appointments a ON a.id = v.appointment_id
@@ -123,21 +142,24 @@ const TARGET_SELECT = `
         AND COALESCE(a.healthray_patient_id, sameday.healthray_patient_id,
                      prior.healthray_patient_id, lab.healthray_patient_id) IS NOT NULL`;
 
-async function scanTargets(visitDate, db, limit) {
+export async function scanTargets(visitDate, db, limit) {
   const { rows } = await db.query(
-    `${TARGET_SELECT}
-        AND v.visit_date = $2::date
-        AND v.current_status <> ALL($5::text[])
-        AND (v.current_status <> ALL($7::text[])
-             OR v.updated_at > NOW() - ($8 || ' minutes')::interval)
-        AND (v.machine_scan_at IS NULL
-             OR v.machine_scan_at < NOW() - ((CASE
-                  WHEN EXISTS (SELECT 1 FROM giniflow_patient_bills b
-                                WHERE b.patient_id = v.patient_id AND b.bill_date = v.visit_date
-                                  AND b.status = 'billed')
-                  THEN (CASE WHEN ${REFUNDABLE_OPEN_SQL} THEN $9 ELSE $6 END)
-                  ELSE $3 END) || ' minutes')::interval)
-      ORDER BY v.machine_scan_at NULLS FIRST, v.created_at
+    `SELECT t.* FROM (
+       SELECT due.*, ${BILL_TIER_SQL} AS bill_tier
+         FROM (${TARGET_SELECT}
+                 AND v.visit_date = $2::date
+                 AND v.current_status <> ALL($5::text[])
+                 AND (v.current_status <> ALL($7::text[])
+                      OR v.updated_at > NOW() - ($8 || ' minutes')::interval)) due
+         JOIN giniflow_visits v ON v.id = due.visit_id
+     ) t
+      WHERE t.machine_scan_at IS NULL
+         OR t.machine_scan_at < NOW() - ((CASE t.bill_tier
+              WHEN 'A' THEN $10
+              WHEN 'B' THEN $3
+              WHEN 'C' THEN $9
+              ELSE $6 END) || ' minutes')::interval
+      ORDER BY t.bill_tier, t.machine_scan_at NULLS FIRST, t.visit_created_at
       LIMIT $4`,
     [
       NEVER_ARRIVED,
@@ -149,6 +171,7 @@ async function scanTargets(visitDate, db, limit) {
       FINISHED,
       String(EXIT_GRACE_MIN),
       String(OPEN_TESTS_RESCAN_MIN),
+      String(UNCONFIRMED_TESTS_RESCAN_MIN),
     ],
   );
   return rows;
@@ -165,7 +188,7 @@ const notYetOrdered = async (client, visitId, lines) => {
   return lines.filter((l) => !rows.some((r) => r.test_name === l.name));
 };
 
-export async function syncMachineOrdersForVisit(visit, db = pool) {
+export async function syncMachineOrdersForVisit(visit, db = pool, { slotWaitMs } = {}) {
   const bill = await readPatientBill(
     {
       patientId: visit.patient_id,
@@ -174,8 +197,12 @@ export async function syncMachineOrdersForVisit(visit, db = pool) {
       date: visit.visit_date,
     },
     db,
-    visit.refundable_open ? { maxAgeMin: OPEN_TESTS_RESCAN_MIN } : undefined,
+    {
+      ...(visit.refundable_open ? { maxAgeMin: OPEN_TESTS_RESCAN_MIN } : {}),
+      slotWaitMs,
+    },
   );
+  if (bill.deferred) return { raised: 0, lines: 0, labSteps: [], removed: null, deferred: true };
   if (bill.status !== "billed") return { raised: 0, lines: 0, labSteps: [], removed: null };
   const machines = await getMachines(db);
   const lines = billedMachineLines(bill, machines);
@@ -234,6 +261,22 @@ export async function syncMachineOrdersForVisit(visit, db = pool) {
       const repriced = await priceOrdersFromBill(client, visit.visit_id, bill, machines);
       if (repriced)
         log("price", `${visit.name}: ${repriced} order(s) repriced to the HealthRay bill`);
+      const paidReprice = await repricePaidOrdersFromBill(client, visit.visit_id, bill, machines);
+      for (const r of paidReprice.repriced) {
+        log(
+          "price-paid",
+          `${visit.name}: ${r.tests} — ₹${r.from} → ₹${r.to} (${r.lines.join("; ")})`,
+        );
+      }
+      for (const r of paidReprice.wouldReprice) {
+        log(
+          "price-paid-dry",
+          `${visit.name}: would reprice ${r.tests} — ₹${r.from} → ₹${r.to} (${r.lines.join("; ")})`,
+        );
+      }
+      for (const r of paidReprice.refused) {
+        log("price-paid-refused", `${visit.name}: ${r.tests} left as paid — ${r.reason}`);
+      }
       if (await syncBillCharges(client, visit.visit_id, bill, machines, skip)) {
         log("charge", `${visit.name}: HealthRay charge(s) waiting at reception`);
       }
@@ -251,8 +294,14 @@ export async function syncMachineOrdersForVisit(visit, db = pool) {
       if (removed.removedSteps || removed.removedOrders) {
         log(
           "unbilled",
-          `${visit.name}: removed ${removed.removedSteps} step(s), ${removed.removedOrders} order(s) not on the bill`,
+          `${visit.name}: cancelled ${removed.removedOrders} order(s), skipped ${removed.removedSteps} step(s) not on the bill`,
         );
+      }
+      for (const w of removed.wouldCancel) {
+        log("unbilled-dry", `${visit.name}: would cancel ${w.test || w.step} (${w.reason})`);
+      }
+      for (const f of removed.failed) {
+        error("unbilled", `${visit.name}: could not cancel ${f.test}: ${f.error}`);
       }
     }
     await client.query("COMMIT");
@@ -293,21 +342,32 @@ export async function runMachineSync(dateStr, { limit = SCAN_BATCH, db = pool } 
   const targets = await scanTargets(visitDate, db, limit);
   let raised = 0;
   let failed = 0;
+  let scanned = 0;
   for (const visit of targets) {
     try {
-      raised += (await syncMachineOrdersForVisit(visit, db)).raised;
+      const result = await syncMachineOrdersForVisit(visit, db, { slotWaitMs: 0 });
+      if (result.deferred) break;
+      raised += result.raised;
     } catch (e) {
       failed++;
       error("scan", `${visit.name}: ${e.message}`);
     }
+    scanned++;
     await db.query(`UPDATE giniflow_visits SET machine_scan_at = NOW() WHERE id = $1`, [
       visit.visit_id,
     ]);
   }
+  const waiting = targets.length - scanned;
   if (targets.length) {
-    log("run", `scanned ${targets.length}, raised ${raised} order(s), ${failed} failed`);
+    const tiers = ["A", "B", "C", "D"]
+      .map((t) => `${t} ${targets.filter((v) => v.bill_tier === t).length}`)
+      .join(" · ");
+    log(
+      "run",
+      `scanned ${scanned}, raised ${raised} order(s), ${failed} failed${waiting ? `, ${waiting} waiting for the next bill-read slot` : ""} (due: ${tiers})`,
+    );
   }
-  return { scanned: targets.length, raised, failed };
+  return { scanned, raised, failed, waiting };
 }
 
 const LAB_STEPS = ["lab_billing", "blood_sample"];
@@ -360,6 +420,7 @@ export async function healthrayBillSteps(patientId, { date = null, db = pool } =
     db,
   );
   const empty = { labTests: [], machines: [], steps: [], readAt: bill.readAt };
+  if (bill.deferred && bill.status === "unknown") return { ...empty, status: "loading" };
   if (bill.status === "unknown") {
     return { ...empty, status: "blocked", blockedUntil: await billReadsBlockedUntil(db) };
   }

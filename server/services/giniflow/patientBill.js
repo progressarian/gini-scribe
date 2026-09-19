@@ -9,6 +9,9 @@ import {
   isTestStep,
 } from "../../../shared/journeyOrder.js";
 import { paise, rupeesFromPaise } from "../../../shared/labPayment.js";
+import { NOT_ON_BILL_REASON } from "../../../shared/testCancelReasons.js";
+import { autoCancelMode, cancelTestIn } from "./testCancel.js";
+import { writeAudit } from "../billing/audit.js";
 
 export const BILL_MAX_AGE_MIN = Number(process.env.SCRIBE_BILL_MAX_AGE_MIN || 60);
 export const NO_BILL_MAX_AGE_MIN = Number(process.env.SCRIBE_NO_BILL_MAX_AGE_MIN || 20);
@@ -83,7 +86,7 @@ const ageMinutes = (bill) =>
 export async function readPatientBill(
   { patientId, hrPatientId, healthrayId = null, date },
   db = pool,
-  { maxAgeMin = BILL_MAX_AGE_MIN, noBillMaxAgeMin = NO_BILL_MAX_AGE_MIN } = {},
+  { maxAgeMin = BILL_MAX_AGE_MIN, noBillMaxAgeMin = NO_BILL_MAX_AGE_MIN, slotWaitMs } = {},
 ) {
   const stored = await storedBill(patientId, date, db);
   const fresh = stored?.status === "billed" ? maxAgeMin : noBillMaxAgeMin;
@@ -92,8 +95,9 @@ export async function readPatientBill(
 
   let txns;
   try {
-    txns = await fetchPatientTransactions(hrPatientId);
+    txns = await fetchPatientTransactions(hrPatientId, { slotWaitMs });
   } catch (e) {
+    if (e.billSlotBusy) return { ...(stored || UNKNOWN), deferred: true };
     if (stored) return stored;
     if (e.healthrayBlocked) return UNKNOWN;
     throw e;
@@ -307,8 +311,157 @@ export async function priceOrdersFromBill(client, visitId, bill, machines) {
   return repriced;
 }
 
+export const autoRepriceMode = () =>
+  String(process.env.SCRIBE_BILL_AUTO_REPRICE ?? "dry").toLowerCase();
+
+export const repriceLineFor = (bill, machines) => {
+  const live = itemsOf(bill);
+  const one = (lines) =>
+    lines.length === 1
+      ? { item: lines[0] }
+      : { refuse: lines.length ? "on more than one bill line" : "not on the bill" };
+  return (kind, testName) => {
+    if (kind === "lab") {
+      const found = one(
+        live.filter((i) => i.category === "lab" && nameKey(i.desc) === nameKey(testName)),
+      );
+      return found.item ? { ...found, billed: Number(found.item.amount) || 0 } : found;
+    }
+    const id = machineForTest(machines, testName)?.id;
+    const found = one(
+      id
+        ? live.filter(
+            (i) =>
+              i.category !== "consultation" &&
+              i.category !== "lab" &&
+              machinesOnBillLine(machines, i.desc).includes(id),
+          )
+        : [],
+    );
+    if (!found.item) return found;
+    const onLine = machinesOnBillLine(machines, found.item.desc);
+    return { ...found, billed: sharesByMachine(onLine, found.item.amount || 0)[id] };
+  };
+};
+
+export const lineRefusal = (item) =>
+  Number(item.refunded || 0) > 0
+    ? "the bill line has a refund"
+    : item.invoiceRefunded == null || item.invoiceDue == null
+      ? "the bill does not say whether the invoice is fully paid"
+      : Number(item.invoiceRefunded) > 0
+        ? "the invoice has a refund"
+        : Number(item.invoiceDue) > 0
+          ? "the invoice is not fully paid"
+          : null;
+
+export const testsOnBill = (bill, machines, kind, testNames) => {
+  if (bill?.status !== "billed") return null;
+  const lineOf = repriceLineFor(bill, machines);
+  return testNames.every((name) => lineOf(kind, name).refuse !== "not on the bill");
+};
+
+export async function repricePaidOrdersFromBill(client, visitId, bill, machines) {
+  const result = { repriced: [], wouldReprice: [], refused: [] };
+  const mode = autoRepriceMode();
+  if (mode === "0" || mode === "off" || bill?.status !== "billed") return result;
+  const lineOf = repriceLineFor(bill, machines);
+  const { rows: orders } = await client.query(
+    `SELECT o.id, o.kind, o.amount_total, o.amount_paid, o.version,
+            COALESCE(o.amount_claimed, 0) AS amount_claimed,
+            COALESCE(o.claim_state, 'none') AS claim_state,
+            json_agg(json_build_object('id', t.id, 'name', t.test_name, 'price', t.price)
+                     ORDER BY t.test_name) AS tests
+       FROM giniflow_lab_orders o
+       JOIN giniflow_lab_order_tests t ON t.lab_order_id = o.id
+      WHERE o.visit_id = $1 AND o.urgency = 'today' AND o.payment_status = 'paid'
+      GROUP BY o.id`,
+    [visitId],
+  );
+  for (const o of orders) {
+    const label = o.tests.map((t) => t.name).join(", ");
+    const testsTotal = o.tests.reduce((sum, t) => sum + paise(t.price), 0);
+    if (
+      o.claim_state !== "none" ||
+      Number(o.amount_claimed) > 0 ||
+      paise(o.amount_paid) !== paise(o.amount_total) ||
+      testsTotal !== paise(o.amount_total)
+    ) {
+      result.refused.push({ tests: label, reason: "not a plain full payment" });
+      continue;
+    }
+    const priced = o.tests.map((t) => ({ ...t, ...lineOf(o.kind, t.name) }));
+    const why =
+      priced.find((t) => t.refuse)?.refuse || priced.map((t) => lineRefusal(t.item)).find(Boolean);
+    if (why) {
+      result.refused.push({ tests: label, reason: why });
+      continue;
+    }
+    const changed = priced.filter((t) => paise(t.billed) !== paise(t.price));
+    if (!changed.length) continue;
+    const newTotal = rupeesFromPaise(priced.reduce((sum, t) => sum + paise(t.billed), 0));
+    const lines = [
+      ...new Set(priced.map((t) => `${t.item.invoice || "?"}: "${t.item.desc}" ₹${t.item.amount}`)),
+    ];
+    const change = {
+      orderId: o.id,
+      tests: priced.map((t) => `${t.name} ₹${Number(t.price)} → ₹${t.billed}`).join(", "),
+      from: Number(o.amount_total),
+      to: newTotal,
+      lines,
+    };
+    if (mode === "dry") {
+      result.wouldReprice.push(change);
+      continue;
+    }
+    const { rowCount } = await client.query(
+      `UPDATE giniflow_lab_orders
+          SET amount_total = $2, amount_paid = $2, version = version + 1, updated_at = NOW()
+        WHERE id = $1 AND version = $3 AND payment_status = 'paid'`,
+      [o.id, newTotal, o.version],
+    );
+    if (rowCount !== 1) {
+      result.refused.push({ tests: label, reason: "the order changed while repricing" });
+      continue;
+    }
+    for (const t of changed) {
+      await client.query(`UPDATE giniflow_lab_order_tests SET price = $2 WHERE id = $1`, [
+        t.id,
+        t.billed,
+      ]);
+    }
+    const reason = `Repriced to the HealthRay bill — ${lines.join("; ")}`;
+    await client.query(
+      `INSERT INTO giniflow_lab_order_events (lab_order_id, track, status, actor_role, meta)
+       VALUES ($1, 'payment', 'repriced', 'system', $2)`,
+      [o.id, { from: change.from, to: newTotal, tests: change.tests, reason }],
+    );
+    await writeAudit(client, {
+      entity: "giniflow_lab_order",
+      entityId: o.id,
+      action: "update",
+      before: {
+        amount_total: Number(o.amount_total),
+        amount_paid: Number(o.amount_paid),
+        tests: o.tests.map((t) => ({ name: t.name, price: Number(t.price) })),
+      },
+      after: {
+        amount_total: newTotal,
+        amount_paid: newTotal,
+        tests: priced.map((t) => ({ name: t.name, price: t.billed })),
+        reason,
+      },
+    });
+    result.repriced.push(change);
+  }
+  return result;
+}
+
 export async function reconcileTestSteps(client, visitId, bill, machines) {
-  if (bill?.status !== "billed") return { removedSteps: 0, removedOrders: 0 };
+  const result = { removedSteps: 0, removedOrders: 0, wouldCancel: [], failed: [] };
+  if (bill?.status !== "billed") return result;
+  const mode = autoCancelMode();
+  if (mode === "0" || mode === "off") return result;
   const billed = billedStepIds(bill, machines, { includeDead: true });
   const labBilled = billedLabLines(bill, { includeDead: true }).length > 0;
 
@@ -362,15 +515,55 @@ export async function reconcileTestSteps(client, visitId, bill, machines) {
         !kept.has(s.step_catalog_id),
   );
 
-  if (removable.length) {
-    await client.query(`DELETE FROM giniflow_lab_orders WHERE id = ANY($1::uuid[])`, [
-      removable.map((o) => o.id),
-    ]);
+  if (mode === "dry") {
+    result.wouldCancel = [
+      ...removable.map((o) => ({ test: o.tests.join(", "), reason: NOT_ON_BILL_REASON })),
+      ...stale.map((st) => ({ step: st.step_catalog_id, reason: NOT_ON_BILL_REASON })),
+    ];
+    return result;
   }
+
+  for (const o of removable) {
+    await client.query("SAVEPOINT not_on_bill");
+    try {
+      await cancelTestIn(client, {
+        target: { orderId: o.id },
+        reason: NOT_ON_BILL_REASON,
+        source: "healthray",
+        actorRole: "system",
+        refundAmount: 0,
+      });
+      await client.query("RELEASE SAVEPOINT not_on_bill");
+      result.removedOrders += 1;
+    } catch (e) {
+      await client.query("ROLLBACK TO SAVEPOINT not_on_bill");
+      result.failed.push({ test: o.tests.join(", "), error: e.message });
+    }
+  }
+
   if (stale.length) {
-    await client.query(`DELETE FROM giniflow_visit_steps WHERE id = ANY($1::uuid[])`, [
-      stale.map((s) => s.id),
-    ]);
+    const { rows: skipped } = await client.query(
+      `UPDATE giniflow_visit_steps SET status = 'skipped'
+        WHERE id = ANY($1::uuid[]) AND status = 'pending'
+        RETURNING step_catalog_id`,
+      [stale.map((st) => st.id)],
+    );
+    if (skipped.length) {
+      await client.query(
+        `INSERT INTO giniflow_visit_events (visit_id, status, actor_role, occurred_at, meta)
+         VALUES ($1, 'test_cancelled', 'system', clock_timestamp(), $2)`,
+        [
+          visitId,
+          {
+            kind: "steps",
+            steps: skipped.map((r) => r.step_catalog_id),
+            reason: NOT_ON_BILL_REASON,
+            source: "healthray",
+          },
+        ],
+      );
+    }
+    result.removedSteps = skipped.length;
   }
-  return { removedSteps: stale.length, removedOrders: removable.length };
+  return result;
 }

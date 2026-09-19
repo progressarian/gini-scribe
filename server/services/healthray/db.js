@@ -407,15 +407,27 @@ async function matchIdentitylessByPhone(phone, name, sex) {
       WHERE health_id IS NULL
         AND (file_no IS NULL OR file_no ~ '^GNI-[0-9]+$')
         AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
-      LIMIT 2`,
+      ORDER BY id`,
     [local10],
   );
-  if (rows.length !== 1) return null;
+  const alike = rows.filter((row) =>
+    personLooksSame({ name: row.name, sex: row.sex === "Other" ? null : row.sex }, name, sex),
+  );
+  if (alike.length === 1) return alike[0].id;
+  const sameName = alike.filter((row) => normName(row.name) === normName(name));
+  return sameName.length === 1 ? sameName[0].id : null;
+}
 
-  const row = rows[0];
-  const knownSex = row.sex === "Other" ? null : row.sex;
-  if (!personLooksSame({ name: row.name, sex: knownSex }, name, sex)) return null;
-  return row.id;
+export async function findUnlinkedBooking(patientId, apptDate) {
+  if (!patientId || !apptDate) return null;
+  const { rows } = await pool.query(
+    `SELECT id FROM appointments
+      WHERE patient_id = $1 AND appointment_date = $2 AND healthray_id IS NULL
+        AND COALESCE(status, '') NOT IN ('cancelled', 'no_show')
+      ORDER BY id LIMIT 1`,
+    [patientId, apptDate],
+  );
+  return rows[0]?.id || null;
 }
 
 export async function upsertPatient({
@@ -742,6 +754,7 @@ export async function upsertAppointment(existingId, data) {
         healthray_previous_medications = $24::jsonb,
         follow_up_with = COALESCE($25, follow_up_with),
         family_member_id = COALESCE($26, family_member_id),
+        file_no = COALESCE($27, file_no),
         updated_at = NOW()
        WHERE id = $1 RETURNING id, patient_id`,
       [
@@ -771,6 +784,7 @@ export async function upsertAppointment(existingId, data) {
         JSON.stringify(healthrayPreviousMedications || []),
         healthrayFollowUpWith || null,
         familyMemberId || null,
+        fileNo || null,
       ],
     );
     await realignVisitToAppointment(rows[0].id);

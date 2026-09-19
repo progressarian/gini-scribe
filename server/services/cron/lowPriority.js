@@ -1,3 +1,4 @@
+import { hostname } from "node:os";
 import { cronPool } from "../../config/db.js";
 
 const lastSkipLogAt = new Map();
@@ -59,6 +60,72 @@ export async function tryAcquireCronLock(label = "cron", key) {
     client.release();
     throw e;
   }
+}
+
+export const cronLeaseEnabled = () => process.env.SCRIBE_CRON_LEASE === "1";
+
+const LEASE_TTL_MS = 2 * 60_000;
+const LEASE_RENEW_MS = 30_000;
+const LEASE_OWNER = `${hostname()}:${process.pid}`;
+
+const logSkip = (label, why) => {
+  const now = Date.now();
+  if (now - (lastSkipLogAt.get(label) || 0) < SKIP_LOG_COOLDOWN_MS) return;
+  lastSkipLogAt.set(label, now);
+  console.log(`[Cron] ${label} skipped — ${why}`);
+};
+
+export async function tryAcquireCronLease(
+  label,
+  key,
+  { db = cronPool, ttlMs = LEASE_TTL_MS, renewMs = LEASE_RENEW_MS, owner = LEASE_OWNER } = {},
+) {
+  if (!Number.isFinite(key))
+    throw new Error(`tryAcquireCronLease(${label}): numeric key is required`);
+  const name = `cron_lease:${key}`;
+  const legacy = await db.query(
+    `SELECT pid FROM pg_locks
+      WHERE locktype = 'advisory' AND ((classid::bigint << 32) | objid::bigint) = $1
+      LIMIT 1`,
+    [key],
+  );
+  if (legacy.rowCount) {
+    logSkip(label, `the old advisory lock is held by backend ${legacy.rows[0].pid}`);
+    return null;
+  }
+  const now = Date.now();
+  const taken = await db.query(
+    `INSERT INTO app_kv (key, value, updated_at) VALUES ($1, $2::jsonb, NOW())
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+      WHERE COALESCE((app_kv.value->>'until')::bigint, 0) < $3
+     RETURNING 1`,
+    [name, JSON.stringify({ owner, label, until: now + ttlMs }), now],
+  );
+  if (!taken.rowCount) {
+    const held = await db.query(`SELECT value FROM app_kv WHERE key = $1`, [name]);
+    logSkip(label, `previous run still holds its lease (${held.rows[0]?.value?.owner || "?"})`);
+    return null;
+  }
+  const renew = setInterval(() => {
+    db.query(
+      `UPDATE app_kv SET value = jsonb_set(value, '{until}', to_jsonb($3::bigint)), updated_at = NOW()
+        WHERE key = $1 AND value->>'owner' = $2`,
+      [name, owner, Date.now() + ttlMs],
+    ).catch((e) => console.error(`[Cron] ${label} lease renew failed:`, e.message));
+  }, renewMs);
+  renew.unref?.();
+  return async () => {
+    clearInterval(renew);
+    try {
+      await db.query(
+        `UPDATE app_kv SET value = jsonb_set(value, '{until}', '0'::jsonb), updated_at = NOW()
+          WHERE key = $1 AND value->>'owner' = $2`,
+        [name, owner],
+      );
+    } catch (e) {
+      console.error(`[Cron] ${label} lease release failed:`, e.message);
+    }
+  };
 }
 
 /**

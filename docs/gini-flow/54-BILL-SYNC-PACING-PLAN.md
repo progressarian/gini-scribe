@@ -1,9 +1,11 @@
 # 54 — Keep the HealthRay bill sync on without getting blocked, and without losing or changing data
 
-Status: **W1 BUILT on local, 19 Sep 2026** (bill-read breaker, D1; not deployed). W2–W7 not started. Bill reads are **off** on local
-(`SCRIBE_MACHINE_CASE_LIST=0`, `.env` line 73) since ~11:17 IST today; appointments and walk-ins sync
-normally. Follows `51-BILL-DRIVEN-TEST-STEPS-PLAN.md` (stored bill, cadence, `reconcileTestSteps`)
-and `53-TEST-CANCEL-REFUND-PLAN.md` (audited cancel, dead lines, "Refunds to check").
+Status: **W1–W6 BUILT on local, 19 Sep 2026; not deployed, not all committed.** W1 bill-read
+breaker, W2 shared 15 s slot, W3 tiered queue, W4 audited not-on-bill cancel, W5 paid-order
+repricing (default `dry`) plus the "Bill differs" card, W6 badge plus confirmation. W7: `.env` has
+`SCRIBE_MACHINE_CASE_LIST=1` again; `SCRIBE_BILL_AUTO_CANCEL` acts (no dry day, by request);
+`SCRIBE_BILL_AUTO_REPRICE` stays `dry`. On 19 Sep at 11:48 a bill-read 403 paused bill reads only,
+and appointments kept syncing: D1 held on the live floor.
 
 ## 1. What was asked
 
@@ -107,8 +109,9 @@ Result: a bad minute on the bill endpoint can no longer hide walk-ins from recep
 - **Interactive reads** (reception opening the check-in bill panel, the post-check-in read) wait up
   to one gap for a slot. If none comes, they return the stored bill and the panel shows
   "HealthRay bill still loading". These are the reads a person is waiting on, so they go first.
-- The legacy `routes/flow.js:3601` read goes through `readPatientBill`, so it is cached, spaced and
-  breaker-checked like the rest.
+- The legacy `routes/flow.js:3601` read stays a direct `fetchPatientTransactions` call (it needs the
+  raw per-appointment rows, not the day's stored bill). The slot and the breaker live in
+  `gatedFetch`, so it is spaced and breaker-checked like the rest; it is just not cached.
 - `SCRIBE_MACHINE_SCAN_BATCH` stays as an upper bound. The gap is what actually limits the rate.
 
 ### D3 — Read the bills that matter first; never skip a patient on the floor
@@ -116,12 +119,12 @@ Result: a bad minute on the bill endpoint can no longer hide walk-ins from recep
 The eligible set stays as it is today: every visit on the floor, until exit (51 D5,
 `SCRIBE_MACHINE_EXIT_GRACE_MIN` = 0). Only the **order** and the **interval** change:
 
-| Tier | Visit                                                                                             | Re-read every       |
-| ---- | ------------------------------------------------------------------------------------------------- | ------------------- |
-| A    | Has pending test steps from the check-in template or added by reception, and no `billed` bill yet | 5 min               |
-| B    | Checked in, no `billed` bill yet, no test steps                                                   | 10 min, then 20 min |
-| C    | `billed`, with a refundable test still open (53 D9)                                               | 15 min (unchanged)  |
-| D    | Everyone else still on the floor, `billed` or not                                                 | 60 min (unchanged)  |
+| Tier | Visit                                                                                             | Re-read every                                   |
+| ---- | ------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| A    | Has pending test steps from the check-in template or added by reception, and no `billed` bill yet | 5 min (`SCRIBE_BILL_TESTS_RESCAN_MIN`)          |
+| B    | Checked in, no `billed` bill yet, no test steps                                                   | 20 min (unchanged, `SCRIBE_MACHINE_RESCAN_MIN`) |
+| C    | `billed`, with a refundable test still open (53 D9)                                               | 15 min (unchanged)                              |
+| D    | Everyone else still on the floor, `billed` or not                                                 | 60 min (unchanged)                              |
 
 Within a run: tier, then oldest `machine_scan_at` first. Tier D is **never dropped**. When the floor
 is busy it is read later, not skipped. That matters because the Chief can bill an ABI or a lab
@@ -131,7 +134,7 @@ The sync log gains one line per run: `bill reads: N done, tier A x · B y · C z
 keeps waiting past 90 min at peak, the gap (D2) is too wide or the batch too small. That is a
 tuning signal, not a silent loss.
 
-Capacity at a normal peak (~90 visits, ~20 in A/B at once): A+B ≈ 20 × 6–12/h ≈ 120–240/h, C+D ≈
+Capacity at a normal peak (~90 visits, ~20 in A/B at once): A ≈ 12 × 12/h, B ≈ 8 × 3/h, C+D ≈
 90/h. That's close to the 240/h a 15 s gap allows, so the tier order is what keeps A and B on time.
 
 ### D4 — An extra test is cancelled with a record, never deleted
@@ -160,6 +163,12 @@ not remaining and render it as "skipped — not on HealthRay bill".
 Removal only ever runs on a bill read that returned `billed` in this call, or within the freshness
 window. Never on `unknown` or on a stored copy kept because a read failed (D1).
 
+**Found while building (19 Sep):** `billSuppressor` treats any cancellation with no bill line as
+"never raise this test again on this visit" (`testCancel.js:75`). A `not_on_bill` cancel has no
+line by definition, so a test billed later in the day (the Chief adds ABI at 2 pm) would never
+reach the floor: a loss. The suppressor now ignores `not_on_bill` rows. Staff cancellations
+(`billed_by_mistake` and the rest) still suppress as 53 designed.
+
 Behind the existing switch **`SCRIBE_BILL_AUTO_CANCEL`**: `dry` logs `would cancel …` and changes
 nothing; `1` acts. Go-live runs in `dry` first (§8).
 
@@ -179,7 +188,12 @@ way `fix-p181807-combined-line-price.mjs` did by hand. Today `priceOrdersFromBil
   with no refund on it: a line with `refunded > 0` belongs to 53 D7b, never to this pass;
 - the HealthRay invoice holding that line is **fully paid**. To confirm while building: which field
   of the `get_transactions` payload says so (the printed bill shows it as "NET PAYABLE 0"). Until
-  that field is confirmed, the pass stays in `dry` (below).
+  that field is confirmed, the pass stays in `dry` (below). **Found 19 Sep:** it is the
+  transaction's `due_amount` (already read by `transactionsToBilling` for the bill's Paid/Due). It's
+  now carried onto every line as `invoiceDue`, with the transaction's `refunded_amount` as
+  `invoiceRefunded`. An invoice with **any** refund is refused: a part refund on the invoice cannot
+  say which line it belongs to (Mukesh's bill has ₹200 refunded on OPD/2627-14455, so his goes to
+  "Bill differs").
 
 **What it writes**, in the sync's transaction, under the visit's `FOR UPDATE` lock:
 
@@ -275,9 +289,14 @@ Duplicates, in the existing code, which this plan does not change:
   Start at 15 s, and widen it if the bill breaker trips.
 - **The permanent fix is still `HEALTHRAY_PROXY_URL`**: a fixed egress IP HealthRay allowlists.
   The code supports it (`cron/lowPriority.js`); it needs a proxy provisioned and HealthRay's approval.
-- **Stranded `HEALTHRAY_SYNC` lock.** Stopping a worker mid-sync left the session advisory lock on a
-  pooled backend twice today. The fix pattern exists (`withCronXactLock`, used by Today's Show
-  Sync) but moving this family is out of scope here.
+- **Stranded `HEALTHRAY_SYNC` lock.** Stopping or restarting a worker left the session advisory lock
+  on a pooled backend four times on 19 Sep. `withCronXactLock`, which older notes describe, is not in
+  the code. **Built 19 Sep, off by default:** `tryAcquireCronLease` (`cron/lowPriority.js`), an
+  `app_kv` lease `cron_lease:918273645` with owner and expiry, renewed every 30 s, TTL 2 min, which
+  refuses to start while any session holds the old advisory lock. It's wired for the HealthRay
+  sync behind `SCRIBE_CRON_LEASE=1`. It stays off until local and production switch **together**:
+  appointments are inserted check-then-insert with no unique index on `healthray_id`, so an
+  old-code process and a new-code process running at once could insert an appointment twice.
 - **Paid-invoice field unconfirmed** (D5). The repricing pass needs the `get_transactions` field that
   says an invoice is fully paid. Until it is found in a real payload, D5 stays `dry`.
 - **Every bill reader must honour the switches.** The 11:18 block came from a bill reader outside the

@@ -132,6 +132,11 @@ router.get(
   run("Billing items list", 200, (req) => items.listItems(req.query)),
 );
 router.get(
+  `${BASE}/items/choices`,
+  master,
+  run("Billing item choices", 200, () => items.itemChoices()),
+);
+router.get(
   `${BASE}/items/not-priced`,
   master,
   run("Billing not priced", 200, () => items.notPricedList()),

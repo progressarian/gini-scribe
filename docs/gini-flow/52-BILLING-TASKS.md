@@ -1049,11 +1049,11 @@ today's lab prices keep working.
     `BILLING_SETTINGS`. Tax code CRUD also sits here.
   - **Done when:** only admin can change these.
   - **E2E test:** `e2e/billing/phase1/P1-27-settings-routes.spec.js` — asserts: only admin can change these.
-  - **Result:** Done 2026-09-19. `server/routes/billingSettings.js`, mounted in `server/index.js`, under `/api/billing/settings`, admin only (`BILLING_SETTINGS`, checked on each route as well as by the prefix gate): `GET` / `PATCH` the settings; `GET` / `PUT series` (create or update by series + year); tax codes `GET` (list), `POST`, `PATCH :id`, `PUT :id/active`, `DELETE :id`. Every body and query uses its P1-25 schema; errors go through the shared `billingRoute` (clear 4xx with details, plain 5xx). Tested over HTTP: admin can do all of it; **reception_admin, reception and coordinator get 403 on every settings endpoint** and change nothing; the GSTIN typo, "GST on without details", "next number can only go up", and "tax code in use" refusals all come back as clear 4xx with their details.
+  - **Result:** Done 2026-09-19. `server/routes/billingSettings.js`, mounted in `server/index.js`, under `/api/billing/settings`, admin only (`BILLING_SETTINGS`, checked on each route as well as by the prefix gate): `GET` / `PATCH` the settings; `GET` / `PUT series` (create or update by series + year); tax codes `GET` (list), `POST`, `PATCH :id`, `PUT :id/active`, `DELETE :id`. Every body and query uses its P1-25 schema; errors go through the shared `billingRoute` (clear 4xx with details, plain 5xx). Tested over HTTP: admin can do all of it; **reception_admin, reception and coordinator get 403 on every settings endpoint** and change nothing; the GSTIN typo, "GST on without details", "next number can only go up", and "tax code in use" refusals all come back as clear 4xx with their details. Review (2026-09-19): a series must be one of `BILL_SERIES` (`MAIN` for bills, `RCPT` for receipts, in `billSeries.js`) — any other code is refused (400), so a typo like `MIAN` can't create a useless series and leave the year without a real one; saving settings or a series without changing anything returns the current values and writes no audit row.
 
 ### 1F. Admin screens
 
-- [ ] **P1-28 · Billing section in settings** — `Pending`
+- [x] **P1-28 · Billing section in settings** — `Done`
   - **Where:** `src/pages/SettingsLayout.jsx`, `src/router.jsx`,
     `src/config/routes.js`, `src/queries/hooks/useBillingMaster.js`.
   - **Steps:**
@@ -1069,8 +1069,9 @@ today's lab prices keep working.
     3. Add TanStack Query hooks for every Phase 1 endpoint.
   - **Done when:** the tabs appear for admin and reception_admin only.
   - **E2E test:** `e2e/billing/phase1/P1-28-billing-section-in-settings.spec.js` — asserts: the tabs appear for admin and reception_admin only.
+  - **Result:** Done 2026-09-19. Settings now shows a tab only when the user may open its page (the tab list reads the same `PAGE_CAPABILITIES` the route guard uses, so a tab and its gate can't disagree). New tabs: **Services** (`/settings/services`, `BILLING_MASTER`), **Category rates** (`/settings/category-rates`, `BILLING_MASTER`) and **Billing settings** (`/settings/billing`, `BILLING_SETTINGS`, admin only); "Patient schemes" is renamed **Categories**. `/settings` itself opens for admin and reception_admin and goes to the first tab they may use (admin → Patient Flow, reception_admin → Services); everyone else is sent home. reception_admin sees Services and Category rates only; Patient Flow, Prescription, Test catalogue, Categories and Billing settings stay admin-only (a deep link sends them home). `src/queries/hooks/useBillingMaster.js` has a query or mutation hook for every `/api/billing/master` and `/api/billing/settings` endpoint (the test compares it with the route files, so a new endpoint without a hook fails). The three new pages are simple read-only starters (groups list, a category's rate grid, current settings and series) that P1-29, P1-32 and P1-33 turn into the real screens. Not done on purpose: **Discounts, Bulk import and Desk requests tabs are added with their pages in Phases 3, 2 and 4** — a tab with no page behind it would be a broken screen. **Categories stays admin-only until P1-31**, because the current page still saves through the admin-only `/api/patient-schemes`; P1-31 moves it to `/api/billing/master/categories` and opens it to reception_admin. Review (2026-09-19): switching category on the Category rates tab no longer shows the previous category's rates while the new ones load (it shows "Loading…"; old rows are kept only when a filter changes within the same category); the Category rates and Billing settings tabs show "Could not load …" on a failed request instead of loading forever; saving, switching off or deleting an item or a category rate also refreshes the floor's price lists (`giniflow` queries), so the Reception desk in the same browser doesn't show an old price for up to 10 minutes; the Categories page title now says "Categories" to match its tab; the "turned away" tests also check the user did not land on `/login` and the app loaded, so a broken login can't make them pass.
 
-- [ ] **P1-29 · Services page** — `Pending`
+- [x] **P1-29 · Services page** — `Done`
   - **Where:** `src/pages/billing/ServicesSettingsPage.jsx`.
   - **Steps:**
     1. Left: groups and their subgroups (add, rename, reorder, deactivate,
@@ -1083,6 +1084,7 @@ today's lab prices keep working.
   - **Done when:** a group, subgroup and item can be created, edited and
     deleted from the screen.
   - **E2E test:** `e2e/billing/phase1/P1-29-services-page.spec.js` — asserts: a group, subgroup and item can be created, edited and deleted from the screen.
+  - **Result:** Done 2026-09-19. `/settings/services` (`src/pages/billing/ServicesSettingsPage.jsx`, parts in `src/components/billing/`). **Left:** groups with their subgroups — add, rename, move up/down, deactivate/activate, delete (delete asks "Confirm delete" first); "All items" or a group or subgroup picks what the right side lists. **Right:** the items, with search (name or code), a kind filter and active/off filter; "+ Add item" is enabled once a subgroup is picked; each row has Edit, History, Deactivate/Activate and Delete. **Item form:** name, code, subgroup, kind, price, unit, "quantity can be more than 1" with an optional max, tax code (and "price includes tax" once one is chosen), consultant (or hospital default) and visit type for a consultation, catalogue test for a test (tests that already have an item are not offered). A server refusal is shown inside the form. **Price change:** changing the price shows a required "Reason for the price change" field; saving without a price change needs no reason and writes no history. **History drawer:** every price with old → new, reason, who and when. **Blocked delete:** a "can't be deleted" dialog lists where it is used and offers "Deactivate instead"; if that is refused too (e.g. a subgroup that still has active items) the reason is shown in the dialog. New endpoint `GET /api/billing/master/items/choices` (`BILLING_MASTER`) gives the form its lists — kinds and visit types from the server's own vocabulary, active catalogue tests with the item already linked to each, and active consultants without the lab-only provider — plus the `useBillingItemChoices` hook. Tested in Chrome as reception_admin: create/rename a group, add and reorder subgroups, create other/test/consultation items, a duplicate-code refusal in the form, a price change with reason and its history, filters, deactivate/activate, both blocked-delete cases, and deleting item, subgroups and group. Test helper `e2e/helpers/browser.mjs` (`gotoReady`) reloads a page only when Chrome reported `net::ERR_NETWORK_CHANGED` (documented in `e2e/README.md`).
 
 - [ ] **P1-30 · "Not priced" tab** — `Pending`
   - **Where:** Services page.
@@ -1832,8 +1834,9 @@ floor. Nothing about the existing "Clear payment" changes.
     2. It builds `prefix + zero-padded next_no` and increments `next_no`.
     3. With no series row for that year, it throws "Ask the admin to set the
        bill series for 2026-27".
-    4. Reuse `financialYear` and `formatNumber` from
-       `server/services/billing/billSeries.js` (P1-23).
+    4. Reuse `financialYear`, `formatNumber` and `BILL_SERIES` (`MAIN` for
+       bills, `RCPT` for receipts) from `server/services/billing/billSeries.js`
+       (P1-23 / P1-27).
     5. **Once a number has been issued** in a series + financial year (any
        bill or receipt carries it), `saveSeries` refuses to change that
        year's `prefix` or `number_width` (409): GST invoices need one
@@ -1872,6 +1875,10 @@ floor. Nothing about the existing "Clear payment" changes.
          (decided 2026-09-18: Tele is charged as Follow Up).
     2. A walk-in or lab-only visit with no consultant gets an empty draft.
     3. A billing failure must never block check-in: log it and continue.
+  - **Note (P1-27 review):** the desk needs a few settings (pay-later
+    allowed, codes per bill, footer). Read them in the desk's own service with
+    `getSettings()` — never through `/api/billing/settings`, which is admin
+    only.
   - **Done when:** checking in a patient creates a draft with the right
     consultation line.
   - **E2E test:** `e2e/billing/phase4/P4-07-draft-at-check-in.spec.js` — asserts: checking in a patient creates a draft with the right consultation line.

@@ -64,20 +64,29 @@ test.describe.serial("P1-27 settings routes", () => {
 
   test("2. admin manages bill series; the next number can only go up", async () => {
     const created = await expectOk("put", `${S}/series`, {
-      series: `main${tag}`,
-      fy: "2026-27",
-      prefix: "GAC/26-27/",
+      series: "main",
+      fy: "2041-42",
+      prefix: "GAC/41-42/",
     });
-    expect(created).toMatchObject({ series: `MAIN${tag}`, next_number: "GAC/26-27/000001" });
-    await expectOk("put", `${S}/series`, { series: `MAIN${tag}`, fy: "2026-27", next_no: 14413 });
+    expect(created).toMatchObject({ series: "MAIN", next_number: "GAC/41-42/000001" });
+    await expectOk("put", `${S}/series`, { series: "MAIN", fy: "2041-42", next_no: 14413 });
     const lower = await call(api, "put", `${S}/series`, {
-      series: `MAIN${tag}`,
-      fy: "2026-27",
+      series: "MAIN",
+      fy: "2041-42",
       next_no: 10,
     });
     expect(lower.status).toBe(409);
+    const typo = await call(api, "put", `${S}/series`, {
+      series: "MIAN",
+      fy: "2041-42",
+      prefix: "X/",
+    });
+    expect(typo.status).toBe(400);
+    expect(typo.body.error).toBe("Series must be one of: MAIN, RCPT");
     const list = await expectOk("get", `${S}/series`);
-    expect(list.find((s) => s.series === `MAIN${tag}`).next_number).toBe("GAC/26-27/014413");
+    expect(list.find((s) => s.series === "MAIN" && s.fy === "2041-42").next_number).toBe(
+      "GAC/41-42/014413",
+    );
   });
 
   test("3. admin manages tax codes, including the in-use refusals", async () => {
@@ -124,7 +133,7 @@ test.describe.serial("P1-27 settings routes", () => {
   test("4. every body endpoint uses its schema", async () => {
     const bodies = [
       ["patch", S, { allow_pay_later: false }],
-      ["put", `${S}/series`, { series: `MAIN${tag}`, fy: "2026-27", prefix: "X/" }],
+      ["put", `${S}/series`, { series: "MAIN", fy: "2041-42", prefix: "X/" }],
       ["post", `${S}/tax-codes`, { code: `X-${tag}` }],
       ["patch", `${S}/tax-codes/${ids.tax}`, { rate_pct: 5 }],
       ["put", `${S}/tax-codes/${ids.tax}/active`, { is_active: true }],
@@ -158,7 +167,7 @@ test.describe.serial("P1-27 settings routes", () => {
       ["get", S],
       ["patch", S, { allow_pay_later: true }],
       ["get", `${S}/series`],
-      ["put", `${S}/series`, { series: `DENY${tag}`, fy: "2026-27" }],
+      ["put", `${S}/series`, { series: "RCPT", fy: "2041-42" }],
       ["get", `${S}/tax-codes`],
       ["post", `${S}/tax-codes`, { code: `DENY-${tag}` }],
       ["delete", `${S}/tax-codes/${ids.tax}`],

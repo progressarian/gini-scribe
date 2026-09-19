@@ -67,7 +67,7 @@ if (unpaid) {
   check("collecting before payment is refused by the service, not just the UI", refused);
 
   // Clearing payment opens the sample task.
-  await clearPayment(unpaid.orderId, { method: "paid" });
+  await clearPayment(unpaid.orderId, { method: "paid", confirmNotOnBill: true });
   const afterPay = await getLabQueue(TEST_DAY);
   const nowReady = [...afterPay.pending].find((o) => o.orderId === unpaid.orderId);
   check("once paid, the sample can be collected", nowReady?.nextAction?.to === "sample_collected");
@@ -208,6 +208,7 @@ check("an order is available to test the claim path", !!claimOrder);
 if (claimOrder) {
   await clearPayment(claimOrder.orderId, {
     method: "insurance_claim",
+    confirmNotOnBill: true,
     actorId: 20,
     insurer: "Star Health",
   });

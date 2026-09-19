@@ -135,7 +135,7 @@ async function resolvePatientByPhone(phone) {
   return { db: null, patient: null };
 }
 
-async function listLinkedPatients(db, phone) {
+export async function listLinkedPatients(db, phone) {
   if (db === "hospital") {
     const last10 = phone.replace(/\D/g, "").slice(-10);
     const { rows } = await pool.query(
