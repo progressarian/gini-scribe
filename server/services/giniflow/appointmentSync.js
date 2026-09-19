@@ -282,6 +282,62 @@ async function sweepPharmacyLeg(client, day, graceMinutes) {
 // only covers the patient still at the counter collecting a printout.
 export const LAB_ONLY_EXIT_GRACE_MINUTES = 15;
 
+export async function reopenAfterLabOnlyExit(client, day) {
+  const { rows } = await client.query(
+    `SELECT v.id, consult.id AS appointment_id
+       FROM giniflow_visits v
+       CROSS JOIN LATERAL (
+         SELECT a.id FROM appointments a
+          WHERE a.patient_id = v.patient_id
+            AND a.appointment_date = v.visit_date
+            AND a.status NOT IN ('cancelled', 'no_show')
+            AND lower(COALESCE(btrim(a.doctor_name), '')) <> lower($2)
+          ORDER BY a.id DESC LIMIT 1
+       ) consult
+      WHERE v.visit_date = $1::date
+        AND v.current_status = 'exited'
+        AND v.merged_into_visit_id IS NULL
+        AND (SELECT e.meta->>'reason' FROM giniflow_visit_events e
+              WHERE e.visit_id = v.id AND ${NOT_A_MARKER_SQL("e.status")}
+              ORDER BY e.seq DESC LIMIT 1) = 'lab_only_reports_complete'
+        AND NOT EXISTS (SELECT 1 FROM giniflow_visit_events c
+                         WHERE c.visit_id = v.id AND c.status = 'checked_in')`,
+    [day, LAB_ONLY_DOCTOR],
+  );
+
+  let reopened = 0;
+  for (const row of rows) {
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `UPDATE giniflow_visits
+            SET current_status = 'booked', appointment_id = $2,
+                resume_status = NULL, blocked_reason = NULL, updated_at = NOW()
+          WHERE id = $1 AND current_status = 'exited'`,
+        [row.id, row.appointment_id],
+      );
+      await client.query(
+        `INSERT INTO giniflow_visit_events (visit_id, status, actor_role, occurred_at, meta)
+         VALUES ($1, 'booked', 'system', clock_timestamp(), $2)`,
+        [
+          row.id,
+          {
+            source: "giniflow",
+            reason: "consult_booked_after_lab_only_exit",
+            appointment_id: row.appointment_id,
+          },
+        ],
+      );
+      await client.query("COMMIT");
+      reopened += 1;
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => {});
+      console.error("[giniflow] reopen after lab-only exit:", row.id, e.message);
+    }
+  }
+  return reopened;
+}
+
 export async function sweepLabOnlyExits(client, day, graceMinutes = LAB_ONLY_EXIT_GRACE_MINUTES) {
   const { rows } = await client.query(
     `SELECT v.id, GREATEST(lab.last_report, step.last_at) AS exit_at
@@ -527,6 +583,7 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
     // this too is what left them in "In building now" all day with no station
     // able to end it. The reports being in IS the floor's own record here.
     result.labOnlySwept = await sweepLabOnlyExits(client, day);
+    result.reopenedAfterLabOnly = await reopenAfterLabOnlyExit(client, day);
     // Only ever used to choose `rx_pending` over `exited`, and on a manual floor
     // `exited` is not a target the sync can have — so the query is skipped rather
     // than run every 30 seconds for an answer nothing reads.

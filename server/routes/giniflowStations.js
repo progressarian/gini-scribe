@@ -1123,6 +1123,18 @@ router.post(
 );
 
 router.post(
+  "/giniflow/stations/reception/case/cancel-test",
+  receptionGate,
+  cancelGate,
+  validate(giniflowCaseCancelSchema),
+  cancelRoute(
+    "Gini Flow reception cancel HealthRay lab case",
+    (req) => ({ caseNos: req.body.caseNos, patientId: req.body.patientId, date: req.body.date }),
+    { source: "reception" },
+  ),
+);
+
+router.post(
   "/giniflow/stations/reception/:orderId/cancel-test",
   receptionGate,
   cancelGate,

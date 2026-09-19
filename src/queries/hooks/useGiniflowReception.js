@@ -37,6 +37,15 @@ export function useCancelReceptionTest() {
   });
 }
 
+export function useCancelReceptionCase() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (body) =>
+      (await api.post(`/api/giniflow/stations/reception/case/cancel-test`, body)).data,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["giniflow"] }),
+  });
+}
+
 export function useCancelCharge() {
   const queryClient = useQueryClient();
   return useMutation({

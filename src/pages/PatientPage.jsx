@@ -231,7 +231,7 @@ export default function PatientPage() {
             >
               {PATIENT_CATEGORIES.map((c) => (
                 <option key={c.value} value={c.value}>
-                  {c.label}
+                  {c.sub ? `\u00a0\u00a0\u00a0${c.label}` : c.label}
                 </option>
               ))}
             </select>

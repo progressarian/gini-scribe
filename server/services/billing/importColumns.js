@@ -1,15 +1,32 @@
-export const YES_NO = ["yes", "no"];
-export const ITEM_KINDS = ["consultation", "test", "procedure", "medicine", "other"];
-export const DISCOUNT_KINDS = ["percent", "flat", "fixed_price"];
-export const PATIENT_PAYS = ["full", "amount", "percent", "nothing"];
-export const REMAINDERS = ["claim", "adjustment"];
-export const DISCOUNT_METHODS = ["auto", "code"];
-export const CATEGORY_RULE_MODES = ["suggest", "auto"];
-export const VISIT_TYPES = ["New", "Follow Up", "Investigation"];
-export const CONSULTATION_VISIT_TYPES = ["New", "Follow Up"];
-export const GENDERS = ["Male", "Female", "Other"];
-export const BILLING_ROLES = ["reception", "reception_admin", "admin"];
-export const RESERVED_CATEGORY_CODES = ["general"];
+import {
+  YES_NO,
+  ITEM_KINDS,
+  DISCOUNT_KINDS,
+  PATIENT_PAYS,
+  REMAINDERS,
+  DISCOUNT_METHODS,
+  CATEGORY_RULE_MODES,
+  VISIT_TYPES,
+  CONSULTATION_VISIT_TYPES,
+  GENDERS,
+  BILLING_ROLES,
+  RESERVED_CATEGORY_CODES,
+} from "../../../shared/billingVocab.js";
+
+export {
+  YES_NO,
+  ITEM_KINDS,
+  DISCOUNT_KINDS,
+  PATIENT_PAYS,
+  REMAINDERS,
+  DISCOUNT_METHODS,
+  CATEGORY_RULE_MODES,
+  VISIT_TYPES,
+  CONSULTATION_VISIT_TYPES,
+  GENDERS,
+  BILLING_ROLES,
+  RESERVED_CATEGORY_CODES,
+};
 
 export const TODAY_ON_CREATE = "today_on_create";
 

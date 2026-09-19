@@ -171,3 +171,153 @@
 .bill-dialog__discard span {
   margin-right: auto;
 }
+.bill-views {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.bill-views__tab {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--fbd);
+  background: #fff;
+  color: var(--fink3);
+  cursor: pointer;
+}
+.bill-views__tab--on {
+  background: var(--fbg);
+  color: inherit;
+  border-color: currentColor;
+}
+.bill-notpriced {
+  display: grid;
+  gap: 14px;
+}
+.bill-cat__side {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+.bill-cat__code {
+  font-size: 11px;
+  color: var(--fink3);
+}
+.bill-cat__flags {
+  margin-top: 10px;
+}
+.bill-cat__dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  background: #94a3b8;
+  vertical-align: middle;
+}
+.bill-cat__dot--blue {
+  background: #3b82f6;
+}
+.bill-cat__dot--teal {
+  background: #14b8a6;
+}
+.bill-cat__dot--green {
+  background: #22c55e;
+}
+.bill-cat__dot--purple {
+  background: #a855f7;
+}
+.bill-cat__dot--amber {
+  background: #f59e0b;
+}
+.bill-cat__dot--red {
+  background: #ef4444;
+}
+.bill-rule-form {
+  border-top: 1px solid var(--fbd);
+  margin-top: 10px;
+  padding-top: 6px;
+}
+.bill-rule-moves {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.bill-rule-move {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.bill-rule-move span {
+  flex: 1 1 140px;
+  font-weight: 600;
+}
+.bill-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.bill-tree__addbtn {
+  margin: 4px 0 2px 18px;
+}
+.bill-tree__adding {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 4px;
+}
+.bill-tree__adding .bill-tree__add {
+  flex: 1 1 200px;
+}
+.bill-src {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--fbg);
+  color: var(--fink3);
+  border: 1px solid var(--fbd);
+}
+.bill-src--own {
+  color: inherit;
+  border-color: currentColor;
+}
+.bill-src--base {
+  opacity: 0.7;
+}
+.bill-rates {
+  margin-top: 14px;
+}
+.bill-rates__on {
+  font-size: 11px;
+  margin-left: auto;
+}
+.bill-rates__dates {
+  display: grid;
+  gap: 4px;
+  min-width: 140px;
+}
+.bill-rates__editing .jb-assign {
+  max-width: none;
+  width: 100%;
+  min-width: 80px;
+}
+.bill-rates__confirm {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.bill-rates__asof {
+  flex-basis: 150px;
+}

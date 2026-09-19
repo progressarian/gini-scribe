@@ -264,21 +264,19 @@ router.get("/patient/app/gini-db-token", async (req, res) => {
   try {
     const patient = requirePatient(req, res);
     if (!patient) return;
-    if (patient.db !== "hospital") return res.json({ enabled: false });
-
     const secret = process.env.SUPABASE_JWT_SECRET;
     if (!secret) return res.status(503).json({ error: "Hospital DB token not configured" });
 
-    if (await isPatientBlocked(patient.id)) {
+    if (patient.db === "hospital" && (await isPatientBlocked(patient.id))) {
       return res
         .status(403)
         .json({ error: "Your account is not active.", code: "account_blocked" });
     }
 
     const linked = await listLinkedPatients("hospital", patient.phone || "");
-    const ids = [...new Set([Number(patient.id), ...linked.map((p) => Number(p.id))])].filter(
-      Number.isInteger,
-    );
+    const own = patient.db === "hospital" ? [Number(patient.id)] : [];
+    const ids = [...new Set([...own, ...linked.map((p) => Number(p.id))])].filter(Number.isInteger);
+    if (!ids.length) return res.json({ enabled: false });
 
     const token = jwt.sign(
       {

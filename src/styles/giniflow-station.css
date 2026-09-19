@@ -8261,3 +8261,23 @@
   color: var(--ink4);
   cursor: not-allowed;
 }
+
+.gf .pay-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.gf .pay-col {
+  min-width: 0;
+}
+@media (max-width: 900px) {
+  .gf .pay-cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.gf .pay-cleared-list {
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}

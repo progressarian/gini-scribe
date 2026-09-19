@@ -2,7 +2,7 @@ import { Router } from "express";
 import { requireCapability } from "../middleware/auth.js";
 import { billingRoute } from "./billingHttp.js";
 import { validate, validateQuery } from "../middleware/validate.js";
-import { CAPABILITIES as CAP } from "../../shared/permissions.js";
+import { CAPABILITIES as CAP, hasCapability } from "../../shared/permissions.js";
 import {
   billingActiveSchema,
   billingCategoryCreateSchema,
@@ -56,6 +56,16 @@ const codeParam = (req) => {
 };
 
 const ctx = (req) => auditContext(req);
+
+const CAP_FIELD = "daily_cap";
+const setsCap = (body, { blankIsNone }) =>
+  Object.hasOwn(body ?? {}, CAP_FIELD) &&
+  !(blankIsNone && (body[CAP_FIELD] === null || body[CAP_FIELD] === ""));
+const guardCap = (req, options) => {
+  if (setsCap(req.body, options) && !hasCapability(req.doctor?.role, CAP.ADMIN)) {
+    throw httpError(403, "Only an admin can change a category's patients-per-day limit");
+  }
+};
 const activeOnly = (req) => req.query.activeOnly === true;
 
 router.get(
@@ -182,15 +192,19 @@ router.post(
   `${BASE}/categories`,
   master,
   validate(billingCategoryCreateSchema),
-  run("Billing category create", 201, (req) => createScheme(req.body, undefined, ctx(req))),
+  run("Billing category create", 201, (req) => {
+    guardCap(req, { blankIsNone: true });
+    return createScheme(req.body, undefined, ctx(req));
+  }),
 );
 router.patch(
   `${BASE}/categories/:code`,
   master,
   validate(billingCategoryUpdateSchema),
-  run("Billing category update", 200, (req) =>
-    updateScheme(codeParam(req), req.body, undefined, ctx(req)),
-  ),
+  run("Billing category update", 200, (req) => {
+    guardCap(req, { blankIsNone: false });
+    return updateScheme(codeParam(req), req.body, undefined, ctx(req));
+  }),
 );
 router.delete(
   `${BASE}/categories/:code`,

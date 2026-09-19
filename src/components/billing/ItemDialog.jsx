@@ -15,7 +15,7 @@ function Field({ label, className = "", children }) {
 
 const text = (v) => (v === null || v === undefined ? "" : String(v));
 
-const formOf = (item, subgroupId) => ({
+const formOf = (item, subgroupId, prefill = {}) => ({
   code: text(item?.code),
   name: text(item?.name),
   subgroup_id: text(item?.subgroup_id ?? subgroupId),
@@ -29,6 +29,7 @@ const formOf = (item, subgroupId) => ({
   doctor_id: text(item?.doctor_id),
   visit_type: text(item?.visit_type),
   test_catalog_id: text(item?.test_catalog_id),
+  ...Object.fromEntries(Object.entries(prefill).map(([key, value]) => [key, text(value)])),
 });
 
 const payloadOf = (form) => {
@@ -57,8 +58,16 @@ const withCurrent = (options, id, current) =>
 const same = (key, a, b) =>
   key === "base_price" ? Number(a) === Number(b) : String(a ?? "") === String(b ?? "");
 
-export default function ItemDialog({ item, subgroupId, groups, choices, taxCodes, onClose }) {
-  const [initial] = useState(() => formOf(item, subgroupId));
+export default function ItemDialog({
+  item,
+  prefill,
+  subgroupId,
+  groups,
+  choices,
+  taxCodes,
+  onClose,
+}) {
+  const [initial] = useState(() => formOf(item, subgroupId, prefill));
   const [form, setForm] = useState(initial);
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");

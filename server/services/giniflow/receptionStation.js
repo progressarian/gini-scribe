@@ -12,16 +12,19 @@ import { journeyProgress } from "../../../shared/journeyOrder.js";
 import { PHONE_DIGITS, toLocal10 } from "../../../shared/phone.js";
 import { searchDayVisits } from "./board.js";
 import { getMachines } from "./machineCatalog.js";
-import { CASE_CANCELLABLE_SQL, LIVE_LAB_CASE_SQL, ORDER_CANCELLABLE_SQL } from "./testsHold.js";
+import {
+  CASE_CANCELLABLE_SQL,
+  LIVE_LAB_CASE_SQL,
+  ORDER_CANCELLABLE_SQL,
+  caseFromEarlierLabOnlyVisit,
+} from "./testsHold.js";
 import {
   billDiscountOn,
+  billedLabLines,
   combinedBillLineOf,
   isLiveBillItem,
-  lineRefusal,
-  repriceLineFor,
   testsOnBill,
 } from "./patientBill.js";
-import { machineForTest, machinesOnBillLine } from "../../../shared/machineStages.js";
 import { blockDetail } from "../patientBlockView.js";
 import { createWalkinBooking } from "../walkinBooking.js";
 import { LAB_ONLY_DOCTOR, labOnlyHiddenPredicate } from "./labOnlyVisits.js";
@@ -203,44 +206,14 @@ const shapeCharge = (r) => ({
   createdAt: r.created_at ? new Date(r.created_at).toISOString() : null,
 });
 
-const REFUND_CHECK_SELECT = `
-  SELECT v.id AS visit_id, p.id AS patient_id, p.name, p.file_no, b.items,
-         COALESCE((
-           SELECT json_agg(json_build_object(
-                    'orderId', o.id, 'kind', o.kind, 'sampleStatus', o.sample_status,
-                    'paymentStatus', o.payment_status, 'amountTotal', o.amount_total,
-                    'claimState', COALESCE(o.claim_state, 'none'),
-                    'canCancel', ${ORDER_CANCELLABLE_SQL("o")},
-                    'tests', (SELECT json_agg(json_build_object('id', t.id, 'name', t.test_name,
-                                                                'price', t.price))
-                                FROM giniflow_lab_order_tests t WHERE t.lab_order_id = o.id)))
-             FROM giniflow_lab_orders o
-            WHERE o.visit_id = v.id AND o.urgency = 'today'), '[]'::json) AS orders,
-         COALESCE((
-           SELECT json_agg(json_build_object('item', c.item_name, 'amount', c.amount))
-             FROM giniflow_bill_charges c
-            WHERE c.visit_id = v.id AND c.payment_status = 'paid'), '[]'::json) AS paid_charges
-    FROM giniflow_patient_bills b
-    JOIN giniflow_visits v
-      ON v.patient_id = b.patient_id AND v.visit_date = b.bill_date
-     AND v.merged_into_visit_id IS NULL
-    JOIN patients p ON p.id = v.patient_id
-   WHERE b.bill_date = $1::date AND b.status = 'billed'
-     AND v.current_status NOT IN ('exited', 'dispensed', 'no_show', 'cancelled')
-     AND NOT COALESCE(p.is_blocked, FALSE)
-     AND (EXISTS (
-            SELECT 1 FROM jsonb_array_elements(b.items) i
-             WHERE COALESCE((i->>'refunded')::numeric, 0) > 0
-                OR COALESCE((i->>'cancelled')::boolean, FALSE)
-                OR COALESCE((i->>'removed')::boolean, FALSE))
-          OR EXISTS (
-            SELECT 1 FROM giniflow_lab_orders po
-             WHERE po.visit_id = v.id AND po.urgency = 'today' AND po.payment_status = 'paid'))`;
-
 const HEALTHRAY_LAB_SELECT = `
-  SELECT v.id AS visit_id, p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
+  SELECT v.id AS visit_id, v.visit_date::text AS visit_date,
+         p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
          lb.id AS lab_billing_step_id,
          bs.id AS billing_step_id, bs.status AS billing_status,
+         (SELECT b.items FROM giniflow_patient_bills b
+           WHERE b.patient_id = v.patient_id AND b.bill_date = v.visit_date
+             AND b.status = 'billed') AS bill_items,
          json_agg(json_build_object('caseNo', lc.case_no, 'tests', lc.test_names)
                   ORDER BY lc.case_no) AS cases,
          min((COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'registered_at')::timestamptz)
@@ -255,6 +228,7 @@ const HEALTHRAY_LAB_SELECT = `
     JOIN lab_cases lc
       ON lc.case_date = v.visit_date AND lc.patient_id = v.patient_id
      AND ${LIVE_LAB_CASE_SQL("lc")}
+     AND NOT ${caseFromEarlierLabOnlyVisit("v")}
    WHERE v.visit_date = $1::date
      AND v.merged_into_visit_id IS NULL
      AND NOT COALESCE(p.is_blocked, FALSE)
@@ -265,8 +239,27 @@ const HEALTHRAY_LAB_SELECT = `
    GROUP BY v.id, p.id, lb.id, bs.id
    ORDER BY registered_at NULLS LAST`;
 
+const sumBy = (lines, key) => lines.reduce((s, l) => s + Number(l[key] || 0), 0);
+
+const healthrayLabMoney = (items) => {
+  if (!items) return { labBill: null, consultationAmount: null };
+  const bill = { items };
+  const labLines = billedLabLines(bill);
+  const consultation = items.filter((i) => i.category === "consultation" && isLiveBillItem(i));
+  return {
+    labBill: {
+      lines: labLines.map((l) => ({ name: l.name, amount: l.amount })),
+      total: sumBy(labLines, "amount"),
+      discount: sumBy(labLines, "discount"),
+    },
+    consultationAmount: consultation.length ? sumBy(consultation, "amount") : null,
+  };
+};
+
 const shapeHealthrayLab = (r) => ({
+  ...healthrayLabMoney(r.bill_items),
   visitId: r.visit_id,
+  visitDate: r.visit_date,
   patientId: r.patient_id,
   name: r.name,
   fileNo: r.file_no,
@@ -277,86 +270,6 @@ const shapeHealthrayLab = (r) => ({
   cases: r.cases || [],
   registeredAt: r.registered_at ? new Date(r.registered_at).toISOString() : null,
 });
-
-const sameName = (a, b) =>
-  String(a || "")
-    .trim()
-    .toLowerCase() ===
-  String(b || "")
-    .trim()
-    .toLowerCase();
-
-function refundChecksOf(row, machines) {
-  const testsOn = (line) => {
-    const onLine = machinesOnBillLine(machines, line.desc);
-    return (row.orders || []).flatMap((o) =>
-      (o.tests || [])
-        .filter((t) =>
-          onLine.length
-            ? o.kind === "machine" && onLine.includes(machineForTest(machines, t.name)?.id)
-            : o.kind === "lab" && line.category === "lab" && sameName(t.name, line.desc),
-        )
-        .map((t) => ({
-          orderId: o.orderId,
-          testId: t.id,
-          name: t.name,
-          kind: o.kind,
-          canCancel: !!o.canCancel,
-        })),
-    );
-  };
-  const items = [];
-  for (const line of row.items || []) {
-    const refunded = Number(line.refunded || 0);
-    const live = isLiveBillItem(line);
-    if (live && refunded > 0 && refunded < Number(line.amount)) {
-      const tests = testsOn(line);
-      if (tests.length)
-        items.push({ kind: "part", line: line.desc, refunded, amount: line.amount, tests });
-    } else if (!live) {
-      const started = testsOn(line).filter((t) => !t.canCancel);
-      if (started.length) items.push({ kind: "done", line: line.desc, refunded, tests: started });
-      const paid = (row.paid_charges || []).find((c) => sameName(c.item, line.desc));
-      if (paid) {
-        items.push({
-          kind: "paid_charge",
-          line: line.desc,
-          refunded,
-          amount: Number(paid.amount),
-          tests: [],
-        });
-      }
-    }
-  }
-  const lineOf = repriceLineFor({ status: "billed", items: row.items || [] }, machines);
-  for (const o of row.orders || []) {
-    if (o.paymentStatus !== "paid") continue;
-    const priced = (o.tests || []).map((t) => ({ ...t, ...lineOf(o.kind, t.name) }));
-    if (!priced.length || priced.some((t) => t.refuse)) continue;
-    const billed = priced.reduce((sum, t) => sum + paise(t.billed), 0);
-    if (billed === paise(o.amountTotal)) continue;
-    items.push({
-      kind: "differs",
-      line: [...new Set(priced.map((t) => t.item.desc))].join(", "),
-      amount: rupeesFromPaise(billed),
-      collected: Number(o.amountTotal),
-      tests: priced.map((t) => ({ name: t.name })),
-      why:
-        o.claimState !== "none"
-          ? "an insurance claim is on this order"
-          : priced.map((t) => lineRefusal(t.item)).find(Boolean) || null,
-    });
-  }
-  return items.length
-    ? {
-        visitId: row.visit_id,
-        patientId: row.patient_id,
-        name: row.name,
-        fileNo: row.file_no,
-        items,
-      }
-    : null;
-}
 
 export async function getPaymentQueue(visitDate, db = pool, { q = "" } = {}) {
   const { rows } = await db.query(`${ORDER_SELECT} ORDER BY o.created_at`, [
@@ -394,9 +307,6 @@ export async function getPaymentQueue(visitDate, db = pool, { q = "" } = {}) {
     await hideLabOnlyPatients(db),
   ]);
   const allHealthrayLab = hrLabRows.map(shapeHealthrayLab);
-  const { rows: refundRows } = await db.query(REFUND_CHECK_SELECT, [visitDate]);
-  const allRefundChecks = refundRows.map((r) => refundChecksOf(r, machines)).filter(Boolean);
-  let refundChecks = allRefundChecks;
   const query = String(q || "").trim();
   let orders = allOrders;
   let charges = allCharges;
@@ -406,7 +316,6 @@ export async function getPaymentQueue(visitDate, db = pool, { q = "" } = {}) {
     orders = allOrders.filter((o) => hits.has(o.visitId));
     charges = allCharges.filter((c) => hits.has(c.visitId));
     healthrayLab = allHealthrayLab.filter((l) => hits.has(l.visitId));
-    refundChecks = allRefundChecks.filter((r) => hits.has(r.visitId));
   }
   const pendingCharges = (list) => list.filter((c) => c.paymentStatus === "pending");
 
@@ -437,13 +346,11 @@ export async function getPaymentQueue(visitDate, db = pool, { q = "" } = {}) {
       pending: pendingCharges(charges),
       cleared: charges.filter((c) => c.paymentStatus === "paid"),
     },
-    refundChecks,
     healthrayLab,
     counts: {
       ...paymentCounts(allOrders),
       charges: pendingCharges(allCharges).length,
       healthrayLab: allHealthrayLab.length,
-      refundChecks: allRefundChecks.length,
     },
     query,
     pricesArePlaceholders: placeholder[0].placeholder,

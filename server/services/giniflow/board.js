@@ -29,6 +29,7 @@ import {
   LIVE_LAB_CASE_SQL,
   caseReportedBeforeVisit,
   caseSampledBeforeVisit,
+  caseFromEarlierLabOnlyVisit,
   chiefWaitClock,
 } from "./testsHold.js";
 import { getMachines } from "./machineCatalog.js";
@@ -89,6 +90,7 @@ const TODAY_CASES = (v, p) => `
             AND NOT EXISTS (SELECT 1 FROM giniflow_lab_orders lo
                              WHERE lo.visit_id = ${v}.id AND lo.urgency = 'today' AND lo.kind = 'lab')
             AND NOT ${caseReportedBeforeVisit(v)}
+            AND NOT ${caseFromEarlierLabOnlyVisit(v)}
             AND ${LIVE_LAB_CASE_SQL("lc")}`;
 
 const CASE_REPORTED = `(COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'reported_on') IS NOT NULL`;

@@ -1,6 +1,13 @@
 import useDialog from "./useDialog";
 
-export default function UsedInDialog({ blocked, error, onDeactivate, onClose, busy }) {
+export default function UsedInDialog({
+  blocked,
+  error,
+  onDeactivate,
+  onClose,
+  busy,
+  verb = "Deactivate",
+}) {
   const ref = useDialog(Boolean(blocked), onClose);
   if (!blocked) return null;
   return (
@@ -22,7 +29,7 @@ export default function UsedInDialog({ blocked, error, onDeactivate, onClose, bu
             <li key={`${use.table}.${use.column}`}>{use.text}</li>
           ))}
         </ul>
-        <p className="flow-muted">Deactivate it instead to stop it being used from now on.</p>
+        <p className="flow-muted">{verb} it instead to stop it being used from now on.</p>
         {error ? (
           <p className="bill-dialog__error" role="alert">
             {error}
@@ -39,7 +46,7 @@ export default function UsedInDialog({ blocked, error, onDeactivate, onClose, bu
               disabled={busy}
               onClick={onDeactivate}
             >
-              Deactivate instead
+              {verb} instead
             </button>
           ) : null}
         </div>

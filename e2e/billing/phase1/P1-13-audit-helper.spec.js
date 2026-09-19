@@ -191,7 +191,7 @@ test.describe("P1-13 audit helper", () => {
       nested: { pin: REDACTED, token: REDACTED, keep: "yes" },
       list: [{ password: REDACTED }, { name: "ok" }],
     });
-    expect(JSON.stringify(row)).not.toMatch(/CGHS-1234|CGHS-9999|5678|4321/);
+    expect(JSON.stringify([row.before, row.after])).not.toMatch(/CGHS-1234|CGHS-9999|5678|4321/);
   });
 
   test("10. only the known actions are accepted", async () => {

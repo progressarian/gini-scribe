@@ -20,7 +20,11 @@ import {
 import { getMachines } from "./machineCatalog.js";
 import { addMachineTestOn } from "./machineStation.js";
 import { testPricesFor, schemeForVisit } from "../pricing.js";
-import { LIVE_LAB_CASE_SQL, caseSampledBeforeVisit } from "./testsHold.js";
+import {
+  LIVE_LAB_CASE_SQL,
+  caseFromEarlierLabOnlyVisit,
+  caseSampledBeforeVisit,
+} from "./testsHold.js";
 import { billSuppressor } from "./testCancel.js";
 import {
   billedLabLines,
@@ -109,7 +113,7 @@ export const SAMPLE_TAKEN_BEFORE_VISIT_SQL = (v = "v", p = "p") => `EXISTS (
           OR (lc.patient_id IS NULL
               AND lc.raw_list_json->'patient'->>'healthray_uid' = ${p}.file_no))
      AND ${LIVE_LAB_CASE_SQL("lc")}
-     AND ${caseSampledBeforeVisit(v)})`;
+     AND (${caseSampledBeforeVisit(v)} OR ${caseFromEarlierLabOnlyVisit(v)}))`;
 
 export async function sampleTakenBeforeVisit(db, visitId) {
   const { rows } = await db.query(
@@ -905,9 +909,10 @@ export async function addLabStepsForArrivedLabCase(patientId, caseDate, db = poo
   try {
     await client.query("BEGIN");
     await client.query(`SELECT id FROM giniflow_visits WHERE id = $1 FOR UPDATE`, [rows[0].id]);
-    const result = (await billHasNoLab(client, rows[0].id))
-      ? { added: [] }
-      : await insertLabStepsForOrder(client, rows[0].id);
+    const result =
+      (await billHasNoLab(client, rows[0].id)) || (await sampleTakenBeforeVisit(client, rows[0].id))
+        ? { added: [] }
+        : await insertLabStepsForOrder(client, rows[0].id);
     await client.query("COMMIT");
     return result;
   } catch (e) {

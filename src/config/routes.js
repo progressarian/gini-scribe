@@ -110,7 +110,7 @@ export const PAGE_CAPABILITIES = {
   "/settings/flow": CAP.ADMIN,
   "/settings/prescription": CAP.ADMIN,
   "/settings/tests": CAP.ADMIN,
-  "/settings/schemes": CAP.SCHEME_ADMIN,
+  "/settings/schemes": CAP.BILLING_MASTER,
   "/settings/services": CAP.BILLING_MASTER,
   "/settings/category-rates": CAP.BILLING_MASTER,
   "/settings/billing": CAP.BILLING_SETTINGS,

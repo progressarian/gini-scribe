@@ -5,6 +5,7 @@ import {
   useClearCharge,
   useCancelReceptionTest,
   useCancelCharge,
+  useCancelReceptionCase,
   useArrivals,
   useArrivalAction,
   useWalkInSearch,
@@ -696,11 +697,10 @@ function VisitPaymentCard({ orders, onClearAll, pending, onCancelTest, canCancel
 }
 
 // How many of the day's cleared orders the tab shows before it is asked.
-const CLEARED_PREVIEW = 8;
 
 // Exported so the render smoke can execute the payments branch too — only one
 // tab is mounted at a time, and the tab that is not showing still has to render.
-function HealthrayLabCard({ lab, onClear, pending }) {
+function HealthrayLabCard({ lab, onClear, pending, onCancelCase, canCancelTest }) {
   return (
     <div className="test-order-card">
       <div className="toc-head">
@@ -726,15 +726,58 @@ function HealthrayLabCard({ lab, onClear, pending }) {
           </span>
         </div>
       ))}
+      {lab.labBill ? (
+        <>
+          <div className="toc-body">
+            {lab.labBill.lines.map((l) => (
+              <span className="toc-test" key={l.name}>
+                {l.name} <span className="tp">{rupees(l.amount)}</span>
+              </span>
+            ))}
+          </div>
+          <div className="toc-total">
+            <span className="amt">Lab total: {rupees(lab.labBill.total)}</span>
+            {lab.labBill.discount > 0 && (
+              <span className="toc-part">{rupees(lab.labBill.discount)} HealthRay discount</span>
+            )}
+            {lab.consultationAmount != null && (
+              <span className="toc-part">Billing: {rupees(lab.consultationAmount)}</span>
+            )}
+          </div>
+        </>
+      ) : (
+        <div className="toc-total">
+          <span className="toc-part">Not billed in HealthRay yet — amount unknown</span>
+        </div>
+      )}
       <div className="toc-foot">
+        {lab.billingStepId && (
+          <button
+            type="button"
+            className="st-btn st-btn-grn"
+            disabled={pending}
+            onClick={() => onClear(lab, "billing")}
+          >
+            ✓ {lab.consultationAmount != null ? `${rupees(lab.consultationAmount)} ` : ""}Billing
+            cleared
+          </button>
+        )}
         <button
           type="button"
           className="st-btn st-btn-grn"
           disabled={pending}
-          onClick={() => onClear(lab)}
+          onClick={() => onClear(lab, "lab")}
         >
-          ✓ {lab.billingStepId ? "Billing + lab payment cleared" : "Lab payment cleared"}
+          ✓ {lab.labBill ? `${rupees(lab.labBill.total)} ` : ""}Lab payment cleared
         </button>
+        {canCancelTest && (
+          <CancelTestControl
+            what="lab tests"
+            busy={pending}
+            cases={lab.cases}
+            onCancel={(body, done) => onCancelCase(lab, body, done)}
+          />
+        )}
       </div>
     </div>
   );
@@ -785,61 +828,6 @@ function ChargeCard({ charge, onClearCharge, pending, onCancelCharge, canCancelT
   );
 }
 
-const refundCheckText = (it) =>
-  it.kind === "differs"
-    ? `${it.line}: HealthRay bill ${rupees(it.amount)} · Scribe cleared ${rupees(it.collected)}${it.why ? ` — not corrected automatically: ${it.why}` : ""}`
-    : it.kind === "part"
-      ? `${rupees(it.refunded)} of ${rupees(it.amount)} refunded on ${it.line} in HealthRay — which test was refunded?`
-      : it.kind === "paid_charge"
-        ? `${it.line} refunded in HealthRay, but ${rupees(it.amount)} was collected in Scribe`
-        : `${it.line} refunded in HealthRay, but ${it.tests.map((t) => t.name).join(", ")} is already under way or done`;
-
-function RefundCheckCard({ check, onCancelTest, canCancelTest, pending }) {
-  return (
-    <div className="test-order-card">
-      <div className="toc-head">
-        <div className="toc-av" style={{ background: avatarColour(check.patientId) }}>
-          {initials(check.name)}
-        </div>
-        <div className="toc-who">
-          <div className="toc-name">
-            {check.name} <span className="badge b-ink">{check.fileNo}</span>
-          </div>
-          <div className="toc-meta">
-            {check.items.every((it) => it.kind === "differs")
-              ? "Scribe's amount differs from the HealthRay bill — check it"
-              : "Refund recorded in HealthRay — check the floor"}
-          </div>
-        </div>
-      </div>
-      {check.items.map((it, i) => (
-        <div className="toc-body" key={`${it.kind}-${it.line}-${i}`}>
-          <span className="toc-test">{refundCheckText(it)}</span>
-          {it.kind === "part" &&
-            canCancelTest &&
-            it.tests
-              .filter((t) => t.canCancel)
-              .map((t) => (
-                <CancelTestControl
-                  key={t.testId}
-                  what={t.name}
-                  busy={pending}
-                  onCancel={(body, done) =>
-                    onCancelTest(
-                      { orderId: t.orderId, name: check.name },
-                      { id: t.testId, name: t.name },
-                      body,
-                      done,
-                    )
-                  }
-                />
-              ))}
-        </div>
-      ))}
-    </div>
-  );
-}
-
 const chargeAsOrder = (c) => ({
   orderId: c.chargeId,
   visitId: c.visitId,
@@ -869,18 +857,17 @@ export function PaymentsTab({
   onCancelCharge = () => {},
   canCancelTest = false,
   onClearHealthrayLab = () => {},
+  onCancelHealthrayCase = () => {},
   healthrayLabPending = false,
 }) {
   const queue = data?.pending || [];
   const healthrayLab = data?.healthrayLab || [];
   const chargeQueue = data?.charges?.pending || [];
-  const refundChecks = data?.refundChecks || [];
   const cleared = byVisit([
     ...(data?.awaitingSample || []),
     ...(data?.cleared || []),
     ...(data?.charges?.cleared || []).map(chargeAsOrder),
   ]);
-  const [showAllCleared, setShowAllCleared] = useState(false);
   const searching = (data?.query || "").length >= 2;
 
   return (
@@ -918,114 +905,101 @@ export function PaymentsTab({
         </div>
       </div>
 
-      <div>
-        <div className="grp-lbl grp-lbl-sp">🔴 Payment pending — collect and clear</div>
-        {isLoading && <div className="empty-note">Loading…</div>}
-        {!isLoading && queue.length === 0 && healthrayLab.length === 0 && (
-          <div className="empty-note">
-            {searching ? "No pending payment matches that search." : "Nothing waiting for payment."}
-          </div>
-        )}
-        {byPatient(queue).map((orders) => {
-          const cards = orders.map((order) => (
-            <OrderCard
-              key={order.orderId}
-              order={order}
-              onClear={onClear}
-              pending={pending}
-              actorId={actorId}
-              onCancelTest={onCancelTest}
-              canCancelTest={canCancelTest}
-            />
-          ));
-          if (orders.length < 2 || !orders.every(isPlainPending))
-            return <Fragment key={orders[0].visitId}>{cards}</Fragment>;
-          return (
-            <VisitPaymentCard
-              key={orders[0].visitId}
-              orders={orders}
-              onClearAll={onClearAll}
-              pending={pending}
-              onCancelTest={onCancelTest}
-              canCancelTest={canCancelTest}
-            >
-              {cards}
-            </VisitPaymentCard>
-          );
-        })}
-        {healthrayLab.map((lab) => (
-          <HealthrayLabCard
-            key={lab.visitId}
-            lab={lab}
-            onClear={onClearHealthrayLab}
-            pending={healthrayLabPending}
-          />
-        ))}
-      </div>
-
-      {refundChecks.length > 0 && (
-        <div>
-          <div className="grp-lbl grp-lbl-sp">↩ Refunds to check</div>
-          {refundChecks.map((check) => (
-            <RefundCheckCard
-              key={check.visitId}
-              check={check}
-              onCancelTest={onCancelTest}
-              canCancelTest={canCancelTest}
-              pending={pending}
-            />
-          ))}
-        </div>
-      )}
-
-      {chargeQueue.length > 0 && (
-        <div>
-          <div className="grp-lbl grp-lbl-sp">🧾 Billed in HealthRay — collect only</div>
-          {chargeQueue.map((charge) => (
-            <ChargeCard
-              key={charge.chargeId}
-              charge={charge}
-              onClearCharge={onClearCharge}
-              pending={chargePending}
-              onCancelCharge={onCancelCharge}
-              canCancelTest={canCancelTest}
-            />
-          ))}
-        </div>
-      )}
-
-      {cleared.length > 0 && (
-        <div>
-          <div className="grp-lbl grp-lbl-sp">✅ Cleared today — lab notified</div>
-          {(showAllCleared ? cleared : cleared.slice(0, CLEARED_PREVIEW)).map((g) => (
-            <div className="test-order-card is-cleared" key={g.visitId}>
-              <div className="toc-head">
-                <div className="toc-cleared">
-                  {g.name}
-                  {clearedRows(g.orders).map((row) => (
-                    <div className="tc-detail" key={row.key}>
-                      {row.label} · {row.settled} · {row.status}
-                    </div>
-                  ))}
-                </div>
-                <div className="sp sp-paid">✓ Cleared {clock(g.paidAt)}</div>
+      <div className="pay-cols">
+        <div className="pay-col">
+          <div>
+            <div className="grp-lbl grp-lbl-sp">🔴 Payment pending — collect and clear</div>
+            {isLoading && <div className="empty-note">Loading…</div>}
+            {!isLoading && queue.length === 0 && healthrayLab.length === 0 && (
+              <div className="empty-note">
+                {searching
+                  ? "No pending payment matches that search."
+                  : "Nothing waiting for payment."}
               </div>
+            )}
+            {byPatient(queue).map((orders) => {
+              const cards = orders.map((order) => (
+                <OrderCard
+                  key={order.orderId}
+                  order={order}
+                  onClear={onClear}
+                  pending={pending}
+                  actorId={actorId}
+                  onCancelTest={onCancelTest}
+                  canCancelTest={canCancelTest}
+                />
+              ));
+              if (orders.length < 2 || !orders.every(isPlainPending))
+                return <Fragment key={orders[0].visitId}>{cards}</Fragment>;
+              return (
+                <VisitPaymentCard
+                  key={orders[0].visitId}
+                  orders={orders}
+                  onClearAll={onClearAll}
+                  pending={pending}
+                  onCancelTest={onCancelTest}
+                  canCancelTest={canCancelTest}
+                >
+                  {cards}
+                </VisitPaymentCard>
+              );
+            })}
+            {healthrayLab.map((lab) => (
+              <HealthrayLabCard
+                key={lab.visitId}
+                lab={lab}
+                onClear={onClearHealthrayLab}
+                pending={healthrayLabPending}
+                onCancelCase={onCancelHealthrayCase}
+                canCancelTest={canCancelTest}
+              />
+            ))}
+          </div>
+
+          {chargeQueue.length > 0 && (
+            <div>
+              <div className="grp-lbl grp-lbl-sp">🧾 Billed in HealthRay — collect only</div>
+              {chargeQueue.map((charge) => (
+                <ChargeCard
+                  key={charge.chargeId}
+                  charge={charge}
+                  onClearCharge={onClearCharge}
+                  pending={chargePending}
+                  onCancelCharge={onCancelCharge}
+                  canCancelTest={canCancelTest}
+                />
+              ))}
             </div>
-          ))}
-          {cleared.length > CLEARED_PREVIEW && (
-            <button
-              type="button"
-              className="more-note more-btn"
-              aria-expanded={showAllCleared}
-              onClick={() => setShowAllCleared((v) => !v)}
-            >
-              {showAllCleared
-                ? `Show fewer — ${cleared.length} patients cleared today`
-                : `+ ${cleared.length - CLEARED_PREVIEW} more patients cleared today — show all`}
-            </button>
           )}
         </div>
-      )}
+        <div className="pay-col">
+          <div>
+            <div className="grp-lbl grp-lbl-sp">✅ Cleared today — lab notified</div>
+            {!isLoading && cleared.length === 0 && (
+              <div className="empty-note">Nothing cleared yet today.</div>
+            )}
+            {cleared.length > 0 && (
+              <div className="pay-cleared-list">
+                {cleared.map((g) => (
+                  <div className="test-order-card is-cleared" key={g.visitId}>
+                    <div className="toc-head">
+                      <div className="toc-cleared">
+                        {g.name}
+                        {clearedRows(g.orders).map((row) => (
+                          <div className="tc-detail" key={row.key}>
+                            {row.label} · {row.settled} · {row.status}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="sp sp-paid">✓ Cleared {clock(g.paidAt)}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     </>
   );
 }
@@ -1989,6 +1963,7 @@ export default function ReceptionStationPage() {
   const clearCharge = useClearCharge();
   const cancelTest = useCancelReceptionTest();
   const cancelCharge = useCancelCharge();
+  const cancelCase = useCancelReceptionCase();
   const journeyStep = useJourneyStep();
   const canCancelTest = hasCapability(
     useAuthStore((st) => st.currentDoctor?.role),
@@ -2006,11 +1981,7 @@ export default function ReceptionStationPage() {
   };
   const payCounts = {
     ...baseCounts,
-    pending:
-      baseCounts.pending +
-      (baseCounts.charges || 0) +
-      (baseCounts.refundChecks || 0) +
-      (baseCounts.healthrayLab || 0),
+    pending: baseCounts.pending + (baseCounts.charges || 0) + (baseCounts.healthrayLab || 0),
   };
   const counts = arrivals?.counts || { expected: 0, onFloor: 0, notComing: 0 };
 
@@ -2050,10 +2021,12 @@ export default function ReceptionStationPage() {
       },
     );
 
-  const onClearHealthrayLab = async (lab) => {
+  const onClearHealthrayLab = async (lab, which) => {
     try {
-      if (lab.billingStepId) {
+      if (which === "billing") {
         await journeyStep.mutateAsync({ stepId: lab.billingStepId, status: "done" });
+        showToast(`✓ Billing cleared for ${lab.name}`);
+        return;
       }
       await journeyStep.mutateAsync({ stepId: lab.labBillingStepId, status: "done" });
       showToast(`✓ Lab payment cleared for ${lab.name} — the lab can take the sample`);
@@ -2061,6 +2034,23 @@ export default function ReceptionStationPage() {
       failed(e, "Could not clear this — check the journey");
     }
   };
+
+  const onCancelHealthrayCase = (lab, body, done) =>
+    cancelCase.mutate(
+      {
+        ...body,
+        caseNos: body.caseNos?.length ? body.caseNos : lab.cases.map((c) => c.caseNo),
+        patientId: lab.patientId,
+        date: lab.visitDate,
+      },
+      {
+        onSuccess: () => {
+          done();
+          showToast(`✕ Lab tests cancelled for ${lab.name}`);
+        },
+        onError: (e) => failed(e, "Could not cancel — nothing was changed"),
+      },
+    );
 
   const onClearCharge = (charge) =>
     clearCharge.mutate(
@@ -2308,7 +2298,8 @@ export default function ReceptionStationPage() {
               onCancelCharge={onCancelCharge}
               canCancelTest={canCancelTest}
               onClearHealthrayLab={onClearHealthrayLab}
-              healthrayLabPending={journeyStep.isPending}
+              onCancelHealthrayCase={onCancelHealthrayCase}
+              healthrayLabPending={journeyStep.isPending || cancelCase.isPending}
             />
           )}
         </div>

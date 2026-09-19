@@ -5,6 +5,7 @@ import { test, expect } from "@playwright/test";
 import { PAGE_CAPABILITIES } from "../../../src/config/routes.js";
 import { hasAnyCapability } from "../../../shared/permissions.js";
 import { apiAs, loginAs } from "../../helpers/auth.mjs";
+import { gotoReady } from "../../helpers/browser.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "../../..");
 const tag = crypto.randomBytes(3).toString("hex");
@@ -21,7 +22,7 @@ const ADMIN_TABS = [
   "Category rates",
   "Billing settings",
 ];
-const RECEPTION_ADMIN_TABS = ["Services", "Category rates"];
+const RECEPTION_ADMIN_TABS = ["Categories", "Services", "Category rates"];
 const BILLING_PAGES = ["/settings/services", "/settings/category-rates", "/settings/billing"];
 const OUTSIDERS = ["reception", "coordinator", "lab", "banshali"];
 
@@ -74,6 +75,7 @@ test.describe("P1-28 billing section in settings — who may open what", () => {
     expect(hasAnyCapability("reception_admin", PAGE_CAPABILITIES["/settings/category-rates"])).toBe(
       true,
     );
+    expect(hasAnyCapability("reception_admin", PAGE_CAPABILITIES["/settings/schemes"])).toBe(true);
     expect(hasAnyCapability("reception_admin", PAGE_CAPABILITIES["/settings/billing"])).toBe(false);
     for (const page of ["/settings/flow", "/settings/prescription", "/settings/tests"]) {
       expect(hasAnyCapability("reception_admin", PAGE_CAPABILITIES[page]), page).toBe(false);
@@ -139,20 +141,25 @@ test.describe("P1-28 billing section in settings — screens", () => {
 
   test("4. admin sees every settings tab, billing ones included", async ({ page }) => {
     await loginAs(page, "admin");
-    await page.goto("/settings");
+    await gotoReady(page, "/settings", () =>
+      page.getByRole("navigation", { name: "Settings sections" }),
+    );
     await expect(page).toHaveURL(/\/settings\/flow$/);
     await expect(tabsOf(page)).toHaveText(ADMIN_TABS);
     await expect(settingsNav(page)).toHaveCount(1);
   });
 
-  test("5. reception_admin lands on Services and sees only the tabs it may use", async ({
+  test("5. reception_admin lands on its first tab and sees only the tabs it may use", async ({
     page,
   }) => {
     await loginAs(page, "reception_admin");
-    await page.goto("/settings");
-    await expect(page).toHaveURL(/\/settings\/services$/);
+    await gotoReady(page, "/settings", () =>
+      page.getByRole("navigation", { name: "Settings sections" }),
+    );
+    await expect(page).toHaveURL(/\/settings\/schemes$/);
     await expect(tabsOf(page)).toHaveText(RECEPTION_ADMIN_TABS);
     await expect(settingsNav(page)).toHaveCount(1);
+    await tabsOf(page).getByText("Services", { exact: true }).click();
     await expect(page.getByRole("button", { name: new RegExp(`^${GROUP.name}`) })).toBeVisible();
   });
 
@@ -177,7 +184,7 @@ test.describe("P1-28 billing section in settings — screens", () => {
 
   test("8. the category rates tab loads a category's grid", async ({ page }) => {
     await loginAs(page, "reception_admin");
-    await page.goto("/settings/category-rates");
+    await gotoReady(page, "/settings/category-rates", () => page.getByLabel("Category"));
     const picker = page.getByLabel("Category");
     await expect(picker.locator("option", { hasText: CATEGORY.label })).toHaveCount(1);
     await picker.selectOption(CATEGORY.code);
@@ -186,14 +193,16 @@ test.describe("P1-28 billing section in settings — screens", () => {
 
   test("9. the billing settings tab shows the saved settings to admin", async ({ page }) => {
     await loginAs(page, "admin");
-    await page.goto("/settings/billing");
+    await gotoReady(page, "/settings/billing", () =>
+      page.getByRole("rowheader", { name: "Discount stacking" }),
+    );
     await expect(page.getByRole("rowheader", { name: "Discount stacking" })).toBeVisible();
     await expect(page.getByRole("rowheader", { name: "Number series" })).toBeVisible();
   });
 
   test("10. switching category never shows the previous category's rates", async ({ page }) => {
     await loginAs(page, "reception_admin");
-    await page.goto("/settings/category-rates");
+    await gotoReady(page, "/settings/category-rates", () => page.getByLabel("Category"));
     const picker = page.getByLabel("Category");
     await picker.selectOption(CATEGORY.code);
     await expect(page.getByRole("columnheader", { name: "Bill code" })).toBeVisible();
@@ -232,7 +241,9 @@ test.describe("P1-28 billing section in settings — screens", () => {
 
   test("12. the Categories tab's page is titled Categories", async ({ page }) => {
     await loginAs(page, "admin");
-    await page.goto("/settings/schemes");
-    await expect(page.locator(".flow-sec-title")).toHaveText("Categories");
+    const title = () =>
+      page.getByRole("region", { name: "Categories" }).getByRole("heading", { level: 2 });
+    await gotoReady(page, "/settings/schemes", title);
+    await expect(title()).toHaveText("Categories");
   });
 });

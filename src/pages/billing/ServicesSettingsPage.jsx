@@ -3,6 +3,7 @@ import {
   useBillingGroups,
   useBillingItemChoices,
   useBillingItems,
+  useBillingNotPriced,
   useBillingTaxCodeOptions,
   useDeleteBillingItem,
   useSetBillingItemActive,
@@ -10,6 +11,7 @@ import {
 import { toast } from "../../stores/uiStore";
 import GroupPanel from "../../components/billing/GroupPanel";
 import ItemDialog from "../../components/billing/ItemDialog";
+import NotPricedPanel from "../../components/billing/NotPricedPanel";
 import PriceHistoryDialog from "../../components/billing/PriceHistoryDialog";
 import UsedInDialog from "../../components/billing/UsedInDialog";
 import { errorOf, rupees, usesOf } from "../../components/billing/format";
@@ -142,6 +144,11 @@ export default function ServicesSettingsPage() {
   const [kind, setKind] = useState("");
   const [status, setStatus] = useState("all");
   const [editing, setEditing] = useState(null);
+  const [view, setView] = useState("items");
+  const notPriced = useBillingNotPriced();
+  const notPricedCount = notPriced.data
+    ? notPriced.data.tests.length + notPriced.data.consultants.length
+    : null;
   const [history, setHistory] = useState(null);
   const [blocked, setBlocked] = useState(null);
   const [deactivating, setDeactivating] = useState(false);
@@ -203,115 +210,138 @@ export default function ServicesSettingsPage() {
 
   return (
     <div className="flow-root fset">
-      <div className="bill-services">
-        {groups.isLoading ? (
-          <div className="flow-card fset__cardsub">Loading…</div>
-        ) : groups.isError ? (
-          <div className="flow-card fset__cardsub">Could not load the services.</div>
-        ) : (
-          <GroupPanel
-            groups={groups.data}
-            selected={selected}
-            onSelect={setSelected}
-            onBlocked={setBlocked}
-          />
-        )}
-
-        <section className="flow-card bill-items" aria-label="Items">
-          <div className="fset__cardhead">
-            <h2 className="flow-sec-title">{heading}</h2>
-            <span className="fset__count">{total}</span>
-            <button
-              type="button"
-              className="flow-btn flow-btn-primary flow-btn-mini bill-items__add"
-              disabled={!canAdd}
-              title={addHint}
-              onClick={() => setEditing({ item: null })}
-            >
-              + Add item
-            </button>
-          </div>
-          <div className="bill-items__filters">
-            <input
-              className="jb-assign"
-              type="search"
-              aria-label="Search items"
-              placeholder="Search name or code"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-            />
-            <select
-              className="jb-assign"
-              aria-label="Kind"
-              value={kind}
-              onChange={(e) => setKind(e.target.value)}
-            >
-              <option value="">All kinds</option>
-              {(choices.data?.kinds ?? []).map((k) => (
-                <option key={k} value={k}>
-                  {k}
-                </option>
-              ))}
-            </select>
-            <select
-              className="jb-assign"
-              aria-label="Status"
-              value={status}
-              onChange={(e) => setStatus(e.target.value)}
-            >
-              <option value="all">Active and off</option>
-              <option value="active">Active only</option>
-              <option value="inactive">Off only</option>
-            </select>
-          </div>
-          {items.isError ? (
-            <div className="fset__cardsub">Could not load the items.</div>
-          ) : items.isLoading ? (
-            <div className="fset__cardsub">Loading…</div>
-          ) : !rows.length ? (
-            <div className="fset__cardsub">No items here yet.</div>
-          ) : (
-            <div className="fset__scroll fset__scroll--wide">
-              <table className="flow-table" aria-label="Items">
-                <thead>
-                  <tr>
-                    <th>Code</th>
-                    <th>Name</th>
-                    <th>Kind</th>
-                    <th>Price</th>
-                    <th>Unit</th>
-                    <th>Tax</th>
-                    <th>Consultant / test</th>
-                    <th>Active</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((item) => (
-                    <ItemRow
-                      key={item.id}
-                      item={item}
-                      showPath={selected?.level !== "subgroup"}
-                      onEdit={() => setEditing({ item })}
-                      onHistory={() => setHistory(item)}
-                      onBlocked={setBlocked}
-                    />
-                  ))}
-                </tbody>
-              </table>
-              {total > rows.length ? (
-                <p className="fset__hint">
-                  Showing {rows.length} of {total}. Search or pick a subgroup to narrow the list.
-                </p>
-              ) : null}
-            </div>
-          )}
-        </section>
+      <div className="bill-views" role="group" aria-label="Services view">
+        <button
+          type="button"
+          aria-pressed={view === "items"}
+          className={`bill-views__tab${view === "items" ? " bill-views__tab--on" : ""}`}
+          onClick={() => setView("items")}
+        >
+          Items
+        </button>
+        <button
+          type="button"
+          aria-pressed={view === "not-priced"}
+          className={`bill-views__tab${view === "not-priced" ? " bill-views__tab--on" : ""}`}
+          onClick={() => setView("not-priced")}
+        >
+          Not priced{notPricedCount === null ? "" : ` · ${notPricedCount}`}
+        </button>
       </div>
+      {view === "not-priced" ? (
+        <NotPricedPanel onCreate={(prefill) => setEditing({ item: null, prefill })} />
+      ) : (
+        <div className="bill-services">
+          {groups.isLoading ? (
+            <div className="flow-card fset__cardsub">Loading…</div>
+          ) : groups.isError ? (
+            <div className="flow-card fset__cardsub">Could not load the services.</div>
+          ) : (
+            <GroupPanel
+              groups={groups.data}
+              selected={selected}
+              onSelect={setSelected}
+              onBlocked={setBlocked}
+            />
+          )}
+
+          <section className="flow-card bill-items" aria-label="Items">
+            <div className="fset__cardhead">
+              <h2 className="flow-sec-title">{heading}</h2>
+              <span className="fset__count">{total}</span>
+              <button
+                type="button"
+                className="flow-btn flow-btn-primary flow-btn-mini bill-items__add"
+                disabled={!canAdd}
+                title={addHint}
+                onClick={() => setEditing({ item: null })}
+              >
+                + Add item
+              </button>
+            </div>
+            <div className="bill-items__filters">
+              <input
+                className="jb-assign"
+                type="search"
+                aria-label="Search items"
+                placeholder="Search name or code"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+              />
+              <select
+                className="jb-assign"
+                aria-label="Kind"
+                value={kind}
+                onChange={(e) => setKind(e.target.value)}
+              >
+                <option value="">All kinds</option>
+                {(choices.data?.kinds ?? []).map((k) => (
+                  <option key={k} value={k}>
+                    {k}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="jb-assign"
+                aria-label="Status"
+                value={status}
+                onChange={(e) => setStatus(e.target.value)}
+              >
+                <option value="all">Active and off</option>
+                <option value="active">Active only</option>
+                <option value="inactive">Off only</option>
+              </select>
+            </div>
+            {items.isError ? (
+              <div className="fset__cardsub">Could not load the items.</div>
+            ) : items.isLoading ? (
+              <div className="fset__cardsub">Loading…</div>
+            ) : !rows.length ? (
+              <div className="fset__cardsub">No items here yet.</div>
+            ) : (
+              <div className="fset__scroll fset__scroll--wide">
+                <table className="flow-table" aria-label="Items">
+                  <thead>
+                    <tr>
+                      <th>Code</th>
+                      <th>Name</th>
+                      <th>Kind</th>
+                      <th>Price</th>
+                      <th>Unit</th>
+                      <th>Tax</th>
+                      <th>Consultant / test</th>
+                      <th>Active</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((item) => (
+                      <ItemRow
+                        key={item.id}
+                        item={item}
+                        showPath={selected?.level !== "subgroup"}
+                        onEdit={() => setEditing({ item })}
+                        onHistory={() => setHistory(item)}
+                        onBlocked={setBlocked}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+                {total > rows.length ? (
+                  <p className="fset__hint">
+                    Showing {rows.length} of {total}. Search or pick a subgroup to narrow the list.
+                  </p>
+                ) : null}
+              </div>
+            )}
+          </section>
+        </div>
+      )}
 
       {editing ? (
         <ItemDialog
           item={editing.item}
+          prefill={editing.prefill}
           subgroupId={selected?.level === "subgroup" ? selected.id : ""}
           groups={groups.data ?? []}
           choices={choices.data}

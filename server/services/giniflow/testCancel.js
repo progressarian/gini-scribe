@@ -15,6 +15,7 @@ import {
   LIVE_LAB_CASE_SQL,
   ORDER_CANCELLABLE_SQL,
   ORDER_OUTPUT_SQL,
+  caseFromEarlierLabOnlyVisit,
 } from "./testsHold.js";
 import { placeTestsBeforeDoctors, syncLabStepsFromLab } from "./journey.js";
 import { billLineRef, isLiveBillItem } from "./patientBill.js";
@@ -185,7 +186,7 @@ async function tidyMachineStep(client, visitId, machineId, machines) {
   );
 }
 
-async function tidyLabSteps(client, visitId) {
+export async function tidyLabSteps(client, visitId) {
   const { rows } = await client.query(
     `SELECT EXISTS (SELECT 1 FROM giniflow_lab_orders o
                      WHERE o.visit_id = v.id AND o.urgency = 'today' AND o.kind = 'lab')
@@ -194,7 +195,8 @@ async function tidyLabSteps(client, visitId) {
                           AND (lc.patient_id = v.patient_id
                                OR (lc.patient_id IS NULL
                                    AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))
-                          AND ${LIVE_LAB_CASE_SQL("lc")}) AS still_lab
+                          AND ${LIVE_LAB_CASE_SQL("lc")}
+                          AND NOT ${caseFromEarlierLabOnlyVisit("v")}) AS still_lab
        FROM giniflow_visits v JOIN patients p ON p.id = v.patient_id
       WHERE v.id = $1`,
     [visitId],

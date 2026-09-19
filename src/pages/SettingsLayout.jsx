@@ -30,7 +30,8 @@ export const SETTINGS_TABS = [
   {
     to: "/settings/schemes",
     label: "Categories",
-    blurb: "CGHS, ECHS and the rest — their labels, their card requirement, and the daily cap",
+    blurb:
+      "CGHS, ECHS and the rest — sub-categories, payer, referral and card needs, the daily cap and who belongs",
   },
   {
     to: "/settings/services",

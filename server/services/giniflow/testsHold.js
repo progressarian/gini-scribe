@@ -1,5 +1,6 @@
 import { CANCELLABLE_ORDER_STATUSES } from "../../../shared/testCancelReasons.js";
 import pool from "../../config/db.js";
+import { LAB_ONLY_DOCTOR } from "../../../shared/labOnly.js";
 
 export const DOCTOR_LEG_STATUSES = [
   "vitals_done",
@@ -89,6 +90,17 @@ const visitArrival = (v) =>
 export const caseReportedBeforeVisit = (v) =>
   `COALESCE(${caseTime("reported_on")} < ${visitArrival(v)}, FALSE)`;
 
+const visitCheckedInAt = (v) =>
+  `COALESCE((SELECT min(ce.occurred_at) FROM giniflow_visit_events ce
+              WHERE ce.visit_id = ${v}.id AND ce.status = 'checked_in'), NOW())`;
+
+export const caseFromEarlierLabOnlyVisit = (v) =>
+  `(EXISTS (SELECT 1 FROM appointments la
+             WHERE la.patient_id = ${v}.patient_id
+               AND la.appointment_date = ${v}.visit_date
+               AND lower(btrim(la.doctor_name)) = lower('${LAB_ONLY_DOCTOR}'))
+    AND COALESCE(${caseTime("registered_at")} < ${visitCheckedInAt(v)}, FALSE))`;
+
 export const caseSampledBeforeVisit = (v) =>
   `COALESCE(LEAST(${caseTime("collected_on")}, ${caseTime("received_on")}, ${caseTime("reported_on")})
             < ${visitArrival(v)}, FALSE)`;
@@ -106,6 +118,7 @@ export const TESTS_HOLD_SQL = (v = "v", p = "p") => `
         WHERE ${caseMatches(v, p)}
           AND NOT ${caseWorkedAsOrder(v)}
           AND NOT ${caseReportedBeforeVisit(v)}
+          AND NOT ${caseFromEarlierLabOnlyVisit(v)}
           AND ${LIVE_LAB_CASE_SQL("lc")}
           AND ${caseDoneAt} IS NULL) AS tests_pending,
     GREATEST(
@@ -115,6 +128,7 @@ export const TESTS_HOLD_SQL = (v = "v", p = "p") => `
           AND e.track = 'sample' AND e.status IN ('uploaded', 'reported')),
       (SELECT max(${caseDoneAt}) FROM lab_cases lc
         WHERE ${caseMatches(v, p)} AND NOT ${caseWorkedAsOrder(v)}
+          AND NOT ${caseFromEarlierLabOnlyVisit(v)}
           AND ${LIVE_LAB_CASE_SQL("lc")})
     ) AS tests_ready_at`;
 
