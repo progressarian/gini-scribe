@@ -70,6 +70,9 @@ Change the checkbox and the status word together.
 - **Inputs are strict.** Services use `cleanActive` (only `true`/`false`)
   and `readNumber` (numbers or number-like text; blank means "not set") from
   `common.js`, never `Number(x)` or truthiness on raw input (P1-16 review).
+  Every whole number is checked against `INT_MAX` (use `wholeNumber`) and
+  every money value against `MONEY_MAX`, so nothing too big for its column
+  reaches the database (P1-25 review).
 - **Services join an outer transaction.** Every billing service uses
   `inTransaction` from `server/services/billing/transaction.js`: given the
   pool it opens its own transaction; given a connection already inside a
@@ -934,7 +937,7 @@ today's lab prices keep working.
   - **E2E test:** `e2e/billing/phase1/P1-21-category-resolver.spec.js` — asserts: each of the four cases returns the expected result.
   - **Result:** Done 2026-09-18. `server/services/billing/categoryResolver.js`: `resolveCategory({ patient, appointment, date }, data)` is a pure function over `loadResolverData(db)` (all categories with display name, active flag, "needs a card" and "has active sub-categories", plus active rules by priority then id); `resolveCategoryFor(input, db)` does both. Returns `{ category, parent, source: appointment | patient | rule | general, rule, suggestions: [{ category, rule, reason }], needs_sub_category, age, age_source, warnings }`. Order: the appointment's category, else the patient's — only if active; a retired or unknown recorded category is skipped with a warning; a recorded bare parent (e.g. CGHS) is returned with `needs_sub_category` and its active sub-categories as `choose_sub_category` suggestions. Then automatic rules (first match; ties by id); a rule on a category with sub-categories only suggests (`move_rule_to_sub_category`); a card category is never applied without a saved card (`needs_card`); retired categories' rules are ignored; other matching rules become suggestions (`suggest_rule` / `lower_priority_auto_rule`), in priority order, one per category. Age is from the date of birth on the billing date (India date by default), falling back to the recorded age; no age means age rules don't match. **Deviation:** gender is normalised with the resolver's own `normalizeGender` (`M`/`male` → Male, `F`/`female` → Female, blank → unknown, anything else → Other) instead of `mapGender`, which turns `"M"` and blank into "Other". Categories load in `sort_order`, then name, so the sub-categories offered for a bare parent always come in the same order (the full suite caught them arriving in a random order).
 
-- [ ] **P1-22 · Category rates service** — `Pending`
+- [x] **P1-22 · Category rates service** — `Done`
   - **Where:** `server/services/billing/categoryRates.js`.
   - **What:** a grid for one category or sub-category (every active item with
     base price and that category's rate, bill name, bill code, dates), upsert a
@@ -951,8 +954,9 @@ today's lab prices keep working.
        inherited from CGHS.
   - **Done when:** the grid saves and reloads correctly.
   - **E2E test:** `e2e/billing/phase1/P1-22-category-rates-service.spec.js` — asserts: the grid saves and reloads correctly.
+  - **Result:** Done 2026-09-19. `server/services/billing/categoryRates.js`: `rateGrid(category, { date, groupId, subgroupId })` lists every active item with its General price, the category's own rate row on that date, the parent's (for a sub-category), and the **effective** rate, bill name and bill code with where each came from (`own` / `parent` / `base`), plus `next_valid_from` when a future rate card is loaded; `saveRate`, `deleteRate`, `rateHistory`. Saving the same start date updates that row. A new **open-ended** rate whose start is after the current open-ended row's start ends that row the day before, in the same transaction and audited; every other overlap is refused, naming the dates. **Choice made:** a _time-limited_ rate inside an open-ended one is refused rather than auto-ending the open one — auto-ending it would leave a gap after the time-limited rate ends, silently falling back to the General price. Saves for the same category + item are serialised with a transaction-scoped advisory lock, so two simultaneous saves can't overlap (tested with a held transaction; removing the lock makes it fail). Refused: a retired or unknown category, a deactivated or unknown item, a negative rate or more than 2 decimals, impossible dates, an end before the start, a row that changes nothing, a bill code with spaces. Review (2026-09-19): deleting a rate reports the rate that ends the day before it (`previous`); with `reopen_previous: true` it extends that rate over the deleted one's dates in the same transaction (audited), so undoing a mistaken rate card doesn't leave the item on the General price — not automatic, because an earlier end date may have been deliberate; the screen asks. `saveRate` returns `starts_in_past` so the screen can confirm a back-dated rate. Keeping "a time-limited rate inside an open-ended one is refused" (confirmed).
 
-- [ ] **P1-23 · Billing settings and bill series services** — `Pending`
+- [x] **P1-23 · Billing settings and bill series services** — `Done`
   - **Where:** `server/services/billing/billingSettings.js`,
     `server/services/billing/billSeries.js`.
   - **What:**
@@ -966,8 +970,9 @@ today's lab prices keep working.
       `RCPT`) and financial year.
   - **Done when:** both save and reload; a bad GSTIN is refused.
   - **E2E test:** `e2e/billing/phase1/P1-23-billing-settings-and-bill-series-services.spec.js` — asserts: both save and reload; a bad GSTIN is refused, including one with the right shape but a wrong check character.
+  - **Result:** Done 2026-09-19. `billingSettings.js`: `getSettings`, `updateSettings` (only the fields sent; strict checks; stacking from `STACKING_MODES`; footer ≤ 1000 characters; blank "codes per bill" means no limit). The GSTIN is upper-cased, checked for shape and for its check character with the standard GSTIN checksum (verified against two published valid GSTINs; a one-character typo is refused); a blank state code is filled from the GSTIN's first two digits; a GSTIN from another state is refused; GST can't be switched on until GSTIN, state code and legal name are filled, and while it is on they can't be cleared. `billSeries.js`: `listSeries` (with the formatted next number, e.g. `GAC/26-27/000001`), `saveSeries` (create or update by series + financial year; series stored in capitals; prefix without spaces, ≤ 30; width 1–12), `financialYear(date)` (April–March) and `formatNumber` for Phase 4. **The next number can only go up** — lowering it could reuse bill numbers — and must fit the width; raising it lets the hospital continue from an earlier numbering. Every change audited. Review (2026-09-19): no code changes; P4-05 now refuses prefix/width changes once a number is issued in that year and warns from 1 March when next year's series is missing; P4-23/P4-24 escape all entered text before printing. Only the regular-taxpayer GSTIN pattern is accepted (right for a hospital).
 
-- [ ] **P1-24 · Move test prices to the service master** — `Pending`
+- [x] **P1-24 · Move test prices to the service master** — `Done`
   - **Where:** `server/services/pricing.js`, `server/services/giniflow/testCatalog.js`.
   - **Steps:**
     1. `testPricesFor` reads `service_items.base_price` through
@@ -985,6 +990,7 @@ today's lab prices keep working.
   - **Done when:** MO test ordering and reception's lab payment queue show the
     same prices as before for every test (checked in P1-35).
   - **E2E test:** `e2e/billing/phase1/P1-24-move-test-prices-to-the-service-master.spec.js` — asserts: MO test ordering and reception's lab payment queue show the same prices as before for every test (checked in P1-35).
+  - **Result:** Done 2026-09-19 — **code only; takes effect when deployed.** `server/services/pricing.js`: a test's base price is its active service item's price, else the catalogue price (`catalogBasePriceSql`, shared by every reader); a category price is the category's own rate in `category_item_rates`, else its parent's, for the India date (`testPricesFor(names, category, db, date)`); `consultationRateJoinSql` gives the Reception arrivals row the category's rate for the assigned doctor's consultation item (else the hospital default item) for the visit's type — Investigation has none, no category shows nothing, as before. Every direct catalogue-price read was switched: MO test panels (`moStation.js`), the desk's test list and arrivals fee (`receptionStation.js`), machine orders (`machineSync.js`, `machineStation.js`), machine options (`machineCatalog.js`), the admin test catalogue (`testCatalog.js`, which also shows `pricedBy` / the item code). `opdFeeFor` and `medicinePricesFor` are removed; no code reads the `scheme_*` tables any more (P1-10 can drop them once this is deployed). **Deviation:** the test catalogue still saves a price for a test that has **no** billing item — the item screens and the hospital's items don't exist yet, so blocking all price edits would leave no way to change a test price; for a test that has an active item, a price edit is refused with the item's name and code. New `shared/billingVisitType.js` (`billingVisitType`, `billingVisitTypeSql`): Investigation → none; `isNewVisitType` → New; everything else (Follow-Up, Tele, OPD) → Follow Up — a test checks the JavaScript and SQL versions agree. With no items or rates loaded, every screen shows exactly today's prices (tested); `smoke-floor-journey` and `smoke-bill-test-steps` pass against the test database. Review (2026-09-19): machine tests (the machine station's `addMachineTestOn` and the machine sync's fallback when HealthRay gives no amount) are now priced with the visit's category rate through `testPriceForVisit`, the same as lab tests — before, they always took the General price, which would have mattered as soon as category rates were loaded; rates of a retired category, or of a sub-category whose parent is retired, are no longer used (matching the resolver). The desk's test picker still lists base prices (it has no patient); the Billing Counter shows the real line.
 
 - [ ] **P1-10 · Migration file: drop the unused scheme price tables** — `Pending`
   - **Moved here (2026-09-18):** it was ordered before P1-24, but
@@ -1007,7 +1013,7 @@ today's lab prices keep working.
 
 ### 1E. Routes
 
-- [ ] **P1-25 · Validation schemas** — `Pending`
+- [x] **P1-25 · Validation schemas** — `Done`
   - **Where:** `server/schemas/index.js`.
   - **What:** Zod schemas for create/update of groups, subgroups, tax codes,
     items, categories, category rules, category rates, settings, series.
@@ -1015,8 +1021,9 @@ today's lab prices keep working.
     numbers with at most 2 decimals.
   - **Done when:** each endpoint in P1-26/27 uses its schema.
   - **E2E test:** `e2e/billing/phase1/P1-25-validation-schemas.spec.js` — asserts: each endpoint in P1-26/27 uses its schema.
+  - **Result:** Done 2026-09-19. `server/schemas/billing.js`, re-exported from `server/schemas/index.js`: 20 schemas in `BILLING_SCHEMAS` — create/update for groups, subgroups, tax codes, items (update also takes `reason`), categories, category rules; category rate save/delete; `billingActiveSchema` (`{ is_active: true/false }`); settings update; series save; and three query schemas (item list, rules/category list, rate grid). All are strict (unknown fields refused — so a desk request can never slip in a price field); update schemas need at least one field; money is a number ≥ 0 with at most 2 decimals, or text like `1200.50` (no commas, `₹` or exponents); lists (kinds, visit types, genders, modes, stacking) come from the shared constants. The query schemas turn `active=true`/`false` text into a real boolean and refuse anything else (the P1-17 note for routes). The schemas check shape and type; business rules stay in the services. A test sends a full valid body through each schema and into the real service, so the two can't drift apart. P1-26/P1-27 must mount every route with its schema (their tests check it). Review (2026-09-19): numbers too big for the database no longer reach it — a sort order, id, cap, quantity or priority above 2,147,483,647 (the integer limit) or a money value above 9,999,999,999.99 (the `NUMERIC(12,2)` limit) gets a clear 400 in both the schemas **and** the services (shared `INT_MAX`, `MONEY_MAX`, `wholeNumber` in `common.js`); before, they reached the database and came back as a raw 500 "out of range". Bill numbers (`next_no`, `BIGINT`) may go above the integer limit.
 
-- [ ] **P1-26 · Master data routes** — `Pending`
+- [x] **P1-26 · Master data routes** — `Done`
   - **Where:** `server/routes/billingMaster.js`, mounted in
     `server/index.js`, under `/api/billing/master`.
   - **What:** list/create/update/delete for groups, subgroups, items, tax
@@ -1033,14 +1040,16 @@ today's lab prices keep working.
     whose checks are strict (P1-17 review). Numbers may be passed as text.
   - **Done when:** each endpoint works and returns 403 without the capability.
   - **E2E test:** `e2e/billing/phase1/P1-26-master-data-routes.spec.js` — asserts: each endpoint works and returns 403 without the capability.
+  - **Result:** Done 2026-09-19. `server/routes/billingMaster.js`, mounted in `server/index.js`, all under `/api/billing/master`: groups (list, create, update, `PUT …/active`, delete), subgroups (create, update, active, delete), `GET tax-codes` (list only — **tax-code changes are in P1-27's settings routes, admin only, as plan §10 says**), items (list with filters, `not-priced`, `:id/price-history`, create, update, active, delete), categories (tree, create, update, delete), category rules (list, create, update, active, delete), category rates (`GET :code` grid, `GET :code/items/:itemId` history, `PUT` save, `DELETE` with a body), and `GET usage/:kind/:key` for the screens to show "where it's used" before a delete. Every body and query goes through its P1-25 schema; ids in the path must be whole numbers within range and category codes must look like codes (400 otherwise). Each route also checks `BILLING_MASTER` itself, on top of the `/api/billing/master` gate (tested: removing the route check still leaves reception, coordinator and lab refused). A 4xx carries the service's details (`uses`, `active`, `conflicts`) so the screen can list them. Changes are audited with the signed-in user and IP. The existing `/api/patient-schemes` routes are unchanged. Review (2026-09-19): unexpected (5xx) errors from billing routes are logged in full with a short reference and shown to the user only as "Something went wrong — it has been logged (ref …)", so database internals (constraint and table names, error codes) are never sent; clear 4xx messages and their details are unchanged. The wrapper is `server/routes/billingHttp.js` (`billingRoute`), for every billing router. Deleting a category rate is now `DELETE /api/billing/master/category-rates/:code/items/:itemId/:validFrom?reopen_previous=true` (no request body, which some proxies drop); the body schema was replaced by `billingCategoryRateDeleteQuerySchema`.
 
-- [ ] **P1-27 · Settings routes** — `Pending`
+- [x] **P1-27 · Settings routes** — `Done`
   - **Where:** `server/routes/billingSettings.js`, mounted in
     `server/index.js`, under `/api/billing/settings`.
   - **What:** read/update settings, list/update series, behind
     `BILLING_SETTINGS`. Tax code CRUD also sits here.
   - **Done when:** only admin can change these.
   - **E2E test:** `e2e/billing/phase1/P1-27-settings-routes.spec.js` — asserts: only admin can change these.
+  - **Result:** Done 2026-09-19. `server/routes/billingSettings.js`, mounted in `server/index.js`, under `/api/billing/settings`, admin only (`BILLING_SETTINGS`, checked on each route as well as by the prefix gate): `GET` / `PATCH` the settings; `GET` / `PUT series` (create or update by series + year); tax codes `GET` (list), `POST`, `PATCH :id`, `PUT :id/active`, `DELETE :id`. Every body and query uses its P1-25 schema; errors go through the shared `billingRoute` (clear 4xx with details, plain 5xx). Tested over HTTP: admin can do all of it; **reception_admin, reception and coordinator get 403 on every settings endpoint** and change nothing; the GSTIN typo, "GST on without details", "next number can only go up", and "tax code in use" refusals all come back as clear 4xx with their details.
 
 ### 1F. Admin screens
 
@@ -1408,6 +1417,10 @@ manage payment rules and discount codes.
     `$1 = ANY(column)`, so a group or category a discount rule targets can't be
     deleted. The P1-14 tests don't catch arrays, so this step is manual; add a
     test case for each.
+  - **Also (P1-22):** a discount `code` must never equal a category bill code
+    (`category_item_rates.bill_code`), and the category rates save (P1-22)
+    must then refuse a bill code equal to an existing discount code — both
+    directions, ignoring case.
   - **E2E test:** `e2e/billing/phase3/P3-02-migration-discount-rules.spec.js` — asserts: the migration runs twice on a fresh test database without error; the new tables, columns and indexes exist; RLS is on; no business rows are inserted.
 
 - [ ] **P3-03 · Apply the rules migration** — `Pending`
@@ -1819,6 +1832,17 @@ floor. Nothing about the existing "Clear payment" changes.
     2. It builds `prefix + zero-padded next_no` and increments `next_no`.
     3. With no series row for that year, it throws "Ask the admin to set the
        bill series for 2026-27".
+    4. Reuse `financialYear` and `formatNumber` from
+       `server/services/billing/billSeries.js` (P1-23).
+    5. **Once a number has been issued** in a series + financial year (any
+       bill or receipt carries it), `saveSeries` refuses to change that
+       year's `prefix` or `number_width` (409): GST invoices need one
+       consistent, consecutive serial per year. Raising `next_no` stays
+       allowed (P1-23 review).
+    6. From **1 March**, the billing settings screen (and `listSeries`) warns
+       when next financial year's series (`MAIN`, `RCPT`) is missing, so
+       billing doesn't stop at midnight on 1 April; the prefix contains the
+       year, so it is never created automatically (P1-23 review).
   - **Done when:** two concurrent finalises get consecutive numbers with no gap.
   - **E2E test:** `e2e/billing/phase4/P4-05-bill-and-receipt-numbers.spec.js` — asserts: two concurrent finalises get consecutive numbers with no gap.
 
@@ -1840,8 +1864,9 @@ floor. Nothing about the existing "Clear payment" changes.
        line: the item for this doctor + visit type, else the hospital default
        consultation item. An **Investigation** visit gets no consultation line
        (no consultation fee, decided 2026-09-17).
-       - Convert the appointment's visit type first with one shared function
-         in `shared/` (plan §7): Investigation → no fee; a type
+       - Convert the appointment's visit type first with the shared
+         `billingVisitType` in `shared/billingVisitType.js` (built in P1-24;
+         plan §7): Investigation → no fee; a type
          `isNewVisitType` calls new (`New`, `New Patient`) → `New`; anything
          else (`Follow-Up`, `Follow-up`, `Tele`, `OPD`) → `Follow Up`
          (decided 2026-09-18: Tele is charged as Follow Up).
@@ -2045,6 +2070,9 @@ floor. Nothing about the existing "Clear payment" changes.
       balance;
     - tax columns, SAC/HSN and GSTIN only when GST is on;
     - footer text from the settings.
+  - **Escape every admin- or desk-entered text** before it goes into the
+    HTML — footer, legal name, bill names, category names, patient name —
+    so `<b>` or `<script>` prints as text, never as markup (P1-23 review).
   - **Done when:** the PDF prints cleanly for a General bill, a CGHS Paid bill
     and a CGHS Referral bill.
   - **E2E test:** `e2e/billing/phase4/P4-23-bill-pdf.spec.js` — asserts: the PDF prints cleanly for a General bill, a CGHS Paid bill and a CGHS Referral bill.
@@ -2052,7 +2080,7 @@ floor. Nothing about the existing "Clear payment" changes.
 - [ ] **P4-24 · Receipt PDF** — `Pending`
   - **Where:** `server/services/billing/receiptPdf.js`.
   - **Contents:** receipt number and date, bill number, patient, amount, mode,
-    reference, received by.
+    reference, received by. Escape all entered text, as in P4-23.
   - **Done when:** one receipt prints per payment.
   - **E2E test:** `e2e/billing/phase4/P4-24-receipt-pdf.spec.js` — asserts: one receipt prints per payment.
 

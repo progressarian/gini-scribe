@@ -1,5 +1,6 @@
 import { CANCELLABLE_ORDER_STATUSES } from "../../../shared/testCancelReasons.js";
 import pool from "../../config/db.js";
+import { testPriceForVisit } from "../pricing.js";
 import { LIVE_LAB_CASE_SQL } from "./testsHold.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config/storage.js";
 import { opensLabGate, outstandingOf } from "../../../shared/labPayment.js";
@@ -615,16 +616,12 @@ export async function addMachineTestOn(
     return { orderId: existing[0].id, machine: machine.id, alreadyThere: true };
   }
 
-  const { rows: priced } = await client.query(
-    `SELECT price FROM giniflow_test_catalog
-      WHERE UPPER(test_name) = UPPER($1) AND COALESCE(is_active, TRUE)`,
-    [machine.tests[0]],
-  );
-  const price = Number(priced[0]?.price ?? 0);
+  const found = await testPriceForVisit(visitId, machine.tests[0], client);
+  const price = Number(found ?? 0);
   // A test with no price cannot be billed, and an order for ₹0 would sit at
   // `pending` with nothing for reception to collect — blocked at the machine
   // for ever. The lab refuses an uncatalogued test outright; so does this.
-  if (!priced.length || !(price > 0)) {
+  if (found === null || !(price > 0)) {
     throw Object.assign(
       new Error(
         `${machine.name} has no price in the test catalogue — an admin must add it under Settings → Flow → Test catalogue before it can be billed`,

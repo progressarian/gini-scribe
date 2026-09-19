@@ -8,6 +8,7 @@ import {
   cleanFlag,
   cleanName,
   hasField,
+  INT_MAX,
   lockRow,
   readNumber,
 } from "./common.js";
@@ -66,7 +67,7 @@ function cleanMode(value) {
 function cleanPriority(value) {
   const priority = readNumber(value, "Priority must be a whole number, 0 or more");
   if (priority === undefined) return 100;
-  if (!Number.isInteger(priority) || priority < 0) {
+  if (!Number.isInteger(priority) || priority < 0 || priority > INT_MAX) {
     throw httpError(400, "Priority must be a whole number, 0 or more");
   }
   return priority;

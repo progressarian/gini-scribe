@@ -8,14 +8,15 @@ import {
   cleanFlag,
   cleanOrder,
   deleteUnused,
+  INT_MAX,
   readNumber,
 } from "./billing/common.js";
 
 // The scheme vocabulary, read from patient_schemes rather than the hardcoded
 // array shared/patientCategories.js used to be (33-PATIENT-SCHEME-PLAN.md §1).
 //
-// `code` is the join key every later feature hangs off — scheme_test_prices,
-// scheme_opd_fees, the daily cap — so a code is never renamed, and is deleted
+// `code` is the join key every later feature hangs off — category rates,
+// category rules, the daily cap — so a code is never renamed, and is deleted
 // only when nothing uses it (billing plan D9). Retiring a scheme flips
 // is_active, which keeps historical appointments resolving their label.
 
@@ -246,7 +247,7 @@ export async function createScheme(input, db = pool, ctx = null) {
 function normalizeCap(v) {
   const n = readNumber(v, "Daily cap must be a whole number, 0 or more");
   if (n === undefined) return null;
-  if (!Number.isInteger(n) || n < 0) {
+  if (!Number.isInteger(n) || n < 0 || n > INT_MAX) {
     throw Object.assign(new Error("Daily cap must be a whole number, 0 or more"), { status: 400 });
   }
   return n;

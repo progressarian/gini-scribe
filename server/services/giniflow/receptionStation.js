@@ -1,4 +1,5 @@
 import pool from "../../config/db.js";
+import { catalogBasePriceSql, consultationRateJoinSql } from "../pricing.js";
 import {
   STATUS_LABEL,
   chainIndex,
@@ -17,6 +18,7 @@ import { machineForTest, machinesOnBillLine } from "../../../shared/machineStage
 import { blockDetail } from "../patientBlockView.js";
 import { createWalkinBooking } from "../walkinBooking.js";
 import { LAB_ONLY_DOCTOR, labOnlyHiddenPredicate } from "./labOnlyVisits.js";
+import { hideLabOnlyPatients } from "./floorSettings.js";
 import {
   CLAIM_STATE,
   collectiblePaise,
@@ -108,8 +110,6 @@ const ORDER_SELECT = `
 // test lines. The card falls back to their sum, so the money maths has to use
 // the same figure — reading the raw column there would call such an order
 // settled while the card still shows what it is worth.
-const HIDE_LAB_ONLY_AT_RECEPTION = false;
-
 const totalOf = (r) =>
   Number(r.amount_total) || (r.tests || []).reduce((s, t) => s + Number(t.price || 0), 0);
 
@@ -289,7 +289,7 @@ export async function getPaymentQueue(visitDate, db = pool, { q = "" } = {}) {
   const { rows } = await db.query(`${ORDER_SELECT} ORDER BY o.created_at`, [
     visitDate,
     LAB_ONLY_DOCTOR,
-    HIDE_LAB_ONLY_AT_RECEPTION,
+    await hideLabOnlyPatients(db),
   ]);
   const machines = await getMachines(db);
   const allOrders = rows.map((r) => {
@@ -729,8 +729,9 @@ export async function clearPayment(
 
 export async function getTestCatalog(db = pool) {
   const { rows } = await db.query(
-    `SELECT test_name, price, source, category FROM giniflow_test_catalog
-      WHERE is_active ORDER BY test_name`,
+    `SELECT c.test_name, ${catalogBasePriceSql("c")} AS price, c.source, c.category
+       FROM giniflow_test_catalog c
+      WHERE c.is_active ORDER BY c.test_name`,
   );
   return rows.map((r) => ({
     name: r.test_name,
@@ -775,11 +776,7 @@ const ARRIVAL_SELECT = `
          ap.patient_category AS scheme_code,
          ap.visit_type AS booking_type,
          (v.appointment_id IS NULL OR COALESCE(checkin_ev.walk_in, FALSE)) AS walk_in,
-         (SELECT f.fee FROM scheme_opd_fees f
-           WHERE f.scheme_code = ap.patient_category
-             AND f.visit_type = ap.visit_type
-             AND (f.doctor_id IS NULL OR f.doctor_id = v.assigned_doctor_id)
-           ORDER BY f.doctor_id NULLS LAST LIMIT 1) AS scheme_opd_fee,
+         opd_fee.rate AS scheme_opd_fee,
          (v.visit_date + COALESCE(v.appointment_time, '00:00'::time))
            AT TIME ZONE 'Asia/Kolkata' AS slot_at,
          p.name, p.file_no, p.age, p.sex, p.phone,
@@ -795,6 +792,12 @@ const ARRIVAL_SELECT = `
     LEFT JOIN appointments ap ON ap.id = v.appointment_id
     LEFT JOIN doctors asd  ON asd.id  = v.assigned_sd_id
     LEFT JOIN doctors adoc ON adoc.id = v.assigned_doctor_id
+    ${consultationRateJoinSql({
+      scheme: "ap.patient_category",
+      doctor: "v.assigned_doctor_id",
+      visitType: "ap.visit_type",
+      date: "v.visit_date",
+    })}
     -- Which visit type to offer the desk. The flags live on flow_visit_types and
     -- the history is the patient's own, so no id is named here.
     --
@@ -953,7 +956,7 @@ export async function getArrivals(visitDate, q = "", now = new Date(), db = pool
   const { rows } = await db.query(ARRIVAL_SELECT, [
     visitDate,
     LAB_ONLY_DOCTOR,
-    HIDE_LAB_ONLY_AT_RECEPTION,
+    await hideLabOnlyPatients(db),
   ]);
 
   // Server-side, and the board's own search rather than a second implementation:

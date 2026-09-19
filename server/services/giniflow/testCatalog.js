@@ -1,4 +1,5 @@
 import pool from "../../config/db.js";
+import { catalogBasePriceSql } from "../pricing.js";
 
 // Which station a test belongs to. The lab draws and runs a specimen; the
 // machine room sits a patient at a machine. One list, so the admin screen, the
@@ -30,8 +31,9 @@ export async function addCatalogTest(
   }
 
   const { rows: existing } = await db.query(
-    `SELECT test_name, price, gloss, is_active, category FROM giniflow_test_catalog
-      WHERE UPPER(test_name) = UPPER($1)`,
+    `SELECT c.test_name, ${catalogBasePriceSql("c")} AS price, c.gloss, c.is_active, c.category
+       FROM giniflow_test_catalog c
+      WHERE UPPER(c.test_name) = UPPER($1)`,
     [clean],
   );
   if (existing.length) {
@@ -77,10 +79,12 @@ export async function addCatalogTest(
 // list that hides them cannot show that it worked.
 export async function listCatalog(db = pool) {
   const { rows } = await db.query(
-    `SELECT c.id, c.test_name, c.price, c.gloss, c.is_active, c.source, c.category, c.updated_at,
+    `SELECT c.id, c.test_name, ${catalogBasePriceSql("c")} AS price, c.gloss, c.is_active, c.source,
+            c.category, c.updated_at, item.id AS service_item_id, item.code AS service_item_code,
             COALESCE(u.times_ordered, 0)::int AS times_ordered,
             u.last_ordered::text AS last_ordered
        FROM giniflow_test_catalog c
+       LEFT JOIN service_items item ON item.test_catalog_id = c.id AND item.is_active
        LEFT JOIN (
          SELECT t.test_name,
                 COUNT(*) AS times_ordered,
@@ -102,6 +106,9 @@ export async function listCatalog(db = pool) {
     updatedAt: r.updated_at,
     timesOrdered: r.times_ordered,
     lastOrdered: r.last_ordered,
+    serviceItemId: r.service_item_id ?? null,
+    serviceItemCode: r.service_item_code ?? null,
+    pricedBy: r.service_item_id ? "service_item" : "catalogue",
   }));
 }
 
@@ -115,12 +122,27 @@ export async function updateCatalogTest(id, { price, gloss, isActive, category }
   if (category != null && !CATEGORIES.includes(category)) {
     throw Object.assign(new Error(`Unknown station: ${category}`), { status: 400 });
   }
+  if (price != null) {
+    const { rows: priced } = await db.query(
+      `SELECT i.code, i.name FROM service_items i
+        WHERE i.test_catalog_id = $1 AND i.is_active`,
+      [id],
+    );
+    if (priced.length) {
+      throw Object.assign(
+        new Error(
+          `This test is priced by the billing item ${priced[0].name} (${priced[0].code}); change its price in Settings → Billing → Items`,
+        ),
+        { status: 409 },
+      );
+    }
+  }
   // Only the NEXT order follows a change of station. `giniflow_lab_orders.kind`
   // is copied from here when the order is raised and never re-read, so a test
   // moved to another station does not drag yesterday's orders across with it —
   // which would take a sample the lab has already drawn off their queue.
   const { rows } = await db.query(
-    `UPDATE giniflow_test_catalog
+    `UPDATE giniflow_test_catalog c
         SET price = COALESCE($2, price),
             gloss = COALESCE($3, gloss),
             is_active = COALESCE($4, is_active),
@@ -128,7 +150,8 @@ export async function updateCatalogTest(id, { price, gloss, isActive, category }
             source = CASE WHEN $2 IS NULL THEN source ELSE 'priced_by_admin' END,
             updated_at = NOW()
       WHERE id = $1
-      RETURNING id, test_name, price, gloss, is_active, source, category`,
+      RETURNING c.id, c.test_name, ${catalogBasePriceSql("c")} AS price, c.gloss, c.is_active,
+                c.source, c.category`,
     [id, price ?? null, gloss ?? null, isActive ?? null, category ?? null],
   );
   if (!rows.length) throw Object.assign(new Error("Test not found"), { status: 404 });

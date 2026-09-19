@@ -15,6 +15,7 @@ import {
   deleteUnused,
   duplicateCodeError,
   hasField,
+  INT_MAX,
   lockRow,
   readNumber,
 } from "./common.js";
@@ -49,7 +50,9 @@ const shape = (row) => (row ? { ...row, base_price: Number(row.base_price) } : r
 function cleanId(value, label) {
   if (value === undefined || value === null || value === "") return null;
   const id = readNumber(value, `Choose a valid ${label}`);
-  if (!Number.isInteger(id) || id <= 0) throw httpError(400, `Choose a valid ${label}`);
+  if (!Number.isInteger(id) || id <= 0 || id > INT_MAX) {
+    throw httpError(400, `Choose a valid ${label}`);
+  }
   return id;
 }
 
@@ -72,7 +75,7 @@ function cleanUnit(value) {
 function cleanMaxQuantity(value) {
   const max = readNumber(value, "Maximum quantity must be a whole number");
   if (max === undefined) return null;
-  if (!Number.isInteger(max) || max < 1) {
+  if (!Number.isInteger(max) || max < 1 || max > INT_MAX) {
     throw httpError(400, "Maximum quantity must be a whole number, 1 or more");
   }
   return max;

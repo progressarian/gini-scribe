@@ -12,6 +12,7 @@ import {
   duplicateCodeError,
   hasField,
   lockRow as lockById,
+  wholeNumber,
 } from "./common.js";
 
 const LEVELS = {
@@ -40,8 +41,8 @@ function cleanInput(level, input, { partial }) {
   if (!partial || has("name")) out.name = cleanName(input?.name);
   if (!partial || has("sort_order")) out.sort_order = cleanOrder(input?.sort_order);
   if (level === "subgroup" && (!partial || has("group_id"))) {
-    const groupId = Number(input?.group_id);
-    if (!Number.isInteger(groupId) || groupId <= 0) throw httpError(400, "Choose a group");
+    const groupId = wholeNumber(input?.group_id, "Group", { min: 1 });
+    if (groupId === undefined) throw httpError(400, "Choose a group");
     out.group_id = groupId;
   }
   return out;

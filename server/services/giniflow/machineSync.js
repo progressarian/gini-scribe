@@ -1,4 +1,5 @@
 import pool from "../../config/db.js";
+import { testPriceForVisit } from "../pricing.js";
 import {
   insertLabStepsForOrder,
   insertMachineStepsForOrders,
@@ -11,7 +12,7 @@ import { billSuppressor, cancelDeadBillTests } from "./testCancel.js";
 import { CANCELLABLE_ORDER_STATUSES } from "../../../shared/testCancelReasons.js";
 import { machineCaseListOnly } from "../../../shared/manualFloor.js";
 import { createLogger } from "../logger.js";
-import { healthrayBlockedUntil } from "./healthrayRefresh.js";
+import { billReadsBlockedUntil } from "./healthrayRefresh.js";
 import { IST_TODAY } from "./statusEngine.js";
 import {
   billedLabLines,
@@ -51,18 +52,10 @@ const alreadyRaised = async (client, visitId, machine) => {
   return rows.length > 0;
 };
 
-const catalogPrice = async (client, testName) => {
-  const { rows } = await client.query(
-    `SELECT price FROM giniflow_test_catalog
-      WHERE UPPER(test_name) = UPPER($1) AND COALESCE(is_active, TRUE)`,
-    [testName],
-  );
-  return Number(rows[0]?.price ?? 0);
-};
-
 async function raiseOrder(client, visitId, machine, { amount }) {
   const testName = machine.tests[0];
-  const price = amount > 0 ? amount : await catalogPrice(client, testName);
+  const price =
+    amount > 0 ? amount : Number((await testPriceForVisit(visitId, testName, client)) ?? 0);
   const { rows } = await client.query(
     `INSERT INTO giniflow_lab_orders
        (visit_id, ordered_by, urgency, payment_status, amount_total,
@@ -273,13 +266,13 @@ export async function syncMachineOrdersForVisit(visit, db = pool) {
 }
 
 export async function canReadBill(visitId, db = pool) {
-  if (await healthrayBlockedUntil(db)) return false;
+  if (await billReadsBlockedUntil(db)) return false;
   const { rows } = await db.query(`${TARGET_SELECT} AND v.id = $2`, [NEVER_ARRIVED, visitId]);
   return rows.some((r) => r.hr_patient_id);
 }
 
 export async function syncBillingForVisitId(visitId, db = pool) {
-  if (await healthrayBlockedUntil(db)) return { raised: 0, lines: 0, labSteps: [], blocked: true };
+  if (await billReadsBlockedUntil(db)) return { raised: 0, lines: 0, labSteps: [], blocked: true };
   const { rows } = await db.query(`${TARGET_SELECT} AND v.id = $2`, [NEVER_ARRIVED, visitId]);
   const visit = rows.find((r) => r.hr_patient_id);
   if (!visit) return { raised: 0, lines: 0, labSteps: [] };
@@ -292,7 +285,7 @@ export async function runMachineSync(dateStr, { limit = SCAN_BATCH, db = pool } 
   if (!machineCaseListOnly()) {
     return { skipped: "SCRIBE_MACHINE_CASE_LIST=0", scanned: 0, raised: 0, failed: 0 };
   }
-  const blockedUntil = await healthrayBlockedUntil(db);
+  const blockedUntil = await billReadsBlockedUntil(db);
   if (blockedUntil) {
     return { skipped: `HealthRay blocked until ${blockedUntil}`, scanned: 0, raised: 0, failed: 0 };
   }
@@ -368,7 +361,7 @@ export async function healthrayBillSteps(patientId, { date = null, db = pool } =
   );
   const empty = { labTests: [], machines: [], steps: [], readAt: bill.readAt };
   if (bill.status === "unknown") {
-    return { ...empty, status: "blocked", blockedUntil: await healthrayBlockedUntil(db) };
+    return { ...empty, status: "blocked", blockedUntil: await billReadsBlockedUntil(db) };
   }
   if (bill.status === "no_bill") return { ...empty, status: "no_bill" };
   const visitId = await visitIdFor(visit.patient_id, visit.visit_date, db);

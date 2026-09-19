@@ -1,4 +1,5 @@
 import pool from "../../config/db.js";
+import { catalogBasePriceSql } from "../pricing.js";
 import { shapeMachine } from "../../../shared/machineStages.js";
 import { createLogger } from "../logger.js";
 
@@ -144,9 +145,9 @@ export async function assertMachineCanStop(stepId, db = pool) {
 
 export async function machineOptions(reportTypes, db = pool) {
   const { rows } = await db.query(
-    `SELECT test_name, price FROM giniflow_test_catalog
-      WHERE category = 'machine' AND COALESCE(is_active, TRUE)
-      ORDER BY test_name`,
+    `SELECT c.test_name, ${catalogBasePriceSql("c")} AS price FROM giniflow_test_catalog c
+      WHERE c.category = 'machine' AND COALESCE(c.is_active, TRUE)
+      ORDER BY c.test_name`,
   );
   return {
     reportTypes,

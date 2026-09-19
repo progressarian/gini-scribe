@@ -19,6 +19,9 @@ export function cleanName(value) {
 
 const NUMBER_TEXT = /^-?\d+(\.\d+)?$/;
 
+export const INT_MAX = 2147483647;
+export const MONEY_MAX = 9999999999.99;
+
 export function readNumber(value, message) {
   if (value === undefined || value === null) return undefined;
   if (typeof value === "string") {
@@ -31,17 +34,23 @@ export function readNumber(value, message) {
   throw httpError(400, message);
 }
 
+export function wholeNumber(value, label, { min = 0, max = INT_MAX } = {}) {
+  const message = `${label} must be a whole number from ${min} to ${max}`;
+  const n = readNumber(value, message);
+  if (n === undefined) return undefined;
+  if (!Number.isInteger(n) || n < min || n > max) throw httpError(400, message);
+  return n;
+}
+
 export function cleanOrder(value) {
-  const order = readNumber(value, "Sort order must be a whole number");
-  if (order === undefined) return 0;
-  if (!Number.isInteger(order)) throw httpError(400, "Sort order must be a whole number");
-  return order;
+  return wholeNumber(value, "Sort order", { min: -INT_MAX, max: INT_MAX }) ?? 0;
 }
 
 export function cleanMoney(value, label) {
   const amount = readNumber(value, `${label} must be an amount in rupees`);
   if (amount === undefined) throw httpError(400, `${label} is required`);
   if (amount < 0) throw httpError(400, `${label} can't be negative`);
+  if (amount > MONEY_MAX) throw httpError(400, `${label} is too large (at most ${MONEY_MAX})`);
   if (Number(amount.toFixed(2)) !== amount) {
     throw httpError(400, `${label} can have at most 2 decimals (paise)`);
   }

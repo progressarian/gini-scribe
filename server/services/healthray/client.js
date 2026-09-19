@@ -109,17 +109,86 @@ async function tripBlock(status, url) {
   );
 }
 
+const BILL_ENDPOINT = "/api/v1/appointment/get_transactions";
+const isBillRead = (url) => endpointOf(url) === BILL_ENDPOINT;
+export const KV_BILL_COOLDOWN = "healthray_bill_cooldown";
+let billSharedUntil = 0;
+let billLocalUntil = 0;
+let billBlockCheckedAt = 0;
+
+const billReadsRefused = (status) =>
+  Object.assign(
+    new Error(
+      status
+        ? `HealthRay refused the bill read (http=${status}) — appointments keep syncing`
+        : `HealthRay bill reads paused until ${new Date(Math.max(billSharedUntil, billLocalUntil)).toISOString()} — appointments keep syncing`,
+    ),
+    { healthrayBlocked: true, billReadsBlocked: true },
+  );
+
+async function assertBillReadsAllowed() {
+  if (!IGNORE_SHARED_BLOCK && Date.now() - billBlockCheckedAt > BLOCK_CHECK_MS) {
+    billBlockCheckedAt = Date.now();
+    billSharedUntil = (await kvGet(KV_BILL_COOLDOWN))?.until || 0;
+  }
+  if (Date.now() < Math.max(billSharedUntil, billLocalUntil)) throw billReadsRefused();
+}
+
+async function tripBillBlock(status, url) {
+  if (IGNORE_SHARED_BLOCK) {
+    billLocalUntil = Date.now() + BLOCK_COOLDOWN_MS;
+    log(
+      "Auth",
+      `⚠ Bill reads paused by HealthRay (http=${status} on ${endpointOf(url)}) — this process pauses bill reads ${Math.round(BLOCK_COOLDOWN_MS / 60000)}min; appointments keep syncing`,
+    );
+    return;
+  }
+  const shared = await kvGet(KV_BILL_COOLDOWN);
+  if (shared?.until > Date.now()) {
+    billSharedUntil = shared.until;
+    return;
+  }
+  const count = (shared?.blockCount || 0) + 1;
+  const backoff = Math.min(BLOCK_COOLDOWN_MAX_MS, BLOCK_COOLDOWN_MS * 2 ** (count - 1));
+  billSharedUntil = Date.now() + backoff;
+  billBlockCheckedAt = Date.now();
+  await kvSet(KV_BILL_COOLDOWN, {
+    until: billSharedUntil,
+    blockCount: count,
+    reason: `bill reads blocked (http=${status} on ${endpointOf(url)})`,
+  });
+  log(
+    "Auth",
+    `⚠ Bill reads paused by HealthRay (http=${status} on ${endpointOf(url)}) — block #${count}, no bill reads for ${Math.round(backoff / 60000)}min; appointments keep syncing`,
+  );
+}
+
+async function clearBillBlock() {
+  billLocalUntil = 0;
+  if (IGNORE_SHARED_BLOCK) return;
+  const shared = await kvGet(KV_BILL_COOLDOWN);
+  if (!shared?.blockCount) return;
+  billSharedUntil = 0;
+  await kvSet(KV_BILL_COOLDOWN, { until: 0, blockCount: 0, reason: "" });
+  log("Auth", "Bill reads working again — bill block cleared");
+}
+
 async function gatedFetch(url, options, timeoutMs) {
+  const billRead = isBillRead(url);
   await assertNotBlocked();
+  if (billRead) await assertBillReadsAllowed();
   const release = await healthrayLimiter.acquire();
   try {
     await assertNotBlocked();
+    if (billRead) await assertBillReadsAllowed();
     countRequest(url);
     const res = await fetchWithTimeout(url, options, timeoutMs);
     const wafPage =
       res.status === 429 ||
       (res.status === 403 && !(res.headers.get("content-type") || "").includes("json"));
-    if (wafPage && url !== HEALTHRAY_LOGIN_URL) {
+    if (wafPage && billRead) {
+      await tripBillBlock(res.status, url);
+    } else if (wafPage && url !== HEALTHRAY_LOGIN_URL) {
       await tripBlock(res.status, url);
     }
     return res;
@@ -411,6 +480,9 @@ export async function fetchPatientTransactions(
     HEALTHRAY_TIMEOUT_MS,
   );
   const contentType = res.headers.get("content-type") || "";
+  if (res.status === 429 || (res.status === 403 && !contentType.includes("json"))) {
+    throw billReadsRefused(res.status);
+  }
   if (contentType.includes("text/html")) {
     if (isRetry) throw new Error("HealthRay session expired — re-login failed");
     await healthrayLogin();
@@ -422,6 +494,7 @@ export async function fetchPatientTransactions(
     return fetchPatientTransactions(patientId, { txnType, limit }, true);
   }
   if (json.status !== 200) throw new Error(`HealthRay get_transactions error: ${json.message}`);
+  await clearBillBlock();
   return json.rows || [];
 }
 

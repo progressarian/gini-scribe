@@ -4,7 +4,12 @@ import { LAB_SAMPLE_FLOW, UNDRAWN_SAMPLE_STATUSES } from "../../../shared/labSta
 import { finalizeConsult } from "./finalize.js";
 import { advanceStatus, budgetColour } from "./statusEngine.js";
 import { getSlaConfig, budgetLookup } from "./board.js";
-import { testPricesFor, testCategoriesFor, schemeForVisit } from "../pricing.js";
+import {
+  catalogBasePriceSql,
+  testPricesFor,
+  testCategoriesFor,
+  schemeForVisit,
+} from "../pricing.js";
 import { slaKeyForStatus, WAIT_SINCE_SQL } from "../../../shared/giniflowStatus.js";
 import { todaysVitals, previousVitals } from "./visitVitals.js";
 import { insertLabStepsForOrder } from "./journey.js";
@@ -650,7 +655,8 @@ export async function getTestPanels(db = pool, visitId = null) {
       WHERE is_active ORDER BY display_order`,
   );
   const { rows: tests } = await db.query(
-    `SELECT test_name, price, gloss FROM giniflow_test_catalog WHERE is_active ORDER BY test_name`,
+    `SELECT c.test_name, ${catalogBasePriceSql("c")} AS price, c.gloss
+       FROM giniflow_test_catalog c WHERE c.is_active ORDER BY c.test_name`,
   );
   const schemeCode = visitId ? await schemeForVisit(visitId, db) : null;
   const schemePrices = schemeCode

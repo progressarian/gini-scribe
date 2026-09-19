@@ -1,5 +1,6 @@
 import pool from "../../config/db.js";
 import { createLogger } from "../logger.js";
+import { KV_BILL_COOLDOWN } from "../healthray/client.js";
 
 const { log, error } = createLogger("Reception Refresh");
 
@@ -55,6 +56,14 @@ const shapeRefresh = (kv) => {
 
 export async function healthrayBlockedUntil(db = pool) {
   return (await readState(db)).blockedUntil;
+}
+
+export async function billReadsBlockedUntil(db = pool) {
+  const blocked = await healthrayBlockedUntil(db);
+  if (blocked) return blocked;
+  const { rows } = await db.query(`SELECT value FROM app_kv WHERE key = $1`, [KV_BILL_COOLDOWN]);
+  const until = Number(rows[0]?.value?.until) || 0;
+  return until > Date.now() ? iso(until) : null;
 }
 
 export async function getHealthrayStatus(db = pool) {

@@ -1,7 +1,7 @@
 import pool from "../../config/db.js";
 import { fetchPatientTransactions } from "../healthray/client.js";
 import { transactionsToBilling } from "../healthray/billingExtractor.js";
-import { healthrayBlockedUntil } from "./healthrayRefresh.js";
+import { billReadsBlockedUntil } from "./healthrayRefresh.js";
 import { machineFor, machineForTest, machinesOnBillLine } from "../../../shared/machineStages.js";
 import {
   LAB_TEST_STEP_IDS,
@@ -88,13 +88,14 @@ export async function readPatientBill(
   const stored = await storedBill(patientId, date, db);
   const fresh = stored?.status === "billed" ? maxAgeMin : noBillMaxAgeMin;
   if (stored && ageMinutes(stored) < fresh) return stored;
-  if (!hrPatientId || (await healthrayBlockedUntil(db))) return stored || UNKNOWN;
+  if (!hrPatientId || (await billReadsBlockedUntil(db))) return stored || UNKNOWN;
 
   let txns;
   try {
     txns = await fetchPatientTransactions(hrPatientId);
   } catch (e) {
     if (stored) return stored;
+    if (e.healthrayBlocked) return UNKNOWN;
     throw e;
   }
   const billing = transactionsToBilling(txns, {
@@ -344,17 +345,21 @@ export async function reconcileTestSteps(client, visitId, bill, machines) {
   const kept = new Set(orders.filter((o) => !removable.includes(o)).flatMap(idsOf));
 
   const { rows: steps } = await client.query(
-    `SELECT s.id, s.step_catalog_id, COALESCE(c.machine, FALSE) AS machine
+    `SELECT s.id, s.step_catalog_id, COALESCE(c.machine, FALSE) AS machine, c.station
        FROM giniflow_visit_steps s
        LEFT JOIN flow_step_catalog c ON c.id = s.step_catalog_id
       WHERE s.visit_id = $1 AND s.status = 'pending' AND s.source IN ('template', 'added')`,
     [visitId],
   );
-  const stale = steps.filter(
-    (s) =>
-      isTestStep(s.step_catalog_id, s.machine) &&
-      !billed.has(s.step_catalog_id) &&
-      !kept.has(s.step_catalog_id),
+  const labNeeded = LAB_TEST_STEP_IDS.some((id) => billed.has(id) || kept.has(id));
+  const isLabStage = (s) =>
+    s.station === "Lab" && !s.machine && !LAB_TEST_STEP_IDS.includes(s.step_catalog_id);
+  const stale = steps.filter((s) =>
+    isLabStage(s)
+      ? !labNeeded
+      : isTestStep(s.step_catalog_id, s.machine) &&
+        !billed.has(s.step_catalog_id) &&
+        !kept.has(s.step_catalog_id),
   );
 
   if (removable.length) {

@@ -68,13 +68,13 @@ export async function billSuppressor(db, visitId) {
   const { rows } = await db.query(
     `SELECT kind, test_name, machine_id, bill_line
        FROM giniflow_test_cancellations
-      WHERE visit_id = $1 AND bill_line IS NOT NULL`,
+      WHERE visit_id = $1`,
     [visitId],
   );
   return ({ kind, testName, machineId, line }) =>
     rows.some(
       (c) =>
-        sameBillLine(c.bill_line, line) &&
+        (c.bill_line == null || sameBillLine(c.bill_line, line)) &&
         (kind === "machine"
           ? c.kind === "machine" && c.machine_id === machineId
           : c.kind === kind && sameTest(c.test_name, testName)),
@@ -200,9 +200,13 @@ async function tidyLabSteps(client, visitId) {
   );
   if (rows[0]?.still_lab) return;
   await client.query(
-    `DELETE FROM giniflow_visit_steps
-      WHERE visit_id = $1 AND step_catalog_id IN ('lab_billing', 'blood_sample')
-        AND status = 'pending'`,
+    `DELETE FROM giniflow_visit_steps s
+      WHERE s.visit_id = $1 AND s.status = 'pending'
+        AND (s.step_catalog_id IN ('lab_billing', 'blood_sample')
+             OR EXISTS (SELECT 1 FROM flow_step_catalog c
+                         WHERE c.id = s.step_catalog_id
+                           AND c.station = 'Lab'
+                           AND NOT COALESCE(c.machine, FALSE)))`,
     [visitId],
   );
 }
