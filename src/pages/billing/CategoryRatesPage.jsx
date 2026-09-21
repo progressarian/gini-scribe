@@ -8,6 +8,7 @@ import {
   useSaveBillingCategoryRate,
 } from "../../queries/hooks/useBillingMaster";
 import { toast } from "../../stores/uiStore";
+import RateHistoryDialog from "../../components/billing/RateHistoryDialog";
 import { errorOf, rupees } from "../../components/billing/format";
 import "../../styles/flow.css";
 import "../flow/FlowSettings.css";
@@ -117,6 +118,7 @@ function EditRow({ item, code, today, onDone }) {
 
 function ClearControls({ item, code, onDone }) {
   const history = useBillingRateHistory(code, item.service_item_id);
+  const checking = history.isLoading;
   const remove = useDeleteBillingCategoryRate();
   const previous = (history.data ?? []).find((r) => {
     if (!r.valid_to) return false;
@@ -143,10 +145,10 @@ function ClearControls({ item, code, onDone }) {
       <button
         type="button"
         className="flow-btn flow-btn-red flow-btn-mini"
-        disabled={remove.isPending}
+        disabled={checking || remove.isPending}
         onClick={() => clear(false)}
       >
-        Clear
+        {checking ? "Checking…" : "Clear"}
       </button>
       {previous ? (
         <button
@@ -166,7 +168,7 @@ function ClearControls({ item, code, onDone }) {
   );
 }
 
-function RateRow({ item, parentName, onEdit, clearing, onClear, onClearDone, code }) {
+function RateRow({ item, parentName, onEdit, onHistory, clearing, onClear, onClearDone, code }) {
   const dates = item.own
     ? `${item.own.valid_from} → ${item.own.valid_to ?? "no end"}`
     : item.rate_source === "parent"
@@ -216,6 +218,14 @@ function RateRow({ item, parentName, onEdit, clearing, onClear, onClearDone, cod
             >
               Edit
             </button>
+            <button
+              type="button"
+              className="flow-btn flow-btn-ghost flow-btn-mini"
+              aria-label={`Every rate for ${item.name}`}
+              onClick={onHistory}
+            >
+              History
+            </button>
             {item.own ? (
               <button
                 type="button"
@@ -241,6 +251,8 @@ export default function CategoryRatesPage() {
   const [date, setDate] = useState("");
   const [editing, setEditing] = useState(null);
   const [clearing, setClearing] = useState(null);
+  const [history, setHistory] = useState(null);
+  const [q, setQ] = useState("");
   const { data: grid, isLoading, isError } = useBillingRateGrid(code, { groupId, date });
   const dateId = useId();
 
@@ -252,6 +264,15 @@ export default function CategoryRatesPage() {
     setClearing(null);
     setter(e.target.value);
   };
+
+  const needle = q.trim().toLowerCase();
+  const items = (grid?.items ?? []).filter(
+    (item) =>
+      !needle ||
+      item.name.toLowerCase().includes(needle) ||
+      item.code.toLowerCase().includes(needle),
+  );
+  const startsOn = grid && date > grid.today ? date : grid?.today;
 
   return (
     <div className="flow-root fset">
@@ -285,6 +306,17 @@ export default function CategoryRatesPage() {
               </option>
             ))}
           </Picker>
+          <div className="fset__field">
+            <label htmlFor={`${dateId}-q`}>Search</label>
+            <input
+              id={`${dateId}-q`}
+              type="search"
+              className="jb-assign"
+              placeholder="Item name or code"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+          </div>
           <div className="fset__field fset__field--narrow bill-rates__asof">
             <label htmlFor={dateId}>As of</label>
             <input
@@ -306,11 +338,15 @@ export default function CategoryRatesPage() {
         <div className="flow-card bill-rates">
           <div className="fset__cardhead">
             <h2 className="flow-sec-title">{grid.category.display_label}</h2>
-            <span className="fset__count">{grid.items.length}</span>
+            <span className="fset__count">{items.length}</span>
             <span className="flow-muted bill-rates__on">as of {grid.date}</span>
           </div>
-          {!grid.items.length ? (
-            <div className="fset__cardsub">No active items{groupId ? " in this group" : ""}.</div>
+          {!items.length ? (
+            <div className="fset__cardsub">
+              {needle ? "No item matches that search." : "No active items"}
+              {needle || !groupId ? "" : " in this group"}
+              {needle ? "" : "."}
+            </div>
           ) : (
             <div className="fset__scroll fset__scroll--wide">
               <table className="flow-table" aria-label="Rates">
@@ -327,13 +363,13 @@ export default function CategoryRatesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {grid.items.map((item) =>
+                  {items.map((item) =>
                     editing === item.service_item_id ? (
                       <EditRow
                         key={item.service_item_id}
                         item={item}
                         code={code}
-                        today={date || grid.date}
+                        today={startsOn}
                         onDone={() => setEditing(null)}
                       />
                     ) : (
@@ -352,6 +388,7 @@ export default function CategoryRatesPage() {
                           setClearing(item.service_item_id);
                         }}
                         onClearDone={() => setClearing(null)}
+                        onHistory={() => setHistory(item)}
                       />
                     ),
                   )}
@@ -361,6 +398,12 @@ export default function CategoryRatesPage() {
           )}
         </div>
       )}
+      <RateHistoryDialog
+        item={history}
+        code={code}
+        categoryName={grid?.category.display_label}
+        onClose={() => setHistory(null)}
+      />
     </div>
   );
 }

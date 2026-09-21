@@ -324,6 +324,7 @@ export async function rateGrid(schemeCode, options = {}, db = pool) {
   return {
     category: category[0],
     date,
+    today: indiaToday(),
     items: rows.map((r) => {
       const rate = pick(
         r.own_rate === null ? null : Number(r.own_rate),

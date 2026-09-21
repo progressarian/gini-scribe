@@ -92,6 +92,9 @@ test.describe.serial("P1-32 category rates page", () => {
       await one(`SELECT ((NOW() AT TIME ZONE 'Asia/Kolkata')::date + 1)::text AS d`)
     ).d;
     seed.today = (await one(`SELECT (NOW() AT TIME ZONE 'Asia/Kolkata')::date::text AS d`)).d;
+    seed.yesterday = (
+      await one(`SELECT ((NOW() AT TIME ZONE 'Asia/Kolkata')::date - 1)::text AS d`)
+    ).d;
   });
 
   test.afterAll(async () => {
@@ -232,6 +235,104 @@ test.describe.serial("P1-32 category rates page", () => {
     await pickCategory(page, TOP.code);
     await editRate(page, CONSULT, { "Bill code": "CC 02" });
     await expect(row(page, CONSULT).getByRole("alert")).toBeVisible();
+    expect(await rateOf(TOP.code)).toHaveLength(1);
+  });
+
+  test("10. looking at an old date never backdates a new rate", async ({ page }) => {
+    await openRates(page);
+    await pickCategory(page, TOP.code);
+    await page.getByLabel("As of", { exact: true }).fill(seed.yesterday);
+    await rates(page)
+      .getByRole("button", { name: `Edit rate for ${CONSULT}`, exact: true })
+      .click();
+    await expect(rates(page).getByLabel(`From for ${CONSULT}`, { exact: true })).toHaveValue(
+      seed.today,
+    );
+    await row(page, CONSULT).getByRole("button", { name: "Cancel", exact: true }).click();
+  });
+
+  test("11. looking at a future date starts the rate on that date", async ({ page }) => {
+    await openRates(page);
+    await pickCategory(page, TOP.code);
+    await page.getByLabel("As of", { exact: true }).fill(seed.tomorrow);
+    await rates(page)
+      .getByRole("button", { name: `Edit rate for ${CONSULT}`, exact: true })
+      .click();
+    await expect(rates(page).getByLabel(`From for ${CONSULT}`, { exact: true })).toHaveValue(
+      seed.tomorrow,
+    );
+    await row(page, CONSULT).getByRole("button", { name: "Cancel", exact: true }).click();
+  });
+
+  test("12. the history drawer lists every rate and clears a future one", async ({ page }) => {
+    const api = await apiAs("admin");
+    expect(
+      (
+        await api.put("/api/billing/master/category-rates", {
+          data: {
+            scheme_code: TOP.code,
+            service_item_id: seed.consult.id,
+            rate: 950,
+            valid_from: seed.tomorrow,
+          },
+        })
+      ).status(),
+    ).toBe(200);
+    await api.dispose();
+
+    await openRates(page);
+    await pickCategory(page, TOP.code);
+    await expect(row(page, CONSULT)).toContainText(`Changes on ${seed.tomorrow}`);
+    await rates(page)
+      .getByRole("button", { name: `Every rate for ${CONSULT}`, exact: true })
+      .click();
+    const drawer = page.getByRole("dialog", { name: new RegExp(`rates · ${CONSULT}`) });
+    const rows = drawer.getByRole("table", { name: "Every rate" }).getByRole("row");
+    await expect(rows).toHaveCount(3);
+    await drawer
+      .getByRole("button", { name: `Clear the rate from ${seed.tomorrow}`, exact: true })
+      .click();
+    await drawer
+      .getByRole("button", { name: `Confirm clear the rate from ${seed.tomorrow}`, exact: true })
+      .click();
+    await expect(rows).toHaveCount(2);
+    await drawer.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(row(page, CONSULT)).not.toContainText("Changes on");
+    expect(await rateOf(TOP.code)).toHaveLength(1);
+  });
+
+  test("13. search narrows the grid", async ({ page }) => {
+    await openRates(page);
+    await pickCategory(page, TOP.code);
+    await page.getByLabel("Search", { exact: true }).fill(`P132C_${tag}`);
+    await expect(row(page, CONSULT)).toBeVisible();
+    await expect(row(page, DRESSING)).toHaveCount(0);
+    await page.getByLabel("Search", { exact: true }).fill("nothing matches this");
+    await expect(page.getByText("No item matches that search.")).toBeVisible();
+  });
+
+  test("14. Clear waits until it knows whether an earlier rate can come back", async ({ page }) => {
+    await openRates(page);
+    await pickCategory(page, TOP.code);
+    let release;
+    const held = new Promise((resolve) => (release = resolve));
+    await page.route(
+      `**/api/billing/master/category-rates/${TOP.code}/items/${seed.consult.id}`,
+      async (route) => {
+        await held;
+        await route.fallback();
+      },
+    );
+    await rates(page)
+      .getByRole("button", { name: `Clear rate for ${CONSULT}`, exact: true })
+      .click();
+    const checking = row(page, CONSULT).getByRole("button", { name: "Checking…", exact: true });
+    await expect(checking).toBeDisabled();
+    release();
+    await expect(
+      row(page, CONSULT).getByRole("button", { name: "Clear", exact: true }),
+    ).toBeEnabled();
+    await row(page, CONSULT).getByRole("button", { name: "Keep", exact: true }).click();
     expect(await rateOf(TOP.code)).toHaveLength(1);
   });
 });
