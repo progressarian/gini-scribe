@@ -239,6 +239,12 @@ export async function syncMachineOrdersForVisit(visit, db = pool, { slotWaitMs }
           log("lab", `${visit.name}: ${missing.length} billed lab test(s) awaiting reception`);
         }
       }
+      await client.query(
+        `UPDATE giniflow_visit_steps SET status = 'pending'
+          WHERE visit_id = $1 AND status = 'skipped'
+            AND step_catalog_id = ANY($2::text[])`,
+        [visit.visit_id, [...LAB_STEPS, "lab_processing_2"]],
+      );
       labSteps = (await insertLabStepsForOrder(client, visit.visit_id)).added;
     }
     for (const line of liveLines) {

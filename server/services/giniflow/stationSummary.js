@@ -1,12 +1,13 @@
 import pool from "../../config/db.js";
-import { LIVE_LAB_CASE_SQL } from "./testsHold.js";
 import { getSlaConfig, getDayBoard, getBottleneck, boardClock } from "./board.js";
 import { getTriageSummary } from "./triage.js";
-import { getMachines, stationOrderCounts } from "./machineCatalog.js";
+import { getMachines } from "./machineCatalog.js";
 import { machinesForStation } from "../../../shared/machineStages.js";
-import { UNDRAWN_SAMPLE_STATUSES } from "../../../shared/labStages.js";
-
-const UNDRAWN_SQL = UNDRAWN_SAMPLE_STATUSES.map((s) => `'${s}'`).join(",");
+import { getPaymentQueue, getArrivals } from "./receptionStation.js";
+import { getLabQueue } from "./labStation.js";
+import { getPharmacyQueue } from "./pharmacyStation.js";
+import { getVitalsQueue } from "./vitalsStation.js";
+import { getMachineQueue } from "./machineStation.js";
 
 // The counts on the launcher tiles. One query set for the whole floor, so the
 // landing screen costs the same whether a coordinator holds one station or all
@@ -23,64 +24,16 @@ export async function getStationSummary(visitDate, db = pool) {
   const col = (key) => board.columns.find((c) => c.key === key)?.count ?? 0;
   const atRisk = board.onFloor.filter((c) => !c.finished && c.statusColour === "red").length;
 
-  const { rows: lab } = await db.query(
-    `SELECT
-       -- Settled means paid or an APPROVED claim. A submitted claim and a
-       -- part-paid order are both still reception's work, the same way the
-       -- reception queue counts them (shared/labPayment.js).
-       count(*) FILTER (WHERE o.payment_status NOT IN ('paid','claim_approved'))::int
-         AS payment_pending,
-       count(*) FILTER (WHERE o.kind = 'lab'
-                          AND o.payment_status IN ('paid','claim_approved')
-                          AND o.sample_status IN (${UNDRAWN_SQL}))::int AS to_collect,
-       count(*) FILTER (WHERE o.kind = 'machine'
-                          AND o.sample_status IN ('ordered','payment_pending','paid'))::int
-         AS machine_waiting,
-       count(*) FILTER (WHERE o.kind = 'machine' AND o.sample_status = 'in_progress')::int
-         AS machine_running,
-       count(*) FILTER (WHERE o.kind = 'machine' AND o.sample_status = 'done')::int
-         AS machine_unreported,
-       count(*) FILTER (WHERE o.sample_status = 'sample_collected')::int AS to_send,
-       count(*) FILTER (WHERE o.sample_status = 'sample_sent')::int AS to_receive,
-       count(*) FILTER (WHERE o.sample_status IN ('sample_received','processing'))::int AS in_lab,
-       count(*) FILTER (WHERE o.sample_status = 'results_ready')::int AS to_upload
-     FROM giniflow_lab_orders o
-     JOIN giniflow_visits v ON v.id = o.visit_id
-    WHERE v.visit_date = $1::date`,
-    [visitDate],
-  );
-
-  // The floor is still worked on HealthRay, so three of these stations have
-  // giniflow_* tables nobody writes to and would read a permanent zero. A zero
-  // that is structural rather than true is the worst thing a launcher tile can
-  // say, so each of them falls back to the table the hospital actually fills:
-  // `lab_cases` for the lab, the day's unarrived appointments for the desk, and
-  // `medications` against `medicine_collections` for the counter.
-  const { rows: live } = await db.query(
-    `SELECT
-       (SELECT count(*)::int FROM giniflow_visits
-         WHERE visit_date = $1::date AND current_status = 'booked') AS to_check_in,
-       (SELECT count(*)::int FROM lab_cases lc
-         WHERE lc.case_date = $1::date AND ${LIVE_LAB_CASE_SQL("lc")}) AS lab_today,
-       -- Outstanding is pending AND partial, the same rule labStation.js and
-       -- the OPD chips use: results_synced flips on the first panel, so a
-       -- synced case with no reported_on is still being worked on.
-       (SELECT count(*) FILTER (
-                 WHERE NOT results_synced
-                    OR raw_detail_json->>'reported_on' IS NULL)::int
-          FROM lab_cases lc
-         WHERE lc.case_date = $1::date AND ${LIVE_LAB_CASE_SQL("lc")}) AS lab_awaiting,
-       (SELECT count(DISTINCT m.patient_id)::int
-          FROM medications m
-          JOIN giniflow_visits v ON v.patient_id = m.patient_id AND v.visit_date = $1::date
-         WHERE (m.created_at AT TIME ZONE 'Asia/Kolkata')::date = $1::date
-           AND m.is_active
-           AND NOT EXISTS (
-             SELECT 1 FROM medicine_collections c
-              WHERE c.medication_id = m.id AND c.collected_date = $1::date
-           )) AS to_hand_over`,
-    [visitDate],
-  );
+  const now = new Date();
+  const [payments, arrivals, collection, processing, pharmacyQueue, vitalsQueue] =
+    await Promise.all([
+      getPaymentQueue(visitDate, db),
+      getArrivals(visitDate, "", now, db),
+      getLabQueue(visitDate, null, db, { room: "collection" }),
+      getLabQueue(visitDate, null, db, { room: "processing" }),
+      getPharmacyQueue(visitDate, now, db),
+      getVitalsQueue(visitDate, now, db),
+    ]);
 
   // Referrals are parallel to the chain, so they are not a board column and the
   // count cannot come from `col()`. "Open" is every referral raised today whose
@@ -99,34 +52,35 @@ export async function getStationSummary(visitDate, db = pool) {
   // own read rather than a slice of the board above.
   const triage = await getTriageSummary(db);
 
-  const orders = lab[0];
-  const floor = live[0];
-  const toDispense = col("pharmacy");
+  const pay = payments.counts;
+  const paymentPending = pay.pending + (pay.charges || 0) + (pay.healthrayLab || 0);
+  const toCheckIn = arrivals.counts.expected;
+  const toCollect = collection.counts.pending + collection.counts.drawing;
+  const toSend = collection.counts.collecting;
+  const toReceive = processing.counts.sent;
+  const inLab = processing.counts.received + processing.counts.processing;
+  const toUpload = processing.counts.ready;
+  const toDispense = pharmacyQueue.counts.toDispense;
+  const inVitalsQueue = vitalsQueue.counts.atStation + vitalsQueue.counts.waiting;
+  const onBreak = vitalsQueue.counts.onBreak;
 
-  // Every machine split out of its own station (Echo, X-Ray, …) gets its own
-  // tile with its own numbers, and the Machine Room tile below stops counting
-  // their work as its own — generic over however many side stations the
-  // catalogue currently has (45-ECHO-STATION-PLAN.md, 46-XRAY-STATION-PLAN.md)
-  // rather than one hardcoded split per station.
   const catalogue = await getMachines(db);
   const sideStationIds = [
-    ...new Set(catalogue.map((m) => m.station).filter((s) => s && s !== "machine_room")),
+    ...new Set(catalogue.map((m) => m.station).filter((st) => st && st !== "machine_room")),
   ];
-  const sideCounts = Object.fromEntries(
+  const machineCounts = Object.fromEntries(
     await Promise.all(
-      sideStationIds.map(async (id) => [
-        id,
-        await stationOrderCounts(machinesForStation(catalogue, id), visitDate, db),
-      ]),
+      ["machine_room", ...sideStationIds].map(async (station) => {
+        const { counts } = await getMachineQueue(visitDate, null, db, { station });
+        return [
+          station,
+          { waiting: counts.ordered, running: counts.in_progress, unreported: counts.done },
+        ];
+      }),
     ),
   );
-  const sideTotal = (key) => sideStationIds.reduce((sum, id) => sum + sideCounts[id][key], 0);
-  const machineRoomWaiting = orders.machine_waiting - sideTotal("waiting");
-  const machineRoomRunning = orders.machine_running - sideTotal("running");
-  const machineRoomUnreported = orders.machine_unreported - sideTotal("unreported");
-  const sideTile = (id) => {
-    const c = sideCounts[id];
-    const label = machinesForStation(catalogue, id)[0]?.name || id;
+  const machineTile = (station, idle) => {
+    const c = machineCounts[station];
     return {
       count: c.waiting + c.running + c.unreported,
       label: c.running
@@ -135,10 +89,12 @@ export async function getStationSummary(visitDate, db = pool) {
           ? `${c.waiting} waiting`
           : c.unreported
             ? `${c.unreported} awaiting a report`
-            : `no ${label.toLowerCase()} today`,
+            : idle,
       tone: c.waiting ? "blue" : "teal",
     };
   };
+  const sideTile = (id) =>
+    machineTile(id, `no ${(machinesForStation(catalogue, id)[0]?.name || id).toLowerCase()} today`);
 
   return {
     // Today first — the tile sits beside eight stations all counting today — with
@@ -159,91 +115,53 @@ export async function getStationSummary(visitDate, db = pool) {
       tone: "red",
     },
     vitals: {
-      count: col("checked_in") + col("vitals"),
-      label: `${col("checked_in") + col("vitals")} in queue`,
+      count: inVitalsQueue,
+      label: `${inVitalsQueue} in queue` + (onBreak ? ` · ${onBreak} on break` : ""),
       tone: "blue",
     },
-    // Payment is the desk's blocking job and stays the headline whenever there
-    // is one; with nothing to collect the tile falls back to the arrivals the
-    // desk has not checked in yet, which is the same screen's other half.
     reception: {
-      count: orders.payment_pending || floor.to_check_in,
-      label: orders.payment_pending
-        ? `${orders.payment_pending} payment pending`
-        : floor.to_check_in
-          ? `${floor.to_check_in} to check in`
+      count: paymentPending || toCheckIn,
+      label: paymentPending
+        ? `${paymentPending} payment pending`
+        : toCheckIn
+          ? `${toCheckIn} to check in`
           : "desk clear",
-      tone: orders.payment_pending ? "red" : floor.to_check_in ? "blue" : "teal",
+      tone: paymentPending ? "red" : toCheckIn ? "blue" : "teal",
     },
-    // The fallback counts `lab_cases` — the hospital's own lab, synced from the
-    // lab API. The station screen lists those read-only below its own queue, so
-    // the label names the system rather than implying work to do: nothing there
-    // is a sample this technician collects or a report they upload.
     lab: {
-      count: orders.to_collect + orders.to_upload || floor.lab_today,
+      count: toCollect + toSend + toReceive + inLab + toUpload,
       label:
-        orders.to_collect + orders.to_upload
-          ? `${orders.to_collect} to collect · ${orders.to_upload} to upload`
-          : floor.lab_today
-            ? `${floor.lab_today} at hospital lab · ${floor.lab_awaiting} still out`
-            : "no samples today",
-      tone: orders.to_collect + orders.to_upload ? "blue" : "teal",
+        toCollect + toSend + toReceive + inLab + toUpload
+          ? `${toCollect} to collect · ${toUpload} to upload`
+          : "no samples waiting",
+      tone: toCollect + toUpload ? "blue" : "teal",
     },
-    // The two rooms, each counting only its own work
-    // (35-LAB-TWO-ROOM-SPLIT-PLAN.md §3.5). The umbrella `lab` tile above stays
-    // for whoever holds the whole day.
     lab_collect: {
-      count: orders.to_collect + orders.to_send || floor.lab_today,
+      count: toCollect + toSend,
       label:
-        orders.to_collect + orders.to_send
-          ? `${orders.to_collect} to collect · ${orders.to_send} to send`
-          : floor.lab_today
-            ? `${floor.lab_today} at hospital lab`
-            : "no samples today",
-      tone: orders.to_collect ? "blue" : "teal",
+        toCollect + toSend ? `${toCollect} to collect · ${toSend} to send` : "nothing to collect",
+      tone: toCollect ? "blue" : "teal",
     },
     lab_process: {
-      count: orders.to_receive + orders.in_lab + orders.to_upload || floor.lab_awaiting,
+      count: toReceive + inLab + toUpload,
       label:
-        orders.to_receive + orders.in_lab + orders.to_upload
-          ? `${orders.to_receive} to receive · ${orders.to_upload} to upload`
-          : floor.lab_awaiting
-            ? `${floor.lab_awaiting} still out`
-            : "bench clear",
-      tone: orders.to_upload ? "red" : orders.to_receive ? "blue" : "teal",
+        toReceive + inLab + toUpload
+          ? `${toReceive} to receive · ${inLab} in the lab · ${toUpload} to upload`
+          : "bench clear",
+      tone: toUpload ? "red" : toReceive ? "blue" : "teal",
     },
-    // ABI, VPT, Fundus, TMT, ECG. Machine tests raise an order like any other, so
-    // unlike the lab tiles this one has no HealthRay fallback to count — a test
-    // nobody ordered through Gini Flow leaves no trace until its report lands.
-    machine: {
-      count: machineRoomWaiting + machineRoomRunning + machineRoomUnreported,
-      label: machineRoomRunning
-        ? `${machineRoomRunning} on a machine · ${machineRoomWaiting} waiting`
-        : machineRoomWaiting
-          ? `${machineRoomWaiting} waiting`
-          : machineRoomUnreported
-            ? `${machineRoomUnreported} awaiting a report`
-            : "no machine tests today",
-      tone: machineRoomWaiting ? "blue" : "teal",
-    },
+    machine: machineTile("machine_room", "no machine tests today"),
     ...Object.fromEntries(sideStationIds.map((id) => [id, sideTile(id)])),
     mo_sd: { count: col("sd"), label: `${col("sd")} in workup`, tone: "blue" },
     doctor: { count: col("wait_doctor"), label: `${col("wait_doctor")} waiting`, tone: "red" },
-    // `to_hand_over` counts patients prescribed today with nothing recorded as
-    // collected — the counter's real backlog even on a day the station screen
-    // itself was never opened.
     rx: {
       count: col("rx"),
       label: col("rx") ? `${col("rx")} to explain` : "nobody waiting",
       tone: col("rx") ? "blue" : "teal",
     },
     pharmacy: {
-      count: toDispense || floor.to_hand_over,
-      label: toDispense
-        ? `${toDispense} to dispense`
-        : floor.to_hand_over
-          ? `${floor.to_hand_over} to hand over`
-          : "nothing to dispense",
+      count: toDispense,
+      label: toDispense ? `${toDispense} to dispense` : "nothing to dispense",
       tone: toDispense ? "blue" : "teal",
     },
     referrals: {

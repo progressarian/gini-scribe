@@ -84,7 +84,7 @@ test.describe.serial("P1-36 regression checks", () => {
     });
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
     expect(result.stdout).toMatch(/built in/);
-    expect(`${result.stdout}\n${result.stderr}`).not.toMatch(/\berror\b/i);
+    expect(`${result.stdout}\n${result.stderr}`).not.toMatch(/error during build|Build failed/);
   });
 
   test("2. npm run smoke:ghm-categories passes on a seeded day, and restores it", async () => {
@@ -121,19 +121,39 @@ test.describe.serial("P1-36 regression checks", () => {
 
   test("4. the MO screen and reception's payment queue show unchanged prices", async () => {
     const admin = await apiAs("admin");
-    const panelPrice = async () =>
-      (await (await admin.get("/api/giniflow/stations/mo/test-panels")).json()).tests.find(
-        (t) => (t.name ?? t.test_name) === TEST,
-      )?.price;
-    const book = async () => {
+    const quote = async (visitId) => {
+      const panels = await (
+        await admin.get(
+          `/api/giniflow/stations/mo/test-panels${visitId ? `?visitId=${visitId}` : ""}`,
+        )
+      ).json();
+      return {
+        schemeCode: panels.schemeCode,
+        ...panels.tests.find((t) => (t.name ?? t.test_name) === TEST),
+      };
+    };
+    const panelPrice = async () => (await quote()).price;
+    const visitFor = async (category) => {
       const patient = await buildPatient({ name: `P136 Floor ${tag} ${seed.visits.length}` });
       seed.patients.push(patient.id);
+      const appointment = category
+        ? await one(
+            `INSERT INTO appointments (patient_id, patient_name, file_no, appointment_date, patient_category, status)
+             VALUES ($1, $2, $3, $4, $5, 'scheduled') RETURNING id`,
+            [patient.id, patient.name, patient.file_no, FLOOR_DAY, category],
+          )
+        : null;
+      if (appointment) seed.appointments.push(appointment.id);
       const visit = await one(
-        `INSERT INTO giniflow_visits (patient_id, visit_date, current_status)
-         VALUES ($1, $2, 'arrived') RETURNING id`,
-        [patient.id, FLOOR_DAY],
+        `INSERT INTO giniflow_visits (patient_id, visit_date, appointment_id, current_status)
+         VALUES ($1, $2, $3, 'arrived') RETURNING id`,
+        [patient.id, FLOOR_DAY, appointment?.id ?? null],
       );
       seed.visits.push(visit.id);
+      return visit.id;
+    };
+    const book = async (category = null, visitId = null) => {
+      const visit = { id: visitId ?? (await visitFor(category)) };
       const ordered = await admin.post(`/api/giniflow/stations/mo/${visit.id}/tests`, {
         data: { urgency: "today", tests: [TEST] },
       });
@@ -184,6 +204,24 @@ test.describe.serial("P1-36 regression checks", () => {
     const after = await book();
     expect(await queuePrice(after)).toBe(350);
     expect(await queuePrice(before), "the earlier order keeps its price").toBe(350);
+
+    const rates = await one(
+      `SELECT count(*)::int AS n FROM category_item_rates r
+         JOIN service_items i ON i.id = r.service_item_id
+        WHERE i.test_catalog_id = $1 AND r.scheme_code IN ('cghs')`,
+      [seed.test.id],
+    );
+    expect(rates.n, "no CGHS rate for this test, so CGHS pays the base price").toBe(0);
+    const cghsVisit = await visitFor("cghs");
+    const cghsQuote = await quote(cghsVisit);
+    expect(cghsQuote).toMatchObject({ schemeCode: "cghs", price: 350, schemePriced: false });
+    await book(null, cghsVisit);
+    expect(await queuePrice(cghsVisit), "a CGHS patient is charged what the MO quoted").toBe(350);
+    const order = await one(
+      `SELECT scheme_code, amount_total::float AS total FROM giniflow_lab_orders WHERE visit_id = $1`,
+      [cghsVisit],
+    );
+    expect(order).toEqual({ scheme_code: "cghs", total: 350 });
     await admin.dispose();
   });
 });

@@ -1,7 +1,8 @@
 # 52 — Billing: OPD, Lab, Machine tests, ECHO, X-ray (and Pharmacy later)
 
-Status: **PLAN, not built.** Written 2026-09-17 against the code as it stands.
-Nothing in this document has been implemented or migrated yet.
+Status: **Phase T and Phase 1 built (2026-09-21)**; Phase 0 waits on the admin
+team's data; Phases 2–7 are still a plan. Written 2026-09-17 against the code as
+it stood. What Phase 1 did differently from this plan is in §0a.
 
 Task list: `52-BILLING-TASKS.md`.
 
@@ -9,6 +10,57 @@ Builds on `28-LAB-PAYMENT-SPLIT-PLAN.md` (cash + claim split),
 `33-PATIENT-SCHEME-PLAN.md` (schemes, scheme price tables),
 `34-LAB-BILLING-STEP-PLAN.md` (pay before the lab) and
 `51-BILL-DRIVEN-TEST-STEPS-PLAN.md` (test steps follow the HealthRay bill).
+
+---
+
+## 0a. Phase 1 as built (2026-09-21)
+
+Every Phase 1 task in `52-BILLING-TASKS.md` is done, each with its e2e test,
+except **P1-10** (drop the old `scheme_*` price tables) and **P1-39** (drop
+the old catalogue price column), which wait until the P1-24 floor-price change
+is deployed. The Phase 1 check passed on the test
+database: `smoke:billing-master`, the regression checks (build, the GHM smoke
+scripts, MO and reception prices unchanged), the permission check, and the
+whole billing e2e suite.
+
+Where it differs from this plan:
+
+- **Settings tabs.** Discounts, Bulk import and Desk requests are not shown yet;
+  each tab arrives with its page in Phases 3, 2 and 4, rather than as an empty
+  tab (P1-28).
+- **Categories page.** The old "Patient schemes" page is rebuilt on the billing
+  master API and is open to reception_admin — except the **patients-per-day
+  limit, which only an admin can change** (the server refuses it from anyone
+  else, P1-31 review).
+- **Test catalogue.** No price can be set there any more, and the server now
+  refuses every catalogue price change, not only for tests that have an item
+  (P1-34 review, widening P1-24). A test without a billing item keeps billing at
+  its old catalogue price until an item is created; the page and
+  `smoke:billing-master` list such tests.
+- **Visit types.** Consultation items exist only for New and Follow Up; Tele and
+  OPD visits bill as Follow Up, Investigation has no consultation line (P1-06,
+  Q30).
+- **Floor prices.** Every floor screen reads one rule — the test's active
+  billing item price, else its catalogue price — and a visit's category rate
+  when one applies (P1-24). `smoke:billing-master` check 7 compares the floor
+  screens against each other.
+- **Category rates.** Price changes start a new rate (from today by default,
+  never from a date only being looked at); clearing a rate can reopen the one
+  before it; each item has a rate history (P1-22, P1-32).
+- **Shared lists.** Item kinds, visit types, genders, rule modes, discount
+  stacking modes, bill series codes and the financial-year rule live in
+  `shared/billingVocab.js`, used by the server and the screens.
+- **Extra endpoints** the screens needed: `GET /api/billing/master/items/choices`
+  (the item form's pickers); the rate grid also returns today's date; the test
+  catalogue list returns a switched-off item's code.
+- **Permission check.** P1-38 reads every `server/routes/billing*.js` file, so
+  the Phase 2–5 routes are checked as soon as they exist; it is run again at the
+  end of Phases 3, 4 and 5.
+- **Production, as of 2026-09-21.** The Phase 1 migrations are applied (P1-07,
+  P1-12). P1-10 (dropping the old `scheme_*` tables) and P1-39 (dropping the
+  catalogue price column) wait until the P1-24 floor-price change is deployed;
+  the commit and deploy state of each task is in `52-BILLING-TASKS.md`. The
+  smoke and regression scripts were run only against the test database.
 
 ---
 
@@ -262,8 +314,10 @@ of deciding which station runs a test (`category`: lab / machine / echo / xray /
 offsite). The **price moves to `service_items`**, linked by `test_catalog_id`.
 `pricing.testPricesFor` is changed to read `service_items.base_price` through
 that link, so the MO ordering screen and the lab payment queue keep working. The
-`giniflow_test_catalog.price` column stays for one release as a read-only copy,
-then is dropped. The admin test-catalog page stops editing price and links to
+`giniflow_test_catalog.price` column stays as the **fallback price** for a test
+that has no billing item yet (as built in P1-24 and P1-34); it is dropped only
+when every active test has an item (P1-39), never on a fixed date. The admin
+test-catalog page stops editing price and links to
 the service master instead. This keeps **one price source**.
 
 **Every test is its own item.** The service master lists each test by name,
@@ -1077,6 +1131,11 @@ of fixed column names, plus a "Read me" sheet.
 | `Discounts`       | `rule_name` (+ `code` when method = code)    | method (auto/code), kind, value, max_discount, groups, subgroups, items, doctors, visit_types, categories, min_age, max_age, gender, valid_from, valid_to, max_uses_total, max_uses_per_patient, max_uses_per_day, max_uses_per_doctor_per_day, priority, stackable, applies_on_scheme_rate, allowed_roles, active |
 | `Consultant fees` | `doctor` + `visit_type` + `category_code`    | fee, patient_pays (full/amount/percent/nothing), patient_value, remainder (claim/adjustment), bill_name, bill_code, valid_from, valid_to — a convenience sheet: each row is saved as the doctor's category rate plus an item-level payment rule; a blank `visit_type` means every visit type for that doctor       |
 
+**Admin-only fields.** A `daily_cap` change in the Categories sheet is refused
+unless the uploader is an admin, the same rule as the Categories page (P1-31);
+the preview shows that row as an error saying why. Everything else in the file
+follows `BILLING_MASTER` as usual.
+
 **Fixed value lists in the template** (drop-downs): `visit_type` = New /
 Follow Up / Investigation (consultation fees: New / Follow Up only); `gender` = Male / Female / Other (as patients are
 stored); `kind`, `patient_pays`, `remainder`, `method`, `mode` as above; every
@@ -1224,18 +1283,18 @@ decided 2026-09-17).
 
 Each phase ships on its own and is checked before the next one starts. Phase T comes before Phase 1, and every task in every phase ends with its e2e test passing (§16).
 
-| Phase  | Scope                                                                                                                                                                                                                                                                                                                                                                                              | Check                                                                                                                                                                                                                                                                                                                                                   |
-| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **0**  | The admin team prepares its data in the Excel template: price list, categories and sub-categories, category rules, payment rules (what each category's patient pays), CGHS/ECHS rate cards with bill codes, discount codes. Answer §15.                                                                                                                                                            | Template filled                                                                                                                                                                                                                                                                                                                                         |
-| **T**  | Test setup (§16): local test database, schema build, production guard, test environment with outside services off, Playwright, reset and fixtures, helpers, scripts, how-to.                                                                                                                                                                                                                       | A fresh test database builds; the guard refuses production; an empty spec runs green; no outbound calls                                                                                                                                                                                                                                                 |
-| **1**  | Master data with full create/edit/delete: groups, subgroups, tax codes, service items (link tests, consultation item per consultant), category extensions, category rules, category rates, `billing_settings`, `reception_admin` role + capabilities, admin screens 8.1 (1–4 without payment rules, 6–8; the desk requests inbox, 10, comes in Phase 4). Move test price reads to `service_items`. | `smoke:billing-master`; MO ordering and lab payment queue show the same prices as before; delete of a used row is refused                                                                                                                                                                                                                               |
-| **2**  | Bulk Excel import (§9) with template download, check, preview, all-or-nothing save.                                                                                                                                                                                                                                                                                                                | `smoke:billing-import` with a good and a bad file                                                                                                                                                                                                                                                                                                       |
-| **3**  | Category payment rules (§5.3a), discount rules (auto + code), category resolution, `priceLine` engine, preview endpoint, admin screens for payment rules and discounts, "test this rule".                                                                                                                                                                                                          | `smoke:billing-pricing`: the CGHS table in §6 (₹1,500→₹700, ₹1,000→₹700, referral ₹0 on every visit, pensioner ₹0, referral number required when the category asks for it), `amount` above an item's price refused at save, rule specificity, age boundaries, both stacking modes, scheme-rate switch, caps, invalid/expired codes, category rule order |
-| **4**  | Bills, lines, several bills per visit with the never-twice check, desk requests (new item + repeat) and the admin inbox, payments (cash/card/UPI, split), actual vs patient payable vs claim vs adjustment on every line, referral capture, pay-later toggle, one bill series, finalise, PDF bill + receipt, Billing Counter page 8.2, cancel unpaid bill, cash closing, audit.                    | `smoke:billing-bill`: finalise twice, pay twice, same item on a second bill (refused), repeat after approval (allowed once), new-item request → item created, ₹0-payable bill finalises without payment, line invariant holds, pay later off/on, cancel unpaid                                                                                          |
-| **4b** | Refunds and credit notes — **on hold** until the refund method is decided (Q14).                                                                                                                                                                                                                                                                                                                   | —                                                                                                                                                                                                                                                                                                                                                       |
-| **5**  | Cashless/receivables: payer claims 8.3. Dashboards 8.5.                                                                                                                                                                                                                                                                                                                                            | Reports match the sum of final bills                                                                                                                                                                                                                                                                                                                    |
-| **6**  | Pharmacy billing: `medicine_catalog` becomes medicine service items (group Pharmacy), batch/stock if needed.                                                                                                                                                                                                                                                                                       | Separate plan                                                                                                                                                                                                                                                                                                                                           |
-| **7**  | GST switched on, if and when the hospital decides.                                                                                                                                                                                                                                                                                                                                                 | GST summary report                                                                                                                                                                                                                                                                                                                                      |
+| Phase                              | Scope                                                                                                                                                                                                                                                                                                                                                                                              | Check                                                                                                                                                                                                                                                                                                                                                   |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **0**                              | The admin team prepares its data in the Excel template: price list, categories and sub-categories, category rules, payment rules (what each category's patient pays), CGHS/ECHS rate cards with bill codes, discount codes. Answer §15.                                                                                                                                                            | Template filled                                                                                                                                                                                                                                                                                                                                         |
+| **T** ✅ built                     | Test setup (§16): local test database, schema build, production guard, test environment with outside services off, Playwright, reset and fixtures, helpers, scripts, how-to.                                                                                                                                                                                                                       | A fresh test database builds; the guard refuses production; an empty spec runs green; no outbound calls                                                                                                                                                                                                                                                 |
+| **1** ✅ built 2026-09-21, see §0a | Master data with full create/edit/delete: groups, subgroups, tax codes, service items (link tests, consultation item per consultant), category extensions, category rules, category rates, `billing_settings`, `reception_admin` role + capabilities, admin screens 8.1 (1–4 without payment rules, 6–8; the desk requests inbox, 10, comes in Phase 4). Move test price reads to `service_items`. | `smoke:billing-master`; MO ordering and lab payment queue show the same prices as before; delete of a used row is refused                                                                                                                                                                                                                               |
+| **2**                              | Bulk Excel import (§9) with template download, check, preview, all-or-nothing save.                                                                                                                                                                                                                                                                                                                | `smoke:billing-import` with a good and a bad file                                                                                                                                                                                                                                                                                                       |
+| **3**                              | Category payment rules (§5.3a), discount rules (auto + code), category resolution, `priceLine` engine, preview endpoint, admin screens for payment rules and discounts, "test this rule".                                                                                                                                                                                                          | `smoke:billing-pricing`: the CGHS table in §6 (₹1,500→₹700, ₹1,000→₹700, referral ₹0 on every visit, pensioner ₹0, referral number required when the category asks for it), `amount` above an item's price refused at save, rule specificity, age boundaries, both stacking modes, scheme-rate switch, caps, invalid/expired codes, category rule order |
+| **4**                              | Bills, lines, several bills per visit with the never-twice check, desk requests (new item + repeat) and the admin inbox, payments (cash/card/UPI, split), actual vs patient payable vs claim vs adjustment on every line, referral capture, pay-later toggle, one bill series, finalise, PDF bill + receipt, Billing Counter page 8.2, cancel unpaid bill, cash closing, audit.                    | `smoke:billing-bill`: finalise twice, pay twice, same item on a second bill (refused), repeat after approval (allowed once), new-item request → item created, ₹0-payable bill finalises without payment, line invariant holds, pay later off/on, cancel unpaid                                                                                          |
+| **4b**                             | Refunds and credit notes — **on hold** until the refund method is decided (Q14).                                                                                                                                                                                                                                                                                                                   | —                                                                                                                                                                                                                                                                                                                                                       |
+| **5**                              | Cashless/receivables: payer claims 8.3. Dashboards 8.5.                                                                                                                                                                                                                                                                                                                                            | Reports match the sum of final bills                                                                                                                                                                                                                                                                                                                    |
+| **6**                              | Pharmacy billing: `medicine_catalog` becomes medicine service items (group Pharmacy), batch/stock if needed.                                                                                                                                                                                                                                                                                       | Separate plan                                                                                                                                                                                                                                                                                                                                           |
+| **7**                              | GST switched on, if and when the hospital decides.                                                                                                                                                                                                                                                                                                                                                 | GST summary report                                                                                                                                                                                                                                                                                                                                      |
 
 ---
 

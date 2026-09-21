@@ -68,7 +68,7 @@ export async function saveSeries(input, ctx, db = pool) {
   const values = {};
   if (hasField(input, "prefix")) values.prefix = cleanPrefix(input.prefix);
   if (hasField(input, "number_width")) {
-    const width = cleanWhole(input.number_width, "Number width", 1, 12);
+    const width = cleanWhole(input.number_width, "Digits", 1, 12);
     if (width !== undefined) values.number_width = width;
   }
   if (hasField(input, "next_no")) {

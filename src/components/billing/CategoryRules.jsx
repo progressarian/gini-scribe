@@ -8,7 +8,7 @@ import {
   useUpdateBillingCategoryRule,
 } from "../../queries/hooks/useBillingMaster";
 import { toast } from "../../stores/uiStore";
-import { errorOf } from "./format";
+import { digitsTyped, errorOf } from "./format";
 
 const MODE_LABEL = { suggest: "Suggest — the desk confirms", auto: "Automatic" };
 const EMPTY = {
@@ -42,6 +42,8 @@ const payloadOf = (form) => ({
   priority: form.priority.trim(),
 });
 
+const DIGIT_FIELDS = new Set(["min_age", "max_age", "priority"]);
+
 const ageOf = (rule) =>
   rule.min_age === null && rule.max_age === null
     ? "Any age"
@@ -51,12 +53,13 @@ const ageOf = (rule) =>
         ? `Up to ${rule.max_age}`
         : `${rule.min_age}–${rule.max_age}`;
 
-function Field({ label, narrow, children }) {
+function Field({ label, narrow, hint, children }) {
   const id = useId();
   return (
     <div className={`fset__field${narrow ? " fset__field--narrow" : ""}`}>
       <label htmlFor={id}>{label}</label>
       {children(id)}
+      {hint ? <small className="flow-muted">{hint}</small> : null}
     </div>
   );
 }
@@ -67,7 +70,15 @@ function RuleForm({ schemeCode, rule, onDone }) {
   const create = useCreateBillingCategoryRule();
   const update = useUpdateBillingCategoryRule();
   const set = (key) => (e) =>
-    setForm({ ...form, [key]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
+    setForm({
+      ...form,
+      [key]:
+        e.target.type === "checkbox"
+          ? e.target.checked
+          : DIGIT_FIELDS.has(key)
+            ? digitsTyped(e.target.value)
+            : e.target.value,
+    });
 
   const submit = async (e) => {
     e.preventDefault();
@@ -99,7 +110,15 @@ function RuleForm({ schemeCode, rule, onDone }) {
     >
       <div className="bill-form">
         <Field label="Rule name">
-          {(id) => <input id={id} className="jb-assign" value={form.name} onChange={set("name")} />}
+          {(id) => (
+            <input
+              id={id}
+              className="jb-assign"
+              maxLength={200}
+              value={form.name}
+              onChange={set("name")}
+            />
+          )}
         </Field>
         <Field label="From age" narrow>
           {(id) => (
@@ -107,6 +126,8 @@ function RuleForm({ schemeCode, rule, onDone }) {
               id={id}
               className="jb-assign"
               inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={3}
               placeholder="Any"
               value={form.min_age}
               onChange={set("min_age")}
@@ -119,6 +140,8 @@ function RuleForm({ schemeCode, rule, onDone }) {
               id={id}
               className="jb-assign"
               inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={3}
               placeholder="Any"
               value={form.max_age}
               onChange={set("max_age")}
@@ -148,13 +171,15 @@ function RuleForm({ schemeCode, rule, onDone }) {
             </select>
           )}
         </Field>
-        <Field label="Priority" narrow>
+        <Field label="Priority" narrow hint="Smaller is checked first">
           {(id) => (
             <input
               id={id}
               className="jb-assign"
               inputMode="numeric"
-              placeholder="Default"
+              pattern="[0-9]*"
+              maxLength={9}
+              placeholder="100"
               value={form.priority}
               onChange={set("priority")}
             />
@@ -242,6 +267,16 @@ function RuleRow({ rule, onEdit }) {
           >
             Confirm delete
           </button>
+        ) : null}
+        {confirming ? (
+          <button
+            type="button"
+            className="flow-btn flow-btn-ghost flow-btn-mini"
+            aria-label={`Cancel deleting rule ${rule.name}`}
+            onClick={() => setConfirming(false)}
+          >
+            Cancel
+          </button>
         ) : (
           <button
             type="button"
@@ -321,6 +356,10 @@ export default function CategoryRules({ category }) {
       <div className="fset__cardsub">
         Rules the Billing Counter uses to suggest (or set) {name} for a patient.
       </div>
+      <p className="fset__hint">
+        When a patient matches more than one rule, the one with the smaller priority number is used;
+        an empty priority counts as 100.
+      </p>
       {isLoading ? (
         <div className="fset__cardsub">Loading…</div>
       ) : isError ? (

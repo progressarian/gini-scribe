@@ -24,7 +24,7 @@ const CATEGORY_GROUP = {
 };
 const GROUP_ORDER = ["Lab", "Machine", "ECHO", "X-ray", "Offsite"];
 
-function suggestedGroup(category, name, machines) {
+export function suggestedGroup(category, name, machines) {
   if (category !== "lab") {
     const machine = machineForTest(machines, name);
     if (machine) return STATION_GROUP[machine.station] ?? "Machine";

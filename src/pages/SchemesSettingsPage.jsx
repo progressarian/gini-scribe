@@ -6,7 +6,7 @@ import CategoryDetails from "../components/billing/CategoryDetails";
 import CategoryRules from "../components/billing/CategoryRules";
 import UsedInDialog from "../components/billing/UsedInDialog";
 import useDialog from "../components/billing/useDialog";
-import { errorOf } from "../components/billing/format";
+import { categoryCodeTyped, errorOf } from "../components/billing/format";
 import "../styles/flow.css";
 import "./flow/FlowSettings.css";
 import "./billing/billing.css";
@@ -164,6 +164,8 @@ export default function SchemesSettingsPage() {
                     <AddForm
                       label={`Add sub-category to ${top.label}`}
                       namePlaceholder="Label"
+                      typeCode={categoryCodeTyped}
+                      codeMax={32}
                       busy={create.isPending}
                       onAdd={(draft) => add(draft, top)}
                     />
@@ -193,6 +195,8 @@ export default function SchemesSettingsPage() {
             <AddForm
               label="Add category"
               namePlaceholder="Label"
+              typeCode={categoryCodeTyped}
+              codeMax={32}
               busy={create.isPending}
               onAdd={(draft) => add(draft, null)}
             />

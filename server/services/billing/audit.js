@@ -55,23 +55,18 @@ export function auditContext(req) {
   };
 }
 
-export async function writeAudit(client, { entity, entityId, action, before, after, actorId, ip }) {
-  if (!client || typeof client.release !== "function") {
-    throw new Error("writeAudit needs the transaction's client, not the pool");
-  }
+function auditVerb(action) {
   const verb = requiredText("action", action);
   if (!AUDIT_ACTIONS.includes(verb)) {
     throw new Error(`writeAudit: unknown action "${verb}" (allowed: ${AUDIT_ACTIONS.join(", ")})`);
   }
-  const values = [
-    requiredText("entity", entity),
-    requiredText("entityId", entityId),
-    verb,
-    snapshot(before),
-    snapshot(after),
-    actorId ?? null,
-    ip ?? null,
-  ];
+  return verb;
+}
+
+async function openSavepoint(client) {
+  if (!client || typeof client.release !== "function") {
+    throw new Error("writeAudit needs the transaction's client, not the pool");
+  }
   try {
     await client.query("SAVEPOINT billing_audit_write");
   } catch (error) {
@@ -80,9 +75,51 @@ export async function writeAudit(client, { entity, entityId, action, before, aft
     }
     throw error;
   }
+}
+
+export async function writeAuditMany(client, entries, { actorId, ip, importId } = {}) {
+  if (!entries.length) return 0;
+  const rows = entries.map(({ entity, entityId, action, before, after }) => ({
+    entity: requiredText("entity", entity),
+    entity_id: requiredText("entityId", entityId),
+    action: auditVerb(action),
+    before: before === undefined || before === null ? null : redact(before),
+    after: after === undefined || after === null ? null : redact(after),
+  }));
+  await openSavepoint(client);
+  const { rowCount } = await client.query(
+    `INSERT INTO billing_audit (entity, entity_id, action, before, after, actor_id, ip, import_id)
+     SELECT x.entity, x.entity_id, x.action, x.before, x.after, $2, $3, $4
+       FROM jsonb_to_recordset($1::jsonb)
+         AS x(entity text, entity_id text, action text, before jsonb, after jsonb)`,
+    [JSON.stringify(rows), actorId ?? null, ip ?? null, importId ?? null],
+  );
+  await client.query("RELEASE SAVEPOINT billing_audit_write");
+  return rowCount;
+}
+
+export async function writeAudit(
+  client,
+  { entity, entityId, action, before, after, actorId, ip, importId },
+) {
+  if (!client || typeof client.release !== "function") {
+    throw new Error("writeAudit needs the transaction's client, not the pool");
+  }
+  const verb = auditVerb(action);
+  const values = [
+    requiredText("entity", entity),
+    requiredText("entityId", entityId),
+    verb,
+    snapshot(before),
+    snapshot(after),
+    actorId ?? null,
+    ip ?? null,
+    importId ?? null,
+  ];
+  await openSavepoint(client);
   const { rows } = await client.query(
-    `INSERT INTO billing_audit (entity, entity_id, action, before, after, actor_id, ip)
-     VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7)
+    `INSERT INTO billing_audit (entity, entity_id, action, before, after, actor_id, ip, import_id)
+     VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7, $8)
      RETURNING id`,
     values,
   );

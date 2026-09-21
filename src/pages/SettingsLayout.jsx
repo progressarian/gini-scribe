@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
 import useAuthStore from "../stores/authStore";
 import { PAGE_CAPABILITIES } from "../config/routes";
@@ -58,6 +59,13 @@ export default function SettingsLayout() {
   const role = useAuthStore((s) => s.currentDoctor?.role);
   const tabs = visibleSettingsTabs(role);
   const active = tabs.find((t) => pathname.startsWith(t.to));
+  const tabsRef = useRef(null);
+
+  useEffect(() => {
+    tabsRef.current
+      ?.querySelector(".set__tab--on")
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [pathname]);
 
   if (pathname.replace(/\/$/, "") === "/settings") {
     return tabs.length ? <Navigate to={tabs[0].to} replace /> : <Navigate to="/" replace />;
@@ -70,7 +78,7 @@ export default function SettingsLayout() {
         {active?.blurb ? <p className="set__blurb">{active.blurb}</p> : null}
       </header>
 
-      <nav className="set__tabs" aria-label="Settings sections">
+      <nav className="set__tabs" aria-label="Settings sections" ref={tabsRef}>
         {tabs.map((t) => (
           <NavLink
             key={t.to}

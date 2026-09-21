@@ -86,7 +86,7 @@ test.describe.serial("P1-20 category rules service", () => {
   test("3. bad rules are refused with a clear message", async () => {
     const cases = [
       [{ name: "Nothing" }, 400, /at least one condition/],
-      [{ name: "Backwards", min_age: 70, max_age: 60 }, 400, /can't be more than the maximum/],
+      [{ name: "Backwards", min_age: 70, max_age: 60 }, 400, /can't be more than To age/],
       [{ name: "Too old", max_age: 151 }, 400, /0 to 150/],
       [{ name: "Fraction", min_age: 60.5 }, 400, /whole number of years/],
       [{ name: "Not a number", min_age: true }, 400, /whole number of years/],
@@ -124,7 +124,7 @@ test.describe.serial("P1-20 category rules service", () => {
     await refused(
       svc.updateRule(ids.senior, { min_age: 130 }, ctx, db),
       400,
-      /can't be more than the maximum/,
+      /can't be more than To age/,
     );
     await refused(
       svc.updateRule(ids.senior, { min_age: null, max_age: null, gender: null }, ctx, db),

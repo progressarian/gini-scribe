@@ -204,6 +204,78 @@ test.describe.serial("P1-31 categories page", () => {
     ).toBeVisible();
   });
 
+  test("4b. review: ages and priority take digits only, priority is explained, delete can be cancelled", async ({
+    page,
+  }) => {
+    await openCategories(page);
+    await pick(page, SUBS[2]).click();
+    const panel = rules(page, PENSIONER);
+    await expect(panel).toContainText("the one with the smaller priority number is used");
+    const addForm = panel.getByRole("form", { name: "Add a rule" });
+    await addForm.getByLabel("From age", { exact: true }).pressSequentially("6a0-");
+    await expect(addForm.getByLabel("From age", { exact: true })).toHaveValue("60");
+    await addForm.getByLabel("To age", { exact: true }).pressSequentially("7e0.");
+    await expect(addForm.getByLabel("To age", { exact: true })).toHaveValue("70");
+    await addForm.getByLabel("Priority", { exact: true }).pressSequentially("1x0");
+    await expect(addForm.getByLabel("Priority", { exact: true })).toHaveValue("10");
+    await expect(addForm).toContainText("Smaller is checked first");
+
+    await panel
+      .getByRole("button", { name: "Delete rule Retired, 60 and over", exact: true })
+      .click();
+    await panel
+      .getByRole("button", { name: "Cancel deleting rule Retired, 60 and over", exact: true })
+      .click();
+    await expect(
+      panel.getByRole("button", { name: "Delete rule Retired, 60 and over", exact: true }),
+    ).toBeVisible();
+    await expect(
+      panel.getByRole("button", { name: "Confirm delete rule Retired, 60 and over", exact: true }),
+    ).toHaveCount(0);
+    expect(
+      (
+        await one(`SELECT count(*)::int AS n FROM category_rules WHERE scheme_code = $1`, [
+          SUBS[2].code,
+        ])
+      ).n,
+    ).toBe(1);
+  });
+
+  test("4c. review: codes, limits and lengths are checked as they are typed", async ({ page }) => {
+    await openCategories(page, "admin");
+    const add = tree(page).getByRole("form", { name: "Add category", exact: true });
+    const addCode = add.getByLabel("Add category code", { exact: true });
+    await addCode.pressSequentially("My Cat-1");
+    await expect(addCode).toHaveValue("mycat1");
+    await expect(addCode).toHaveAttribute("maxlength", "32");
+    await expect(add.getByLabel("Add category name", { exact: true })).toHaveAttribute(
+      "maxlength",
+      "200",
+    );
+
+    await pick(page, SUBS[2]).click();
+    const form = details(page, PENSIONER);
+    const cap = form.getByLabel("Patients per day", { exact: true });
+    await cap.pressSequentially("1a2.");
+    await expect(cap).toHaveValue("12");
+    await expect(form.getByLabel("Label", { exact: true })).toHaveAttribute("maxlength", "200");
+    await expect(form.getByLabel("Payer name", { exact: true })).toHaveAttribute(
+      "maxlength",
+      "200",
+    );
+
+    const addRule = rules(page, PENSIONER).getByRole("form", { name: "Add a rule" });
+    await expect(addRule.getByLabel("Rule name", { exact: true })).toHaveAttribute(
+      "maxlength",
+      "200",
+    );
+    await addRule.getByLabel("Rule name", { exact: true }).fill("Backwards");
+    await addRule.getByLabel("From age", { exact: true }).fill("70");
+    await addRule.getByLabel("To age", { exact: true }).fill("60");
+    await addRule.getByRole("button", { name: "+ Add rule", exact: true }).click();
+    await expect(addRule.getByRole("alert")).toHaveText("From age can't be more than To age");
+  });
+
   test("5. a rule that matches everyone is refused in the form", async ({ page }) => {
     await openCategories(page);
     await pick(page, SUBS[0]).click();

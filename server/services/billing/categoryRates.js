@@ -94,14 +94,14 @@ export async function saveRate(input, ctx, db = pool) {
   const values = {
     scheme_code: cleanScheme(input?.scheme_code),
     service_item_id: cleanItemId(input?.service_item_id),
-    valid_from: cleanDate(input?.valid_from, "Start date", { required: false }) ?? indiaToday(),
-    valid_to: cleanDate(input?.valid_to, "End date", { required: false }),
+    valid_from: cleanDate(input?.valid_from, "From date", { required: false }) ?? indiaToday(),
+    valid_to: cleanDate(input?.valid_to, "To date", { required: false }),
     rate: cleanRate(input?.rate),
     bill_name: cleanText(input?.bill_name, "Bill name"),
     bill_code: cleanBillCode(input?.bill_code),
   };
   if (values.valid_to !== null && values.valid_to < values.valid_from) {
-    throw httpError(400, "End date can't be before the start date");
+    throw httpError(400, "To date can't be before the From date");
   }
   if (values.rate === null && values.bill_name === null && values.bill_code === null) {
     throw httpError(
@@ -203,7 +203,7 @@ const lockItem = (client, scheme, itemId) =>
 export async function deleteRate(input, ctx, db = pool) {
   const scheme = cleanScheme(input?.scheme_code);
   const itemId = cleanItemId(input?.service_item_id);
-  const from = cleanDate(input?.valid_from, "Start date", { required: true });
+  const from = cleanDate(input?.valid_from, "From date", { required: true });
   const reopen = hasField(input, "reopen_previous")
     ? cleanFlag(input.reopen_previous, "Reopen previous")
     : false;

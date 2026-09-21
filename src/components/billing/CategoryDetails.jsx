@@ -6,7 +6,7 @@ import {
   useUpdateBillingCategory,
 } from "../../queries/hooks/useBillingMaster";
 import { toast } from "../../stores/uiStore";
-import { errorOf, usesOf } from "./format";
+import { digitsTyped, errorOf, usesOf } from "./format";
 
 const COLORS = ["gray", "blue", "teal", "green", "purple", "amber", "red"];
 const PAY_LATER = [
@@ -59,7 +59,15 @@ export default function CategoryDetails({ category, parent, onBlocked, onDeleted
   const update = useUpdateBillingCategory();
   const remove = useDeleteBillingCategory();
   const set = (key) => (e) =>
-    setForm({ ...form, [key]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
+    setForm({
+      ...form,
+      [key]:
+        e.target.type === "checkbox"
+          ? e.target.checked
+          : key === "daily_cap"
+            ? digitsTyped(e.target.value)
+            : e.target.value,
+    });
 
   const before = payloadOf(formOf(category));
   const after = payloadOf(form);
@@ -126,7 +134,13 @@ export default function CategoryDetails({ category, parent, onBlocked, onDeleted
       <div className="bill-form">
         <Field label="Label">
           {(id) => (
-            <input id={id} className="jb-assign" value={form.label} onChange={set("label")} />
+            <input
+              id={id}
+              className="jb-assign"
+              maxLength={200}
+              value={form.label}
+              onChange={set("label")}
+            />
           )}
         </Field>
         <Field label="Colour">
@@ -146,6 +160,7 @@ export default function CategoryDetails({ category, parent, onBlocked, onDeleted
               id={id}
               className="jb-assign"
               inputMode="numeric"
+              maxLength={9}
               placeholder="No limit"
               value={form.daily_cap}
               readOnly={!canSetCap}
@@ -162,6 +177,7 @@ export default function CategoryDetails({ category, parent, onBlocked, onDeleted
               id={id}
               className="jb-assign"
               placeholder={inherited ? `Same as ${parent.label}: ${inherited}` : "None"}
+              maxLength={200}
               value={form.payer_name}
               onChange={set("payer_name")}
             />

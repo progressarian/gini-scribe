@@ -172,6 +172,51 @@ test.describe.serial("P1-32 category rates page", () => {
     expect((await rateOf(SUBS[0].code))[0]).toMatchObject({ rate: null, bill_code: "CC03" });
   });
 
+  test("4b. review: the rate box takes only an amount", async ({ page }) => {
+    await openRates(page);
+    await pickCategory(page, SUBS[0].code);
+    await rates(page)
+      .getByRole("button", { name: `Edit rate for ${CONSULT}`, exact: true })
+      .click();
+    const rate = rates(page).getByLabel(`Rate for ${CONSULT}`, { exact: true });
+    await rate.pressSequentially("1e fgjdfhk00");
+    await expect(rate).toHaveValue("100");
+    await rate.fill("");
+    await rate.pressSequentially("₹-1,250.555");
+    await expect(rate).toHaveValue("1250.55");
+    await row(page, CONSULT).getByRole("button", { name: "Cancel", exact: true }).click();
+    expect((await rateOf(SUBS[0].code))[0]).toMatchObject({ rate: null, bill_code: "CC03" });
+  });
+
+  test("4c. review: bill code has no spaces, To can't be before From, From is required", async ({
+    page,
+  }) => {
+    await openRates(page);
+    await pickCategory(page, SUBS[0].code);
+    await rates(page)
+      .getByRole("button", { name: `Edit rate for ${CONSULT}`, exact: true })
+      .click();
+    const code = rates(page).getByLabel(`Bill code for ${CONSULT}`, { exact: true });
+    await code.fill("");
+    await code.pressSequentially("CC 04");
+    await expect(code).toHaveValue("CC04");
+    await expect(code).toHaveAttribute("maxlength", "40");
+    await expect(
+      rates(page).getByLabel(`Bill name for ${CONSULT}`, { exact: true }),
+    ).toHaveAttribute("maxlength", "200");
+    await rates(page).getByLabel(`From for ${CONSULT}`, { exact: true }).fill("2030-05-02");
+    await rates(page).getByLabel(`To for ${CONSULT}`, { exact: true }).fill("2030-05-01");
+    const save = row(page, CONSULT).getByRole("button", { name: "Save", exact: true });
+    await save.click();
+    await expect(row(page, CONSULT).getByRole("alert")).toHaveText(
+      "To date can't be before the From date",
+    );
+    await rates(page).getByLabel(`From for ${CONSULT}`, { exact: true }).fill("");
+    await expect(save).toBeDisabled();
+    await row(page, CONSULT).getByRole("button", { name: "Cancel", exact: true }).click();
+    expect((await rateOf(SUBS[0].code))[0]).toMatchObject({ rate: null, bill_code: "CC03" });
+  });
+
   test("5. the group filter narrows the grid", async ({ page }) => {
     await openRates(page);
     await pickCategory(page, TOP.code);
@@ -233,8 +278,10 @@ test.describe.serial("P1-32 category rates page", () => {
   test("9. a refused save shows why in the row", async ({ page }) => {
     await openRates(page);
     await pickCategory(page, TOP.code);
-    await editRate(page, CONSULT, { "Bill code": "CC 02" });
-    await expect(row(page, CONSULT).getByRole("alert")).toBeVisible();
+    await editRate(page, CONSULT, { From: "2020-01-01", To: "2099-12-31" });
+    await expect(row(page, CONSULT).getByRole("alert")).toContainText(
+      "These dates overlap another rate for the same item",
+    );
     expect(await rateOf(TOP.code)).toHaveLength(1);
   });
 

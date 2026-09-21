@@ -1,6 +1,7 @@
 import { writeAudit } from "./audit.js";
 import { assertUnused, whereUsed } from "./usage.js";
 import { httpError } from "./transaction.js";
+import { INT_MAX, MONEY_MAX } from "../../../shared/billingVocab.js";
 
 export const hasField = (input, key) =>
   Boolean(input) && Object.prototype.hasOwnProperty.call(input, key);
@@ -19,8 +20,7 @@ export function cleanName(value) {
 
 const NUMBER_TEXT = /^-?\d+(\.\d+)?$/;
 
-export const INT_MAX = 2147483647;
-export const MONEY_MAX = 9999999999.99;
+export { INT_MAX, MONEY_MAX };
 
 export function readNumber(value, message) {
   if (value === undefined || value === null) return undefined;
@@ -67,7 +67,11 @@ export function cleanActive(value) {
   return value;
 }
 
-export const auditFields = (ctx) => ({ actorId: ctx?.actorId ?? null, ip: ctx?.ip ?? null });
+export const auditFields = (ctx) => ({
+  actorId: ctx?.actorId ?? null,
+  ip: ctx?.ip ?? null,
+  importId: ctx?.importId ?? null,
+});
 
 export async function assertCodeFree(client, { table, noun }, code, exceptId = null) {
   const { rows } = await client.query(

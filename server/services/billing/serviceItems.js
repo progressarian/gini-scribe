@@ -73,10 +73,10 @@ function cleanUnit(value) {
 }
 
 function cleanMaxQuantity(value) {
-  const max = readNumber(value, "Maximum quantity must be a whole number");
+  const max = readNumber(value, "Max quantity must be a whole number");
   if (max === undefined) return null;
   if (!Number.isInteger(max) || max < 1 || max > INT_MAX) {
-    throw httpError(400, "Maximum quantity must be a whole number, 1 or more");
+    throw httpError(400, "Max quantity must be a whole number, 1 or more");
   }
   return max;
 }
@@ -330,8 +330,9 @@ export async function listItems(filters = {}, db = pool) {
 
 export async function createItem(input, ctx, db = pool) {
   const values = cleanInput(input, { partial: false });
+  if (hasField(input, "is_active")) values.is_active = cleanActive(input.is_active);
   return inTransaction(async (client) => {
-    await validate(client, { ...values, is_active: true });
+    await validate(client, { ...values, is_active: values.is_active ?? true });
     const keys = Object.keys(values);
     const { rows } = await client
       .query(

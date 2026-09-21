@@ -1,16 +1,23 @@
+import fs from "node:fs/promises";
 import ExcelJS from "exceljs";
-import { IMPORT_SHEETS, README_SHEET } from "./importColumns.js";
+import { IMPORT_SHEETS, LATER_SHEETS, README_SHEET, isLaterSheet } from "./importColumns.js";
 import {
   CGHS_CATEGORY_EXAMPLE,
   CONSULTANT_FEES_EXAMPLE,
   EXAMPLE_NOTICE,
   GENERAL_RULES,
+  LATER_SHEET_NOTE,
   README_INTRO,
   README_TITLE,
   VALUE_GLOSSARY,
+  laterSheetsRule,
 } from "./importReadme.js";
 
 export const TEMPLATE_ROWS = 2000;
+export const TEMPLATE_FILE_NAME = "gini-billing-template.xlsx";
+export const LATER_TAB_COLOR = "FFB0B0B0";
+
+const LATER_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF4E5" } };
 
 const HEADER_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE8EEF7" } };
 const REQUIRED_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFDE9C9" } };
@@ -33,8 +40,10 @@ function numberFormatFor(column) {
 }
 
 function addDataSheet(workbook, sheet) {
+  const later = isLaterSheet(sheet.name);
   const ws = workbook.addWorksheet(sheet.name, {
     views: [{ state: "frozen", ySplit: 1 }],
+    ...(later ? { properties: { tabColor: { argb: LATER_TAB_COLOR } } } : {}),
   });
   ws.columns = sheet.columns.map((column) => ({
     header: column.name,
@@ -52,6 +61,7 @@ function addDataSheet(workbook, sheet) {
     cell.fill = column.required ? REQUIRED_FILL : HEADER_FILL;
     cell.border = { bottom: { style: "thin" } };
   });
+  if (later) header.getCell(1).note = LATER_SHEET_NOTE;
 
   sheet.columns.forEach((column, i) => {
     if (!column.values) return;
@@ -163,8 +173,8 @@ function addReadmeSheet(workbook) {
   addMergedLine(ws, README_INTRO);
 
   addSection(ws, "How to fill this file");
-  GENERAL_RULES.forEach((rule, i) =>
-    wrapRow(ws.addRow(["All sheets", `Rule ${i + 1}`, "", "", rule, "", ""])),
+  [...GENERAL_RULES, ...(LATER_SHEETS.length ? [laterSheetsRule(LATER_SHEETS)] : [])].forEach(
+    (rule, i) => wrapRow(ws.addRow(["All sheets", `Rule ${i + 1}`, "", "", rule, "", ""])),
   );
 
   addSection(ws, "Allowed values");
@@ -188,6 +198,22 @@ function addReadmeSheet(workbook) {
     sheetRow.eachCell((cell) => {
       cell.fill = SHEET_FILL;
     });
+    if (isLaterSheet(sheet.name)) {
+      const laterRow = ws.addRow([
+        sheet.name,
+        "(available after Phase 3)",
+        "",
+        "",
+        LATER_SHEET_NOTE,
+        "",
+        "",
+      ]);
+      wrapRow(laterRow);
+      laterRow.font = { bold: true, color: { argb: "FF9A4B08" } };
+      laterRow.eachCell((cell) => {
+        cell.fill = LATER_FILL;
+      });
+    }
     for (const column of sheet.columns) {
       wrapRow(
         ws.addRow([
@@ -220,11 +246,11 @@ export function buildTemplateWorkbook() {
   return workbook;
 }
 
-export async function writeTemplateFile(filePath) {
-  await buildTemplateWorkbook().xlsx.writeFile(filePath);
-  return filePath;
-}
-
 export async function templateBuffer() {
   return buildTemplateWorkbook().xlsx.writeBuffer();
+}
+
+export async function writeTemplateFile(filePath) {
+  await fs.writeFile(filePath, Buffer.from(await templateBuffer()));
+  return filePath;
 }

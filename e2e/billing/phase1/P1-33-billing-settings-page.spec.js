@@ -166,6 +166,40 @@ test.describe.serial("P1-33 billing settings page", () => {
     ).toHaveAttribute("maxlength", "30");
   });
 
+  test("1d. review: number boxes take digits only, GSTIN and prefix drop spaces", async ({
+    page,
+  }) => {
+    await openSettings(page);
+    const most = card(page, "Bills").getByLabel("Most codes on one bill", { exact: true });
+    await most.fill("");
+    await most.pressSequentially("1x5.");
+    await expect(most).toHaveValue("15");
+    const gst = card(page, "GST");
+    const gstin = gst.getByLabel("GSTIN", { exact: true });
+    await gstin.fill("");
+    await gstin.pressSequentially("27 aapfu");
+    await expect(gstin).toHaveValue("27AAPFU");
+    const state = gst.getByLabel("State code", { exact: true });
+    await state.fill("");
+    await state.pressSequentially("a2b7");
+    await expect(state).toHaveValue("27");
+    const series = section(page, "Number series");
+    const prefix = series.getByLabel("Bills prefix", { exact: true });
+    await prefix.fill("");
+    await prefix.pressSequentially("GH / 26");
+    await expect(prefix).toHaveValue("GH/26");
+    const digits = series.getByLabel("Bills digits", { exact: true });
+    await digits.fill("");
+    await digits.pressSequentially("x5");
+    await expect(digits).toHaveValue("5");
+    await expect(digits).toHaveAttribute("maxlength", "2");
+    const next = series.getByLabel("Bills next number", { exact: true });
+    await next.fill("");
+    await next.pressSequentially("4a1");
+    await expect(next).toHaveValue("41");
+    await expect(next).toHaveAttribute("maxlength", "12");
+  });
+
   test("2. GST switches on with its details, and the state code comes from the GSTIN", async ({
     page,
   }) => {
@@ -270,6 +304,36 @@ test.describe.serial("P1-33 billing settings page", () => {
     ).toHaveCount(0);
   });
 
+  test("3d. review: tax code boxes filter as typed and an edit error shows in its row", async ({
+    page,
+  }) => {
+    await openSettings(page);
+    const taxes = section(page, "Tax codes");
+    const add = taxes.getByRole("form", { name: "Add tax code" });
+    const code = `P133_R_${tag}`;
+    await add.getByLabel("Code", { exact: true }).pressSequentially(`P133 _R_${tag}`);
+    await expect(add.getByLabel("Code", { exact: true })).toHaveValue(code);
+    await add.getByLabel("SAC/HSN", { exact: true }).pressSequentially("99a93-11");
+    await expect(add.getByLabel("SAC/HSN", { exact: true })).toHaveValue("999311");
+    await add.getByLabel("Rate %", { exact: true }).pressSequentially("1a8.555%");
+    await expect(add.getByLabel("Rate %", { exact: true })).toHaveValue("18.55");
+    await add.getByRole("button", { name: "+ Add tax code", exact: true }).click();
+    const row = taxes.getByRole("row", { name: new RegExp(code) });
+    await expect(row).toContainText("18.55%");
+
+    await taxes.getByRole("button", { name: `Edit ${code}`, exact: true }).click();
+    const sac = taxes.getByLabel(`SAC/HSN for ${code}`, { exact: true });
+    await sac.fill("");
+    await sac.pressSequentially("12x345");
+    await expect(sac).toHaveValue("12345");
+    await row.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(row.getByRole("alert")).toHaveText("SAC/HSN must be 4, 6 or 8 digits");
+    await taxes.getByLabel(`Rate % for ${code}`, { exact: true }).fill("");
+    await expect(row.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+    await row.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(row.getByRole("alert")).toHaveCount(0);
+  });
+
   test("4. a tax code used by an item can't be deleted and says where", async ({ page }) => {
     const code = `P133_used_${tag}`;
     const admin = await apiAs("admin");
@@ -364,7 +428,7 @@ test.describe.serial("P1-33 billing settings page", () => {
 
   test("7. reception_admin can't open billing settings", async ({ page }) => {
     await loginAs(page, "reception_admin");
-    await page.goto("/settings/billing");
+    await gotoReady(page, "/settings/billing", () => page.locator(".tabs"));
     await expect(page).not.toHaveURL(/\/settings\/billing/);
   });
 });

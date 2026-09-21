@@ -11,6 +11,8 @@ import {
   GENDERS,
   BILLING_ROLES,
   RESERVED_CATEGORY_CODES,
+  INT_MAX,
+  MONEY_MAX,
 } from "../../../shared/billingVocab.js";
 
 export {
@@ -53,8 +55,36 @@ const column = (type, name, meaning, example, extra = {}) => {
   else if (!def.blank) def.blank = NONE;
   return def;
 };
-const text = (name, meaning, example, extra) => column("text", name, meaning, example, extra);
-const number = (name, meaning, example, extra) => column("number", name, meaning, example, extra);
+const MONEY_COLUMNS = ["base_price", "rate", "fee", "patient_value", "value", "max_discount"];
+const SIGNED_COLUMNS = ["sort_order"];
+const COMMA_LISTS = {
+  visit_types: VISIT_TYPES,
+  allowed_roles: BILLING_ROLES,
+  groups: null,
+  subgroups: null,
+  items: null,
+  doctors: null,
+  categories: null,
+};
+
+const isCodeColumn = (name) => name === "code" || name.endsWith("_code");
+const TEXT_LIMITS = { unit: 30 };
+
+const text = (name, meaning, example, extra) =>
+  column("text", name, meaning, example, {
+    maxLength: isCodeColumn(name) ? 40 : (TEXT_LIMITS[name] ?? 200),
+    ...(isCodeColumn(name) ? { code: true } : {}),
+    ...(Object.hasOwn(COMMA_LISTS, name)
+      ? { multi: true, ...(COMMA_LISTS[name] ? { choices: COMMA_LISTS[name] } : {}) }
+      : {}),
+    ...extra,
+  });
+const number = (name, meaning, example, extra) =>
+  column("number", name, meaning, example, {
+    numberKind: MONEY_COLUMNS.includes(name) ? "money" : "whole",
+    min: SIGNED_COLUMNS.includes(name) ? -INT_MAX : 0,
+    ...extra,
+  });
 const date = (name, meaning, example, extra) => column("date", name, meaning, example, extra);
 const list = (name, values, meaning, example, extra = {}) =>
   column("list", name, meaning, example, { values, ...extra });
@@ -490,6 +520,10 @@ export const CATEGORY_RATE_DB_COLUMNS = {
 
 export const README_SHEET = "Read me";
 
+export const LATER_SHEETS = ["Payment rules", "Consultant fees", "Discounts"];
+
+export const isLaterSheet = (name) => LATER_SHEETS.includes(name);
+
 export const TEMPLATE_SHEET_NAMES = [...IMPORT_SHEETS.map((sheet) => sheet.name), README_SHEET];
 
 export function sheetByName(name) {
@@ -500,4 +534,157 @@ export function blankValue(sheetName, columnName) {
   const found = sheetByName(sheetName)?.columns.find((c) => c.name === columnName);
   if (!found || found.required) return undefined;
   return found.blank.value;
+}
+
+const UNREADABLE = Symbol("unreadable");
+
+const cellValue = (raw) => {
+  if (!raw || typeof raw !== "object" || raw instanceof Date) return raw;
+  if ("error" in raw) return { [UNREADABLE]: "excel_error", detail: raw.error };
+  if ("formula" in raw || "sharedFormula" in raw) {
+    return raw.result === undefined ? { [UNREADABLE]: "no_result" } : cellValue(raw.result);
+  }
+  if ("result" in raw) return cellValue(raw.result);
+  if (Array.isArray(raw.richText)) return raw.richText.map((part) => part.text).join("");
+  if ("text" in raw) return cellValue(raw.text);
+  return { [UNREADABLE]: "unknown" };
+};
+
+function unreadableError(column, value) {
+  if (value[UNREADABLE] === "excel_error") {
+    return `${column.name} shows an Excel error (${value.detail}); fix the cell and upload again`;
+  }
+  if (value[UNREADABLE] === "no_result") {
+    return `${column.name} is a formula with no saved value; open the file in Excel, save it and upload again`;
+  }
+  return `${column.name} can't be read; type the value in plainly`;
+}
+
+const isBlankCell = (value) =>
+  value === undefined || value === null || (typeof value === "string" && value.trim() === "");
+
+const matchChoice = (values, input) =>
+  values.find((v) => String(v).toLowerCase() === String(input).trim().toLowerCase());
+
+const ISO_DATE =
+  /^(\d{4})-(\d{2})-(\d{2})(?:[ T]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/;
+const EXCEL_EPOCH = Date.UTC(1899, 11, 30);
+
+function parseDate(value) {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString().slice(0, 10);
+  }
+  if (typeof value === "number" && Number.isInteger(value) && value > 0 && value < 2958466) {
+    return new Date(EXCEL_EPOCH + value * 86400000).toISOString().slice(0, 10);
+  }
+  const match = ISO_DATE.exec(String(value).trim());
+  if (!match) return null;
+  const [, y, m, d] = match.map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d
+    ? `${match[1]}-${match[2]}-${match[3]}`
+    : null;
+}
+
+function parseNumber(column, value) {
+  const text = typeof value === "number" ? null : String(value).trim();
+  if (text !== null && !/^-?\d+(\.\d+)?$/.test(text)) {
+    return { error: `${column.name} must be a plain number (no ₹ sign, no commas)` };
+  }
+  const n = typeof value === "number" ? value : Number(text);
+  if (!Number.isFinite(n)) return { error: `${column.name} must be a number` };
+  if (n < column.min) {
+    return { error: `${column.name} can't be less than ${column.min}` };
+  }
+  if (column.numberKind === "money") {
+    const paise = Number(n.toFixed(2));
+    if (Math.abs(paise - n) > 1e-9) {
+      return { error: `${column.name} can have at most 2 decimals (paise)` };
+    }
+    if (paise > MONEY_MAX) return { error: `${column.name} is too large (at most ${MONEY_MAX})` };
+    return { value: paise };
+  }
+  if (!Number.isInteger(n)) return { error: `${column.name} must be a whole number` };
+  if (Math.abs(n) > INT_MAX) return { error: `${column.name} is too large (at most ${INT_MAX})` };
+  return { value: n };
+}
+
+function parseList(column, value) {
+  const parts = [];
+  for (const part of String(value).split(",")) {
+    const item = part.trim();
+    if (!item || parts.some((p) => p.toLowerCase() === item.toLowerCase())) continue;
+    parts.push(item);
+  }
+  if (!parts.length) return blankOf(column);
+  if (!column.choices) return { value: parts };
+  const unknown = parts.filter((p) => !matchChoice(column.choices, p));
+  if (unknown.length) {
+    return {
+      error: `${column.name}: ${unknown.join(", ")} ${unknown.length === 1 ? "is" : "are"} not allowed; use ${column.choices.join(", ")}`,
+    };
+  }
+  return { value: parts.map((p) => matchChoice(column.choices, p)) };
+}
+
+function blankOf(column) {
+  return column.required
+    ? { error: `${column.name} is required` }
+    : { value: column.blank.value, blank: true };
+}
+
+function parseText(column, value) {
+  const text = String(value).trim();
+  if (text.length > column.maxLength) {
+    return { error: `${column.name} can be at most ${column.maxLength} characters` };
+  }
+  if (column.code && /\s/.test(text)) return { error: `${column.name} can't contain spaces` };
+  return { value: text };
+}
+
+export function parseCell(column, raw) {
+  const value = cellValue(raw);
+  if (value && typeof value === "object" && UNREADABLE in value) {
+    return { error: unreadableError(column, value) };
+  }
+  if (isBlankCell(value)) return blankOf(column);
+  if (value instanceof Date && column.type !== "date") {
+    return {
+      error: `${column.name} is a date, so Excel has probably changed what was typed; format the column as Text and type it again`,
+    };
+  }
+  switch (column.type) {
+    case "number":
+      return parseNumber(column, value);
+    case "date": {
+      const date = parseDate(value);
+      return date ? { value: date } : { error: `${column.name} must be a date like 2026-10-01` };
+    }
+    case "boolean": {
+      if (typeof value === "boolean") return { value };
+      const answer = String(value).trim().toLowerCase();
+      if (["yes", "y", "true"].includes(answer)) return { value: true };
+      if (["no", "n", "false"].includes(answer)) return { value: false };
+      return { error: `${column.name} must be yes or no` };
+    }
+    case "list": {
+      const found = matchChoice(column.values, value);
+      return found === undefined
+        ? { error: `${column.name} must be one of: ${column.values.join(", ")}` }
+        : { value: found };
+    }
+    default:
+      return column.multi ? parseList(column, value) : parseText(column, value);
+  }
+}
+
+export function parseRow(sheet, cells) {
+  const values = {};
+  const errors = [];
+  for (const column of sheet.columns) {
+    const result = parseCell(column, cells?.[column.name]);
+    if (result.error) errors.push({ column: column.name, message: result.error });
+    else values[column.name] = result.value;
+  }
+  return { values, errors };
 }

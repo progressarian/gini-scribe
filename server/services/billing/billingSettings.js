@@ -52,10 +52,10 @@ function cleanText(value, label, max) {
 }
 
 function cleanMaxCodes(value) {
-  const max = readNumber(value, "Codes per bill must be a whole number, 1 or more");
+  const max = readNumber(value, "Most codes on one bill must be a whole number, 1 or more");
   if (max === undefined) return null;
   if (!Number.isInteger(max) || max < 1 || max > INT_MAX) {
-    throw httpError(400, "Codes per bill must be a whole number, 1 or more");
+    throw httpError(400, "Most codes on one bill must be a whole number, 1 or more");
   }
   return max;
 }

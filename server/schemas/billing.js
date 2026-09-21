@@ -28,7 +28,7 @@ export const money = z.union([
   z
     .string()
     .trim()
-    .regex(MONEY_TEXT, "must be an amount like 1200 or 1200.50")
+    .regex(MONEY_TEXT, { message: "must be an amount like 1200 or 1200.50", abort: true })
     .refine(withinMoney, TOO_MUCH),
 ]);
 
@@ -39,7 +39,11 @@ const percent = z.union([
 
 const whole = z.union([
   z.number().int("must be a whole number").nonnegative("must be 0 or more").max(INT_MAX, TOO_BIG),
-  z.string().trim().regex(WHOLE_TEXT, "must be a whole number").refine(withinInt, TOO_BIG),
+  z
+    .string()
+    .trim()
+    .regex(WHOLE_TEXT, { message: "must be a whole number", abort: true })
+    .refine(withinInt, TOO_BIG),
 ]);
 
 const bigWhole = z.union([
@@ -52,7 +56,7 @@ const id = z.union([
   z
     .string()
     .trim()
-    .regex(/^[1-9]\d*$/, "must be an id")
+    .regex(/^[1-9]\d*$/, { message: "must be an id", abort: true })
     .refine(withinInt, TOO_BIG),
 ]);
 
@@ -60,7 +64,7 @@ const blank = z.literal("");
 const code = z
   .string()
   .trim()
-  .min(1, "can't be blank")
+  .min(1, { message: "can't be blank", abort: true })
   .max(40)
   .regex(/^\S+$/, "can't contain spaces");
 const name = z.string().trim().min(1, "can't be blank").max(200);
@@ -80,7 +84,7 @@ const groupFields = {
     z
       .string()
       .trim()
-      .regex(/^-?\d+$/)
+      .regex(/^-?\d+$/, { message: "must be a whole number", abort: true })
       .refine(withinInt, TOO_BIG),
   ]),
 };
@@ -286,6 +290,65 @@ export const billingRateGridQuerySchema = z.strictObject({
   groupId: queryId.optional(),
   subgroupId: queryId.optional(),
 });
+
+export const BILLING_FIELD_LABELS = {
+  code: "Code",
+  name: "Name",
+  sort_order: "Order",
+  group_id: "Group",
+  subgroup_id: "Subgroup",
+  is_active: "Active",
+  sac_hsn: "SAC/HSN",
+  rate_pct: "Rate %",
+  base_price: "Price",
+  unit: "Unit",
+  allow_quantity: "Quantity can be more than 1",
+  max_quantity: "Max quantity",
+  tax_code_id: "Tax code",
+  price_includes_tax: "Price includes tax",
+  kind: "Kind",
+  doctor_id: "Consultant",
+  visit_type: "Visit type",
+  test_catalog_id: "Catalogue test",
+  reason: "Reason for the price change",
+  label: "Label",
+  color: "Colour",
+  parent_code: "Parent category",
+  payer_name: "Payer name",
+  requires_ref: "Card number required",
+  requires_referral: "Needs a referral",
+  requires_referral_doc: "Needs the referral scanned",
+  print_category_on_bill: "Print the category on the bill",
+  allow_pay_later: "Pay later",
+  daily_cap: "Patients per day",
+  scheme_code: "Category",
+  min_age: "From age",
+  max_age: "To age",
+  gender: "Gender",
+  requires_card: "Has a card",
+  mode: "How it applies",
+  priority: "Priority",
+  service_item_id: "Item",
+  valid_from: "From",
+  valid_to: "To",
+  rate: "Rate",
+  bill_name: "Bill name",
+  bill_code: "Bill code",
+  discount_stacking: "When several discounts apply",
+  max_codes_per_bill: "Most codes on one bill",
+  gst_enabled: "Charge GST on bills",
+  gstin: "GSTIN",
+  state_code: "State code",
+  legal_name: "Legal name",
+  bill_footer: "Bill footer",
+  series: "Series",
+  fy: "Financial year",
+  prefix: "Prefix",
+  number_width: "Digits",
+  next_no: "Next number",
+  q: "Search",
+  date: "As of",
+};
 
 export const BILLING_SCHEMAS = {
   billingGroupCreateSchema,

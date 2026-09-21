@@ -82,8 +82,8 @@ function cleanScheme(value) {
 const CLEANERS = {
   scheme_code: cleanScheme,
   name: cleanName,
-  min_age: (v) => cleanAge(v, "Minimum age"),
-  max_age: (v) => cleanAge(v, "Maximum age"),
+  min_age: (v) => cleanAge(v, "From age"),
+  max_age: (v) => cleanAge(v, "To age"),
   gender: cleanGender,
   requires_card: (v) => cleanFlag(v, "Card required"),
   mode: cleanMode,
@@ -110,7 +110,7 @@ function cleanInput(input, { partial }) {
 
 function checkShape(rule) {
   if (rule.min_age !== null && rule.max_age !== null && rule.min_age > rule.max_age) {
-    throw httpError(400, "Minimum age can't be more than the maximum age");
+    throw httpError(400, "From age can't be more than To age");
   }
   if (
     rule.min_age === null &&

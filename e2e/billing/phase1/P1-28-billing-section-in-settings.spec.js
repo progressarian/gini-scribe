@@ -248,4 +248,38 @@ test.describe("P1-28 billing section in settings — screens", () => {
     await gotoReady(page, "/settings/schemes", title);
     await expect(title()).toHaveText("Categories");
   });
+
+  test("13. on a phone every settings page fits the screen and its tab is in view", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 800 });
+    await loginAs(page, "admin");
+    for (const target of [
+      "/settings/flow",
+      "/settings/tests",
+      "/settings/schemes",
+      "/settings/services",
+      "/settings/category-rates",
+      "/settings/billing",
+    ]) {
+      await gotoReady(page, target, () =>
+        page.getByRole("navigation", { name: "Settings sections" }),
+      );
+      await expect(page.locator(".set__panel")).toBeVisible();
+      await expect
+        .poll(
+          () =>
+            page.evaluate(
+              () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+            ),
+          { message: `${target} is wider than the screen` },
+        )
+        .toBe(0);
+      const selected = await page.locator(".set__tab--on").evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        return r.left >= 0 && r.right <= window.innerWidth;
+      });
+      expect(selected, `${target}: the selected tab is on screen`).toBe(true);
+    }
+  });
 });

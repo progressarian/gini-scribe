@@ -268,6 +268,52 @@ test.describe.serial("P1-29 services page — screen", () => {
     await expect(dialog(page)).toHaveCount(0);
   });
 
+  test("6b. review: the price box takes only an amount", async ({ page }) => {
+    await openServices(page);
+    await pickSubgroup(page, S1.name);
+    await page.getByRole("button", { name: "+ Add item", exact: true }).click();
+    await field(page, "Price (₹)").pressSequentially("₹1,2a00.5.67");
+    await expect(field(page, "Price (₹)")).toHaveValue("1200.56");
+    await page.keyboard.press("Escape");
+    await dialog(page)
+      .getByRole("group", { name: "Discard changes?" })
+      .getByRole("button", { name: "Discard", exact: true })
+      .click();
+    await expect(dialog(page)).toHaveCount(0);
+  });
+
+  test("6c. review: code, max quantity and text boxes stop bad input as it is typed", async ({
+    page,
+  }) => {
+    await openServices(page);
+    await pickSubgroup(page, S1.name);
+    const addGroupCode = groups(page).getByLabel("Add group code", { exact: true });
+    await addGroupCode.pressSequentially("LAB 01");
+    await expect(addGroupCode).toHaveValue("LAB01");
+    await expect(addGroupCode).toHaveAttribute("maxlength", "40");
+    await expect(groups(page).getByLabel("Add group name", { exact: true })).toHaveAttribute(
+      "maxlength",
+      "200",
+    );
+    await addGroupCode.fill("");
+
+    await page.getByRole("button", { name: "+ Add item", exact: true }).click();
+    await field(page, "Code").pressSequentially("CBC 2");
+    await expect(field(page, "Code")).toHaveValue("CBC2");
+    await expect(field(page, "Code")).toHaveAttribute("maxlength", "40");
+    await expect(field(page, "Name")).toHaveAttribute("maxlength", "200");
+    await expect(field(page, "Unit")).toHaveAttribute("maxlength", "30");
+    await dialog(page).getByText("Quantity can be more than 1").click();
+    await field(page, "Max quantity").pressSequentially("1a0.5");
+    await expect(field(page, "Max quantity")).toHaveValue("105");
+    await page.keyboard.press("Escape");
+    await dialog(page)
+      .getByRole("group", { name: "Discard changes?" })
+      .getByRole("button", { name: "Discard", exact: true })
+      .click();
+    await expect(dialog(page)).toHaveCount(0);
+  });
+
   test("7. a price change asks for a reason and shows in the history drawer", async ({ page }) => {
     await openServices(page);
     await pickSubgroup(page, S1.name);

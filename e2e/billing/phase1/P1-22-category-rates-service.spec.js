@@ -195,7 +195,7 @@ test.describe.serial("P1-22 category rates service", () => {
       [
         { rate: 1, valid_from: "2030-05-02", valid_to: "2030-05-01" },
         400,
-        /can't be before the start/,
+        /can't be before the From date/,
       ],
       [{ valid_from: "2030-01-01" }, 400, /must change something/],
       [{ bill_code: "C C", valid_from: "2030-01-01" }, 400, /can't contain spaces/],

@@ -1,6 +1,6 @@
 import { cloneElement, useId, useState } from "react";
 import { useCreateBillingItem, useUpdateBillingItem } from "../../queries/hooks/useBillingMaster";
-import { errorOf } from "./format";
+import { codeTyped, digitsTyped, errorOf, moneyTyped } from "./format";
 import useDialog from "./useDialog";
 
 function Field({ label, className = "", children }) {
@@ -55,6 +55,8 @@ const payloadOf = (form) => {
 const withCurrent = (options, id, current) =>
   !id || options.some((o) => String(o.id) === String(id)) ? options : [...options, current()];
 
+const TYPED = { base_price: moneyTyped, code: codeTyped, max_quantity: digitsTyped };
+
 const same = (key, a, b) =>
   key === "base_price" ? Number(a) === Number(b) : String(a ?? "") === String(b ?? "");
 
@@ -80,7 +82,15 @@ export default function ItemDialog({
   const busy = create.isPending || update.isPending;
   const editing = Boolean(item);
   const set = (key) => (e) =>
-    setForm({ ...form, [key]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
+    setForm({
+      ...form,
+      [key]:
+        e.target.type === "checkbox"
+          ? e.target.checked
+          : TYPED[key]
+            ? TYPED[key](e.target.value)
+            : e.target.value,
+    });
 
   const before = editing ? payloadOf(formOf(item)) : null;
   const priceChanged =
@@ -146,10 +156,22 @@ export default function ItemDialog({
         </h2>
         <div className="bill-form">
           <Field label="Name">
-            <input className="jb-assign" value={form.name} onChange={set("name")} required />
+            <input
+              className="jb-assign"
+              maxLength={200}
+              value={form.name}
+              onChange={set("name")}
+              required
+            />
           </Field>
           <Field label="Code" className="fset__field--narrow bill-form__code">
-            <input className="jb-assign" value={form.code} onChange={set("code")} required />
+            <input
+              className="jb-assign"
+              maxLength={40}
+              value={form.code}
+              onChange={set("code")}
+              required
+            />
           </Field>
           <Field label="Subgroup">
             <select
@@ -191,7 +213,7 @@ export default function ItemDialog({
             />
           </Field>
           <Field label="Unit" className="fset__field--narrow">
-            <input className="jb-assign" value={form.unit} onChange={set("unit")} />
+            <input className="jb-assign" maxLength={30} value={form.unit} onChange={set("unit")} />
           </Field>
         </div>
 
@@ -199,6 +221,7 @@ export default function ItemDialog({
           <Field label="Reason for the price change" className="bill-form__reason">
             <input
               className="jb-assign"
+              maxLength={500}
               value={reason}
               placeholder={`${item.base_price} → ${form.base_price.trim()}`}
               onChange={(e) => setReason(e.target.value)}
@@ -217,6 +240,7 @@ export default function ItemDialog({
               <input
                 className="jb-assign"
                 inputMode="numeric"
+                maxLength={9}
                 placeholder="No limit"
                 value={form.max_quantity}
                 onChange={set("max_quantity")}

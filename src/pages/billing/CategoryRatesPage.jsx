@@ -9,12 +9,13 @@ import {
 } from "../../queries/hooks/useBillingMaster";
 import { toast } from "../../stores/uiStore";
 import RateHistoryDialog from "../../components/billing/RateHistoryDialog";
-import { errorOf, rupees } from "../../components/billing/format";
+import { codeTyped, errorOf, moneyTyped, rupees } from "../../components/billing/format";
 import "../../styles/flow.css";
 import "../flow/FlowSettings.css";
 import "./billing.css";
 
 const text = (v) => (v === null || v === undefined ? "" : String(v));
+const TYPED = { rate: moneyTyped, bill_code: codeTyped };
 
 function Source({ source, parentName }) {
   if (source === "own") return <span className="bill-src bill-src--own">Own</span>;
@@ -44,7 +45,8 @@ function EditRow({ item, code, today, onDone }) {
     valid_to: "",
   });
   const [error, setError] = useState("");
-  const set = (key) => (e) => setForm({ ...form, [key]: e.target.value });
+  const set = (key) => (e) =>
+    setForm({ ...form, [key]: TYPED[key] ? TYPED[key](e.target.value) : e.target.value });
   const submit = async () => {
     setError("");
     try {
@@ -88,17 +90,18 @@ function EditRow({ item, code, today, onDone }) {
           placeholder: `${rupees(item.rate)} (${item.rate_source === "own" ? "own" : item.rate_source === "parent" ? "inherited" : "base price"})`,
         })}
       </td>
-      <td>{input("bill_name", "Bill name", { placeholder: item.name })}</td>
-      <td>{input("bill_code", "Bill code")}</td>
+      <td>{input("bill_name", "Bill name", { placeholder: item.name, maxLength: 200 })}</td>
+      <td>{input("bill_code", "Bill code", { maxLength: 40 })}</td>
       <td className="bill-rates__dates">
         {input("valid_from", "From", { type: "date", required: true })}
-        {input("valid_to", "To", { type: "date" })}
+        {input("valid_to", "To", { type: "date", min: form.valid_from || undefined })}
       </td>
       <td className="bill-items__actions">
         <button
           type="button"
           className="flow-btn flow-btn-primary flow-btn-mini"
-          disabled={save.isPending}
+          disabled={save.isPending || !form.valid_from}
+          title={form.valid_from ? undefined : "Choose the date this rate starts"}
           onClick={submit}
         >
           Save

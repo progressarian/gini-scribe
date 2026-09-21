@@ -3,6 +3,7 @@ import { requireCapability } from "../middleware/auth.js";
 import { validate, validateQuery } from "../middleware/validate.js";
 import { CAPABILITIES as CAP } from "../../shared/permissions.js";
 import {
+  BILLING_FIELD_LABELS,
   billingActiveSchema,
   billingListQuerySchema,
   billingSeriesSaveSchema,
@@ -37,7 +38,7 @@ router.get(
 router.patch(
   `${BASE}`,
   settings,
-  validate(billingSettingsUpdateSchema),
+  validate(billingSettingsUpdateSchema, BILLING_FIELD_LABELS),
   run("Billing settings update", 200, (req) => updateSettings(req.body, ctx(req))),
 );
 
@@ -49,14 +50,14 @@ router.get(
 router.put(
   `${BASE}/series`,
   settings,
-  validate(billingSeriesSaveSchema),
+  validate(billingSeriesSaveSchema, BILLING_FIELD_LABELS),
   run("Bill series save", 200, (req) => saveSeries(req.body, ctx(req))),
 );
 
 router.get(
   `${BASE}/tax-codes`,
   settings,
-  validateQuery(billingListQuerySchema),
+  validateQuery(billingListQuerySchema, BILLING_FIELD_LABELS),
   run("Tax codes list", 200, (req) =>
     taxes.listTaxCodes({ activeOnly: req.query.activeOnly === true }),
   ),
@@ -64,19 +65,19 @@ router.get(
 router.post(
   `${BASE}/tax-codes`,
   settings,
-  validate(billingTaxCodeCreateSchema),
+  validate(billingTaxCodeCreateSchema, BILLING_FIELD_LABELS),
   run("Tax code create", 201, (req) => taxes.createTaxCode(req.body, ctx(req))),
 );
 router.patch(
   `${BASE}/tax-codes/:id`,
   settings,
-  validate(billingTaxCodeUpdateSchema),
+  validate(billingTaxCodeUpdateSchema, BILLING_FIELD_LABELS),
   run("Tax code update", 200, (req) => taxes.updateTaxCode(idParam(req), req.body, ctx(req))),
 );
 router.put(
   `${BASE}/tax-codes/:id/active`,
   settings,
-  validate(billingActiveSchema),
+  validate(billingActiveSchema, BILLING_FIELD_LABELS),
   run("Tax code active", 200, (req) =>
     taxes.setTaxCodeActive(idParam(req), req.body.is_active, ctx(req)),
   ),

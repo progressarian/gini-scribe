@@ -138,7 +138,12 @@ export default function TestCatalogPage() {
       (t) =>
         (showRetired || t.isActive) &&
         (station === "all" || (t.category || "lab") === station) &&
-        (!needle || `${t.name} ${t.gloss || ""}`.toLowerCase().includes(needle)),
+        (!needle ||
+          [t.name, t.gloss, t.serviceItemCode, t.offItemCode]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase()
+            .includes(needle)),
     );
   }, [tests, q, showRetired, station]);
 
@@ -187,6 +192,7 @@ export default function TestCatalogPage() {
           <input
             className="tcat__search"
             value={newName}
+            maxLength={120}
             placeholder="Test name — offered to every patient"
             onChange={(e) => setNewName(e.target.value)}
           />
@@ -230,7 +236,8 @@ export default function TestCatalogPage() {
           <input
             className="tcat__search"
             value={q}
-            placeholder="Search tests…"
+            aria-label="Search tests by name or code"
+            placeholder="Search name or code…"
             onChange={(e) => setQ(e.target.value)}
           />
           <label className="tcat__toggle">
@@ -302,6 +309,7 @@ export default function TestCatalogPage() {
                       <input
                         className="tcat__gloss"
                         defaultValue={t.gloss || ""}
+                        maxLength={160}
                         placeholder="Why a doctor orders it"
                         onBlur={(e) => {
                           const gloss = e.target.value.trim();

@@ -172,3 +172,12 @@ export const CONSULTANT_FEES_EXAMPLE = {
   ],
   note: "Row 1: the patient pays nothing, gets the printout, and the whole fee stays Pending until the payer pays. Rows 3–4: the patient pays [amount] and the rest of the fee is claimed. Example only: every doctor, fee and code is entered by the admin.",
 };
+
+export const LATER_SHEET_NOTE =
+  "Available after Phase 3: rows on this sheet are not imported yet. You can fill it in now; it is read once payment rules and discounts are switched on.";
+
+const listed = (names) =>
+  names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0];
+
+export const laterSheetsRule = (names) =>
+  `The ${listed(names)} ${names.length > 1 ? "sheets are" : "sheet is"} available after Phase 3. ${names.length > 1 ? "Their tabs are" : "Its tab is"} grey and rows on ${names.length > 1 ? "them" : "it"} are not imported yet; fill ${names.length > 1 ? "them" : "it"} in now if you like, and upload again once ${names.length > 1 ? "they are" : "it is"} switched on.`;

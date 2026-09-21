@@ -1,3 +1,5 @@
+export const INT_MAX = 2147483647;
+export const MONEY_MAX = 9999999999.99;
 export const YES_NO = ["yes", "no"];
 export const ITEM_KINDS = ["consultation", "test", "procedure", "medicine", "other"];
 export const DISCOUNT_KINDS = ["percent", "flat", "fixed_price"];

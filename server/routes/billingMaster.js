@@ -4,6 +4,7 @@ import { billingRoute } from "./billingHttp.js";
 import { validate, validateQuery } from "../middleware/validate.js";
 import { CAPABILITIES as CAP, hasCapability } from "../../shared/permissions.js";
 import {
+  BILLING_FIELD_LABELS,
   billingActiveSchema,
   billingCategoryCreateSchema,
   billingCategoryRateDeleteQuerySchema,
@@ -71,25 +72,25 @@ const activeOnly = (req) => req.query.activeOnly === true;
 router.get(
   `${BASE}/groups`,
   master,
-  validateQuery(billingListQuerySchema),
+  validateQuery(billingListQuerySchema, BILLING_FIELD_LABELS),
   run("Billing groups list", 200, (req) => groups.listGroups({ activeOnly: activeOnly(req) })),
 );
 router.post(
   `${BASE}/groups`,
   master,
-  validate(billingGroupCreateSchema),
+  validate(billingGroupCreateSchema, BILLING_FIELD_LABELS),
   run("Billing group create", 201, (req) => groups.createGroup(req.body, ctx(req))),
 );
 router.patch(
   `${BASE}/groups/:id`,
   master,
-  validate(billingGroupUpdateSchema),
+  validate(billingGroupUpdateSchema, BILLING_FIELD_LABELS),
   run("Billing group update", 200, (req) => groups.updateGroup(idParam(req), req.body, ctx(req))),
 );
 router.put(
   `${BASE}/groups/:id/active`,
   master,
-  validate(billingActiveSchema),
+  validate(billingActiveSchema, BILLING_FIELD_LABELS),
   run("Billing group active", 200, (req) =>
     groups.setGroupActive(idParam(req), req.body.is_active, ctx(req)),
   ),
@@ -103,13 +104,13 @@ router.delete(
 router.post(
   `${BASE}/subgroups`,
   master,
-  validate(billingSubgroupCreateSchema),
+  validate(billingSubgroupCreateSchema, BILLING_FIELD_LABELS),
   run("Billing subgroup create", 201, (req) => groups.createSubgroup(req.body, ctx(req))),
 );
 router.patch(
   `${BASE}/subgroups/:id`,
   master,
-  validate(billingSubgroupUpdateSchema),
+  validate(billingSubgroupUpdateSchema, BILLING_FIELD_LABELS),
   run("Billing subgroup update", 200, (req) =>
     groups.updateSubgroup(idParam(req), req.body, ctx(req)),
   ),
@@ -117,7 +118,7 @@ router.patch(
 router.put(
   `${BASE}/subgroups/:id/active`,
   master,
-  validate(billingActiveSchema),
+  validate(billingActiveSchema, BILLING_FIELD_LABELS),
   run("Billing subgroup active", 200, (req) =>
     groups.setSubgroupActive(idParam(req), req.body.is_active, ctx(req)),
   ),
@@ -131,14 +132,14 @@ router.delete(
 router.get(
   `${BASE}/tax-codes`,
   master,
-  validateQuery(billingListQuerySchema),
+  validateQuery(billingListQuerySchema, BILLING_FIELD_LABELS),
   run("Billing tax codes list", 200, (req) => listTaxCodes({ activeOnly: activeOnly(req) })),
 );
 
 router.get(
   `${BASE}/items`,
   master,
-  validateQuery(billingItemListQuerySchema),
+  validateQuery(billingItemListQuerySchema, BILLING_FIELD_LABELS),
   run("Billing items list", 200, (req) => items.listItems(req.query)),
 );
 router.get(
@@ -159,19 +160,19 @@ router.get(
 router.post(
   `${BASE}/items`,
   master,
-  validate(billingItemCreateSchema),
+  validate(billingItemCreateSchema, BILLING_FIELD_LABELS),
   run("Billing item create", 201, (req) => items.createItem(req.body, ctx(req))),
 );
 router.patch(
   `${BASE}/items/:id`,
   master,
-  validate(billingItemUpdateSchema),
+  validate(billingItemUpdateSchema, BILLING_FIELD_LABELS),
   run("Billing item update", 200, (req) => items.updateItem(idParam(req), req.body, ctx(req))),
 );
 router.put(
   `${BASE}/items/:id/active`,
   master,
-  validate(billingActiveSchema),
+  validate(billingActiveSchema, BILLING_FIELD_LABELS),
   run("Billing item active", 200, (req) =>
     items.setItemActive(idParam(req), req.body.is_active, ctx(req)),
   ),
@@ -185,13 +186,13 @@ router.delete(
 router.get(
   `${BASE}/categories`,
   master,
-  validateQuery(billingListQuerySchema),
+  validateQuery(billingListQuerySchema, BILLING_FIELD_LABELS),
   run("Billing categories list", 200, (req) => listSchemeTree({ all: !activeOnly(req) })),
 );
 router.post(
   `${BASE}/categories`,
   master,
-  validate(billingCategoryCreateSchema),
+  validate(billingCategoryCreateSchema, BILLING_FIELD_LABELS),
   run("Billing category create", 201, (req) => {
     guardCap(req, { blankIsNone: true });
     return createScheme(req.body, undefined, ctx(req));
@@ -200,7 +201,7 @@ router.post(
 router.patch(
   `${BASE}/categories/:code`,
   master,
-  validate(billingCategoryUpdateSchema),
+  validate(billingCategoryUpdateSchema, BILLING_FIELD_LABELS),
   run("Billing category update", 200, (req) => {
     guardCap(req, { blankIsNone: false });
     return updateScheme(codeParam(req), req.body, undefined, ctx(req));
@@ -215,7 +216,7 @@ router.delete(
 router.get(
   `${BASE}/category-rules`,
   master,
-  validateQuery(billingListQuerySchema),
+  validateQuery(billingListQuerySchema, BILLING_FIELD_LABELS),
   run("Billing category rules list", 200, (req) =>
     rules.listRules({ schemeCode: req.query.schemeCode, activeOnly: activeOnly(req) }),
   ),
@@ -223,13 +224,13 @@ router.get(
 router.post(
   `${BASE}/category-rules`,
   master,
-  validate(billingCategoryRuleCreateSchema),
+  validate(billingCategoryRuleCreateSchema, BILLING_FIELD_LABELS),
   run("Billing category rule create", 201, (req) => rules.createRule(req.body, ctx(req))),
 );
 router.patch(
   `${BASE}/category-rules/:id`,
   master,
-  validate(billingCategoryRuleUpdateSchema),
+  validate(billingCategoryRuleUpdateSchema, BILLING_FIELD_LABELS),
   run("Billing category rule update", 200, (req) =>
     rules.updateRule(idParam(req), req.body, ctx(req)),
   ),
@@ -237,7 +238,7 @@ router.patch(
 router.put(
   `${BASE}/category-rules/:id/active`,
   master,
-  validate(billingActiveSchema),
+  validate(billingActiveSchema, BILLING_FIELD_LABELS),
   run("Billing category rule active", 200, (req) =>
     rules.setRuleActive(idParam(req), req.body.is_active, ctx(req)),
   ),
@@ -251,7 +252,7 @@ router.delete(
 router.get(
   `${BASE}/category-rates/:code`,
   master,
-  validateQuery(billingRateGridQuerySchema),
+  validateQuery(billingRateGridQuerySchema, BILLING_FIELD_LABELS),
   run("Billing category rates grid", 200, (req) => rates.rateGrid(codeParam(req), req.query)),
 );
 router.get(
@@ -264,13 +265,13 @@ router.get(
 router.put(
   `${BASE}/category-rates`,
   master,
-  validate(billingCategoryRateSaveSchema),
+  validate(billingCategoryRateSaveSchema, BILLING_FIELD_LABELS),
   run("Billing category rate save", 200, (req) => rates.saveRate(req.body, ctx(req))),
 );
 router.delete(
   `${BASE}/category-rates/:code/items/:itemId/:validFrom`,
   master,
-  validateQuery(billingCategoryRateDeleteQuerySchema),
+  validateQuery(billingCategoryRateDeleteQuerySchema, BILLING_FIELD_LABELS),
   run("Billing category rate delete", 200, (req) =>
     rates.deleteRate(
       {

@@ -54,6 +54,7 @@ function NodeRow({
           <input
             className="jb-assign"
             aria-label={`New name for ${node.name}`}
+            maxLength={200}
             value={renaming}
             autoFocus
             onChange={(e) => setRenaming(e.target.value)}

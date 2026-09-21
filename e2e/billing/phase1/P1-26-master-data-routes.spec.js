@@ -207,7 +207,7 @@ test.describe.serial("P1-26 master data routes", () => {
     for (const [method, path, body] of bodies) {
       const r = await call(method, path, { ...body, price_override: 1 });
       expect(r.status, `${method.toUpperCase()} ${path} with an unknown field`).toBe(400);
-      expect(r.body.error).toBe("Validation failed");
+      expect(r.body.error).toBe("Unknown field: price_override");
     }
     const badValue = await call("post", `${M}/items`, {
       code: "X",
@@ -217,6 +217,7 @@ test.describe.serial("P1-26 master data routes", () => {
       kind: "other",
     });
     expect(badValue.status).toBe(400);
+    expect(badValue.body.error).toBe("Price must be 0 or more");
     const badActive = await call("put", `${M}/items/${ids.item}/active`, { is_active: "false" });
     expect(badActive.status).toBe(400);
     for (const path of [

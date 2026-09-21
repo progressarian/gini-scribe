@@ -14,12 +14,13 @@ const RETIRED = `P134 Retired ${tag}`;
 const seed = {};
 
 const table = (page) => page.locator(".tcat__table");
+const search = (page) => page.getByLabel("Search tests by name or code", { exact: true });
 const row = (page, name) => table(page).getByRole("row", { name: new RegExp(name) });
 
 async function openCatalogue(page) {
   await loginAs(page, "admin");
-  await gotoReady(page, "/settings/tests", () => page.getByPlaceholder("Search tests…"));
-  await page.getByPlaceholder("Search tests…").fill(`P134`);
+  await gotoReady(page, "/settings/tests", () => search(page));
+  await search(page).fill(`P134`);
 }
 
 test.describe.serial("P1-34 test catalogue page stops editing price", () => {
@@ -108,6 +109,29 @@ test.describe.serial("P1-34 test catalogue page stops editing price", () => {
     const unbilled = tests.filter((t) => t.isActive && !t.serviceItemCode).length;
     await expect(page.locator(".tcat__warn")).toContainText(
       `${unbilled} active test${unbilled === 1 ? " has" : "s have"} no active billing item`,
+    );
+  });
+
+  test("2b. review: search finds a test by its billing item's code", async ({ page }) => {
+    await openCatalogue(page);
+    await search(page).fill(`p134p_${tag}`);
+    await expect(row(page, PRICED)).toBeVisible();
+    await expect(table(page).getByRole("row", { name: new RegExp(UNBILLED) })).toHaveCount(0);
+    await search(page).fill(`P134O_${tag}`);
+    await expect(row(page, OFF)).toBeVisible();
+    await expect(table(page).getByRole("row", { name: new RegExp(PRICED) })).toHaveCount(0);
+  });
+
+  test("2c. review: the new test name and the gloss stop at the server's lengths", async ({
+    page,
+  }) => {
+    await openCatalogue(page);
+    await expect(
+      page.getByPlaceholder("Test name — offered to every patient", { exact: true }),
+    ).toHaveAttribute("maxlength", "120");
+    await expect(row(page, PRICED).getByPlaceholder("Why a doctor orders it")).toHaveAttribute(
+      "maxlength",
+      "160",
     );
   });
 

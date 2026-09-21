@@ -82,6 +82,17 @@ await markAppointmentAsSeen(appt.id, "completed");
 const { rows: after } = await pool.query(`SELECT status FROM appointments WHERE id = $1`, [
   appt.id,
 ]);
-console.log(
-  `Appointment ${appt.id} is now ${after[0].status}; the Rx auto-save finishes before exit.`,
-);
+console.log(`Appointment ${appt.id} is now ${after[0].status}.`);
+for (let i = 0; i < 90; i++) {
+  const { rows: saved } = await pool.query(
+    `SELECT 1 FROM documents WHERE patient_id = $1 AND source = 'visit' AND doc_type = 'prescription' AND storage_path IS NOT NULL
+        AND created_at > NOW() - interval '5 minutes' LIMIT 1`,
+    [appt.patient_id],
+  );
+  if (saved.length) {
+    console.log("Scribe prescription saved.");
+    break;
+  }
+  await new Promise((r) => setTimeout(r, 2000));
+}
+await pool.end();

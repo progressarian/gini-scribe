@@ -14,7 +14,13 @@ import {
 } from "../../queries/hooks/useBillingMaster";
 import { toast } from "../../stores/uiStore";
 import UsedInDialog from "../../components/billing/UsedInDialog";
-import { errorOf, usesOf } from "../../components/billing/format";
+import {
+  codeTyped,
+  digitsTyped,
+  errorOf,
+  moneyTyped,
+  usesOf,
+} from "../../components/billing/format";
 import "../../styles/flow.css";
 import "../flow/FlowSettings.css";
 import "./billing.css";
@@ -31,6 +37,19 @@ const nextYear = (fy) => {
   const start = Number(fy.slice(0, 4)) + 1;
   return `${start}-${String((start + 1) % 100).padStart(2, "0")}`;
 };
+const gstinTyped = (value) => value.toUpperCase().replace(/[^0-9A-Z]/g, "");
+const TYPED = {
+  max_codes_per_bill: digitsTyped,
+  gstin: gstinTyped,
+  state_code: digitsTyped,
+  code: codeTyped,
+  sac_hsn: digitsTyped,
+  rate_pct: moneyTyped,
+  prefix: codeTyped,
+  number_width: digitsTyped,
+  next_no: digitsTyped,
+};
+const typed = (key, value) => (TYPED[key] ? TYPED[key](value) : value);
 const changedOnly = (after, before) =>
   Object.fromEntries(
     Object.entries(after).filter(([key, value]) => String(value) !== String(before[key])),
@@ -81,7 +100,10 @@ function useSettingsForm(settings, pick) {
   }, [latest, dirty, base]);
 
   const set = (key) => (e) =>
-    setForm({ ...form, [key]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
+    setForm({
+      ...form,
+      [key]: e.target.type === "checkbox" ? e.target.checked : typed(key, e.target.value),
+    });
   const save = async (e, message) => {
     e.preventDefault();
     setError("");
@@ -138,6 +160,7 @@ function GeneralCard({ settings }) {
               id={id}
               className="jb-assign"
               inputMode="numeric"
+              maxLength={9}
               placeholder="No limit"
               value={form.max_codes_per_bill}
               onChange={set("max_codes_per_bill")}
@@ -232,6 +255,7 @@ function GstCard({ settings }) {
 
 function TaxRow({ tax, onBlocked }) {
   const [form, setForm] = useState(null);
+  const [error, setError] = useState("");
   const [confirming, setConfirming] = useState(false);
   const update = useUpdateBillingTaxCode();
   const setActive = useSetBillingTaxCodeActive();
@@ -272,9 +296,19 @@ function TaxRow({ tax, onBlocked }) {
         ...("sac_hsn" in changes ? { sac_hsn: form.sac_hsn.trim() || null } : {}),
       };
       if (!Object.keys(body).length) return setForm(null);
-      if (await attempt(() => update.mutateAsync({ id: tax.id, ...body }), `Saved ${tax.code}`)) {
+      setError("");
+      try {
+        await update.mutateAsync({ id: tax.id, ...body });
+        toast(`Saved ${tax.code}`, "success");
         setForm(null);
+      } catch (err) {
+        setError(errorOf(err, `Could not save ${tax.code}`));
       }
+    };
+    const edit = (key) => (e) => setForm({ ...form, [key]: typed(key, e.target.value) });
+    const close = () => {
+      setError("");
+      setForm(null);
     };
     return (
       <tr>
@@ -283,9 +317,10 @@ function TaxRow({ tax, onBlocked }) {
           <input
             className="jb-assign"
             aria-label={`SAC/HSN for ${tax.code}`}
+            inputMode="numeric"
             maxLength={8}
             value={form.sac_hsn}
-            onChange={(e) => setForm({ ...form, sac_hsn: e.target.value })}
+            onChange={edit("sac_hsn")}
           />
         </td>
         <td>
@@ -293,8 +328,9 @@ function TaxRow({ tax, onBlocked }) {
             className="jb-assign"
             aria-label={`Rate % for ${tax.code}`}
             inputMode="decimal"
+            maxLength={6}
             value={form.rate_pct}
-            onChange={(e) => setForm({ ...form, rate_pct: e.target.value })}
+            onChange={edit("rate_pct")}
           />
         </td>
         <td>{tax.item_count}</td>
@@ -303,18 +339,19 @@ function TaxRow({ tax, onBlocked }) {
           <button
             type="button"
             className="flow-btn flow-btn-primary flow-btn-mini"
-            disabled={update.isPending}
+            disabled={update.isPending || !form.rate_pct.trim()}
             onClick={save}
           >
             Save
           </button>
-          <button
-            type="button"
-            className="flow-btn flow-btn-ghost flow-btn-mini"
-            onClick={() => setForm(null)}
-          >
+          <button type="button" className="flow-btn flow-btn-ghost flow-btn-mini" onClick={close}>
             Cancel
           </button>
+          {error ? (
+            <p className="bill-dialog__error" role="alert">
+              {error}
+            </p>
+          ) : null}
         </td>
       </tr>
     );
@@ -388,7 +425,7 @@ function TaxAddForm() {
   const [draft, setDraft] = useState(EMPTY_TAX);
   const [error, setError] = useState("");
   const create = useCreateBillingTaxCode();
-  const set = (key) => (e) => setDraft({ ...draft, [key]: e.target.value });
+  const set = (key) => (e) => setDraft({ ...draft, [key]: typed(key, e.target.value) });
   const submit = async (e) => {
     e.preventDefault();
     setError("");
@@ -439,6 +476,7 @@ function TaxAddForm() {
               id={id}
               className="jb-assign"
               inputMode="decimal"
+              maxLength={6}
               placeholder="18"
               value={draft.rate_pct}
               onChange={set("rate_pct")}
@@ -526,7 +564,7 @@ function SeriesRow({ series, fy, row }) {
     width > 0 && /^\d+$/.test(form.next_no)
       ? `${form.prefix.trim()}${form.next_no.padStart(width, "0")}`
       : "—";
-  const set = (key) => (e) => setForm({ ...form, [key]: e.target.value });
+  const set = (key) => (e) => setForm({ ...form, [key]: typed(key, e.target.value) });
   const submit = async () => {
     setError("");
     try {
@@ -558,6 +596,7 @@ function SeriesRow({ series, fy, row }) {
           className="jb-assign"
           aria-label={`${label} digits`}
           inputMode="numeric"
+          maxLength={2}
           value={form.number_width}
           onChange={set("number_width")}
         />
@@ -567,6 +606,7 @@ function SeriesRow({ series, fy, row }) {
           className="jb-assign"
           aria-label={`${label} next number`}
           inputMode="numeric"
+          maxLength={12}
           value={form.next_no}
           onChange={set("next_no")}
         />

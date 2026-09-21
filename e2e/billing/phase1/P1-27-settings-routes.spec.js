@@ -141,7 +141,7 @@ test.describe.serial("P1-27 settings routes", () => {
     for (const [method, path, body] of bodies) {
       const r = await call(api, method, path, { ...body, rogue: 1 });
       expect(r.status, `${method.toUpperCase()} ${path} with an unknown field`).toBe(400);
-      expect(r.body.error).toBe("Validation failed");
+      expect(r.body.error).toBe("Unknown field: rogue");
     }
     for (const [method, path, body] of [
       ["patch", S, {}],

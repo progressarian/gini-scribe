@@ -21,8 +21,18 @@
   gap: 4px;
   border-bottom: 1px solid #dde3ea;
   margin-bottom: 18px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex-wrap: nowrap;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.set__tabs::-webkit-scrollbar {
+  display: none;
 }
 .set__tab {
+  flex-shrink: 0;
+  white-space: nowrap;
   font-size: 13px;
   font-weight: 600;
   color: #6b7d90;
