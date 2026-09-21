@@ -229,11 +229,11 @@ test.describe.serial("P1-24 test prices move to the service master", () => {
     expect(fee(general), "no category, nothing to key in").toBeNull();
   });
 
-  test("5. the test catalogue refuses a price edit for a test priced by a billing item", async () => {
+  test("5. the test catalogue refuses every price edit (P1-24, widened in P1-34)", async () => {
     const error = await failure(catalog.updateCatalogTest(ids.lab, { price: 175 }, db));
     expect(error?.status).toBe(409);
     expect(error.message).toBe(
-      `This test is priced by the billing item Ferritin (P-FER-${tag}); change its price in Settings → Billing → Items`,
+      `This test is priced by the billing item Ferritin (P-FER-${tag}); change its price in Settings → Services`,
     );
     const gloss = await catalog.updateCatalogTest(ids.lab, { gloss: "Iron stores" }, db);
     expect(gloss, "other edits still work and show the item's price").toMatchObject({
@@ -244,8 +244,14 @@ test.describe.serial("P1-24 test prices move to the service master", () => {
       `INSERT INTO giniflow_test_catalog (test_name, price) VALUES ($1, 90) RETURNING id`,
       [`Unpriced ${tag}`],
     );
-    const edited = await catalog.updateCatalogTest(other.id, { price: 120 }, db);
-    expect(edited.price, "a test with no billing item is still priced here, as today").toBe(120);
+    const unpriced = await failure(catalog.updateCatalogTest(other.id, { price: 120 }, db));
+    expect(unpriced.status, "P1-34: no catalogue price is set here any more").toBe(409);
+    expect(unpriced.message).toBe(
+      "Test prices are set on the test's billing item; create one in Settings → Services",
+    );
+    expect(
+      (await one(`SELECT price::int FROM giniflow_test_catalog WHERE id = $1`, [other.id])).price,
+    ).toBe(90);
     const found = await catalog.addCatalogTest(LAB, {}, db);
     expect(found).toMatchObject({ created: false, price: 400 });
   });

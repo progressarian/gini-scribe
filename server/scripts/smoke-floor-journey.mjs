@@ -128,7 +128,7 @@ try {
   );
   check("and Reception is no longer behind", s2.behind_station === null, s2.behind_station);
 
-  console.log("\n── 2–4 · Vitals, then Lab 1, then the machine ──────────────");
+  console.log("\n── 2–4 · Vitals, then the machine, then Lab 1 ──────────────");
   const { rows: lab } = await client.query(
     `INSERT INTO giniflow_lab_orders
        (visit_id, urgency, payment_status, amount_total, amount_paid, sample_status, kind)
@@ -147,8 +147,6 @@ try {
     [lab[0].id, mach[0].id],
   );
 
-  const noVitalsDraw = await refusal(() => advanceSample(lab[0].id, { to: "drawing" }, db));
-  check("before vitals, Lab 1 cannot draw", noVitalsDraw?.status === 409, noVitalsDraw?.message);
   const noVitalsMachine = await refusal(() =>
     advanceMachineTest(mach[0].id, { to: "in_progress" }, db),
   );

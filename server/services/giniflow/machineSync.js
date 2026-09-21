@@ -14,6 +14,7 @@ import { machineCaseListOnly } from "../../../shared/manualFloor.js";
 import { LAB_TEST_STEP_IDS } from "../../../shared/journeyOrder.js";
 import { createLogger } from "../logger.js";
 import { billReadsBlockedUntil } from "./healthrayRefresh.js";
+import { BILL_MIN_GAP_MS } from "../healthray/client.js";
 import { IST_TODAY } from "./statusEngine.js";
 import {
   billedLabLines,
@@ -32,6 +33,7 @@ const RESCAN_MIN = Number(process.env.SCRIBE_MACHINE_RESCAN_MIN || 20);
 const BILL_READ_RESCAN_MIN = Number(process.env.SCRIBE_MACHINE_BILL_READ_RESCAN_MIN || 60);
 const OPEN_TESTS_RESCAN_MIN = Number(process.env.SCRIBE_BILL_OPEN_TESTS_RESCAN_MIN || 15);
 const UNCONFIRMED_TESTS_RESCAN_MIN = Number(process.env.SCRIBE_BILL_TESTS_RESCAN_MIN || 5);
+const BILL_READS_PER_RUN = Number(process.env.SCRIBE_BILL_READS_PER_RUN || 4);
 
 const REFUNDABLE_OPEN_SQL = `(
   EXISTS (SELECT 1 FROM giniflow_lab_orders ro
@@ -343,9 +345,12 @@ export async function runMachineSync(dateStr, { limit = SCAN_BATCH, db = pool } 
   let raised = 0;
   let failed = 0;
   let scanned = 0;
+  const slotDeadline = Date.now() + Math.max(0, BILL_READS_PER_RUN - 1) * BILL_MIN_GAP_MS;
   for (const visit of targets) {
     try {
-      const result = await syncMachineOrdersForVisit(visit, db, { slotWaitMs: 0 });
+      const result = await syncMachineOrdersForVisit(visit, db, {
+        slotWaitMs: Math.max(0, slotDeadline - Date.now()),
+      });
       if (result.deferred) break;
       raised += result.raised;
     } catch (e) {

@@ -850,6 +850,7 @@ export const giniflowSampleSchema = z.object({
   ]),
   room: z.enum(["collection", "processing"]).nullish(),
   reportUrl: z.string().url().max(2000).nullish(),
+  thenBreak: z.boolean().optional(),
 });
 
 // Confirm-and-attribute on a HealthRay-owned case. The DB CHECK still permits
@@ -864,6 +865,7 @@ export const giniflowLabCaseActionSchema = z.object({
   room: z.enum(["collection", "processing"]).nullish(),
   note: z.string().max(500).nullish(),
   undo: z.boolean().optional(),
+  thenBreak: z.boolean().optional(),
 });
 
 export const giniflowReportSchema = z.object({

@@ -1,49 +1,703 @@
-import { useBillingSettings, useBillSeries } from "../../queries/hooks/useBillingMaster";
+import { useEffect, useId, useState } from "react";
+import { Link } from "react-router-dom";
+import { BILL_SERIES, STACKING_MODES, financialYearOf } from "../../../shared/billingVocab.js";
+import {
+  useBillingSettings,
+  useBillingTaxCodes,
+  useBillSeries,
+  useCreateBillingTaxCode,
+  useDeleteBillingTaxCode,
+  useSaveBillSeries,
+  useSetBillingTaxCodeActive,
+  useUpdateBillingSettings,
+  useUpdateBillingTaxCode,
+} from "../../queries/hooks/useBillingMaster";
+import { toast } from "../../stores/uiStore";
+import UsedInDialog from "../../components/billing/UsedInDialog";
+import { errorOf, usesOf } from "../../components/billing/format";
 import "../../styles/flow.css";
 import "../flow/FlowSettings.css";
+import "./billing.css";
 
-const STACKING_LABEL = { best_only: "Best discount only", per_rule: "Per rule" };
+const STACKING_LABEL = {
+  best_only: "Only the best discount",
+  per_rule: "Each rule's discount, one after another",
+};
+const SERIES_LABEL = { MAIN: "Bills", RCPT: "Receipts" };
+
+const text = (v) => (v === null || v === undefined ? "" : String(v));
+const indiaToday = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+const nextYear = (fy) => {
+  const start = Number(fy.slice(0, 4)) + 1;
+  return `${start}-${String((start + 1) % 100).padStart(2, "0")}`;
+};
+const changedOnly = (after, before) =>
+  Object.fromEntries(
+    Object.entries(after).filter(([key, value]) => String(value) !== String(before[key])),
+  );
+
+function Field({ label, hint, children }) {
+  const id = useId();
+  return (
+    <div className="fset__field">
+      <label htmlFor={id}>{label}</label>
+      {children(id)}
+      {hint ? <small className="flow-muted">{hint}</small> : null}
+    </div>
+  );
+}
+
+function Actions({ error, dirty, busy }) {
+  return (
+    <>
+      {error ? (
+        <p className="bill-dialog__error" role="alert">
+          {error}
+        </p>
+      ) : null}
+      <div className="bill-dialog__actions">
+        <button type="submit" className="flow-btn flow-btn-primary" disabled={!dirty || busy}>
+          Save
+        </button>
+      </div>
+    </>
+  );
+}
+
+function useSettingsForm(settings, pick) {
+  const [base, setBase] = useState(() => pick(settings));
+  const [form, setForm] = useState(base);
+  const [error, setError] = useState("");
+  const update = useUpdateBillingSettings();
+  const changes = changedOnly(form, base);
+  const dirty = Object.keys(changes).length > 0;
+  const latest = JSON.stringify(pick(settings));
+
+  useEffect(() => {
+    if (dirty || latest === JSON.stringify(base)) return;
+    const fresh = JSON.parse(latest);
+    setBase(fresh);
+    setForm(fresh);
+  }, [latest, dirty, base]);
+
+  const set = (key) => (e) =>
+    setForm({ ...form, [key]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
+  const save = async (e, message) => {
+    e.preventDefault();
+    setError("");
+    try {
+      const saved = pick(await update.mutateAsync(changes));
+      setBase(saved);
+      setForm(saved);
+      toast(message, "success");
+    } catch (err) {
+      setError(errorOf(err, "Could not save"));
+    }
+  };
+  return { form, set, save, error, dirty, busy: update.isPending };
+}
+
+const pickGeneral = (s) => ({
+  discount_stacking: s.discount_stacking,
+  allow_pay_later: s.allow_pay_later,
+  max_codes_per_bill: text(s.max_codes_per_bill),
+  bill_footer: text(s.bill_footer),
+});
+
+function GeneralCard({ settings }) {
+  const { form, set, save, error, dirty, busy } = useSettingsForm(settings, pickGeneral);
+  return (
+    <form
+      className="flow-card"
+      aria-label="Bills"
+      onSubmit={(e) => save(e, "Saved the bill settings")}
+    >
+      <div className="fset__cardhead">
+        <h2 className="flow-sec-title">Bills</h2>
+      </div>
+      <div className="bill-form">
+        <Field label="When several discounts apply">
+          {(id) => (
+            <select
+              id={id}
+              className="jb-assign"
+              value={form.discount_stacking}
+              onChange={set("discount_stacking")}
+            >
+              {STACKING_MODES.map((mode) => (
+                <option key={mode} value={mode}>
+                  {STACKING_LABEL[mode] ?? mode}
+                </option>
+              ))}
+            </select>
+          )}
+        </Field>
+        <Field label="Most codes on one bill" hint="Leave empty for no limit">
+          {(id) => (
+            <input
+              id={id}
+              className="jb-assign"
+              inputMode="numeric"
+              placeholder="No limit"
+              value={form.max_codes_per_bill}
+              onChange={set("max_codes_per_bill")}
+            />
+          )}
+        </Field>
+      </div>
+      <label className="fset__check bill-settings__check">
+        <input type="checkbox" checked={form.allow_pay_later} onChange={set("allow_pay_later")} />
+        Allow pay later (a category can override this)
+      </label>
+      <Field label="Bill footer">
+        {(id) => (
+          <textarea
+            id={id}
+            className="jb-assign bill-settings__footer"
+            rows={3}
+            maxLength={1000}
+            value={form.bill_footer}
+            onChange={set("bill_footer")}
+          />
+        )}
+      </Field>
+      <p className="fset__hint">
+        The logo and letterhead printed on bills come from{" "}
+        <Link to="/settings/prescription">Prescription settings</Link>.
+      </p>
+      <Actions error={error} dirty={dirty} busy={busy} />
+    </form>
+  );
+}
+
+const pickGst = (s) => ({
+  gst_enabled: s.gst_enabled,
+  gstin: text(s.gstin),
+  state_code: text(s.state_code),
+  legal_name: text(s.legal_name),
+});
+
+function GstCard({ settings }) {
+  const { form, set, save, error, dirty, busy } = useSettingsForm(settings, pickGst);
+  return (
+    <form className="flow-card" aria-label="GST" onSubmit={(e) => save(e, "Saved the GST details")}>
+      <div className="fset__cardhead">
+        <h2 className="flow-sec-title">GST</h2>
+      </div>
+      <label className="fset__check bill-settings__check">
+        <input type="checkbox" checked={form.gst_enabled} onChange={set("gst_enabled")} />
+        Charge GST on bills
+      </label>
+      <div className="bill-form">
+        <Field label="GSTIN">
+          {(id) => (
+            <input
+              id={id}
+              className="jb-assign"
+              placeholder="03ABCDE1234F1Z5"
+              maxLength={15}
+              value={form.gstin}
+              onChange={set("gstin")}
+            />
+          )}
+        </Field>
+        <Field label="State code" hint="Filled from the GSTIN if left empty">
+          {(id) => (
+            <input
+              id={id}
+              className="jb-assign"
+              inputMode="numeric"
+              maxLength={2}
+              value={form.state_code}
+              onChange={set("state_code")}
+            />
+          )}
+        </Field>
+        <Field label="Legal name">
+          {(id) => (
+            <input
+              id={id}
+              className="jb-assign"
+              maxLength={200}
+              value={form.legal_name}
+              onChange={set("legal_name")}
+            />
+          )}
+        </Field>
+      </div>
+      <Actions error={error} dirty={dirty} busy={busy} />
+    </form>
+  );
+}
+
+function TaxRow({ tax, onBlocked }) {
+  const [form, setForm] = useState(null);
+  const [confirming, setConfirming] = useState(false);
+  const update = useUpdateBillingTaxCode();
+  const setActive = useSetBillingTaxCodeActive();
+  const remove = useDeleteBillingTaxCode();
+  const attempt = async (work, message) => {
+    try {
+      await work();
+      toast(message, "success");
+      return true;
+    } catch (err) {
+      toast(errorOf(err), "error");
+      return false;
+    }
+  };
+  const destroy = async () => {
+    setConfirming(false);
+    try {
+      await remove.mutateAsync(tax.id);
+      toast(`Deleted ${tax.code}`, "success");
+    } catch (err) {
+      const uses = usesOf(err);
+      if (!uses) return toast(errorOf(err), "error");
+      onBlocked({
+        name: tax.code,
+        uses,
+        canDeactivate: tax.is_active,
+        deactivate: () => setActive.mutateAsync({ id: tax.id, is_active: false }),
+      });
+    }
+  };
+
+  if (form) {
+    const before = { sac_hsn: text(tax.sac_hsn), rate_pct: text(tax.rate_pct) };
+    const changes = changedOnly(form, before);
+    const save = async () => {
+      const body = {
+        ...changes,
+        ...("sac_hsn" in changes ? { sac_hsn: form.sac_hsn.trim() || null } : {}),
+      };
+      if (!Object.keys(body).length) return setForm(null);
+      if (await attempt(() => update.mutateAsync({ id: tax.id, ...body }), `Saved ${tax.code}`)) {
+        setForm(null);
+      }
+    };
+    return (
+      <tr>
+        <td>{tax.code}</td>
+        <td>
+          <input
+            className="jb-assign"
+            aria-label={`SAC/HSN for ${tax.code}`}
+            maxLength={8}
+            value={form.sac_hsn}
+            onChange={(e) => setForm({ ...form, sac_hsn: e.target.value })}
+          />
+        </td>
+        <td>
+          <input
+            className="jb-assign"
+            aria-label={`Rate % for ${tax.code}`}
+            inputMode="decimal"
+            value={form.rate_pct}
+            onChange={(e) => setForm({ ...form, rate_pct: e.target.value })}
+          />
+        </td>
+        <td>{tax.item_count}</td>
+        <td>{tax.is_active ? "Yes" : "No"}</td>
+        <td className="bill-items__actions">
+          <button
+            type="button"
+            className="flow-btn flow-btn-primary flow-btn-mini"
+            disabled={update.isPending}
+            onClick={save}
+          >
+            Save
+          </button>
+          <button
+            type="button"
+            className="flow-btn flow-btn-ghost flow-btn-mini"
+            onClick={() => setForm(null)}
+          >
+            Cancel
+          </button>
+        </td>
+      </tr>
+    );
+  }
+
+  return (
+    <tr className={tax.is_active ? "" : "fset__row--off"}>
+      <td>{tax.code}</td>
+      <td>{tax.sac_hsn ?? "—"}</td>
+      <td>{tax.rate_pct}%</td>
+      <td>{tax.item_count}</td>
+      <td>{tax.is_active ? "Yes" : "No"}</td>
+      <td className="bill-items__actions">
+        <button
+          type="button"
+          className="flow-btn flow-btn-ghost flow-btn-mini"
+          aria-label={`Edit ${tax.code}`}
+          onClick={() => setForm({ sac_hsn: text(tax.sac_hsn), rate_pct: text(tax.rate_pct) })}
+        >
+          Edit
+        </button>
+        <button
+          type="button"
+          className="flow-btn flow-btn-ghost flow-btn-mini"
+          aria-label={`${tax.is_active ? "Deactivate" : "Activate"} ${tax.code}`}
+          onClick={() =>
+            attempt(
+              () => setActive.mutateAsync({ id: tax.id, is_active: !tax.is_active }),
+              `${tax.code} ${tax.is_active ? "deactivated" : "activated"}`,
+            )
+          }
+        >
+          {tax.is_active ? "Deactivate" : "Activate"}
+        </button>
+        {confirming ? (
+          <>
+            <button
+              type="button"
+              className="flow-btn flow-btn-red flow-btn-mini"
+              aria-label={`Confirm delete ${tax.code}`}
+              onClick={destroy}
+            >
+              Confirm delete
+            </button>
+            <button
+              type="button"
+              className="flow-btn flow-btn-ghost flow-btn-mini"
+              onClick={() => setConfirming(false)}
+            >
+              Keep
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            className="flow-btn flow-btn-ghost flow-btn-mini"
+            aria-label={`Delete ${tax.code}`}
+            onClick={() => setConfirming(true)}
+          >
+            Delete
+          </button>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+const EMPTY_TAX = { code: "", sac_hsn: "", rate_pct: "" };
+
+function TaxAddForm() {
+  const [draft, setDraft] = useState(EMPTY_TAX);
+  const [error, setError] = useState("");
+  const create = useCreateBillingTaxCode();
+  const set = (key) => (e) => setDraft({ ...draft, [key]: e.target.value });
+  const submit = async (e) => {
+    e.preventDefault();
+    setError("");
+    const code = draft.code.trim();
+    try {
+      await create.mutateAsync({
+        code,
+        rate_pct: draft.rate_pct.trim(),
+        ...(draft.sac_hsn.trim() ? { sac_hsn: draft.sac_hsn.trim() } : {}),
+      });
+      toast(`Added ${code}`, "success");
+      setDraft(EMPTY_TAX);
+    } catch (err) {
+      setError(errorOf(err, "Could not add the tax code"));
+    }
+  };
+  return (
+    <form aria-label="Add tax code" onSubmit={submit}>
+      <div className="bill-form">
+        <Field label="Code">
+          {(id) => (
+            <input
+              id={id}
+              className="jb-assign"
+              maxLength={40}
+              placeholder="GST18"
+              value={draft.code}
+              onChange={set("code")}
+            />
+          )}
+        </Field>
+        <Field label="SAC/HSN">
+          {(id) => (
+            <input
+              id={id}
+              className="jb-assign"
+              inputMode="numeric"
+              maxLength={8}
+              placeholder="Optional"
+              value={draft.sac_hsn}
+              onChange={set("sac_hsn")}
+            />
+          )}
+        </Field>
+        <Field label="Rate %">
+          {(id) => (
+            <input
+              id={id}
+              className="jb-assign"
+              inputMode="decimal"
+              placeholder="18"
+              value={draft.rate_pct}
+              onChange={set("rate_pct")}
+            />
+          )}
+        </Field>
+      </div>
+      {error ? (
+        <p className="bill-dialog__error" role="alert">
+          {error}
+        </p>
+      ) : null}
+      <div className="bill-dialog__actions">
+        <button
+          type="submit"
+          className="flow-btn flow-btn-primary"
+          disabled={create.isPending || !draft.code.trim() || !draft.rate_pct.trim()}
+        >
+          + Add tax code
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function TaxCodesCard({ onBlocked }) {
+  const { data: taxes = [], isLoading, isError } = useBillingTaxCodes();
+  return (
+    <section className="flow-card" aria-label="Tax codes">
+      <div className="fset__cardhead">
+        <h2 className="flow-sec-title">Tax codes</h2>
+        <span className="fset__count">{taxes.length}</span>
+      </div>
+      <div className="fset__cardsub">
+        The GST rates items can carry. A code used by an item can't be deleted, only switched off.
+      </div>
+      {isLoading ? (
+        <div className="fset__cardsub">Loading…</div>
+      ) : isError ? (
+        <div className="fset__cardsub">Could not load the tax codes.</div>
+      ) : taxes.length ? (
+        <div className="fset__scroll">
+          <table className="flow-table" aria-label="Tax codes">
+            <thead>
+              <tr>
+                <th>Code</th>
+                <th>SAC/HSN</th>
+                <th>Rate</th>
+                <th>Items</th>
+                <th>Active</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {taxes.map((tax) => (
+                <TaxRow key={tax.id} tax={tax} onBlocked={onBlocked} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="fset__cardsub">No tax codes yet.</div>
+      )}
+      <div className="fset__add">
+        <div className="fset__addtitle">Add tax code</div>
+        <TaxAddForm />
+      </div>
+    </section>
+  );
+}
+
+function SeriesRow({ series, fy, row }) {
+  const initial = {
+    prefix: text(row?.prefix),
+    number_width: text(row?.number_width ?? 6),
+    next_no: text(row?.next_no ?? 1),
+  };
+  const [form, setForm] = useState(initial);
+  const [error, setError] = useState("");
+  const save = useSaveBillSeries();
+  const changes = row ? changedOnly(form, initial) : form;
+  const dirty = !row || Object.keys(changedOnly(form, initial)).length > 0;
+  const width = Number(form.number_width) || 0;
+  const preview =
+    width > 0 && /^\d+$/.test(form.next_no)
+      ? `${form.prefix.trim()}${form.next_no.padStart(width, "0")}`
+      : "—";
+  const set = (key) => (e) => setForm({ ...form, [key]: e.target.value });
+  const submit = async () => {
+    setError("");
+    try {
+      await save.mutateAsync({ series, fy, ...changes });
+      toast(`Saved the ${SERIES_LABEL[series] ?? series} series for ${fy}`, "success");
+    } catch (err) {
+      setError(errorOf(err, "Could not save the series"));
+    }
+  };
+  const label = SERIES_LABEL[series] ?? series;
+  return (
+    <tr>
+      <td>
+        {label}
+        {row ? null : <div className="flow-muted bill-items__sub">Not set up yet</div>}
+      </td>
+      <td>
+        <input
+          className="jb-assign"
+          aria-label={`${label} prefix`}
+          maxLength={30}
+          placeholder="None"
+          value={form.prefix}
+          onChange={set("prefix")}
+        />
+      </td>
+      <td>
+        <input
+          className="jb-assign"
+          aria-label={`${label} digits`}
+          inputMode="numeric"
+          value={form.number_width}
+          onChange={set("number_width")}
+        />
+      </td>
+      <td>
+        <input
+          className="jb-assign"
+          aria-label={`${label} next number`}
+          inputMode="numeric"
+          value={form.next_no}
+          onChange={set("next_no")}
+        />
+      </td>
+      <td>
+        <code>{preview}</code>
+      </td>
+      <td className="bill-items__actions">
+        <button
+          type="button"
+          className="flow-btn flow-btn-primary flow-btn-mini"
+          aria-label={`Save ${label} series`}
+          disabled={!dirty || save.isPending}
+          onClick={submit}
+        >
+          {row ? "Save" : "Set up"}
+        </button>
+        {error ? (
+          <p className="bill-dialog__error" role="alert">
+            {error}
+          </p>
+        ) : null}
+      </td>
+    </tr>
+  );
+}
+
+function SeriesCard() {
+  const { data: rows = [], isLoading, isError } = useBillSeries();
+  const current = financialYearOf(indiaToday());
+  const [fy, setFy] = useState(current);
+  const id = useId();
+  return (
+    <section className="flow-card" aria-label="Number series">
+      <div className="fset__cardhead">
+        <h2 className="flow-sec-title">Number series</h2>
+      </div>
+      <div className="fset__cardsub">
+        Bill and receipt numbers start again each financial year (April–March). The next number can
+        only go up, so a number is never used twice.
+      </div>
+      <div className="bill-form">
+        <div className="fset__field fset__field--narrow bill-rates__asof">
+          <label htmlFor={id}>Financial year</label>
+          <select id={id} className="jb-assign" value={fy} onChange={(e) => setFy(e.target.value)}>
+            <option value={current}>{current}</option>
+            <option value={nextYear(current)}>{nextYear(current)}</option>
+          </select>
+        </div>
+      </div>
+      {isLoading ? (
+        <div className="fset__cardsub">Loading…</div>
+      ) : isError ? (
+        <div className="fset__cardsub">Could not load the number series.</div>
+      ) : (
+        <div className="fset__scroll">
+          <table className="flow-table" aria-label={`Number series ${fy}`}>
+            <thead>
+              <tr>
+                <th>Series</th>
+                <th>Prefix</th>
+                <th>Digits</th>
+                <th>Next number</th>
+                <th>Next looks like</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {BILL_SERIES.map((series) => {
+                const row = rows.find((r) => r.series === series && r.fy === fy) ?? null;
+                return (
+                  <SeriesRow
+                    key={`${series}-${fy}-${row ? row.updated_at : "new"}`}
+                    series={series}
+                    fy={fy}
+                    row={row}
+                  />
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
 
 export default function BillingSettingsPage() {
   const { data: settings, isLoading, isError } = useBillingSettings();
-  const { data: series = [] } = useBillSeries();
+  const [blocked, setBlocked] = useState(null);
+  const [blockedError, setBlockedError] = useState("");
+  const [deactivating, setDeactivating] = useState(false);
+
+  const deactivateBlocked = async () => {
+    setDeactivating(true);
+    setBlockedError("");
+    try {
+      await blocked.deactivate();
+      toast(`${blocked.name} deactivated`, "success");
+      setBlocked(null);
+    } catch (err) {
+      setBlockedError(errorOf(err, "Could not deactivate it"));
+    } finally {
+      setDeactivating(false);
+    }
+  };
 
   return (
     <div className="flow-root fset">
-      <div className="flow-card">
-        <div className="fset__cardhead">
-          <div className="flow-sec-title">Billing settings</div>
+      {isError ? (
+        <div className="flow-card fset__cardsub">Could not load the billing settings.</div>
+      ) : isLoading || !settings ? (
+        <div className="flow-card fset__cardsub">Loading…</div>
+      ) : (
+        <div className="bill-settings">
+          <GeneralCard settings={settings} />
+          <GstCard settings={settings} />
+          <TaxCodesCard onBlocked={setBlocked} />
+          <SeriesCard />
         </div>
-        {isError ? (
-          <div className="fset__cardsub">Could not load the billing settings.</div>
-        ) : isLoading || !settings ? (
-          <div className="fset__cardsub">Loading…</div>
-        ) : (
-          <table className="flow-table" style={{ border: "none" }}>
-            <tbody>
-              <tr>
-                <th style={{ width: 220 }}>Discount stacking</th>
-                <td>{STACKING_LABEL[settings.discount_stacking]}</td>
-              </tr>
-              <tr>
-                <th>Pay later</th>
-                <td>{settings.allow_pay_later ? "Allowed" : "Not allowed"}</td>
-              </tr>
-              <tr>
-                <th>GST</th>
-                <td>{settings.gst_enabled ? `On · ${settings.gstin}` : "Off"}</td>
-              </tr>
-              <tr>
-                <th>Number series</th>
-                <td>
-                  {series.map((s) => `${s.series} ${s.fy}: ${s.next_number}`).join(" · ") ||
-                    "None yet"}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        )}
-      </div>
+      )}
+      <UsedInDialog
+        blocked={blocked}
+        error={blockedError}
+        busy={deactivating}
+        onClose={() => {
+          setBlocked(null);
+          setBlockedError("");
+        }}
+        onDeactivate={deactivateBlocked}
+      />
     </div>
   );
 }

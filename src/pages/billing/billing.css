@@ -321,3 +321,15 @@
 .bill-rates__asof {
   flex-basis: 150px;
 }
+.bill-settings {
+  display: grid;
+  gap: 14px;
+}
+.bill-settings__check {
+  margin: 10px 0 4px;
+}
+.bill-settings__footer {
+  max-width: none;
+  width: 100%;
+  resize: vertical;
+}

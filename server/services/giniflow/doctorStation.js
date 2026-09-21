@@ -112,7 +112,7 @@ const resultsLine = (row) => {
 };
 
 const QUEUE_SQL = `
-  SELECT v.id, v.current_status, v.results_status, v.category, v.blocked_reason,
+  SELECT v.id, v.current_status, v.results_status, v.category, v.blocked_reason, v.paused_at,
          v.priority, v.priority_reason, v.assigned_doctor_id, v.assigned_sd_id,
          v.appointment_time::text AS appointment_time,
          p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
@@ -291,7 +291,7 @@ export async function getDoctorQueue(
       }
     }
 
-    const waited = minutesSince(row.status_since, now);
+    const waited = minutesSince(row.status_since, row.paused_at ? new Date(row.paused_at) : now);
     const budget = budgetFor(slaKeyForStatus(row.current_status), row.category);
 
     const card = {
@@ -312,6 +312,7 @@ export async function getDoctorQueue(
       sdName: row.sd_name,
       doctorName: row.doctor_name,
       statusSince: row.status_since ? new Date(row.status_since).toISOString() : null,
+      pausedAt: row.paused_at ? new Date(row.paused_at).toISOString() : null,
       checkedInAt: row.checked_in_at ? new Date(row.checked_in_at).toISOString() : null,
       waitMinutes: waited,
       waitBudget: budget,

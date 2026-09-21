@@ -167,6 +167,8 @@ export function useReceptionHealthrayRefresh() {
   });
 }
 
+const BILL_RECHECK_MS = { loading: 5_000, blocked: 60_000, no_bill: 60_000 };
+
 export function useHealthrayBill(patientId) {
   return useQuery({
     queryKey: ["giniflow", "reception", "healthray-bill", patientId],
@@ -179,7 +181,7 @@ export function useHealthrayBill(patientId) {
     enabled: !!patientId,
     staleTime: Infinity,
     refetchOnWindowFocus: false,
-    refetchInterval: (query) => (query.state.data?.status === "loading" ? 5_000 : false),
+    refetchInterval: (query) => BILL_RECHECK_MS[query.state.data?.status] ?? false,
     retry: false,
   });
 }

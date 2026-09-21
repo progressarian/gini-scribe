@@ -272,6 +272,20 @@ const byTimeAsc = (a, b) => rowTime(a) - rowTime(b);
 // problem — the report exists, the MO just has not been told.
 const UPLOAD_WAIT_AMBER = 15;
 
+function BreakButton({ busy, onClick, full = false }) {
+  return (
+    <button
+      type="button"
+      className={`st-btn st-btn-g${full ? " btn-full" : ""}`}
+      disabled={busy}
+      title="The sample is taken and the patient is leaving for a while — their wait starts when they are back at vitals"
+      onClick={onClick}
+    >
+      ⏸ Sample taken · on break
+    </button>
+  );
+}
+
 function LabCard({ order, group, onAdvance, onUpload, onOpen, busy }) {
   const mins = minutesSince(group.key === "uploaded" ? order.uploadedAt : order.since);
   const fileRef = useRef(null);
@@ -350,13 +364,18 @@ function LabCard({ order, group, onAdvance, onUpload, onOpen, busy }) {
             </button>
           </>
         ) : order.nextAction ? (
-          <button
-            className="st-btn st-btn-tl"
-            disabled={busy}
-            onClick={() => onAdvance(order, order.nextAction.to)}
-          >
-            {order.nextAction.label}
-          </button>
+          <>
+            <button
+              className="st-btn st-btn-tl"
+              disabled={busy}
+              onClick={() => onAdvance(order, order.nextAction.to)}
+            >
+              {order.nextAction.label}
+            </button>
+            {order.nextAction.to === "sample_collected" && (
+              <BreakButton busy={busy} onClick={() => onAdvance(order, "sample_collected", true)} />
+            )}
+          </>
         ) : (
           <div className={`sp ${group.pill}`}>{group.pillText}</div>
         )}
@@ -522,6 +541,13 @@ function LabDetailPane({
                   >
                     {order.nextAction.label}
                   </button>
+                  {order.nextAction.to === "sample_collected" && (
+                    <BreakButton
+                      full
+                      busy={busy}
+                      onClick={() => onAdvance(order, "sample_collected", true)}
+                    />
+                  )}
                   {order.canCancelStart && (
                     <button
                       type="button"
@@ -1135,6 +1161,12 @@ function HealthrayCasePane({
                               {c.nextAction.label}
                             </button>
                           )}
+                          {next?.action === "sample_taken" && !row.labOnly && (
+                            <BreakButton
+                              busy={busy || blocked}
+                              onClick={() => onAction(c.caseNo, next.action, false, true)}
+                            />
+                          )}
                         </div>
                       </>
                     );
@@ -1376,17 +1408,19 @@ export default function LabRoom({ room = null }) {
     toastTimer.current = setTimeout(() => setToast(""), 3500);
   };
 
-  const onAdvance = (order, to) =>
+  const onAdvance = (order, to, thenBreak = false) =>
     advance.mutate(
-      { orderId: order.orderId, to },
+      { orderId: order.orderId, to, thenBreak },
       {
         onSuccess: (r) =>
           showToast(
             r.unchanged
               ? `${order.name} was already past that step`
-              : to === "uploaded"
-                ? `📤 ${order.name}'s report uploaded — MO and doctor now see "Results ready"`
-                : `✓ ${order.name} — ${to.replace(/_/g, " ")}`,
+              : r.onBreak
+                ? `⏸ ${order.name} — sample taken, on break. Their wait starts when they are back at vitals`
+                : to === "uploaded"
+                  ? `📤 ${order.name}'s report uploaded — MO and doctor now see "Results ready"`
+                  : `✓ ${order.name} — ${to.replace(/_/g, " ")}`,
           ),
         onError: (e) =>
           showToast(e?.response?.data?.error || "Could not update — nothing was changed"),
@@ -1532,12 +1566,18 @@ export default function LabRoom({ room = null }) {
       },
     );
 
-  const onCaseAction = (caseNo, action, undo) =>
+  const onCaseAction = (caseNo, action, undo, thenBreak = false) =>
     caseAction.mutate(
-      { caseNo, action, undo },
+      { caseNo, action, undo, thenBreak },
       {
-        onSuccess: () =>
-          showToast(undo ? "Undone — nothing recorded" : `✓ Recorded on case ${caseNo}`),
+        onSuccess: (r) =>
+          showToast(
+            undo
+              ? "Undone — nothing recorded"
+              : r.onBreak
+                ? `⏸ Sample taken on case ${caseNo} — patient on break until they are back at vitals`
+                : `✓ Recorded on case ${caseNo}`,
+          ),
         onError: (e) => showToast(e?.response?.data?.error || "Could not record that"),
       },
     );

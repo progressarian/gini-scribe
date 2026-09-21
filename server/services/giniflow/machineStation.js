@@ -30,6 +30,8 @@ import {
   machinesForStation,
 } from "../../../shared/machineStages.js";
 import { getMachines } from "./machineCatalog.js";
+import { VITALS_TAKEN_SQL } from "./visitVitals.js";
+import { resumeVisitTx } from "./statusEngine.js";
 import { UNDRAWN_SAMPLE_STATUSES } from "../../../shared/labStages.js";
 import {
   machineShowsHealthrayReports,
@@ -231,15 +233,7 @@ async function assertReadyToStart(db, visitId, catalogue, machineId) {
   const machineName = machine?.name || "machine";
   const { rows } = await db.query(
     `SELECT p.name,
-            (
-              EXISTS (SELECT 1 FROM giniflow_vitals g WHERE g.visit_id = v.id)
-              OR EXISTS (
-                SELECT 1 FROM giniflow_visit_events e
-                 WHERE e.visit_id = v.id
-                   AND e.status IN ('with_vitals', 'vitals_done')
-                   AND e.actor_role <> 'system'
-              )
-            ) AS vitals_recorded,
+            ${VITALS_TAKEN_SQL("v")} AS vitals_recorded,
             ${labOnlyPredicate("v", "$2")} AS lab_only,
             ${BLOOD_NOT_DRAWN_SQL("$3")} AS blood_not_drawn
        FROM giniflow_visits v
@@ -325,15 +319,7 @@ export async function getMachineQueue(
             -- The two sequencing gates (39-HYBRID-FLOOR-PLAN.md §3). Asked of the
             -- table, not of the screen: a technician with a stale tab must be
             -- refused by the service, not merely shown no button.
-            (
-              EXISTS (SELECT 1 FROM giniflow_vitals g WHERE g.visit_id = v.id)
-              OR EXISTS (
-                SELECT 1 FROM giniflow_visit_events e
-                 WHERE e.visit_id = v.id
-                   AND e.status IN ('with_vitals', 'vitals_done')
-                   AND e.actor_role <> 'system'
-              )
-            ) AS vitals_recorded,
+            ${VITALS_TAKEN_SQL("v")} AS vitals_recorded,
             ${labOnlyPredicate("v", "$3")} AS lab_only,
             ${BLOOD_NOT_DRAWN_SQL("$4")} AS blood_not_drawn
        FROM giniflow_lab_orders o
@@ -873,6 +859,7 @@ export async function advanceMachineTest(
       );
       await assertReadyToStart(client, row.visit_id, catalogue, orderMachine);
       await assertMachineFree(client, orderMachine, row.visit_date, orderId);
+      await resumeVisitTx(client, row.visit_id, { actorId, actorRole: "lab" });
     }
     // The evidence gate — and here it covers FINISHING the test, not only filing
     // the report.

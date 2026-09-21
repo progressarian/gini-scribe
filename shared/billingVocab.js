@@ -10,3 +10,11 @@ export const CONSULTATION_VISIT_TYPES = ["New", "Follow Up"];
 export const GENDERS = ["Male", "Female", "Other"];
 export const BILLING_ROLES = ["reception", "reception_admin", "admin"];
 export const RESERVED_CATEGORY_CODES = ["general"];
+export const STACKING_MODES = ["best_only", "per_rule"];
+export const BILL_SERIES = ["MAIN", "RCPT"];
+
+export function financialYearOf(date) {
+  const [year, month] = date.split("-").map(Number);
+  const start = month >= 4 ? year : year - 1;
+  return `${start}-${String((start + 1) % 100).padStart(2, "0")}`;
+}

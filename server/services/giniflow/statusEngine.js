@@ -1,7 +1,9 @@
 import {
   JOURNEY_START_SQL,
+  JOURNEY_START_STATUSES,
   WAIT_SINCE_SQL,
   hasNotStarted,
+  isSampleBreak,
   canTransition,
   isMarkerStatus,
   chainIndex,
@@ -11,6 +13,7 @@ import {
   isTerminalStatus,
   isExceptionStatus,
   slaKeyForStatus,
+  STATION_STATUSES,
   STATUS_LABEL,
   TERMINAL_STATUSES,
 } from "../../../shared/giniflowStatus.js";
@@ -267,6 +270,13 @@ export async function advanceStatus(
   // random uuid, and the patient's timeline shows the two steps in whichever
   // order the uuids happened to sort. clock_timestamp() advances mid-transaction,
   // so consecutive events keep the order they were written in.
+  const patientIsHere =
+    [...STATION_STATUSES, "dispensed"].includes(toStatus) ||
+    (actorRole !== "system" && hasNotStarted(fromStatus));
+  if (patientIsHere && !occurredAt && !isExceptionStatus(toStatus)) {
+    await resumeVisitTx(client, visitId, { actorId, actorRole });
+  }
+
   const event = await client.query(
     `INSERT INTO giniflow_visit_events (visit_id, status, actor_role, actor_id, occurred_at, meta)
      VALUES ($1, $2, $3, $4, COALESCE($5::timestamptz, clock_timestamp()), $6)
@@ -356,6 +366,8 @@ const SKIPPED_STATION_NAME = {
 
 const markerLabel = (row) => {
   const base = STATUS_LABEL[row.status] || row.status;
+  if (row.status === "paused" && isSampleBreak(row.meta?.reason)) return "On break — sample given";
+  if (row.status === "resumed" && row.meta?.cancelled) return "Break cancelled — sample undone";
   if (row.status !== "test_cancelled") return base;
   const what = [...(row.meta?.tests || []), ...(row.meta?.cases || []).map((c) => `case ${c}`)];
   const reason = testCancelReasonLabel(row.meta?.reason);
@@ -397,7 +409,6 @@ export async function getStationTimes(
 
   // The rooms a patient is physically in. A step that ends at an event further
   // down the chain than one of these has swallowed a room nobody recorded.
-  const STATION_STATUSES = ["with_vitals", "with_sd", "with_doctor", "with_rx"];
   const stationsSkipped = (from, to) =>
     isChainStatus(from) && isChainStatus(to)
       ? STATION_STATUSES.filter(
@@ -796,10 +807,33 @@ export async function getStationTimes(
   const rankOf = (entry) =>
     entry.rank ?? eventRank.get(`${entry.status}|${new Date(entry.enteredAt).getTime()}`) ?? null;
 
+  const arrivedBeforeBreak = statusRows
+    .filter((row) => JOURNEY_START_STATUSES.includes(row.status) && row.meta?.original_occurred_at)
+    .map((row) => ({
+      status: "arrived_before_break",
+      timestampOnly: true,
+      label: "Arrived — break time is not counted",
+      actorRole: row.actor_role,
+      meta: row.meta,
+      enteredAt: new Date(row.meta.original_occurred_at).toISOString(),
+      leftAt: null,
+      waitMinutes: 0,
+      waitBudget: null,
+      stationMinutes: 0,
+      stationBudget: null,
+      totalMinutes: 0,
+      budgetMinutes: null,
+      overBy: 0,
+      colour: "neutral",
+      isCurrent: false,
+      visits: 1,
+    }));
+
   const withMarkers = [
     ...skipped,
     ...vitalsSavedDirectly,
     ...merged,
+    ...arrivedBeforeBreak,
     ...markerRows.map((row) => ({
       status: row.status,
       timestampOnly: true,
@@ -847,163 +881,184 @@ export async function getStationTimes(
 //
 // The true time is kept in the event's meta.original_occurred_at, and the
 // paused/resumed pair is logged, so the shift never loses what really happened.
-export async function pauseVisit(
+export async function pauseVisitTx(
+  client,
   visitId,
-  { actorId = null, actorRole = "reception", reason = null } = {},
-  db = pool,
+  { actorId = null, actorRole = "reception", reason = null, meta = {} } = {},
 ) {
-  const client = await db.connect();
-  try {
-    await client.query("BEGIN");
-    const { rows } = await client.query(
-      `SELECT current_status, paused_at FROM giniflow_visits WHERE id = $1 FOR UPDATE`,
-      [visitId],
-    );
-    if (!rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
-    const { current_status: status, paused_at: alreadyPaused } = rows[0];
+  const { rows } = await client.query(
+    `SELECT current_status, paused_at FROM giniflow_visits WHERE id = $1 FOR UPDATE`,
+    [visitId],
+  );
+  if (!rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
+  const { current_status: status, paused_at: alreadyPaused } = rows[0];
 
-    if (isTerminalStatus(status)) {
-      throw Object.assign(new Error("This visit has already finished for the day"), {
-        status: 409,
-        reason: "finished",
-      });
-    }
-    // Idempotent: a second press on an already-paused visit must not restart the
-    // pause clock, or the first part of the break is silently lost.
-    if (alreadyPaused) {
-      await client.query("COMMIT");
-      return { ok: true, paused: true, pausedAt: alreadyPaused, status, unchanged: true };
-    }
-
-    await client.query(
-      `UPDATE giniflow_visits
-          SET paused_at = NOW(), paused_by = $2, paused_reason = $3, updated_at = NOW()
-        WHERE id = $1`,
-      [visitId, actorId, reason],
-    );
-    const ev = await client.query(
-      `INSERT INTO giniflow_visit_events (visit_id, status, actor_role, actor_id, meta)
-       VALUES ($1, 'paused', $2, $3, $4)
-       RETURNING occurred_at`,
-      [visitId, actorRole, actorId, { source: "scribe", pausedFrom: status, reason }],
-    );
-    await client.query("COMMIT");
-    return { ok: true, paused: true, pausedAt: ev.rows[0].occurred_at, status };
-  } catch (e) {
-    await client.query("ROLLBACK");
-    throw e;
-  } finally {
-    client.release();
+  if (isTerminalStatus(status)) {
+    throw Object.assign(new Error("This visit has already finished for the day"), {
+      status: 409,
+      reason: "finished",
+    });
   }
+  // Idempotent: a second press on an already-paused visit must not restart the
+  // pause clock, or the first part of the break is silently lost.
+  if (alreadyPaused) {
+    return { ok: true, paused: true, pausedAt: alreadyPaused, status, unchanged: true };
+  }
+
+  await client.query(
+    `UPDATE giniflow_visits
+        SET paused_at = NOW(), paused_by = $2, paused_reason = $3, updated_at = NOW()
+      WHERE id = $1`,
+    [visitId, actorId, reason],
+  );
+  const ev = await client.query(
+    `INSERT INTO giniflow_visit_events (visit_id, status, actor_role, actor_id, meta)
+     VALUES ($1, 'paused', $2, $3, $4)
+     RETURNING occurred_at`,
+    [visitId, actorRole, actorId, { source: "scribe", pausedFrom: status, reason, ...meta }],
+  );
+  return { ok: true, paused: true, pausedAt: ev.rows[0].occurred_at, status };
 }
 
-export async function resumeVisit(
-  visitId,
-  { actorId = null, actorRole = "reception" } = {},
-  db = pool,
-) {
+const inVisitTransaction = async (db, work) => {
   const client = await db.connect();
   try {
     await client.query("BEGIN");
-    const { rows } = await client.query(
-      `SELECT current_status, paused_at FROM giniflow_visits WHERE id = $1 FOR UPDATE`,
-      [visitId],
-    );
-    if (!rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
-    const { current_status: status, paused_at: pausedAt } = rows[0];
-    if (!pausedAt) {
-      await client.query("COMMIT");
-      return { ok: true, paused: false, status, unchanged: true };
-    }
-
-    // Two shapes, decided by whether the patient had actually started.
-    //
-    //   underway    — shift the anchors FORWARD by the break, so the work
-    //                 already done keeps its elapsed time and only the break
-    //                 drops out.
-    //   not started — move the anchors TO NOW, so the clock restarts at zero.
-    //                 They left the queue before anyone saw them; keeping the
-    //                 wait they accrued before walking off would hold a place
-    //                 the floor has already given away, and it is what a
-    //                 HealthRay re-check-in does to them anyway.
-    const restart = hasNotStarted(status);
-
-    // Each anchor at most once: the journey start (the visit's total) and the
-    // latest wait event (the current status timer). They are the same row when
-    // the patient never left the check-in column, which is why this dedupes.
-    const shifted = await client.query(
-      `WITH gap AS (SELECT NOW() - $2::timestamptz AS d),
-       anchors AS (
-         SELECT id FROM (
-           SELECT id FROM giniflow_visit_events
-            WHERE visit_id = $1 AND ${JOURNEY_START_SQL("status")}
-            ORDER BY occurred_at DESC LIMIT 1
-         ) j
-         UNION
-         SELECT id FROM (
-           SELECT e.id FROM giniflow_visit_events e
-            JOIN giniflow_visits v ON v.id = e.visit_id
-            WHERE e.visit_id = $1 AND ${WAIT_SINCE_SQL("e", "v")}
-            ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1
-         ) w
-       )
-       UPDATE giniflow_visit_events e
-          SET occurred_at = CASE WHEN $3::boolean THEN NOW()
-                                 ELSE e.occurred_at + (SELECT d FROM gap) END,
-              meta = e.meta || jsonb_build_object(
-                'original_occurred_at', COALESCE(e.meta->>'original_occurred_at', e.occurred_at::text),
-                'shifted_for_pause_ms', (EXTRACT(EPOCH FROM (SELECT d FROM gap)) * 1000)::bigint)
-        WHERE e.id IN (SELECT id FROM anchors)
-        RETURNING e.id, e.status`,
-      [visitId, pausedAt, restart],
-    );
-
-    // A step the patient was in the middle of moves with them.
-    await client.query(
-      `UPDATE giniflow_visit_steps
-          SET started_at = started_at + (NOW() - $2::timestamptz)
-        WHERE visit_id = $1 AND status = 'in_progress' AND started_at IS NOT NULL`,
-      [visitId, pausedAt],
-    );
-
-    const upd = await client.query(
-      `UPDATE giniflow_visits
-          SET paused_at = NULL, paused_by = NULL, paused_reason = NULL,
-              paused_ms_total = paused_ms_total
-                + GREATEST(0, (EXTRACT(EPOCH FROM (NOW() - $2::timestamptz)) * 1000)::bigint),
-              updated_at = NOW()
-        WHERE id = $1
-        RETURNING paused_ms_total`,
-      [visitId, pausedAt],
-    );
-    await client.query(
-      `INSERT INTO giniflow_visit_events (visit_id, status, actor_role, actor_id, meta)
-       VALUES ($1, 'resumed', $2, $3, $4)`,
-      [
-        visitId,
-        actorRole,
-        actorId,
-        {
-          source: "scribe",
-          resumedAt: status,
-          restarted: restart,
-          pausedMsTotal: Number(upd.rows[0].paused_ms_total),
-          anchorsShifted: shifted.rows.map((r) => r.status),
-        },
-      ],
-    );
+    const result = await work(client);
     await client.query("COMMIT");
-    return {
-      ok: true,
-      paused: false,
-      restarted: restart,
-      status,
-      pausedMsTotal: Number(upd.rows[0].paused_ms_total),
-    };
+    return result;
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;
   } finally {
     client.release();
   }
+};
+
+export const pauseVisit = (visitId, options = {}, db = pool) =>
+  inVisitTransaction(db, (client) => pauseVisitTx(client, visitId, options));
+
+export async function resumeVisitTx(
+  client,
+  visitId,
+  { actorId = null, actorRole = "reception" } = {},
+) {
+  const { rows } = await client.query(
+    `SELECT current_status, paused_at FROM giniflow_visits WHERE id = $1 FOR UPDATE`,
+    [visitId],
+  );
+  if (!rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
+  const { current_status: status, paused_at: pausedAt } = rows[0];
+  if (!pausedAt) {
+    return { ok: true, paused: false, status, unchanged: true };
+  }
+
+  // Two shapes, decided by whether the patient had actually started.
+  //
+  //   underway    — shift the anchors FORWARD by the break, so the work
+  //                 already done keeps its elapsed time and only the break
+  //                 drops out.
+  //   not started — move the anchors TO NOW, so the clock restarts at zero.
+  //                 They left the queue before anyone saw them; keeping the
+  //                 wait they accrued before walking off would hold a place
+  //                 the floor has already given away, and it is what a
+  //                 HealthRay re-check-in does to them anyway.
+  const restart = hasNotStarted(status);
+
+  // Each anchor at most once: the journey start (the visit's total) and the
+  // latest wait event (the current status timer). They are the same row when
+  // the patient never left the check-in column, which is why this dedupes.
+  const shifted = await client.query(
+    `WITH gap AS (SELECT NOW() - $2::timestamptz AS d),
+     anchors AS (
+       SELECT id FROM (
+         SELECT id FROM giniflow_visit_events
+          WHERE visit_id = $1 AND ${JOURNEY_START_SQL("status")}
+          ORDER BY occurred_at DESC LIMIT 1
+       ) j
+       UNION
+       SELECT id FROM (
+         SELECT e.id FROM giniflow_visit_events e
+          JOIN giniflow_visits v ON v.id = e.visit_id
+          WHERE e.visit_id = $1 AND ${WAIT_SINCE_SQL("e", "v")}
+          ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1
+       ) w
+     )
+     UPDATE giniflow_visit_events e
+        SET occurred_at = CASE WHEN $3::boolean THEN NOW()
+                               ELSE e.occurred_at + (SELECT d FROM gap) END,
+            meta = e.meta || jsonb_build_object(
+              'original_occurred_at', COALESCE(e.meta->>'original_occurred_at', e.occurred_at::text),
+              'shifted_for_pause_ms', (EXTRACT(EPOCH FROM (SELECT d FROM gap)) * 1000)::bigint)
+      WHERE e.id IN (SELECT id FROM anchors)
+      RETURNING e.id, e.status`,
+    [visitId, pausedAt, restart],
+  );
+
+  // A step the patient was in the middle of moves with them.
+  await client.query(
+    `UPDATE giniflow_visit_steps
+        SET started_at = started_at + (NOW() - $2::timestamptz)
+      WHERE visit_id = $1 AND status = 'in_progress' AND started_at IS NOT NULL`,
+    [visitId, pausedAt],
+  );
+
+  const upd = await client.query(
+    `UPDATE giniflow_visits
+        SET paused_at = NULL, paused_by = NULL, paused_reason = NULL,
+            paused_ms_total = paused_ms_total
+              + GREATEST(0, (EXTRACT(EPOCH FROM (NOW() - $2::timestamptz)) * 1000)::bigint),
+            updated_at = NOW()
+      WHERE id = $1
+      RETURNING paused_ms_total`,
+    [visitId, pausedAt],
+  );
+  await client.query(
+    `INSERT INTO giniflow_visit_events (visit_id, status, actor_role, actor_id, meta)
+     VALUES ($1, 'resumed', $2, $3, $4)`,
+    [
+      visitId,
+      actorRole,
+      actorId,
+      {
+        source: "scribe",
+        resumedAt: status,
+        restarted: restart,
+        pausedMsTotal: Number(upd.rows[0].paused_ms_total),
+        anchorsShifted: shifted.rows.map((r) => r.status),
+      },
+    ],
+  );
+  return {
+    ok: true,
+    paused: false,
+    restarted: restart,
+    status,
+    pausedMsTotal: Number(upd.rows[0].paused_ms_total),
+  };
+}
+
+export const resumeVisit = (visitId, options = {}, db = pool) =>
+  inVisitTransaction(db, (client) => resumeVisitTx(client, visitId, options));
+
+export async function cancelPauseTx(client, visitId, reason, { actorId = null, actorRole } = {}) {
+  const { rows } = await client.query(
+    `UPDATE giniflow_visits
+        SET paused_at = NULL, paused_by = NULL, paused_reason = NULL, updated_at = NOW()
+      WHERE id = $1 AND paused_at IS NOT NULL AND paused_reason = $2
+      RETURNING current_status`,
+    [visitId, reason],
+  );
+  if (!rows.length) return false;
+  await client.query(
+    `INSERT INTO giniflow_visit_events (visit_id, status, actor_role, actor_id, meta)
+     VALUES ($1, 'resumed', $2, $3, $4)`,
+    [
+      visitId,
+      actorRole,
+      actorId,
+      { source: "scribe", resumedAt: rows[0].current_status, cancelled: true, reason },
+    ],
+  );
+  return true;
 }

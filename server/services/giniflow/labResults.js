@@ -1,7 +1,7 @@
 import pool from "../../config/db.js";
 import { getCanonical } from "../../utils/labCanonical.js";
 import { flagForRange } from "../../utils/labFlag.js";
-import { advanceSample, markCaseResultsReady } from "./labStation.js";
+import { advanceSample, assertSampleDrawn, markCaseResultsReady } from "./labStation.js";
 import { syncLabStepsFromLab } from "./journey.js";
 import { advanceMachineTest } from "./machineStation.js";
 import { machineForTest } from "../../../shared/machineStages.js";
@@ -523,6 +523,7 @@ export async function saveResults(
       409,
     );
   }
+  assertSampleDrawn(order);
 
   const { written, skipped } = await writeEntries(
     db,

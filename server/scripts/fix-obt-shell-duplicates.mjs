@@ -2,10 +2,20 @@ import "../loadEnv.js";
 import pool from "../config/db.js";
 
 const APPLY = process.argv.includes("--apply");
-const PAIRS = [
-  { gni: "GNI-00084", real: "P_181819" },
-  { gni: "GNI-00083", real: "P_181820" },
-];
+const ALLOW_SEX_MISMATCH = process.argv.includes("--allow-sex-mismatch");
+const PAIRS = process.argv
+  .slice(2)
+  .filter((a) => /^GNI-\d+=P_\d+$/.test(a))
+  .map((a) => {
+    const [gni, real] = a.split("=");
+    return { gni, real };
+  });
+if (!PAIRS.length) {
+  console.error(
+    "Usage: node scripts/fix-obt-shell-duplicates.mjs GNI-00080=P_181841 [...] [--allow-sex-mismatch] [--apply]",
+  );
+  process.exit(1);
+}
 
 const normName = (s) =>
   (s || "")
@@ -79,7 +89,7 @@ for (const pair of PAIRS) {
   const realTokens = new Set(normName(real.name).split(" "));
   const checks = {
     samePhone: last10(gni.phone) === last10(real.phone) && last10(gni.phone).length === 10,
-    sameSex: gni.sex === real.sex,
+    sameSex: ALLOW_SEX_MISMATCH || gni.sex === real.sex,
     nameOverlap: gniTokens.some((t) => realTokens.has(t)),
     gniIsPlaceholder: gni.health_id == null && /^GNI-\d+$/.test(gni.file_no),
     realIsHealthray: real.health_id != null,

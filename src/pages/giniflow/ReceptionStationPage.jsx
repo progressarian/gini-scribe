@@ -30,7 +30,7 @@ import StationNotice from "../../components/giniflow/StationNotice";
 import JourneyBuilder from "../../components/giniflow/JourneyBuilder";
 import { useFlowStepCatalog, useFlowVisitTypes } from "../../queries/hooks/useFlow";
 import { stepPassesConditions } from "../../../shared/giniflowConditions.js";
-import { hasNotStarted } from "../../../shared/giniflowStatus.js";
+import { hasNotStarted, isSampleBreak, pauseReasonLabel } from "../../../shared/giniflowStatus.js";
 import { paise, refundOnTestCancel, rupeesFromPaise } from "../../../shared/labPayment.js";
 import { amountLeft, cleanAmount } from "../../utils/amountInput.js";
 import {
@@ -1236,6 +1236,9 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
             <div className="wi-head">
               <strong>What is this visit?</strong>
             </div>
+            {billNote(bill, billLoading) && (
+              <div className="dp-hint">{billNote(bill, billLoading)}</div>
+            )}
             {showConsultChoice && (
               <div className="dp-hint" style={{ marginBottom: "8px" }}>
                 <strong className="consultation-type-label">Consultation Type:</strong>
@@ -1614,8 +1617,10 @@ export function ArrivalsTab({
   // The list holds everyone who is not expected and not a no-show, so it counts
   // the patients who have already gone home alongside the ones standing in the
   // building. One number for both read as 89 people on a floor holding 32.
-  const stillHere = onFloor.filter((a) => !FINISHED_STATUSES.includes(a.status)).length;
-  const alreadyLeft = onFloor.length - stillHere;
+  const notFinished = onFloor.filter((a) => !FINISHED_STATUSES.includes(a.status));
+  const onBreak = notFinished.filter((a) => a.paused).length;
+  const stillHere = notFinished.length - onBreak;
+  const alreadyLeft = onFloor.length - notFinished.length;
   const notComing = data?.notComing || [];
   const searching = (data?.query || "").length >= 2;
 
@@ -1714,6 +1719,7 @@ export function ArrivalsTab({
         <div className="ar-col">
           <div className="grp-lbl grp-lbl-sp">
             🏥 On the floor ({stillHere} here
+            {onBreak > 0 ? ` · ${onBreak} on break` : ""}
             {alreadyLeft > 0 ? ` · ${alreadyLeft} left` : ""})
           </div>
           {onFloor.length === 0 && <div className="empty-note">Nobody in the building yet.</div>}
@@ -1773,26 +1779,34 @@ export function ArrivalsTab({
                   className={`st-btn ${a.paused ? "st-btn-grn" : "st-btn-ghost"}`}
                   disabled={breakBusy}
                   title={
-                    hasNotStarted(a.status)
-                      ? a.paused
-                        ? "They are back — their wait starts again from zero, because nobody had seen them yet"
-                        : "They left before anyone saw them — stop their clock until they come back"
-                      : a.paused
-                        ? "They are back — start the clocks again and leave the break out of their waiting time"
-                        : "They have stepped out — hold their clocks until they are back"
+                    a.paused && isSampleBreak(a.pausedReason) && hasNotStarted(a.status)
+                      ? "Back from their break — they go to the vitals queue and their wait starts now"
+                      : hasNotStarted(a.status)
+                        ? a.paused
+                          ? "They are back — their wait starts again from zero, because nobody had seen them yet"
+                          : "They left before anyone saw them — stop their clock until they come back"
+                        : a.paused
+                          ? "They are back — start the clocks again and leave the break out of their waiting time"
+                          : "They have stepped out — hold their clocks until they are back"
                   }
                   onClick={() => onPauseToggle(a)}
                 >
-                  {hasNotStarted(a.status)
-                    ? a.paused
-                      ? "▶ Restart"
-                      : "⏹ Stop"
-                    : a.paused
-                      ? "▶ Resume"
-                      : "⏸ Pause"}
+                  {a.paused && isSampleBreak(a.pausedReason)
+                    ? "▶ Back"
+                    : hasNotStarted(a.status)
+                      ? a.paused
+                        ? "▶ Restart"
+                        : "⏹ Stop"
+                      : a.paused
+                        ? "▶ Resume"
+                        : "⏸ Pause"}
                 </button>
               )}
-              <span className="ar-since">in since {clock(a.checkedInAt)}</span>
+              <span className="ar-since">
+                {a.paused
+                  ? `${pauseReasonLabel(a.pausedReason) || "On break"} · on break since ${clock(a.pausedAt)}`
+                  : `in since ${clock(a.checkedInAt)}`}
+              </span>
             </ArrivalRow>
           ))}
         </div>
@@ -1936,7 +1950,7 @@ export default function ReceptionStationPage() {
             onSuccess: () =>
               showToast(
                 fresh
-                  ? `▶ ${a.name} is back — their wait starts again from now`
+                  ? `▶ ${a.name} is back — in the vitals queue, their wait starts from now`
                   : `▶ ${a.name} resumed — the break is left out of their waiting time`,
               ),
             onError: pauseErr,
@@ -2229,6 +2243,7 @@ export default function ReceptionStationPage() {
                     <div className="sl">On the floor</div>
                     <div className="ss">
                       in the building
+                      {counts.onFloorAway > 0 ? ` · ${counts.onFloorAway} on break` : ""}
                       {counts.onFloorLeft > 0 ? ` · ${counts.onFloorLeft} left today` : ""}
                     </div>
                   </div>

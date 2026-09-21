@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../services/api.js";
 import { toast } from "../stores/uiStore.js";
@@ -11,7 +12,8 @@ import "./TestCatalogPage.css";
 
 // The clinic's test price list. One table behind the consultant's picker, the
 // MO's chips and reception's payment card — so a test the floor added mid-clinic
-// is priced here, and a typo is retired here, without a database session.
+// is listed here, and a typo is retired here, without a database session. Its
+// price comes from its billing item in Settings → Services.
 //
 // The Test catalogue tab of /settings. It was its own page at
 // /admin/test-catalog, which is now a redirect.
@@ -43,28 +45,40 @@ const SOURCE_LABEL = (s) =>
         ? "added on the floor"
         : s || "—";
 
-function PriceCell({ test, onSave, saving }) {
-  const [value, setValue] = useState(String(test.price));
-  const dirty = value.trim() !== String(test.price);
-  return (
-    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-      <span style={{ color: "#64748b" }}>₹</span>
-      <input
-        className="tcat__price"
-        inputMode="decimal"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && dirty && onSave(Number(value))}
-      />
-      {dirty && (
-        <button
-          type="button"
-          className="tcat__save"
-          disabled={saving || !(Number(value) >= 0)}
-          onClick={() => onSave(Number(value))}
+function PriceCell({ test }) {
+  const amount = `₹${Number(test.price || 0).toLocaleString("en-IN")}`;
+  if (test.serviceItemCode) {
+    return (
+      <div className="tcat__priced">
+        <strong>{amount}</strong>
+        <Link
+          to={`/settings/services?q=${encodeURIComponent(test.serviceItemCode)}`}
+          aria-label={`${test.serviceItemCode} — change the price of ${test.name} in Services`}
         >
-          Save
-        </button>
+          {test.serviceItemCode}
+        </Link>
+      </div>
+    );
+  }
+  return (
+    <div className="tcat__priced">
+      <span className="tcat__unbilled">{amount}</span>
+      {test.offItemCode ? (
+        <Link
+          to={`/settings/services?q=${encodeURIComponent(test.offItemCode)}`}
+          aria-label={`${test.offItemCode} is off — the billing item for ${test.name}`}
+        >
+          {test.offItemCode} is off
+        </Link>
+      ) : test.isActive ? (
+        <Link
+          to={`/settings/services?createTest=${encodeURIComponent(test.id)}`}
+          aria-label={`Create item for ${test.name}`}
+        >
+          Create item
+        </Link>
+      ) : (
+        <span className="tcat__unbilled">Retired</span>
       )}
     </div>
   );
@@ -112,7 +126,6 @@ export default function TestCatalogPage() {
   const update = useUpdateTest();
   const addTest = useAddTest();
   const [newName, setNewName] = useState("");
-  const [newPrice, setNewPrice] = useState("");
   const [q, setQ] = useState("");
   const [showRetired, setShowRetired] = useState(false);
   const [station, setStation] = useState("all");
@@ -138,7 +151,7 @@ export default function TestCatalogPage() {
     [tests],
   );
 
-  const unpriced = tests.filter((t) => t.isActive && !t.price).length;
+  const unbilled = tests.filter((t) => t.isActive && !t.serviceItemCode).length;
 
   const save = (test, patch) =>
     update.mutate(
@@ -157,14 +170,15 @@ export default function TestCatalogPage() {
           <span className="fset__count">{tests.length}</span>
         </div>
         <div className="fset__cardsub">
-          What the floor can order and what reception charges. A test added during a consultation
-          arrives here priced ₹0 until someone sets it.
+          What the floor can order. Prices come from each test's billing item in Services — change
+          them there.
         </div>
 
-        {unpriced > 0 && (
+        {unbilled > 0 && (
           <div className="tcat__warn">
-            ⚠ {unpriced} active test{unpriced === 1 ? "" : "s"} priced ₹0 — they can be ordered and
-            will bill nothing.
+            ⚠ {unbilled} active test{unbilled === 1 ? " has" : "s have"} no active billing item —
+            reception charges the old catalogue price until one is created.{" "}
+            <Link to="/settings/services">Create them in Services</Link>
           </div>
         )}
 
@@ -175,13 +189,6 @@ export default function TestCatalogPage() {
             value={newName}
             placeholder="Test name — offered to every patient"
             onChange={(e) => setNewName(e.target.value)}
-          />
-          <input
-            className="tcat__price"
-            inputMode="decimal"
-            value={newPrice}
-            placeholder="₹ price"
-            onChange={(e) => setNewPrice(e.target.value)}
           />
           <select
             className="tcat__station"
@@ -203,16 +210,8 @@ export default function TestCatalogPage() {
               addTest.mutate(
                 { name: newName.trim(), category: newStation },
                 {
-                  onSuccess: async (t) => {
-                    const price = Number(newPrice);
-                    if (price > 0) {
-                      const row = (await api.get("/api/giniflow/test-catalog")).data.tests.find(
-                        (x) => x.name === t.name,
-                      );
-                      if (row) update.mutate({ id: row.id, price });
-                    }
+                  onSuccess: (t) => {
                     setNewName("");
-                    setNewPrice("");
                     toast(
                       t.created ? `✓ ${t.name} added` : `${t.name} was already listed`,
                       "success",
@@ -297,11 +296,7 @@ export default function TestCatalogPage() {
                       />
                     </td>
                     <td>
-                      <PriceCell
-                        test={t}
-                        saving={update.isPending}
-                        onSave={(price) => save(t, { price })}
-                      />
+                      <PriceCell test={t} />
                     </td>
                     <td>
                       <input

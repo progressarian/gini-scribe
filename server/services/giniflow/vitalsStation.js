@@ -39,7 +39,7 @@ const minutesSince = (from, now) =>
 const QUEUE_SQL = `
   SELECT v.id, v.current_status, v.category, v.appointment_time::text AS appointment_time,
          v.priority, v.priority_reason, v.blocked_reason,
-         v.queue_position, v.queue_column,
+         v.queue_position, v.queue_column, v.paused_at, v.paused_reason,
          p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
          first_ev.occurred_at AS checked_in_at,
          last_ev.occurred_at  AS status_since,
@@ -140,7 +140,7 @@ const DONE_SQL = `
    ORDER BY recorded_at DESC NULLS LAST`;
 
 // The groups the station splits into, and the only values `group` accepts.
-export const VITALS_GROUPS = ["atStation", "waiting", "held", "moved", "exited"];
+export const VITALS_GROUPS = ["atStation", "waiting", "onBreak", "held", "moved", "exited"];
 
 export async function getVitalsQueue(
   visitDate,
@@ -201,7 +201,18 @@ export async function getVitalsQueue(
   // board's rule applies — priority first, then a manual position, then longest
   // waiting — so the station calls patients in the order the floor manager
   // arranged rather than in appointment order.
+  const onBreak = rows
+    .filter((r) => r.paused_at)
+    .map((r) => ({
+      ...base(r),
+      waitMinutes: null,
+      pausedAt: new Date(r.paused_at).toISOString(),
+      pausedReason: r.paused_reason,
+    }))
+    .sort((a, b) => a.pausedAt.localeCompare(b.pausedAt));
+
   const ordered = rows
+    .filter((r) => !r.paused_at)
     .map(base)
     .map((r) => ({ ...r, statusMinutes: r.waitMinutes }))
     .sort((a, b) => {
@@ -246,6 +257,7 @@ export async function getVitalsQueue(
   const groups = {
     atStation,
     waiting,
+    onBreak,
     held: heldRows.map(base),
     // Vitals taken and the patient has moved on, but the day is not finished:
     // still somewhere on the floor. Tapping one reopens the reading, because a

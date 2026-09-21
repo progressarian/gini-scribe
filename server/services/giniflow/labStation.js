@@ -13,7 +13,7 @@ import { publish } from "./eventHub.js";
 import { t as clipText } from "../../utils/helpers.js";
 import { promoteLabReport, promoteQuietly } from "./promote.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config/storage.js";
-import { advanceStatus } from "./statusEngine.js";
+import { advanceStatus, cancelPauseTx, pauseVisitTx, resumeVisitTx } from "./statusEngine.js";
 import { advanceMachineTest } from "./machineStation.js";
 import { opensLabGate, outstandingOf } from "../../../shared/labPayment.js";
 import {
@@ -22,6 +22,7 @@ import {
   WAIT_STATUSES,
   columnForStatus,
   NOT_A_MARKER_SQL,
+  SAMPLE_BREAK_REASON,
 } from "../../../shared/giniflowStatus.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate, labOnlyHiddenPredicate } from "./labOnlyVisits.js";
 import { hideLabOnlyPatients } from "./floorSettings.js";
@@ -36,6 +37,7 @@ import {
   NEXT_SAMPLE_ACTION,
   SAMPLE_STATUS_TO_STAGE,
   stageIndexOf,
+  UNDRAWN_SAMPLE_STATUSES,
   visibleRungs,
   roomOwns,
   CASE_ACTION_VERBS,
@@ -796,6 +798,7 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
        LEFT JOIN patients p ON p.id = c.pid
        LEFT JOIN giniflow_visits v ON v.patient_id = c.pid AND v.visit_date = $1::date
       WHERE NOT COALESCE(p.is_blocked, FALSE)
+        AND NOT ($4::boolean AND v.id IS NULL)
       GROUP BY c.grp, c.pid, p.id, p.name, p.file_no, p.age, p.sex, v.current_status,
                v.results_status, v.id
       -- Samples-only patients don't show on any station screen, this one
@@ -972,39 +975,14 @@ async function assertPatientIsFree(db, visitId, what) {
   }
 }
 
-// Vitals come before the bench (39-HYBRID-FLOOR-PLAN.md §3). On the draw only:
-// a tube already collected must not become un-processable because nobody ticked
-// a box upstream, and the analyzer bench never sees the patient anyway.
-//
-// Samples-only registrations are exempt — they never take vitals and never see a
-// doctor, so requiring the step would strand every one of them.
-async function assertVitalsRecorded(db, visitId) {
-  if (!visitId) return;
-  const { rows } = await db.query(
-    `SELECT p.name,
-            (
-              EXISTS (SELECT 1 FROM giniflow_vitals g WHERE g.visit_id = v.id)
-              OR EXISTS (
-                SELECT 1 FROM giniflow_visit_events e
-                 WHERE e.visit_id = v.id
-                   AND e.status IN ('with_vitals', 'vitals_done')
-                   AND e.actor_role <> 'system'
-              )
-            ) AS vitals_recorded,
-            ${labOnlyPredicate("v", "$2")} AS lab_only
-       FROM giniflow_visits v
-       JOIN patients p ON p.id = v.patient_id
-      WHERE v.id = $1`,
-    [visitId, LAB_ONLY_DOCTOR],
+export function assertSampleDrawn({ kind, sample_status: status }) {
+  if (kind !== "lab" || !UNDRAWN_SAMPLE_STATUSES.includes(status)) return;
+  throw Object.assign(
+    new Error(
+      "Record the sample first — Lab 1 taps Sample taken before it can be sent, run or reported",
+    ),
+    { status: 409 },
   );
-  if (!rows.length) return;
-  const { name, vitals_recorded, lab_only } = rows[0];
-  if (!lab_only && !vitals_recorded) {
-    throw Object.assign(
-      new Error(`${name} has no vitals recorded yet — the patient goes to vitals before the draw`),
-      { status: 409 },
-    );
-  }
 }
 
 // No sample is drawn before payment, whoever ordered the test. A Scribe order
@@ -1113,7 +1091,7 @@ export async function cancelDrawing(
 
 export async function advanceSample(
   orderId,
-  { to, actorId = null, reportUrl = null, room = null },
+  { to, actorId = null, reportUrl = null, room = null, thenBreak = false },
   db = pool,
 ) {
   if (!LAB_SAMPLE_FLOW.includes(to)) {
@@ -1168,8 +1146,8 @@ export async function advanceSample(
     // no-op rather than becoming an error about where the patient is now.
     if (to === "drawing") {
       await assertPatientIsFree(client, visitId, "start the collection");
-      await assertVitalsRecorded(client, visitId);
       await assertStationFree(client, visitId, LAB_STATION, "start the collection");
+      if (visitId) await resumeVisitTx(client, visitId, { actorId, actorRole: "lab" });
     }
     if (to === "sample_collected") {
       if (from !== "drawing") {
@@ -1181,7 +1159,9 @@ export async function advanceSample(
         );
       }
       await assertPatientIsFree(client, visitId, "collect the sample");
-      await assertVitalsRecorded(client, visitId);
+    }
+    if (!UNDRAWN_SAMPLE_STATUSES.includes(to) && to !== "sample_collected") {
+      assertSampleDrawn({ kind: "lab", sample_status: from });
     }
 
     await client.query(
@@ -1235,8 +1215,18 @@ export async function advanceSample(
     // and the rung it is drawn from can never disagree.
     if (visitId) await syncLabStepsFromLab(client, visitId);
 
+    const onBreak =
+      thenBreak && to === "sample_collected" && visitId
+        ? await pauseVisitTx(client, visitId, {
+            actorId,
+            actorRole: "lab",
+            reason: SAMPLE_BREAK_REASON,
+            meta: { lab_order_id: orderId },
+          })
+        : null;
+
     await client.query("COMMIT");
-    return { orderId, sampleStatus: to, unchanged: false };
+    return { orderId, sampleStatus: to, unchanged: false, onBreak: !!onBreak };
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;
@@ -1341,6 +1331,7 @@ export async function uploadReport(
   if (!opensLabGate(rows[0].payment_status)) {
     throw Object.assign(new Error("Payment is not cleared for this order"), { status: 409 });
   }
+  assertSampleDrawn(rows[0]);
   if (rows[0].report_file_url && !confirmAdditional) {
     throw Object.assign(new Error("A report is already on this order"), {
       status: 409,
@@ -1414,7 +1405,15 @@ export const CASE_ACTIONS = CASE_ACTION_VERBS;
 
 export async function markLabCaseAction(
   caseNo,
-  { action, actorId = null, actorRole = "lab", note = null, undo = false, room = null },
+  {
+    action,
+    actorId = null,
+    actorRole = "lab",
+    note = null,
+    undo = false,
+    room = null,
+    thenBreak = false,
+  },
   db = pool,
 ) {
   if (!CASE_ACTIONS.includes(action)) throw new Error(`Unknown lab case action: ${action}`);
@@ -1511,7 +1510,6 @@ export async function markLabCaseAction(
   if ((action === "sample_taken" || action === "drawing_started") && !undo) {
     const what = action === "drawing_started" ? "start the collection" : "collect the sample";
     await assertPatientIsFree(db, resolvedVisitId, what);
-    await assertVitalsRecorded(db, resolvedVisitId);
     await assertLabBillingCleared(db, resolvedVisitId);
   }
 
@@ -1524,6 +1522,11 @@ export async function markLabCaseAction(
         WHERE case_no = $1 AND action = ANY($2::text[])`,
       [caseNo, CASE_ACTIONS.slice(CASE_ACTIONS.indexOf(action))],
     );
+    if (resolvedVisitId && CASE_ACTIONS.indexOf(action) <= CASE_ACTIONS.indexOf("sample_taken")) {
+      await withVisitLock(db, (client) =>
+        cancelPauseTx(client, resolvedVisitId, SAMPLE_BREAK_REASON, { actorId, actorRole: "lab" }),
+      );
+    }
     if (resolvedVisitId) publish({ kind: "lab_order", visitId: resolvedVisitId, status: action });
     return { caseNo, action, undone: true };
   }
@@ -1540,13 +1543,26 @@ export async function markLabCaseAction(
        RETURNING action, created_at`,
       [caseNo, action, actorRole, actorId, note],
     );
+  const breakAfter = thenBreak && action === "sample_taken" && !!resolvedVisitId;
   const { rows } =
     action === "drawing_started" && resolvedVisitId
       ? await withVisitLock(db, async (client) => {
           await assertStationFree(client, resolvedVisitId, LAB_STATION, "start the collection");
+          await resumeVisitTx(client, resolvedVisitId, { actorId, actorRole: "lab" });
           return recordAction(client);
         })
-      : await recordAction(db);
+      : breakAfter
+        ? await withVisitLock(db, async (client) => {
+            const recorded = await recordAction(client);
+            await pauseVisitTx(client, resolvedVisitId, {
+              actorId,
+              actorRole: "lab",
+              reason: SAMPLE_BREAK_REASON,
+              meta: { case_no: caseNo },
+            });
+            return recorded;
+          })
+        : await recordAction(db);
   if (resolvedVisitId) publish({ kind: "lab_order", visitId: resolvedVisitId, status: action });
 
   // The card and the lab track come from two different tables (the journey's
@@ -1581,7 +1597,7 @@ export async function markLabCaseAction(
     }
   }
 
-  return { caseNo, ...rows[0], markedResultsReady };
+  return { caseNo, ...rows[0], markedResultsReady, onBreak: breakAfter };
 }
 
 // Taking a wrongly-attached report back off a case.

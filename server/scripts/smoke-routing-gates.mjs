@@ -1,14 +1,17 @@
 // The hybrid floor, steps 5 and 6: the order the patient walks the floor in
 // (docs/gini-flow/39-HYBRID-FLOOR-PLAN.md §3).
 //
-//   vitals  →  Lab 1 draw  →  Machine Room
+//   Lab 1 draw (any time after payment)  ·  vitals  →  Machine Room
 //
-// Two rules, both enforced in the SERVICE and not only by hiding a button — a
-// stale tab is exactly the case hiding does not cover:
+// Rules enforced in the SERVICE and not only by hiding a button — a stale tab
+// is exactly the case hiding does not cover:
 //
-//   G1  Neither bench starts before vitals are recorded. Samples-only
-//       registrations are exempt; they never take vitals.
+//   G1  The machine does not start before vitals are recorded — a saved
+//       reading or vitals done by a person, not merely being taken in.
+//       Samples-only registrations are exempt; they never take vitals.
+//       The lab draw has no vitals gate (55-SAMPLE-THEN-BREAK-PLAN.md).
 //   G2  A patient billed for blood as well as a machine is drawn first.
+//   G3  A lab order cannot pass the draw without it being recorded.
 //
 // Both apply to the START of the work only. A test already on the machine, or a
 // tube already drawn, must never become unfinishable because of a box nobody
@@ -166,14 +169,38 @@ try {
   const ok0 = await refusal(() => advanceMachineTest(midOrder, { to: "done" }, db));
   check("and it finishes with no vitals ever recorded", ok0 === null, ok0?.message);
 
-  console.log("\n── G1 · the lab draw waits for vitals too ──────────────────");
-  const labNoVitals = await make("LABNOVIT");
+  console.log("\n── G1 · being taken in at vitals is not vitals ─────────────");
+  const tappedOnly = await make("TAPPED", { status: "checked_in" });
+  await client.query(
+    `INSERT INTO giniflow_visit_events (visit_id, status, actor_role)
+     VALUES ($1, 'with_vitals', 'vitals')`,
+    [tappedOnly.visitId],
+  );
+  const tOrder = await order(tappedOnly.visitId, "machine", "paid", "VPT");
+  const rT = await refusal(() => advanceMachineTest(tOrder, { to: "in_progress" }, db));
+  check("the machine stays shut with no reading", rT?.status === 409, rT?.message);
+
+  console.log("\n── G1 · the lab draw goes ahead before vitals ──────────────");
+  const labNoVitals = await make("LABNOVIT", { status: "checked_in" });
   const lOrder = await order(labNoVitals.visitId, "lab");
-  const r3 = await refusal(() => advanceSample(lOrder, { to: "drawing" }, db));
-  check("the draw is refused", r3?.status === 409, r3?.message);
-  await recordVitals(labNoVitals.visitId);
   const ok2 = await refusal(() => advanceSample(lOrder, { to: "drawing" }, db));
-  check("and allowed once vitals are in", ok2 === null, ok2?.message);
+  check("the draw starts with no vitals", ok2 === null, ok2?.message);
+  const ok2b = await refusal(() => advanceSample(lOrder, { to: "sample_collected" }, db));
+  check("and the sample is recorded", ok2b === null, ok2b?.message);
+
+  console.log("\n── G3 · no step past the draw until it is recorded ─────────");
+  const skip = await make("SKIPDRAW");
+  const sOrder = await order(skip.visitId, "lab");
+  for (const to of ["sample_sent", "sample_received", "processing", "uploaded"]) {
+    const r = await refusal(() => advanceSample(sOrder, { to }, db));
+    check(`paid → ${to} is refused`, r?.status === 409, r?.message);
+  }
+  await advanceSample(sOrder, { to: "drawing" }, db);
+  const rD = await refusal(() => advanceSample(sOrder, { to: "sample_received" }, db));
+  check("drawing → sample_received is refused too", rD?.status === 409, rD?.message);
+  await advanceSample(sOrder, { to: "sample_collected" }, db);
+  const okR = await refusal(() => advanceSample(sOrder, { to: "sample_received" }, db));
+  check("Lab 2 may still receive straight after the draw", okR === null, okR?.message);
 
   console.log("\n── G1 · samples-only patients are exempt ───────────────────");
   // They never take vitals and never see a doctor, so requiring the step would

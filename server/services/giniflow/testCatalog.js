@@ -81,10 +81,12 @@ export async function listCatalog(db = pool) {
   const { rows } = await db.query(
     `SELECT c.id, c.test_name, ${catalogBasePriceSql("c")} AS price, c.gloss, c.is_active, c.source,
             c.category, c.updated_at, item.id AS service_item_id, item.code AS service_item_code,
+            off.code AS off_item_code,
             COALESCE(u.times_ordered, 0)::int AS times_ordered,
             u.last_ordered::text AS last_ordered
        FROM giniflow_test_catalog c
        LEFT JOIN service_items item ON item.test_catalog_id = c.id AND item.is_active
+       LEFT JOIN service_items off ON off.test_catalog_id = c.id AND NOT off.is_active
        LEFT JOIN (
          SELECT t.test_name,
                 COUNT(*) AS times_ordered,
@@ -108,6 +110,7 @@ export async function listCatalog(db = pool) {
     lastOrdered: r.last_ordered,
     serviceItemId: r.service_item_id ?? null,
     serviceItemCode: r.service_item_code ?? null,
+    offItemCode: r.off_item_code ?? null,
     pricedBy: r.service_item_id ? "service_item" : "catalogue",
   }));
 }
@@ -128,14 +131,14 @@ export async function updateCatalogTest(id, { price, gloss, isActive, category }
         WHERE i.test_catalog_id = $1 AND i.is_active`,
       [id],
     );
-    if (priced.length) {
-      throw Object.assign(
-        new Error(
-          `This test is priced by the billing item ${priced[0].name} (${priced[0].code}); change its price in Settings → Billing → Items`,
-        ),
-        { status: 409 },
-      );
-    }
+    throw Object.assign(
+      new Error(
+        priced.length
+          ? `This test is priced by the billing item ${priced[0].name} (${priced[0].code}); change its price in Settings → Services`
+          : "Test prices are set on the test's billing item; create one in Settings → Services",
+      ),
+      { status: 409 },
+    );
   }
   // Only the NEXT order follows a change of station. `giniflow_lab_orders.kind`
   // is copied from here when the order is raised and never re-read, so a test

@@ -1045,11 +1045,17 @@ export async function getArrivals(visitDate, q = "", now = new Date(), db = pool
         // `onFloor` is everyone who arrived, finished or not, so on its own it
         // says 89 about a floor holding 32. Split so the tile can say which.
         if (key === "onFloor") {
-          acc[FINISHED_STATUSES.includes(r.current_status) ? "onFloorLeft" : "onFloorHere"]++;
+          acc[
+            FINISHED_STATUSES.includes(r.current_status)
+              ? "onFloorLeft"
+              : r.paused_at
+                ? "onFloorAway"
+                : "onFloorHere"
+          ]++;
         }
         return acc;
       },
-      { expected: 0, onFloor: 0, notComing: 0, onFloorHere: 0, onFloorLeft: 0 },
+      { expected: 0, onFloor: 0, notComing: 0, onFloorHere: 0, onFloorAway: 0, onFloorLeft: 0 },
     ),
     query,
   };

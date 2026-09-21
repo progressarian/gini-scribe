@@ -98,10 +98,17 @@ export function useSaveLabResults() {
 export function useAdvanceSample() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ orderId, to, reportUrl }) =>
-      (await api.post(`/api/giniflow/stations/lab/${orderId}/advance`, { to, reportUrl })).data,
+    mutationFn: async ({ orderId, to, reportUrl, thenBreak }) =>
+      (
+        await api.post(`/api/giniflow/stations/lab/${orderId}/advance`, {
+          to,
+          reportUrl,
+          thenBreak,
+        })
+      ).data,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["giniflow", "lab"] });
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "vitals"] });
       // Uploading turns the patient green on the board and the MO queue.
       queryClient.invalidateQueries({ queryKey: ["giniflow", "board"] });
       queryClient.invalidateQueries({ queryKey: ["giniflow", "reception"] });
@@ -144,9 +151,19 @@ export function useCancelLabCase() {
 export function useMarkLabCaseAction() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ caseNo, action, undo }) =>
-      (await api.post(`/api/giniflow/stations/lab/case/${caseNo}/action`, { action, undo })).data,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["giniflow", "lab"] }),
+    mutationFn: async ({ caseNo, action, undo, thenBreak }) =>
+      (
+        await api.post(`/api/giniflow/stations/lab/case/${caseNo}/action`, {
+          action,
+          undo,
+          thenBreak,
+        })
+      ).data,
+    onSuccess: () => {
+      for (const key of ["lab", "vitals", "board", "reception"]) {
+        queryClient.invalidateQueries({ queryKey: ["giniflow", key] });
+      }
+    },
   });
 }
 

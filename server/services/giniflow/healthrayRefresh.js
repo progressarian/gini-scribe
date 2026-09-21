@@ -1,6 +1,6 @@
 import pool from "../../config/db.js";
 import { createLogger } from "../logger.js";
-import { KV_BILL_COOLDOWN } from "../healthray/client.js";
+import { IGNORE_SHARED_BLOCK, KV_BILL_COOLDOWN, ownBillPauseUntil } from "../healthray/client.js";
 
 const { log, error } = createLogger("Reception Refresh");
 
@@ -59,6 +59,7 @@ export async function healthrayBlockedUntil(db = pool) {
 }
 
 export async function billReadsBlockedUntil(db = pool) {
+  if (IGNORE_SHARED_BLOCK) return ownBillPauseUntil();
   const blocked = await healthrayBlockedUntil(db);
   if (blocked) return blocked;
   const { rows } = await db.query(`SELECT value FROM app_kv WHERE key = $1`, [KV_BILL_COOLDOWN]);

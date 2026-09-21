@@ -22,7 +22,7 @@ const healthrayLimiter = createRateLimiter({
 });
 
 const BLOCK_CHECK_MS = 15_000;
-const IGNORE_SHARED_BLOCK = process.env.HEALTHRAY_IGNORE_SHARED_BLOCK === "1";
+export const IGNORE_SHARED_BLOCK = process.env.HEALTHRAY_IGNORE_SHARED_BLOCK === "1";
 const COUNT_LOG_MS = 10 * 60_000;
 let blockCheckedAt = 0;
 let sharedBlockUntil = 0;
@@ -162,6 +162,11 @@ async function tripBillBlock(status, url) {
     `⚠ Bill reads paused by HealthRay (http=${status} on ${endpointOf(url)}) — block #${count}, no bill reads for ${Math.round(backoff / 60000)}min; appointments keep syncing`,
   );
 }
+
+export const ownBillPauseUntil = () => {
+  const until = Math.max(billLocalUntil, blockedLocallyUntil);
+  return until > Date.now() ? new Date(until).toISOString() : null;
+};
 
 async function clearBillBlock() {
   billLocalUntil = 0;

@@ -103,8 +103,12 @@ function GroupHead({ icon, title, sub, count, open, onToggle, id }) {
 }
 
 function QueueCard({ card, now, group, onOpen }) {
-  const waited = minutesSince(card.statusSince, now) ?? card.waitMinutes ?? 0;
-  const tone = group === "done" ? "neutral" : budgetColour(waited, card.waitBudget);
+  const waited =
+    minutesSince(card.statusSince, card.pausedAt ? new Date(card.pausedAt) : now) ??
+    card.waitMinutes ??
+    0;
+  const tone =
+    group === "done" || card.pausedAt ? "neutral" : budgetColour(waited, card.waitBudget);
   const chip = PRIORITY_CHIP[card.priority];
   const badge = CATEGORY_BADGE[card.category];
   const missing = card.results.status === "missing";
@@ -170,7 +174,9 @@ function QueueCard({ card, now, group, onOpen }) {
         </div>
       </div>
       <div className="dc-right">
-        <span className={`si-tmr si-tmr-${tone}`}>⏱ {waited}m</span>
+        <span className={`si-tmr si-tmr-${tone}`}>
+          {card.pausedAt ? "⏸ on break" : `⏱ ${waited}m`}
+        </span>
         <span className="dc-state">
           {group === "withMe"
             ? "in room"

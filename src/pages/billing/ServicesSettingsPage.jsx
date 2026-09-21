@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   useBillingGroups,
   useBillingItemChoices,
@@ -140,12 +141,43 @@ function ItemRow({ item, showPath, onEdit, onHistory, onBlocked }) {
 
 export default function ServicesSettingsPage() {
   const [selected, setSelected] = useState(null);
-  const [q, setQ] = useState("");
+  const [params, setParams] = useSearchParams();
+  const [q, setQ] = useState(() => params.get("q") ?? "");
   const [kind, setKind] = useState("");
   const [status, setStatus] = useState("all");
   const [editing, setEditing] = useState(null);
   const [view, setView] = useState("items");
   const notPriced = useBillingNotPriced();
+  const createTest = params.get("createTest");
+
+  useEffect(() => {
+    if (!createTest || !notPriced.data) return;
+    const test = notPriced.data.tests.find(
+      (t) => t.test_catalog_id === createTest && t.status === "no_item",
+    );
+    if (test) {
+      setEditing({
+        item: null,
+        prefill: {
+          name: test.test_name,
+          kind: "test",
+          test_catalog_id: test.test_catalog_id,
+          base_price: test.catalogue_price,
+        },
+      });
+    } else {
+      toast("That test can't get a new item — it already has one, or it's retired", "warn");
+    }
+    setParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("createTest");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [createTest, notPriced.data, setParams]);
+
   const notPricedCount = notPriced.data
     ? notPriced.data.tests.length + notPriced.data.consultants.length
     : null;

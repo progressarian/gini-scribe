@@ -84,6 +84,8 @@ export const STATUS_LABEL = {
   // rendered the raw key.
   reports_reviewed: "Reports read by the MO",
   test_cancelled: "Test cancelled",
+  paused: "Stepped out — clock held",
+  resumed: "Back — clock running",
   doctor_done: "Waiting for Prescription Explain",
   rx_pending: "Waiting for Prescription Explain",
   with_rx: "Prescription being explained",
@@ -225,6 +227,14 @@ export const MARKER_STATUSES = [
 // this is exactly a wait starting again, which is what stops an hour at the
 // canteen reading as an hour waiting for the MO.
 export const BREAK_RETURN_STATUS = "returned_from_break";
+
+export const SAMPLE_BREAK_REASON = "sample_break";
+
+const PAUSE_REASON_LABEL = { [SAMPLE_BREAK_REASON]: "Sample given" };
+
+export const pauseReasonLabel = (reason) => PAUSE_REASON_LABEL[reason] ?? reason;
+
+export const isSampleBreak = (reason) => reason === SAMPLE_BREAK_REASON;
 
 // Nothing has happened to this patient yet: they arrived and are waiting for
 // their first stop. A break here is not a pause — there is no journey in

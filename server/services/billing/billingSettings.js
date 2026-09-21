@@ -2,8 +2,9 @@ import pool from "../../config/db.js";
 import { writeAudit } from "./audit.js";
 import { httpError, inTransaction } from "./transaction.js";
 import { auditFields, cleanFlag, hasField, INT_MAX, readNumber } from "./common.js";
+import { STACKING_MODES } from "../../../shared/billingVocab.js";
 
-export const STACKING_MODES = ["best_only", "per_rule"];
+export { STACKING_MODES };
 
 const GSTIN_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const GSTIN_SHAPE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;

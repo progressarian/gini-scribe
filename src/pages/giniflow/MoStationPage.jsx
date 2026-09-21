@@ -267,12 +267,15 @@ function TrendChart({ marker, history }) {
 const CLAIMABLE = ["vitals_done", "sd_pending", "with_sd"];
 
 function WaitChip({ card, now }) {
-  const waited = minutesSince(card.statusSince, now) ?? card.waitMinutes ?? 0;
+  const waited =
+    minutesSince(card.statusSince, card.pausedAt ? new Date(card.pausedAt) : now) ??
+    card.waitMinutes ??
+    0;
   const tone = budgetColour(waited, card.waitBudget);
   return (
     <div className="si-wait">
-      <span className={`si-tmr si-tmr-${tone}`}>
-        ⏱ {waited}m {WAIT_WORD[card.status] || "waiting"}
+      <span className={`si-tmr si-tmr-${card.pausedAt ? "neutral" : tone}`}>
+        {card.pausedAt ? "⏸ on break" : `⏱ ${waited}m ${WAIT_WORD[card.status] || "waiting"}`}
       </span>
       {card.checkedInAt && <span className="si-since">in since {clock(card.checkedInAt)}</span>}
     </div>

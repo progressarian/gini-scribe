@@ -9,6 +9,7 @@ import {
 } from "../../queries/hooks/useGiniflowVitals";
 import { useVoiceVitals } from "../../hooks/useVoiceVitals";
 import { SPOKEN_EXAMPLE, flagLargeChanges } from "../../../shared/giniflowVitalsSpeech";
+import { pauseReasonLabel } from "../../../shared/giniflowStatus";
 import { useTick, minutesSince, budgetColour } from "../../lib/giniflowTime";
 import {
   ALLERGY_OPTIONS,
@@ -102,6 +103,13 @@ const SECTIONS = [
     sub: "being seen now",
   },
   { key: "waiting", icon: "⏳", short: "Waiting", title: "Waiting", sub: "ready to call" },
+  {
+    key: "onBreak",
+    icon: "⏸",
+    short: "On break",
+    title: "On break",
+    sub: "tap when they are back",
+  },
   { key: "held", icon: "🚫", short: "Held", title: "Held", sub: "cannot be called" },
   {
     key: "moved",
@@ -182,6 +190,25 @@ function QueueRow({ q, active, now, onPick }) {
   );
 }
 
+function BreakRow({ b, active, onPick }) {
+  return (
+    <button
+      type="button"
+      className={`sq-done${active ? " active" : ""}`}
+      onClick={() => onPick(b.visitId)}
+    >
+      <div className="si-name">{b.name}</div>
+      <div className="si-meta">
+        {b.age}
+        {(b.sex || "")[0] || ""} · {b.fileNo}
+      </div>
+      <div className="si-nowat">
+        ⏸ {pauseReasonLabel(b.pausedReason) || "On break"} · left {clock(b.pausedAt)}
+      </div>
+    </button>
+  );
+}
+
 // A patient whose vitals are recorded. Tapping reopens the reading — saveVitals
 // stores a correction without walking them back through the chain, so this
 // needs no new write path.
@@ -250,6 +277,7 @@ export default function VitalsStationPage() {
 
   const atStation = queueData?.atStation || [];
   const waitingList = queueData?.waiting || [];
+  const onBreak = queueData?.onBreak || [];
   const held = queueData?.held || [];
   const moved = queueData?.moved || [];
   const exited = queueData?.exited || [];
@@ -257,8 +285,8 @@ export default function VitalsStationPage() {
   // group filter are both applied by the server now, so this is the searched
   // set rather than the whole day — the pane opens on the first patient the
   // station is actually looking at, and on a done-only filter it opens on none.
-  const queue = [...atStation, ...waitingList];
-  const sectionRows = { atStation, waiting: waitingList, held, moved, exited };
+  const queue = [...atStation, ...waitingList, ...onBreak];
+  const sectionRows = { atStation, waiting: waitingList, onBreak, held, moved, exited };
   // Counts come from the server, whole-day and search-aware, so a chip says how
   // many of the searched-for patients are in that group — never the returned
   // array lengths, which hold one group once a filter is on.
@@ -268,7 +296,7 @@ export default function VitalsStationPage() {
 
   // Derived, not set in an effect: the screen opens on whoever is at the station
   // with no click and no flash of the empty state.
-  const activeVisitId = selected ?? queue[0]?.visitId ?? null;
+  const activeVisitId = selected ?? [...atStation, ...waitingList][0]?.visitId ?? null;
   // A patient reopened from the done list has already left the station, and
   // saveVitals will store the correction without moving them. The bar must say
   // that rather than promising to send them on again.
@@ -569,24 +597,33 @@ export default function VitalsStationPage() {
                           <div className="si-reason">🚫 {h.blockedReason || "On hold"}</div>
                         </div>
                       ))
-                    : g.done
-                      ? rows.map((d) => (
-                          <DoneRow
-                            key={`${d.visitId}-${d.recordedAt}`}
-                            d={d}
-                            active={d.visitId === activeVisitId}
+                    : g.key === "onBreak"
+                      ? rows.map((b) => (
+                          <BreakRow
+                            key={b.visitId}
+                            b={b}
+                            active={b.visitId === activeVisitId}
                             onPick={pick}
                           />
                         ))
-                      : rows.map((q) => (
-                          <QueueRow
-                            key={q.visitId}
-                            q={q}
-                            now={now}
-                            active={q.visitId === activeVisitId}
-                            onPick={pick}
-                          />
-                        ))}
+                      : g.done
+                        ? rows.map((d) => (
+                            <DoneRow
+                              key={`${d.visitId}-${d.recordedAt}`}
+                              d={d}
+                              active={d.visitId === activeVisitId}
+                              onPick={pick}
+                            />
+                          ))
+                        : rows.map((q) => (
+                            <QueueRow
+                              key={q.visitId}
+                              q={q}
+                              now={now}
+                              active={q.visitId === activeVisitId}
+                              onPick={pick}
+                            />
+                          ))}
                 </div>
               </div>
             );

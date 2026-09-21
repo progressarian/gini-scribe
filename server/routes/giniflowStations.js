@@ -1558,6 +1558,7 @@ router.post(
           action: req.body.action,
           note: req.body.note ?? null,
           undo: req.body.undo === true,
+          thenBreak: req.body.thenBreak === true,
           room: req.labRoom,
           actorId: req.doctor?.doctor_id ?? null,
           actorRole: req.doctor?.role || "lab",
@@ -1661,6 +1662,7 @@ router.post(
           to: req.body.to,
           room: req.labRoom,
           reportUrl: req.body.reportUrl ?? null,
+          thenBreak: req.body.thenBreak === true,
           actorId: req.doctor?.doctor_id ?? null,
         }),
       );

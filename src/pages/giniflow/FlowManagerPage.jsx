@@ -24,6 +24,8 @@ import {
   TERMINAL_STATUSES,
   hasNotStarted,
   isMachineColumn,
+  isSampleBreak,
+  pauseReasonLabel,
   SIDE_TRACK_COLUMNS,
 } from "../../../shared/giniflowStatus";
 import {
@@ -599,8 +601,14 @@ function PatientCard({
         {card.paused && (
           <div className="wait4 blocked">
             <span className="w-ico">{hasNotStarted(card.status) ? "⏹" : "⏸"}</span>{" "}
-            {hasNotStarted(card.status) ? "Left before being seen" : "On a break — clock held"}
-            {card.pausedReason ? ` · ${card.pausedReason}` : ""}
+            {isSampleBreak(card.pausedReason)
+              ? `Sample given — on break since ${clockAt(card.pausedAt)}`
+              : hasNotStarted(card.status)
+                ? "Left before being seen"
+                : "On a break — clock held"}
+            {card.pausedReason && !isSampleBreak(card.pausedReason)
+              ? ` · ${pauseReasonLabel(card.pausedReason)}`
+              : ""}
           </div>
         )}
         {isLab && !isMachine && card.finished && !card.lab.collected && (
@@ -676,13 +684,15 @@ function PatientCard({
                 {card.paused ? "▶" : hasNotStarted(card.status) ? "⏹" : "⏸"}
               </span>
               <span className="pc-hold-t">
-                {hasNotStarted(card.status)
-                  ? card.paused
-                    ? "Restart"
-                    : "Stop"
-                  : card.paused
-                    ? "Resume"
-                    : "Pause"}
+                {card.paused && isSampleBreak(card.pausedReason)
+                  ? "Back"
+                  : hasNotStarted(card.status)
+                    ? card.paused
+                      ? "Restart"
+                      : "Stop"
+                    : card.paused
+                      ? "Resume"
+                      : "Pause"}
               </span>
             </button>
           )}
@@ -1614,8 +1624,12 @@ export default function FlowManagerPage() {
     resumeVisit.mutate(
       { visitId },
       {
-        onSuccess: () =>
-          showToast(`▶ ${name} resumed — the break is left out of their waiting time`),
+        onSuccess: (r) =>
+          showToast(
+            r?.restarted
+              ? `▶ ${name} is back — their wait starts from now`
+              : `▶ ${name} resumed — the break is left out of their waiting time`,
+          ),
         onError: pauseErr,
       },
     );

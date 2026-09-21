@@ -1372,7 +1372,9 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
     // Blocked patients are excluded from the average: they are stuck on missing
     // reports, not on this station's throughput, and letting them skew it points
     // the bottleneck banner at the wrong station.
-    const timedCards = items.filter((c) => !c.blockedReason && !c.heldForTests);
+    const timedCards = items.filter(
+      (c) => !c.blockedReason && !c.heldForTests && (col.key === "lab" || !c.paused),
+    );
     const timed = onMachines
       ? machineTimed.map((c) => c.machine.minutes ?? 0)
       : col.key === "lab"

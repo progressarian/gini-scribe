@@ -105,7 +105,7 @@ const reportsLine = (resultsStatus, hasBiomarkers) => {
 
 const QUEUE_SQL = `
   SELECT v.id, v.current_status, v.results_status, v.category, v.assigned_sd_id,
-         v.appointment_time::text AS appointment_time, v.blocked_reason,
+         v.appointment_time::text AS appointment_time, v.blocked_reason, v.paused_at,
          p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
          sd.short_name AS sd_name,
          seq.visit_number,
@@ -177,8 +177,9 @@ const QUEUE_SQL = `
 // do we. Merging them hides the only group an MO can unblock.
 const waitMinutes = (row, now) => {
   const { since } = chiefWaitClock(row);
+  const until = row.paused_at ? new Date(row.paused_at) : now;
   return since
-    ? Math.max(0, Math.round((now.getTime() - new Date(since).getTime()) / 60000))
+    ? Math.max(0, Math.round((until.getTime() - new Date(since).getTime()) / 60000))
     : null;
 };
 
@@ -250,6 +251,7 @@ export async function getMoQueue(visitDate, sdId = null, q = null, now = new Dat
       slot: null,
       checkedInAt: r.checked_in_at ? new Date(r.checked_in_at).toISOString() : null,
       statusSince: waitSince ? new Date(waitSince).toISOString() : null,
+      pausedAt: r.paused_at ? new Date(r.paused_at).toISOString() : null,
       // The wait is judged against the same budget the board judges it by, so a
       // patient the coordinator sees in red is red at the MO's desk too. The
       // client recomputes the minutes every second; the budget and the colour

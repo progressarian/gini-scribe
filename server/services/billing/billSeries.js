@@ -3,16 +3,13 @@ import { writeAudit } from "./audit.js";
 import { indiaToday } from "./categoryResolver.js";
 import { httpError, inTransaction } from "./transaction.js";
 import { auditFields, hasField, readNumber } from "./common.js";
+import { BILL_SERIES, financialYearOf } from "../../../shared/billingVocab.js";
 
 const FY = /^([0-9]{4})-([0-9]{2})$/;
 
-export const BILL_SERIES = ["MAIN", "RCPT"];
+export { BILL_SERIES };
 
-export function financialYear(date = indiaToday()) {
-  const [year, month] = date.split("-").map(Number);
-  const start = month >= 4 ? year : year - 1;
-  return `${start}-${String((start + 1) % 100).padStart(2, "0")}`;
-}
+export const financialYear = (date = indiaToday()) => financialYearOf(date);
 
 export const formatNumber = ({ prefix, number_width: width }, number) =>
   `${prefix}${String(number).padStart(width, "0")}`;

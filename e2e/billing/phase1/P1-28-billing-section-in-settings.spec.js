@@ -196,10 +196,10 @@ test.describe("P1-28 billing section in settings — screens", () => {
   test("9. the billing settings tab shows the saved settings to admin", async ({ page }) => {
     await loginAs(page, "admin");
     await gotoReady(page, "/settings/billing", () =>
-      page.getByRole("rowheader", { name: "Discount stacking" }),
+      page.getByRole("form", { name: "Bills", exact: true }),
     );
-    await expect(page.getByRole("rowheader", { name: "Discount stacking" })).toBeVisible();
-    await expect(page.getByRole("rowheader", { name: "Number series" })).toBeVisible();
+    await expect(page.getByLabel("When several discounts apply", { exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Number series", exact: true })).toBeVisible();
   });
 
   test("10. switching category never shows the previous category's rates", async ({ page }) => {

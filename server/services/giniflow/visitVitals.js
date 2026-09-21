@@ -35,6 +35,14 @@ const LEGACY_SQL = `
      AND (recorded_at AT TIME ZONE 'Asia/Kolkata')::date = $2::date
    ORDER BY recorded_at DESC LIMIT 1`;
 
+export const VITALS_TAKEN_SQL = (v) => `(
+  EXISTS (SELECT 1 FROM giniflow_vitals g WHERE g.visit_id = ${v}.id)
+  OR EXISTS (
+    SELECT 1 FROM giniflow_visit_events e
+     WHERE e.visit_id = ${v}.id AND e.status = 'vitals_done' AND e.actor_role <> 'system'
+  )
+)`;
+
 // `vitals` stores numerics and `giniflow_vitals` stores plain numbers, so the
 // same BP arrives as "149.00" from one and 149 from the other. Normalise, or
 // the MO reads 149.00/84.00 depending on which nurse took it.

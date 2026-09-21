@@ -5,6 +5,7 @@ import {
   chainIndex,
   isChainStatus,
   isTerminalStatus,
+  JOURNEY_START_SQL,
 } from "../../../shared/giniflowStatus.js";
 import { advanceStatus } from "./statusEngine.js";
 import { labStepsAreManual } from "../../../shared/manualFloor.js";
@@ -1150,14 +1151,14 @@ export async function reorderSteps(visitId, stepIds, db = pool) {
 // name and nothing else that identifies the patient.
 export async function trackByToken(token, db = pool) {
   const { rows } = await db.query(
-    `SELECT v.id, v.current_status, v.planned_total_min, p.name,
+    `SELECT v.id, v.current_status, v.planned_total_min, v.paused_at, p.name,
             checkin.occurred_at AS checked_in_at
        FROM giniflow_visits v
        JOIN patients p ON p.id = v.patient_id
        LEFT JOIN LATERAL (
          SELECT occurred_at FROM giniflow_visit_events e
-          WHERE e.visit_id = v.id AND e.status = 'checked_in'
-          ORDER BY occurred_at LIMIT 1
+          WHERE e.visit_id = v.id AND ${JOURNEY_START_SQL("e.status")}
+          ORDER BY occurred_at DESC LIMIT 1
        ) checkin ON TRUE
       WHERE v.visit_token = $1`,
     [token],
@@ -1167,8 +1168,9 @@ export async function trackByToken(token, db = pool) {
 
   const { steps, doneCount, totalCount, currentStep } = await getJourney(visit.id, db);
   const planned = visit.planned_total_min || 0;
+  const now = visit.paused_at ? new Date(visit.paused_at).getTime() : Date.now();
   const elapsed = visit.checked_in_at
-    ? Math.max(0, Math.round((Date.now() - new Date(visit.checked_in_at).getTime()) / 60000))
+    ? Math.max(0, Math.round((now - new Date(visit.checked_in_at).getTime()) / 60000))
     : 0;
   return {
     first_name: (visit.name || "").split(" ")[0],
