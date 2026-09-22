@@ -367,7 +367,7 @@ export const IMPORT_SHEETS = [
         { blank: blank(null, "both New and Follow Up for this doctor") },
       ),
       text("category_code", "The category or sub-category.", "pensioner", { required: true }),
-      number("fee", "The doctor's fee in this category, in rupees.", "[fee]", { required: true }),
+      number("fee", "The doctor's fee in this category, in rupees.", 800, { required: true }),
       list(
         "patient_pays",
         PATIENT_PAYS,
@@ -518,11 +518,58 @@ export const CATEGORY_RATE_DB_COLUMNS = {
   valid_to: "valid_to",
 };
 
+export const PAYMENT_RULE_DB_COLUMNS = {
+  category_code: "scheme_code",
+  rule_name: "name",
+  group_code: "group_id",
+  subgroup_code: "subgroup_id",
+  item_code: "service_item_id",
+  visit_types: "visit_types",
+  patient_pays: "patient_pays",
+  patient_value: "patient_value",
+  remainder: "remainder",
+  valid_from: "valid_from",
+  valid_to: "valid_to",
+  priority: "priority",
+  active: "is_active",
+};
+
+export const DISCOUNT_DB_COLUMNS = {
+  rule_name: "name",
+  code: "code",
+  method: "method",
+  kind: "kind",
+  value: "value",
+  max_discount: "max_discount",
+  groups: "group_ids",
+  subgroups: "subgroup_ids",
+  items: "service_item_ids",
+  doctors: "doctor_ids",
+  visit_types: "visit_types",
+  categories: "scheme_codes",
+  min_age: "min_age",
+  max_age: "max_age",
+  gender: "gender",
+  valid_from: "valid_from",
+  valid_to: "valid_to",
+  max_uses_total: "max_uses_total",
+  max_uses_per_patient: "max_uses_per_patient",
+  max_uses_per_day: "max_uses_per_day",
+  max_uses_per_doctor_per_day: "max_uses_per_doctor_per_day",
+  priority: "priority",
+  stackable: "stackable",
+  applies_on_scheme_rate: "applies_on_scheme_rate",
+  allowed_roles: "allowed_roles",
+  active: "is_active",
+};
+
 export const README_SHEET = "Read me";
 
-export const LATER_SHEETS = ["Payment rules", "Consultant fees", "Discounts"];
+export const LATER_SHEETS = [];
 
 export const ERROR_COLUMN = "error";
+
+export const isExampleKey = (text) => /^\s*example/i.test(String(text ?? ""));
 
 export const isLaterSheet = (name) => LATER_SHEETS.includes(name);
 

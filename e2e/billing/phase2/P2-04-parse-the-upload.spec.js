@@ -6,9 +6,11 @@ import {
   IMPORT_SHEETS,
   LATER_SHEETS,
   blankValue,
+  parseRow,
   sheetByName,
 } from "../../../server/services/billing/importColumns.js";
 import { templateBuffer } from "../../../server/services/billing/importTemplate.js";
+import { SHEET_EXAMPLES } from "../../../server/services/billing/importReadme.js";
 import {
   MAX_SHEET_ROWS,
   MAX_UPLOAD_BYTES,
@@ -19,7 +21,7 @@ const ExcelJS = createRequire(path.join(repoRoot, "server", "package.json"))("ex
 
 async function template() {
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(await templateBuffer());
+  await workbook.xlsx.load(await templateBuffer({ examples: false }));
   return workbook;
 }
 
@@ -187,20 +189,27 @@ test.describe("P2-04 parse the upload", () => {
     });
   });
 
-  test("6. Payment rules, Consultant fees and Discounts rows are counted as not imported, never parsed", async () => {
+  test("6. since P3-22 Payment rules, Consultant fees and Discounts rows are parsed like every other sheet", async () => {
     const result = await parseFilled((wb) => {
       fill(wb, "Discounts", [{ rule_name: "Staff", method: "nonsense" }, { rule_name: "Two" }]);
       fill(wb, "Consultant fees", [{ doctor: "[Doctor A]", fee: "abc" }]);
       fill(wb, "Groups", [{ group_code: "LAB", name: "Lab" }]);
     });
     expect(result.problems).toEqual([]);
-    expect(sheetOf(result, "Discounts")).toEqual({
-      name: "Discounts",
-      later: true,
-      notImported: 2,
-      rows: [],
-    });
-    expect(sheetOf(result, "Consultant fees").notImported).toBe(1);
+    const discounts = sheetOf(result, "Discounts");
+    expect(discounts).toMatchObject({ name: "Discounts", later: false, notImported: 0 });
+    expect(discounts.rows.map((r) => [r.row, r.errors.map((e) => e.message)])).toEqual([
+      [2, ["method must be one of: auto, code", "kind is required", "value is required"]],
+      [3, ["method is required", "kind is required", "value is required"]],
+    ]);
+    const [fee] = sheetOf(result, "Consultant fees").rows;
+    expect(fee.errors.map((e) => e.column)).toEqual([
+      "category_code",
+      "fee",
+      "patient_pays",
+      "remainder",
+    ]);
+    expect(fee.values.doctor).toBe("[Doctor A]");
     expect(sheetOf(result, "Payment rules")).toBeUndefined();
     expect(sheetOf(result, "Groups").later).toBe(false);
   });
@@ -319,5 +328,46 @@ test.describe("P2-04 parse the upload", () => {
           "sort_order is a date, so Excel has probably changed what was typed; format the column as Text and type it again",
       },
     ]);
+  });
+
+  test("14. the template's example rows are valid, and an upload always skips them", async () => {
+    for (const sheet of IMPORT_SHEETS) {
+      const examples = SHEET_EXAMPLES[sheet.name];
+      expect(examples, `${sheet.name} has two examples`).toHaveLength(2);
+      for (const example of examples) {
+        expect(String(example[sheet.columns[0].name]), sheet.name).toMatch(/^example/i);
+        expect(parseRow(sheet, example).errors, `${sheet.name} example`).toEqual([]);
+      }
+    }
+
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await templateBuffer());
+    const add = (name, cells) => {
+      const ws = wb.getWorksheet(name);
+      const names = ws.getRow(1).values.slice(1);
+      ws.addRow(names.map((n) => cells[n] ?? null));
+    };
+    add("Groups", { group_code: "REAL_LAB", name: "Real lab" });
+    add("Discounts", {
+      rule_name: "Staff",
+      method: "code",
+      code: "STAFF1",
+      kind: "flat",
+      value: 50,
+    });
+    const result = await parseUpload(await bytes(wb));
+    expect(result.problems).toEqual([]);
+    expect(result.sheets.map((s) => [s.name, s.rows.map((r) => r.row), s.notImported])).toEqual([
+      ["Groups", [4], 0],
+      ["Discounts", [4], 0],
+    ]);
+
+    const moved = new ExcelJS.Workbook();
+    const ws = moved.addWorksheet("Groups");
+    ws.addRow(["name", "sort_order", "active", "group_code"]);
+    ws.addRow(["Lab (example)", 1, "yes", "EXAMPLE_LAB"]);
+    ws.addRow(["Real lab", 1, "yes", "REAL_LAB"]);
+    const reordered = await parseUpload(await bytes(moved));
+    expect(reordered.sheets[0].rows.map((r) => r.values.group_code)).toEqual(["REAL_LAB"]);
   });
 });

@@ -7,6 +7,7 @@ import {
   YES_NO,
 } from "../../../server/services/billing/importColumns.js";
 import { TEMPLATE_ROWS, templateBuffer } from "../../../server/services/billing/importTemplate.js";
+import { SHEET_EXAMPLES } from "../../../server/services/billing/importReadme.js";
 import { repoRoot } from "../../setup/testEnv.mjs";
 
 const COMMITTED = path.join(repoRoot, "docs", "gini-flow", "billing-template.xlsx");
@@ -175,7 +176,13 @@ function checkWorkbook(workbook) {
     const ws = workbook.getWorksheet(sheetName);
     expect(headers(ws), sheetName).toEqual(expected);
     expect(ws.views[0], `${sheetName} frozen header`).toMatchObject({ state: "frozen", ySplit: 1 });
-    expect(ws.rowCount, `${sheetName} has no data rows`).toBe(1);
+    const examples = SHEET_EXAMPLES[sheetName];
+    expect(ws.rowCount, `${sheetName} has only its example rows`).toBe(1 + examples.length);
+    examples.forEach((_, i) => {
+      expect(String(ws.getRow(i + 2).getCell(1).value), `${sheetName} example ${i + 1}`).toMatch(
+        /^example/i,
+      );
+    });
   }
 
   for (const sheet of IMPORT_SHEETS) {

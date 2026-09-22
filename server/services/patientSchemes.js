@@ -1,5 +1,6 @@
 import pool from "../config/db.js";
 import { writeAudit } from "./billing/audit.js";
+import { checkCategoryPrices, checkClaimPayers } from "./billing/paymentRules.js";
 import { RESERVED_CATEGORY_CODES } from "./billing/importColumns.js";
 import { httpError, inTransaction } from "./billing/transaction.js";
 import {
@@ -319,6 +320,12 @@ export async function updateScheme(code, patch, db = pool, ctx = null) {
       .catch((e) => {
         throw treeError(e);
       });
+    if ("payer_name" in values || "parent_code" in values) {
+      await checkClaimPayers(client, code);
+    }
+    const reactivated = values.is_active === true && !before.is_active;
+    const reparented = "parent_code" in values && values.parent_code !== before.parent_code;
+    if (reactivated || reparented) await checkCategoryPrices(client, code);
     const after = await lockScheme(client, code);
     await writeAudit(client, {
       entity: "patient_schemes",

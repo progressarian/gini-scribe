@@ -156,12 +156,16 @@ export async function scanTargets(visitDate, db, limit) {
          JOIN giniflow_visits v ON v.id = due.visit_id
      ) t
       WHERE t.machine_scan_at IS NULL
+         OR NOT EXISTS (SELECT 1 FROM giniflow_patient_bills nb
+                         WHERE nb.patient_id = t.patient_id AND nb.bill_date = $2::date)
          OR t.machine_scan_at < NOW() - ((CASE t.bill_tier
               WHEN 'A' THEN $10
               WHEN 'B' THEN $3
               WHEN 'C' THEN $9
               ELSE $6 END) || ' minutes')::interval
-      ORDER BY t.bill_tier, t.machine_scan_at NULLS FIRST, t.visit_created_at
+      ORDER BY EXISTS (SELECT 1 FROM giniflow_patient_bills nb
+                        WHERE nb.patient_id = t.patient_id AND nb.bill_date = $2::date),
+               t.bill_tier, t.machine_scan_at NULLS FIRST, t.visit_created_at
       LIMIT $4`,
     [
       NEVER_ARRIVED,

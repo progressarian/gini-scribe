@@ -9,6 +9,7 @@ import {
   LATER_SHEET_NOTE,
   README_INTRO,
   README_TITLE,
+  SHEET_EXAMPLES,
   VALUE_GLOSSARY,
   laterSheetsRule,
 } from "./importReadme.js";
@@ -16,6 +17,9 @@ import {
 export const TEMPLATE_ROWS = 2000;
 export const TEMPLATE_FILE_NAME = "gini-billing-template.xlsx";
 export const LATER_TAB_COLOR = "FFB0B0B0";
+
+const EXAMPLE_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF2F2F2" } };
+const EXAMPLE_FONT = { italic: true, color: { argb: "FF7A7A7A" } };
 
 const LATER_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF4E5" } };
 
@@ -39,7 +43,17 @@ function numberFormatFor(column) {
   return "@";
 }
 
-function addDataSheet(workbook, sheet) {
+function addExampleRows(ws, sheet) {
+  for (const example of SHEET_EXAMPLES[sheet.name] ?? []) {
+    const row = ws.addRow(sheet.columns.map((column) => example[column.name] ?? null));
+    sheet.columns.forEach((column, i) => {
+      const cell = row.getCell(i + 1);
+      cell.style = { ...cell.style, fill: EXAMPLE_FILL, font: EXAMPLE_FONT };
+    });
+  }
+}
+
+function addDataSheet(workbook, sheet, { examples }) {
   const later = isLaterSheet(sheet.name);
   const ws = workbook.addWorksheet(sheet.name, {
     views: [{ state: "frozen", ySplit: 1 }],
@@ -80,6 +94,7 @@ function addDataSheet(workbook, sheet) {
     });
   });
 
+  if (examples) addExampleRows(ws, sheet);
   return ws;
 }
 
@@ -236,18 +251,18 @@ function addReadmeSheet(workbook) {
   return ws;
 }
 
-export function buildTemplateWorkbook() {
+export function buildTemplateWorkbook({ examples = true } = {}) {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "Gini Scribe";
   workbook.created = new Date(0);
   workbook.modified = new Date(0);
-  for (const sheet of IMPORT_SHEETS) addDataSheet(workbook, sheet);
+  for (const sheet of IMPORT_SHEETS) addDataSheet(workbook, sheet, { examples });
   addReadmeSheet(workbook);
   return workbook;
 }
 
-export async function templateBuffer() {
-  return buildTemplateWorkbook().xlsx.writeBuffer();
+export async function templateBuffer(options) {
+  return buildTemplateWorkbook(options).xlsx.writeBuffer();
 }
 
 export async function writeTemplateFile(filePath) {

@@ -190,7 +190,7 @@ test.describe.serial("P1-14 where-is-it-used helper", () => {
          JOIN information_schema.tables t
            ON t.table_schema = c.table_schema AND t.table_name = c.table_name
         WHERE c.table_schema = 'public' AND t.table_type = 'BASE TABLE'
-          AND c.column_name IN ('scheme_code', 'patient_category', 'parent_code')
+          AND c.column_name IN ('scheme_code', 'scheme_codes', 'patient_category', 'parent_code')
           AND NOT (c.table_name = ANY($1))`,
       [DROPPED_LATER],
     );

@@ -473,6 +473,10 @@ export async function reconcileTestSteps(client, visitId, bill, machines) {
                                AND s.source IN ('template', 'added')) AS from_checkin,
             EXISTS (SELECT 1 FROM giniflow_lab_order_events e
                      WHERE e.lab_order_id = o.id AND e.track = 'sample') AS started,
+            EXISTS (SELECT 1 FROM giniflow_lab_order_events e
+                     WHERE e.lab_order_id = o.id AND e.track = 'payment' AND e.status = 'paid'
+                       AND COALESCE((e.meta->>'notOnBill')::boolean, FALSE)) AS cleared_before_bill,
+            COALESCE(o.claim_state, 'none') AS claim_state,
             COALESCE((SELECT array_agg(t.test_name) FROM giniflow_lab_order_tests t
                        WHERE t.lab_order_id = o.id), '{}') AS tests
        FROM giniflow_lab_orders o
@@ -486,14 +490,18 @@ export async function reconcileTestSteps(client, visitId, bill, machines) {
       ? LAB_TEST_STEP_IDS
       : o.tests.map((n) => machineForTest(machines, n)?.id).filter(Boolean);
   const unbilled = (o) => (o.kind === "lab" ? !labBilled : idsOf(o).every((id) => !billed.has(id)));
+  const unpaid = (o) =>
+    o.payment_status === "pending" &&
+    Number(o.amount_paid) === 0 &&
+    ["ordered", "payment_pending"].includes(o.sample_status);
+  const paidBeforeBill = (o) =>
+    o.kind === "machine" &&
+    o.cleared_before_bill &&
+    o.payment_status === "paid" &&
+    o.sample_status === "paid" &&
+    o.claim_state === "none";
   const removable = orders.filter(
-    (o) =>
-      o.from_checkin &&
-      o.payment_status === "pending" &&
-      Number(o.amount_paid) === 0 &&
-      ["ordered", "payment_pending"].includes(o.sample_status) &&
-      !o.started &&
-      unbilled(o),
+    (o) => o.from_checkin && !o.started && unbilled(o) && (unpaid(o) || paidBeforeBill(o)),
   );
   const kept = new Set(orders.filter((o) => !removable.includes(o)).flatMap(idsOf));
 
@@ -531,7 +539,12 @@ export async function reconcileTestSteps(client, visitId, bill, machines) {
         reason: NOT_ON_BILL_REASON,
         source: "healthray",
         actorRole: "system",
-        refundAmount: 0,
+        refundAmount: Number(o.amount_paid) || 0,
+        ...(Number(o.amount_paid) > 0
+          ? {
+              note: "Paid at reception before the HealthRay bill was read; not on the bill — refund if collected",
+            }
+          : {}),
       });
       await client.query("RELEASE SAVEPOINT not_on_bill");
       result.removedOrders += 1;

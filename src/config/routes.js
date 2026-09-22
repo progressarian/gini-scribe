@@ -113,6 +113,8 @@ export const PAGE_CAPABILITIES = {
   "/settings/schemes": CAP.BILLING_MASTER,
   "/settings/services": CAP.BILLING_MASTER,
   "/settings/category-rates": CAP.BILLING_MASTER,
+  "/settings/consultant-fees": CAP.BILLING_MASTER,
+  "/settings/discounts": CAP.BILLING_MASTER,
   "/settings/bulk-import": CAP.BILLING_MASTER,
   "/settings/billing": CAP.BILLING_SETTINGS,
   "/medicine-collection": CAP.MED_COLLECTION,

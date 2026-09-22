@@ -25,7 +25,7 @@ const seed = {};
 
 async function workbook(sheets) {
   const book = new ExcelJS.Workbook();
-  await book.xlsx.load(await templateBuffer());
+  await book.xlsx.load(await templateBuffer({ examples: false }));
   for (const [sheetName, rows] of Object.entries(sheets)) {
     const ws = book.getWorksheet(sheetName);
     const columns = {};

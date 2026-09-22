@@ -302,6 +302,16 @@ export async function advanceStatus(
       WHERE id = $1`,
     [visitId, toStatus, fromStatus, blockedReason],
   );
+  if (TERMINAL_STATUSES.includes(toStatus)) {
+    await client.query(
+      `UPDATE giniflow_visits
+          SET paused_ms_total = paused_ms_total
+                + GREATEST(0, (EXTRACT(EPOCH FROM (NOW() - paused_at)) * 1000)::bigint),
+              paused_at = NULL, paused_by = NULL, paused_reason = NULL
+        WHERE id = $1 AND paused_at IS NOT NULL`,
+      [visitId],
+    );
+  }
 
   // The patient's journey follows the status in the same transaction, so the
   // plan and the board can never disagree about where someone is. It only ever

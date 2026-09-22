@@ -1,7 +1,7 @@
 import { writeAudit } from "./audit.js";
 import { assertUnused, whereUsed } from "./usage.js";
 import { httpError } from "./transaction.js";
-import { INT_MAX, MONEY_MAX } from "../../../shared/billingVocab.js";
+import { INT_MAX, MONEY_MAX, VISIT_TYPES } from "../../../shared/billingVocab.js";
 
 export const hasField = (input, key) =>
   Boolean(input) && Object.prototype.hasOwnProperty.call(input, key);
@@ -115,4 +115,39 @@ export async function deleteUnused(client, { table, key = "id", kind, id, label,
     ...auditFields(ctx),
   });
   return { deleted: true, id };
+}
+
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+export function cleanDate(value, label) {
+  if (value === undefined || value === null || value === "") return null;
+  const text = typeof value === "string" ? value.trim() : "";
+  const parsed = DATE.test(text) ? new Date(`${text}T00:00:00Z`) : null;
+  if (!parsed || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== text) {
+    throw httpError(400, `${label} must be a date like 2026-10-01`);
+  }
+  return text;
+}
+
+export function cleanPriority(value) {
+  const priority = readNumber(value, "Priority must be a whole number, 0 or more");
+  if (priority === undefined) return 100;
+  if (!Number.isInteger(priority) || priority < 0 || priority > INT_MAX) {
+    throw httpError(400, "Priority must be a whole number, 0 or more");
+  }
+  return priority;
+}
+
+export function cleanVisitTypes(value) {
+  if (value === undefined || value === null || value === "") return null;
+  if (!Array.isArray(value)) throw httpError(400, "Visit types must be a list");
+  const unknown = value.filter((v) => !VISIT_TYPES.includes(v));
+  if (unknown.length) {
+    throw httpError(
+      400,
+      `Visit types must be from: ${VISIT_TYPES.join(", ")} (not ${unknown.map(String).join(", ")})`,
+    );
+  }
+  const chosen = VISIT_TYPES.filter((v) => value.includes(v));
+  return chosen.length ? chosen : null;
 }

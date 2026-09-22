@@ -1,7 +1,14 @@
 import pool from "../../config/db.js";
+import {
+  checkClaimPayers,
+  conflictText,
+  priceConflicts,
+  throwPriceConflicts,
+  tooCheapText,
+} from "./paymentRules.js";
 import { parseUpload } from "./importParse.js";
 import { markStatus, summarize } from "./importPreview.js";
-import { checkMasterRows, key, loadReference, nameKey } from "./importValidate.js";
+import { checkMasterRows, key, loadReference, nameKey, ruleKeyOf } from "./importValidate.js";
 import { writeAudit, writeAuditMany } from "./audit.js";
 import { auditFields } from "./common.js";
 import { httpError } from "./transaction.js";
@@ -86,7 +93,60 @@ const TABLES = {
       is_active: "boolean",
     },
   },
+  paymentRules: {
+    table: "category_payment_rules",
+    insert: {
+      scheme_code: "text",
+      name: "text",
+      group_id: "int",
+      subgroup_id: "int",
+      service_item_id: "int",
+      visit_types: "text[]",
+      patient_pays: "text",
+      patient_value: "numeric",
+      remainder: "text",
+      valid_from: "date",
+      valid_to: "date",
+      priority: "int",
+      is_active: "boolean",
+    },
+  },
+  discounts: {
+    table: "discount_rules",
+    insert: {
+      name: "text",
+      code: "text",
+      method: "text",
+      kind: "text",
+      value: "numeric",
+      max_discount: "numeric",
+      group_ids: "int[]",
+      subgroup_ids: "int[]",
+      service_item_ids: "int[]",
+      doctor_ids: "int[]",
+      visit_types: "text[]",
+      scheme_codes: "text[]",
+      min_age: "int",
+      max_age: "int",
+      gender: "text",
+      valid_from: "date",
+      valid_to: "date",
+      max_uses_total: "int",
+      max_uses_per_patient: "int",
+      max_uses_per_day: "int",
+      max_uses_per_doctor_per_day: "int",
+      priority: "int",
+      stackable: "boolean",
+      applies_on_scheme_rate: "boolean",
+      allowed_roles: "text[]",
+      is_active: "boolean",
+    },
+  },
 };
+const allBut = (types, ...skip) =>
+  Object.fromEntries(Object.entries(types).filter(([column]) => !skip.includes(column)));
+TABLES.paymentRules.update = allBut(TABLES.paymentRules.insert, "scheme_code", "name");
+TABLES.discounts.update = allBut(TABLES.discounts.insert, "name");
 TABLES.items.update = Object.fromEntries(
   Object.entries(TABLES.items.insert).filter(([column]) => column !== "code"),
 );
@@ -320,6 +380,11 @@ async function saveCategories(client, sheets, ctx, audit) {
     ctx,
   );
   const subs = await create(fresh.filter((r) => r.values.parent_code));
+  for (const { before, after } of updated) {
+    if (before.payer_name !== after.payer_name || before.parent_code !== after.parent_code) {
+      await checkClaimPayers(client, after.code);
+    }
+  }
   audit.push(...auditOf("patient_schemes", (r) => r.code, [...tops, ...subs], updated));
 }
 
@@ -360,16 +425,322 @@ async function saveRules(client, sheets, ids, ctx, audit) {
 
 const rateId = (r) => `${r.scheme_code}:${r.service_item_id}:${r.valid_from}`;
 
+const categoryKey = (code) => String(code ?? "").toLowerCase();
+
+const feeTargets = (sheets) =>
+  rowsOf(sheets, "Consultant fees").flatMap((row) =>
+    (row.resolved?.targets ?? []).map((target) => ({ row, ...target })),
+  );
+
+async function importConflicts(client, sheets, ids, ruleCodes) {
+  const itemIds = [
+    ...[...rowsOf(sheets, "Items"), ...rowsOf(sheets, "Category rates")].map((r) =>
+      ids.items.get(key(r.values.item_code)),
+    ),
+    ...feeTargets(sheets)
+      .filter((t) => t.rateChanged)
+      .map((t) => ids.items.get(key(t.item.code))),
+  ];
+  const subgroupIds = rowsOf(sheets, "Subgroups")
+    .filter((r) => r.status === "update")
+    .map((r) => ids.subgroups.get(key(r.values.subgroup_code)));
+  if (subgroupIds.length) {
+    const { rows } = await client.query(
+      `SELECT id FROM service_items WHERE subgroup_id = ANY($1::int[]) AND is_active`,
+      [subgroupIds],
+    );
+    itemIds.push(...rows.map((r) => r.id));
+  }
+  const schemeCodes = rowsOf(sheets, "Categories")
+    .filter((r) => r.status === "update")
+    .map((r) => categoryKey(r.values.category_code));
+  const found = [
+    ...(await priceConflicts(client, { itemIds })),
+    ...(await priceConflicts(client, { schemeCodes: [...schemeCodes, ...ruleCodes] })),
+  ];
+  const seen = new Set();
+  return found.filter((c) => {
+    const id = `${c.rule_id}:${c.id}`;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
+function rowsInConflict(sheets, conflict) {
+  const categories = [conflict.billed_code, conflict.billed_parent].filter(Boolean);
+  const inCategories = (r) => categories.includes(categoryKey(r.values.category_code));
+  const changed = (r, column) => r.changes?.some((c) => c.column === column);
+  return [
+    ...rowsOf(sheets, "Items")
+      .filter((r) => key(r.values.item_code) === key(conflict.code))
+      .map((row) => [row, "base_price"]),
+    ...rowsOf(sheets, "Category rates")
+      .filter((r) => key(r.values.item_code) === key(conflict.code) && inCategories(r))
+      .map((row) => [row, "rate"]),
+    ...feeTargets(sheets)
+      .filter(
+        (t) =>
+          t.rateChanged &&
+          key(t.item.code) === key(conflict.code) &&
+          categories.includes(t.rate.category_code),
+      )
+      .map((t) => [t.row, "fee"]),
+    ...rowsOf(sheets, "Subgroups")
+      .filter(
+        (r) => r.status === "update" && key(r.values.subgroup_code) === key(conflict.subgroup_code),
+      )
+      .map((row) => [row, "group_code"]),
+    ...rowsOf(sheets, "Categories")
+      .filter((r) => r.status === "update" && inCategories(r))
+      .map((row) => [row, changed(row, "parent_code") ? "parent_code" : "active"]),
+  ];
+}
+
+function markConflicts(parsed, conflicts, ruleRows) {
+  const byRule = new Map();
+  for (const conflict of conflicts) {
+    const owner = ruleRows.get(conflict.rule_id);
+    if (owner) byRule.set(owner, [...(byRule.get(owner) ?? []), conflict]);
+  }
+  const marked = conflicts.map((conflict) => [
+    conflict,
+    rowsInConflict(parsed.sheets, conflict).filter(
+      ([row]) => row !== ruleRows.get(conflict.rule_id)?.row,
+    ),
+  ]);
+  for (const [conflict, rows] of marked) {
+    if (!rows.length && !ruleRows.has(conflict.rule_id)) {
+      parsed.problems.push(conflictText(conflict));
+    }
+    for (const [row, column] of rows) row.errors.push({ column, message: conflictText(conflict) });
+  }
+  for (const [{ row, column }, list] of byRule) {
+    const message = tooCheapText(list[0].amount, list);
+    if (!row.errors.some((e) => e.message === message)) row.errors.push({ column, message });
+    row.status = "error";
+  }
+  for (const [, rows] of marked) for (const [row] of rows) row.status = "error";
+}
+
+async function writeSheets(client, sheets, ref, ctx, reason) {
+  const ids = idMaps(ref);
+  const audit = [];
+  const ruleRows = new Map();
+  await saveGroups(client, sheets, ids, ctx, audit);
+  await saveSubgroups(client, sheets, ids, ctx, audit);
+  await saveItems(client, sheets, ids, ctx, audit, reason);
+  await saveCategories(client, sheets, ctx, audit);
+  await saveRules(client, sheets, ids, ctx, audit);
+  await saveRates(client, sheets, ids, ctx, audit);
+  await savePaymentRules(client, sheets, ids, ctx, audit, ruleRows);
+  await saveConsultantFees(client, sheets, ids, ctx, audit, ruleRows);
+  await saveDiscounts(client, sheets, ids, ctx, audit);
+  const ruleCodes = [...new Set([...ruleRows.values()].map((r) => r.scheme))];
+  for (const code of ruleCodes) await checkClaimPayers(client, code);
+  return {
+    audit,
+    conflicts: await importConflicts(client, sheets, ids, ruleCodes),
+    ruleRows,
+  };
+}
+
+export async function tryUploadWrites(parsed, ref, db = pool) {
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [IMPORT_LOCK]);
+    const { conflicts, ruleRows } = await writeSheets(
+      client,
+      parsed.sheets,
+      ref,
+      { actorId: null, ip: null, importId: null },
+      "Preview",
+    );
+    markConflicts(parsed, conflicts, ruleRows);
+  } catch (error) {
+    if (!error.status && !String(error.code ?? "").startsWith("23")) throw explain(error);
+    parsed.problems.push(
+      error.status ? error.message : `Saving this file would fail: ${error.message}`,
+    );
+  } finally {
+    await client.query("ROLLBACK").catch(() => {});
+    client.release();
+  }
+}
+
+const rateRow = (values, ids) => ({
+  scheme_code: values.category_code,
+  service_item_id: ids.items.get(key(values.item_code)),
+  valid_from: values.valid_from,
+  valid_to: values.valid_to,
+  rate: values.rate,
+  bill_name: values.bill_name,
+  bill_code: values.bill_code,
+});
+
 async function saveRates(client, sheets, ids, ctx, audit) {
-  const rows = rowsOf(sheets, "Category rates").map((r) => ({
-    scheme_code: r.values.category_code,
-    service_item_id: ids.items.get(key(r.values.item_code)),
-    valid_from: r.values.valid_from,
-    valid_to: r.values.valid_to,
-    rate: r.values.rate,
-    bill_name: r.values.bill_name,
-    bill_code: r.values.bill_code,
-  }));
+  const rows = rowsOf(sheets, "Category rates").map((r) => rateRow(r.values, ids));
+  await writeRates(client, rows, ctx, audit);
+}
+
+const ruleValues = (rule) => ({
+  group_id: rule.group_id,
+  subgroup_id: rule.subgroup_id,
+  service_item_id: rule.service_item_id,
+  visit_types: rule.visit_types,
+  patient_pays: rule.patient_pays,
+  patient_value: rule.patient_value,
+  remainder: rule.remainder,
+  valid_from: rule.valid_from,
+  valid_to: rule.valid_to,
+  priority: rule.priority,
+  is_active: rule.is_active,
+});
+
+async function writePaymentRules(client, updates, inserts, ctx, audit, ruleRows) {
+  const updated = await updateRows(
+    client,
+    TABLES.paymentRules,
+    updates.map(({ id, rule }) => ({ id, ...ruleValues(rule) })),
+    ctx,
+  );
+  const created = await insertRows(
+    client,
+    TABLES.paymentRules,
+    inserts.map(({ rule }) => ({
+      scheme_code: rule.scheme_code,
+      name: rule.name,
+      ...ruleValues(rule),
+    })),
+    ctx,
+  );
+  const byId = new Map(updates.map((u) => [u.id, u.owner]));
+  const byKey = new Map(inserts.map((i) => [ruleKeyOf(i.rule.scheme_code, i.rule.name), i.owner]));
+  for (const { after } of updated)
+    ruleRows.set(after.id, { ...byId.get(after.id), scheme: after.scheme_code });
+  for (const rule of created) {
+    ruleRows.set(rule.id, {
+      ...byKey.get(ruleKeyOf(rule.scheme_code, rule.name)),
+      scheme: rule.scheme_code,
+    });
+  }
+  audit.push(...auditOf("category_payment_rules", (r) => r.id, created, updated));
+}
+
+async function savePaymentRules(client, sheets, ids, ctx, audit, ruleRows) {
+  const rows = rowsOf(sheets, "Payment rules");
+  const scopeId = (map, code) => (code ? map.get(key(code)) : null);
+  const rule = (row) => ({
+    scheme_code: row.values.category_code,
+    name: row.values.rule_name,
+    group_id: scopeId(ids.groups, row.values.group_code),
+    subgroup_id: scopeId(ids.subgroups, row.values.subgroup_code),
+    service_item_id: scopeId(ids.items, row.values.item_code),
+    visit_types: row.values.visit_types,
+    patient_pays: row.values.patient_pays,
+    patient_value: row.values.patient_value,
+    remainder: row.values.remainder,
+    valid_from: row.values.valid_from,
+    valid_to: row.values.valid_to,
+    priority: row.values.priority,
+    is_active: row.values.active,
+  });
+  const owner = (row) => ({ row, column: "patient_value" });
+  await writePaymentRules(
+    client,
+    rows
+      .filter((r) => r.status === "update")
+      .map((r) => ({
+        id: ids.paymentRules.get(ruleKeyOf(r.values.category_code, r.values.rule_name)),
+        rule: rule(r),
+        owner: owner(r),
+      })),
+    rows.filter((r) => r.status === "new").map((r) => ({ rule: rule(r), owner: owner(r) })),
+    ctx,
+    audit,
+    ruleRows,
+  );
+}
+
+async function saveConsultantFees(client, sheets, ids, ctx, audit, ruleRows) {
+  const targets = feeTargets(sheets);
+  if (!targets.length) return;
+  await writeRates(
+    client,
+    targets.filter((t) => t.rateChanged).map((t) => rateRow(t.rate, ids)),
+    ctx,
+    audit,
+  );
+  const ops = targets.flatMap((t) =>
+    t.ruleOps.map((op) => ({ ...op, owner: { row: t.row, column: "patient_value" } })),
+  );
+  await writePaymentRules(
+    client,
+    ops
+      .filter((op) => op.before)
+      .map((op) => ({ id: op.before.id, rule: op.after, owner: op.owner })),
+    ops
+      .filter((op) => !op.before)
+      .map((op) => ({
+        rule: { ...op.after, service_item_id: ids.items.get(key(op.after.item_code)) },
+        owner: op.owner,
+      })),
+    ctx,
+    audit,
+    ruleRows,
+  );
+}
+
+async function saveDiscounts(client, sheets, ids, ctx, audit) {
+  const rows = rowsOf(sheets, "Discounts");
+  if (!rows.length) return;
+  const idsOf = (codes, map) => (codes ? codes.map((code) => map.get(key(code))) : null);
+  const values = ({ values: v, resolved }) => ({
+    code: v.code,
+    method: v.method,
+    kind: v.kind,
+    value: v.value,
+    max_discount: v.max_discount,
+    group_ids: idsOf(resolved.groups, ids.groups),
+    subgroup_ids: idsOf(resolved.subgroups, ids.subgroups),
+    service_item_ids: idsOf(resolved.items, ids.items),
+    doctor_ids: resolved.doctors,
+    visit_types: v.visit_types,
+    scheme_codes: resolved.categories,
+    min_age: v.min_age,
+    max_age: v.max_age,
+    gender: v.gender,
+    valid_from: v.valid_from,
+    valid_to: v.valid_to,
+    max_uses_total: v.max_uses_total,
+    max_uses_per_patient: v.max_uses_per_patient,
+    max_uses_per_day: v.max_uses_per_day,
+    max_uses_per_doctor_per_day: v.max_uses_per_doctor_per_day,
+    priority: v.priority,
+    stackable: v.stackable,
+    applies_on_scheme_rate: v.applies_on_scheme_rate,
+    allowed_roles: v.allowed_roles,
+    is_active: v.active,
+  });
+  const updated = await updateRows(
+    client,
+    TABLES.discounts,
+    rows
+      .filter((r) => r.status === "update")
+      .map((r) => ({ id: ids.discounts.get(nameKey(r.values.rule_name)), ...values(r) })),
+    ctx,
+  );
+  const created = await insertRows(
+    client,
+    TABLES.discounts,
+    rows.filter((r) => r.status === "new").map((r) => ({ name: r.values.rule_name, ...values(r) })),
+    ctx,
+  );
+  audit.push(...auditOf("discount_rules", (r) => r.id, created, updated));
+}
+
+async function writeRates(client, rows, ctx, audit) {
   if (!rows.length) return;
   const keys = JSON.stringify(
     rows.map(({ scheme_code, service_item_id, valid_from }) => ({
@@ -452,6 +823,10 @@ function idMaps(ref) {
     rules: new Map(
       (ref.rules ?? []).map((r) => [`${key(r.scheme_code)}|${nameKey(r.name)}`, r.id]),
     ),
+    paymentRules: new Map(
+      (ref.paymentRules ?? []).map((r) => [ruleKeyOf(r.scheme_code, r.name), r.id]),
+    ),
+    discounts: new Map((ref.discounts ?? []).map((d) => [nameKey(d.name), d.id])),
   };
 }
 
@@ -528,14 +903,14 @@ export async function commitUpload(buffer, { fileName, ctx, options = {} }, db =
       ...auditFields(importCtx),
     });
 
-    const ids = idMaps(ref);
-    const audit = [];
-    await saveGroups(client, parsed.sheets, ids, importCtx, audit);
-    await saveSubgroups(client, parsed.sheets, ids, importCtx, audit);
-    await saveItems(client, parsed.sheets, ids, importCtx, audit, `Bulk import: ${name}`);
-    await saveCategories(client, parsed.sheets, importCtx, audit);
-    await saveRules(client, parsed.sheets, ids, importCtx, audit);
-    await saveRates(client, parsed.sheets, ids, importCtx, audit);
+    const { audit, conflicts } = await writeSheets(
+      client,
+      parsed.sheets,
+      ref,
+      importCtx,
+      `Bulk import: ${name}`,
+    );
+    throwPriceConflicts(conflicts);
     await writeAuditMany(client, audit, auditFields(importCtx));
 
     await client.query("COMMIT");

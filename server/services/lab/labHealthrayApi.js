@@ -57,7 +57,7 @@ let cooldownLoadPromise = null;
 
 const BLOCK_BACKOFF_BASE_MS = 20_000; // non-block failures: 20s, doubles
 const BLOCK_BACKOFF_MAX_MS = 10 * 60_000; // …capped at 10 min
-const WAF_COOLDOWN_BASE_MS = 30 * 60_000; // WAF block: 30 min base
+const WAF_COOLDOWN_BASE_MS = 45 * 60_000; // WAF block: 45 min base
 const WAF_COOLDOWN_MAX_MS = 2 * 60 * 60_000; // …escalates to a 2 h cap
 const KV_LAB_COOLDOWN = "lab_login_cooldown";
 

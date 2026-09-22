@@ -315,7 +315,7 @@ test.describe.serial("P1-31 categories page", () => {
       data: { is_active: false },
     });
     await admin.dispose();
-    await page.reload();
+    await gotoReady(page, "/settings/schemes", () => tree(page));
     await pick(page, LONE).click();
     const moves = rules(page, LONE.label).getByRole("list", { name: "Rules to move" });
     await expect(moves).toContainText("Women");

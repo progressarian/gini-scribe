@@ -1,7 +1,15 @@
 import pool from "../../config/db.js";
-import { CATEGORY_DB_COLUMNS, CATEGORY_RULE_DB_COLUMNS, IMPORT_SHEETS } from "./importColumns.js";
+import { tryUploadWrites } from "./importCommit.js";
+import {
+  BILLING_ROLES,
+  CATEGORY_DB_COLUMNS,
+  CATEGORY_RULE_DB_COLUMNS,
+  DISCOUNT_DB_COLUMNS,
+  IMPORT_SHEETS,
+  PAYMENT_RULE_DB_COLUMNS,
+} from "./importColumns.js";
 import { parseUpload } from "./importParse.js";
-import { checkMasterRows, key, loadReference, nameKey } from "./importValidate.js";
+import { checkMasterRows, key, loadReference, nameKey, ruleKeyOf } from "./importValidate.js";
 
 export const STATUSES = ["new", "update", "unchanged", "error"];
 
@@ -12,9 +20,19 @@ const CODE_COLUMNS = new Set([
   "category_code",
   "parent_code",
   "tax_code",
+  "groups",
+  "subgroups",
+  "items",
+  "categories",
 ]);
 
-const plain = (value) => (value === undefined || value === "" ? null : value);
+const plain = (value) =>
+  value === undefined || value === "" || (Array.isArray(value) && !value.length) ? null : value;
+
+const byCode = (a, b) => key(a).localeCompare(key(b));
+const sorted = (list, order = byCode) => (list ? [...list].sort(order) : null);
+const money = (value) => (value === null || value === undefined ? null : Number(value));
+const allRolesIfCode = (roles, method) => roles ?? (method === "code" ? BILLING_ROLES : null);
 
 function same(column, a, b) {
   const x = plain(a);
@@ -34,6 +52,7 @@ function storedIndex(ref) {
   const tests = byId(ref.tests);
   const items = byId(ref.items);
   const codeOf = (map, id) => (id == null ? null : (map.get(id)?.code ?? null));
+  const codesOf = (map, ids) => sorted(ids?.map((id) => codeOf(map, id)) ?? null);
   const fromColumns = (row, columns) =>
     Object.fromEntries(Object.entries(columns).map(([sheet, db]) => [sheet, row[db]]));
 
@@ -117,6 +136,71 @@ function storedIndex(ref) {
         valid_to: r.valid_to,
       }),
     },
+    "Payment rules": {
+      rows: ref.paymentRules ?? [],
+      keyOf: (r) => ruleKeyOf(r.scheme_code, r.name),
+      rowKey: (v) => ruleKeyOf(v.category_code, v.rule_name),
+      stored: (r) => {
+        const { category_code, rule_name, ...rest } = fromColumns(r, PAYMENT_RULE_DB_COLUMNS);
+        return {
+          ...rest,
+          group_code: codeOf(groups, r.group_id),
+          subgroup_code: codeOf(subgroups, r.subgroup_id),
+          item_code: codeOf(items, r.service_item_id),
+          patient_value: money(r.patient_value),
+        };
+      },
+    },
+    "Consultant fees": {
+      rows: [],
+      keyOf: () => null,
+      rowKey: () => null,
+      stored: () => null,
+      statusOf: (row) => {
+        const targets = row.resolved?.targets ?? [];
+        const seen = new Set();
+        const changes = targets
+          .flatMap((t) => t.changes)
+          .filter((c) => {
+            const id = JSON.stringify(c);
+            if (seen.has(id)) return false;
+            seen.add(id);
+            return true;
+          });
+        return { isNew: !targets.some((t) => t.existed), changes };
+      },
+    },
+    Discounts: {
+      rows: ref.discounts ?? [],
+      keyOf: (d) => nameKey(d.name),
+      rowKey: (v) => nameKey(v.rule_name),
+      stored: (d) => {
+        const { rule_name, ...rest } = fromColumns(d, DISCOUNT_DB_COLUMNS);
+        return {
+          ...rest,
+          value: money(d.value),
+          max_discount: money(d.max_discount),
+          groups: codesOf(groups, d.group_ids),
+          subgroups: codesOf(subgroups, d.subgroup_ids),
+          items: codesOf(items, d.service_item_ids),
+          doctors: sorted(d.doctor_ids, (a, b) => a - b),
+          categories: sorted(d.scheme_codes),
+          allowed_roles: allRolesIfCode(d.allowed_roles, d.method),
+        };
+      },
+      compared: (row) => ({
+        ...row.values,
+        groups: sorted(row.resolved?.groups),
+        subgroups: sorted(row.resolved?.subgroups),
+        items: sorted(row.resolved?.items),
+        doctors: sorted(row.resolved?.doctors, (a, b) => a - b),
+        categories: sorted(row.resolved?.categories),
+        allowed_roles: allRolesIfCode(row.values.allowed_roles, row.values.method),
+      }),
+      shown: {
+        doctors: (ids) => ids.map((id) => doctors.get(id)?.name ?? id).join(", "),
+      },
+    },
   };
   for (const spec of Object.values(sheets)) {
     spec.byKey = new Map(spec.rows.map((r) => [spec.keyOf(r), spec.stored(r)]));
@@ -187,7 +271,27 @@ function renamedCodeWarnings(sheet, ref) {
 function display(spec, column, value) {
   const shown = spec.shown?.[column];
   const v = plain(value);
-  return v === null ? null : shown ? shown(v) : v;
+  if (v === null) return null;
+  if (shown) return shown(v);
+  return Array.isArray(v) ? v.join(", ") : v;
+}
+
+function storedStatus(spec, row) {
+  const stored = spec.byKey.get(spec.rowKey(row.values));
+  const changes = [];
+  if (stored) {
+    const compared = spec.compared ? spec.compared(row) : row.values;
+    for (const [column, before] of Object.entries(stored)) {
+      if (!same(column, before, compared[column])) {
+        changes.push({
+          column,
+          from: display(spec, column, before),
+          to: display(spec, column, compared[column]),
+        });
+      }
+    }
+  }
+  return { isNew: !stored, changes };
 }
 
 export function markStatus(sheets, ref) {
@@ -197,24 +301,12 @@ export function markStatus(sheets, ref) {
     if (!spec) continue;
     for (const row of sheet.rows) {
       row.warnings ??= [];
-      const stored = spec.byKey.get(spec.rowKey(row.values));
-      row.isNew = !stored;
-      row.changes = [];
-      if (stored) {
-        const compared = spec.compared ? spec.compared(row) : row.values;
-        for (const [column, before] of Object.entries(stored)) {
-          if (!same(column, before, compared[column])) {
-            row.changes.push({
-              column,
-              from: display(spec, column, before),
-              to: display(spec, column, compared[column]),
-            });
-          }
-        }
-      }
+      const { isNew, changes } = spec.statusOf ? spec.statusOf(row) : storedStatus(spec, row);
+      row.isNew = isNew;
+      row.changes = changes;
       row.status = row.errors.length
         ? "error"
-        : !stored
+        : isNew
           ? "new"
           : row.changes.length
             ? "update"
@@ -267,5 +359,6 @@ export async function previewUpload(buffer, db = pool, options = {}) {
   const ref = await loadReference(db);
   checkMasterRows(parsed.sheets, ref, options);
   markStatus(parsed.sheets, ref);
+  if (summarize(parsed).canImport) await tryUploadWrites(parsed, ref, db);
   return summarize(parsed);
 }

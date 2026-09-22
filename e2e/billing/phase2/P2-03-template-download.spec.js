@@ -16,6 +16,7 @@ import {
 } from "../../../server/services/billing/importTemplate.js";
 import {
   LATER_SHEET_NOTE,
+  SHEET_EXAMPLES,
   laterSheetsRule,
 } from "../../../server/services/billing/importReadme.js";
 
@@ -89,33 +90,26 @@ test.describe("P2-03 template download", () => {
     for (const sheet of IMPORT_SHEETS) {
       const ws = workbook.getWorksheet(sheet.name);
       expect(ws.getRow(1).values.slice(1), sheet.name).toEqual(sheet.columns.map((c) => c.name));
-      expect(ws.rowCount, `${sheet.name} has no data rows`).toBe(1);
+      expect(ws.rowCount, `${sheet.name} has only its example rows`).toBe(
+        1 + SHEET_EXAMPLES[sheet.name].length,
+      );
     }
   });
 
-  test("3. Payment rules, Consultant fees and Discounts are marked available after Phase 3; the rest are not", async () => {
-    expect(LATER_SHEETS).toEqual(["Payment rules", "Consultant fees", "Discounts"]);
+  test("3. since P3-22 no sheet is marked available after Phase 3: no grey tab, note or Read me rule", async () => {
+    expect(LATER_SHEETS).toEqual([]);
     const workbook = await load((await download("admin")).body);
     for (const sheet of IMPORT_SHEETS) {
       const ws = workbook.getWorksheet(sheet.name);
-      const later = LATER_SHEETS.includes(sheet.name);
-      expect(ws.properties.tabColor?.argb ?? null, `${sheet.name} tab`).toBe(
-        later ? LATER_TAB_COLOR : null,
-      );
-      expect(ws.getCell("A1").note ?? null, `${sheet.name} header note`).toBe(
-        later ? LATER_SHEET_NOTE : null,
-      );
+      expect(ws.properties.tabColor?.argb ?? null, `${sheet.name} tab`).not.toBe(LATER_TAB_COLOR);
+      expect(ws.getCell("A1").note ?? null, `${sheet.name} header note`).toBeNull();
     }
     const rows = readmeRows(workbook);
-    const marked = rows.filter((r) => r[1] === "(available after Phase 3)").map((r) => r[0]);
-    expect(marked).toEqual(LATER_SHEETS);
-    for (const row of rows.filter((r) => r[1] === "(available after Phase 3)")) {
-      expect(row[4]).toBe(LATER_SHEET_NOTE);
-    }
+    expect(rows.filter((r) => r[1] === "(available after Phase 3)")).toEqual([]);
+    expect(rows.filter((r) => r.includes(LATER_SHEET_NOTE))).toEqual([]);
     const rules = rows.filter((r) => r[0] === "All sheets").map((r) => r[4]);
-    expect(rules.at(-1)).toContain(
-      "The Payment rules, Consultant fees and Discounts sheets are available after Phase 3",
-    );
+    expect(rules.join("\n")).not.toContain("available after Phase 3");
+    expect(rules.at(-1)).toContain("Any error stops the whole upload");
   });
 
   test("4. every other role is refused, and so is a request with no login", async () => {
@@ -136,7 +130,7 @@ test.describe("P2-03 template download", () => {
     expect(laterSheetsRule(["Payment rules", "Discounts"])).toMatch(
       /^The Payment rules and Discounts sheets are available after Phase 3\. Their tabs are grey/,
     );
-    expect(laterSheetsRule(LATER_SHEETS)).toContain(
+    expect(laterSheetsRule(["Payment rules", "Consultant fees", "Discounts"])).toContain(
       "The Payment rules, Consultant fees and Discounts sheets",
     );
   });

@@ -59,7 +59,7 @@ const insideOuter = (client) => {
 
 async function workbook(sheets) {
   const book = new ExcelJS.Workbook();
-  await book.xlsx.load(await templateBuffer());
+  await book.xlsx.load(await templateBuffer({ examples: false }));
   for (const [sheetName, rows] of Object.entries(sheets)) {
     const ws = book.getWorksheet(sheetName);
     const columns = {};
@@ -178,6 +178,62 @@ function goodSheets({ consultant, test }) {
         bill_code: `SM${tag}`.toUpperCase(),
       },
     ],
+    "Payment rules": [
+      {
+        category_code: category("paid"),
+        rule_name: "Smoke procedures 20%",
+        subgroup_code: code("PROC"),
+        visit_types: "New, Follow Up",
+        patient_pays: "percent",
+        patient_value: 20,
+        remainder: "claim",
+      },
+      {
+        category_code: category("pen"),
+        rule_name: "Smoke pensioner pays nothing",
+        patient_pays: "nothing",
+        remainder: "claim",
+      },
+    ],
+    ...(consultant
+      ? {
+          "Consultant fees": [
+            {
+              doctor: String(consultant.id),
+              visit_type: "New",
+              category_code: category("paid"),
+              fee: 800,
+              patient_pays: "amount",
+              patient_value: 300,
+              remainder: "claim",
+              bill_code: `SF${tag}`.toUpperCase(),
+            },
+          ],
+        }
+      : {}),
+    Discounts: [
+      {
+        rule_name: `Smoke staff ${tag}`,
+        code: code("STAFF"),
+        method: "code",
+        kind: "percent",
+        value: 10,
+        max_discount: 200,
+        groups: code("G"),
+        categories: `general, ${cghs}`,
+        max_uses_per_day: 5,
+        max_uses_per_doctor_per_day: 2,
+        allowed_roles: "reception_admin, admin",
+      },
+      {
+        rule_name: `Smoke senior ${tag}`,
+        method: "auto",
+        kind: "flat",
+        value: 20,
+        min_age: 60,
+        active: "no",
+      },
+    ],
   };
 }
 
@@ -189,6 +245,8 @@ const TAGGED = `(SELECT count(*) FROM service_groups WHERE code ILIKE '%' || $1)
   (SELECT count(*) FROM patient_schemes WHERE code LIKE '%' || $1)::int AS categories,
   (SELECT count(*) FROM category_rules WHERE scheme_code LIKE '%' || $1)::int AS rules,
   (SELECT count(*) FROM category_item_rates WHERE scheme_code LIKE '%' || $1)::int AS rates,
+  (SELECT count(*) FROM category_payment_rules WHERE scheme_code LIKE '%' || $1)::int AS payment_rules,
+  (SELECT count(*) FROM discount_rules WHERE name LIKE '%' || $1 OR code ILIKE '%' || $1)::int AS discounts,
   (SELECT count(*) FROM billing_imports WHERE file_name LIKE '%' || $1 || '.xlsx')::int AS imports,
   (SELECT count(*) FROM billing_audit WHERE import_id = ANY($2::bigint[])
      OR entity_id ILIKE '%' || $1)::int AS audit`;
@@ -226,16 +284,51 @@ async function run(client) {
       );
     }
     const found = await tagged(client);
+    const fees = picked.consultant ? 1 : 0;
     expect(
       found.groups === 1 &&
         found.subgroups === 2 &&
         found.items === expected.Items &&
         found.categories === 4 &&
         found.rules === 1 &&
-        found.rates === 1 &&
+        found.rates === 1 + fees &&
+        found.payment_rules === 2 + fees &&
+        found.discounts === 2 &&
         found.imports === 1,
       `the rows are not all in the tables: ${JSON.stringify(found)}`,
     );
+    const { rows: staff } = await client.query(
+      `SELECT d.max_uses_per_day, d.max_uses_per_doctor_per_day, d.scheme_codes, d.allowed_roles,
+              (SELECT array_agg(g.code) FROM service_groups g WHERE g.id = ANY(d.group_ids)) AS groups
+         FROM discount_rules d WHERE d.code = $1`,
+      [code("STAFF")],
+    );
+    expect(
+      staff[0]?.max_uses_per_day === 5 &&
+        staff[0].max_uses_per_doctor_per_day === 2 &&
+        staff[0].groups?.join() === code("G") &&
+        staff[0].scheme_codes?.join() === `general,${category("cghs")}` &&
+        staff[0].allowed_roles?.join() === "reception_admin,admin",
+      `the coupon was not saved as written: ${JSON.stringify(staff[0])}`,
+    );
+    if (picked.consultant) {
+      const { rows: fee } = await client.query(
+        `SELECT r.rate::float8 AS rate, p.patient_pays, p.patient_value::float8 AS value, p.remainder
+           FROM service_items i
+           JOIN category_item_rates r ON r.service_item_id = i.id AND r.scheme_code = $2
+           JOIN category_payment_rules p ON p.service_item_id = i.id AND p.scheme_code = $2
+          WHERE i.code = $1`,
+        [code("FEE"), category("paid")],
+      );
+      expect(
+        fee.length === 1 &&
+          fee[0].rate === 800 &&
+          fee[0].patient_pays === "amount" &&
+          fee[0].value === 300 &&
+          fee[0].remainder === "claim",
+        `the consultant fee is not the doctor's rate plus an item payment rule: ${JSON.stringify(fee)}`,
+      );
+    }
     const { rows: subs } = await client.query(
       `SELECT label FROM patient_schemes WHERE parent_code = $1 ORDER BY label`,
       [category("cghs")],
@@ -329,7 +422,90 @@ async function run(client) {
     expect(JSON.stringify(before) === JSON.stringify(after), "the bad file changed the tables");
   });
 
-  await check("4. other sessions never see the import before it is rolled back", async () => {
+  await check("4. a bad row on each rules sheet is reported and imports nothing", async () => {
+    const bad = await workbook({
+      "Payment rules": [
+        {
+          category_code: category("paid"),
+          rule_name: "Smoke no amount",
+          patient_pays: "amount",
+          remainder: "claim",
+        },
+      ],
+      "Consultant fees": [
+        {
+          doctor: `Smoke Nobody ${tag}`,
+          category_code: category("paid"),
+          fee: 500,
+          patient_pays: "nothing",
+          remainder: "claim",
+        },
+      ],
+      Discounts: [
+        {
+          rule_name: `Smoke auto with code ${tag}`,
+          code: code("AUTO"),
+          method: "auto",
+          kind: "flat",
+          value: 20,
+        },
+      ],
+    });
+    const before = await tagged(client);
+    const preview = await previewUpload(bad, db);
+    const errors = Object.fromEntries(
+      preview.sheets.map((s) => [
+        s.name,
+        s.rows.flatMap((r) => r.errors.map((e) => `${e.column}: ${e.message}`)),
+      ]),
+    );
+    expect(
+      !preview.canImport &&
+        errors["Payment rules"]?.join() ===
+          "patient_value: Enter the amount in rupees the patient pays" &&
+        errors["Consultant fees"]?.join() ===
+          `doctor: There is no doctor called "Smoke Nobody ${tag}" in Scribe` &&
+        errors.Discounts?.join() ===
+          "code: An automatic discount applies by itself, so it has no code; leave the code empty",
+      `the preview does not report one readable error per sheet: ${JSON.stringify(errors)}`,
+    );
+    const result = await commitUpload(bad, { fileName: fileName("bad-rules"), ctx }, db);
+    expect(result.saved === false && result.preview.counts.error === 3, "the bad rules were saved");
+    const after = await tagged(client);
+    expect(JSON.stringify(before) === JSON.stringify(after), "the bad rules changed the tables");
+  });
+
+  await check("5. a payment rule amount above a covered item's price is refused", async () => {
+    const cheap = await workbook({
+      "Payment rules": [
+        {
+          category_code: category("cghs"),
+          rule_name: "Smoke procedures ₹180",
+          subgroup_code: code("PROC"),
+          patient_pays: "amount",
+          patient_value: 180,
+          remainder: "claim",
+        },
+      ],
+    });
+    const before = (await tagged(client)).payment_rules;
+    const preview = await previewUpload(cheap, db);
+    const [row] = preview.sheets.find((s) => s.name === "Payment rules").rows;
+    expect(
+      !preview.canImport &&
+        row.status === "error" &&
+        row.errors[0]?.message.startsWith("The patient can't pay ₹180 for items that cost less"),
+      `the preview does not refuse the rule on its row: ${JSON.stringify(row.errors)}`,
+    );
+    const refused = await commitUpload(cheap, { fileName: fileName("cheap"), ctx }, db).then(
+      () => null,
+      (error) => error,
+    );
+    expect(refused?.status === 409, "the save of a rule above an item's price was not refused");
+    expect((await tagged(client)).payment_rules === before, "the refused rule was saved");
+  });
+
+  await check("6. other sessions never see the import before it is rolled back", async () => {
     const outside = await tagged(pool);
     const left = Object.entries(outside).filter(([, n]) => n > 0);
     expect(
@@ -351,7 +527,7 @@ try {
   client.release();
 }
 
-await check("5. everything ran inside a transaction that was rolled back", async () => {
+await check("7. everything ran inside a transaction that was rolled back", async () => {
   expect(importIds.length === 1, `expected 1 saved import, got ${importIds.length}`);
   const left = Object.entries(await tagged(pool)).filter(([, n]) => n > 0);
   expect(

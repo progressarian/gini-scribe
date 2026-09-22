@@ -24,7 +24,7 @@ const ids = {};
 
 async function upload(sheets) {
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(await templateBuffer());
+  await workbook.xlsx.load(await templateBuffer({ examples: false }));
   for (const [name, rows] of Object.entries(sheets)) {
     const ws = workbook.getWorksheet(name);
     const headers = ws.getRow(1).values.slice(1);
@@ -200,17 +200,19 @@ test.describe.serial("P2-07 row status and preview", () => {
     expect(sheetOf(preview, "Groups").counts.warning).toBe(1);
   });
 
-  test("5. Phase 3 sheets are counted as not imported, and a refused file returns only its problems", async () => {
+  test("5. since P3-22 the Phase 3 sheets are checked like the others, and a refused file returns only its problems", async () => {
     const preview = await upload({
       Groups: [SAME.Groups[0]],
       Discounts: [{ rule_name: "Staff" }, { rule_name: "Senior" }],
     });
-    expect(sheetOf(preview, "Discounts")).toMatchObject({
-      later: true,
-      counts: { notImported: 2 },
-      rows: [],
-    });
-    expect(preview.counts.notImported).toBe(2);
+    const discounts = sheetOf(preview, "Discounts");
+    expect(discounts).toMatchObject({ later: false, counts: { notImported: 0, error: 2 } });
+    expect(discounts.rows.map((r) => [r.row, r.status, r.errors.map((e) => e.message)])).toEqual([
+      [2, "error", ["method is required", "kind is required", "value is required"]],
+      [3, "error", ["method is required", "kind is required", "value is required"]],
+    ]);
+    expect(preview.counts.notImported).toBe(0);
+    expect(preview.canImport).toBe(false);
 
     const refused = await previewUpload(Buffer.from("not a spreadsheet"), getPool());
     expect(refused).toEqual({

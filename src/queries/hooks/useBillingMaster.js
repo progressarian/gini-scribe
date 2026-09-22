@@ -23,6 +23,14 @@ export const billingKeys = {
   ],
   rateGrid: (code, filters) => ["billing", "category-rates", code, filters ?? {}],
   rateHistory: (code, itemId) => ["billing", "category-rates", code, "items", itemId],
+  paymentRules: (schemeCode, activeOnly) => [
+    "billing",
+    "payment-rules",
+    schemeCode ?? "any",
+    activeOnly ? "active" : "all",
+  ],
+  discounts: (filters) => ["billing", "discounts", filters ?? {}],
+  consultantFees: (filters) => ["billing", "consultant-fees", filters ?? {}],
   usage: (kind, key) => ["billing", "usage", kind, key],
   settings: () => ["billing", "settings"],
   series: () => ["billing", "series"],
@@ -271,6 +279,115 @@ export function useDeleteBillingCategoryRate() {
       ).data,
     PRICE_KEYS,
   );
+}
+
+export function useBillingPaymentRules({ schemeCode, activeOnly = false } = {}) {
+  return useQuery({
+    queryKey: billingKeys.paymentRules(schemeCode, activeOnly),
+    queryFn: () =>
+      read(
+        `${MASTER}/payment-rules`,
+        withoutBlanks({ schemeCode, activeOnly: activeOnly ? "true" : undefined }),
+      ),
+    enabled: Boolean(schemeCode),
+  });
+}
+
+export function useCreateBillingPaymentRule() {
+  return useBillingMutation(async (body) => (await api.post(`${MASTER}/payment-rules`, body)).data);
+}
+
+export function useUpdateBillingPaymentRule() {
+  return useBillingMutation(
+    async ({ id, ...body }) => (await api.patch(`${MASTER}/payment-rules/${id}`, body)).data,
+  );
+}
+
+export function useSetBillingPaymentRuleActive() {
+  return useBillingMutation(
+    async ({ id, is_active }) =>
+      (await api.put(`${MASTER}/payment-rules/${id}/active`, { is_active })).data,
+  );
+}
+
+export function useDeleteBillingPaymentRule() {
+  return useBillingMutation(async (id) => (await api.delete(`${MASTER}/payment-rules/${id}`)).data);
+}
+
+export function useBillingDiscounts(filters = {}) {
+  const params = withoutBlanks(filters);
+  return useQuery({
+    queryKey: billingKeys.discounts(params),
+    queryFn: () => read(`${MASTER}/discounts`, params),
+  });
+}
+
+export function useCreateBillingDiscount() {
+  return useBillingMutation(async (body) => (await api.post(`${MASTER}/discounts`, body)).data);
+}
+
+export function useUpdateBillingDiscount() {
+  return useBillingMutation(
+    async ({ id, ...body }) => (await api.patch(`${MASTER}/discounts/${id}`, body)).data,
+  );
+}
+
+export function useSetBillingDiscountActive() {
+  return useBillingMutation(
+    async ({ id, is_active }) =>
+      (await api.put(`${MASTER}/discounts/${id}/active`, { is_active })).data,
+  );
+}
+
+export function useDeleteBillingDiscount() {
+  return useBillingMutation(async (id) => (await api.delete(`${MASTER}/discounts/${id}`)).data);
+}
+
+export function useBillingConsultantFees(filters = {}) {
+  const params = withoutBlanks(filters);
+  return useQuery({
+    queryKey: billingKeys.consultantFees(params),
+    queryFn: () => read(`${MASTER}/consultant-fees`, params),
+  });
+}
+
+export function useSaveBillingConsultantFee() {
+  return useBillingMutation(
+    async (body) => (await api.put(`${MASTER}/consultant-fees`, body)).data,
+    PRICE_KEYS,
+  );
+}
+
+export function useClearBillingConsultantFee() {
+  return useBillingMutation(
+    async ({ scheme_code, service_item_id, date }) =>
+      (
+        await api.delete(
+          `${MASTER}/consultant-fees/${scheme_code}/items/${service_item_id}`,
+          date ? { params: { date } } : undefined,
+        )
+      ).data,
+    PRICE_KEYS,
+  );
+}
+
+export function useCopyBillingConsultantFees() {
+  return useBillingMutation(
+    async (body) => (await api.post(`${MASTER}/consultant-fees/copy`, body)).data,
+    PRICE_KEYS,
+  );
+}
+
+export function useTestBillingRule() {
+  return useMutation({
+    mutationFn: async (body) => (await api.post(`${MASTER}/test-rule`, body)).data,
+  });
+}
+
+export function useBillingPreview() {
+  return useMutation({
+    mutationFn: async (body) => (await api.post("/api/billing/preview", body)).data,
+  });
 }
 
 export function useBillingUsage(kind, key) {

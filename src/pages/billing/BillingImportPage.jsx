@@ -8,7 +8,7 @@ import {
 } from "../../queries/hooks/useBillingMaster";
 import { toast } from "../../stores/uiStore";
 import useDialog from "../../components/billing/useDialog";
-import { errorOf } from "../../components/billing/format";
+import { requestErrorOf } from "../../components/billing/format";
 import "../../styles/flow.css";
 import "../flow/FlowSettings.css";
 import "./billing.css";
@@ -355,7 +355,7 @@ export default function BillingImportPage() {
     try {
       saveBlob(await mutation.mutateAsync(arg));
     } catch (err) {
-      toast(errorOf(err, fallback), "error", 6000);
+      toast(requestErrorOf(err, fallback), "error", 6000);
     }
   };
 
@@ -374,7 +374,7 @@ export default function BillingImportPage() {
       const result = await check.mutateAsync(picked);
       if (turn === latest.current) setPreview(result);
     } catch (err) {
-      if (turn === latest.current) setError(errorOf(err, "Could not check the file"));
+      if (turn === latest.current) setError(requestErrorOf(err, "Could not check the file"));
     }
   };
 
@@ -405,7 +405,7 @@ export default function BillingImportPage() {
     } catch (err) {
       if (turn !== latest.current) return;
       setConfirming(false);
-      setError(errorOf(err, "Could not import the file"));
+      setError(requestErrorOf(err, "Could not import the file"));
     }
   };
 

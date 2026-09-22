@@ -4,6 +4,7 @@ import { toast } from "../stores/uiStore";
 import AddForm from "../components/billing/AddForm";
 import CategoryDetails from "../components/billing/CategoryDetails";
 import CategoryRules from "../components/billing/CategoryRules";
+import PaymentRules from "../components/billing/PaymentRules";
 import UsedInDialog from "../components/billing/UsedInDialog";
 import useDialog from "../components/billing/useDialog";
 import { categoryCodeTyped, errorOf } from "../components/billing/format";
@@ -215,6 +216,11 @@ export default function SchemesSettingsPage() {
                 onDirtyChange={setDirty}
               />
               <CategoryRules key={`rules-${selected.code}`} category={selected} />
+              <PaymentRules
+                key={`pay-${selected.code}`}
+                category={selected}
+                parent={selected.parent}
+              />
             </>
           ) : (
             <div className="flow-card fset__cardsub">

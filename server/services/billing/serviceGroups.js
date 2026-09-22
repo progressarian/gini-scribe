@@ -1,4 +1,5 @@
 import pool from "../../config/db.js";
+import { checkItemPrices } from "./paymentRules.js";
 import { writeAudit } from "./audit.js";
 import { httpError, inTransaction } from "./transaction.js";
 import {
@@ -176,6 +177,16 @@ async function update(level, id, input, ctx, db) {
       .catch((error) => {
         throw duplicateCode(level, error);
       });
+    if (level === "subgroup" && rows[0].group_id !== before.group_id) {
+      const { rows: moved } = await client.query(
+        `SELECT id FROM service_items WHERE subgroup_id = $1 AND is_active`,
+        [id],
+      );
+      await checkItemPrices(
+        client,
+        moved.map((item) => item.id),
+      );
+    }
     await writeAudit(client, {
       entity: spec.table,
       entityId: id,

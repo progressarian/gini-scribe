@@ -12,12 +12,21 @@ import {
   billingCategoryRuleCreateSchema,
   billingCategoryRuleUpdateSchema,
   billingCategoryUpdateSchema,
+  billingConsultantFeeClearQuerySchema,
+  billingConsultantFeeCopySchema,
+  billingConsultantFeeGridQuerySchema,
+  billingConsultantFeeSaveSchema,
+  billingDiscountCreateSchema,
+  billingDiscountListQuerySchema,
+  billingDiscountUpdateSchema,
   billingGroupCreateSchema,
   billingGroupUpdateSchema,
   billingItemCreateSchema,
   billingItemListQuerySchema,
   billingItemUpdateSchema,
   billingListQuerySchema,
+  billingPaymentRuleCreateSchema,
+  billingPaymentRuleUpdateSchema,
   billingRateGridQuerySchema,
   billingSubgroupCreateSchema,
   billingSubgroupUpdateSchema,
@@ -30,6 +39,9 @@ import * as groups from "../services/billing/serviceGroups.js";
 import * as items from "../services/billing/serviceItems.js";
 import * as rules from "../services/billing/categoryRules.js";
 import * as rates from "../services/billing/categoryRates.js";
+import * as paymentRules from "../services/billing/paymentRules.js";
+import * as discounts from "../services/billing/discountRules.js";
+import * as consultantFees from "../services/billing/consultantFees.js";
 import { listTaxCodes } from "../services/billing/taxCodes.js";
 import {
   createScheme,
@@ -284,6 +296,128 @@ router.delete(
       },
       ctx(req),
     ),
+  ),
+);
+
+router.get(
+  `${BASE}/payment-rules`,
+  master,
+  validateQuery(billingListQuerySchema, BILLING_FIELD_LABELS),
+  run("Billing payment rules list", 200, (req) =>
+    paymentRules.listPaymentRules({
+      schemeCode: req.query.schemeCode,
+      activeOnly: activeOnly(req),
+    }),
+  ),
+);
+router.post(
+  `${BASE}/payment-rules`,
+  master,
+  validate(billingPaymentRuleCreateSchema, BILLING_FIELD_LABELS),
+  run("Billing payment rule create", 201, (req) =>
+    paymentRules.createPaymentRule(req.body, ctx(req)),
+  ),
+);
+router.patch(
+  `${BASE}/payment-rules/:id`,
+  master,
+  validate(billingPaymentRuleUpdateSchema, BILLING_FIELD_LABELS),
+  run("Billing payment rule update", 200, (req) =>
+    paymentRules.updatePaymentRule(idParam(req), req.body, ctx(req)),
+  ),
+);
+router.put(
+  `${BASE}/payment-rules/:id/active`,
+  master,
+  validate(billingActiveSchema, BILLING_FIELD_LABELS),
+  run("Billing payment rule active", 200, (req) =>
+    paymentRules.setPaymentRuleActive(idParam(req), req.body.is_active, ctx(req)),
+  ),
+);
+router.delete(
+  `${BASE}/payment-rules/:id`,
+  master,
+  run("Billing payment rule delete", 200, (req) =>
+    paymentRules.deletePaymentRule(idParam(req), ctx(req)),
+  ),
+);
+
+router.get(
+  `${BASE}/discounts`,
+  master,
+  validateQuery(billingDiscountListQuerySchema, BILLING_FIELD_LABELS),
+  run("Billing discounts list", 200, (req) =>
+    discounts.listDiscountRulesWithUsage({
+      activeOnly: activeOnly(req),
+      method: req.query.method,
+    }),
+  ),
+);
+router.post(
+  `${BASE}/discounts`,
+  master,
+  validate(billingDiscountCreateSchema, BILLING_FIELD_LABELS),
+  run("Billing discount create", 201, (req) => discounts.createDiscountRule(req.body, ctx(req))),
+);
+router.patch(
+  `${BASE}/discounts/:id`,
+  master,
+  validate(billingDiscountUpdateSchema, BILLING_FIELD_LABELS),
+  run("Billing discount update", 200, (req) =>
+    discounts.updateDiscountRule(idParam(req), req.body, ctx(req)),
+  ),
+);
+router.put(
+  `${BASE}/discounts/:id/active`,
+  master,
+  validate(billingActiveSchema, BILLING_FIELD_LABELS),
+  run("Billing discount active", 200, (req) =>
+    discounts.setDiscountRuleActive(idParam(req), req.body.is_active, ctx(req)),
+  ),
+);
+router.delete(
+  `${BASE}/discounts/:id`,
+  master,
+  run("Billing discount delete", 200, (req) =>
+    discounts.deleteDiscountRule(idParam(req), ctx(req)),
+  ),
+);
+
+router.get(
+  `${BASE}/consultant-fees`,
+  master,
+  validateQuery(billingConsultantFeeGridQuerySchema, BILLING_FIELD_LABELS),
+  run("Billing consultant fees grid", 200, (req) => consultantFees.consultantFeeGrid(req.query)),
+);
+router.put(
+  `${BASE}/consultant-fees`,
+  master,
+  validate(billingConsultantFeeSaveSchema, BILLING_FIELD_LABELS),
+  run("Billing consultant fee save", 200, (req) =>
+    consultantFees.saveConsultantFee(req.body, ctx(req)),
+  ),
+);
+router.delete(
+  `${BASE}/consultant-fees/:code/items/:itemId`,
+  master,
+  validateQuery(billingConsultantFeeClearQuerySchema, BILLING_FIELD_LABELS),
+  run("Billing consultant fee clear", 200, (req) =>
+    consultantFees.clearConsultantFee(
+      {
+        scheme_code: codeParam(req),
+        service_item_id: idParam(req, "itemId"),
+        date: req.query.date,
+      },
+      ctx(req),
+    ),
+  ),
+);
+router.post(
+  `${BASE}/consultant-fees/copy`,
+  master,
+  validate(billingConsultantFeeCopySchema, BILLING_FIELD_LABELS),
+  run("Billing consultant fees copy", 200, (req) =>
+    consultantFees.copyConsultantFees(req.body, ctx(req)),
   ),
 );
 

@@ -1,8 +1,10 @@
 # 52 — Billing: OPD, Lab, Machine tests, ECHO, X-ray (and Pharmacy later)
 
-Status: **Phase T and Phase 1 built (2026-09-21)**; Phase 0 waits on the admin
-team's data; Phases 2–7 are still a plan. Written 2026-09-17 against the code as
-it stood. What Phase 1 did differently from this plan is in §0a.
+Status: **Phase T and Phase 1 built (2026-09-21); Phase 2 built (2026-09-22)**
+except loading the hospital's data (P2-13), which, like Phase 0, waits on the
+admin team; Phases 3–7 are still a plan. Written 2026-09-17 against the code as
+it stood. What Phase 1 and Phase 2 did differently from this plan is in §0a and
+§0b.
 
 Task list: `52-BILLING-TASKS.md`.
 
@@ -25,9 +27,9 @@ whole billing e2e suite.
 
 Where it differs from this plan:
 
-- **Settings tabs.** Discounts, Bulk import and Desk requests are not shown yet;
-  each tab arrives with its page in Phases 3, 2 and 4, rather than as an empty
-  tab (P1-28).
+- **Settings tabs.** Discounts and Desk requests are not shown yet; each tab
+  arrives with its page in Phases 3 and 4, rather than as an empty tab (P1-28).
+  Bulk import arrived with its page in Phase 2.
 - **Categories page.** The old "Patient schemes" page is rebuilt on the billing
   master API and is open to reception_admin — except the **patients-per-day
   limit, which only an admin can change** (the server refuses it from anyone
@@ -63,6 +65,65 @@ Where it differs from this plan:
   smoke and regression scripts were run only against the test database.
 
 ---
+
+## 0b. Phase 2 as built (2026-09-22)
+
+Every Phase 2 task in `52-BILLING-TASKS.md` is done, each with its e2e test,
+except **P2-13** (upload the hospital's workbook), which waits on the admin
+team's Phase 0 data and is done by them on production. The Phase 2 check passed
+on the test database: `smoke:billing-import` (a good file, the same file again,
+a file with one bad row, everything rolled back) and the whole billing e2e suite
+(478 tests).
+
+Where it differs from §9:
+
+- **Reading the file.** The upload is read with `exceljs`, the library the
+  template is built with, not `xlsx`. At most 5 MB and 5,000 rows a sheet.
+  Every template column must be in row 1 (not only the required ones), so a
+  deleted header can't silently turn its values into defaults; values in a
+  column with no header, an unknown column, the same sheet twice and a title
+  row above the headers are refused with the reason. A value Excel turned into
+  a date is an error on its cell. An `error` column is reserved and ignored,
+  so the error file uploads again as it is. Each sheet of the template starts with two
+  grey example rows whose first cell starts with `EXAMPLE`; the reader always
+  skips them, so leaving them in is harmless.
+- **Phase 3 sheets.** `Payment rules`, `Consultant fees` (each fee row also
+  saves a payment rule) and `Discounts` are in the template with a grey tab and
+  a note, "available after Phase 3"; their rows are counted as not imported,
+  never read, so a half-filled sheet can't block an upload (P3-22 switches them
+  on).
+- **Checks.** Each row is checked the way its screen checks it, against the
+  **final state** — Scribe's rows with the file laid over them by code,
+  ignoring case — so a clash is caught inside the file or against Scribe, and
+  every message says where the other row is. Additions beyond §9: a new row
+  under a retired or deactivated parent is refused even when the row itself is
+  inactive (the screens' create rules); a doctor name typed a little
+  differently gets "did you mean …"; a test filed under a group of another kind
+  gets a warning (revenue would count in the wrong place); adding the first
+  sub-category under a category that has rules warns that those rules stop
+  applying; a new open-ended rate ends Scribe's current one the day before, as
+  a warning; two open-ended rows for one item in the file are refused with the
+  exact `valid_to` to add; a new code whose name matches an existing row warns
+  that the code may have been changed on screen.
+- **Saving.** One transaction, one import at a time, and every check runs
+  again inside it — the save never trusts an earlier preview. Writes are
+  batched per sheet rather than made row by row through the screen services
+  (24 queries per file whatever its size; 2,000 items in about a second), in
+  the order the database's unique indexes need. The `billing_imports` row is
+  written first and every audit row carries its id; a price change is recorded
+  with "Bulk import: <file>". A failed save is recorded as `failed`; a change
+  made by someone else meanwhile comes back as a plain "nothing was saved" 409.
+- **Error file.** The admin's own uploaded workbook is returned with an
+  `error` column and the faulty cells shaded, rather than a new file, so
+  nothing they typed — including the Phase 3 sheets, formulas and drop-downs —
+  is lost.
+- **Screen and routes.** Settings → **Bulk import** (`/settings/bulk-import`,
+  admin and reception_admin): download template, preview on choosing a file,
+  Import only when nothing is in error (with a confirm), Download errors, and
+  the import history. Only an admin may change a daily cap by upload. Routes
+  under `/api/billing/import`.
+- **In production.** The `billing_imports` table and the `billing_audit.import_id`
+  link are applied (2026-09-21). The Phase 2 code is not deployed yet.
 
 ## 0. Summary
 
@@ -1288,7 +1349,7 @@ Each phase ships on its own and is checked before the next one starts. Phase T c
 | **0**                              | The admin team prepares its data in the Excel template: price list, categories and sub-categories, category rules, payment rules (what each category's patient pays), CGHS/ECHS rate cards with bill codes, discount codes. Answer §15.                                                                                                                                                            | Template filled                                                                                                                                                                                                                                                                                                                                         |
 | **T** ✅ built                     | Test setup (§16): local test database, schema build, production guard, test environment with outside services off, Playwright, reset and fixtures, helpers, scripts, how-to.                                                                                                                                                                                                                       | A fresh test database builds; the guard refuses production; an empty spec runs green; no outbound calls                                                                                                                                                                                                                                                 |
 | **1** ✅ built 2026-09-21, see §0a | Master data with full create/edit/delete: groups, subgroups, tax codes, service items (link tests, consultation item per consultant), category extensions, category rules, category rates, `billing_settings`, `reception_admin` role + capabilities, admin screens 8.1 (1–4 without payment rules, 6–8; the desk requests inbox, 10, comes in Phase 4). Move test price reads to `service_items`. | `smoke:billing-master`; MO ordering and lab payment queue show the same prices as before; delete of a used row is refused                                                                                                                                                                                                                               |
-| **2**                              | Bulk Excel import (§9) with template download, check, preview, all-or-nothing save.                                                                                                                                                                                                                                                                                                                | `smoke:billing-import` with a good and a bad file                                                                                                                                                                                                                                                                                                       |
+| **2** ✅ built 2026-09-22, see §0b | Bulk Excel import (§9) with template download, check, preview, all-or-nothing save.                                                                                                                                                                                                                                                                                                                | `smoke:billing-import` with a good and a bad file                                                                                                                                                                                                                                                                                                       |
 | **3**                              | Category payment rules (§5.3a), discount rules (auto + code), category resolution, `priceLine` engine, preview endpoint, admin screens for payment rules and discounts, "test this rule".                                                                                                                                                                                                          | `smoke:billing-pricing`: the CGHS table in §6 (₹1,500→₹700, ₹1,000→₹700, referral ₹0 on every visit, pensioner ₹0, referral number required when the category asks for it), `amount` above an item's price refused at save, rule specificity, age boundaries, both stacking modes, scheme-rate switch, caps, invalid/expired codes, category rule order |
 | **4**                              | Bills, lines, several bills per visit with the never-twice check, desk requests (new item + repeat) and the admin inbox, payments (cash/card/UPI, split), actual vs patient payable vs claim vs adjustment on every line, referral capture, pay-later toggle, one bill series, finalise, PDF bill + receipt, Billing Counter page 8.2, cancel unpaid bill, cash closing, audit.                    | `smoke:billing-bill`: finalise twice, pay twice, same item on a second bill (refused), repeat after approval (allowed once), new-item request → item created, ₹0-payable bill finalises without payment, line invariant holds, pay later off/on, cancel unpaid                                                                                          |
 | **4b**                             | Refunds and credit notes — **on hold** until the refund method is decided (Q14).                                                                                                                                                                                                                                                                                                                   | —                                                                                                                                                                                                                                                                                                                                                       |

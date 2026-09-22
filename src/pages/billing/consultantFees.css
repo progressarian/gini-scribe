@@ -1,0 +1,90 @@
+.cf-page__copy {
+  flex: 0 0 auto;
+}
+.cf-notpriced {
+  margin-top: 14px;
+}
+.cf-scroll > .cf-grid {
+  min-width: 0;
+  width: max-content;
+}
+.cf-grid th,
+.cf-grid td {
+  vertical-align: top;
+}
+.cf-grid thead th {
+  white-space: nowrap;
+}
+.cf-grid__sub {
+  font-weight: 500;
+}
+.cf-grid__who {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--fwhite);
+  text-align: left;
+  min-width: 130px;
+  max-width: 200px;
+}
+.cf-cell {
+  min-width: 96px;
+  padding: 2px;
+}
+.cf-cell--general {
+  padding: 6px 8px;
+}
+.cf-cell__btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid var(--fbd);
+  border-radius: 6px;
+  background: var(--fwhite);
+  color: var(--fink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cf-cell__btn:hover,
+.cf-cell__btn:focus-visible {
+  border-color: var(--ftl);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--ftll);
+}
+.cf-cell__btn--inherited {
+  border-style: dashed;
+  background: var(--fbg);
+}
+.cf-cell__fee {
+  font-weight: 700;
+  font-size: 13px;
+}
+.cf-cell__pays {
+  font-size: 11px;
+}
+.cf-cell__note {
+  font-size: 10px;
+  color: var(--fink3);
+  font-style: italic;
+}
+.cf-dim {
+  color: var(--fink3);
+  font-weight: 500;
+}
+.cf-cell--general .cf-cell__fee,
+.cf-cell--general .cf-cell__note {
+  display: block;
+}
+.cf-editor__now {
+  margin-bottom: 0;
+}
+.cf-editor__money {
+  flex-basis: 110px;
+}
+.cf-editor__clear {
+  margin-right: auto;
+}

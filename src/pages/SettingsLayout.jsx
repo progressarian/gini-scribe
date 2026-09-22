@@ -45,6 +45,16 @@ export const SETTINGS_TABS = [
     blurb: "What each category pays for each service, and the code printed on its bill",
   },
   {
+    to: "/settings/consultant-fees",
+    label: "Consultant fees",
+    blurb: "Each doctor's New and Follow Up fee for every category, and what the patient pays",
+  },
+  {
+    to: "/settings/discounts",
+    label: "Discounts",
+    blurb: "Automatic discounts and codes the desk can enter, their limits and who they are for",
+  },
+  {
     to: "/settings/bulk-import",
     label: "Bulk import",
     blurb: "Upload the Excel template to add or update services, categories and rates in one go",

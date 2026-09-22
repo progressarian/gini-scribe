@@ -18,4 +18,13 @@ export const categoryCodeTyped = (value) => value.toLowerCase().replace(/[^a-z0-
 export const errorOf = (e, fallback = "Something went wrong") =>
   e?.response?.data?.error || fallback;
 
+export const requestErrorOf = (e, fallback) => {
+  if (e?.response?.data?.error) return e.response.data.error;
+  if (e?.isAxiosError && !e.response) {
+    return `${fallback}: Scribe's server didn't answer — check it is running, then try again`;
+  }
+  if (e?.response?.status) return `${fallback} (the server answered ${e.response.status})`;
+  return fallback;
+};
+
 export const usesOf = (e) => (e?.response?.status === 409 ? e.response.data?.uses : null) || null;

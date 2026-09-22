@@ -83,6 +83,8 @@ const PrescriptionFooterPage = lazyWithRetry(() => import("./pages/PrescriptionF
 const SchemesSettingsPage = lazyWithRetry(() => import("./pages/SchemesSettingsPage"));
 const ServicesSettingsPage = lazyWithRetry(() => import("./pages/billing/ServicesSettingsPage"));
 const CategoryRatesPage = lazyWithRetry(() => import("./pages/billing/CategoryRatesPage"));
+const ConsultantFeesPage = lazyWithRetry(() => import("./pages/billing/ConsultantFeesPage"));
+const DiscountsSettingsPage = lazyWithRetry(() => import("./pages/billing/DiscountsSettingsPage"));
 const BillingSettingsPage = lazyWithRetry(() => import("./pages/billing/BillingSettingsPage"));
 const BillingImportPage = lazyWithRetry(() => import("./pages/billing/BillingImportPage"));
 const TestCatalogPage = lazyWithRetry(() => import("./pages/TestCatalogPage"));
@@ -231,6 +233,8 @@ const router = createBrowserRouter([
                   { path: "schemes", element: lazyEl(SchemesSettingsPage) },
                   { path: "services", element: lazyEl(ServicesSettingsPage) },
                   { path: "category-rates", element: lazyEl(CategoryRatesPage) },
+                  { path: "consultant-fees", element: lazyEl(ConsultantFeesPage) },
+                  { path: "discounts", element: lazyEl(DiscountsSettingsPage) },
                   { path: "bulk-import", element: lazyEl(BillingImportPage) },
                   { path: "billing", element: lazyEl(BillingSettingsPage) },
                 ],

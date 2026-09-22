@@ -1,5 +1,6 @@
 import pool from "../../config/db.js";
 import { writeAudit } from "./audit.js";
+import { checkItemPrices } from "./paymentRules.js";
 import { indiaToday } from "./categoryResolver.js";
 import { httpError, inTransaction } from "./transaction.js";
 import { auditFields, cleanFlag, hasField, INT_MAX, MONEY_MAX, readNumber } from "./common.js";
@@ -81,6 +82,20 @@ async function checkCategory(client, code) {
   return rows[0].name;
 }
 
+async function checkBillCodeFree(client, billCode) {
+  if (!billCode) return;
+  const { rows } = await client.query(
+    `SELECT code, name FROM discount_rules WHERE lower(code) = lower($1)`,
+    [billCode],
+  );
+  if (rows.length) {
+    throw httpError(
+      409,
+      `${rows[0].code} is already the code of the discount "${rows[0].name}"; choose another bill code`,
+    );
+  }
+}
+
 async function checkItem(client, id) {
   const { rows } = await client.query(`SELECT name, is_active FROM service_items WHERE id = $1`, [
     id,
@@ -112,6 +127,7 @@ export async function saveRate(input, ctx, db = pool) {
   return inTransaction(async (client) => {
     await checkCategory(client, values.scheme_code);
     await checkItem(client, values.service_item_id);
+    await checkBillCodeFree(client, values.bill_code);
     await lockItem(client, values.scheme_code, values.service_item_id);
     const { rows: existing } = await client.query(
       `SELECT ${ROW} FROM category_item_rates
@@ -190,6 +206,7 @@ export async function saveRate(input, ctx, db = pool) {
       after: rows[0],
       ...auditFields(ctx),
     });
+    await checkItemPrices(client, [values.service_item_id]);
     return { rate: shape(rows[0]), closed, starts_in_past: values.valid_from < indiaToday() };
   }, db);
 }
@@ -229,7 +246,10 @@ export async function deleteRate(input, ctx, db = pool) {
         WHERE scheme_code = $1 AND service_item_id = $2 AND valid_to = $3::date - 1`,
       [scheme, itemId, deleted.valid_from],
     );
-    if (!reopen) return { deleted: true, previous: shape(previous[0]) ?? null, reopened: null };
+    if (!reopen) {
+      await checkItemPrices(client, [itemId]);
+      return { deleted: true, previous: shape(previous[0]) ?? null, reopened: null };
+    }
     if (!previous.length) {
       throw httpError(
         409,
@@ -250,6 +270,7 @@ export async function deleteRate(input, ctx, db = pool) {
       after: reopened[0],
       ...auditFields(ctx),
     });
+    await checkItemPrices(client, [itemId]);
     return { deleted: true, previous: shape(reopened[0]), reopened: shape(reopened[0]) };
   }, db);
 }

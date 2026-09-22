@@ -20,13 +20,24 @@ const ADMIN_TABS = [
   "Categories",
   "Services",
   "Category rates",
+  "Consultant fees",
+  "Discounts",
   "Bulk import",
   "Billing settings",
 ];
-const RECEPTION_ADMIN_TABS = ["Categories", "Services", "Category rates", "Bulk import"];
+const RECEPTION_ADMIN_TABS = [
+  "Categories",
+  "Services",
+  "Category rates",
+  "Consultant fees",
+  "Discounts",
+  "Bulk import",
+];
 const BILLING_PAGES = [
   "/settings/services",
   "/settings/category-rates",
+  "/settings/consultant-fees",
+  "/settings/discounts",
   "/settings/bulk-import",
   "/settings/billing",
 ];

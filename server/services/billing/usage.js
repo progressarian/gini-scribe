@@ -13,6 +13,19 @@ export const USAGE_KINDS = {
         column: "group_id",
         text: (n, name) => `${n} ${plural(n, "subgroup", "subgroups")} under ${name}`,
       },
+      {
+        table: "category_payment_rules",
+        column: "group_id",
+        text: (n, name) =>
+          `${n} ${plural(n, "payment rule covers", "payment rules cover")} ${name}`,
+      },
+      {
+        table: "discount_rules",
+        column: "group_ids",
+        any: true,
+        text: (n, name) =>
+          `${n} ${plural(n, "discount rule covers", "discount rules cover")} ${name}`,
+      },
     ],
   },
   subgroup: {
@@ -25,6 +38,19 @@ export const USAGE_KINDS = {
         column: "subgroup_id",
         text: (n, name) => `${n} ${plural(n, "item", "items")} in ${name}`,
       },
+      {
+        table: "category_payment_rules",
+        column: "subgroup_id",
+        text: (n, name) =>
+          `${n} ${plural(n, "payment rule covers", "payment rules cover")} ${name}`,
+      },
+      {
+        table: "discount_rules",
+        column: "subgroup_ids",
+        any: true,
+        text: (n, name) =>
+          `${n} ${plural(n, "discount rule covers", "discount rules cover")} ${name}`,
+      },
     ],
   },
   item: {
@@ -36,6 +62,19 @@ export const USAGE_KINDS = {
         table: "category_item_rates",
         column: "service_item_id",
         text: (n, name) => `${n} ${plural(n, "category rate", "category rates")} for ${name}`,
+      },
+      {
+        table: "category_payment_rules",
+        column: "service_item_id",
+        text: (n, name) =>
+          `${n} ${plural(n, "payment rule covers", "payment rules cover")} ${name}`,
+      },
+      {
+        table: "discount_rules",
+        column: "service_item_ids",
+        any: true,
+        text: (n, name) =>
+          `${n} ${plural(n, "discount rule covers", "discount rules cover")} ${name}`,
       },
     ],
   },
@@ -70,6 +109,18 @@ export const USAGE_KINDS = {
         table: "category_item_rates",
         column: "scheme_code",
         text: (n, name) => `${n} ${plural(n, "category rate", "category rates")} for ${name}`,
+      },
+      {
+        table: "category_payment_rules",
+        column: "scheme_code",
+        text: (n, name) => `${n} ${plural(n, "payment rule", "payment rules")} for ${name}`,
+      },
+      {
+        table: "discount_rules",
+        column: "scheme_codes",
+        any: true,
+        text: (n, name) =>
+          `${n} ${plural(n, "discount rule is", "discount rules are")} for ${name}`,
       },
       {
         table: "patients",
@@ -116,7 +167,8 @@ export async function whereUsed(kind, key, db = pool) {
   const uses = [];
   for (const use of spec.uses) {
     const { rows } = await db.query(
-      `SELECT count(*)::int AS n FROM ${use.table} WHERE ${use.column} = $1`,
+      `SELECT count(*)::int AS n FROM ${use.table}
+        WHERE ${use.any ? `$1 = ANY(${use.column})` : `${use.column} = $1`}`,
       [key],
     );
     if (rows[0].n > 0) {

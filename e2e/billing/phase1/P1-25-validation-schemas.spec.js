@@ -52,7 +52,20 @@ const MINIMAL = {
   billingImportHistoryQuerySchema: {},
 };
 
+const LEFTOVER_CONSULT = "^VI-[0-9a-f]{6}$";
+
+async function retireConsultItems(codePattern) {
+  await query(
+    `UPDATE service_items SET is_active = FALSE
+      WHERE kind = 'consultation' AND is_active AND doctor_id = $1 AND visit_type = 'Follow Up'
+        AND code ~ $2`,
+    [CONSULTANTS.beant.id, codePattern],
+  );
+}
+
 test.describe("P1-25 validation schemas", () => {
+  test.afterAll(() => retireConsultItems(`^VI-${tag}$`));
+
   test("1. every billing schema is registered and accepts a minimal valid body", () => {
     expect(Object.keys(S).sort()).toEqual(Object.keys(MINIMAL).sort());
     for (const [key, body] of Object.entries(MINIMAL)) {
@@ -142,6 +155,7 @@ test.describe("P1-25 validation schemas", () => {
 
   test("7. a full valid body passes the schema and is accepted by the real service", async () => {
     const parsed = (key, body) => S[key].parse(body);
+    await retireConsultItems(LEFTOVER_CONSULT);
     const group = await groups.createGroup(
       parsed("billingGroupCreateSchema", {
         code: `VG-${tag}`,

@@ -1,6 +1,15 @@
 import crypto from "node:crypto";
 
-const DETAILS = ["uses", "active", "conflicts"];
+const DETAILS = [
+  "uses",
+  "active",
+  "conflicts",
+  "needs_sub_category",
+  "suggestions",
+  "line_no",
+  "items",
+  "rules",
+];
 
 export function sendFailure(context, res, e) {
   if (Number.isInteger(e?.status) && e.status >= 400 && e.status < 500) {

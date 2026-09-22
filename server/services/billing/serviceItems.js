@@ -2,6 +2,7 @@ import pool from "../../config/db.js";
 import { isLabOnlyDoctor } from "../../../shared/labOnly.js";
 import { CONSULTATION_VISIT_TYPES, ITEM_KINDS } from "./importColumns.js";
 import { looksLikeSameTest, normalizeTestName } from "./testNames.js";
+import { checkItemPrices } from "./paymentRules.js";
 import { writeAudit } from "./audit.js";
 import { httpError, inTransaction } from "./transaction.js";
 import {
@@ -345,6 +346,7 @@ export async function createItem(input, ctx, db = pool) {
         throw uniqueViolation(error);
       });
     await recordPrice(client, rows[0].id, null, values.base_price, "Created", ctx);
+    await checkItemPrices(client, [rows[0].id]);
     await writeAudit(client, {
       entity: SPEC.table,
       entityId: rows[0].id,
@@ -389,6 +391,7 @@ export async function updateItem(id, input, ctx, db = pool) {
     if (priceChanged) {
       await recordPrice(client, id, Number(before.base_price), values.base_price, reason, ctx);
     }
+    if (priceChanged || "subgroup_id" in values) await checkItemPrices(client, [id]);
     await writeAudit(client, {
       entity: SPEC.table,
       entityId: id,
@@ -416,6 +419,7 @@ export async function setItemActive(id, value, ctx, db = pool) {
       .catch((error) => {
         throw uniqueViolation(error);
       });
+    if (active) await checkItemPrices(client, [id]);
     await writeAudit(client, {
       entity: SPEC.table,
       entityId: id,

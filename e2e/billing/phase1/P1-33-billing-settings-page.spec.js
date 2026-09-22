@@ -101,7 +101,7 @@ test.describe.serial("P1-33 billing settings page", () => {
         bill_footer: `Thank you ${tag}`,
       });
 
-    await page.reload();
+    await gotoReady(page, "/settings/billing", () => card(page, "Bills"));
     const again = card(page, "Bills");
     await expect(again.getByLabel("When several discounts apply", { exact: true })).toHaveValue(
       "per_rule",
@@ -220,7 +220,7 @@ test.describe.serial("P1-33 billing settings page", () => {
     await expect(gst.getByLabel("GSTIN", { exact: true })).toHaveValue(GSTIN);
     await expect(gst.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
 
-    await page.reload();
+    await gotoReady(page, "/settings/billing", () => card(page, "Bills"));
     const again = card(page, "GST");
     await expect(again.getByLabel("Charge GST on bills", { exact: true })).toBeChecked();
     await expect(again.getByLabel("GSTIN", { exact: true })).toHaveValue(GSTIN);
@@ -254,7 +254,7 @@ test.describe.serial("P1-33 billing settings page", () => {
     await taxes.getByRole("button", { name: `Deactivate ${TAX}`, exact: true }).click();
     await expect(taxes.getByRole("button", { name: `Activate ${TAX}`, exact: true })).toBeVisible();
 
-    await page.reload();
+    await gotoReady(page, "/settings/billing", () => card(page, "Bills"));
     const after = section(page, "Tax codes").getByRole("row", { name: new RegExp(TAX) });
     await expect(after).toContainText("12.5%");
     await expect(after).toContainText("999312");
@@ -388,7 +388,7 @@ test.describe.serial("P1-33 billing settings page", () => {
     await table.getByRole("button", { name: "Save Receipts series", exact: true }).click();
     await expect(table.getByRole("row", { name: /^Receipts/ })).not.toContainText("Not set up yet");
 
-    await page.reload();
+    await gotoReady(page, "/settings/billing", () => card(page, "Bills"));
     const again = section(page, "Number series").getByRole("table", {
       name: `Number series ${saved.fy}`,
     });

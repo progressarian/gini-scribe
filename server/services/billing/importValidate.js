@@ -2,7 +2,19 @@ import pool from "../../config/db.js";
 import { isLabOnlyDoctor } from "../../../shared/labOnly.js";
 import { normalizeTestName } from "./testNames.js";
 import { suggestedGroup } from "./testListExport.js";
-import { RESERVED_CATEGORY_CODES } from "./importColumns.js";
+import {
+  BILLING_ROLES,
+  CONSULTATION_VISIT_TYPES,
+  DISCOUNT_DB_COLUMNS,
+  PAYMENT_RULE_DB_COLUMNS,
+  RESERVED_CATEGORY_CODES,
+  TODAY_ON_CREATE,
+  VISIT_TYPES,
+} from "./importColumns.js";
+import { claimPayerProblem, paymentRuleShapeProblem, rupees } from "./paymentRules.js";
+import { discountShapeProblem } from "./discountRules.js";
+import { laterRuleText } from "./consultantFees.js";
+import { indiaToday } from "./categoryResolver.js";
 
 export const key = (code) =>
   String(code ?? "")
@@ -20,34 +32,60 @@ export const nameKey = (name) =>
     .toLowerCase();
 
 export async function loadReference(db = pool) {
-  const [groups, subgroups, items, doctors, tests, taxCodes, categories, rules, rates] =
-    await Promise.all([
-      db.query(`SELECT id, code, name, sort_order, is_active FROM service_groups`),
-      db.query(`SELECT id, code, name, group_id, sort_order, is_active FROM service_subgroups`),
-      db.query(
-        `SELECT id, code, name, subgroup_id, base_price, unit, allow_quantity, max_quantity,
+  const [
+    groups,
+    subgroups,
+    items,
+    doctors,
+    tests,
+    taxCodes,
+    categories,
+    rules,
+    rates,
+    discounts,
+    paymentRules,
+  ] = await Promise.all([
+    db.query(`SELECT id, code, name, sort_order, is_active FROM service_groups`),
+    db.query(`SELECT id, code, name, group_id, sort_order, is_active FROM service_subgroups`),
+    db.query(
+      `SELECT id, code, name, subgroup_id, base_price, unit, allow_quantity, max_quantity,
                 tax_code_id, kind, doctor_id, visit_type, test_catalog_id, is_active
            FROM service_items`,
-      ),
-      db.query(`SELECT id, name, is_active FROM doctors`),
-      db.query(`SELECT id, test_name, category, is_active FROM giniflow_test_catalog`),
-      db.query(`SELECT id, code, is_active FROM tax_codes`),
-      db.query(
-        `SELECT code, label, parent_code, payer_name, requires_ref, requires_referral,
+    ),
+    db.query(`SELECT id, name, is_active FROM doctors`),
+    db.query(`SELECT id, test_name, category, is_active FROM giniflow_test_catalog`),
+    db.query(`SELECT id, code, is_active FROM tax_codes`),
+    db.query(
+      `SELECT code, label, parent_code, payer_name, requires_ref, requires_referral,
                 requires_referral_doc, print_category_on_bill, allow_pay_later, daily_cap, is_active
            FROM patient_schemes`,
-      ),
-      db.query(
-        `SELECT id, scheme_code, name, min_age, max_age, gender, requires_card, mode, priority,
+    ),
+    db.query(
+      `SELECT id, scheme_code, name, min_age, max_age, gender, requires_card, mode, priority,
                 is_active
            FROM category_rules`,
-      ),
-      db.query(
-        `SELECT scheme_code, service_item_id, valid_from::text AS valid_from,
+    ),
+    db.query(
+      `SELECT scheme_code, service_item_id, valid_from::text AS valid_from,
                 valid_to::text AS valid_to, rate, bill_name, bill_code
            FROM category_item_rates`,
-      ),
-    ]);
+    ),
+    db.query(
+      `SELECT id, code, name, method, kind, value::float8 AS value,
+                max_discount::float8 AS max_discount, group_ids, subgroup_ids, service_item_ids,
+                doctor_ids, visit_types, scheme_codes, min_age, max_age, gender,
+                valid_from::text AS valid_from, valid_to::text AS valid_to, max_uses_total,
+                max_uses_per_patient, max_uses_per_day, max_uses_per_doctor_per_day, applies_per,
+                priority, stackable, applies_on_scheme_rate, allowed_roles, is_active
+           FROM discount_rules`,
+    ),
+    db.query(
+      `SELECT id, scheme_code, name, group_id, subgroup_id, service_item_id, visit_types,
+                patient_pays, patient_value::float8 AS patient_value, remainder,
+                valid_from::text AS valid_from, valid_to::text AS valid_to, priority, is_active
+           FROM category_payment_rules`,
+    ),
+  ]);
   const { getMachines } = await import("../giniflow/machineCatalog.js");
   return {
     groups: groups.rows,
@@ -59,6 +97,11 @@ export async function loadReference(db = pool) {
     categories: categories.rows,
     rules: rules.rows,
     rates: rates.rows,
+    discountCodes: discounts.rows
+      .filter((d) => d.code !== null)
+      .map((d) => ({ code: d.code, name: d.name })),
+    discounts: discounts.rows,
+    paymentRules: paymentRules.rows,
     machines: await getMachines(db),
   };
 }
@@ -109,8 +152,7 @@ function finalState(dbRows, fileRows, codeColumn, fromDb, fromFile) {
   return state;
 }
 
-function missingParent(row, column, noun, sheetName, state) {
-  const typed = row.values[column];
+function missingParent(row, column, noun, sheetName, state, typed = row.values[column]) {
   const broken = state.fileRowsWithErrors[sheetName]?.get(key(typed));
   fail(
     row,
@@ -213,9 +255,7 @@ function checkSubgroups(sheet, state) {
   }
 }
 
-function resolveDoctor(row, lookup) {
-  const typed = row.values.doctor;
-  if (typed == null) return null;
+function findDoctor(typed, lookup) {
   const byId = /^\d+$/.test(typed) ? (lookup.doctorsById.get(typed) ?? []) : [];
   const matches = byId.length ? byId : (lookup.doctorsByName.get(nameKey(typed)) ?? []);
   if (!matches.length) {
@@ -225,20 +265,27 @@ function resolveDoctor(row, lookup) {
     const hint = near.length
       ? `; did you mean ${near.map((d) => `"${d.name}"`).join(" or ")}?`
       : "";
-    fail(row, "doctor", `There is no doctor called "${typed}" in Scribe${hint}`);
-    return undefined;
+    return { error: `There is no doctor called "${typed}" in Scribe${hint}` };
   }
   if (matches.length > 1) {
-    fail(
-      row,
-      "doctor",
-      `${matches.length} doctors are called "${typed}"; write the doctor's id instead (${matches
+    return {
+      error: `${matches.length} doctors are called "${typed}"; write the doctor's id instead (${matches
         .map((d) => d.id)
         .join(" or ")})`,
-    );
+    };
+  }
+  return { doctor: matches[0] };
+}
+
+function resolveDoctor(row, lookup) {
+  const typed = row.values.doctor;
+  if (typed == null) return null;
+  const found = findDoctor(typed, lookup);
+  if (found.error) {
+    fail(row, "doctor", found.error);
     return undefined;
   }
-  const [doctor] = matches;
+  const { doctor } = found;
   if (doctor.is_active === false) {
     fail(row, "doctor", `${doctor.name} is not an active doctor`);
     return undefined;
@@ -481,6 +528,7 @@ function buildState(sheets, ref) {
       active: c.is_active,
       parent: c.parent_code ? key(c.parent_code) : null,
       requiresRef: c.requires_ref,
+      payer: c.payer_name,
       dbCap: c.daily_cap === null ? null : Number(c.daily_cap),
       inDb: true,
     }),
@@ -490,6 +538,7 @@ function buildState(sheets, ref) {
       active: row.values.active,
       parent: row.values.parent_code ? key(row.values.parent_code) : null,
       requiresRef: row.values.requires_ref,
+      payer: row.values.payer_name,
     }),
   );
   const fileRowsWithErrors = {
@@ -516,8 +565,40 @@ function buildState(sheets, ref) {
   const ruleKeys = new Set(
     (ref.rules ?? []).map((r) => `${key(r.scheme_code)}|${nameKey(r.name)}`),
   );
-  return { groups, subgroups, items, categories, fileRowsWithErrors, index, hadChildren, ruleKeys };
+  const codeById = {
+    groups: new Map(ref.groups.map((g) => [g.id, g.code])),
+    subgroups: new Map(ref.subgroups.map((sg) => [sg.id, sg.code])),
+    items: new Map(ref.items.map((i) => [i.id, i.code])),
+  };
+  const slotOf = (scheme, itemId) => `${key(scheme)}|${itemId}`;
+  return {
+    groups,
+    subgroups,
+    items,
+    categories,
+    fileRowsWithErrors,
+    index,
+    hadChildren,
+    ruleKeys,
+    codeById,
+    dbItems: new Map(ref.items.map((i) => [key(i.code), i])),
+    ratesBySlot: indexBy(ref.rates ?? [], (r) => slotOf(r.scheme_code, r.service_item_id)),
+    rulesBySlot: indexBy(
+      (ref.paymentRules ?? []).filter((r) => r.service_item_id !== null),
+      (r) => slotOf(r.scheme_code, r.service_item_id),
+    ),
+    slotOf,
+    paymentRules: new Map(
+      (ref.paymentRules ?? []).map((r) => [ruleKeyOf(r.scheme_code, r.name), r]),
+    ),
+    discounts: new Map((ref.discounts ?? []).map((d) => [nameKey(d.name), d])),
+    discountsByCode: new Map(
+      (ref.discounts ?? []).filter((d) => d.code !== null).map((d) => [key(d.code), d]),
+    ),
+  };
 }
+
+export const ruleKeyOf = (category, name) => `${key(category)}|${nameKey(name)}`;
 
 const CATEGORY_CODE = /^[a-z0-9_]{2,32}$/;
 const MAX_AGE = 150;
@@ -527,12 +608,17 @@ function lowerCategoryCodes(sheets) {
     Categories: ["category_code", "parent_code"],
     "Category rules": ["category_code"],
     "Category rates": ["category_code"],
+    "Payment rules": ["category_code"],
+    "Consultant fees": ["category_code"],
+    Discounts: ["categories"],
   };
   for (const sheet of sheets) {
     for (const column of columns[sheet.name] ?? []) {
       for (const row of sheet.rows) {
-        if (typeof row.values[column] === "string") {
-          row.values[column] = row.values[column].toLowerCase();
+        const value = row.values[column];
+        if (typeof value === "string") row.values[column] = value.toLowerCase();
+        if (Array.isArray(value)) {
+          row.values[column] = [...new Set(value.map((v) => v.toLowerCase()))];
         }
       }
     }
@@ -762,11 +848,29 @@ function rateSlots(ref, rows) {
   return slots;
 }
 
-function checkRates(sheet, state, ref) {
+function checkRates(rows, state, ref, discountCodes) {
   const { categories, items } = state;
-  const slots = rateSlots(ref, sheet.rows);
-  for (const row of sheet.rows) {
+  const slots = rateSlots(ref, rows);
+  const storedCodes = new Map(
+    (ref.rates ?? []).map((r) => [
+      `${key(r.scheme_code)}|${r.service_item_id}|${r.valid_from}`,
+      key(r.bill_code),
+    ]),
+  );
+  for (const row of rows) {
     const v = row.values;
+    const itemId = state.dbItems.get(key(v.item_code))?.id;
+    const kept =
+      v.bill_code != null &&
+      storedCodes.get(`${key(v.category_code)}|${itemId}|${v.valid_from}`) === key(v.bill_code);
+    const discount = !kept && !hasError(row, "bill_code") && discountCodes.get(key(v.bill_code));
+    if (discount) {
+      fail(
+        row,
+        "bill_code",
+        `${discount.code} is already the code of the discount "${discount.name}"; choose another bill code`,
+      );
+    }
     if (
       !hasError(row, "valid_from", "valid_to") &&
       v.valid_to != null &&
@@ -834,6 +938,659 @@ function checkRates(sheet, state, ref) {
   }
 }
 
+const PAYMENT_RULE_COLUMN = Object.fromEntries(
+  Object.entries(PAYMENT_RULE_DB_COLUMNS).map(([sheet, db]) => [db, sheet]),
+);
+const DISCOUNT_COLUMN = Object.fromEntries(
+  Object.entries(DISCOUNT_DB_COLUMNS).map(([sheet, db]) => [db, sheet]),
+);
+DISCOUNT_COLUMN.applies_per = "kind";
+
+const SCOPES = [
+  { column: "group_code", field: "group_id", state: "groups", noun: "group", sheet: "Groups" },
+  {
+    column: "subgroup_code",
+    field: "subgroup_id",
+    state: "subgroups",
+    noun: "subgroup",
+    sheet: "Subgroups",
+  },
+  { column: "item_code", field: "service_item_id", state: "items", noun: "item", sheet: "Items" },
+];
+const TAKES_VALUE = ["amount", "percent"];
+const USE_LIMITS = [
+  "max_uses_total",
+  "max_uses_per_patient",
+  "max_uses_per_day",
+  "max_uses_per_doctor_per_day",
+];
+
+const inOrder = (list, order) => (list ? order.filter((v) => list.includes(v)) : list);
+
+const startOf = (typed, stored) =>
+  typed === TODAY_ON_CREATE ? (stored ? stored.valid_from : indiaToday()) : typed;
+
+const failOnce = (row, column, message) => {
+  if (!row.errors.some((e) => e.message === message)) fail(row, column, message);
+};
+
+const warnOnce = (row, column, message) => {
+  if (!row.warnings.some((w) => w.message === message)) warn(row, column, message);
+};
+
+function categoryFacts(entry, categories) {
+  const parent = entry.parent ? categories.get(entry.parent) : null;
+  return {
+    name: categoryName(entry, categories),
+    parent_code: entry.parent,
+    payer_name: entry.payer ?? parent?.payer ?? null,
+  };
+}
+
+function checkPaymentRules(sheet, state) {
+  const { categories } = state;
+  for (const row of sheet.rows) {
+    const v = row.values;
+    v.visit_types = inOrder(v.visit_types, VISIT_TYPES);
+    const stored = hasError(row, "category_code", "rule_name")
+      ? null
+      : (state.paymentRules.get(ruleKeyOf(v.category_code, v.rule_name)) ?? null);
+    if (!hasError(row, "valid_from")) v.valid_from = startOf(v.valid_from, stored);
+    row.resolved = { stored };
+    const reviving = Boolean(stored) && !stored.is_active && v.active === true;
+    const scopes = SCOPES.filter((scope) => v[scope.column] != null);
+    const shapeColumns = [
+      "patient_pays",
+      "patient_value",
+      "valid_from",
+      "valid_to",
+      ...SCOPES.map((scope) => scope.column),
+    ];
+    if (!hasError(row, ...shapeColumns)) {
+      const problem = paymentRuleShapeProblem({
+        ...Object.fromEntries(SCOPES.map((scope) => [scope.field, v[scope.column] ?? null])),
+        patient_pays: v.patient_pays,
+        patient_value: v.patient_value ?? null,
+        valid_from: v.valid_from,
+        valid_to: v.valid_to ?? null,
+      });
+      if (problem) fail(row, PAYMENT_RULE_COLUMN[problem.field], problem.message);
+    }
+    if (scopes.length === 1 && !hasError(row, scopes[0].column)) {
+      const [scope] = scopes;
+      const target = state[scope.state].get(key(v[scope.column]));
+      if (!target) {
+        missingParent(row, scope.column, scope.noun, scope.sheet, state);
+      } else {
+        const before = stored ? state.codeById[scope.state].get(stored[scope.field]) : null;
+        const changed = !stored || key(before) !== key(target.code);
+        if ((changed || reviving) && !target.active) {
+          fail(row, scope.column, `The ${scope.noun} ${target.name} is deactivated`);
+        }
+      }
+    }
+    const category = findCategory(row, state);
+    if (!category) continue;
+    const facts = categoryFacts(category, categories);
+    if ((!stored || reviving) && !categoryLive(category, categories)) {
+      fail(row, "category_code", `${facts.name} is retired; bring it back first`);
+    }
+    if (v.active && !hasError(row, "patient_pays", "remainder")) {
+      const problem = claimPayerProblem(facts, v);
+      if (problem) fail(row, "remainder", problem);
+    }
+  }
+}
+
+const liveOn = (entry, date) =>
+  entry.valid_from <= date && (entry.valid_to === null || entry.valid_to >= date);
+
+function ownRateOn(state, scheme, itemId, date) {
+  return (
+    (state.ratesBySlot.get(state.slotOf(scheme, itemId)) ?? [])
+      .filter((r) => liveOn(r, date))
+      .sort((a, b) => b.valid_from.localeCompare(a.valid_from))[0] ?? null
+  );
+}
+
+function ownRuleOn(state, scheme, item, date) {
+  return (
+    (state.rulesBySlot.get(state.slotOf(scheme, item.id)) ?? [])
+      .filter(
+        (r) =>
+          r.is_active &&
+          liveOn(r, date) &&
+          (r.visit_types === null || r.visit_types.includes(item.visit_type)),
+      )
+      .sort((a, b) => a.priority - b.priority || a.id - b.id)[0] ?? null
+  );
+}
+
+const sameRule = (rule, values) =>
+  rule.patient_pays === values.patient_pays &&
+  (rule.patient_value ?? null) === (values.patient_value ?? null) &&
+  rule.remainder === values.remainder;
+
+const RULE_FIELDS = ["patient_pays", "patient_value", "remainder", "valid_to"];
+
+function ruleChanges(before, after) {
+  return RULE_FIELDS.filter((f) => String(before?.[f] ?? null) !== String(after[f] ?? null)).map(
+    (f) => ({ column: f, from: before?.[f] ?? null, to: after[f] ?? null }),
+  );
+}
+
+const RATE_FIELDS = [
+  ["fee", "rate"],
+  ["bill_name", "bill_name"],
+  ["bill_code", "bill_code"],
+  ["valid_to", "valid_to"],
+];
+
+function rateChanges(before, after) {
+  return RATE_FIELDS.filter(([, f]) => {
+    const [a, b] = [before?.[f] ?? null, after[f] ?? null];
+    return f === "rate" && a !== null && b !== null ? Number(a) !== Number(b) : a !== b;
+  }).map(([column, f]) => ({
+    column,
+    from: before?.[f] == null ? null : f === "rate" ? Number(before[f]) : before[f],
+    to: after[f] ?? null,
+  }));
+}
+
+function dayBeforeText(date) {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function prepareConsultantFees(sheet, state, lookup) {
+  const slots = new Map();
+  for (const row of sheet.rows) {
+    const v = row.values;
+    row.resolved = { targets: [] };
+    const doctor = resolveDoctor(row, lookup);
+    if (!hasError(row, "category_code") && RESERVED_CATEGORY_CODES.includes(v.category_code)) {
+      fail(
+        row,
+        "category_code",
+        "The General fee is the consultation item's own price; change it on the Items sheet or the Services page",
+      );
+      continue;
+    }
+    const category = findCategory(row, state);
+    if (!doctor || hasError(row, "visit_type")) continue;
+    const items = [];
+    for (const visitType of v.visit_type ? [v.visit_type] : CONSULTATION_VISIT_TYPES) {
+      const [item] = state.index.consultations.get(`${doctor.id}|${visitType}`) ?? [];
+      if (!item) {
+        fail(
+          row,
+          v.visit_type ? "visit_type" : "doctor",
+          `${doctor.name} has no active ${visitType} consultation item; create it first on the Services or Consultant fees page (or on the Items sheet of this file), then upload again`,
+        );
+      } else {
+        items.push({ visitType, item });
+      }
+    }
+    if (!category) continue;
+    row.resolved = { doctor, category, items, targets: [] };
+    for (const { visitType } of items) {
+      const k = `${doctor.id}|${visitType}|${key(category.code)}`;
+      slots.set(k, [...(slots.get(k) ?? []), { row, visitType }]);
+    }
+  }
+  for (const group of slots.values()) {
+    if (group.length < 2) continue;
+    for (const { row, visitType } of group) {
+      const rest = [...new Set(group.filter((g) => g.row !== row).map((g) => g.row.row))];
+      if (!rest.length) continue;
+      failOnce(
+        row,
+        "doctor",
+        `${row.resolved.doctor.name} (${visitType}) in ${row.values.category_code} is also on ${rowList(rest)}; each doctor + visit_type + category_code can appear only once`,
+      );
+    }
+  }
+}
+
+const spansMeet = (a, b) =>
+  (a.valid_to === null || b.valid_from <= a.valid_to) &&
+  (b.valid_to === null || a.valid_from <= b.valid_to);
+
+const coversVisit = (rule, visitType) =>
+  rule.visit_types == null || rule.visit_types.includes(visitType);
+
+const stretches = ({ before, after }) =>
+  !before ||
+  after.valid_to === null ||
+  (before.valid_to !== null && after.valid_to > before.valid_to);
+
+function sheetRulesByCell(paymentRuleRows) {
+  return indexBy(
+    [...paymentRuleRows.values()].filter(
+      (row) =>
+        row.values.item_code != null &&
+        row.values.active !== false &&
+        !hasError(row, "item_code", "valid_from", "valid_to"),
+    ),
+    (row) => `${key(row.values.category_code)}|${key(row.values.item_code)}`,
+  );
+}
+
+function laterStoredRule(state, scheme, dbItem, visitType, ops, op) {
+  const skip = new Set(ops.map((o) => o.before?.id).filter(Boolean));
+  return (
+    (state.rulesBySlot.get(state.slotOf(scheme, dbItem.id)) ?? [])
+      .filter(
+        (r) =>
+          r.is_active &&
+          !skip.has(r.id) &&
+          coversVisit(r, visitType) &&
+          r.valid_from > op.after.valid_from &&
+          (op.after.valid_to === null || r.valid_from <= op.after.valid_to),
+      )
+      .sort((a, b) => a.valid_from.localeCompare(b.valid_from) || a.id - b.id)[0] ?? null
+  );
+}
+
+function checkConsultantFees(sheet, state, paymentRuleRows) {
+  const today = indiaToday();
+  const sheetRules = sheetRulesByCell(paymentRuleRows);
+  const taken = new Set([...state.paymentRules.keys(), ...paymentRuleRows.keys()]);
+  const freeName = (scheme, item, start) => {
+    const name =
+      [item.name, `${item.name} from ${start}`].find((n) => !taken.has(ruleKeyOf(scheme, n))) ??
+      `${item.name} from ${start} (${Date.now()})`;
+    taken.add(ruleKeyOf(scheme, name));
+    return name;
+  };
+  const rates = [];
+  for (const row of sheet.rows) {
+    const { category, items } = row.resolved;
+    if (!category || !items?.length || row.errors.length) continue;
+    const v = row.values;
+    const facts = categoryFacts(category, state.categories);
+    const scheme = key(category.code);
+    const payer = claimPayerProblem(facts, v);
+    if (payer) fail(row, "remainder", payer);
+    const given = v.valid_from === TODAY_ON_CREATE ? null : v.valid_from;
+    const on = given ?? today;
+    const values = {
+      patient_pays: v.patient_pays,
+      patient_value: TAKES_VALUE.includes(v.patient_pays) ? (v.patient_value ?? null) : null,
+      remainder: v.remainder,
+    };
+    for (const { visitType, item } of items) {
+      if (v.patient_pays === "amount" && values.patient_value !== null) {
+        if (values.patient_value > v.fee) {
+          fail(
+            row,
+            "patient_value",
+            `The patient can't pay ${rupees(values.patient_value)} for ${item.name} in ${facts.name}: the fee there is ${rupees(v.fee)}. Lower the amount, or raise the fee.`,
+          );
+        }
+      }
+      const dbItem = state.dbItems.get(key(item.code));
+      const existing = dbItem ? ownRateOn(state, scheme, dbItem.id, on) : null;
+      const start = given ?? existing?.valid_from ?? today;
+      const rateBefore = dbItem
+        ? ((state.ratesBySlot.get(state.slotOf(scheme, dbItem.id)) ?? []).find(
+            (r) => r.valid_from === start,
+          ) ?? null)
+        : null;
+      const rate = {
+        category_code: scheme,
+        item_code: item.code,
+        valid_from: start,
+        valid_to: v.valid_to ?? null,
+        rate: v.fee,
+        bill_name: v.bill_name ?? null,
+        bill_code: v.bill_code ?? null,
+      };
+      const current = dbItem ? ownRuleOn(state, scheme, dbItem, on) : null;
+      const ops = [];
+      if (current && (!given || given === current.valid_from)) {
+        ops.push({ before: current, after: { ...current, ...values, valid_to: rate.valid_to } });
+      } else if (current && sameRule(current, values)) {
+        ops.push({ before: current, after: { ...current, valid_to: rate.valid_to } });
+      } else {
+        if (current) {
+          ops.push({ before: current, after: { ...current, valid_to: dayBeforeText(on) } });
+        }
+        ops.push({
+          before: null,
+          after: {
+            scheme_code: scheme,
+            name: freeName(scheme, item, on),
+            group_id: null,
+            subgroup_id: null,
+            item_code: item.code,
+            visit_types: null,
+            ...values,
+            valid_from: on,
+            valid_to: rate.valid_to,
+            priority: 100,
+            is_active: true,
+          },
+        });
+      }
+      for (const { before, after } of ops) {
+        const problem = paymentRuleShapeProblem({
+          group_id: null,
+          subgroup_id: null,
+          service_item_id: null,
+          patient_pays: after.patient_pays,
+          patient_value: after.patient_value,
+          valid_from: after.valid_from,
+          valid_to: after.valid_to,
+        });
+        if (problem) failOnce(row, PAYMENT_RULE_COLUMN[problem.field], problem.message);
+        const clash = before && paymentRuleRows.get(ruleKeyOf(scheme, before.name));
+        if (clash) {
+          failOnce(
+            row,
+            "patient_pays",
+            `This fee changes the payment rule "${before.name}", which is also on the Payment rules sheet (row ${clash.row}); change it in one place`,
+          );
+        }
+      }
+      const own = ops.at(-1);
+      const touched = new Set(ops.filter((op) => op.before).map((op) => nameKey(op.before.name)));
+      for (const other of sheetRules.get(`${scheme}|${key(item.code)}`) ?? []) {
+        if (touched.has(nameKey(other.values.rule_name))) continue;
+        if (!coversVisit(other.values, visitType) || !spansMeet(other.values, own.after)) continue;
+        failOnce(
+          row,
+          "patient_pays",
+          `The Payment rules sheet (row ${other.row}) also sets what the patient pays for ${item.name} in ${facts.name}; set it in one place`,
+        );
+      }
+      if (dbItem) {
+        for (const op of ops.filter(stretches)) {
+          const later = laterStoredRule(state, scheme, dbItem, visitType, ops, op);
+          if (later) failOnce(row, "valid_to", laterRuleText(item.name, facts.name, later));
+        }
+      }
+      const ruleOps = ops.filter((op) => !op.before || ruleChanges(op.before, op.after).length);
+      const changes = [
+        ...rateChanges(rateBefore, rate),
+        ...ruleChanges(current, ops.at(-1).after).filter((c) => c.column !== "valid_to"),
+      ];
+      row.resolved.targets.push({
+        visitType,
+        item,
+        rate,
+        rateChanged: !rateBefore || rateChanges(rateBefore, rate).length > 0,
+        ruleOps,
+        existed: Boolean(rateBefore || current),
+        changes,
+      });
+      rates.push({ row: row.row, values: rate, errors: [], warnings: [], source: row });
+    }
+  }
+  return rates;
+}
+
+const FEE_RATE_COLUMNS = { rate: "fee", item_code: "doctor" };
+
+function copyRateFindings(rates, sheetRates) {
+  const faulted = new Map(
+    rates.map((rate) => [rate.source, new Set(rate.source.errors.map((e) => e.column))]),
+  );
+  const onSheet = new Map(
+    sheetRates
+      .filter((r) => !hasError(r, "category_code", "item_code", "valid_from"))
+      .map((r) => [
+        `${key(r.values.category_code)}|${key(r.values.item_code)}|${r.values.valid_from}`,
+        r,
+      ]),
+  );
+  for (const rate of rates) {
+    const v = rate.values;
+    const twin = onSheet.get(`${key(v.category_code)}|${key(v.item_code)}|${v.valid_from}`);
+    if (twin) {
+      failOnce(
+        rate.source,
+        "fee",
+        `The rate for ${v.item_code} in ${v.category_code} from ${v.valid_from} is also on the Category rates sheet (row ${twin.row}); set it in one place`,
+      );
+    }
+    for (const e of rate.errors) {
+      const column = FEE_RATE_COLUMNS[e.column] ?? e.column;
+      if (!faulted.get(rate.source).has(column)) failOnce(rate.source, column, e.message);
+    }
+    for (const w of rate.warnings) {
+      warnOnce(rate.source, FEE_RATE_COLUMNS[w.column] ?? w.column, w.message);
+    }
+  }
+}
+
+function billCodesOf(rateRows, state, ref) {
+  const codes = new Map();
+  const describe = (code, scheme, itemName) => {
+    const category = state.categories.get(key(scheme));
+    codes.set(key(code), {
+      code,
+      item: itemName,
+      category: category ? categoryName(category, state.categories) : scheme,
+    });
+  };
+  for (const r of ref.rates ?? []) {
+    if (!r.bill_code) continue;
+    const item = state.items.get(key(state.codeById.items.get(r.service_item_id)));
+    describe(r.bill_code, r.scheme_code, item?.name ?? r.service_item_id);
+  }
+  for (const r of rateRows) {
+    if (!r.values.bill_code) continue;
+    describe(
+      r.values.bill_code,
+      r.values.category_code,
+      state.items.get(key(r.values.item_code))?.name ?? r.values.item_code,
+    );
+  }
+  return codes;
+}
+
+function discountCodesOf(ref, sheet) {
+  const codes = new Map((ref.discountCodes ?? []).map((d) => [key(d.code), d]));
+  for (const row of sheet?.rows ?? []) {
+    if (row.values.code && !hasError(row, "code", "rule_name")) {
+      codes.set(key(row.values.code), { code: row.values.code, name: row.values.rule_name });
+    }
+  }
+  return codes;
+}
+
+function keptCodes(stored, field, codeById) {
+  return new Set((stored?.[field] ?? []).map((id) => key(codeById.get(id))));
+}
+
+function resolveCodes(row, column, entries, target, state, kept) {
+  const typed = row.values[column];
+  if (!typed || hasError(row, column)) return null;
+  const found = new Map();
+  const off = [];
+  for (const code of typed) {
+    const entry = entries.get(key(code));
+    if (!entry) {
+      missingParent(row, column, target.noun, target.sheet, state, code);
+      continue;
+    }
+    if (!entry.active && !kept.has(key(entry.code))) off.push(entry.name);
+    found.set(key(entry.code), entry.code);
+  }
+  if (off.length) {
+    fail(
+      row,
+      column,
+      `Deactivated ${target.noun}${off.length === 1 ? "" : "s"}: ${off.join(", ")}`,
+    );
+  }
+  return found.size ? [...found.values()] : null;
+}
+
+function resolveDoctors(row, lookup, kept) {
+  const typed = row.values.doctors;
+  if (!typed || hasError(row, "doctors")) return null;
+  const ids = new Set();
+  const off = [];
+  for (const text of typed) {
+    const found = findDoctor(text, lookup);
+    if (found.error) {
+      fail(row, "doctors", found.error);
+      continue;
+    }
+    if (found.doctor.is_active === false && !kept.has(found.doctor.id)) off.push(found.doctor.name);
+    ids.add(found.doctor.id);
+  }
+  if (off.length) {
+    fail(row, "doctors", `Deactivated doctor${off.length === 1 ? "" : "s"}: ${off.join(", ")}`);
+  }
+  return ids.size ? [...ids] : null;
+}
+
+function resolveDiscountCategories(row, state, kept) {
+  const typed = row.values.categories;
+  if (!typed || hasError(row, "categories")) return null;
+  const { categories } = state;
+  const found = [];
+  const retired = [];
+  for (const code of typed) {
+    if (RESERVED_CATEGORY_CODES.includes(code)) {
+      found.push({ code });
+      continue;
+    }
+    const entry = categories.get(key(code));
+    if (!entry) {
+      missingParent(row, "categories", "category", "Categories", state, code);
+      continue;
+    }
+    if (!categoryLive(entry, categories) && !kept.has(key(entry.code))) {
+      retired.push(categoryName(entry, categories));
+    }
+    found.push(entry);
+  }
+  if (retired.length) fail(row, "categories", `Retired: ${retired.join(", ")}`);
+  const listed = new Set(found.map((c) => key(c.code)));
+  const covered = found.filter((c) => c.parent && listed.has(c.parent));
+  if (covered.length) {
+    const parent = categories.get(covered[0].parent);
+    fail(
+      row,
+      "categories",
+      `${parent.name} already covers its sub-categories, so ${covered
+        .map((c) => categoryName(c, categories))
+        .join(
+          ", ",
+        )} ${covered.length === 1 ? "is" : "are"} already included; choose the category or its sub-categories, not both`,
+    );
+  }
+  return found.length ? found.map((c) => key(c.code)) : null;
+}
+
+const SHAPE_COLUMNS = [
+  "method",
+  "code",
+  "allowed_roles",
+  "kind",
+  "value",
+  "max_discount",
+  "min_age",
+  "max_age",
+  "valid_from",
+  "valid_to",
+];
+
+function checkDiscounts(sheet, state, lookup, billCodes) {
+  for (const row of sheet.rows) {
+    const v = row.values;
+    const stored = hasError(row, "rule_name")
+      ? null
+      : (state.discounts.get(nameKey(v.rule_name)) ?? null);
+    const reviving = Boolean(stored) && !stored.is_active && v.active === true;
+    const before = reviving ? null : stored;
+    if (
+      !hasError(row, "method") &&
+      v.method === "auto" &&
+      !String(row.input?.allowed_roles ?? "").trim()
+    ) {
+      v.allowed_roles = null;
+    }
+    v.allowed_roles = inOrder(v.allowed_roles, BILLING_ROLES);
+    v.visit_types = inOrder(v.visit_types, VISIT_TYPES);
+    if (!hasError(row, "valid_from")) v.valid_from = startOf(v.valid_from, stored);
+    for (const column of ["min_age", "max_age"]) {
+      if (!hasError(row, column) && v[column] != null && v[column] > MAX_AGE) {
+        fail(row, column, `${column} must be ${MAX_AGE} or less`);
+      }
+    }
+    for (const column of USE_LIMITS) {
+      if (!hasError(row, column) && v[column] === 0) {
+        fail(row, column, `${column} must be 1 or more; leave it blank for no limit`);
+      }
+    }
+    if (!hasError(row, ...SHAPE_COLUMNS)) {
+      const problem = discountShapeProblem({
+        method: v.method,
+        code: v.code ?? null,
+        allowed_roles: v.allowed_roles ?? null,
+        kind: v.kind,
+        value: v.value ?? null,
+        max_discount: v.max_discount ?? null,
+        applies_per: stored?.applies_per ?? "line",
+        min_age: v.min_age ?? null,
+        max_age: v.max_age ?? null,
+        valid_from: v.valid_from ?? null,
+        valid_to: v.valid_to ?? null,
+      });
+      if (problem) fail(row, DISCOUNT_COLUMN[problem.field], problem.message);
+    }
+    row.resolved = {
+      stored,
+      groups: resolveCodes(
+        row,
+        "groups",
+        state.groups,
+        SCOPES[0],
+        state,
+        keptCodes(before, "group_ids", state.codeById.groups),
+      ),
+      subgroups: resolveCodes(
+        row,
+        "subgroups",
+        state.subgroups,
+        SCOPES[1],
+        state,
+        keptCodes(before, "subgroup_ids", state.codeById.subgroups),
+      ),
+      items: resolveCodes(
+        row,
+        "items",
+        state.items,
+        SCOPES[2],
+        state,
+        keptCodes(before, "service_item_ids", state.codeById.items),
+      ),
+      doctors: resolveDoctors(row, lookup, new Set(before?.doctor_ids ?? [])),
+      categories: resolveDiscountCategories(row, state, new Set(before?.scheme_codes ?? [])),
+    };
+    if (v.code && !hasError(row, "code")) {
+      const other = state.discountsByCode.get(key(v.code));
+      if (other && nameKey(other.name) !== nameKey(v.rule_name)) {
+        fail(row, "code", `The discount "${other.name}" already uses the code ${v.code}`);
+      }
+      const bill = billCodes.get(key(v.code));
+      if (bill) {
+        fail(
+          row,
+          "code",
+          `${bill.code} is already the bill code of ${bill.item} for ${bill.category}; choose another discount code`,
+        );
+      }
+    }
+  }
+}
+
 export function checkMasterRows(sheets, ref, options = {}) {
   for (const sheet of sheets) {
     for (const row of sheet.rows) row.warnings ??= [];
@@ -847,6 +1604,9 @@ export function checkMasterRows(sheets, ref, options = {}) {
     ["Categories", "category_code"],
     ["Category rules", ["category_code", "rule_name"]],
     ["Category rates", ["category_code", "item_code", "valid_from"]],
+    ["Payment rules", ["category_code", "rule_name"]],
+    ["Discounts", "rule_name"],
+    ["Discounts", "code"],
   ]) {
     if (sheetOf(name)) markDuplicates(sheetOf(name).rows, columns);
   }
@@ -860,7 +1620,30 @@ export function checkMasterRows(sheets, ref, options = {}) {
   if (items) checkItemsAgainstState(items, state, lookup);
   if (sheetOf("Categories")) checkCategories(sheetOf("Categories"), state, options);
   if (sheetOf("Category rules")) checkRules(sheetOf("Category rules"), state);
-  if (sheetOf("Category rates")) checkRates(sheetOf("Category rates"), state, ref);
+  const paymentRules = sheetOf("Payment rules");
+  if (paymentRules) checkPaymentRules(paymentRules, state);
+  const paymentRuleRows = new Map(
+    (paymentRules?.rows ?? [])
+      .filter((row) => !hasError(row, "category_code", "rule_name"))
+      .map((row) => [ruleKeyOf(row.values.category_code, row.values.rule_name), row]),
+  );
+  const fees = sheetOf("Consultant fees");
+  if (fees) prepareConsultantFees(fees, state, lookup);
+  const feeRates = fees ? checkConsultantFees(fees, state, paymentRuleRows) : [];
+  const sheetRates = sheetOf("Category rates")?.rows ?? [];
+  const discountCodes = discountCodesOf(ref, sheetOf("Discounts"));
+  if (sheetRates.length || feeRates.length) {
+    checkRates([...sheetRates, ...feeRates], state, ref, discountCodes);
+  }
+  copyRateFindings(feeRates, sheetRates);
+  if (sheetOf("Discounts")) {
+    checkDiscounts(
+      sheetOf("Discounts"),
+      state,
+      lookup,
+      billCodesOf([...sheetRates, ...feeRates], state, ref),
+    );
+  }
   return sheets;
 }
 

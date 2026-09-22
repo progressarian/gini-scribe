@@ -459,7 +459,7 @@ test.describe("P2-05 check groups, subgroups and items", () => {
 
   test("13. a real upload is checked against the test database", async () => {
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(await templateBuffer());
+    await workbook.xlsx.load(await templateBuffer({ examples: false }));
     const items = workbook.getWorksheet("Items");
     const names = items.getRow(1).values.slice(1);
     const add = (cells) => items.addRow(names.map((n) => cells[n] ?? null));

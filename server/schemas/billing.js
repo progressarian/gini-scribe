@@ -6,8 +6,17 @@ import {
   ITEM_KINDS,
 } from "../services/billing/importColumns.js";
 import { STACKING_MODES } from "../services/billing/billingSettings.js";
-import { INT_MAX, MONEY_MAX } from "../services/billing/common.js";
+import { cleanDate, INT_MAX, MONEY_MAX } from "../services/billing/common.js";
 import { IMPORT_HISTORY_PAGE_MAX } from "../services/billing/importHistory.js";
+import { MAX_BILL_CODES, MAX_BILL_LINES } from "../services/billing/priceBill.js";
+import {
+  BILLING_ROLES,
+  DISCOUNT_KINDS,
+  DISCOUNT_METHODS,
+  PATIENT_PAYS,
+  REMAINDERS,
+  VISIT_TYPES,
+} from "../../shared/billingVocab.js";
 
 const MONEY_TEXT = /^\d+(\.\d{1,2})?$/;
 const WHOLE_TEXT = /^\d+$/;
@@ -321,6 +330,264 @@ export const billingImportHistoryQuerySchema = z.strictObject({
     .optional(),
 });
 
+const OLDEST_AGE = 150;
+
+const pricedId = (what) =>
+  z.union(
+    [
+      z
+        .number()
+        .int(`${what} must be an id`)
+        .positive(`${what} must be an id`)
+        .max(INT_MAX, TOO_BIG),
+      z
+        .string()
+        .trim()
+        .regex(/^[1-9]\d*$/, { message: `${what} must be an id`, abort: true })
+        .refine(withinInt, TOO_BIG),
+    ],
+    {
+      error: (issue) =>
+        issue.input === undefined ? `${what} is required` : `${what} must be an id`,
+    },
+  );
+
+const pricedQuantity = z.union([
+  z
+    .number()
+    .int("quantity must be a whole number")
+    .positive("quantity must be 1 or more")
+    .max(INT_MAX, TOO_BIG),
+  z
+    .string()
+    .trim()
+    .regex(/^[1-9]\d*$/, { message: "quantity must be a whole number of 1 or more", abort: true })
+    .refine(withinInt, TOO_BIG),
+]);
+
+const pricedVisitType = z.enum(VISIT_TYPES, {
+  message: `must be one of: ${VISIT_TYPES.join(", ")}`,
+});
+
+const objectOnly = (message) => ({
+  error: (issue) => (issue.code === "invalid_type" ? message : undefined),
+});
+
+const realDate = (text) => {
+  try {
+    return cleanDate(text, "Date") === text;
+  } catch {
+    return false;
+  }
+};
+
+const pricedLine = z.strictObject(
+  {
+    item_id: pricedId("item"),
+    quantity: pricedQuantity.optional(),
+    visit_type: z
+      .enum(VISIT_TYPES, { message: `visit type must be one of: ${VISIT_TYPES.join(", ")}` })
+      .optional(),
+    doctor_id: pricedId("doctor").optional(),
+  },
+  objectOnly("must be an item, like { item_id: 12 }"),
+);
+
+const pricingFields = {
+  category: z.string({ error: "must be a category code" }).pipe(code).optional(),
+  date: date.refine(realDate, "must be a date like 2026-10-01").optional(),
+  visit_type: pricedVisitType.optional(),
+  doctor_id: id.optional(),
+  lines: z
+    .array(pricedLine, { error: "must be a list of items" })
+    .min(1, "list is empty: choose at least one item")
+    .max(MAX_BILL_LINES, `list can have at most ${MAX_BILL_LINES} items`),
+  codes: z
+    .array(z.string({ error: "must be a list of codes" }).pipe(code), {
+      error: "must be a list of codes",
+    })
+    .max(MAX_BILL_CODES, `can be at most ${MAX_BILL_CODES}`)
+    .optional(),
+};
+
+const WHOLE_BILL = objectOnly("Send the bill as an object");
+
+export const billingPreviewSchema = z
+  .strictObject(
+    {
+      patient_id: id.optional(),
+      appointment_id: id.optional(),
+      ...pricingFields,
+    },
+    WHOLE_BILL,
+  )
+  .refine((body) => body.patient_id !== undefined || body.appointment_id !== undefined, {
+    message: "Choose the patient or the appointment to bill",
+  });
+
+const noRealPatient = z.undefined({
+  error: "can't be sent: a rule test uses an age, gender and category, not a real patient",
+});
+
+export const billingRuleTestSchema = z.strictObject(
+  {
+    patient_id: noRealPatient,
+    appointment_id: noRealPatient,
+    age: z
+      .number({ error: "must be a whole number" })
+      .int("must be a whole number")
+      .min(0, "must be 0 or more")
+      .max(OLDEST_AGE, `must be at most ${OLDEST_AGE}`)
+      .nullable()
+      .optional(),
+    gender: z.union([z.enum(GENDERS), z.null()]).optional(),
+    role: z
+      .enum(BILLING_ROLES, { message: `must be one of: ${BILLING_ROLES.join(", ")}` })
+      .optional(),
+    ...pricingFields,
+  },
+  WHOLE_BILL,
+);
+
+export const BILLING_PRICING_LABELS = {
+  patient_id: "Patient",
+  appointment_id: "Appointment",
+  category: "Category",
+  date: "Bill date",
+  visit_type: "Visit type",
+  doctor_id: "Consultant",
+  lines: "Line",
+  codes: "Discount codes",
+  age: "Age",
+  gender: "Gender",
+  role: "Role",
+};
+
+const numberValue = z.union([
+  z.number().refine(Number.isFinite, "must be a number"),
+  z
+    .string()
+    .trim()
+    .regex(/^-?\d+(\.\d+)?$/, "must be a number"),
+  z.null(),
+  blank,
+]);
+const optionalId = z.union([id, z.null(), blank]);
+const fromDate = z.union([date.refine(realDate, "must be a date like 2026-10-01"), blank]);
+const toDate = z.union([date.refine(realDate, "must be a date like 2026-10-01"), z.null(), blank]);
+const visitTypes = z.union([
+  z.array(z.enum(VISIT_TYPES, { message: `must be from: ${VISIT_TYPES.join(", ")}` })).max(3),
+  z.null(),
+]);
+const remainder = z.union([z.enum(REMAINDERS), z.null(), blank]);
+const priority = z.union([whole, blank]);
+
+const paymentRuleFields = {
+  scheme_code: code,
+  name,
+  group_id: optionalId,
+  subgroup_id: optionalId,
+  service_item_id: optionalId,
+  visit_types: visitTypes,
+  patient_pays: z.enum(PATIENT_PAYS),
+  patient_value: numberValue,
+  remainder,
+  valid_from: fromDate,
+  valid_to: toDate,
+  priority,
+};
+export const billingPaymentRuleCreateSchema = z.strictObject({
+  ...Object.fromEntries(
+    Object.entries(paymentRuleFields).map(([key, schema]) => [
+      key,
+      ["scheme_code", "name", "patient_pays"].includes(key) ? schema : schema.optional(),
+    ]),
+  ),
+});
+export const billingPaymentRuleUpdateSchema = atLeastOne(
+  z.strictObject(paymentRuleFields).partial(),
+);
+
+const idList = z.union([z.array(id).max(1000), z.null()]);
+const limit = z.union([whole, z.null(), blank]);
+const discountFields = {
+  code: z.union([code, z.null(), blank]),
+  name,
+  method: z.enum(DISCOUNT_METHODS),
+  kind: z.enum(DISCOUNT_KINDS),
+  value: numberValue,
+  max_discount: numberValue,
+  group_ids: idList,
+  subgroup_ids: idList,
+  service_item_ids: idList,
+  doctor_ids: idList,
+  visit_types: visitTypes,
+  scheme_codes: z.union([z.array(code).max(200), z.null()]),
+  min_age: z.union([whole, z.null(), blank]),
+  max_age: z.union([whole, z.null(), blank]),
+  gender: z.union([z.enum(GENDERS), z.null(), blank]),
+  valid_from: toDate,
+  valid_to: toDate,
+  max_uses_total: limit,
+  max_uses_per_patient: limit,
+  max_uses_per_day: limit,
+  max_uses_per_doctor_per_day: limit,
+  applies_per: z.enum(["line", "bill"]),
+  priority,
+  stackable: flag,
+  applies_on_scheme_rate: flag,
+  allowed_roles: z.union([
+    z.array(z.enum(BILLING_ROLES, { message: `must be from: ${BILLING_ROLES.join(", ")}` })),
+    z.null(),
+  ]),
+};
+export const billingDiscountCreateSchema = z.strictObject({
+  ...Object.fromEntries(
+    Object.entries(discountFields).map(([key, schema]) => [
+      key,
+      ["name", "method", "kind", "value"].includes(key) ? schema : schema.optional(),
+    ]),
+  ),
+});
+export const billingDiscountUpdateSchema = atLeastOne(z.strictObject(discountFields).partial());
+
+export const billingDiscountListQuerySchema = z.strictObject({
+  activeOnly: trueFalse.optional(),
+  method: z.enum(DISCOUNT_METHODS).optional(),
+});
+
+export const billingConsultantFeeGridQuerySchema = z.strictObject({
+  doctorId: queryId.optional(),
+  schemeCode: code.optional(),
+  date: date.refine(realDate, "must be a date like 2026-10-01").optional(),
+});
+
+export const billingConsultantFeeSaveSchema = z.strictObject({
+  scheme_code: code,
+  service_item_id: id,
+  fee: z.union([money, z.null(), blank]).optional(),
+  bill_name: z.union([text(200), z.null()]).optional(),
+  bill_code: z
+    .union([z.string().trim().max(40).regex(/^\S*$/, "can't contain spaces"), z.null()])
+    .optional(),
+  patient_pays: z.enum(PATIENT_PAYS).optional(),
+  patient_value: z.union([money, z.null(), blank]).optional(),
+  remainder: remainder.optional(),
+  valid_from: fromDate.optional(),
+  valid_to: toDate.optional(),
+});
+
+export const billingConsultantFeeClearQuerySchema = z.strictObject({
+  date: date.refine(realDate, "must be a date like 2026-10-01").optional(),
+});
+
+export const billingConsultantFeeCopySchema = z.strictObject({
+  from_scheme_code: code,
+  to_scheme_code: code,
+  valid_from: fromDate.optional(),
+  date: date.refine(realDate, "must be a date like 2026-10-01").optional(),
+});
+
 export const BILLING_FIELD_LABELS = {
   code: "Code",
   name: "Name",
@@ -381,6 +648,32 @@ export const BILLING_FIELD_LABELS = {
   fileName: "File name",
   limit: "Page size",
   offset: "Offset",
+  activeOnly: "Active only",
+  schemeCode: "Category",
+  doctorId: "Doctor",
+  patient_pays: "Patient pays",
+  patient_value: "Value",
+  remainder: "The rest goes to",
+  visit_types: "Visit types",
+  method: "Automatic or code",
+  value: "Value",
+  max_discount: "Largest discount",
+  group_ids: "Groups",
+  subgroup_ids: "Subgroups",
+  service_item_ids: "Items",
+  doctor_ids: "Doctors",
+  scheme_codes: "Categories",
+  max_uses_total: "Total uses",
+  max_uses_per_patient: "Uses per patient",
+  max_uses_per_day: "Uses per day",
+  max_uses_per_doctor_per_day: "Uses per doctor per day",
+  applies_per: "Applies per",
+  stackable: "Stackable",
+  applies_on_scheme_rate: "Also on payment-rule lines",
+  allowed_roles: "Roles",
+  fee: "Fee",
+  from_scheme_code: "Copy from",
+  to_scheme_code: "Copy to",
 };
 
 export const BILLING_SCHEMAS = {

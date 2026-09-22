@@ -3,6 +3,7 @@ import {
   ERROR_COLUMN,
   IMPORT_SHEETS,
   README_SHEET,
+  isExampleKey,
   isLaterSheet,
   parseRow,
 } from "./importColumns.js";
@@ -36,6 +37,17 @@ function rowHasContent(row) {
   });
   return found;
 }
+
+function keyColumnOf(ws, sheet) {
+  let at = 1;
+  const key = normal(sheet.columns[0].name);
+  ws.getRow(1).eachCell({ includeEmpty: false }, (cell, col) => {
+    if (normal(cellText(cell)) === key) at = col;
+  });
+  return at;
+}
+
+const isExampleRow = (row, keyCol) => isExampleKey(cellText(row.getCell(keyCol)));
 
 function sheetHasContent(ws) {
   let found = false;
@@ -108,8 +120,9 @@ function readHeader(ws, sheet, problems) {
 
 function readRows(ws, sheet, positions) {
   const rows = [];
+  const keyCol = positions[sheet.columns[0].name] ?? keyColumnOf(ws, sheet);
   ws.eachRow({ includeEmpty: false }, (row, number) => {
-    if (number === 1 || !rowHasContent(row)) return;
+    if (number === 1 || !rowHasContent(row) || isExampleRow(row, keyCol)) return;
     const cells = {};
     const input = {};
     for (const column of sheet.columns) {
@@ -125,10 +138,11 @@ function readRows(ws, sheet, positions) {
   return rows;
 }
 
-function countRows(ws) {
+function countRows(ws, sheet) {
+  const keyCol = keyColumnOf(ws, sheet);
   let count = 0;
   ws.eachRow({ includeEmpty: false }, (row, number) => {
-    if (number > 1 && rowHasContent(row)) count += 1;
+    if (number > 1 && rowHasContent(row) && !isExampleRow(row, keyCol)) count += 1;
   });
   return count;
 }
@@ -188,7 +202,7 @@ export async function parseUpload(buffer) {
 
   const sheets = [];
   for (const { ws, sheet } of found) {
-    const count = countRows(ws);
+    const count = countRows(ws, sheet);
     if (!count) continue;
     if (count > MAX_SHEET_ROWS) {
       problems.push(

@@ -243,6 +243,17 @@ router.get(
   },
 );
 
+const onlineTimeline = (timeline, journeySteps) => {
+  const stops = new Map(
+    journeySteps.filter((j) => j.chain_status).map((j) => [j.chain_status, j.label]),
+  );
+  return timeline.flatMap((s) => {
+    if (!s.skipped) return [{ ...s, unrecorded: false }];
+    const label = stops.get(s.status.replace(/^skipped:/, ""));
+    return label ? [{ ...s, label: `${label} — done in HealthRay` }] : [];
+  });
+};
+
 router.get("/giniflow/visits/:id/timeline", async (req, res) => {
   try {
     const visit = await pool.query(
@@ -265,7 +276,7 @@ router.get("/giniflow/visits/:id/timeline", async (req, res) => {
       [req.params.id, LAB_ONLY_DOCTOR],
     );
     const { rows: journeySteps } = await pool.query(
-      `SELECT id, step_name AS label, planned_duration_min AS budget, status
+      `SELECT id, step_name AS label, planned_duration_min AS budget, status, chain_status
          FROM giniflow_visit_steps
         WHERE visit_id = $1
         ORDER BY step_order`,
@@ -362,7 +373,7 @@ router.get("/giniflow/visits/:id/timeline", async (req, res) => {
 
     res.json({
       visit: { ...visit.rows[0], labOnly },
-      steps: timeline,
+      steps: visit.rows[0].online ? onlineTimeline(timeline, journeySteps) : timeline,
       journeySteps,
       reportsPending,
       labTrack: [...labTrack, ...scribeLabMarks]

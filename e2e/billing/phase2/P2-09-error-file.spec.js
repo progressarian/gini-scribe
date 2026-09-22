@@ -24,7 +24,7 @@ const ctx = { actorId: USERS.admin.id };
 
 async function build(sheets) {
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(await templateBuffer());
+  await wb.xlsx.load(await templateBuffer({ examples: false }));
   for (const [name, rows] of Object.entries(sheets)) {
     const ws = wb.getWorksheet(name);
     const headers = ws.getRow(1).values.slice(1);
@@ -69,7 +69,9 @@ const FILE = {
       kind: "other",
     },
   ],
-  Discounts: [{ rule_name: "Staff discount", method: "code", code: "STAFF10" }],
+  Discounts: [
+    { rule_name: `P209 Staff ${T}`, method: "code", code: `P209S${T}`, kind: "flat", value: 10 },
+  ],
 };
 
 test.describe.serial("P2-09 error file", () => {
@@ -79,6 +81,7 @@ test.describe.serial("P2-09 error file", () => {
                    (SELECT id FROM service_items WHERE code ILIKE $1)`,
       ["P209-%"],
     );
+    await query(`DELETE FROM discount_rules WHERE name LIKE $1`, ["P209 %"]);
     await query(`DELETE FROM service_items WHERE code ILIKE $1`, ["P209-%"]);
     await query(`DELETE FROM service_subgroups WHERE code ILIKE $1`, ["P209S%"]);
     await query(`DELETE FROM service_groups WHERE code ILIKE $1`, ["P209G%"]);
@@ -117,9 +120,10 @@ test.describe.serial("P2-09 error file", () => {
       "a sheet without errors gets no column",
     ).toBe(-1);
     const discounts = wb.getWorksheet("Discounts");
-    expect(discounts.getRow(2).getCell(1).value, "Phase 3 sheets keep their rows").toBe(
-      "Staff discount",
+    expect(discounts.getRow(2).getCell(1).value, "a sheet without errors keeps its rows").toBe(
+      `P209 Staff ${T}`,
     );
+    expect(headerCol(discounts, "error"), "and gets no error column").toBe(-1);
     expect(wb.worksheets.map((ws) => ws.name)).toContain("Read me");
     expect(errorFileName("master prices.xlsx")).toBe("master prices - errors.xlsx");
     expect(errorFileName("")).toBe("billing-import - errors.xlsx");
@@ -144,7 +148,7 @@ test.describe.serial("P2-09 error file", () => {
 
     const checked = await preview(fixed);
     expect(checked.problems).toEqual([]);
-    expect(checked.counts).toMatchObject({ error: 0, new: 5 });
+    expect(checked.counts).toMatchObject({ error: 0, new: 6 });
     expect(checked.canImport).toBe(true);
     const saved = await commitUpload(
       fixed,

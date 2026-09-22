@@ -33,7 +33,7 @@ const CAPPED = `p210_cap_${tag}`;
 
 async function workbook(sheets) {
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(await templateBuffer());
+  await wb.xlsx.load(await templateBuffer({ examples: false }));
   for (const [name, rows] of Object.entries(sheets)) {
     const ws = wb.getWorksheet(name);
     const headers = ws.getRow(1).values.slice(1);

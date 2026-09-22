@@ -50,6 +50,8 @@ const PAGES = [
   "/settings/schemes",
   "/settings/services",
   "/settings/category-rates",
+  "/settings/consultant-fees",
+  "/settings/discounts",
   "/settings/bulk-import",
   "/settings/billing",
 ];
@@ -86,7 +88,7 @@ test.describe("P1-38 billing permissions — APIs", () => {
       expect.arrayContaining(["billingMaster.js", "billingSettings.js"]),
     );
     for (const f of withRoutes) {
-      expect(f.base, `${f.file} has no BASE line`).toMatch(/^\/billing\//);
+      expect(f.base, `${f.file} has no BASE line`).toMatch(/^\/billing(\/|$)/);
       expect(f.parsed.length, `${f.file}: every router.<verb>( call is a \${BASE} route`).toBe(
         f.declared,
       );
@@ -207,7 +209,14 @@ test.describe("P1-38 billing permissions — screens", () => {
     );
     await expect(
       page.getByRole("navigation", { name: "Settings sections" }).getByRole("link"),
-    ).toHaveText(["Categories", "Services", "Category rates", "Bulk import"]);
+    ).toHaveText([
+      "Categories",
+      "Services",
+      "Category rates",
+      "Consultant fees",
+      "Discounts",
+      "Bulk import",
+    ]);
     await expect(page).toHaveURL(/\/settings\/schemes$/);
     for (const target of PAGES.filter((p) => p !== "/settings/billing")) {
       await gotoReady(page, target, () =>
