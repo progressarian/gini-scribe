@@ -7,6 +7,7 @@ import {
 } from "../services/billing/importColumns.js";
 import { STACKING_MODES } from "../services/billing/billingSettings.js";
 import { INT_MAX, MONEY_MAX } from "../services/billing/common.js";
+import { IMPORT_HISTORY_PAGE_MAX } from "../services/billing/importHistory.js";
 
 const MONEY_TEXT = /^\d+(\.\d{1,2})?$/;
 const WHOLE_TEXT = /^\d+$/;
@@ -291,6 +292,35 @@ export const billingRateGridQuerySchema = z.strictObject({
   subgroupId: queryId.optional(),
 });
 
+export const IMPORT_FILE_NAME_MAX = 200;
+
+export const billingImportFileQuerySchema = z.strictObject({
+  fileName: z
+    .string({ error: "is required" })
+    .trim()
+    .min(1, { message: "can't be blank", abort: true })
+    .max(IMPORT_FILE_NAME_MAX)
+    .regex(/\.xlsx$/i, "must end in .xlsx — upload the Excel template"),
+});
+
+export const billingImportHistoryQuerySchema = z.strictObject({
+  limit: z
+    .string()
+    .trim()
+    .regex(WHOLE_TEXT, { message: "must be a whole number", abort: true })
+    .refine(
+      (v) => Number(v) >= 1 && Number(v) <= IMPORT_HISTORY_PAGE_MAX,
+      `must be between 1 and ${IMPORT_HISTORY_PAGE_MAX}`,
+    )
+    .optional(),
+  offset: z
+    .string()
+    .trim()
+    .regex(WHOLE_TEXT, { message: "must be a whole number", abort: true })
+    .refine(withinInt, TOO_BIG)
+    .optional(),
+});
+
 export const BILLING_FIELD_LABELS = {
   code: "Code",
   name: "Name",
@@ -348,6 +378,9 @@ export const BILLING_FIELD_LABELS = {
   next_no: "Next number",
   q: "Search",
   date: "As of",
+  fileName: "File name",
+  limit: "Page size",
+  offset: "Offset",
 };
 
 export const BILLING_SCHEMAS = {
@@ -371,4 +404,6 @@ export const BILLING_SCHEMAS = {
   billingItemListQuerySchema,
   billingListQuerySchema,
   billingRateGridQuerySchema,
+  billingImportFileQuerySchema,
+  billingImportHistoryQuerySchema,
 };

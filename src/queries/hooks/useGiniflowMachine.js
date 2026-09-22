@@ -110,16 +110,19 @@ export function useCancelMachineTest(station = DEFAULT_STATION) {
 
 // One call: the file is stored and the test closed together, so a report can
 // never sit in storage with the test still open.
+const readBase64 = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1]);
+    reader.onerror = () => reject(new Error("Could not read that file"));
+    reader.readAsDataURL(file);
+  });
+
 export function useUploadMachineReport(station = DEFAULT_STATION) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ orderId, file, confirmAdditional = false }) => {
-      const base64 = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result).split(",")[1]);
-        reader.onerror = () => reject(new Error("Could not read that file"));
-        reader.readAsDataURL(file);
-      });
+      const base64 = await readBase64(file);
       return (
         await api.post(`/api/giniflow/stations/${station}/${orderId}/report`, {
           base64,
@@ -138,6 +141,30 @@ export function useRemoveMachineReport(station = DEFAULT_STATION) {
   return useMutation({
     mutationFn: async ({ orderId }) =>
       (await api.delete(`/api/giniflow/stations/${station}/${orderId}/report`)).data,
+    onSuccess: () => invalidate(queryClient, station),
+  });
+}
+
+export function useAddExtraMachineReport(station = DEFAULT_STATION) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ orderId, file }) =>
+      (
+        await api.post(`/api/giniflow/stations/${station}/${orderId}/reports`, {
+          base64: await readBase64(file),
+          fileName: file.name,
+          mediaType: file.type || "application/pdf",
+        })
+      ).data,
+    onSuccess: () => invalidate(queryClient, station),
+  });
+}
+
+export function useRemoveExtraMachineReport(station = DEFAULT_STATION) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ orderId, docId }) =>
+      (await api.delete(`/api/giniflow/stations/${station}/${orderId}/reports/${docId}`)).data,
     onSuccess: () => invalidate(queryClient, station),
   });
 }

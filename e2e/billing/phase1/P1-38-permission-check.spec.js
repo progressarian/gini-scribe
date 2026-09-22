@@ -50,6 +50,7 @@ const PAGES = [
   "/settings/schemes",
   "/settings/services",
   "/settings/category-rates",
+  "/settings/bulk-import",
   "/settings/billing",
 ];
 
@@ -73,7 +74,7 @@ const describe = (rows) =>
   rows.map((r) => `${r.method ?? "get"} ${r.route ?? r.url} → ${r.status}`);
 
 async function expectTurnedAway(page, target) {
-  await page.goto(target);
+  await gotoReady(page, target, () => page.locator(".tabs"));
   await expect(page).not.toHaveURL(/\/settings|\/login/);
   await expect(page.locator(".tabs")).toBeVisible();
 }
@@ -206,12 +207,13 @@ test.describe("P1-38 billing permissions — screens", () => {
     );
     await expect(
       page.getByRole("navigation", { name: "Settings sections" }).getByRole("link"),
-    ).toHaveText(["Categories", "Services", "Category rates"]);
+    ).toHaveText(["Categories", "Services", "Category rates", "Bulk import"]);
     await expect(page).toHaveURL(/\/settings\/schemes$/);
     for (const target of PAGES.filter((p) => p !== "/settings/billing")) {
-      await page.goto(target);
+      await gotoReady(page, target, () =>
+        page.getByRole("navigation", { name: "Settings sections" }),
+      );
       await expect(page).toHaveURL(new RegExp(`${target}$`));
-      await expect(page.getByRole("navigation", { name: "Settings sections" })).toBeVisible();
     }
     await expectTurnedAway(page, "/settings/billing");
   });
@@ -222,9 +224,10 @@ test.describe("P1-38 billing permissions — screens", () => {
       page.getByRole("navigation", { name: "Settings sections" }),
     );
     for (const target of PAGES) {
-      await page.goto(target);
+      await gotoReady(page, target, () =>
+        page.getByRole("navigation", { name: "Settings sections" }),
+      );
       await expect(page).toHaveURL(new RegExp(`${target}$`));
-      await expect(page.getByRole("navigation", { name: "Settings sections" })).toBeVisible();
     }
   });
 });

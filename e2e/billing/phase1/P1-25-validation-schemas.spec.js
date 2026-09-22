@@ -48,6 +48,8 @@ const MINIMAL = {
   billingItemListQuerySchema: {},
   billingListQuerySchema: {},
   billingRateGridQuerySchema: {},
+  billingImportFileQuerySchema: { fileName: "rates.xlsx" },
+  billingImportHistoryQuerySchema: {},
 };
 
 test.describe("P1-25 validation schemas", () => {

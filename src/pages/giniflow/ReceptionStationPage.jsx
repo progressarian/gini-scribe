@@ -467,7 +467,14 @@ const settledAs = (o) => {
 const byVisit = (orders) => {
   const groups = new Map();
   for (const o of orders) {
-    const group = groups.get(o.visitId) || { visitId: o.visitId, name: o.name, orders: [] };
+    const group = groups.get(o.visitId) || {
+      visitId: o.visitId,
+      name: o.name,
+      fileNo: o.fileNo,
+      age: o.age,
+      sex: o.sex,
+      orders: [],
+    };
     group.orders.push(o);
     groups.set(o.visitId, group);
   }
@@ -832,6 +839,9 @@ const chargeAsOrder = (c) => ({
   orderId: c.chargeId,
   visitId: c.visitId,
   name: c.name,
+  fileNo: c.fileNo,
+  age: c.age,
+  sex: c.sex,
   kind: "charge",
   tests: [{ name: c.item }],
   paid: c.amount,
@@ -984,7 +994,11 @@ export function PaymentsTab({
                   <div className="test-order-card is-cleared" key={g.visitId}>
                     <div className="toc-head">
                       <div className="toc-cleared">
-                        {g.name}
+                        {g.name} {g.fileNo && <span className="badge b-ink">{g.fileNo}</span>}
+                        <div className="toc-meta">
+                          {g.age ?? "—"}
+                          {(g.sex || "")[0] || ""}
+                        </div>
                         {clearedRows(g.orders).map((row) => (
                           <div className="tc-detail" key={row.key}>
                             {row.label} · {row.settled} · {row.status}

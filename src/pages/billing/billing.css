@@ -333,3 +333,97 @@
   width: 100%;
   resize: vertical;
 }
+.bill-import__counts {
+  list-style: none;
+  margin: 6px 0 10px;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.bill-import__count {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--fbg);
+  border: 1px solid var(--fbd);
+}
+.bill-import__count--error {
+  color: var(--fre);
+  background: var(--frel);
+}
+.bill-import__count--warning {
+  color: var(--fam);
+  background: var(--faml);
+}
+.bill-import__count--notImported {
+  color: var(--fink3);
+}
+.bill-import__status--error {
+  color: var(--fre);
+  border-color: currentColor;
+}
+.bill-import__status--update {
+  color: var(--fsk);
+  border-color: currentColor;
+}
+.bill-import__status--new {
+  color: var(--fgn);
+  border-color: currentColor;
+}
+.bill-import__sheet {
+  border-top: 1px solid var(--fbd);
+  margin-top: 12px;
+  padding-top: 10px;
+}
+.bill-import__msgs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.bill-import__msg--error {
+  color: var(--fre);
+}
+.bill-import__msg--warning {
+  color: var(--fam);
+}
+.bill-import__rows td:first-child {
+  width: 48px;
+}
+.bill-import__problems {
+  margin: 6px 0 10px 18px;
+  color: var(--fre);
+  font-size: 13px;
+}
+.bill-import__actions,
+.bill-import__pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.bill-import__reason {
+  margin: 8px 0 0;
+}
+.bill-import__more {
+  margin-top: 8px;
+}
+.bill-import__file {
+  overflow-wrap: anywhere;
+}
+.bill-import__picker {
+  max-width: 100%;
+  font-size: 13px;
+}
+.bill-import__state {
+  margin: 8px 0 0;
+}
+.bill-import__done {
+  border-left: 4px solid var(--fgn);
+}

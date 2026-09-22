@@ -1,5 +1,11 @@
 import ExcelJS from "exceljs";
-import { IMPORT_SHEETS, README_SHEET, isLaterSheet, parseRow } from "./importColumns.js";
+import {
+  ERROR_COLUMN,
+  IMPORT_SHEETS,
+  README_SHEET,
+  isLaterSheet,
+  parseRow,
+} from "./importColumns.js";
 
 export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 export const MAX_SHEET_ROWS = 5000;
@@ -46,9 +52,14 @@ function readHeader(ws, sheet, problems) {
   const known = new Map(sheet.columns.map((column) => [normal(column.name), column.name]));
   const positions = {};
   const unknown = [];
+  const ignored = new Set();
   ws.getRow(1).eachCell({ includeEmpty: false }, (cell, col) => {
     const heading = cellText(cell);
     if (!heading) return;
+    if (normal(heading) === ERROR_COLUMN) {
+      ignored.add(col);
+      return;
+    }
     const name = known.get(normal(heading));
     if (!name) {
       unknown.push(heading);
@@ -82,7 +93,9 @@ function readHeader(ws, sheet, problems) {
   ws.eachRow({ includeEmpty: false }, (row, number) => {
     if (number === 1) return;
     row.eachCell({ includeEmpty: false }, (cell, col) => {
-      if (!headed.has(col) && cellText(cell) !== "") stray.add(ws.getColumn(col).letter);
+      if (!headed.has(col) && !ignored.has(col) && cellText(cell) !== "") {
+        stray.add(ws.getColumn(col).letter);
+      }
     });
   });
   for (const letter of stray) {
@@ -105,6 +118,7 @@ function readRows(ws, sheet, positions) {
       cells[column.name] = cell ? cell.value : null;
       input[column.name] = cell ? cellText(cell) : "";
     }
+    if (Object.values(input).every((text) => text === "")) return;
     const { values, errors } = parseRow(sheet, cells);
     rows.push({ row: number, input, values, errors });
   });

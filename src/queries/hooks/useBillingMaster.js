@@ -3,6 +3,8 @@ import api from "../../services/api";
 
 const MASTER = "/api/billing/master";
 const SETTINGS = "/api/billing/settings";
+const IMPORT = "/api/billing/import";
+const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 export const billingKeys = {
   all: ["billing"],
@@ -24,6 +26,7 @@ export const billingKeys = {
   usage: (kind, key) => ["billing", "usage", kind, key],
   settings: () => ["billing", "settings"],
   series: () => ["billing", "series"],
+  imports: (page) => ["billing", "imports", page ?? {}],
 };
 
 const PRICE_KEYS = [billingKeys.all, ["giniflow"]];
@@ -326,4 +329,82 @@ export function useSetBillingTaxCodeActive() {
 
 export function useDeleteBillingTaxCode() {
   return useBillingMutation(async (id) => (await api.delete(`${SETTINGS}/tax-codes/${id}`)).data);
+}
+
+const IMPORT_KEYS = [billingKeys.all, ["giniflow"], ["patient-schemes"]];
+
+const fileNameOf = (headers, fallback) => {
+  const header = headers?.["content-disposition"] ?? "";
+  const encoded = header.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  if (encoded) return decodeURIComponent(encoded);
+  return header.match(/filename="([^"]+)"/i)?.[1] ?? fallback;
+};
+
+const readBlobError = async (e) => {
+  const data = e?.response?.data;
+  if (data instanceof Blob) {
+    try {
+      e.response.data = JSON.parse(await data.text());
+    } catch {
+      e.response.data = {};
+    }
+  }
+  throw e;
+};
+
+const sendFile = (url, file, config = {}) =>
+  api.post(url, file, {
+    ...config,
+    params: { fileName: file.name },
+    headers: { "Content-Type": XLSX_TYPE },
+  });
+
+export function useBillingImportHistory({ limit, offset } = {}) {
+  const params = withoutBlanks({ limit, offset });
+  return useQuery({
+    queryKey: billingKeys.imports(params),
+    queryFn: () => read(`${IMPORT}/history`, params),
+    placeholderData: (prev) => prev,
+  });
+}
+
+export function useBillingImportTemplate() {
+  return useMutation({
+    mutationFn: async () => {
+      const response = await api
+        .get(`${IMPORT}/template`, { responseType: "blob" })
+        .catch(readBlobError);
+      return {
+        blob: response.data,
+        fileName: fileNameOf(response.headers, "gini-billing-template.xlsx"),
+      };
+    },
+  });
+}
+
+export function usePreviewBillingImport() {
+  return useMutation({
+    mutationFn: async (file) => (await sendFile(`${IMPORT}/preview`, file)).data,
+  });
+}
+
+export function useCommitBillingImport() {
+  return useBillingMutation(
+    async (file) => (await sendFile(`${IMPORT}/commit`, file)).data,
+    IMPORT_KEYS,
+  );
+}
+
+export function useBillingImportErrorFile() {
+  return useMutation({
+    mutationFn: async (file) => {
+      const response = await sendFile(`${IMPORT}/errors`, file, { responseType: "blob" }).catch(
+        readBlobError,
+      );
+      return {
+        blob: response.data,
+        fileName: fileNameOf(response.headers, file.name.replace(/\.xlsx$/i, " - errors.xlsx")),
+      };
+    },
+  });
 }

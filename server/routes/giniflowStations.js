@@ -108,6 +108,7 @@ import {
   cancelDrawing,
 } from "../services/giniflow/labStation.js";
 import { releaseVisit } from "../services/giniflow/stationRelease.js";
+import { addExtraReport, removeExtraReport } from "../services/giniflow/extraReports.js";
 import {
   getReferrals,
   searchReferralPatients,
@@ -1749,7 +1750,10 @@ const machineGate = requireCapability(CAP.GINIFLOW_STATION_MACHINE);
 const echoGate = requireCapability(CAP.GINIFLOW_STATION_ECHO);
 const xrayGate = requireCapability(CAP.GINIFLOW_STATION_XRAY);
 
-function mountMachineStationRoutes(router, { prefix, gate, station, reportRemoveCap }) {
+function mountMachineStationRoutes(
+  router,
+  { prefix, gate, station, reportRemoveCap, extraReports = false },
+) {
   router.get(
     `/giniflow/stations/${prefix}/queue`,
     gate,
@@ -1923,6 +1927,41 @@ function mountMachineStationRoutes(router, { prefix, gate, station, reportRemove
       }
     },
   );
+
+  if (!extraReports) return;
+
+  router.post(
+    `/giniflow/stations/${prefix}/:orderId/reports`,
+    gate,
+    validate(giniflowReportSchema),
+    async (req, res) => {
+      try {
+        await assertOrderInStation(req.params.orderId, station);
+        res.json(
+          await addExtraReport(req.params.orderId, {
+            base64: req.body.base64,
+            fileName: req.body.fileName,
+            mediaType: req.body.mediaType || "application/pdf",
+          }),
+        );
+      } catch (e) {
+        handleError(res, e, `Gini Flow ${prefix} additional report`);
+      }
+    },
+  );
+
+  router.delete(
+    `/giniflow/stations/${prefix}/:orderId/reports/:docId`,
+    requireCapability(reportRemoveCap),
+    async (req, res) => {
+      try {
+        await assertOrderInStation(req.params.orderId, station);
+        res.json(await removeExtraReport(req.params.orderId, req.params.docId));
+      } catch (e) {
+        handleError(res, e, `Gini Flow ${prefix} additional report delete`);
+      }
+    },
+  );
 }
 
 router.get("/giniflow/machines", machineGate, async (_req, res) => {
@@ -1970,6 +2009,7 @@ mountMachineStationRoutes(router, {
   gate: xrayGate,
   station: "xray",
   reportRemoveCap: CAP.GINIFLOW_XRAY_REPORT_REMOVE,
+  extraReports: true,
 });
 
 router.get("/giniflow/stations/mo/:visitId/prescription", moGate, async (req, res) => {

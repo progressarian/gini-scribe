@@ -48,6 +48,7 @@ import {
 import { publish } from "./eventHub.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate, labOnlyHiddenPredicate } from "./labOnlyVisits.js";
 import { hideLabOnlyPatients } from "./floorSettings.js";
+import { hasExtraReports } from "./extraReports.js";
 
 const UNDRAWN_LAB = UNDRAWN_SAMPLE_STATUSES.map((v) => `'${v}'`).join(", ");
 
@@ -315,6 +316,14 @@ export async function getMachineQueue(
             last_ev.occurred_at AS since,
             (SELECT doc.id FROM documents doc WHERE doc.giniflow_lab_order_id = o.id)
               AS report_doc_id,
+            COALESCE(
+              (SELECT json_agg(
+                        json_build_object('docId', doc.id, 'fileName', doc.file_name,
+                                          'uploadedAt', doc.created_at)
+                        ORDER BY doc.created_at)
+                 FROM documents doc WHERE doc.giniflow_extra_report_of = o.id),
+              '[]'::json
+            ) AS extra_reports,
             EXISTS (SELECT 1 FROM lab_results lr WHERE lr.lab_order_id = o.id) AS has_values,
             -- The two sequencing gates (39-HYBRID-FLOOR-PLAN.md §3). Asked of the
             -- table, not of the screen: a technician with a stale tab must be
@@ -436,6 +445,7 @@ export async function getMachineQueue(
         !r.has_values,
       reportDocId: r.report_doc_id || null,
       reportUrl: r.report_file_url || null,
+      extraReports: r.extra_reports || [],
       orderedAt: r.created_at ? new Date(r.created_at).toISOString() : null,
       since: new Date(r.since || r.updated_at || r.created_at).toISOString(),
       uploadedAt: r.uploaded_at ? new Date(r.uploaded_at).toISOString() : null,
@@ -1077,6 +1087,11 @@ export async function removeMachineReport(
   assertMachineInStation(catalogue, orderMachine, station);
   if (!row.report_file_url && !row.report_doc_id) {
     throw Object.assign(new Error("There is no report on this test to remove"), { status: 409 });
+  }
+  if (await hasExtraReports(orderId, db)) {
+    throw Object.assign(new Error("Remove the additional reports on this test first"), {
+      status: 409,
+    });
   }
 
   const storagePath = String(row.report_file_url || "").split(`/${STORAGE_BUCKET}/`)[1] || null;

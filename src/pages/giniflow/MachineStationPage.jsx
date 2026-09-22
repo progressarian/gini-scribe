@@ -9,6 +9,8 @@ import {
   useCancelMachineTest,
   useUploadMachineReport,
   useRemoveMachineReport,
+  useAddExtraMachineReport,
+  useRemoveExtraMachineReport,
   useMachineCandidates,
   useAddMachineTest,
   useMachines,
@@ -144,8 +146,12 @@ function TestPane({
   onCancelStart,
   onUpload,
   onView,
+  onViewDoc,
   onRemoveReport,
   canRemoveReport,
+  multiReport,
+  onAddExtra,
+  onRemoveExtra,
   onCancelTest,
   canCancelTest,
   busy,
@@ -153,6 +159,7 @@ function TestPane({
   const { data: catalogue = [] } = useMachines(useStation());
   const paneRef = useRef(null);
   const fileRef = useRef(null);
+  const extraRef = useRef(null);
   const [replacing, setReplacing] = useState(false);
   useEffect(() => {
     if (!order) return undefined;
@@ -170,6 +177,7 @@ function TestPane({
   const handsOver = machineHandsOver(catalogue, order.machine);
   const canUpload = order.stage !== "ordered" && !handsOver;
   const showUploader = canUpload && (!order.hasReport || replacing);
+  const extras = order.extraReports || [];
 
   return (
     <div className="detail-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
@@ -291,13 +299,59 @@ function TestPane({
                     <button
                       type="button"
                       className="st-btn st-btn-r"
-                      disabled={busy}
+                      disabled={busy || extras.length > 0}
                       onClick={() => onRemoveReport(order)}
                     >
                       🗑 Remove report
                     </button>
                   )}
                 </div>
+                {multiReport &&
+                  extras.map((rep, i) => (
+                    <div className="dp-acts" key={rep.docId}>
+                      <button
+                        type="button"
+                        className="st-btn st-btn-g"
+                        onClick={() => onViewDoc(rep.docId)}
+                      >
+                        📄 View report {i + 2}
+                      </button>
+                      {canRemoveReport && (
+                        <button
+                          type="button"
+                          className="st-btn st-btn-r"
+                          disabled={busy}
+                          onClick={() => onRemoveExtra(order, rep.docId)}
+                        >
+                          🗑 Remove report {i + 2}
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                {multiReport && canUpload && (
+                  <>
+                    <input
+                      ref={extraRef}
+                      type="file"
+                      accept="application/pdf,image/*"
+                      multiple
+                      hidden
+                      onChange={(e) => {
+                        const files = [...(e.target.files || [])];
+                        e.target.value = "";
+                        if (files.length) onAddExtra(order, files);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="st-btn st-btn-tl btn-full"
+                      disabled={busy}
+                      onClick={() => extraRef.current?.click()}
+                    >
+                      ➕ Add another X-ray report
+                    </button>
+                  </>
+                )}
                 <div className="dp-hint">
                   Replacing attaches a new file and leaves the test closed. Removing takes the
                   report off the patient&apos;s chart and reopens this test at &ldquo;Test
@@ -506,11 +560,18 @@ export default function MachineStationPage({ station = "machine", label = "Machi
   );
   const upload = useUploadMachineReport(station);
   const removeReport = useRemoveMachineReport(station);
+  const addExtra = useAddExtraMachineReport(station);
+  const removeExtra = useRemoveExtraMachineReport(station);
   const cancelStart = useCancelMachineStart(station);
   const cancelTest = useCancelMachineTest(station);
   const canCancelTest = hasCapability(role, C.GINIFLOW_TEST_CANCEL);
   const busy =
-    advance.isPending || upload.isPending || cancelStart.isPending || cancelTest.isPending;
+    advance.isPending ||
+    upload.isPending ||
+    addExtra.isPending ||
+    removeExtra.isPending ||
+    cancelStart.isPending ||
+    cancelTest.isPending;
 
   const showToast = (msg) => {
     setToast(msg);
@@ -643,6 +704,31 @@ export default function MachineStationPage({ station = "machine", label = "Machi
       },
     );
   };
+
+  const onAddExtra = async (order, files) => {
+    const tooBig = files.find((f) => f.size > 10 * 1024 * 1024);
+    if (tooBig) return showToast(`${tooBig.name} is larger than 10 MB`);
+    let added = 0;
+    for (const file of files) {
+      try {
+        await addExtra.mutateAsync({ orderId: order.orderId, file });
+        added++;
+      } catch (e) {
+        showToast(e?.response?.data?.error || `Could not upload ${file.name}`);
+        return;
+      }
+    }
+    showToast(`📤 ${added} more report${added === 1 ? "" : "s"} added for ${order.name}`);
+  };
+
+  const onRemoveExtra = (order, docId) =>
+    removeExtra.mutate(
+      { orderId: order.orderId, docId },
+      {
+        onSuccess: () => showToast(`🗑 Report removed from ${order.name}'s chart`),
+        onError: (e) => showToast(e?.response?.data?.error || "Could not remove that report"),
+      },
+    );
 
   const onRemoveReport = (order) =>
     removeReport.mutate(
@@ -1054,6 +1140,12 @@ export default function MachineStationPage({ station = "machine", label = "Machi
           onUpload={onUpload}
           onRemoveReport={onRemoveReport}
           canRemoveReport={canRemoveReport}
+          multiReport={station === "xray"}
+          onAddExtra={onAddExtra}
+          onRemoveExtra={onRemoveExtra}
+          onViewDoc={(id) =>
+            setViewingDoc({ id, title: "Machine test report", doc_type: "lab_report" })
+          }
           onCancelTest={onCancelTest}
           canCancelTest={canCancelTest}
           onView={(o) =>

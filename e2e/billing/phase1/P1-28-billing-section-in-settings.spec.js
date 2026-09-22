@@ -20,10 +20,16 @@ const ADMIN_TABS = [
   "Categories",
   "Services",
   "Category rates",
+  "Bulk import",
   "Billing settings",
 ];
-const RECEPTION_ADMIN_TABS = ["Categories", "Services", "Category rates"];
-const BILLING_PAGES = ["/settings/services", "/settings/category-rates", "/settings/billing"];
+const RECEPTION_ADMIN_TABS = ["Categories", "Services", "Category rates", "Bulk import"];
+const BILLING_PAGES = [
+  "/settings/services",
+  "/settings/category-rates",
+  "/settings/bulk-import",
+  "/settings/billing",
+];
 const OUTSIDERS = ["reception", "coordinator", "lab", "banshali"];
 
 const tabsOf = (page) =>
@@ -78,6 +84,9 @@ test.describe("P1-28 billing section in settings — who may open what", () => {
       true,
     );
     expect(hasAnyCapability("reception_admin", PAGE_CAPABILITIES["/settings/schemes"])).toBe(true);
+    expect(hasAnyCapability("reception_admin", PAGE_CAPABILITIES["/settings/bulk-import"])).toBe(
+      true,
+    );
     expect(hasAnyCapability("reception_admin", PAGE_CAPABILITIES["/settings/billing"])).toBe(false);
     for (const page of ["/settings/flow", "/settings/prescription", "/settings/tests"]) {
       expect(hasAnyCapability("reception_admin", PAGE_CAPABILITIES[page]), page).toBe(false);
@@ -168,7 +177,7 @@ test.describe("P1-28 billing section in settings — screens", () => {
   test("6. reception_admin is turned away from admin-only settings", async ({ page }) => {
     await loginAs(page, "reception_admin");
     for (const target of ["/settings/billing", "/settings/flow", "/settings/tests"]) {
-      await page.goto(target);
+      await gotoReady(page, target, () => page.locator(".tabs"));
       await expectTurnedAway(page);
     }
   });
@@ -177,7 +186,7 @@ test.describe("P1-28 billing section in settings — screens", () => {
     test(`7. ${role} gets no settings tab and no billing page`, async ({ page }) => {
       await loginAs(page, role);
       for (const target of ["/settings", ...BILLING_PAGES]) {
-        await page.goto(target);
+        await gotoReady(page, target, () => page.locator(".tabs"));
         await expectTurnedAway(page);
       }
       await expect(settingsNav(page)).toHaveCount(0);
@@ -260,6 +269,7 @@ test.describe("P1-28 billing section in settings — screens", () => {
       "/settings/schemes",
       "/settings/services",
       "/settings/category-rates",
+      "/settings/bulk-import",
       "/settings/billing",
     ]) {
       await gotoReady(page, target, () =>

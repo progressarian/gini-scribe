@@ -84,6 +84,7 @@ const SchemesSettingsPage = lazyWithRetry(() => import("./pages/SchemesSettingsP
 const ServicesSettingsPage = lazyWithRetry(() => import("./pages/billing/ServicesSettingsPage"));
 const CategoryRatesPage = lazyWithRetry(() => import("./pages/billing/CategoryRatesPage"));
 const BillingSettingsPage = lazyWithRetry(() => import("./pages/billing/BillingSettingsPage"));
+const BillingImportPage = lazyWithRetry(() => import("./pages/billing/BillingImportPage"));
 const TestCatalogPage = lazyWithRetry(() => import("./pages/TestCatalogPage"));
 const SettingsLayout = lazyWithRetry(() => import("./pages/SettingsLayout"));
 const MedicineCollectionPage = lazyWithRetry(() => import("./pages/MedicineCollectionPage"));
@@ -230,6 +231,7 @@ const router = createBrowserRouter([
                   { path: "schemes", element: lazyEl(SchemesSettingsPage) },
                   { path: "services", element: lazyEl(ServicesSettingsPage) },
                   { path: "category-rates", element: lazyEl(CategoryRatesPage) },
+                  { path: "bulk-import", element: lazyEl(BillingImportPage) },
                   { path: "billing", element: lazyEl(BillingSettingsPage) },
                 ],
               },

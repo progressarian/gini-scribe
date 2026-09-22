@@ -1309,6 +1309,47 @@ export async function fetchStoredReport(orderId, db = pool) {
   };
 }
 
+export async function storeReportObject({ base64, fileName, mediaType, kind, patientId }) {
+  const buffer = Buffer.from(base64, "base64");
+  // The screen tells the technician 10 MB, so 10 MB is the limit. A service that
+  // quietly allows more than the interface promises is a service nobody can
+  // predict.
+  const MAX_BYTES = 10 * 1024 * 1024;
+  if (buffer.length > MAX_BYTES) {
+    throw Object.assign(new Error("Report is larger than 10 MB"), { status: 413 });
+  }
+
+  const safeName = String(fileName || "report.pdf").replace(/[^a-zA-Z0-9._-]/g, "_");
+  const storagePath = `giniflow/${kind === "machine" ? "machine" : "lab"}/${patientId}/${Date.now()}_${safeName}`;
+
+  const resp = await fetch(`${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+      "Content-Type": mediaType,
+      "x-upsert": "true",
+    },
+    body: buffer,
+  });
+  if (!resp.ok) {
+    throw Object.assign(new Error(`Upload failed: ${await resp.text()}`), { status: 502 });
+  }
+
+  // The OBJECT path, not a public URL.
+  //
+  // This used to store `/object/public/<bucket>/<path>`, which is the form
+  // Supabase composes for a public bucket. `patient-files` is PRIVATE — it holds
+  // every patient's prescriptions and lab reports — so that URL resolves to
+  // "Bucket not found" and every "View uploaded report" button 404'd. The bucket
+  // cannot be made public to fix it.
+  //
+  // So the row stores the authenticated form and the route proxies the bytes,
+  // exactly as the referral letter does. Rows written before this fix hold the
+  // public form; `fetchStoredReport` accepts both.
+  const url = `${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`;
+  return { url, storagePath, safeName, bytes: buffer.length };
+}
+
 export async function uploadReport(
   orderId,
   { base64, fileName, mediaType = "application/pdf", actorId = null, confirmAdditional = false },
@@ -1340,43 +1381,13 @@ export async function uploadReport(
     });
   }
 
-  const buffer = Buffer.from(base64, "base64");
-  // The screen tells the technician 10 MB, so 10 MB is the limit. A service that
-  // quietly allows more than the interface promises is a service nobody can
-  // predict.
-  const MAX_BYTES = 10 * 1024 * 1024;
-  if (buffer.length > MAX_BYTES) {
-    throw Object.assign(new Error("Report is larger than 10 MB"), { status: 413 });
-  }
-
-  const safeName = String(fileName || "report.pdf").replace(/[^a-zA-Z0-9._-]/g, "_");
-  const storagePath = `giniflow/${rows[0].kind === "machine" ? "machine" : "lab"}/${rows[0].patient_id}/${Date.now()}_${safeName}`;
-
-  const resp = await fetch(`${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
-      "Content-Type": mediaType,
-      "x-upsert": "true",
-    },
-    body: buffer,
+  const { url, safeName, bytes } = await storeReportObject({
+    base64,
+    fileName,
+    mediaType,
+    kind: rows[0].kind,
+    patientId: rows[0].patient_id,
   });
-  if (!resp.ok) {
-    throw Object.assign(new Error(`Upload failed: ${await resp.text()}`), { status: 502 });
-  }
-
-  // The OBJECT path, not a public URL.
-  //
-  // This used to store `/object/public/<bucket>/<path>`, which is the form
-  // Supabase composes for a public bucket. `patient-files` is PRIVATE — it holds
-  // every patient's prescriptions and lab reports — so that URL resolves to
-  // "Bucket not found" and every "View uploaded report" button 404'd. The bucket
-  // cannot be made public to fix it.
-  //
-  // So the row stores the authenticated form and the route proxies the bytes,
-  // exactly as the referral letter does. Rows written before this fix hold the
-  // public form; `fetchStoredReport` accepts both.
-  const url = `${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`;
 
   // The file is stored, so now mark it uploaded — which is what notifies the MO.
   // Done through advanceSample so trigger 1 and the event log are the same code
@@ -1392,7 +1403,7 @@ export async function uploadReport(
   // report only the lab station can see.
   promoteQuietly(promoteLabReport, orderId);
 
-  return { orderId, reportUrl: url, fileName: safeName, bytes: buffer.length };
+  return { orderId, reportUrl: url, fileName: safeName, bytes };
 }
 
 // Confirm-and-attribute (06-PHASE-2-PLAN §0.4). Records that a technician acted

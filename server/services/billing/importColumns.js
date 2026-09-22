@@ -522,6 +522,8 @@ export const README_SHEET = "Read me";
 
 export const LATER_SHEETS = ["Payment rules", "Consultant fees", "Discounts"];
 
+export const ERROR_COLUMN = "error";
+
 export const isLaterSheet = (name) => LATER_SHEETS.includes(name);
 
 export const TEMPLATE_SHEET_NAMES = [...IMPORT_SHEETS.map((sheet) => sheet.name), README_SHEET];

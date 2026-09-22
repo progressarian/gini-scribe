@@ -45,6 +45,11 @@ export const SETTINGS_TABS = [
     blurb: "What each category pays for each service, and the code printed on its bill",
   },
   {
+    to: "/settings/bulk-import",
+    label: "Bulk import",
+    blurb: "Upload the Excel template to add or update services, categories and rates in one go",
+  },
+  {
     to: "/settings/billing",
     label: "Billing settings",
     blurb: "Discount stacking, pay later, GST and the bill number series",
