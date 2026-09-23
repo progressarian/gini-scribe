@@ -9,6 +9,11 @@ if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 const rules = await import("../../../server/services/billing/paymentRules.js");
 const discounts = await import("../../../server/services/billing/discountRules.js");
 const schemes = await import("../../../server/services/patientSchemes.js");
+const { priceBill } = await import("../../../server/services/billing/priceBill.js");
+const { assertBillLineBalances } =
+  await import("../../../server/services/billing/lineInvariant.js");
+const { billingPreviewSchema, billingRuleTestSchema } =
+  await import("../../../server/schemas/billing.js");
 
 const PREVIEW = "/api/billing/preview";
 const TEST_RULE = "/api/billing/master/test-rule";
@@ -390,5 +395,84 @@ test.describe.serial("P3-17 test this rule endpoint", () => {
     const anonymous = await post(null, TEST_RULE, trial());
     expect(anonymous.status).toBe(403);
     expect(anonymous.json.error).toBe("Doctor account required");
+  });
+
+  test("7. a draft rule prices exactly as the same rule saved would", async () => {
+    const bill = (extra) => ({
+      category: c("paid"),
+      date: DAY,
+      visitType: "New",
+      role: "reception_admin",
+      patient: { age: 70, gender: "Female" },
+      lines: [
+        { item: ids.consult },
+        { item: ids.test },
+        { item: ids.dressing },
+        { item: ids.swab, quantity: 3 },
+      ],
+      ...extra,
+    });
+    const shaped = {
+      subgroup_id: ids.tests,
+      patient_pays: "percent",
+      patient_value: 20,
+      remainder: "claim",
+      visit_types: ["New"],
+    };
+    const withoutRule = await priceBill(bill(), db);
+    const drafted = await priceBill(bill({ draftRule: shaped }), db);
+    const saved = await rules.createPaymentRule(
+      { ...shaped, scheme_code: c("paid"), valid_from: "2026-01-01", name: `P317 draft ${tag}` },
+      ctx,
+      db,
+    );
+    const priced = await priceBill(bill(), db);
+    await rules.deletePaymentRule(saved.id, ctx, db);
+
+    const money = ({ payment_rule_id, payment_rule_name, payment_rule_text, ...line }) => line;
+    expect(drafted.lines.map(money)).toEqual(priced.lines.map(money));
+    expect(drafted.totals).toEqual(priced.totals);
+    expect(
+      drafted.lines.map((line) => [
+        line.payment_rule_id,
+        line.payment_rule_name,
+        line.payment_rule_text,
+      ]),
+    ).toEqual([
+      [priced.lines[0].payment_rule_id, priced.lines[0].payment_rule_name, "amount ₹700"],
+      [null, "Draft rule", "percent 20% (draft)"],
+      [null, "Draft rule", "percent 20% (draft)"],
+      [null, "Draft rule", "percent 20% (draft)"],
+    ]);
+    expect(
+      drafted.lines[0],
+      "a line the draft rule doesn't cover is priced as it always was",
+    ).toEqual(withoutRule.lines[0]);
+    for (const line of drafted.lines) expect(() => assertBillLineBalances(line)).not.toThrow();
+    const badDraft = await priceBill(
+      bill({ draftRule: { patient_pays: "percent", patient_value: 150 } }),
+      db,
+    ).catch((error) => error);
+    expect(badDraft.status).toBe(400);
+    expect(badDraft.line_no, "a draft rule is no line's fault").toBeUndefined();
+  });
+
+  test("8. only the rule test takes a draft rule; the desk preview refuses it", async () => {
+    const body = {
+      patient_id: ids.patient,
+      lines: [{ item_id: ids.consult }],
+      draft_rule: { patient_pays: "nothing" },
+    };
+    const previewed = billingPreviewSchema.safeParse(body);
+    expect(previewed.success).toBe(false);
+    expect(JSON.stringify(previewed.error.issues)).toMatch(/draft_rule|unrecognized/i);
+    const { patient_id: _patientId, ...trialBody } = body;
+    expect(billingRuleTestSchema.safeParse(trialBody).success).toBe(true);
+    expect(
+      billingRuleTestSchema.safeParse({
+        ...trialBody,
+        draft_rule: { patient_pays: "half" },
+      }).success,
+    ).toBe(false);
   });
 });

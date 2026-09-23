@@ -1,10 +1,10 @@
 # 52 — Billing: OPD, Lab, Machine tests, ECHO, X-ray (and Pharmacy later)
 
-Status: **Phase T and Phase 1 built (2026-09-21); Phase 2 built (2026-09-22)**
-except loading the hospital's data (P2-13), which, like Phase 0, waits on the
-admin team; Phases 3–7 are still a plan. Written 2026-09-17 against the code as
-it stood. What Phase 1 and Phase 2 did differently from this plan is in §0a and
-§0b.
+Status: **Phase T and Phase 1 built (2026-09-21); Phase 2 built (2026-09-22);
+Phase 3 built (2026-09-23)** except loading the hospital's data (P2-13 and
+P3-23), which, like Phase 0, waits on the admin team; Phases 4–7 are still a
+plan. Written 2026-09-17 against the code as it stood. What Phases 1, 2 and 3
+did differently from this plan is in §0a, §0b and §0c.
 
 Task list: `52-BILLING-TASKS.md`.
 
@@ -193,6 +193,59 @@ The design has eight parts:
 8. **Bulk Excel upload** of groups, subgroups, items, categories, category rules,
    category rates, payment rules and discount codes. The upload is checked and previewed before anything is
    saved.
+
+---
+
+## 0c. Phase 3 as built (2026-09-23)
+
+Every Phase 3 task in `52-BILLING-TASKS.md` is done, each with its e2e test,
+except **P3-23** (loading the hospital's own rules), which waits on the admin
+team's filled `Payment rules`, `Consultant fees` and `Discounts` sheets. The
+whole billing e2e suite passed on the test database (786 tests), and
+`smoke:billing-pricing` passes its 37 checks, including the CGHS table of §6.
+The two rules tables were applied to production on 2026-09-22, and the
+bill-level fixed-price check on 2026-09-23; both are empty of business rows.
+
+Where it differs from §5.3a, §5.4 and §6:
+
+- **Every link is `ON DELETE RESTRICT`**, not CASCADE. Deleting a category,
+  group, subgroup or item that a rule or discount uses is refused and names
+  what uses it, instead of silently deleting the rules.
+- **Money is worked out in whole paise**, with exact integer maths (BigInt
+  where a product could pass JavaScript's safe range), so no rounding drifts.
+  Each line is checked to balance before it is returned
+  (`actual − discount + tax = patient payable + claim + adjustment`), and a
+  line that doesn't balance is a programming error, never a saved bill.
+- **Prices that include tax** keep `actual` and `discount` tax-exclusive, with
+  the price-list figures alongside as `listed_actual` / `listed_discount`, so
+  the invariant holds for both kinds of item.
+- **An `amount` rule is per unit** (three dressings under "patient pays ₹200"
+  cost the patient ₹600), matching the per-unit price guard and the per-unit
+  fixed-price discount.
+- **Tax stays on the undiscounted net**: §6 puts tax (step 5) before the
+  discount on payment-rule lines (step 8), so a discount there reduces only
+  what the patient pays. The same is true of a bill-level discount. Before GST
+  is switched on (Phase 7) the hospital's accountant should confirm this, since
+  a discount shown on the invoice normally lowers the taxable value.
+- **Whole-bill discounts** come off the patient payable after the line
+  discounts, never touching a claim, and are shared back over the lines they
+  cover (largest remainder) so every line still balances. A bill-level fixed
+  price is refused, in the service and now by a database check.
+- **`best_only`** picks the largest discount per line, but a line can still
+  take a whole-bill discount on top; whether bill rules should compete with
+  line rules is an open decision.
+- **The bill preview and "test this rule"** are two endpoints
+  (`POST /api/billing/preview` for the desk, `POST /api/billing/master/test-rule`
+  for admins). Both refuse any request that carries a price, rate or discount
+  amount. The rule test also prices a **draft rule** the admin is still typing,
+  which is what the payment-rules panel previews with.
+- **Consultant fees have their own grid** (`consultantFees.js` and
+  `/settings/consultant-fees`): each doctor's New and Follow Up fee for every
+  category in one screen, with copy between categories, because R14's per-doctor
+  category fees are otherwise a rate row plus an item-level payment rule each.
+- **Usage limits on discount codes** (total, per patient, per day, per doctor
+  per day) are counted from the Phase 4 bill tables; until those exist every
+  count is zero, and the limits work from the day bills are saved.
 
 ---
 

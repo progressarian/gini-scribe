@@ -463,8 +463,8 @@ function LabDetailPane({
   // it only for the service to reject it. The limit is the one the zone states.
   const take = (file) => {
     if (!file) return;
-    if (file.size > 10 * 1024 * 1024) {
-      onUpload(order, file, "Report is larger than 10 MB — nothing was uploaded");
+    if (file.size > 5 * 1024 * 1024) {
+      onUpload(order, file, "Report is larger than 5 MB — nothing was uploaded");
       return;
     }
     onUpload(order, file);
@@ -622,7 +622,7 @@ function LabDetailPane({
                   <div className="ua-t">
                     {busy ? "Uploading…" : "Tap or drop the lab report here"}
                   </div>
-                  <div className="ua-s">PDF · JPG · PNG accepted · Max 10MB</div>
+                  <div className="ua-s">PDF · JPG · PNG accepted · Max 5MB</div>
                 </button>
                 <div className="dp-trigger">
                   <span className="wn-ico">⚡</span>
@@ -1235,7 +1235,7 @@ function HealthrayCasePane({
                       >
                         <div className="ua-ico">📄</div>
                         <div className="ua-t">Tap to upload lab report PDF</div>
-                        <div className="ua-s">PDF · JPG · PNG accepted · Max 10MB</div>
+                        <div className="ua-s">PDF · JPG · PNG accepted · Max 5MB</div>
                       </button>
                       <div className="dp-hint">
                         Stored on the patient&apos;s chart, where the doctor and the patient app
@@ -1527,7 +1527,7 @@ export default function LabRoom({ room = null }) {
     CAP.GINIFLOW_STATION_LAB_PROCESS,
   );
   const onUploadCase = (caseNo, file, confirmAdditional = false) => {
-    if (file.size > 10 * 1024 * 1024) return showToast("File is larger than 10 MB — not uploaded");
+    if (file.size > 5 * 1024 * 1024) return showToast("File is larger than 5 MB — not uploaded");
     caseUpload.mutate(
       { caseNo, file, confirmAdditional },
       {

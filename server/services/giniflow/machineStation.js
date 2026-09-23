@@ -1,5 +1,6 @@
 import { CANCELLABLE_ORDER_STATUSES } from "../../../shared/testCancelReasons.js";
 import pool from "../../config/db.js";
+import { linesForOrder } from "../billing/visitLines.js";
 import { testPriceForVisit } from "../pricing.js";
 import { LIVE_LAB_CASE_SQL } from "./testsHold.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config/storage.js";
@@ -644,6 +645,13 @@ export async function addMachineTestOn(
     `INSERT INTO giniflow_lab_order_events (lab_order_id, track, status, actor_role, actor_id)
      VALUES ($1, 'payment', 'pending', 'machine', $2)`,
     [orderId, actorId],
+  );
+
+  await linesForOrder(
+    visitId,
+    { labOrderId: orderId, testNames: [machine.tests[0]] },
+    { actorId },
+    client,
   );
 
   return { orderId, machine: machine.id, name: visit[0].name, alreadyThere: false, price };

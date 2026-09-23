@@ -352,3 +352,61 @@
 .mroom__stage .pc-recheck:hover {
   border-color: var(--blu);
 }
+
+.mroom__switch {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  min-width: 0;
+  padding: 3px;
+  background: rgb(255 255 255 / 0.08);
+  border: 1px solid rgb(255 255 255 / 0.16);
+  border-radius: 999px;
+}
+.mroom__switch button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 4px 14px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  color: rgb(255 255 255 / 0.72);
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+.mroom__switch button:hover {
+  color: #fff;
+  background: rgb(255 255 255 / 0.12);
+}
+.mroom__switch button.on {
+  color: var(--nv);
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+}
+.mroom__switch button:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+@media (max-width: 560px) {
+  .mroom__switch {
+    display: flex;
+    flex: 1 1 100%;
+    border-radius: 14px;
+  }
+  .mroom__switch button {
+    flex: 1 1 0;
+    min-height: 34px;
+    padding: 6px 10px;
+  }
+}

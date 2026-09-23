@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
   useBillingCategories,
   useBillingConsultantFees,
@@ -18,14 +18,26 @@ import "./consultantFees.css";
 
 const RESERVED = "general";
 
-function Picker({ label, value, onChange, children }) {
+function Picker({ label, value, onChange, note, children }) {
   const id = useId();
+  const noteId = `${id}-note`;
   return (
     <div className="fset__field">
       <label htmlFor={id}>{label}</label>
-      <select id={id} className="jb-assign" value={value} onChange={onChange}>
+      <select
+        id={id}
+        className="jb-assign"
+        value={value}
+        onChange={onChange}
+        aria-describedby={note ? noteId : undefined}
+      >
         {children}
       </select>
+      {note ? (
+        <p id={noteId} className="fset__hint cf-page__note" role="alert">
+          {note}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -97,11 +109,11 @@ function ActivateButton({ doctor }) {
   );
 }
 
-function NotPriced({ doctors, onCreate }) {
+function NotPriced({ doctors, headingRef, buttonRefs, onCreate }) {
   return (
     <section className="flow-card cf-notpriced" aria-labelledby="cf-notpriced-title">
       <div className="fset__cardhead">
-        <h2 id="cf-notpriced-title" className="flow-sec-title">
+        <h2 id="cf-notpriced-title" className="flow-sec-title" ref={headingRef} tabIndex={-1}>
           Not priced
         </h2>
         <span className="fset__count">{doctors.length}</span>
@@ -122,7 +134,7 @@ function NotPriced({ doctors, onCreate }) {
             </tr>
           </thead>
           <tbody>
-            {doctors.map((d) => (
+            {doctors.map((d, index) => (
               <tr key={`${d.doctor_id}-${d.visit_type}`}>
                 <td>
                   {d.doctor_name}
@@ -138,7 +150,12 @@ function NotPriced({ doctors, onCreate }) {
                     type="button"
                     className="flow-btn flow-btn-primary flow-btn-mini"
                     aria-label={`Create item for ${d.doctor_name} (${d.visit_type})`}
-                    onClick={() => onCreate(d)}
+                    ref={(node) => {
+                      const key = `${d.doctor_id}-${d.visit_type}`;
+                      if (node) buttonRefs.current.set(key, node);
+                      else buttonRefs.current.delete(key);
+                    }}
+                    onClick={() => onCreate({ doctor: d, index })}
                   >
                     Create item
                   </button>
@@ -153,14 +170,29 @@ function NotPriced({ doctors, onCreate }) {
 }
 
 export default function ConsultantFeesPage() {
-  const { data: tree = [] } = useBillingCategories({ activeOnly: true });
-  const { data: choices } = useBillingItemChoices();
+  const { data: tree = [], isError: categoriesFailed } = useBillingCategories({ activeOnly: true });
+  const { data: choices, isError: doctorsFailed } = useBillingItemChoices();
   const [doctorId, setDoctorId] = useState("");
   const [schemeCode, setSchemeCode] = useState("");
   const [editing, setEditing] = useState(null);
   const [creating, setCreating] = useState(null);
   const [copying, setCopying] = useState(false);
+  const [focusAfter, setFocusAfter] = useState(null);
   const { data: grid, isLoading, isError } = useBillingConsultantFees({ doctorId, schemeCode });
+  const notPriced = grid?.not_priced ?? [];
+  const createRefs = useRef(new Map());
+  const notPricedRef = useRef(null);
+  const feesRef = useRef(null);
+
+  useEffect(() => {
+    if (focusAfter === null) return;
+    setFocusAfter(null);
+    const next = notPriced[Math.min(focusAfter, notPriced.length - 1)];
+    const target = next
+      ? createRefs.current.get(`${next.doctor_id}-${next.visit_type}`)
+      : (notPricedRef.current ?? feesRef.current);
+    target?.focus();
+  }, [focusAfter, notPriced]);
 
   const categories = tree.filter((top) => top.code !== RESERVED);
   const labels = new Map(
@@ -188,7 +220,16 @@ export default function ConsultantFeesPage() {
           the base price — until the cell gets its own.
         </div>
         <div className="bill-form">
-          <Picker label="Doctor" value={doctorId} onChange={(e) => setDoctorId(e.target.value)}>
+          <Picker
+            label="Doctor"
+            value={doctorId}
+            note={
+              doctorsFailed
+                ? "Could not load the doctors — the grid below still shows every doctor."
+                : ""
+            }
+            onChange={(e) => setDoctorId(e.target.value)}
+          >
             <option value="">All doctors</option>
             {(choices?.consultants ?? []).map((d) => (
               <option key={d.id} value={d.id}>
@@ -199,6 +240,11 @@ export default function ConsultantFeesPage() {
           <Picker
             label="Category"
             value={schemeCode}
+            note={
+              categoriesFailed
+                ? "Could not load the categories — the grid below still shows every category."
+                : ""
+            }
             onChange={(e) => setSchemeCode(e.target.value)}
           >
             <option value="">All categories</option>
@@ -223,8 +269,13 @@ export default function ConsultantFeesPage() {
         </div>
       </div>
 
-      {grid?.not_priced?.length ? (
-        <NotPriced doctors={grid.not_priced} onCreate={setCreating} />
+      {notPriced.length ? (
+        <NotPriced
+          doctors={notPriced}
+          headingRef={notPricedRef}
+          buttonRefs={createRefs}
+          onCreate={setCreating}
+        />
       ) : null}
 
       {isError ? (
@@ -234,7 +285,9 @@ export default function ConsultantFeesPage() {
       ) : (
         <div className="flow-card bill-rates">
           <div className="fset__cardhead">
-            <h2 className="flow-sec-title">Fees</h2>
+            <h2 className="flow-sec-title" ref={feesRef} tabIndex={-1}>
+              Fees
+            </h2>
             <span className="fset__count">{grid.rows.length}</span>
             <span className="flow-muted bill-rates__on">as of {grid.date}</span>
           </div>
@@ -305,9 +358,13 @@ export default function ConsultantFeesPage() {
       ) : null}
       {creating ? (
         <ConsultantFeeCreateItem
-          doctor={creating}
-          subgroupId={subgroupFor(creating)}
+          doctor={creating.doctor}
+          subgroupId={subgroupFor(creating.doctor)}
           onClose={() => setCreating(null)}
+          onCreated={() => {
+            setFocusAfter(creating.index);
+            setCreating(null);
+          }}
         />
       ) : null}
       {copying ? (

@@ -367,6 +367,14 @@ test.describe.serial("P3-16 preview endpoint", () => {
     expect(parent.json.suggestions.map((s) => [s.category.code, s.reason])).toEqual([
       [c("paid"), "choose_sub_category"],
     ]);
+    const chosenParent = await post("reception", bill({ category: c("scheme") }));
+    expect(chosenParent.status, JSON.stringify(chosenParent.json)).toBe(409);
+    expect(
+      chosenParent.json.needs_sub_category,
+      "a chosen parent is refused like a resolved one",
+    ).toBe(true);
+    expect(chosenParent.json.suggestions.map((sub) => sub.category.code)).toEqual([c("paid")]);
+    expect(chosenParent.json.line_no, "the category is no line's fault").toBeUndefined();
     const chosen = await post(
       "reception",
       bill({ patient_id: ids.parentPatient, category: c("paid") }),

@@ -76,6 +76,22 @@ export const USAGE_KINDS = {
         text: (n, name) =>
           `${n} ${plural(n, "discount rule covers", "discount rules cover")} ${name}`,
       },
+      {
+        table: "bill_lines",
+        column: "service_item_id",
+        text: (n, name) => `${n} bill ${plural(n, "line charges", "lines charge")} ${name}`,
+      },
+      {
+        table: "billing_requests",
+        column: "service_item_id",
+        text: (n, name) =>
+          `${n} ${plural(n, "request asks", "requests ask")} to bill ${name} again`,
+      },
+      {
+        table: "billing_requests",
+        column: "created_item_id",
+        text: (n, name) => `${n} ${plural(n, "request", "requests")} created ${name}`,
+      },
     ],
   },
   taxCode: {
@@ -138,6 +154,11 @@ export const USAGE_KINDS = {
         column: "scheme_code",
         text: (n, name) =>
           `${n} daily-limit ${plural(n, "override is", "overrides are")} recorded for ${name}`,
+      },
+      {
+        table: "bills",
+        column: "scheme_code",
+        text: (n, name) => `${n} ${plural(n, "bill is", "bills are")} billed as ${name}`,
       },
       {
         table: "appointments",

@@ -1,4 +1,5 @@
 import pool from "../../config/db.js";
+import { linesForOrder } from "../billing/visitLines.js";
 import { testPriceForVisit } from "../pricing.js";
 import {
   insertLabStepsForOrder,
@@ -94,6 +95,7 @@ async function raiseOrder(client, visitId, machine, { amount }) {
      VALUES ($1, 'payment', $2, 'system', NULL)`,
     [orderId, "pending"],
   );
+  await linesForOrder(visitId, { labOrderId: orderId, testNames: [testName] }, null, client);
   return orderId;
 }
 

@@ -34,6 +34,7 @@ export async function tryAcquireCronLock(label = "cron", key) {
   if (!Number.isFinite(key)) {
     throw new Error(`tryAcquireCronLock(${label}): numeric key is required`);
   }
+  if (cronLeaseEnabled()) return tryAcquireCronLease(label, key);
   const client = await cronPool.connect();
   try {
     const { rows } = await client.query("SELECT pg_try_advisory_lock($1) AS got", [key]);
@@ -49,7 +50,14 @@ export async function tryAcquireCronLock(label = "cron", key) {
     }
     return async () => {
       try {
-        await client.query("SELECT pg_advisory_unlock($1)", [key]);
+        const { rows: unlocked } = await client.query("SELECT pg_advisory_unlock($1) AS released", [
+          key,
+        ]);
+        if (!unlocked[0]?.released) {
+          console.error(
+            `[Cron] ${label} unlock missed — the lock is stranded on a pooled backend until it recycles. Release: node scripts/release-orphan-cron-lock.mjs ${key}`,
+          );
+        }
       } catch (e) {
         console.error(`[Cron] ${label} unlock failed:`, e.message);
       } finally {

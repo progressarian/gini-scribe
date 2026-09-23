@@ -26,6 +26,7 @@ import { SUPABASE_URL, SUPABASE_SERVICE_KEY } from "../../config/storage.js";
 let client = null;
 let warned = false;
 let dormantLogged = false;
+let billingDormantLogged = false;
 
 // Can the server publish at all?
 const enabled = () => !!(SUPABASE_URL && SUPABASE_SERVICE_KEY);
@@ -130,6 +131,27 @@ export function publishEvents(events) {
     if (!ev?.date) continue;
     publish(dayTopic(ev.date), ev).catch(() => {});
   }
+}
+
+export const BILLING_REQUESTS_STATION = "billing-requests";
+
+export const billingRequestsTopic = () => stationTopic(BILLING_REQUESTS_STATION);
+
+export async function publishBillingRequest(event) {
+  const topics = [billingRequestsTopic(), event?.date ? dayTopic(event.date) : null].filter(
+    Boolean,
+  );
+  if (!browserEnabled()) {
+    if (!billingDormantLogged) {
+      billingDormantLogged = true;
+      console.log(
+        "[giniflow realtime] billing requests dormant — SUPABASE_JWT_SECRET/ANON_KEY unset, so the desk and the inbox refresh on their poll.",
+      );
+    }
+    return { published: false, reason: "dormant", topics };
+  }
+  const results = await Promise.all(topics.map((topic) => publish(topic, event)));
+  return { published: results.every((r) => r.published), topics, results };
 }
 
 // A message no table implies — the coordinator telling a station it is the

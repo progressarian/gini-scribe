@@ -1,4 +1,5 @@
 import pool from "../../config/db.js";
+import { linesForOrder } from "../billing/visitLines.js";
 import { OPEN_LAB_CASES_SQL } from "./labStation.js";
 import { LAB_SAMPLE_FLOW, UNDRAWN_SAMPLE_STATUSES } from "../../../shared/labStages.js";
 import { finalizeConsult } from "./finalize.js";
@@ -813,6 +814,7 @@ export async function orderTests(
          VALUES ($1, 'payment', 'pending', 'mo_sd', $2)`,
         [id, actorId],
       );
+      await linesForOrder(visitId, { labOrderId: id, testNames: kindTests }, { actorId }, client);
       orders.push({ id, kind, tests: kindTests, total: kindTotal });
     }
 

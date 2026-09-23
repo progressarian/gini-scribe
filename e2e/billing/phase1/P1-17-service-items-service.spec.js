@@ -32,6 +32,13 @@ const expectRefused = async (promise, status, message, label) => {
 };
 
 test.describe.serial("P1-17 service items service", () => {
+  test.afterAll(async () => {
+    await query(`UPDATE service_items SET is_active = FALSE WHERE code LIKE $1`, [`%-${tag}`]);
+    await query(`DELETE FROM service_items WHERE code LIKE $1 AND test_catalog_id IS NOT NULL`, [
+      `%-${tag}`,
+    ]);
+  });
+
   test.beforeAll(async () => {
     const group = await one(
       `INSERT INTO service_groups (code, name) VALUES ($1, $2) RETURNING id`,

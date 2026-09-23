@@ -15,6 +15,9 @@ import { claimPayerProblem, paymentRuleShapeProblem, rupees } from "./paymentRul
 import { discountShapeProblem } from "./discountRules.js";
 import { laterRuleText } from "./consultantFees.js";
 import { indiaToday } from "./categoryResolver.js";
+import { nameKey } from "./common.js";
+
+export { nameKey };
 
 export const key = (code) =>
   String(code ?? "")
@@ -25,11 +28,6 @@ const looseDoctorName = (name) =>
     .toLowerCase()
     .replace(/^\s*dr\.?\s+/, "")
     .replace(/[^a-z0-9]+/g, "");
-export const nameKey = (name) =>
-  String(name ?? "")
-    .trim()
-    .replace(/\s+/g, " ")
-    .toLowerCase();
 
 export async function loadReference(db = pool) {
   const [

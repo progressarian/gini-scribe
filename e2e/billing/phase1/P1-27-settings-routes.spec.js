@@ -26,13 +26,17 @@ const resetSettings = () =>
             legal_name = NULL, bill_footer = NULL`,
   );
 
+const clearSeries = () => query(`DELETE FROM bill_series WHERE fy = '2041-42'`);
+
 test.describe.serial("P1-27 settings routes", () => {
   test.beforeAll(async () => {
     await resetSettings();
+    await clearSeries();
     api = await apiAs("admin");
   });
   test.afterAll(async () => {
     await resetSettings();
+    await clearSeries();
     await api?.dispose();
   });
 

@@ -1,5 +1,10 @@
 import pool from "../../config/db.js";
-import { CASE_CANCELLABLE_SQL, LIVE_LAB_CASE_SQL, ORDER_CANCELLABLE_SQL } from "./testsHold.js";
+import {
+  CASE_CANCELLABLE_SQL,
+  LIVE_LAB_CASE_SQL,
+  ORDER_CANCELLABLE_SQL,
+  caseFromEarlierLabOnlyVisit,
+} from "./testsHold.js";
 import {
   LAB_STATION,
   assertStationFree,
@@ -673,6 +678,15 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
                 ON uid.file_no = lc.raw_list_json->'patient'->>'healthray_uid'
         WHERE lc.case_date = $1::date
           AND ${LIVE_LAB_CASE_SQL("lc")}
+          AND NOT (
+            $4::boolean
+            AND EXISTS (
+              SELECT 1 FROM giniflow_visits hv
+               WHERE hv.patient_id = COALESCE(lc.patient_id, uid.id)
+                 AND hv.visit_date = lc.case_date
+                 AND ${caseFromEarlierLabOnlyVisit("hv")}
+            )
+          )
           -- NO DOUBLE ROWS. Once reception or a doctor raises the same patient's
           -- tests in Scribe, that order is the one the bench works: it carries
           -- the payment, the manual ladder and the audit trail. The hospital's
@@ -1311,12 +1325,12 @@ export async function fetchStoredReport(orderId, db = pool) {
 
 export async function storeReportObject({ base64, fileName, mediaType, kind, patientId }) {
   const buffer = Buffer.from(base64, "base64");
-  // The screen tells the technician 10 MB, so 10 MB is the limit. A service that
+  // The screen tells the technician 5 MB, so 5 MB is the limit. A service that
   // quietly allows more than the interface promises is a service nobody can
   // predict.
-  const MAX_BYTES = 10 * 1024 * 1024;
+  const MAX_BYTES = 5 * 1024 * 1024;
   if (buffer.length > MAX_BYTES) {
-    throw Object.assign(new Error("Report is larger than 10 MB"), { status: 413 });
+    throw Object.assign(new Error("Report is larger than 5 MB"), { status: 413 });
   }
 
   const safeName = String(fileName || "report.pdf").replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -1754,9 +1768,9 @@ export async function uploadLabCaseReport(
   }
 
   const buffer = Buffer.from(base64, "base64");
-  const MAX_BYTES = 10 * 1024 * 1024;
+  const MAX_BYTES = 5 * 1024 * 1024;
   if (buffer.length > MAX_BYTES) {
-    throw Object.assign(new Error("Report is larger than 10 MB"), { status: 413 });
+    throw Object.assign(new Error("Report is larger than 5 MB"), { status: 413 });
   }
 
   const ext = mediaType === "image/jpeg" ? "jpg" : mediaType === "image/png" ? "png" : "pdf";

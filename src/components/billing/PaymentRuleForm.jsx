@@ -97,14 +97,22 @@ function missingOf(form) {
   return "";
 }
 
-const hundredthsOf = (value) => Math.round(Number(value || 0) * 100);
+const DRAFT_NAME = "Draft rule";
 
-export function shareOf(total, form) {
-  if (form.patient_pays === "full") return total;
-  if (form.patient_pays === "nothing") return 0;
-  if (form.patient_pays === "amount") return Math.min(hundredthsOf(form.patient_value), total);
-  const hundredths = BigInt(Math.min(hundredthsOf(form.patient_value), 10000));
-  return Number((BigInt(total) * hundredths * 2n + 10000n) / 20000n);
+function draftOf(form) {
+  if (form.scope !== "category" && !form[SCOPE_KEY[form.scope]]) return null;
+  if (takesValue(form.patient_pays) && !form.patient_value.trim()) return null;
+  return {
+    ...(form.scope === "category"
+      ? {}
+      : { [SCOPE_KEY[form.scope]]: Number(form[SCOPE_KEY[form.scope]]) }),
+    ...(form.visit_types.length
+      ? { visit_types: VISIT_TYPES.filter((v) => form.visit_types.includes(v)) }
+      : {}),
+    patient_pays: form.patient_pays,
+    ...(takesValue(form.patient_pays) ? { patient_value: form.patient_value.trim() } : {}),
+    ...(form.patient_pays === "full" ? {} : { remainder: form.remainder }),
+  };
 }
 
 function Field({ label, narrow, hint, children }) {
@@ -199,7 +207,9 @@ function Preview({ category, form, payer, scopeItem }) {
   const item = picked?.scopeKey === scopeKey ? picked.item : null;
   const [visitType, setVisitType] = useState("");
   const [result, setResult] = useState(null);
+  const [draftResult, setDraftResult] = useState(null);
   const [error, setError] = useState("");
+  const [draftError, setDraftError] = useState("");
   const trial = useTestBillingRule();
   const seq = useRef(0);
   const chosen = form.scope === "item" ? scopeItem : item;
@@ -208,37 +218,61 @@ function Preview({ category, form, payer, scopeItem }) {
   const visit = ownVisit ?? (visitChoices.includes(visitType) ? visitType : visitChoices[0]);
   const date = form.valid_from || undefined;
   const itemId = chosen?.id ?? null;
+  const draft = draftOf(form);
+  const draftKey = JSON.stringify(draft);
 
   useEffect(() => {
     const mine = ++seq.current;
     if (!itemId) {
       setResult(null);
+      setDraftResult(null);
       setError("");
+      setDraftError("");
       return;
     }
-    trial
-      .mutateAsync({
+    const price = (extra) =>
+      trial.mutateAsync({
         category: category.code,
         visit_type: visit,
         date,
         lines: [{ item_id: itemId }],
-      })
-      .then((data) => {
-        if (mine !== seq.current) return;
-        setResult(data);
-        setError("");
-      })
-      .catch((err) => {
-        if (mine !== seq.current) return;
-        setResult(null);
-        setError(requestErrorOf(err, "Could not price the item"));
+        ...extra,
       });
-  }, [itemId, visit, date, category.code]);
+    const timer = setTimeout(() => {
+      price({})
+        .then((data) => {
+          if (mine !== seq.current) return;
+          setResult(data);
+          setError("");
+        })
+        .catch((err) => {
+          if (mine !== seq.current) return;
+          setResult(null);
+          setError(requestErrorOf(err, "Could not price the item"));
+        });
+      if (!draft) {
+        setDraftResult(null);
+        setDraftError("");
+        return;
+      }
+      price({ draft_rule: draft })
+        .then((data) => {
+          if (mine !== seq.current) return;
+          setDraftResult(data);
+          setDraftError("");
+        })
+        .catch((err) => {
+          if (mine !== seq.current) return;
+          setDraftResult(null);
+          setDraftError(requestErrorOf(err, "Could not price this rule"));
+        });
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [itemId, visit, date, category.code, draftKey]);
 
   const line = result?.lines?.[0];
-  const draftPays = line ? shareOf(line.total, form) : 0;
-  const discounted = Boolean(line && (line.discounts?.length || line.bill_discount));
-  const covered = !form.visit_types.length || form.visit_types.includes(visit);
+  const draftLine = draftResult?.lines?.[0];
+  const covered = draftLine?.payment_rule_name === DRAFT_NAME;
   const restLabel =
     form.remainder === "claim" ? `claimed${payer ? ` from ${payer}` : ""}` : "to adjustment";
   const filters =
@@ -299,19 +333,26 @@ function Preview({ category, form, payer, scopeItem }) {
         <p className="fset__hint">Pricing…</p>
       ) : (
         <>
-          {covered ? (
+          {draftError ? (
+            <p className="bill-dialog__error" role="alert">
+              {draftError}
+            </p>
+          ) : !draft ? (
+            <p className="fset__hint">Fill in what the patient pays to see this rule's numbers.</p>
+          ) : !draftLine ? (
+            <p className="fset__hint">Pricing this rule…</p>
+          ) : covered ? (
             <>
               <Split
                 label="With this rule"
-                line={line}
-                pays={draftPays}
-                rest={line.total - draftPays}
+                line={draftLine}
+                pays={draftLine.patient_payable}
+                rest={draftLine.claim + draftLine.adjustment}
                 restLabel={restLabel}
               />
-              {discounted ? (
+              {draftLine.discount ? (
                 <p className="fset__hint">
-                  Before discounts — a discount on this item changes what the patient pays once the
-                  rule is saved.
+                  Discounts take off {rupees(draftLine.discount / 100)}, already counted above.
                 </p>
               ) : null}
             </>

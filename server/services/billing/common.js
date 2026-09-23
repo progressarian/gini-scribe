@@ -18,6 +18,14 @@ export function cleanName(value) {
   return name;
 }
 
+export const nameKey = (name) =>
+  String(name ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+
+export const NAME_KEY_SQL = `lower(regexp_replace(btrim(name), '\\s+', ' ', 'g'))`;
+
 const NUMBER_TEXT = /^-?\d+(\.\d+)?$/;
 
 export { INT_MAX, MONEY_MAX };

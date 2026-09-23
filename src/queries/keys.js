@@ -36,6 +36,10 @@ export const qk = {
     list: (params) => ["patient-blocks", "list", params || null],
     history: (patientId) => ["patient-blocks", "history", String(patientId)],
   },
+  patientAppUnlinks: {
+    all: ["patient-app-unlinks"],
+    family: (patientId) => ["patient-app-unlinks", "family", String(patientId)],
+  },
   flow: {
     all: ["flow"],
     visits: (date, status) => ["flow", "visits", date, status || null],

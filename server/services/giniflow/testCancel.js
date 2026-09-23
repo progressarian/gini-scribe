@@ -1,4 +1,5 @@
 import pool from "../../config/db.js";
+import { releaseOrderLines } from "../billing/visitLines.js";
 import { derivePaymentStatus, opensLabGate } from "../../../shared/labPayment.js";
 import { machineForTest, machinesOnBillLine } from "../../../shared/machineStages.js";
 import {
@@ -313,6 +314,7 @@ async function cancelOrderIn(client, visit, order, input, machines) {
       amount_claimed: Number(order.amount_claimed) || 0,
       claim_state: order.claim_state,
     });
+    await releaseOrderLines(client, order.id, [single.name], { actorId: input.actorId ?? null });
     await client.query(`DELETE FROM giniflow_lab_order_tests WHERE id = $1`, [single.id]);
     await client.query(
       `UPDATE giniflow_lab_orders
@@ -350,6 +352,7 @@ async function cancelOrderIn(client, visit, order, input, machines) {
     }
     refundLeft = money((Number(order.amount_paid) || 0) - newPaid);
   } else {
+    await releaseOrderLines(client, order.id, null, { actorId: input.actorId ?? null });
     await client.query(`DELETE FROM giniflow_lab_orders WHERE id = $1`, [order.id]);
   }
 

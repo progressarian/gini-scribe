@@ -298,6 +298,12 @@ test.describe.serial("P3-04 payment rules service", () => {
       409,
       /already has a payment rule called "Consultation ₹700"/,
     );
+    await refused(
+      create({ name: "Consultation  ₹700" }),
+      409,
+      /already has a payment rule called "Consultation ₹700"/,
+      "names that differ only in inner spaces are the same name, as the import reads them",
+    );
     const otherCategory = await svc.createPaymentRule(
       { scheme_code: c("cghs"), name: "Consultation ₹700", patient_pays: "full" },
       ctx,

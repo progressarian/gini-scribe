@@ -1,4 +1,5 @@
 import pool from "../../config/db.js";
+import { linesForOrder } from "../billing/visitLines.js";
 import {
   CHAIN,
   STATUS_LABEL,
@@ -361,6 +362,7 @@ export async function raiseOrdersFromSteps(client, visitId, steps, actorId = nul
          VALUES ($1, 'payment', 'pending', 'reception', $2)`,
         [labOrderId, actorId],
       );
+      await linesForOrder(visitId, { labOrderId, testNames: tests }, { actorId }, client);
       raised.labOrderId = labOrderId;
       raised.labTests = tests;
     }

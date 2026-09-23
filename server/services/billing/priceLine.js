@@ -8,7 +8,7 @@ import { applyDiscounts } from "./lineDiscounts.js";
 import { linePayable } from "./linePayable.js";
 import { lineTax } from "./lineTax.js";
 import { assertLineBalances } from "./lineInvariant.js";
-import { checkBillable, ruleForLine } from "./paymentRules.js";
+import { checkBillable, cleanDraftRule, draftForLine, ruleForLine } from "./paymentRules.js";
 import { httpError } from "./transaction.js";
 import { cleanDate, INT_MAX, MONEY_MAX, readNumber, wholeNumber } from "./common.js";
 
@@ -222,10 +222,13 @@ export async function priceLine(input = {}, db = pool) {
   const codesOnBill = wholeNumber(input.codesOnBill, "Codes on the bill") ?? 0;
   const settings = input.settings ?? (await getSettings(db));
   checkTaxCode(line.tax_code, settings);
-  const payment = await ruleForLine(
-    { category: line.category, item: line.item_id, visitType, date: line.date },
-    db,
-  );
+  const draft = draftForLine(cleanDraftRule(input.draftRule), line, visitType);
+  const payment =
+    draft ??
+    (await ruleForLine(
+      { category: line.category, item: line.item_id, visitType, date: line.date },
+      db,
+    ));
   const context = {
     category: line.category,
     patient: input.patient ?? {},
@@ -279,6 +282,9 @@ export async function priceLine(input = {}, db = pool) {
     ...tax,
     ...shares,
     patient_payable: shares.patient_payable - payableStep.discount,
+    payment_rule_text: payment.draft
+      ? `${shares.payment_rule_text} (draft)`
+      : shares.payment_rule_text,
     payment_rule_name: payment.rule?.name ?? null,
     payment_rule_scope: payment.scope,
     payment_rule_from_parent: payment.from_parent,

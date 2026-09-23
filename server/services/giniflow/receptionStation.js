@@ -1,4 +1,5 @@
 import pool from "../../config/db.js";
+import { draftAtCheckIn } from "../billing/visitLines.js";
 import { catalogBasePriceSql, consultationRateJoinSql } from "../pricing.js";
 import {
   STATUS_LABEL,
@@ -1089,6 +1090,7 @@ async function transition(visitId, toStatus, { actorId, meta = {}, guard }, db =
       meta,
     });
     await client.query("COMMIT");
+    if (toStatus === "checked_in") await draftAtCheckIn(visitId, { actorId }, db);
     return { visitId, status: toStatus, unchanged: false };
   } catch (e) {
     await client.query("ROLLBACK");
@@ -1307,6 +1309,7 @@ export async function checkInWalkIn(
       });
     }
     await client.query("COMMIT");
+    if (!alreadyThere) await draftAtCheckIn(visitId, { actorId }, db);
     return {
       visitId,
       patientId: patient.id,

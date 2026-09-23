@@ -11,7 +11,7 @@ import { cleanDate, wholeNumber } from "./common.js";
 import { autoRulesFor, checkCode, CODE_REFUSALS } from "./discountRules.js";
 import { applyDiscounts } from "./lineDiscounts.js";
 import { assertBillLineBalances } from "./lineInvariant.js";
-import { checkBillable } from "./paymentRules.js";
+import { cleanDraftRule } from "./paymentRules.js";
 import { priceLine } from "./priceLine.js";
 import { httpError } from "./transaction.js";
 
@@ -111,27 +111,45 @@ async function loadPatient(id, db) {
   return rows[0];
 }
 
+const SUB_CATEGORIES = `
+  (SELECT json_agg(json_build_object(
+            'category', json_build_object(
+              'code', c.code,
+              'label', c.label,
+              'display_label', s.label || ' › ' || c.label,
+              'parent_code', c.parent_code,
+              'payer_name', c.payer_name),
+            'rule', NULL,
+            'reason', 'choose_sub_category')
+          ORDER BY c.sort_order, c.label, c.code)
+     FROM patient_schemes c WHERE c.parent_code = s.code AND c.is_active)`;
+
+function needsSubCategory(displayLabel, suggestions) {
+  const choices = suggestions.map((s) => s.category.display_label);
+  return httpError(
+    409,
+    `${displayLabel} has sub-categories, so the bill can't be made under it: choose one of ${choices.join(", ")}`,
+    { needs_sub_category: true, suggestions },
+  );
+}
+
 async function describeCategory(code, db) {
   if (code === null) return null;
-  await checkBillable(db, code);
   const { rows } = await db.query(
     `SELECT s.code, s.label, s.parent_code,
             CASE WHEN p.code IS NULL THEN s.label ELSE p.label || ' › ' || s.label END AS display_label,
-            COALESCE(NULLIF(btrim(s.payer_name), ''), NULLIF(btrim(p.payer_name), '')) AS payer_name
+            COALESCE(NULLIF(btrim(s.payer_name), ''), NULLIF(btrim(p.payer_name), '')) AS payer_name,
+            s.is_active AND COALESCE(p.is_active, TRUE) AS billable,
+            ${SUB_CATEGORIES} AS sub_categories
        FROM patient_schemes s LEFT JOIN patient_schemes p ON p.code = s.parent_code
       WHERE s.code = $1`,
     [code],
   );
-  return rows[0];
-}
-
-function needsSubCategory(resolution) {
-  const choices = resolution.suggestions.map((s) => s.category.display_label);
-  return httpError(
-    409,
-    `${resolution.category.display_label} has sub-categories, so the bill can't be made under it: choose one of ${choices.join(", ")}`,
-    { needs_sub_category: true, suggestions: resolution.suggestions },
-  );
+  if (!rows.length) throw httpError(404, "That category doesn't exist");
+  const { billable, sub_categories: subCategories, ...category } = rows[0];
+  if (!billable) throw httpError(409, `${category.display_label} is retired`);
+  if (subCategories) throw needsSubCategory(category.display_label, subCategories);
+  return category;
 }
 
 function billPatientFacts(value) {
@@ -157,7 +175,6 @@ async function billWho(input, date, db) {
   const explicit = cleanCategory(input.category);
   const resolution =
     patient || appointment ? await resolveCategoryFor({ patient, appointment, date }, db) : null;
-  if (explicit === undefined && resolution?.needs_sub_category) throw needsSubCategory(resolution);
   const code = explicit !== undefined ? explicit : (resolution?.category?.code ?? null);
   const category = await describeCategory(code, db);
   const facts = patient
@@ -440,7 +457,8 @@ export async function priceBill(input = {}, source = pool) {
   const category = who.category?.code ?? null;
   const visitType = input.visitType ?? appointmentVisitType(who.appointment);
   const doctorId = input.doctorId ?? who.appointment?.doctor_id ?? null;
-  const base = { category, date, patient: who.patient, role: input.role, settings };
+  const draftRule = cleanDraftRule(input.draftRule);
+  const base = { category, date, patient: who.patient, role: input.role, settings, draftRule };
   const lineInputs = lineList.map((line) => ({
     ...base,
     item: line.item,

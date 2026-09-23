@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback, useState } from "react";
 import BlockedBadge from "../components/ui/BlockedBadge";
 import { usePatientBlockStatus } from "../queries/hooks/usePatientBlocks";
 import BlockPatientModal from "../components/patient/BlockPatientModal";
+import PhoneFamilyModal from "../components/patient/PhoneFamilyModal";
 import { hasCapability, CAPABILITIES } from "../../shared/permissions.js";
 import { MOBILE_HINT, PHONE_DIGITS, isValidMobile, toEntryDigits } from "../../shared/phone.js";
 import { useNavigate } from "react-router-dom";
@@ -90,6 +91,7 @@ export default function FindPage() {
     usePatientBlockStatus((dbPatients || []).map((p) => p.id).filter(Boolean)).data || {};
   const canBlock = hasCapability(currentDoctor?.role, CAPABILITIES.ADMIN);
   const [blockTarget, setBlockTarget] = useState(null);
+  const [familyTarget, setFamilyTarget] = useState(null);
 
   // Doctor's slot availability for the quick-book form.
   const apptSlots = useDayAvailability(bookForm.doc, bookForm.dt);
@@ -737,6 +739,19 @@ export default function FindPage() {
                     Block
                   </button>
                 )}
+                {canBlock && (
+                  <button
+                    type="button"
+                    className="find__patient-family"
+                    title="Family members on this phone's app account"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setFamilyTarget(r);
+                    }}
+                  >
+                    Family
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -809,6 +824,10 @@ export default function FindPage() {
 
       {blockTarget && (
         <BlockPatientModal patient={blockTarget} onClose={() => setBlockTarget(null)} />
+      )}
+
+      {familyTarget && (
+        <PhoneFamilyModal patient={familyTarget} onClose={() => setFamilyTarget(null)} />
       )}
     </div>
   );

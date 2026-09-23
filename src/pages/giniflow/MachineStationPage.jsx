@@ -154,6 +154,8 @@ function TestPane({
   onRemoveExtra,
   onCancelTest,
   canCancelTest,
+  siblings = [],
+  onSwitch,
   busy,
 }) {
   const { data: catalogue = [] } = useMachines(useStation());
@@ -193,9 +195,28 @@ function TestPane({
             <button className="rbtn" type="button" onClick={onClose}>
               ← Back
             </button>
-            <span className="sp sp-process">
-              {machine ? `${machine.icon} ${machine.name}` : "Machine test"}
-            </span>
+            {siblings.length > 1 ? (
+              <div className="mroom__switch" role="group" aria-label="This patient's tests">
+                {siblings.map((s) => {
+                  const m = machineFor(catalogue, s.machine);
+                  return (
+                    <button
+                      key={s.orderId}
+                      type="button"
+                      className={s.orderId === order.orderId ? "on" : ""}
+                      aria-pressed={s.orderId === order.orderId}
+                      onClick={() => onSwitch(s.orderId)}
+                    >
+                      {m ? `${m.icon} ${m.name}` : s.machine}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <span className="sp sp-process">
+                {machine ? `${machine.icon} ${machine.name}` : "Machine test"}
+              </span>
+            )}
           </div>
         </div>
 
@@ -397,7 +418,7 @@ function TestPane({
                 >
                   <div className="ua-ico">📄</div>
                   <div className="ua-t">Tap or drop the report here</div>
-                  <div className="ua-s">PDF · JPG · PNG · Max 10MB</div>
+                  <div className="ua-s">PDF · JPG · PNG · Max 5MB</div>
                 </button>
                 <div className="dp-hint">
                   Filing the report closes this test and tells the MO the patient is released.
@@ -625,17 +646,20 @@ export default function MachineStationPage({ station = "machine", label = "Machi
       }
       return byPatient.get(o.patientId);
     };
-    const add = (e, machine, at, docId = null) => {
+    const add = (e, machine, at, docId = null, orderId = null) => {
       if (machine) {
         const already = e.machines.find((m) => m.id === machine);
-        if (!already) e.machines.push({ id: machine, docId });
-        else if (!already.docId && docId) already.docId = docId;
+        if (!already) e.machines.push({ id: machine, docId, orderId });
+        else {
+          if (!already.docId && docId) already.docId = docId;
+          if (!already.orderId && orderId) already.orderId = orderId;
+        }
       }
       if (at && (!e.at || at > e.at)) e.at = at;
     };
 
     for (const o of rowsFor(MACHINE_RUNGS.find((r) => r.key === "reported"))) {
-      add(ensure(o), o.machine, o.uploadedAt, o.reportDocId);
+      add(ensure(o), o.machine, o.uploadedAt, o.reportDocId, o.orderId);
     }
     for (const r of reconciliation.data?.rows || []) {
       const e = ensure(r);
@@ -695,7 +719,7 @@ export default function MachineStationPage({ station = "machine", label = "Machi
     );
 
   const onUpload = (order, file, replacing = false) => {
-    if (file.size > 10 * 1024 * 1024) return showToast("That file is larger than 10 MB");
+    if (file.size > 5 * 1024 * 1024) return showToast("That file is larger than 5 MB");
     upload.mutate(
       { orderId: order.orderId, file, confirmAdditional: replacing },
       {
@@ -706,8 +730,8 @@ export default function MachineStationPage({ station = "machine", label = "Machi
   };
 
   const onAddExtra = async (order, files) => {
-    const tooBig = files.find((f) => f.size > 10 * 1024 * 1024);
-    if (tooBig) return showToast(`${tooBig.name} is larger than 10 MB`);
+    const tooBig = files.find((f) => f.size > 5 * 1024 * 1024);
+    if (tooBig) return showToast(`${tooBig.name} is larger than 5 MB`);
     let added = 0;
     for (const file of files) {
       try {
@@ -1050,8 +1074,20 @@ export default function MachineStationPage({ station = "machine", label = "Machi
                           {doneToday.map((r) => (
                             <div
                               key={r.patientId}
-                              className="pt-card is-readonly"
-                              aria-disabled="true"
+                              className="pt-card"
+                              onClick={(e) => {
+                                if (e.target.closest("button, input, a")) return;
+                                const withOrder = r.machines.find((m) => m.orderId);
+                                if (withOrder) return setOpenId(withOrder.orderId);
+                                const withDoc = r.machines.find((m) => m.docId);
+                                if (!withDoc) return;
+                                const name = machineFor(catalogue, withDoc.id)?.name || withDoc.id;
+                                setViewingDoc({
+                                  id: withDoc.docId,
+                                  title: `${name} report`,
+                                  doc_type: "lab_report",
+                                });
+                              }}
                             >
                               <div
                                 className="pc-av"
@@ -1132,6 +1168,7 @@ export default function MachineStationPage({ station = "machine", label = "Machi
         {viewingDoc && <PdfViewerModal doc={viewingDoc} onClose={() => setViewingDoc(null)} />}
 
         <TestPane
+          key={openOrder?.orderId ?? "none"}
           order={openOrder}
           busy={busy}
           onClose={() => setOpenId(null)}
@@ -1148,6 +1185,8 @@ export default function MachineStationPage({ station = "machine", label = "Machi
           }
           onCancelTest={onCancelTest}
           canCancelTest={canCancelTest}
+          siblings={openOrder ? allRows.filter((o) => o.patientId === openOrder.patientId) : []}
+          onSwitch={setOpenId}
           onView={(o) =>
             setViewingDoc({
               id: o.reportDocId,

@@ -1,6 +1,9 @@
 .cf-page__copy {
   flex: 0 0 auto;
 }
+.cf-page__note {
+  margin: 0;
+}
 .cf-notpriced {
   margin-top: 14px;
 }

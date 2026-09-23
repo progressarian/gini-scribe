@@ -28,9 +28,19 @@ const resetSettings = () =>
             legal_name = NULL, bill_footer = NULL`,
   );
 
+const clearSeries = () => query(`DELETE FROM bill_series WHERE fy = '2031-32'`);
+let auditFrom = 0;
+
 test.describe.serial("P1-23 billing settings and bill series services", () => {
-  test.beforeAll(resetSettings);
-  test.afterAll(resetSettings);
+  test.beforeAll(async () => {
+    await resetSettings();
+    await clearSeries();
+    auditFrom = (await query(`SELECT COALESCE(max(id), 0) AS id FROM billing_audit`)).rows[0].id;
+  });
+  test.afterAll(async () => {
+    await resetSettings();
+    await clearSeries();
+  });
 
   test("1. settings start with the safe defaults", async () => {
     expect(await settings.getSettings(db)).toMatchObject({
@@ -182,8 +192,9 @@ test.describe.serial("P1-23 billing settings and bill series services", () => {
     const list = (await series.listSeries(db)).filter((s) => s.fy === "2031-32");
     expect(list.map((s) => s.series)).toEqual(["MAIN", "RCPT"]);
     const audit = await query(
-      `SELECT action FROM billing_audit WHERE entity = 'bill_series' AND entity_id = $1 ORDER BY id`,
-      ["MAIN:2031-32"],
+      `SELECT action FROM billing_audit
+        WHERE entity = 'bill_series' AND entity_id = $1 AND id > $2 ORDER BY id`,
+      ["MAIN:2031-32", auditFrom],
     );
     expect(audit.rows.map((r) => r.action)).toEqual(["create", "update"]);
   });

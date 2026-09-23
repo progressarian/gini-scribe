@@ -19,6 +19,7 @@ const DOCTORS = {
   gamma: { name: `Dr Gamma P318A ${tag}`, price: 1500, fee: "700" },
 };
 const NOFEE = `Dr Delta P318A ${tag}`;
+const BOTH = `Dr Eps P318A ${tag}`;
 const STAFF = { code: `p318a_np_${tag}`, label: `P318A Staff ${tag}` };
 const TAKEN = `P318AX${T}`;
 const VISITS = ["New", "Follow Up"];
@@ -106,6 +107,12 @@ test.describe.serial("P3-18a consultant fees screen", () => {
       await one(
         `INSERT INTO doctors (name, role, pin, is_active) VALUES ($1, 'consultant', 'x', TRUE) RETURNING id`,
         [NOFEE],
+      )
+    ).id;
+    seed.both = (
+      await one(
+        `INSERT INTO doctors (name, role, pin, is_active) VALUES ($1, 'consultant', 'x', TRUE) RETURNING id`,
+        [BOTH],
       )
     ).id;
     await post("categories", { ...TOP, payer_name: "CGHS Wellness Centre" });
@@ -437,5 +444,68 @@ test.describe.serial("P3-18a consultant fees screen", () => {
     expect((await dbCell(STAFF.code, seed.items["alpha:New"])).rules).toEqual([
       { patient_pays: "nothing", remainder: "adjustment" },
     ]);
+  });
+
+  test("14. when the category list fails the Category filter says so and the grid still works", async ({
+    page,
+  }) => {
+    await page.route(
+      (url) => url.pathname.endsWith("/api/billing/master/categories"),
+      (route) => route.fulfill({ status: 500, json: { error: "boom" } }),
+    );
+    await openFees(page);
+    await expect(
+      page.getByText("Could not load the categories — the grid below still shows every category."),
+    ).toBeVisible({ timeout: 20000 });
+    await expect(page.getByText(/Could not load the doctors/)).toHaveCount(0);
+    await expect(
+      page
+        .getByRole("table", { name: "Consultant fees" })
+        .getByRole("columnheader", { name: col("paid"), exact: true }),
+    ).toBeVisible();
+  });
+
+  test("15. when the doctor list fails the Doctor filter says so and the grid still works", async ({
+    page,
+  }) => {
+    await page.route(
+      (url) => url.pathname.endsWith("/api/billing/master/items/choices"),
+      (route) => route.fulfill({ status: 500, json: { error: "boom" } }),
+    );
+    await openFees(page);
+    await expect(
+      page.getByText("Could not load the doctors — the grid below still shows every doctor."),
+    ).toBeVisible({ timeout: 20000 });
+    await expect(page.getByText(/Could not load the categories/)).toHaveCount(0);
+    await onlyOurs(page);
+    await expect(cellOf(page, "pensioner", DOCTORS.beta.name, "New")).toBeVisible();
+  });
+
+  test("16. after Create item focus moves to the next Not priced row, then to the grid when the list empties", async ({
+    page,
+  }) => {
+    await openFees(page);
+    await page.getByLabel("Doctor", { exact: true }).selectOption(String(seed.both));
+    const list = page.getByRole("table", { name: "Not priced" });
+    await expect(list.getByRole("row")).toHaveCount(3);
+    const create = async () => {
+      const box = dialog(page);
+      await box.getByLabel("Price (₹)", { exact: true }).fill("400");
+      await box.getByLabel("Subgroup", { exact: true }).selectOption(String(seed.subgroup.id));
+      await box.getByRole("button", { name: "Create item", exact: true }).click();
+      await expect(box).toBeHidden();
+    };
+
+    await list.getByRole("button", { name: `Create item for ${BOTH} (New)` }).click();
+    await create();
+    await expect(list.getByRole("row")).toHaveCount(2);
+    await expect(
+      list.getByRole("button", { name: `Create item for ${BOTH} (Follow Up)` }),
+    ).toBeFocused();
+
+    await page.keyboard.press("Enter");
+    await create();
+    await expect(list).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Fees", exact: true })).toBeFocused();
   });
 });

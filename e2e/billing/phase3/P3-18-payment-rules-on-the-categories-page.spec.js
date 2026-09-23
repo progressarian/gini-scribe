@@ -12,6 +12,8 @@ const PAID = { code: `p318_paid_${tag}`, label: "CGHS Paid" };
 const REF = { code: `p318_ref_${tag}`, label: "CGHS Referral" };
 const PEN = { code: `p318_pen_${tag}`, label: "Pensioner" };
 const NOPAYER = { code: `p318_np_${tag}`, label: `P318 Staff ${tag}` };
+const RETIRED = { code: `p318_old_${tag}`, label: `P318 Old ${tag}` };
+const RETIRED_RULE = `P318 old half ${tag}`;
 const CONSULTS = `P318 Consultations ${tag}`;
 const CARE = `P318 Care ${tag}`;
 const GROUP = `P318 OPD ${tag}`;
@@ -21,6 +23,8 @@ const DRESSING = `P318 Dressing ${tag}`;
 const MISC_GROUP = `P318 Misc ${tag}`;
 const ODD = `P318 Odd ${tag}`;
 const ODD_RULE = `P318 odd 12.7% ${tag}`;
+const ODD_DISCOUNT = `P318 misc 10% ${tag}`;
+const DRAFT_RULE = `P318 odd draft ${tag}`;
 const STAFF_RULE = `P318 staff full ${tag}`;
 const PARENT_RULE = `P318 CGHS care default ${tag}`;
 const PAID_RULE = "CGHS Paid — consultation ₹700";
@@ -76,6 +80,14 @@ async function previewItem(form, itemName) {
 
 const optionLabel = async (select, itemName) =>
   (await select.locator("option", { hasText: itemName }).textContent()).trim();
+
+const money = (amount) => {
+  const rupee = amount / 100;
+  return `₹${rupee.toLocaleString("en-IN", {
+    minimumFractionDigits: Number.isInteger(rupee) ? 0 : 2,
+    maximumFractionDigits: 2,
+  })}`;
+};
 
 const ruleRow = (page, name, ruleName) =>
   ownTable(page, name).getByRole("row").filter({ hasText: ruleName });
@@ -179,7 +191,9 @@ test.describe.serial("P3-18 payment rules on the categories page", () => {
     await query(`DELETE FROM service_subgroups WHERE code LIKE $1`, [`P318%${T}`]);
     await query(`DELETE FROM service_groups WHERE code LIKE $1`, [`P318%${T}`]);
     await query(`DELETE FROM patient_schemes WHERE parent_code = $1`, [TOP.code]);
-    await query(`DELETE FROM patient_schemes WHERE code = ANY ($1)`, [[TOP.code, NOPAYER.code]]);
+    await query(`DELETE FROM patient_schemes WHERE code = ANY ($1)`, [
+      [TOP.code, NOPAYER.code, RETIRED.code],
+    ]);
     if (seed.doctor) await query(`DELETE FROM doctors WHERE id = $1`, [seed.doctor.id]);
   });
 
@@ -487,6 +501,70 @@ test.describe.serial("P3-18 payment rules on the categories page", () => {
     await edit.getByRole("button", { name: "Cancel", exact: true }).click();
   });
 
+  test("10b. the draft preview is priced by the server, discounts and all", async ({ page }) => {
+    const api = await apiAs("admin");
+    const added = await api.post("/api/billing/master/discounts", {
+      data: {
+        name: ODD_DISCOUNT,
+        method: "auto",
+        kind: "percent",
+        value: 10,
+        group_ids: [seed.misc],
+        applies_on_scheme_rate: true,
+      },
+    });
+    expect(added.status(), await added.text()).toBe(201);
+    const discountId = (await added.json()).id;
+    try {
+      const priced = await api.post("/api/billing/master/test-rule", {
+        data: {
+          category: PAID.code,
+          visit_type: "New",
+          lines: [{ item_id: seed.odd }],
+          draft_rule: {
+            service_item_id: seed.odd,
+            patient_pays: "percent",
+            patient_value: 12.7,
+            remainder: "claim",
+          },
+        },
+      });
+      expect(priced.status()).toBe(200);
+      const line = (await priced.json()).lines[0];
+      expect(line.payment_rule_name).toBe("Draft rule");
+      expect(line.discount).toBeGreaterThan(0);
+      expect(line.patient_payable).not.toBe(2604);
+
+      await openCategory(page, PAID);
+      const form = await openAdd(page, nameOf(PAID));
+      await form.getByLabel("Rule name", { exact: true }).fill(DRAFT_RULE);
+      await form.getByLabel("Applies to", { exact: true }).selectOption("item");
+      await form.getByLabel("Find item", { exact: true }).fill(ODD);
+      const select = form.getByLabel("Item", { exact: true });
+      await expect(select.locator("option", { hasText: ODD })).toHaveCount(1);
+      await select.selectOption({ label: await optionLabel(select, ODD) });
+      await form.getByLabel("Patient pays", { exact: true }).selectOption("percent");
+      await form.getByLabel("Percent (%)", { exact: true }).fill("12.7");
+
+      const withRule = split(form, "With this rule");
+      await expect(withRule).toContainText(`Patient pays ${money(line.patient_payable)}`);
+      await expect(withRule).toContainText(`Rest ${money(line.claim + line.adjustment)}`);
+      await expect(preview(form)).toContainText(`Discounts take off ${money(line.discount)}`);
+      await expect(preview(form)).not.toContainText("Before discounts");
+      await expect(withRule).not.toContainText("₹26.04");
+
+      await form.getByLabel("Percent (%)", { exact: true }).fill("150");
+      await expect(preview(form).getByRole("alert")).toContainText(
+        "The percent must be from 0 to 100",
+      );
+      await expect(split(form, "With this rule")).toHaveCount(0);
+      await form.getByRole("button", { name: "Cancel", exact: true }).click();
+    } finally {
+      await query(`DELETE FROM discount_rules WHERE id = $1`, [discountId]);
+      await api.dispose();
+    }
+  });
+
   test("11. a rule's scope moves from one item to a group, and unticking every visit type means any visit", async ({
     page,
   }) => {
@@ -537,14 +615,18 @@ test.describe.serial("P3-18 payment rules on the categories page", () => {
     ]);
   });
 
-  test("13. the preview charges the rule on the price with tax, and says when discounts are left out", async ({
+  test("13. the preview charges the rule on the price with tax, discounts counted in", async ({
     page,
   }) => {
     await page.route("**/api/billing/master/test-rule", async (route) => {
+      const draft = Boolean(route.request().postDataJSON()?.draft_rule);
       const response = await route.fetch();
       const body = await response.json();
       const [line] = body.lines;
       const tax = Math.round(line.actual * 0.18);
+      const total = line.actual + tax;
+      const net = total - 10000;
+      const payable = draft ? net / 2 : net;
       body.lines = [
         {
           ...line,
@@ -552,11 +634,13 @@ test.describe.serial("P3-18 payment rules on the categories page", () => {
           cgst: tax / 2,
           sgst: tax / 2,
           tax_rate: 18,
-          total: line.actual + tax,
-          patient_payable: line.actual + tax - 10000,
-          claim: 0,
+          total,
+          patient_payable: payable,
+          claim: net - payable,
           adjustment: 0,
-          payable_discount: 0,
+          discount: 10000,
+          payable_discount: 10000,
+          payment_rule_name: draft ? "Draft rule" : line.payment_rule_name,
           discounts: [{ rule_id: 1, name: "P318 test discount", amount: 10000 }],
         },
       ];
@@ -568,9 +652,10 @@ test.describe.serial("P3-18 payment rules on the categories page", () => {
     await previewItem(form, NEW);
     const withRule = split(form, "With this rule");
     await expect(withRule).toContainText("Actual ₹1,500 (₹1,770 with tax)");
-    await expect(withRule).toContainText("Patient pays ₹885");
-    await expect(withRule).toContainText("Rest ₹885 claimed");
-    await expect(preview(form)).toContainText("Before discounts");
+    await expect(withRule).toContainText("Patient pays ₹835");
+    await expect(withRule).toContainText("Rest ₹835 claimed");
+    await expect(preview(form)).toContainText("Discounts take off ₹100, already counted above.");
+    await expect(preview(form)).not.toContainText("Before discounts");
     await form.getByRole("button", { name: "Cancel", exact: true }).click();
   });
 
@@ -642,5 +727,40 @@ test.describe.serial("P3-18 payment rules on the categories page", () => {
     await form.getByLabel("Find preview item", { exact: true }).fill(NEW);
     await expect(form).toContainText(/Showing the first 1 of 71 — type more of the name or code/);
     await form.getByRole("button", { name: "Cancel", exact: true }).click();
+  });
+
+  test("18. a retired category keeps its rules visible but offers no way to change them", async ({
+    page,
+  }) => {
+    const api = await apiAs("admin");
+    const made = await api.post("/api/billing/master/categories", { data: RETIRED });
+    expect(made.status()).toBe(201);
+    const rule = await api.post("/api/billing/master/payment-rules", {
+      data: {
+        scheme_code: RETIRED.code,
+        name: RETIRED_RULE,
+        patient_pays: "percent",
+        patient_value: 50,
+        remainder: "adjustment",
+      },
+    });
+    expect(rule.status()).toBe(201);
+    const retire = await api.patch(`/api/billing/master/categories/${RETIRED.code}`, {
+      data: { is_active: false },
+    });
+    expect(retire.status()).toBe(200);
+    await api.dispose();
+
+    await openCategory(page, RETIRED);
+    const own = panel(page, RETIRED.label);
+    const row = ruleRow(page, RETIRED.label, RETIRED_RULE);
+    await expect(row).toContainText("50%");
+    await expect(row).toContainText("Adjustment");
+    await expect(own).toContainText("This category is retired; bring it back to change its rules.");
+    await expect(own.getByRole("button")).toHaveCount(0);
+    await expect(
+      own.getByRole("button", { name: `Edit payment rule ${RETIRED_RULE}` }),
+    ).toHaveCount(0);
+    await expect(own.getByRole("button", { name: "+ Payment rule", exact: true })).toHaveCount(0);
   });
 });

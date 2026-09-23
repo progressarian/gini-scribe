@@ -23,6 +23,8 @@ import {
   INT_MAX,
   lockRow,
   MONEY_MAX,
+  NAME_KEY_SQL,
+  nameKey,
   readNumber,
   wholeNumber,
 } from "./common.js";
@@ -366,8 +368,8 @@ async function checkCodeFree(client, rule, id) {
 
 async function checkNameFree(client, name, id) {
   const { rows } = await client.query(
-    `SELECT name FROM discount_rules WHERE lower(name) = lower($1) AND id IS DISTINCT FROM $2`,
-    [name, id],
+    `SELECT name FROM discount_rules WHERE ${NAME_KEY_SQL} = $1 AND id IS DISTINCT FROM $2`,
+    [nameKey(name), id],
   );
   if (rows.length) throw httpError(409, `There is already a discount called "${rows[0].name}"`);
 }
@@ -414,6 +416,30 @@ const NAMES = `
      FROM patient_schemes s LEFT JOIN patient_schemes p ON p.code = s.parent_code
     WHERE s.code = ANY(d.scheme_codes)) AS category_names`;
 
+const targetsOf = (column, table, alias, field) => `
+  (SELECT json_agg(json_build_object(
+            'id', ${alias}.id, 'name', ${alias}.${field},
+            'is_active', COALESCE(${alias}.is_active, TRUE)) ORDER BY t.ord)
+     FROM unnest(d.${column}) WITH ORDINALITY AS t(target_id, ord)
+     JOIN ${table} ${alias} ON ${alias}.id = t.target_id)`;
+
+const TARGET_LISTS = `
+  ${targetsOf("group_ids", "service_groups", "g", "name")} AS groups,
+  ${targetsOf("subgroup_ids", "service_subgroups", "sg", "name")} AS subgroups,
+  ${targetsOf("service_item_ids", "service_items", "i", "name")} AS items,
+  ${targetsOf("doctor_ids", "doctors", "dr", "name")} AS doctors,
+  (SELECT json_agg(json_build_object(
+            'code', t.code,
+            'label', COALESCE(s.label, initcap(t.code)),
+            'display_label', COALESCE(
+              CASE WHEN p.code IS NULL THEN s.label ELSE p.label || ' › ' || s.label END,
+              initcap(t.code)),
+            'is_active', COALESCE(s.is_active AND COALESCE(p.is_active, TRUE), TRUE))
+          ORDER BY t.ord)
+     FROM unnest(d.scheme_codes) WITH ORDINALITY AS t(code, ord)
+     LEFT JOIN patient_schemes s ON s.code = t.code
+     LEFT JOIN patient_schemes p ON p.code = s.parent_code) AS categories`;
+
 export async function listDiscountRules({ activeOnly = false, method } = {}, db = pool) {
   const where = [];
   const params = [];
@@ -423,7 +449,7 @@ export async function listDiscountRules({ activeOnly = false, method } = {}, db 
     where.push(`d.method = $${params.length}`);
   }
   const { rows } = await db.query(
-    `SELECT ${COLUMNS.map((c) => `d.${c}`).join(", ")}, ${NAMES}
+    `SELECT ${COLUMNS.map((c) => `d.${c}`).join(", ")}, ${NAMES}, ${TARGET_LISTS}
        FROM discount_rules d
       ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
       ORDER BY d.priority, lower(d.name), d.id`,

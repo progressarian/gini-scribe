@@ -17,7 +17,7 @@ function Field({ label, className = "", children }) {
 const suggestedCode = (doctor) =>
   `CONS-${doctor.doctor_id}-${doctor.visit_type === "New" ? "NEW" : "FU"}`;
 
-export default function ConsultantFeeCreateItem({ doctor, subgroupId, onClose }) {
+export default function ConsultantFeeCreateItem({ doctor, subgroupId, onClose, onCreated }) {
   const { data: groups = [] } = useBillingGroups({ activeOnly: true });
   const create = useCreateBillingItem();
   const [form, setForm] = useState(() => ({
@@ -46,7 +46,7 @@ export default function ConsultantFeeCreateItem({ doctor, subgroupId, onClose })
         visit_type: doctor.visit_type,
       });
       toast(`Added ${form.name.trim()}`, "success");
-      onClose();
+      onCreated();
     } catch (err) {
       setError(requestErrorOf(err, "Could not create the item"));
     }

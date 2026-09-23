@@ -201,10 +201,14 @@ export default function PaymentRules({ category, parent }) {
           {own.length ? (
             <div className="fset__scroll fset__scroll--wide">
               <table className="flow-table" aria-label="Payment rules">
-                <Head actions />
+                <Head actions={category.is_active} />
                 <tbody>
                   {own.map((rule) =>
-                    editing === rule.id ? (
+                    !category.is_active ? (
+                      <tr key={rule.id} className={rule.is_active ? "" : "fset__row--off"}>
+                        <RuleCells rule={rule} />
+                      </tr>
+                    ) : editing === rule.id ? (
                       <tr key={rule.id}>
                         <td colSpan={COLUMNS.length + 1}>
                           <PaymentRuleForm
@@ -259,7 +263,11 @@ export default function PaymentRules({ category, parent }) {
               </div>
             </div>
           ) : null}
-          {!category.is_active ? null : adding ? (
+          {!category.is_active ? (
+            <p className="fset__hint">
+              This category is retired; bring it back to change its rules.
+            </p>
+          ) : adding ? (
             <PaymentRuleForm
               key={category.code}
               category={category}

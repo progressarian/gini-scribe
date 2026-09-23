@@ -1326,4 +1326,12 @@ export const prescriptionFooterSchema = z.object({
     })
     .optional(),
 });
+export const patientAppUnlinkSchema = z.object({
+  patientId: z.coerce.number().int().positive(),
+  source: z.enum(["hospital", "app"]),
+  memberId: z.string().trim().min(1).max(64),
+  reason: z.string().trim().min(3).max(500),
+  requestedBy: z.string().trim().min(2).max(200),
+});
+
 export * from "./billing.js";

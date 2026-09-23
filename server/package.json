@@ -74,7 +74,8 @@
     "smoke:reception-orders": "node scripts/smoke-reception-orders.mjs",
     "smoke:routing-gates": "node scripts/smoke-routing-gates.mjs",
     "smoke:sample-break": "node scripts/smoke-sample-break.mjs",
-    "smoke:station-lock": "node scripts/smoke-test-station-lock.mjs"
+    "smoke:station-lock": "node scripts/smoke-test-station-lock.mjs",
+    "smoke:patient-app-unlinks": "node scripts/smoke-patient-app-unlinks.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.101.1",

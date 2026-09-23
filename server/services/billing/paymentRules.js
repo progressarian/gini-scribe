@@ -19,6 +19,8 @@ import {
   INT_MAX,
   lockRow,
   MONEY_MAX,
+  NAME_KEY_SQL,
+  nameKey,
   readNumber,
 } from "./common.js";
 
@@ -179,6 +181,52 @@ export function paymentRuleShapeProblem(rule) {
   return null;
 }
 
+const DRAFT_FIELDS = [
+  "group_id",
+  "subgroup_id",
+  "service_item_id",
+  "visit_types",
+  "patient_pays",
+  "patient_value",
+  "remainder",
+];
+const DRAFT_NAME = "Draft rule";
+
+export function cleanDraftRule(input) {
+  if (input === undefined || input === null) return null;
+  if (typeof input !== "object" || Array.isArray(input)) {
+    throw httpError(400, "A draft rule must be an object");
+  }
+  const rule = Object.fromEntries(DRAFT_FIELDS.map((key) => [key, CLEANERS[key](input[key])]));
+  if (!TAKES_VALUE.includes(rule.patient_pays) && !hasField(input, "patient_value")) {
+    rule.patient_value = null;
+  }
+  const problem = paymentRuleShapeProblem({ ...rule, valid_from: null, valid_to: null });
+  if (problem) throw httpError(400, problem.message);
+  return rule;
+}
+
+export function draftForLine(draft, line, visitType) {
+  if (!draft) return null;
+  if (draft.visit_types && !draft.visit_types.includes(visitType)) return null;
+  const scopes = [
+    ["item", draft.service_item_id, line.item_id],
+    ["subgroup", draft.subgroup_id, line.subgroup_id],
+    ["group", draft.group_id, line.group_id],
+  ];
+  const chosen = scopes.find(([, chosenId]) => chosenId !== null);
+  if (chosen && chosen[1] !== chosen[2]) return null;
+  return {
+    rule: { ...draft, id: null, name: DRAFT_NAME },
+    patient_pays: draft.patient_pays,
+    patient_value: draft.patient_value,
+    remainder: draft.remainder,
+    scope: chosen ? chosen[0] : "category",
+    from_parent: false,
+    draft: true,
+  };
+}
+
 function checkShape(rule) {
   const problem = paymentRuleShapeProblem(rule);
   if (problem) throw httpError(400, problem.message);
@@ -220,8 +268,8 @@ async function checkScope(client, rule) {
 async function checkNameFree(client, schemeCode, name, exceptId) {
   const { rows } = await client.query(
     `SELECT name FROM category_payment_rules
-      WHERE scheme_code = $1 AND lower(name) = lower($2) AND id IS DISTINCT FROM $3`,
-    [schemeCode, name, exceptId],
+      WHERE scheme_code = $1 AND ${NAME_KEY_SQL} = $2 AND id IS DISTINCT FROM $3`,
+    [schemeCode, nameKey(name), exceptId],
   );
   if (rows.length) {
     throw httpError(409, `This category already has a payment rule called "${rows[0].name}"`);

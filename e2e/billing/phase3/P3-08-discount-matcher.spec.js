@@ -61,32 +61,61 @@ const refusal = async (text, line, extra, client = db) => {
 
 async function scratchUsage(work) {
   const client = await db.connect();
+  let seat = 0;
   try {
     await client.query("BEGIN");
-    await client.query(`
-      CREATE TABLE bills (id SERIAL PRIMARY KEY, patient_id INT, bill_date DATE, status TEXT);
-      CREATE TABLE bill_lines (id SERIAL PRIMARY KEY, bill_id INT, doctor_id INT,
-                               is_live BOOLEAN NOT NULL DEFAULT TRUE);
-      CREATE TABLE bill_line_discounts (id SERIAL PRIMARY KEY, bill_line_id INT, rule_id INT);`);
+    const newPatient = async (label) =>
+      (
+        await client.query(
+          `INSERT INTO patients (name, file_no, age, sex) VALUES ($1, $2, 40, 'Male')
+           RETURNING id`,
+          [`P308 ${label} ${tag}`, `F308${label}-${tag}`],
+        )
+      ).rows[0].id;
+    const who = { main: await newPatient("Main"), other: await newPatient("Other") };
     const use = async (
       ruleId,
-      { patient = 900001, date = DAY, doctor = null, status = "final" },
+      { patient = who.main, date = DAY, doctor = null, status = "final" },
     ) => {
+      seat += 1;
+      const visit = await client.query(
+        `INSERT INTO giniflow_visits (patient_id, visit_date)
+         VALUES ($1, DATE '2015-01-01' + $2::int) RETURNING id`,
+        [patient, seat],
+      );
+      const numbered = status !== "draft";
+      const cancelled = status === "cancelled";
       const bill = await client.query(
-        `INSERT INTO bills (patient_id, bill_date, status) VALUES ($1, $2, $3) RETURNING id`,
-        [patient, date, status],
+        `INSERT INTO bills (patient_id, visit_id, bill_date, status, bill_no, series, fy,
+                            finalised_at, cancelled_at, cancel_reason)
+         VALUES ($1, $2, $3::date, $4, $5, $6, $7, $8, $9, $10)
+         RETURNING id`,
+        [
+          patient,
+          visit.rows[0].id,
+          date,
+          status,
+          numbered ? `P308/${tag}/${String(seat).padStart(4, "0")}` : null,
+          numbered ? "MAIN" : null,
+          numbered ? "2026-27" : null,
+          numbered ? new Date() : null,
+          cancelled ? new Date() : null,
+          cancelled ? "P308 scratch" : null,
+        ],
       );
       const line = await client.query(
-        `INSERT INTO bill_lines (bill_id, doctor_id) VALUES ($1, $2) RETURNING id`,
-        [bill.rows[0].id, doctor],
+        `INSERT INTO bill_lines (bill_id, visit_id, line_no, service_item_id, bill_name, doctor_id)
+         VALUES ($1, $2, 1, $3, 'P308 scratch line', $4) RETURNING id`,
+        [bill.rows[0].id, visit.rows[0].id, ids.consult, doctor],
       );
       await client.query(
-        `INSERT INTO bill_line_discounts (bill_line_id, rule_id) VALUES ($1, $2)`,
+        `INSERT INTO bill_line_discounts (bill_line_id, rule_id, method, amount)
+         VALUES ($1, $2, 'auto', 1.00)`,
         [line.rows[0].id, ruleId],
       );
       return bill.rows[0].id;
     };
-    return await work(client, use);
+    return await work(client, use, who);
   } finally {
     await client.query("ROLLBACK").catch(() => {});
     client.release();
@@ -372,30 +401,34 @@ test.describe.serial("P3-08 discount matcher", () => {
     ids.drDaily = await addCode("DRDAILY", { max_uses_per_doctor_per_day: 1 });
     ids.autoCapped = await addRule("Auto capped", { max_uses_total: 1 });
     const line = lineFor("consult", { doctor_id: ids.drA });
-    expect(await refusal(code("TOTAL"), line, {}), "no bills table yet: nothing used").toEqual({
+    expect(await refusal(code("TOTAL"), line, {}), "nothing used yet").toEqual({
       ok: true,
     });
-    await scratchUsage(async (client, use) => {
-      await use(ids.total, { patient: 1, date: "2026-10-01" });
+    await scratchUsage(async (client, use, who) => {
+      await use(ids.total, { patient: who.other, date: "2026-10-01" });
       expect(await refusal(code("TOTAL"), line, {}, client)).toEqual({ ok: true });
-      await use(ids.total, { patient: 2, date: "2026-10-02" });
+      await use(ids.total, { patient: who.main, date: "2026-10-02" });
       expect(await refusal(code("TOTAL"), line, {}, client)).toEqual({
         reason: "total_limit",
         message: "Total limit reached — 2 of 2 used",
       });
 
-      await use(ids.perPatient, { patient: 900001 });
-      expect(await refusal(code("PERPATIENT"), line, {}, client)).toEqual({
+      await use(ids.perPatient, { patient: who.main });
+      expect(
+        await refusal(code("PERPATIENT"), line, { patient: { id: who.main } }, client),
+      ).toEqual({
         reason: "patient_limit",
         message: "Limit for this patient reached — 1 of 1 used",
       });
-      expect(await refusal(code("PERPATIENT"), line, { patient: { id: 900002 } }, client)).toEqual({
+      expect(
+        await refusal(code("PERPATIENT"), line, { patient: { id: who.other } }, client),
+      ).toEqual({
         ok: true,
       });
 
-      await use(ids.daily, { patient: 5 });
+      await use(ids.daily, { patient: who.main });
       expect(await refusal(code("DAILY"), line, {}, client)).toEqual({ ok: true });
-      const second = await use(ids.daily, { patient: 6 });
+      const second = await use(ids.daily, { patient: who.other });
       expect(await refusal(code("DAILY"), line, {}, client)).toEqual({
         reason: "daily_limit",
         message: "Daily limit reached — 2 of 2 used today",
@@ -403,11 +436,15 @@ test.describe.serial("P3-08 discount matcher", () => {
       expect(await refusal(code("DAILY"), line, { date: NEXT_DAY }, client), "next day").toEqual({
         ok: true,
       });
-      await client.query(`UPDATE bills SET status = 'cancelled' WHERE id = $1`, [second]);
+      await client.query(
+        `UPDATE bills SET status = 'cancelled', cancelled_at = NOW(), cancel_reason = 'P308 scratch'
+          WHERE id = $1`,
+        [second],
+      );
       expect(await refusal(code("DAILY"), line, {}, client), "cancelled bill").toEqual({
         ok: true,
       });
-      await use(ids.daily, { patient: 7, status: "draft" });
+      await use(ids.daily, { patient: who.main, status: "draft" });
       expect(await refusal(code("DAILY"), line, {}, client), "draft bill").toEqual({ ok: true });
 
       await use(ids.drDaily, { doctor: ids.drA });

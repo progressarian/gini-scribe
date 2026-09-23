@@ -124,6 +124,7 @@ const ROUTE_CAPABILITIES = [
   ["/api/alerts", CAP.CLINICAL_WRITE],
   ["/api/patient-alerts", CAP.CLINICAL_WRITE],
   ["/api/patient-blocks", CAP.ADMIN],
+  ["/api/patient-app-unlinks", CAP.ADMIN],
   ["/api/patient-block-status", CAP.PATIENT_READ],
   ["/api/rx-feedback", CAP.CLINICAL_WRITE],
   ["/api/ai", CAP.AI_TOOLS],

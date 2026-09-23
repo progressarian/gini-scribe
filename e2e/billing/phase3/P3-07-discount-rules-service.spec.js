@@ -277,6 +277,12 @@ test.describe.serial("P3-07 discount rules service", () => {
       409,
       new RegExp(`There is already a discount called "Staff 10% ${tag}"`),
     );
+    await refused(
+      create({ name: `Staff  10%  ${tag}`, code: code("SPACED") }),
+      409,
+      new RegExp(`There is already a discount called "Staff 10% ${tag}"`),
+      "names that differ only in inner spaces are the same name, as the import reads them",
+    );
   });
 
   test("6. check 5: categories exist; a parent covers its sub-categories, so not both", async () => {

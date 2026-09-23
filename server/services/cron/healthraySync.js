@@ -52,13 +52,7 @@ import {
 } from "../healthray/db.js";
 import { createLogger } from "../logger.js";
 import { WAITING_ROLE } from "../flow/journey.js";
-import {
-  tryAcquireCronLock,
-  tryAcquireCronLease,
-  cronLeaseEnabled,
-  yieldToApp,
-  CRON_LOCK_KEYS,
-} from "./lowPriority.js";
+import { tryAcquireCronLock, yieldToApp, CRON_LOCK_KEYS } from "./lowPriority.js";
 const { log, error } = createLogger("HealthRay Sync");
 
 // Pause between items so user HTTP requests get event-loop time between
@@ -1244,8 +1238,7 @@ async function runSync(date, prefetched = null, opts = {}) {
   // caller's lock — otherwise a long range backfill would starve itself.
   let releaseLock = null;
   if (!prefetched) {
-    const acquire = cronLeaseEnabled() ? tryAcquireCronLease : tryAcquireCronLock;
-    releaseLock = await acquire(`HealthRay Sync ${date}`, CRON_LOCK_KEYS.HEALTHRAY_SYNC);
+    releaseLock = await tryAcquireCronLock(`HealthRay Sync ${date}`, CRON_LOCK_KEYS.HEALTHRAY_SYNC);
     if (!releaseLock) return { date, skippedRun: true };
   }
 

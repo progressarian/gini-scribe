@@ -57,9 +57,52 @@ const shape = (row) => ({
 
 const COLUMNS = `series, fy, prefix, number_width, next_no, created_at, updated_at`;
 
-export async function listSeries(db = pool) {
+const RECEIPT_IST = `(payments.received_at AT TIME ZONE 'Asia/Kolkata')`;
+
+const RECEIPT_FY = `to_char(${RECEIPT_IST} - INTERVAL '3 months', 'YYYY')
+  || '-' || to_char(${RECEIPT_IST} + INTERVAL '9 months', 'YY')`;
+
+const ISSUED = {
+  MAIN: {
+    sql: `SELECT 1 FROM bills WHERE series = $1 AND fy = $2 AND bill_no IS NOT NULL LIMIT 1`,
+    params: (series, fy) => [series, fy],
+  },
+  RCPT: {
+    sql: `SELECT 1 FROM payments WHERE receipt_no IS NOT NULL AND ${RECEIPT_FY} = $1 LIMIT 1`,
+    params: (series, fy) => [fy],
+  },
+};
+
+const WORDS = { prefix: "prefix", number_width: "number of digits" };
+
+export async function hasIssuedNumber(series, fy, db = pool) {
+  const source = ISSUED[series];
+  if (!source) return false;
+  const { rows } = await db.query(source.sql, source.params(series, fy));
+  return rows.length > 0;
+}
+
+export function nextFinancialYear(fy) {
+  const start = Number(fy.slice(0, 4)) + 1;
+  return `${start}-${String((start + 1) % 100).padStart(2, "0")}`;
+}
+
+export async function listSeries(db = pool, today = indiaToday()) {
   const { rows } = await db.query(`SELECT ${COLUMNS} FROM bill_series ORDER BY fy DESC, series`);
-  return rows.map(shape);
+  const list = rows.map(shape);
+  const thisYear = financialYear(today);
+  const coming = nextFinancialYear(thisYear);
+  const march = Number(today.slice(5, 7)) === 3;
+  const have = new Set(list.map((row) => `${row.series}:${row.fy}`));
+  return list.map((row) => ({
+    ...row,
+    next_fy: nextFinancialYear(row.fy),
+    next_fy_missing:
+      march &&
+      row.fy === thisYear &&
+      BILL_SERIES.includes(row.series) &&
+      !have.has(`${row.series}:${coming}`),
+  }));
 }
 
 export async function saveSeries(input, ctx, db = pool) {
@@ -81,6 +124,17 @@ export async function saveSeries(input, ctx, db = pool) {
       [series, fy],
     );
     const before = existing[0] ?? null;
+    const locked = before
+      ? Object.keys(WORDS).filter(
+          (key) => values[key] !== undefined && String(values[key]) !== String(before[key]),
+        )
+      : [];
+    if (locked.length && (await hasIssuedNumber(series, fy, client))) {
+      throw httpError(
+        409,
+        `${series} numbers have already been issued for ${fy}, so the ${WORDS[locked[0]]} can't change; a GST series must stay the same all year. The next number can still be raised.`,
+      );
+    }
     if (before && values.next_no !== undefined && values.next_no < Number(before.next_no)) {
       throw httpError(
         409,

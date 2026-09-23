@@ -14,6 +14,7 @@ import jwt from "jsonwebtoken";
 import pool from "../config/db.js";
 import { isPatientBlocked } from "../services/patientBlockGuard.js";
 import { listLinkedPatients } from "./patientAuth.js";
+import { unlinkedIdsForPhone } from "../services/patientAppUnlinks.js";
 import { handleError } from "../utils/errorHandler.js";
 import { getGenieDb, importGenieHistoryToScribePatient } from "../services/genieImport.js";
 
@@ -63,11 +64,13 @@ async function resolveGeniePatient(patient) {
 async function findScribePatientByPhone(phone) {
   const l10 = last10(phone);
   if (!l10) return null;
+  const { hospital: unlinked } = await unlinkedIdsForPhone(l10);
   const { rows } = await pool.query(
     `SELECT id, name, phone, file_no FROM patients
       WHERE right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
+        AND NOT (id = ANY($2::int[]))
       ORDER BY id ASC LIMIT 1`,
-    [l10],
+    [l10, [...unlinked]],
   );
   return rows[0] || null;
 }
@@ -225,7 +228,12 @@ router.post("/patient/app/link-file-no", async (req, res) => {
     }
 
     // The security gate: verified app phone must match the hospital record.
-    if (!scribe.phone || last10(scribe.phone) !== last10(patient.phone)) {
+    const { hospital: unlinked } = await unlinkedIdsForPhone(patient.phone);
+    if (
+      !scribe.phone ||
+      last10(scribe.phone) !== last10(patient.phone) ||
+      unlinked.has(Number(scribe.id))
+    ) {
       console.log(
         `[PatientApp] link-file-no REFUSED: ${fileNo} phone mismatch for app patient ${patient.id}`,
       );

@@ -10,12 +10,11 @@ import {
   useBillingCategories,
   useBillingGroups,
   useBillingItemChoices,
-  useBillingItems,
   useCreateBillingDiscount,
   useUpdateBillingDiscount,
 } from "../../queries/hooks/useBillingMaster";
 import DiscountItemPicker from "./DiscountItemPicker";
-import { KIND_LABEL, ROLE_LABEL } from "./discountText";
+import { KIND_LABEL, ROLE_LABEL, offLabel } from "./discountText";
 import { codeTyped, digitsTyped, moneyTyped, requestErrorOf } from "./format";
 import useDialog from "./useDialog";
 
@@ -137,12 +136,6 @@ function Checks({ legend, hint, options, chosen, onToggle, scroll }) {
   );
 }
 
-function ItemLookup({ ids: wanted, children }) {
-  const { data } = useBillingItems({ limit: "1000" });
-  const names = new Map((data?.items ?? []).map((item) => [item.id, item.name]));
-  return children(wanted.map((id) => ({ id, name: names.get(id) ?? `Item ${id}` })));
-}
-
 function ChosenItems({ items, onRemove }) {
   if (!items.length) return <p className="fset__hint">No items chosen.</p>;
   return (
@@ -164,7 +157,7 @@ function ChosenItems({ items, onRemove }) {
   );
 }
 
-const inactive = (label, active) => (active ? label : `${label} (inactive)`);
+const chosenOf = (targets) => new Map((targets ?? []).map((t) => [t.id, t]));
 
 const TARGETS = [
   "group_ids",
@@ -228,13 +221,13 @@ export default function DiscountForm({ rule, onClose }) {
 
   const groupOptions = groups.flatMap((g) => [
     ...(g.is_active || form.group_ids.includes(g.id)
-      ? [{ value: `g${g.id}`, label: inactive(g.name, g.is_active) }]
+      ? [{ value: `g${g.id}`, label: offLabel(g.name, g.is_active) }]
       : []),
     ...(g.subgroups ?? [])
       .filter((s) => s.is_active || form.subgroup_ids.includes(s.id))
       .map((s) => ({
         value: `s${s.id}`,
-        label: inactive(s.name, s.is_active),
+        label: offLabel(s.name, s.is_active),
         aria: `${g.name} › ${s.name}`,
         nested: true,
       })),
@@ -244,12 +237,12 @@ export default function DiscountForm({ rule, onClose }) {
     ...tree.flatMap((top) =>
       top.is_active || form.scheme_codes.includes(top.code)
         ? [
-            { value: top.code, label: inactive(top.label, top.is_active) },
+            { value: top.code, label: offLabel(top.label, top.is_active) },
             ...(top.sub_categories ?? [])
               .filter((s) => s.is_active || form.scheme_codes.includes(s.code))
               .map((s) => ({
                 value: s.code,
-                label: inactive(s.label, s.is_active),
+                label: offLabel(s.label, s.is_active),
                 aria: s.display_label,
                 nested: true,
               })),
@@ -258,15 +251,27 @@ export default function DiscountForm({ rule, onClose }) {
     ),
   ];
   const consultants = choices?.consultants ?? [];
+  const chosenDoctors = chosenOf(rule?.doctors);
+  const chosenItems = chosenOf(rule?.items);
   const doctorOptions = [
     ...consultants.map((d) => ({ value: d.id, label: d.name })),
     ...form.doctor_ids
-      .filter((id) => !consultants.some((d) => d.id === id))
-      .map((id) => ({ value: id, label: choices ? `Doctor ${id} (inactive)` : `Doctor ${id}` })),
+      .filter((id) => !consultants.some((d) => d.id === id) && chosenDoctors.has(id))
+      .map((id) => ({
+        value: id,
+        label: offLabel(chosenDoctors.get(id).name, chosenDoctors.get(id).is_active),
+      })),
   ];
 
-  const unknownItems = form.service_item_ids.filter((id) => !known[id]);
-  const knownItems = form.service_item_ids.filter((id) => known[id]);
+  const items = form.service_item_ids
+    .map((id) =>
+      known[id]
+        ? { id, name: known[id] }
+        : chosenItems.has(id)
+          ? { id, name: offLabel(chosenItems.get(id).name, chosenItems.get(id).is_active) }
+          : null,
+    )
+    .filter(Boolean);
 
   const payload = payloadOf(form);
   const everyBill = coversEveryone(payload) && (!editing || !coversEveryone(payloadOf(initial)));
@@ -420,21 +425,7 @@ export default function DiscountForm({ rule, onClose }) {
                 toggle("service_item_ids")(item.id);
               }}
             />
-            {unknownItems.length ? (
-              <ItemLookup ids={form.service_item_ids}>
-                {(items) => (
-                  <ChosenItems
-                    items={items.map((i) => ({ ...i, name: known[i.id] ?? i.name }))}
-                    onRemove={toggle("service_item_ids")}
-                  />
-                )}
-              </ItemLookup>
-            ) : (
-              <ChosenItems
-                items={knownItems.map((id) => ({ id, name: known[id] }))}
-                onRemove={toggle("service_item_ids")}
-              />
-            )}
+            <ChosenItems items={items} onRemove={toggle("service_item_ids")} />
           </div>
           <Checks
             legend="Doctors"

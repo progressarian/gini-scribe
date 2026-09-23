@@ -508,7 +508,19 @@ test.describe.serial("P3-15 bill pricing", () => {
     const general = adds(await bill(["hba1c"], { patientId, category: "General" }));
     expect(general.category).toBeNull();
 
-    await expect(bill(["hba1c"], { category: c("cghs") })).rejects.toMatchObject({ status: 409 });
+    const chosenParent = await bill(["hba1c"], { category: c("cghs") }).catch((e) => e);
+    expect(chosenParent, "a chosen parent is refused like a resolved one").toMatchObject({
+      status: 409,
+      needs_sub_category: true,
+    });
+    expect(chosenParent.message).toMatch(/has sub-categories/);
+    expect(chosenParent.suggestions.map((sub) => [sub.category.code, sub.reason])).toEqual(
+      expect.arrayContaining([
+        [c("paid"), "choose_sub_category"],
+        [c("pens"), "choose_sub_category"],
+      ]),
+    );
+    expect(chosenParent.line_no, "the category is no line's fault").toBeUndefined();
     await expect(bill(["hba1c"], { category: c("nothere") })).rejects.toMatchObject({
       status: 404,
     });
@@ -697,6 +709,12 @@ test.describe.serial("P3-15 bill pricing", () => {
          VALUES ($1, $2, $3, 'fixed_price', 1, 'bill', '2026-01-01')`,
         [`${name} ${tag}`, code, code ? "code" : "auto"],
       );
+    await client.query("SAVEPOINT refused");
+    await expect(insert("Whole bill ₹1 refused", null)).rejects.toMatchObject({ code: "23514" });
+    await client.query("ROLLBACK TO SAVEPOINT refused");
+    await client.query(
+      `ALTER TABLE discount_rules DROP CONSTRAINT discount_rules_bill_fixed_price_check`,
+    );
     await insert("Whole bill ₹1", null);
     await insert("Whole bill ₹1 code", `FIX1${T}`);
     const priced = adds(await bill(["hba1c", "lipid"], { codes: [`FIX1${T}`] }));

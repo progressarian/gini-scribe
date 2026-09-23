@@ -24,12 +24,16 @@ export const valueOf = (rule) => {
 
 const listed = (label, names) => (names?.length ? `${label}: ${names.join(", ")}` : null);
 
+export const offLabel = (name, isActive) => (isActive === false ? `${name} (switched off)` : name);
+
+const targetNames = (targets) => (targets ?? []).map((t) => offLabel(t.name, t.is_active));
+
 export const coversOf = (rule) => {
   const parts = [
-    listed("Groups", rule.group_names),
-    listed("Subgroups", rule.subgroup_names),
-    listed("Items", rule.item_names),
-    listed("Doctors", rule.doctor_names),
+    listed("Groups", targetNames(rule.groups)),
+    listed("Subgroups", targetNames(rule.subgroups)),
+    listed("Items", targetNames(rule.items)),
+    listed("Doctors", targetNames(rule.doctors)),
     listed("Visits", rule.visit_types),
   ].filter(Boolean);
   return parts.length ? parts : ["Every service"];
@@ -45,9 +49,9 @@ export const ageText = (min, max) =>
         : `Age ${min}–${max}`;
 
 export const whoOf = (rule) => {
+  const categories = (rule.categories ?? []).map((c) => offLabel(c.display_label, c.is_active));
   const parts = [
-    rule.scheme_codes?.includes("general") ? "General" : null,
-    rule.category_names?.length ? rule.category_names.join(", ") : null,
+    categories.length ? categories.join(", ") : null,
     ageText(rule.min_age ?? null, rule.max_age ?? null),
     rule.gender,
   ].filter(Boolean);

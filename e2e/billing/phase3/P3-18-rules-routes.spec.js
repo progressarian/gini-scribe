@@ -40,12 +40,12 @@ test.describe.serial("P3-18 payment rule, discount and consultant fee routes", (
   test.beforeAll(async () => {
     await schemes.createScheme(
       { code: c("cghs"), label: `P318R CGHS ${tag}`, payer_name: "CGHS Wellness Centre" },
-      undefined,
+      getPool(),
       ctx,
     );
     await schemes.createScheme(
       { code: c("pensioner"), label: "Pensioner", parent_code: c("cghs") },
-      undefined,
+      getPool(),
       ctx,
     );
     ids.opd = await one(`INSERT INTO service_groups (code, name) VALUES ($1, $1) RETURNING id`, [
@@ -420,5 +420,71 @@ test.describe.serial("P3-18 payment rule, discount and consultant fee routes", (
     }
     const still = await admin("get", `${RULES}?schemeCode=${c("cghs")}`);
     expect(still.json.find((r) => r.id === ids.parentRule).is_active).toBe(true);
+  });
+
+  test("9. the discounts list names every chosen target in the order it was chosen", async () => {
+    const otherGroup = await one(
+      `INSERT INTO service_groups (code, name) VALUES ($1, $1) RETURNING id`,
+      [`P318R-LAB-${T}`],
+    );
+    const otherSubgroup = await one(
+      `INSERT INTO service_subgroups (group_id, code, name) VALUES ($1, $2, $2) RETURNING id`,
+      [otherGroup, `P318R-BLOOD-${T}`],
+    );
+    const otherItem = await one(
+      `INSERT INTO service_items (code, name, subgroup_id, base_price, kind)
+       VALUES ($1, $2, $3, 400, 'procedure') RETURNING id`,
+      [`P318R-HBA1C-${T}`, `HbA1c ${tag}`, otherSubgroup],
+    );
+    const retiring = await one(
+      `INSERT INTO doctors (name, short_name, role) VALUES ($1, 'Dr Gone', 'consultant') RETURNING id`,
+      [`Dr Gone P318R ${tag}`],
+    );
+    const rule = await discountService.createDiscountRule(
+      {
+        name: `Targets ${tag}`,
+        method: "auto",
+        kind: "percent",
+        value: 5,
+        group_ids: [otherGroup, ids.opd],
+        subgroup_ids: [otherSubgroup, ids.consults],
+        service_item_ids: [otherItem, ids.dressing],
+        doctor_ids: [retiring, ids.doctor],
+        scheme_codes: ["general", c("pensioner")],
+      },
+      ctx,
+      getPool(),
+    );
+    await query(`UPDATE doctors SET is_active = FALSE WHERE id = $1`, [retiring]);
+    await discountService.setDiscountRuleActive(rule.id, false, ctx, getPool());
+
+    const listed = (await discountService.listDiscountRulesWithUsage({}, getPool())).find(
+      (d) => d.id === rule.id,
+    );
+    expect(listed.groups).toEqual([
+      { id: otherGroup, name: `P318R-LAB-${T}`, is_active: true },
+      { id: ids.opd, name: `P318R-OPD-${T}`, is_active: true },
+    ]);
+    expect(listed.subgroups.map((g) => g.id)).toEqual([otherSubgroup, ids.consults]);
+    expect(listed.items.map((i) => [i.id, i.name])).toEqual([
+      [otherItem, `HbA1c ${tag}`],
+      [ids.dressing, `Dressing ${tag}`],
+    ]);
+    expect(listed.doctors).toEqual([
+      { id: retiring, name: `Dr Gone P318R ${tag}`, is_active: false },
+      { id: ids.doctor, name: `Dr Route P318R ${tag}`, is_active: true },
+    ]);
+    expect(listed.categories).toEqual([
+      { code: "general", label: "General", display_label: "General", is_active: true },
+      {
+        code: c("pensioner"),
+        label: "Pensioner",
+        display_label: `P318R CGHS ${tag} › Pensioner`,
+        is_active: true,
+      },
+    ]);
+    expect(listed.group_names).toEqual([`P318R-LAB-${T}`, `P318R-OPD-${T}`].sort());
+    expect(listed.doctor_names).toContain(`Dr Gone P318R ${tag}`);
+    await discountService.deleteDiscountRule(rule.id, ctx, getPool());
   });
 });

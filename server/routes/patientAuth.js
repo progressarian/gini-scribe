@@ -28,6 +28,12 @@ import { loginLimiter } from "../middleware/rateLimit.js";
 import { sendOtpSms } from "../services/msg91.js";
 import { getGenieDb, autoMigrateGeniePatient } from "../services/genieImport.js";
 import {
+  appRowsForPhone,
+  hospitalRowsForPhone,
+  phoneVariants,
+  unlinkedIdsForPhone,
+} from "../services/patientAppUnlinks.js";
+import {
   issuePatientRefreshToken,
   lookupRefreshToken,
   revokeFamily,
@@ -57,12 +63,6 @@ function normalisePhone(raw) {
   return `+${digits}`;
 }
 
-function phoneVariants(phone) {
-  const digits = phone.replace(/\D/g, "");
-  const last10 = digits.slice(-10);
-  return Array.from(new Set([phone, digits, `+${digits}`, last10]));
-}
-
 function generateOtp() {
   return String(crypto.randomInt(0, 1_000_000)).padStart(6, "0");
 }
@@ -76,14 +76,16 @@ async function findHospitalPatient(phone) {
   // digit-only comparison so anything-with-the-same-digits still resolves.
   const variants = phoneVariants(phone);
   const last10 = phone.replace(/\D/g, "").slice(-10);
+  const { hospital: unlinked } = await unlinkedIdsForPhone(phone);
 
   const { rows } = await pool.query(
     `SELECT * FROM patients
-       WHERE phone = ANY($1)
+       WHERE (phone = ANY($1)
           OR regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $2
-          OR right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $2
+          OR right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $2)
+         AND NOT (id = ANY($3::int[]))
        LIMIT 1`,
-    [variants, last10],
+    [variants, last10, [...unlinked]],
   );
   return rows[0] || null;
 }
@@ -91,16 +93,20 @@ async function findHospitalPatient(phone) {
 async function findAppPatient(phone) {
   const db = getGenieDb();
   if (!db) return null;
+  const { app: unlinked } = await unlinkedIdsForPhone(phone);
+  const notUnlinked = (q) =>
+    unlinked.size ? q.not("id", "in", `(${[...unlinked].join(",")})`) : q;
 
   // First try exact-variant match (the common case).
   // null = new self-registered patient (insertAppPatient doesn't set the field);
   // false = explicitly not migrated. Treat both as "not yet migrated".
-  const { data, error } = await db
-    .from("patients")
-    .select("*")
-    .in("phone", phoneVariants(phone))
-    .or("migrated_to_gini.eq.false,migrated_to_gini.is.null")
-    .limit(1);
+  const { data, error } = await notUnlinked(
+    db
+      .from("patients")
+      .select("*")
+      .in("phone", phoneVariants(phone))
+      .or("migrated_to_gini.eq.false,migrated_to_gini.is.null"),
+  ).limit(1);
   if (!error && data && data.length > 0) return data[0];
 
   // Fallback: any row whose digits end with the same last-10. Supabase has no
@@ -108,12 +114,13 @@ async function findAppPatient(phone) {
   // common storage shapes.
   const last10 = phone.replace(/\D/g, "").slice(-10);
   if (!last10) return null;
-  const { data: data2 } = await db
-    .from("patients")
-    .select("*")
-    .or(`phone.ilike.%${last10},phone.ilike.+91${last10}`)
-    .or("migrated_to_gini.eq.false,migrated_to_gini.is.null")
-    .limit(1);
+  const { data: data2 } = await notUnlinked(
+    db
+      .from("patients")
+      .select("*")
+      .or(`phone.ilike.%${last10},phone.ilike.+91${last10}`)
+      .or("migrated_to_gini.eq.false,migrated_to_gini.is.null"),
+  ).limit(1);
   return data2?.[0] || null;
 }
 
@@ -136,25 +143,13 @@ async function resolvePatientByPhone(phone) {
 }
 
 export async function listLinkedPatients(db, phone) {
+  const unlinked = await unlinkedIdsForPhone(phone);
   if (db === "hospital") {
-    const last10 = phone.replace(/\D/g, "").slice(-10);
-    const { rows } = await pool.query(
-      `SELECT id, name, dob, sex, file_no, phone FROM patients
-         WHERE phone = ANY($1)
-            OR regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $2
-            OR right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $2
-         ORDER BY id`,
-      [phoneVariants(phone), last10],
-    );
-    return rows;
+    const rows = await hospitalRowsForPhone(phone);
+    return rows.filter((r) => !unlinked.hospital.has(Number(r.id)));
   }
-  const sb = getGenieDb();
-  if (!sb) return [];
-  const { data } = await sb
-    .from("patients")
-    .select("id, name, dob, sex, phone")
-    .in("phone", phoneVariants(phone));
-  return data || [];
+  const rows = await appRowsForPhone(phone);
+  return rows.filter((r) => !unlinked.app.has(String(r.id))).map(({ migrated_to_gini, ...r }) => r);
 }
 
 // ── Per-DB write adapters ───────────────────────────────────────────────────
@@ -204,16 +199,21 @@ async function writePatient(db, id, fields) {
  *  primary write. */
 export async function propagateToAllRows(phone, fields) {
   const variants = phoneVariants(phone);
+  const unlinked = await unlinkedIdsForPhone(phone).catch(() => ({
+    hospital: new Set(),
+    app: new Set(),
+  }));
 
   // Hospital DB
   try {
     const keys = Object.keys(fields);
     const sets = keys.map((k, i) => `${k} = $${i + 2}`).join(", ");
     const values = keys.map((k) => fields[k]);
-    await pool.query(`UPDATE patients SET ${sets} WHERE phone = ANY($1::text[])`, [
-      variants,
-      ...values,
-    ]);
+    await pool.query(
+      `UPDATE patients SET ${sets}
+        WHERE phone = ANY($1::text[]) AND NOT (id = ANY($${keys.length + 2}::int[]))`,
+      [variants, ...values, [...unlinked.hospital]],
+    );
   } catch (e) {
     console.error("[propagatePassword] hospital update failed", e);
   }
@@ -222,7 +222,8 @@ export async function propagateToAllRows(phone, fields) {
   try {
     const sb = getGenieDb();
     if (sb) {
-      await sb.from("patients").update(fields).in("phone", variants);
+      const q = sb.from("patients").update(fields).in("phone", variants);
+      await (unlinked.app.size ? q.not("id", "in", `(${[...unlinked.app].join(",")})`) : q);
     }
   } catch (e) {
     console.error("[propagatePassword] app update failed", e);

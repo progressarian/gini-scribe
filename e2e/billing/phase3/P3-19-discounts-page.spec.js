@@ -343,7 +343,7 @@ test.describe.serial("P3-19 discounts page", () => {
     expect(await ruleOf(name)).toBeNull();
   });
 
-  test("6b. a coupon's doctors aren't called inactive while the doctor list loads", async ({
+  test("6b. a coupon's doctors are named from the rule while the doctor list loads", async ({
     page,
   }) => {
     let release;
@@ -357,11 +357,12 @@ test.describe.serial("P3-19 discounts page", () => {
     await openPage(page);
     await page.getByRole("button", { name: `Edit discount ${COUPON.name}`, exact: true }).click();
     const doctors = dialog(page).getByRole("group", { name: "Doctors" });
-    await expect(doctors).toContainText(`Doctor ${seed.doctors[0].id}`);
-    await expect(doctors).not.toContainText("inactive");
+    await expect(doctors).toContainText(DOCTORS[0]);
+    await expect(doctors).not.toContainText(`Doctor ${seed.doctors[0].id}`);
+    await expect(doctors).not.toContainText("switched off");
     release();
     await expect(check(page, DOCTORS[0])).toBeChecked();
-    await expect(doctors).not.toContainText("inactive");
+    await expect(doctors).not.toContainText("switched off");
   });
 
   test("7. deactivate, activate, and delete only after confirming", async ({ page }) => {
@@ -411,6 +412,26 @@ test.describe.serial("P3-19 discounts page", () => {
     await save(page, "Add discount");
     await expect(row(page, name)).toContainText(`Items: ${ITEM}`);
     expect((await ruleOf(name)).service_item_ids).toEqual([seed.item.id]);
+  });
+
+  test("9b. an item switched off since is still named, in the list and in the form", async ({
+    page,
+  }) => {
+    const name = `Enter probe ${tag}`;
+    await query(`UPDATE service_items SET is_active = FALSE WHERE id = $1`, [seed.item.id]);
+    try {
+      await openPage(page);
+      await expect(row(page, name)).toContainText(`Items: ${ITEM} (switched off)`);
+      await page.getByRole("button", { name: `Edit discount ${name}`, exact: true }).click();
+      await expect(dialog(page).getByRole("list", { name: "Chosen items" })).toContainText(
+        `${ITEM} (switched off)`,
+      );
+      await field(page, "Items").fill(ITEM);
+      await expect(dialog(page).getByRole("button", { name: `Add ${ITEM}` })).toHaveCount(0);
+      await dialog(page).getByRole("button", { name: "Cancel", exact: true }).click();
+    } finally {
+      await query(`UPDATE service_items SET is_active = TRUE WHERE id = $1`, [seed.item.id]);
+    }
   });
 
   test("10. a fixed price puts 'Applies to' back on each line and bill rules say what they cover", async ({

@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { test, expect } from "@playwright/test";
 import { apiAs } from "../../helpers/auth.mjs";
-import { query } from "../../helpers/db.mjs";
+import { getPool, query } from "../../helpers/db.mjs";
 import { USERS } from "../../fixtures/data.mjs";
 import { assertTestDatabase } from "../../setup/guard.mjs";
 
@@ -64,7 +64,7 @@ test.describe.serial("P3-17a consultant fees service", () => {
   test.beforeAll(async () => {
     await schemes.createScheme(
       { code: c("cghs"), label: `P317A CGHS ${tag}`, payer_name: "CGHS Wellness Centre" },
-      undefined,
+      getPool(),
       ctx,
     );
     for (const [key, label] of [
@@ -72,9 +72,9 @@ test.describe.serial("P3-17a consultant fees service", () => {
       ["referral", "CGHS Referral"],
       ["paid", "CGHS Paid"],
     ]) {
-      await schemes.createScheme({ code: c(key), label, parent_code: c("cghs") }, undefined, ctx);
+      await schemes.createScheme({ code: c(key), label, parent_code: c("cghs") }, getPool(), ctx);
     }
-    await schemes.createScheme({ code: c("staff"), label: `P317A Staff ${tag}` }, undefined, ctx);
+    await schemes.createScheme({ code: c("staff"), label: `P317A Staff ${tag}` }, getPool(), ctx);
     ids.opd = await one(`INSERT INTO service_groups (code, name) VALUES ($1, $1) RETURNING id`, [
       `P317A-OPD-${T}`,
     ]);
@@ -130,6 +130,7 @@ test.describe.serial("P3-17a consultant fees service", () => {
         valid_from: "2026-01-01",
       },
       ctx,
+      getPool(),
     );
     await rules.createPaymentRule(
       {
@@ -141,6 +142,7 @@ test.describe.serial("P3-17a consultant fees service", () => {
         valid_from: "2026-01-01",
       },
       ctx,
+      getPool(),
     );
     await rules.createPaymentRule(
       {
@@ -151,6 +153,7 @@ test.describe.serial("P3-17a consultant fees service", () => {
         valid_from: "2026-01-01",
       },
       ctx,
+      getPool(),
     );
   });
 
@@ -593,13 +596,14 @@ test.describe.serial("P3-17a consultant fees service", () => {
   test("11. a cell's payment rule can't be saved over one already scheduled for a later date", async () => {
     const base = { scheme_code: c("paid"), service_item_id: ids.beantFU };
     const refused = (input) =>
-      fees.saveConsultantFee({ ...base, ...input }, ctx).then(
+      fees.saveConsultantFee({ ...base, ...input }, ctx, getPool()).then(
         () => null,
         (error) => ({ status: error.status, message: error.message }),
       );
     const scheduled = await fees.saveConsultantFee(
       { ...base, patient_pays: "nothing", valid_from: "2027-03-01" },
       ctx,
+      getPool(),
     );
     const name = scheduled.rule.name;
     const clash = {
@@ -613,6 +617,7 @@ test.describe.serial("P3-17a consultant fees service", () => {
     const before = await fees.saveConsultantFee(
       { ...base, patient_pays: "full", valid_from: "2027-02-01", valid_to: "2027-02-28" },
       ctx,
+      getPool(),
     );
     expect(before.rule).toMatchObject({ valid_from: "2027-02-01", valid_to: "2027-02-28" });
     expect(
@@ -627,11 +632,10 @@ test.describe.serial("P3-17a consultant fees service", () => {
       { patient_pays: "full", valid_from: "2027-02-01", valid_to: "2027-02-28" },
       { patient_pays: "nothing", valid_from: "2027-03-01", valid_to: null },
     ]);
-    const march = await fees.consultantFeeGrid({
-      doctorId: ids.beant,
-      schemeCode: c("paid"),
-      date: "2027-03-02",
-    });
+    const march = await fees.consultantFeeGrid(
+      { doctorId: ids.beant, schemeCode: c("paid"), date: "2027-03-02" },
+      getPool(),
+    );
     const cellThen = march.rows.find((r) => r.visit_type === "Follow Up").cells[c("paid")];
     expect(cellThen.own_rule).toMatchObject({ name, patient_pays: "nothing" });
   });

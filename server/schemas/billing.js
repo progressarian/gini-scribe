@@ -10,6 +10,26 @@ import { cleanDate, INT_MAX, MONEY_MAX } from "../services/billing/common.js";
 import { IMPORT_HISTORY_PAGE_MAX } from "../services/billing/importHistory.js";
 import { MAX_BILL_CODES, MAX_BILL_LINES } from "../services/billing/priceBill.js";
 import {
+  LINE_SOURCES,
+  NUMBER_TEXT_MAX as SEALED_MAX,
+  TEXT_MAX as BILL_TEXT_MAX,
+} from "../services/billing/bills.js";
+import {
+  PAYMENTS_AT_ONCE,
+  PAYMENT_MODES,
+  REFERENCE_MAX as PAYMENT_REFERENCE_MAX,
+} from "../services/billing/payments.js";
+import {
+  DRAWER_MODE,
+  NOTE_MAX as SHIFT_NOTE_MAX,
+  STATUSES as SHIFT_STATUSES,
+} from "../services/billing/cashShifts.js";
+import {
+  KINDS as REQUEST_KIND_LABELS,
+  STATUSES as REQUEST_STATUSES,
+  TEXT_MAX as REQUEST_TEXT_MAX,
+} from "../services/billing/billingRequests.js";
+import {
   BILLING_ROLES,
   DISCOUNT_KINDS,
   DISCOUNT_METHODS,
@@ -381,6 +401,25 @@ const realDate = (text) => {
   }
 };
 
+const numberValue = z.union([
+  z.number().refine(Number.isFinite, "must be a number"),
+  z
+    .string()
+    .trim()
+    .regex(/^-?\d+(\.\d+)?$/, "must be a number"),
+  z.null(),
+  blank,
+]);
+const optionalId = z.union([id, z.null(), blank]);
+const fromDate = z.union([date.refine(realDate, "must be a date like 2026-10-01"), blank]);
+const toDate = z.union([date.refine(realDate, "must be a date like 2026-10-01"), z.null(), blank]);
+const visitTypes = z.union([
+  z.array(z.enum(VISIT_TYPES, { message: `must be from: ${VISIT_TYPES.join(", ")}` })).max(3),
+  z.null(),
+]);
+const remainder = z.union([z.enum(REMAINDERS), z.null(), blank]);
+const priority = z.union([whole, blank]);
+
 const pricedLine = z.strictObject(
   {
     item_id: pricedId("item"),
@@ -429,6 +468,19 @@ const noRealPatient = z.undefined({
   error: "can't be sent: a rule test uses an age, gender and category, not a real patient",
 });
 
+const draftRule = z.strictObject(
+  {
+    group_id: optionalId.optional(),
+    subgroup_id: optionalId.optional(),
+    service_item_id: optionalId.optional(),
+    visit_types: visitTypes.optional(),
+    patient_pays: z.enum(PATIENT_PAYS, { message: `must be one of: ${PATIENT_PAYS.join(", ")}` }),
+    patient_value: numberValue.optional(),
+    remainder: remainder.optional(),
+  },
+  objectOnly('must be a rule, like { patient_pays: "percent", patient_value: 20 }'),
+);
+
 export const billingRuleTestSchema = z.strictObject(
   {
     patient_id: noRealPatient,
@@ -444,6 +496,7 @@ export const billingRuleTestSchema = z.strictObject(
     role: z
       .enum(BILLING_ROLES, { message: `must be one of: ${BILLING_ROLES.join(", ")}` })
       .optional(),
+    draft_rule: draftRule.optional(),
     ...pricingFields,
   },
   WHOLE_BILL,
@@ -461,26 +514,8 @@ export const BILLING_PRICING_LABELS = {
   age: "Age",
   gender: "Gender",
   role: "Role",
+  draft_rule: "Draft rule",
 };
-
-const numberValue = z.union([
-  z.number().refine(Number.isFinite, "must be a number"),
-  z
-    .string()
-    .trim()
-    .regex(/^-?\d+(\.\d+)?$/, "must be a number"),
-  z.null(),
-  blank,
-]);
-const optionalId = z.union([id, z.null(), blank]);
-const fromDate = z.union([date.refine(realDate, "must be a date like 2026-10-01"), blank]);
-const toDate = z.union([date.refine(realDate, "must be a date like 2026-10-01"), z.null(), blank]);
-const visitTypes = z.union([
-  z.array(z.enum(VISIT_TYPES, { message: `must be from: ${VISIT_TYPES.join(", ")}` })).max(3),
-  z.null(),
-]);
-const remainder = z.union([z.enum(REMAINDERS), z.null(), blank]);
-const priority = z.union([whole, blank]);
 
 const paymentRuleFields = {
   scheme_code: code,
@@ -699,4 +734,277 @@ export const BILLING_SCHEMAS = {
   billingRateGridQuerySchema,
   billingImportFileQuerySchema,
   billingImportHistoryQuerySchema,
+};
+
+const uuid = z.string().trim().regex(UUID_TEXT, "must be an id");
+const optionalUuid = z.union([uuid, z.null(), blank]);
+const count = z.union([
+  z.number().int("must be a whole number").min(1, "must be 1 or more").max(INT_MAX, TOO_BIG),
+  z
+    .string()
+    .trim()
+    .regex(/^[1-9]\d*$/, { message: "must be a whole number, 1 or more", abort: true })
+    .refine(withinInt, TOO_BIG),
+]);
+const reason = z.string().trim().min(1, "can't be blank").max(BILL_TEXT_MAX);
+const requestReason = z.string().trim().min(1, "can't be blank").max(REQUEST_TEXT_MAX);
+const REQUEST_KINDS = Object.keys(REQUEST_KIND_LABELS);
+const shiftNote = z.string().trim().max(SHIFT_NOTE_MAX);
+const realDateText = date.refine(realDate, "must be a date like 2026-10-01");
+const cardNumber = z.union([z.string().trim().max(SEALED_MAX), z.null()]);
+
+const DESK_SETS_NO_PRICE =
+  "can't be sent from the billing desk — the admin sets prices and bill names";
+
+const noPrice = (fields) =>
+  Object.fromEntries(fields.map((key) => [key, z.undefined({ error: DESK_SETS_NO_PRICE })]));
+
+const DESK_PRICE_FIELDS = [
+  "price",
+  "rate",
+  "base_price",
+  "mrp",
+  "bill_name",
+  "bill_code",
+  "discount",
+  "discount_amount",
+  "discount_value",
+];
+
+const NO_PRICE = noPrice(DESK_PRICE_FIELDS);
+const NO_PRICE_OR_AMOUNT = noPrice([...DESK_PRICE_FIELDS, "amount"]);
+
+const deskObject = (fields, message) => z.strictObject({ ...NO_PRICE, ...fields }, message);
+
+export const billingDraftOpenSchema = deskObject({}, objectOnly("Send the request as an object"));
+
+export const billingLineAddSchema = deskObject(
+  {
+    item_id: id,
+    quantity: count.optional(),
+    source: z
+      .enum(LINE_SOURCES, { message: `must be one of: ${LINE_SOURCES.join(", ")}` })
+      .optional(),
+    lab_order_id: optionalUuid.optional(),
+    doctor_id: z.union([id, z.null()]).optional(),
+    repeat_request_id: optionalUuid.optional(),
+  },
+  objectOnly("Send the line as an object, like { item_id: 12 }"),
+);
+
+export const billingLineQuantitySchema = deskObject({ quantity: count });
+
+export const billingLineRemoveSchema = deskObject({ reason });
+
+export const billingCodeAddSchema = deskObject({ code });
+
+export const billingCategorySetSchema = deskObject({
+  category: z.union([code, z.null(), blank]).optional(),
+  scheme_ref: cardNumber.optional(),
+  referral_no: cardNumber.optional(),
+  referral_doc_id: z.union([id, z.null()]).optional(),
+}).refine(
+  (body) => Object.keys(body).length > 0,
+  "send the category, card number, referral number or referral scan to change",
+);
+
+export const billingFinaliseSchema = deskObject({
+  version: whole,
+  pay_later: flag.optional(),
+});
+
+export const billingCancelSchema = deskObject({ reason });
+
+const paymentAmount = z.union([
+  z
+    .number()
+    .positive("must be more than zero")
+    .refine(twoDecimals, "can have at most 2 decimals (paise)")
+    .refine(withinMoney, TOO_MUCH),
+  z
+    .string()
+    .trim()
+    .regex(MONEY_TEXT, { message: "must be an amount like 1200 or 1200.50", abort: true })
+    .refine((v) => Number(v) > 0, "must be more than zero")
+    .refine(withinMoney, TOO_MUCH),
+]);
+
+const takenPayment = z
+  .strictObject(
+    {
+      mode: z.enum(PAYMENT_MODES, { message: `must be one of: ${PAYMENT_MODES.join(", ")}` }),
+      amount: paymentAmount,
+      reference: z.union([z.string().trim().max(PAYMENT_REFERENCE_MAX), z.null()]).optional(),
+      ...NO_PRICE,
+    },
+    objectOnly('must be a payment, like { mode: "cash", amount: 500 }'),
+  )
+  .refine(
+    (entry) => entry.mode === DRAWER_MODE || Boolean(entry.reference),
+    "needs its reference number when it isn't cash",
+  );
+
+export const billingPaymentsTakeSchema = z.strictObject(
+  {
+    version: whole,
+    payments: z
+      .array(takenPayment, { error: "must be a list of payments" })
+      .min(1, "list is empty: enter the payment being taken")
+      .max(PAYMENTS_AT_ONCE, `can be at most ${PAYMENTS_AT_ONCE} at once`),
+    ...NO_PRICE,
+  },
+  objectOnly("Send the payment as an object"),
+);
+
+export const billingDuesQuerySchema = z.strictObject({
+  patient_id: id.optional(),
+  from: realDateText.optional(),
+  to: realDateText.optional(),
+  limit: count.optional(),
+});
+
+export const billingReceiptQuerySchema = z.strictObject({
+  payment_id: uuid.optional(),
+  receipt_no: z.string().trim().min(1, "can't be blank").max(SEALED_MAX).optional(),
+  token: z.string().optional(),
+});
+
+export const billingShiftOpenSchema = deskObject({
+  opening_cash: z.union([money, z.null(), blank]).optional(),
+});
+
+export const billingShiftCloseSchema = deskObject({
+  counted_cash: money,
+  note: z.union([shiftNote, z.null()]).optional(),
+});
+
+const shiftFilters = {
+  from: realDateText.optional(),
+  to: realDateText.optional(),
+  status: z
+    .enum(SHIFT_STATUSES, { message: `must be one of: ${SHIFT_STATUSES.join(", ")}` })
+    .optional(),
+  limit: count.optional(),
+};
+
+export const billingMyShiftsQuerySchema = z.strictObject({ ...shiftFilters });
+
+export const billingShiftListQuerySchema = z.strictObject({
+  user_id: id.optional(),
+  ...shiftFilters,
+});
+
+export const billingNewItemRequestSchema = z.strictObject(
+  {
+    proposed_name: name,
+    proposed_group: text(REQUEST_TEXT_MAX).optional(),
+    reason: requestReason,
+    visit_id: optionalUuid.optional(),
+    bill_id: optionalUuid.optional(),
+    ...NO_PRICE_OR_AMOUNT,
+  },
+  objectOnly("Send the request as an object"),
+);
+
+export const billingRepeatRequestSchema = z.strictObject(
+  {
+    service_item_id: id,
+    visit_id: uuid,
+    bill_id: optionalUuid.optional(),
+    reason: requestReason,
+    ...NO_PRICE_OR_AMOUNT,
+  },
+  objectOnly("Send the request as an object"),
+);
+
+export const billingRequestListQuerySchema = z.strictObject({
+  status: z
+    .union([
+      z.enum(REQUEST_STATUSES, { message: `must be from: ${REQUEST_STATUSES.join(", ")}` }),
+      z
+        .array(
+          z.enum(REQUEST_STATUSES, { message: `must be from: ${REQUEST_STATUSES.join(", ")}` }),
+        )
+        .min(1)
+        .max(REQUEST_STATUSES.length),
+    ])
+    .optional(),
+  kind: z
+    .enum(REQUEST_KINDS, { message: `must be one of: ${REQUEST_KINDS.join(", ")}` })
+    .optional(),
+  visit_id: uuid.optional(),
+  limit: count.optional(),
+});
+
+export const billingRequestApproveSchema = z.strictObject(
+  {
+    note: text(REQUEST_TEXT_MAX).optional(),
+    item: z
+      .strictObject({
+        name: itemFields.name.optional(),
+        code: itemFields.code,
+        subgroup_id: itemFields.subgroup_id,
+        base_price: itemFields.base_price,
+        kind: itemFields.kind,
+        unit: itemFields.unit.optional(),
+        allow_quantity: itemFields.allow_quantity.optional(),
+        max_quantity: itemFields.max_quantity.optional(),
+        tax_code_id: itemFields.tax_code_id.optional(),
+        price_includes_tax: itemFields.price_includes_tax.optional(),
+        doctor_id: itemFields.doctor_id.optional(),
+        visit_type: itemFields.visit_type.optional(),
+        test_catalog_id: itemFields.test_catalog_id.optional(),
+      })
+      .optional(),
+  },
+  objectOnly("Send the answer as an object"),
+);
+
+export const billingRequestRejectSchema = z.strictObject(
+  { note: requestReason },
+  objectOnly("Send the answer as an object"),
+);
+
+export const BILLING_DESK_LABELS = {
+  ...BILLING_FIELD_LABELS,
+  item_id: "Item",
+  quantity: "Quantity",
+  source: "Line source",
+  lab_order_id: "Test order",
+  repeat_request_id: "Approval",
+  category: "Category",
+  scheme_ref: "Card number",
+  referral_no: "Referral number",
+  referral_doc_id: "Referral scan",
+  version: "Version",
+  pay_later: "Pay later",
+  reason: "Reason",
+  payments: "Payment",
+  amount: "The amount taken",
+  reference: "Reference",
+  counted_cash: "Counted cash",
+  opening_cash: "Opening cash",
+  note: "Note",
+  status: "Status",
+  user_id: "Desk",
+  patient_id: "Patient",
+  visit_id: "Visit",
+  bill_id: "Bill",
+  service_item_id: "Item",
+  proposed_name: "Name",
+  proposed_group: "Group hint",
+  from: "From",
+  to: "To",
+  payment_id: "Payment",
+  receipt_no: "Receipt number",
+  item: "Item",
+  price: "Price",
+  rate: "Rate",
+  base_price: "Price",
+  mrp: "Price",
+  bill_name: "Bill name",
+  bill_code: "Bill code",
+  discount: "Discount",
+  discount_amount: "Discount",
+  discount_value: "Discount",
 };

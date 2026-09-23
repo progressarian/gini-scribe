@@ -57,6 +57,7 @@ import obtStatusRoutes from "./routes/obt-status.js";
 import obtDashboardRoutes from "./routes/obt-dashboard.js";
 import patientAlertRoutes from "./routes/patient-alerts.js";
 import patientBlockRoutes from "./routes/patientBlocks.js";
+import patientAppUnlinkRoutes from "./routes/patientAppUnlinks.js";
 import diabetesChampionRoutes from "./routes/diabetes-champions.js";
 import appInstallRoutes from "./routes/app-installs.js";
 import appDownloadRoutes from "./routes/app-download.js";
@@ -122,8 +123,21 @@ app.use((req, res, next) => {
     // rejects for any real artwork.
     p.includes("/prescription-logo");
 
-  const limit = isLarge ? "50mb" : isMedium ? "5mb" : "1mb";
+  const isStationReport = p.startsWith("/api/giniflow/stations/") && /\/reports?$/.test(p);
+
+  const limit = isLarge ? "50mb" : isStationReport ? "7mb" : isMedium ? "5mb" : "1mb";
   express.json({ limit })(req, res, next);
+});
+
+const BODY_ERRORS = {
+  "entity.parse.failed": "The request body isn't valid JSON",
+  "entity.too.large": "The request body is too large",
+};
+
+app.use((error, req, res, next) => {
+  const message = BODY_ERRORS[error?.type];
+  if (!message || res.headersSent) return next(error);
+  res.status(error.status || error.statusCode || 400).json({ error: message });
 });
 
 // Sync routes (no auth — internal/admin)
@@ -190,6 +204,7 @@ app.use("/api", obtStatusRoutes);
 app.use("/api", obtDashboardRoutes);
 app.use("/api", patientAlertRoutes);
 app.use("/api", patientBlockRoutes);
+app.use("/api", patientAppUnlinkRoutes);
 app.use("/api", diabetesChampionRoutes);
 app.use("/api", appInstallRoutes);
 app.use("/api", doctorScheduleRoutes);
