@@ -1,19 +1,3 @@
-// Shared biomarker classification used by:
-//   - LiveDashboard (daily, full Tier-1 + Tier-2 composite)
-//   - OpdRangeReport (period, full tier model)
-//   - OPD visit detail trajectory label
-//
-// Tier model (clinical brief):
-//   Tier 1 — Headline metric. Drives outcome classification.
-//     T2DM        → hba1c
-//     Hypertension → sbp
-//     Hypothyroid → tsh
-//   Tier 2 — Supporting signals. Used to detect conflicts (Better → Mixed).
-//     fg (FBS), ldl, tg, uacr, egfr
-//   Tier 3 — Monitored only, not part of outcome.
-//     weight, alt, ast, hb, wbc
-
-//
 export const BIO_TIER = {
   hba1c: 1,
   sbp: 1,
@@ -34,11 +18,6 @@ export const BIO_TIER = {
   dbp: 3,
 };
 
-// Clinical targets. Status thresholds:
-//   good = at target, warn = borderline, bad = outside
-// For lower-is-better:  v <= good → 'good'; v <= warn → 'warn'; else 'bad'
-// For higher-is-better: v >= good → 'good'; v >= warn → 'warn'; else 'bad'
-// For range (TSH):      low <= v <= high → 'good'; within ±50% buffer → 'warn'; else 'bad'
 export const BIO_TARGET = {
   hba1c: { good: 7, warn: 9, lowerBetter: true },
   sbp: { good: 130, warn: 140, lowerBetter: true },
@@ -59,9 +38,6 @@ export const BIO_TARGET = {
   wbc: { good: 11000, warn: 13000, lowerBetter: true },
 };
 
-// Absolute "stable" thresholds — what counts as a meaningful change visit-over-visit.
-// Tier 1 uses absolute deltas (per clinical brief: ±0.3% HbA1c, ±5 mmHg SBP).
-// Other markers fall back to a 5% relative threshold inside classifyBiomarker().
 export const STABILITY = {
   hba1c: 0.3,
   sbp: 5,
@@ -99,20 +75,6 @@ export function targetStatus(key, value) {
   return "bad";
 }
 
-// classifyBiomarker(key, cur, prev) → 'better' | 'worse' | 'stable' | 'unknown'
-//
-// Zone-aware classification (clinical model):
-//   1. If the reading crossed a target zone (good ↔ warn ↔ bad), zone direction
-//      decides the trend regardless of delta — a small move that crosses into
-//      a worse zone is "worse"; a move into a better zone is "better".
-//   2. Same zone, both in 'good': any movement is treated as within-target
-//      jitter → stable. Avoids flagging benign noise like LDL 66 → 89.
-//   3. Same zone, in 'warn' or 'bad': delta direction matters even if the
-//      patient stays in that zone — improvement (e.g. HbA1c 11 → 9.8) is
-//      surfaced as "better"; deterioration as "worse". Sub-stability deltas
-//      still fall back to "stable".
-//   4. Range markers (TSH) follow the same zone rules; the range itself is the
-//      'good' zone, so within-band movement is stable.
 const ZONE_RANK = { good: 0, warn: 1, bad: 2 };
 
 export function classifyBiomarker(key, cur, prev) {
@@ -138,11 +100,8 @@ export function classifyBiomarker(key, cur, prev) {
     if (curStatus === "good" && prevStatus === "good") return "stable";
   }
 
-  // 3) Sub-stability delta in the same non-good zone → stable.
   if (withinStability) return "stable";
 
-  // 4) Significant delta in same warn/bad zone (or marker has no target):
-  //    use direction.
   if (t && t.range) {
     // For range markers any non-good movement still uses midpoint distance.
     const mid = (t.low + t.high) / 2;
@@ -154,17 +113,6 @@ export function classifyBiomarker(key, cur, prev) {
   return down ? "worse" : "better";
 }
 
-// classifyComposite(perBiomarker) → { outcome, reasons, conflicts }
-// perBiomarker shape: { [key]: { cur, prev, status?, target? } }
-//   - cur/prev are required for trend (status comes from classifyBiomarker if absent)
-// Outcome rules (from client brief):
-//   better  — every Tier-1 present is improving AND no Tier-2 is worsening
-//   worse   — any Tier-1 is worsening (and not offset by another Tier-1 improving)
-//   mixed   — Tier 1 improving but ≥1 Tier-2 worsening,
-//             OR one Tier-1 better + another Tier-1 worse,
-//             OR Tier 1 stable/better but a Tier-2 has crossed into 'bad' range
-//   stable  — every Tier-1 present is stable, no Tier-2 worsening
-//   partial — no Tier-1 has both cur+prev to compute a trend
 export function classifyComposite(perBiomarker) {
   const reasons = [];
   const conflicts = [];
@@ -242,10 +190,6 @@ export function classifyComposite(perBiomarker) {
     return { outcome: "mixed", reasons: conflicts.slice(), conflicts };
   }
 
-  // Tier 1 stable but a Tier 2 marker is parked in 'bad' zone (no movement).
-  // Symmetric with the t1Better + t2Bad branch above — a chronically off-target
-  // supporting marker still warrants review even when nothing is actively
-  // worsening this visit.
   if (t1Stable.length > 0 && t2Bad.length > 0) {
     conflicts.push(
       `Tier-1 stable but ${t2Bad.map((e) => e.key.toUpperCase()).join(", ")} outside target`,

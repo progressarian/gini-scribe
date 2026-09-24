@@ -36,18 +36,40 @@ const BOUNDS = {
   height: [30, 260],
   bpSys: [50, 300],
   bpDia: [20, 200],
+  bpStandingSys: [50, 300],
+  bpStandingDia: [20, 200],
+  waist: [30, 250],
+  bodyFat: [2, 75],
   pulse: [20, 250],
   spo2: [50, 100],
   temp: [90, 115],
 };
 
-const EMPTY = { weight: "", height: "", bpSys: "", bpDia: "", pulse: "", spo2: "", temp: "" };
+const EMPTY = {
+  weight: "",
+  height: "",
+  bpSys: "",
+  bpDia: "",
+  bpStandingSys: "",
+  bpStandingDia: "",
+  waist: "",
+  bodyFat: "",
+  pulse: "",
+  spo2: "",
+  temp: "",
+};
 
 const FIELD_LABEL = {
   weight: "weight",
   height: "height",
+  bp: "BP",
+  bpStanding: "standing BP",
   bpSys: "BP",
   bpDia: "BP",
+  bpStandingSys: "standing BP",
+  bpStandingDia: "standing BP",
+  waist: "waist",
+  bodyFat: "body fat",
   pulse: "pulse",
   spo2: "SpO2",
   temp: "temperature",
@@ -315,6 +337,10 @@ export default function VitalsStationPage() {
             height: r.height ?? "",
             bpSys: r.bp_sys ?? "",
             bpDia: r.bp_dia ?? "",
+            bpStandingSys: r.bp_standing_sys ?? "",
+            bpStandingDia: r.bp_standing_dia ?? "",
+            waist: r.waist ?? "",
+            bodyFat: r.body_fat ?? "",
             pulse: r.pulse ?? "",
             spo2: r.spo2 ?? "",
             temp: r.temp ?? "",
@@ -463,14 +489,23 @@ export default function VitalsStationPage() {
         height: num(form.height),
         bpSys: num(form.bpSys),
         bpDia: num(form.bpDia),
+        bpStandingSys: num(form.bpStandingSys),
+        bpStandingDia: num(form.bpStandingDia),
+        waist: num(form.waist),
+        bodyFat: num(form.bodyFat),
         pulse: num(form.pulse),
         spo2: num(form.spo2),
         temp: num(form.temp),
         source: spokeAnything ? "voice" : "manual",
       },
       {
-        onSuccess: () => {
-          showToast(`✓ ${patient?.name?.split(" ")[0] || "Patient"} moved to the MO queue`);
+        onSuccess: (saved) => {
+          const who = patient?.name?.split(" ")[0] || "Patient";
+          showToast(
+            saved?.movedTo === "ready_for_doctor"
+              ? `✓ ${who} moved to the consultant's queue — no Chief Endocrinologist step in their plan`
+              : `✓ ${who} moved to the Chief Endocrinologist queue`,
+          );
           // Auto-advance to the next patient, as the prototype does.
           const next = queue.find((q) => q.visitId !== selectedId);
           setSelected(next ? next.visitId : null);
@@ -734,7 +769,7 @@ export default function VitalsStationPage() {
                           {" "}
                           Ignored{" "}
                           {voice.result.rejected
-                            .map((r) => `${r.field} "${r.heard}"`)
+                            .map((r) => `${FIELD_LABEL[r.field] || r.field} "${r.heard}"`)
                             .join(", ")}{" "}
                           as a mishearing.
                         </>
@@ -875,13 +910,14 @@ export default function VitalsStationPage() {
                     <div className="vf-unit">{bmi ? `BMI auto: ${bmi}` : "cm"}</div>
                   </div>
                   <div className="vf">
-                    <div className="vf-lbl">Blood pressure</div>
+                    <div className="vf-lbl">BP sitting</div>
                     <div className="vf-bp">
                       <input
                         className={`vf-inp${outOfRange("bpSys", form.bpSys) ? " bad" : ""}`}
                         type="number"
                         inputMode="numeric"
                         placeholder="Sys"
+                        aria-label="Sitting systolic"
                         style={{ flex: 1 }}
                         value={form.bpSys}
                         onChange={set("bpSys")}
@@ -892,6 +928,7 @@ export default function VitalsStationPage() {
                         type="number"
                         inputMode="numeric"
                         placeholder="Dia"
+                        aria-label="Sitting diastolic"
                         style={{ flex: 1 }}
                         value={form.bpDia}
                         onChange={set("bpDia")}
@@ -899,6 +936,68 @@ export default function VitalsStationPage() {
                     </div>
                     <div className="vf-unit">
                       mmHg{last?.bp_sys ? ` · Last: ${last.bp_sys}/${last.bp_dia}` : ""}
+                    </div>
+                  </div>
+                  <div className="vf">
+                    <div className="vf-lbl">BP standing</div>
+                    <div className="vf-bp">
+                      <input
+                        className={`vf-inp${outOfRange("bpStandingSys", form.bpStandingSys) ? " bad" : ""}`}
+                        type="number"
+                        inputMode="numeric"
+                        placeholder="Sys"
+                        aria-label="Standing systolic"
+                        style={{ flex: 1 }}
+                        value={form.bpStandingSys}
+                        onChange={set("bpStandingSys")}
+                      />
+                      <span>/</span>
+                      <input
+                        className={`vf-inp${outOfRange("bpStandingDia", form.bpStandingDia) ? " bad" : ""}`}
+                        type="number"
+                        inputMode="numeric"
+                        placeholder="Dia"
+                        aria-label="Standing diastolic"
+                        style={{ flex: 1 }}
+                        value={form.bpStandingDia}
+                        onChange={set("bpStandingDia")}
+                      />
+                    </div>
+                    <div className="vf-unit">
+                      mmHg
+                      {last?.bp_standing_sys
+                        ? ` · Last: ${Number(last.bp_standing_sys)}/${Number(last.bp_standing_dia)}`
+                        : ""}
+                    </div>
+                  </div>
+                  <div className="vf">
+                    <div className="vf-lbl">Waist (cm)</div>
+                    <input
+                      className={`vf-inp${outOfRange("waist", form.waist) ? " bad" : form.waist ? " ok" : ""}`}
+                      type="number"
+                      step="0.1"
+                      inputMode="decimal"
+                      placeholder="e.g. 92"
+                      value={form.waist}
+                      onChange={set("waist")}
+                    />
+                    <div className="vf-unit">
+                      cm{last?.waist ? ` · Last: ${Number(last.waist)}` : ""}
+                    </div>
+                  </div>
+                  <div className="vf">
+                    <div className="vf-lbl">Body fat (%)</div>
+                    <input
+                      className={`vf-inp${outOfRange("bodyFat", form.bodyFat) ? " bad" : form.bodyFat ? " ok" : ""}`}
+                      type="number"
+                      step="0.1"
+                      inputMode="decimal"
+                      placeholder="e.g. 28"
+                      value={form.bodyFat}
+                      onChange={set("bodyFat")}
+                    />
+                    <div className="vf-unit">
+                      %{last?.body_fat ? ` · Last: ${Number(last.body_fat)}` : ""}
                     </div>
                   </div>
                   <div className="vf">
@@ -990,7 +1089,9 @@ export default function VitalsStationPage() {
                           ? "Confirm you have taken the reading again"
                           : correcting
                             ? "Already recorded — saving updates the reading, the patient stays where they are"
-                            : "Patient moves to the Chief Endocrinologist queue automatically"}
+                            : patient?.skipsChief
+                              ? "Patient moves to the consultant's queue — their plan has no Chief Endocrinologist step"
+                              : "Patient moves to the Chief Endocrinologist queue automatically"}
                     </div>
                   </div>
                   <button className="db-btn" disabled={!canSave} onClick={submit}>

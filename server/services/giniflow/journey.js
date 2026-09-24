@@ -80,6 +80,19 @@ const shapeStep = (r) => ({
   source: r.source,
 });
 
+export async function planSkips(db, visitId, chainStatuses) {
+  const { rows } = await db.query(
+    `SELECT EXISTS (SELECT 1 FROM giniflow_visit_steps WHERE visit_id = $1) AS planned,
+            EXISTS (SELECT 1 FROM giniflow_visit_steps
+                     WHERE visit_id = $1 AND chain_status = ANY($2::text[]) AND status <> 'skipped')
+              AS has_stop`,
+    [visitId, chainStatuses],
+  );
+  return !!rows[0]?.planned && !rows[0].has_stop;
+}
+
+export const PLAN_STOP = { vitals: ["with_vitals"], chief: ["with_sd"], doctor: ["with_doctor"] };
+
 const clampMinutes = (v) => Math.min(600, Math.max(0, Math.round(Number(v) || 0)));
 
 // A HealthRay case is registered at their counter, billed there, and its
@@ -513,6 +526,30 @@ export async function checkInWithJourney(
         forColumn("with_doctor"),
       ],
     );
+    const { rows: nowAt } = await client.query(
+      `SELECT current_status FROM giniflow_visits WHERE id = $1`,
+      [visitId],
+    );
+    if (
+      nowAt[0]?.current_status === "checked_in" &&
+      (await planSkips(client, visitId, PLAN_STOP.vitals)) &&
+      (await planSkips(client, visitId, PLAN_STOP.chief)) &&
+      !(await planSkips(client, visitId, PLAN_STOP.doctor))
+    ) {
+      await client.query("SAVEPOINT straight_to_consultant");
+      try {
+        await advanceStatus(client, {
+          visitId,
+          toStatus: "ready_for_doctor",
+          actorRole: "system",
+          allowSkip: true,
+          meta: { reason: "plan_has_no_vitals_or_chief_step", after: "checked_in" },
+        });
+        await client.query("RELEASE SAVEPOINT straight_to_consultant");
+      } catch {
+        await client.query("ROLLBACK TO SAVEPOINT straight_to_consultant");
+      }
+    }
     await client.query("COMMIT");
     const journey = await getJourney(visitId, db);
     const { rows } = await db.query(

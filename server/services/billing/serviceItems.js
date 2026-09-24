@@ -291,6 +291,37 @@ function cleanReason(value) {
   return reason;
 }
 
+export const DESK_SEARCH_LIMIT = 30;
+
+export async function searchDeskItems(filters = {}, db = pool) {
+  const q = typeof filters.q === "string" ? filters.q.trim() : "";
+  const asked = cleanId(filters.limit, "limit") ?? DESK_SEARCH_LIMIT;
+  const limit = Math.min(asked, DESK_SEARCH_LIMIT);
+  const params = [limit];
+  let match = "";
+  if (q) {
+    params.push(`%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+    match = `AND (i.name ILIKE $2 OR i.code ILIKE $2)`;
+  }
+  const { rows } = await db.query(
+    `SELECT i.id, i.code, i.name, i.kind, i.unit, i.allow_quantity, i.max_quantity,
+            i.doctor_id, s.name AS subgroup_name, g.name AS group_name
+       FROM service_items i
+       JOIN service_subgroups s ON s.id = i.subgroup_id
+       JOIN service_groups g ON g.id = s.group_id
+      WHERE i.is_active AND s.is_active AND g.is_active ${match}
+      ORDER BY i.name, i.id
+      LIMIT $1`,
+    params,
+  );
+  return {
+    items: rows.map((row) => ({
+      ...row,
+      max_quantity: row.max_quantity === null ? null : Number(row.max_quantity),
+    })),
+  };
+}
+
 export async function listItems(filters = {}, db = pool) {
   const where = [];
   const params = [];

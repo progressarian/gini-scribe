@@ -1,3 +1,4 @@
+import { planSkips, PLAN_STOP } from "./journey.js";
 import pool from "../../config/db.js";
 import { advanceStatus, returnToQueue, budgetColour, IST_TODAY } from "./statusEngine.js";
 import { getSlaConfig, budgetLookup } from "./board.js";
@@ -75,6 +76,13 @@ const QUEUE_SQL = `
      -- reached the consultation statuses. They have no vitals leg: the lab track
      -- is their whole visit.
      AND NOT ${labOnlyPredicate("v", "$4")}
+     AND NOT (
+       EXISTS (SELECT 1 FROM giniflow_visit_steps ps WHERE ps.visit_id = v.id)
+       AND NOT EXISTS (
+         SELECT 1 FROM giniflow_visit_steps ps
+          WHERE ps.visit_id = v.id AND ps.chain_status = 'with_vitals' AND ps.status <> 'skipped'
+       )
+     )
      AND (
        $3::text IS NULL
        OR p.name ILIKE '%' || $3 || '%'
@@ -328,7 +336,8 @@ export async function getVitalsPatient(visitId, db = pool) {
   // the shared clinical `vitals` table, which is where a patient's history
   // actually lives — Gini Flow writes its own readings but has no history yet.
   const { rows: last } = await db.query(
-    `SELECT weight, height, bp_sys, bp_dia, pulse, spo2, temp, recorded_at
+    `SELECT weight, height, bp_sys, bp_dia, bp_standing_sys, bp_standing_dia, waist, body_fat,
+            pulse, spo2, temp, recorded_at
        FROM vitals
       WHERE patient_id = $1 AND recorded_at::date < (NOW() AT TIME ZONE 'Asia/Kolkata')::date
       ORDER BY recorded_at DESC LIMIT 1`,
@@ -336,7 +345,8 @@ export async function getVitalsPatient(visitId, db = pool) {
   );
 
   const { rows: current } = await db.query(
-    `SELECT weight, height, bmi, bp_sys, bp_dia, pulse, spo2, temp, source, recorded_at
+    `SELECT weight, height, bmi, bp_sys, bp_dia, bp_standing_sys, bp_standing_dia, waist, body_fat,
+            pulse, spo2, temp, source, recorded_at
        FROM giniflow_vitals WHERE visit_id = $1 ORDER BY recorded_at DESC LIMIT 1`,
     [visitId],
   );
@@ -356,6 +366,7 @@ export async function getVitalsPatient(visitId, db = pool) {
     allergyNote: visit.allergy_note || null,
     lastVisit: last[0] || null,
     recorded: current[0] || null,
+    skipsChief: await planSkipsChief(db, visitId),
   };
 }
 
@@ -395,9 +406,25 @@ export async function saveAllergy(visitId, { status, note = null, actorId = null
   return rows[0];
 }
 
+export const planSkipsChief = (db, visitId) => planSkips(db, visitId, PLAN_STOP.chief);
+
 export async function saveVitals(
   visitId,
-  { weight, height, bpSys, bpDia, pulse, spo2, temp, source = "manual", actorId = null },
+  {
+    weight,
+    height,
+    bpSys,
+    bpDia,
+    bpStandingSys,
+    bpStandingDia,
+    waist,
+    bodyFat,
+    pulse,
+    spo2,
+    temp,
+    source = "manual",
+    actorId = null,
+  },
   db = pool,
 ) {
   const client = await db.connect();
@@ -415,7 +442,19 @@ export async function saveVitals(
     // "Vitals just taken" with nothing under it, and the vitals budget measured
     // a station that took no reading. All three vitals rows on record are this.
     if (
-      [weight, height, bpSys, bpDia, pulse, spo2, temp].every((v) => v === null || v === undefined)
+      [
+        weight,
+        height,
+        bpSys,
+        bpDia,
+        bpStandingSys,
+        bpStandingDia,
+        waist,
+        bodyFat,
+        pulse,
+        spo2,
+        temp,
+      ].every((v) => v === null || v === undefined)
     )
       throw Object.assign(new Error("Enter at least one reading before marking vitals done"), {
         status: 400,
@@ -424,8 +463,9 @@ export async function saveVitals(
     const bmi = bmiOf(weight, height);
     const saved = await client.query(
       `INSERT INTO giniflow_vitals
-         (visit_id, patient_id, weight, height, bmi, bp_sys, bp_dia, pulse, spo2, temp, source, recorded_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+         (visit_id, patient_id, weight, height, bmi, bp_sys, bp_dia, pulse, spo2, temp, source,
+          recorded_by, bp_standing_sys, bp_standing_dia, waist, body_fat)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
        RETURNING id, recorded_at`,
       [
         visitId,
@@ -440,12 +480,17 @@ export async function saveVitals(
         temp ?? null,
         source,
         actorId,
+        bpStandingSys ?? null,
+        bpStandingDia ?? null,
+        waist ?? null,
+        bodyFat ?? null,
       ],
     );
 
     // Only move a patient forward. A correction to an already-recorded visit
     // saves the reading without dragging them back through the chain.
     const from = visit.rows[0].current_status;
+    let movedTo = null;
     if (["checked_in", "vitals_pending", "with_vitals"].includes(from)) {
       await advanceStatus(client, {
         visitId,
@@ -459,6 +504,9 @@ export async function saveVitals(
             height,
             bmi,
             bp: bpSys && bpDia ? `${bpSys}/${bpDia}` : null,
+            bpStanding: bpStandingSys && bpStandingDia ? `${bpStandingSys}/${bpStandingDia}` : null,
+            waist,
+            bodyFat,
             pulse,
             spo2,
             temp,
@@ -466,6 +514,23 @@ export async function saveVitals(
           source,
         },
       });
+      movedTo = "vitals_done";
+      if (await planSkipsChief(client, visitId)) {
+        await client.query("SAVEPOINT straight_to_consultant");
+        try {
+          await advanceStatus(client, {
+            visitId,
+            toStatus: "ready_for_doctor",
+            actorRole: "system",
+            allowSkip: true,
+            meta: { reason: "plan_has_no_chief_step", after: "vitals_done" },
+          });
+          await client.query("RELEASE SAVEPOINT straight_to_consultant");
+          movedTo = "ready_for_doctor";
+        } catch {
+          await client.query("ROLLBACK TO SAVEPOINT straight_to_consultant");
+        }
+      }
     }
 
     await client.query("COMMIT");
@@ -475,7 +540,7 @@ export async function saveVitals(
     // so a retry (or `backfillPromotions`) can always finish the job.
     promoteQuietly(promoteVitals, saved.rows[0].id);
 
-    return { id: saved.rows[0].id, recordedAt: saved.rows[0].recorded_at, bmi };
+    return { id: saved.rows[0].id, recordedAt: saved.rows[0].recorded_at, bmi, movedTo };
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;

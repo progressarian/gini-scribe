@@ -1,8 +1,12 @@
+import { rupeesFromPaise } from "../../../shared/labPayment.js";
+
 export const rupees = (n) => {
   const amount = Number(n || 0);
   const paise = Number.isInteger(amount) ? 0 : 2;
   return `₹${amount.toLocaleString("en-IN", { minimumFractionDigits: paise, maximumFractionDigits: 2 })}`;
 };
+
+export const fromPaise = (amount) => rupees(rupeesFromPaise(Number(amount || 0)));
 
 export const moneyTyped = (value) => {
   const [whole, ...rest] = value.replace(/[^\d.]/g, "").split(".");

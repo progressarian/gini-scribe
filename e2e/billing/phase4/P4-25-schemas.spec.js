@@ -4,6 +4,7 @@ import { assertTestDatabase } from "../../setup/guard.mjs";
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 
 const schemas = await import("../../../server/schemas/index.js");
+const { MONEY_MAX } = await import("../../../server/services/billing/common.js");
 const { validate, validateQuery } = await import("../../../server/middleware/validate.js");
 
 const LABELS = schemas.BILLING_DESK_LABELS;
@@ -354,5 +355,45 @@ test.describe("P4-25 phase 4 request schemas", () => {
     );
     expect((await asked(schemas.billingReceiptQuerySchema, { payment_id: "7" })).status).toBe(400);
     expect((await asked(schemas.billingReceiptQuerySchema, { receipt_no: "" })).status).toBe(400);
+    const both = await asked(schemas.billingReceiptQuerySchema, {
+      payment_id: VISIT,
+      receipt_no: "R/1",
+    });
+    expect(both.status).toBe(400);
+    expect(both.body.error).toMatch(/not both/i);
+  });
+
+  test("an amount can't be a number the money column could not hold", async () => {
+    const payment = (amount) => ({ version: 1, payments: [{ mode: "cash", amount }] });
+    await accepted(schemas.billingPaymentsTakeSchema, payment(MONEY_MAX), "the largest amount");
+    await refused(
+      schemas.billingPaymentsTakeSchema,
+      payment(MONEY_MAX + 1),
+      /too large/i,
+      "one rupee more than the column holds",
+    );
+    for (const [label, amount] of [
+      ["infinity", Infinity],
+      ["a number too big for JavaScript", 1e400],
+      ["not a number", NaN],
+      ["true", true],
+      ["an object", {}],
+      ["an amount in exponent form", "1e3"],
+      ["a negative amount as text", "-5"],
+    ]) {
+      await refused(schemas.billingPaymentsTakeSchema, payment(amount), null, label);
+    }
+    await refused(
+      schemas.billingShiftCloseSchema,
+      { counted_cash: MONEY_MAX + 1 },
+      /too large/i,
+      "a drawer bigger than the column holds",
+    );
+    await refused(
+      schemas.billingShiftCloseSchema,
+      { counted_cash: -1 },
+      /0 or more/i,
+      "a negative drawer",
+    );
   });
 });

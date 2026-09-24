@@ -199,4 +199,38 @@ test.describe.serial("P4-24 receipt PDF", () => {
     ]);
     expect(Math.round(Number(stored.amount) * 100)).toBe(single.receipts[0].amount);
   });
+
+  test("7. the name of whoever took the money, and every other field, is escaped", async () => {
+    const LONG = `P4${"z".repeat(300)}`;
+    const view = {
+      payment: {
+        id: "11111111-2222-3333-4444-555555555555",
+        receipt_no: `R/${NASTY}`,
+        received_at: new Date().toISOString(),
+        amount: 50000,
+        mode: "card",
+        reference: `</td><td>stolen`,
+        received_by_name: `Desk ${NASTY}`,
+      },
+      bill: { bill_no: `B/${NASTY}` },
+      patient: { name: `${LONG} ${NASTY}`, file_no: `F/${NASTY}` },
+      settings: { bill_footer: `Footer ${NASTY}` },
+      hospital: null,
+      logo: "",
+    };
+    const html = receiptPdf.buildReceiptHtml(view);
+    expect(html).not.toContain("<script>");
+    expect(fieldOf(html, "Received by")).toBe(`Desk ${ESCAPED}`);
+    expect(fieldOf(html, "Reference")).toBe("&lt;/td&gt;&lt;td&gt;stolen");
+    expect(fieldOf(html, "Receipt number")).toBe(`R/${ESCAPED}`);
+    expect(fieldOf(html, "Bill number")).toBe(`B/${ESCAPED}`);
+    expect(fieldOf(html, "UHID")).toBe(`F/${ESCAPED}`);
+    expect(fieldOf(html, "Patient")).toBe(`${LONG} ${ESCAPED}`);
+    expect(html).toContain(`Footer ${ESCAPED}`);
+    expect((html.match(/<td[ >]/g) ?? []).length).toBe((html.match(/<\/td>/g) ?? []).length);
+
+    const name = receiptPdf.buildReceiptFileName([view]);
+    expect(name).toMatch(/^Receipt_[a-z0-9_]+_[a-z0-9_]+\.pdf$/);
+    expect(name.length).toBeLessThanOrEqual(100);
+  });
 });

@@ -3374,6 +3374,8 @@ router.post("/visit/:patientId/vitals", async (req, res) => {
     const {
       bp_sys,
       bp_dia,
+      bp_standing_sys,
+      bp_standing_dia,
       pulse,
       temp,
       spo2,
@@ -3404,8 +3406,8 @@ router.post("/visit/:patientId/vitals", async (req, res) => {
       return res.json({ ok: true, id: existing.rows[0].id, deduplicated: true });
     }
     const { rows } = await pool.query(
-      `INSERT INTO vitals (patient_id, recorded_at, bp_sys, bp_dia, pulse, temp, spo2, weight, height, bmi, body_fat, muscle_mass, waist, rbs, meal_type)
-       VALUES ($1, COALESCE($2::timestamptz, NOW()), $3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+      `INSERT INTO vitals (patient_id, recorded_at, bp_sys, bp_dia, pulse, temp, spo2, weight, height, bmi, body_fat, muscle_mass, waist, rbs, meal_type, bp_standing_sys, bp_standing_dia)
+       VALUES ($1, COALESCE($2::timestamptz, NOW()), $3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
        RETURNING id, recorded_at, bp_sys, bp_dia, pulse, temp, spo2, weight, height, rbs, meal_type`,
       [
         pid,
@@ -3423,6 +3425,8 @@ router.post("/visit/:patientId/vitals", async (req, res) => {
         num(waist),
         num(rbs),
         t(meal_type, 50),
+        num(bp_standing_sys),
+        num(bp_standing_dia),
       ],
     );
     // Fire-and-forget push so the patient sees doctor-entered BP/weight on
@@ -3445,6 +3449,8 @@ router.patch("/visit/:patientId/vitals/:id", async (req, res) => {
     const allowed = [
       "bp_sys",
       "bp_dia",
+      "bp_standing_sys",
+      "bp_standing_dia",
       "pulse",
       "temp",
       "spo2",
@@ -3476,6 +3482,31 @@ router.patch("/visit/:patientId/vitals/:id", async (req, res) => {
     handleError(res, e, "Update vitals");
   }
 });
+
+async function saveStandingOnTodaysClinicRow(pid, fields, body) {
+  const values = fields.map((f) => num(body[f]));
+  const today = await pool.query(
+    `SELECT id FROM vitals
+      WHERE patient_id = $1
+        AND (recorded_at AT TIME ZONE 'Asia/Kolkata')::date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date
+      ORDER BY recorded_at DESC, id DESC LIMIT 1`,
+    [pid],
+  );
+  if (today.rows[0]) {
+    const sets = fields.map((f, i) => `${f} = $${i + 1}`).join(", ");
+    await pool.query(`UPDATE vitals SET ${sets} WHERE id = $${fields.length + 1}`, [
+      ...values,
+      today.rows[0].id,
+    ]);
+    return;
+  }
+  if (values.every((v) => v === null)) return;
+  await pool.query(
+    `INSERT INTO vitals (patient_id, recorded_at, ${fields.join(", ")})
+     VALUES ($1, NOW(), ${fields.map((_, i) => `$${i + 2}`).join(", ")})`,
+    [pid, ...values],
+  );
+}
 
 // ── PATCH /visit/:patientId/app-vitals/:logId — edit a patient-app row ──
 // Doctor edits a vital that was originally logged from the Genie app. The
@@ -3513,23 +3544,28 @@ router.patch("/visit/:patientId/app-vitals/:logId", async (req, res) => {
       sets.push(`${col} = $${vals.length}`);
       genieFields[col] = v;
     }
-    if (!sets.length) return res.json({ ok: true });
-    vals.push(logId, pid);
-    const upd = await pool.query(
-      `UPDATE patient_vitals_log SET ${sets.join(", ")}
-       WHERE id = $${vals.length - 1} AND patient_id = $${vals.length}
-       RETURNING id, genie_id`,
-      vals,
+    const standing = ["bp_standing_sys", "bp_standing_dia"].filter(
+      (f) => req.body[f] !== undefined,
     );
-    if (!upd.rows[0]) {
-      return res.status(404).json({ error: "patient_vitals_log row not found" });
-    }
-    const genieId = upd.rows[0].genie_id;
-    if (genieId) {
-      updateGenieVitalsByGenieId(genieId, genieFields).catch((e) =>
-        console.warn("[Visit] App-vitals push skipped:", e.message),
+    if (sets.length) {
+      vals.push(logId, pid);
+      const upd = await pool.query(
+        `UPDATE patient_vitals_log SET ${sets.join(", ")}
+         WHERE id = $${vals.length - 1} AND patient_id = $${vals.length}
+         RETURNING id, genie_id`,
+        vals,
       );
+      if (!upd.rows[0]) {
+        return res.status(404).json({ error: "patient_vitals_log row not found" });
+      }
+      const genieId = upd.rows[0].genie_id;
+      if (genieId) {
+        updateGenieVitalsByGenieId(genieId, genieFields).catch((e) =>
+          console.warn("[Visit] App-vitals push skipped:", e.message),
+        );
+      }
     }
+    if (standing.length) await saveStandingOnTodaysClinicRow(pid, standing, req.body);
     res.json({ ok: true });
   } catch (e) {
     handleError(res, e, "Update app vitals");

@@ -6,6 +6,14 @@ import { getSettings } from "./billingSettings.js";
 import { httpError, inTransaction } from "./transaction.js";
 import { auditFields } from "./common.js";
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function cleanUuid(value, label) {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!UUID.test(text)) throw httpError(400, `Choose a valid ${label}`);
+  return text.toLowerCase();
+}
+
 const nothing = (error) => ({
   ok: false,
   error: error.message,
@@ -161,7 +169,7 @@ export async function notPricedForVisit(visitId, db = pool) {
        LEFT JOIN service_items i ON i.test_catalog_id = c.id AND i.is_active
       WHERE o.visit_id = $1 AND i.id IS NULL
       ORDER BY 1`,
-    [visitId],
+    [cleanUuid(visitId, "visit")],
   );
   return rows.map((row) => row.test_name);
 }

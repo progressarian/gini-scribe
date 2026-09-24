@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   useReceptionQueue,
   useClearPayment,
@@ -30,7 +31,13 @@ import StationNotice from "../../components/giniflow/StationNotice";
 import JourneyBuilder from "../../components/giniflow/JourneyBuilder";
 import { useFlowStepCatalog, useFlowVisitTypes } from "../../queries/hooks/useFlow";
 import { stepPassesConditions } from "../../../shared/giniflowConditions.js";
-import { hasNotStarted, isSampleBreak, pauseReasonLabel } from "../../../shared/giniflowStatus.js";
+import {
+  columnForStatus,
+  hasNotStarted,
+  isSampleBreak,
+  pauseReasonLabel,
+} from "../../../shared/giniflowStatus.js";
+import { useGiniflowTimeline } from "../../queries/hooks/useGiniflowBoard";
 import { paise, refundOnTestCancel, rupeesFromPaise } from "../../../shared/labPayment.js";
 import { amountLeft, cleanAmount } from "../../utils/amountInput.js";
 import {
@@ -1338,8 +1345,17 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
 // them "with the consultant" for the whole time they were at the X-Ray.
 function JourneyPanel({ arrival, onClose }) {
   const { data, isLoading } = useJourney(arrival.visitId);
+  const { data: timeline } = useGiniflowTimeline(arrival.visitId);
   const step = useJourneyStep();
   const steps = data?.steps || [];
+  const planColumns = new Set(
+    steps.map((s) => s.chainStatus && columnForStatus(s.chainStatus)).filter(Boolean),
+  );
+  if (planColumns.has("doctor")) planColumns.add("wait_doctor");
+  const floorSteps = (timeline?.steps || []).filter((t) => {
+    const column = columnForStatus(t.status);
+    return column && column !== "checked_in" && !planColumns.has(column);
+  });
   const doctorName = arrival.assignedDoctorName || arrival.assignedSdName || null;
 
   return (
@@ -1372,6 +1388,20 @@ function JourneyPanel({ arrival, onClose }) {
                     ? ` · next: ${data.nextStep}`
                     : ""}
               </div>
+            )}
+            {floorSteps.length > 0 && (
+              <>
+                <div className="dp-hint">On the floor — stops outside this visit&apos;s plan</div>
+                {floorSteps.map((t) => (
+                  <div className="jp-row" key={`floor-${t.status}`}>
+                    <span className={`jp-dot ${t.isCurrent ? "jp-in_progress" : "jp-done"}`} />
+                    <span className="jp-name">{t.label}</span>
+                    <span className="jp-min">{clock(t.enteredAt)}</span>
+                    <span className="jp-status">{t.isCurrent ? "now" : "done"}</span>
+                  </div>
+                ))}
+                <div className="dp-hint">Planned stops</div>
+              </>
             )}
             {steps.map((s, i) => {
               // Its turn: everything before it is finished, one way or another.
@@ -1479,6 +1509,25 @@ function ArrivalRow({ arrival, children, note, warning, wide }) {
   );
 }
 
+function BillButton({ visitId }) {
+  const canBill = hasCapability(
+    useAuthStore((st) => st.currentDoctor?.role),
+    CAPS.BILLING_DESK,
+  );
+  if (!canBill || !visitId) return null;
+  return (
+    <Link
+      className="st-btn st-btn-ghost"
+      to={`/giniflow/station/billing?visit=${visitId}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      title="Open the billing counter for this patient — the desk list stays open here"
+    >
+      Bill
+    </Link>
+  );
+}
+
 function ExpectedRow({ arrival, onAct, onCheckIn, busy }) {
   const [reason, setReason] = useState(null);
 
@@ -1539,6 +1588,7 @@ function ExpectedRow({ arrival, onAct, onCheckIn, busy }) {
       <button className="st-btn st-btn-ghost" disabled={busy} onClick={() => setReason("")}>
         Cancel
       </button>
+      <BillButton visitId={arrival.visitId} />
     </ArrivalRow>
   );
 }
@@ -1816,6 +1866,7 @@ export function ArrivalsTab({
                         : "⏸ Pause"}
                 </button>
               )}
+              <BillButton visitId={a.visitId} />
               <span className="ar-since">
                 {a.paused
                   ? `${pauseReasonLabel(a.pausedReason) || "On break"} · on break since ${clock(a.pausedAt)}`

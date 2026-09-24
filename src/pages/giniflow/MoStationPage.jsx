@@ -77,10 +77,31 @@ const WAIT_WORD = {
 const VITAL_ROWS = [
   {
     key: "bp",
-    label: "BP",
+    label: "BP sitting",
     of: (v) => (v?.bp_sys ? `${v.bp_sys}/${v.bp_dia}` : null),
     delta: (a, b) => a.bp_sys - b.bp_sys,
     unit: "",
+  },
+  {
+    key: "bpStanding",
+    label: "BP standing",
+    of: (v) => (v?.bp_standing_sys ? `${v.bp_standing_sys}/${v.bp_standing_dia}` : null),
+    delta: (a, b) => a.bp_standing_sys - b.bp_standing_sys,
+    unit: "",
+  },
+  {
+    key: "waist",
+    label: "Waist",
+    of: (v) => v?.waist ?? null,
+    delta: (a, b) => a.waist - b.waist,
+    unit: " cm",
+  },
+  {
+    key: "bodyFat",
+    label: "Body fat",
+    of: (v) => v?.body_fat ?? null,
+    delta: (a, b) => a.body_fat - b.body_fat,
+    unit: "%",
   },
   {
     key: "weight",

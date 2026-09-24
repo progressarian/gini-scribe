@@ -269,25 +269,48 @@ test.describe.serial("P3-18 payment rule, discount and consultant fee routes", (
 
   test("5. discounts: today's usage is counted per rule and per doctor", async () => {
     const client = await getPool().connect();
+    let seat = 0;
     try {
       await client.query("BEGIN");
-      await client.query(`
-        CREATE TABLE bills (id SERIAL PRIMARY KEY, patient_id INT, bill_date DATE, status TEXT);
-        CREATE TABLE bill_lines (id SERIAL PRIMARY KEY, bill_id INT, doctor_id INT,
-                                 is_live BOOLEAN NOT NULL DEFAULT TRUE);
-        CREATE TABLE bill_line_discounts (id SERIAL PRIMARY KEY, bill_line_id INT, rule_id INT);`);
+      const patient = (
+        await client.query(
+          `INSERT INTO patients (name, file_no, age, sex) VALUES ($1, $2, 40, 'Male')
+           RETURNING id`,
+          [`P318R Usage ${tag}`, `F318R-${tag}`],
+        )
+      ).rows[0].id;
       const use = async (date, doctor, status = "final") => {
+        seat += 1;
+        const visit = await client.query(
+          `INSERT INTO giniflow_visits (patient_id, visit_date)
+           VALUES ($1, DATE '2015-01-01' + $2::int) RETURNING id`,
+          [patient, seat],
+        );
+        const cancelled = status === "cancelled";
         const bill = await client.query(
-          `INSERT INTO bills (patient_id, bill_date, status) VALUES (900001, $1, $2) RETURNING id`,
-          [date, status],
+          `INSERT INTO bills (patient_id, visit_id, bill_date, status, bill_no, series, fy,
+                              finalised_at, cancelled_at, cancel_reason)
+           VALUES ($1, $2, $3::date, $4, $5, 'MAIN', '2026-27', NOW(), $6, $7)
+           RETURNING id`,
+          [
+            patient,
+            visit.rows[0].id,
+            date,
+            status,
+            `P318R/${tag}/${String(seat).padStart(4, "0")}`,
+            cancelled ? new Date() : null,
+            cancelled ? "P318R scratch" : null,
+          ],
         );
         const line = await client.query(
-          `INSERT INTO bill_lines (bill_id, doctor_id) VALUES ($1, $2) RETURNING id`,
-          [bill.rows[0].id, doctor],
+          `INSERT INTO bill_lines (bill_id, visit_id, line_no, service_item_id, bill_name, doctor_id)
+           VALUES ($1, $2, 1, $3, 'P318R scratch line', $4) RETURNING id`,
+          [bill.rows[0].id, visit.rows[0].id, ids.dressing, doctor],
         );
         await client.query(
-          `INSERT INTO bill_line_discounts (bill_line_id, rule_id) VALUES ($1, $2)`,
-          [line.rows[0].id, ids.coupon],
+          `INSERT INTO bill_line_discounts (bill_line_id, rule_id, method, code, amount)
+           VALUES ($1, $2, 'code', $3, 1.00)`,
+          [line.rows[0].id, ids.coupon, `CC50${T}`],
         );
       };
       const today = indiaToday();
@@ -304,8 +327,9 @@ test.describe.serial("P3-18 payment rule, discount and consultant fee routes", (
         count: 3,
         by_doctor: [{ doctor_id: ids.doctor, name: `Dr Route P318R ${tag}`, count: 2 }],
       });
-      const other = rules.find((r) => r.id !== ids.coupon);
-      if (other) expect(other.usage_today.count).toBe(0);
+      for (const other of rules.filter((r) => r.id !== ids.coupon && r.name?.endsWith(tag))) {
+        expect(other.usage_today.count, other.name).toBe(0);
+      }
     } finally {
       await client.query("ROLLBACK").catch(() => {});
       client.release();

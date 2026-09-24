@@ -1,9 +1,3 @@
-// Smart Drug Warnings Engine
-// Deterministic rule-based system (no AI) — all thresholds approved by Dr. Anil Bhansali
-// Do not change threshold values without explicit approval
-
-// ─── Helpers ───────────────────────────────────────────────────────────────
-
 function num(labResults, name) {
   if (!labResults) return null;
   const lab = labResults.find((l) => {
@@ -388,7 +382,6 @@ export function getWarning(drugName, context = {}) {
     }
   }
 
-  // BETA BLOCKERS (Metoprolol, Bisoprolol, etc.)
   if (isBetaBlocker(name)) {
     if (
       hasDx(
@@ -432,7 +425,5 @@ export function getWarning(drugName, context = {}) {
       };
     }
   }
-
-  // Unknown drug
   return null;
 }

@@ -56,6 +56,21 @@ const closeOpenShifts = () =>
     [USERS.reception.id],
   );
 
+const fieldOf = (html, label) =>
+  new RegExp(`<div class="bp-label">${label}</div><div class="bp-value">([^<]*)</div>`).exec(
+    html,
+  )?.[1] ?? null;
+
+const cellsOf = (html) => (html.match(/<td[^>]*>([^<]*)<\/td>/g) ?? []).join("\n");
+
+const esc = (value) =>
+  String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
 const totalOf = (html, label) =>
   new RegExp(`<td>${label}</td><td class="bp-num">([^<]*)</td>`).exec(html)?.[1] ?? null;
 
@@ -121,6 +136,7 @@ test.describe.serial("P4-23 bill PDF", () => {
     await query(`DELETE FROM cash_shifts WHERE user_id = $1`, [USERS.reception.id]).catch(
       () => null,
     );
+    await query(`DELETE FROM tax_codes WHERE code = $1`, [`P4TAX-${tag}`]).catch(() => null);
     if (settingsWas) {
       await query(
         `UPDATE billing_settings SET gst_enabled = $1, gstin = $2, state_code = $3,
@@ -369,5 +385,93 @@ test.describe.serial("P4-23 bill PDF", () => {
       expect(printed.pdf.length).toBeGreaterThan(2000);
       expect(printed.filename).toMatch(/^Bill_.+\.pdf$/);
     }
+  });
+
+  test("10. a bill that carries GST keeps its tax on the page after GST is switched off", async () => {
+    const tax = await one(
+      `INSERT INTO tax_codes (code, sac_hsn, rate_pct) VALUES ($1, '999312', 18) RETURNING id`,
+      [`P4TAX-${tag}`],
+    );
+    const taxed = await one(
+      `INSERT INTO service_items (code, name, subgroup_id, base_price, kind, tax_code_id)
+       VALUES ($1, $2, $3, 1000, 'procedure', $4) RETURNING id`,
+      [`P4-TX-${tag}`, `P4 Taxed ${tag}`, ids.subgroup, tax.id],
+    );
+    await settings.updateSettings(
+      { gstin: GSTIN, legal_name: `P4 Hospital ${tag}`, gst_enabled: true },
+      admin,
+      db,
+    );
+    const visit = await extraVisit(ids, "Gst");
+    const id = await billOn(visit.visit, [taxed.id]);
+    const ready = await bills.readBill(id, db);
+    expect(ready.totals.tax).toBe(18000);
+    await finalise(id);
+
+    await settings.updateSettings({ gst_enabled: false }, admin, db);
+    const html = await htmlFor(id);
+    const stored = await storedTotals(id);
+    expect(paise(stored.tax_amount)).toBe(18000);
+    expect(totalOf(html, "Tax \\(CGST \\+ SGST\\)")).toBe(billPdf.money(paise(stored.tax_amount)));
+    expect(html).toContain("SAC/HSN");
+    expect(html).toContain("999312");
+    expect(html).toContain(GSTIN);
+    expect(
+      paise(stored.actual_amount) -
+        paise(stored.discount_amount) +
+        paise(stored.tax_amount) +
+        paise(stored.round_off),
+    ).toBe(paise(stored.patient_payable));
+    expect(totalOf(html, "Patient payable")).toBe(billPdf.money(paise(stored.patient_payable)));
+
+    const plain = await htmlFor(ids.general);
+    expect(plain).not.toContain("SAC/HSN");
+    expect(plain).not.toContain(GSTIN);
+    await settings.updateSettings({ bill_footer: `P4 footer ${tag}` }, admin, db);
+  });
+
+  test("11. every other entered string on the page is escaped, field by field", async () => {
+    const LONG = `P4${"z".repeat(300)}`;
+    await settings.updateSettings(
+      { gstin: GSTIN, legal_name: `P4 Hospital ${NASTY}`, gst_enabled: true },
+      admin,
+      db,
+    );
+    const visit = await extraVisit(ids, "Esc");
+    await query(`UPDATE patients SET file_no = $2 WHERE id = $1`, [
+      visit.patient,
+      `F4${NASTY}`.slice(0, 60),
+    ]);
+    const item = await one(
+      `INSERT INTO service_items (code, name, subgroup_id, base_price, kind)
+       VALUES ($1, $2, $3, 400, 'procedure') RETURNING id`,
+      [`P4-${NASTY}`.replace(/\s+/g, ""), `${LONG} ${NASTY}`, ids.subgroup],
+    );
+    await query(
+      `UPDATE patient_schemes SET payer_name = $2, print_category_on_bill = TRUE WHERE code = $1`,
+      [ids.pensioner, `P4 payer ${NASTY}`],
+    );
+    const id = await billOn(visit.visit, [item.id]);
+    await bills.setCategory(id, { category: ids.pensioner }, desk, db);
+    await query(`UPDATE bill_lines SET sac_hsn = $2 WHERE bill_id = $1`, [id, `<td>9993</td>`]);
+    const html = await htmlFor(id);
+
+    expect(html).not.toContain("<script>");
+    expect(html).not.toContain("<b>");
+    expect(fieldOf(html, "UHID")).toContain("&lt;script&gt;");
+    expect(fieldOf(html, "Payer")).toBe(`P4 payer ${ESCAPED}`);
+    expect(fieldOf(html, "Billed by")).toBe(`P4 Hospital ${ESCAPED}`);
+    expect(fieldOf(html, "GSTIN")).toBe(GSTIN);
+    expect(cellsOf(html)).toContain(esc(`P4-${NASTY}`.replace(/\s+/g, "")));
+    expect(cellsOf(html)).toContain("&lt;td&gt;9993&lt;/td&gt;");
+    expect(html).toContain(LONG);
+    expect((html.match(/<td[ >]/g) ?? []).length).toBe((html.match(/<\/td>/g) ?? []).length);
+
+    await settings.updateSettings({ gst_enabled: false }, admin, db);
+    await query(
+      `UPDATE patient_schemes SET payer_name = NULL, print_category_on_bill = FALSE
+                  WHERE code = $1`,
+      [ids.pensioner],
+    );
   });
 });

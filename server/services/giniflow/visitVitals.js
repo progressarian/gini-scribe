@@ -18,7 +18,8 @@ import pool from "../../config/db.js";
 // number came from instead of implying the nurse at this station took it.
 
 const GINIFLOW_SQL = `
-  SELECT weight, height, bmi, bp_sys, bp_dia, pulse, spo2, temp, recorded_at,
+  SELECT weight, height, bmi, bp_sys, bp_dia, bp_standing_sys, bp_standing_dia, waist, body_fat,
+         pulse, spo2, temp, recorded_at,
          'station'::text AS reading_source
     FROM giniflow_vitals
    WHERE visit_id = $1
@@ -28,7 +29,8 @@ const GINIFLOW_SQL = `
 // every caller fetches separately — handing it back here would render last
 // month's weight as though it were taken this morning.
 const LEGACY_SQL = `
-  SELECT weight, height, bmi, bp_sys, bp_dia, pulse, spo2, temp, recorded_at,
+  SELECT weight, height, bmi, bp_sys, bp_dia, bp_standing_sys, bp_standing_dia, waist, body_fat,
+         pulse, spo2, temp, recorded_at,
          'healthray'::text AS reading_source
     FROM vitals
    WHERE patient_id = $1
@@ -56,6 +58,10 @@ const shape = (r) =>
     bmi: num(r.bmi),
     bp_sys: num(r.bp_sys),
     bp_dia: num(r.bp_dia),
+    bp_standing_sys: num(r.bp_standing_sys),
+    bp_standing_dia: num(r.bp_standing_dia),
+    waist: num(r.waist),
+    body_fat: num(r.body_fat),
     pulse: num(r.pulse),
     spo2: num(r.spo2),
     temp: num(r.temp),
@@ -77,7 +83,8 @@ export async function todaysVitals(visitId, { patientId, visitDate } = {}, db = 
 export async function previousVitals(patientId, visitDate, db = pool) {
   if (!patientId) return null;
   const { rows } = await db.query(
-    `SELECT weight, height, bmi, bp_sys, bp_dia, pulse, spo2, temp, recorded_at
+    `SELECT weight, height, bmi, bp_sys, bp_dia, bp_standing_sys, bp_standing_dia, waist, body_fat,
+            pulse, spo2, temp, recorded_at
        FROM vitals
       WHERE patient_id = $1
         AND (recorded_at AT TIME ZONE 'Asia/Kolkata')::date < $2::date

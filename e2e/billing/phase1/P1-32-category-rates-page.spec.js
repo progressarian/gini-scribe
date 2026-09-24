@@ -33,6 +33,14 @@ async function openRates(page) {
   );
 }
 
+async function openEditor(page, name, box) {
+  const edit = rates(page).getByRole("button", { name: `Edit rate for ${name}`, exact: true });
+  await expect(async () => {
+    await edit.click();
+    await expect(box).toBeVisible({ timeout: 2000 });
+  }).toPass({ timeout: 20000 });
+}
+
 async function editRate(page, name, values) {
   await rates(page)
     .getByRole("button", { name: `Edit rate for ${name}`, exact: true })
@@ -175,10 +183,9 @@ test.describe.serial("P1-32 category rates page", () => {
   test("4b. review: the rate box takes only an amount", async ({ page }) => {
     await openRates(page);
     await pickCategory(page, SUBS[0].code);
-    await rates(page)
-      .getByRole("button", { name: `Edit rate for ${CONSULT}`, exact: true })
-      .click();
     const rate = rates(page).getByLabel(`Rate for ${CONSULT}`, { exact: true });
+    await openEditor(page, CONSULT, rate);
+    await expect(rate).toHaveValue("");
     await rate.pressSequentially("1e fgjdfhk00");
     await expect(rate).toHaveValue("100");
     await rate.fill("");

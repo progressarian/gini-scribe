@@ -85,8 +85,10 @@ const ServicesSettingsPage = lazyWithRetry(() => import("./pages/billing/Service
 const CategoryRatesPage = lazyWithRetry(() => import("./pages/billing/CategoryRatesPage"));
 const ConsultantFeesPage = lazyWithRetry(() => import("./pages/billing/ConsultantFeesPage"));
 const DiscountsSettingsPage = lazyWithRetry(() => import("./pages/billing/DiscountsSettingsPage"));
+const DeskRequestsPage = lazyWithRetry(() => import("./pages/billing/DeskRequestsPage"));
 const BillingSettingsPage = lazyWithRetry(() => import("./pages/billing/BillingSettingsPage"));
 const BillingImportPage = lazyWithRetry(() => import("./pages/billing/BillingImportPage"));
+const BillingCounterPage = lazyWithRetry(() => import("./pages/billing/BillingCounterPage"));
 const TestCatalogPage = lazyWithRetry(() => import("./pages/TestCatalogPage"));
 const SettingsLayout = lazyWithRetry(() => import("./pages/SettingsLayout"));
 const MedicineCollectionPage = lazyWithRetry(() => import("./pages/MedicineCollectionPage"));
@@ -235,6 +237,7 @@ const router = createBrowserRouter([
                   { path: "category-rates", element: lazyEl(CategoryRatesPage) },
                   { path: "consultant-fees", element: lazyEl(ConsultantFeesPage) },
                   { path: "discounts", element: lazyEl(DiscountsSettingsPage) },
+                  { path: "desk-requests", element: lazyEl(DeskRequestsPage) },
                   { path: "bulk-import", element: lazyEl(BillingImportPage) },
                   { path: "billing", element: lazyEl(BillingSettingsPage) },
                 ],
@@ -276,6 +279,7 @@ const router = createBrowserRouter([
               { path: "/giniflow/station/rx", element: lazyEl(GiniFlowRxPage) },
               { path: "/giniflow/station/pharmacy", element: lazyEl(GiniFlowPharmacyPage) },
               { path: "/giniflow/station/referrals", element: lazyEl(GiniFlowReferralsPage) },
+              { path: "/giniflow/station/billing", element: lazyEl(BillingCounterPage) },
               { path: "/crm/home", element: lazyEl(RepHomePage) },
               { path: "/crm/visit/:doctorId", element: lazyEl(AddVisitPage) },
               { path: "/crm/doctor/:doctorId", element: lazyEl(Doctor360Page) },

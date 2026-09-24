@@ -856,6 +856,11 @@ export const billingPaymentsTakeSchema = z.strictObject(
   objectOnly("Send the payment as an object"),
 );
 
+export const billingItemSearchQuerySchema = z.strictObject({
+  q: z.string().max(100).optional(),
+  limit: count.optional(),
+});
+
 export const billingDuesQuerySchema = z.strictObject({
   patient_id: id.optional(),
   from: realDateText.optional(),
@@ -863,11 +868,16 @@ export const billingDuesQuerySchema = z.strictObject({
   limit: count.optional(),
 });
 
-export const billingReceiptQuerySchema = z.strictObject({
-  payment_id: uuid.optional(),
-  receipt_no: z.string().trim().min(1, "can't be blank").max(SEALED_MAX).optional(),
-  token: z.string().optional(),
-});
+export const billingReceiptQuerySchema = z
+  .strictObject({
+    payment_id: uuid.optional(),
+    receipt_no: z.string().trim().min(1, "can't be blank").max(SEALED_MAX).optional(),
+    token: z.string().optional(),
+  })
+  .refine(
+    (query) => !(query.payment_id && query.receipt_no),
+    "ask for the payment or the receipt number, not both",
+  );
 
 export const billingShiftOpenSchema = deskObject({
   opening_cash: z.union([money, z.null(), blank]).optional(),

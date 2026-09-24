@@ -11,6 +11,7 @@ import {
   billingDraftOpenSchema,
   billingDuesQuerySchema,
   billingFinaliseSchema,
+  billingItemSearchQuerySchema,
   billingLineAddSchema,
   billingLineQuantitySchema,
   billingLineRemoveSchema,
@@ -38,6 +39,8 @@ import * as payments from "../services/billing/payments.js";
 import * as shifts from "../services/billing/cashShifts.js";
 import * as requests from "../services/billing/billingRequests.js";
 import { notPricedForVisit } from "../services/billing/visitLines.js";
+import { deskSettings } from "../services/billing/billingSettings.js";
+import { searchDeskItems } from "../services/billing/serviceItems.js";
 
 const router = Router();
 const BASE = "/billing";
@@ -104,6 +107,19 @@ router.post(
       appointmentId: req.body.appointment_id,
     }),
   ),
+);
+
+router.get(
+  `${BASE}/desk-settings`,
+  desk,
+  run("Desk billing settings", 200, () => deskSettings()),
+);
+
+router.get(
+  `${BASE}/items/search`,
+  desk,
+  validateQuery(billingItemSearchQuerySchema, BILLING_DESK_LABELS),
+  run("Item search", 200, (req) => searchDeskItems({ q: req.query.q, limit: req.query.limit })),
 );
 
 router.get(

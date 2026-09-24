@@ -25,6 +25,7 @@ import {
 } from "../services/giniflow/journey.js";
 import { advanceStatus } from "../services/giniflow/statusEngine.js";
 import { clearPayment } from "../services/giniflow/receptionStation.js";
+import { getVitalsQueue } from "../services/giniflow/vitalsStation.js";
 
 let failures = 0;
 const check = (label, ok, detail = "") => {
@@ -139,7 +140,9 @@ check(
 );
 check(
   "and what is left that nobody can tick automatically is only the real stops",
-  testsPlan.filter((s) => !s.chainStatus).every((s) => /Blood Sample|Billing/.test(s.name)),
+  testsPlan
+    .filter((s) => !s.chainStatus)
+    .every((s) => /Blood Sample|Billing|Lab Processing/.test(s.name)),
 );
 
 // ── Check-in ────────────────────────────────────────────────────────────────
@@ -240,22 +243,29 @@ const added = withEcg.steps.find((s) => s.catalogId === "ecg");
 check("an added ECG has no board column, so the desk ticks it", added?.manual === true);
 
 // A stop with no board column only becomes tickable when the ones before it are
-// finished. Billing sits seventh of eight in every template, and a tick offered
-// from check-in let a patient be marked billed before they had seen the doctor.
+// finished. Billing now opens every template, so the rule is tested on Lab
+// Billing, which sits behind Vitals in the tests journey.
 {
-  const billing = withEcg.steps.find((x) => x.catalogId === "billing");
-  if (billing) {
-    const tooSoon = await setStepStatus(billing.stepId, "done")
+  const vOrder = await bookedVisit("933", "Demo Journey Order");
+  const orderPlan = await checkInWithJourney(vOrder.id, {
+    visitTypeId: "FU_APPT_TESTS",
+    steps: (await defaultPlan("FU_APPT_TESTS")).filter((x) => x.included),
+    actorId: 20,
+    actorRole: "reception",
+  });
+  const labBilling = orderPlan.steps.find((x) => x.catalogId === "lab_billing");
+  if (labBilling) {
+    const tooSoon = await setStepStatus(labBilling.stepId, "done")
       .then(() => false)
       .catch((e) => e.status === 409);
-    check("a template stop cannot be ticked before its turn", tooSoon, billing.name);
-    const untouched = await getJourney(v1.id);
+    check("a template stop cannot be ticked before its turn", tooSoon, labBilling.name);
+    const untouched = await getJourney(vOrder.id);
     check(
       "and the refusal leaves it alone",
-      untouched.steps.find((x) => x.stepId === billing.stepId)?.status === "pending",
+      untouched.steps.find((x) => x.stepId === labBilling.stepId)?.status === "pending",
     );
   } else {
-    check("the template has an off-chain stop to test the order on", false);
+    check("the tests template has a Lab Billing stop to test the order on", false);
   }
 }
 
@@ -351,7 +361,11 @@ check(
   caught.doneCount > 0,
   `${caught.doneCount} done`,
 );
-check("rather than starting them from the beginning", caught.steps[0].status !== "pending");
+check(
+  "rather than starting them from the beginning",
+  caught.steps.find((x) => x.chainStatus)?.status !== "pending",
+  caught.steps.find((x) => x.chainStatus)?.name,
+);
 const again = await ensurePlan(v2.id);
 check("a second look does not seed a second one", again.seeded === false);
 
@@ -495,7 +509,9 @@ const lateIds = late.steps.map((s) => s.catalogId);
 check("ordering tests adds the counter and the sample", lateIds.includes("lab_billing"));
 check(
   "in front of the work still to come, not after the pharmacy",
-  lateIds.indexOf("lab_billing") === 1 && lateIds.indexOf("blood_sample") === 2,
+  lateIds.indexOf("lab_billing") === lateIds.indexOf("vitals") + 1 &&
+    lateIds.indexOf("blood_sample") === lateIds.indexOf("lab_billing") + 1 &&
+    lateIds.indexOf("blood_sample") < lateIds.indexOf("pharmacy"),
   lateIds.join(" → "),
 );
 check("and the stop the patient already finished keeps its place", late.steps[0].status === "done");
@@ -544,11 +560,14 @@ await pool.query(
    VALUES ('ZZJRN-LAB', 'sample_taken', 'lab', 20)`,
 );
 const hrEvidence = await syncLabStepsFromLab(pool, v5.id);
-check("a HealthRay case counts as billed and drawn", hrEvidence.billed && hrEvidence.drawn);
+check(
+  "a HealthRay case counts as drawn, but never as paid",
+  hrEvidence.drawn && !hrEvidence.billed,
+);
 const hrJourney = await getJourney(v5.id);
 const hrBill = hrJourney.steps.find((s) => s.catalogId === "lab_billing");
 const hrSample = hrJourney.steps.find((s) => s.catalogId === "blood_sample");
-check("so the counter is not left for the desk to tick", hrBill.status === "done");
+check("so Lab Billing stays for reception to clear", hrBill.status !== "done", hrBill.status);
 check("and neither is the sample the lab already drew", hrSample.status === "done");
 await pool.query(`DELETE FROM giniflow_lab_case_actions WHERE case_no = 'ZZJRN-LAB'`);
 await pool.query(`DELETE FROM lab_cases WHERE case_no = 'ZZJRN-LAB'`);
@@ -584,6 +603,52 @@ try {
 } finally {
   client6.release();
 }
+
+// ── An online plan follows only its own stops ──────────────────────────────
+const onlinePlan = (await defaultPlan("ONLINE")).filter((s) => s.included);
+check(
+  "the online plan has no vitals or Chief Endocrinologist stop",
+  !onlinePlan.some((s) => ["with_vitals", "with_sd"].includes(s.chainStatus)) &&
+    onlinePlan.some((s) => s.chainStatus === "with_doctor"),
+  onlinePlan.map((s) => s.name).join(", "),
+);
+const vOnline = await bookedVisit("931", "Demo Online Patient");
+await checkInWithJourney(vOnline.id, {
+  visitTypeId: "ONLINE",
+  steps: onlinePlan,
+  actorId: 20,
+  actorRole: "reception",
+});
+const onlineAt = await one(`SELECT current_status FROM giniflow_visits WHERE id = $1`, [
+  vOnline.id,
+]);
+check(
+  "an online patient goes straight to the consultant's queue at check-in",
+  onlineAt.current_status === "ready_for_doctor",
+  onlineAt.current_status,
+);
+const vInPerson = await bookedVisit("932", "Demo In-person Patient");
+await checkInWithJourney(vInPerson.id, {
+  visitTypeId: suggestion,
+  steps,
+  actorId: 20,
+  actorRole: "reception",
+});
+const inPersonAt = await one(`SELECT current_status FROM giniflow_visits WHERE id = $1`, [
+  vInPerson.id,
+]);
+check(
+  "an in-person patient with vitals in the plan stays at check-in for vitals",
+  inPersonAt.current_status === "checked_in",
+  inPersonAt.current_status,
+);
+await pool.query(`UPDATE giniflow_visits SET current_status = 'checked_in' WHERE id = $1`, [
+  vOnline.id,
+]);
+const vq = await getVitalsQueue(TEST_DAY);
+const inVitals = (id) => [...vq.atStation, ...vq.waiting].some((q) => q.visitId === id);
+check("the vitals queue never offers a plan without a vitals stop", !inVitals(vOnline.id));
+check("but still offers a plan that has one", inVitals(vInPerson.id));
 
 // ── The older module is not touched ────────────────────────────────────────
 const after = await one(

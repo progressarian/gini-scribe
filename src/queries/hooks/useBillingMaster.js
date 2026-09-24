@@ -35,6 +35,18 @@ export const billingKeys = {
   settings: () => ["billing", "settings"],
   series: () => ["billing", "series"],
   imports: (page) => ["billing", "imports", page ?? {}],
+  visitBills: (visitId) => ["billing", "visits", visitId ?? "none", "bills"],
+  visitNotPriced: (visitId) => ["billing", "visits", visitId ?? "none", "not-priced"],
+  bill: (billId) => ["billing", "bills", billId ?? "none"],
+  billPayments: (billId) => ["billing", "bills", billId ?? "none", "payments"],
+  dues: (filters) => ["billing", "dues", filters ?? {}],
+  myShifts: (filters) => ["billing", "shifts", "mine", filters ?? {}],
+  currentShift: () => ["billing", "shifts", "current"],
+  myRequests: (filters) => ["billing", "requests", "mine", filters ?? {}],
+  deskItems: (q) => ["billing", "desk-items", q ?? ""],
+  deskSettings: () => ["billing", "desk-settings"],
+  requests: () => ["billing", "requests"],
+  requestInbox: (filters) => ["billing", "requests", "inbox", filters ?? {}],
 };
 
 const PRICE_KEYS = [billingKeys.all, ["giniflow"]];

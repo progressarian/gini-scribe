@@ -334,7 +334,7 @@ export async function takePayments(billId, input, ctx, db = pool) {
     }
     const taken = [];
     for (const payment of wanted) {
-      const receipt = await nextNumber(client, seriesFor("receipt"));
+      const receipt = await nextNumber(client, seriesFor("receipt"), null, ctx);
       const { rows } = await client.query(
         `INSERT INTO payments (bill_id, mode, amount, reference, receipt_no, shift_id,
                                received_by, created_by, updated_by)

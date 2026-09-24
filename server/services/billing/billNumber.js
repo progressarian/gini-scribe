@@ -1,4 +1,6 @@
 import { httpError, inTransaction } from "./transaction.js";
+import { writeAudit } from "./audit.js";
+import { auditFields } from "./common.js";
 import { indiaToday } from "./categoryResolver.js";
 import { BILL_SERIES, financialYear, formatNumber } from "./billSeries.js";
 
@@ -31,7 +33,7 @@ function cleanDate(value) {
   return text;
 }
 
-export async function nextNumber(client, series, date) {
+export async function nextNumber(client, series, date, ctx = null) {
   if (!client || typeof client.release !== "function") {
     throw new Error("nextNumber needs the finalising transaction's client, not the pool");
   }
@@ -64,6 +66,14 @@ export async function nextNumber(client, series, date) {
         WHERE series = $1 AND fy = $2`,
       [name, fy],
     );
+    await writeAudit(tx, {
+      entity: "bill_series",
+      entityId: `${name}:${fy}`,
+      action: "update",
+      before: { next_no: no },
+      after: { next_no: no + 1 },
+      ...auditFields(ctx),
+    });
     return { number: formatNumber(row, no), series: name, fy, no };
   }, client);
 }

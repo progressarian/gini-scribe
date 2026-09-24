@@ -5,6 +5,7 @@ import { USERS } from "../../fixtures/data.mjs";
 import { assertTestDatabase } from "../../setup/guard.mjs";
 import {
   discountCode,
+  extraVisit,
   newTag,
   payRule,
   setUp,
@@ -332,13 +333,16 @@ test.describe.serial("P4-26 billing routes", () => {
         params: { user_id: String(USERS.reception.id) },
       }),
     );
-    expect(mine.every((shift) => shift.user_id === USERS.reception.id)).toBe(true);
+    expect(mine.every((shift) => shift.user.id === USERS.reception.id)).toBe(true);
     const closed = ok(
       await master("post", `${API}/master/shifts/${ids.shift}/close`, {
         data: { counted_cash: 100, note: "Counted by the manager" },
       }),
     );
-    expect(closed.status).toBe("closed");
+    expect(closed.is_open).toBe(false);
+    expect(closed.closed_at).not.toBe(null);
+    expect(closed.counted_cash).toBe(100);
+    expect(closed.difference).toBe(closed.counted_cash - closed.expected_cash);
     expect(ok(await desk("get", `${API}/shifts/current`))).toBe(null);
   });
 
@@ -347,7 +351,8 @@ test.describe.serial("P4-26 billing routes", () => {
     ids.shift = open.id;
     const closed = ok(await desk("post", `${API}/shifts/close`, { data: { counted_cash: 0 } }));
     expect(closed.id).toBe(open.id);
-    expect(closed.status).toBe("closed");
+    expect(closed.is_open).toBe(false);
+    expect(closed.closed_at).not.toBe(null);
     const none = await desk("post", `${API}/shifts/close`, { data: { counted_cash: 0 } });
     expect(none.status).toBe(409);
   });
@@ -371,5 +376,98 @@ test.describe.serial("P4-26 billing routes", () => {
       expect(response.status, `${method.toUpperCase()} ${url}`).not.toBe(403);
       expect(response.status, `${method.toUpperCase()} ${url}`).toBeLessThan(500);
     }
+  });
+
+  test("14. an id that isn't an id is refused in words, never a 500", async () => {
+    const BAD = "not-a-uuid";
+    const deskUrls = [
+      ["get", `${API}/bills/${BAD}`, undefined],
+      ["get", `${API}/visits/${BAD}/bills`, undefined],
+      ["post", `${API}/visits/${BAD}/bills`, {}],
+      ["get", `${API}/visits/${BAD}/not-priced`, undefined],
+      ["post", `${API}/bills/${BAD}/lines`, { item_id: fixture.brace }],
+      ["patch", `${API}/bills/${BAD}/lines/${BAD}`, { quantity: 2 }],
+      ["post", `${API}/bills/${BAD}/lines/${BAD}/remove`, { reason: "Not needed" }],
+      ["post", `${API}/bills/${BAD}/codes`, { code: CODE }],
+      ["delete", `${API}/bills/${BAD}/codes/${CODE}`, undefined],
+      ["patch", `${API}/bills/${BAD}/category`, { category: fixture.paid }],
+      ["post", `${API}/bills/${BAD}/finalise`, { version: 0 }],
+      ["post", `${API}/bills/${BAD}/cancel`, { reason: "Billed twice" }],
+      [
+        "post",
+        `${API}/bills/${BAD}/payments`,
+        { version: 0, payments: [{ mode: "cash", amount: 5 }] },
+      ],
+      ["get", `${API}/bills/${BAD}/payments`, undefined],
+      ["get", `${API}/bills/${BAD}/bill.pdf`, undefined],
+      ["get", `${API}/bills/${BAD}/receipt.pdf`, undefined],
+      ["get", `${API}/dues?patient_id=${BAD}`, undefined],
+      ["get", `${API}/items/search?limit=${BAD}`, undefined],
+      [
+        "post",
+        `${API}/requests/repeat`,
+        { service_item_id: fixture.dressing, visit_id: BAD, reason: "x" },
+      ],
+    ];
+    for (const [method, url, data] of deskUrls) {
+      const response = await desk(method, url, data === undefined ? {} : { data });
+      expect(response.status, `${method.toUpperCase()} ${url}`).toBe(400);
+      expect(String(response.body.error), `${method.toUpperCase()} ${url}`).toMatch(/\w/);
+    }
+    const masterUrls = [
+      ["post", `${API}/master/requests/${BAD}/approve`, {}],
+      ["post", `${API}/master/requests/${BAD}/reject`, { note: "No" }],
+      ["post", `${API}/master/shifts/${BAD}/close`, { counted_cash: 0 }],
+      ["get", `${API}/master/shifts?user_id=${BAD}`, undefined],
+    ];
+    for (const [method, url, data] of masterUrls) {
+      const response = await master(method, url, data === undefined ? {} : { data });
+      expect(response.status, `${method.toUpperCase()} ${url}`).toBe(400);
+    }
+  });
+
+  test("15. a printout URL is refused for a token without the capability, and for a bad one", async () => {
+    const guest = await anonymousApi();
+    try {
+      const coordinator = (await tokensFor("coordinator")).access;
+      const refused = await guest.get(`${API}/bills/${ids.bill}/bill.pdf?token=${coordinator}`);
+      expect(refused.status()).toBe(403);
+      expect((await refused.json()).error).toMatch(/permission/i);
+
+      for (const token of ["garbage", ""]) {
+        const bad = await guest.get(`${API}/bills/${ids.bill}/bill.pdf?token=${token}`);
+        expect(bad.status(), `token "${token}"`).toBe(403);
+      }
+
+      const { access } = await tokensFor("reception");
+      const signed = await guest.get(`${API}/bills/${ids.bill}/bill.pdf?token=${access}`);
+      expect(signed.status()).toBe(200);
+      const body = await signed.body();
+      expect(signed.headers()["content-length"]).toBe(String(body.length));
+      expect(signed.headers()["content-disposition"]).toMatch(
+        /^inline; filename="[A-Za-z0-9_.-]+"$/,
+      );
+    } finally {
+      await guest.dispose();
+    }
+  });
+
+  test("16. a draft with no items still prints, and a receipt for another bill's payment does not", async () => {
+    const other = await extraVisit(fixture, "Pdf");
+    const draft = ok(await desk("post", `${API}/visits/${other.visit}/bills`, { data: {} }));
+    const printed = await desk("get", `${API}/bills/${draft.id}/bill.pdf`);
+    expect(printed.status, String(printed.body)).toBe(200);
+    expect(printed.body.subarray(0, 4).toString()).toBe("%PDF");
+    expect(printed.headers["content-disposition"]).toMatch(/filename="Bill_draft_/);
+
+    const none = await desk("get", `${API}/bills/${draft.id}/receipt.pdf`);
+    expect(none.status).toBe(404);
+    expect(none.body.error).toMatch(/No payment has been taken/i);
+
+    const elsewhere = await desk("get", `${API}/bills/${ids.bill}/receipt.pdf`, {
+      params: { payment_id: "11111111-2222-3333-4444-555555555555" },
+    });
+    expect(elsewhere.status).toBe(404);
+    expect(elsewhere.body.error).toMatch(/isn't on this bill/i);
   });
 });

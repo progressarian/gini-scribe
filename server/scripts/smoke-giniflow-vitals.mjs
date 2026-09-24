@@ -155,6 +155,10 @@ const saved = await saveVitals(target, {
   height: 161,
   bpSys: 148,
   bpDia: 94,
+  bpStandingSys: 136,
+  bpStandingDia: 88,
+  waist: 96.5,
+  bodyFat: 29.4,
   pulse: 82,
   spo2: 98,
   temp: 98.6,
@@ -194,12 +198,31 @@ check(
   ev.meta?.vitals?.bp === "148/94",
   JSON.stringify(ev.meta?.vitals?.bp),
 );
+check(
+  "the event carries standing BP and waist",
+  ev.meta?.vitals?.bpStanding === "136/88" && ev.meta?.vitals?.waist === 96.5,
+  `${ev.meta?.vitals?.bpStanding} · ${ev.meta?.vitals?.waist}`,
+);
 
 const row = await one(
   `SELECT * FROM giniflow_vitals WHERE visit_id = $1 ORDER BY recorded_at DESC LIMIT 1`,
   [target],
 );
 check("the reading is stored", Number(row.weight) === 72.4 && row.bp_sys === 148);
+check(
+  "standing BP and waist are stored",
+  row.bp_standing_sys === 136 &&
+    row.bp_standing_dia === 88 &&
+    Number(row.waist) === 96.5 &&
+    Number(row.body_fat) === 29.4,
+  `${row.bp_standing_sys}/${row.bp_standing_dia} · ${row.waist}`,
+);
+const reopened = await getVitalsPatient(target);
+check(
+  "reopening the patient shows standing BP and waist",
+  reopened.recorded?.bp_standing_sys === 136 && Number(reopened.recorded?.waist) === 96.5,
+  `${reopened.recorded?.bp_standing_sys} · ${reopened.recorded?.waist}`,
+);
 await new Promise((r) => setTimeout(r, 1500));
 const promotedRow = await one(`SELECT promoted_at FROM giniflow_vitals WHERE id = $1`, [row.id]);
 const onChart = await one(`SELECT count(*)::int AS c FROM vitals WHERE giniflow_vitals_id = $1`, [
@@ -209,6 +232,19 @@ check(
   "the reading reaches the patient's chart, not just this station",
   !!promotedRow.promoted_at && onChart.c === 1,
   `promoted ${!!promotedRow.promoted_at}, ${onChart.c} on the chart`,
+);
+const chartRow = await one(
+  `SELECT bp_sys, bp_standing_sys, bp_standing_dia, waist, body_fat FROM vitals WHERE giniflow_vitals_id = $1`,
+  [row.id],
+);
+check(
+  "standing BP and waist reach the chart; sitting stays in bp_sys",
+  Number(chartRow?.bp_sys) === 148 &&
+    Number(chartRow?.bp_standing_sys) === 136 &&
+    Number(chartRow?.bp_standing_dia) === 88 &&
+    Number(chartRow?.waist) === 96.5 &&
+    Number(chartRow?.body_fat) === 29.4,
+  JSON.stringify(chartRow),
 );
 
 const after2 = await getVitalsQueue(TEST_DAY);
@@ -239,6 +275,77 @@ const missing = await saveVitals(target, { weight: 70 })
   .then(() => true)
   .catch(() => false);
 check("a partial reading is allowed", missing);
+
+for (const [label, reading] of [
+  ["waist alone", { waist: 94 }],
+  ["body fat alone", { bodyFat: 27 }],
+  ["standing BP alone", { bpStandingSys: 126, bpStandingDia: 82 }],
+]) {
+  const ok = await saveVitals(target, reading)
+    .then(() => true)
+    .catch((e) => e.message);
+  check(`a reading of ${label} can be saved`, ok === true, ok === true ? "" : ok);
+}
+const emptyRefused = await saveVitals(target, { waist: null, bodyFat: null })
+  .then(() => false)
+  .catch((e) => e.status === 400);
+check("a save with every field empty is still refused", emptyRefused);
+
+const planQueue = callable(await getVitalsQueue(TEST_DAY)).filter((q) => q.visitId !== target);
+const onlinePlan = planQueue[0]?.visitId;
+const givePlan = async (visitId, stops) => {
+  for (const [i, [catalogId, name, chain]] of stops.entries()) {
+    await pool.query(
+      `INSERT INTO giniflow_visit_steps (visit_id, step_order, step_catalog_id, step_name, chain_status)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [visitId, i + 1, catalogId, name, chain],
+    );
+  }
+};
+await givePlan(target, [
+  ["vitals", "Vitals", "with_vitals"],
+  ["mo_assessment", "Chief Endocrinologist Assessment", "with_sd"],
+  ["chief_consult", "Chief Consultation", "with_doctor"],
+]);
+check(
+  "a plan with the Chief step is not skipped",
+  (await getVitalsPatient(target)).skipsChief === false,
+);
+if (onlinePlan) {
+  await givePlan(onlinePlan, [
+    ["billing", "Billing", null],
+    ["chief_consult", "Chief Consultation", "with_doctor"],
+    ["rx_explain", "Prescription Explain", "with_rx"],
+  ]);
+  check(
+    "a plan with no Chief step is known to skip it",
+    (await getVitalsPatient(onlinePlan)).skipsChief === true,
+  );
+  await startVitals(onlinePlan);
+  const online = await saveVitals(onlinePlan, { weight: 70 });
+  const onlineNow = await one(`SELECT current_status FROM giniflow_visits WHERE id = $1`, [
+    onlinePlan,
+  ]);
+  check(
+    "no Chief step in the plan → straight to the consultant's queue",
+    online.movedTo === "ready_for_doctor" && onlineNow.current_status === "ready_for_doctor",
+    `${online.movedTo} / ${onlineNow.current_status}`,
+  );
+  const trail = await pool.query(
+    `SELECT status FROM giniflow_visit_events WHERE visit_id = $1 ORDER BY occurred_at`,
+    [onlinePlan],
+  );
+  check(
+    "the timeline still records vitals done before the move",
+    trail.rows
+      .map((r) => r.status)
+      .join(">")
+      .includes("vitals_done>ready_for_doctor"),
+    trail.rows.map((r) => r.status).join(" > "),
+  );
+} else {
+  check("a second patient in the queue for the plan check", false);
+}
 
 const badVisit = await saveVitals("00000000-0000-0000-0000-000000000000", { weight: 70 })
   .then(() => false)

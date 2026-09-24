@@ -942,6 +942,8 @@ export default function VisitPage() {
     const VITAL_FIELDS = [
       "bp_sys",
       "bp_dia",
+      "bp_standing_sys",
+      "bp_standing_dia",
       "pulse",
       "temp",
       "spo2",

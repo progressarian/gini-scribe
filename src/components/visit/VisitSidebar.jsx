@@ -38,6 +38,8 @@ const KEY_BIOMARKERS = [
 const VITALS_FIELDS = [
   { key: "bp_sys", label: "BP", unit: "mmHg" },
   { key: "bp_dia", label: "BP Dia", unit: "mmHg" },
+  { key: "bp_standing_sys", label: "BP Standing", unit: "mmHg" },
+  { key: "bp_standing_dia", label: "BP Standing Dia", unit: "mmHg" },
   { key: "pulse", label: "HR", unit: "bpm" },
   { key: "rbs", label: "Sugar", unit: "mg/dL" },
   { key: "weight", label: "Weight", unit: "kg" },
@@ -80,6 +82,8 @@ const VisitSidebar = memo(function VisitSidebar({
     setEditVals({
       bp_sys: v?.bp_sys ?? "",
       bp_dia: v?.bp_dia ?? "",
+      bp_standing_sys: v?.bp_standing_sys ?? "",
+      bp_standing_dia: v?.bp_standing_dia ?? "",
       pulse: v?.pulse ?? "",
       rbs: v?.rbs ?? "",
       weight: v?.weight ?? "",

@@ -10,7 +10,10 @@ import {
 import { machineFor } from "../../../shared/machineStages.js";
 import { getMachines } from "./machineCatalog.js";
 import { billSuppressor, cancelDeadBillTests } from "./testCancel.js";
-import { CANCELLABLE_ORDER_STATUSES } from "../../../shared/testCancelReasons.js";
+import {
+  CANCELLABLE_ORDER_STATUSES,
+  NOT_ON_BILL_REASON,
+} from "../../../shared/testCancelReasons.js";
 import { machineCaseListOnly } from "../../../shared/manualFloor.js";
 import { LAB_TEST_STEP_IDS } from "../../../shared/journeyOrder.js";
 import { createLogger } from "../logger.js";
@@ -42,6 +45,12 @@ const REFUNDABLE_OPEN_SQL = `(
              AND ro.sample_status = ANY(ARRAY[${CANCELLABLE_ORDER_STATUSES.map((st) => `'${st}'`).join(", ")}]))
   OR EXISTS (SELECT 1 FROM giniflow_bill_charges rc
               WHERE rc.visit_id = v.id AND rc.payment_status = 'pending'))`;
+const TESTS_TRIMMED_SQL = `(
+  EXISTS (SELECT 1 FROM giniflow_test_cancellations tc
+           WHERE tc.visit_id = v.id AND tc.reason = '${NOT_ON_BILL_REASON}')
+  OR EXISTS (SELECT 1 FROM giniflow_visit_events te
+              WHERE te.visit_id = v.id AND te.status = 'test_cancelled'
+                AND te.meta->>'reason' = '${NOT_ON_BILL_REASON}'))`;
 const BILLED_SQL = `EXISTS (SELECT 1 FROM giniflow_patient_bills b
                              WHERE b.patient_id = v.patient_id AND b.bill_date = v.visit_date
                                AND b.status = 'billed')`;
@@ -54,7 +63,7 @@ const UNCONFIRMED_TESTS_SQL = `EXISTS (
 const BILL_TIER_SQL = `(CASE
   WHEN NOT ${BILLED_SQL} AND ${UNCONFIRMED_TESTS_SQL} THEN 'A'
   WHEN NOT ${BILLED_SQL} THEN 'B'
-  WHEN ${REFUNDABLE_OPEN_SQL} THEN 'C'
+  WHEN ${REFUNDABLE_OPEN_SQL} OR ${TESTS_TRIMMED_SQL} THEN 'C'
   ELSE 'D' END)`;
 const EXIT_GRACE_MIN = Number(process.env.SCRIBE_MACHINE_EXIT_GRACE_MIN || 0);
 const NEVER_ON_FLOOR = ["booked", "confirmed"];
@@ -121,6 +130,7 @@ const TARGET_SELECT = `
             COALESCE(a.healthray_patient_id, sameday.healthray_patient_id,
                      prior.healthray_patient_id, lab.healthray_patient_id) AS hr_patient_id,
             ${REFUNDABLE_OPEN_SQL} AS refundable_open,
+            ${TESTS_TRIMMED_SQL} AS tests_trimmed,
             p.name,
             v.machine_scan_at,
             v.created_at AS visit_created_at
@@ -206,7 +216,7 @@ export async function syncMachineOrdersForVisit(visit, db = pool, { slotWaitMs }
     },
     db,
     {
-      ...(visit.refundable_open ? { maxAgeMin: OPEN_TESTS_RESCAN_MIN } : {}),
+      ...(visit.refundable_open || visit.tests_trimmed ? { maxAgeMin: OPEN_TESTS_RESCAN_MIN } : {}),
       slotWaitMs,
     },
   );

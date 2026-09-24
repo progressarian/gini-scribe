@@ -134,6 +134,8 @@ function shapeLine(row) {
     bill_code: row.bill_code,
     bill_name: row.bill_name,
     quantity: Number(row.quantity),
+    allow_quantity: row.allow_quantity ?? false,
+    max_quantity: row.max_quantity === null ? null : Number(row.max_quantity),
     rate: paise(row.rate),
     actual: paise(row.actual_amount),
     discount: paise(row.discount),
@@ -260,8 +262,13 @@ async function categoryRules(client, code) {
 
 async function liveLines(client, billId, { all = false } = {}) {
   const { rows } = await client.query(
-    `SELECT ${LINE_COLUMNS} FROM bill_lines
-      WHERE bill_id = $1 AND (is_live OR $2) ORDER BY line_no, created_at, id`,
+    `SELECT ${LINE_COLUMNS.split(/,\s*/)
+      .map((column) => `l.${column}`)
+      .join(", ")},
+            COALESCE(i.allow_quantity, FALSE) AS allow_quantity, i.max_quantity
+       FROM bill_lines l LEFT JOIN service_items i ON i.id = l.service_item_id
+      WHERE l.bill_id = $1 AND (l.is_live OR $2)
+      ORDER BY l.line_no, l.created_at, l.id`,
     [billId, all],
   );
   return rows;
@@ -417,12 +424,30 @@ async function reprice(client, bill, codes, ctx) {
   return { priced, lines, bill: await saveTotals(client, bill, priced.totals, ctx) };
 }
 
-async function withLines(client, row, extra = {}) {
-  return shapeBill(
-    row,
-    await liveLines(client, row.id, { all: row.status === "cancelled" }),
-    extra,
+async function billDiscounts(client, billId) {
+  const { rows } = await client.query(
+    `SELECT d.code, d.method, COALESCE(r.name, d.code) AS name, SUM(d.amount) AS amount
+       FROM bill_line_discounts d
+       JOIN bill_lines l ON l.id = d.bill_line_id
+       LEFT JOIN discount_rules r ON r.id = d.rule_id
+      WHERE l.bill_id = $1 AND l.is_live
+      GROUP BY d.code, d.method, COALESCE(r.name, d.code)
+      ORDER BY d.method, COALESCE(r.name, d.code)`,
+    [billId],
   );
+  return rows.map((row) => ({
+    code: row.code,
+    method: row.method,
+    name: row.name,
+    amount: paise(row.amount),
+  }));
+}
+
+async function withLines(client, row, extra = {}) {
+  return shapeBill(row, await liveLines(client, row.id, { all: row.status === "cancelled" }), {
+    discounts: await billDiscounts(client, row.id),
+    ...extra,
+  });
 }
 
 function assertDraft(bill) {
@@ -513,6 +538,7 @@ export async function openDraft(visitId, ctx, db = pool) {
       date: bill.bill_date,
     });
     return withLines(client, bill, {
+      codes: await billCodes(client, bill.id),
       needs_category: !bill.scheme_code && resolution.needs_sub_category,
       suggestions: bill.scheme_code ? [] : resolution.suggestions,
     });
@@ -525,6 +551,7 @@ export async function readBill(billId, db = pool) {
   if (!rows.length) throw httpError(404, "That bill no longer exists");
   return shapeBill(rows[0], await liveLines(db, id, { all: rows[0].status === "cancelled" }), {
     codes: await billCodes(db, id),
+    discounts: await billDiscounts(db, id),
   });
 }
 
@@ -941,7 +968,7 @@ export async function finaliseBill(billId, input, ctx, db = pool) {
         "Pay later isn't allowed, so this bill must be paid before it is made final",
       );
     }
-    const number = await nextNumber(client, seriesFor("bill"), saved.bill.bill_date);
+    const number = await nextNumber(client, seriesFor("bill"), saved.bill.bill_date, ctx);
     const claimStatus = saved.priced.totals.claim > 0 ? "pending" : "none";
     const { rows } = await client.query(
       `UPDATE bills

@@ -20,6 +20,7 @@ const shifts = await import("../../../server/services/billing/cashShifts.js");
 const visitLines = await import("../../../server/services/billing/visitLines.js");
 const reception = await import("../../../server/services/giniflow/receptionStation.js");
 const settings = await import("../../../server/services/billing/billingSettings.js");
+const billSeries = await import("../../../server/services/billing/billSeries.js");
 
 const db = getPool();
 const tag = newTag();
@@ -399,11 +400,13 @@ test.describe.serial("P4-15 take payments", () => {
         WHERE id = $1 RETURNING bill_date::text`,
       [draft.id, ids.day],
     );
-    const { count } = await one(
-      `SELECT COUNT(*)::int AS count FROM bill_series WHERE series = 'RCPT' AND fy <> $1`,
-      [ids.fy],
-    );
-    expect(count, `no RCPT series exists for ${bill_date}'s year`).toBe(0);
+    const billFy = billSeries.financialYear(bill_date);
+    expect(billFy, `${bill_date} falls in a different financial year`).not.toBe(ids.fy);
+    const receiptSeries = async (fy) =>
+      (await one(`SELECT next_no FROM bill_series WHERE series = 'RCPT' AND fy = $1`, [fy]))
+        ?.next_no ?? null;
+    const oldYearBefore = await receiptSeries(billFy);
+    const thisYearBefore = await receiptSeries(ids.fy);
 
     const taken = await payments.takePayments(
       draft.id,
@@ -412,9 +415,13 @@ test.describe.serial("P4-15 take payments", () => {
       db,
     );
     expect(taken.payments[0].receipt_no.startsWith(ids.receiptPrefix)).toBe(true);
-    const { fy } = await one(
-      `SELECT fy FROM bill_series WHERE series = 'RCPT' AND next_no > 1 LIMIT 1`,
+    expect(await receiptSeries(billFy), `${billFy} numbered nothing`).toBe(oldYearBefore);
+    expect(receiptNo(taken.payments[0]), `${ids.fy} numbered the receipt`).toBeGreaterThanOrEqual(
+      Number(thisYearBefore),
     );
-    expect(fy).toBe(ids.fy);
+    expect(
+      Number(await receiptSeries(ids.fy)),
+      `${ids.fy} is the series that moved`,
+    ).toBeGreaterThan(Number(thisYearBefore));
   });
 });

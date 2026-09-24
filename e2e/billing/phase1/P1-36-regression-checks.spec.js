@@ -56,6 +56,19 @@ test.describe.serial("P1-36 regression checks", () => {
 
   test.afterAll(async () => {
     await query(
+      `DELETE FROM bill_line_discounts WHERE bill_line_id IN
+         (SELECT id FROM bill_lines WHERE visit_id = ANY($1::uuid[]))`,
+      [seed.visits],
+    );
+    await query(`DELETE FROM bill_lines WHERE visit_id = ANY($1::uuid[])`, [seed.visits]);
+    await query(`DELETE FROM billing_requests WHERE visit_id = ANY($1::uuid[])`, [seed.visits]);
+    await query(
+      `DELETE FROM payments WHERE bill_id IN
+         (SELECT id FROM bills WHERE visit_id = ANY($1::uuid[]))`,
+      [seed.visits],
+    );
+    await query(`DELETE FROM bills WHERE visit_id = ANY($1::uuid[])`, [seed.visits]);
+    await query(
       `DELETE FROM giniflow_lab_order_tests WHERE lab_order_id IN
          (SELECT id FROM giniflow_lab_orders WHERE visit_id = ANY($1::uuid[]))`,
       [seed.visits],

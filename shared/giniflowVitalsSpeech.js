@@ -12,13 +12,21 @@
 
 // Spoken forms per field, longest first so "blood pressure" wins over "pressure"
 // and "spo2" is not eaten by a bare "o2".
+const BP_PAIR = /(\d{2,3})\s*(?:over|by|slash|\/|-)\s*(\d{2,3})/i;
+
 const FIELDS = [
+  {
+    key: "bpStanding",
+    words: ["standingreading"],
+    pattern: BP_PAIR,
+    pair: ["bpStandingSys", "bpStandingDia"],
+  },
   {
     key: "bp",
     words: ["blood pressure", "bp", "pressure"],
     // "148 over 94", "148 by 94", "148/94", "148 - 94"
-    pattern: /(\d{2,3})\s*(?:over|by|slash|\/|-)\s*(\d{2,3})/i,
-    pair: true,
+    pattern: BP_PAIR,
+    pair: ["bpSys", "bpDia"],
   },
   // Said as two separate readings — "systolic 179 diastolic 79" — which is how
   // a nurse reading off a monitor usually says it. Listed after the paired form
@@ -27,6 +35,16 @@ const FIELDS = [
   { key: "bpDia", words: ["diastolic", "diastolic blood pressure", "lower"], pattern: /(\d{2,3})/ },
   { key: "weight", words: ["weight", "wait", "vajan"], pattern: /(\d{1,3}(?:[.,]\d)?)/ },
   { key: "height", words: ["height", "heights"], pattern: /(\d{2,3}(?:[.,]\d)?)/ },
+  {
+    key: "waist",
+    words: ["waist circumference", "waist size", "waist", "kamar"],
+    pattern: /(\d{2,3}(?:[.,]\d)?)/,
+  },
+  {
+    key: "bodyFat",
+    words: ["body fat percentage", "body fat", "fat percentage", "fat"],
+    pattern: /(\d{1,2}(?:[.,]\d)?)/,
+  },
   { key: "pulse", words: ["pulse", "heart rate", "heartrate"], pattern: /(\d{2,3})/ },
   {
     key: "spo2",
@@ -44,6 +62,10 @@ const BOUNDS = {
   height: [30, 260],
   bpSys: [50, 300],
   bpDia: [20, 200],
+  bpStandingSys: [50, 300],
+  bpStandingDia: [20, 200],
+  waist: [30, 250],
+  bodyFat: [2, 75],
   pulse: [20, 250],
   spo2: [50, 100],
   temp: [90, 115],
@@ -51,6 +73,15 @@ const BOUNDS = {
 
 const inBounds = (field, value) =>
   value !== null && value >= BOUNDS[field][0] && value <= BOUNDS[field][1];
+
+const isLetter = (ch) => !!ch && /[a-z]/.test(ch);
+
+const wordAt = (text, word) => {
+  for (let at = text.indexOf(word); at !== -1; at = text.indexOf(word, at + 1)) {
+    if (!isLetter(text[at - 1]) && !isLetter(text[at + word.length])) return at;
+  }
+  return -1;
+};
 
 const toNumber = (raw) => {
   const n = Number(String(raw).replace(",", "."));
@@ -69,10 +100,30 @@ const normalise = (text) =>
     .replace(/\bbeats per minute\b|\bbpm\b/g, " ")
     .replace(/\bdegrees?\b|\bfahrenheit\b|\bf\b/g, " ")
     .replace(/\bmmhg\b/g, " ")
+    .replace(
+      /\b(?:standing|on standing|after standing)\s+(?:blood pressure|bp|pressure)\b|\b(?:blood pressure|bp|pressure)\s+(?:standing|on standing|after standing)\b/g,
+      " standingreading ",
+    )
+    .replace(
+      /\b(?:sitting|seated)\s+(?:blood pressure|bp|pressure)\b|\b(?:blood pressure|bp|pressure)\s+(?:sitting|seated)\b/g,
+      " bp ",
+    )
     .replace(/\s+/g, " ")
     .trim();
 
-export const ALL_FIELDS = ["weight", "height", "bpSys", "bpDia", "pulse", "spo2", "temp"];
+export const ALL_FIELDS = [
+  "weight",
+  "height",
+  "bpSys",
+  "bpDia",
+  "bpStandingSys",
+  "bpStandingDia",
+  "waist",
+  "bodyFat",
+  "pulse",
+  "spo2",
+  "temp",
+];
 
 export function parseSpokenVitals(transcript) {
   const text = normalise(transcript);
@@ -84,7 +135,7 @@ export function parseSpokenVitals(transcript) {
 
   for (const field of FIELDS) {
     for (const word of field.words) {
-      const at = text.indexOf(word);
+      const at = wordAt(text, word);
       if (at === -1) continue;
 
       // Only look at what follows the keyword, and stop before the next field's
@@ -97,7 +148,7 @@ export function parseSpokenVitals(transcript) {
       const firstDigit = after.search(/\d/);
       const nextKeyword = FIELDS.flatMap((f) => (f === field ? [] : f.words))
         .filter((w) => !w.includes(word) && !word.includes(w))
-        .map((w) => after.indexOf(w))
+        .map((w) => wordAt(after, w))
         .filter((i) => i > 0 && (firstDigit === -1 || i > firstDigit))
         .sort((a, b) => a - b)[0];
       const window = nextKeyword === undefined ? after : after.slice(0, nextKeyword);
@@ -106,14 +157,15 @@ export function parseSpokenVitals(transcript) {
       if (!m) break;
 
       if (field.pair) {
+        const [sysKey, diaKey] = field.pair;
         const sys = toNumber(m[1]);
         const dia = toNumber(m[2]);
-        if (inBounds("bpSys", sys) && inBounds("bpDia", dia)) {
-          values.bpSys = sys;
-          values.bpDia = dia;
-          filled.push("bpSys", "bpDia");
+        if (inBounds(sysKey, sys) && inBounds(diaKey, dia)) {
+          values[sysKey] = sys;
+          values[diaKey] = dia;
+          filled.push(sysKey, diaKey);
         } else {
-          rejected.push({ field: "bp", heard: `${m[1]}/${m[2]}` });
+          rejected.push({ field: field.key, heard: `${m[1]}/${m[2]}` });
         }
       } else {
         const v = toNumber(m[1]);
@@ -131,7 +183,11 @@ export function parseSpokenVitals(transcript) {
   // A bare pair with no keyword — "148 by 94" — is unambiguous enough to read as
   // a blood pressure, but only if nothing has already claimed those numbers and
   // both halves are plausible.
-  if (values.bpSys === undefined && values.bpDia === undefined) {
+  if (
+    values.bpSys === undefined &&
+    values.bpDia === undefined &&
+    values.bpStandingSys === undefined
+  ) {
     const bare = text.match(/(?:^|\s)(\d{2,3})\s*(?:over|by|slash|\/)\s*(\d{2,3})(?:\s|$)/);
     if (bare) {
       const sys = toNumber(bare[1]);
@@ -158,7 +214,8 @@ export function parseSpokenVitals(transcript) {
   };
 }
 
-export const SPOKEN_EXAMPLE = "Weight 72 kilos, BP 148 over 94, pulse 82, SpO2 98";
+export const SPOKEN_EXAMPLE =
+  "Weight 72 kilos, BP 148 over 94, standing BP 138 over 88, waist 96, pulse 82, SpO2 98";
 
 // ── Change against the last visit ────────────────────────────────────────────
 // A reading can be physiologically plausible and still wrong: 179/79 is a valid

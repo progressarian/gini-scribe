@@ -1,8 +1,3 @@
-// Shared helper for rendering a doc's extraction status on doctor-facing
-// pages. Derives the state from the persisted `extracted_data` column, so
-// it works across OPD / Visit / Docs / Lab Portal / Dashboard without
-// access to the companion Zustand pendingExtractions map.
-
 export function parseExtractedData(raw) {
   if (!raw) return null;
   if (typeof raw === "string") {
@@ -15,12 +10,6 @@ export function parseExtractedData(raw) {
   return raw;
 }
 
-// Returns one of:
-//   { kind: "pending",   label: "⏳ Extracting…",   color, bg, border }
-//   { kind: "mismatch",  label: "⚠️ Needs Review", color, bg, border }
-//   { kind: "failed",    label: "❌ Failed",        color, bg, border, error, retryCount }
-//   { kind: "extracted", label: "✅ Extracted",     color, bg, border }
-//   { kind: "none",      label: null, ... }        (no extraction data yet)
 export function getDocStatus(doc) {
   const ext = parseExtractedData(doc?.extracted_data);
   const status = ext?.extraction_status;

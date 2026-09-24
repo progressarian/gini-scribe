@@ -87,6 +87,15 @@ export async function getSettings(db = pool) {
   return rows[0];
 }
 
+export async function deskSettings(db = pool) {
+  const { allow_pay_later, gst_enabled, max_codes_per_bill } = await getSettings(db);
+  return {
+    allow_pay_later,
+    gst_enabled,
+    max_codes_per_bill: max_codes_per_bill === null ? null : Number(max_codes_per_bill),
+  };
+}
+
 export async function updateSettings(patch, ctx, db = pool) {
   const values = {};
   for (const key of Object.keys(CLEANERS)) {

@@ -35,6 +35,7 @@ import { t as clipText } from "../../utils/helpers.js";
 export async function promoteVitals(giniflowVitalsId, db = pool) {
   const { rows } = await db.query(
     `SELECT gv.id, gv.patient_id, gv.weight, gv.height, gv.bmi, gv.bp_sys, gv.bp_dia,
+            gv.bp_standing_sys, gv.bp_standing_dia, gv.waist, gv.body_fat,
             gv.pulse, gv.spo2, gv.temp, gv.recorded_at, gv.source,
             v.appointment_id, v.visit_date::text AS visit_date
        FROM giniflow_vitals gv
@@ -54,7 +55,19 @@ export async function promoteVitals(giniflowVitalsId, db = pool) {
   // a trend line would gain three empty points. That is precisely the pollution
   // the original migration refused to risk; the idempotency key stops double
   // writes, and this stops empty ones.
-  const measured = [r.bp_sys, r.bp_dia, r.pulse, r.spo2, r.temp, r.weight, r.bmi];
+  const measured = [
+    r.bp_sys,
+    r.bp_dia,
+    r.bp_standing_sys,
+    r.bp_standing_dia,
+    r.waist,
+    r.body_fat,
+    r.pulse,
+    r.spo2,
+    r.temp,
+    r.weight,
+    r.bmi,
+  ];
   if (measured.every((v) => v === null || v === undefined)) {
     return { promoted: false, reason: "nothing measured — height alone is not a reading" };
   }
@@ -62,12 +75,17 @@ export async function promoteVitals(giniflowVitalsId, db = pool) {
   const { rows: written } = await db.query(
     `INSERT INTO vitals
        (patient_id, appointment_id, recorded_at, bp_sys, bp_dia, pulse, temp, spo2,
-        weight, height, bmi, source, giniflow_vitals_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'giniflow',$12)
+        weight, height, bmi, source, giniflow_vitals_id, bp_standing_sys, bp_standing_dia, waist,
+        body_fat)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'giniflow',$12,$13,$14,$15,$16)
      ON CONFLICT (giniflow_vitals_id) WHERE giniflow_vitals_id IS NOT NULL
      DO UPDATE SET bp_sys = EXCLUDED.bp_sys, bp_dia = EXCLUDED.bp_dia,
                    pulse = EXCLUDED.pulse, temp = EXCLUDED.temp, spo2 = EXCLUDED.spo2,
                    weight = EXCLUDED.weight, height = EXCLUDED.height, bmi = EXCLUDED.bmi,
+                   bp_standing_sys = EXCLUDED.bp_standing_sys,
+                   bp_standing_dia = EXCLUDED.bp_standing_dia,
+                   waist = EXCLUDED.waist,
+                   body_fat = EXCLUDED.body_fat,
                    recorded_at = EXCLUDED.recorded_at
      RETURNING id`,
     [
@@ -83,6 +101,10 @@ export async function promoteVitals(giniflowVitalsId, db = pool) {
       r.height,
       r.bmi,
       r.id,
+      r.bp_standing_sys,
+      r.bp_standing_dia,
+      r.waist,
+      r.body_fat,
     ],
   );
 

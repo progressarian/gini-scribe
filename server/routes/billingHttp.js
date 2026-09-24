@@ -7,6 +7,10 @@ const DETAILS = [
   "needs_sub_category",
   "suggestions",
   "line_no",
+  "version",
+  "bill_id",
+  "bill_no",
+  "service_item_id",
   "items",
   "rules",
 ];

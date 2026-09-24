@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { API_URL } from "../../services/api";
 import { setLiveConnected } from "./giniflowPolling";
 import { createLiveConnection } from "./giniflowLiveConnection";
+import { billingKeys } from "./useBillingMaster";
 
 // One connection per screen, not one per query.
 //
@@ -66,6 +67,7 @@ const INVALIDATES = {
     ["giniflow", "doctor"],
     ["giniflow", "board"],
   ],
+  billing_request: [billingKeys.requests()],
 };
 
 const ALL = [

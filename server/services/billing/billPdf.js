@@ -67,10 +67,13 @@ export const momentText = (value) => {
   return date ? MOMENT_FORMAT.format(date).replace(",", "") : "";
 };
 
+export const SLUG_MAX = 40;
+
 export const slug = (text, fallback) =>
   String(text ?? "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
+    .slice(0, SLUG_MAX)
     .replace(/^_+|_+$/g, "") || fallback;
 
 const FONTS =
@@ -204,7 +207,10 @@ function bannerHtml(bill) {
   </div>`;
 }
 
-function metaHtml(view) {
+export const printsTax = (view) =>
+  Boolean(view?.settings?.gst_enabled) || (view?.bill?.totals?.tax ?? 0) > 0;
+
+function metaHtml(view, gst) {
   const { bill, patient, category, settings } = view;
   const fields = [
     field("Bill number", bill.bill_no || "Not issued yet"),
@@ -222,9 +228,9 @@ function metaHtml(view) {
     if (bill.scheme_ref) fields.push(field("Card number", bill.scheme_ref));
     if (bill.referral_no) fields.push(field("Referral number", bill.referral_no));
   }
-  if (settings?.gst_enabled) {
-    if (settings.legal_name) fields.push(field("Billed by", settings.legal_name));
-    if (settings.gstin) fields.push(field("GSTIN", settings.gstin));
+  if (gst) {
+    if (settings?.legal_name) fields.push(field("Billed by", settings.legal_name));
+    if (settings?.gstin) fields.push(field("GSTIN", settings.gstin));
   }
   return `<div class="bp-meta">${fields.join("")}</div>`;
 }
@@ -298,12 +304,12 @@ function totalsHtml(bill, gst) {
 export function buildBillHtml(view) {
   if (!view?.bill) throw httpError(500, "There is no bill to print");
   const { bill, settings } = view;
-  const gst = Boolean(settings?.gst_enabled);
+  const gst = printsTax(view);
   const heading = bill.status === "draft" ? "Draft bill" : "Bill";
   const body = `<div class="rx-page bp-page">
   ${letterheadHtml(escapeHtml(heading), escapeHtml(bill.bill_no || "No bill number yet"), view.logo || "", view.hospital)}
   ${bannerHtml(bill)}
-  ${metaHtml(view)}
+  ${metaHtml(view, gst)}
   ${linesHtml(bill, gst)}
   ${totalsHtml(bill, gst)}
   ${footerHtml(settings?.bill_footer)}
