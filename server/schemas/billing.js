@@ -8,6 +8,14 @@ import {
 import { STACKING_MODES } from "../services/billing/billingSettings.js";
 import { cleanDate, INT_MAX, MONEY_MAX } from "../services/billing/common.js";
 import { IMPORT_HISTORY_PAGE_MAX } from "../services/billing/importHistory.js";
+import {
+  DECIDE_AT_ONCE,
+  DECISIONS,
+  OUTCOMES,
+  ROW_STATUSES,
+  SEARCH_MAX,
+  SHEET_NAMES,
+} from "../services/billing/importSessions.js";
 import { MAX_BILL_CODES, MAX_BILL_LINES } from "../services/billing/priceBill.js";
 import {
   LINE_SOURCES,
@@ -319,6 +327,9 @@ export const billingRateGridQuerySchema = z.strictObject({
   date: date.optional(),
   groupId: queryId.optional(),
   subgroupId: queryId.optional(),
+  q: z.string().max(100).optional(),
+  limit: z.string().regex(WHOLE_TEXT).optional(),
+  offset: z.string().regex(WHOLE_TEXT).optional(),
 });
 
 export const IMPORT_FILE_NAME_MAX = 200;
@@ -709,6 +720,70 @@ export const BILLING_FIELD_LABELS = {
   fee: "Fee",
   from_scheme_code: "Copy from",
   to_scheme_code: "Copy to",
+};
+
+const choice = (values) =>
+  z.enum(values, { message: `must be one of: ${values.join(", ")}` }).optional();
+
+const importSearch = z.string().max(SEARCH_MAX).optional();
+
+const importRowId = z.union([
+  z
+    .number()
+    .int("must be row ids")
+    .positive("must be row ids")
+    .max(Number.MAX_SAFE_INTEGER, "must be row ids"),
+  z
+    .string()
+    .trim()
+    .regex(/^[1-9]\d{0,15}$/, "must be row ids"),
+]);
+
+export const billingImportRowsQuerySchema = z.strictObject({
+  status: choice(ROW_STATUSES),
+  outcome: choice(OUTCOMES),
+  sheet: choice(SHEET_NAMES),
+  q: importSearch,
+  page: z
+    .string()
+    .trim()
+    .regex(/^[1-9]\d{0,8}$/, "must be a whole number, 1 or more")
+    .optional(),
+});
+
+export const billingImportDecisionSchema = z
+  .strictObject(
+    {
+      decision: z.enum(DECISIONS, { message: `must be one of: ${DECISIONS.join(", ")}` }),
+      row_ids: z
+        .array(importRowId, { error: "must be a list of row ids" })
+        .min(1, "list is empty: choose the rows to decide")
+        .max(DECIDE_AT_ONCE, `can be at most ${DECIDE_AT_ONCE} at once; use the filter`)
+        .optional(),
+      filter: z
+        .strictObject(
+          { sheet: choice(SHEET_NAMES), q: importSearch },
+          objectOnly('must be an object like { "sheet": "Items" }'),
+        )
+        .optional(),
+    },
+    objectOnly("Send the decision as an object"),
+  )
+  .refine(
+    (input) => (input.row_ids === undefined) !== (input.filter === undefined),
+    "Send either row_ids or a filter, not both",
+  );
+
+export const BILLING_IMPORT_LABELS = {
+  ...BILLING_FIELD_LABELS,
+  status: "Status",
+  outcome: "Outcome",
+  sheet: "Sheet",
+  q: "Search",
+  page: "Page",
+  decision: "Decision",
+  row_ids: "Rows",
+  filter: "Filter",
 };
 
 export const BILLING_SCHEMAS = {

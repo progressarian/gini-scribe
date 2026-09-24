@@ -27,3 +27,64 @@
   color: var(--fink2);
   white-space: pre-wrap;
 }
+
+.fset.bill-ui.dreq-page {
+  display: grid;
+  gap: 16px;
+}
+.fset.bill-ui.dreq-page .fset__cardhead {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.fset.bill-ui.dreq-page .flow-table td {
+  vertical-align: top;
+}
+.fset.bill-ui.dreq-page .flow-table td strong {
+  font-weight: 600;
+  color: var(--ui-ink);
+}
+.fset.bill-ui .dreq__muted {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ui-muted);
+}
+.fset.bill-ui .dreq__tag {
+  margin-top: 5px;
+}
+.fset.bill-ui .dreq__tag--new {
+  color: #1d4ed8;
+  background: #eff6ff;
+}
+.fset.bill-ui .dreq__tag--again {
+  color: #6d28d9;
+  background: #f5f3ff;
+}
+.fset.bill-ui .dreq__answer--yes {
+  color: #15803d;
+  background: #edfcf0;
+}
+.fset.bill-ui .dreq__answer--no {
+  color: #b91c1c;
+  background: #fdf0f0;
+}
+.fset.bill-ui .dreq__reason {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ui-ink2);
+}
+.fset.bill-ui.dreq-page td.bill-items__actions {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+}
+.fset.bill-ui.dreq-page td.bill-items__actions .flow-btn {
+  gap: 6px;
+}
+.fset.bill-ui .dreq__reject:hover:not(:disabled) {
+  color: #d94f4f;
+  border-color: #f3c4c4;
+  background: #fdf0f0;
+}
+.fset.bill-ui.dreq-page .pgn {
+  margin-top: 12px;
+}

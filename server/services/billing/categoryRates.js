@@ -298,6 +298,16 @@ export async function rateGrid(schemeCode, options = {}, db = pool) {
     params.push(cleanId(options.subgroupId, "a subgroup"));
     where.push(`i.subgroup_id = $${params.length}`);
   }
+  const q = typeof options.q === "string" ? options.q.trim() : "";
+  if (q) {
+    params.push(`%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+    where.push(`(i.name ILIKE $${params.length} OR i.code ILIKE $${params.length})`);
+  }
+  const limit =
+    hasField(options, "limit") && options.limit !== "" ? cleanId(options.limit, "limit") : null;
+  const offset = readNumber(options.offset, "Offset must be a whole number") ?? 0;
+  if (!Number.isInteger(offset) || offset < 0)
+    throw httpError(400, "Offset must be a whole number");
   const { rows: category } = await db.query(
     `SELECT s.code, s.parent_code,
             CASE WHEN p.code IS NULL THEN s.label ELSE p.label || ' › ' || s.label END AS display_label
@@ -326,14 +336,16 @@ export async function rateGrid(schemeCode, options = {}, db = pool) {
             par.bill_code AS parent_bill_code,
             (SELECT min(f.valid_from)::text FROM category_item_rates f
               WHERE f.scheme_code = $1 AND f.service_item_id = i.id AND f.valid_from > $2::date)
-              AS next_valid_from
+              AS next_valid_from,
+            count(*) OVER ()::int AS total
        FROM service_items i
        JOIN service_subgroups s ON s.id = i.subgroup_id
        JOIN service_groups g ON g.id = s.group_id
        ${current("$1")} own ON TRUE
        ${current(parentParam)} par ON TRUE
       WHERE ${where.join(" AND ")}
-      ORDER BY g.sort_order, g.name, s.sort_order, s.name, i.name`,
+      ORDER BY g.sort_order, g.name, s.sort_order, s.name, i.name
+      ${limit ? `LIMIT ${Math.min(limit, 1000)} OFFSET ${offset}` : ""}`,
     params,
   );
   const pick = (own, parent, base) =>
@@ -346,6 +358,7 @@ export async function rateGrid(schemeCode, options = {}, db = pool) {
     category: category[0],
     date,
     today: indiaToday(),
+    total: rows[0]?.total ?? 0,
     items: rows.map((r) => {
       const rate = pick(
         r.own_rate === null ? null : Number(r.own_rate),

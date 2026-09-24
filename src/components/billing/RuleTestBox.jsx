@@ -11,12 +11,13 @@ import RuleTestResult from "./RuleTestResult";
 import { ROLE_LABEL } from "./discountText";
 import { digitsTyped, requestErrorOf, rupees } from "./format";
 
-function Field({ label, className = "", children }) {
+function Field({ label, hint, className = "", children }) {
   const id = useId();
   return (
     <div className={`fset__field ${className}`.trim()}>
       <label htmlFor={id}>{label}</label>
       {cloneElement(children, { id })}
+      {hint ? <small className="flow-muted">{hint}</small> : null}
     </div>
   );
 }
@@ -107,13 +108,13 @@ export default function RuleTestBox() {
       </div>
       <form aria-label="Test a bill" onSubmit={run}>
         <div className="bill-form">
-          <Field label="Test age" className="fset__field--narrow">
+          <Field label="Test age" className="fset__field--narrow" hint="Empty = unknown">
             <input
               className="jb-assign"
               inputMode="numeric"
               pattern="[0-9]*"
               maxLength={3}
-              placeholder="Unknown"
+              placeholder="e.g. 65"
               value={form.age}
               onChange={set("age", digitsTyped)}
             />

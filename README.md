@@ -278,6 +278,7 @@ Both the API and the worker load the **repo-root `.env`** (`server/loadEnv.js` r
 | `HOSPITAL_PHONE` / `HOSPITAL_NAME` | No | Shown on the patient chat's "call clinic" card |
 | `RUN_CRON_IN_API` | No | `1` runs cron inside the API process instead of the worker |
 | `SCRIBE_MANUAL_FLOOR` | No | The floor is manual by default — Scribe is the system of record. Set to `0` (and only `0`) to hand the flow back to the HealthRay sync |
+| `SCRIBE_BILL_TAKES_TEST_PAYMENTS` | No | Off by default: reception's Payments tab takes money for tests exactly as before. Set to `1` (and only `1`) once the Billing Counter is live on the floor — reception then refuses to take money for any test that is on a live bill line ("HbA1c is on bill …, take the payment there"), so one test is paid once. Leave it off until then: every priced test ordered on the floor already gets a draft bill line, so turning it on early stops reception collecting for tests (task P4-40) |
 | `AADHAAR_ENCRYPTION_KEY` | No | Encrypts stored Aadhaar numbers |
 
 ---

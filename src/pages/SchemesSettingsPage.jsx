@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useBillingCategories, useCreateBillingCategory } from "../queries/hooks/useBillingMaster";
 import { toast } from "../stores/uiStore";
-import AddForm from "../components/billing/AddForm";
+import AddDialog from "../components/billing/AddDialog";
 import CategoryDetails from "../components/billing/CategoryDetails";
 import CategoryRules from "../components/billing/CategoryRules";
 import PaymentRules from "../components/billing/PaymentRules";
@@ -11,8 +11,9 @@ import { categoryCodeTyped, errorOf } from "../components/billing/format";
 import "../styles/flow.css";
 import "./flow/FlowSettings.css";
 import "./billing/billing.css";
+import "./billing/billingUi.css";
 
-function CategoryRow({ category, level, selected, onSelect }) {
+function CategoryRow({ category, level, selected, onSelect, toggle }) {
   const meta = [
     category.code,
     category.daily_cap === null ? null : `${category.daily_cap}/day`,
@@ -24,6 +25,7 @@ function CategoryRow({ category, level, selected, onSelect }) {
     <div
       className={`bill-tree__row bill-tree__row--${level}${category.is_active ? "" : " bill-tree__row--off"}${selected ? " bill-tree__row--on" : ""}`}
     >
+      {toggle}
       <button type="button" className="bill-tree__pick" aria-pressed={selected} onClick={onSelect}>
         <span className="bill-tree__name">
           <span className={`bill-cat__dot bill-cat__dot--${category.color || "gray"}`} />
@@ -72,7 +74,17 @@ export default function SchemesSettingsPage() {
   const [deactivating, setDeactivating] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [pendingCode, setPendingCode] = useState(undefined);
-  const [openAdd, setOpenAdd] = useState(null);
+  const [adding, setAdding] = useState(null);
+  const [collapsed, setCollapsed] = useState(() => new Set());
+
+  const setGroupOpen = (code, open) =>
+    setCollapsed((prev) => {
+      if (prev.has(code) !== open) return prev;
+      const next = new Set(prev);
+      if (open) next.delete(code);
+      else next.add(code);
+      return next;
+    });
 
   const requestSelect = (code) => {
     if (code === selectedCode) return;
@@ -93,6 +105,7 @@ export default function SchemesSettingsPage() {
         label: draft.name,
         ...(parent ? { parent_code: parent.code } : {}),
       });
+      if (parent) setGroupOpen(parent.code, true);
       toast(`Added ${created.display_label ?? draft.name}`, "success");
       if (created.rules_to_move?.length) {
         toast(
@@ -104,7 +117,6 @@ export default function SchemesSettingsPage() {
       } else {
         requestSelect(created.code);
       }
-      setOpenAdd(null);
       return true;
     } catch (e) {
       toast(errorOf(e), "error");
@@ -127,12 +139,19 @@ export default function SchemesSettingsPage() {
   };
 
   return (
-    <div className="flow-root fset">
-      <div className="bill-services">
+    <div className="flow-root fset bill-ui">
+      <div className="bill-services bill-services--split">
         <section className="flow-card bill-tree" aria-label="Categories">
           <div className="fset__cardhead">
             <h2 className="flow-sec-title">Categories</h2>
             <span className="fset__count">{flat.length}</span>
+            <button
+              type="button"
+              className="flow-btn flow-btn-primary flow-btn-mini bill-tree__headbtn"
+              onClick={() => setAdding({ parent: null })}
+            >
+              + Add category
+            </button>
           </div>
           <div className="fset__cardsub">
             Who a patient is billed as — CGHS, ECHS and the rest. A category can hold
@@ -143,65 +162,60 @@ export default function SchemesSettingsPage() {
           ) : isError ? (
             <div className="fset__cardsub">Could not load the categories.</div>
           ) : (
-            tree.map((top) => (
-              <div key={top.code} className="bill-tree__group">
-                <CategoryRow
-                  category={top}
-                  level="group"
-                  selected={selectedCode === top.code}
-                  onSelect={() => requestSelect(top.code)}
-                />
-                {top.sub_categories.map((sub) => (
+            tree.map((top) => {
+              const open = !collapsed.has(top.code);
+              const bodyId = `bill-cat-group-${top.code}`;
+              const subCount = top.sub_categories.length;
+              return (
+                <div key={top.code} className="bill-tree__group">
                   <CategoryRow
-                    key={sub.code}
-                    category={sub}
-                    level="subgroup"
-                    selected={selectedCode === sub.code}
-                    onSelect={() => requestSelect(sub.code)}
+                    category={top}
+                    level="group"
+                    selected={selectedCode === top.code}
+                    onSelect={() => requestSelect(top.code)}
+                    toggle={
+                      <button
+                        type="button"
+                        className="bill-tree__toggle"
+                        aria-expanded={open}
+                        aria-controls={bodyId}
+                        aria-label={`${open ? "Collapse" : "Expand"} ${top.label}`}
+                        onClick={() => setGroupOpen(top.code, !open)}
+                      >
+                        <span className="bill-tree__chev" aria-hidden="true" />
+                      </button>
+                    }
                   />
-                ))}
-                {!top.is_active ? null : openAdd === top.code ? (
-                  <div className="bill-tree__adding">
-                    <AddForm
-                      label={`Add sub-category to ${top.label}`}
-                      namePlaceholder="Label"
-                      typeCode={categoryCodeTyped}
-                      codeMax={32}
-                      busy={create.isPending}
-                      onAdd={(draft) => add(draft, top)}
-                    />
-                    <button
-                      type="button"
-                      className="flow-btn flow-btn-ghost flow-btn-mini"
-                      onClick={() => setOpenAdd(null)}
-                    >
-                      Cancel
-                    </button>
+                  {!open && subCount ? (
+                    <span className="bill-tree__subcount">
+                      {subCount} sub-categor{subCount === 1 ? "y" : "ies"}
+                    </span>
+                  ) : null}
+                  <div id={bodyId} hidden={!open}>
+                    {top.sub_categories.map((sub) => (
+                      <CategoryRow
+                        key={sub.code}
+                        category={sub}
+                        level="subgroup"
+                        selected={selectedCode === sub.code}
+                        onSelect={() => requestSelect(sub.code)}
+                      />
+                    ))}
+                    {top.is_active ? (
+                      <button
+                        type="button"
+                        className="flow-btn flow-btn-ghost flow-btn-mini bill-tree__addbtn"
+                        aria-label={`New sub-category under ${top.label}`}
+                        onClick={() => setAdding({ parent: top })}
+                      >
+                        + Sub-category
+                      </button>
+                    ) : null}
                   </div>
-                ) : (
-                  <button
-                    type="button"
-                    className="flow-btn flow-btn-ghost flow-btn-mini bill-tree__addbtn"
-                    aria-label={`New sub-category under ${top.label}`}
-                    onClick={() => setOpenAdd(top.code)}
-                  >
-                    + Sub-category
-                  </button>
-                )}
-              </div>
-            ))
+                </div>
+              );
+            })
           )}
-          <div className="fset__add">
-            <div className="fset__addtitle">Add category</div>
-            <AddForm
-              label="Add category"
-              namePlaceholder="Label"
-              typeCode={categoryCodeTyped}
-              codeMax={32}
-              busy={create.isPending}
-              onAdd={(draft) => add(draft, null)}
-            />
-          </div>
         </section>
 
         <div className="bill-cat__side">
@@ -229,6 +243,22 @@ export default function SchemesSettingsPage() {
           )}
         </div>
       </div>
+      {adding ? (
+        <AddDialog
+          title={adding.parent ? `Add sub-category to ${adding.parent.label}` : "Add category"}
+          submitLabel={adding.parent ? "Add sub-category" : "Add category"}
+          note="The code is permanent and used on every price and rule; the label can be changed later."
+          nameLabel="Label"
+          codePlaceholder={adding.parent ? "e.g. cghs_pensioner" : "e.g. cghs"}
+          codeHint="Lowercase letters, numbers and _ only"
+          namePlaceholder={adding.parent ? "e.g. CGHS Pensioner" : "e.g. CGHS"}
+          codeMax={32}
+          typeCode={categoryCodeTyped}
+          busy={create.isPending}
+          onAdd={(draft) => add(draft, adding.parent)}
+          onClose={() => setAdding(null)}
+        />
+      ) : null}
       {pendingCode !== undefined && selected ? (
         <DiscardDialog
           name={selected.display_label || selected.label}

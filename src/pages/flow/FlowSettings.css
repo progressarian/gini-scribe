@@ -9,6 +9,14 @@
  * columns, one column under that, and every table scrolls inside its own box
  * rather than pushing the page sideways. */
 
+.flow-root.fset {
+  padding: 0;
+  background: transparent;
+}
+.fset .flow-wrap {
+  max-width: none;
+}
+
 .fset__grid {
   display: grid;
   /* auto-fit, not a breakpoint: the cards reflow at the width they actually

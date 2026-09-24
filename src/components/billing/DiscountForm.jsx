@@ -23,10 +23,10 @@ const METHOD_CHOICE = {
   auto: "Automatic — applies by itself",
 };
 const LIMITS = [
-  ["max_uses_total", "Uses in all"],
-  ["max_uses_per_patient", "Uses per patient"],
-  ["max_uses_per_day", "Uses per day"],
-  ["max_uses_per_doctor_per_day", "Uses per doctor per day"],
+  ["max_uses_total", "Uses in all", "e.g. 500"],
+  ["max_uses_per_patient", "Uses per patient", "e.g. 1"],
+  ["max_uses_per_day", "Uses per day", "e.g. 20"],
+  ["max_uses_per_doctor_per_day", "Uses per doctor per day", "e.g. 5"],
 ];
 const DIGITS = new Set(["min_age", "max_age", "priority", ...LIMITS.map(([key]) => key)]);
 const TYPED = { value: moneyTyped, max_discount: moneyTyped, code: codeTyped };
@@ -325,6 +325,7 @@ export default function DiscountForm({ rule, onClose }) {
               <input
                 className="jb-assign"
                 maxLength={200}
+                placeholder="e.g. Senior citizen 10% off"
                 value={form.name}
                 onChange={set("name")}
                 required
@@ -345,6 +346,7 @@ export default function DiscountForm({ rule, onClose }) {
                   className="jb-assign"
                   maxLength={40}
                   autoComplete="off"
+                  placeholder="e.g. SENIOR10"
                   value={form.code}
                   onChange={set("code")}
                 />
@@ -371,6 +373,13 @@ export default function DiscountForm({ rule, onClose }) {
                 className="jb-assign"
                 inputMode="decimal"
                 maxLength={14}
+                placeholder={
+                  form.kind === "percent"
+                    ? "e.g. 10"
+                    : form.kind === "flat"
+                      ? "e.g. 200"
+                      : "e.g. 500"
+                }
                 value={form.value}
                 onChange={set("value")}
               />
@@ -381,6 +390,7 @@ export default function DiscountForm({ rule, onClose }) {
                   className="jb-assign"
                   inputMode="decimal"
                   maxLength={14}
+                  placeholder="e.g. 500"
                   value={form.max_discount}
                   onChange={set("max_discount")}
                 />
@@ -454,24 +464,24 @@ export default function DiscountForm({ rule, onClose }) {
             scroll
           />
           <div className="bill-form">
-            <Field label="From age" className="fset__field--narrow">
+            <Field label="From age" className="fset__field--narrow" hint="Empty = any age">
               <input
                 className="jb-assign"
                 inputMode="numeric"
                 pattern="[0-9]*"
                 maxLength={3}
-                placeholder="Any"
+                placeholder="e.g. 60"
                 value={form.min_age}
                 onChange={set("min_age")}
               />
             </Field>
-            <Field label="To age" className="fset__field--narrow">
+            <Field label="To age" className="fset__field--narrow" hint="Empty = any age">
               <input
                 className="jb-assign"
                 inputMode="numeric"
                 pattern="[0-9]*"
                 maxLength={3}
-                placeholder="Any"
+                placeholder="e.g. 80"
                 value={form.max_age}
                 onChange={set("max_age")}
               />
@@ -511,13 +521,14 @@ export default function DiscountForm({ rule, onClose }) {
             </Field>
           </div>
           <div className="bill-form">
-            {LIMITS.map(([key, label]) => (
+            {LIMITS.map(([key, label, example]) => (
               <Field key={key} label={label} hint="Empty = no limit">
                 <input
                   className="jb-assign"
                   inputMode="numeric"
                   pattern="[0-9]*"
                   maxLength={9}
+                  placeholder={example}
                   value={form[key]}
                   onChange={set(key)}
                 />

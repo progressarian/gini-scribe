@@ -1,5 +1,6 @@
 import pool from "../../config/db.js";
-import { draftAtCheckIn } from "../billing/visitLines.js";
+import { draftAtCheckIn, refuseOrderOnBill } from "../billing/visitLines.js";
+import { billTakesTestPayments } from "../../../shared/manualFloor.js";
 import { catalogBasePriceSql, consultationRateJoinSql } from "../pricing.js";
 import {
   STATUS_LABEL,
@@ -557,6 +558,7 @@ export async function clearPayment(
     let rejection = null;
 
     const takesMoney = ["paid", "split", "insurance_claim"].includes(method);
+    if (takesMoney && billTakesTestPayments()) await refuseOrderOnBill(client, orderId);
     const onBill = row.bill_items
       ? testsOnBill(
           { status: "billed", items: row.bill_items },

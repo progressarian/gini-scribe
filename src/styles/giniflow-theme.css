@@ -411,3 +411,78 @@
   color: var(--ink3);
   font-size: 13px;
 }
+
+.gf.gf--page {
+  background: #fff;
+  padding: 0 22px;
+  box-sizing: border-box;
+}
+.gf.gf--page .rail {
+  background: transparent;
+  height: auto;
+  padding: 7px 0;
+  margin: 0;
+  border-bottom: 1px solid #dde3ea;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  font-family: inherit;
+}
+.gf.gf--page .rail-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #0e2240;
+}
+.gf.gf--page .rail-head,
+.gf.gf--page .rail-sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.gf.gf--page .rail-live {
+  margin-left: 0;
+  font-size: 11px;
+  color: #6b7d90;
+}
+.gf.gf--page .rail-live.is-stale {
+  color: var(--amb);
+}
+.gf.gf--page .rail-date-label {
+  font-size: 11px;
+  color: #6b7d90;
+}
+.gf.gf--page .rr {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.gf.gf--page .rbtn {
+  padding: 6px 12px;
+  font-size: 12px;
+  border-color: #cdd5df;
+  color: #334155;
+  background: #fff;
+}
+.gf.gf--page .rbtn:hover {
+  background: #f1f5f9;
+  color: #0e2240;
+}
+.gf.gf--page .rail-search,
+.gf.gf--page .rail-date {
+  padding: 6px 10px;
+  font-size: 12px;
+  border: 1px solid #cdd5df;
+  border-radius: 6px;
+  background: #fff;
+  color: #0e2240;
+  color-scheme: light;
+}
+.gf.gf--page .rail-search::placeholder {
+  color: #94a3b8;
+}
+.gf.gf--page .rail-search:focus {
+  background: #fff;
+}
+.gf.gf--page .rail-clock {
+  font-size: 11px;
+  color: #6b7d90;
+}

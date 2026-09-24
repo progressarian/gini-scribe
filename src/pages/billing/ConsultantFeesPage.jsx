@@ -14,6 +14,7 @@ import { requestErrorOf, rupees } from "../../components/billing/format";
 import "../../styles/flow.css";
 import "../flow/FlowSettings.css";
 import "./billing.css";
+import "./billingUi.css";
 import "./consultantFees.css";
 
 const RESERVED = "general";
@@ -111,12 +112,12 @@ function ActivateButton({ doctor }) {
 
 function NotPriced({ doctors, headingRef, buttonRefs, onCreate }) {
   return (
-    <section className="flow-card cf-notpriced" aria-labelledby="cf-notpriced-title">
+    <section className="flow-card bill-stack cf-notpriced" aria-labelledby="cf-notpriced-title">
       <div className="fset__cardhead">
         <h2 id="cf-notpriced-title" className="flow-sec-title" ref={headingRef} tabIndex={-1}>
           Not priced
         </h2>
-        <span className="fset__count">{doctors.length}</span>
+        <span className="fset__count bill-count--todo">{doctors.length}</span>
       </div>
       <div className="fset__cardsub">
         These doctors have no consultation item for a visit type, so they have no fee to set here.
@@ -130,21 +131,23 @@ function NotPriced({ doctors, headingRef, buttonRefs, onCreate }) {
               <th>Doctor</th>
               <th>Visit type</th>
               <th>Billed meanwhile</th>
-              <th />
+              <th className="bill-items__actions-head">Action</th>
             </tr>
           </thead>
           <tbody>
             {doctors.map((d, index) => (
               <tr key={`${d.doctor_id}-${d.visit_type}`}>
-                <td>
+                <td data-label="Doctor">
                   {d.doctor_name}
                   {d.doctor_active === false ? (
                     <span className="flow-muted"> (inactive)</span>
                   ) : null}
                 </td>
-                <td>{d.visit_type}</td>
-                <td>{d.default_covers ? "Hospital default fee" : "Nothing — no fee"}</td>
-                <td className="bill-items__actions">
+                <td data-label="Visit type">{d.visit_type}</td>
+                <td data-label="Billed meanwhile">
+                  {d.default_covers ? "Hospital default fee" : "Nothing — no fee"}
+                </td>
+                <td data-label="" className="bill-items__actions">
                   {d.status === "item_deactivated" ? <ActivateButton doctor={d} /> : null}
                   <button
                     type="button"
@@ -209,7 +212,7 @@ export default function ConsultantFeesPage() {
   const copyFrom = schemeCode && schemeCode !== RESERVED ? schemeCode : "";
 
   return (
-    <div className="flow-root fset cf-page">
+    <div className="flow-root fset bill-ui cf-page">
       <div className="flow-card">
         <div className="fset__cardhead">
           <h2 className="flow-sec-title">Consultant fees</h2>
@@ -219,7 +222,7 @@ export default function ConsultantFeesPage() {
           cell to change it. Greyed values are inherited — from the parent category, a wider rule or
           the base price — until the cell gets its own.
         </div>
-        <div className="bill-form">
+        <div className="bill-form cf-filters">
           <Picker
             label="Doctor"
             value={doctorId}
@@ -283,7 +286,7 @@ export default function ConsultantFeesPage() {
       ) : isLoading || !grid ? (
         <div className="flow-card fset__cardsub">Loading…</div>
       ) : (
-        <div className="flow-card bill-rates">
+        <div className="flow-card cf-fees">
           <div className="fset__cardhead">
             <h2 className="flow-sec-title" ref={feesRef} tabIndex={-1}>
               Fees
@@ -291,6 +294,17 @@ export default function ConsultantFeesPage() {
             <span className="fset__count">{grid.rows.length}</span>
             <span className="flow-muted bill-rates__on">as of {grid.date}</span>
           </div>
+          {grid.rows.length ? (
+            <div className="cf-legend" aria-hidden="true">
+              <span className="cf-legend__item">
+                <span className="cf-legend__swatch" /> Set for this category
+              </span>
+              <span className="cf-legend__item">
+                <span className="cf-legend__swatch cf-legend__swatch--inherited" /> Inherited
+              </span>
+              <span className="cf-legend__item">Click a cell to change it</span>
+            </div>
+          ) : null}
           {!grid.rows.length ? (
             <div className="fset__cardsub">
               {doctorId
@@ -327,7 +341,9 @@ export default function ConsultantFeesPage() {
                         ) : null}
                         <div className="flow-muted bill-items__sub">{row.item.code}</div>
                       </th>
-                      <td>{row.visit_type}</td>
+                      <td className="cf-grid__visit">
+                        <span className="bill-tree__badge">{row.visit_type}</span>
+                      </td>
                       {grid.columns.map((column) => (
                         <FeeCell
                           key={column.code}

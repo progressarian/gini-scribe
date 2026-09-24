@@ -42,7 +42,7 @@ export function normalizeHospital(raw) {
   };
 }
 
-function normalize(raw) {
+export function normalizePrescriptionFooter(raw) {
   if (!raw || typeof raw !== "object") return DEFAULT_FOOTER;
   const lines = Array.isArray(raw.serviceLines) ? raw.serviceLines : [];
   return {
@@ -66,7 +66,7 @@ export async function getPrescriptionFooter({ fresh = false } = {}) {
   if (!fresh && cache && Date.now() - cachedAt < TTL_MS) return cache;
   try {
     const { rows } = await pool.query("SELECT value FROM app_kv WHERE key=$1", [KEY]);
-    cache = rows[0]?.value ? normalize(rows[0].value) : DEFAULT_FOOTER;
+    cache = rows[0]?.value ? normalizePrescriptionFooter(rows[0].value) : DEFAULT_FOOTER;
   } catch {
     cache = DEFAULT_FOOTER;
   }
@@ -75,7 +75,7 @@ export async function getPrescriptionFooter({ fresh = false } = {}) {
 }
 
 export async function setPrescriptionFooter(next) {
-  const value = normalize(next);
+  const value = normalizePrescriptionFooter(next);
   await pool.query(
     `INSERT INTO app_kv (key, value, updated_at) VALUES ($1, $2::jsonb, NOW())
      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,

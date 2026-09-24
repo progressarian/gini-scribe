@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useArrivals } from "../../queries/hooks/useGiniflowReception";
 import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
@@ -31,18 +31,94 @@ const TABS = {
   shift: { key: "shift", label: "Shift" },
 };
 
+const LIST_WIDTH = { min: 220, max: 560, initial: 300, step: 16, key: "billing.counter.listWidth" };
+
+const clampWidth = (value) => Math.min(LIST_WIDTH.max, Math.max(LIST_WIDTH.min, value));
+
+function savedWidth() {
+  try {
+    const saved = Number(localStorage.getItem(LIST_WIDTH.key));
+    return saved ? clampWidth(saved) : LIST_WIDTH.initial;
+  } catch {
+    return LIST_WIDTH.initial;
+  }
+}
+
+function useListWidth() {
+  const [width, setWidth] = useState(savedWidth);
+  const change = useCallback((next) => {
+    const value = clampWidth(Math.round(next));
+    setWidth(value);
+    try {
+      localStorage.setItem(LIST_WIDTH.key, String(value));
+    } catch {
+      return;
+    }
+  }, []);
+  return [width, change];
+}
+
+function Resizer({ width, onChange }) {
+  const drag = (e) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = width;
+    const move = (ev) => onChange(startWidth + ev.clientX - startX);
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      document.body.classList.remove("bc-resizing");
+    };
+    document.body.classList.add("bc-resizing");
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop);
+  };
+  const keys = {
+    ArrowLeft: () => onChange(width - LIST_WIDTH.step),
+    ArrowRight: () => onChange(width + LIST_WIDTH.step),
+    Home: () => onChange(LIST_WIDTH.min),
+    End: () => onChange(LIST_WIDTH.max),
+  };
+  return (
+    <div
+      className="bc-resizer"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize the patient list"
+      aria-valuemin={LIST_WIDTH.min}
+      aria-valuemax={LIST_WIDTH.max}
+      aria-valuenow={width}
+      tabIndex={0}
+      title="Drag to resize · double-click to reset"
+      onPointerDown={drag}
+      onDoubleClick={() => onChange(LIST_WIDTH.initial)}
+      onKeyDown={(e) => {
+        if (!keys[e.key]) return;
+        e.preventDefault();
+        keys[e.key]();
+      }}
+    >
+      <span className="bc-resizer__grip" aria-hidden="true" />
+    </div>
+  );
+}
+
 function VisitRow({ row, active, onPick }) {
   return (
     <button
       type="button"
-      className={`sq-item${active ? " active" : ""}`}
+      className={`bc-row${active ? " bc-row--on" : ""}`}
+      aria-current={active ? "true" : undefined}
       onClick={() => onPick(row.visitId)}
     >
-      <div className="si-name">{row.name}</div>
-      <div className="si-meta">
+      <span className="bc-row__top">
+        <span className="bc-row__name">{row.name}</span>
+        {row.statusLabel ? <span className="bc-row__status">{row.statusLabel}</span> : null}
+      </span>
+      <span className="bc-row__meta">
         {row.age}
-        {(row.sex || "")[0] || ""} · {row.fileNo || "—"} · {row.statusLabel}
-      </div>
+        {(row.sex || "")[0] || ""} · {row.fileNo || "—"}
+      </span>
     </button>
   );
 }
@@ -60,6 +136,7 @@ export default function BillingCounterPage() {
   const [tab, setTab] = useState(TABS.bill.key);
   const [duePatient, setDuePatient] = useState(null);
   const opened = useRef(null);
+  const [listWidth, setListWidth] = useListWidth();
 
   useEffect(() => {
     const timer = setTimeout(() => setDebounced(search), 250);
@@ -133,14 +210,6 @@ export default function BillingCounterPage() {
           🧾 Billing Counter
         </div>
         <div className="rail-right">
-          <input
-            className="rail-search"
-            type="search"
-            value={search}
-            placeholder="Search name, file no, phone…"
-            aria-label="Search today's patients"
-            onChange={(e) => setSearch(e.target.value)}
-          />
           <LiveBadge live={live} className="tr-live" />
           <a className="tr-back" href="/giniflow/stations">
             ← Stations
@@ -148,127 +217,153 @@ export default function BillingCounterPage() {
         </div>
       </div>
 
-      <div className="scroll">
-        <div className="inner">
-          <div className="ar-split">
-            <div className="ar-col">
-              <div className="grp-lbl grp-lbl-sp">
-                Expected<span className="grp-split">{expected.length}</span>
-              </div>
-              {isLoading && <div className="empty-note">Loading…</div>}
-              {!isLoading && !expected.length && <div className="empty-note">Nobody expected.</div>}
-              {expected.map((row) => (
-                <VisitRow
-                  key={row.visitId}
-                  row={row}
-                  active={row.visitId === visitId}
-                  onPick={pick}
-                />
-              ))}
+      <div className="bc-layout" style={{ "--bc-list": `${listWidth}px` }}>
+        <aside className="bc-list" aria-label="Today's patients">
+          <div className="bc-list__head">
+            <div className="bc-list__title">
+              Patients<span className="bc-count">{rows.length}</span>
+            </div>
+            <input
+              className="bc-list__search"
+              type="search"
+              value={search}
+              placeholder="Search name, file no, phone…"
+              aria-label="Search today's patients"
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          <div className="bc-list__body">
+            <div className="bc-group">
+              Expected<span className="bc-count">{expected.length}</span>
+            </div>
+            {isLoading && <div className="bc-list__empty">Loading…</div>}
+            {!isLoading && !expected.length && (
+              <div className="bc-list__empty">Nobody expected.</div>
+            )}
+            {expected.map((row) => (
+              <VisitRow
+                key={row.visitId}
+                row={row}
+                active={row.visitId === visitId}
+                onPick={pick}
+              />
+            ))}
 
-              <div className="grp-lbl grp-sub">
-                On the floor<span className="grp-split">{onFloor.length}</span>
-              </div>
-              {!onFloor.length && <div className="empty-note">Nobody on the floor.</div>}
-              {onFloor.map((row) => (
-                <VisitRow
-                  key={row.visitId}
-                  row={row}
-                  active={row.visitId === visitId}
-                  onPick={pick}
-                />
+            <div className="bc-group">
+              On the floor<span className="bc-count">{onFloor.length}</span>
+            </div>
+            {!onFloor.length && <div className="bc-list__empty">Nobody on the floor.</div>}
+            {onFloor.map((row) => (
+              <VisitRow
+                key={row.visitId}
+                row={row}
+                active={row.visitId === visitId}
+                onPick={pick}
+              />
+            ))}
+          </div>
+        </aside>
+
+        <Resizer width={listWidth} onChange={setListWidth} />
+
+        <div className="bc-main">
+          <div className="bc-detail">
+            <div className="bc-tabs" role="tablist" aria-label="Billing counter">
+              {tabs.map((entry) => (
+                <button
+                  key={entry.key}
+                  type="button"
+                  role="tab"
+                  id={`bc-tab-${entry.key}`}
+                  aria-controls={`bc-panel-${entry.key}`}
+                  aria-selected={activeTab === entry.key}
+                  className={`bc-tab${activeTab === entry.key ? " bc-tab--on" : ""}`}
+                  onClick={() => setTab(entry.key)}
+                >
+                  {entry.label}
+                </button>
               ))}
             </div>
 
-            <div className="bc-detail">
-              <div className="bc-tabs" role="tablist" aria-label="Billing counter">
-                {tabs.map((entry) => (
-                  <button
-                    key={entry.key}
-                    type="button"
-                    role="tab"
-                    id={`bc-tab-${entry.key}`}
-                    aria-controls={`bc-panel-${entry.key}`}
-                    aria-selected={activeTab === entry.key}
-                    className={`st-btn${activeTab === entry.key ? " st-btn-grn" : " st-btn-g"}`}
-                    onClick={() => setTab(entry.key)}
-                  >
-                    {entry.label}
-                  </button>
-                ))}
+            {activeTab === TABS.bill.key && (
+              <div
+                className="bc-panel"
+                role="tabpanel"
+                id="bc-panel-bill"
+                aria-labelledby="bc-tab-bill"
+              >
+                {missing && (
+                  <div className="bc-empty">That patient has no visit on the floor today.</div>
+                )}
+                {!visitId && !billId && !missing && (
+                  <div className="bc-empty">
+                    <strong>No patient chosen</strong>
+                    Pick a patient from the list to open their bill.
+                  </div>
+                )}
+                {error && <div className="bc-err">{error}</div>}
+                {(visitId || billId) && !bill && !error && (
+                  <div className="bc-empty">Opening the bill…</div>
+                )}
+                {bill && (
+                  <>
+                    <PatientHeader
+                      patient={selected || duePatient}
+                      bill={bill}
+                      needsCategory={bill.needs_category}
+                      suggestions={bill.suggestions}
+                      onBill={setBill}
+                    />
+                    <div className="bc-bill">
+                      <div className="bc-bill__work">
+                        <PreviousBills bills={earlier} />
+                        <BillLinesTable bill={bill} onBill={setBill} />
+                        <AddItems bill={bill} onBill={setBill} />
+                        <NotPricedTests tests={notPriced} />
+                        <DiscountCodeBox bill={bill} onBill={setBill} />
+                      </div>
+                      <div className="bc-bill__summary">
+                        <TotalsAndPayment
+                          bill={bill}
+                          onBill={setBill}
+                          schemes={schemes || []}
+                          payLater={payLater}
+                          onPayLater={setPayLater}
+                        />
+                        <BillActions
+                          bill={bill}
+                          onBill={setBill}
+                          schemes={schemes || []}
+                          payLater={payLater}
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
+            )}
 
-              {activeTab === TABS.bill.key && (
-                <div
-                  className="bc-panel"
-                  role="tabpanel"
-                  id="bc-panel-bill"
-                  aria-labelledby="bc-tab-bill"
-                >
-                  {missing && (
-                    <div className="empty-note">That patient has no visit on the floor today.</div>
-                  )}
-                  {!visitId && !billId && !missing && (
-                    <div className="empty-note">Choose a patient to see their bills.</div>
-                  )}
-                  {error && <div className="bc-err">{error}</div>}
-                  {(visitId || billId) && !bill && !error && (
-                    <div className="empty-note">Opening the bill…</div>
-                  )}
-                  {bill && (
-                    <>
-                      <PatientHeader
-                        patient={selected || duePatient}
-                        bill={bill}
-                        needsCategory={bill.needs_category}
-                        suggestions={bill.suggestions}
-                        onBill={setBill}
-                      />
-                      <PreviousBills bills={earlier} />
-                      <BillLinesTable bill={bill} onBill={setBill} />
-                      <AddItems bill={bill} onBill={setBill} />
-                      <NotPricedTests tests={notPriced} />
-                      <DiscountCodeBox bill={bill} onBill={setBill} />
-                      <TotalsAndPayment
-                        bill={bill}
-                        onBill={setBill}
-                        schemes={schemes || []}
-                        payLater={payLater}
-                        onPayLater={setPayLater}
-                      />
-                      <BillActions
-                        bill={bill}
-                        onBill={setBill}
-                        schemes={schemes || []}
-                        payLater={payLater}
-                      />
-                    </>
-                  )}
-                </div>
-              )}
+            {activeTab === TABS.dues.key && (
+              <div
+                className="bc-panel"
+                role="tabpanel"
+                id="bc-panel-dues"
+                aria-labelledby="bc-tab-dues"
+              >
+                <DuesList onTakePayment={takePaymentOn} />
+              </div>
+            )}
 
-              {activeTab === TABS.dues.key && (
-                <div
-                  className="bc-panel"
-                  role="tabpanel"
-                  id="bc-panel-dues"
-                  aria-labelledby="bc-tab-dues"
-                >
-                  <DuesList onTakePayment={takePaymentOn} />
-                </div>
-              )}
-
-              {activeTab === TABS.shift.key && (
-                <div
-                  className="bc-panel"
-                  role="tabpanel"
-                  id="bc-panel-shift"
-                  aria-labelledby="bc-tab-shift"
-                >
-                  <ShiftPanel />
-                </div>
-              )}
-            </div>
+            {activeTab === TABS.shift.key && (
+              <div
+                className="bc-panel"
+                role="tabpanel"
+                id="bc-panel-shift"
+                aria-labelledby="bc-tab-shift"
+              >
+                <ShiftPanel />
+              </div>
+            )}
           </div>
         </div>
       </div>

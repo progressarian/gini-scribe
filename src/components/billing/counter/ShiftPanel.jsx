@@ -163,7 +163,7 @@ export default function ShiftPanel() {
       {error && <div className="bc-err">{error}</div>}
 
       {!!earlier.length && (
-        <div className="ltablewrap bc-requests">
+        <div className="ltablewrap bc-requests bc-stack">
           <table className="ltable" aria-label="Your earlier shifts">
             <thead>
               <tr>
@@ -178,12 +178,12 @@ export default function ShiftPanel() {
             <tbody>
               {earlier.map((row) => (
                 <tr key={row.id}>
-                  <td>{clock(row.opened_at)}</td>
-                  <td>{clock(row.closed_at)}</td>
-                  <td>{rupees(row.expected_cash)}</td>
-                  <td>{rupees(row.counted_cash)}</td>
-                  <td>{rupees(row.difference)}</td>
-                  <td>{shiftStateText(row.is_open)}</td>
+                  <td data-label="Opened">{clock(row.opened_at)}</td>
+                  <td data-label="Closed">{clock(row.closed_at)}</td>
+                  <td data-label="Expected">{rupees(row.expected_cash)}</td>
+                  <td data-label="Counted">{rupees(row.counted_cash)}</td>
+                  <td data-label="Difference">{rupees(row.difference)}</td>
+                  <td data-label="Status">{shiftStateText(row.is_open)}</td>
                 </tr>
               ))}
             </tbody>

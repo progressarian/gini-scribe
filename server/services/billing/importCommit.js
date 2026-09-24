@@ -13,7 +13,7 @@ import { writeAudit, writeAuditMany } from "./audit.js";
 import { auditFields } from "./common.js";
 import { httpError } from "./transaction.js";
 
-const IMPORT_LOCK = "billing_import";
+export const IMPORT_LOCK = "billing_import";
 const STAMP_IGNORED = new Set(["updated_at", "updated_by", "created_at", "created_by"]);
 
 const TABLES = {
@@ -497,7 +497,7 @@ function rowsInConflict(sheets, conflict) {
   ];
 }
 
-function markConflicts(parsed, conflicts, ruleRows) {
+export function markConflicts(parsed, conflicts, ruleRows) {
   const byRule = new Map();
   for (const conflict of conflicts) {
     const owner = ruleRows.get(conflict.rule_id);
@@ -523,7 +523,7 @@ function markConflicts(parsed, conflicts, ruleRows) {
   for (const [, rows] of marked) for (const [row] of rows) row.status = "error";
 }
 
-async function writeSheets(client, sheets, ref, ctx, reason) {
+export async function writeSheets(client, sheets, ref, ctx, reason) {
   const ids = idMaps(ref);
   const audit = [];
   const ruleRows = new Map();
@@ -842,7 +842,7 @@ const sheetCounts = (preview) =>
 
 const CHANGED_MEANWHILE = new Set(["23505", "23503", "23514", "P0001"]);
 
-function explain(error) {
+export function explain(error) {
   if (CHANGED_MEANWHILE.has(error?.code)) {
     return httpError(
       409,
@@ -852,7 +852,7 @@ function explain(error) {
   return error;
 }
 
-async function recordFailure(db, fileName, actorId) {
+export async function recordFailure(db, fileName, actorId) {
   await db
     .query(
       `INSERT INTO billing_imports (file_name, imported_by, status) VALUES ($1, $2, 'failed')`,

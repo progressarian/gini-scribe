@@ -1,7 +1,7 @@
 import pool from "../../config/db.js";
 import { billingVisitType } from "../../../shared/billingVisitType.js";
 import { writeAudit } from "./audit.js";
-import { addLineIn, openDraftIn, repriceBillIn } from "./bills.js";
+import { addLineIn, billLabel, openDraftIn, repriceBillIn } from "./bills.js";
 import { getSettings } from "./billingSettings.js";
 import { httpError, inTransaction } from "./transaction.js";
 import { auditFields } from "./common.js";
@@ -172,6 +172,24 @@ export async function notPricedForVisit(visitId, db = pool) {
     [cleanUuid(visitId, "visit")],
   );
   return rows.map((row) => row.test_name);
+}
+
+export async function refuseOrderOnBill(client, labOrderId) {
+  const { rows } = await client.query(
+    `SELECT l.bill_id, l.bill_name, b.bill_no
+       FROM bill_lines l
+       JOIN bills b ON b.id = l.bill_id
+      WHERE l.lab_order_id = $1 AND l.is_live
+      ORDER BY l.line_no
+      LIMIT 1`,
+    [labOrderId],
+  );
+  if (!rows.length) return;
+  throw httpError(409, `${rows[0].bill_name} is on ${billLabel(rows[0])}, take the payment there`, {
+    code: "on_bill",
+    bill_id: rows[0].bill_id,
+    bill_no: rows[0].bill_no,
+  });
 }
 
 export async function releaseOrderLines(client, labOrderId, testNames = null, ctx = null) {

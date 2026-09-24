@@ -1,20 +1,6 @@
 .set {
-  max-width: 1180px;
+  padding: 0px 4px;
   margin: 0 auto;
-  padding: 22px 20px 48px;
-}
-.set__head {
-  margin-bottom: 14px;
-}
-.set__title {
-  font-size: 20px;
-  font-weight: 700;
-  color: #0e2240;
-}
-.set__blurb {
-  font-size: 13px;
-  color: #6b7d90;
-  margin-top: 4px;
 }
 .set__tabs {
   display: flex;

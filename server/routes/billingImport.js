@@ -1,20 +1,20 @@
 import express, { Router } from "express";
-import pool from "../config/db.js";
 import { requireCapability } from "../middleware/auth.js";
-import { validateQuery } from "../middleware/validate.js";
-import { CAPABILITIES as CAP, hasCapability } from "../../shared/permissions.js";
+import { validate, validateQuery } from "../middleware/validate.js";
+import { CAPABILITIES as CAP } from "../../shared/permissions.js";
 import {
   BILLING_FIELD_LABELS,
+  BILLING_IMPORT_LABELS,
+  billingImportDecisionSchema,
   billingImportFileQuerySchema,
   billingImportHistoryQuerySchema,
+  billingImportRowsQuerySchema,
 } from "../schemas/index.js";
 import { billingRoute, sendFailure } from "./billingHttp.js";
 import { auditContext } from "../services/billing/audit.js";
-import { commitUpload } from "../services/billing/importCommit.js";
-import { errorFile, errorFileName } from "../services/billing/importErrorFile.js";
 import { listImports } from "../services/billing/importHistory.js";
 import { MAX_UPLOAD_BYTES } from "../services/billing/importParse.js";
-import { previewUpload } from "../services/billing/importPreview.js";
+import * as sessions from "../services/billing/importSessions.js";
 import { TEMPLATE_FILE_NAME, templateBuffer } from "../services/billing/importTemplate.js";
 
 const router = Router();
@@ -46,7 +46,9 @@ const upload = [
   readFile,
 ];
 
-const options = (req) => ({ canChangeDailyCap: hasCapability(req.doctor?.role, CAP.ADMIN) });
+const ctx = (req) => ({ ...auditContext(req), role: req.doctor.role });
+
+const SESSIONS = `${BASE}/sessions`;
 
 const disposition = (fileName) => {
   const plain = fileName.replace(/[^\x20-\x7e]|["\\]/g, "_");
@@ -73,47 +75,66 @@ router.get(`${BASE}/template`, master, async (req, res) => {
   }
 });
 
-router.post(
-  `${BASE}/preview`,
-  upload,
-  billingRoute("Billing import preview", 200, (req) => previewUpload(req.body, pool, options(req))),
-);
-
-router.post(
-  `${BASE}/commit`,
-  upload,
-  billingRoute("Billing import", 200, (req) =>
-    commitUpload(req.body, {
-      fileName: req.query.fileName,
-      ctx: auditContext(req),
-      options: options(req),
-    }),
-  ),
-);
-
-router.post(`${BASE}/errors`, upload, async (req, res) => {
-  try {
-    const preview = await previewUpload(req.body, pool, options(req));
-    const file = await errorFile(req.body, preview);
-    if (!file) {
-      return res.status(422).json({
-        error: preview.problems.length
-          ? "The file can't be checked row by row, so there is no error file — fix the problems listed first"
-          : "No row in this file has an error, so there is no error file",
-        problems: preview.problems,
-      });
-    }
-    sendXlsx(res, file, errorFileName(req.query.fileName));
-  } catch (e) {
-    sendFailure("Billing import error file", res, e);
-  }
-});
-
 router.get(
   `${BASE}/history`,
   master,
   validateQuery(billingImportHistoryQuerySchema, BILLING_FIELD_LABELS),
   billingRoute("Billing import history", 200, (req) => listImports(req.query)),
+);
+
+router.post(
+  SESSIONS,
+  upload,
+  billingRoute("Billing import session", 201, (req) =>
+    sessions.createSession(req.body, { fileName: req.query.fileName, ctx: ctx(req) }),
+  ),
+);
+
+router.get(
+  `${SESSIONS}/:id`,
+  master,
+  billingRoute("Billing import session", 200, (req) => sessions.getSession(req.params.id)),
+);
+
+router.get(
+  `${SESSIONS}/:id/rows`,
+  master,
+  validateQuery(billingImportRowsQuerySchema, BILLING_IMPORT_LABELS),
+  billingRoute("Billing import rows", 200, (req) => sessions.listRows(req.params.id, req.query)),
+);
+
+router.post(
+  `${SESSIONS}/:id/decisions`,
+  master,
+  validate(billingImportDecisionSchema, BILLING_IMPORT_LABELS),
+  billingRoute("Billing import decision", 200, (req) =>
+    sessions.decideRows(req.params.id, req.body, ctx(req)),
+  ),
+);
+
+router.post(
+  `${SESSIONS}/:id/commit`,
+  master,
+  billingRoute("Billing import commit", 200, (req) =>
+    sessions.commitSession(req.params.id, { ctx: ctx(req) }),
+  ),
+);
+
+router.get(`${SESSIONS}/:id/failed`, master, async (req, res) => {
+  try {
+    const { file, fileName } = await sessions.failedRowsFile(req.params.id);
+    sendXlsx(res, file, fileName);
+  } catch (e) {
+    sendFailure("Billing import failed rows", res, e);
+  }
+});
+
+router.post(
+  `${SESSIONS}/:id/abandon`,
+  master,
+  billingRoute("Billing import abandon", 200, (req) =>
+    sessions.abandonSession(req.params.id, ctx(req)),
+  ),
 );
 
 export default router;

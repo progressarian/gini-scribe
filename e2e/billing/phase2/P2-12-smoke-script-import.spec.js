@@ -151,10 +151,21 @@ const tagged = async () =>
   );
 
 const picker = (page) => page.getByLabel("Filled-in template (.xlsx)", { exact: true });
-const preview = (page) => page.getByRole("region", { name: "Preview", exact: true });
-const importButton = (page) => preview(page).getByRole("button", { name: "Import", exact: true });
-const countsOf = (page, name) =>
-  page.getByRole("list", { name, exact: true }).getByRole("listitem");
+const card = (page) => page.getByRole("region", { name: /^Import( report)?$/ });
+const commitButton = (page) => card(page).getByRole("button", { name: "Commit", exact: true });
+const summary = (page) =>
+  page.getByRole("list", { name: "All rows", exact: true }).getByRole("listitem");
+const sheetOptions = (page) => card(page).getByLabel("Sheet", { exact: true }).locator("option");
+const table = (page) => page.getByRole("table", { name: "Import rows", exact: true });
+const bodyRows = (page) => table(page).locator("tbody tr");
+const rowOf = (page, key) => bodyRows(page).filter({ has: page.getByText(key, { exact: true }) });
+const outcome = (page) =>
+  page.getByRole("list", { name: "What happened", exact: true }).getByRole("listitem");
+
+const sheetList = () => [
+  `All sheets (${EXPECTED.reduce((a, b) => a + b, 0)})`,
+  ...SHEETS.map((sheet, i) => `${sheet} (${EXPECTED[i]})`),
+];
 
 async function open(page) {
   await loginAs(page, "reception_admin");
@@ -163,7 +174,18 @@ async function open(page) {
 
 async function upload(page, name, buffer) {
   await picker(page).setInputFiles({ name, mimeType: XLSX_TYPE, buffer });
-  await expect(preview(page)).toContainText(name);
+  await expect(card(page)).toContainText(name, { timeout: 30_000 });
+}
+
+async function commitAll(page, name, rows) {
+  await commitButton(page).click();
+  await page
+    .getByRole("dialog", { name: `Commit ${name}?`, exact: true })
+    .getByRole("button", { name: `Yes, save ${rows} rows`, exact: true })
+    .click();
+  await expect(page.getByRole("heading", { name: `Imported ${name}`, exact: true })).toBeVisible({
+    timeout: 30_000,
+  });
 }
 
 test.describe.serial("P2-12 smoke files through the Bulk import page", () => {
@@ -181,6 +203,7 @@ test.describe.serial("P2-12 smoke files through the Bulk import page", () => {
   });
 
   test.afterAll(async () => {
+    await query(`DELETE FROM billing_import_sessions WHERE file_name ILIKE $1`, [`%${tag}%`]);
     await query(`DELETE FROM category_item_rates WHERE scheme_code LIKE $1`, ["p212%"]);
     await query(`DELETE FROM category_rules WHERE scheme_code LIKE $1`, ["p212%"]);
     await query(`DELETE FROM patient_schemes WHERE parent_code LIKE $1`, ["p212%"]);
@@ -195,26 +218,24 @@ test.describe.serial("P2-12 smoke files through the Bulk import page", () => {
   test("1. the good file (CGHS with three sub-categories) imports every row", async ({ page }) => {
     await open(page);
     await upload(page, fileName("good"), await workbook(goodSheets()));
-    await expect(countsOf(page, "All sheets")).toHaveText(["12 new", "1 with warnings"]);
-    for (const [i, sheet] of SHEETS.entries()) {
-      await expect(countsOf(page, `${sheet} counts`), sheet).toHaveText(
-        sheet === "Items" ? ["3 new", "1 with warnings"] : [`${EXPECTED[i]} new`],
-      );
-    }
-    const warned = page.getByRole("table", { name: "Items rows", exact: true }).getByRole("row");
-    await expect(warned.nth(1)).toContainText(
+    await expect(summary(page)).toHaveText(["12 ready"]);
+    await expect(sheetOptions(page)).toHaveText(sheetList());
+    await expect(rowOf(page, code("TEST"))).toContainText(
       `subgroup_code: ${TEST_NAME} is a Lab test, but P212 procedures is in the P212 group ${tag} group`,
     );
-    await importButton(page).click();
-    const dialog = page.getByRole("dialog", { name: `Import ${fileName("good")}?`, exact: true });
-    await expect(dialog).toContainText("12 new rows and 0 updates will be saved");
-    await dialog.getByRole("button", { name: "Yes, import", exact: true }).click();
-    await expect(
-      page.getByRole("heading", { name: `Imported ${fileName("good")}`, exact: true }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("list", { name: "What was saved", exact: true }).getByRole("listitem"),
-    ).toHaveText(SHEETS.map((sheet, i) => `${sheet}: ${EXPECTED[i]} new`));
+    await commitButton(page).click();
+    const dialog = page.getByRole("dialog", { name: `Commit ${fileName("good")}?`, exact: true });
+    await expect(dialog.getByRole("list", { name: "What will happen" })).toContainText(
+      "12 rows will be saved — new rows, and the changes you chose to override",
+    );
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await commitAll(page, fileName("good"), 12);
+    await expect(outcome(page)).toHaveText([
+      "12 saved",
+      "0 kept as they were — not changed",
+      "0 failed — skipped",
+      "0 unchanged",
+    ]);
 
     expect(await tagged()).toEqual({
       groups: 1,
@@ -239,48 +260,50 @@ test.describe.serial("P2-12 smoke files through the Bulk import page", () => {
       fileName("good"),
     ]);
     expect(imported.rows).toEqual([{ status: "saved" }]);
-    await expect(
-      page
-        .getByRole("table", { name: "Past imports", exact: true })
-        .getByRole("row")
-        .filter({ hasText: fileName("good") }),
-    ).toContainText("Saved");
+    const mine = page
+      .getByRole("table", { name: "Past imports", exact: true })
+      .getByRole("row")
+      .filter({ hasText: fileName("good") });
+    await expect(mine).toContainText("Saved");
+    for (const [i, sheet] of SHEETS.entries()) {
+      await expect(mine, sheet).toContainText(`${sheet}: ${EXPECTED[i]} new`);
+    }
   });
 
-  test("2. the same file again is all unchanged and can't be imported", async ({ page }) => {
+  test("2. the same file again is all unchanged and can't be committed", async ({ page }) => {
     const before = await tagged();
     await open(page);
     await upload(page, fileName("again"), await workbook(goodSheets()));
-    await expect(countsOf(page, "All sheets")).toHaveText(["12 unchanged", "1 with warnings"]);
-    for (const [i, sheet] of SHEETS.entries()) {
-      await expect(countsOf(page, `${sheet} counts`), sheet).toHaveText(
-        sheet === "Items" ? ["3 unchanged", "1 with warnings"] : [`${EXPECTED[i]} unchanged`],
-      );
+    await expect(summary(page)).toHaveText(["12 unchanged"]);
+    await expect(sheetOptions(page)).toHaveText(sheetList());
+    await card(page).getByLabel("Sheet", { exact: true }).selectOption("Items");
+    await expect(bodyRows(page)).toHaveCount(3);
+    for (const item of ["DRESS", "FEE", "TEST"]) {
+      await expect(rowOf(page, code(item)).getByRole("cell").nth(2)).toHaveText("Unchanged");
     }
-    const items = page.getByRole("table", { name: "Items rows", exact: true }).getByRole("row");
-    await expect(items).toHaveCount(2);
-    await expect(items.nth(1).getByRole("cell").nth(1)).toHaveText("Unchanged");
-    await expect(preview(page).getByRole("table")).toHaveCount(1);
-    await expect(importButton(page)).toBeDisabled();
+    await expect(commitButton(page)).toBeDisabled();
     expect(await tagged()).toEqual(before);
+    const imported = await query(`SELECT 1 FROM billing_imports WHERE file_name = $1`, [
+      fileName("again"),
+    ]);
+    expect(imported.rows).toEqual([]);
   });
 
-  test("3. the file with one bad row imports nothing and offers the error download", async ({
+  test("3. the file with one bad row fails only that row, offers the failed rows download, and saves the rest", async ({
     page,
   }) => {
     const before = await tagged();
     await open(page);
     const name = fileName("bad");
     await upload(page, name, await workbook(badSheets()));
-    await expect(countsOf(page, "All sheets")).toHaveText(["4 new", "1 with errors"]);
-    await expect(importButton(page)).toBeDisabled();
-    const bad = page.getByRole("table", { name: "Items rows", exact: true }).getByRole("row");
-    await expect(bad.nth(1)).toContainText("Error");
-    await expect(bad.nth(1)).toContainText('typed "₹1,200"');
+    await expect(summary(page)).toHaveText(["4 ready", "1 failed"]);
+    const bad = rowOf(page, code("BAD2"));
+    await expect(bad).toContainText("Failed");
+    await expect(bad).toContainText('typed "₹1,200"');
 
     const [download] = await Promise.all([
       page.waitForEvent("download"),
-      preview(page).getByRole("button", { name: "Download errors", exact: true }).click(),
+      card(page).getByRole("button", { name: "Download failed rows", exact: true }).click(),
     ]);
     expect(download.suggestedFilename()).toBe(`p212-bad-${tag} - errors.xlsx`);
     const wb = new ExcelJS.Workbook();
@@ -291,8 +314,26 @@ test.describe.serial("P2-12 smoke files through the Bulk import page", () => {
     expect(ws.getRow(3).getCell(col).text).not.toBe("");
     expect(ws.getRow(2).getCell(col).text).toBe("");
 
-    expect(await tagged()).toEqual(before);
-    const imported = await query(`SELECT 1 FROM billing_imports WHERE file_name = $1`, [name]);
-    expect(imported.rows).toEqual([]);
+    expect(await tagged(), "nothing is saved before Commit").toEqual(before);
+    await commitAll(page, name, 4);
+    await expect(outcome(page)).toHaveText([
+      "4 saved",
+      "0 kept as they were — not changed",
+      "1 failed — skipped",
+      "0 unchanged",
+    ]);
+    expect(await tagged()).toEqual({
+      ...before,
+      groups: before.groups + 1,
+      subgroups: before.subgroups + 1,
+      items: before.items + 1,
+      categories: before.categories + 1,
+    });
+    const saved = await query(`SELECT code FROM service_items WHERE code = ANY($1) ORDER BY code`, [
+      [code("OK2"), code("BAD2")],
+    ]);
+    expect(saved.rows).toEqual([{ code: code("OK2") }]);
+    const imported = await query(`SELECT status FROM billing_imports WHERE file_name = $1`, [name]);
+    expect(imported.rows).toEqual([{ status: "saved" }]);
   });
 });

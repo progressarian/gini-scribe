@@ -140,6 +140,24 @@ export async function sampleTakenBeforeVisit(db, visitId) {
   return !!rows[0]?.earlier;
 }
 
+export async function labCaseAlreadyReported(db, visitId) {
+  const { rows } = await db.query(
+    `SELECT EXISTS (
+       SELECT 1 FROM lab_cases lc
+        WHERE lc.case_date = v.visit_date
+          AND (lc.patient_id = v.patient_id
+               OR (lc.patient_id IS NULL
+                   AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))
+          AND ${LIVE_LAB_CASE_SQL("lc")}
+          AND COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'reported_on' IS NOT NULL
+     ) AS reported
+       FROM giniflow_visits v JOIN patients p ON p.id = v.patient_id
+      WHERE v.id = $1`,
+    [visitId],
+  );
+  return !!rows[0]?.reported;
+}
+
 const trimmed = (v, max = 120) =>
   typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null;
 

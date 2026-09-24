@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import {
   useBillingCategories,
   useBillingGroups,
@@ -9,10 +9,13 @@ import {
 } from "../../queries/hooks/useBillingMaster";
 import { toast } from "../../stores/uiStore";
 import RateHistoryDialog from "../../components/billing/RateHistoryDialog";
+import Pagination from "../../components/ui/Pagination";
+import useDebounced from "../../hooks/useDebounced";
 import { codeTyped, errorOf, moneyTyped, rupees } from "../../components/billing/format";
 import "../../styles/flow.css";
 import "../flow/FlowSettings.css";
 import "./billing.css";
+import "./billingUi.css";
 
 const text = (v) => (v === null || v === undefined ? "" : String(v));
 const TYPED = { rate: moneyTyped, bill_code: codeTyped };
@@ -79,24 +82,26 @@ function EditRow({ item, code, today, onDone }) {
   );
   return (
     <tr className="bill-rates__editing">
-      <td>
+      <td data-label="Group › subgroup">
         {item.group_name} › {item.subgroup_name}
       </td>
-      <td>{item.name}</td>
-      <td>{rupees(item.base_price)}</td>
-      <td>
+      <td data-label="Item">{item.name}</td>
+      <td data-label="Base price">{rupees(item.base_price)}</td>
+      <td data-label="Rate">
         {input("rate", "Rate", {
           inputMode: "decimal",
           placeholder: `${rupees(item.rate)} (${item.rate_source === "own" ? "own" : item.rate_source === "parent" ? "inherited" : "base price"})`,
         })}
       </td>
-      <td>{input("bill_name", "Bill name", { placeholder: item.name, maxLength: 200 })}</td>
-      <td>{input("bill_code", "Bill code", { maxLength: 40 })}</td>
-      <td className="bill-rates__dates">
+      <td data-label="Bill name">
+        {input("bill_name", "Bill name", { placeholder: item.name, maxLength: 200 })}
+      </td>
+      <td data-label="Bill code">{input("bill_code", "Bill code", { maxLength: 40 })}</td>
+      <td data-label="Valid" className="bill-rates__dates">
         {input("valid_from", "From", { type: "date", required: true })}
         {input("valid_to", "To", { type: "date", min: form.valid_from || undefined })}
       </td>
-      <td className="bill-items__actions">
+      <td data-label="" className="bill-items__actions">
         <button
           type="button"
           className="flow-btn flow-btn-primary flow-btn-mini"
@@ -179,36 +184,36 @@ function RateRow({ item, parentName, onEdit, onHistory, clearing, onClear, onCle
       : "—";
   return (
     <tr>
-      <td>
+      <td data-label="Group › subgroup">
         {item.group_name} › {item.subgroup_name}
       </td>
-      <td>
+      <td data-label="Item">
         {item.name}
         <div className="flow-muted bill-items__sub">{item.code}</div>
       </td>
-      <td>{rupees(item.base_price)}</td>
-      <td>
+      <td data-label="Base price">{rupees(item.base_price)}</td>
+      <td data-label="Rate">
         {rupees(item.rate)} <Source source={item.rate_source} parentName={parentName} />
       </td>
-      <td>
+      <td data-label="Bill name">
         {item.bill_name}
         {item.bill_name_source === "parent" ? (
           <Source source="parent" parentName={parentName} />
         ) : null}
       </td>
-      <td>
+      <td data-label="Bill code">
         {item.bill_code ?? "—"}
         {item.bill_code_source === "parent" ? (
           <Source source="parent" parentName={parentName} />
         ) : null}
       </td>
-      <td>
+      <td data-label="Valid">
         {dates}
         {item.next_valid_from ? (
           <div className="flow-muted bill-items__sub">Changes on {item.next_valid_from}</div>
         ) : null}
       </td>
-      <td className="bill-items__actions">
+      <td data-label="" className="bill-items__actions">
         {clearing ? (
           <ClearControls item={item} code={code} onDone={onClearDone} />
         ) : (
@@ -256,7 +261,21 @@ export default function CategoryRatesPage() {
   const [clearing, setClearing] = useState(null);
   const [history, setHistory] = useState(null);
   const [q, setQ] = useState("");
-  const { data: grid, isLoading, isError } = useBillingRateGrid(code, { groupId, date });
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const needle = useDebounced(q.trim(), 300);
+  const {
+    data: grid,
+    isLoading,
+    isError,
+    isFetching,
+  } = useBillingRateGrid(code, {
+    groupId,
+    date,
+    q: needle,
+    limit: String(pageSize),
+    offset: String((page - 1) * pageSize),
+  });
   const dateId = useId();
 
   const parent = tree.find((top) => top.sub_categories.some((sub) => sub.code === code));
@@ -265,20 +284,21 @@ export default function CategoryRatesPage() {
   const choose = (setter) => (e) => {
     setEditing(null);
     setClearing(null);
+    setPage(1);
     setter(e.target.value);
   };
 
-  const needle = q.trim().toLowerCase();
-  const items = (grid?.items ?? []).filter(
-    (item) =>
-      !needle ||
-      item.name.toLowerCase().includes(needle) ||
-      item.code.toLowerCase().includes(needle),
-  );
+  const items = grid?.items ?? [];
+  const total = grid?.total ?? 0;
+  const pastEnd = !isFetching && grid && !items.length && page > 1;
+
+  useEffect(() => {
+    if (pastEnd) setPage(1);
+  }, [pastEnd]);
   const startsOn = grid && date > grid.today ? date : grid?.today;
 
   return (
-    <div className="flow-root fset">
+    <div className="flow-root fset bill-ui bill-rates-page">
       <div className="flow-card">
         <div className="fset__cardhead">
           <h2 className="flow-sec-title">Category rates</h2>
@@ -287,7 +307,7 @@ export default function CategoryRatesPage() {
           What each category pays for each service. A sub-category uses its parent's rate, bill name
           and bill code unless it has its own; with neither, the base price applies.
         </div>
-        <div className="bill-form">
+        <div className="bill-form bill-rates__filters">
           <Picker label="Category" value={code} onChange={choose(setCode)}>
             <option value="">Choose a category</option>
             {tree.flatMap((top) => [
@@ -317,7 +337,7 @@ export default function CategoryRatesPage() {
               className="jb-assign"
               placeholder="Item name or code"
               value={q}
-              onChange={(e) => setQ(e.target.value)}
+              onChange={choose(setQ)}
             />
           </div>
           <div className="fset__field fset__field--narrow bill-rates__asof">
@@ -333,15 +353,19 @@ export default function CategoryRatesPage() {
         </div>
       </div>
 
-      {!code ? null : isError ? (
+      {!code ? (
+        <div className="flow-card bill-rates__empty">
+          Choose a category above to see and edit what it pays for each service.
+        </div>
+      ) : isError ? (
         <div className="flow-card fset__cardsub">Could not load the rates.</div>
       ) : isLoading || !grid ? (
         <div className="flow-card fset__cardsub">Loading…</div>
       ) : (
-        <div className="flow-card bill-rates">
+        <div className="flow-card bill-rates bill-stack">
           <div className="fset__cardhead">
             <h2 className="flow-sec-title">{grid.category.display_label}</h2>
-            <span className="fset__count">{items.length}</span>
+            <span className="fset__count">{total}</span>
             <span className="flow-muted bill-rates__on">as of {grid.date}</span>
           </div>
           {!items.length ? (
@@ -399,6 +423,19 @@ export default function CategoryRatesPage() {
               </table>
             </div>
           )}
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            total={total}
+            onChange={(next) => {
+              setEditing(null);
+              setClearing(null);
+              setPage(next);
+            }}
+            onPageSizeChange={setPageSize}
+            disabled={isFetching}
+            unit="items"
+          />
         </div>
       )}
       <RateHistoryDialog

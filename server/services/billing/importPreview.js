@@ -167,7 +167,8 @@ function storedIndex(ref) {
             seen.add(id);
             return true;
           });
-        return { isNew: !targets.some((t) => t.existed), changes };
+        const before = targets.filter((t) => t.existed).map((t) => t.stored);
+        return { isNew: !before.length, changes, before: before.length ? before : null };
       },
     },
     Discounts: {
@@ -291,7 +292,7 @@ function storedStatus(spec, row) {
       }
     }
   }
-  return { isNew: !stored, changes };
+  return { isNew: !stored, changes, before: stored ?? null };
 }
 
 export function markStatus(sheets, ref) {
@@ -301,9 +302,12 @@ export function markStatus(sheets, ref) {
     if (!spec) continue;
     for (const row of sheet.rows) {
       row.warnings ??= [];
-      const { isNew, changes } = spec.statusOf ? spec.statusOf(row) : storedStatus(spec, row);
+      const { isNew, changes, before } = spec.statusOf
+        ? spec.statusOf(row)
+        : storedStatus(spec, row);
       row.isNew = isNew;
       row.changes = changes;
+      row.before = before;
       row.status = row.errors.length
         ? "error"
         : isNew

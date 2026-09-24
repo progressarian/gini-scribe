@@ -210,18 +210,18 @@ test.describe.serial("P4-17 paid test lines open the gate", () => {
     );
     const before = await orderRow(order);
     const draft = await bills.openDraft(visit, desk, db);
-    const paid = await payments.takePayments(
-      draft.id,
-      { version: draft.version, mode: "cash", amount: 250 },
-      desk,
-      db,
+    await refused(
+      payments.takePayments(
+        draft.id,
+        { version: draft.version, mode: "cash", amount: 250 },
+        desk,
+        db,
+      ),
+      409,
+      /has its own insurance claim of ₹250\.00 at reception/,
+      "paying on the bill for a test that carries its own claim",
     );
-    expect(paid.orders).toHaveLength(0);
-    expect(await orderRow(order)).toMatchObject({
-      payment_status: before.payment_status,
-      claim_state: "submitted",
-      version: before.version,
-    });
+    expect(await orderRow(order)).toEqual(before);
   });
 
   test("6. cancelling the bill leaves no order looking paid", async () => {

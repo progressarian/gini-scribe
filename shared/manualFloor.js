@@ -80,6 +80,8 @@ export const pharmacyWaitsForRx = () =>
 
 export const bloodBeforeMachine = () => process.env.SCRIBE_BLOOD_BEFORE_MACHINE === "1";
 
+export const billTakesTestPayments = () => process.env.SCRIBE_BILL_TAKES_TEST_PAYMENTS === "1";
+
 // The lab's one exception (39-HYBRID-FLOOR-PLAN.md §15).
 //
 // The Chief and the consultants order lab tests in HealthRay, not here, so with

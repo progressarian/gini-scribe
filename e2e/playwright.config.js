@@ -1,5 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
-import { API_URL, WEB_URL, WEB_PORT, API_PORT } from "./setup/testEnv.mjs";
+import { API_URL, WEB_URL, WEB_PORT, API_PORT, buildTestEnv } from "./setup/testEnv.mjs";
+
+Object.assign(process.env, buildTestEnv());
 
 const browserChannel = process.env.E2E_BROWSER_CHANNEL ?? "chrome";
 

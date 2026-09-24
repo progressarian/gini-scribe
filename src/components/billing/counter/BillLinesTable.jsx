@@ -10,7 +10,8 @@ function QuantityCell({ bill, line, onBill, onError }) {
 
   useEffect(() => setValue(String(line.quantity)), [line.quantity]);
 
-  if (bill.status !== "draft" || !line.allow_quantity) return <td>{line.quantity}</td>;
+  if (bill.status !== "draft" || !line.allow_quantity)
+    return <td data-label="Qty">{line.quantity}</td>;
 
   const commit = async () => {
     const quantity = Number(value);
@@ -34,7 +35,7 @@ function QuantityCell({ bill, line, onBill, onError }) {
   };
 
   return (
-    <td>
+    <td data-label="Qty">
       <span className="sr-only">{line.quantity}</span>
       <input
         className="bc-qty"
@@ -84,7 +85,7 @@ export default function BillLinesTable({ bill, onBill }) {
       {!bill.lines.length ? (
         <div className="empty-note">Nothing on this bill yet.</div>
       ) : (
-        <div className="ltablewrap">
+        <div className="ltablewrap bc-stack">
           <table className="ltable" aria-label="Bill lines">
             <thead>
               <tr>
@@ -101,14 +102,14 @@ export default function BillLinesTable({ bill, onBill }) {
             <tbody>
               {bill.lines.map((line) => (
                 <tr key={line.id}>
-                  <td>{line.bill_name}</td>
-                  <td>{line.bill_code || "—"}</td>
+                  <td data-label="Item">{line.bill_name}</td>
+                  <td data-label="Bill code">{line.bill_code || "—"}</td>
                   <QuantityCell bill={bill} line={line} onBill={onBill} onError={setError} />
-                  <td>{fromPaise(line.actual)}</td>
-                  <td>{fromPaise(line.discount)}</td>
-                  <td>{paymentRuleText(line.payment_rule)}</td>
-                  <td>{fromPaise(line.patient_payable)}</td>
-                  <td>
+                  <td data-label="Actual">{fromPaise(line.actual)}</td>
+                  <td data-label="Discount">{fromPaise(line.discount)}</td>
+                  <td data-label="Payment rule">{paymentRuleText(line.payment_rule)}</td>
+                  <td data-label="Patient pays">{fromPaise(line.patient_payable)}</td>
+                  <td data-label="" className="bc-cell-actions">
                     {bill.status === "draft" && (
                       <button
                         type="button"

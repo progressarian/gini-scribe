@@ -6,6 +6,7 @@ import {
   insertMachineStepsForOrders,
   raiseOrdersFromSteps,
   sampleTakenBeforeVisit,
+  labCaseAlreadyReported,
 } from "./journey.js";
 import { machineFor } from "../../../shared/machineStages.js";
 import { getMachines } from "./machineCatalog.js";
@@ -243,7 +244,8 @@ export async function syncMachineOrdersForVisit(visit, db = pool, { slotWaitMs }
     if (
       liveLabLines.length &&
       !FINISHED.includes(visit.current_status) &&
-      !(await sampleTakenBeforeVisit(client, visit.visit_id))
+      !(await sampleTakenBeforeVisit(client, visit.visit_id)) &&
+      !(await labCaseAlreadyReported(client, visit.visit_id))
     ) {
       const missing = await notYetOrdered(client, visit.visit_id, liveLabLines);
       if (missing.length) {

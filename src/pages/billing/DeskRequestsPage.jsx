@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Check, X } from "lucide-react";
 import {
   INBOX_POLL_MS,
   useDeskRequests,
@@ -8,9 +9,11 @@ import useDeskRequestsLive from "../../queries/hooks/useDeskRequestsLive";
 import { toast } from "../../stores/uiStore";
 import DeskRequestDecisionDialog from "../../components/billing/DeskRequestDecisionDialog";
 import DeskRequestItemDialog from "../../components/billing/DeskRequestItemDialog";
+import Pagination from "../../components/ui/Pagination";
 import "../../styles/flow.css";
 import "../flow/FlowSettings.css";
 import "./billing.css";
+import "./billingUi.css";
 import "./deskRequests.css";
 
 const when = (value) =>
@@ -43,7 +46,9 @@ function Wanted({ request }) {
   return (
     <>
       <strong>{subjectOf(request)}</strong>
-      <div className="dreq__tag">{newItem ? "New item" : "Bill again"}</div>
+      <span className={`bill-status dreq__tag dreq__tag--${newItem ? "new" : "again"}`}>
+        {newItem ? "New item" : "Bill again"}
+      </span>
       {newItem ? (
         request.proposed_group ? (
           <div className="dreq__muted">Group: {request.proposed_group}</div>
@@ -62,7 +67,7 @@ function Answer({ request }) {
   if (request.status === "rejected") {
     return (
       <>
-        <strong>Rejected</strong>
+        <span className="bill-status dreq__answer--no">Rejected</span>
         <div className="dreq__muted">{request.decision_note}</div>
       </>
     );
@@ -70,7 +75,7 @@ function Answer({ request }) {
   if (request.kind === "new_item") {
     return (
       <>
-        <strong>Item created</strong>
+        <span className="bill-status dreq__answer--yes">Item created</span>
         <div className="dreq__muted">
           {[request.created_item?.code, request.created_item?.name].filter(Boolean).join(" — ")}
         </div>
@@ -80,7 +85,7 @@ function Answer({ request }) {
   }
   return (
     <>
-      <strong>Approved</strong>
+      <span className="bill-status dreq__answer--yes">Approved</span>
       <div className="dreq__muted">
         {request.usable
           ? "Usable — waiting for the desk to bill it"
@@ -96,32 +101,36 @@ function PendingRow({ request, onAct }) {
   const newItem = request.kind === "new_item";
   return (
     <tr>
-      <td>
+      <td data-label="Asked by">
         <strong>{request.requested_by?.name ?? "The desk"}</strong>
         <div className="dreq__muted">{when(request.requested_at)}</div>
       </td>
-      <td>
+      <td data-label="Patient">
         <Patient request={request} />
       </td>
-      <td>
+      <td data-label="What for">
         <Wanted request={request} />
       </td>
-      <td className="dreq__reason">{request.reason}</td>
-      <td className="bill-items__actions">
+      <td data-label="Why" className="dreq__reason">
+        {request.reason}
+      </td>
+      <td data-label="" className="bill-items__actions">
         <button
           type="button"
           className="flow-btn flow-btn-primary flow-btn-mini"
           aria-label={newItem ? `Create item for ${subject}` : `Approve billing ${subject} again`}
           onClick={() => onAct(request, newItem ? "create" : "approve")}
         >
+          <Check size={14} aria-hidden="true" />
           {newItem ? "Create item" : "Approve"}
         </button>
         <button
           type="button"
-          className="flow-btn flow-btn-ghost flow-btn-mini"
+          className="flow-btn flow-btn-ghost flow-btn-mini dreq__reject"
           aria-label={`Reject request for ${subject}`}
           onClick={() => onAct(request, "reject")}
         >
+          <X size={14} aria-hidden="true" />
           Reject
         </button>
       </td>
@@ -134,20 +143,47 @@ export default function DeskRequestsPage() {
   const pending = usePendingDeskRequests({ refetchInterval: INBOX_POLL_MS });
   const history = useDeskRequests({ refetchInterval: INBOX_POLL_MS });
   const [acting, setActing] = useState(null);
+  const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   const waiting = pending.data ?? [];
-  const decided = (history.data ?? []).filter((request) => request.status !== "pending");
+  const needle = q.trim().toLowerCase();
+  const decided = (history.data ?? [])
+    .filter((request) => request.status !== "pending")
+    .sort((a, b) => String(b.decided_at ?? "").localeCompare(String(a.decided_at ?? "")));
+  const found = decided.filter(
+    (request) =>
+      !needle ||
+      [
+        subjectOf(request),
+        request.patient?.name,
+        request.patient?.file_no,
+        request.requested_by?.name,
+        request.decided_by?.name,
+        request.reason,
+      ].some((v) =>
+        String(v ?? "")
+          .toLowerCase()
+          .includes(needle),
+      ),
+  );
+  const lastPage = Math.max(1, Math.ceil(found.length / pageSize));
+  const current = Math.min(page, lastPage);
+  const shown = found.slice((current - 1) * pageSize, current * pageSize);
   const close = (message) => {
     setActing(null);
     if (message) toast(message, "success");
   };
 
   return (
-    <div className="flow-root fset">
-      <div className="flow-card">
+    <div className="flow-root fset bill-ui dreq-page">
+      <div className="flow-card bill-stack">
         <div className="fset__cardhead">
           <h2 className="flow-sec-title">Waiting for an answer</h2>
-          <span className="fset__count">{waiting.length}</span>
+          <span className={`fset__count bill-count--${waiting.length ? "todo" : "done"}`}>
+            {waiting.length}
+          </span>
         </div>
         <div className="fset__cardsub">
           The billing desk asks here when an item is missing from the master, or when a patient
@@ -167,7 +203,7 @@ export default function DeskRequestsPage() {
                   <th>Patient</th>
                   <th>What for</th>
                   <th>Why</th>
-                  <th />
+                  <th className="bill-items__actions-head">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -182,59 +218,84 @@ export default function DeskRequestsPage() {
             </table>
           </div>
         ) : (
-          <div className="fset__cardsub">Nothing is waiting for an answer.</div>
+          <div className="bill-allclear">Nothing is waiting for an answer.</div>
         )}
       </div>
 
-      <div className="flow-card">
+      <div className="flow-card bill-stack">
         <div className="fset__cardhead">
           <h2 className="flow-sec-title">Already answered</h2>
           <span className="fset__count">{decided.length}</span>
+          {decided.length ? (
+            <input
+              type="search"
+              className="jb-assign bill-np-search"
+              aria-label="Search answered requests"
+              placeholder="e.g. patient, item or staff name"
+              value={q}
+              onChange={(e) => {
+                setQ(e.target.value);
+                setPage(1);
+              }}
+            />
+          ) : null}
         </div>
         {history.isLoading ? (
           <div className="fset__cardsub">Loading…</div>
         ) : history.isError ? (
           <div className="fset__cardsub">Could not load the history.</div>
-        ) : decided.length ? (
-          <div className="fset__scroll fset__scroll--wide">
-            <table className="flow-table" aria-label="Decided requests">
-              <thead>
-                <tr>
-                  <th>Asked by</th>
-                  <th>Patient</th>
-                  <th>What for</th>
-                  <th>Answer</th>
-                  <th>Answered by</th>
-                </tr>
-              </thead>
-              <tbody>
-                {decided.map((request) => (
-                  <tr key={request.id}>
-                    <td>
-                      <strong>{request.requested_by?.name ?? "The desk"}</strong>
-                      <div className="dreq__muted">{when(request.requested_at)}</div>
-                    </td>
-                    <td>
-                      <Patient request={request} />
-                    </td>
-                    <td>
-                      <Wanted request={request} />
-                      <div className="dreq__muted dreq__reason">{request.reason}</div>
-                    </td>
-                    <td>
-                      <Answer request={request} />
-                    </td>
-                    <td>
-                      {request.decided_by?.name ?? ""}
-                      <div className="dreq__muted">{when(request.decided_at)}</div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
+        ) : !decided.length ? (
           <div className="fset__cardsub">Nothing has been answered yet.</div>
+        ) : !found.length ? (
+          <div className="fset__cardsub">Nothing answered matches that search.</div>
+        ) : (
+          <>
+            <div className="fset__scroll fset__scroll--wide">
+              <table className="flow-table" aria-label="Decided requests">
+                <thead>
+                  <tr>
+                    <th>Asked by</th>
+                    <th>Patient</th>
+                    <th>What for</th>
+                    <th>Answer</th>
+                    <th>Answered by</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shown.map((request) => (
+                    <tr key={request.id}>
+                      <td data-label="Asked by">
+                        <strong>{request.requested_by?.name ?? "The desk"}</strong>
+                        <div className="dreq__muted">{when(request.requested_at)}</div>
+                      </td>
+                      <td data-label="Patient">
+                        <Patient request={request} />
+                      </td>
+                      <td data-label="What for">
+                        <Wanted request={request} />
+                        <div className="dreq__muted dreq__reason">{request.reason}</div>
+                      </td>
+                      <td data-label="Answer">
+                        <Answer request={request} />
+                      </td>
+                      <td data-label="Answered by">
+                        {request.decided_by?.name ?? ""}
+                        <div className="dreq__muted">{when(request.decided_at)}</div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Pagination
+              page={current}
+              pageSize={pageSize}
+              total={found.length}
+              onChange={setPage}
+              onPageSizeChange={setPageSize}
+              unit="requests"
+            />
+          </>
         )}
       </div>
 

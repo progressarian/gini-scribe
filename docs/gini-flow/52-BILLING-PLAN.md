@@ -125,6 +125,38 @@ Where it differs from §9:
 - **In production.** The `billing_imports` table and the `billing_audit.import_id`
   link are applied (2026-09-21). The Phase 2 code is not deployed yet.
 
+### Phase 2b as built (2026-09-24)
+
+Phase 2b (P2b-01 to P2b-11) replaced the preview / all-or-nothing import above
+with the import sessions of §9a. What changed from §0b:
+
+- **Upload, then triage.** Choosing a file creates a session
+  (`billing_import_sessions` + `billing_import_rows`); nothing is saved until
+  Commit. Rows are Ready, Needs override, Failed or Unchanged, listed 50 a page
+  from the server with chips, a sheet filter and a search. A failed new row
+  fails the new rows that depend on it, naming it.
+- **Partial save.** Commit saves Ready and overridden rows and keeps the rest;
+  an overridden row changed in Scribe since the upload, or one that now breaks
+  a price check, fails instead of being written. The checks, the batched
+  writes, `billing_imports`, the audit rows with the import id and the price
+  history are the ones from Phase 2. The session stays as the import's report.
+- **Retired.** `POST /api/billing/import/preview`, `/import/commit` and
+  `/import/errors` are gone, with their hooks. The services behind them
+  (`previewUpload`, `commitUpload`) stay: the sessions reuse their checks and
+  writes, and specs and `smoke:billing-import` still call them directly.
+  The failed-rows download reuses `importErrorFile`.
+- **History.** `/import/history` rows carry `session_id`; a committed import
+  links to its session's report on the page.
+- **Read me.** The template's Read me no longer says an error stops the whole
+  upload: a failed row is skipped, a change to an existing row needs Override,
+  and the failed rows download goes back in fixed. The committed
+  `billing-template.xlsx` was rebuilt.
+- **Housekeeping.** Sessions expire 24 hours after upload; expired and
+  abandoned ones are deleted on the next upload (nothing runs this on a
+  schedule yet).
+- **In production.** Both session tables are applied (2026-09-24). The
+  Phase 2b code is not deployed yet.
+
 ## 0. Summary
 
 Scribe gets its own billing: bills are **made, discounted, paid and reported**
@@ -1276,6 +1308,81 @@ A new insurer or CGHS rate card is therefore: add a `Categories` row, its
 `Payment rules` rows and (if its prices or bill codes differ) its
 `Category rates` rows, then upload. The same save-time checks as the screens
 apply, e.g. an `amount` above an item's price is an error row.
+
+### 9a. Import sessions: triage, overrides and partial import (decided 2026-09-24)
+
+Steps 3 and 4 above are **replaced** by this section. Asked for by the user:
+an existing row that comes in with a different price must not simply be
+overwritten; failures must be listed with their reason; and the admin works
+through the file in filtered, server-paged lists.
+
+**Decisions (2026-09-24):**
+
+- **Partial import.** Good rows are saved even when other rows fail. This
+  replaces "a file is either fully imported or not at all" (step 4).
+- **Every change to an existing row needs an explicit Override** — price, rate,
+  name, unit, active, anything. Only brand-new rows go straight to Ready.
+
+**Why a session.** Today the file is parsed three times (preview, commit,
+error file) and every row is sent to the browser; nothing is kept between
+preview and commit. Paging, filtering and per-row decisions need the parsed
+file to live on the server. An upload therefore creates an **import session**:
+the rows are parsed and checked once, stored, and everything afterwards works
+off that session.
+
+**Row statuses.**
+
+| Status             | Meaning                                                  | Default on commit             |
+| ------------------ | -------------------------------------------------------- | ----------------------------- |
+| **Ready**          | A new row that passed every check                        | Saved                         |
+| **Needs override** | An existing row whose values differ from what is stored  | **Not saved** unless overridden |
+| **Unchanged**      | An existing row identical to what is stored              | Nothing to do                 |
+| **Failed**         | A row that can't be saved, with the reason in words      | Skipped, listed               |
+
+A Needs-override row shows the old and new value of every changed column. The
+admin chooses **Override** (save the new values) or **Keep** (leave what is
+stored), row by row or for every row matching the current filter. A row left
+undecided at commit is **kept** — nothing changes on an existing row that
+nobody chose to change — and the commit confirmation says how many.
+
+**Rules that hold whatever is decided:**
+
+1. **A contradiction is Failed, never overridable.** A price below what a
+   payment rule makes the patient pay (Pensioner pays ₹700, item now ₹500), an
+   `amount` above an item's price, an unknown code — these are errors in the
+   data, not preferences.
+2. **A row that depends on a failed row fails with it**, naming it ("depends on
+   Items row 14, which failed"). If a new group fails, its new subgroups, their
+   new items and those items' rates fail too, so nothing is saved pointing at a
+   row that was never created. A **kept** row still exists, so rows depending
+   on it are unaffected.
+3. **Nothing is overwritten that changed after the upload.** The session keeps
+   each existing row's values as they were at upload. At commit, inside the
+   transaction, each overridden row is compared with the database; if someone
+   has changed it since (on the Services page, or another import), that row
+   fails with "changed since you uploaded (now ₹X) — upload again", and the
+   rest is saved.
+4. **The price checks run again at commit** on what will actually be saved
+   (Ready plus overridden rows). A row that now conflicts — for instance
+   because a related row was kept — fails with its reason; the rest is saved.
+5. **The admin-only `daily_cap` rule** (§9 above) stays: such a row fails for a
+   reception_admin.
+
+**Lists.** Filter chips with counts — All · Ready · Needs override · Failed ·
+Unchanged — plus a sheet filter and a search on code or name. **Paged on the
+server**, 50 rows a page. Failed rows download as Excel with the reason beside
+each row, as today.
+
+**Life of a session.** Open until committed or abandoned. It expires 24 hours
+after upload; an expired session can't be committed and its rows are deleted.
+A committed session keeps its rows as that import's report (what was saved,
+kept, skipped and why), linked to its `billing_imports` row. Only the admin who
+uploaded it, or an admin, may decide or commit it.
+
+**What stays the same.** The template, the sheets and their keys, the column
+parsing, the admin-only fields, `billing_imports`, `billing_audit.import_id`
+and `service_item_price_history` — all unchanged. An import still only adds and
+updates; it never deletes.
 
 ---
 

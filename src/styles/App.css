@@ -38,7 +38,7 @@
      the header spans the full viewport width and sits flush to the top — a
      standard app-shell chrome bar. Inner horizontal padding re-aligns the
      header content with the page content below. */
-  margin: calc(-1 * var(--pad-y)) calc(-1 * var(--pad-x)) 14px;
+  margin: calc(-1 * var(--pad-y)) calc(-1 * var(--pad-x)) 4px;
   padding: 10px var(--gutter-x);
   background: #ffffff;
   border-bottom: 1px solid #e8edf3;

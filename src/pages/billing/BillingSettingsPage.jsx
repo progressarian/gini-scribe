@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from "react";
+import { Pencil, Power, PowerOff, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { BILL_SERIES, STACKING_MODES, financialYearOf } from "../../../shared/billingVocab.js";
 import {
@@ -24,6 +25,7 @@ import {
 import "../../styles/flow.css";
 import "../flow/FlowSettings.css";
 import "./billing.css";
+import "./billingUi.css";
 
 const STACKING_LABEL = {
   best_only: "Only the best discount",
@@ -137,7 +139,10 @@ function GeneralCard({ settings }) {
       <div className="fset__cardhead">
         <h2 className="flow-sec-title">Bills</h2>
       </div>
-      <div className="bill-form">
+      <div className="fset__cardsub">
+        How discounts combine, whether patients can pay later, and the note printed on every bill.
+      </div>
+      <div className="bill-form bill-set__bills">
         <Field label="When several discounts apply">
           {(id) => (
             <select
@@ -161,7 +166,7 @@ function GeneralCard({ settings }) {
               className="jb-assign"
               inputMode="numeric"
               maxLength={9}
-              placeholder="No limit"
+              placeholder="e.g. 2"
               value={form.max_codes_per_bill}
               onChange={set("max_codes_per_bill")}
             />
@@ -179,6 +184,7 @@ function GeneralCard({ settings }) {
             className="jb-assign bill-settings__footer"
             rows={3}
             maxLength={1000}
+            placeholder="e.g. Thank you for choosing Gini. Please keep this bill for your records."
             value={form.bill_footer}
             onChange={set("bill_footer")}
           />
@@ -207,17 +213,20 @@ function GstCard({ settings }) {
       <div className="fset__cardhead">
         <h2 className="flow-sec-title">GST</h2>
       </div>
+      <div className="fset__cardsub">
+        Printed on GST bills. GST can only be switched on once all three details are filled in.
+      </div>
       <label className="fset__check bill-settings__check">
         <input type="checkbox" checked={form.gst_enabled} onChange={set("gst_enabled")} />
         Charge GST on bills
       </label>
-      <div className="bill-form">
+      <div className="bill-form bill-set__gst">
         <Field label="GSTIN">
           {(id) => (
             <input
               id={id}
               className="jb-assign"
-              placeholder="03ABCDE1234F1Z5"
+              placeholder="e.g. 03ABCDE1234F1Z5"
               maxLength={15}
               value={form.gstin}
               onChange={set("gstin")}
@@ -231,6 +240,7 @@ function GstCard({ settings }) {
               className="jb-assign"
               inputMode="numeric"
               maxLength={2}
+              placeholder="e.g. 03"
               value={form.state_code}
               onChange={set("state_code")}
             />
@@ -242,6 +252,7 @@ function GstCard({ settings }) {
               id={id}
               className="jb-assign"
               maxLength={200}
+              placeholder="e.g. Gini Health Private Limited"
               value={form.legal_name}
               onChange={set("legal_name")}
             />
@@ -312,8 +323,8 @@ function TaxRow({ tax, onBlocked }) {
     };
     return (
       <tr>
-        <td>{tax.code}</td>
-        <td>
+        <td data-label="Code">{tax.code}</td>
+        <td data-label="SAC/HSN">
           <input
             className="jb-assign"
             aria-label={`SAC/HSN for ${tax.code}`}
@@ -323,7 +334,7 @@ function TaxRow({ tax, onBlocked }) {
             onChange={edit("sac_hsn")}
           />
         </td>
-        <td>
+        <td data-label="Rate">
           <input
             className="jb-assign"
             aria-label={`Rate % for ${tax.code}`}
@@ -333,9 +344,13 @@ function TaxRow({ tax, onBlocked }) {
             onChange={edit("rate_pct")}
           />
         </td>
-        <td>{tax.item_count}</td>
-        <td>{tax.is_active ? "Yes" : "No"}</td>
-        <td className="bill-items__actions">
+        <td data-label="Items">{tax.item_count}</td>
+        <td data-label="Active">
+          <span className={`bill-status disc-status--${tax.is_active ? "on" : "off"}`}>
+            {tax.is_active ? "Yes" : "No"}
+          </span>
+        </td>
+        <td data-label="" className="bill-items__actions">
           <button
             type="button"
             className="flow-btn flow-btn-primary flow-btn-mini"
@@ -359,24 +374,30 @@ function TaxRow({ tax, onBlocked }) {
 
   return (
     <tr className={tax.is_active ? "" : "fset__row--off"}>
-      <td>{tax.code}</td>
-      <td>{tax.sac_hsn ?? "—"}</td>
-      <td>{tax.rate_pct}%</td>
-      <td>{tax.item_count}</td>
-      <td>{tax.is_active ? "Yes" : "No"}</td>
-      <td className="bill-items__actions">
+      <td data-label="Code">{tax.code}</td>
+      <td data-label="SAC/HSN">{tax.sac_hsn ?? "—"}</td>
+      <td data-label="Rate">{tax.rate_pct}%</td>
+      <td data-label="Items">{tax.item_count}</td>
+      <td data-label="Active">
+        <span className={`bill-status disc-status--${tax.is_active ? "on" : "off"}`}>
+          {tax.is_active ? "Yes" : "No"}
+        </span>
+      </td>
+      <td data-label="" className="bill-items__actions">
         <button
           type="button"
-          className="flow-btn flow-btn-ghost flow-btn-mini"
+          className="bill-icon-btn"
           aria-label={`Edit ${tax.code}`}
+          title="Edit"
           onClick={() => setForm({ sac_hsn: text(tax.sac_hsn), rate_pct: text(tax.rate_pct) })}
         >
-          Edit
+          <Pencil size={15} aria-hidden="true" />
         </button>
         <button
           type="button"
-          className="flow-btn flow-btn-ghost flow-btn-mini"
+          className="bill-icon-btn"
           aria-label={`${tax.is_active ? "Deactivate" : "Activate"} ${tax.code}`}
+          title={tax.is_active ? "Deactivate" : "Activate"}
           onClick={() =>
             attempt(
               () => setActive.mutateAsync({ id: tax.id, is_active: !tax.is_active }),
@@ -384,7 +405,11 @@ function TaxRow({ tax, onBlocked }) {
             )
           }
         >
-          {tax.is_active ? "Deactivate" : "Activate"}
+          {tax.is_active ? (
+            <PowerOff size={15} aria-hidden="true" />
+          ) : (
+            <Power size={15} aria-hidden="true" />
+          )}
         </button>
         {confirming ? (
           <>
@@ -407,11 +432,12 @@ function TaxRow({ tax, onBlocked }) {
         ) : (
           <button
             type="button"
-            className="flow-btn flow-btn-ghost flow-btn-mini"
+            className="bill-icon-btn bill-icon-btn--danger"
             aria-label={`Delete ${tax.code}`}
+            title="Delete"
             onClick={() => setConfirming(true)}
           >
-            Delete
+            <Trash2 size={15} aria-hidden="true" />
           </button>
         )}
       </td>
@@ -444,14 +470,14 @@ function TaxAddForm() {
   };
   return (
     <form aria-label="Add tax code" onSubmit={submit}>
-      <div className="bill-form">
+      <div className="bill-form bill-set__tax">
         <Field label="Code">
           {(id) => (
             <input
               id={id}
               className="jb-assign"
               maxLength={40}
-              placeholder="GST18"
+              placeholder="e.g. GST18"
               value={draft.code}
               onChange={set("code")}
             />
@@ -464,7 +490,7 @@ function TaxAddForm() {
               className="jb-assign"
               inputMode="numeric"
               maxLength={8}
-              placeholder="Optional"
+              placeholder="e.g. 999312 (optional)"
               value={draft.sac_hsn}
               onChange={set("sac_hsn")}
             />
@@ -477,7 +503,7 @@ function TaxAddForm() {
               className="jb-assign"
               inputMode="decimal"
               maxLength={6}
-              placeholder="18"
+              placeholder="e.g. 18"
               value={draft.rate_pct}
               onChange={set("rate_pct")}
             />
@@ -505,7 +531,7 @@ function TaxAddForm() {
 function TaxCodesCard({ onBlocked }) {
   const { data: taxes = [], isLoading, isError } = useBillingTaxCodes();
   return (
-    <section className="flow-card" aria-label="Tax codes">
+    <section className="flow-card bill-stack" aria-label="Tax codes">
       <div className="fset__cardhead">
         <h2 className="flow-sec-title">Tax codes</h2>
         <span className="fset__count">{taxes.length}</span>
@@ -527,7 +553,7 @@ function TaxCodesCard({ onBlocked }) {
                 <th>Rate</th>
                 <th>Items</th>
                 <th>Active</th>
-                <th />
+                <th className="bill-items__actions-head">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -577,11 +603,11 @@ function SeriesRow({ series, fy, row }) {
   const label = SERIES_LABEL[series] ?? series;
   return (
     <tr>
-      <td>
+      <td data-label="Series">
         {label}
         {row ? null : <div className="flow-muted bill-items__sub">Not set up yet</div>}
       </td>
-      <td>
+      <td data-label="Prefix">
         <input
           className="jb-assign"
           aria-label={`${label} prefix`}
@@ -591,7 +617,7 @@ function SeriesRow({ series, fy, row }) {
           onChange={set("prefix")}
         />
       </td>
-      <td>
+      <td data-label="Digits">
         <input
           className="jb-assign"
           aria-label={`${label} digits`}
@@ -601,7 +627,7 @@ function SeriesRow({ series, fy, row }) {
           onChange={set("number_width")}
         />
       </td>
-      <td>
+      <td data-label="Next number">
         <input
           className="jb-assign"
           aria-label={`${label} next number`}
@@ -611,10 +637,10 @@ function SeriesRow({ series, fy, row }) {
           onChange={set("next_no")}
         />
       </td>
-      <td>
+      <td data-label="Next looks like">
         <code>{preview}</code>
       </td>
-      <td className="bill-items__actions">
+      <td data-label="" className="bill-items__actions">
         <button
           type="button"
           className="flow-btn flow-btn-primary flow-btn-mini"
@@ -640,7 +666,7 @@ function SeriesCard() {
   const [fy, setFy] = useState(current);
   const id = useId();
   return (
-    <section className="flow-card" aria-label="Number series">
+    <section className="flow-card bill-stack" aria-label="Number series">
       <div className="fset__cardhead">
         <h2 className="flow-sec-title">Number series</h2>
       </div>
@@ -648,7 +674,7 @@ function SeriesCard() {
         Bill and receipt numbers start again each financial year (April–March). The next number can
         only go up, so a number is never used twice.
       </div>
-      <div className="bill-form">
+      <div className="bill-form bill-set__fy">
         <div className="fset__field fset__field--narrow bill-rates__asof">
           <label htmlFor={id}>Financial year</label>
           <select id={id} className="jb-assign" value={fy} onChange={(e) => setFy(e.target.value)}>
@@ -671,7 +697,7 @@ function SeriesCard() {
                 <th>Digits</th>
                 <th>Next number</th>
                 <th>Next looks like</th>
-                <th />
+                <th className="bill-items__actions-head">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -715,7 +741,7 @@ export default function BillingSettingsPage() {
   };
 
   return (
-    <div className="flow-root fset">
+    <div className="flow-root fset bill-ui bill-settings-page">
       {isError ? (
         <div className="flow-card fset__cardsub">Could not load the billing settings.</div>
       ) : isLoading || !settings ? (

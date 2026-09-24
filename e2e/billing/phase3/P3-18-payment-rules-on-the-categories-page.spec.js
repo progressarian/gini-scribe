@@ -42,7 +42,11 @@ const ownTable = (page, name) =>
   panel(page, name).getByRole("table", { name: "Payment rules", exact: true });
 const addForm = (page, name) =>
   panel(page, name).getByRole("form", { name: "Add a payment rule", exact: true });
-const preview = (form) => form.getByRole("region", { name: "Preview" });
+const preview = (form) => form.getByRole("region", { name: "Test this rule" });
+async function openTest(form) {
+  const toggle = preview(form).getByRole("button", { name: /^Test this rule/ });
+  if ((await toggle.getAttribute("aria-expanded")) === "false") await toggle.click();
+}
 const split = (form, label) => preview(form).getByRole("group", { name: label, exact: true });
 
 async function openCategory(page, category, role = "reception_admin") {
@@ -72,6 +76,7 @@ async function fillRule(form, { name, subgroup, group, visits = [], pays, value 
 }
 
 async function previewItem(form, itemName) {
+  await openTest(form);
   await form.getByLabel("Find preview item", { exact: true }).fill(itemName);
   const select = form.getByLabel("Preview item", { exact: true });
   await expect(select.locator("option", { hasText: itemName })).toHaveCount(1);
@@ -476,6 +481,7 @@ test.describe.serial("P3-18 payment rules on the categories page", () => {
     await select.selectOption({ label: await optionLabel(select, ODD) });
     await form.getByLabel("Patient pays", { exact: true }).selectOption("percent");
     await form.getByLabel("Percent (%)", { exact: true }).fill("12.7");
+    await openTest(form);
     const withRule = split(form, "With this rule");
     await expect(withRule).toContainText("Actual ₹205");
     await expect(withRule).toContainText("Patient pays ₹26.04");
@@ -496,6 +502,7 @@ test.describe.serial("P3-18 payment rules on the categories page", () => {
     const edit = panel(page, nameOf(PAID)).getByRole("form", {
       name: `Edit payment rule ${ODD_RULE}`,
     });
+    await openTest(edit);
     await expect(split(edit, "With this rule")).toContainText("Patient pays ₹26.04");
     await expect(split(edit, "With the saved rules")).toContainText("Patient pays ₹26.04");
     await edit.getByRole("button", { name: "Cancel", exact: true }).click();
@@ -545,6 +552,7 @@ test.describe.serial("P3-18 payment rules on the categories page", () => {
       await select.selectOption({ label: await optionLabel(select, ODD) });
       await form.getByLabel("Patient pays", { exact: true }).selectOption("percent");
       await form.getByLabel("Percent (%)", { exact: true }).fill("12.7");
+      await openTest(form);
 
       const withRule = split(form, "With this rule");
       await expect(withRule).toContainText(`Patient pays ${money(line.patient_payable)}`);

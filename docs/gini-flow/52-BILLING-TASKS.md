@@ -1424,6 +1424,134 @@ and saves it all at once or not at all.
 
 ---
 
+## Phase 2b — Import sessions: triage, overrides, partial import
+
+Goal: an upload becomes a saved session; the admin works through it in
+filtered, server-paged lists — Ready, Needs override, Failed, Unchanged —
+overrides or keeps every change to an existing row, and saves the good rows
+even when others fail. Design: plan §9a (decided 2026-09-24).
+
+- [x] **P2b-01 · Migration: import sessions** — `Done`
+  - **Where:** `server/migrations/<date>_billing_import_sessions.sql`.
+  - **What:** `billing_import_sessions` (`id` uuid, `file_name`, `uploaded_by`,
+    `uploaded_at`, `expires_at`, `status` open / committed / abandoned,
+    `counts` JSONB, `import_id` → `billing_imports` once committed) and
+    `billing_import_rows` (`session_id` → sessions ON DELETE CASCADE, `sheet`,
+    `row_no`, `row_key`, `status` ready / override / unchanged / failed,
+    `decision` pending / override / keep, `reason`, `values` JSONB, `before`
+    JSONB, `changes` JSONB, `depends_on`, `outcome` after commit). Index for
+    the list: `(session_id, status, sheet, row_no)`. RLS on and forced, no
+    `anon` / `authenticated`. Review, then apply.
+  - **Done when:** both tables exist in production.
+  - **E2E test:** `e2e/billing/phase2b/P2b-01-migration-import-sessions.spec.js` — asserts: runs twice, planned columns and checks, the cascade, the lockdown.
+
+  - **Result:** Done 2026-09-24 (built by a sub-agent). `server/migrations/2026-10-21_billing_import_sessions.sql` adds `billing_import_sessions` (the stored file, uploader, 24-hour expiry, status open/committed/abandoned, counts, and the `import_id` → `billing_imports` link with who and when it was committed) and `billing_import_rows` (sheet, row, key, label, status, decision, reason with errors, warnings, values, input, before, changes, `depends_on`, outcome). The database refuses illegal states: an expiry not after the upload; a file only while the session isn't abandoned; committed exactly when linked to an import, by someone, at a time; a decision only on override rows, which also need `before` and changes; a reason with errors exactly when the row failed; `depends_on` only on a failed row and within its own session; an outcome that fits the status and decision; and — through a deferred link on two generated columns — an outcome only once the session is committed, then on every row, and no rows on an abandoned session. Rows go with their session. Indexes cover `(session_id, status, sheet, row_no)`, dependencies and stale sessions. RLS on and forced; no anon/authenticated access. 13 tests. **Applied to production 2026-09-24** (aws-1-ap-south-1 pooler, Postgres 17): the check found both names free and `billing_imports`, `doctors` and `gen_random_uuid()` present; `--apply` ran it in one transaction with a 5 s lock timeout; the read-only verify passed all 23 checks (both tables with exactly the planned columns, types and NOT NULLs, both generated columns, all 38 checks, keys and links, the deferred state link, cascade and RESTRICT deletes, every allowed-value list including the nine sheet names, all 4 indexes, RLS on and forced, no anon/authenticated access, both empty). The migration is additive only — its sole `ALTER`s switch RLS on for the two new tables.
+- [x] **P2b-02 · Create a session from an upload** — `Done`
+  - **Where:** `server/services/billing/importSessions.js`.
+  - **Steps:**
+    1. Parse and check the file once, reusing `importParse` / `importValidate` /
+       `importPreview` — the checks do not change.
+    2. Store every row with its status. A brand-new row that passes is
+       **Ready**; an existing row with **any** difference is **Needs
+       override**, with `before` (the stored values at upload) and `changes`
+       (old → new per column); identical is **Unchanged**; an error is
+       **Failed** with its reason.
+    3. **Cascade failures** to dependent new rows, naming the row they depend
+       on (plan §9a rule 2).
+    4. A contradiction (a price below a payment rule, an amount above a price)
+       is Failed, never Needs override (rule 1).
+  - **Done when:** a file with new, changed, identical and bad rows produces the
+    four statuses, and a failed new group fails its subgroups, items and rates.
+  - **E2E test:** `e2e/billing/phase2b/P2b-02-create-a-session.spec.js`.
+
+  - **Result:** Done 2026-09-24 (built by a sub-agent). `createSession` in the new `server/services/billing/importSessions.js` parses the file once and runs the unchanged P2-04–P2-07 checks and the dry-run price check, storing each row as Ready (new), Needs override (any difference, with `before` and old→new `changes`), Unchanged, or Failed (with its reason). The checks run again without the failed rows until nothing more fails, so a failed new group, subgroup, item or category fails every row that refers to it — each saying "Depends on Items row 14, which failed" and linked to it — while a failed *existing* row does not fail the rows under it. Contradictions are always Failed (a price under a payment rule, an amount above a price, an unknown code); a daily-cap change fails for reception_admin; a Consultant fees row is one row with one decision covering its rate and its rule. A file that can't be read row by row is refused (422) with its problems. Creating a session saves nothing to the master data and is audited. 9 tests.
+- [x] **P2b-03 · Rows: filters and server-side paging** — `Done`
+  - **What:** list a session's rows by status, sheet and a search on code or
+    name, 50 a page, with the total and counts per status and per sheet for the
+    filter chips.
+  - **Done when:** each filter and page returns exactly the right rows, and a
+    10,000-row session pages without loading everything.
+  - **E2E test:** `e2e/billing/phase2b/P2b-03-rows-filters-and-paging.spec.js`.
+
+  - **Result:** Done 2026-09-24 (built by a sub-agent). `listRows` filters by status, outcome, sheet and a search on code or name (case-insensitive, `%` and `_` literal) and returns 50 rows a page **paged in SQL**, with the total, page count and chip counts — each facet applying the other filters but not its own — from one aggregate query. A 10,000-row session pages through 2,500 filtered rows in about a second, and no query returns more than 50 rows. 5 tests.
+- [x] **P2b-04 · Override or keep** — `Done`
+  - **What:** set a Needs-override row to override or keep, one row at a time
+    or for every row matching the current filter. Only Needs-override rows take
+    a decision; only the uploader or an admin may decide; a committed, abandoned
+    or expired session refuses. Audited.
+  - **Done when:** single and filtered decisions are saved, and the refusals are
+    in words.
+  - **E2E test:** `e2e/billing/phase2b/P2b-04-override-or-keep.spec.js`.
+
+  - **Result:** Done 2026-09-24 (built by a sub-agent). `decideRows` sets override, keep or pending (to undo) on up to 500 rows by id, or on every override row matching a sheet and search filter. Refused in words: a row that doesn't need an override, a filter on another status, a filter matching nothing, rows from another session, and anyone but the uploader or an admin; a committed or abandoned session gives 409, an expired one 410. Every call writes one audit row. 7 tests.
+- [x] **P2b-05 · Commit: partial** — `Done`
+  - **Steps:** in one transaction —
+    1. Save Ready rows and overridden rows; undecided rows are **kept**.
+    2. Compare each overridden row with the database; one changed since upload
+       **fails** with "changed since you uploaded" (rule 3).
+    3. Re-run the price checks on what will be saved; a row that now conflicts
+       **fails** with its reason (rule 4).
+    4. Cascade those new failures to their dependents.
+    5. Record `billing_imports`, the audit rows with `import_id`, and price
+       history — as today. Store each row's outcome (saved / kept / failed /
+       unchanged) and link the session to the import.
+  - **Done when:** a session with ready, overridden, kept and failed rows saves
+    exactly the right rows; a row edited on the Services page after upload is
+    not overwritten; the report says what happened to every row.
+  - **E2E test:** `e2e/billing/phase2b/P2b-05-commit-partial.spec.js`.
+
+  - **Result:** Done 2026-09-24 (built by a sub-agent). `commitSession` saves Ready and overridden rows in one transaction and keeps undecided and kept rows. It **works out the final set before writing**: the stored file is re-parsed, only Ready and overridden rows are checked against the database as it is now, failures and their new dependents are dropped, and the checks repeat until stable. That set is written inside **one savepoint** with the existing batched save and price-conflict check — if rows conflict, it rolls back to the savepoint, fails them and repeats; if not, the savepoint becomes the real save. An overridden row changed since upload fails with "Changed since you uploaded (now base_price ₹550) — upload again"; a Ready row whose code now exists fails as "Added in Scribe after you uploaded"; an overridden row since deleted fails too; the rest is saved. It records `billing_imports` (now with kept and failed counts), audit rows with `import_id` and price history as today, stores every row's outcome and links the session to its import. A kept parent does not fail its dependents; a rule that relied on a kept price fails. A failure that isn't a row check saves nothing and leaves the session open to retry. 5,000 items triage in 3.6 s and commit in 2.1 s locally. 8 tests.
+- [x] **P2b-06 · Failed rows download** — `Done`
+  - **What:** the Failed rows (before or after commit) as Excel, each with its
+    reason, built from the admin's own workbook as the current error file is.
+  - **E2E test:** `e2e/billing/phase2b/P2b-06-failed-rows-download.spec.js`.
+
+  - **Result:** Done 2026-09-24 (built by a sub-agent). `failedRowsFile` builds the file from the admin's own stored workbook with the existing `importErrorFile`, covering rows that failed at upload or during the commit, each with its reason and shaded cells, named "<file> - errors.xlsx"; fixed in place, it uploads again cleanly. 422 when no row failed, 409 once abandoned. 4 tests.
+- [x] **P2b-07 · Expiry and abandon** — `Done`
+  - **What:** a session expires 24 h after upload and can't be committed;
+    expired and abandoned sessions are deleted with their rows; committed ones
+    keep their rows as the import's report. Abandon on request.
+  - **E2E test:** `e2e/billing/phase2b/P2b-07-expiry-and-abandon.spec.js`.
+
+  - **Result:** Done 2026-09-24 (built by a sub-agent). Sessions expire 24 hours after upload; an expired session can't be decided or committed (410) but can be read or abandoned. `abandonSession` deletes the rows and the file at once and is audited. `purgeStaleSessions` deletes expired and abandoned sessions with their rows; committed sessions keep their rows as the import's report. **The sweep runs only on the next upload** — nothing runs it on a schedule yet. 5 tests.
+- [x] **P2b-08 · Schemas and routes** — `Done`
+  - **Where:** `server/schemas/billing.js`, `server/routes/billingImport.js`,
+    behind `BILLING_MASTER`.
+  - **What:** create a session (upload), read it, list rows (query: status,
+    sheet, q, page), decide (row ids, or a filter), commit, failed-rows
+    download, abandon. Every bad parameter a readable 4xx.
+  - **E2E test:** `e2e/billing/phase2b/P2b-08-routes.spec.js`.
+
+  - **Result:** Done 2026-09-24 (built by a sub-agent). Seven routes under `/api/billing/import/sessions` behind `BILLING_MASTER`: upload (201), read, rows, decisions, commit, failed download, abandon. Strict Zod schemas (`billingImportRowsQuerySchema`, `billingImportDecisionSchema` — a decision plus exactly one of `row_ids` (1–500) or a `filter`) with readable labels; ctx carries the role. 23 bad-parameter cases each give a readable 4xx; four roles and no login get 403 on every route; `verify-rbac.mjs` has the new paths. The old `/import/preview`, `/import/commit` and `/import/errors` are untouched until P2b-10. 8 tests, run by mounting the real router on a spare port.
+- [x] **P2b-09 · Screen** — `Done`
+  - **Where:** `src/pages/billing/BillingImportPage.jsx`.
+  - **What:** upload → counts → filter chips (All · Ready · Needs override ·
+    Failed · Unchanged), sheet filter and search → server-paged table. Needs
+    override shows old → new per changed column with **Override** / **Keep**,
+    and "Override all" / "Keep all" for the current filter. Failed shows the
+    reason. Commit confirms what will be saved, kept and skipped, then shows
+    the result. Works at phone width.
+  - **Done when:** a whole file can be triaged and committed from the page.
+  - **E2E test:** `e2e/billing/phase2b/P2b-09-screen.spec.js`.
+
+  - **Result:** Done 2026-09-24 (built by a sub-agent). `/settings/bulk-import` now works on import sessions, in the page's existing look. Choosing a file creates a session and shows the file, who uploaded it, when it expires, its counts per status, and what a commit would do now (from `live.plan`). Rows are listed 50 a page, paged on the server, with filter chips and counts (All · Ready · Needs override · Failed · Unchanged, taken from the API's `counts`), a sheet filter and a search on code or name. The session and every filter live in the URL (`session`, `status`/`outcome`, `sheet`, `q`, `page`, `row`), following `ServicesSettingsPage`, so a refresh or a shared link keeps the view and a filter change goes back to page 1. A Needs-override row shows old → new for every changed column, its decision in words ("Undecided — will be kept", "Override — will be saved", "Keep — stays as it is") and Override / Keep / Undo; Override all / Keep all decide every override row matching the current sheet and search. A failed row gives its reason and what was typed, and a cascaded failure links to its parent row, which is highlighted. Download failed rows gives "<file> - errors.xlsx". **Commit re-reads the session first** and confirms exactly what `live.plan` says will be saved, kept (with how many are undecided), skipped as failed and unchanged — stating in so many words that kept rows are not saved and that a row changed since upload fails rather than being overwritten — then shows the outcome and switches the list to Saved · Kept · Failed · Unchanged; a committed session stays viewable as that import's report. Abandon asks first. An expired import says so and offers a fresh upload; someone else's import is read-only with a note; 403, 404, 409 and 410 are shown in the server's words. New components `ImportSession.jsx`, `ImportRows.jsx`, `importText.js`; hooks and keys added to `useBillingMaster.js`. 10 tests written; the data they rely on was checked against the test database (57 ready, 3 override, 2 failed, 1 unchanged; the cascade reason; the plan and outcome counts).
+  - **Run (2026-09-24):** the browser spec passed **10/10 on its first run** against the test servers (40 s) — upload and counts, every chip, server paging and the filter in the URL, old → new with Override/Keep/Undo, Override all scoped to the filter, a failed row's reason and the jump to its parent, the commit confirmation matching `live.plan` then the outcome view, expired and not-your-import handling, Abandon, and no sideways scroll at 390 px. **The P2-11 and P2-12 browser specs now fail** — they drive the old page — and are P2b-10's to update.
+  - **Left for P2b-10:** the old hooks (`usePreviewBillingImport`, `useCommitBillingImport`, `useBillingImportErrorFile`), the old routes and the old CSS classes; the P2-11/P2-12 specs; and a link from Import history to a session's report (needs `session_id` in `/import/history`, whose exact keys P2-10 test 4 pins).
+- [x] **P2b-10 · Retire the old flow** — `Done`
+  - **What:** remove `POST /import/preview`, `/import/commit` and
+    `/import/errors` once P2b-09 replaces them; update the Phase 2 specs that
+    use them, and the Read me sheet's "all or nothing" wording.
+  - **E2E test:** No new spec — the updated Phase 2 specs.
+
+  - **Result:** Done 2026-09-24 (built by a sub-agent). `POST /api/billing/import/preview`, `/import/commit` and `/import/errors` are removed with their hooks (`usePreviewBillingImport`, `useCommitBillingImport`, `useBillingImportErrorFile`) and five unused CSS rules, each checked unused by grep. The services behind them are **kept**: the sessions reuse their checks and writes, `failedRowsFile` uses `importErrorFile`, and `commitUpload` / `previewUpload` are still called by `p2b-fixture`'s seed, P2-07/08/09, P3-04/05/22 and `smoke:billing-import`. `verify-rbac.mjs` now checks the session paths. `/import/history` rows carry `session_id`, and each committed import links to its session report ("View report"). The Read me intro and rule 16 now describe the partial import with Override, and `billing-template.xlsx` was rebuilt (P0-01/P0-02 pass). P2-10 now tests the session routes — **its intent changed on purpose**: a file with a bad row now saves its good row (§9a), `session_id` is pinned in history, and the old routes return 404. P2-11 and P2-12 drive the session screen; P2-11's mocked "data changed" commit is replaced by a **real race** (override a row, change it in the database, commit — the row fails with "Changed since you uploaded" and nothing is overwritten). The removed checks were for the old Preview screen only. Verified by mounting the real router on a spare port (P2-03 5/5, P2-10 9/9, P2-11 15/15).
+- [x] **P2b-11 · Checks** — `Done`
+  - **What:** a smoke script over a whole session (`smoke:billing-import`
+    extended), the full billing suite green, and plan §0b updated.
+  - **E2E test:** No new spec — run `npm run test:e2e:billing`.
+
+  - **Result:** Done 2026-09-24 (built by a sub-agent). `smoke:billing-import` gained check 6, a whole session inside its rolled-back transaction: upload with all four statuses and nothing saved, one Override, the plan (save 4 / keep 1 / failed 1 / unchanged 1), a partial commit with that outcome, the session linked to its import, only the right rows written, every row's outcome stored, the import's counts and audit rows, and the failed-rows file — 8/8, twice, with the test-database guard unchanged. All of Phase 2 and 2b plus P1-25 and P3-22 ran twice back to back: 223 passed each time. The only 4 failures (and the 12 serial tests after them) are the running test API still serving the old code — the old Read me text, no `session_id` in history, no report link — and pass once it restarts. **Confirmed 2026-09-24 after the API restart:** P2-03, P2-10, P2-11 and P2-12 over HTTP — 32/32. Plan §0b now has "Phase 2b as built".
+---
+
 ## Phase 3 — Payment rules, discounts, pricing engine
 
 Goal: for any patient and any list of items, the server calculates the actual
@@ -2366,7 +2494,7 @@ floor. Nothing about the existing "Clear payment" changes.
   - **Result:** Done 2026-09-24 (built by a sub-agent). `src/pages/billing/DeskRequestsPage.jsx` at `/settings/desk-requests`, behind `BILLING_MASTER`, in the router through `lazyWithRetry` and on the settings tab strip with a pending-count badge. Pending first, decided below. A waiting row carries everything the answer needs — who asked and when, the patient (name, file no, age, visit date) or "No patient — a new item only" for a visit-less request, the proposed name and group hint or the item and the bill it is already live on, and the reason. **A new-item request shows no price anywhere**, because the desk sends none: "Create item" opens the master's own item form pre-filled with the requested name, and the admin types the code, subgroup, kind and **price** there; saving is the approval, so the item is created inside the same transaction and `created_item_id` is linked. A repeat is Approve (note optional) or Reject, and **rejecting sends whatever was typed so the server's own refusal is what the admin reads** — nothing is faked on the client. A decided request is offered no buttons at all, matching the server's 409, and the decided list shows the answer: the note, the created item's code and name, or for a repeat "Usable — waiting for the desk to bill it" until the desk spends it and then "Used on bill …". Live updates: the inbox subscribes with `createRealtimeConnection({ station: "billing-requests" })` through its own small hook (`useDeskRequestsLive.js`, kept out of the settings shell's chunk), and `billing_request` is now wired into `INVALIDATES` in `useGiniflowLive.js` as `[billingKeys.requests()]` — the `|| ALL` fallback would have refreshed the whole floor and no billing screen. `billingKeys` gained two additive keys, `requests` and `requestInbox`. 7 tests.
   - **Review:** (2026-09-24), run against the test servers. The screen was right about the things it was designed around — a new-item request carries no price anywhere (the table has no price column to carry one), the create-item dialog is the only place a price is typed, a decided request is offered no buttons, and the server's refusal is shown verbatim rather than guessed at. Two things were missing. **A refused decision taught the screen nothing:** the mutation invalidated only on success, so when a second admin answered a request first, the 409 appeared in the dialog and the row stayed in "Waiting for an answer" with both buttons live forever; it now invalidates on settled, and the row moves to the answered list as soon as the refusal lands. **The inbox had no fallback refresh:** with Supabase unconfigured — which is how the servers actually run, `realtime-token` answering `{enabled:false}` — there was no broadcast, no SSE and no poll, so an admin watching the inbox never saw a request arrive, although the bus's own dormant message promises exactly that poll; the page's two queries now carry the house 15 s `refetchInterval` (background off), left off the settings-tab badge so it costs nothing on the other tabs. Checked and left as they were: the approval transaction really does roll back — a duplicate code and a bad subgroup each leave the request pending with no item created, now proved through the UI as well as the API; the client's station string matches the server's `BILLING_REQUESTS_STATION`, so the hook joins `giniflow:station:billing-requests`, and because it keys only on `kind`, all four actions (`created`, `approved`, `rejected`, `used`) invalidate; `billing_request → billingKeys.requests()` is in `INVALIDATES` and is a prefix of both inbox keys. The capability holds on both sides, and a non-master's browser now provably never even asks for the inbox. Dialogs focus, trap, escape and restore focus correctly; the page fits 390 px with no horizontal page scroll. 10 tests (was 7); two deliberate breaks each took a new test red. Still unproven: real broadcast delivery to a browser, which needs a configured Supabase project.
   - **Follow-up (open):** the "Already answered" list is fetched unfiltered and trimmed in the browser, so past the server's 200-row cap decided history is silently truncated, and every load fetches the pending rows twice. The fix is to ask for `status: ["approved","rejected","used"]`, which wants a shared request-status vocabulary that does not exist yet (`STATUSES` lives in the service, `REQUEST_STATUSES` in `server/schemas/billing.js`).
-- [ ] **P4-37 · Smoke script: bills** — `Pending`
+- [x] **P4-37 · Smoke script: bills** — `Done (browser spec not built)`
   - **Where:** `server/scripts/smoke-billing-bill.mjs`,
     `smoke:billing-bill`.
   - **Checks:**
@@ -2403,6 +2531,10 @@ floor. Nothing about the existing "Clear payment" changes.
     accepted when entered.
   - **E2E test:** `e2e/billing/phase4/P4-37-smoke-script-bills.spec.js` — the same scenarios as the smoke script, driven through the Billing Counter page in the browser as `reception` (with approvals done as `reception_admin` in a second browser context), asserting on-screen totals, bill numbers, the PDF download, and the lab station seeing the cleared test.
 
+  - **Result:** Done 2026-09-24 (built by a sub-agent). `server/scripts/smoke-billing-bill.mjs`, run as `npm run smoke:billing-bill` from `server/`, calls the real services in one transaction that is rolled back, with a savepoint per check; `clearPayment` joins it through a small stand-in that turns its BEGIN/COMMIT/ROLLBACK into savepoints. It covers every check the block lists: finalising twice and overpaying refused; never twice, one extra line per approved repeat, a second use refused; a new-item request creating the item that can then be billed; CGHS Referral and Pensioner bills finalising at ₹0 with no payment and opening the gate; the Dr Banshali Pensioner bill at ₹700 with no payment, no receipt, `claim_status = pending`, and cancellable; a coupon at its daily limit refused at finalise; bare CGHS refused; pay later off refusing and on allowing and listing the due; an unpaid bill cancelling and freeing its items while a paid one is refused; paying a test line opening the gate, Clear payment still working, and reception unable to collect an order the bill already paid; priced requests refused; card and referral numbers encrypted and masked, and never in the audit log. **Concurrent finalises** are proved against a throwaway 2091-92 series: the second waits on the locked row, and when the first rolls back it gets the same number — no gap, no number burnt. It refuses any database whose name lacks "test" unless `SMOKE_ANY_DATABASE=1`, the same guard the other billing smoke scripts use, checked before any connection is opened. 14/14 on the test database, nothing left behind; three deliberate breaks each took a check red.
+  - **Not built:** the browser spec `P4-37-smoke-script-bills.spec.js` — the test servers were down.
+  - **Fixture change (same task):** `e2e/billing/phase4/p4-bills-fixture.mjs` now cleans up only its own tag, so parallel P4 specs no longer delete each other's rows. Each run holds an advisory lock on its tag while alive, and `setUp` sweeps any tag whose lock is free — a crashed run is cleaned up by the next `setUp`, a live one is never touched. Scoping the sweep exposed a second collision it had been hiding: the three test consultation items are unique across the database (`service_items_consultation_key`), so a second fixture now waits up to 45 s for them and then fails naming the run that holds them. Fixture-owned bill series are removed only when no P4 fixture is left. Proved by seven concurrent specs run twice (54/54 each, zero rows left), a four-spec run (28/28), a crashed run swept, and a live run left alone. Still open: P4-15, P4-17 and P4-24 delete `cash_shifts` for the shared reception user in their own teardown, so running those three at once can still interfere.
+
 - [ ] **P4-38 · Floor trial** — `Pending`
   - **Depends on:** P2-13, P3-23 and P0-09 (GSTIN, bill footer, bill and receipt number prefixes entered in Billing settings).
   - **What:** one reception user bills real patients for one session with a
@@ -2414,7 +2546,7 @@ floor. Nothing about the existing "Clear payment" changes.
 - [ ] **P4-39 · Update the plan status** — `Pending`
   - **E2E test:** No new spec — run `npm run test:e2e:billing`; the whole suite must be green before the phase is marked built.
 
-- [ ] **P4-40 · One test, one payment** — `Pending` (found by P4-18)
+- [x] **P4-40 · One test, one payment** — `Done` (found by P4-18; behind a valve, off until P4-38)
   - **Where:** `clearPayment` in `server/services/giniflow/receptionStation.js`.
   - **Why:** the two payment paths can't double-write an order, but they can
     double-charge the patient — reception collects ₹250 on the order while the
@@ -2436,6 +2568,19 @@ floor. Nothing about the existing "Clear payment" changes.
     doing first: every half-measure is a screen change, and the service-side
     guard is the same one line either way.
 
+  - **Result:** Done 2026-09-24 (built by a sub-agent). Reception now refuses to take money for a test that has a live bill line, behind a valve: `SCRIBE_BILL_TAKES_TEST_PAYMENTS`, off unless it is exactly `1` (`billTakesTestPayments()` in `shared/manualFloor.js`, documented in the README's env table). It is off by default because every priced test ordered on the floor already gets a draft bill line, so a guard that was on by default would stop reception collecting for tests the moment it deployed; it is turned on the day the Billing Counter goes live (P4-38). The change to `clearPayment` is one line, after the "already settled" no-op and before any money is taken, for `paid`, `split` and `insurance_claim` only: `refuseOrderOnBill` (new in `visitLines.js`) runs one `SELECT` on `bill_lines WHERE lab_order_id = $1 AND is_live` inside the transaction `clearPayment` already holds and refuses in the `releaseOrderLines` words: "HbA1c is on bill …, take the payment there" (or "…on this visit's draft bill…"). **Both double-charge routes are closed:** a test on the bill (₹500 with the valve off, ₹250 once with it on) and an order carrying its own submitted claim that the bill skips (the remainder at the desk, ₹350 with the valve off, refused with it on). Claim approval and rejection still go through; a test with no price, a removed draft line and a cancelled bill's order still clear at reception. P4-18's md5 pin was re-taken deliberately: `getPaymentQueue` and `shared/labPayment.js` are still byte-identical to HEAD, `clearPayment` is pinned to its new digest `218f621d…`, and the guard (`c1ea3665…`) and the valve line are pinned too; its test 4 now proves the refusal instead of the double charge. The reception clear endpoint needs an API restart to pick this up. New spec `P4-40-one-test-one-payment.spec.js`, 5 tests; P4-17, P4-18, P4-07, P4-08, P4-13, P4-14 and P4-15 all pass.
+  - **Before turning the valve on:** if a claim is rejected on a final bill where the patient paid ₹0 (Pensioner / CGHS Referral), reception is refused until someone cancels that bill (P4-40 test 5 shows the cancel-then-collect path); the refusal's wording, "take the payment there", is slightly off for that case.
+  - **Follow-up (open) — the hospital can collect twice:** on the claim route the patient pays the full ₹250 on the bill while the order's own ₹150 insurance claim still stands, so the hospital is paid ₹400 for a ₹250 test (the patient is not overcharged; the payer is). Not fixed here; needs its own task — the bill should either honour the order's standing claim or the claim should be withdrawn when the bill takes the test.
+
+
+- [x] **P4-41 · One claim per test** — `Done` (found by P4-40)
+  - **Where:** `server/services/billing/payments.js` (`refuseStandingClaims`), called from `takePayments` and `finaliseBill`.
+  - **Why:** an order carrying its own insurer claim is skipped by `settleTestOrders`, but its bill line stayed fully payable — a ₹250 test with a ₹150 claim standing was paid ₹250 on the bill and ₹150 by the insurer, ₹400 in all; on a CGHS / Pensioner bill the bill's ₹250 category claim was banked beside the order's ₹150 claim.
+  - **What:** the bill refuses to take money for, or finalise with, a live test line whose order has a submitted or approved claim that the bill did not write; the counter removes the line (or cancels a final bill) and reception collects the rest.
+  - **Done when:** the ₹400-for-₹250 outcome is refused on both the payment and the finalise route, a rejected claim lets the bill take the test, and a claim the bill wrote itself never blocks the rest of the bill.
+  - **E2E test:** `e2e/billing/phase4/P4-41-one-claim-per-test.spec.js`.
+  - **Result:** Done 2026-09-24 (built by a sub-agent). Reproduced first on the test database: with a ₹150 Star Health claim standing on a ₹250 HbA1c the patient paid ₹250 on the bill and the insurer approved ₹150 — the hospital held ₹400; the same happened with the P4-40 valve on (line removed, claim raised, test re-added to the draft by its order) and through finalise (a Pensioner bill banked a ₹250 CGHS claim beside the order's ₹150 claim). Three designs were weighed: **honouring the claim on the bill** (rejected — the bill's `claim_amount` belongs to the category payer, with its own register and payer name, the database refuses a claim on a line with no payment rule, and a later rejection on a final bill would leave the patient's share uncollectable); **withdrawing the order's claim** (rejected — it withdraws nothing at the insurer and makes an insured patient pay what the policy covers); and **refusing on the bill** (chosen, since reception is where insurer claims live today). `refuseStandingClaims` runs one query over the bill's live test lines and their orders; a submitted or approved claim is refused unless the order's money is still exactly what this bill's own settle wrote (the `sameMoney` test `releaseOrder` uses), so a CGHS claim the bill itself settled never blocks the bill's other lines. The refusal is a 409 with `code: "order_claim"`: "HbA1c has its own insurance claim of ₹150.00 at reception, so it can't also be paid on this visit's draft bill — remove it from this bill and collect the rest at reception" (on a final bill: "… cancel this bill and collect the rest at reception"). It runs in `takePayments` before any money is taken and in `finaliseBill` before a number is taken. Now: a standing claim is refused, and once the line is removed reception collects the remainder (₹150 claim + ₹100 desk = ₹250); a rejected claim lets the bill take the test once; a cancelled bill leaves the order's own claim exactly as it was; CGHS category bills are unchanged. No schema, pricing or `clearPayment` change — P4-18's pins still hold. P4-17 test 5 and P4-40 test 4, which asserted the old double collection, now assert the refusal. 6 tests; three deliberate breaks (dropping the own-claim test, the payment guard, the finalise guard) each failed a test and were restored by md5. P4-07, 08, 13, 14, 15, 16, 17, 18, 24, 40 and 41 pass (80/80).
+  - **Still open:** the **cash version** of the same route (cancel → reception collects cash → the order's line re-added → paid again) is not covered; widening the guard to any order money the bill did not write would close it but changes P4-40 test 2. The counter only learns of the claim when payment or finalise is refused — a line flag on `readBill` would let it show "claim at reception" up front. **P4-23's test 6 renames a patient outside its tag**, so its teardown leaves a bill the fixture sweep can't find, which breaks the sweep for every P4 spec run after it.
 ---
 
 ## Phase 4b — Refunds and credit notes

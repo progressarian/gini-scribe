@@ -7,7 +7,7 @@ import { test, expect } from "@playwright/test";
 import { getPool, one, query } from "../../helpers/db.mjs";
 import { USERS } from "../../fixtures/data.mjs";
 import { assertTestDatabase } from "../../setup/guard.mjs";
-import { desk, extraVisit, newTag, setUp, tearDown } from "./p4-bills-fixture.mjs";
+import { desk, extraVisit, newTag, refused, setUp, tearDown } from "./p4-bills-fixture.mjs";
 
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 const bills = await import("../../../server/services/billing/bills.js");
@@ -23,12 +23,19 @@ const tag = newTag();
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const STATION = "server/services/giniflow/receptionStation.js";
 const GATE = "shared/labPayment.js";
-const GUARDED = ["getPaymentQueue", "clearPayment"];
+const LINES = "server/services/billing/visitLines.js";
+const VALVE_FILE = "shared/manualFloor.js";
+const VALVE = "SCRIBE_BILL_TAKES_TEST_PAYMENTS";
+const PINNED = {
+  getPaymentQueue: "c7e6c3f66a2c37d919dea2862aa14c50",
+  clearPayment: "218f621d60d191d2d03db1d60efa536f",
+  refuseOrderOnBill: "c1ea3665083a2c8761dfaa3bc57fe852",
+};
 let ids;
 
 const bodyOf = (source, name) => {
   const start = source.indexOf(`export async function ${name}(`);
-  expect(start, `${name} is no longer in ${STATION}`).toBeGreaterThan(-1);
+  expect(start, `${name} is no longer where it was`).toBeGreaterThan(-1);
   const end = source.indexOf("\n}\n", start);
   return source.slice(start, end + 2);
 };
@@ -95,26 +102,32 @@ test.describe.serial("P4-18 the existing Clear payment is untouched", () => {
     await query(`DELETE FROM cash_shifts WHERE user_id = $1`, [USERS.reception.id]).catch(() => {});
   });
 
-  test("1. clearPayment and getPaymentQueue are exactly what the repository holds", async () => {
+  test("1. getPaymentQueue and the gate are untouched, and clearPayment is exactly what P4-40 made it", async () => {
     const atHead = (file) =>
       execFileSync("git", ["show", `HEAD:${file}`], {
         cwd: repoRoot,
         encoding: "utf8",
         maxBuffer: 32 * 1024 * 1024,
       });
-    const working = fs.readFileSync(path.join(repoRoot, STATION), "utf8");
-    const committed = atHead(STATION);
+    const read = (file) => fs.readFileSync(path.join(repoRoot, file), "utf8");
+    const station = read(STATION);
+    expect(digest(read(GATE)), `the gate code in ${GATE} has been edited`).toBe(
+      digest(atHead(GATE)),
+    );
+    expect(digest(bodyOf(station, "getPaymentQueue")), "getPaymentQueue has been edited").toBe(
+      digest(bodyOf(atHead(STATION), "getPaymentQueue")),
+    );
+    expect(digest(bodyOf(station, "getPaymentQueue"))).toBe(PINNED.getPaymentQueue);
+    expect(digest(bodyOf(station, "clearPayment")), "clearPayment has been edited").toBe(
+      PINNED.clearPayment,
+    );
     expect(
-      digest(fs.readFileSync(path.join(repoRoot, GATE), "utf8")),
-      `the gate code in ${GATE} has been edited`,
-    ).toBe(digest(atHead(GATE)));
-    for (const name of GUARDED) {
-      expect(digest(bodyOf(working, name)), `${name} has been edited`).toBe(
-        digest(bodyOf(committed, name)),
-      );
-    }
-    expect(digest(bodyOf(working, "getPaymentQueue"))).toBe("c7e6c3f66a2c37d919dea2862aa14c50");
-    expect(digest(bodyOf(working, "clearPayment"))).toBe("5f9a03a44cdf720b5cc7673258346ce9");
+      digest(bodyOf(read(LINES), "refuseOrderOnBill")),
+      "the P4-40 guard has been edited",
+    ).toBe(PINNED.refuseOrderOnBill);
+    expect(read(VALVE_FILE)).toContain(
+      `export const billTakesTestPayments = () => process.env.${VALVE} === "1";`,
+    );
   });
 
   test("2. clearing a payment at reception still opens the lab gate", async () => {
@@ -170,38 +183,56 @@ test.describe.serial("P4-18 the existing Clear payment is untouched", () => {
     expect(Number(taken)).toBe(250);
   });
 
-  test("4. an order reception cleared is left alone by the bill — but the patient can still be charged twice", async () => {
-    const { visit } = await extraVisit(ids, "Twice");
-    const order = await pricedOrder(visit, ids.hba1cName, 250);
-    const raised = await visitLines.linesForOrder(
-      visit,
-      { labOrderId: order, testNames: [ids.hba1cName] },
-      desk,
-      db,
-    );
-    await clear(order);
-    const cleared = await orderRow(order);
-    expect(Number(cleared.amount_paid)).toBe(250);
+  test("4. with the Billing Counter live, reception refuses a test on the bill — the patient pays once", async () => {
+    const was = process.env[VALVE];
+    process.env[VALVE] = "1";
+    try {
+      const { visit } = await extraVisit(ids, "Twice");
+      const order = await pricedOrder(visit, ids.hba1cName, 250);
+      const raised = await visitLines.linesForOrder(
+        visit,
+        { labOrderId: order, testNames: [ids.hba1cName] },
+        desk,
+        db,
+      );
+      const draft = await bills.readBill(raised.bill_id, db);
+      expect(draft.totals.payable).toBe(25000);
+      const before = await orderRow(order);
+      const error = await refused(
+        clear(order),
+        409,
+        null,
+        "reception collecting a test the bill is also collecting",
+      );
+      expect(error.message).toBe(
+        `${draft.lines[0].bill_name} is on this visit's draft bill, take the payment there`,
+      );
+      expect(await orderRow(order)).toEqual(before);
 
-    const draft = await bills.readBill(raised.bill_id, db);
-    expect(draft.totals.payable).toBe(25000);
-    const paid = await payments.takePayments(
-      draft.id,
-      { version: draft.version, mode: "cash", amount: 250 },
-      desk,
-      db,
-    );
-    expect(paid.orders).toHaveLength(0);
-    const after = await orderRow(order);
-    expect(Number(after.amount_paid)).toBe(250);
-    expect(after.version).toBe(cleared.version);
-
-    const { taken } = await one(
-      `SELECT COALESCE(SUM(amount), 0)::numeric AS taken FROM payments WHERE bill_id = $1`,
-      [draft.id],
-    );
-    expect(Number(taken)).toBe(250);
-    expect(Number(taken) + Number(after.amount_paid)).toBe(500);
+      const paid = await payments.takePayments(
+        draft.id,
+        { version: draft.version, mode: "cash", amount: 250 },
+        desk,
+        db,
+      );
+      expect(paid.orders).toHaveLength(1);
+      const after = await orderRow(order);
+      expect(Number(after.amount_paid)).toBe(250);
+      const { taken } = await one(
+        `SELECT COALESCE(SUM(amount), 0)::numeric AS taken FROM payments WHERE bill_id = $1`,
+        [draft.id],
+      );
+      expect(Number(taken)).toBe(250);
+      const { rows: collections } = await query(
+        `SELECT meta ->> 'bill_id' AS bill_id FROM giniflow_lab_order_events
+          WHERE lab_order_id = $1 AND track = 'payment' AND status IN ('paid', 'part_paid')`,
+        [order],
+      );
+      expect(collections).toEqual([{ bill_id: draft.id }]);
+    } finally {
+      if (was === undefined) delete process.env[VALVE];
+      else process.env[VALVE] = was;
+    }
   });
 
   test("5. an order the bill settled looks exactly like one reception cleared", async () => {

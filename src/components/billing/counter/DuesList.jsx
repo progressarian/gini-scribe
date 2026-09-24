@@ -15,7 +15,7 @@ export default function DuesList({ onTakePayment }) {
         <div className="empty-note">Nothing is left to collect.</div>
       )}
       {!!rows.length && (
-        <div className="ltablewrap">
+        <div className="ltablewrap bc-stack">
           <table className="ltable" aria-label="Unpaid balances">
             <thead>
               <tr>
@@ -32,20 +32,20 @@ export default function DuesList({ onTakePayment }) {
             <tbody>
               {rows.map((row) => (
                 <tr key={row.bill_id}>
-                  <td>
+                  <td data-label="Patient">
                     {row.patient.name}
                     <span className="bc-head__meta"> · {row.patient.file_no || "—"}</span>
                   </td>
-                  <td>
+                  <td data-label="Bill">
                     {row.bill_no}
                     {row.pay_later && <span className="bc-chip bc-chip--auto">Pay later</span>}
                   </td>
-                  <td>{row.bill_date}</td>
-                  <td>{dueAgeText(row.days)}</td>
-                  <td>{fromPaise(row.payable)}</td>
-                  <td>{fromPaise(row.paid)}</td>
-                  <td>{fromPaise(row.outstanding)}</td>
-                  <td>
+                  <td data-label="Date">{row.bill_date}</td>
+                  <td data-label="Waiting">{dueAgeText(row.days)}</td>
+                  <td data-label="Patient pays">{fromPaise(row.payable)}</td>
+                  <td data-label="Paid">{fromPaise(row.paid)}</td>
+                  <td data-label="Outstanding">{fromPaise(row.outstanding)}</td>
+                  <td data-label="" className="bc-cell-actions">
                     <button
                       type="button"
                       className="st-btn st-btn-grn"

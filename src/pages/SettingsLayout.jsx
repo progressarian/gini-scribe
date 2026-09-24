@@ -16,61 +16,47 @@ export const SETTINGS_TABS = [
   {
     to: "/settings/flow",
     label: "Patient Flow",
-    blurb: "Visit-time benchmarks and the journey steps · changes apply to new check-ins",
   },
   {
     to: "/settings/prescription",
     label: "Prescription",
-    blurb:
-      "Hospital identity, letterhead logo, and the strip printed at the foot of every prescription",
   },
   {
     to: "/settings/tests",
     label: "Test catalogue",
-    blurb: "What the floor can order and what reception charges for it",
   },
   {
     to: "/settings/schemes",
     label: "Categories",
-    blurb:
-      "CGHS, ECHS and the rest — sub-categories, payer, referral and card needs, the daily cap and who belongs",
   },
   {
     to: "/settings/services",
     label: "Services",
-    blurb: "Groups, subgroups and the items the hospital bills for, with their prices",
   },
   {
     to: "/settings/category-rates",
     label: "Category rates",
-    blurb: "What each category pays for each service, and the code printed on its bill",
   },
   {
     to: "/settings/consultant-fees",
     label: "Consultant fees",
-    blurb: "Each doctor's New and Follow Up fee for every category, and what the patient pays",
   },
   {
     to: "/settings/discounts",
     label: "Discounts",
-    blurb: "Automatic discounts and codes the desk can enter, their limits and who they are for",
   },
   {
     to: "/settings/desk-requests",
     label: "Desk requests",
-    blurb:
-      "What the billing desk is waiting on — a missing item to create, or an item to bill a second time on one visit",
     Badge: DeskRequestsBadge,
   },
   {
     to: "/settings/bulk-import",
     label: "Bulk import",
-    blurb: "Upload the Excel template to add or update services, categories and rates in one go",
   },
   {
     to: "/settings/billing",
     label: "Billing settings",
-    blurb: "Discount stacking, pay later, GST and the bill number series",
   },
 ];
 
@@ -81,7 +67,6 @@ export default function SettingsLayout() {
   const { pathname } = useLocation();
   const role = useAuthStore((s) => s.currentDoctor?.role);
   const tabs = visibleSettingsTabs(role);
-  const active = tabs.find((t) => pathname.startsWith(t.to));
   const tabsRef = useRef(null);
 
   useEffect(() => {
@@ -96,11 +81,6 @@ export default function SettingsLayout() {
 
   return (
     <div className="set">
-      <header className="set__head">
-        <h1 className="set__title">⚙️ Scribe Settings</h1>
-        {active?.blurb ? <p className="set__blurb">{active.blurb}</p> : null}
-      </header>
-
       <nav className="set__tabs" aria-label="Settings sections" ref={tabsRef}>
         {tabs.map((t) => (
           <NavLink

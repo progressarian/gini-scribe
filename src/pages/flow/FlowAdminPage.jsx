@@ -19,6 +19,7 @@ import {
 } from "../../queries/hooks/useGiniflowFloorSettings";
 import "../../styles/flow.css";
 import "./FlowSettings.css";
+import "../billing/billingUi.css";
 
 // Admin settings: edit visit-time benchmarks (max minutes) and fully manage the
 // step catalog (create / update / delete). Inline-edit on blur. ADMIN-gated
@@ -136,7 +137,7 @@ export default function FlowAdminPage() {
   };
 
   return (
-    <div className="flow-root fset">
+    <div className="flow-root fset bill-ui flow-set-page">
       <div className="flow-wrap">
         {/* Floor behaviour — admin-toggleable flags (server/services/giniflow/floorSettings.js).
             Its own full-width section, not a grid cell: a one-line toggle squeezed
@@ -265,7 +266,8 @@ export default function FlowAdminPage() {
                 <input
                   className="jb-assign"
                   style={{ maxWidth: "none", flex: "2 1 150px" }}
-                  placeholder="Visit type name"
+                  aria-label="Visit type name"
+                  placeholder="e.g. Diabetes follow-up"
                   value={newType.label}
                   onChange={(e) => setNewType((n) => ({ ...n, label: e.target.value }))}
                 />
@@ -273,7 +275,8 @@ export default function FlowAdminPage() {
                   className="jb-dur"
                   type="number"
                   min="1"
-                  placeholder="max min"
+                  aria-label="Most minutes for this visit type"
+                  placeholder="e.g. 90 min"
                   value={newType.min}
                   onChange={(e) => setNewType((n) => ({ ...n, min: e.target.value }))}
                 />
@@ -385,7 +388,8 @@ export default function FlowAdminPage() {
                 <input
                   className="jb-assign"
                   style={{ maxWidth: "none", flex: "2 1 150px" }}
-                  placeholder="Step name"
+                  aria-label="Step name"
+                  placeholder="e.g. Foot examination"
                   value={newStep.name}
                   onChange={(e) => setNewStep((n) => ({ ...n, name: e.target.value }))}
                 />
@@ -393,7 +397,8 @@ export default function FlowAdminPage() {
                 <input
                   className="jb-assign"
                   list="flow-station-options"
-                  placeholder="Station"
+                  aria-label="Station"
+                  placeholder="Station, e.g. vitals"
                   value={newStep.station}
                   onChange={(e) => setNewStep((n) => ({ ...n, station: e.target.value }))}
                 />
@@ -406,7 +411,8 @@ export default function FlowAdminPage() {
                 <input
                   className="jb-assign"
                   list="flow-role-options"
-                  placeholder="Role"
+                  aria-label="Role"
+                  placeholder="Role, e.g. nurse"
                   value={newStep.role}
                   onChange={(e) => setNewStep((n) => ({ ...n, role: e.target.value }))}
                 />
@@ -419,7 +425,8 @@ export default function FlowAdminPage() {
                   className="jb-dur"
                   type="number"
                   min="0"
-                  placeholder="min"
+                  aria-label="Minutes for this step"
+                  placeholder="e.g. 10 min"
                   value={newStep.min}
                   onChange={(e) => setNewStep((n) => ({ ...n, min: e.target.value }))}
                 />

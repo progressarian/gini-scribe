@@ -1322,6 +1322,20 @@ function checkConsultantFees(sheet, state, paymentRuleRows) {
         ruleOps,
         existed: Boolean(rateBefore || current),
         changes,
+        stored: {
+          visit_type: visitType,
+          fee: rateBefore?.rate == null ? null : Number(rateBefore.rate),
+          bill_name: rateBefore?.bill_name ?? null,
+          bill_code: rateBefore?.bill_code ?? null,
+          rate_from: rateBefore?.valid_from ?? null,
+          rate_to: rateBefore?.valid_to ?? null,
+          rule_name: current?.name ?? null,
+          patient_pays: current?.patient_pays ?? null,
+          patient_value: current?.patient_value ?? null,
+          remainder: current?.remainder ?? null,
+          rule_from: current?.valid_from ?? null,
+          rule_to: current?.valid_to ?? null,
+        },
       });
       rates.push({ row: row.row, values: rate, errors: [], warnings: [], source: row });
     }

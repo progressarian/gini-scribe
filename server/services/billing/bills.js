@@ -13,7 +13,7 @@ import {
 import { normalizeGender, resolveCategoryFor } from "./categoryResolver.js";
 import { checkCode } from "./discountRules.js";
 import { assertBillLineBalances } from "./lineInvariant.js";
-import { releaseTestOrders, settleTestOrders } from "./payments.js";
+import { refuseStandingClaims, releaseTestOrders, settleTestOrders } from "./payments.js";
 import { priceBill } from "./priceBill.js";
 import { httpError, inTransaction } from "./transaction.js";
 import { auditFields, hasField, INT_MAX, lockRow, readNumber, wholeNumber } from "./common.js";
@@ -115,7 +115,8 @@ const maskTail = (stored) => {
   return text.length <= 4 ? text : `XXXX${text.slice(-4)}`;
 };
 
-const billLabel = (bill) => (bill?.bill_no ? `bill ${bill.bill_no}` : "this visit's draft bill");
+export const billLabel = (bill) =>
+  bill?.bill_no ? `bill ${bill.bill_no}` : "this visit's draft bill";
 
 function shapeLine(row) {
   return {
@@ -944,6 +945,7 @@ export async function finaliseBill(billId, input, ctx, db = pool) {
     await recheckCodes(client, bill, codes, ctx);
     const saved = await reprice(client, bill, codes, ctx);
     saved.priced.lines.forEach(assertBillLineBalances);
+    await refuseStandingClaims(client, saved.bill);
     const category = await categoryRules(client, saved.bill.scheme_code);
     if (category.requires_referral && !saved.bill.referral_no_enc) {
       throw httpError(409, `${category.display_label} needs the referral number on the bill`);

@@ -1,10 +1,12 @@
 import { useId, useState } from "react";
+import { Pencil, Power, PowerOff, Trash2 } from "lucide-react";
 import {
   useBillingDiscounts,
   useDeleteBillingDiscount,
   useSetBillingDiscountActive,
 } from "../../queries/hooks/useBillingMaster";
 import { toast } from "../../stores/uiStore";
+import Pagination from "../../components/ui/Pagination";
 import DiscountForm from "../../components/billing/DiscountForm";
 import RuleTestBox from "../../components/billing/RuleTestBox";
 import {
@@ -19,6 +21,7 @@ import { requestErrorOf } from "../../components/billing/format";
 import "../../styles/flow.css";
 import "../flow/FlowSettings.css";
 import "./billing.css";
+import "./billingUi.css";
 import "./discounts.css";
 
 function Lines({ parts }) {
@@ -40,26 +43,38 @@ function DiscountRow({ rule, onEdit }) {
   };
   return (
     <tr className={rule.is_active ? "" : "fset__row--off"}>
-      <td>
+      <td data-label="Name">
         <strong>{rule.name}</strong>
-        {rule.code ? <div className="disc-code">{rule.code}</div> : null}
+        {rule.code ? <code className="disc-code">{rule.code}</code> : null}
       </td>
-      <td>{METHOD_LABEL[rule.method]}</td>
-      <td>{valueOf(rule)}</td>
-      <td className="disc-cell">
+      <td data-label="Type">
+        <span className={`bill-status disc-type disc-type--${rule.method}`}>
+          {METHOD_LABEL[rule.method]}
+        </span>
+      </td>
+      <td data-label="Value" className="disc-value">
+        {valueOf(rule)}
+      </td>
+      <td data-label="Covers" className="disc-cell">
         <Lines parts={coversOf(rule)} />
       </td>
-      <td className="disc-cell">
+      <td data-label="Who" className="disc-cell">
         <Lines parts={whoOf(rule)} />
       </td>
-      <td>{datesOf(rule)}</td>
-      <td className="disc-cell">
+      <td data-label="Dates" className="disc-dates">
+        {datesOf(rule)}
+      </td>
+      <td data-label="Uses" className="disc-cell">
         <Lines parts={usageOf(rule)} />
       </td>
-      <td>{rule.is_active ? "Active" : "Inactive"}</td>
-      <td className="bill-items__actions">
+      <td data-label="Status">
+        <span className={`bill-status disc-status--${rule.is_active ? "on" : "off"}`}>
+          {rule.is_active ? "Active" : "Inactive"}
+        </span>
+      </td>
+      <td data-label="" className="bill-items__actions">
         {confirming ? (
-          <span role="group" aria-label={`Delete discount ${rule.name}?`}>
+          <span role="group" className="disc-confirm" aria-label={`Delete discount ${rule.name}?`}>
             <button
               type="button"
               className="flow-btn flow-btn-red flow-btn-mini"
@@ -93,16 +108,18 @@ function DiscountRow({ rule, onEdit }) {
           <>
             <button
               type="button"
-              className="flow-btn flow-btn-ghost flow-btn-mini"
+              className="bill-icon-btn"
               aria-label={`Edit discount ${rule.name}`}
+              title="Edit"
               onClick={onEdit}
             >
-              Edit
+              <Pencil size={15} aria-hidden="true" />
             </button>
             <button
               type="button"
-              className="flow-btn flow-btn-ghost flow-btn-mini"
+              className="bill-icon-btn"
               aria-label={`${rule.is_active ? "Deactivate" : "Activate"} discount ${rule.name}`}
+              title={rule.is_active ? "Deactivate" : "Activate"}
               disabled={setActive.isPending}
               onClick={() =>
                 attempt(
@@ -112,16 +129,21 @@ function DiscountRow({ rule, onEdit }) {
                 )
               }
             >
-              {rule.is_active ? "Deactivate" : "Activate"}
+              {rule.is_active ? (
+                <PowerOff size={15} aria-hidden="true" />
+              ) : (
+                <Power size={15} aria-hidden="true" />
+              )}
             </button>
             <button
               type="button"
-              className="flow-btn flow-btn-ghost flow-btn-mini"
+              className="bill-icon-btn bill-icon-btn--danger"
               aria-label={`Delete discount ${rule.name}`}
+              title="Delete"
               autoFocus={kept}
               onClick={() => setConfirming(true)}
             >
-              Delete
+              <Trash2 size={15} aria-hidden="true" />
             </button>
           </>
         )}
@@ -135,6 +157,8 @@ export default function DiscountsSettingsPage() {
   const [activeOnly, setActiveOnly] = useState(false);
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
   const { data: rules = [], isLoading, isError } = useBillingDiscounts({ method, activeOnly });
   const id = useId();
 
@@ -145,20 +169,27 @@ export default function DiscountsSettingsPage() {
       rule.name.toLowerCase().includes(needle) ||
       (rule.code ?? "").toLowerCase().includes(needle),
   );
+  const lastPage = Math.max(1, Math.ceil(shown.length / pageSize));
+  const current = Math.min(page, lastPage);
+  const pageRules = shown.slice((current - 1) * pageSize, current * pageSize);
+  const filter = (setter) => (value) => {
+    setter(value);
+    setPage(1);
+  };
   const close = (message) => {
     setEditing(null);
     if (message) toast(message, "success");
   };
 
   return (
-    <div className="flow-root fset">
-      <div className="flow-card">
+    <div className="flow-root fset bill-ui disc-page">
+      <div className="flow-card bill-stack">
         <div className="fset__cardhead">
           <h2 className="flow-sec-title">Discounts</h2>
           <span className="fset__count">{shown.length}</span>
           <button
             type="button"
-            className="flow-btn flow-btn-primary disc-new"
+            className="flow-btn flow-btn-primary flow-btn-mini bill-tree__headbtn"
             onClick={() => setEditing("new")}
           >
             + New discount
@@ -167,16 +198,16 @@ export default function DiscountsSettingsPage() {
         <div className="fset__cardsub">
           Automatic discounts and codes the desk can enter, their limits and who they are for.
         </div>
-        <div className="bill-form">
+        <div className="bill-form disc-filters">
           <div className="fset__field">
             <label htmlFor={`${id}-q`}>Search</label>
             <input
               id={`${id}-q`}
               type="search"
               className="jb-assign"
-              placeholder="Name or code"
+              placeholder="e.g. Senior or SENIOR10"
               value={q}
-              onChange={(e) => setQ(e.target.value)}
+              onChange={(e) => filter(setQ)(e.target.value)}
             />
           </div>
           <div className="fset__field">
@@ -185,7 +216,7 @@ export default function DiscountsSettingsPage() {
               id={`${id}-method`}
               className="jb-assign"
               value={method}
-              onChange={(e) => setMethod(e.target.value)}
+              onChange={(e) => filter(setMethod)(e.target.value)}
             >
               <option value="">Automatic and codes</option>
               <option value="auto">Automatic only</option>
@@ -196,7 +227,7 @@ export default function DiscountsSettingsPage() {
             <input
               type="checkbox"
               checked={activeOnly}
-              onChange={(e) => setActiveOnly(e.target.checked)}
+              onChange={(e) => filter(setActiveOnly)(e.target.checked)}
             />
             Active only
           </label>
@@ -206,28 +237,38 @@ export default function DiscountsSettingsPage() {
         ) : isError ? (
           <div className="fset__cardsub">Could not load the discounts.</div>
         ) : shown.length ? (
-          <div className="fset__scroll fset__scroll--wide disc-list">
-            <table className="flow-table" aria-label="Discounts">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Type</th>
-                  <th>Value</th>
-                  <th>Covers</th>
-                  <th>Who</th>
-                  <th>Dates</th>
-                  <th>Uses</th>
-                  <th>Status</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {shown.map((rule) => (
-                  <DiscountRow key={rule.id} rule={rule} onEdit={() => setEditing(rule)} />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <>
+            <div className="fset__scroll fset__scroll--wide disc-list">
+              <table className="flow-table" aria-label="Discounts">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Value</th>
+                    <th>Covers</th>
+                    <th>Who</th>
+                    <th>Dates</th>
+                    <th>Uses</th>
+                    <th>Status</th>
+                    <th className="bill-items__actions-head">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pageRules.map((rule) => (
+                    <DiscountRow key={rule.id} rule={rule} onEdit={() => setEditing(rule)} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Pagination
+              page={current}
+              pageSize={pageSize}
+              total={shown.length}
+              onChange={setPage}
+              onPageSizeChange={setPageSize}
+              unit="discounts"
+            />
+          </>
         ) : (
           <div className="fset__cardsub">
             {needle || method || activeOnly

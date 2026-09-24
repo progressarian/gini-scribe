@@ -17,7 +17,7 @@ export default function DiscountItemPicker({ label, chosenIds = [], onPick }) {
           id={id}
           type="search"
           className="jb-assign"
-          placeholder="Item name or code"
+          placeholder="e.g. HbA1c or LAB-HBA1C"
           maxLength={100}
           value={q}
           onChange={(e) => setQ(e.target.value)}

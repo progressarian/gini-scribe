@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { History, Pencil, Power, PowerOff, Trash2 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import {
   useBillingGroups,
@@ -11,7 +12,9 @@ import {
 } from "../../queries/hooks/useBillingMaster";
 import { toast } from "../../stores/uiStore";
 import GroupPanel from "../../components/billing/GroupPanel";
+import ConfirmDeleteDialog from "../../components/billing/ConfirmDeleteDialog";
 import ItemDialog from "../../components/billing/ItemDialog";
+import NodeToolbar from "../../components/billing/NodeToolbar";
 import NotPricedPanel from "../../components/billing/NotPricedPanel";
 import PriceHistoryDialog from "../../components/billing/PriceHistoryDialog";
 import UsedInDialog from "../../components/billing/UsedInDialog";
@@ -19,6 +22,7 @@ import { errorOf, rupees, usesOf } from "../../components/billing/format";
 import "../../styles/flow.css";
 import "../flow/FlowSettings.css";
 import "./billing.css";
+import "./billingUi.css";
 
 const STATUS_FILTER = { active: "true", inactive: "false", all: undefined };
 
@@ -84,56 +88,52 @@ function ItemRow({ item, showPath, onEdit, onHistory, onBlocked }) {
       <td className="bill-items__actions">
         <button
           type="button"
-          className="flow-btn flow-btn-ghost flow-btn-mini"
+          className="bill-icon-btn"
           aria-label={`Edit ${item.name}`}
+          title="Edit"
           onClick={onEdit}
         >
-          Edit
+          <Pencil size={15} aria-hidden="true" />
         </button>
         <button
           type="button"
-          className="flow-btn flow-btn-ghost flow-btn-mini"
+          className="bill-icon-btn"
           aria-label={`Price history of ${item.name}`}
+          title="Price history"
           onClick={onHistory}
         >
-          History
+          <History size={15} aria-hidden="true" />
         </button>
         <button
           type="button"
-          className="flow-btn flow-btn-ghost flow-btn-mini"
+          className="bill-icon-btn"
           aria-label={`${item.is_active ? "Deactivate" : "Activate"} ${item.name}`}
+          title={item.is_active ? "Deactivate" : "Activate"}
           onClick={toggle}
         >
-          {item.is_active ? "Deactivate" : "Activate"}
+          {item.is_active ? (
+            <PowerOff size={15} aria-hidden="true" />
+          ) : (
+            <Power size={15} aria-hidden="true" />
+          )}
+        </button>
+        <button
+          type="button"
+          className="bill-icon-btn bill-icon-btn--danger"
+          aria-label={`Delete ${item.name}`}
+          title="Delete"
+          onClick={() => setConfirming(true)}
+        >
+          <Trash2 size={15} aria-hidden="true" />
         </button>
         {confirming ? (
-          <>
-            <button
-              type="button"
-              className="flow-btn flow-btn-red flow-btn-mini"
-              aria-label={`Confirm delete ${item.name}`}
-              onClick={destroy}
-            >
-              Confirm delete
-            </button>
-            <button
-              type="button"
-              className="flow-btn flow-btn-ghost flow-btn-mini"
-              onClick={() => setConfirming(false)}
-            >
-              Keep
-            </button>
-          </>
-        ) : (
-          <button
-            type="button"
-            className="flow-btn flow-btn-ghost flow-btn-mini"
-            aria-label={`Delete ${item.name}`}
-            onClick={() => setConfirming(true)}
-          >
-            Delete
-          </button>
-        )}
+          <ConfirmDeleteDialog
+            name={item.name}
+            note="The item is removed for good. One that is already used can be deactivated instead."
+            onKeep={() => setConfirming(false)}
+            onDelete={destroy}
+          />
+        ) : null}
       </td>
     </tr>
   );
@@ -232,16 +232,30 @@ export default function ServicesSettingsPage() {
     : selected.level === "subgroup"
       ? `${selectedGroup.name} › ${selectedNode.name}`
       : selectedNode.name;
-  const canAdd = selected?.level === "subgroup" && Boolean(selectedNode?.is_active);
-  const addHint =
-    selected?.level !== "subgroup"
-      ? "Choose a subgroup first"
+  const groupPicked = selected?.level === "group" && selectedNode;
+  const openSubgroups = groupPicked ? selectedNode.subgroups.filter((s) => s.is_active) : [];
+  const canAdd = Boolean(selectedNode?.is_active) && (!groupPicked || openSubgroups.length > 0);
+  const addHint = !selectedNode
+    ? "Choose a group or subgroup first"
+    : !selectedNode.is_active
+      ? `This ${selected.level} is off; activate it to add items`
       : canAdd
         ? ""
-        : "This subgroup is off; activate it to add items";
+        : `Add a subgroup to ${selectedNode.name} first`;
+  const addingNew = editing && !editing.item && view === "items";
+  const dialogGroups =
+    addingNew && groupPicked
+      ? (groups.data ?? []).filter((g) => g.id === selectedNode.id)
+      : (groups.data ?? []);
+  const dialogSubgroupId =
+    selected?.level === "subgroup"
+      ? selected.id
+      : addingNew && openSubgroups.length === 1
+        ? openSubgroups[0].id
+        : "";
 
   return (
-    <div className="flow-root fset">
+    <div className="flow-root fset bill-ui">
       <div className="bill-views" role="group" aria-label="Services view">
         <button
           type="button"
@@ -263,24 +277,20 @@ export default function ServicesSettingsPage() {
       {view === "not-priced" ? (
         <NotPricedPanel onCreate={(prefill) => setEditing({ item: null, prefill })} />
       ) : (
-        <div className="bill-services">
+        <div className="bill-services bill-services--split">
           {groups.isLoading ? (
             <div className="flow-card fset__cardsub">Loading…</div>
           ) : groups.isError ? (
             <div className="flow-card fset__cardsub">Could not load the services.</div>
           ) : (
-            <GroupPanel
-              groups={groups.data}
-              selected={selected}
-              onSelect={setSelected}
-              onBlocked={setBlocked}
-            />
+            <GroupPanel groups={groups.data} selected={selected} onSelect={setSelected} />
           )}
 
           <section className="flow-card bill-items" aria-label="Items">
             <div className="fset__cardhead">
               <h2 className="flow-sec-title">{heading}</h2>
               <span className="fset__count">{total}</span>
+              {addHint ? <span className="bill-items__addhint">{addHint}</span> : null}
               <button
                 type="button"
                 className="flow-btn flow-btn-primary flow-btn-mini bill-items__add"
@@ -291,6 +301,18 @@ export default function ServicesSettingsPage() {
                 + Add item
               </button>
             </div>
+            {selectedNode ? (
+              <NodeToolbar
+                key={`${selected.level}-${selectedNode.id}`}
+                node={selectedNode}
+                level={selected.level}
+                siblings={
+                  selected.level === "group" ? (groups.data ?? []) : selectedGroup.subgroups
+                }
+                onDeleted={() => setSelected(null)}
+                onBlocked={setBlocked}
+              />
+            ) : null}
             <div className="bill-items__filters">
               <input
                 className="jb-assign"
@@ -343,7 +365,7 @@ export default function ServicesSettingsPage() {
                       <th>Tax</th>
                       <th>Consultant / test</th>
                       <th>Active</th>
-                      <th />
+                      <th className="bill-items__actions-head">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -374,8 +396,8 @@ export default function ServicesSettingsPage() {
         <ItemDialog
           item={editing.item}
           prefill={editing.prefill}
-          subgroupId={selected?.level === "subgroup" ? selected.id : ""}
-          groups={groups.data ?? []}
+          subgroupId={dialogSubgroupId}
+          groups={dialogGroups}
           choices={choices.data}
           taxCodes={taxCodes.data ?? []}
           onClose={closeEditor}

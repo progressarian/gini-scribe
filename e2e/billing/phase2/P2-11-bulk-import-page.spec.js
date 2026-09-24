@@ -71,11 +71,21 @@ const withErrors = () => ({
 });
 
 const picker = (page) => page.getByLabel("Filled-in template (.xlsx)", { exact: true });
-const preview = (page) => page.getByRole("region", { name: "Preview", exact: true });
-const importButton = (page) => preview(page).getByRole("button", { name: "Import", exact: true });
-const countsOf = (page, name) =>
-  page.getByRole("list", { name, exact: true }).getByRole("listitem");
-const rowsOf = (page, sheet) => page.getByRole("table", { name: `${sheet} rows`, exact: true });
+const card = (page) => page.getByRole("region", { name: /^Import( report)?$/ });
+const commitButton = (page) => card(page).getByRole("button", { name: "Commit", exact: true });
+const summary = (page) =>
+  page.getByRole("list", { name: "All rows", exact: true }).getByRole("listitem");
+const chip = (page, name) =>
+  page
+    .getByRole("group", { name: "Show rows", exact: true })
+    .getByRole("button", { name: new RegExp(`^${name} · `) });
+const table = (page) => page.getByRole("table", { name: "Import rows", exact: true });
+const bodyRows = (page) => table(page).locator("tbody tr");
+const rowOf = (page, key) => bodyRows(page).filter({ has: page.getByText(key, { exact: true }) });
+const commitDialog = (page, name) =>
+  page.getByRole("dialog", { name: `Commit ${name}?`, exact: true });
+const outcome = (page) =>
+  page.getByRole("list", { name: "What happened", exact: true }).getByRole("listitem");
 const history = (page) => page.getByRole("table", { name: "Past imports", exact: true });
 
 async function openPage(page, role = "reception_admin") {
@@ -87,6 +97,16 @@ async function upload(page, name, buffer) {
   await picker(page).setInputFiles({ name, mimeType: XLSX_TYPE, buffer });
 }
 
+async function commitAll(page, name, rows) {
+  await commitButton(page).click();
+  await commitDialog(page, name)
+    .getByRole("button", { name: `Yes, save ${rows} ${rows === 1 ? "row" : "rows"}`, exact: true })
+    .click();
+  await expect(page.getByRole("heading", { name: `Imported ${name}`, exact: true })).toBeVisible({
+    timeout: 30_000,
+  });
+}
+
 const importsNamed = async (name) =>
   (
     await query(
@@ -95,26 +115,36 @@ const importsNamed = async (name) =>
     )
   ).rows;
 
+const HOOK_CALLS = {
+  "get /template": "`${IMPORT}/template`",
+  "get /history": "`${IMPORT}/history`",
+  "post /sessions": "sendFile(SESSIONS, file)",
+  "get /sessions/:id": "read(`${SESSIONS}/${id}`)",
+  "get /sessions/:id/rows": "read(`${SESSIONS}/${id}/rows`",
+  "post /sessions/:id/decisions": "api.post(`${SESSIONS}/${id}/decisions`",
+  "post /sessions/:id/commit": "api.post(`${SESSIONS}/${id}/commit`",
+  "get /sessions/:id/failed": ".get(`${SESSIONS}/${id}/failed`",
+  "post /sessions/:id/abandon": "api.post(`${SESSIONS}/${id}/abandon`",
+};
+
 test.describe("P2-11 bulk import page — wiring", () => {
   test("0. the page is gated by billing master and has a hook for every import route", () => {
     expect(PAGE_CAPABILITIES[PAGE]).toBe(CAPABILITIES.BILLING_MASTER);
     const read = (file) => fs.readFileSync(path.join(repoRoot, file), "utf8");
+    const source = read("server/routes/billingImport.js");
+    expect(source).toContain("const SESSIONS = `${BASE}/sessions`;");
     const routes = [
-      ...read("server/routes/billingImport.js").matchAll(
-        /router\.(get|post)\(\s*`\$\{BASE\}([^`]*)`/g,
+      ...source.matchAll(
+        /router\.(get|post)\(\s*(?:`\$\{BASE\}([^`]*)`|`\$\{SESSIONS\}([^`]*)`|(SESSIONS)\s*,)/g,
       ),
-    ].map(([, method, route]) => `${method} ${route}`);
-    expect(routes.sort()).toEqual(
-      ["get /history", "get /template", "post /commit", "post /errors", "post /preview"].sort(),
+    ].map(([, method, base, session, bare]) =>
+      base !== undefined ? `${method} ${base}` : `${method} /sessions${bare ? "" : session}`,
     );
+    expect(routes.sort()).toEqual(Object.keys(HOOK_CALLS).sort());
     const hooks = read("src/queries/hooks/useBillingMaster.js");
-    for (const route of routes) {
-      const [method, url] = route.split(" ");
-      const call =
-        method === "get"
-          ? new RegExp(`(read|api\\s*\\.get)\\(\\s*\`\\$\\{IMPORT\\}${url}\``)
-          : new RegExp(`sendFile\\(\`\\$\\{IMPORT\\}${url}\``);
-      expect(hooks, route).toMatch(call);
+    for (const [route, call] of Object.entries(HOOK_CALLS)) expect(hooks, route).toContain(call);
+    for (const retired of ["preview", "commit", "errors"]) {
+      expect(hooks, retired).not.toContain(`\`\${IMPORT}/${retired}\``);
     }
     expect(read("src/router.jsx")).toMatch(
       /\{ path: "bulk-import", element: lazyEl\(BillingImportPage\) \}/,
@@ -126,6 +156,7 @@ test.describe.serial("P2-11 bulk import page", () => {
   test.describe.configure({ retries: 1 });
 
   test.afterAll(async () => {
+    await query(`DELETE FROM billing_import_sessions WHERE file_name ILIKE $1`, [`%${tag}%`]);
     await query(`DELETE FROM discount_rules WHERE name LIKE $1`, ["P211 Discount %"]);
     await query(`DELETE FROM service_items WHERE code ILIKE $1`, ["P211I%"]);
     await query(`DELETE FROM service_subgroups WHERE code ILIKE $1`, ["P211S%"]);
@@ -146,48 +177,39 @@ test.describe.serial("P2-11 bulk import page", () => {
     }
   });
 
-  test("2. a good file is previewed with its counts, imported, and shows in the history", async ({
+  test("2. a good file is checked with its counts, committed, and shows in the history with its report", async ({
     page,
   }) => {
     await openPage(page);
     await upload(page, fileName("good"), await workbook(good()));
-    await expect(preview(page)).toContainText(fileName("good"));
-    await expect(countsOf(page, "All sheets")).toHaveText(["4 new"]);
-    await expect(countsOf(page, "Items counts")).toHaveText(["1 new"]);
-    await expect(rowsOf(page, "Items")).toContainText(`item_code: ${ITEM}`);
-    await expect(countsOf(page, "Discounts counts")).toHaveText(["1 new"]);
-    await expect(rowsOf(page, "Discounts")).toContainText(`rule_name: P211 Discount ${T}`);
+    await expect(card(page)).toContainText(fileName("good"), { timeout: 30_000 });
+    await expect(summary(page)).toHaveText(["4 ready"]);
+    await expect(rowOf(page, ITEM)).toContainText("Ready");
+    await expect(table(page)).toContainText(`P211 Discount ${T}`);
     await expect(
-      preview(page).getByRole("button", { name: "Download errors", exact: true }),
+      card(page).getByRole("button", { name: "Download failed rows", exact: true }),
     ).toHaveCount(0);
     expect(await query(`SELECT 1 FROM service_groups WHERE code = $1`, [GROUP])).toMatchObject({
       rows: [],
     });
 
-    await importButton(page).click();
-    const dialog = page.getByRole("dialog", { name: `Import ${fileName("good")}?`, exact: true });
-    await expect(dialog).toContainText("4 new rows and 0 updates will be saved");
-    await expect(dialog.getByRole("list", { name: "What will be saved" })).toContainText(
-      "Items: 1 new, 0 to update",
+    await commitButton(page).click();
+    const dialog = commitDialog(page, fileName("good"));
+    await expect(dialog.getByRole("list", { name: "What will happen" })).toContainText(
+      "4 rows will be saved — new rows, and the changes you chose to override",
     );
-    await expect(dialog.getByRole("list", { name: "What will be saved" })).toContainText(
-      "Discounts: 1 new, 0 to update",
-    );
-    await expect(dialog).not.toContainText("Phase 3 sheets");
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(dialog).toHaveCount(0);
     expect((await query(`SELECT 1 FROM service_groups WHERE code = $1`, [GROUP])).rows).toEqual([]);
 
-    await importButton(page).click();
-    await dialog.getByRole("button", { name: "Yes, import", exact: true }).click();
-    const done = page.getByRole("status").filter({
-      has: page.getByRole("heading", { name: `Imported ${fileName("good")}`, exact: true }),
-    });
-    await expect(done).toBeVisible();
-    await expect(
-      done.getByRole("list", { name: "What was saved", exact: true }).getByRole("listitem"),
-    ).toHaveText(["Groups: 1 new", "Subgroups: 1 new", "Items: 1 new", "Discounts: 1 new"]);
-    await expect(preview(page)).toHaveCount(0);
+    await commitAll(page, fileName("good"), 4);
+    await expect(outcome(page)).toHaveText([
+      "4 saved",
+      "0 kept as they were — not changed",
+      "0 failed — skipped",
+      "0 unchanged",
+    ]);
+    const sessionId = new URL(page.url()).searchParams.get("session");
 
     const item = await query(
       `SELECT i.name, i.base_price::text AS price, s.code AS sub, g.code AS grp
@@ -200,6 +222,8 @@ test.describe.serial("P2-11 bulk import page", () => {
       { status: "saved", imported_by: USERS.reception_admin.id },
     ]);
 
+    await openPage(page);
+    await expect(card(page)).toHaveCount(0);
     const mine = history(page)
       .getByRole("row")
       .filter({ hasText: fileName("good") });
@@ -208,27 +232,41 @@ test.describe.serial("P2-11 bulk import page", () => {
     await expect(mine).toContainText("Saved");
     await expect(mine).toContainText("Items: 1 new");
     await expect(history(page).getByRole("row").nth(1)).toContainText(fileName("good"));
+    await mine
+      .getByRole("link", { name: `View the report for ${fileName("good")}`, exact: true })
+      .click();
+    await expect(page.getByRole("heading", { name: "Import report", exact: true })).toBeVisible();
+    expect(new URL(page.url()).searchParams.get("session")).toBe(sessionId);
+    await expect(outcome(page).first()).toHaveText("4 saved");
   });
 
-  test("3. a changed row shows what changes, unchanged rows are folded away, and it imports", async ({
+  test("3. a changed row shows what changes and is saved only when overridden", async ({
     page,
   }) => {
     await openPage(page, "admin");
     await upload(page, fileName("rename"), await workbook(good(`P211 Renamed ${T}`)));
-    await expect(countsOf(page, "All sheets")).toHaveText(["1 to update", "3 unchanged"]);
-    const groups = rowsOf(page, "Groups");
-    await expect(groups.getByRole("row")).toHaveCount(2);
-    await expect(groups).toContainText("Update");
-    await expect(groups).toContainText(`name: P211 Group ${T} → P211 Renamed ${T}`);
-    await expect(rowsOf(page, "Items")).toHaveCount(0);
-    await expect(preview(page).getByRole("region", { name: "Items", exact: true })).toContainText(
-      "1 unchanged row not listed",
-    );
-    await importButton(page).click();
-    await page.getByRole("button", { name: "Yes, import", exact: true }).click();
-    await expect(
-      page.getByRole("heading", { name: `Imported ${fileName("rename")}`, exact: true }),
-    ).toBeVisible();
+    await expect(summary(page)).toHaveText(["1 needs override", "3 unchanged"], {
+      timeout: 30_000,
+    });
+    await chip(page, "Unchanged").click();
+    await expect(bodyRows(page)).toHaveCount(3);
+    await chip(page, "Needs override").click();
+    await expect(bodyRows(page)).toHaveCount(1);
+    const group = rowOf(page, GROUP);
+    await expect(group).toContainText("Needs override");
+    await expect(group).toContainText(`name: P211 Group ${T} → P211 Renamed ${T}`);
+    await expect(group).toContainText("Undecided — will be kept");
+    await expect(commitButton(page)).toBeDisabled();
+
+    await group.getByRole("button", { name: "Override Groups row 2", exact: true }).click();
+    await expect(group).toContainText("Override — will be saved");
+    await commitAll(page, fileName("rename"), 1);
+    await expect(outcome(page)).toHaveText([
+      "1 saved",
+      "0 kept as they were — not changed",
+      "0 failed — skipped",
+      "3 unchanged",
+    ]);
     expect((await query(`SELECT name FROM service_groups WHERE code = $1`, [GROUP])).rows).toEqual([
       { name: `P211 Renamed ${T}` },
     ]);
@@ -239,37 +277,39 @@ test.describe.serial("P2-11 bulk import page", () => {
     ).toContainText(USERS.admin.name);
   });
 
-  test("4. the same file again has nothing to save, so Import stays off", async ({ page }) => {
+  test("4. the same file again has nothing to save, so Commit stays off", async ({ page }) => {
     await openPage(page);
     await upload(page, fileName("again"), await workbook(good(`P211 Renamed ${T}`)));
-    await expect(countsOf(page, "All sheets")).toHaveText(["4 unchanged"]);
-    await expect(importButton(page)).toBeDisabled();
-    await expect(preview(page)).toContainText(
-      "Nothing to save — every row already matches Scribe.",
+    await expect(summary(page)).toHaveText(["4 unchanged"], { timeout: 30_000 });
+    await expect(commitButton(page)).toBeDisabled();
+    await expect(card(page)).toContainText(
+      "Nothing to save yet — no row is ready and no change is overridden.",
     );
   });
 
-  test("5. a file with errors lists the error rows, blocks Import, and downloads the error file", async ({
+  test("5. a file with errors lists the failed rows with their reasons, downloads them, and commits only the good row", async ({
     page,
   }) => {
     await openPage(page);
     const name = fileName("errors");
     await upload(page, name, await workbook(withErrors()));
-    await expect(countsOf(page, "All sheets")).toHaveText(["1 new", "2 with errors"]);
-    await expect(importButton(page)).toBeDisabled();
+    await expect(summary(page)).toHaveText(["1 ready", "2 failed"], { timeout: 30_000 });
+    await chip(page, "Failed").click();
+    await expect(bodyRows(page)).toHaveCount(2);
 
-    const sub = rowsOf(page, "Subgroups").getByRole("row").nth(1);
-    await expect(sub.getByRole("cell").nth(0)).toHaveText("2");
-    await expect(sub.getByRole("cell").nth(1)).toHaveText("Error");
+    const sub = rowOf(page, `P211S_BAD_${T}`);
+    await expect(sub.getByRole("cell").nth(0)).toContainText("Subgroups");
+    await expect(sub.getByRole("cell").nth(0)).toContainText("row 2");
+    await expect(sub.getByRole("cell").nth(2)).toHaveText("Failed");
     await expect(sub).toContainText("group_code:");
     await expect(sub).toContainText(`typed "P211_NOPE_${T}"`);
-    const item = rowsOf(page, "Items").getByRole("row").nth(1);
+    const item = rowOf(page, `P211I_BAD_${T}`);
     await expect(item).toContainText("base_price:");
     await expect(item).toContainText('typed "₹1,200"');
 
     const [download] = await Promise.all([
       page.waitForEvent("download"),
-      preview(page).getByRole("button", { name: "Download errors", exact: true }).click(),
+      card(page).getByRole("button", { name: "Download failed rows", exact: true }).click(),
     ]);
     expect(download.suggestedFilename()).toBe(`p211-errors-${tag} - errors.xlsx`);
     const wb = new ExcelJS.Workbook();
@@ -283,6 +323,23 @@ test.describe.serial("P2-11 bulk import page", () => {
     expect(
       (await query(`SELECT 1 FROM service_groups WHERE code = $1`, [`P211G_BAD_${T}`])).rows,
     ).toEqual([]);
+
+    await commitAll(page, name, 1);
+    await expect(outcome(page)).toHaveText([
+      "1 saved",
+      "0 kept as they were — not changed",
+      "2 failed — skipped",
+      "0 unchanged",
+    ]);
+    expect(
+      (await query(`SELECT 1 FROM service_groups WHERE code = $1`, [`P211G_BAD_${T}`])).rows,
+    ).toHaveLength(1);
+    expect(
+      (await query(`SELECT 1 FROM service_subgroups WHERE code = $1`, [`P211S_BAD_${T}`])).rows,
+    ).toEqual([]);
+    expect(
+      (await query(`SELECT 1 FROM service_items WHERE code = $1`, [`P211I_BAD_${T}`])).rows,
+    ).toEqual([]);
   });
 
   test("6. a refused file shows its problems; a wrong file name is explained", async ({ page }) => {
@@ -293,10 +350,7 @@ test.describe.serial("P2-11 bulk import page", () => {
     ).toHaveText(
       "This isn't an Excel .xlsx file; save it as an Excel Workbook (.xlsx) and upload again",
     );
-    await expect(importButton(page)).toBeDisabled();
-    await expect(
-      preview(page).getByRole("button", { name: "Download errors", exact: true }),
-    ).toHaveCount(0);
+    await expect(card(page)).toHaveCount(0);
 
     await picker(page).setInputFiles({
       name: `p211-${tag}.csv`,
@@ -306,38 +360,41 @@ test.describe.serial("P2-11 bulk import page", () => {
     await expect(
       page.getByRole("region", { name: "Bulk import", exact: true }).getByRole("alert"),
     ).toHaveText("File name must end in .xlsx — upload the Excel template");
-    await expect(preview(page)).toHaveCount(0);
+    await expect(card(page)).toHaveCount(0);
   });
 
-  test("7. if the data changed before Import, the new preview is shown and nothing is saved", async ({
+  test("7. a row changed in Scribe after the upload fails at commit instead of being overwritten", async ({
     page,
   }) => {
     await openPage(page);
     const name = fileName("raced");
     await upload(page, name, await workbook(good(`P211 Raced ${T}`)));
-    await expect(countsOf(page, "All sheets")).toHaveText(["1 to update", "3 unchanged"]);
-    await page.route("**/api/billing/import/commit**", async (route) => {
-      const response = await route.fetch({
-        url: route.request().url().replace("/commit", "/preview"),
-      });
-      const fresh = await response.json();
-      fresh.canImport = false;
-      fresh.counts.error = 1;
-      fresh.sheets[0].counts.error = 1;
-      fresh.sheets[0].rows[0] = {
-        ...fresh.sheets[0].rows[0],
-        status: "error",
-        errors: [{ column: "name", message: "Changed meanwhile" }],
-      };
-      await route.fulfill({ json: { saved: false, preview: fresh } });
+    await expect(summary(page)).toHaveText(["1 needs override", "3 unchanged"], {
+      timeout: 30_000,
     });
-    await importButton(page).click();
-    await page.getByRole("button", { name: "Yes, import", exact: true }).click();
-    await expect(preview(page).getByRole("alert")).toContainText("Nothing was saved.");
-    await expect(rowsOf(page, "Groups")).toContainText("Changed meanwhile");
-    await expect(importButton(page)).toBeDisabled();
+    await chip(page, "Needs override").click();
+    await rowOf(page, GROUP)
+      .getByRole("button", { name: "Override Groups row 2", exact: true })
+      .click();
+    await expect(rowOf(page, GROUP)).toContainText("Override — will be saved");
+    await query(`UPDATE service_groups SET name = $2 WHERE code = $1`, [
+      GROUP,
+      `P211 Meanwhile ${T}`,
+    ]);
+
+    await commitAll(page, name, 1);
+    await expect(outcome(page)).toHaveText([
+      "0 saved",
+      "0 kept as they were — not changed",
+      "1 failed — skipped",
+      "3 unchanged",
+    ]);
+    await chip(page, "Failed").click();
+    await expect(rowOf(page, GROUP)).toContainText(
+      `Changed since you uploaded (now name "P211 Meanwhile ${T}") — upload again`,
+    );
     expect((await query(`SELECT name FROM service_groups WHERE code = $1`, [GROUP])).rows).toEqual([
-      { name: `P211 Renamed ${T}` },
+      { name: `P211 Meanwhile ${T}` },
     ]);
   });
 
@@ -350,6 +407,7 @@ test.describe.serial("P2-11 bulk import page", () => {
       counts: { Groups: { new: 1, update: 0, unchanged: 0 } },
       imported_by: USERS.admin.id,
       imported_by_name: USERS.admin.name,
+      session_id: null,
     });
     const offsets = [];
     await page.route("**/api/billing/import/history**", (route) => {
@@ -361,6 +419,7 @@ test.describe.serial("P2-11 bulk import page", () => {
     await openPage(page);
     await expect(page.getByText("1–25 of 30", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Newer", exact: true })).toBeDisabled();
+    await expect(history(page).getByRole("link")).toHaveCount(0);
     await page.getByRole("button", { name: "Older", exact: true }).click();
     await expect(page.getByText("26–30 of 30", { exact: true })).toBeVisible();
     await expect(history(page).getByRole("row")).toHaveCount(6);
@@ -369,11 +428,11 @@ test.describe.serial("P2-11 bulk import page", () => {
     expect(offsets).toContain(25);
   });
 
-  test("9. on a phone the preview fits the screen", async ({ page }) => {
+  test("9. on a phone the import fits the screen", async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 800 });
     await openPage(page);
     await upload(page, fileName("phone"), await workbook(withErrors()));
-    await expect(rowsOf(page, "Subgroups")).toBeVisible();
+    await expect(table(page)).toBeVisible({ timeout: 30_000 });
     await expect
       .poll(() =>
         page.evaluate(
@@ -403,7 +462,7 @@ test.describe("P2-11 bulk import page — review", () => {
     await expect(page.locator(".toast").last()).toContainText(
       "Could not download the template (the server answered 502)",
     );
-    await page.route("**/api/billing/import/preview**", (route) =>
+    await page.route("**/api/billing/import/sessions**", (route) =>
       route.abort("connectionrefused"),
     );
     await upload(page, "prices.xlsx", Buffer.from("x"));

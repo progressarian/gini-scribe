@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
+import { keepPreviousData, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../services/api.js";
 import { toast } from "../stores/uiStore.js";
+import useDebounced from "../hooks/useDebounced";
 import "./PrescriptionFooterPage.css";
 
 // The fixed strip at the foot of every prescription. HealthRay has the same
@@ -29,6 +30,63 @@ const useLogo = () =>
 
 const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
 
+const A4_WIDTH_PX = 794;
+const A4_HEIGHT_PX = 1123;
+const PRINT_MARGIN = "<style>html{background:#fff}body{padding:12mm}</style></head>";
+
+function A4Preview({ footer }) {
+  const key = useDebounced(JSON.stringify(footer), 400);
+  const { data, isFetching, isError } = useQuery({
+    queryKey: ["admin", "prescription-preview", key],
+    queryFn: async () => (await api.post("/api/admin/prescription-preview", JSON.parse(key))).data,
+    placeholderData: keepPreviousData,
+  });
+  const boxRef = useRef(null);
+  const [scale, setScale] = useState(0.5);
+
+  useEffect(() => {
+    const box = boxRef.current;
+    if (!box) return undefined;
+    const fit = () => setScale(box.clientWidth / A4_WIDTH_PX);
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, []);
+
+  const status = isError
+    ? "Could not load the preview"
+    : isFetching
+      ? "Updating…"
+      : "Sample patient · A4";
+
+  return (
+    <section className="rxf__sheetWrap" aria-label="Prescription preview">
+      <div className="rxf__sheetHead">
+        <h2 className="rxf__legend">Preview</h2>
+        <span className="rxf__sheetStatus" aria-live="polite">
+          {status}
+        </span>
+      </div>
+      <div ref={boxRef} className="rxf__sheetBox" style={{ height: A4_HEIGHT_PX * scale }}>
+        {data?.html ? (
+          <iframe
+            title="Prescription on an A4 sheet"
+            className="rxf__sheet"
+            sandbox=""
+            srcDoc={data.html.replace("</head>", PRINT_MARGIN)}
+            style={{ transform: `scale(${scale})` }}
+          />
+        ) : null}
+      </div>
+      <p className="rxf__hint">
+        The first page of a prescription with your unsaved changes, using a sample patient and
+        doctor.
+      </p>
+    </section>
+  );
+}
+
 const readAsDataUri = (file) =>
   new Promise((resolve, reject) => {
     const r = new FileReader();
@@ -47,6 +105,7 @@ function LogoSection({ hospital }) {
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["admin", "prescription-logo"] });
+    queryClient.invalidateQueries({ queryKey: ["admin", "prescription-preview"] });
   };
 
   const upload = async (file) => {
@@ -151,7 +210,6 @@ function LogoSection({ hospital }) {
 export default function PrescriptionFooterPage() {
   const queryClient = useQueryClient();
   const { data, isLoading } = useFooter();
-  const { data: logo } = useLogo();
   const [form, setForm] = useState(BLANK);
 
   useEffect(() => {
@@ -215,146 +273,124 @@ export default function PrescriptionFooterPage() {
     phone: form.hospital.phone.trim() || data?.hospital?.phone || "",
   };
 
-  const preview = {
-    lines: form.serviceLines.map((l) => l.trim()).filter(Boolean),
-    appLine: form.appLine.trim(),
-    storeLine: form.storeLine.trim(),
-  };
+  const previewFooter = { ...payload, hospital: previewHospital };
 
   return (
     <div className="rxf">
-      <p className="rxf__sub">Leave a field blank to drop that line from the printed page.</p>
-
       {isLoading ? (
         <p className="rxf__loading">Loading…</p>
       ) : (
         <>
-          <form
-            className="rxf__form"
-            onSubmit={(e) => {
-              e.preventDefault();
-              save.mutate(payload);
-            }}
-          >
-            <fieldset className="rxf__group">
-              <legend className="rxf__legend">Hospital identity</legend>
-              <p className="rxf__hint">
-                Printed across the top of every prescription and referral letter. Leave a field
-                blank to keep the current value.
-              </p>
-              <label className="rxf__field">
-                <span className="rxf__label">Hospital name</span>
-                <input
-                  className="rxf__input"
-                  value={form.hospital.name}
-                  maxLength={120}
-                  placeholder={data?.hospital?.name || "Gini Advanced Care Hospital"}
-                  onChange={(e) => setHospital("name", e.target.value)}
-                />
-              </label>
-              <label className="rxf__field">
-                <span className="rxf__label">Address</span>
-                <input
-                  className="rxf__input"
-                  value={form.hospital.address}
-                  maxLength={200}
-                  placeholder={data?.hospital?.address || ""}
-                  onChange={(e) => setHospital("address", e.target.value)}
-                />
-              </label>
-              <label className="rxf__field">
-                <span className="rxf__label">Phone</span>
-                <input
-                  className="rxf__input"
-                  type="tel"
-                  value={form.hospital.phone}
-                  maxLength={120}
-                  placeholder={data?.hospital?.phone || ""}
-                  onChange={(e) => setHospital("phone", e.target.value)}
-                />
-              </label>
-            </fieldset>
-
-            <LogoSection hospital={previewHospital} />
-
-            <fieldset className="rxf__group">
-              <legend className="rxf__legend">Clinic services</legend>
-              {form.serviceLines.map((line, i) => (
-                <label className="rxf__field" key={i}>
-                  <span className="rxf__label">Service line {i + 1}</span>
+          <div className="rxf__main">
+            <p className="rxf__sub">Leave a field blank to drop that line from the printed page.</p>
+            <form
+              className="rxf__form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                save.mutate(payload);
+              }}
+            >
+              <fieldset className="rxf__group">
+                <legend className="rxf__legend">Hospital identity</legend>
+                <p className="rxf__hint">
+                  Printed across the top of every prescription and referral letter. Leave a field
+                  blank to keep the current value.
+                </p>
+                <label className="rxf__field">
+                  <span className="rxf__label">Hospital name</span>
                   <input
                     className="rxf__input"
-                    value={line}
+                    value={form.hospital.name}
                     maxLength={120}
-                    placeholder="e.g. Online consultation available"
-                    onChange={(e) => setLine(i, e.target.value)}
+                    placeholder={data?.hospital?.name || "Gini Advanced Care Hospital"}
+                    onChange={(e) => setHospital("name", e.target.value)}
                   />
                 </label>
-              ))}
-              {form.serviceLines.length < 4 && (
-                <button
-                  type="button"
-                  className="rxf__add"
-                  onClick={() => setForm((f) => ({ ...f, serviceLines: [...f.serviceLines, ""] }))}
-                >
-                  + Add a line
-                </button>
-              )}
-            </fieldset>
+                <label className="rxf__field">
+                  <span className="rxf__label">Address</span>
+                  <input
+                    className="rxf__input"
+                    value={form.hospital.address}
+                    maxLength={200}
+                    placeholder={data?.hospital?.address || ""}
+                    onChange={(e) => setHospital("address", e.target.value)}
+                  />
+                </label>
+                <label className="rxf__field">
+                  <span className="rxf__label">Phone</span>
+                  <input
+                    className="rxf__input"
+                    type="tel"
+                    value={form.hospital.phone}
+                    maxLength={120}
+                    placeholder={data?.hospital?.phone || ""}
+                    onChange={(e) => setHospital("phone", e.target.value)}
+                  />
+                </label>
+              </fieldset>
 
-            <fieldset className="rxf__group">
-              <legend className="rxf__legend">Patient app</legend>
-              <label className="rxf__field">
-                <span className="rxf__label">App line</span>
-                <input
-                  className="rxf__input"
-                  value={form.appLine}
-                  maxLength={120}
-                  placeholder="e.g. Track this prescription on My Gini"
-                  onChange={(e) => setForm((f) => ({ ...f, appLine: e.target.value }))}
-                />
-              </label>
-              <label className="rxf__field">
-                <span className="rxf__label">Store line</span>
-                <input
-                  className="rxf__input"
-                  value={form.storeLine}
-                  maxLength={120}
-                  placeholder="e.g. Free on Google Play and the App Store"
-                  onChange={(e) => setForm((f) => ({ ...f, storeLine: e.target.value }))}
-                />
-              </label>
-            </fieldset>
+              <LogoSection hospital={previewHospital} />
 
-            <div className="rxf__actions">
-              <button className="rxf__save" type="submit" disabled={!dirty || save.isPending}>
-                {save.isPending ? "Saving…" : "Save"}
-              </button>
-              <span className="rxf__note">Applies to the next prescription printed.</span>
-            </div>
-          </form>
-
-          <section className="rxf__previewWrap">
-            <h2 className="rxf__legend">Preview</h2>
-            <div className="rxf__preview">
-              <div className="rxf__previewSvc">
-                {preview.lines.map((l, i) => (
-                  <div key={i}>{l}</div>
+              <fieldset className="rxf__group">
+                <legend className="rxf__legend">Clinic services</legend>
+                {form.serviceLines.map((line, i) => (
+                  <label className="rxf__field" key={i}>
+                    <span className="rxf__label">Service line {i + 1}</span>
+                    <input
+                      className="rxf__input"
+                      value={line}
+                      maxLength={120}
+                      placeholder="e.g. Online consultation available"
+                      onChange={(e) => setLine(i, e.target.value)}
+                    />
+                  </label>
                 ))}
+                {form.serviceLines.length < 4 && (
+                  <button
+                    type="button"
+                    className="rxf__add"
+                    onClick={() =>
+                      setForm((f) => ({ ...f, serviceLines: [...f.serviceLines, ""] }))
+                    }
+                  >
+                    + Add a line
+                  </button>
+                )}
+              </fieldset>
+
+              <fieldset className="rxf__group">
+                <legend className="rxf__legend">Patient app</legend>
+                <label className="rxf__field">
+                  <span className="rxf__label">App line</span>
+                  <input
+                    className="rxf__input"
+                    value={form.appLine}
+                    maxLength={120}
+                    placeholder="e.g. Track this prescription on My Gini"
+                    onChange={(e) => setForm((f) => ({ ...f, appLine: e.target.value }))}
+                  />
+                </label>
+                <label className="rxf__field">
+                  <span className="rxf__label">Store line</span>
+                  <input
+                    className="rxf__input"
+                    value={form.storeLine}
+                    maxLength={120}
+                    placeholder="e.g. Free on Google Play and the App Store"
+                    onChange={(e) => setForm((f) => ({ ...f, storeLine: e.target.value }))}
+                  />
+                </label>
+              </fieldset>
+
+              <div className="rxf__actions">
+                <button className="rxf__save" type="submit" disabled={!dirty || save.isPending}>
+                  {save.isPending ? "Saving…" : "Save"}
+                </button>
+                <span className="rxf__note">Applies to the next prescription printed.</span>
               </div>
-              {(preview.appLine || preview.storeLine) && (
-                <div className="rxf__previewApp">
-                  {logo?.dataUri && <img src={logo.dataUri} alt="" className="rxf__previewLogo" />}
-                  <div className="rxf__previewTxt">
-                    {preview.appLine && <div className="rxf__previewTtl">{preview.appLine}</div>}
-                    {preview.storeLine && (
-                      <div className="rxf__previewSub">{preview.storeLine}</div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          </section>
+            </form>
+          </div>
+          <A4Preview footer={previewFooter} />
         </>
       )}
     </div>

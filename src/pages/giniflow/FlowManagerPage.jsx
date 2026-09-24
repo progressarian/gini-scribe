@@ -45,6 +45,7 @@ import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
 import { useTriageStaff, useAssignVisit } from "../../queries/hooks/useGiniflowTriage";
 import LiveBadge from "../../components/giniflow/LiveBadge";
 import { dayClock } from "../../lib/giniflowTime";
+import useDebounced from "../../hooks/useDebounced";
 import "../../styles/giniflow.css";
 
 // Each category needs its own mark: 🟡 for both "worse in range" and "getting
@@ -160,15 +161,6 @@ function useDismissable(open, onClose, ref = null) {
       if (opener.current instanceof HTMLElement) opener.current.focus();
     };
   }, [open, onClose, ref]);
-}
-
-function useDebounced(value, delayMs = 250) {
-  const [settled, setSettled] = useState(value);
-  useEffect(() => {
-    const id = setTimeout(() => setSettled(value), delayMs);
-    return () => clearTimeout(id);
-  }, [value, delayMs]);
-  return settled;
 }
 
 function useTick(intervalMs = 1000) {
@@ -1769,42 +1761,23 @@ export default function FlowManagerPage() {
   const canUseCardMenu = canManageQueue && !date;
 
   return (
-    <div className="gf" ref={rootRef}>
-      <div className="rail">
-        <div className="rl">Gini Flow</div>
-        <div className="rsep" />
-        <span className="rail-title">Flow Manager</span>
-        <LiveBadge live={live} stale={stale} />
-        <span className="rail-date-label">
-          {new Date().toLocaleDateString("en-IN", {
-            weekday: "short",
-            day: "numeric",
-            month: "short",
-            year: "numeric",
-          })}
-        </span>
+    <div className="gf gf--page" ref={rootRef}>
+      <header className="rail">
+        <div className="rail-head">
+          <h1 className="rail-title">🔀 Flow Manager</h1>
+          <div className="rail-sub">
+            <LiveBadge live={live} stale={stale} />
+            <span className="rail-date-label">
+              {new Date().toLocaleDateString("en-IN", {
+                weekday: "short",
+                day: "numeric",
+                month: "short",
+                year: "numeric",
+              })}
+            </span>
+          </div>
+        </div>
         <div className="rr">
-          <input
-            className="rail-search"
-            type="search"
-            value={search}
-            placeholder="Search name, file no, phone…"
-            aria-label="Search today's patients"
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <input
-            className="rail-date"
-            type="date"
-            value={date || istDay}
-            max={istDay}
-            aria-label="Board date"
-            onChange={(e) => setDate(e.target.value === istDay ? null : e.target.value || null)}
-          />
-          {date && (
-            <button className="rbtn" onClick={() => setDate(null)}>
-              Back to today
-            </button>
-          )}
           <button className="rbtn" data-gf-toggle onClick={dayReport}>
             📊 Day report
           </button>
@@ -1827,7 +1800,7 @@ export default function FlowManagerPage() {
             })}
           </span>
         </div>
-      </div>
+      </header>
 
       <div
         className="stats stats--compact"
@@ -1895,6 +1868,29 @@ export default function FlowManagerPage() {
           activeFilter={statFilter}
           onFilter={setStatFilter}
         />
+        <div className="stats-tools">
+          <input
+            className="rail-search"
+            type="search"
+            value={search}
+            placeholder="Search name, file no, phone…"
+            aria-label="Search today's patients"
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <input
+            className="rail-date"
+            type="date"
+            value={date || istDay}
+            max={istDay}
+            aria-label="Board date"
+            onChange={(e) => setDate(e.target.value === istDay ? null : e.target.value || null)}
+          />
+          {date && (
+            <button className="rbtn" onClick={() => setDate(null)}>
+              Back to today
+            </button>
+          )}
+        </div>
       </div>
 
       {(filter || searchActive) && (

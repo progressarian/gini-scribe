@@ -11,10 +11,11 @@ export async function listImports(filters = {}, db = pool) {
   const offset = wholeNumber(filters.offset, "Offset") ?? 0;
   const { rows } = await db.query(
     `SELECT i.id, i.file_name, i.imported_at, i.status, i.counts,
-            i.imported_by, d.name AS imported_by_name,
+            i.imported_by, d.name AS imported_by_name, s.id AS session_id,
             count(*) OVER ()::int AS total
        FROM billing_imports i
        LEFT JOIN doctors d ON d.id = i.imported_by
+       LEFT JOIN billing_import_sessions s ON s.import_id = i.id
       ORDER BY i.imported_at DESC, i.id DESC
       LIMIT $1 OFFSET $2`,
     [limit, offset],

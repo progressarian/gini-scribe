@@ -44,11 +44,11 @@
 
 /* ── BOTTLENECK BANNER ── */
 .gf .bottleneck {
-  margin: 9px 14px 0;
+  margin: 9px 1px 0;
   background: var(--red-l);
   border: 1px solid var(--red-b);
   border-radius: var(--r-lg);
-  padding: 9px 13px;
+  padding: 4px 10px;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1305,4 +1305,86 @@
   margin: 10px 0 4px;
   padding-top: 8px;
   border-top: 1px dashed var(--bd);
+}
+
+.gf.gf--page .stats,
+.gf.gf--page .board-wrap {
+  padding-left: 0;
+  padding-right: 0;
+}
+.gf.gf--page .stats {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr)) auto;
+  align-items: stretch;
+}
+.gf.gf--page .stats .stat {
+  min-width: 0;
+}
+.gf.gf--page .stats-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+@media (max-width: 1440px) {
+  .gf.gf--page .stats {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+  .gf.gf--page .stats-tools {
+    grid-column: 1 / -1;
+  }
+  .gf.gf--page .stats-tools .rail-search {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+  }
+}
+@media (max-width: 1180px) {
+  .gf.gf--page .stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 900px) {
+  .gf.gf--page .stats {
+    display: none;
+  }
+}
+.gf.gf--page .stats-tools .rail-search,
+.gf.gf--page .stats-tools .rail-date {
+  height: 40px;
+  padding: 0 12px;
+  font-size: 13px;
+  font-family: var(--fb);
+  color: var(--ink);
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  box-shadow: var(--sh);
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+.gf.gf--page .stats-tools .rail-search {
+  width: 260px;
+  padding-left: 34px;
+  background: var(--white)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' viewBox='0 0 24 24'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E")
+    no-repeat 11px center;
+}
+.gf.gf--page .stats-tools .rail-date {
+  font-family: var(--fm);
+  cursor: pointer;
+}
+.gf.gf--page .stats-tools .rail-search:hover,
+.gf.gf--page .stats-tools .rail-date:hover {
+  border-color: var(--bd2);
+}
+.gf.gf--page .stats-tools .rail-search:focus,
+.gf.gf--page .stats-tools .rail-date:focus {
+  outline: none;
+  border-color: var(--tl);
+  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.15);
+}
+.gf.gf--page .stats-tools .rbtn {
+  height: 40px;
+  border-radius: var(--r);
 }

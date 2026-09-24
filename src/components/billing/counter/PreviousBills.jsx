@@ -8,7 +8,7 @@ export default function PreviousBills({ bills }) {
   return (
     <section className="bc-card" aria-label="Earlier bills on this visit">
       <h3 className="bc-card__title">Earlier bills on this visit</h3>
-      <div className="ltablewrap">
+      <div className="ltablewrap bc-stack">
         <table className="ltable" aria-label="Earlier bills">
           <thead>
             <tr>
@@ -24,13 +24,13 @@ export default function PreviousBills({ bills }) {
           <tbody>
             {bills.map((b) => (
               <tr key={b.id}>
-                <td>{b.bill_no || "Not numbered"}</td>
-                <td>{billStatusText(b.status)}</td>
-                <td>{fromPaise(b.totals.actual)}</td>
-                <td>{fromPaise(b.totals.discount)}</td>
-                <td>{fromPaise(b.totals.payable)}</td>
-                <td>{fromPaise(b.totals.paid)}</td>
-                <td>
+                <td data-label="Bill">{b.bill_no || "Not numbered"}</td>
+                <td data-label="Status">{billStatusText(b.status)}</td>
+                <td data-label="Actual">{fromPaise(b.totals.actual)}</td>
+                <td data-label="Discount">{fromPaise(b.totals.discount)}</td>
+                <td data-label="Patient pays">{fromPaise(b.totals.payable)}</td>
+                <td data-label="Paid">{fromPaise(b.totals.paid)}</td>
+                <td data-label="" className="bc-cell-actions">
                   <a
                     className="st-btn"
                     href={billPdfHref(b.id)}

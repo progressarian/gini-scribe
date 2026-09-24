@@ -23,6 +23,7 @@ const { default: pool } = await import("../config/db.js");
 const { templateBuffer } = await import("../services/billing/importTemplate.js");
 const { commitUpload } = await import("../services/billing/importCommit.js");
 const { previewUpload } = await import("../services/billing/importPreview.js");
+const sessions = await import("../services/billing/importSessions.js");
 
 const tag = crypto.randomBytes(3).toString("hex");
 const code = (name) => `SMOKE_${name}_${tag}`.toUpperCase();
@@ -248,6 +249,7 @@ const TAGGED = `(SELECT count(*) FROM service_groups WHERE code ILIKE '%' || $1)
   (SELECT count(*) FROM category_payment_rules WHERE scheme_code LIKE '%' || $1)::int AS payment_rules,
   (SELECT count(*) FROM discount_rules WHERE name LIKE '%' || $1 OR code ILIKE '%' || $1)::int AS discounts,
   (SELECT count(*) FROM billing_imports WHERE file_name LIKE '%' || $1 || '.xlsx')::int AS imports,
+  (SELECT count(*) FROM billing_import_sessions WHERE file_name LIKE '%' || $1 || '.xlsx')::int AS sessions,
   (SELECT count(*) FROM billing_audit WHERE import_id = ANY($2::bigint[])
      OR entity_id ILIKE '%' || $1)::int AS audit`;
 
@@ -505,7 +507,145 @@ async function run(client) {
     expect((await tagged(client)).payment_rules === before, "the refused rule was saved");
   });
 
-  await check("6. other sessions never see the import before it is rolled back", async () => {
+  await check(
+    "6. a whole session: four statuses, a decision, a partial commit and its outcome",
+    async () => {
+      const sessionCtx = { ...ctx, role: "admin" };
+      const cghs = sheets.Categories[0];
+      const file = await workbook({
+        Groups: [
+          { group_code: code("G"), name: `Smoke group renamed ${tag}`, sort_order: 90 },
+          { group_code: code("G3"), name: `Smoke group three ${tag}` },
+        ],
+        Subgroups: [
+          { subgroup_code: code("PROC"), group_code: code("G"), name: "Smoke procedures renamed" },
+          { subgroup_code: code("SUB3"), group_code: code("G3"), name: "Smoke three" },
+        ],
+        Items: [
+          {
+            item_code: code("OK3"),
+            name: "Smoke fine three",
+            subgroup_code: code("SUB3"),
+            base_price: 30,
+            kind: "other",
+          },
+          {
+            item_code: code("BAD3"),
+            name: "Smoke broken three",
+            subgroup_code: code("SUB3"),
+            base_price: "₹1,200",
+            kind: "other",
+          },
+        ],
+        Categories: [cghs],
+      });
+      const before = await tagged(client);
+      const session = await sessions.createSession(
+        file,
+        { fileName: fileName("session"), ctx: sessionCtx },
+        db,
+      );
+      const status = session.live.status;
+      expect(
+        status.ready === 3 &&
+          status.override === 2 &&
+          status.unchanged === 1 &&
+          status.failed === 1,
+        `expected 3 ready, 2 needing override, 1 unchanged and 1 failed, got ${JSON.stringify(status)}`,
+      );
+      const afterUpload = await tagged(client);
+      expect(
+        ["groups", "subgroups", "items", "categories", "imports"].every(
+          (k) => afterUpload[k] === before[k],
+        ) && afterUpload.sessions === before.sessions + 1,
+        `the upload saved master data: ${JSON.stringify(afterUpload)}`,
+      );
+
+      const { rows: failed } = await sessions.listRows(session.id, { status: "failed" }, db);
+      expect(
+        failed.length === 1 && failed[0].key === code("BAD3") && failed[0].reason,
+        `the failed row is not BAD3 with a reason: ${JSON.stringify(failed)}`,
+      );
+      const { rows: override } = await sessions.listRows(session.id, { status: "override" }, db);
+      const group = override.find((r) => r.key === code("G"));
+      expect(
+        override.length === 2 &&
+          group?.changes.some((c) => c.column === "name" && c.to === `Smoke group renamed ${tag}`),
+        `the renamed group does not show its change: ${JSON.stringify(override)}`,
+      );
+      const decided = await sessions.decideRows(
+        session.id,
+        { decision: "override", row_ids: [group.id] },
+        sessionCtx,
+        db,
+      );
+      expect(decided.changed === 1, `the decision changed ${decided.changed} rows`);
+      const { live } = await sessions.getSession(session.id, db);
+      expect(
+        JSON.stringify(live.plan) ===
+          JSON.stringify({ save: 4, keep: 1, undecided: 1, failed: 1, unchanged: 1 }),
+        `the plan is wrong: ${JSON.stringify(live.plan)}`,
+      );
+
+      const result = await sessions.commitSession(session.id, { ctx: sessionCtx }, db);
+      importIds.push(result.importId);
+      expect(
+        JSON.stringify(result.outcome) ===
+          JSON.stringify({ saved: 4, kept: 1, failed: 1, unchanged: 1 }),
+        `the outcome is wrong: ${JSON.stringify(result.outcome)}`,
+      );
+      expect(
+        result.session.status === "committed" && result.session.import_id === result.importId,
+        "the session is not committed and linked to its import",
+      );
+      const { rows: names } = await client.query(
+        `SELECT (SELECT name FROM service_groups WHERE code = $1) AS renamed,
+                (SELECT name FROM service_subgroups WHERE code = $2) AS kept,
+                (SELECT count(*) FROM service_items WHERE code = $3)::int AS ok,
+                (SELECT count(*) FROM service_items WHERE code = $4)::int AS bad`,
+        [code("G"), code("PROC"), code("OK3"), code("BAD3")],
+      );
+      expect(
+        names[0].renamed === `Smoke group renamed ${tag}` &&
+          names[0].kept === "Smoke procedures" &&
+          names[0].ok === 1 &&
+          names[0].bad === 0,
+        `the wrong rows were saved: ${JSON.stringify(names[0])}`,
+      );
+      const { rows: outcomes } = await client.query(
+        `SELECT outcome, count(*)::int AS n FROM billing_import_rows
+          WHERE session_id = $1 GROUP BY outcome ORDER BY outcome`,
+        [session.id],
+      );
+      expect(
+        outcomes.map((o) => `${o.outcome}:${o.n}`).join() === "failed:1,kept:1,saved:4,unchanged:1",
+        `the report does not say what happened to every row: ${JSON.stringify(outcomes)}`,
+      );
+      const { rows: imported } = await client.query(
+        `SELECT status, counts,
+                (SELECT count(*) FROM billing_audit a WHERE a.import_id = i.id)::int AS audit
+           FROM billing_imports i WHERE i.id = $1`,
+        [result.importId],
+      );
+      expect(
+        imported[0]?.status === "saved" &&
+          imported[0].counts.Groups?.new === 1 &&
+          imported[0].counts.Groups?.update === 1 &&
+          imported[0].counts.Subgroups?.kept === 1 &&
+          imported[0].counts.Items?.failed === 1 &&
+          imported[0].audit >= 5,
+        `the import record is wrong: ${JSON.stringify(imported[0])}`,
+      );
+      const errors = await sessions.failedRowsFile(session.id, db);
+      expect(
+        errors.fileName === `smoke-session-${tag} - errors.xlsx` &&
+          errors.file.subarray(0, 2).toString() === "PK",
+        `the failed rows file is wrong: ${errors.fileName}`,
+      );
+    },
+  );
+
+  await check("7. other sessions never see the import before it is rolled back", async () => {
     const outside = await tagged(pool);
     const left = Object.entries(outside).filter(([, n]) => n > 0);
     expect(
@@ -527,8 +667,8 @@ try {
   client.release();
 }
 
-await check("7. everything ran inside a transaction that was rolled back", async () => {
-  expect(importIds.length === 1, `expected 1 saved import, got ${importIds.length}`);
+await check("8. everything ran inside a transaction that was rolled back", async () => {
+  expect(importIds.length === 2, `expected 2 saved imports, got ${importIds.length}`);
   const left = Object.entries(await tagged(pool)).filter(([, n]) => n > 0);
   expect(
     left.length === 0,

@@ -27,17 +27,23 @@ async function openCategories(page, role = "reception_admin") {
   await gotoReady(page, "/settings/schemes", () => tree(page));
 }
 
-async function addCategory(page, formLabel, { code, label }) {
-  const parent = formLabel.match(/^Add sub-category to (.+)$/)?.[1];
-  if (parent) {
-    await tree(page)
-      .getByRole("button", { name: `New sub-category under ${parent}`, exact: true })
-      .click();
-  }
-  const form = tree(page).getByRole("form", { name: formLabel, exact: true });
-  await form.getByLabel(`${formLabel} code`, { exact: true }).fill(code);
-  await form.getByLabel(`${formLabel} name`, { exact: true }).fill(label);
-  await form.getByRole("button", { name: "+ Add", exact: true }).click();
+const addDialog = (page, title) => page.getByRole("dialog", { name: title, exact: true });
+
+async function addCategory(page, title, { code, label }) {
+  const parent = title.match(/^Add sub-category to (.+)$/)?.[1];
+  await tree(page)
+    .getByRole("button", {
+      name: parent ? `New sub-category under ${parent}` : "+ Add category",
+      exact: true,
+    })
+    .click();
+  const dialog = addDialog(page, title);
+  await dialog.getByLabel("Code", { exact: true }).fill(code);
+  await dialog.getByLabel("Label", { exact: true }).fill(label);
+  await dialog
+    .getByRole("button", { name: parent ? "Add sub-category" : "Add category", exact: true })
+    .click();
+  await expect(dialog).toHaveCount(0);
 }
 
 test.describe.serial("P1-31 categories page", () => {
@@ -74,7 +80,7 @@ test.describe.serial("P1-31 categories page", () => {
     expect(rows.rows.map((r) => r.code).sort()).toEqual(SUBS.map((s) => s.code).sort());
     for (const sub of SUBS) {
       await expect(
-        tree(page).getByRole("form", { name: `Add sub-category to ${sub.label}` }),
+        tree(page).getByRole("button", { name: `New sub-category under ${sub.label}` }),
       ).toHaveCount(0);
     }
   });
@@ -243,15 +249,15 @@ test.describe.serial("P1-31 categories page", () => {
 
   test("4c. review: codes, limits and lengths are checked as they are typed", async ({ page }) => {
     await openCategories(page, "admin");
-    const add = tree(page).getByRole("form", { name: "Add category", exact: true });
-    const addCode = add.getByLabel("Add category code", { exact: true });
+    await tree(page).getByRole("button", { name: "+ Add category", exact: true }).click();
+    const add = addDialog(page, "Add category");
+    const addCode = add.getByLabel("Code", { exact: true });
     await addCode.pressSequentially("My Cat-1");
     await expect(addCode).toHaveValue("mycat1");
     await expect(addCode).toHaveAttribute("maxlength", "32");
-    await expect(add.getByLabel("Add category name", { exact: true })).toHaveAttribute(
-      "maxlength",
-      "200",
-    );
+    await expect(add.getByLabel("Label", { exact: true })).toHaveAttribute("maxlength", "200");
+    await add.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(add).toHaveCount(0);
 
     await pick(page, SUBS[2]).click();
     const form = details(page, PENSIONER);

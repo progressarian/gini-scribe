@@ -109,7 +109,7 @@ test.describe("P2-03 template download", () => {
     expect(rows.filter((r) => r.includes(LATER_SHEET_NOTE))).toEqual([]);
     const rules = rows.filter((r) => r[0] === "All sheets").map((r) => r[4]);
     expect(rules.join("\n")).not.toContain("available after Phase 3");
-    expect(rules.at(-1)).toContain("Any error stops the whole upload");
+    expect(rules.at(-1)).toContain("A row with an error fails and is skipped");
   });
 
   test("4. every other role is refused, and so is a request with no login", async () => {

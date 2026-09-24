@@ -1,13 +1,17 @@
-.disc-new {
-  margin-left: auto;
-}
 .disc-list .flow-table {
-  min-width: 980px;
+  min-width: 1040px;
 }
 .disc-code {
+  display: inline-block;
+  margin-top: 3px;
+  padding: 0 6px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
+  line-height: 18px;
   color: var(--fink3);
+  background: var(--fbg);
+  border: 1px solid var(--fbd);
+  border-radius: 5px;
 }
 .disc-cell {
   font-size: 12px;
@@ -15,6 +19,100 @@
 }
 .disc-test {
   margin-top: 14px;
+}
+
+.fset.bill-ui.disc-page {
+  display: grid;
+  gap: 16px;
+}
+.fset.bill-ui .disc-test {
+  margin-top: 0;
+}
+.fset.bill-ui .disc-filters {
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto;
+  align-items: end;
+  margin: 4px 0 14px;
+}
+.fset.bill-ui .disc-filters > .fset__check {
+  height: 36px;
+  padding: 0 14px 0 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ui-ink2);
+  background: #fff;
+  border: 1px solid var(--ui-field);
+  border-radius: 999px;
+  cursor: pointer;
+  user-select: none;
+}
+.fset.bill-ui .disc-filters > .fset__check:has(input:checked) {
+  color: var(--ui-accent);
+  background: var(--ui-accent-soft);
+  border-color: var(--ui-accent);
+}
+.fset.bill-ui .disc-filters input[type="search"] {
+  padding-left: 34px;
+  background: #fff
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' viewBox='0 0 24 24'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E")
+    no-repeat 11px center;
+}
+.fset.bill-ui .disc-list td strong {
+  display: block;
+  font-weight: 600;
+  color: var(--ui-ink);
+}
+.fset.bill-ui .disc-list td {
+  vertical-align: top;
+}
+.fset.bill-ui .disc-cell {
+  line-height: 1.5;
+  color: var(--ui-ink2);
+}
+.fset.bill-ui .disc-value {
+  font-weight: 600;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--ui-ink);
+}
+.fset.bill-ui .disc-dates {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.fset.bill-ui .disc-type--auto {
+  color: #1d4ed8;
+  background: #eff6ff;
+}
+.fset.bill-ui .disc-type--code {
+  color: #6d28d9;
+  background: #f5f3ff;
+}
+.fset.bill-ui .disc-status--on {
+  color: #15803d;
+  background: #edfcf0;
+}
+.fset.bill-ui .disc-status--off {
+  color: var(--ui-muted);
+  background: #eef2f6;
+}
+.fset.bill-ui .disc-list td.bill-items__actions {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+}
+.fset.bill-ui .disc-confirm {
+  display: inline-flex;
+  gap: 6px;
+}
+.fset.bill-ui.disc-page .pgn {
+  margin-top: 12px;
+}
+@media (max-width: 700px) {
+  .fset.bill-ui .disc-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .fset.bill-ui .disc-filters > .fset__check {
+    justify-self: start;
+  }
 }
 .disc-dialog {
   max-width: 760px;

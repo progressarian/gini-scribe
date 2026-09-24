@@ -40,10 +40,23 @@ async function ensureSeed() {
   );
 }
 
+const addDialog = (page, title) => page.getByRole("dialog", { name: title, exact: true });
+
+async function addNode(page, { opener, title, submit }, { code, name }) {
+  await groups(page).getByRole("button", { name: opener, exact: true }).click();
+  const dialog = addDialog(page, title);
+  await dialog.getByLabel("Code", { exact: true }).fill(code);
+  await dialog.getByLabel("Name", { exact: true }).fill(name);
+  await dialog.getByRole("button", { name: submit, exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+}
+
 async function openServices(page) {
   await loginAs(page, "reception_admin");
   await gotoReady(page, "/settings/services", () => groups(page));
 }
+
+const nodeBar = (page, name) => page.getByRole("toolbar", { name: `Actions for ${name}` });
 
 async function pickSubgroup(page, name) {
   await groups(page)
@@ -123,19 +136,16 @@ test.describe.serial("P1-29 services page — screen", () => {
 
   test("3. a group is created and renamed from the screen", async ({ page }) => {
     await openServices(page);
-    const add = groups(page).getByRole("form", { name: "Add group" });
-    await add.getByLabel("Add group code").fill(G.code);
-    await add.getByLabel("Add group name").fill(G.name);
-    await add.getByRole("button", { name: "+ Add", exact: true }).click();
+    await addNode(page, { opener: "+ Add group", title: "Add group", submit: "Add group" }, G);
     await expect(
       groups(page).getByRole("button", { name: new RegExp(`^${G.name}`) }),
     ).toBeVisible();
 
-    await groups(page)
-      .getByRole("button", { name: `Rename ${G.name}`, exact: true })
-      .click();
-    await groups(page).getByLabel(`New name for ${G.name}`).fill(G.renamed);
-    await groups(page).getByRole("button", { name: "Save", exact: true }).click();
+    await pickSubgroup(page, G.name);
+    const bar = nodeBar(page, G.name);
+    await bar.getByRole("button", { name: `Rename ${G.name}`, exact: true }).click();
+    await bar.getByLabel(`New name for ${G.name}`).fill(G.renamed);
+    await bar.getByRole("button", { name: "Save", exact: true }).click();
     await expect(
       groups(page).getByRole("button", { name: new RegExp(`^${G.renamed}`) }),
     ).toBeVisible();
@@ -145,11 +155,16 @@ test.describe.serial("P1-29 services page — screen", () => {
 
   test("4. subgroups are added and reordered", async ({ page }) => {
     await openServices(page);
-    const add = groups(page).getByRole("form", { name: `Add subgroup to ${G.renamed}` });
     for (const sub of [S1, S2]) {
-      await add.getByLabel(`Add subgroup to ${G.renamed} code`).fill(sub.code);
-      await add.getByLabel(`Add subgroup to ${G.renamed} name`).fill(sub.name);
-      await add.getByRole("button", { name: "+ Add", exact: true }).click();
+      await addNode(
+        page,
+        {
+          opener: `New subgroup under ${G.renamed}`,
+          title: `Add subgroup to ${G.renamed}`,
+          submit: "Add subgroup",
+        },
+        sub,
+      );
       await expect(
         groups(page).getByRole("button", { name: new RegExp(`^${sub.name}`) }),
       ).toBeVisible();
@@ -162,27 +177,24 @@ test.describe.serial("P1-29 services page — screen", () => {
         )
       ).rows.map((r) => r.code);
     expect(await order()).toEqual([S1.code, S2.code]);
-    await groups(page)
-      .getByRole("button", { name: `Move ${S2.name} up`, exact: true })
-      .click();
+    await pickSubgroup(page, S2.name);
+    const bar = nodeBar(page, S2.name);
+    await bar.getByRole("button", { name: `Move ${S2.name} up`, exact: true }).click();
     await expect.poll(order).toEqual([S2.code, S1.code]);
     await expect(
-      groups(page).getByRole("button", { name: `Move ${S2.name} up`, exact: true }),
+      bar.getByRole("button", { name: `Move ${S2.name} up`, exact: true }),
     ).toBeDisabled();
   });
 
   test("4b. the move buttons are locked while a move is saving", async ({ page }) => {
     await openServices(page);
+    await pickSubgroup(page, S1.name);
+    const bar = nodeBar(page, S1.name);
+    const up = bar.getByRole("button", { name: `Move ${S1.name} up`, exact: true });
+    await expect(up).toBeEnabled();
     const release = await holdRequests(page, "**/api/billing/master/subgroups/*", "PATCH");
-    await groups(page)
-      .getByRole("button", { name: `Move ${S1.name} up`, exact: true })
-      .click();
-    await expect(
-      groups(page).getByRole("button", { name: `Move ${S2.name} down`, exact: true }),
-    ).toBeDisabled();
-    await expect(
-      groups(page).getByRole("button", { name: `Move ${G.renamed} down`, exact: true }),
-    ).toBeDisabled();
+    await up.click();
+    await expect(up).toBeDisabled();
     release();
     await expect
       .poll(async () =>
@@ -195,7 +207,7 @@ test.describe.serial("P1-29 services page — screen", () => {
       )
       .toEqual([S1.code, S2.code]);
     await expect(
-      groups(page).getByRole("button", { name: `Move ${S2.name} up`, exact: true }),
+      bar.getByRole("button", { name: `Move ${S1.name} down`, exact: true }),
     ).toBeEnabled();
   });
 
@@ -287,15 +299,15 @@ test.describe.serial("P1-29 services page — screen", () => {
   }) => {
     await openServices(page);
     await pickSubgroup(page, S1.name);
-    const addGroupCode = groups(page).getByLabel("Add group code", { exact: true });
+    await groups(page).getByRole("button", { name: "+ Add group", exact: true }).click();
+    const addGroup = addDialog(page, "Add group");
+    const addGroupCode = addGroup.getByLabel("Code", { exact: true });
     await addGroupCode.pressSequentially("LAB 01");
     await expect(addGroupCode).toHaveValue("LAB01");
     await expect(addGroupCode).toHaveAttribute("maxlength", "40");
-    await expect(groups(page).getByLabel("Add group name", { exact: true })).toHaveAttribute(
-      "maxlength",
-      "200",
-    );
-    await addGroupCode.fill("");
+    await expect(addGroup.getByLabel("Name", { exact: true })).toHaveAttribute("maxlength", "200");
+    await addGroup.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(addGroup).toHaveCount(0);
 
     await page.getByRole("button", { name: "+ Add item", exact: true }).click();
     await field(page, "Code").pressSequentially("CBC 2");
@@ -465,28 +477,22 @@ test.describe.serial("P1-29 services page — screen", () => {
     const addItem = page.getByRole("button", { name: "+ Add item", exact: true });
     await expect(addItem).toBeEnabled();
     const renamed = `${S2.name} Renamed`;
-    await groups(page)
-      .getByRole("button", { name: `Rename ${S2.name}`, exact: true })
-      .click();
-    await groups(page).getByLabel(`New name for ${S2.name}`).fill(renamed);
-    await groups(page).getByRole("button", { name: "Save", exact: true }).click();
+    const bar = nodeBar(page, S2.name);
+    await bar.getByRole("button", { name: `Rename ${S2.name}`, exact: true }).click();
+    await bar.getByLabel(`New name for ${S2.name}`).fill(renamed);
+    await bar.getByRole("button", { name: "Save", exact: true }).click();
     await expect(
       page.getByRole("heading", { level: 2, name: `${G.renamed} › ${renamed}` }),
     ).toBeVisible();
-    await groups(page)
-      .getByRole("button", { name: `Deactivate ${renamed}`, exact: true })
-      .click();
+    const renamedBar = nodeBar(page, renamed);
+    await renamedBar.getByRole("button", { name: `Deactivate ${renamed}`, exact: true }).click();
     await expect(addItem).toBeDisabled();
     await expect(addItem).toHaveAttribute("title", /This subgroup is off/);
-    await groups(page)
-      .getByRole("button", { name: `Activate ${renamed}`, exact: true })
-      .click();
+    await renamedBar.getByRole("button", { name: `Activate ${renamed}`, exact: true }).click();
     await expect(addItem).toBeEnabled();
-    await groups(page)
-      .getByRole("button", { name: `Rename ${renamed}`, exact: true })
-      .click();
-    await groups(page).getByLabel(`New name for ${renamed}`).fill(S2.name);
-    await groups(page).getByRole("button", { name: "Save", exact: true }).click();
+    await renamedBar.getByRole("button", { name: `Rename ${renamed}`, exact: true }).click();
+    await renamedBar.getByLabel(`New name for ${renamed}`).fill(S2.name);
+    await renamedBar.getByRole("button", { name: "Save", exact: true }).click();
     await expect(
       page.getByRole("heading", { level: 2, name: `${G.renamed} › ${S2.name}` }),
     ).toBeVisible();
@@ -494,12 +500,11 @@ test.describe.serial("P1-29 services page — screen", () => {
 
   test("11. deleting a subgroup that has items shows where it is used", async ({ page }) => {
     await openServices(page);
-    await groups(page)
+    await pickSubgroup(page, S1.name);
+    await nodeBar(page, S1.name)
       .getByRole("button", { name: `Delete ${S1.name}`, exact: true })
       .click();
-    await groups(page)
-      .getByRole("button", { name: `Confirm delete ${S1.name}`, exact: true })
-      .click();
+    await page.getByRole("button", { name: `Confirm delete ${S1.name}`, exact: true }).click();
     const blocked = page.getByRole("dialog", { name: `${S1.name} can't be deleted` });
     await expect(blocked.getByRole("list", { name: "Used in" })).toContainText(
       `3 items in ${S1.name}`,
@@ -516,12 +521,11 @@ test.describe.serial("P1-29 services page — screen", () => {
     page,
   }) => {
     await openServices(page);
-    await groups(page)
+    await pickSubgroup(page, S1.name);
+    await nodeBar(page, S1.name)
       .getByRole("button", { name: `Delete ${S1.name}`, exact: true })
       .click();
-    await groups(page)
-      .getByRole("button", { name: `Confirm delete ${S1.name}`, exact: true })
-      .click();
+    await page.getByRole("button", { name: `Confirm delete ${S1.name}`, exact: true }).click();
     const blocked = page.getByRole("dialog", { name: `${S1.name} can't be deleted` });
     await blocked.getByRole("button", { name: "Deactivate instead", exact: true }).click();
     await expect(blocked.getByRole("alert")).toContainText("still has 3 active items");
@@ -568,26 +572,16 @@ test.describe.serial("P1-29 services page — screen", () => {
       await expect(itemsTable(page).getByRole("cell", { name: item.code })).toHaveCount(0);
     }
     await expect(page.getByText("No items here yet.")).toBeVisible();
-    for (const sub of [S1, S2]) {
-      await groups(page)
-        .getByRole("button", { name: `Delete ${sub.name}`, exact: true })
+    for (const name of [S1.name, S2.name, G.renamed]) {
+      await pickSubgroup(page, name);
+      await nodeBar(page, name)
+        .getByRole("button", { name: `Delete ${name}`, exact: true })
         .click();
-      await groups(page)
-        .getByRole("button", { name: `Confirm delete ${sub.name}`, exact: true })
-        .click();
-      await expect(
-        groups(page).getByRole("button", { name: new RegExp(`^${sub.name}`) }),
-      ).toHaveCount(0);
+      await page.getByRole("button", { name: `Confirm delete ${name}`, exact: true }).click();
+      await expect(groups(page).getByRole("button", { name: new RegExp(`^${name}`) })).toHaveCount(
+        0,
+      );
     }
-    await groups(page)
-      .getByRole("button", { name: `Delete ${G.renamed}`, exact: true })
-      .click();
-    await groups(page)
-      .getByRole("button", { name: `Confirm delete ${G.renamed}`, exact: true })
-      .click();
-    await expect(
-      groups(page).getByRole("button", { name: new RegExp(`^${G.renamed}`) }),
-    ).toHaveCount(0);
     const left = await one(
       `SELECT (SELECT count(*) FROM service_items WHERE code LIKE $1)::int
             + (SELECT count(*) FROM service_subgroups WHERE code LIKE $1)::int

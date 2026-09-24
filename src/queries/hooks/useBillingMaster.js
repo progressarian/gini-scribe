@@ -35,6 +35,9 @@ export const billingKeys = {
   settings: () => ["billing", "settings"],
   series: () => ["billing", "series"],
   imports: (page) => ["billing", "imports", page ?? {}],
+  importSessions: () => ["billing", "import-sessions"],
+  importSession: (id) => ["billing", "import-sessions", id ?? "none"],
+  importRows: (id, filters) => ["billing", "import-sessions", id ?? "none", "rows", filters ?? {}],
   visitBills: (visitId) => ["billing", "visits", visitId ?? "none", "bills"],
   visitNotPriced: (visitId) => ["billing", "visits", visitId ?? "none", "not-priced"],
   bill: (billId) => ["billing", "bills", billId ?? "none"],
@@ -481,9 +484,8 @@ const readBlobError = async (e) => {
   throw e;
 };
 
-const sendFile = (url, file, config = {}) =>
+const sendFile = (url, file) =>
   api.post(url, file, {
-    ...config,
     params: { fileName: file.name },
     headers: { "Content-Type": XLSX_TYPE },
   });
@@ -511,28 +513,82 @@ export function useBillingImportTemplate() {
   });
 }
 
-export function usePreviewBillingImport() {
-  return useMutation({
-    mutationFn: async (file) => (await sendFile(`${IMPORT}/preview`, file)).data,
+const SESSIONS = `${IMPORT}/sessions`;
+const retryUnlessRefused = (count, e) => !(e?.response?.status < 500) && count < 1;
+
+export function useBillingImportSession(id) {
+  return useQuery({
+    queryKey: billingKeys.importSession(id),
+    queryFn: () => read(`${SESSIONS}/${id}`),
+    enabled: Boolean(id),
+    retry: retryUnlessRefused,
   });
 }
 
-export function useCommitBillingImport() {
-  return useBillingMutation(
-    async (file) => (await sendFile(`${IMPORT}/commit`, file)).data,
+export function useBillingImportRows(id, filters = {}) {
+  const params = withoutBlanks(filters);
+  return useQuery({
+    queryKey: billingKeys.importRows(id, params),
+    queryFn: () => read(`${SESSIONS}/${id}/rows`, params),
+    enabled: Boolean(id),
+    placeholderData: (prev) => prev,
+    retry: retryUnlessRefused,
+  });
+}
+
+export function useCreateBillingImportSession() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (file) => (await sendFile(SESSIONS, file)).data,
+    onSuccess: (session) => {
+      queryClient.setQueryData(billingKeys.importSession(session.id), session);
+    },
+  });
+}
+
+function useImportSessionMutation(mutationFn, invalidate) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSettled: (_data, _error, { id }) =>
+      Promise.all(
+        [billingKeys.importSession(id), ...invalidate].map((queryKey) =>
+          queryClient.invalidateQueries({ queryKey }),
+        ),
+      ),
+  });
+}
+
+export function useDecideBillingImportRows() {
+  return useImportSessionMutation(
+    async ({ id, ...body }) => (await api.post(`${SESSIONS}/${id}/decisions`, body)).data,
+    [],
+  );
+}
+
+export function useCommitBillingImportSession() {
+  return useImportSessionMutation(
+    async ({ id }) => (await api.post(`${SESSIONS}/${id}/commit`)).data,
     IMPORT_KEYS,
   );
 }
 
-export function useBillingImportErrorFile() {
+export function useAbandonBillingImportSession() {
+  return useImportSessionMutation(
+    async ({ id }) => (await api.post(`${SESSIONS}/${id}/abandon`)).data,
+    [],
+  );
+}
+
+export function useBillingImportFailedRows() {
   return useMutation({
-    mutationFn: async (file) => {
-      const response = await sendFile(`${IMPORT}/errors`, file, { responseType: "blob" }).catch(
-        readBlobError,
-      );
+    mutationFn: async ({ id, fileName }) => {
+      const response = await api
+        .get(`${SESSIONS}/${id}/failed`, { responseType: "blob" })
+        .catch(readBlobError);
       return {
         blob: response.data,
-        fileName: fileNameOf(response.headers, file.name.replace(/\.xlsx$/i, " - errors.xlsx")),
+        fileName: fileNameOf(response.headers, fileName.replace(/\.xlsx$/i, " - errors.xlsx")),
       };
     },
   });

@@ -20,12 +20,15 @@ const tag = crypto.randomBytes(3).toString("hex");
 const T = tag.toUpperCase();
 const ALLOWED = ["admin", "reception_admin"];
 const REFUSED = ["reception", "coordinator", "lab", "banshali"];
+const SESSIONS = `${BASE}/sessions`;
+const UNKNOWN = "00000000-0000-4000-8000-000000000000";
 const ROUTES = [
-  ["post", `${BASE}/preview`],
-  ["post", `${BASE}/commit`],
-  ["post", `${BASE}/errors`],
+  ["post", SESSIONS],
+  ["post", `${SESSIONS}/${UNKNOWN}/commit`],
+  ["get", `${SESSIONS}/${UNKNOWN}/failed`],
   ["get", `${BASE}/history`],
 ];
+const RETIRED = ["preview", "commit", "errors"];
 
 const groupCode = (who) => `P210G_${who}_${T}`;
 const subCode = (who) => `P210S_${who}_${T}`;
@@ -82,89 +85,111 @@ const importsNamed = async (fileName) =>
     )
   ).rows;
 
+const upload = async (role, file, fileName) =>
+  asRole(role, (api) => send(api, "post", SESSIONS, { file, fileName }));
+
+const commit = (role, id) => asRole(role, (api) => send(api, "post", `${SESSIONS}/${id}/commit`));
+
+const rowsOf = async (role, id, params = {}) =>
+  (await asRole(role, (api) => send(api, "get", `${SESSIONS}/${id}/rows`, { params }))).json.rows;
+
+const sessionIds = {};
+
 test.describe.serial("P2-10 import routes", () => {
   test.afterAll(async () => {
+    await query(`DELETE FROM billing_import_sessions WHERE file_name ILIKE $1`, [`%${tag}%`]);
     await query(`DELETE FROM patient_schemes WHERE code LIKE $1`, ["p210%"]);
     await query(`DELETE FROM service_subgroups WHERE code ILIKE $1`, ["P210S%"]);
     await query(`DELETE FROM service_groups WHERE code ILIKE $1`, ["P210G%"]);
   });
 
-  test("1. preview: admin and reception_admin see row statuses and counts, nothing is saved", async () => {
+  test("1. upload: admin and reception_admin get a session with row statuses and counts, nothing is saved", async () => {
     for (const role of ALLOWED) {
-      const response = await asRole(role, async (api) =>
-        send(api, "post", `${BASE}/preview`, {
-          file: await workbook(clean(role)),
-          fileName: `p210-preview-${tag}.xlsx`,
-        }),
-      );
-      expect(response.status, role).toBe(200);
+      const fileName = `p210-upload-${tag}.xlsx`;
+      const response = await upload(role, await workbook(clean(role)), fileName);
+      expect(response.status, role).toBe(201);
       const body = response.json;
-      expect(Object.keys(body).sort()).toEqual(["canImport", "counts", "problems", "sheets"]);
-      expect(body).toMatchObject({ problems: [], canImport: true });
-      expect(body.counts).toMatchObject({ new: 2, update: 0, error: 0 });
-      expect(body.sheets.find((s) => s.name === "Groups").rows[0]).toMatchObject({
-        status: "new",
+      expect(body).toMatchObject({
+        file_name: fileName,
+        status: "open",
+        uploaded_by: USERS[role].id,
+        live: { status: { ready: 2, override: 0, unchanged: 0, failed: 0 } },
+      });
+      const rows = await rowsOf(role, body.id, { sheet: "Groups" });
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        status: "ready",
+        key: groupCode(role),
         values: { group_code: groupCode(role) },
       });
     }
     const groups = await query(`SELECT 1 FROM service_groups WHERE code ILIKE $1`, ["P210G%"]);
     expect(groups.rows).toEqual([]);
-    expect(await importsNamed(`p210-preview-${tag}.xlsx`)).toEqual([]);
+    expect(await importsNamed(`p210-upload-${tag}.xlsx`)).toEqual([]);
   });
 
-  test("2. commit: a clean file saves for admin and reception_admin; the same file again and a file with an error row save nothing", async () => {
+  test("2. commit: a clean file saves for admin and reception_admin; the same file again has nothing to save; a file with an error row saves only its good rows", async () => {
     for (const role of ALLOWED) {
       const fileName = `p210-${role}-${tag}.xlsx`;
       const file = await workbook(clean(role));
-      const saved = await asRole(role, (api) =>
-        send(api, "post", `${BASE}/commit`, { file, fileName }),
-      );
+      const created = (await upload(role, file, fileName)).json;
+      sessionIds[role] = created.id;
+      const saved = await commit(role, created.id);
       expect(saved.status, role).toBe(200);
       const body = saved.json;
-      expect(body).toMatchObject({ saved: true, preview: { canImport: true } });
+      expect(body).toMatchObject({
+        saved: true,
+        outcome: { saved: 2, kept: 0, failed: 0, unchanged: 0 },
+        session: { id: created.id, status: "committed", import_id: body.importId },
+      });
       expect(body.importId).toBeTruthy();
       expect(body.importedAt).toBeTruthy();
       expect(await importsNamed(fileName)).toEqual([
-        { id: body.importId, status: "saved", imported_by: USERS[role].id },
+        { id: String(body.importId), status: "saved", imported_by: USERS[role].id },
       ]);
       const group = await query(`SELECT name FROM service_groups WHERE code = $1`, [
         groupCode(role),
       ]);
       expect(group.rows).toEqual([{ name: `P210 Group ${role} ${T}` }]);
 
-      const again = await asRole(role, (api) =>
-        send(api, "post", `${BASE}/commit`, { file, fileName: `p210-again-${role}-${tag}.xlsx` }),
-      );
-      expect(again.status, `${role} same file again`).toBe(200);
-      const againBody = again.json;
-      expect(againBody.saved).toBe(false);
-      expect(againBody.importId).toBeUndefined();
-      expect(againBody.preview.counts).toMatchObject({ new: 0, update: 0, unchanged: 2 });
-      expect(await importsNamed(`p210-again-${role}-${tag}.xlsx`)).toEqual([]);
+      const againName = `p210-again-${role}-${tag}.xlsx`;
+      const again = (await upload(role, file, againName)).json;
+      expect(again.live.status, `${role} same file again`).toEqual({
+        ready: 0,
+        override: 0,
+        unchanged: 2,
+        failed: 0,
+      });
+      const nothing = await commit(role, again.id);
+      expect(nothing.status, `${role} same file again`).toBe(409);
+      expect(nothing.json.error).toMatch(/^Nothing to save: no row is ready/);
+      expect(await importsNamed(againName)).toEqual([]);
     }
 
-    const refused = await asRole("admin", async (api) =>
-      send(api, "post", `${BASE}/commit`, {
-        file: await workbook(withBadRow("bad")),
-        fileName: `p210-bad-${tag}.xlsx`,
-      }),
-    );
-    expect(refused.status).toBe(200);
-    const refusedBody = refused.json;
-    expect(refusedBody).toMatchObject({ saved: false, preview: { canImport: false } });
-    expect(refusedBody.preview.counts).toMatchObject({ new: 1, error: 1 });
-    const bad = await query(`SELECT 1 FROM service_groups WHERE code = $1`, [groupCode("bad")]);
-    expect(bad.rows, "nothing from the refused file was saved").toEqual([]);
-    expect(await importsNamed(`p210-bad-${tag}.xlsx`)).toEqual([]);
+    const badName = `p210-bad-${tag}.xlsx`;
+    const bad = (await upload("admin", await workbook(withBadRow("bad")), badName)).json;
+    sessionIds.bad = bad.id;
+    expect(bad.live.status).toEqual({ ready: 1, override: 0, unchanged: 0, failed: 1 });
+    const partial = await commit("admin", bad.id);
+    expect(partial.status).toBe(200);
+    expect(partial.json).toMatchObject({
+      saved: true,
+      outcome: { saved: 1, kept: 0, failed: 1, unchanged: 0 },
+    });
+    const good = await query(`SELECT 1 FROM service_groups WHERE code = $1`, [groupCode("bad")]);
+    expect(good.rows, "the good row of the file was saved").toHaveLength(1);
+    const failed = await query(`SELECT 1 FROM service_subgroups WHERE code = $1`, [subCode("bad")]);
+    expect(failed.rows, "the failed row was not saved").toEqual([]);
+    expect(await importsNamed(badName)).toMatchObject([{ status: "saved" }]);
   });
 
-  test("3. error file: an .xlsx attachment marking the bad row, which can be fixed and uploaded again", async () => {
+  test("3. failed rows file: an .xlsx attachment marking the bad row, which can be fixed and uploaded again", async () => {
     for (const role of ALLOWED) {
-      const response = await asRole(role, async (api) =>
-        send(api, "post", `${BASE}/errors`, {
-          file: await workbook(withBadRow(`err_${role}`)),
-          fileName: `P210 rates ${tag}.XLSX`,
-        }),
+      const created = (
+        await upload(role, await workbook(withBadRow(`err_${role}`)), `P210 rates ${tag}.XLSX`)
+      ).json;
+      const response = await asRole(role, (api) =>
+        send(api, "get", `${SESSIONS}/${created.id}/failed`),
       );
       expect(response.status, role).toBe(200);
       const headers = response.headers;
@@ -184,48 +209,42 @@ test.describe.serial("P2-10 import routes", () => {
       expect(errorCol, "the Subgroups sheet gets an error column").toBeGreaterThan(0);
       expect(String(ws.getRow(2).getCell(errorCol).value)).toMatch(/P210_NOPE/i);
 
-      const reupload = (buffer) =>
-        asRole(role, (api) =>
-          send(api, "post", `${BASE}/preview`, { file: buffer, fileName: "fixed.xlsx" }),
-        );
-      const asIs = (await reupload(file)).json;
-      expect(asIs.problems, "the error file itself reads back cleanly").toEqual([]);
-      expect(asIs.counts).toMatchObject({ error: 1 });
+      const reupload = async (buffer) =>
+        (await upload(role, buffer, `p210-fixed-${tag}.xlsx`)).json;
+      const asIs = await reupload(file);
+      expect(asIs.live.status, "the error file itself reads back cleanly").toMatchObject({
+        ready: 1,
+        failed: 1,
+      });
 
       ws.getRow(2).getCell(headings.indexOf("group_code") + 1).value = groupCode(`err_${role}`);
-      const fixed = Buffer.from(await wb.xlsx.writeBuffer());
-      const fixedPreview = (await reupload(fixed)).json;
-      expect(fixedPreview).toMatchObject({ problems: [], canImport: true });
-      expect(fixedPreview.counts).toMatchObject({ new: 2, error: 0 });
+      const fixed = await reupload(Buffer.from(await wb.xlsx.writeBuffer()));
+      expect(fixed.live.status).toMatchObject({ ready: 2, failed: 0 });
     }
 
-    const none = await asRole("admin", async (api) =>
-      send(api, "post", `${BASE}/errors`, {
-        file: await workbook(clean("none")),
-        fileName: `p210-none-${tag}.xlsx`,
-      }),
-    );
+    const tidy = (await upload("admin", await workbook(clean("none")), `p210-none-${tag}.xlsx`))
+      .json;
+    const none = await asRole("admin", (api) => send(api, "get", `${SESSIONS}/${tidy.id}/failed`));
     expect(none.status).toBe(422);
     expect(none.json).toEqual({
-      error: "No row in this file has an error, so there is no error file",
-      problems: [],
+      error: "No row in this import failed, so there is no file of failed rows",
     });
 
-    const unreadable = await asRole("admin", (api) =>
-      send(api, "post", `${BASE}/errors`, {
-        file: Buffer.from("not a spreadsheet"),
-        fileName: `p210-junk-${tag}.xlsx`,
-      }),
+    const unreadable = await upload(
+      "admin",
+      Buffer.from("not a spreadsheet"),
+      `p210-junk-${tag}.xlsx`,
     );
     expect(unreadable.status).toBe(422);
-    const unreadableBody = unreadable.json;
-    expect(unreadableBody.error).toMatch(/fix the problems listed first/);
-    expect(unreadableBody.problems).toEqual([
+    expect(unreadable.json.error).toMatch(/fix the problems listed/);
+    expect(unreadable.json.problems).toEqual([
       "This isn't an Excel .xlsx file; save it as an Excel Workbook (.xlsx) and upload again",
     ]);
+    const groups = await query(`SELECT 1 FROM service_groups WHERE code ILIKE $1`, ["P210G_ERR%"]);
+    expect(groups.rows).toEqual([]);
   });
 
-  test("4. history: newest first, with who imported, file name, when, status and counts; paged", async () => {
+  test("4. history: newest first, with who imported, file name, when, status, counts and the session report; paged", async () => {
     for (const role of ALLOWED) {
       const response = await asRole(role, (api) =>
         send(api, "get", `${BASE}/history`, { params: { limit: "100" } }),
@@ -233,19 +252,26 @@ test.describe.serial("P2-10 import routes", () => {
       expect(response.status, role).toBe(200);
       const body = response.json;
       expect(body).toMatchObject({ limit: 100, offset: 0 });
-      expect(body.total).toBeGreaterThanOrEqual(2);
+      expect(body.total).toBeGreaterThanOrEqual(3);
       const ours = body.imports.filter((i) => i.file_name.endsWith(`-${tag}.xlsx`));
       expect(ours.map((i) => i.file_name)).toEqual([
+        `p210-bad-${tag}.xlsx`,
         `p210-reception_admin-${tag}.xlsx`,
         `p210-admin-${tag}.xlsx`,
       ]);
-      expect(ours[0]).toMatchObject({
+      expect(ours[1]).toMatchObject({
         status: "saved",
         imported_by: USERS.reception_admin.id,
         imported_by_name: USERS.reception_admin.name,
-        counts: { Groups: { new: 1, update: 0, unchanged: 0 } },
+        session_id: sessionIds.reception_admin,
+        counts: { Groups: { new: 1, update: 0, unchanged: 0, kept: 0, failed: 0 } },
       });
-      expect(Object.keys(ours[0]).sort()).toEqual(
+      expect(ours[0]).toMatchObject({
+        session_id: sessionIds.bad,
+        counts: { Groups: { new: 1, failed: 0 }, Subgroups: { new: 0, failed: 1 } },
+      });
+      expect(ours[2].session_id).toBe(sessionIds.admin);
+      expect(Object.keys(ours[1]).sort()).toEqual(
         [
           "counts",
           "file_name",
@@ -253,6 +279,7 @@ test.describe.serial("P2-10 import routes", () => {
           "imported_at",
           "imported_by",
           "imported_by_name",
+          "session_id",
           "status",
         ].sort(),
       );
@@ -313,42 +340,42 @@ test.describe.serial("P2-10 import routes", () => {
     }
     await anonymous.dispose();
     expect(await importsNamed(`p210-refused-${tag}.xlsx`)).toEqual([]);
+    const sessions = await query(`SELECT 1 FROM billing_import_sessions WHERE file_name = $1`, [
+      `p210-refused-${tag}.xlsx`,
+    ]);
+    expect(sessions.rows).toEqual([]);
     const groups = await query(`SELECT 1 FROM service_groups WHERE code = $1`, [
       groupCode("refused"),
     ]);
     expect(groups.rows).toEqual([]);
   });
 
-  test("6. a daily_cap change is refused for reception_admin and allowed for admin", async () => {
+  test("6. a daily_cap change fails for reception_admin and is saved for admin", async () => {
     const file = await workbook({
       Categories: [{ category_code: CAPPED, label: `P210 Capped ${T}`, daily_cap: 7 }],
     });
     const fileName = `p210-cap-${tag}.xlsx`;
 
-    const preview = await asRole("reception_admin", (api) =>
-      send(api, "post", `${BASE}/preview`, { file, fileName }),
-    );
-    const previewBody = preview.json;
-    expect(previewBody.canImport).toBe(false);
-    expect(previewBody.sheets.find((s) => s.name === "Categories").rows[0].errors).toEqual([
+    const refusedSession = (await upload("reception_admin", file, fileName)).json;
+    expect(refusedSession.live.status).toMatchObject({ ready: 0, failed: 1 });
+    const [row] = await rowsOf("reception_admin", refusedSession.id, { sheet: "Categories" });
+    expect(row.status).toBe("failed");
+    expect(row.errors).toEqual([
       expect.objectContaining({
         column: "daily_cap",
         message: expect.stringMatching(/^Only an admin can change a category's patients-per-day/),
       }),
     ]);
-
-    const refused = await asRole("reception_admin", (api) =>
-      send(api, "post", `${BASE}/commit`, { file, fileName }),
-    );
-    expect(refused.status).toBe(200);
-    expect(refused.json).toMatchObject({ saved: false, preview: { canImport: false } });
+    const refused = await commit("reception_admin", refusedSession.id);
+    expect(refused.status).toBe(409);
     expect((await query(`SELECT 1 FROM patient_schemes WHERE code = $1`, [CAPPED])).rows).toEqual(
       [],
     );
+    expect(await importsNamed(fileName)).toEqual([]);
 
-    const allowed = await asRole("admin", (api) =>
-      send(api, "post", `${BASE}/commit`, { file, fileName }),
-    );
+    const allowedSession = (await upload("admin", file, fileName)).json;
+    expect(allowedSession.live.status).toMatchObject({ ready: 1, failed: 0 });
+    const allowed = await commit("admin", allowedSession.id);
     expect(allowed.status).toBe(200);
     expect(allowed.json.saved).toBe(true);
     const saved = await query(`SELECT daily_cap FROM patient_schemes WHERE code = $1`, [CAPPED]);
@@ -361,26 +388,24 @@ test.describe.serial("P2-10 import routes", () => {
   test("7. a bad file name or a missing file is a 400 with a readable message", async () => {
     const file = await workbook(clean("names"));
     await asRole("admin", async (api) => {
-      for (const [method, url] of ROUTES.filter(([m]) => m === "post")) {
-        for (const [fileName, message] of [
-          [undefined, "File name is required"],
-          ["   ", "File name can't be blank"],
-          ["rates.csv", "File name must end in .xlsx — upload the Excel template"],
-          [`${"a".repeat(196)}.xlsx`, "File name can be at most 200 characters"],
-        ]) {
-          const response = await send(api, method, url, { file, fileName });
-          expect(response.status, `${url} ${fileName}`).toBe(400);
-          expect(response.json.error, `${url} ${fileName}`).toBe(message);
-        }
-        const empty = await send(api, method, url, { fileName: "rates.xlsx" });
-        expect(empty.status, `${url} empty`).toBe(400);
-        expect(empty.json.error).toBe("Attach the filled-in .xlsx file as the body of the request");
-        const json = await api.post(url, { params: { fileName: "rates.xlsx" }, data: {} });
-        expect(json.status(), `${url} JSON body`).toBe(400);
-        expect((await json.json()).error).toBe(
-          "Attach the filled-in .xlsx file as the body of the request",
-        );
+      for (const [fileName, message] of [
+        [undefined, "File name is required"],
+        ["   ", "File name can't be blank"],
+        ["rates.csv", "File name must end in .xlsx — upload the Excel template"],
+        [`${"a".repeat(196)}.xlsx`, "File name can be at most 200 characters"],
+      ]) {
+        const response = await send(api, "post", SESSIONS, { file, fileName });
+        expect(response.status, `${fileName}`).toBe(400);
+        expect(response.json.error, `${fileName}`).toBe(message);
       }
+      const empty = await send(api, "post", SESSIONS, { fileName: "rates.xlsx" });
+      expect(empty.status, "empty").toBe(400);
+      expect(empty.json.error).toBe("Attach the filled-in .xlsx file as the body of the request");
+      const json = await api.post(SESSIONS, { params: { fileName: "rates.xlsx" }, data: {} });
+      expect(json.status(), "JSON body").toBe(400);
+      expect((await json.json()).error).toBe(
+        "Attach the filled-in .xlsx file as the body of the request",
+      );
     });
     const groups = await query(`SELECT 1 FROM service_groups WHERE code = $1`, [
       groupCode("names"),
@@ -390,16 +415,30 @@ test.describe.serial("P2-10 import routes", () => {
 
   test("8. review: a file over the limit is refused with the same 5 MB the reader uses", async () => {
     await asRole("admin", async (api) => {
-      for (const [method, url] of ROUTES.filter(([m]) => m === "post")) {
-        const response = await send(api, method, url, {
-          file: Buffer.alloc(MAX_UPLOAD_BYTES + 1, 1),
-          fileName: "big.xlsx",
+      const response = await send(api, "post", SESSIONS, {
+        file: Buffer.alloc(MAX_UPLOAD_BYTES + 1, 1),
+        fileName: "big.xlsx",
+      });
+      expect(response.status).toBe(413);
+      expect(response.json.error).toBe("The file is larger than 5 MB; split it into smaller files");
+    });
+  });
+
+  test("9. the old all-or-nothing preview, commit and errors routes are gone", async () => {
+    const file = await workbook(clean("retired"));
+    await asRole("admin", async (api) => {
+      for (const route of RETIRED) {
+        const response = await send(api, "post", `${BASE}/${route}`, {
+          file,
+          fileName: `p210-retired-${tag}.xlsx`,
         });
-        expect(response.status, url).toBe(413);
-        expect(response.json.error, url).toBe(
-          "The file is larger than 5 MB; split it into smaller files",
-        );
+        expect(response.status, route).toBe(404);
       }
     });
+    expect(await importsNamed(`p210-retired-${tag}.xlsx`)).toEqual([]);
+    const groups = await query(`SELECT 1 FROM service_groups WHERE code = $1`, [
+      groupCode("retired"),
+    ]);
+    expect(groups.rows).toEqual([]);
   });
 });

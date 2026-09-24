@@ -126,9 +126,10 @@ test.describe.serial("P1-34 test catalogue page stops editing price", () => {
     page,
   }) => {
     await openCatalogue(page);
-    await expect(
-      page.getByPlaceholder("Test name — offered to every patient", { exact: true }),
-    ).toHaveAttribute("maxlength", "120");
+    await page.getByRole("button", { name: "+ Add test", exact: true }).click();
+    const add = page.getByRole("dialog", { name: "Add a test" });
+    await expect(add.getByLabel("Test name", { exact: true })).toHaveAttribute("maxlength", "120");
+    await add.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(row(page, PRICED).getByPlaceholder("Why a doctor orders it")).toHaveAttribute(
       "maxlength",
       "160",
@@ -189,8 +190,11 @@ test.describe.serial("P1-34 test catalogue page stops editing price", () => {
 
   test("6. a new test is added without a price and offers Create item", async ({ page }) => {
     await openCatalogue(page);
-    await page.getByPlaceholder("Test name — offered to every patient").fill(ADDED);
-    await page.getByRole("button", { name: "+ Add", exact: true }).click();
+    await page.getByRole("button", { name: "+ Add test", exact: true }).click();
+    const add = page.getByRole("dialog", { name: "Add a test" });
+    await add.getByLabel("Test name", { exact: true }).fill(ADDED);
+    await add.getByRole("button", { name: "Add test", exact: true }).click();
+    await expect(add).toHaveCount(0);
     await expect(
       row(page, ADDED).getByRole("link", { name: `Create item for ${ADDED}` }),
     ).toBeVisible();

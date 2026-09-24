@@ -212,6 +212,8 @@ function Preview({ category, form, payer, scopeItem }) {
   const [draftError, setDraftError] = useState("");
   const trial = useTestBillingRule();
   const seq = useRef(0);
+  const [open, setOpen] = useState(false);
+  const bodyId = useId();
   const chosen = form.scope === "item" ? scopeItem : item;
   const ownVisit = chosen?.visit_type ?? null;
   const visitChoices = form.visit_types.length ? form.visit_types : VISIT_TYPES;
@@ -283,98 +285,113 @@ function Preview({ category, form, payer, scopeItem }) {
         : {};
 
   return (
-    <section className="pr-preview" aria-label="Preview">
-      <h3 className="pr-preview__title">Preview</h3>
-      <div className="bill-form">
-        {form.scope === "item" ? (
+    <section className="pr-preview" aria-label="Test this rule">
+      <h3 className="pr-preview__title">
+        <button
+          type="button"
+          className="pr-preview__toggle"
+          aria-expanded={open}
+          aria-controls={bodyId}
+          onClick={() => setOpen((o) => !o)}
+        >
+          Test this rule
+          <span className="pr-preview__note">Try it on an item — nothing here is saved</span>
+        </button>
+      </h3>
+      <div id={bodyId} className="pr-preview__body" hidden={!open}>
+        <div className="bill-form">
+          {form.scope === "item" ? (
+            <p className="fset__hint">
+              {scopeItem ? `Pricing ${scopeItem.name}.` : "Choose the item above to preview it."}
+            </p>
+          ) : (
+            <ItemPicker
+              key={scopeKey}
+              label="Preview item"
+              value={item ? String(item.id) : ""}
+              onChange={(_, found) => setPicked(found ? { scopeKey, item: found } : null)}
+              filters={filters}
+              current={item}
+            />
+          )}
+          {ownVisit ? (
+            <p className="fset__hint">This item is always a {ownVisit} visit.</p>
+          ) : (
+            <Field label="Preview visit type">
+              {(id) => (
+                <select
+                  id={id}
+                  className="jb-assign"
+                  value={visit}
+                  onChange={(e) => setVisitType(e.target.value)}
+                >
+                  {visitChoices.map((v) => (
+                    <option key={v} value={v}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </Field>
+          )}
+        </div>
+        {!chosen ? (
           <p className="fset__hint">
-            {scopeItem ? `Pricing ${scopeItem.name}.` : "Choose the item above to preview it."}
+            Pick an item to see the actual price, what the patient pays and the rest.
           </p>
+        ) : error ? (
+          <p className="bill-dialog__error" role="alert">
+            {error}
+          </p>
+        ) : !line ? (
+          <p className="fset__hint">Pricing…</p>
         ) : (
-          <ItemPicker
-            key={scopeKey}
-            label="Preview item"
-            value={item ? String(item.id) : ""}
-            onChange={(_, found) => setPicked(found ? { scopeKey, item: found } : null)}
-            filters={filters}
-            current={item}
-          />
-        )}
-        {ownVisit ? (
-          <p className="fset__hint">This item is always a {ownVisit} visit.</p>
-        ) : (
-          <Field label="Preview visit type">
-            {(id) => (
-              <select
-                id={id}
-                className="jb-assign"
-                value={visit}
-                onChange={(e) => setVisitType(e.target.value)}
-              >
-                {visitChoices.map((v) => (
-                  <option key={v} value={v}>
-                    {v}
-                  </option>
-                ))}
-              </select>
+          <>
+            {draftError ? (
+              <p className="bill-dialog__error" role="alert">
+                {draftError}
+              </p>
+            ) : !draft ? (
+              <p className="fset__hint">
+                Fill in what the patient pays to see this rule's numbers.
+              </p>
+            ) : !draftLine ? (
+              <p className="fset__hint">Pricing this rule…</p>
+            ) : covered ? (
+              <>
+                <Split
+                  label="With this rule"
+                  line={draftLine}
+                  pays={draftLine.patient_payable}
+                  rest={draftLine.claim + draftLine.adjustment}
+                  restLabel={restLabel}
+                />
+                {draftLine.discount ? (
+                  <p className="fset__hint">
+                    Discounts take off {rupees(draftLine.discount / 100)}, already counted above.
+                  </p>
+                ) : null}
+              </>
+            ) : (
+              <p className="fset__hint">
+                This rule doesn't cover {visit} visits, so it doesn't change this item.
+              </p>
             )}
-          </Field>
+            <Split
+              label="With the saved rules"
+              line={line}
+              pays={line.patient_payable}
+              rest={line.claim + line.adjustment}
+              restLabel={line.claim ? "claimed" : line.adjustment ? "to adjustment" : ""}
+            />
+            <p className="fset__hint">
+              Saved rules today:{" "}
+              {line.payment_rule_text === "full" ? "full price" : line.payment_rule_text}
+              {line.payment_rule_id ? "" : " — no rule covers it yet"}.
+            </p>
+          </>
         )}
       </div>
-      {!chosen ? (
-        <p className="fset__hint">
-          Pick an item to see the actual price, what the patient pays and the rest.
-        </p>
-      ) : error ? (
-        <p className="bill-dialog__error" role="alert">
-          {error}
-        </p>
-      ) : !line ? (
-        <p className="fset__hint">Pricing…</p>
-      ) : (
-        <>
-          {draftError ? (
-            <p className="bill-dialog__error" role="alert">
-              {draftError}
-            </p>
-          ) : !draft ? (
-            <p className="fset__hint">Fill in what the patient pays to see this rule's numbers.</p>
-          ) : !draftLine ? (
-            <p className="fset__hint">Pricing this rule…</p>
-          ) : covered ? (
-            <>
-              <Split
-                label="With this rule"
-                line={draftLine}
-                pays={draftLine.patient_payable}
-                rest={draftLine.claim + draftLine.adjustment}
-                restLabel={restLabel}
-              />
-              {draftLine.discount ? (
-                <p className="fset__hint">
-                  Discounts take off {rupees(draftLine.discount / 100)}, already counted above.
-                </p>
-              ) : null}
-            </>
-          ) : (
-            <p className="fset__hint">
-              This rule doesn't cover {visit} visits, so it doesn't change this item.
-            </p>
-          )}
-          <Split
-            label="With the saved rules"
-            line={line}
-            pays={line.patient_payable}
-            rest={line.claim + line.adjustment}
-            restLabel={line.claim ? "claimed" : line.adjustment ? "to adjustment" : ""}
-          />
-          <p className="fset__hint">
-            Saved rules today:{" "}
-            {line.payment_rule_text === "full" ? "full price" : line.payment_rule_text}
-            {line.payment_rule_id ? "" : " — no rule covers it yet"}.
-          </p>
-        </>
-      )}
     </section>
   );
 }

@@ -261,6 +261,30 @@ const sameMoney = (order, money) =>
   paise(order.amount_claimed) === paise(money.amount_claimed) &&
   order.claim_state === money.claim_state;
 
+export async function refuseStandingClaims(client, bill) {
+  const { rows } = await client.query(
+    `SELECT l.bill_name, o.id, o.amount_paid, o.amount_claimed, o.claim_state,
+            (SELECT e.meta FROM giniflow_lab_order_events e
+              WHERE e.lab_order_id = o.id AND e.track = 'payment' AND e.meta ->> 'bill_id' = $2
+              ORDER BY e.occurred_at DESC, e.seq DESC LIMIT 1) AS settle
+       FROM bill_lines l JOIN giniflow_lab_orders o ON o.id = l.lab_order_id
+      WHERE l.bill_id = $1 AND l.is_live AND o.claim_state = ANY($3::text[])
+      ORDER BY l.line_no, l.id`,
+    [bill.id, bill.id, [CLAIM_STATE.SUBMITTED, CLAIM_STATE.APPROVED]],
+  );
+  const standing = rows.find((row) => !(row.settle?.after && sameMoney(row, row.settle.after)));
+  if (!standing) return;
+  const way =
+    bill.status === "draft"
+      ? "remove it from this bill and collect the rest at reception"
+      : "cancel this bill and collect the rest at reception";
+  throw httpError(
+    409,
+    `${standing.bill_name} has its own insurance claim of ₹${rupees(paise(standing.amount_claimed))} at reception, so it can't also be paid on ${billLabel(bill)} — ${way}`,
+    { code: "order_claim", lab_order_id: standing.id, claim_state: standing.claim_state },
+  );
+}
+
 async function releaseOrder(client, bill, orderId, ctx) {
   const { rows } = await client.query(
     `SELECT meta FROM giniflow_lab_order_events
@@ -314,6 +338,7 @@ export async function takePayments(billId, input, ctx, db = pool) {
         version: bill.version,
       });
     }
+    await refuseStandingClaims(client, bill);
     const outstanding = Math.max(0, paise(bill.patient_payable) - (await takenOn(client, bill.id)));
     const asked = wanted.reduce((sum, payment) => sum + payment.amount, 0);
     if (!outstanding) throw httpError(409, `Nothing is left to collect on ${billLabel(bill)}`);

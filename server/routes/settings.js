@@ -2,6 +2,7 @@ import express from "express";
 import { validate } from "../middleware/validate.js";
 import { prescriptionFooterSchema } from "../schemas/index.js";
 import { getPrescriptionFooter, setPrescriptionFooter } from "../services/prescriptionFooter.js";
+import { buildPrescriptionPreviewHtml } from "../services/prescriptionPreview.js";
 import {
   getPrescriptionLogo,
   setPrescriptionLogo,
@@ -28,6 +29,14 @@ router.put("/admin/prescription-footer", validate(prescriptionFooterSchema), asy
     res.json(await setPrescriptionFooter(req.body));
   } catch (e) {
     handleError(res, e, "Update prescription footer");
+  }
+});
+
+router.post("/admin/prescription-preview", validate(prescriptionFooterSchema), async (req, res) => {
+  try {
+    res.json({ html: await buildPrescriptionPreviewHtml(req.body) });
+  } catch (e) {
+    handleError(res, e, "Preview prescription");
   }
 });
 

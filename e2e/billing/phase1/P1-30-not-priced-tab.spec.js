@@ -19,6 +19,20 @@ const tests = (page) => page.getByRole("table", { name: "Tests without an item" 
 const consultants = (page) => page.getByRole("table", { name: "Consultants without a fee" });
 const reports = (page) => page.getByRole("table", { name: "Lab reports not in the catalogue" });
 
+const LIST_TAB = {
+  tests: /^\d+\s*Tests without an item/,
+  consultants: /^\d+\s*Consultants without a fee/,
+  reports: /^\d+\s*Lab reports not in the catalogue/,
+};
+
+async function showList(page, list, needle) {
+  await page
+    .getByRole("tablist", { name: "Not priced lists" })
+    .getByRole("tab", { name: LIST_TAB[list] })
+    .click();
+  await page.getByRole("searchbox", { name: "Search this list" }).fill(needle);
+}
+
 async function openNotPriced(page) {
   await loginAs(page, "reception_admin");
   await gotoReady(page, "/settings/services", () =>
@@ -27,7 +41,7 @@ async function openNotPriced(page) {
   await viewSwitch(page)
     .getByRole("button", { name: /^Not priced/ })
     .click();
-  await expect(tests(page).or(page.getByText("Every catalogue test has an item."))).toBeVisible();
+  await expect(page.getByRole("tablist", { name: "Not priced lists" })).toBeVisible();
 }
 
 test.describe.serial("P1-30 not priced tab", () => {
@@ -101,9 +115,11 @@ test.describe.serial("P1-30 not priced tab", () => {
       "aria-pressed",
       "true",
     );
+    await showList(page, "tests", TEST_NAME);
     const row = tests(page).getByRole("row", { name: new RegExp(TEST_NAME) });
     await expect(row).toContainText("₹320");
     await expect(row).toContainText("No item");
+    await showList(page, "consultants", DOCTOR);
     for (const visit of ["New", "Follow Up"]) {
       await expect(
         consultants(page).getByRole("button", {
@@ -114,6 +130,7 @@ test.describe.serial("P1-30 not priced tab", () => {
     }
     const report = list.reportsNotInCatalogue.find((r) => r.name === REPORT);
     expect(report).toBeTruthy();
+    await showList(page, "reports", REPORT);
     await expect(reports(page).getByRole("row", { name: new RegExp(REPORT) })).toContainText(
       "Not in the test catalogue",
     );
@@ -124,6 +141,7 @@ test.describe.serial("P1-30 not priced tab", () => {
     page,
   }) => {
     await openNotPriced(page);
+    await showList(page, "tests", TEST_NAME);
     await tests(page)
       .getByRole("button", { name: `Create item for ${TEST_NAME}`, exact: true })
       .click();
@@ -147,6 +165,7 @@ test.describe.serial("P1-30 not priced tab", () => {
     page,
   }) => {
     await openNotPriced(page);
+    await showList(page, "consultants", DOCTOR);
     const create = consultants(page).getByRole("button", {
       name: `Create item for ${DOCTOR} (New)`,
       exact: true,
@@ -172,6 +191,7 @@ test.describe.serial("P1-30 not priced tab", () => {
 
   test("4. a test whose item is off offers to activate it, and the row goes", async ({ page }) => {
     await openNotPriced(page);
+    await showList(page, "tests", OFF_TEST_NAME);
     const row = tests(page).getByRole("row", { name: new RegExp(OFF_TEST_NAME) });
     await expect(row).toContainText(`P130OFF_${tag} is off`);
     await expect(
@@ -192,6 +212,7 @@ test.describe.serial("P1-30 not priced tab", () => {
 
   test("5. closing a pre-filled form without changes creates nothing", async ({ page }) => {
     await openNotPriced(page);
+    await showList(page, "consultants", DOCTOR);
     await consultants(page)
       .getByRole("button", { name: `Create item for ${DOCTOR} (Follow Up)`, exact: true })
       .click();

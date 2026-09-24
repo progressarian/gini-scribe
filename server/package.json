@@ -16,6 +16,7 @@
     "seed:xray": "node scripts/seed-xray-demo.mjs",
     "smoke:analytics": "node scripts/smoke-analytics.mjs",
     "smoke:auth-refresh": "node scripts/smoke-auth-refresh.mjs",
+    "smoke:billing-bill": "node scripts/smoke-billing-bill.mjs",
     "smoke:billing-import": "node scripts/smoke-billing-import.mjs",
     "smoke:billing-master": "node scripts/smoke-billing-master.mjs",
     "smoke:billing-pricing": "node scripts/smoke-billing-pricing.mjs",

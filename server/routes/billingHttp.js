@@ -13,6 +13,7 @@ const DETAILS = [
   "service_item_id",
   "items",
   "rules",
+  "problems",
 ];
 
 export function sendFailure(context, res, e) {

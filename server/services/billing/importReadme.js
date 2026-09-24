@@ -1,7 +1,7 @@
 export const README_TITLE = "Gini Scribe — billing data template";
 
 export const README_INTRO =
-  "Fill the sheets, then upload the file in Settings › Billing › Bulk import. Nothing is saved until every row passes the checks.";
+  "Fill the sheets, then upload the file in Settings › Billing › Bulk import. Every row is checked and listed as Ready, Needs override, Failed or Unchanged; nothing is saved until you press Commit.";
 
 export const GENERAL_RULES = [
   "One row = one thing: one group, one item, one category, one rule, one fee, one discount.",
@@ -19,7 +19,7 @@ export const GENERAL_RULES = [
   "On the Discounts sheet, groups, subgroups and items are written as their codes, doctors by name (or id if two share a name) and categories by category code. A discount is matched by its rule_name: uploading the same name again updates it.",
   "The upload only adds and updates. To retire a row, set active to no; rows are never deleted by an upload.",
   "Uploading the same file twice changes nothing the second time. A blank start date (valid_from) is set to the upload day only when the row is first created; later uploads keep it.",
-  "Any error stops the whole upload: fix the rows listed in the error file and upload again.",
+  "A row with an error fails and is skipped, and so is every new row that depends on it; the other rows can still be saved. A change to a row already in Scribe is saved only if you choose Override for it — otherwise the row is kept as it is. Download the failed rows, fix them and upload that file again.",
 ];
 
 export const VALUE_GLOSSARY = [
