@@ -1,5 +1,4 @@
 import { createClient } from "@supabase/supabase-js";
-import { SUPABASE_URL, SUPABASE_SERVICE_KEY } from "../../config/storage.js";
 
 // Publishing Gini Flow's live envelopes over Supabase Realtime Broadcast.
 //
@@ -29,7 +28,10 @@ let dormantLogged = false;
 let billingDormantLogged = false;
 
 // Can the server publish at all?
-const enabled = () => !!(SUPABASE_URL && SUPABASE_SERVICE_KEY);
+const supabaseUrl = () => process.env.SUPABASE_URL || "";
+const serviceKey = () => process.env.SUPABASE_SERVICE_KEY || "";
+
+const enabled = () => !!(supabaseUrl() && serviceKey());
 
 // Can any browser actually JOIN the topic? A different question, and the one
 // that decides whether publishing is worth doing.
@@ -41,12 +43,12 @@ const enabled = () => !!(SUPABASE_URL && SUPABASE_SERVICE_KEY);
 // the browser half is configured there is no room to broadcast into, so the
 // automatic fan-out stays off and the two halves switch on together.
 const browserEnabled = () =>
-  !!(process.env.SUPABASE_JWT_SECRET && process.env.SUPABASE_ANON_KEY && SUPABASE_URL);
+  !!(process.env.SUPABASE_JWT_SECRET && process.env.SUPABASE_ANON_KEY && supabaseUrl());
 
 function bus() {
   if (!enabled()) return null;
   if (!client) {
-    client = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
+    client = createClient(supabaseUrl(), serviceKey(), {
       auth: { persistSession: false, autoRefreshToken: false },
       realtime: { params: { eventsPerSecond: 40 } },
     });

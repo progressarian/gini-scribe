@@ -7,10 +7,23 @@ import { assertTestDatabase, TEST_DATABASE_URL } from "../../setup/guard.mjs";
 process.env.DATABASE_URL = process.env.DATABASE_URL || TEST_DATABASE_URL;
 assertTestDatabase(process.env.DATABASE_URL);
 
-process.env.SUPABASE_URL = "p421-unreachable-bus";
-process.env.SUPABASE_SERVICE_KEY = "p421-service-key";
-process.env.SUPABASE_JWT_SECRET = "p421-jwt-secret";
-process.env.SUPABASE_ANON_KEY = "p421-anon-key";
+const UNREACHABLE_BUS = {
+  SUPABASE_URL: "p421-unreachable-bus",
+  SUPABASE_SERVICE_KEY: "p421-service-key",
+  SUPABASE_JWT_SECRET: "p421-jwt-secret",
+  SUPABASE_ANON_KEY: "p421-anon-key",
+};
+const busEnvWas = Object.fromEntries(
+  Object.keys(UNREACHABLE_BUS).map((key) => [key, process.env[key]]),
+);
+Object.assign(process.env, UNREACHABLE_BUS);
+
+const restoreBusEnv = () => {
+  for (const [key, value] of Object.entries(busEnvWas)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+};
 
 const svc = await import("../../../server/services/billing/billingRequests.js");
 const bus = await import("../../../server/services/giniflow/realtimeBus.js");
@@ -450,6 +463,7 @@ test.describe.serial("P4-21 live updates for desk requests", () => {
     atPublish = null;
     console.warn = realWarn;
     process.off("unhandledRejection", onUnhandled);
+    restoreBusEnv();
     const wipe = async (sql, params) => {
       await query(sql, params).catch(() => {});
     };

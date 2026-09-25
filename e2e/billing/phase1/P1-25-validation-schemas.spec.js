@@ -63,8 +63,24 @@ async function retireConsultItems(codePattern) {
   );
 }
 
+const SAVED_SERIES = { series: "RCPT", fy: "2051-52" };
+
+const removeSavedSeries = () =>
+  query(`DELETE FROM bill_series WHERE series = $1 AND fy = $2`, [
+    SAVED_SERIES.series,
+    SAVED_SERIES.fy,
+  ]);
+
 test.describe("P1-25 validation schemas", () => {
-  test.afterAll(() => retireConsultItems(`^VI-${tag}$`));
+  test.beforeAll(removeSavedSeries);
+
+  test.afterAll(async () => {
+    try {
+      await retireConsultItems(`^VI-${tag}$`);
+    } finally {
+      await removeSavedSeries();
+    }
+  });
 
   test("1. every billing schema is registered and accepts a minimal valid body", () => {
     expect(Object.keys(S).sort()).toEqual(Object.keys(MINIMAL).sort());
@@ -275,8 +291,7 @@ test.describe("P1-25 validation schemas", () => {
     expect(deleted.deleted).toBe(true);
     const saved = await series.saveSeries(
       parsed("billingSeriesSaveSchema", {
-        series: "RCPT",
-        fy: "2051-52",
+        ...SAVED_SERIES,
         prefix: "V/",
         number_width: "4",
         next_no: "",

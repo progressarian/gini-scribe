@@ -32,7 +32,7 @@ import {
 } from "../../../shared/machineStages.js";
 import { getMachines } from "./machineCatalog.js";
 import { VITALS_TAKEN_SQL } from "./visitVitals.js";
-import { resumeVisitTx } from "./statusEngine.js";
+import { resumeVisitTx, reopenResultsForNewOrder } from "./statusEngine.js";
 import { UNDRAWN_SAMPLE_STATUSES } from "../../../shared/labStages.js";
 import {
   machineShowsHealthrayReports,
@@ -636,6 +636,7 @@ export async function addMachineTestOn(
     [visitId, actorId, price],
   );
   const orderId = order[0].id;
+  await reopenResultsForNewOrder(client, visitId);
   await client.query(
     `INSERT INTO giniflow_lab_order_tests (lab_order_id, test_name, price)
      VALUES ($1, $2, $3)`,

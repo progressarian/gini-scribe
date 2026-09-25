@@ -1205,8 +1205,17 @@ export async function advanceSample(
     // does not know about.
     if (to === "uploaded") {
       await client.query(
-        `UPDATE giniflow_visits SET results_status = 'ready', updated_at = NOW() WHERE id = $1`,
-        [visitId],
+        `UPDATE giniflow_visits v
+            SET results_status = CASE
+                  WHEN EXISTS (
+                    SELECT 1 FROM giniflow_lab_orders o2
+                     WHERE o2.visit_id = v.id AND o2.urgency = 'today' AND o2.id <> $2
+                       AND o2.sample_status NOT IN ('uploaded', 'reported', 'cancelled')
+                  ) THEN 'partial'
+                  ELSE 'ready' END,
+                updated_at = NOW()
+          WHERE v.id = $1`,
+        [visitId, orderId],
       );
       // "Reports arrived" is a fact about the patient, not a place they moved
       // to. This used to go through advanceStatus, which sets current_status —

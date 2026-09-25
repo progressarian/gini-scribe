@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import ConfirmModal from "../../ui/ConfirmModal";
 import { useChangeLineQuantity, useRemoveBillLine } from "../../../queries/hooks/useBilling";
 import { errorOf, fromPaise } from "../format";
-import { paymentRuleText } from "./lineText";
+import { ORDER_STATE_NOTE, orderStateText, paymentRuleText } from "./lineText";
 
 function QuantityCell({ bill, line, onBill, onError }) {
   const change = useChangeLineQuantity();
@@ -58,6 +58,11 @@ export default function BillLinesTable({ bill, onBill }) {
   const [going, setGoing] = useState(null);
   const [reason, setReason] = useState("");
   const [error, setError] = useState(null);
+  const atReception = bill.lines.filter((line) => line.order_state);
+  const receptionWay =
+    bill.status === "draft"
+      ? "remove it from this bill"
+      : "cancel this bill and bill it again without it";
 
   const drop = async () => {
     setError(null);
@@ -102,7 +107,15 @@ export default function BillLinesTable({ bill, onBill }) {
             <tbody>
               {bill.lines.map((line) => (
                 <tr key={line.id}>
-                  <td data-label="Item">{line.bill_name}</td>
+                  <td data-label="Item">
+                    {line.bill_name}
+                    {line.order_state && (
+                      <>
+                        {" "}
+                        <span className="badge b-amb">{orderStateText(line.order_state)}</span>
+                      </>
+                    )}
+                  </td>
                   <td data-label="Bill code">{line.bill_code || "—"}</td>
                   <QuantityCell bill={bill} line={line} onBill={onBill} onError={setError} />
                   <td data-label="Actual">{fromPaise(line.actual)}</td>
@@ -131,6 +144,11 @@ export default function BillLinesTable({ bill, onBill }) {
           </table>
         </div>
       )}
+      {atReception.map((line) => (
+        <div className="bc-hint" role="note" key={line.id}>
+          {line.bill_name} {ORDER_STATE_NOTE[line.order_state]} — {receptionWay}.
+        </div>
+      ))}
       {error && <div className="bc-err">{error}</div>}
 
       <ConfirmModal

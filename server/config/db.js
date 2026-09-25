@@ -24,6 +24,7 @@ const pool = new pg.Pool({
   // client-side backstop. 60s is far above any legitimate sync query.
   statement_timeout: 60000,
   query_timeout: 60000,
+  idle_in_transaction_session_timeout: 120000,
   max: 15,
   allowExitOnIdle: true,
   keepAlive: true, // send TCP keepalives — prevents Railway from closing idle connections
@@ -39,6 +40,7 @@ const cronPool = new pg.Pool({
   idleTimeoutMillis: 20000,
   statement_timeout: 60000, // see pool above — no background query may hang forever
   query_timeout: 60000,
+  idle_in_transaction_session_timeout: 120000,
   max: 4,
   allowExitOnIdle: true,
   keepAlive: true,
@@ -67,6 +69,39 @@ function attachClientErrorHandler(p, label) {
 }
 attachClientErrorHandler(pool, "DB");
 attachClientErrorHandler(cronPool, "cron DB");
+
+const POISON_CODES = new Set(["25P02", "57014"]);
+const isPoison = (err) =>
+  !!err && (err.message === "Query read timeout" || POISON_CODES.has(err.code));
+
+function destroyPoisonedClients(p) {
+  p.on("connect", (client) => {
+    const query = client.query.bind(client);
+    client.query = (...args) => {
+      const last = args[args.length - 1];
+      if (typeof last === "function") {
+        args[args.length - 1] = (err, res) => {
+          if (isPoison(err)) client.poisoned = true;
+          last(err, res);
+        };
+        return query(...args);
+      }
+      const result = query(...args);
+      if (result && typeof result.catch === "function") {
+        result.catch((err) => {
+          if (isPoison(err)) client.poisoned = true;
+        });
+      }
+      return result;
+    };
+  });
+  p.on("acquire", (client) => {
+    const release = client.release;
+    client.release = (err) => release.call(client, err || client.poisoned || undefined);
+  });
+}
+destroyPoisonedClients(pool);
+destroyPoisonedClients(cronPool);
 
 // Wrap pool.query with transient-error retry. Only retries on connection-level
 // failures (Supabase pooler drop, ECONNRESET, admin shutdown). Query errors

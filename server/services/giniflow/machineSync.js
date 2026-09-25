@@ -7,7 +7,10 @@ import {
   raiseOrdersFromSteps,
   sampleTakenBeforeVisit,
   labCaseAlreadyReported,
+  healthrayCaseTestNames,
 } from "./journey.js";
+import { isSameLabTest } from "../billing/testNames.js";
+import { followHealthrayCases } from "./labCaseReconcile.js";
 import { machineFor } from "../../../shared/machineStages.js";
 import { getMachines } from "./machineCatalog.js";
 import { billSuppressor, cancelDeadBillTests } from "./testCancel.js";
@@ -20,7 +23,7 @@ import { LAB_TEST_STEP_IDS } from "../../../shared/journeyOrder.js";
 import { createLogger } from "../logger.js";
 import { billReadsBlockedUntil } from "./healthrayRefresh.js";
 import { BILL_MIN_GAP_MS } from "../healthray/client.js";
-import { IST_TODAY } from "./statusEngine.js";
+import { IST_TODAY, reopenResultsForNewOrder } from "./statusEngine.js";
 import {
   billedLabLines,
   billedMachineLines,
@@ -95,6 +98,7 @@ async function raiseOrder(client, visitId, machine, { amount }) {
     [visitId, price],
   );
   const orderId = rows[0].id;
+  await reopenResultsForNewOrder(client, visitId);
   await client.query(
     `INSERT INTO giniflow_lab_order_tests (lab_order_id, test_name, price)
      VALUES ($1, $2, $3)`,
@@ -247,7 +251,10 @@ export async function syncMachineOrdersForVisit(visit, db = pool, { slotWaitMs }
       !(await sampleTakenBeforeVisit(client, visit.visit_id)) &&
       !(await labCaseAlreadyReported(client, visit.visit_id))
     ) {
-      const missing = await notYetOrdered(client, visit.visit_id, liveLabLines);
+      const onHealthrayCase = await healthrayCaseTestNames(client, visit.visit_id);
+      const missing = (await notYetOrdered(client, visit.visit_id, liveLabLines)).filter(
+        (l) => !onHealthrayCase.some((t) => isSameLabTest(t, l.name)),
+      );
       if (missing.length) {
         const r = await raiseOrdersFromSteps(client, visit.visit_id, [
           { catalogId: "blood_sample", billedIn: "healthray", billedTests: missing },
@@ -274,6 +281,15 @@ export async function syncMachineOrdersForVisit(visit, db = pool, { slotWaitMs }
         });
         raised++;
         log("raise", `${visit.name}: ${machine.name} (${line.name})`);
+      }
+    }
+    if (!FINISHED.includes(visit.current_status)) {
+      const followed = await followHealthrayCases(client, visit.visit_id);
+      if (followed.collected || followed.reported) {
+        log(
+          "lab-case",
+          `${visit.name}: ${followed.collected} order(s) collected, ${followed.reported} reported on the HealthRay case`,
+        );
       }
     }
     const billedMachines = [...new Set(liveLines.flatMap((l) => l.machines))];

@@ -13,7 +13,12 @@ import {
 import { normalizeGender, resolveCategoryFor } from "./categoryResolver.js";
 import { checkCode } from "./discountRules.js";
 import { assertBillLineBalances } from "./lineInvariant.js";
-import { refuseStandingClaims, releaseTestOrders, settleTestOrders } from "./payments.js";
+import {
+  orderStatesOn,
+  refuseReceptionMoney,
+  releaseTestOrders,
+  settleTestOrders,
+} from "./payments.js";
 import { priceBill } from "./priceBill.js";
 import { httpError, inTransaction } from "./transaction.js";
 import { auditFields, hasField, INT_MAX, lockRow, readNumber, wholeNumber } from "./common.js";
@@ -149,6 +154,7 @@ function shapeLine(row) {
     patient_payable: paise(row.patient_payable),
     claim: paise(row.claim_amount),
     adjustment: paise(row.adjustment_amount),
+    order_state: row.order_state ?? null,
   };
 }
 
@@ -273,6 +279,12 @@ async function liveLines(client, billId, { all = false } = {}) {
     [billId, all],
   );
   return rows;
+}
+
+async function shownLines(client, billId, options) {
+  const lines = await liveLines(client, billId, options);
+  const states = await orderStatesOn(client, billId);
+  return lines.map((line) => ({ ...line, order_state: states.get(line.id) ?? null }));
 }
 
 async function billCodes(client, billId) {
@@ -445,7 +457,7 @@ async function billDiscounts(client, billId) {
 }
 
 async function withLines(client, row, extra = {}) {
-  return shapeBill(row, await liveLines(client, row.id, { all: row.status === "cancelled" }), {
+  return shapeBill(row, await shownLines(client, row.id, { all: row.status === "cancelled" }), {
     discounts: await billDiscounts(client, row.id),
     ...extra,
   });
@@ -550,7 +562,7 @@ export async function readBill(billId, db = pool) {
   const id = cleanUuid(billId, "bill");
   const { rows } = await db.query(`SELECT ${BILL_COLUMNS} FROM bills WHERE id = $1`, [id]);
   if (!rows.length) throw httpError(404, "That bill no longer exists");
-  return shapeBill(rows[0], await liveLines(db, id, { all: rows[0].status === "cancelled" }), {
+  return shapeBill(rows[0], await shownLines(db, id, { all: rows[0].status === "cancelled" }), {
     codes: await billCodes(db, id),
     discounts: await billDiscounts(db, id),
   });
@@ -563,7 +575,7 @@ export async function listVisitBills(visitId, db = pool) {
     [id],
   );
   const bills = [];
-  for (const row of rows) bills.push(shapeBill(row, await liveLines(db, row.id)));
+  for (const row of rows) bills.push(shapeBill(row, await shownLines(db, row.id)));
   return bills;
 }
 
@@ -945,7 +957,7 @@ export async function finaliseBill(billId, input, ctx, db = pool) {
     await recheckCodes(client, bill, codes, ctx);
     const saved = await reprice(client, bill, codes, ctx);
     saved.priced.lines.forEach(assertBillLineBalances);
-    await refuseStandingClaims(client, saved.bill);
+    await refuseReceptionMoney(client, saved.bill);
     const category = await categoryRules(client, saved.bill.scheme_code);
     if (category.requires_referral && !saved.bill.referral_no_enc) {
       throw httpError(409, `${category.display_label} needs the referral number on the bill`);

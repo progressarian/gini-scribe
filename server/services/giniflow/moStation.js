@@ -3,7 +3,7 @@ import { linesForOrder } from "../billing/visitLines.js";
 import { OPEN_LAB_CASES_SQL } from "./labStation.js";
 import { LAB_SAMPLE_FLOW, UNDRAWN_SAMPLE_STATUSES } from "../../../shared/labStages.js";
 import { finalizeConsult } from "./finalize.js";
-import { advanceStatus, budgetColour } from "./statusEngine.js";
+import { advanceStatus, budgetColour, reopenResultsForNewOrder } from "./statusEngine.js";
 import { getSlaConfig, budgetLookup } from "./board.js";
 import {
   catalogBasePriceSql,
@@ -804,6 +804,7 @@ export async function orderTests(
         [visitId, actorId, urgency, kindTotal, schemeCode, kind],
       );
       const id = order.rows[0].id;
+      if (urgency === "today") await reopenResultsForNewOrder(client, visitId);
       await client.query(
         `INSERT INTO giniflow_lab_order_tests (lab_order_id, test_name, price)
          SELECT $1, * FROM UNNEST($2::text[], $3::numeric[])`,

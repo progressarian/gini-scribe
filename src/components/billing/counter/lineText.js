@@ -1,3 +1,19 @@
+import { ORDER_STATE } from "../../../../shared/billingVocab.js";
+
+export const ORDER_STATE_LABEL = {
+  [ORDER_STATE.CLAIM_AT_RECEPTION]: "Claim at reception",
+  [ORDER_STATE.PAID_AT_RECEPTION]: "Paid at reception",
+};
+
+export const ORDER_STATE_NOTE = {
+  [ORDER_STATE.CLAIM_AT_RECEPTION]:
+    "has its own insurance claim at reception, so this bill can't take money for it",
+  [ORDER_STATE.PAID_AT_RECEPTION]:
+    "was already paid at reception, so this bill can't take money for it",
+};
+
+export const orderStateText = (state) => ORDER_STATE_LABEL[state] ?? null;
+
 export const PAYMENT_RULE_LABEL = {
   full: "Patient pays in full",
   amount: "Patient pays a fixed amount",

@@ -365,44 +365,65 @@ const TAG_OF = {
   scheme: "^p4.*-([0-9a-f]{6})$",
 };
 
+const idsOf = async (text, params) => (await query(text, params)).rows.map((row) => row.id);
+
 export async function sweep(tag) {
   const named = `P4 % ${tag}`;
   const coded = `P4-%-${tag}`;
   const schemes = `p4%-${tag}`;
-  const patients = `SELECT id FROM patients WHERE name LIKE $1`;
-  const visits = `SELECT id FROM giniflow_visits WHERE patient_id IN (${patients})`;
-  const bills = `SELECT id FROM bills WHERE patient_id IN (${patients})`;
-  const lines = `SELECT id FROM bill_lines WHERE bill_id IN (${bills})`;
-  const items = `SELECT id FROM service_items WHERE code LIKE $1
-                 OR subgroup_id IN (SELECT id FROM service_subgroups WHERE code = 'P4S-' || $2)`;
-  await query(`DELETE FROM bill_line_discounts WHERE bill_line_id IN (${lines})`, [named]);
-  await query(`DELETE FROM bill_lines WHERE bill_id IN (${bills})`, [named]);
-  await query(`DELETE FROM payments WHERE bill_id IN (${bills})`, [named]);
-  await query(
-    `DELETE FROM billing_requests WHERE patient_id IN (${patients}) OR visit_id IN (${visits})`,
-    [named],
-  );
-  await query(
-    `DELETE FROM billing_requests WHERE created_item_id IN (${items})
-       OR service_item_id IN (${items})`,
+  const filed = `^F4([A-Za-z][A-Za-z0-9]*)?-${tag}$`;
+  const patients = await idsOf(`SELECT id FROM patients WHERE name LIKE $1 OR file_no ~ $2`, [
+    named,
+    filed,
+  ]);
+  const visits = await idsOf(`SELECT id FROM giniflow_visits WHERE patient_id = ANY($1)`, [
+    patients,
+  ]);
+  const items = await idsOf(
+    `SELECT id FROM service_items WHERE code LIKE $1
+        OR subgroup_id IN (SELECT id FROM service_subgroups WHERE code = 'P4S-' || $2)`,
     [coded, tag],
   );
-  await query(`DELETE FROM bills WHERE patient_id IN (${patients})`, [named]);
-  await query(`DELETE FROM giniflow_lab_orders WHERE visit_id IN (${visits})`, [named]);
-  await query(`DELETE FROM giniflow_visit_events WHERE visit_id IN (${visits})`, [named]);
-  await query(`DELETE FROM giniflow_visits WHERE patient_id IN (${patients})`, [named]);
-  await query(`DELETE FROM appointments WHERE patient_id IN (${patients})`, [named]);
-  await query(`DELETE FROM walkin_bookings WHERE patient_id IN (${patients})`, [named]).catch(
-    () => {},
+  const rules = await idsOf(`SELECT id FROM discount_rules WHERE name LIKE $1`, [named]);
+  const bills = await idsOf(
+    `SELECT id FROM bills
+      WHERE patient_id = ANY($1) OR visit_id = ANY($2) OR scheme_code LIKE $3
+         OR id IN (SELECT bill_id FROM bill_lines WHERE service_item_id = ANY($4))`,
+    [patients, visits, schemes, items],
   );
-  await query(`DELETE FROM documents WHERE patient_id IN (${patients})`, [named]);
-  await query(`DELETE FROM patients WHERE name LIKE $1`, [named]);
-  await query(`DELETE FROM discount_rules WHERE name LIKE $1`, [named]);
-  await query(`DELETE FROM category_payment_rules WHERE name LIKE $1 OR scheme_code LIKE $2`, [
-    named,
-    schemes,
+  const lines = await idsOf(
+    `SELECT id FROM bill_lines WHERE bill_id = ANY($1) OR service_item_id = ANY($2)`,
+    [bills, items],
+  );
+  await query(`DELETE FROM bill_line_discounts WHERE bill_line_id = ANY($1) OR rule_id = ANY($2)`, [
+    lines,
+    rules,
   ]);
-  await query(`DELETE FROM service_items WHERE id IN (${items})`, [coded, tag]);
+  await query(`DELETE FROM bill_lines WHERE id = ANY($1)`, [lines]);
+  await query(`DELETE FROM payments WHERE bill_id = ANY($1)`, [bills]);
+  await query(
+    `DELETE FROM billing_requests
+      WHERE patient_id = ANY($1) OR visit_id = ANY($2) OR bill_id = ANY($3)
+         OR created_item_id = ANY($4) OR service_item_id = ANY($4)`,
+    [patients, visits, bills, items],
+  );
+  await query(`DELETE FROM bills WHERE id = ANY($1)`, [bills]);
+  await query(`DELETE FROM giniflow_lab_orders WHERE visit_id = ANY($1)`, [visits]);
+  await query(`DELETE FROM giniflow_visit_events WHERE visit_id = ANY($1)`, [visits]);
+  await query(`DELETE FROM giniflow_visits WHERE id = ANY($1)`, [visits]);
+  await query(`DELETE FROM appointments WHERE patient_id = ANY($1)`, [patients]);
+  await query(`DELETE FROM walkin_bookings WHERE patient_id = ANY($1)`, [patients]).catch(() => {});
+  await query(`DELETE FROM documents WHERE patient_id = ANY($1)`, [patients]);
+  await query(`DELETE FROM patients WHERE id = ANY($1)`, [patients]);
+  await query(`UPDATE patients SET scheme_code = NULL WHERE scheme_code LIKE $1`, [schemes]);
+  await query(`DELETE FROM discount_rules WHERE id = ANY($1)`, [rules]);
+  await query(
+    `DELETE FROM category_payment_rules
+      WHERE name LIKE $1 OR scheme_code LIKE $2 OR service_item_id = ANY($3)`,
+    [named, schemes, items],
+  );
+  await query(`DELETE FROM category_item_rates WHERE service_item_id = ANY($1)`, [items]);
+  await query(`DELETE FROM service_items WHERE id = ANY($1)`, [items]);
   await query(`DELETE FROM giniflow_test_catalog WHERE test_name LIKE $1`, [named]);
   await query(`DELETE FROM service_subgroups WHERE code = 'P4S-' || $1`, [tag]);
   await query(`DELETE FROM service_groups WHERE code = 'P4G-' || $1`, [tag]);

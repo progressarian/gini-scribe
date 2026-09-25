@@ -732,6 +732,7 @@ test.describe.serial("P3-18 payment rules on the categories page", () => {
     );
     await openCategory(page, PAID);
     const form = await openAdd(page, nameOf(PAID));
+    await openTest(form);
     await form.getByLabel("Find preview item", { exact: true }).fill(NEW);
     await expect(form).toContainText(/Showing the first 1 of 71 — type more of the name or code/);
     await form.getByRole("button", { name: "Cancel", exact: true }).click();

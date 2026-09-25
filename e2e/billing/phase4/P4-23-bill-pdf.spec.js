@@ -296,36 +296,42 @@ test.describe.serial("P4-23 bill PDF", () => {
 
   test("6. every entered name, label and footer is escaped, never markup", async () => {
     const visit = await extraVisit(ids, "Xss");
-    await query(`UPDATE patients SET name = $2 WHERE id = $1`, [visit.patient, `P4 ${NASTY}`]);
+    await query(`UPDATE patients SET name = $2 WHERE id = $1`, [
+      visit.patient,
+      `P4 ${NASTY} ${tag}`,
+    ]);
     const item = await one(
       `INSERT INTO service_items (code, name, subgroup_id, base_price, kind)
        VALUES ($1, $2, $3, 300, 'procedure') RETURNING id`,
       [`P4-XSS-${tag}`, `P4 item ${NASTY}`, ids.subgroup],
     );
-    await query(
-      `UPDATE patient_schemes SET label = $2, print_category_on_bill = TRUE
-                  WHERE code = $1`,
-      [ids.pensioner, `P4 label ${NASTY}`],
-    );
-    await settings.updateSettings({ bill_footer: `P4 footer ${NASTY}` }, admin, db);
+    try {
+      await query(
+        `UPDATE patient_schemes SET label = $2, print_category_on_bill = TRUE
+                    WHERE code = $1`,
+        [ids.pensioner, `P4 label ${NASTY}`],
+      );
+      await settings.updateSettings({ bill_footer: `P4 footer ${NASTY}` }, admin, db);
 
-    const id = await billOn(visit.visit, [item.id]);
-    await bills.setCategory(id, { category: ids.pensioner }, desk, db);
-    await finalise(id);
+      const id = await billOn(visit.visit, [item.id]);
+      await bills.setCategory(id, { category: ids.pensioner }, desk, db);
+      await finalise(id);
 
-    const html = await htmlFor(id);
-    expect(html).not.toContain("<script>");
-    expect(html).not.toContain("alert(1)</script>");
-    expect(html).toContain(ESCAPED);
-    const seen = html.match(new RegExp(ESCAPED.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) ?? [];
-    expect(seen.length).toBeGreaterThanOrEqual(4);
-
-    await settings.updateSettings({ bill_footer: `P4 footer ${tag}` }, admin, db);
-    await query(
-      `UPDATE patient_schemes SET label = 'Pensioner', print_category_on_bill = FALSE
-                  WHERE code = $1`,
-      [ids.pensioner],
-    );
+      const html = await htmlFor(id);
+      expect(html).not.toContain("<script>");
+      expect(html).not.toContain("alert(1)</script>");
+      expect(html).toContain(ESCAPED);
+      const seen =
+        html.match(new RegExp(ESCAPED.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) ?? [];
+      expect(seen.length).toBeGreaterThanOrEqual(4);
+    } finally {
+      await settings.updateSettings({ bill_footer: `P4 footer ${tag}` }, admin, db);
+      await query(
+        `UPDATE patient_schemes SET label = 'Pensioner', print_category_on_bill = FALSE
+                    WHERE code = $1`,
+        [ids.pensioner],
+      );
+    }
   });
 
   test("7. a draft says it is not a bill, and a cancelled bill says it is cancelled", async () => {
@@ -437,41 +443,43 @@ test.describe.serial("P4-23 bill PDF", () => {
       admin,
       db,
     );
-    const visit = await extraVisit(ids, "Esc");
-    await query(`UPDATE patients SET file_no = $2 WHERE id = $1`, [
-      visit.patient,
-      `F4${NASTY}`.slice(0, 60),
-    ]);
-    const item = await one(
-      `INSERT INTO service_items (code, name, subgroup_id, base_price, kind)
-       VALUES ($1, $2, $3, 400, 'procedure') RETURNING id`,
-      [`P4-${NASTY}`.replace(/\s+/g, ""), `${LONG} ${NASTY}`, ids.subgroup],
-    );
-    await query(
-      `UPDATE patient_schemes SET payer_name = $2, print_category_on_bill = TRUE WHERE code = $1`,
-      [ids.pensioner, `P4 payer ${NASTY}`],
-    );
-    const id = await billOn(visit.visit, [item.id]);
-    await bills.setCategory(id, { category: ids.pensioner }, desk, db);
-    await query(`UPDATE bill_lines SET sac_hsn = $2 WHERE bill_id = $1`, [id, `<td>9993</td>`]);
-    const html = await htmlFor(id);
+    try {
+      const visit = await extraVisit(ids, "Esc");
+      await query(`UPDATE patients SET file_no = $2 WHERE id = $1`, [
+        visit.patient,
+        `F4${NASTY}`.slice(0, 60),
+      ]);
+      const item = await one(
+        `INSERT INTO service_items (code, name, subgroup_id, base_price, kind)
+         VALUES ($1, $2, $3, 400, 'procedure') RETURNING id`,
+        [`P4-${NASTY}`.replace(/\s+/g, ""), `${LONG} ${NASTY}`, ids.subgroup],
+      );
+      await query(
+        `UPDATE patient_schemes SET payer_name = $2, print_category_on_bill = TRUE WHERE code = $1`,
+        [ids.pensioner, `P4 payer ${NASTY}`],
+      );
+      const id = await billOn(visit.visit, [item.id]);
+      await bills.setCategory(id, { category: ids.pensioner }, desk, db);
+      await query(`UPDATE bill_lines SET sac_hsn = $2 WHERE bill_id = $1`, [id, `<td>9993</td>`]);
+      const html = await htmlFor(id);
 
-    expect(html).not.toContain("<script>");
-    expect(html).not.toContain("<b>");
-    expect(fieldOf(html, "UHID")).toContain("&lt;script&gt;");
-    expect(fieldOf(html, "Payer")).toBe(`P4 payer ${ESCAPED}`);
-    expect(fieldOf(html, "Billed by")).toBe(`P4 Hospital ${ESCAPED}`);
-    expect(fieldOf(html, "GSTIN")).toBe(GSTIN);
-    expect(cellsOf(html)).toContain(esc(`P4-${NASTY}`.replace(/\s+/g, "")));
-    expect(cellsOf(html)).toContain("&lt;td&gt;9993&lt;/td&gt;");
-    expect(html).toContain(LONG);
-    expect((html.match(/<td[ >]/g) ?? []).length).toBe((html.match(/<\/td>/g) ?? []).length);
-
-    await settings.updateSettings({ gst_enabled: false }, admin, db);
-    await query(
-      `UPDATE patient_schemes SET payer_name = NULL, print_category_on_bill = FALSE
-                  WHERE code = $1`,
-      [ids.pensioner],
-    );
+      expect(html).not.toContain("<script>");
+      expect(html).not.toContain("<b>");
+      expect(fieldOf(html, "UHID")).toContain("&lt;script&gt;");
+      expect(fieldOf(html, "Payer")).toBe(`P4 payer ${ESCAPED}`);
+      expect(fieldOf(html, "Billed by")).toBe(`P4 Hospital ${ESCAPED}`);
+      expect(fieldOf(html, "GSTIN")).toBe(GSTIN);
+      expect(cellsOf(html)).toContain(esc(`P4-${NASTY}`.replace(/\s+/g, "")));
+      expect(cellsOf(html)).toContain("&lt;td&gt;9993&lt;/td&gt;");
+      expect(html).toContain(LONG);
+      expect((html.match(/<td[ >]/g) ?? []).length).toBe((html.match(/<\/td>/g) ?? []).length);
+    } finally {
+      await settings.updateSettings({ gst_enabled: false }, admin, db);
+      await query(
+        `UPDATE patient_schemes SET payer_name = NULL, print_category_on_bill = FALSE
+                    WHERE code = $1`,
+        [ids.pensioner],
+      );
+    }
   });
 });

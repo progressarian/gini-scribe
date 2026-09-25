@@ -14,6 +14,10 @@ export const BILLING_ROLES = ["reception", "reception_admin", "admin"];
 export const RESERVED_CATEGORY_CODES = ["general"];
 export const STACKING_MODES = ["best_only", "per_rule"];
 export const BILL_SERIES = ["MAIN", "RCPT"];
+export const ORDER_STATE = {
+  CLAIM_AT_RECEPTION: "claim_at_reception",
+  PAID_AT_RECEPTION: "paid_at_reception",
+};
 
 export function financialYearOf(date) {
   const [year, month] = date.split("-").map(Number);

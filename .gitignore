@@ -31,3 +31,4 @@ docs/gini-flow/billing-consultant-list*.xlsx
 docs/gini-flow/billing-handover/
 docs/gini-flow/billing-handover-*.zip
 .~lock.*#
+.claude/

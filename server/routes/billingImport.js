@@ -48,8 +48,6 @@ const upload = [
 
 const ctx = (req) => ({ ...auditContext(req), role: req.doctor.role });
 
-const SESSIONS = `${BASE}/sessions`;
-
 const disposition = (fileName) => {
   const plain = fileName.replace(/[^\x20-\x7e]|["\\]/g, "_");
   return plain === fileName
@@ -83,7 +81,7 @@ router.get(
 );
 
 router.post(
-  SESSIONS,
+  `${BASE}/sessions`,
   upload,
   billingRoute("Billing import session", 201, (req) =>
     sessions.createSession(req.body, { fileName: req.query.fileName, ctx: ctx(req) }),
@@ -91,20 +89,20 @@ router.post(
 );
 
 router.get(
-  `${SESSIONS}/:id`,
+  `${BASE}/sessions/:id`,
   master,
   billingRoute("Billing import session", 200, (req) => sessions.getSession(req.params.id)),
 );
 
 router.get(
-  `${SESSIONS}/:id/rows`,
+  `${BASE}/sessions/:id/rows`,
   master,
   validateQuery(billingImportRowsQuerySchema, BILLING_IMPORT_LABELS),
   billingRoute("Billing import rows", 200, (req) => sessions.listRows(req.params.id, req.query)),
 );
 
 router.post(
-  `${SESSIONS}/:id/decisions`,
+  `${BASE}/sessions/:id/decisions`,
   master,
   validate(billingImportDecisionSchema, BILLING_IMPORT_LABELS),
   billingRoute("Billing import decision", 200, (req) =>
@@ -113,14 +111,14 @@ router.post(
 );
 
 router.post(
-  `${SESSIONS}/:id/commit`,
+  `${BASE}/sessions/:id/commit`,
   master,
   billingRoute("Billing import commit", 200, (req) =>
     sessions.commitSession(req.params.id, { ctx: ctx(req) }),
   ),
 );
 
-router.get(`${SESSIONS}/:id/failed`, master, async (req, res) => {
+router.get(`${BASE}/sessions/:id/failed`, master, async (req, res) => {
   try {
     const { file, fileName } = await sessions.failedRowsFile(req.params.id);
     sendXlsx(res, file, fileName);
@@ -130,7 +128,7 @@ router.get(`${SESSIONS}/:id/failed`, master, async (req, res) => {
 });
 
 router.post(
-  `${SESSIONS}/:id/abandon`,
+  `${BASE}/sessions/:id/abandon`,
   master,
   billingRoute("Billing import abandon", 200, (req) =>
     sessions.abandonSession(req.params.id, ctx(req)),

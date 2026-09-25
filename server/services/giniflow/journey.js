@@ -8,7 +8,7 @@ import {
   isTerminalStatus,
   JOURNEY_START_SQL,
 } from "../../../shared/giniflowStatus.js";
-import { advanceStatus } from "./statusEngine.js";
+import { advanceStatus, reopenResultsForNewOrder } from "./statusEngine.js";
 import { labStepsAreManual } from "../../../shared/manualFloor.js";
 import { genVisitToken } from "../flow/journey.js";
 import { LAB_RUNGS, stageIndexOf, UNDRAWN_SAMPLE_STATUSES } from "../../../shared/labStages.js";
@@ -138,6 +138,28 @@ export async function sampleTakenBeforeVisit(db, visitId) {
     [visitId],
   );
   return !!rows[0]?.earlier;
+}
+
+export async function healthrayCaseTestNames(db, visitId) {
+  const { rows: visit } = await db.query(
+    `SELECT v.patient_id, v.visit_date::text AS visit_date, p.file_no
+       FROM giniflow_visits v JOIN patients p ON p.id = v.patient_id
+      WHERE v.id = $1`,
+    [visitId],
+  );
+  if (!visit.length) return [];
+  const { patient_id: patientId, visit_date: visitDate, file_no: fileNo } = visit[0];
+  const { rows } = await db.query(
+    `SELECT lc.test_names
+       FROM lab_cases lc
+      WHERE lc.case_date = $1::date
+        AND (lc.patient_id = $2
+             OR (lc.patient_id IS NULL
+                 AND lc.raw_list_json->'patient'->>'healthray_uid' = $3))
+        AND ${LIVE_LAB_CASE_SQL("lc")}`,
+    [visitDate, patientId, fileNo],
+  );
+  return rows.flatMap((r) => r.test_names || []);
 }
 
 export async function labCaseAlreadyReported(db, visitId) {
@@ -383,6 +405,7 @@ export async function raiseOrdersFromSteps(client, visitId, steps, actorId = nul
         [visitId, actorId, total, schemeCode],
       );
       const labOrderId = order[0].id;
+      await reopenResultsForNewOrder(client, visitId);
       await client.query(
         `INSERT INTO giniflow_lab_order_tests (lab_order_id, test_name, price)
          SELECT $1, * FROM UNNEST($2::text[], $3::numeric[])`,
@@ -1046,7 +1069,7 @@ export async function syncLabStepsFromLab(db, visitId) {
   const e = rows[0];
   if (!e) return { billed: false, drawn: false };
 
-  const drawn = e.orders > 0 ? e.drawn > 0 : !!e.hr_collected;
+  const drawn = e.orders > 0 ? e.drawn === e.orders : !!e.hr_collected;
   const billed = e.orders > 0 && e.unsettled === 0;
 
   const tick = async (catalogId) =>
@@ -1059,8 +1082,17 @@ export async function syncLabStepsFromLab(db, visitId) {
           AND status IN ('pending', 'in_progress', 'skipped')`,
       [visitId, catalogId],
     );
+  const reopen = async (catalogId) =>
+    db.query(
+      `UPDATE giniflow_visit_steps
+          SET status = 'pending', completed_at = NULL
+        WHERE visit_id = $1 AND step_catalog_id = $2 AND status = 'done'`,
+      [visitId, catalogId],
+    );
   if (billed) await tick("lab_billing");
+  else if (e.orders > 0) await reopen("lab_billing");
   if (drawn) await tick("blood_sample");
+  else if (e.orders > 0) await reopen("blood_sample");
   return { billed, drawn };
 }
 

@@ -171,6 +171,9 @@
 .fset.bill-ui .tcat .pgn {
   margin-top: 12px;
 }
+.fset.bill-ui.tcat .pgn__controls {
+  flex-wrap: wrap;
+}
 .fset.bill-ui .bill-add-dialog .tcat__addform {
   grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
 }

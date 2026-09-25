@@ -1,11 +1,13 @@
 import pool from "../../config/db.js";
 import {
   CLAIM_STATE,
+  collectiblePaise,
   derivePaymentStatus,
   opensLabGate,
   paise,
   rupeesFromPaise,
 } from "../../../shared/labPayment.js";
+import { ORDER_STATE } from "../../../shared/billingVocab.js";
 import { writeAudit } from "./audit.js";
 import { nextNumber, seriesFor } from "./billNumber.js";
 import { DRAWER_MODE, openShiftIdFor, PAYMENT_MODES } from "./cashShifts.js";
@@ -261,28 +263,69 @@ const sameMoney = (order, money) =>
   paise(order.amount_claimed) === paise(money.amount_claimed) &&
   order.claim_state === money.claim_state;
 
-export async function refuseStandingClaims(client, bill) {
+const STANDING_CLAIMS = [CLAIM_STATE.SUBMITTED, CLAIM_STATE.APPROVED];
+
+function receptionState(order) {
+  if (order.settle?.after && sameMoney(order, order.settle.after)) return null;
+  if (STANDING_CLAIMS.includes(order.claim_state)) return ORDER_STATE.CLAIM_AT_RECEPTION;
+  if (paise(order.amount_paid) > 0) return ORDER_STATE.PAID_AT_RECEPTION;
+  return null;
+}
+
+async function receptionMoneyLines(client, billId) {
   const { rows } = await client.query(
-    `SELECT l.bill_name, o.id, o.amount_paid, o.amount_claimed, o.claim_state,
+    `SELECT l.id AS line_id, l.bill_name, o.id, o.amount_total, o.amount_paid, o.amount_claimed,
+            o.claim_state,
             (SELECT e.meta FROM giniflow_lab_order_events e
               WHERE e.lab_order_id = o.id AND e.track = 'payment' AND e.meta ->> 'bill_id' = $2
               ORDER BY e.occurred_at DESC, e.seq DESC LIMIT 1) AS settle
        FROM bill_lines l JOIN giniflow_lab_orders o ON o.id = l.lab_order_id
-      WHERE l.bill_id = $1 AND l.is_live AND o.claim_state = ANY($3::text[])
+      WHERE l.bill_id = $1 AND l.is_live
+        AND (o.claim_state = ANY($3::text[]) OR o.amount_paid > 0)
       ORDER BY l.line_no, l.id`,
-    [bill.id, bill.id, [CLAIM_STATE.SUBMITTED, CLAIM_STATE.APPROVED]],
+    [billId, billId, STANDING_CLAIMS],
   );
-  const standing = rows.find((row) => !(row.settle?.after && sameMoney(row, row.settle.after)));
-  if (!standing) return;
-  const way =
-    bill.status === "draft"
+  return rows
+    .map((row) => ({ ...row, order_state: receptionState(row) }))
+    .filter((row) => row.order_state);
+}
+
+export async function orderStatesOn(client, billId) {
+  const lines = await receptionMoneyLines(client, billId);
+  return new Map(lines.map((line) => [line.line_id, line.order_state]));
+}
+
+function receptionMoneyRefusal(line, bill) {
+  const draft = bill.status === "draft";
+  if (line.order_state === ORDER_STATE.CLAIM_AT_RECEPTION) {
+    const way = draft
       ? "remove it from this bill and collect the rest at reception"
       : "cancel this bill and collect the rest at reception";
-  throw httpError(
-    409,
-    `${standing.bill_name} has its own insurance claim of ₹${rupees(paise(standing.amount_claimed))} at reception, so it can't also be paid on ${billLabel(bill)} — ${way}`,
-    { code: "order_claim", lab_order_id: standing.id, claim_state: standing.claim_state },
-  );
+    return {
+      code: "order_claim",
+      message: `${line.bill_name} has its own insurance claim of ₹${rupees(paise(line.amount_claimed))} at reception, so it can't also be paid on ${billLabel(bill)} — ${way}`,
+    };
+  }
+  const rest = collectiblePaise(line) > 0;
+  const way = draft
+    ? `remove it from this bill${rest ? " and collect the rest at reception" : ""}`
+    : `cancel this bill and bill it again without this test${rest ? ", and collect the rest at reception" : ""}`;
+  return {
+    code: "order_paid",
+    message: `${line.bill_name} was already paid ₹${rupees(paise(line.amount_paid))} at reception, so it can't also be paid on ${billLabel(bill)} — ${way}`,
+  };
+}
+
+export async function refuseReceptionMoney(client, bill) {
+  const [line] = await receptionMoneyLines(client, bill.id);
+  if (!line) return;
+  const { code, message } = receptionMoneyRefusal(line, bill);
+  throw httpError(409, message, {
+    code,
+    order_state: line.order_state,
+    lab_order_id: line.id,
+    claim_state: line.claim_state,
+  });
 }
 
 async function releaseOrder(client, bill, orderId, ctx) {
@@ -338,7 +381,7 @@ export async function takePayments(billId, input, ctx, db = pool) {
         version: bill.version,
       });
     }
-    await refuseStandingClaims(client, bill);
+    await refuseReceptionMoney(client, bill);
     const outstanding = Math.max(0, paise(bill.patient_payable) - (await takenOn(client, bill.id)));
     const asked = wanted.reduce((sum, payment) => sum + payment.amount, 0);
     if (!outstanding) throw httpError(409, `Nothing is left to collect on ${billLabel(bill)}`);

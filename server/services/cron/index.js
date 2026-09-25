@@ -22,6 +22,7 @@ import {
   backfillLabPdfs,
 } from "./labSync.js";
 import { runAuthTokenCleanup } from "./authTokenCleanup.js";
+import { runImportSessionSweep } from "./importSessionSweep.js";
 import { runDocumentRecovery } from "./documentRecovery.js";
 import { runDocumentClassification } from "./documentClassification.js";
 import { getLoginCooldownMs } from "../healthray/client.js";
@@ -370,6 +371,7 @@ let pdfRetryIntervalId = null;
 let blankSweepIntervalId = null;
 let batchQueueIntervalId = null;
 let authTokenCleanupIntervalId = null;
+let importSessionSweepIntervalId = null;
 
 export function startCronJobs() {
   if (!process.env.HEALTHRAY_MOBILE && !process.env.HEALTHRAY_SESSION) {
@@ -652,6 +654,19 @@ export function startCronJobs() {
     }, AUTH_TOKEN_CLEANUP_INTERVAL_MS);
   }, AUTH_TOKEN_CLEANUP_DELAY_MS);
 
+  const IMPORT_SESSION_SWEEP_DELAY_MS = 25 * 60 * 1000;
+  const IMPORT_SESSION_SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+  setTimeout(() => {
+    runImportSessionSweep().catch((e) =>
+      console.error("[Cron] Import session sweep failed:", e.message),
+    );
+    importSessionSweepIntervalId = setInterval(() => {
+      runImportSessionSweep().catch((e) =>
+        console.error("[Cron] Import session sweep failed:", e.message),
+      );
+    }, IMPORT_SESSION_SWEEP_INTERVAL_MS);
+  }, IMPORT_SESSION_SWEEP_DELAY_MS);
+
   // ── AI batch queue: submit pending + poll/apply results ──────────────────
   // Only when AI_BATCH_ENABLED=true. Submits queued med-side-effects and
   // OPD-parse requests to Anthropic's Message Batches API (50% cheaper, async)
@@ -779,6 +794,11 @@ export function stopCronJobs() {
     authTokenCleanupIntervalId = null;
     console.log("[Cron] Auth token cleanup stopped");
   }
+  if (importSessionSweepIntervalId) {
+    clearInterval(importSessionSweepIntervalId);
+    importSessionSweepIntervalId = null;
+    console.log("[Cron] Import session sweep stopped");
+  }
 }
 
 // Manual trigger exports
@@ -803,4 +823,5 @@ export {
   forceResyncDate,
   syncAppointmentStatuses,
   runAuthTokenCleanup,
+  runImportSessionSweep,
 };

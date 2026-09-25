@@ -1072,3 +1072,10 @@ export async function cancelPauseTx(client, visitId, reason, { actorId = null, a
   );
   return true;
 }
+
+export const reopenResultsForNewOrder = (db, visitId) =>
+  db.query(
+    `UPDATE giniflow_visits SET results_status = 'partial', updated_at = NOW()
+      WHERE id = $1 AND results_status = 'ready'`,
+    [visitId],
+  );

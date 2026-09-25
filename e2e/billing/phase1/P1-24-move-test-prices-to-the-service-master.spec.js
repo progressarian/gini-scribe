@@ -33,8 +33,52 @@ const deskPrice = async (name) =>
 const machinePrice = async (name) =>
   (await machines.machineOptions([], db)).tests.find((t) => t.testName === name)?.price;
 
+const vptItemState = () =>
+  one(
+    `SELECT si.id, si.base_price, si.is_active FROM service_items si
+       JOIN giniflow_test_catalog t ON t.id = si.test_catalog_id
+      WHERE t.test_name = 'VPT'`,
+  );
+
+async function cleanUp(runTag) {
+  const patients = `SELECT id FROM patients WHERE name LIKE ANY($1::text[])`;
+  const visits = `SELECT id FROM giniflow_visits WHERE patient_id IN (${patients})`;
+  const named = [[`E2E Arrival ${runTag} %`, `E2E Machine ${runTag} %`]];
+  const items = `SELECT id FROM service_items WHERE subgroup_id IN
+                   (SELECT id FROM service_subgroups WHERE code = $1)`;
+  const sub = [`PS-${runTag}`];
+  const schemes = [[`cghs_${runTag}`, `paid_${runTag}`]];
+  await query(
+    `DELETE FROM giniflow_lab_order_tests WHERE lab_order_id IN
+       (SELECT id FROM giniflow_lab_orders WHERE visit_id IN (${visits}))`,
+    named,
+  );
+  await query(`DELETE FROM giniflow_lab_orders WHERE visit_id IN (${visits})`, named);
+  await query(`DELETE FROM giniflow_visit_events WHERE visit_id IN (${visits})`, named);
+  await query(`DELETE FROM giniflow_visits WHERE patient_id IN (${patients})`, named);
+  await query(`DELETE FROM appointments WHERE patient_id IN (${patients})`, named);
+  await query(`DELETE FROM patients WHERE name LIKE ANY($1::text[])`, named);
+  await query(`DELETE FROM category_item_rates WHERE scheme_code = ANY($1::text[])`, schemes);
+  await query(`DELETE FROM category_item_rates WHERE service_item_id IN (${items})`, sub);
+  await query(`DELETE FROM service_item_price_history WHERE service_item_id IN (${items})`, sub);
+  await query(`DELETE FROM service_items WHERE id IN (${items})`, sub);
+  await query(`DELETE FROM service_subgroups WHERE code = $1`, sub);
+  await query(`DELETE FROM service_groups WHERE code = $1`, [`PG-${runTag}`]);
+  await query(`DELETE FROM giniflow_test_catalog WHERE test_name = ANY($1::text[])`, [
+    [`Ferritin ${runTag}`, `Doppler ${runTag}`, `Unpriced ${runTag}`],
+  ]);
+  await query(`DELETE FROM patient_schemes WHERE code = $1`, [`paid_${runTag}`]);
+  await query(`DELETE FROM patient_schemes WHERE code = $1`, [`cghs_${runTag}`]);
+}
+
 test.describe.serial("P1-24 test prices move to the service master", () => {
   test.beforeAll(async () => {
+    const earlier = await query(
+      `SELECT substring(code FROM 4) AS tag FROM service_groups
+        WHERE code ~ '^PG-[0-9a-f]{6}$' AND name = 'Prices ' || substring(code FROM 4)`,
+    );
+    for (const { tag: runTag } of earlier.rows) await cleanUp(runTag);
+    ids.vptBefore = await vptItemState();
     ids.lab = (
       await one(
         `INSERT INTO giniflow_test_catalog (test_name, price, category) VALUES ($1, 150, 'lab') RETURNING id`,
@@ -63,6 +107,20 @@ test.describe.serial("P1-24 test prices move to the service master", () => {
       db,
       ctx,
     );
+  });
+
+  test.afterAll(async () => {
+    try {
+      await cleanUp(tag);
+    } finally {
+      const before = ids.vptBefore;
+      if (before)
+        await query(`UPDATE service_items SET base_price = $2, is_active = $3 WHERE id = $1`, [
+          before.id,
+          before.base_price,
+          before.is_active,
+        ]);
+    }
   });
 
   test("1. with no service item, every screen shows the catalogue price, as before", async () => {

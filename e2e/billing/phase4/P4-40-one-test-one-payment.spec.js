@@ -131,14 +131,19 @@ test.describe.serial("P4-40 one test, one payment", () => {
     expect(floor.billTakesTestPayments()).toBe(true);
   });
 
-  test("2. with the valve off, reception still collects a test on the bill, as today", async () => {
+  test("2. with the valve off, reception still collects a test on the bill, and the bill then refuses it", async () => {
     setValve(undefined);
     const { order, billId } = await onTheBill("Off");
     const cleared = await clear(order);
     expect(cleared).toMatchObject({ paymentStatus: "paid", alreadySettled: false });
-    const paid = await payOnBill(billId, 250);
-    expect(paid.orders).toHaveLength(0);
-    expect(Number((await orderRow(order)).amount_paid) + (await takenOnBill(billId))).toBe(500);
+    const error = await refused(
+      payOnBill(billId, 250),
+      409,
+      /was already paid ₹250\.00 at reception/,
+      "the bill taking a test reception already collected",
+    );
+    expect(error).toMatchObject({ code: "order_paid", lab_order_id: order });
+    expect(Number((await orderRow(order)).amount_paid) + (await takenOnBill(billId))).toBe(250);
   });
 
   test("3. with the valve on, reception refuses a test on the bill and the patient pays once", async () => {
