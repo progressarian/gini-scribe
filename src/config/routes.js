@@ -166,6 +166,8 @@ export const PAGE_CAPABILITIES = {
   "/giniflow/station/pharmacy": CAP.GINIFLOW_STATION_PHARMACY,
   "/giniflow/station/referrals": CAP.GINIFLOW_REFERRALS,
   "/giniflow/station/billing": CAP.BILLING_DESK,
+  "/billing/reports": CAP.BILLING_REPORTS,
+  "/billing/cghs-register": CAP.BILLING_CLAIMS,
   "/crm/home": CAP.CRM_ACCESS,
   "/crm/doctor/:doctorId": CAP.CRM_ACCESS,
   "/crm/visit/:doctorId": CAP.CRM_ACCESS,

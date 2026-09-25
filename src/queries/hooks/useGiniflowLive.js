@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { createRealtimeConnection } from "../../lib/giniflowRealtime";
+import { BILLING_REQUESTS_STATION, createRealtimeConnection } from "../../lib/giniflowRealtime";
 import { useQueryClient } from "@tanstack/react-query";
 import { API_URL } from "../../services/api";
 import { setLiveConnected } from "./giniflowPolling";
@@ -161,6 +161,7 @@ export function useGiniflowLive({ date, enabled = true, paused = false } = {}) {
     // telling this screen — and SSE is still the one carrying every event.
     const realtime = createRealtimeConnection({
       date,
+      station: BILLING_REQUESTS_STATION,
       onSignal: ({ kind }) => queue(INVALIDATES[kind] || ALL),
       onStatus: () => {},
     });

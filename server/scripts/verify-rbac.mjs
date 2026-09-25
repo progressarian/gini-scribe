@@ -92,6 +92,14 @@ const ROUTE_CASES = [
   ["/api/billing/master/items", "coordinator", false],
   ["/api/billing/bills", "lab", false],
   ["/api/billing/bills", "consultant", false],
+  ["/api/billing/reports", "reception", false],
+  ["/api/billing/reports/revenue_items", "reception", false],
+  ["/api/billing/reports/revenue_items/export", "reception", false],
+  ["/api/billing/reports", "coordinator", false],
+  ["/api/billing/reports/collections", "lab", false],
+  ["/api/billing/reports", "reception_admin", true],
+  ["/api/billing/reports/revenue_items/export", "reception_admin", true],
+  ["/api/billing/reports/collections", "admin", true],
   ["/api/flow/checkin", "reception_admin", true],
   ["/api/flow/reports", "reception_admin", false],
   ["/api/appointments", "reception_admin", true],
@@ -211,6 +219,7 @@ const AUTH_CASES = [
   ["/api/billing/master/payment-rules", undefined, 403],
   ["/api/billing/master/discounts", undefined, 403],
   ["/api/billing/master/consultant-fees", undefined, 403],
+  ["/api/billing/reports/revenue_items", undefined, 403],
 ];
 
 const runAuth = (path, doctor) => {

@@ -38,7 +38,7 @@ import * as bills from "../services/billing/bills.js";
 import * as payments from "../services/billing/payments.js";
 import * as shifts from "../services/billing/cashShifts.js";
 import * as requests from "../services/billing/billingRequests.js";
-import { notPricedForVisit } from "../services/billing/visitLines.js";
+import { consultationForDesk, notPricedForVisit } from "../services/billing/visitLines.js";
 import { deskSettings } from "../services/billing/billingSettings.js";
 import { searchDeskItems } from "../services/billing/serviceItems.js";
 
@@ -132,7 +132,10 @@ router.post(
   `${BASE}/visits/:visitId/bills`,
   desk,
   validate(billingDraftOpenSchema, BILLING_DESK_LABELS),
-  run("Open draft bill", 200, (req) => bills.openDraft(req.params.visitId, ctx(req))),
+  run("Open draft bill", 200, async (req) => {
+    await consultationForDesk(req.params.visitId, ctx(req));
+    return bills.openDraft(req.params.visitId, ctx(req));
+  }),
 );
 
 router.get(

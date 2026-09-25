@@ -31,7 +31,7 @@ const STACKING_LABEL = {
   best_only: "Only the best discount",
   per_rule: "Each rule's discount, one after another",
 };
-const SERIES_LABEL = { MAIN: "Bills", RCPT: "Receipts" };
+const SERIES_LABEL = { MAIN: "Bills", RCPT: "Receipts", CN: "Credit notes" };
 
 const text = (v) => (v === null || v === undefined ? "" : String(v));
 const indiaToday = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });

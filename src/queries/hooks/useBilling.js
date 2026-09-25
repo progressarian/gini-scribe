@@ -34,6 +34,7 @@ export function useVisitBills(visitId) {
     queryKey: billingKeys.visitBills(visitId),
     queryFn: () => read(`${DESK}/visits/${visitId}/bills`),
     enabled: !!visitId,
+    refetchInterval: 15 * 1000,
   });
 }
 

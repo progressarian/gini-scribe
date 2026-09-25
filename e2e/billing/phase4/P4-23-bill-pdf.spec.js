@@ -127,7 +127,11 @@ test.describe.serial("P4-23 bill PDF", () => {
     await closeOpenShifts();
     await shifts.openShift({ opening_cash: 0 }, desk, db);
     settingsWas = await settings.getSettings(db);
-    await settings.updateSettings({ bill_footer: `P4 footer ${tag}` }, admin, db);
+    await settings.updateSettings(
+      { bill_footer: `P4 footer ${tag}`, gst_enabled: false },
+      admin,
+      db,
+    );
   });
 
   test.afterAll(async () => {
@@ -269,12 +273,17 @@ test.describe.serial("P4-23 bill PDF", () => {
     expect(off).not.toContain("SGST");
     expect(off).not.toContain(GSTIN);
 
+    const visit = await extraVisit(ids, "Live");
+    const draft = await billOn(visit.visit, [ids.dressing, ids.brace]);
     await settings.updateSettings(
       { gstin: GSTIN, legal_name: `P4 Hospital ${tag}`, gst_enabled: true },
       admin,
       db,
     );
-    const on = await htmlFor(ids.general);
+    const issued = await htmlFor(ids.general);
+    expect(issued).not.toContain("SAC/HSN");
+    expect(issued).not.toContain(GSTIN);
+    const on = await htmlFor(draft);
     expect(on).toContain("SAC/HSN");
     expect(on).toContain("GST %");
     expect(on).toContain("CGST");
@@ -284,14 +293,16 @@ test.describe.serial("P4-23 bill PDF", () => {
     expect(on).toContain(`P4 Hospital ${tag}`);
     const line = await one(
       `SELECT tax_rate_pct FROM bill_lines WHERE bill_id = $1 ORDER BY line_no LIMIT 1`,
-      [ids.general],
+      [draft],
     );
     expect(on).toContain(billPdf.percentText(line.tax_rate_pct));
 
     await settings.updateSettings({ gst_enabled: false }, admin, db);
-    const back = await htmlFor(ids.general);
-    expect(back).not.toContain("SAC/HSN");
-    expect(back).not.toContain(GSTIN);
+    for (const id of [ids.general, draft]) {
+      const back = await htmlFor(id);
+      expect(back).not.toContain("SAC/HSN");
+      expect(back).not.toContain(GSTIN);
+    }
   });
 
   test("6. every entered name, label and footer is escaped, never markup", async () => {

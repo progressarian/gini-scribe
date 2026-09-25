@@ -1,10 +1,12 @@
 # 52 — Billing: OPD, Lab, Machine tests, ECHO, X-ray (and Pharmacy later)
 
 Status: **Phase T and Phase 1 built (2026-09-21); Phase 2 built (2026-09-22);
-Phase 3 built (2026-09-23)** except loading the hospital's data (P2-13 and
-P3-23), which, like Phase 0, waits on the admin team; Phases 4–7 are still a
-plan. Written 2026-09-17 against the code as it stood. What Phases 1, 2 and 3
-did differently from this plan is in §0a, §0b and §0c.
+Phase 3 built (2026-09-23); Phase 4 built (2026-09-25)** except loading the
+hospital's data (P2-13 and P3-23), which, like Phase 0, waits on the admin
+team, and the Billing Counter's floor trial (P4-38). Phase 4b (refunds) is
+designed (`52-BILLING-REFUNDS-PLAN.md`) and being built; Phases 5–7 are still a
+plan. Written 2026-09-17 against the code as it stood. What Phases 1–4 did
+differently from this plan is in §0a–§0d.
 
 Task list: `52-BILLING-TASKS.md`.
 
@@ -280,6 +282,42 @@ Where it differs from §5.3a, §5.4 and §6:
   count is zero, and the limits work from the day bills are saved.
 
 ---
+
+## 0d. Phase 4 as built (2026-09-25)
+
+Every Phase 4 task in `52-BILLING-TASKS.md` is done, each with its e2e test and
+a review, except **P4-38** — the supervised floor trial, whose checklist is
+`52-BILLING-FLOOR-TRIAL.md`. The whole billing e2e suite passed on the test
+database on 2026-09-25: **1184 tests** (two flaky, passing on retry). Where it
+differs from §5.5–§8:
+
+- **Money is whole paise inside the services** and rupees only at the SQL edge
+  (`NUMERIC(12,2)`); responses carry paise, requests take rupees.
+- **Drafts are made automatically, with no switch:** every check-in creates a
+  draft with its consultation line, and every test order adds a line. Neither
+  can fail the check-in or the order (a savepoint, a logged failure).
+- **One test is paid once.** A bill refuses to take money for, or finalise, a
+  test whose order carries money it did not write — a standing insurer claim
+  (P4-41) or cash taken at reception (P4-42) — and each line says so up front
+  (`order_state`). Reception's side refuses a test on a live bill line only once
+  `SCRIBE_BILL_TAKES_TEST_PAYMENTS=1` (P4-40), which stays off until the counter
+  is used for every patient.
+- **Paying a test line opens the lab gate** by writing the order's money
+  through, line by line in bill order; cancelling a bill restores exactly what
+  its own settle wrote, and nothing another desk collected.
+- **Cash needs an open shift**; card and UPI may go unattached. A shift's
+  expected drawer is opening cash plus cash taken.
+- **Receipts are numbered by the day they are written**, bills by their bill
+  date.
+- **Additions not in §8:** a desk item search (`GET /billing/items/search`,
+  active items, no price field) and desk settings (`GET /billing/desk-settings`,
+  flags only); the admin inbox is Settings › **Desk requests**; realtime
+  `billing_request` events on the `billing-requests` station topic, with a 15 s
+  poll as the fallback because the realtime bus is not configured.
+- **A printed bill follows the bill:** its tax block shows whenever the bill
+  carries tax, whatever today's GST setting.
+- **In production:** the Phase 4 tables (2026-09-23) and the import-session
+  tables (2026-09-24). The refunds migration is on the test database only.
 
 ## 1. What was asked (2026-09-17)
 

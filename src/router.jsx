@@ -89,6 +89,8 @@ const DeskRequestsPage = lazyWithRetry(() => import("./pages/billing/DeskRequest
 const BillingSettingsPage = lazyWithRetry(() => import("./pages/billing/BillingSettingsPage"));
 const BillingImportPage = lazyWithRetry(() => import("./pages/billing/BillingImportPage"));
 const BillingCounterPage = lazyWithRetry(() => import("./pages/billing/BillingCounterPage"));
+const BillingReportsPage = lazyWithRetry(() => import("./pages/billing/BillingReportsPage"));
+const CghsRegisterPage = lazyWithRetry(() => import("./pages/billing/CghsRegisterPage"));
 const TestCatalogPage = lazyWithRetry(() => import("./pages/TestCatalogPage"));
 const SettingsLayout = lazyWithRetry(() => import("./pages/SettingsLayout"));
 const MedicineCollectionPage = lazyWithRetry(() => import("./pages/MedicineCollectionPage"));
@@ -280,6 +282,8 @@ const router = createBrowserRouter([
               { path: "/giniflow/station/pharmacy", element: lazyEl(GiniFlowPharmacyPage) },
               { path: "/giniflow/station/referrals", element: lazyEl(GiniFlowReferralsPage) },
               { path: "/giniflow/station/billing", element: lazyEl(BillingCounterPage) },
+              { path: "/billing/reports", element: lazyEl(BillingReportsPage) },
+              { path: "/billing/cghs-register", element: lazyEl(CghsRegisterPage) },
               { path: "/crm/home", element: lazyEl(RepHomePage) },
               { path: "/crm/visit/:doctorId", element: lazyEl(AddVisitPage) },
               { path: "/crm/doctor/:doctorId", element: lazyEl(Doctor360Page) },

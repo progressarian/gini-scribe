@@ -1,0 +1,170 @@
+.fset.bill-ui.cghs-page {
+  display: grid;
+  gap: 16px;
+}
+.fset.bill-ui.cghs-page .flow-table td {
+  vertical-align: top;
+}
+.fset.bill-ui.cghs-page .flow-table td strong {
+  font-weight: 600;
+  color: var(--ui-ink);
+}
+
+.cghs-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--ui-line);
+  margin-bottom: 12px;
+}
+.cghs-tab {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 8px 14px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--ui-muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+}
+.cghs-tab:hover {
+  color: var(--ui-ink);
+}
+.cghs-tab--on {
+  color: var(--ui-accent);
+  border-bottom-color: var(--ui-accent);
+}
+.cghs-tab:focus-visible {
+  outline: 2px solid var(--ui-ring);
+  outline-offset: 2px;
+}
+
+.cghs-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 12px;
+  margin-bottom: 12px;
+}
+.fset.bill-ui .cghs-filters .fset__field {
+  min-width: 140px;
+  flex: 0 1 180px;
+}
+.cghs-filters__reset {
+  margin-bottom: 2px;
+}
+
+.cghs-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin-bottom: 10px;
+}
+.cghs-totals {
+  margin: 0;
+  color: var(--ui-ink2);
+}
+.cghs-totals strong {
+  color: var(--ui-ink);
+}
+.cghs-bar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.fset.bill-ui.cghs-page .cghs-num {
+  text-align: right;
+  white-space: nowrap;
+}
+.fset.bill-ui.cghs-page .cghs-pick {
+  width: 1%;
+}
+.fset.bill-ui.cghs-page td.bill-items__actions {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+}
+.cghs-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.cghs-difference {
+  margin: 12px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-weight: 600;
+  color: #b45309;
+  background: #fffbeb;
+}
+.cghs-difference--ok {
+  color: #15803d;
+  background: #edfcf0;
+}
+.fset.bill-ui .cghs-dialog {
+  max-width: 520px;
+}
+
+.cghs-print {
+  display: none;
+}
+
+@media print {
+  :where(body:has(.cghs-print)) * {
+    visibility: hidden;
+  }
+  .cghs-print,
+  .cghs-print * {
+    visibility: visible;
+  }
+  .cghs-print {
+    display: block;
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+    font-size: 11px;
+    color: #000;
+  }
+  .cghs-print h1 {
+    font-size: 16px;
+    margin: 0 0 6px;
+  }
+  .cghs-print h2 {
+    font-size: 13px;
+    margin: 14px 0 4px;
+  }
+  .cghs-print table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 8px;
+  }
+  .cghs-print caption {
+    text-align: left;
+    font-weight: 600;
+    padding: 4px 0;
+  }
+  .cghs-print th,
+  .cghs-print td {
+    border: 1px solid #999;
+    padding: 3px 5px;
+    text-align: left;
+  }
+  .cghs-print tfoot td {
+    font-weight: 600;
+  }
+  .cghs-print__subtotal,
+  .cghs-print__total {
+    font-weight: 700;
+  }
+  .cghs-print__group {
+    break-inside: avoid-page;
+  }
+}

@@ -1,10 +1,16 @@
 import pool from "../../config/db.js";
 import { billingVisitType } from "../../../shared/billingVisitType.js";
+import { collectiblePaise, paise } from "../../../shared/labPayment.js";
 import { writeAudit } from "./audit.js";
 import { addLineIn, billLabel, openDraftIn, repriceBillIn } from "./bills.js";
 import { getSettings } from "./billingSettings.js";
+import { UNCOVERED_SQL } from "./payments.js";
 import { httpError, inTransaction } from "./transaction.js";
 import { auditFields } from "./common.js";
+
+const ON_ANY_BILL = "bl.bill_id";
+
+const rupees = (amount) => (amount / 100).toFixed(2);
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -66,6 +72,12 @@ async function consultationItem(client, visit) {
   return rows[0] ? { ...rows[0], visit_type: visitType, chosen_doctor_id: doctorId } : null;
 }
 
+async function holdConsultation(client, visitId) {
+  await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
+    `billing-consultation:${visitId}`,
+  ]);
+}
+
 async function alreadyOnVisit(client, visitId, serviceItemId) {
   const { rows } = await client.query(
     `SELECT id FROM bill_lines WHERE visit_id = $1 AND service_item_id = $2 AND is_live LIMIT 1`,
@@ -78,9 +90,11 @@ export async function draftAtCheckIn(visitId, ctx, db = pool) {
   try {
     return await inTransaction(async (client) => {
       const visit = await visitFor(client, visitId);
+      await holdConsultation(client, visit.id);
+      const settled = await consultationSettled(client, visit.id);
       const bill = await openDraftIn(client, visitId, ctx);
       const item = await consultationItem(client, visit);
-      if (!item || (await alreadyOnVisit(client, visitId, item.id))) {
+      if (!item || settled || (await alreadyOnVisit(client, visitId, item.id))) {
         return { ok: true, bill_id: bill.id, consultation: null, added: [], not_priced: [] };
       }
       await addLineIn(
@@ -103,6 +117,52 @@ export async function draftAtCheckIn(visitId, ctx, db = pool) {
     }, db);
   } catch (error) {
     return report(`no draft bill at check-in for visit ${visitId}`, error);
+  }
+}
+
+async function consultationSettled(client, visitId) {
+  const { rows } = await client.query(
+    `SELECT 1 FROM bills WHERE visit_id = $1 AND bill_type = 'invoice' AND status = 'final'
+     UNION ALL
+     SELECT 1 FROM bill_lines l JOIN bills b ON b.id = l.bill_id
+      WHERE l.visit_id = $1 AND l.source = 'visit' AND b.status <> 'cancelled'
+     UNION ALL
+     SELECT 1 FROM billing_audit
+      WHERE entity = 'bill_lines' AND action = 'delete'
+        AND at >= (SELECT min(created_at) FROM bills WHERE visit_id = $1)
+        AND before ->> 'visit_id' = $1::text AND before ->> 'source' = 'visit'
+        AND NOT EXISTS (SELECT 1 FROM bills b
+                         WHERE b.id::text = before ->> 'bill_id' AND b.status = 'cancelled')
+     LIMIT 1`,
+    [visitId],
+  );
+  return rows.length > 0;
+}
+
+export async function consultationForDesk(visitId, ctx, db = pool) {
+  try {
+    return await inTransaction(async (client) => {
+      const visit = await visitFor(client, cleanUuid(visitId, "visit"));
+      await holdConsultation(client, visit.id);
+      const item = await consultationItem(client, visit);
+      if (
+        !item ||
+        (await consultationSettled(client, visit.id)) ||
+        (await alreadyOnVisit(client, visit.id, item.id))
+      ) {
+        return { ok: true, added: [] };
+      }
+      const bill = await openDraftIn(client, visit.id, ctx);
+      await addLineIn(
+        client,
+        bill,
+        { item_id: item.id, source: "visit", doctor_id: item.doctor_id ?? item.chosen_doctor_id },
+        ctx,
+      );
+      return { ok: true, bill_id: bill.id, added: [item.name] };
+    }, db);
+  } catch (error) {
+    return report(`no consultation line at the counter for visit ${visitId}`, error);
   }
 }
 
@@ -176,19 +236,32 @@ export async function notPricedForVisit(visitId, db = pool) {
 
 export async function refuseOrderOnBill(client, labOrderId) {
   const { rows } = await client.query(
-    `SELECT l.bill_id, l.bill_name, b.bill_no
+    `SELECT l.bill_id, l.bill_name, l.patient_payable, b.bill_no, b.status, o.amount_total,
+            o.amount_paid, o.amount_claimed, o.claim_state,
+            ${UNCOVERED_SQL(ON_ANY_BILL, "$1")} AS uncovered
        FROM bill_lines l
        JOIN bills b ON b.id = l.bill_id
+       JOIN giniflow_lab_orders o ON o.id = l.lab_order_id
       WHERE l.lab_order_id = $1 AND l.is_live
       ORDER BY l.line_no
       LIMIT 1`,
     [labOrderId],
   );
   if (!rows.length) return;
-  throw httpError(409, `${rows[0].bill_name} is on ${billLabel(rows[0])}, take the payment there`, {
+  const uncovered = paise(rows[0].uncovered);
+  if (uncovered > 0 && collectiblePaise(rows[0]) <= uncovered) return;
+  const settlesAtFinalise = rows[0].status === "draft" && !paise(rows[0].patient_payable);
+  const first = settlesAtFinalise
+    ? `Finalise ${billLabel(rows[0])} for ${rows[0].bill_name} first`
+    : `Pay ${rows[0].bill_name} on ${billLabel(rows[0])} first`;
+  const message = uncovered
+    ? `${first}; reception then collects ₹${rupees(uncovered)} for the tests the bill doesn't charge for`
+    : `${rows[0].bill_name} is on ${billLabel(rows[0])}, take the payment there`;
+  throw httpError(409, message, {
     code: "on_bill",
     bill_id: rows[0].bill_id,
     bill_no: rows[0].bill_no,
+    uncovered,
   });
 }
 

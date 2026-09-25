@@ -20,6 +20,7 @@
     "smoke:billing-import": "node scripts/smoke-billing-import.mjs",
     "smoke:billing-master": "node scripts/smoke-billing-master.mjs",
     "smoke:billing-pricing": "node scripts/smoke-billing-pricing.mjs",
+    "smoke:billing-reports": "node scripts/smoke-billing-reports.mjs",
     "smoke:bill-test-steps": "node scripts/smoke-bill-test-steps.mjs",
     "smoke:doctor-steps": "node scripts/smoke-doctor-steps.mjs",
     "smoke:doctors": "node scripts/smoke-doctor-management.mjs",

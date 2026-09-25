@@ -8,7 +8,7 @@ export { BILL_SERIES };
 
 const DATE_TEXT = /^(\d{4})-(\d{2})-(\d{2})$/;
 
-const SERIES_OF = { bill: "MAIN", receipt: "RCPT" };
+const SERIES_OF = { bill: "MAIN", receipt: "RCPT", credit_note: "CN" };
 
 export const seriesFor = (kind) => SERIES_OF[kind];
 

@@ -108,10 +108,21 @@ function billLineForTest(bill, machines, { kind, testName, machineId }) {
 async function lockVisit(client, visitId) {
   const { rows } = await client.query(
     `SELECT v.id, v.patient_id, v.visit_date::text AS visit_date, v.current_status
-       FROM giniflow_visits v WHERE v.id = $1 FOR UPDATE`,
+       FROM giniflow_visits v WHERE v.id = $1 FOR NO KEY UPDATE`,
     [visitId],
   );
   return rows[0] || null;
+}
+
+async function lockBillsOf(client, visitId, orderId) {
+  await client.query(
+    `SELECT id FROM bills
+      WHERE (visit_id = $1 AND status = 'draft' AND bill_type = 'invoice')
+         OR id IN (SELECT bill_id FROM bill_lines WHERE lab_order_id = $2)
+      ORDER BY id
+      FOR UPDATE`,
+    [visitId, orderId],
+  );
 }
 
 async function orderWithState(client, orderId) {
@@ -426,6 +437,7 @@ export async function cancelTestIn(client, input) {
     if (!head.length)
       throw bad("This test is no longer on the list — it may already be cancelled", 404);
     const visit = await lockVisit(client, head[0].visit_id);
+    await lockBillsOf(client, head[0].visit_id, target.orderId);
     const order = await orderWithState(client, target.orderId);
     if (!order) throw bad("This test is no longer on the list — it may already be cancelled", 404);
     if (input.expectKind && order.kind !== input.expectKind) {

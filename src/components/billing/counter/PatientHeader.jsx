@@ -89,7 +89,7 @@ export default function PatientHeader({ patient, bill, needsCategory, suggestion
           {(patient?.sex || "")[0] || ""}
         </div>
         <span className="badge b-ink bc-head__cat">
-          {bill.category_label || "Category not confirmed"}
+          {bill.category_label || (needsCategory ? "Category not confirmed" : "General")}
         </span>
         {bill.payer_name && <span className="bc-head__payer">Payer: {bill.payer_name}</span>}
       </div>
@@ -129,7 +129,7 @@ export default function PatientHeader({ patient, bill, needsCategory, suggestion
             value={chosen}
             onChange={(e) => setChosen(e.target.value)}
           >
-            <option value="">Choose a category…</option>
+            <option value="">General (no category)</option>
             {list
               .filter((s) => !s.parent_code)
               .map((top) => {

@@ -259,6 +259,7 @@ async function build(tag, { visitType = "New Patient" } = {}) {
   };
   ids.prefix = await series("MAIN", `P4${tag.toUpperCase()}/`);
   ids.receiptPrefix = await series("RCPT", `R4${tag.toUpperCase()}/`);
+  ids.creditPrefix = await series("CN", `C4${tag.toUpperCase()}/`);
   return ids;
 }
 
@@ -399,6 +400,9 @@ export async function sweep(tag) {
     lines,
     rules,
   ]);
+  await query(`DELETE FROM bill_lines WHERE id = ANY($1) AND credited_line_id IS NOT NULL`, [
+    lines,
+  ]);
   await query(`DELETE FROM bill_lines WHERE id = ANY($1)`, [lines]);
   await query(`DELETE FROM payments WHERE bill_id = ANY($1)`, [bills]);
   await query(
@@ -407,7 +411,22 @@ export async function sweep(tag) {
          OR created_item_id = ANY($4) OR service_item_id = ANY($4)`,
     [patients, visits, bills, items],
   );
+  const settlements = await idsOf(
+    `SELECT settlement_id AS id FROM claim_settlement_bills WHERE bill_id = ANY($1)
+     UNION SELECT claim_settlement_id FROM bills
+      WHERE id = ANY($1) AND claim_settlement_id IS NOT NULL
+     UNION SELECT id FROM claim_settlements WHERE payer_name LIKE '% ' || $2`,
+    [bills, tag],
+  );
+  await query(`DELETE FROM claim_settlement_bills WHERE bill_id = ANY($1)`, [bills]);
+  await query(`DELETE FROM bills WHERE id = ANY($1) AND original_bill_id IS NOT NULL`, [bills]);
   await query(`DELETE FROM bills WHERE id = ANY($1)`, [bills]);
+  await query(
+    `DELETE FROM claim_settlements s WHERE s.id = ANY($1)
+        AND NOT EXISTS (SELECT 1 FROM claim_settlement_bills x WHERE x.settlement_id = s.id)
+        AND NOT EXISTS (SELECT 1 FROM bills b WHERE b.claim_settlement_id = s.id)`,
+    [settlements],
+  );
   await query(`DELETE FROM giniflow_lab_orders WHERE visit_id = ANY($1)`, [visits]);
   await query(`DELETE FROM giniflow_visit_events WHERE visit_id = ANY($1)`, [visits]);
   await query(`DELETE FROM giniflow_visits WHERE id = ANY($1)`, [visits]);
@@ -461,7 +480,8 @@ async function releaseSeries(fy) {
     `DELETE FROM bill_series
       WHERE fy = $1
         AND ((series = 'MAIN' AND prefix ~ '^P4[0-9A-F]{6}/$')
-          OR (series = 'RCPT' AND prefix ~ '^R4[0-9A-F]{6}/$'))
+          OR (series = 'RCPT' AND prefix ~ '^R4[0-9A-F]{6}/$')
+          OR (series = 'CN' AND prefix ~ '^C4[0-9A-F]{6}/$'))
         AND NOT EXISTS (SELECT 1 FROM service_groups WHERE code LIKE 'P4G-%')`,
     [fy],
   );

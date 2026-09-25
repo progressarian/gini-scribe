@@ -29,7 +29,7 @@ const VALVE = "SCRIBE_BILL_TAKES_TEST_PAYMENTS";
 const PINNED = {
   getPaymentQueue: "c7e6c3f66a2c37d919dea2862aa14c50",
   clearPayment: "218f621d60d191d2d03db1d60efa536f",
-  refuseOrderOnBill: "c1ea3665083a2c8761dfaa3bc57fe852",
+  refuseOrderOnBill: "a5954f99178660f014c9af2004f86dce",
 };
 let ids;
 

@@ -194,6 +194,18 @@ const NAV_ITEMS = [
     match: (p) => p.startsWith("/flow/station") || p === "/flow/my-patients",
   },
   { path: "/flow/reports", label: "📊 Flow Reports", cap: C["/flow/reports"], show: () => true },
+  {
+    path: "/billing/reports",
+    label: "💹 Billing Reports",
+    cap: C["/billing/reports"],
+    show: () => true,
+  },
+  {
+    path: "/billing/cghs-register",
+    label: "🧾 CGHS register",
+    cap: C["/billing/cghs-register"],
+    show: () => true,
+  },
   { path: "/settings", label: "⚙️ Settings", cap: C["/settings"], show: () => true },
 ];
 

@@ -127,7 +127,7 @@ export default function TotalsAndPayment({ bill, onBill, schemes, payLater, onPa
         </tbody>
       </table>
 
-      {bill.status !== "cancelled" && balance === 0 && (
+      {bill.status !== "cancelled" && balance === 0 && bill.lines.length > 0 && (
         <div className="bc-pay__clear">No payment is needed on this bill.</div>
       )}
 

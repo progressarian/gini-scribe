@@ -465,14 +465,14 @@ export function useDeleteBillingTaxCode() {
 
 const IMPORT_KEYS = [billingKeys.all, ["giniflow"], ["patient-schemes"]];
 
-const fileNameOf = (headers, fallback) => {
+export const fileNameOf = (headers, fallback) => {
   const header = headers?.["content-disposition"] ?? "";
   const encoded = header.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
   if (encoded) return decodeURIComponent(encoded);
   return header.match(/filename="([^"]+)"/i)?.[1] ?? fallback;
 };
 
-const readBlobError = async (e) => {
+export const readBlobError = async (e) => {
   const data = e?.response?.data;
   if (data instanceof Blob) {
     try {

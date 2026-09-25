@@ -12,8 +12,11 @@ import {
 } from "./billingRequests.js";
 import { normalizeGender, resolveCategoryFor } from "./categoryResolver.js";
 import { checkCode } from "./discountRules.js";
+import { issuedGstReady } from "./issuedGst.js";
 import { assertBillLineBalances } from "./lineInvariant.js";
 import {
+  moneyOn,
+  orderShares,
   orderStatesOn,
   refuseReceptionMoney,
   releaseTestOrders,
@@ -23,7 +26,8 @@ import { priceBill } from "./priceBill.js";
 import { httpError, inTransaction } from "./transaction.js";
 import { auditFields, hasField, INT_MAX, lockRow, readNumber, wholeNumber } from "./common.js";
 
-const BILL_COLUMNS = `id, bill_no, series, fy, bill_type, patient_id, visit_id, appointment_id,
+const BILL_COLUMNS = `id, bill_no, series, fy, bill_type, original_bill_id, patient_id, visit_id,
+  appointment_id,
   bill_date::text AS bill_date, status, scheme_code, scheme_label, payer_name,
   scheme_ref_enc, referral_no_enc, referral_doc_id, patient_age, pay_later,
   actual_amount, discount_amount, tax_amount, patient_payable, claim_amount,
@@ -33,7 +37,7 @@ const BILL_COLUMNS = `id, bill_no, series, fy, bill_type, patient_id, visit_id, 
 const SPEC = { table: "bills", noun: "bill", columns: BILL_COLUMNS };
 
 const LINE_COLUMNS = `id, bill_id, visit_id, line_no, service_item_id, source, lab_order_id,
-  doctor_id, is_live, repeat_request_id, group_code, subgroup_code, item_code, bill_code,
+  doctor_id, is_live, repeat_request_id, credited_line_id, group_code, subgroup_code, item_code, bill_code,
   bill_name, quantity, base_rate, rate, listed_actual, actual_amount, listed_discount, discount,
   payable_discount, bill_discount, tax_code, sac_hsn, tax_rate_pct, taxable, cgst, sgst,
   payment_rule_id, payment_rule, patient_payable, claim_amount, adjustment_amount`;
@@ -113,7 +117,7 @@ function sealNumber(value, label) {
 
 const sameCode = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
 
-const maskTail = (stored) => {
+export const maskTail = (stored) => {
   const full = decryptAadhaarFull(stored);
   if (!full) return null;
   const text = String(full).replace(/[^0-9A-Za-z]+/g, "");
@@ -134,6 +138,7 @@ function shapeLine(row) {
     doctor_id: row.doctor_id,
     is_live: row.is_live,
     repeat_request_id: row.repeat_request_id,
+    credited_line_id: row.credited_line_id,
     group_code: row.group_code,
     subgroup_code: row.subgroup_code,
     item_code: row.item_code,
@@ -165,6 +170,7 @@ function shapeBill(row, lines = [], extra = {}) {
     series: row.series,
     fy: row.fy,
     bill_type: row.bill_type,
+    original_bill_id: row.original_bill_id,
     status: row.status,
     patient_id: row.patient_id,
     visit_id: row.visit_id,
@@ -456,8 +462,10 @@ async function billDiscounts(client, billId) {
   }));
 }
 
+const showsEveryLine = (row) => row.status !== "draft";
+
 async function withLines(client, row, extra = {}) {
-  return shapeBill(row, await shownLines(client, row.id, { all: row.status === "cancelled" }), {
+  return shapeBill(row, await shownLines(client, row.id, { all: showsEveryLine(row) }), {
     discounts: await billDiscounts(client, row.id),
     ...extra,
   });
@@ -558,13 +566,27 @@ export async function openDraft(visitId, ctx, db = pool) {
   }, db);
 }
 
+async function claimClearedOn(db, rows) {
+  const ids = rows.filter((row) => row.claim_status === "cleared").map((row) => row.id);
+  if (!ids.length) return new Map();
+  const { rows: found } = await db.query(
+    `SELECT b.id, s.received_on::text AS received_on
+       FROM bills b JOIN claim_settlements s ON s.id = b.claim_settlement_id
+      WHERE b.id = ANY($1::uuid[]) AND s.voided_at IS NULL`,
+    [ids],
+  );
+  return new Map(found.map((row) => [row.id, row.received_on]));
+}
+
 export async function readBill(billId, db = pool) {
   const id = cleanUuid(billId, "bill");
   const { rows } = await db.query(`SELECT ${BILL_COLUMNS} FROM bills WHERE id = $1`, [id]);
   if (!rows.length) throw httpError(404, "That bill no longer exists");
-  return shapeBill(rows[0], await shownLines(db, id, { all: rows[0].status === "cancelled" }), {
+  const clearedOn = await claimClearedOn(db, rows);
+  return shapeBill(rows[0], await shownLines(db, id, { all: showsEveryLine(rows[0]) }), {
     codes: await billCodes(db, id),
     discounts: await billDiscounts(db, id),
+    claim_cleared_on: clearedOn.get(rows[0].id) ?? null,
   });
 }
 
@@ -574,8 +596,15 @@ export async function listVisitBills(visitId, db = pool) {
     `SELECT ${BILL_COLUMNS} FROM bills WHERE visit_id = $1 ORDER BY created_at, id`,
     [id],
   );
+  const clearedOn = await claimClearedOn(db, rows);
   const bills = [];
-  for (const row of rows) bills.push(shapeBill(row, await shownLines(db, row.id)));
+  for (const row of rows) {
+    bills.push(
+      shapeBill(row, await shownLines(db, row.id, { all: showsEveryLine(row) }), {
+        claim_cleared_on: clearedOn.get(row.id) ?? null,
+      }),
+    );
+  }
   return bills;
 }
 
@@ -694,6 +723,25 @@ async function lineOf(client, bill, lineId) {
   return rows[0];
 }
 
+async function resettleTestOrders(client, bill, ctx) {
+  if (!(await moneyOn(client, bill.id)).held) return;
+  if ((await orderStatesOn(client, bill.id)).size) return;
+  const shares = await orderShares(client, bill);
+  const uncovered = [...shares].filter(([, share]) => !share.settled).map(([orderId]) => orderId);
+  if (uncovered.length) await releaseTestOrders(client, bill, ctx, uncovered);
+  await settleTestOrders(client, bill, ctx);
+}
+
+async function lastLineOfOrder(client, line) {
+  if (!line.lab_order_id) return false;
+  const { rows } = await client.query(
+    `SELECT 1 FROM bill_lines
+      WHERE bill_id = $1 AND lab_order_id = $2 AND is_live AND id <> $3 LIMIT 1`,
+    [line.bill_id, line.lab_order_id, line.id],
+  );
+  return !rows.length;
+}
+
 export async function changeQuantity(billId, lineId, input, ctx, db = pool) {
   const quantity = wholeNumber(input?.quantity, "Quantity", { min: 1 });
   if (quantity === undefined) throw httpError(400, "Quantity must be a whole number, 1 or more");
@@ -714,6 +762,7 @@ export async function changeQuantity(billId, lineId, input, ctx, db = pool) {
       [before.id, quantity, ctx?.actorId ?? null],
     );
     const saved = await reprice(client, bill, await billCodes(client, bill.id), ctx);
+    await resettleTestOrders(client, saved.bill, ctx);
     await writeAudit(client, {
       entity: "bill_lines",
       entityId: before.id,
@@ -731,9 +780,13 @@ export async function removeLine(billId, lineId, input, ctx, db = pool) {
   return inTransaction(async (client) => {
     const bill = assertDraft(await lockBill(client, billId));
     const before = await lineOf(client, bill, lineId);
+    if (await lastLineOfOrder(client, before)) {
+      await releaseTestOrders(client, bill, ctx, [before.lab_order_id]);
+    }
     await client.query(`DELETE FROM bill_line_discounts WHERE bill_line_id = $1`, [before.id]);
     await client.query(`DELETE FROM bill_lines WHERE id = $1`, [before.id]);
     const saved = await reprice(client, bill, await billCodes(client, bill.id), ctx);
+    await resettleTestOrders(client, saved.bill, ctx);
     await writeAudit(client, {
       entity: "bill_lines",
       entityId: before.id,
@@ -984,14 +1037,28 @@ export async function finaliseBill(billId, input, ctx, db = pool) {
     }
     const number = await nextNumber(client, seriesFor("bill"), saved.bill.bill_date, ctx);
     const claimStatus = saved.priced.totals.claim > 0 ? "pending" : "none";
+    const gst = Boolean(settings.gst_enabled) || saved.priced.totals.tax > 0;
+    const snapshot = (await issuedGstReady(client))
+      ? [gst, gst ? settings.gstin : null, gst ? settings.legal_name : null]
+      : [];
     const { rows } = await client.query(
       `UPDATE bills
           SET status = 'final', bill_no = $2, series = $3, fy = $4, claim_status = $5,
               pay_later = $6, finalised_by = $7, finalised_at = NOW(),
+              ${snapshot.length ? "issued_gst = $8, issued_gstin = $9, issued_legal_name = $10," : ""}
               version = version + 1, updated_at = NOW(), updated_by = $7
         WHERE id = $1
         RETURNING ${BILL_COLUMNS}`,
-      [bill.id, number.number, number.series, number.fy, claimStatus, later, ctx?.actorId ?? null],
+      [
+        bill.id,
+        number.number,
+        number.series,
+        number.fy,
+        claimStatus,
+        later,
+        ctx?.actorId ?? null,
+        ...snapshot,
+      ],
     );
     await settleTestOrders(client, rows[0], ctx);
     await writeAudit(client, {
@@ -1013,8 +1080,21 @@ export async function cancelBill(billId, input, ctx, db = pool) {
     if (bill.status === "draft") {
       throw httpError(409, "That bill is still a draft, so remove its lines instead");
     }
+    if (bill.bill_type === "credit_note") {
+      throw httpError(409, "A credit note can't be cancelled — it stays with the bill it credits");
+    }
     if (bill.status === "cancelled") throw httpError(409, "That bill is already cancelled");
     if (bill.claim_status === "cleared") throw httpError(409, "Already paid by CGHS");
+    const { rows: credits } = await client.query(
+      `SELECT bill_no FROM bills WHERE original_bill_id = $1 ORDER BY created_at LIMIT 1`,
+      [bill.id],
+    );
+    if (credits.length) {
+      throw httpError(
+        409,
+        `${billLabel(bill)} has credit note ${credits[0].bill_no} against it, so it can't be cancelled — refund what is left on it instead`,
+      );
+    }
     const paid = await takenOn(client, bill.id);
     if (paid > 0) throw httpError(409, "Refunds are not available yet");
     await client.query(

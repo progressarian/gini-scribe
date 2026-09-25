@@ -1,5 +1,5 @@
 import pool from "../../config/db.js";
-import { linesForOrder } from "../billing/visitLines.js";
+import { draftAtCheckIn, linesForOrder } from "../billing/visitLines.js";
 import {
   CHAIN,
   STATUS_LABEL,
@@ -592,6 +592,7 @@ export async function checkInWithJourney(
       }
     }
     await client.query("COMMIT");
+    if (!alreadyHere) await draftAtCheckIn(visitId, { actorId }, db);
     const journey = await getJourney(visitId, db);
     const { rows } = await db.query(
       `SELECT visit_token, planned_total_min FROM giniflow_visits WHERE id = $1`,

@@ -23,6 +23,8 @@ import api from "../services/api";
 // through the boundary and woke with a token about to die.
 const REFRESH_MARGIN_MS = 10 * 60 * 1000;
 
+export const BILLING_REQUESTS_STATION = "billing-requests";
+
 export function createRealtimeConnection({ date, station, onSignal, onNotice, onStatus }) {
   let client = null;
   let channels = [];
@@ -42,6 +44,24 @@ export function createRealtimeConnection({ date, station, onSignal, onNotice, on
     channels = [];
   };
 
+  const topics = [date && `giniflow:day:${date}`, station && `giniflow:station:${station}`].filter(
+    Boolean,
+  );
+
+  const join = (topic) => {
+    const ch = client.channel(topic, { config: { private: true } });
+    ch.on("broadcast", { event: "giniflow" }, ({ payload }) => {
+      if (!payload) return;
+      if (payload.kind === "notice") onNotice?.(payload);
+      else onSignal?.(payload);
+    }).subscribe((status) => {
+      // Only the day topic decides the badge. A station topic is a bonus
+      // channel; its state should not make the screen claim to be offline.
+      if (topic.startsWith("giniflow:day:")) onStatus?.(status === "SUBSCRIBED");
+    });
+    return ch;
+  };
+
   const start = async () => {
     if (stopped) return;
     let cfg;
@@ -50,10 +70,13 @@ export function createRealtimeConnection({ date, station, onSignal, onNotice, on
     } catch {
       // The API is unreachable or the capability was withdrawn. SSE and the
       // poll are still there; say nothing and stay off.
+      teardown();
       onStatus?.(false);
       return;
     }
-    if (stopped || !cfg?.enabled || !cfg.token || !cfg.url || !cfg.anonKey) {
+    if (stopped) return;
+    if (!cfg?.enabled || !cfg.token || !cfg.url || !cfg.anonKey) {
+      teardown();
       onStatus?.(false);
       return;
     }
@@ -63,37 +86,16 @@ export function createRealtimeConnection({ date, station, onSignal, onNotice, on
         auth: { persistSession: false, autoRefreshToken: false },
       });
     }
-    // The token is what the RLS policy reads. Set before subscribing, and again
-    // on every refresh, or the socket keeps authenticating as the old one.
     await client.realtime.setAuth(cfg.token);
-
-    const topics = [
-      date && `giniflow:day:${date}`,
-      station && `giniflow:station:${station}`,
-    ].filter(Boolean);
+    if (stopped || !client) return;
 
     channels = topics.map((topic) => {
-      const ch = client.channel(topic, { config: { private: true } });
-      ch.on("broadcast", { event: "giniflow" }, ({ payload }) => {
-        if (!payload) return;
-        if (payload.kind === "notice") onNotice?.(payload);
-        else onSignal?.(payload);
-      }).subscribe((status) => {
-        // Only the day topic decides the badge. A station topic is a bonus
-        // channel; its state should not make the screen claim to be offline.
-        if (topic.startsWith("giniflow:day:")) onStatus?.(status === "SUBSCRIBED");
-      });
-      return ch;
+      const held = channels.find((ch) => ch.topic === `realtime:${topic}`);
+      return held && held.state !== "closed" ? held : join(topic);
     });
 
     const ttlMs = (cfg.expiresIn || 3600) * 1000;
-    refreshTimer = setTimeout(
-      () => {
-        teardown();
-        start();
-      },
-      Math.max(60_000, ttlMs - REFRESH_MARGIN_MS),
-    );
+    refreshTimer = setTimeout(start, Math.max(60_000, ttlMs - REFRESH_MARGIN_MS));
   };
 
   return {

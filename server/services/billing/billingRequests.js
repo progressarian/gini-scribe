@@ -1,5 +1,6 @@
 import pool from "../../config/db.js";
 import { writeAudit } from "./audit.js";
+import { checkRefund, cleanRefundMode, creditNoteIn, readCreditNote } from "./creditNotes.js";
 import { createItem } from "./serviceItems.js";
 import { httpError, inTransaction } from "./transaction.js";
 import { auditFields, cleanName, hasField, INT_MAX, lockRow, readNumber } from "./common.js";
@@ -22,6 +23,11 @@ const COLUMNS = [
   "decided_by",
   "decided_at",
   "decision_note",
+  "refund_lines",
+  "requested_mode",
+  "approved_mode",
+  "mode_reason",
+  "credit_note_id",
 ];
 
 const SPEC = {
@@ -30,7 +36,7 @@ const SPEC = {
   columns: COLUMNS.join(", "),
 };
 
-export const KINDS = { new_item: "new item", repeat_item: "repeat" };
+export const KINDS = { new_item: "new item", repeat_item: "repeat", refund: "refund" };
 const PRICE_FIELDS = ["base_price", "price", "rate", "amount", "mrp", "discount"];
 export const TEXT_MAX = 1000;
 const LIST_LIMIT = 200;
@@ -131,6 +137,18 @@ const shape = (row) =>
     used_on: row.used_line_id
       ? { line_id: row.used_line_id, bill_id: row.used_bill_id, bill_no: row.used_bill_no ?? null }
       : null,
+    refund:
+      row.kind === "refund"
+        ? {
+            lines: row.refund_lines,
+            requested_mode: row.requested_mode,
+            approved_mode: row.approved_mode ?? null,
+            mode_reason: row.mode_reason ?? null,
+            credit_note: row.credit_note_id
+              ? { id: row.credit_note_id, bill_no: row.credit_note_no ?? null }
+              : null,
+          }
+        : null,
   };
 
 const LIST_SQL = `
@@ -138,17 +156,18 @@ const LIST_SQL = `
          p.name AS patient_name, p.file_no AS patient_file_no, p.age AS patient_age,
          i.code AS item_code, i.name AS item_name,
          ci.code AS created_item_code, ci.name AS created_item_name,
-         b.bill_no,
+         b.bill_no, cn.bill_no AS credit_note_no,
          rq.name AS requested_by_name, dq.name AS decided_by_name,
          l.id AS used_line_id, l.bill_id AS used_bill_id, ub.bill_no AS used_bill_no,
          v.visit_date::text AS visit_date,
-         (r.status = 'approved' AND l.id IS NULL) AS usable
+         (r.kind <> 'refund' AND r.status = 'approved' AND l.id IS NULL) AS usable
     FROM billing_requests r
     LEFT JOIN patients p ON p.id = r.patient_id
     LEFT JOIN giniflow_visits v ON v.id = r.visit_id
     LEFT JOIN service_items i ON i.id = r.service_item_id
     LEFT JOIN service_items ci ON ci.id = r.created_item_id
     LEFT JOIN bills b ON b.id = r.bill_id
+    LEFT JOIN bills cn ON cn.id = r.credit_note_id
     LEFT JOIN doctors rq ON rq.id = r.requested_by
     LEFT JOIN doctors dq ON dq.id = r.decided_by
     LEFT JOIN bill_lines l ON l.repeat_request_id = r.id
@@ -415,6 +434,91 @@ export async function createRepeatRequest(input, ctx, db = pool) {
   return request;
 }
 
+async function refundWaiting(client, billId) {
+  const { rows } = await client.query(
+    `SELECT id FROM billing_requests WHERE kind = 'refund' AND status = 'pending' AND bill_id = $1
+      LIMIT 1`,
+    [billId],
+  );
+  return rows[0] ?? null;
+}
+
+const refundWaitingError = (bill) =>
+  httpError(409, `A refund on ${billLabel(bill)} is already waiting for an admin's answer`);
+
+export async function createRefundRequest(input, ctx, db = pool) {
+  refusePrice(input);
+  const actorId = actorOf(ctx, "ask for a refund");
+  const billId = cleanUuid(input?.bill_id, "bill");
+  const reason = cleanReason(input?.reason);
+  const requestedMode = cleanRefundMode(input?.requested_mode);
+  const request = await inTransaction(async (client) => {
+    const checked = await checkRefund(client, billId, input);
+    const bill = checked.bill;
+    if (await refundWaiting(client, bill.id)) throw refundWaitingError(bill);
+    await client.query("SAVEPOINT billing_refund_request");
+    let id;
+    try {
+      id = await insertRequest(
+        client,
+        {
+          kind: "refund",
+          patient_id: bill.patient_id,
+          visit_id: bill.visit_id,
+          bill_id: bill.id,
+          refund_lines: JSON.stringify(checked.refund_lines),
+          requested_mode: requestedMode,
+          reason,
+          requested_by: actorId,
+        },
+        ctx,
+      );
+    } catch (error) {
+      if (error.code !== "23505") throw error;
+      await client.query("ROLLBACK TO SAVEPOINT billing_refund_request");
+      throw refundWaitingError(bill);
+    }
+    await client.query("RELEASE SAVEPOINT billing_refund_request");
+    return finishCreate(client, id, ctx);
+  }, db);
+  announce("created", request, db);
+  return request;
+}
+
+function cleanModeChange(before, input) {
+  const approvedMode = cleanRefundMode(input?.approved_mode ?? before.requested_mode);
+  if (approvedMode === before.requested_mode) return { approvedMode, modeReason: null };
+  const modeReason = cleanText(
+    input?.mode_reason,
+    "Say why the money goes back another way than the desk asked",
+    { required: true },
+  );
+  return { approvedMode, modeReason };
+}
+
+async function approveRefund(client, before, input, note, ctx) {
+  const { approvedMode, modeReason } = cleanModeChange(before, input);
+  const made = await creditNoteIn(
+    client,
+    {
+      billId: before.bill_id,
+      lines: before.refund_lines,
+      adminReason: note,
+      requestId: before.id,
+    },
+    ctx,
+  );
+  await client.query(
+    `UPDATE billing_requests
+        SET status = 'approved', decision_note = $2, approved_mode = $3, mode_reason = $4,
+            credit_note_id = $5, decided_by = $6, decided_at = NOW(), updated_at = NOW(),
+            updated_by = $6
+      WHERE id = $1`,
+    [before.id, note, approvedMode, modeReason, made.credit_note_id, ctx?.actorId ?? null],
+  );
+  return made;
+}
+
 const DECIDED = { approved: "approved", rejected: "rejected", used: "approved and used" };
 
 function checkPending(before) {
@@ -458,6 +562,17 @@ export async function approveRequest(id, input, ctx, db = pool) {
     const before = await lockRow(client, SPEC, requestId);
     checkPending(before);
     let createdItemId = null;
+    if (before.kind === "refund") {
+      const made = await approveRefund(client, before, input, note, { ...ctx, actorId });
+      const listed = await client.query(`${LIST_SQL} WHERE r.id = $1`, [requestId]);
+      const after = shape(listed.rows[0]);
+      await audit(client, { id: requestId, action: "approve", before, after, ctx });
+      return {
+        ...after,
+        credit_note: await readCreditNote(made.credit_note_id, client),
+        released_orders: made.released,
+      };
+    }
     if (before.kind === "new_item") {
       const item = await createItem(
         { name: before.proposed_name, ...(input?.item ?? {}) },

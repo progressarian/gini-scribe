@@ -11,6 +11,14 @@ export default function DiscountCodeBox({ bill, onBill }) {
 
   const codes = bill.codes || [];
   const automatic = (bill.discounts || []).filter((entry) => entry.method === "auto");
+  const detailOf = (entered) =>
+    (bill.discounts || []).find(
+      (entry) => entry.method === "code" && entry.code?.toLowerCase() === entered.toLowerCase(),
+    );
+  const chipText = (entered) => {
+    const detail = detailOf(entered);
+    return detail ? `${entered} · ${detail.name} · ${fromPaise(detail.amount)} off` : entered;
+  };
 
   const apply = async (event) => {
     event.preventDefault();
@@ -71,7 +79,7 @@ export default function DiscountCodeBox({ bill, onBill }) {
         <ul className="bc-chips" aria-label="Codes on this bill">
           {codes.map((entered) => (
             <li key={entered} className="bc-chip">
-              <span>{entered}</span>
+              <span>{chipText(entered)}</span>
               {bill.status === "draft" && (
                 <button
                   type="button"

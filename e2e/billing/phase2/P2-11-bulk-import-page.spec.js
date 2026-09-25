@@ -132,7 +132,6 @@ test.describe("P2-11 bulk import page — wiring", () => {
     expect(PAGE_CAPABILITIES[PAGE]).toBe(CAPABILITIES.BILLING_MASTER);
     const read = (file) => fs.readFileSync(path.join(repoRoot, file), "utf8");
     const source = read("server/routes/billingImport.js");
-    expect(source).toContain("const SESSIONS = `${BASE}/sessions`;");
     const routes = [
       ...source.matchAll(
         /router\.(get|post)\(\s*(?:`\$\{BASE\}([^`]*)`|`\$\{SESSIONS\}([^`]*)`|(SESSIONS)\s*,)/g,

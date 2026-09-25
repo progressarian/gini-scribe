@@ -11,6 +11,7 @@ import {
   readNumber,
 } from "./common.js";
 import { CAPABILITIES, hasAnyCapability } from "../../../shared/permissions.js";
+import { paise } from "../../../shared/labPayment.js";
 
 export const PAYMENT_MODES = ["cash", "card", "upi"];
 export const DRAWER_MODE = "cash";
@@ -79,34 +80,65 @@ function actorOf(ctx, doing) {
 
 const money = (value) => Number(Number(value ?? 0).toFixed(2));
 
-const TOTALS = PAYMENT_MODES.map(
-  (mode) => `COALESCE(SUM(p.amount) FILTER (WHERE p.mode = '${mode}'), 0) AS ${mode}_collected`,
-).join(",\n           ");
+const FLOWS = { collected: "in", refunded: "out" };
+
+const TOTALS = Object.entries(FLOWS)
+  .flatMap(([flow, direction]) =>
+    PAYMENT_MODES.map(
+      (mode) =>
+        `COALESCE(SUM(p.amount) FILTER (WHERE p.direction = '${direction}' AND p.mode = '${mode}'), 0) AS ${mode}_${flow}`,
+    ),
+  )
+  .join(",\n           ");
+
+const TOTAL_COLUMNS = Object.keys(FLOWS)
+  .flatMap((flow) => PAYMENT_MODES.map((mode) => `t.${mode}_${flow}`))
+  .join(", ");
+
+const DRAWER_SQL = `
+  SELECT s.opening_cash
+         + COALESCE(SUM(p.amount) FILTER (WHERE p.direction = 'in'), 0)
+         - COALESCE(SUM(p.amount) FILTER (WHERE p.direction = 'out'), 0) AS cash
+    FROM cash_shifts s
+    LEFT JOIN payments p ON p.shift_id = s.id AND p.mode = $2
+   WHERE s.id = $1
+   GROUP BY s.opening_cash`;
 
 const SHIFT_SQL = `
   SELECT s.id, s.user_id, s.opened_at, s.closed_at, s.opening_cash, s.expected_cash,
          s.counted_cash, s.difference, s.note, s.updated_by,
          u.name AS user_name, u.short_name AS user_short_name,
-         t.${PAYMENT_MODES.map((mode) => `${mode}_collected`).join(", t.")},
-         t.payment_count, t.bill_count
+         ${TOTAL_COLUMNS},
+         t.payment_count, t.bill_count, t.refund_count, t.credit_note_count
     FROM cash_shifts s
     LEFT JOIN doctors u ON u.id = s.user_id
     LEFT JOIN LATERAL (
       SELECT ${TOTALS},
-             COUNT(*) AS payment_count,
-             COUNT(DISTINCT p.bill_id) AS bill_count
+             COUNT(*) FILTER (WHERE p.direction = 'in') AS payment_count,
+             COUNT(DISTINCT p.bill_id) FILTER (WHERE p.direction = 'in') AS bill_count,
+             COUNT(*) FILTER (WHERE p.direction = 'out') AS refund_count,
+             COUNT(DISTINCT p.bill_id) FILTER (WHERE p.direction = 'out') AS credit_note_count
         FROM payments p
-       WHERE p.shift_id = s.id AND p.direction = 'in'
+       WHERE p.shift_id = s.id
     ) t ON TRUE`;
 
 const IST_DAY = `(s.opened_at AT TIME ZONE 'Asia/Kolkata')::date`;
 
+function flowOf(row, flow) {
+  const byMode = Object.fromEntries(
+    PAYMENT_MODES.map((mode) => [mode, money(row[`${mode}_${flow}`])]),
+  );
+  const total = PAYMENT_MODES.reduce((sum, mode) => sum + paise(byMode[mode]), 0);
+  return { ...byMode, total: total / 100 };
+}
+
+const drawerOf = (openingCash, collected, refunded) =>
+  (paise(openingCash) + paise(collected[DRAWER_MODE]) - paise(refunded[DRAWER_MODE])) / 100;
+
 function shape(row) {
   if (!row) return null;
-  const collected = Object.fromEntries(
-    PAYMENT_MODES.map((mode) => [mode, money(row[`${mode}_collected`])]),
-  );
-  collected.total = money(PAYMENT_MODES.reduce((sum, mode) => sum + collected[mode], 0));
+  const collected = flowOf(row, "collected");
+  const refunded = flowOf(row, "refunded");
   const openingCash = money(row.opening_cash);
   const isOpen = row.closed_at === null;
   return {
@@ -117,9 +149,12 @@ function shape(row) {
     is_open: isOpen,
     opening_cash: openingCash,
     collected,
+    refunded,
     payment_count: Number(row.payment_count ?? 0),
     bill_count: Number(row.bill_count ?? 0),
-    expected_cash: isOpen ? money(openingCash + collected[DRAWER_MODE]) : money(row.expected_cash),
+    refund_count: Number(row.refund_count ?? 0),
+    credit_note_count: Number(row.credit_note_count ?? 0),
+    expected_cash: isOpen ? drawerOf(openingCash, collected, refunded) : money(row.expected_cash),
     counted_cash: row.counted_cash === null ? null : money(row.counted_cash),
     difference: row.difference === null ? null : money(row.difference),
     note: row.note ?? null,
@@ -131,6 +166,16 @@ async function readShift(db, id) {
   const { rows } = await db.query(`${SHIFT_SQL} WHERE s.id = $1`, [id]);
   if (!rows.length) throw httpError(404, "That shift no longer exists");
   return shape(rows[0]);
+}
+
+export async function cashOutShift(client, userId) {
+  const { rows } = await client.query(
+    `SELECT id FROM cash_shifts WHERE user_id = $1 AND closed_at IS NULL FOR UPDATE`,
+    [cleanUserId(userId)],
+  );
+  if (!rows.length) return null;
+  const drawer = await client.query(DRAWER_SQL, [rows[0].id, DRAWER_MODE]);
+  return { id: rows[0].id, cash: paise(drawer.rows[0].cash) };
 }
 
 export async function openShiftIdFor(client, userId) {
@@ -229,13 +274,15 @@ export async function listMyShifts(filters = {}, ctx, db = pool) {
   return listShifts({ ...filters, userId: actorOf(ctx, "see your shifts") }, db);
 }
 
-async function expectedCashFor(client, id, openingCash) {
-  const { rows } = await client.query(
-    `SELECT COALESCE(SUM(amount), 0) AS cash
-       FROM payments WHERE shift_id = $1 AND direction = 'in' AND mode = $2`,
-    [id, DRAWER_MODE],
-  );
-  const expected = money(money(openingCash) + money(rows[0].cash));
+async function expectedCashFor(client, id) {
+  const { rows } = await client.query(DRAWER_SQL, [id, DRAWER_MODE]);
+  const expected = money(rows[0].cash);
+  if (expected < 0) {
+    throw httpError(
+      409,
+      `More cash was paid back than this shift's drawer ever held (it comes to ${expected}) — check this shift's refunds before closing it`,
+    );
+  }
   if (expected > MONEY_MAX) {
     throw httpError(
       409,
@@ -265,7 +312,7 @@ export async function closeShift(id, input = {}, ctx, db = pool) {
       throw httpError(403, "That shift belongs to another desk");
     }
     const before = await readShift(client, shiftId);
-    const expected = await expectedCashFor(client, shiftId, current.opening_cash);
+    const expected = await expectedCashFor(client, shiftId);
     await client.query(
       `UPDATE cash_shifts
           SET closed_at = GREATEST(NOW(), opened_at),

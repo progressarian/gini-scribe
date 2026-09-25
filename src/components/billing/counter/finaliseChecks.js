@@ -15,15 +15,18 @@ export function payLaterAllowed(bill, schemes = [], settings = null) {
   return Boolean(settings?.allow_pay_later);
 }
 
-export function finaliseBlockers(bill, { schemes = [], settings = null, payLater = false } = {}) {
+export function finaliseBlockers(
+  bill,
+  { schemes = [], settings = null, payLater = false, needsCategory = false } = {},
+) {
   if (bill.status !== "draft") return [];
   const blockers = [];
   if (!bill.lines.length) blockers.push("Add an item to this bill first.");
   const { scheme, parent } = schemeOf(bill, schemes);
-  if (!bill.category) blockers.push("Confirm the patient's category first.");
-  else if ((schemes || []).some((entry) => entry.parent_code === bill.category)) {
-    blockers.push("Choose a sub-category before this bill can be made final.");
-  }
+  const bareParent = bill.category
+    ? (schemes || []).some((entry) => entry.parent_code === bill.category)
+    : needsCategory;
+  if (bareParent) blockers.push("Choose a sub-category before this bill can be made final.");
   const needs = (flag) => Boolean(scheme?.[flag] || parent?.[flag]);
   if (scheme && needs("requires_referral") && !bill.referral_no) {
     blockers.push("Enter the referral number first.");

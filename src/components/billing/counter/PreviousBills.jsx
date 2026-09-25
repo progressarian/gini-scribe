@@ -2,7 +2,7 @@ import { billPdfHref } from "../../../queries/hooks/useBilling";
 import { fromPaise } from "../format";
 import { billStatusText } from "./lineText";
 
-export default function PreviousBills({ bills }) {
+export default function PreviousBills({ bills, onOpen }) {
   if (!bills.length) return null;
 
   return (
@@ -31,6 +31,16 @@ export default function PreviousBills({ bills }) {
                 <td data-label="Patient pays">{fromPaise(b.totals.payable)}</td>
                 <td data-label="Paid">{fromPaise(b.totals.paid)}</td>
                 <td data-label="" className="bc-cell-actions">
+                  {onOpen && b.status !== "draft" && (
+                    <button
+                      type="button"
+                      className="st-btn st-btn-g"
+                      aria-label={`Open bill ${b.bill_no || "draft"}`}
+                      onClick={() => onOpen(b)}
+                    >
+                      Open
+                    </button>
+                  )}
                   <a
                     className="st-btn"
                     href={billPdfHref(b.id)}

@@ -39,6 +39,7 @@ export default function AddItems({ bill, onBill }) {
   }, [bill.lines, blocked]);
 
   const items = data?.items || [];
+  const settling = search.trim() !== debounced || isFetching;
   const mine = (requests || []).filter(
     (request) => !request.visit_id || request.visit_id === bill.visit_id,
   );
@@ -149,6 +150,7 @@ export default function AddItems({ bill, onBill }) {
                   <button
                     type="button"
                     className="st-btn st-btn-g"
+                    disabled={settling}
                     onClick={() => {
                       setReason("");
                       setError(null);
@@ -161,7 +163,7 @@ export default function AddItems({ bill, onBill }) {
                   <button
                     type="button"
                     className="st-btn st-btn-grn"
-                    disabled={addLine.isPending}
+                    disabled={addLine.isPending || settling}
                     onClick={() => add(item.id)}
                   >
                     Add

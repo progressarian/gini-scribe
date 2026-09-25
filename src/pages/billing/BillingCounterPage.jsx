@@ -135,6 +135,8 @@ export default function BillingCounterPage() {
   const [payLater, setPayLater] = useState(false);
   const [tab, setTab] = useState(TABS.bill.key);
   const [duePatient, setDuePatient] = useState(null);
+  const [fresh, setFresh] = useState(0);
+  const [needsSub, setNeedsSub] = useState(false);
   const opened = useRef(null);
   const [listWidth, setListWidth] = useListWidth();
 
@@ -160,7 +162,19 @@ export default function BillingCounterPage() {
   const pick = (id) => {
     setTab(TABS.bill.key);
     setDuePatient(null);
+    if (id && id === visitId && !billId) setFresh((n) => n + 1);
     setParams(id ? { visit: id } : {});
+  };
+
+  const openEarlier = (earlierBill) => {
+    setDuePatient(selected);
+    setParams({ visit: visitId, bill: earlierBill.id });
+  };
+
+  const openVisitDraft = () => {
+    setDuePatient(null);
+    setFresh((n) => n + 1);
+    setParams(visitId ? { visit: visitId } : {});
   };
 
   const takePaymentOn = (due) => {
@@ -176,7 +190,7 @@ export default function BillingCounterPage() {
   }, [patientId, visitId, rows, setParams]);
 
   useEffect(() => {
-    const wanted = billId ? `bill:${billId}` : visitId ? `visit:${visitId}` : "";
+    const wanted = billId ? `bill:${billId}` : visitId ? `visit:${visitId}:${fresh}` : "";
     if (!wanted) {
       opened.current = null;
       setBill(null);
@@ -188,18 +202,43 @@ export default function BillingCounterPage() {
     setBill(null);
     setError(null);
     setPayLater(false);
+    setNeedsSub(false);
     const handlers = {
-      onSuccess: setBill,
-      onError: (e) => setError(errorOf(e, "This bill could not be opened")),
+      onSuccess: (found) => {
+        if (opened.current !== wanted) return;
+        setNeedsSub(Boolean(found?.needs_category));
+        setBill(found);
+      },
+      onError: (e) => {
+        if (opened.current === wanted) setError(errorOf(e, "This bill could not be opened"));
+      },
     };
     if (billId) reread.mutate({ billId }, handlers);
     else openDraft.mutate({ visitId }, handlers);
-  }, [visitId, billId]);
+  }, [visitId, billId, fresh]);
+
+  useEffect(() => {
+    if (!bill || bill.status !== "draft" || reread.isPending) return;
+    const listed = (visitBills || []).find((b) => b.id === bill.id);
+    if (!listed || listed.version <= bill.version) return;
+    reread.mutate(
+      { billId: bill.id },
+      {
+        onSuccess: (found) =>
+          setBill((current) =>
+            current?.id === found.id && found.version >= current.version ? found : current,
+          ),
+      },
+    );
+  }, [visitBills]);
 
   const duesOn = Boolean(settings?.allow_pay_later);
   const tabs = [TABS.bill, ...(duesOn ? [TABS.dues] : []), TABS.shift];
   const activeTab = tab === TABS.dues.key && !duesOn ? TABS.bill.key : tab;
   const earlier = (visitBills || []).filter((b) => b.id !== bill?.id);
+  const newerDraft = bill && bill.status !== "draft" && earlier.some((b) => b.status === "draft");
+  const startAgain = bill?.status === "cancelled" && !newerDraft;
+  const needsCategory = needsSub && !bill?.category;
   const missing = patientId && !visitId && rows.length > 0;
 
   return (
@@ -305,18 +344,34 @@ export default function BillingCounterPage() {
                 {(visitId || billId) && !bill && !error && (
                   <div className="bc-empty">Opening the bill…</div>
                 )}
+                {newerDraft && (
+                  <div className="bc-hint" role="status">
+                    A new draft bill is open on this visit.{" "}
+                    <button type="button" className="st-btn st-btn-blu" onClick={openVisitDraft}>
+                      Open the new draft bill
+                    </button>
+                  </div>
+                )}
+                {startAgain && (
+                  <div className="bc-hint" role="status">
+                    This bill was cancelled.{" "}
+                    <button type="button" className="st-btn st-btn-blu" onClick={openVisitDraft}>
+                      Start a new bill for this visit
+                    </button>
+                  </div>
+                )}
                 {bill && (
                   <>
                     <PatientHeader
                       patient={selected || duePatient}
                       bill={bill}
-                      needsCategory={bill.needs_category}
+                      needsCategory={needsCategory}
                       suggestions={bill.suggestions}
                       onBill={setBill}
                     />
                     <div className="bc-bill">
                       <div className="bc-bill__work">
-                        <PreviousBills bills={earlier} />
+                        <PreviousBills bills={earlier} onOpen={openEarlier} />
                         <BillLinesTable bill={bill} onBill={setBill} />
                         <AddItems bill={bill} onBill={setBill} />
                         <NotPricedTests tests={notPriced} />
@@ -335,6 +390,7 @@ export default function BillingCounterPage() {
                           onBill={setBill}
                           schemes={schemes || []}
                           payLater={payLater}
+                          needsCategory={needsCategory}
                         />
                       </div>
                     </div>

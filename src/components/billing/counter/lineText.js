@@ -44,7 +44,8 @@ export const PAYMENT_MODE_LABEL = { cash: "Cash", card: "Card", upi: "UPI" };
 
 export const CLAIM_BADGE = { pending: "CGHS pending", cleared: "CGHS cleared" };
 
-export const claimBadgeText = (status) => CLAIM_BADGE[status] ?? null;
+export const claimBadgeText = (status, clearedOn = null) =>
+  status === "cleared" && clearedOn ? `Cleared on ${clearedOn}` : (CLAIM_BADGE[status] ?? null);
 
 export const dueAgeText = (days) => {
   const age = Number(days || 0);

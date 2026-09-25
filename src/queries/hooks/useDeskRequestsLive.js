@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { createRealtimeConnection } from "../../lib/giniflowRealtime";
+import { BILLING_REQUESTS_STATION, createRealtimeConnection } from "../../lib/giniflowRealtime";
 import { billingKeys } from "./useBillingMaster";
 
 export default function useDeskRequestsLive() {
@@ -9,7 +9,7 @@ export default function useDeskRequestsLive() {
     if (typeof window === "undefined") return undefined;
     if (!localStorage.getItem("gini_auth_token")) return undefined;
     const connection = createRealtimeConnection({
-      station: "billing-requests",
+      station: BILLING_REQUESTS_STATION,
       onSignal: ({ kind }) => {
         if (kind !== "billing_request") return;
         queryClient.invalidateQueries({ queryKey: billingKeys.requests() });

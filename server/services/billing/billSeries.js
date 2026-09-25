@@ -62,11 +62,14 @@ const RECEIPT_IST = `(payments.received_at AT TIME ZONE 'Asia/Kolkata')`;
 const RECEIPT_FY = `to_char(${RECEIPT_IST} - INTERVAL '3 months', 'YYYY')
   || '-' || to_char(${RECEIPT_IST} + INTERVAL '9 months', 'YY')`;
 
+const BILL_ISSUED = {
+  sql: `SELECT 1 FROM bills WHERE series = $1 AND fy = $2 AND bill_no IS NOT NULL LIMIT 1`,
+  params: (series, fy) => [series, fy],
+};
+
 const ISSUED = {
-  MAIN: {
-    sql: `SELECT 1 FROM bills WHERE series = $1 AND fy = $2 AND bill_no IS NOT NULL LIMIT 1`,
-    params: (series, fy) => [series, fy],
-  },
+  MAIN: BILL_ISSUED,
+  CN: BILL_ISSUED,
   RCPT: {
     sql: `SELECT 1 FROM payments WHERE receipt_no IS NOT NULL AND ${RECEIPT_FY} = $1 LIMIT 1`,
     params: (series, fy) => [fy],

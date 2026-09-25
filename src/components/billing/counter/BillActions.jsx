@@ -12,7 +12,7 @@ import { errorOf } from "../format";
 import { claimBadgeText } from "./lineText";
 import { finaliseBlockers } from "./finaliseChecks";
 
-export default function BillActions({ bill, onBill, schemes, payLater }) {
+export default function BillActions({ bill, onBill, schemes, payLater, needsCategory }) {
   const { data: settings } = useDeskSettings();
   const finalise = useFinaliseBill();
   const cancel = useCancelBill();
@@ -22,8 +22,8 @@ export default function BillActions({ bill, onBill, schemes, payLater }) {
   const [cancelling, setCancelling] = useState(false);
   const [reason, setReason] = useState("");
 
-  const blockers = finaliseBlockers(bill, { schemes, settings, payLater });
-  const badge = claimBadgeText(bill.claim_status);
+  const blockers = finaliseBlockers(bill, { schemes, settings, payLater, needsCategory });
+  const badge = claimBadgeText(bill.claim_status, bill.claim_cleared_on);
 
   const save = async () => {
     setError(null);

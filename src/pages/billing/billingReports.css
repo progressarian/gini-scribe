@@ -1,0 +1,67 @@
+.fset.bill-ui.brep-page {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+}
+.fset.bill-ui.brep-page .fset__cardhead {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.fset.bill-ui .brep-export {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.fset.bill-ui .brep-tabs {
+  margin: 4px 0 12px;
+}
+.fset.bill-ui .brep-tab {
+  background: none;
+  border-top: 0;
+  border-left: 0;
+  border-right: 0;
+  cursor: pointer;
+  font-family: inherit;
+}
+.fset.bill-ui .brep-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+  align-items: flex-end;
+}
+.fset.bill-ui .brep-field {
+  min-width: 150px;
+  flex: 0 1 180px;
+}
+.fset.bill-ui .brep-panel {
+  display: grid;
+  gap: 16px;
+}
+.fset.bill-ui .brep-table .brep-num {
+  text-align: right;
+  white-space: nowrap;
+}
+.fset.bill-ui .brep-table .brep-subtotal td {
+  font-weight: 600;
+  background: var(--ui-soft, #f6f8fa);
+}
+.fset.bill-ui .brep-table .brep-total td {
+  font-weight: 700;
+  border-top: 2px solid #dde3ea;
+}
+.fset.bill-ui .brep-over {
+  color: #b42318;
+  font-weight: 600;
+}
+.fset.bill-ui .brep-error {
+  color: #b42318;
+}
+@media (max-width: 640px) {
+  .fset.bill-ui.brep-page {
+    padding: 8px;
+  }
+  .fset.bill-ui .brep-field {
+    flex: 1 1 100%;
+  }
+}

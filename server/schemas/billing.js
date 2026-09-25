@@ -45,6 +45,12 @@ import {
   REMAINDERS,
   VISIT_TYPES,
 } from "../../shared/billingVocab.js";
+import {
+  BILLS_AT_ONCE as CLAIM_BILLS_AT_ONCE,
+  FILTER_TEXT_MAX as CLAIM_FILTER_MAX,
+  NOTE_MAX as CLAIM_NOTE_MAX,
+  REFERENCE_MAX as CLAIM_REFERENCE_MAX,
+} from "../services/billing/cghsRegister.js";
 
 const MONEY_TEXT = /^\d+(\.\d{1,2})?$/;
 const WHOLE_TEXT = /^\d+$/;
@@ -1092,4 +1098,48 @@ export const BILLING_DESK_LABELS = {
   discount: "Discount",
   discount_amount: "Discount",
   discount_value: "Discount",
+};
+
+const claimNote = z.string().trim().max(CLAIM_NOTE_MAX);
+
+export const billingClaimsListQuerySchema = z.strictObject({
+  from: z.union([realDateText, blank]).optional(),
+  to: z.union([realDateText, blank]).optional(),
+  category: z.string().trim().max(CLAIM_FILTER_MAX).optional(),
+  doctor_id: z.union([id, blank]).optional(),
+  payer: z.string().trim().max(CLAIM_FILTER_MAX).optional(),
+  reference: z.string().trim().max(CLAIM_REFERENCE_MAX).optional(),
+});
+
+export const billingClaimsClearSchema = z.strictObject(
+  {
+    bill_ids: z
+      .array(uuid, { error: "must be a list of bills" })
+      .min(1, "list is empty: choose the bills to clear")
+      .max(CLAIM_BILLS_AT_ONCE, `can be at most ${CLAIM_BILLS_AT_ONCE} at once`),
+    received_on: realDateText,
+    reference: z.string().trim().min(1, "can't be blank").max(CLAIM_REFERENCE_MAX),
+    amount: paymentAmount,
+    note: z.union([claimNote, z.null()]).optional(),
+  },
+  objectOnly("Send the payment as an object"),
+);
+
+export const billingClaimsUndoSchema = z.strictObject(
+  { reason: z.string().trim().min(1, "can't be blank").max(CLAIM_NOTE_MAX) },
+  objectOnly("Send the reason as an object"),
+);
+
+export const BILLING_CLAIMS_LABELS = {
+  from: "From",
+  to: "To",
+  category: "Sub-category",
+  doctor_id: "Doctor",
+  payer: "Payer",
+  reference: "Reference",
+  bill_ids: "Bills",
+  received_on: "Date received",
+  amount: "The amount received",
+  note: "Note",
+  reason: "Reason",
 };

@@ -112,7 +112,11 @@ test.describe.serial("P4-14 cancel an unpaid bill", () => {
   test("5. a cleared claim is refused with 'Already paid by CGHS'", async () => {
     const { bill } = await finalBill("Cleared", { category: ids.paid, paid: true });
     await query(
-      `UPDATE bills SET claim_status = 'cleared', claim_settlement_id = gen_random_uuid()
+      `WITH s AS (
+         INSERT INTO claim_settlements (payer_name, received_on, reference, amount)
+         SELECT payer_name, bill_date, 'UTR-' || bill_no, claim_amount FROM bills WHERE id = $1
+         RETURNING id)
+       UPDATE bills SET claim_status = 'cleared', claim_settlement_id = (SELECT id FROM s)
         WHERE id = $1`,
       [bill.id],
     );

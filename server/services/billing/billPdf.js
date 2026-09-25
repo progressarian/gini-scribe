@@ -88,17 +88,28 @@ const DOCUMENT_CSS = `
 .bp-meta{display:flex;flex-wrap:wrap;gap:6px 26px;padding:14px 22px;border-bottom:1px solid var(--bd)}
 .bp-field{min-width:120px}
 .bp-label{font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink3)}
-.bp-value{font-size:12px;color:var(--ink);margin-top:2px}
+.bp-value{font-size:12px;color:var(--ink);margin-top:2px;overflow-wrap:anywhere}
 .bp-section{padding:14px 22px}
 .bp-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--ink2);margin-bottom:8px}
 table.bp-lines{width:100%;border-collapse:collapse;font-size:11px;table-layout:auto}
 table.bp-gst{font-size:9px}
-table.bp-gst th,table.bp-gst td{padding:5px 4px}
+table.bp-lines.bp-gst th,table.bp-lines.bp-gst td{padding:5px 3px}
+table.bp-lines tr{break-inside:avoid}
+table.bp-lines td{overflow-wrap:anywhere}
+table.bp-lines td.bp-sac{white-space:nowrap}
+table.bp-lines td.bp-item{min-width:8em}
 table.bp-lines th{background:var(--bg);color:var(--ink2);text-align:left;padding:6px 7px;border-bottom:1px solid var(--bd2);font-weight:600;white-space:nowrap}
 table.bp-lines td{padding:6px 7px;border-bottom:1px solid var(--bd);vertical-align:top}
 table.bp-lines .bp-num{text-align:right;font-family:var(--fm);white-space:nowrap}
 table.bp-lines th.bp-num{text-align:right}
 .bp-totals{width:52%;margin-left:auto;border-collapse:collapse;font-size:11px}
+table.bp-lines > tbody > tr.bp-closing{break-before:avoid}
+table.bp-lines > tbody > tr.bp-closing > td{padding:0;border-bottom:0}
+table.bp-lines .bp-closing .bp-section{padding:28px 0 14px}
+table.bp-lines .bp-closing .bp-section:last-child{padding-bottom:0}
+table.bp-lines .bp-closing .bp-totals td{padding:4px 8px;vertical-align:middle}
+table.bp-lines .bp-closing .bp-totals tr:not(.bp-strong) td{border-bottom:0}
+table.bp-lines .bp-closing .bp-footer{margin:0 -22px -14px}
 .bp-totals td{padding:4px 8px}
 .bp-totals td.bp-num{text-align:right;font-family:var(--fm)}
 .bp-totals tr.bp-strong td{font-weight:700;font-size:12px;border-top:1px solid var(--bd2);border-bottom:1px solid var(--bd2)}
@@ -145,14 +156,24 @@ export async function letterhead() {
   return { hospital: footer?.hospital ?? null, logo: logo?.dataUri ?? "" };
 }
 
+const issuedOf = (row) =>
+  row?.issued_gst === null || row?.issued_gst === undefined
+    ? null
+    : {
+        issued_gst: row.issued_gst,
+        issued_gstin: row.issued_gstin,
+        issued_legal_name: row.issued_legal_name,
+      };
+
 export async function billView(billId, db = pool) {
   const bill = await readBill(billId, db);
-  const [settings, patients, categories, taxes, marks] = await Promise.all([
+  const [settings, patients, categories, taxes, marks, issued] = await Promise.all([
     getSettings(db),
     db.query(PATIENT_SQL, [bill.patient_id]),
     bill.category ? db.query(CATEGORY_SQL, [bill.category]) : Promise.resolve({ rows: [] }),
     db.query(`SELECT id, sac_hsn, tax_rate_pct FROM bill_lines WHERE bill_id = $1`, [bill.id]),
     letterhead(),
+    db.query(`SELECT to_jsonb(b) AS row FROM bills b WHERE b.id = $1`, [bill.id]),
   ]);
   const byLine = new Map(taxes.rows.map((row) => [row.id, row]));
   return {
@@ -167,6 +188,7 @@ export async function billView(billId, db = pool) {
     patient: patients.rows[0] ?? null,
     category: categories.rows[0] ?? null,
     settings,
+    issued: issuedOf(issued.rows[0]?.row),
     hospital: marks.hospital,
     logo: marks.logo,
   };
@@ -208,10 +230,16 @@ function bannerHtml(bill) {
 }
 
 export const printsTax = (view) =>
-  Boolean(view?.settings?.gst_enabled) || (view?.bill?.totals?.tax ?? 0) > 0;
+  Boolean(view?.issued ? view.issued.issued_gst : view?.settings?.gst_enabled) ||
+  (view?.bill?.totals?.tax ?? 0) > 0;
+
+const gstIdentity = (view) =>
+  view?.issued
+    ? { legal_name: view.issued.issued_legal_name, gstin: view.issued.issued_gstin }
+    : { legal_name: view?.settings?.legal_name, gstin: view?.settings?.gstin };
 
 function metaHtml(view, gst) {
-  const { bill, patient, category, settings } = view;
+  const { bill, patient, category } = view;
   const fields = [
     field("Bill number", bill.bill_no || "Not issued yet"),
     field("Bill date", dateText(bill.bill_date)),
@@ -229,15 +257,16 @@ function metaHtml(view, gst) {
     if (bill.referral_no) fields.push(field("Referral number", bill.referral_no));
   }
   if (gst) {
-    if (settings?.legal_name) fields.push(field("Billed by", settings.legal_name));
-    if (settings?.gstin) fields.push(field("GSTIN", settings.gstin));
+    const { legal_name, gstin } = gstIdentity(view);
+    if (legal_name) fields.push(field("Billed by", legal_name));
+    if (gstin) fields.push(field("GSTIN", gstin));
   }
   return `<div class="bp-meta">${fields.join("")}</div>`;
 }
 
-function linesHtml(bill, gst) {
+function linesHtml(bill, gst, closing) {
   if (!bill.lines.length) {
-    return `<div class="bp-section"><div class="bp-empty">No items on this bill yet.</div></div>`;
+    return `<div class="bp-section"><div class="bp-empty">No items on this bill yet.</div></div>${closing}`;
   }
   const headings = ["#", "Bill code", "Item"]
     .concat(gst ? ["SAC/HSN"] : [])
@@ -255,9 +284,9 @@ function linesHtml(bill, gst) {
       const cells = [
         `<td class="bp-num">${index + 1}</td>`,
         `<td>${escapeHtml(line.bill_code ?? line.item_code ?? "")}</td>`,
-        `<td>${escapeHtml(line.bill_name ?? "")}</td>`,
+        `<td class="bp-item">${escapeHtml(line.bill_name ?? "")}</td>`,
       ];
-      if (gst) cells.push(`<td>${escapeHtml(line.sac_hsn ?? "")}</td>`);
+      if (gst) cells.push(`<td class="bp-sac">${escapeHtml(line.sac_hsn ?? "")}</td>`);
       cells.push(`<td class="bp-num">${line.quantity}</td>`);
       cells.push(`<td class="bp-num">${money(line.actual)}</td>`);
       cells.push(`<td class="bp-num">${money(line.discount)}</td>`);
@@ -271,9 +300,10 @@ function linesHtml(bill, gst) {
       return `<tr>${cells.join("")}</tr>`;
     })
     .join("");
+  const end = `<tr class="bp-closing"><td colspan="${headings.length}">${closing}</td></tr>`;
   return `<div class="bp-section">
     <div class="bp-title">Items</div>
-    <table class="bp-lines${gst ? " bp-gst" : ""}"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>
+    <table class="bp-lines${gst ? " bp-gst" : ""}"><thead><tr>${head}</tr></thead><tbody>${rows}${end}</tbody></table>
   </div>`;
 }
 
@@ -310,9 +340,7 @@ export function buildBillHtml(view) {
   ${letterheadHtml(escapeHtml(heading), escapeHtml(bill.bill_no || "No bill number yet"), view.logo || "", view.hospital)}
   ${bannerHtml(bill)}
   ${metaHtml(view, gst)}
-  ${linesHtml(bill, gst)}
-  ${totalsHtml(bill, gst)}
-  ${footerHtml(settings?.bill_footer)}
+  ${linesHtml(bill, gst, `${totalsHtml(bill, gst)}${footerHtml(settings?.bill_footer)}`)}
 </div>`;
   return documentHtml({ title: `${heading} ${bill.bill_no || ""}`.trim(), body });
 }

@@ -35,3 +35,22 @@ export const billingRoute = (context, status, work) => async (req, res) => {
     sendFailure(context, res, e);
   }
 };
+
+const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+const disposition = (fileName) => {
+  const plain = fileName.replace(/[^\x20-\x7e]|["\\]/g, "_");
+  return plain === fileName
+    ? `attachment; filename="${fileName}"`
+    : `attachment; filename="${plain}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+};
+
+export const sendXlsx = (res, file, fileName) => {
+  res.set({
+    "Content-Type": XLSX_TYPE,
+    "Content-Disposition": disposition(fileName),
+    "Content-Length": file.length,
+    "Cache-Control": "no-store",
+  });
+  res.send(file);
+};

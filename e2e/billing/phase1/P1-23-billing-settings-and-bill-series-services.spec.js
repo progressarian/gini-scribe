@@ -231,9 +231,9 @@ test.describe.serial("P1-23 billing settings and bill series services", () => {
 
   test("8. bad series input is refused", async () => {
     const cases = [
-      [{ series: "", fy: "2031-32" }, /must be one of: MAIN, RCPT/],
-      [{ series: "MIAN", fy: "2031-32" }, /must be one of: MAIN, RCPT/],
-      [{ series: "MA IN", fy: "2031-32" }, /must be one of: MAIN, RCPT/],
+      [{ series: "", fy: "2031-32" }, /must be one of: MAIN, RCPT, CN/],
+      [{ series: "MIAN", fy: "2031-32" }, /must be one of: MAIN, RCPT, CN/],
+      [{ series: "MA IN", fy: "2031-32" }, /must be one of: MAIN, RCPT, CN/],
       [{ series: "MAIN", fy: "2026-28" }, /like 2026-27/],
       [{ series: "MAIN", fy: "26-27" }, /like 2026-27/],
       [{ series: "MAIN", fy: "2031-32", prefix: "GAC 26/" }, /can't contain spaces/],

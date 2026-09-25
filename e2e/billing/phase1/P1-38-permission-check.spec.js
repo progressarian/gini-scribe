@@ -29,12 +29,14 @@ const routeFiles = fs
     return { file, base, declared, parsed };
   });
 
+const ADMIN_ONLY = ["/api/billing/claims/settlements/:id/undo"];
+
 const endpoints = routeFiles.flatMap(({ parsed }) =>
   parsed.map(({ method, route }) => ({
     method,
     route,
     url: route.replace(/:(\w+)/g, (_, name) => DUMMY[name] ?? "1"),
-    settings: route.startsWith("/api/billing/settings"),
+    settings: route.startsWith("/api/billing/settings") || ADMIN_ONLY.includes(route),
     desk: !/^\/api\/billing\/(master|import|claims|reports|settings)(\/|$)/.test(route),
   })),
 );

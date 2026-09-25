@@ -86,7 +86,7 @@ test.describe.serial("P1-27 settings routes", () => {
       prefix: "X/",
     });
     expect(typo.status).toBe(400);
-    expect(typo.body.error).toBe("Series must be one of: MAIN, RCPT");
+    expect(typo.body.error).toBe("Series must be one of: MAIN, RCPT, CN");
     const list = await expectOk("get", `${S}/series`);
     expect(list.find((s) => s.series === "MAIN" && s.fy === "2041-42").next_number).toBe(
       "GAC/41-42/014413",
