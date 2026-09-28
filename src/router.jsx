@@ -91,6 +91,7 @@ const BillingImportPage = lazyWithRetry(() => import("./pages/billing/BillingImp
 const BillingCounterPage = lazyWithRetry(() => import("./pages/billing/BillingCounterPage"));
 const BillingReportsPage = lazyWithRetry(() => import("./pages/billing/BillingReportsPage"));
 const CghsRegisterPage = lazyWithRetry(() => import("./pages/billing/CghsRegisterPage"));
+const DuesRegisterPage = lazyWithRetry(() => import("./pages/billing/DuesRegisterPage"));
 const TestCatalogPage = lazyWithRetry(() => import("./pages/TestCatalogPage"));
 const SettingsLayout = lazyWithRetry(() => import("./pages/SettingsLayout"));
 const MedicineCollectionPage = lazyWithRetry(() => import("./pages/MedicineCollectionPage"));
@@ -284,6 +285,7 @@ const router = createBrowserRouter([
               { path: "/giniflow/station/billing", element: lazyEl(BillingCounterPage) },
               { path: "/billing/reports", element: lazyEl(BillingReportsPage) },
               { path: "/billing/cghs-register", element: lazyEl(CghsRegisterPage) },
+              { path: "/billing/dues", element: lazyEl(DuesRegisterPage) },
               { path: "/crm/home", element: lazyEl(RepHomePage) },
               { path: "/crm/visit/:doctorId", element: lazyEl(AddVisitPage) },
               { path: "/crm/doctor/:doctorId", element: lazyEl(Doctor360Page) },

@@ -91,6 +91,14 @@ export const loginSchema = z.object({
   pin: z.string({ required_error: "PIN is required" }).min(1, "PIN is required"),
 });
 
+export const doctorRemovalSchema = z.object({
+  reason: z
+    .string({ required_error: "Give a reason for deleting this doctor" })
+    .trim()
+    .min(1, "Give a reason for deleting this doctor")
+    .max(500),
+});
+
 export const refreshTokenSchema = z.object({
   refresh_token: z
     .string({ required_error: "refresh_token is required" })

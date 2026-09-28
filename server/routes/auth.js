@@ -6,7 +6,7 @@ import pool from "../config/db.js";
 import { dbUrl, needsSsl } from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
 import { validate } from "../middleware/validate.js";
-import { loginSchema, refreshTokenSchema } from "../schemas/index.js";
+import { doctorRemovalSchema, loginSchema, refreshTokenSchema } from "../schemas/index.js";
 import { loginLimiter } from "../middleware/rateLimit.js";
 import { requireCapability } from "../middleware/auth.js";
 import { CAPABILITIES, normalizeRole } from "../../shared/permissions.js";
@@ -18,6 +18,12 @@ import {
   rotateRefreshToken,
   ttlToMs,
 } from "../services/refreshTokens.js";
+import {
+  listRemovedDoctors,
+  removalPreview,
+  removeDoctor,
+  restoreDoctor,
+} from "../services/doctorRemoval.js";
 
 if (!process.env.JWT_SECRET) {
   throw new Error(
@@ -310,5 +316,43 @@ router.patch("/doctors/:id", requireCapability(CAPABILITIES.ADMIN), async (req, 
     handleError(res, e, "Update doctor");
   }
 });
+
+const admin = requireCapability(CAPABILITIES.ADMIN);
+
+const removalCtx = (req) => ({ actorId: req.doctor.doctor_id, ip: req.ip, role: req.doctor.role });
+
+const sendRemoval = (label, work) => async (req, res) => {
+  try {
+    res.json(await work(req));
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    handleError(res, e, label);
+  }
+};
+
+router.get(
+  "/doctors/removed",
+  admin,
+  sendRemoval("Removed doctors", () => listRemovedDoctors()),
+);
+
+router.get(
+  "/doctors/:id/removal",
+  admin,
+  sendRemoval("Doctor removal preview", (req) => removalPreview(req.params.id)),
+);
+
+router.post(
+  "/doctors/:id/removal",
+  admin,
+  validate(doctorRemovalSchema),
+  sendRemoval("Delete doctor", (req) => removeDoctor(req.params.id, req.body, removalCtx(req))),
+);
+
+router.delete(
+  "/doctors/:id/removal",
+  admin,
+  sendRemoval("Restore doctor", (req) => restoreDoctor(req.params.id, removalCtx(req))),
+);
 
 export default router;

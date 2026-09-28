@@ -153,6 +153,58 @@
   font-size: 11.5px;
   color: var(--ink3);
 }
+.gf .bc-row__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.gf .bc-badge {
+  padding: 0 7px;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+  border-radius: 999px;
+  color: var(--ink3);
+  background: var(--bg);
+}
+.gf .bc-badge--online {
+  color: var(--pu);
+  background: var(--pu-l);
+}
+.gf .bc-badge--samples {
+  color: var(--blu);
+  background: var(--blu-l);
+}
+.gf .bc-badge--draft {
+  color: var(--amb);
+  background: var(--amb-l);
+}
+.gf .bc-badge--due {
+  color: var(--red);
+  background: var(--red-l);
+}
+.gf .bc-badge--claim {
+  color: var(--tl);
+  background: var(--tl-l);
+}
+.gf .bc-badge--paid {
+  color: var(--grn);
+  background: var(--grn-l);
+}
+.gf .bc-group--toggle {
+  width: 100%;
+  gap: 6px;
+  font-family: inherit;
+  text-align: left;
+  border: 0;
+  border-top: 1px solid var(--bd);
+  cursor: pointer;
+}
+.gf .bc-group--toggle:focus-visible {
+  outline: 2px solid var(--tl);
+  outline-offset: -2px;
+}
 
 .gf .bc-resizer {
   position: relative;
@@ -1014,4 +1066,26 @@ body.bc-resizing {
 }
 .gf .bc-main .bc-pay__money .bc-field__in {
   padding-left: 22px;
+}
+.gf .bc-earlier {
+  margin-bottom: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  color: var(--amb);
+  background: var(--amb-l);
+}
+.gf .bc-earlier__list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.gf .bc-earlier__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
 }

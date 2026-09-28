@@ -551,6 +551,22 @@ grid. Example the admin would enter (figures from the hospital, 2026-09-17):
 | Dr Beant    | any        | (base)  | fee ₹350, pays ₹0 | fee ₹350, pays ₹0    |
 | Dr Banshali | any        | (base)  | fee ₹700, pays ₹0 | fee ₹700, pays ₹0    |
 
+**A removed doctor bills nothing (P4C-08, decided 2026-09-28).** An admin
+deletes a doctor from Doctor Management with a reason. It is a soft delete:
+`doctors.is_active` goes false and `removed_at`, `removed_by` and
+`removed_reason` record it, so past consultations, final bills, receipts,
+reports and the CGHS register keep the name. At once the doctor is signed out
+everywhere and their consultation items are deactivated. From then on the
+server refuses, naming the doctor: a line for their consultation (their own item,
+or the hospital default charged to them); finalising a draft that still holds
+one (the desk removes the line); an item, fee, category rate or discount aimed at
+them, on screen or by import; and a doctor-only discount on their lines. Check-in
+drafts no consultation fee for a visit with a removed doctor and never falls
+back to the hospital default; the counter says the doctor was removed. An open
+draft that already holds their line keeps working until the desk removes it.
+Final bills are untouched. **Restore** lets the doctor log in again but does not
+reactivate their consultation items; the admin does that on the Services page.
+
 ### 5.2 Categories (extend `patient_schemes`)
 
 ```sql
@@ -1437,6 +1453,7 @@ reception_admin.
 | `BILLING_SETTINGS` | Stacking mode, pay-later toggle, GST switch and GSTIN, tax codes, bill series                                                                                             | ✓     |                 |           |
 | `BILLING_CLAIMS`   | CGHS pending register: view, clear one or many bills, export (undo clear: admin only)                                                                                     | ✓     | ✓               |           |
 | `BILLING_REPORTS`  | Dashboards and exports                                                                                                                                                    | ✓     | ✓               |           |
+| `BILLING_DUES`     | Dues page: every final bill with money still owed, filtered, paged and exported                                                                                           | ✓     | ✓               |           |
 
 **Only these three roles for now** (Q18, decided 2026-09-17). The coordinator
 and other roles get no billing access; access can be widened later.

@@ -5,6 +5,7 @@ import { writeAudit } from "./audit.js";
 import { addLineIn, billLabel, openDraftIn, repriceBillIn } from "./bills.js";
 import { getSettings } from "./billingSettings.js";
 import { UNCOVERED_SQL } from "./payments.js";
+import { removedDoctor } from "./removedDoctors.js";
 import { httpError, inTransaction } from "./transaction.js";
 import { auditFields } from "./common.js";
 
@@ -61,6 +62,8 @@ async function consultationItem(client, visit) {
   const visitType = billingVisitType(visit.visit_type);
   if (!visitType) return null;
   const doctorId = visit.appointment_doctor_id ?? visit.assigned_doctor_id ?? null;
+  const removed = await removedDoctor(doctorId, client);
+  if (removed) return { removed };
   const { rows } = await client.query(
     `SELECT id, name, doctor_id FROM service_items
       WHERE kind = 'consultation' AND is_active AND visit_type = $1
@@ -94,6 +97,16 @@ export async function draftAtCheckIn(visitId, ctx, db = pool) {
       const settled = await consultationSettled(client, visit.id);
       const bill = await openDraftIn(client, visitId, ctx);
       const item = await consultationItem(client, visit);
+      if (item?.removed) {
+        return {
+          ok: true,
+          bill_id: bill.id,
+          consultation: null,
+          added: [],
+          not_priced: [],
+          removed_doctor: item.removed,
+        };
+      }
       if (!item || settled || (await alreadyOnVisit(client, visitId, item.id))) {
         return { ok: true, bill_id: bill.id, consultation: null, added: [], not_priced: [] };
       }
@@ -145,6 +158,7 @@ export async function consultationForDesk(visitId, ctx, db = pool) {
       const visit = await visitFor(client, cleanUuid(visitId, "visit"));
       await holdConsultation(client, visit.id);
       const item = await consultationItem(client, visit);
+      if (item?.removed) return { ok: true, added: [], removed_doctor: item.removed };
       if (
         !item ||
         (await consultationSettled(client, visit.id)) ||
@@ -207,6 +221,7 @@ export async function linesForOrder(visitId, { labOrderId, testNames = [] } = {}
           }, outer);
           added.push(name);
         } catch (error) {
+          if (error.code === "40P01") throw error;
           skipped.push({ test: name, message: error.message });
         }
       }
@@ -216,6 +231,7 @@ export async function linesForOrder(visitId, { labOrderId, testNames = [] } = {}
       return { ok: true, bill_id: billId, added, not_priced: notPriced, skipped };
     }, db);
   } catch (error) {
+    if (error.code === "40P01") throw error;
     return report(`no bill lines for the tests ordered on visit ${visitId}`, error);
   }
 }

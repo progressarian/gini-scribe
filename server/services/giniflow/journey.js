@@ -472,7 +472,7 @@ export async function checkInWithJourney(
     const existing = await client.query(
       `SELECT v.current_status, v.patient_id, v.visit_date,
               (SELECT count(*)::int FROM giniflow_visit_steps s WHERE s.visit_id = v.id) AS steps
-         FROM giniflow_visits v WHERE v.id = $1 FOR UPDATE`,
+         FROM giniflow_visits v WHERE v.id = $1 FOR NO KEY UPDATE`,
       [visitId],
     );
     if (!existing.rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });

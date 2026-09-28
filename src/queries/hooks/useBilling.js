@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api, { API_URL } from "../../services/api";
 import { billingKeys } from "./useBillingMaster";
+import { pollInterval } from "./giniflowPolling";
 
 const DESK = "/api/billing";
 
 const DUES = billingKeys.dues().slice(0, -1);
 const SHIFTS_MINE = billingKeys.myShifts().slice(0, -1);
+const COUNTER_PATIENTS = ["giniflow", "reception", "billing-counter"];
 
 const read = async (url, params) => (await api.get(url, params ? { params } : undefined)).data;
 
@@ -25,7 +27,18 @@ function useVisitMutation(mutationFn) {
     onSuccess: (_bill, variables) => {
       queryClient.invalidateQueries({ queryKey: billingKeys.visitBills(variables?.visitId) });
       queryClient.invalidateQueries({ queryKey: billingKeys.visitNotPriced(variables?.visitId) });
+      queryClient.invalidateQueries({ queryKey: COUNTER_PATIENTS });
     },
+  });
+}
+
+export function useCounterPatients(q = "") {
+  return useQuery({
+    queryKey: [...COUNTER_PATIENTS, q],
+    queryFn: () => read(`${DESK}/counter/patients`, q ? { q } : undefined),
+    refetchInterval: pollInterval,
+    refetchIntervalInBackground: false,
+    placeholderData: (prev) => prev,
   });
 }
 
@@ -152,6 +165,7 @@ export function useTakePayments() {
       queryClient.invalidateQueries({ queryKey: billingKeys.billPayments(variables?.billId) });
       queryClient.invalidateQueries({ queryKey: billingKeys.currentShift() });
       queryClient.invalidateQueries({ queryKey: DUES });
+      queryClient.invalidateQueries({ queryKey: COUNTER_PATIENTS });
     },
   });
 }
@@ -168,6 +182,21 @@ export function useDues(filters) {
   return useQuery({
     queryKey: billingKeys.dues(filters),
     queryFn: () => read(`${DESK}/dues`, filters),
+  });
+}
+
+export function useDuesToday() {
+  return useQuery({
+    queryKey: [...DUES, "today"],
+    queryFn: () => read(`${DESK}/dues/today`),
+  });
+}
+
+export function usePatientDues(patientId) {
+  return useQuery({
+    queryKey: billingKeys.dues({ patient_id: patientId }),
+    queryFn: () => read(`${DESK}/dues`, { patient_id: patientId }),
+    enabled: !!patientId,
   });
 }
 

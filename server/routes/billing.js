@@ -28,6 +28,7 @@ import {
   billingShiftCloseSchema,
   billingShiftListQuerySchema,
   billingShiftOpenSchema,
+  giniflowArrivalsQuerySchema,
 } from "../schemas/index.js";
 import { billingRoute, sendFailure } from "./billingHttp.js";
 import { auditContext } from "../services/billing/audit.js";
@@ -36,11 +37,13 @@ import { generateBillPdf } from "../services/billing/billPdf.js";
 import { generateReceiptPdf } from "../services/billing/receiptPdf.js";
 import * as bills from "../services/billing/bills.js";
 import * as payments from "../services/billing/payments.js";
+import { duesToday } from "../services/billing/dues.js";
 import * as shifts from "../services/billing/cashShifts.js";
 import * as requests from "../services/billing/billingRequests.js";
 import { consultationForDesk, notPricedForVisit } from "../services/billing/visitLines.js";
 import { deskSettings } from "../services/billing/billingSettings.js";
 import { searchDeskItems } from "../services/billing/serviceItems.js";
+import { counterPatients } from "../services/billing/counterPatients.js";
 
 const router = Router();
 const BASE = "/billing";
@@ -120,6 +123,16 @@ router.get(
   desk,
   validateQuery(billingItemSearchQuerySchema, BILLING_DESK_LABELS),
   run("Item search", 200, (req) => searchDeskItems({ q: req.query.q, limit: req.query.limit })),
+);
+
+router.get(
+  `${BASE}/counter/patients`,
+  desk,
+  validateQuery(giniflowArrivalsQuerySchema, BILLING_DESK_LABELS),
+  run("Counter patient list", 200, async (req) => ({
+    ...(await counterPatients(req.query.date, req.query.q || "")),
+    serverTime: new Date().toISOString(),
+  })),
 );
 
 router.get(
@@ -255,6 +268,12 @@ router.get(
       limit: req.query.limit,
     }),
   ),
+);
+
+router.get(
+  `${BASE}/dues/today`,
+  desk,
+  run("Dues today", 200, () => duesToday()),
 );
 
 router.get(

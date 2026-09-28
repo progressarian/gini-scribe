@@ -156,23 +156,24 @@ test.describe.serial("P4-32 totals and payment", () => {
   test("4. Finalise is enabled only once the finalise checks would pass", async ({ page }) => {
     await loginAs(page, "reception");
     await open(page, ids.visit);
-    await expect(totalRow(page, "Balance").getByRole("cell")).toHaveText(fromPaise(50000));
+    await expect(totalRow(page, "Balance").getByRole("cell")).toHaveText(fromPaise(250000));
     await expect(finaliseButton(page)).toBeDisabled();
 
     await pad(page).getByLabel("Amount").fill("300");
-    await expect(pad(page).getByText(`Remaining ${fromPaise(20000)}`)).toBeVisible();
-    await pad(page).getByLabel("Amount").fill("500");
+    await expect(pad(page).getByText(`Remaining ${fromPaise(220000)}`)).toBeVisible();
+    await pad(page).getByLabel("Amount").fill("2500");
     await expect(pad(page).getByText(`Remaining ${fromPaise(0)}`)).toBeVisible();
     await pad(page).getByRole("button", { name: "Take payment" }).click();
 
-    await expect(totalRow(page, "Paid").getByRole("cell")).toHaveText(fromPaise(50000));
+    await expect(totalRow(page, "Paid").getByRole("cell")).toHaveText(fromPaise(250000));
     await expect(totalRow(page, "Balance").getByRole("cell")).toHaveText(fromPaise(0));
     await expect(finaliseButton(page)).toBeEnabled();
     const saved = await bills.readBill(ids.bill, db);
-    expect(saved.totals.paid).toBe(50000);
+    expect(saved.totals.paid).toBe(250000);
   });
 
   test("5. pay later is offered only where it is allowed", async ({ page }) => {
+    await setPayLater(false);
     await loginAs(page, "reception");
     await open(page, later.visit);
     await expect(pad(page).getByLabel("Pay later")).toHaveCount(0);
@@ -200,7 +201,9 @@ test.describe.serial("P4-32 totals and payment", () => {
 
     const popup = page.waitForEvent("popup").catch(() => null);
     await finaliseButton(page).click();
-    await expect(page.getByText("CGHS pending")).toBeVisible();
+    await expect(
+      page.getByRole("region", { name: "Bill actions" }).getByText("CGHS pending"),
+    ).toBeVisible();
     await popup;
 
     const saved = await bills.readBill(free.bill, db);
@@ -235,7 +238,7 @@ test.describe.serial("P4-32 totals and payment", () => {
     const bill = await freshBill("Stale", ids.dressing, ids.paid);
     await loginAs(page, "reception");
     await open(page, bill.visit);
-    await expect(totalRow(page, "Balance").getByRole("cell")).toHaveText(fromPaise(50000));
+    await expect(totalRow(page, "Balance").getByRole("cell")).toHaveText(fromPaise(250000));
 
     const held = await bills.readBill(bill.bill, db);
     await payments.takePayments(
@@ -246,7 +249,7 @@ test.describe.serial("P4-32 totals and payment", () => {
     );
 
     await pad(page).getByLabel("Mode").selectOption("card");
-    await pad(page).getByLabel("Amount").fill("400");
+    await pad(page).getByLabel("Amount").fill("2400");
     await pad(page).getByLabel("Reference").fill("P4-32-8B");
     await pad(page).getByRole("button", { name: "Take payment" }).click();
     await expect(
@@ -255,11 +258,11 @@ test.describe.serial("P4-32 totals and payment", () => {
     await expect(totalRow(page, "Paid").getByRole("cell")).toHaveText(fromPaise(10000));
 
     await pad(page).getByLabel("Mode").selectOption("card");
-    await pad(page).getByLabel("Amount").fill("400");
+    await pad(page).getByLabel("Amount").fill("2400");
     await pad(page).getByLabel("Reference").fill("P4-32-8B");
     await pad(page).getByRole("button", { name: "Take payment" }).click();
     await expect(pad(page).getByText("Payment taken")).toBeVisible();
-    expect((await bills.readBill(bill.bill, db)).totals.paid).toBe(50000);
+    expect((await bills.readBill(bill.bill, db)).totals.paid).toBe(250000);
   });
 
   test("9. pay later is not carried from one patient to the next", async ({ page }) => {
@@ -272,7 +275,11 @@ test.describe.serial("P4-32 totals and payment", () => {
       await pad(page).getByLabel("Pay later").check();
       await expect(finaliseButton(page)).toBeEnabled();
 
-      await page.getByRole("button", { name: `P4 Untouched ${tag}` }).click();
+      const untouched = page.getByRole("button", { name: `P4 Untouched ${tag}` });
+      if (!(await untouched.isVisible())) {
+        await page.getByRole("button", { name: /^Not arrived/ }).click();
+      }
+      await untouched.click();
       await expect(page.getByRole("heading", { name: `P4 Untouched ${tag}` })).toBeVisible();
       await expect(pad(page).getByLabel("Pay later")).not.toBeChecked();
       await expect(finaliseButton(page)).toBeDisabled();

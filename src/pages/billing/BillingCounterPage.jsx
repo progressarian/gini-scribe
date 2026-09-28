@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import { useArrivals } from "../../queries/hooks/useGiniflowReception";
+import { useLocation, useSearchParams } from "react-router-dom";
 import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
 import {
+  useCounterPatients,
   useDeskSettings,
   useOpenDraft,
   usePatientSchemeList,
@@ -11,6 +11,7 @@ import {
   useVisitNotPriced,
 } from "../../queries/hooks/useBilling";
 import LiveBadge from "../../components/giniflow/LiveBadge";
+import PatientList from "../../components/billing/counter/PatientList";
 import PatientHeader from "../../components/billing/counter/PatientHeader";
 import PreviousBills from "../../components/billing/counter/PreviousBills";
 import BillLinesTable from "../../components/billing/counter/BillLinesTable";
@@ -20,6 +21,7 @@ import DiscountCodeBox from "../../components/billing/counter/DiscountCodeBox";
 import TotalsAndPayment from "../../components/billing/counter/TotalsAndPayment";
 import BillActions from "../../components/billing/counter/BillActions";
 import DuesList from "../../components/billing/counter/DuesList";
+import EarlierDues from "../../components/billing/counter/EarlierDues";
 import ShiftPanel from "../../components/billing/counter/ShiftPanel";
 import { errorOf } from "../../components/billing/format";
 import "../../styles/giniflow-station.css";
@@ -103,28 +105,9 @@ function Resizer({ width, onChange }) {
   );
 }
 
-function VisitRow({ row, active, onPick }) {
-  return (
-    <button
-      type="button"
-      className={`bc-row${active ? " bc-row--on" : ""}`}
-      aria-current={active ? "true" : undefined}
-      onClick={() => onPick(row.visitId)}
-    >
-      <span className="bc-row__top">
-        <span className="bc-row__name">{row.name}</span>
-        {row.statusLabel ? <span className="bc-row__status">{row.statusLabel}</span> : null}
-      </span>
-      <span className="bc-row__meta">
-        {row.age}
-        {(row.sex || "")[0] || ""} · {row.fileNo || "—"}
-      </span>
-    </button>
-  );
-}
-
 export default function BillingCounterPage() {
   const [params, setParams] = useSearchParams();
+  const sentPatient = useLocation().state?.duePatient ?? null;
   const visitId = params.get("visit") || "";
   const patientId = params.get("patient") || "";
   const billId = params.get("bill") || "";
@@ -137,6 +120,7 @@ export default function BillingCounterPage() {
   const [duePatient, setDuePatient] = useState(null);
   const [fresh, setFresh] = useState(0);
   const [needsSub, setNeedsSub] = useState(false);
+  const [removedDoctor, setRemovedDoctor] = useState(null);
   const opened = useRef(null);
   const [listWidth, setListWidth] = useListWidth();
 
@@ -146,7 +130,7 @@ export default function BillingCounterPage() {
   }, [search]);
 
   const live = useGiniflowLive();
-  const { data, isLoading } = useArrivals(undefined, debounced);
+  const { data, isLoading } = useCounterPatients(debounced.trim());
   const openDraft = useOpenDraft();
   const reread = useRereadBill();
   const { data: settings } = useDeskSettings();
@@ -154,9 +138,10 @@ export default function BillingCounterPage() {
   const { data: notPriced } = useVisitNotPriced(visitId);
   const { data: schemes } = usePatientSchemeList();
 
-  const expected = data?.expected || [];
-  const onFloor = data?.onFloor || [];
-  const rows = useMemo(() => [...expected, ...onFloor], [expected, onFloor]);
+  const rows = useMemo(
+    () => [...(data?.onFloor || []), ...(data?.left || []), ...(data?.notArrived || [])],
+    [data],
+  );
   const selected = rows.find((row) => row.visitId === visitId) || null;
 
   const pick = (id) => {
@@ -203,10 +188,12 @@ export default function BillingCounterPage() {
     setError(null);
     setPayLater(false);
     setNeedsSub(false);
+    setRemovedDoctor(null);
     const handlers = {
       onSuccess: (found) => {
         if (opened.current !== wanted) return;
         setNeedsSub(Boolean(found?.needs_category));
+        setRemovedDoctor(found?.removed_doctor ?? null);
         setBill(found);
       },
       onError: (e) => {
@@ -271,36 +258,13 @@ export default function BillingCounterPage() {
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          <div className="bc-list__body">
-            <div className="bc-group">
-              Expected<span className="bc-count">{expected.length}</span>
-            </div>
-            {isLoading && <div className="bc-list__empty">Loading…</div>}
-            {!isLoading && !expected.length && (
-              <div className="bc-list__empty">Nobody expected.</div>
-            )}
-            {expected.map((row) => (
-              <VisitRow
-                key={row.visitId}
-                row={row}
-                active={row.visitId === visitId}
-                onPick={pick}
-              />
-            ))}
-
-            <div className="bc-group">
-              On the floor<span className="bc-count">{onFloor.length}</span>
-            </div>
-            {!onFloor.length && <div className="bc-list__empty">Nobody on the floor.</div>}
-            {onFloor.map((row) => (
-              <VisitRow
-                key={row.visitId}
-                row={row}
-                active={row.visitId === visitId}
-                onPick={pick}
-              />
-            ))}
-          </div>
+          <PatientList
+            data={data}
+            isLoading={isLoading}
+            visitId={visitId}
+            searching={debounced.trim().length >= 2}
+            onPick={pick}
+          />
         </aside>
 
         <Resizer width={listWidth} onChange={setListWidth} />
@@ -360,10 +324,21 @@ export default function BillingCounterPage() {
                     </button>
                   </div>
                 )}
+                {bill && removedDoctor && (
+                  <div className="bc-hint" role="status">
+                    {removedDoctor.name} was removed, so this visit has no consultation fee.
+                  </div>
+                )}
                 {bill && (
                   <>
+                    <EarlierDues
+                      patientId={bill.patient_id}
+                      visitId={visitId}
+                      billId={bill.id}
+                      onTakePayment={takePaymentOn}
+                    />
                     <PatientHeader
-                      patient={selected || duePatient}
+                      patient={selected || duePatient || sentPatient}
                       bill={bill}
                       needsCategory={needsCategory}
                       suggestions={bill.suggestions}

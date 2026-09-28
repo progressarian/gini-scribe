@@ -200,13 +200,19 @@ test.describe.serial("P4-34 dues list and shift panel", () => {
     await expect(shiftPanel(page).getByLabel("Opening cash")).toBeVisible();
   });
 
-  test("5. a due from an earlier day still names its patient at the counter", async ({ page }) => {
+  test("5. a due from an earlier day is chased from the Dues page and still names its patient at the counter", async ({
+    page,
+  }) => {
     await loginAs(page, "reception");
     await openCounter(page, () => tab(page, "Dues"));
     await tab(page, "Dues").click();
-    await dues(page)
-      .getByRole("button", { name: `Take payment on bill ${older.due.bill_no}` })
-      .click();
+    await expect(dues(page).getByTestId("dues-today-total")).toBeVisible();
+    await expect(dues(page).getByRole("row").filter({ hasText: older.due.bill_no })).toHaveCount(0);
+
+    await loginAs(page, "reception_admin");
+    await gotoReady(page, "/billing/dues", () => page.getByRole("heading", { name: "Dues" }));
+    await page.getByLabel("Search", { exact: true }).fill(older.due.bill_no);
+    await page.getByRole("link", { name: `Take payment on bill ${older.due.bill_no}` }).click();
 
     await expect(page.getByRole("heading", { name: `P4 Older ${tag}` })).toBeVisible();
     await expect(actions(page)).toBeVisible();

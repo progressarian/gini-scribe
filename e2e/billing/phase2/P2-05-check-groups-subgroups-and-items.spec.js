@@ -234,7 +234,9 @@ test.describe("P2-05 check groups, subgroups and items", () => {
     expect(rows[2].errors).toEqual([]);
     expect(rows[2].resolved.doctor.id).toBe(3);
     expect(messages(rows[3])).toEqual(['doctor: There is no doctor called "Dr Nobody" in Scribe']);
-    expect(messages(rows[4])).toEqual(["doctor: Dr Gone is not an active doctor"]);
+    expect(messages(rows[4])).toEqual([
+      "doctor: Dr Gone was removed, so nothing can be priced under them",
+    ]);
     expect(messages(rows[5])).toEqual([
       "doctor: Dr. Hospital Admin is the lab-only provider; samples-only visits have no consultation fee",
     ]);

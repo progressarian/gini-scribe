@@ -9,6 +9,7 @@ import { linePayable } from "./linePayable.js";
 import { lineTax } from "./lineTax.js";
 import { assertLineBalances } from "./lineInvariant.js";
 import { checkBillable, cleanDraftRule, draftForLine, ruleForLine } from "./paymentRules.js";
+import { refuseRemoved } from "./removedDoctors.js";
 import { httpError } from "./transaction.js";
 import { cleanDate, INT_MAX, MONEY_MAX, readNumber, wholeNumber } from "./common.js";
 
@@ -54,7 +55,7 @@ const pick = (own, parent, base) =>
       ? { value: parent, source: "parent" }
       : { value: base, source: "base" };
 
-export async function lineActual({ item, quantity, category, date } = {}, db = pool) {
+export async function lineActual({ item, quantity, category, date, kept } = {}, db = pool) {
   const itemId = cleanItem(item);
   const count = wholeNumber(quantity, "Quantity", { min: 1 }) ?? 1;
   const on = cleanDate(date, "Date") ?? indiaToday();
@@ -63,7 +64,8 @@ export async function lineActual({ item, quantity, category, date } = {}, db = p
     `SELECT i.id, i.code, i.name, i.kind, i.subgroup_id, sg.group_id, sg.code AS subgroup_code,
             g.code AS group_code, i.doctor_id, i.visit_type,
             i.unit, i.allow_quantity, i.max_quantity, i.base_price, i.price_includes_tax,
-            i.is_active, t.id AS tax_id, t.code AS tax_code, t.sac_hsn AS tax_sac_hsn,
+            i.is_active, dr.name AS doctor_name, dr.is_active IS FALSE AS doctor_removed,
+            t.id AS tax_id, t.code AS tax_code, t.sac_hsn AS tax_sac_hsn,
             t.rate_pct AS tax_rate_pct, t.is_active AS tax_active,
             own.rate AS own_rate, own.bill_name AS own_bill_name, own.bill_code AS own_bill_code,
             par.rate AS parent_rate, par.bill_name AS parent_bill_name,
@@ -72,6 +74,7 @@ export async function lineActual({ item, quantity, category, date } = {}, db = p
        JOIN service_subgroups sg ON sg.id = i.subgroup_id
        JOIN service_groups g ON g.id = sg.group_id
        LEFT JOIN tax_codes t ON t.id = i.tax_code_id
+       LEFT JOIN doctors dr ON dr.id = i.doctor_id
        ${rateOn("$2")} own ON TRUE
        ${rateOn("(SELECT parent_code FROM patient_schemes WHERE code = $2)")} par ON TRUE
       WHERE i.id = $1`,
@@ -79,7 +82,15 @@ export async function lineActual({ item, quantity, category, date } = {}, db = p
   );
   if (!rows.length) throw httpError(404, "That item doesn't exist");
   const [row] = rows;
-  if (!row.is_active) throw httpError(409, `${row.name} is deactivated`);
+  if (row.doctor_removed && !kept) {
+    throw refuseRemoved(
+      { id: row.doctor_id, name: row.doctor_name },
+      `${row.name} can't be billed`,
+    );
+  }
+  if (!row.is_active && !(kept && row.doctor_removed)) {
+    throw httpError(409, `${row.name} is deactivated`);
+  }
   checkQuantity(row, count);
   if (code) await checkBillable(db, code);
   const rate = pick(
@@ -149,11 +160,15 @@ function cleanVisitType(value, own) {
 }
 
 async function lineDoctor(own, value, db) {
-  const id = wholeNumber(value, "Doctor", { min: 1 }) ?? null;
-  if (own !== null || id === null) return own;
-  const { rows } = await db.query(`SELECT 1 FROM doctors WHERE id = $1`, [id]);
+  const asked = wholeNumber(value, "Doctor", { min: 1 }) ?? null;
+  const id = own ?? asked;
+  if (id === null) return { id, removed: false };
+  const { rows } = await db.query(
+    `SELECT is_active IS FALSE AS removed FROM doctors WHERE id = $1`,
+    [id],
+  );
   if (!rows.length) throw httpError(404, "That doctor doesn't exist");
-  return id;
+  return { id, removed: rows[0].removed };
 }
 
 function checkTaxCode(taxCode, settings) {
@@ -217,7 +232,8 @@ const described = (applied, rules, takenFrom) => {
 export async function priceLine(input = {}, db = pool) {
   const line = await lineActual(input, db);
   const visitType = cleanVisitType(input.visitType, line.visit_type);
-  const doctorId = await lineDoctor(line.doctor_id, input.doctorId, db);
+  const doctor = await lineDoctor(line.doctor_id, input.doctorId, db);
+  const doctorId = doctor.id;
   const codes = cleanCodes(input.codes);
   const codesOnBill = wholeNumber(input.codesOnBill, "Codes on the bill") ?? 0;
   const settings = input.settings ?? (await getSettings(db));
@@ -269,6 +285,7 @@ export async function priceLine(input = {}, db = pool) {
     ...line,
     visit_type: visitType,
     doctor_id: doctorId,
+    doctor_removed: doctor.removed,
     actual,
     listed_actual: line.actual,
     discount: actual - tax.taxable + payableStep.discount,

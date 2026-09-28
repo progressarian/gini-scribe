@@ -1,5 +1,7 @@
 import pool from "../../config/db.js";
 import { releaseOrderLines } from "../billing/visitLines.js";
+import { resettleTestOrders } from "../billing/bills.js";
+import { releaseTestOrders } from "../billing/payments.js";
 import { derivePaymentStatus, opensLabGate } from "../../../shared/labPayment.js";
 import { machineForTest, machinesOnBillLine } from "../../../shared/machineStages.js";
 import {
@@ -123,6 +125,25 @@ async function lockBillsOf(client, visitId, orderId) {
       FOR UPDATE`,
     [visitId, orderId],
   );
+}
+
+async function draftsHolding(client, orderId) {
+  const { rows } = await client.query(
+    `SELECT DISTINCT b.id, b.bill_no FROM bills b JOIN bill_lines l ON l.bill_id = b.id
+      WHERE l.lab_order_id = $1 AND l.is_live AND b.status = 'draft'
+      ORDER BY b.id`,
+    [orderId],
+  );
+  return rows;
+}
+
+async function orderMoney(client, orderId) {
+  const { rows } = await client.query(
+    `SELECT amount_paid, amount_claimed, claim_state, payment_status
+       FROM giniflow_lab_orders WHERE id = $1`,
+    [orderId],
+  );
+  return rows[0];
 }
 
 async function orderWithState(client, orderId) {
@@ -314,16 +335,19 @@ async function cancelOrderIn(client, visit, order, input, machines) {
   };
 
   let refundLeft = null;
-  let newPaid = Number(order.amount_paid) || 0;
+  const moneyCtx = { role: input.actorRole || "system", actorId: input.actorId ?? null };
+  const drafts = await draftsHolding(client, order.id);
   if (partial) {
+    for (const draft of drafts) await releaseTestOrders(client, draft, moneyCtx, [order.id]);
+    const held = await orderMoney(client, order.id);
     const remaining = tests.filter((t) => t.id !== single.id);
     const total = money(remaining.reduce((s, t) => s + Number(t.price || 0), 0));
-    newPaid = Math.min(Number(order.amount_paid) || 0, total);
+    const newPaid = Math.min(Number(held.amount_paid) || 0, total);
     const status = derivePaymentStatus({
       amount_total: total,
       amount_paid: newPaid,
-      amount_claimed: Number(order.amount_claimed) || 0,
-      claim_state: order.claim_state,
+      amount_claimed: Number(held.amount_claimed) || 0,
+      claim_state: held.claim_state,
     });
     await releaseOrderLines(client, order.id, [single.name], { actorId: input.actorId ?? null });
     await client.query(`DELETE FROM giniflow_lab_order_tests WHERE id = $1`, [single.id]);
@@ -334,7 +358,7 @@ async function cancelOrderIn(client, visit, order, input, machines) {
         WHERE id = $1`,
       [order.id, total, newPaid, status],
     );
-    if (status !== order.payment_status) {
+    if (status !== held.payment_status) {
       await client.query(
         `INSERT INTO giniflow_lab_order_events (lab_order_id, track, status, actor_role, actor_id, meta)
          VALUES ($1, 'payment', $2, $3, $4, $5)`,
@@ -347,7 +371,7 @@ async function cancelOrderIn(client, visit, order, input, machines) {
         ],
       );
     }
-    if (opensLabGate(status) && !opensLabGate(order.payment_status)) {
+    if (opensLabGate(status) && !opensLabGate(held.payment_status)) {
       const { rowCount } = await client.query(
         `UPDATE giniflow_lab_orders SET sample_status = 'paid'
           WHERE id = $1 AND sample_status IN ('ordered', 'payment_pending')`,
@@ -361,10 +385,13 @@ async function cancelOrderIn(client, visit, order, input, machines) {
         );
       }
     }
-    refundLeft = money((Number(order.amount_paid) || 0) - newPaid);
+    for (const draft of drafts) await resettleTestOrders(client, draft, moneyCtx);
+    const after = await orderMoney(client, order.id);
+    refundLeft = money((Number(order.amount_paid) || 0) - (Number(after.amount_paid) || 0));
   } else {
     await releaseOrderLines(client, order.id, null, { actorId: input.actorId ?? null });
     await client.query(`DELETE FROM giniflow_lab_orders WHERE id = $1`, [order.id]);
+    for (const draft of drafts) await resettleTestOrders(client, draft, moneyCtx);
   }
 
   for (const t of going) {

@@ -20,6 +20,26 @@ export const ORDER_STATE = {
   CLAIM_AT_RECEPTION: "claim_at_reception",
   PAID_AT_RECEPTION: "paid_at_reception",
 };
+export const COUNTER_BILL_STATE = {
+  NONE: "none",
+  DRAFT: "draft",
+  DUE: "due",
+  PAID: "paid",
+  CLAIM_PENDING: "claim_pending",
+  CLAIM_CLEARED: "claim_cleared",
+};
+export const DUE_AGES = [
+  { key: "0-7", label: "0–7 days", min: 0, max: 7 },
+  { key: "8-30", label: "8–30 days", min: 8, max: 30 },
+  { key: "31-90", label: "31–90 days", min: 31, max: 90 },
+  { key: "90+", label: "Over 90 days", min: 91, max: null },
+];
+export const DUE_SORTS = [
+  { key: "oldest", label: "Oldest first" },
+  { key: "largest", label: "Largest due first" },
+];
+export const DUES_PAGE_SIZE = 50;
+export const DUES_PAGE_SIZE_MAX = 200;
 
 export function financialYearOf(date) {
   const [year, month] = date.split("-").map(Number);

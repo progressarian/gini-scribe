@@ -1,110 +1,86 @@
-# Billing — Demo and Testing Guide
+# Gini Billing — Step-by-Step Guide
 
-A click-by-click guide to record everything built in billing so far, from the first setting to the last report. Every value in the tables can be copied straight into the field it names. The examples build on each other: the items made in Part 2 are the ones billed at the counter in Part 9.
+This guide sets up billing from scratch and then uses it at the counter. Every table lists the screen's field names on the left and a sample value on the right, ready to copy.
 
----
-
-## Before you start
-
-- Record on the **test servers**: open `http://localhost:3100`. They use the test database, so nothing reaches real patients or real bills.
-- Do not run the automatic billing tests while recording. They wipe the test database and everything you set up.
-- Logins (PIN is **4321** for all):
-
-| Who                 | Role            | What they can open                                                                                   |
-| ------------------- | --------------- | ---------------------------------------------------------------------------------------------------- |
-| E2E Admin           | Admin           | Everything, including Billing settings and Undo on the CGHS register                                 |
-| E2E Reception Admin | Reception admin | Billing counter, Settings billing tabs (not Billing settings), Desk requests, CGHS register, Reports |
-| E2E Reception       | Reception       | Billing counter only                                                                                 |
-
-- Test patients already in the system: **E2E General Adult** (40, Male), **E2E Senior 72** (72, Female), **E2E CGHS Paid** (55, Male), **E2E CGHS Referral** (60, Female), **E2E Pensioner** (68, Male).
-- Doctors: **Dr E2E Banshali**, **Dr E2E Rahul**, **Dr E2E Beant**.
-- Wherever a date says **today**, pick today's date in the date picker.
-
-### Order of the recording
-
-1. Billing settings (tax codes, bill numbers, pay later)
-2. Services — groups, sub-groups, items
-3. Categories — categories, sub-categories, who belongs, what the patient pays
-4. Category rates
-5. Consultant fees
-6. Discounts
-7. Bulk import
-8. Desk requests (shown together with the counter)
-9. Billing counter — every case
-10. CGHS register
-11. Billing reports
-12. Who can see what
+The steps build on each other: the items created in Step 2 are the ones billed in Step 8.
 
 ---
 
-## Part 1 — Billing settings
+## Who does what
 
-**Login:** E2E Admin → ⚙️ Settings → **Billing settings** tab.
-This tab is for the admin only. It has four cards, and each card has its own **Save** button.
+| User                | Can use                                                                       |
+| ------------------- | ----------------------------------------------------------------------------- |
+| **Admin**           | Everything, including Billing settings                                        |
+| **Reception Admin** | Billing counter, billing setup screens, Desk requests, CGHS register, Reports |
+| **Reception**       | Billing counter only                                                          |
 
-### 1.1 Card "Bills"
+**Sample patients used in this guide:**
 
-How discounts combine, whether patients can pay later, and the note at the bottom of every bill.
+- a General patient, aged under 60
+- a patient aged 60 or over
+- a CGHS card holder
+- a CGHS referral patient
+- a CGHS pensioner
 
-| Field                                          | Enter                                                                                       |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| When several discounts apply                   | Only the best discount                                                                      |
-| Most codes on one bill                         | 2                                                                                           |
-| Allow pay later (a category can override this) | ✔ tick it (needed for the Dues demo)                                                        |
-| Bill footer                                    | Thank you for choosing Gini Advanced Care Hospital. Please keep this bill for your records. |
-
-Press **Save**. You should see: _Saved the bill settings_.
-
-> The hospital logo and letterhead on bills come from **Prescription settings**, not from here.
-
-### 1.2 Card "GST"
-
-Leave **Charge GST on bills** switched **off**. The hospital does not charge GST yet.
-
-GST can only be switched on once GSTIN, State code and Legal name are all filled in.
-
-### 1.3 Card "Tax codes"
-
-The GST rates an item can carry. Items can only pick a tax code that exists here.
-
-Press **+ Add tax code** after each row:
-
-| Code   | SAC/HSN         | Rate % |
-| ------ | --------------- | ------ |
-| EXEMPT | _(leave empty)_ | 0      |
-| GST18  | 999312          | 18     |
-
-You should see _Added EXEMPT_, then _Added GST18_.
-
-### 1.4 Card "Number series" (bill numbers)
-
-Bill and receipt numbers start again every financial year (April to March). The next number can only go up, so a number is never used twice.
-
-**Financial year:** 2026-27
-
-| Series       | Prefix | Digits | Next number | Next looks like |
-| ------------ | ------ | ------ | ----------- | --------------- |
-| Bills        | GH26-  | 6      | 1           | GH26-000001     |
-| Receipts     | RC26-  | 6      | 1           | RC26-000001     |
-| Credit notes | CN26-  | 6      | 1           | CN26-000001     |
-
-Press **Set up** on each row. You should see _Saved the Bills series for 2026-27_.
-
-> **Important:** if the Bills or Receipts series is not set up, the counter can't finalise a bill. It shows: _Ask the admin to set the bill series for 2026-27_.
+Wherever a date says **today**, choose today's date.
 
 ---
 
-## Part 2 — Services: groups, sub-groups and items
+## Step 1 — Billing settings (Admin)
 
-**Settings → Services** tab.
+**Settings → Billing settings.** The page has four sections, and each one has its own **Save** button.
 
-- **Group:** a top-level head used in reports (OPD, Lab, Cardiology…).
-- **Sub-group:** a section inside a group (Lab › Biochemistry). Every item sits in one sub-group.
-- **Item:** one thing you can bill, with its own price.
+### 1.1 Bills
 
-The **code** can never be changed later; the **name** can. Codes have no spaces.
+| Field                        | Sample value                                                                                |
+| ---------------------------- | ------------------------------------------------------------------------------------------- |
+| When several discounts apply | Only the best discount                                                                      |
+| Most codes on one bill       | 2                                                                                           |
+| Allow pay later              | ✔ Ticked                                                                                    |
+| Bill footer                  | Thank you for choosing Gini Advanced Care Hospital. Please keep this bill for your records. |
 
-### 2.1 Groups — press **+ Add group**
+The hospital logo and letterhead on bills come from **Prescription settings**.
+
+### 1.2 GST
+
+Leave **Charge GST on bills** switched off. It can be switched on later, once the GSTIN, state code and legal name are filled in.
+
+### 1.3 Tax codes
+
+These are the tax rates an item can carry. Press **+ Add tax code** after each row.
+
+| Code   | SAC/HSN   | Rate % |
+| ------ | --------- | ------ |
+| EXEMPT | _(empty)_ | 0      |
+| GST18  | 999312    | 18     |
+
+### 1.4 Number series (bill numbers)
+
+Numbers restart every financial year (April–March) and never repeat.
+
+Choose **Financial year 2026-27**, fill in each row below, and press **Set up** on it.
+
+| Series       | Prefix | Digits | Next number | First number will be |
+| ------------ | ------ | ------ | ----------- | -------------------- |
+| Bills        | GH26-  | 6      | 1           | GH26-000001          |
+| Receipts     | RC26-  | 6      | 1           | RC26-000001          |
+| Credit notes | CN26-  | 6      | 1           | CN26-000001          |
+
+> Without the Bills and Receipts series, the counter cannot finalise a bill.
+
+---
+
+## Step 2 — Services (what the hospital charges for)
+
+**Settings → Services.**
+
+- **Group:** a main head, such as OPD or Laboratory.
+- **Sub-group:** a section inside a group, such as Laboratory → Biochemistry.
+- **Item:** one billable service with its price. Every item sits in a sub-group.
+
+A **code** is permanent and has no spaces. A **name** can be changed later.
+
+### 2.1 Groups — **+ Add group**
 
 | Code | Name                     |
 | ---- | ------------------------ |
@@ -113,9 +89,9 @@ The **code** can never be changed later; the **name** can. Codes have no spaces.
 | CARD | Cardiology Tests         |
 | PROC | Procedures               |
 
-### 2.2 Sub-groups — click the group, then **+ Subgroup**
+### 2.2 Sub-groups — select a group, then **+ Subgroup**
 
-| Under group              | Code       | Name                          |
+| Group                    | Code       | Name                          |
 | ------------------------ | ---------- | ----------------------------- |
 | Out-patient Consultation | OPD-CONS   | Consultation                  |
 | Laboratory               | LAB-BIO    | Biochemistry                  |
@@ -123,40 +99,32 @@ The **code** can never be changed later; the **name** can. Codes have no spaces.
 | Cardiology Tests         | CARD-HEART | ECG and Heart                 |
 | Procedures               | PROC-DRS   | Dressing and Minor Procedures |
 
-**Show on the recording:** Rename, the Move up / Move down arrows, and Deactivate / Activate on one sub-group.
+### 2.3 Hospital consultation fee — select **Consultation**, then **+ Add item**
 
-### 2.3 Hospital default consultation items
+This fee is used for any doctor who has no fee of their own.
 
-These are used for any doctor who has no fee of their own.
+| Field      | New visit                         | Follow-up visit                     |
+| ---------- | --------------------------------- | ----------------------------------- |
+| Name       | Consultation — Hospital (New)     | Consultation — Hospital (Follow Up) |
+| Code       | CONS-DEF-NEW                      | CONS-DEF-FU                         |
+| Kind       | Consultation                      | Consultation                        |
+| Price (₹)  | 800                               | 500                                 |
+| Consultant | Hospital default (any consultant) | Hospital default (any consultant)   |
+| Visit type | New                               | Follow Up                           |
 
-Pick the **Consultation** sub-group → **+ Add item**:
+### 2.4 "Not priced" — fill the gaps in one click
 
-| Field      | Item 1                                | Item 2                                      |
-| ---------- | ------------------------------------- | ------------------------------------------- |
-| Name       | Consultation — Hospital default (New) | Consultation — Hospital default (Follow Up) |
-| Code       | CONS-DEF-NEW                          | CONS-DEF-FU                                 |
-| Subgroup   | Consultation                          | Consultation                                |
-| Kind       | Consultation                          | Consultation                                |
-| Price (₹)  | 800                                   | 500                                         |
-| Unit       | each                                  | each                                        |
-| Tax code   | No tax                                | No tax                                      |
-| Consultant | Hospital default (any consultant)     | Hospital default (any consultant)           |
-| Visit type | New                                   | Follow Up                                   |
+Press **Not priced** at the top. It lists what doctors and the lab can order but billing has no price for yet.
 
-### 2.4 "Not priced" — create items straight from what is missing
+**Consultants without a fee.** Press **Create item** for a consultant:
 
-Press the top button **Not priced**.
+| Field     | New visit     | Follow-up visit |
+| --------- | ------------- | --------------- |
+| Code      | CONS-DR01-NEW | CONS-DR01-FU    |
+| Subgroup  | Consultation  | Consultation    |
+| Price (₹) | 1000          | 600             |
 
-**Consultants without a fee.** Find **Dr E2E Banshali** and press **Create item** on each row:
-
-| Field     | New                                                     | Follow Up                                  |
-| --------- | ------------------------------------------------------- | ------------------------------------------ |
-| Name      | _(already filled)_ Consultation — Dr E2E Banshali (New) | Consultation — Dr E2E Banshali (Follow Up) |
-| Code      | CONS-BANSHALI-NEW                                       | CONS-BANSHALI-FU                           |
-| Subgroup  | Consultation                                            | Consultation                               |
-| Price (₹) | 1000                                                    | 600                                        |
-
-**Tests without an item.** Press **Create item** on each test below. The name, Kind = Test and the test link are filled in for you.
+**Tests without an item.** Press **Create item** on each test. The name and test link are already filled in.
 
 | Test          | Code       | Subgroup      | Price (₹) |
 | ------------- | ---------- | ------------- | --------- |
@@ -165,543 +133,319 @@ Press the top button **Not priced**.
 | CBC           | LAB-CBC    | Haematology   | 200       |
 | ECG           | CARD-ECG12 | ECG and Heart | 300       |
 
-### 2.5 A procedure that can be billed more than once
+### 2.5 An item that can be billed more than once
 
-Pick the **Dressing and Minor Procedures** sub-group → **+ Add item**:
+Select **Dressing and Minor Procedures**, then **+ Add item**:
 
-| Field                       | Enter                         |
-| --------------------------- | ----------------------------- |
-| Name                        | Dressing — Small              |
-| Code                        | PROC-DRS-S                    |
-| Subgroup                    | Dressing and Minor Procedures |
-| Kind                        | Procedure                     |
-| Price (₹)                   | 250                           |
-| Unit                        | each                          |
-| Tax code                    | No tax                        |
-| Quantity can be more than 1 | ✔                             |
-| Max quantity                | 5                             |
+| Field                       | Sample value     |
+| --------------------------- | ---------------- |
+| Name                        | Dressing — Small |
+| Code                        | PROC-DRS-S       |
+| Kind                        | Procedure        |
+| Price (₹)                   | 250              |
+| Quantity can be more than 1 | ✔ Ticked         |
+| Max quantity                | 5                |
 
-### 2.6 Things to show on the recording
+**Good to know:**
 
-- **Change a price and see its history.** Edit **CBC** and change the price 200 → 220. The box **Reason for the price change** appears; type _Reagent cost increased_. Save, then press the **Price history** icon.
-- **An error.** Add another item with code **LAB-CBC**. You get _A item with code "LAB-CBC" already exists_.
-- **An item on a bill can't be deleted.** Try this after Part 9: Delete **HbA1c**. The screen shows _can't be deleted … N bill lines charge HbA1c_ and offers **Deactivate instead**.
+- To change a price, edit the item. The screen asks for a reason, for example _Reagent cost increased_, and records it under **Price history**.
+- An item that has been used on a bill cannot be deleted. It can only be **deactivated**.
 
 ---
 
-## Part 3 — Categories: who the patient is billed as
+## Step 3 — Categories (who pays)
 
-**Settings → Categories** tab.
+**Settings → Categories.**
 
-- **Category:** who the patient is billed as (CGHS, ECHS, Senior Citizen…). "General" means no category, so never create a category called General.
-- **Sub-category:** one level under a category (CGHS › CGHS Paid). It uses the parent's rates and rules unless it has its own.
-- **Who belongs:** rules that make the counter suggest (or set) a category for a patient.
-- **What the patient pays:** payment rules. They split the price into what the patient pays and what is claimed from the payer (or written off).
+- **Category:** the type of patient, such as CGHS, ECHS or Senior Citizen. A patient with no category is billed as **General**, so General is never created here.
+- **Sub-category:** a type inside a category, such as CGHS → CGHS Paid.
+- **Who belongs:** rules that set a patient's category automatically.
+- **What the patient pays:** rules that split a price into the patient's share and the part claimed from the payer, such as CGHS.
 
-The categories **CGHS, ECHS, Himachal Government, Senior Citizen** and **Special Discount** already exist.
+CGHS, ECHS, Himachal Government, Senior Citizen and Special Discount already exist.
 
-### 3.1 CGHS details — click **CGHS**
+### 3.1 Set up CGHS — select **CGHS**
 
-| Field                          | Enter                                                |
-| ------------------------------ | ---------------------------------------------------- |
-| Colour                         | blue                                                 |
-| Patients per day               | _(leave empty = no limit; only an admin can set it)_ |
-| Payer name                     | CGHS Chandigarh                                      |
-| Pay later                      | Follow the billing setting                           |
-| Print the category on the bill | ✔                                                    |
+| Field                          | Sample value    |
+| ------------------------------ | --------------- |
+| Payer name                     | CGHS Chandigarh |
+| Print the category on the bill | ✔ Ticked        |
 
-Press **Save**. The payer name is needed before any rule can claim money from CGHS.
+Press **Save**.
 
-### 3.2 CGHS sub-categories — on CGHS press **+ Sub-category**
+### 3.2 CGHS sub-categories — **+ Sub-category**
 
-| Code           | Label          |
-| -------------- | -------------- |
-| cghs_paid      | CGHS Paid      |
-| cghs_referral  | CGHS Referral  |
-| cghs_pensioner | CGHS Pensioner |
+| Code           | Label          | Tick these, then Save                                |
+| -------------- | -------------- | ---------------------------------------------------- |
+| cghs_paid      | CGHS Paid      | Card number required, Print the category on the bill |
+| cghs_referral  | CGHS Referral  | Needs a referral, Print the category on the bill     |
+| cghs_pensioner | CGHS Pensioner | Card number required, Print the category on the bill |
 
-Codes are lowercase letters, numbers and `_` only.
+Leave **Payer name** empty on each sub-category; it uses CGHS's. A CGHS patient must always be billed under one of these three.
 
-Now open each sub-category and tick its boxes, then **Save**. Leave **Payer name** empty on all three; they use CGHS's.
+### 3.3 Who belongs — open **Senior Citizen**, then **+ Add rule**
 
-| Sub-category   | Card number required | Needs a referral | Needs the referral scanned                                 | Print the category on the bill |
-| -------------- | -------------------- | ---------------- | ---------------------------------------------------------- | ------------------------------ |
-| CGHS Paid      | ✔                    |                  |                                                            | ✔                              |
-| CGHS Referral  |                      | ✔                | _(leave off on the test server — scans need file storage)_ | ✔                              |
-| CGHS Pensioner | ✔                    |                  |                                                            | ✔                              |
+| Field          | Sample value     |
+| -------------- | ---------------- |
+| Rule name      | Age 60 and above |
+| From age       | 60               |
+| How it applies | Automatic        |
 
-### 3.3 "Who belongs" rules — open the category or sub-category, then **+ Add rule**
+Now every patient aged 60 or over opens at the counter as **Senior Citizen**. The desk can still change it.
 
-| On             | Rule name                | From age | To age    | Gender | Has a card | How it applies              | Priority |
-| -------------- | ------------------------ | -------- | --------- | ------ | ---------- | --------------------------- | -------- |
-| Senior Citizen | Age 60 and above         | 60       | _(empty)_ | Any    |            | Automatic                   | 100      |
-| CGHS Pensioner | Pensioner with CGHS card | 60       | _(empty)_ | Any    | ✔          | Suggest — the desk confirms | 50       |
+### 3.4 What the patient pays — **+ Payment rule**
 
-- **Automatic:** the bill opens already set to that category. Here, every patient aged 60 or over opens as Senior Citizen.
-- **Suggest:** the rule is recorded, and you can see it working in **Test this rule** (Part 6), but the counter does not show it as a button today. The desk picks the category by hand.
+| Add on         | Rule name                     | Applies to                            | Patient pays            | The rest                     |
+| -------------- | ----------------------------- | ------------------------------------- | ----------------------- | ---------------------------- |
+| CGHS           | CGHS — patient pays 20%       | The whole category                    | A percent: **20**       | Claimed from CGHS Chandigarh |
+| CGHS Paid      | CGHS Paid — consultation ₹200 | A group: **Out-patient Consultation** | A fixed amount: **200** | Claimed from CGHS Chandigarh |
+| CGHS Referral  | Referral — nothing to pay     | The whole category                    | Nothing                 | Claimed from CGHS Chandigarh |
+| CGHS Pensioner | Pensioner — nothing to pay    | The whole category                    | Nothing                 | Claimed from CGHS Chandigarh |
 
-When a patient matches two rules, the smaller priority number wins.
+Leave the dates and priority empty.
 
-> On **CGHS** itself the screen says rules must go on a sub-category. That is expected: a patient is always billed under one of its sub-categories.
+**How the rules combine:**
 
-### 3.4 "What the patient pays" — payment rules, **+ Payment rule**
+- The most specific rule wins: an item rule beats a sub-group rule, which beats a group rule, which beats a whole-category rule.
+- A sub-category's own rule beats its parent's rule.
+- Example: a CGHS Paid patient pays ₹200 for a consultation and 20% of everything else.
 
-**Rule 1 — on CGHS (the parent).** It applies to every CGHS sub-category that has no rule of its own.
-
-| Field        | Enter                          |
-| ------------ | ------------------------------ |
-| Rule name    | CGHS — patient pays 20%        |
-| Applies to   | The whole category             |
-| Visit types  | _(none ticked = every visit)_  |
-| Patient pays | A percent of the price         |
-| Percent (%)  | 20                             |
-| The rest     | Claimed from CGHS Chandigarh   |
-| From / To    | _(empty = from today, no end)_ |
-| Priority     | 100                            |
-
-**Rule 2 — on CGHS Paid.** A fixed consultation share, which beats the 20% for OPD items.
-
-| Field        | Enter                              |
-| ------------ | ---------------------------------- |
-| Rule name    | CGHS Paid — consultation ₹200      |
-| Applies to   | A group → Out-patient Consultation |
-| Patient pays | A fixed amount (₹)                 |
-| Amount (₹)   | 200                                |
-| The rest     | Claimed from CGHS Chandigarh       |
-
-**Rule 3 — on CGHS Referral.**
-
-| Field        | Enter                        |
-| ------------ | ---------------------------- |
-| Rule name    | Referral — nothing to pay    |
-| Applies to   | The whole category           |
-| Patient pays | Nothing                      |
-| The rest     | Claimed from CGHS Chandigarh |
-
-**Rule 4 — on CGHS Pensioner.**
-
-| Field        | Enter                        |
-| ------------ | ---------------------------- |
-| Rule name    | Pensioner — nothing to pay   |
-| Applies to   | The whole category           |
-| Patient pays | Nothing                      |
-| The rest     | Claimed from CGHS Chandigarh |
-
-**Show on the recording:** before saving Rule 2, press **Test this rule**, pick the preview item **Consultation — Dr E2E Banshali (New)** and visit type **New**. It shows the actual price → what the patient pays → the rest claimed. Nothing is saved.
-
-- **Most specific wins:** an item rule beats a sub-group rule, which beats a group rule, which beats the whole category. A sub-category's own rule beats its parent's.
-- **Error to show:** set Amount ₹2000 on a rule for **Dressing — Small** only. The screen says the patient can't pay ₹2000 because the item costs less.
+**Tip:** press **Test this rule** inside the form to preview the patient's share before saving. Nothing is saved by the preview.
 
 ---
 
-## Part 4 — Category rates
+## Step 4 — Category rates (special prices)
 
-**Settings → Category rates** tab.
+**Settings → Category rates.** Choose **Category: CGHS**, then **Edit** a row and **Save**.
 
-A category's own price for an item, with its own name and code as printed on the bill. Sub-categories use the parent's rate unless they have their own.
+| Item  | Rate (₹) | Bill name                        | Bill code | From  |
+| ----- | -------- | -------------------------------- | --------- | ----- |
+| HbA1c | 450      | Glycosylated Haemoglobin (HbA1c) | CG101     | today |
+| ECG   | 250      | ECG 12 Lead                      | CG201     | today |
 
-**Category:** CGHS. Press **Edit** on each row, fill it in, then **Save**:
-
-| Item  | Rate | Bill name                        | Bill code | From  | To        |
-| ----- | ---- | -------------------------------- | --------- | ----- | --------- |
-| HbA1c | 450  | Glycosylated Haemoglobin (HbA1c) | CG101     | today | _(empty)_ |
-| ECG   | 250  | ECG 12 Lead                      | CG201     | today | _(empty)_ |
-
-Now choose **CGHS Paid** in the Category box. The same rows show **From CGHS**, meaning they are inherited.
-
-- Press **History** on a row to see its rates over time.
-- **Clear** removes a rate.
-- A bill code can never be the same as a discount code.
+CGHS sub-categories use these rates automatically; the screen shows them as **From CGHS**. **History** shows past rates.
 
 ---
 
-## Part 5 — Consultant fees
+## Step 5 — Consultant fees
 
-**Settings → Consultant fees** tab.
+**Settings → Consultant fees.** One grid holds every doctor's New and Follow-up fee for every category. Click a cell to change it.
 
-Each doctor's New and Follow Up fee for every category, and what the patient pays, on one grid. Greyed values are inherited. The **General** column is the base price, which is changed on the Services page.
+Click the consultant's **New** row, **CGHS Paid** column:
 
-Click the cell **Dr E2E Banshali · New × CGHS Paid**:
-
-| Field            | Enter                   |
+| Field            | Sample value            |
 | ---------------- | ----------------------- |
 | Fee (₹)          | 900                     |
-| Patient pays     | An amount (₹)           |
-| Amount (₹)       | 200                     |
+| Patient pays     | An amount (₹): 200      |
 | The rest goes to | Claim (CGHS Chandigarh) |
 | Bill name        | OPD Consultation — CGHS |
 | Bill code        | CG001                   |
 | Valid from       | today                   |
-| Valid to         | _(empty)_               |
 
-Press **Save**. You should see _Saved the CGHS Paid fee for Dr E2E Banshali (New)_.
-
-**Copy a column.** Press **Copy column to…**:
-
-| Field     | Enter     |
-| --------- | --------- |
-| Copy from | CGHS Paid |
-| Copy to   | ECHS      |
-| Starting  | _(empty)_ |
-
-Press **Copy…**, then **Copy**. You should see _Copied N fees from CGHS Paid to ECHS_.
+**Copy column to…** copies one category's fees to another in one step, for example **CGHS Paid → ECHS**.
 
 ---
 
-## Part 6 — Discounts
+## Step 6 — Discounts
 
-**Settings → Discounts** tab → **+ New discount**.
+**Settings → Discounts → + New discount.**
 
-There are two kinds of discount:
+- A **code** discount is typed by the desk.
+- An **automatic** discount applies by itself.
+- The desk can never type a discount amount by hand.
 
-- **Code:** the desk types it at the counter.
-- **Automatic:** applies by itself when the patient and item match.
+| Field              | Senior discount        | Health camp coupon                    | Doctor's coupon                       | Camp price               |
+| ------------------ | ---------------------- | ------------------------------------- | ------------------------------------- | ------------------------ |
+| Name               | Senior citizen 10% off | Health camp ₹50 off                   | Doctor coupon 5%                      | Lipid Profile camp price |
+| How it applies     | Code                   | Code                                  | Code                                  | Automatic                |
+| Code               | SENIOR10               | CAMP50                                | DOC5                                  | —                        |
+| Kind               | Percent off: 10        | Flat ₹ off: 50                        | Percent off: 5                        | Fixed price: 450         |
+| Largest discount ₹ | 500                    | —                                     | —                                     | —                        |
+| Applies to         | Each line              | The whole bill                        | Each line                             | Each line                |
+| Covers             | —                      | —                                     | Doctors: your consultant              | Items: LAB-LIPID         |
+| Who gets it        | From age: 60           | —                                     | —                                     | —                        |
+| Valid to           | 2026-12-31             | 2026-10-31                            | —                                     | 2026-10-31               |
+| Limits             | Uses per day: 50       | Uses in all: 100, Uses per patient: 1 | Uses per doctor per day: 5            | —                        |
+| Other              | —                      | Stacks with other discounts ✔         | Who may enter: Reception admin, Admin | —                        |
 
-Reception can never type a discount amount by hand.
+Leave any field marked — empty. Set **Valid from** to today on every discount.
 
-### Discount 1 — senior citizen code
+**Test this rule** (below the list) prices a sample bill without saving anything. For example:
 
-| Field                   | Enter                            |
-| ----------------------- | -------------------------------- |
-| Name                    | Senior citizen 10% off           |
-| How it applies          | Code — the desk enters it        |
-| Code                    | SENIOR10                         |
-| Kind                    | Percent off                      |
-| Percent                 | 10                               |
-| Largest discount ₹      | 500                              |
-| Applies to              | Each line                        |
-| What it covers          | _(nothing = every service)_      |
-| Categories              | _(nothing)_                      |
-| From age / To age       | 60 / _(empty)_                   |
-| Gender                  | Any                              |
-| Valid from / to         | today / 2026-12-31               |
-| Uses per day            | 50                               |
-| Priority                | 100                              |
-| Who may enter this code | _(nothing = every billing role)_ |
+- **Age:** 65
+- **Items:** HbA1c and Lipid Profile
+- **Codes:** SENIOR10, DOC5
+- **Test as role:** Reception
 
-### Discount 2 — camp coupon on the whole bill
-
-| Field                       | Enter                     |
-| --------------------------- | ------------------------- |
-| Name                        | Health camp ₹50 off       |
-| How it applies              | Code — the desk enters it |
-| Code                        | CAMP50                    |
-| Kind                        | Flat ₹ off                |
-| ₹ off                       | 50                        |
-| Applies to                  | The whole bill            |
-| Valid from / to             | today / 2026-10-31        |
-| Uses in all                 | 100                       |
-| Uses per patient            | 1                         |
-| Stacks with other discounts | ✔                         |
-
-### Discount 3 — doctor's coupon
-
-| Field                   | Enter                      |
-| ----------------------- | -------------------------- |
-| Name                    | Dr Banshali patient coupon |
-| How it applies          | Code — the desk enters it  |
-| Code                    | DRB5                       |
-| Kind                    | Percent off                |
-| Percent                 | 5                          |
-| Applies to              | Each line                  |
-| Doctors                 | ✔ Dr E2E Banshali          |
-| Uses per doctor per day | 5                          |
-| Who may enter this code | ✔ Reception admin, ✔ Admin |
-
-### Discount 4 — automatic camp price for Lipid Profile
-
-| Field           | Enter                         |
-| --------------- | ----------------------------- |
-| Name            | Lipid Profile camp price      |
-| How it applies  | Automatic — applies by itself |
-| Kind            | Fixed price                   |
-| Price ₹         | 450                           |
-| Applies to      | Each line                     |
-| Items           | search **LAB-LIPID** → Add    |
-| Valid from / to | today / 2026-10-31            |
-
-### "Test this rule" (below the list)
-
-This prices a made-up bill exactly as the counter would. Nothing is saved and no limit is used up.
-
-| Field                     | Enter                            |
-| ------------------------- | -------------------------------- |
-| Test age                  | 65                               |
-| Test gender               | Female                           |
-| Test category             | General                          |
-| Test visit type           | New                              |
-| Test doctor               | Dr E2E Banshali                  |
-| Test date                 | today                            |
-| Test as role              | Reception                        |
-| Test items                | HbA1c → Add, Lipid Profile → Add |
-| Codes entered at the desk | SENIOR10, DRB5                   |
-
-Press **Test**. The results should show:
-
-- **SENIOR10 under "Discounts that applied".**
-- **DRB5 under "Codes refused"**, because reception is not allowed to enter it.
-- **Lipid Profile at its ₹450 camp price.** With "Only the best discount" set, each line takes its single biggest discount.
+Press **Test**. SENIOR10 applies. DOC5 is refused, because reception may not enter it.
 
 ---
 
-## Part 7 — Bulk import
+## Step 7 — Bulk import (many rows at once)
 
-**Settings → Bulk import** tab.
+**Settings → Bulk import.**
 
-Add or update many rows at once from an Excel file. Nothing is saved until you press **Commit**.
+1. Press **Download template**. It downloads an Excel file with one sheet per kind of data and a **Read me** sheet.
+2. On the **Items** sheet, add rows. For example:
 
-1. Press **Download template**. This saves **gini-billing-template.xlsx**, which has one sheet per kind of data plus a **Read me** sheet.
-2. Open the **Items** sheet and type these three rows under the grey EXAMPLE rows:
+| item_code | name | subgroup_code | base_price | kind | test_name |
+| --------- | ---- | ------------- | ---------- | ---- | --------- |
+| LAB-TSH   | TSH  | LAB-BIO       | 280        | test | TSH       |
+| LAB-CBC   | CBC  | LAB-HAEM      | 240        | test | CBC       |
 
-| item_code | name            | subgroup_code | base_price | unit | allow_quantity | kind  | test_name |
-| --------- | --------------- | ------------- | ---------- | ---- | -------------- | ----- | --------- |
-| LAB-TSH   | TSH             | LAB-BIO       | 280        | each | no             | test  | TSH       |
-| LAB-CBC   | CBC             | LAB-HAEM      | 240        | each | no             | test  | CBC       |
-| LAB-BAD   | Wrong price row | LAB-BIO       | ₹300       | each | no             | other |           |
+3. Upload the file. Every row is checked first and sorted into four lists:
+   - **Ready:** new rows.
+   - **Needs override:** changes to rows that already exist. A change is saved only if you press **Override**.
+   - **Failed:** rows with a mistake. The reason is shown, for example _base_price must be a plain number (no ₹ sign, no commas)_.
+   - **Unchanged:** rows that already match.
+4. Press **Commit**. Only Ready rows and the rows you chose to override are saved.
 
-3. Save the file as **.xlsx** and drop it on **Filled-in template (.xlsx)**.
-
-What you should see:
-
-- **LAB-TSH** is **Ready**: a new item.
-- **LAB-CBC** is **Needs override**: its price changes 220 → 240.
-- **LAB-BAD** is **Failed**: _base_price must be a plain number (no ₹ sign, no commas)_.
-
-**Show on the recording:**
-
-- The status tabs, the **Sheet** filter and the **Search** box.
-- **Download failed rows**.
-- On LAB-CBC press **Override**, then **Commit** → **Yes, save 2 rows**.
-- The **Import history** card at the bottom → **View report**.
-
-Blank cells use their default. Required column headers are orange. Amounts have no ₹ sign or commas, and dates are written as 2026-10-01.
+Amounts are plain numbers, dates are written as 2026-10-01, and an empty cell uses its default value.
 
 ---
 
-## Part 8 — Desk requests
+## Step 8 — Billing counter (daily use)
 
-**Settings → Desk requests** tab. It needs Admin or Reception admin, and the tab shows a count badge.
+### 8.1 Start of day — open the cash drawer
 
-The counter sends two kinds of request here:
+Open **Billing Counter → Shift**. Enter **Opening cash: 2000** and press **Open shift**.
 
-- **Bill again:** the patient needs an item billed a second time on the same visit.
-- **New item:** an item is missing from the list. It comes with no price; the admin sets the price.
+Cash can only be taken while a shift is open. Card and UPI payments work without a shift.
 
-The requests themselves are raised during Part 9 (cases G and H). Keep this tab open in a second window to show it updating live.
+### 8.2 Check-in creates the bill
 
----
+When reception checks a patient in, a **draft bill** opens by itself with the consultation fee on it. Tests the doctor orders are added to the bill automatically.
 
-## Part 9 — Billing counter
+Press **Bill** on the patient's row at reception to open their bill.
 
-### 9.1 Open the shift (cash drawer)
+### Case A — General patient, cash payment
 
-**Login:** E2E Reception. Go to Stations → **🧾 Billing Counter** → **Shift** tab.
+1. **Add items:** HbA1c, then Dressing — Small. Change the dressing's **Qty** to **2**.
+2. **Discount code:** CAMP50, then **Apply code**.
+3. **Payment:** Mode **Cash**, press **Rest**, then **Take payment**.
+4. Press **Finalise & print** to get the bill (GH26-000001), then **Print receipt** for the receipt.
 
-| Field        | Enter |
-| ------------ | ----- |
-| Opening cash | 2000  |
+### Case B — Senior patient, card + UPI
 
-Press **Open shift**. Cash can't be taken without an open shift; card and UPI can.
+1. The bill opens as **Senior Citizen** automatically.
+2. Add Lipid Profile (the ₹450 camp price applies by itself) and HbA1c.
+3. **Discount code:** SENIOR10.
+4. **Payment 1:** Card, **500**, Reference **4321**.
+5. Press **+ Split payment**. **Payment 2:** UPI, **Rest**, Reference **UPI302611223344**.
+6. Press **Take payment**, then **Finalise & print**.
 
-### 9.2 Check the patient in (this creates the draft bill)
+A wrong code is refused with the reason. For example, SENIOR10 on a patient under 60 is refused because of age.
 
-Go to **Reception** station → **+ Walk-in**, search the patient, choose the journey step (Consultation) → **✓ Check in**.
+### Case C — CGHS Paid
 
-Check-in quietly opens a **draft bill** with the consultation fee already on it. On the patient's row, press **Bill** to open that bill on the counter in a new tab.
+1. **Category:** CGHS → CGHS Paid.
+2. **Card number:** CGHS12345678. Press **Save numbers**, then **Confirm category**.
+3. Add HbA1c and ECG. The lines show the CGHS names and codes.
+4. **Totals** shows the **Claimed** part, which CGHS pays. Take only the patient's share.
+5. Press **Finalise & print**. The bill shows **CGHS pending**.
 
-Check in all five test patients this way.
+### Case D — CGHS Referral
 
-### Case A — General patient, cash, quantity, whole-bill coupon
+1. **Category:** CGHS → CGHS Referral.
+2. **Referral number:** REF/CHD/2026/0457. Press **Save numbers**, then **Confirm category**.
+3. Add Lipid Profile. There is nothing to pay.
+4. Press **Finalise & print**. The bill shows **CGHS pending**.
 
-Patient: **E2E General Adult**.
+### Case E — CGHS Pensioner
 
-1. The consultation line is already there.
-2. **Add items**, search and **Add**: `LAB-HBA1C`, `PROC-DRS-S`.
-3. On Dressing — Small, change **Qty** to **2** and press Enter.
-4. **Discount code:** `CAMP50` → **Apply code**. The chip shows _CAMP50 · Health camp ₹50 off · ₹50 off_.
-5. **Payment:** Mode **Cash** → press **Rest** → **Take payment ₹…**.
-6. Press **Finalise & print**. The bill PDF opens with number **GH26-000001**.
-7. Press **Print receipt**. You get one page per payment, starting at **RC26-000001**.
+1. **Category:** CGHS → CGHS Pensioner.
+2. **Card number:** CGHS87654321. Press **Save numbers**, then **Confirm category**.
+3. Add CBC. There is nothing to pay.
+4. Press **Finalise & print**.
 
-### Case B — wrong code, then senior discount and a split payment
+### Case F — Pay later
 
-Patient: **E2E Senior 72**.
+1. Add CBC.
+2. Tick **Pay later**, then **Finalise & print**.
+3. Later: open the **Dues** tab, press **Take payment**, and collect the amount.
 
-1. The bill opens already set to **Senior Citizen**. That is the automatic "Age 60 and above" rule from Part 3.
-2. Add `LAB-LIPID` and `LAB-HBA1C`. Lipid Profile already shows the automatic ₹450 camp price.
-3. **Show a refused code:** type `DRB5` → **Apply code**. It is refused because reception can't enter it.
-4. Type `SENIOR10` → **Apply code**.
-5. **Payment** row 1: Mode **Card**, Amount **500**, Reference **4321**.
-6. Press **+ Split payment**. Row 2: Mode **UPI**, press **Rest**, Reference **UPI302611223344**.
-7. Press **Take payment**, then **Finalise & print**.
+### Case G — Billing the same item twice (needs approval)
 
-To show another refusal: on Case A's patient, `SENIOR10` is refused because the patient is under 60.
+1. Add an item that is already on this visit's bill. It shows **Ask admin to bill again**.
+2. Enter a reason, for example _Repeat sample — first sample haemolysed_, and press **Send request**.
+3. The admin opens **Settings → Desk requests**, presses **Approve**, then **Approve request**.
+4. Back at the counter, press **Add to bill** under **My requests**.
 
-### Case C — CGHS Paid (card, patient pays a share)
+### Case H — Item not in the list
 
-Patient: **E2E CGHS Paid**.
+1. Search **Nebulisation**. Nothing is found, so press **Request new item**.
+2. Fill in **Item name:** Nebulisation, **Group:** Procedures, **Why:** _Doctor advised nebulisation today_.
+3. The admin opens **Desk requests** and presses **Create item**.
+   - **Code:** PROC-NEB
+   - **Subgroup:** Dressing and Minor Procedures
+   - **Price:** 300
+4. The admin presses **Create item and approve**. The item can now be billed.
 
-1. **Category:** CGHS → **CGHS Paid**. If you pick plain CGHS, the counter asks you to choose a sub-category.
-2. **Card number:** `CGHS12345678` → **Save numbers** → **Confirm category**.
-3. Add `LAB-HBA1C` and `CARD-ECG12`. The lines show the CGHS bill names and codes (CG101, CG201).
-4. **Totals** shows **Claimed**: the part CGHS pays.
-5. Take the patient's share in **Cash** with **Rest**, then **Finalise & print**.
-6. The badge reads **CGHS pending**.
+### Case I — Cancel an unpaid bill
 
-### Case D — CGHS Referral (referral number, nothing to pay)
+On a final bill with nothing paid, press **Cancel unpaid bill** and enter a reason, for example _Patient left before paying_. Then press **Start a new bill for this visit** if needed.
 
-Patient: **E2E CGHS Referral**.
+### Case J — Second bill on the same visit
 
-1. The bill opens as **Senior Citizen** (the patient is 60). Change **Category** to CGHS → **CGHS Referral**.
-2. **Referral number:** `REF/CHD/2026/0457` → **Save numbers** → **Confirm category**.
-   - Before the number is saved, the list under the buttons shows _Enter the referral number first._
-3. Add `LAB-LIPID`.
-4. The screen says _No payment is needed on this bill._ Press **Finalise & print**. The badge reads **CGHS pending**.
+A test ordered after a bill is final opens a new draft bill. Press **Open the new draft bill**. Earlier bills stay under **Earlier bills on this visit**, where **Print** reprints them.
 
-### Case E — CGHS Pensioner (nothing to pay)
+### Case K — Lab waits for payment
 
-Patient: **E2E Pensioner**.
+An ordered test waits at the lab until it is paid. Once the counter takes the payment, the lab can start the test.
 
-1. The bill opens as **Senior Citizen** (the patient is 68). Change **Category** to CGHS → **CGHS Pensioner**.
-2. **Card number:** `CGHS87654321` → **Save numbers** → **Confirm category**.
-3. Add `LAB-CBC`, then **Finalise & print**. Everything is claimed and the badge reads **CGHS pending**.
+CGHS Referral and Pensioner tests are released when the bill is finalised, because CGHS pays for them.
 
-### Case F — pay later, then collect from Dues
+### 8.3 End of day — close the cash drawer
 
-Use a General patient who has not paid yet (check in **E2E General Adult** again, or use any new walk-in).
+Open the **Shift** tab. Enter the **Counted cash** and press **Close shift**.
 
-1. Add `LAB-CBC`.
-2. Tick **Pay later** → **Finalise & print**.
-3. Open the **Dues** tab. The bill shows its **Outstanding** amount. Press **Take payment**, then pay in **Cash** with **Rest**.
-
-### Case G — bill again (needs an admin)
-
-On Case A's patient, search `LAB-HBA1C` again. It is greyed with **Ask admin to bill again**.
-
-1. Press it. In **Why must it be billed again?** type _Repeat sample — first sample haemolysed_ → **Send request**.
-2. **Admin window:** Settings → **Desk requests**. The request appears. Press **Approve**, type _OK to repeat_ in **Note for the desk** → **Approve request**.
-3. **Counter:** under **My requests** the row shows **Approved**. Press **Add to bill**.
-
-### Case H — new item request
-
-1. On any draft, search `Nebulisation`. The screen says no item matches. Press **Request new item**:
-
-| Field             | Enter                             |
-| ----------------- | --------------------------------- |
-| Item name         | Nebulisation                      |
-| Group             | Procedures                        |
-| Why is it needed? | Doctor advised nebulisation today |
-
-Press **Send request**.
-
-2. **Admin window:** Desk requests → **Create item**:
-
-| Field             | Enter                         |
-| ----------------- | ----------------------------- |
-| Name              | Nebulisation                  |
-| Code              | PROC-NEB                      |
-| Subgroup          | Dressing and Minor Procedures |
-| Kind              | procedure                     |
-| Price (₹)         | 300                           |
-| Note for the desk | Added at ₹300                 |
-
-Press **Create item and approve**. The counter can now add **PROC-NEB**.
-
-### Case I — cancel an unpaid bill
-
-Take a bill finalised with **Pay later** that has nothing paid (repeat Case F without collecting).
-
-1. Press **Cancel unpaid bill**.
-2. In **Why is this bill being cancelled?** type _Patient left before paying — billed by mistake_ → **Cancel bill**.
-3. Then press **Start a new bill for this visit**.
-
-A bill with money on it has no Cancel button; refunds are not built on screen yet.
-
-### Case J — second bill on the same visit
-
-After a bill is final, a new test ordered for that visit opens a second draft. The screen shows _A new draft bill is open on this visit_ → **Open the new draft bill**. The first bill moves to **Earlier bills on this visit**, where **Print** reprints it.
-
-### Case K — lab gate (optional; needs the MO station)
-
-A test ordered at the MO station waits at the Lab with _Waiting for reception to clear payment_. Once the counter takes the money for that test, the Lab can press **Start collection**. CGHS Referral and Pensioner tests are released when the bill is finalised.
-
-### 9.3 Close the shift
-
-**Shift** tab.
-
-| Field        | Enter                                                                     |
-| ------------ | ------------------------------------------------------------------------- |
-| Counted cash | _(the "Expected in the drawer" figure, or ₹10 less to show a difference)_ |
-| Note         | End of demo shift                                                         |
-
-Press **Close shift** → **Close the shift**. The screen shows expected, counted and the difference.
+The screen shows the expected cash, the counted cash and any difference.
 
 ---
 
-## Part 10 — CGHS register
+## Step 9 — CGHS register (claims from CGHS)
 
-**Login:** E2E Reception Admin (or Admin). Top menu → **🧾 CGHS register**.
+**Menu → CGHS register** (Admin or Reception Admin).
 
-Every final bill with an amount claimed from CGHS stays **Pending** until the money reaches the bank.
+Every CGHS bill stays **Pending** until CGHS pays the hospital.
 
-1. The **Pending** tab lists the bills from Cases C, D and E.
-2. Tick all three (or **Select all filtered**) → **Clear selected**.
+1. On the **Pending** tab, tick the bills that CGHS paid for, then press **Clear selected**.
+2. Fill in the payment:
 
-| Field               | Enter                                              |
-| ------------------- | -------------------------------------------------- |
-| Date received       | today                                              |
-| Reference (UTR)     | UTR2026092500123                                   |
-| Amount received (₹) | _(already filled with the total claim — leave it)_ |
-| Note                | CGHS September batch                               |
+| Field               | Sample value                            |
+| ------------------- | --------------------------------------- |
+| Date received       | today                                   |
+| Reference (UTR)     | UTR2026092500123                        |
+| Amount received (₹) | _(already filled with the total claim)_ |
+| Note                | CGHS September batch                    |
 
-3. The line says _The amount matches the selected claims._ Press **Save**. You should see _Cleared 3 bills — reference UTR2026092500123_.
-4. **Counter:** open Case C's bill. The badge now reads **Cleared on 2026-09-25**.
-5. **Cleared** tab → **Undo** (admin only). Enter Reason _Wrong UTR entered_ → **Undo payment**. The bills go back to Pending. Clear them again.
-6. Press **Print pending list** and **Export Pending (.xlsx)** / **Export Cleared (.xlsx)**.
+3. The screen confirms _The amount matches the selected claims_. Press **Save**.
+4. At the counter, those bills now show **Cleared on** and the date.
 
-To show an error, change the amount received to a different figure. **Save** stays off and the screen shows the difference.
+If the amount does not match, the register shows the difference and **Save** stays off.
 
----
-
-## Part 11 — Billing reports
-
-Top menu → **💹 Billing Reports**. Final bills only; days are India dates.
-
-**Dates:** This month.
-
-Open each tab:
-
-- Revenue by service
-- Revenue by consultant
-- Revenue by category
-- Collections (by payment mode, user, shift and day)
-- Dues
-- Discounts
-- CGHS receivables (with ageing)
-- Coupon usage
-- Cancellations
-- Desk requests
-
-Try the filters **By: Day**, **Category: CGHS**, **Consultant: Dr E2E Banshali**. Press **Download Excel**.
+An Admin can **Undo** a wrong entry from the **Cleared** tab. The **Print pending list** and **Export (.xlsx)** buttons give the lists for CGHS follow-up.
 
 ---
 
-## Part 12 — Who can see what
+## Step 10 — Billing reports
 
-| Screen                                                                                                 | Admin        | Reception admin | Reception |
-| ------------------------------------------------------------------------------------------------------ | ------------ | --------------- | --------- |
-| Billing counter                                                                                        | ✔            | ✔               | ✔         |
-| Settings: Categories, Services, Category rates, Consultant fees, Discounts, Desk requests, Bulk import | ✔            | ✔               | ✘         |
-| Settings: Billing settings                                                                             | ✔            | ✘               | ✘         |
-| Category "Patients per day"                                                                            | ✔            | read only       | ✘         |
-| CGHS register                                                                                          | ✔ (and Undo) | ✔               | ✘         |
-| Billing reports                                                                                        | ✔            | ✔               | ✘         |
+**Menu → Billing Reports.** Choose the dates, then open a tab. **Download Excel** saves every tab.
 
-**Show on the recording:** log in as **E2E Reception**. There is no billing Settings, no CGHS register and no Billing Reports in the menu.
+| Report                                     | Shows                                      |
+| ------------------------------------------ | ------------------------------------------ |
+| Revenue by service / consultant / category | Earnings split each way                    |
+| Collections                                | Cash, card and UPI, by user, shift and day |
+| Dues                                       | Bills still unpaid                         |
+| Discounts                                  | Every discount and coupon given            |
+| CGHS receivables                           | What CGHS still owes, and for how long     |
+| Coupon usage                               | How often each code was used               |
+| Cancellations                              | Cancelled bills and the reasons            |
+| Desk requests                              | Bill-again and new-item requests           |
 
 ---
 
-## Not built on screen yet
+## Coming next
 
-- **Refunds and credit notes.** The server side exists, but there is no counter screen. A paid bill can't be cancelled.
-- **GST on bills.** It is ready but switched off until the hospital needs it.
+- **Refunds and credit notes** at the counter. Until then, a paid bill cannot be cancelled.
+- **GST on bills.** It is ready, and is switched on in Billing settings when the hospital needs it.

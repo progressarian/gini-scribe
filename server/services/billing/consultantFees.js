@@ -6,6 +6,7 @@ import {
 } from "../../../shared/billingVocab.js";
 import { isLabOnlyDoctor } from "../../../shared/labOnly.js";
 import { indiaToday } from "./categoryResolver.js";
+import { refuseRemovedItem } from "./removedDoctors.js";
 import { httpError, inTransaction } from "./transaction.js";
 import { cleanDate, hasField, INT_MAX, readNumber } from "./common.js";
 import { deleteRate, saveRate } from "./categoryRates.js";
@@ -391,6 +392,7 @@ async function loadItem(client, itemId) {
   if (item.kind !== "consultation") {
     throw httpError(409, `${item.name} isn't a consultation item, so it has no consultant fee`);
   }
+  await refuseRemovedItem(item.id, (name) => `${name} can't be given a fee`, client);
   if (!item.is_active) throw httpError(409, `${item.name} is deactivated`);
   return { ...item, base_price: Number(item.base_price) };
 }

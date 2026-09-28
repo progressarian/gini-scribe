@@ -4,6 +4,7 @@ import { CONSULTATION_VISIT_TYPES, ITEM_KINDS } from "./importColumns.js";
 import { looksLikeSameTest, normalizeTestName } from "./testNames.js";
 import { checkItemPrices } from "./paymentRules.js";
 import { writeAudit } from "./audit.js";
+import { refuseRemoved } from "./removedDoctors.js";
 import { httpError, inTransaction } from "./transaction.js";
 import {
   assertCodeFree,
@@ -183,11 +184,14 @@ async function checkTaxCode(client, taxCodeId) {
 
 async function checkDoctor(client, doctorId) {
   if (!doctorId) return;
-  const { rows } = await client.query(`SELECT name, is_active FROM doctors WHERE id = $1`, [
-    doctorId,
-  ]);
+  const { rows } = await client.query(
+    `SELECT id, name, is_active FROM doctors WHERE id = $1 FOR SHARE`,
+    [doctorId],
+  );
   if (!rows.length) throw httpError(404, "That doctor no longer exists");
-  if (rows[0].is_active === false) throw httpError(409, `${rows[0].name} is not an active doctor`);
+  if (rows[0].is_active === false) {
+    throw refuseRemoved(rows[0], "no consultation item can be made or brought back for them");
+  }
   if (isLabOnlyDoctor(rows[0].name)) {
     throw httpError(
       409,

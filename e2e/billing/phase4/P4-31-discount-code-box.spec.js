@@ -59,7 +59,7 @@ test.describe.serial("P4-31 discount code box", () => {
 
     await expect(box(page).getByText(`${CODE} applied`)).toBeVisible();
     const saved = await bills.readBill(ids.bill, db);
-    expect(saved.totals.discount).toBe(15000);
+    expect(saved.totals.discount).toBe(35000);
     await expect(totalRow(page, "Discount")).toHaveText(fromPaise(saved.totals.discount));
     await expect(totalRow(page, "Patient payable")).toHaveText(fromPaise(saved.totals.payable));
   });

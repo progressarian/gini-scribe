@@ -201,6 +201,7 @@ export const CAPABILITIES = {
   BILLING_SETTINGS: "BILLING_SETTINGS",
   BILLING_CLAIMS: "BILLING_CLAIMS",
   BILLING_REPORTS: "BILLING_REPORTS",
+  BILLING_DUES: "BILLING_DUES",
 };
 
 const C = CAPABILITIES;
@@ -430,6 +431,7 @@ export const ROLE_CAPABILITIES = {
     C.BILLING_MASTER,
     C.BILLING_CLAIMS,
     C.BILLING_REPORTS,
+    C.BILLING_DUES,
   ],
   // Coordinators run GHM ops/calling and need Genie Chats with patients.
   // The GDA works two desks: Vitals and the Assistant Station. Dietitian was

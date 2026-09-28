@@ -730,7 +730,7 @@ export async function orderTests(
     await assertOwner(client, visitId, actorId);
 
     const { rows: visitRows } = await client.query(
-      `SELECT current_status FROM giniflow_visits WHERE id = $1 FOR UPDATE`,
+      `SELECT current_status FROM giniflow_visits WHERE id = $1 FOR NO KEY UPDATE`,
       [visitId],
     );
     if (!visitRows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });

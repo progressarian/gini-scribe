@@ -196,7 +196,7 @@ const outcome = (promise) =>
     (error) => ({ ok: false, error }),
   );
 
-async function interleave({ hold, deskWork, orderId }) {
+async function interleave({ hold, deskWork, orderId, floorWaits = true }) {
   const holder = new pg.Client({
     connectionString: TEST_DATABASE_URL,
     ssl: false,
@@ -213,7 +213,7 @@ async function interleave({ hold, deskWork, orderId }) {
     const deskRun = outcome(deskWork(deskPool));
     await waitsOnALock(deskPid, "the desk");
     const floorRun = outcome(cancelOnFloor(orderId, floorPool));
-    await waitsOnALock(floorPid, "the floor cancel");
+    if (floorWaits) await waitsOnALock(floorPid, "the floor cancel");
     await holder.query("ROLLBACK");
     const [deskDone, floorDone] = await Promise.all([deskRun, floorRun]);
     return { deskDone, floorDone };
@@ -340,6 +340,7 @@ test.describe.serial("P4C-06 lock order and reception claims", () => {
       hold: { sql: `SELECT id FROM bills WHERE id = $1 FOR UPDATE`, params: [first.id] },
       deskWork: (pool) => bills.addLine(added.bill_id, { item_id: ids.brace }, desk, pool),
       orderId: order,
+      floorWaits: false,
     });
     expect(race.deskDone.error?.code).not.toBe(DEADLOCK);
     expect(race.floorDone.error?.code).not.toBe(DEADLOCK);

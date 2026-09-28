@@ -1,22 +1,29 @@
-import { useDues } from "../../../queries/hooks/useBilling";
+import { useDuesToday } from "../../../queries/hooks/useBilling";
 import { errorOf, fromPaise } from "../format";
 import { dueAgeText } from "./lineText";
 
 export default function DuesList({ onTakePayment }) {
-  const { data, isLoading, error } = useDues();
-  const rows = data || [];
+  const { data, isLoading, error } = useDuesToday();
+  const rows = data?.rows || [];
+  const count = data?.totals.bills ?? 0;
 
   return (
     <section className="bc-card" aria-label="Dues">
-      <h3 className="bc-card__title">Unpaid balances</h3>
+      <h3 className="bc-card__title">Due today</h3>
+      {data && (
+        <p className="bc-head__meta" aria-live="polite" data-testid="dues-today-total">
+          {count === 1 ? "1 bill" : `${count} bills`} · {fromPaise(data.totals.outstanding)} due
+          today
+        </p>
+      )}
       {isLoading && <div className="empty-note">Loading…</div>}
       {error && <div className="bc-err">{errorOf(error, "The dues could not be read")}</div>}
       {!isLoading && !error && !rows.length && (
-        <div className="empty-note">Nothing is left to collect.</div>
+        <div className="empty-note">Nothing is left to collect from today&apos;s bills.</div>
       )}
       {!!rows.length && (
         <div className="ltablewrap bc-stack">
-          <table className="ltable" aria-label="Unpaid balances">
+          <table className="ltable" aria-label="Due today">
             <thead>
               <tr>
                 <th>Patient</th>

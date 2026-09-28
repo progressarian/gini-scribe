@@ -445,3 +445,33 @@
   padding: 0 6px;
   margin-left: 4px;
 }
+
+.docmgmt-modal-actions .docmgmt-danger {
+  background: #d8392b;
+  color: #fff;
+  border: none;
+}
+.docmgmt-danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.docmgmt-counts {
+  margin: 8px 0 14px;
+  padding-left: 20px;
+  font-size: 14px;
+  color: #2a3342;
+}
+.docmgmt-reason {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: #555;
+}
+.docmgmt-reason textarea {
+  font: inherit;
+  padding: 8px;
+  border: 1px solid #cdd5df;
+  border-radius: 8px;
+  resize: vertical;
+}

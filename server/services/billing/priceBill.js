@@ -227,7 +227,9 @@ function billRuleMiss(rule, line) {
   if (targets.length && !targets.some((key) => rule[key].includes(line[LINE_TARGETS[key]]))) {
     return "items";
   }
-  if (rule.doctor_ids && !rule.doctor_ids.includes(line.doctor_id)) return "doctor";
+  if (rule.doctor_ids && (!rule.doctor_ids.includes(line.doctor_id) || line.doctor_removed)) {
+    return "doctor";
+  }
   if (rule.visit_types && !rule.visit_types.includes(line.visit_type)) return "visit_type";
   if (line.remainder !== null && !rule.applies_on_scheme_rate) return "payment_rule";
   return null;
@@ -465,6 +467,7 @@ export async function priceBill(input = {}, source = pool) {
     quantity: line.quantity,
     visitType: line.visitType ?? visitType,
     doctorId: line.doctorId ?? doctorId,
+    kept: line.kept === true,
   }));
   const context = { category, patient: who.patient, date, role: input.role, codesOnBill: 0 };
   const { admitted, refused, priced, lineCodes } = await admitCodes(

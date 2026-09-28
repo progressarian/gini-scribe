@@ -41,6 +41,7 @@ test.describe("P4-38c the counter's re-read stays on its own patient", () => {
     });
     await bills.addLine(draft.id, { item_id: day.items.dressing }, desk, db);
     await expect.poll(() => held, { timeout: 25000 }).not.toBeNull();
+    await page.getByRole("button", { name: /^Not arrived/ }).click();
     await page
       .getByRole("button", { name: new RegExp(second.name) })
       .first()

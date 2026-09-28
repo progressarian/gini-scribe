@@ -23,6 +23,7 @@ import {
   settleTestOrders,
 } from "./payments.js";
 import { priceBill } from "./priceBill.js";
+import { refuseRemoved, removedDoctor } from "./removedDoctors.js";
 import { httpError, inTransaction } from "./transaction.js";
 import { auditFields, hasField, INT_MAX, lockRow, readNumber, wholeNumber } from "./common.js";
 
@@ -160,6 +161,7 @@ function shapeLine(row) {
     claim: paise(row.claim_amount),
     adjustment: paise(row.adjustment_amount),
     order_state: row.order_state ?? null,
+    removed_doctor: row.removed_doctor ?? null,
   };
 }
 
@@ -278,8 +280,11 @@ async function liveLines(client, billId, { all = false } = {}) {
     `SELECT ${LINE_COLUMNS.split(/,\s*/)
       .map((column) => `l.${column}`)
       .join(", ")},
-            COALESCE(i.allow_quantity, FALSE) AS allow_quantity, i.max_quantity
+            COALESCE(i.allow_quantity, FALSE) AS allow_quantity, i.max_quantity,
+            CASE WHEN i.kind = 'consultation' AND rd.is_active IS FALSE
+                 THEN json_build_object('id', rd.id, 'name', rd.name) END AS removed_doctor
        FROM bill_lines l LEFT JOIN service_items i ON i.id = l.service_item_id
+       LEFT JOIN doctors rd ON rd.id = COALESCE(i.doctor_id, l.doctor_id)
       WHERE l.bill_id = $1 AND (l.is_live OR $2)
       ORDER BY l.line_no, l.created_at, l.id`,
     [billId, all],
@@ -424,6 +429,7 @@ async function reprice(client, bill, codes, ctx) {
         item: line.service_item_id,
         quantity: Number(line.quantity),
         doctorId: line.doctor_id,
+        kept: true,
       })),
     },
     client,
@@ -485,8 +491,13 @@ async function lockBill(client, billId) {
   return lockRow(client, SPEC, cleanUuid(billId, "bill"));
 }
 
+async function lockVisitBills(client, visitId) {
+  await client.query(`SELECT id FROM bills WHERE visit_id = $1 ORDER BY id FOR UPDATE`, [visitId]);
+}
+
 export async function openDraftIn(client, visitId, ctx) {
   const visit = await visitFacts(client, visitId);
+  await lockVisitBills(client, visitId);
   const open = await client.query(
     `SELECT ${BILL_COLUMNS} FROM bills
       WHERE visit_id = $1 AND status = 'draft' AND bill_type = 'invoice' FOR UPDATE`,
@@ -549,6 +560,11 @@ export async function repriceBillIn(client, billId, ctx) {
   return reprice(client, rows[0], await billCodes(client, billId), ctx);
 }
 
+async function removedDoctorOfVisit(client, visitId) {
+  const visit = await visitFacts(client, visitId);
+  return removedDoctor(visit.appointment_doctor_id ?? visit.assigned_doctor_id, client);
+}
+
 export async function openDraft(visitId, ctx, db = pool) {
   const id = cleanUuid(visitId, "visit");
   return inTransaction(async (client) => {
@@ -562,6 +578,7 @@ export async function openDraft(visitId, ctx, db = pool) {
       codes: await billCodes(client, bill.id),
       needs_category: !bill.scheme_code && resolution.needs_sub_category,
       suggestions: bill.scheme_code ? [] : resolution.suggestions,
+      removed_doctor: await removedDoctorOfVisit(client, id),
     });
   }, db);
 }
@@ -620,7 +637,9 @@ async function itemFor(client, itemId) {
 }
 
 async function approvalFor(client, bill, item, repeatRequestId, ctx) {
-  await client.query(`SELECT id FROM bills WHERE visit_id = $1 FOR UPDATE`, [bill.visit_id]);
+  await client.query(`SELECT id FROM bills WHERE visit_id = $1 ORDER BY id FOR UPDATE`, [
+    bill.visit_id,
+  ]);
   const line = await liveLineFor(client, {
     visitId: bill.visit_id,
     serviceItemId: item.id,
@@ -645,9 +664,32 @@ async function approvalFor(client, bill, item, repeatRequestId, ctx) {
   return approval.id;
 }
 
+async function refuseRemovedConsultant(client, bill, itemId, doctorId) {
+  const { rows } = await client.query(
+    `SELECT d.id, d.name, i.name AS item
+       FROM service_items i
+       LEFT JOIN appointments a ON a.id = $3
+       JOIN doctors d ON d.id = COALESCE(i.doctor_id, $2::int, a.doctor_id)
+      WHERE i.id = $1 AND i.kind = 'consultation' AND d.is_active IS FALSE`,
+    [itemId, doctorId, bill.appointment_id ?? null],
+  );
+  if (rows.length) throw refuseRemoved(rows[0], `${rows[0].item} can't be billed`);
+}
+
+function refuseRemovedLines(lines) {
+  const line = lines.find((entry) => entry.removed_doctor);
+  if (!line) return;
+  throw refuseRemoved(
+    line.removed_doctor,
+    `${line.bill_name} can't be billed; remove it from this bill first`,
+  );
+}
+
 export async function addLineIn(client, bill, input, ctx) {
   assertDraft(bill);
   const itemId = cleanItemId(input?.item_id ?? input?.item);
+  const doctorId = wholeNumber(input?.doctor_id, "Doctor", { min: 1 }) ?? null;
+  await refuseRemovedConsultant(client, bill, itemId, doctorId);
   const quantity = wholeNumber(input?.quantity, "Quantity", { min: 1 }) ?? 1;
   const source = input?.source ?? "added";
   if (!LINE_SOURCES.includes(source)) throw httpError(400, "That line source isn't known");
@@ -679,7 +721,7 @@ export async function addLineIn(client, bill, input, ctx) {
       item.id,
       source,
       labOrderId,
-      input?.doctor_id ?? null,
+      doctorId,
       repeatRequestId,
       item.name,
       quantity,
@@ -705,6 +747,10 @@ export async function addLineIn(client, bill, input, ctx) {
 export async function addLine(billId, input, ctx, db = pool) {
   let usedApprovalId = null;
   const bill = await inTransaction(async (client) => {
+    const { rows: owner } = await client.query(`SELECT visit_id FROM bills WHERE id = $1`, [
+      cleanUuid(billId, "bill"),
+    ]);
+    if (owner[0]?.visit_id) await lockVisitBills(client, owner[0].visit_id);
     const locked = await lockBill(client, billId);
     const saved = await addLineIn(client, locked, input, ctx);
     usedApprovalId = saved.used_approval_id;
@@ -723,7 +769,7 @@ async function lineOf(client, bill, lineId) {
   return rows[0];
 }
 
-async function resettleTestOrders(client, bill, ctx) {
+export async function resettleTestOrders(client, bill, ctx) {
   if (!(await moneyOn(client, bill.id)).held) return;
   if ((await orderStatesOn(client, bill.id)).size) return;
   const shares = await orderShares(client, bill);
@@ -1005,6 +1051,7 @@ export async function finaliseBill(billId, input, ctx, db = pool) {
     }
     const lines = await liveLines(client, bill.id);
     if (!lines.length) throw httpError(409, "This bill has no items on it yet");
+    refuseRemovedLines(lines);
     await assertCategoryChosen(client, bill);
     const codes = await billCodes(client, bill.id);
     await recheckCodes(client, bill, codes, ctx);

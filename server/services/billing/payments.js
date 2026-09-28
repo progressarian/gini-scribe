@@ -11,6 +11,7 @@ import { AS_PAID, ORDER_STATE } from "../../../shared/billingVocab.js";
 import { writeAudit } from "./audit.js";
 import { nextNumber, seriesFor } from "./billNumber.js";
 import { cashOutShift, DRAWER_MODE, openShiftIdFor, PAYMENT_MODES } from "./cashShifts.js";
+import { DUE_BILLS, DUE_DAYS, DUE_MONEY, DUE_OUTSTANDING, shapeDue } from "./dues.js";
 import { httpError, inTransaction } from "./transaction.js";
 import {
   auditFields,
@@ -629,12 +630,7 @@ export async function listPayments(billId, db = pool) {
 }
 
 export async function listDues(filters = {}, db = pool) {
-  const where = [
-    `b.status = 'final'`,
-    `b.paid_amount < b.patient_payable`,
-    `b.bill_type = 'invoice'`,
-    `GREATEST(b.patient_payable - m.credited, 0) > b.paid_amount - m.refunded`,
-  ];
+  const where = [DUE_BILLS, `${DUE_OUTSTANDING} > 0`];
   const params = [];
   const add = (sql, value) => {
     params.push(value);
@@ -650,39 +646,20 @@ export async function listDues(filters = {}, db = pool) {
   if (to) add("b.bill_date <= ?::date", to);
   params.push(cleanLimit(filters.limit));
   const { rows } = await db.query(
-    `SELECT b.id, b.bill_no, b.bill_date::text AS bill_date, b.visit_id, b.pay_later,
-            b.patient_payable, b.paid_amount, b.scheme_label,
-            p.id AS patient_id, p.name AS patient_name, p.file_no, m.credited, m.refunded,
-            ((NOW() AT TIME ZONE 'Asia/Kolkata')::date - b.bill_date) AS days
+    `SELECT b.id, b.bill_no, b.bill_date::text AS bill_day, b.visit_id, b.pay_later,
+            b.patient_payable, b.paid_amount, b.scheme_code, b.scheme_label,
+            COALESCE(cs.parent_code, b.scheme_code) AS category,
+            p.id AS patient_id, p.name AS patient_name, p.file_no, p.phone, m.credited, m.refunded,
+            ${DUE_DAYS} AS days
        FROM bills b JOIN patients p ON p.id = b.patient_id
-       CROSS JOIN LATERAL (
-         SELECT COALESCE((SELECT SUM(c.patient_payable) FROM bills c
-                           WHERE c.original_bill_id = b.id), 0) AS credited,
-                COALESCE((SELECT SUM(x.amount) FROM payments x JOIN bills c ON c.id = x.bill_id
-                           WHERE c.original_bill_id = b.id), 0) AS refunded
-       ) m
+       LEFT JOIN patient_schemes cs ON cs.code = b.scheme_code
+       ${DUE_MONEY}
       WHERE ${where.join(" AND ")}
       ORDER BY b.bill_date, b.created_at, b.id
       LIMIT $${params.length}`,
     params,
   );
-  return rows.map((row) => ({
-    bill_id: row.id,
-    bill_no: row.bill_no,
-    bill_date: row.bill_date,
-    visit_id: row.visit_id,
-    pay_later: row.pay_later,
-    category_label: row.scheme_label,
-    patient: { id: row.patient_id, name: row.patient_name, file_no: row.file_no },
-    payable: paise(row.patient_payable),
-    paid: paise(row.paid_amount),
-    credited: paise(row.credited),
-    refunded: paise(row.refunded),
-    outstanding:
-      Math.max(0, paise(row.patient_payable) - paise(row.credited)) -
-      (paise(row.paid_amount) - paise(row.refunded)),
-    days: Number(row.days),
-  }));
+  return rows.map(shapeDue);
 }
 
 function creditNoteRow(row) {

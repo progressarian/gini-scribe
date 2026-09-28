@@ -2654,6 +2654,85 @@ and a full rehearsal of the trial day on the test system.
   - **Why:** (1) a desk line change or payment (bill → order) **deadlocked** with a floor test cancellation (order → bill); (2) with the valve on, a reception insurance claim on the unpriced part blocked the draft for good once approved, and removing the priced line left the bill's ₹250 on the order with the gate open; (3) raising an earlier line's quantity left a later order paid; (4) a refusal after a re-add named the wrong test and the whole amount.
   - **Result:** Done 2026-09-25 (built by a sub-agent). All four reproduced first. The deadlock by real two-connection interleavings — `40P01` for `removeLine`, `changeQuantity`, `takePayments` and a fourth the review hadn't found, `addLine` on a visit's second bill. **Lock order everywhere is now visit → bills (by id) → order → lines**: `cancelTestIn` locks the visit's live draft bills and every bill holding a line of the order, in id order, before the order, and its visit lock is `FOR NO KEY UPDATE` so a desk line insert (which checks the visit key) no longer blocks on it. None of the four deadlocks now; the cancel still removes a draft line, refuses a final bill's and releases a cancelled bill's order link. A claim reception adds after a claim-free settle is now reception's money (kept by the settle, left by a release) — submitted, approved or rejected. `resettleTestOrders` also releases orders the bill no longer covers. The refusal names the test re-added since the bill's last settle and only reception's part. No schema change; `clearPayment`, `getPaymentQueue`, `labPayment.js` and `visitLines.js` unchanged, so P4-18's pins hold. 11 tests; ten deliberate breaks each failed a test. 142/142 twice across P4-07, 08, 10, 15–18, 40–42, P4C-04/05/06, all P4B and P4-38b. **The API and the worker need a restart.**
   - **Still open — the same deadlock class elsewhere (P4C-07):** the HealthRay sync transaction (`machineSync`) updates orders before its auto-cancel locks bills (order → bill); floor stations that hold the visit `FOR UPDATE` and then open the draft can deadlock with a desk line insert; `approvalFor` locks the visit's bills without an order after already holding one; a category claim meeting a standing reception claim on one order leaves the order to reception. Postgres ends a deadlock by failing one request — no bad data — but the floor would see an error.
+  - **Review:** (2026-09-28, by a sub-agent against the committed code) The lock order is right on the four paths it fixed. Rerun with two real connections, none deadlock; with `lockBillsOf` or `FOR NO KEY UPDATE` reverted, P4C-06 tests 1–4 each fail with `40P01`. P4C-04/05/06 passed 34/34. `FOR NO KEY UPDATE` is safe: stations and the sync still hold the visit `FOR UPDATE`, draft uniqueness is the index plus the 23505 fallback, and "never twice" is the advisory lock. The reception-claim changes were walked through submitted, approved, rejected and split claims; no double charge, lost claim or wrongly opened gate. **Found — all moved to P4C-07:** (1) money-wrong: a floor cancel of one test from a paid draft's order leaves the draft stuck for good, and can open the gate with money uncollected; (2) an `approvalFor` deadlock; (3) the machineSync and station deadlocks confirmed with real `40P01`, including a test silently left off the bill.
+
+- [~] **P4C-07 · Remaining lock-order paths and the partial floor cancel** — `Items 1–4 done; item 5 open` (from the P4C-06 build and review; merged 2026-09-28)
+  - **Where:**
+    - `server/services/giniflow/testCancel.js`: `cancelOrderIn`, plus new helpers `draftsHolding` and `orderMoney`.
+    - `server/services/billing/bills.js`: new `lockVisitBills`, called by `openDraftIn` and `addLine`; `approvalFor` gains `ORDER BY id`; `resettleTestOrders` is exported.
+    - `visitLines.js`: `linesForOrder` rethrows `40P01`.
+    - `moStation.orderTests`, `journey.checkInWithJourney` and `machineSync` lock the visit `FOR NO KEY UPDATE`; `machineSync` also locks the visit's bills in id order right after the visit.
+    - Spec: `e2e/billing/phase4/P4C-07-lock-order-and-partial-cancel.spec.js`. P4C-06 test 4's harness takes `floorWaits: false`.
+  - **Result:** Done 2026-09-28 for items 1–4 (built by a sub-agent).
+    - **1. Partial floor cancel.** The order is released from the draft bills holding its lines. Only reception's own money is capped at the new total. The test and its line are deleted, the bill is repriced, and the drafts are re-settled; `amount_paid` is never written by hand. A whole-order cancel also re-settles.
+      - D2: the order is paid ₹250; the bill is ₹750 with ₹650 paid; ₹100 more is taken and it finalises.
+      - D: the order stays part-paid at ₹250 of ₹550 and the gate stays closed until ₹300 is collected.
+    - **2.** `addLine` and `openDraftIn` lock every bill on the visit in id order before the target bill.
+    - **3.** A deadlocked `linesForOrder` fails its station instead of committing the order with no bill line. The stations' visit lock no longer blocks a desk line insert.
+    - **4.** machineSync locks the visit's bills in id order. This is covered by the regression suites only.
+    - 7 tests; 4 deliberate breaks each failed a test. After merging with P4C-08/09, 150/150 across P4C-04…09, P4-38b, P4-18, P4-4x, P4-31, P4-27 and all P4B. No schema change. **The API and the worker need a restart.**
+  - **Still open:**
+    - (5) `payOut` locks the original bill before the credit note, out of id order.
+    - The charge-path cancel locks charge → visit.
+    - Item 4 has no two-connection test.
+    - A category claim meeting a standing reception claim on one order still leaves the order to reception.
+- [x] **P4C-08 · Admin deletes a doctor; billing under that doctor stops** — `Done` (asked 2026-09-28)
+  - **Where:** migration `server/migrations/2026-10-25_doctor_removal.sql` (`removed_at`, `removed_by`, `removed_reason` and a check tying them together). New `server/services/doctorRemoval.js` and `server/services/billing/removedDoctors.js`. In `server/routes/auth.js`: admin-only `GET /doctors/removed` and `GET|POST|DELETE /doctors/:id/removal`. In billing: `bills.js`, `visitLines.js`, `priceLine.js`, `priceBill.js`, `discountRules.js`, `serviceItems.js`, `categoryRates.js`, `consultantFees.js`, `importValidate.js`, `reports.js`. On the client: `DoctorManagementPage.jsx`, `BillingCounterPage.jsx`, `finaliseChecks.js`. Specs: `P4C-08-billing-stops-under-a-removed-doctor.spec.js` and `P4C-08-delete-doctor-page.spec.js`. P1-17 and P2-05 were reworded. Plan §5.1 records the rule.
+  - **Why:** an admin must be able to remove a doctor who has left, and from then on nothing can be billed under them, with no manual clean-up.
+  - **Result:** Done 2026-09-28 (built by a sub-agent).
+    - **Soft delete.** The row stays, so final bills, reports and the CGHS register keep the name.
+    - **Delete** needs a reason and is refused on yourself. It is idempotent. It signs the doctor out at once (sessions and refresh tokens), deactivates their consultation items (billing-audited) and logs `remove_doctor`. The preview shows future appointments and open drafts still charging their fee. **Restore** does not reactivate the items.
+    - **Refused (409 `doctor_removed`, naming the doctor):**
+      - a line for their consultation, including the hospital default charged to them
+      - a price preview
+      - finalise while such a line remains (the counter blocker says the same)
+      - an item, reactivation, category rate, consultant fee or discount aimed at them, on screen and on the import sheets
+      - doctor-only discounts on their lines
+    - **Check-in** drafts no fee and never falls back to the hospital default; the counter says "Dr X was removed, so this visit has no consultation fee". An open draft that already holds their line keeps pricing, so floor tests still land on it.
+    - Removed doctors vanish from every billing picker.
+    - Doctor Management has an admin-only **Delete doctor** dialog and a **Removed doctors** section with **Restore**.
+    - 21 tests; 25 deliberate breaks each failed a test; the regression set passed 137/137 and 176/176.
+    - **The migration is on the test DB only. Production needs the migration, then an API and worker restart.**
+  - **Still open:** after a restore the doctor bills at the hospital default fee until the admin reactivates their items. The preview counts open drafts but doesn't list them.
+- [x] **P4-31 / P4-32 / P4C-09 spec updates** — (2026-09-28) The counter re-adds the doctor's consultation on open (P4-38b, by design), so P4-31 #1 and P4-32 #4 and #8 now include the ₹2,000 fixture consultation. P4-32 #5 sets the hospital pay-later setting itself instead of trusting what earlier specs left behind. #9 opens "Not arrived" when needed (P4C-09 list). #6 reads "CGHS pending" in Bill actions only, since the list badge now shows it too. P4C-09 #3 compares names in any order. P4-32, P4C-09 and P5-05 pass 35/35, twice.
+- [x] **P4C-09 · Billing counter patient list: who shows, and in what order** — `Done` (merged into main 2026-09-28)
+  - **Where:** `server/services/billing/counterPatients.js` (new). It wraps the exported `ARRIVAL_SELECT`, `labOnlyPredicate` and a bills summary in one query; `getArrivals` is untouched. `GET /api/billing/counter/patients` in `server/routes/billing.js` (BILLING_DESK). `src/components/billing/counter/PatientList.jsx` (new). `useCounterPatients` in `src/queries/hooks/useBilling.js`. `COUNTER_BILL_STATE` in `shared/billingVocab.js`. `BillingCounterPage.jsx` (list swapped) and `billingCounter.css` (badges, section toggle). Spec: `e2e/billing/phase4/P4C-09-counter-patient-list.spec.js`.
+  - **Why:** the counter reused reception's Arrivals list. 59 of 66 rows were booked patients who hadn't arrived; samples-only patients were hidden by the floor toggle; no-shows and cancels with a bill vanished; and rows said nothing about the bill.
+  - **Result:** Done 2026-09-28 (built by a sub-agent).
+    - **On the floor** runs by arrival time. **Left today** sits below it: dispensed or exited, then no-show or cancelled visits with a draft, money due or a pending CGHS claim.
+    - Booked and confirmed patients go in a collapsed **Not arrived** section with a count (`<button aria-expanded>`); a search opens it.
+    - Samples-only visits show whatever the hide toggle says. Blocked patients never show.
+    - Badges: Online, Samples only, and one bill state (No bill / Draft / ₹X due / Paid / CGHS pending / Cleared). The most urgent wins: due > draft > CGHS pending > paid/cleared. Due uses the Dues list's credited/refunded formula. Cancelled bills and credit notes are ignored.
+    - Reception's Arrivals tab is unchanged, asserted key-for-key on the same fixtures.
+    - 17 tests; 19 deliberate breaks each failed a test. P4-27 test 1 and P4-38c-reread now open "Not arrived" first.
+    - P1-38, P1-24, P4-27…36, P4-38/38b/38c and the Arrivals setup specs pass, apart from P4-31 #1 and P4-32 #4, which fail identically on HEAD.
+    - Needs an API restart.
+  - **Still open:**
+    - P4-31 #1 and P4-32 #4 expect totals from before the counter added the doctor's consultation line (P4-38b); the specs need fixing.
+    - An empty auto-created draft counts as "Draft", so a cancelled visit that was checked in still shows.
+    - "CGHS pending" is the label for any payer's pending claim.
+
+- [x] **P4C-10 · Dues: today at the counter, a full Dues page, earlier dues on return** — `Done` (built in a worktree; merged 2026-09-28)
+  - **Where:**
+    - `server/services/billing/dues.js` (new). It holds the one outstanding formula (`DUE_MONEY`, `DUE_OUTSTANDING`, `DUE_BILLS`), now also used by `payments.listDues` and the Dues report, plus `listDuesRegister`, `duesToday` and `exportDues`.
+    - `server/routes/billingDues.js` (new): `GET /api/billing/dues-register` and `/export`, behind the new `BILLING_DUES` capability (admin, reception_admin; `shared/permissions.js`, `middleware/auth.js`, `src/config/routes.js`, plan §10).
+    - `GET /api/billing/dues/today` (BILLING_DESK).
+    - `src/pages/billing/DuesRegisterPage.jsx` at `/billing/dues`: lazy-loaded, with a "💰 Dues" menu entry after the CGHS register.
+    - Counter: `DuesList.jsx` shows today only; `EarlierDues.jsx` is the strip above the bill.
+    - `DUE_AGES` and `DUE_SORTS` in `shared/billingVocab.js`.
+  - **Result:** Done 2026-09-28 (built by a sub-agent).
+    - **Dues page:**
+      - Search by name, file no, phone or bill no.
+      - Filters: bill date, age bucket, category, sub-category, amount due min/max, pay later.
+      - Server-side paging with two sorts (oldest first, largest due first). The totals cover the whole filtered set.
+      - Excel export of the filtered set.
+      - Take payment opens the counter on that bill, with the patient named.
+    - **Counter Dues tab** shows today only, with "N bills · ₹X due today"; the 500-row all-time list is gone. The **earlier-dues strip** shows a returning patient's older unpaid bills, with Take payment.
+    - **Money:** CGHS claims never show; only `patient_payable` less credit notes and refunds. The Dues report shares the formula, and a test checks the totals agree for 5 sets of filters.
+    - P4-34 #5 now checks that an earlier day's due is chased from the Dues page.
+    - Tests: 13, and 17 deliberate breaks each failed one. P1-02 and P1-38 are updated.
+    - **The API and the worker need a restart.**
+  - **Still open:** the earlier-dues strip reuses `listDues`, which keeps its 500-row limit per patient. That is harmless.
 
 ---
 

@@ -2,6 +2,7 @@ import pool from "../../config/db.js";
 import { writeAudit } from "./audit.js";
 import { checkItemPrices } from "./paymentRules.js";
 import { indiaToday } from "./categoryResolver.js";
+import { refuseRemovedItem } from "./removedDoctors.js";
 import { httpError, inTransaction } from "./transaction.js";
 import { auditFields, cleanFlag, hasField, INT_MAX, MONEY_MAX, readNumber } from "./common.js";
 
@@ -101,6 +102,7 @@ async function checkItem(client, id) {
     id,
   ]);
   if (!rows.length) throw httpError(404, "That item doesn't exist");
+  await refuseRemovedItem(id, (item) => `${item} can't be priced`, client);
   if (!rows[0].is_active) throw httpError(409, `${rows[0].name} is deactivated`);
   return rows[0].name;
 }

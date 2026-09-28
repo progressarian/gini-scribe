@@ -8,6 +8,7 @@ import {
   VISIT_TYPES,
 } from "../../../shared/billingVocab.js";
 import { writeAudit } from "./audit.js";
+import { REMOVED_DOCTOR, removedText } from "./removedDoctors.js";
 import { getSettings } from "./billingSettings.js";
 import { indiaToday, normalizeGender } from "./categoryResolver.js";
 import { httpError, inTransaction } from "./transaction.js";
@@ -300,6 +301,11 @@ async function checkTargets(client, rule, before) {
     }
     const kept = new Set(before?.[key] ?? []);
     const off = rows.filter((r) => !r.is_active && !kept.has(r.id)).map((r) => r.name);
+    if (off.length && key === "doctor_ids") {
+      throw httpError(409, removedText(off.join(", "), "a discount can't be aimed at them"), {
+        code: REMOVED_DOCTOR,
+      });
+    }
     if (off.length) {
       throw httpError(409, `Deactivated ${noun}${off.length === 1 ? "" : "s"}: ${off.join(", ")}`);
     }
@@ -759,6 +765,15 @@ async function categoryOf(db, category) {
   return { codes: [rows[0].code, rows[0].parent_code].filter(Boolean), name: rows[0].name };
 }
 
+const REMOVED_LINE_DOCTOR = (param) =>
+  `(SELECT dr.name FROM doctors dr WHERE dr.id = ${param} AND dr.is_active IS FALSE)
+     AS removed_doctor`;
+
+const withRemovedDoctor = (facts, name) =>
+  name && facts.line ? { ...facts, line: { ...facts.line, removed_doctor: name } } : facts;
+
+const rulesOf = (rows) => rows.map(({ removed_doctor, ...row }) => shape(row));
+
 async function matchFacts(line, context, db) {
   const codesOnBill = wholeNumber(context?.codesOnBill, "Codes on the bill");
   return {
@@ -787,7 +802,9 @@ function ruleMiss(rule, { line, category, patient }) {
   if (targets.length && !targets.some((key) => rule[key].includes(line[LINE_TARGETS[key]]))) {
     return "items";
   }
-  if (rule.doctor_ids && !rule.doctor_ids.includes(line.doctor_id)) return "doctor";
+  if (rule.doctor_ids && (!rule.doctor_ids.includes(line.doctor_id) || line.removed_doctor)) {
+    return "doctor";
+  }
   if (rule.visit_types && !rule.visit_types.includes(line.visit_type)) return "visit_type";
   return null;
 }
@@ -865,9 +882,11 @@ const MESSAGES = {
   patient: ({ rule, patient }) => `The code ${rule.code} is only for ${patientText(rule, patient)}`,
   items: ({ rule }) => `The code ${rule.code} isn't for these items`,
   doctor: ({ rule, line, names }) =>
-    line.doctor_id
-      ? `The code ${rule.code} isn't for this doctor; it is only for ${names.join(", ")}`
-      : `The code ${rule.code} is only for ${names.join(", ")}, and this line has no doctor`,
+    line.removed_doctor
+      ? `The code ${rule.code} doesn't apply: ${removedText(line.removed_doctor, "no doctor's discount applies to their lines")}`
+      : line.doctor_id
+        ? `The code ${rule.code} isn't for this doctor; it is only for ${names.join(", ")}`
+        : `The code ${rule.code} is only for ${names.join(", ")}, and this line has no doctor`,
   visit_type: ({ rule }) =>
     `The code ${rule.code} is only for ${rule.visit_types.join(" or ")} visits`,
   total_limit: ({ used, limit }) => `Total limit reached — ${used} of ${limit} used`,
@@ -900,28 +919,31 @@ async function codeMiss(rule, facts, db) {
 export async function checkCode(code, line, context, db = pool) {
   if (typeof code !== "string" || !code.trim()) throw httpError(400, "Enter a discount code");
   const text = code.trim();
-  const facts = await matchFacts(line, context, db);
+  const asked = await matchFacts(line, context, db);
   const { rows } = await db.query(
-    `SELECT ${SPEC.columns} FROM discount_rules WHERE method = 'code' AND lower(code) = lower($1)`,
-    [text],
+    `SELECT ${SPEC.columns}, ${REMOVED_LINE_DOCTOR("$2::int")}
+       FROM discount_rules WHERE method = 'code' AND lower(code) = lower($1)`,
+    [text, asked.line?.doctor_id ?? null],
   );
   if (!rows.length) return refuse("unknown", { code: text });
-  const rule = shape(rows[0]);
+  const [rule] = rulesOf(rows);
+  const facts = withRemovedDoctor(asked, rows[0].removed_doctor);
   const miss = await codeMiss(rule, facts, db);
   return miss ? refuse(miss.reason, { ...facts, ...miss, rule }) : { ok: true, rule };
 }
 
 export async function autoRulesFor(line, context, db = pool) {
-  const facts = await matchFacts(line, context, db);
+  const asked = await matchFacts(line, context, db);
   const { rows } = await db.query(
-    `SELECT ${SPEC.columns} FROM discount_rules
+    `SELECT ${SPEC.columns}, ${REMOVED_LINE_DOCTOR("$3::int")} FROM discount_rules
       WHERE is_active AND method = 'auto' AND applies_per = $1
         AND (valid_from IS NULL OR valid_from <= $2::date)
         AND (valid_to IS NULL OR valid_to >= $2::date)
       ORDER BY priority, id`,
-    [facts.line ? "line" : "bill", facts.date],
+    [asked.line ? "line" : "bill", asked.date, asked.line?.doctor_id ?? null],
   );
-  const candidates = rows.map(shape).filter((rule) => !ruleMiss(rule, facts));
+  const facts = withRemovedDoctor(asked, rows[0]?.removed_doctor);
+  const candidates = rulesOf(rows).filter((rule) => !ruleMiss(rule, facts));
   const usage = await usageFor(candidates, facts, db);
   return candidates.filter((rule) => !limitMiss(rule, usage, facts));
 }

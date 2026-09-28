@@ -37,7 +37,9 @@ const endpoints = routeFiles.flatMap(({ parsed }) =>
     route,
     url: route.replace(/:(\w+)/g, (_, name) => DUMMY[name] ?? "1"),
     settings: route.startsWith("/api/billing/settings") || ADMIN_ONLY.includes(route),
-    desk: !/^\/api\/billing\/(master|import|claims|reports|settings)(\/|$)/.test(route),
+    desk: !/^\/api\/billing\/(master|import|claims|reports|settings|dues-register)(\/|$)/.test(
+      route,
+    ),
   })),
 );
 
@@ -106,6 +108,7 @@ test.describe("P1-38 billing permissions — APIs", () => {
     expect(holders(CAPABILITIES.BILLING_MASTER)).toEqual(["admin", "reception_admin"]);
     expect(holders(CAPABILITIES.BILLING_CLAIMS)).toEqual(["admin", "reception_admin"]);
     expect(holders(CAPABILITIES.BILLING_REPORTS)).toEqual(["admin", "reception_admin"]);
+    expect(holders(CAPABILITIES.BILLING_DUES)).toEqual(["admin", "reception_admin"]);
     expect(holders(CAPABILITIES.BILLING_SETTINGS)).toEqual(["admin"]);
     expect(holders(CAPABILITIES.BILLING_DESK)).toEqual(["admin", "reception", "reception_admin"]);
   });

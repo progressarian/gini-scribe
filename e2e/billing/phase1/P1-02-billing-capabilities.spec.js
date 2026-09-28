@@ -16,6 +16,7 @@ const BILLING = [
   "BILLING_SETTINGS",
   "BILLING_CLAIMS",
   "BILLING_REPORTS",
+  "BILLING_DUES",
 ];
 const BILLING_ROLES = ["admin", "reception_admin", "reception"];
 
@@ -50,7 +51,7 @@ function planMatrix() {
 }
 
 test.describe("P1-02 billing capabilities", () => {
-  test("1. the five billing capabilities exist", () => {
+  test("1. the six billing capabilities exist", () => {
     for (const name of BILLING) expect(CAPABILITIES[name]).toBe(name);
     expect(GRANT_ALL_CAPABILITIES).toBe(false);
   });

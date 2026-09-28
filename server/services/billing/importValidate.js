@@ -16,6 +16,7 @@ import { discountShapeProblem } from "./discountRules.js";
 import { laterRuleText } from "./consultantFees.js";
 import { indiaToday } from "./categoryResolver.js";
 import { nameKey } from "./common.js";
+import { removedText } from "./removedDoctors.js";
 
 export { nameKey };
 
@@ -285,7 +286,7 @@ function resolveDoctor(row, lookup) {
   }
   const { doctor } = found;
   if (doctor.is_active === false) {
-    fail(row, "doctor", `${doctor.name} is not an active doctor`);
+    fail(row, "doctor", removedText(doctor.name, "nothing can be priced under them"));
     return undefined;
   }
   if (isLabOnlyDoctor(doctor.name)) {
@@ -846,6 +847,9 @@ function rateSlots(ref, rows) {
   return slots;
 }
 
+const removedOwner = (item, ref) =>
+  item.doctorId ? ref.doctors.find((d) => d.id === item.doctorId && d.is_active === false) : null;
+
 function checkRates(rows, state, ref, discountCodes) {
   const { categories, items } = state;
   const slots = rateSlots(ref, rows);
@@ -900,7 +904,13 @@ function checkRates(rows, state, ref, discountCodes) {
     if (!hasError(row, "item_code")) {
       item = items.get(key(v.item_code));
       if (!item) missingParent(row, "item_code", "item", "Items", state);
-      else if (!item.active) fail(row, "item_code", `${item.name} is deactivated`);
+      else if (removedOwner(item, ref)) {
+        fail(
+          row,
+          "item_code",
+          removedText(removedOwner(item, ref).name, `${item.name} can't be priced`),
+        );
+      } else if (!item.active) fail(row, "item_code", `${item.name} is deactivated`);
     }
     if (!category || !item || row.errors.length) continue;
     const mine = slots.get(`${key(v.category_code)}|${key(v.item_code)}`);
@@ -1456,7 +1466,7 @@ function resolveDoctors(row, lookup, kept) {
     ids.add(found.doctor.id);
   }
   if (off.length) {
-    fail(row, "doctors", `Deactivated doctor${off.length === 1 ? "" : "s"}: ${off.join(", ")}`);
+    fail(row, "doctors", removedText(off.join(", "), "a discount can't be aimed at them"));
   }
   return ids.size ? [...ids] : null;
 }

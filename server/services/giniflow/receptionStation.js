@@ -792,11 +792,11 @@ export async function getTestCatalog(db = pool) {
 // past the status HealthRay reports, so a patient checked in here whom HealthRay
 // still calls `scheduled` is left alone.
 
-const EXPECTED_STATUSES = ["booked", "confirmed"];
-const NOT_COMING_STATUSES = ["no_show", "cancelled"];
+export const EXPECTED_STATUSES = ["booked", "confirmed"];
+export const NOT_COMING_STATUSES = ["no_show", "cancelled"];
 // Arrived and done. They stay on the floor list — the desk is asked about them
 // — but they are not in the building.
-const FINISHED_STATUSES = ["dispensed", "exited"];
+export const FINISHED_STATUSES = ["dispensed", "exited"];
 
 // Marking someone absent is only truthful while the desk is the last thing that
 // happened to them. Once a station has seen the patient, the building itself has
@@ -804,7 +804,7 @@ const FINISHED_STATUSES = ["dispensed", "exited"];
 // recorded as a fact the timeline knows to be false.
 const ABSENTABLE_STATUSES = [...EXPECTED_STATUSES, "checked_in"];
 
-const ARRIVAL_SELECT = `
+export const ARRIVAL_SELECT = `
   SELECT v.id, v.patient_id, v.current_status, v.appointment_time::text AS appointment_time,
          v.priority, v.blocked_reason, v.paused_at, v.paused_reason,
          ap.patient_category AS scheme_code,
@@ -901,7 +901,7 @@ const ARRIVAL_SELECT = `
 const minutesBetween = (from, now) =>
   from ? Math.round((now.getTime() - new Date(from).getTime()) / 60000) : null;
 
-const shapeArrival = (r, now) => ({
+export const shapeArrival = (r, now) => ({
   visitId: r.id,
   patientId: r.patient_id,
   name: r.name,

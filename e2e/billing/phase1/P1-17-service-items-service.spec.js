@@ -233,7 +233,7 @@ test.describe.serial("P1-17 service items service", () => {
     await expectRefused(
       svc.createItem(consult({ doctor_id: ids.gone }), ctx, db),
       409,
-      /not an active doctor/,
+      /Dr .* was removed, so no consultation item can be made or brought back for them/,
     );
     await expectRefused(
       svc.createItem(consult({ doctor_id: ids.labOnly }), ctx, db),

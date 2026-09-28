@@ -206,6 +206,12 @@ const NAV_ITEMS = [
     cap: C["/billing/cghs-register"],
     show: () => true,
   },
+  {
+    path: "/billing/dues",
+    label: "💰 Dues",
+    cap: C["/billing/dues"],
+    show: () => true,
+  },
   { path: "/settings", label: "⚙️ Settings", cap: C["/settings"], show: () => true },
 ];
 

@@ -236,7 +236,12 @@ export async function syncMachineOrdersForVisit(visit, db = pool, { slotWaitMs }
   let removed = null;
   try {
     await client.query("BEGIN");
-    await client.query(`SELECT id FROM giniflow_visits WHERE id = $1 FOR UPDATE`, [visit.visit_id]);
+    await client.query(`SELECT id FROM giniflow_visits WHERE id = $1 FOR NO KEY UPDATE`, [
+      visit.visit_id,
+    ]);
+    await client.query(`SELECT id FROM bills WHERE visit_id = $1 ORDER BY id FOR UPDATE`, [
+      visit.visit_id,
+    ]);
     const skip = await billSuppressor(client, visit.visit_id);
     const liveLabLines = billedLabLines(bill, { skip });
     const liveLines = lines

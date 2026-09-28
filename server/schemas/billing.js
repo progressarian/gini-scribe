@@ -41,9 +41,12 @@ import {
   BILLING_ROLES,
   DISCOUNT_KINDS,
   DISCOUNT_METHODS,
+  DUE_AGES,
+  DUE_SORTS,
   PATIENT_PAYS,
   REMAINDERS,
   VISIT_TYPES,
+  YES_NO,
 } from "../../shared/billingVocab.js";
 import {
   BILLS_AT_ONCE as CLAIM_BILLS_AT_ONCE,
@@ -1129,6 +1132,36 @@ export const billingClaimsUndoSchema = z.strictObject(
   { reason: z.string().trim().min(1, "can't be blank").max(CLAIM_NOTE_MAX) },
   objectOnly("Send the reason as an object"),
 );
+
+export const billingDuesRegisterQuerySchema = z.strictObject({
+  q: z.string().trim().max(100).optional(),
+  from: z.union([realDateText, blank]).optional(),
+  to: z.union([realDateText, blank]).optional(),
+  age: z.union([z.enum(DUE_AGES.map((a) => a.key)), blank]).optional(),
+  category: z.string().trim().max(40).optional(),
+  sub_category: z.string().trim().max(40).optional(),
+  min: z.string().trim().max(20).optional(),
+  max: z.string().trim().max(20).optional(),
+  pay_later: z.union([z.enum(YES_NO), blank]).optional(),
+  sort: z.union([z.enum(DUE_SORTS.map((s) => s.key)), blank]).optional(),
+  page: z.union([count, blank]).optional(),
+  page_size: z.union([count, blank]).optional(),
+});
+
+export const BILLING_DUES_LABELS = {
+  q: "Search",
+  from: "From",
+  to: "To",
+  age: "Age",
+  category: "Category",
+  sub_category: "Sub-category",
+  min: "The smallest amount due",
+  max: "The largest amount due",
+  pay_later: "Pay later",
+  sort: "Sort",
+  page: "Page",
+  page_size: "Page size",
+};
 
 export const BILLING_CLAIMS_LABELS = {
   from: "From",

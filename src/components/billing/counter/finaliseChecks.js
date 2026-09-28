@@ -22,6 +22,13 @@ export function finaliseBlockers(
   if (bill.status !== "draft") return [];
   const blockers = [];
   if (!bill.lines.length) blockers.push("Add an item to this bill first.");
+  for (const line of bill.lines) {
+    if (line.removed_doctor) {
+      blockers.push(
+        `${line.removed_doctor.name} was removed; remove ${line.bill_name} from this bill first.`,
+      );
+    }
+  }
   const { scheme, parent } = schemeOf(bill, schemes);
   const bareParent = bill.category
     ? (schemes || []).some((entry) => entry.parent_code === bill.category)

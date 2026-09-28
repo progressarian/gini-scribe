@@ -73,6 +73,8 @@ export default function DoctorManagementPage() {
   // Bumped after any mutation so every section re-fetches (one-page layout).
   const [refresh, setRefresh] = useState(0);
   const onChange = () => setRefresh((n) => n + 1);
+  const [deleting, setDeleting] = useState(false);
+  const [removedRefresh, setRemovedRefresh] = useState(0);
 
   // On a hard refresh straight to this route, LoginPage never mounts, so the
   // doctors list may be empty — load it here (same pattern as Find/Dashboard).
@@ -140,7 +142,33 @@ export default function DoctorManagementPage() {
             Chief consultant
           </label>
         )}
+        {doctor && (
+          <button
+            type="button"
+            className="docmgmt-danger"
+            disabled={doctor.id === currentDoctor?.id}
+            title={
+              doctor.id === currentDoctor?.id ? "You can't delete your own account" : undefined
+            }
+            onClick={() => setDeleting(true)}
+          >
+            Delete doctor
+          </button>
+        )}
       </div>
+
+      {deleting && doctor && (
+        <DeleteDoctorModal
+          doctor={doctor}
+          onClose={() => setDeleting(false)}
+          onDone={async () => {
+            setDeleting(false);
+            setDoctorId(currentDoctor?.id ?? null);
+            setRemovedRefresh((n) => n + 1);
+            await fetchDoctorsList();
+          }}
+        />
+      )}
 
       {!doctorId ? (
         <p className="docmgmt-empty">Select a doctor.</p>
@@ -168,6 +196,182 @@ export default function DoctorManagementPage() {
           </section>
         </div>
       )}
+
+      <section className="docmgmt-section" aria-labelledby="docmgmt-removed-title">
+        <h2 className="docmgmt-section-title" id="docmgmt-removed-title">
+          🗑️ Removed doctors
+        </h2>
+        <RemovedDoctors refresh={removedRefresh} onRestored={fetchDoctorsList} />
+      </section>
+    </div>
+  );
+}
+
+function DeleteDoctorModal({ doctor, onClose, onDone }) {
+  const [counts, setCounts] = useState(null);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api
+      .get(`/api/doctors/${doctor.id}/removal`)
+      .then((r) => setCounts(r.data))
+      .catch((e) =>
+        toast(e.response?.data?.error || "Could not check this doctor's bookings", "error"),
+      );
+  }, [doctor.id]);
+
+  const remove = async () => {
+    setBusy(true);
+    try {
+      await api.post(`/api/doctors/${doctor.id}/removal`, { reason: reason.trim() });
+      toast(`${doctor.name} was deleted and signed out`, "success");
+      await onDone();
+    } catch (e) {
+      toast(e.response?.data?.error || e.response?.data?.details?.[0] || "Delete failed", "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="docmgmt-modal-bg" onClick={onClose}>
+      <div
+        className="docmgmt-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="docmgmt-delete-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id="docmgmt-delete-title">Delete {doctor.name}?</h2>
+        <p className="docmgmt-hint">
+          They are signed out at once and can't log in. Their consultation items are switched off,
+          so nothing more can be billed under them. Past visits, bills and reports keep their name.
+          You can restore them later from Removed doctors.
+        </p>
+        {counts ? (
+          <ul className="docmgmt-counts">
+            <li>
+              <strong>{counts.future_appointments}</strong> future appointment
+              {counts.future_appointments === 1 ? "" : "s"} still booked with them
+            </li>
+            <li>
+              <strong>{counts.open_drafts}</strong> open draft bill
+              {counts.open_drafts === 1 ? "" : "s"} still charging their consultation
+            </li>
+          </ul>
+        ) : (
+          <p className="docmgmt-empty">Checking their bookings…</p>
+        )}
+        <label className="docmgmt-reason">
+          Reason (required)
+          <textarea
+            value={reason}
+            maxLength={500}
+            rows={3}
+            placeholder="e.g. Left the hospital on 30 September"
+            onChange={(e) => setReason(e.target.value)}
+          />
+        </label>
+        <div className="docmgmt-modal-actions">
+          <div className="spacer" />
+          <button type="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="docmgmt-danger"
+            disabled={busy || !counts || !reason.trim()}
+            onClick={remove}
+          >
+            {busy ? "Deleting…" : "Delete doctor"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RemovedDoctors({ refresh, onRestored }) {
+  const [list, setList] = useState(null);
+  const [restoring, setRestoring] = useState(null);
+
+  const load = useCallback(() => {
+    api
+      .get("/api/doctors/removed")
+      .then((r) => setList(r.data || []))
+      .catch(() => setList([]));
+  }, [refresh]);
+  useEffect(load, [load]);
+
+  const restore = async (d) => {
+    setRestoring(d.id);
+    try {
+      await api.delete(`/api/doctors/${d.id}/removal`);
+      toast(
+        `${d.name} restored — reactivate their consultation items on the Services page`,
+        "success",
+      );
+      load();
+      await onRestored?.();
+    } catch (e) {
+      toast(e.response?.data?.error || "Restore failed", "error");
+    } finally {
+      setRestoring(null);
+    }
+  };
+
+  return (
+    <div>
+      <p className="docmgmt-hint">
+        Removed doctors can't log in and nothing can be billed under them. Restoring lets them log
+        in again; their consultation items stay off until an admin reactivates them.
+      </p>
+      <table className="docmgmt-list">
+        <thead>
+          <tr>
+            <th>Doctor</th>
+            <th>Removed on</th>
+            <th>By</th>
+            <th>Reason</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {list === null && (
+            <tr>
+              <td colSpan="5" className="docmgmt-empty">
+                Loading…
+              </td>
+            </tr>
+          )}
+          {list?.length === 0 && (
+            <tr>
+              <td colSpan="5" className="docmgmt-empty">
+                No removed doctors.
+              </td>
+            </tr>
+          )}
+          {(list || []).map((d) => (
+            <tr key={d.id}>
+              <td>{d.name}</td>
+              <td>{d.removed_at ? new Date(d.removed_at).toLocaleDateString("en-IN") : "—"}</td>
+              <td>{d.removed_by_name || "—"}</td>
+              <td>{d.removed_reason || "—"}</td>
+              <td>
+                <button
+                  type="button"
+                  className="docmgmt-del"
+                  disabled={restoring === d.id}
+                  onClick={() => restore(d)}
+                >
+                  {restoring === d.id ? "Restoring…" : "Restore"}
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

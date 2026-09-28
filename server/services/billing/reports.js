@@ -5,6 +5,7 @@ import { ROLES } from "../../../shared/permissions.js";
 import { KINDS as REQUEST_KINDS } from "./billingRequests.js";
 import { PAYMENT_MODES } from "./cashShifts.js";
 import { indiaToday } from "./categoryResolver.js";
+import { DUE_BILLS, DUE_DAYS, DUE_MONEY, DUE_OUTSTANDING } from "./dues.js";
 import { httpError } from "./transaction.js";
 import {
   cleanFilters,
@@ -496,20 +497,13 @@ async function dues(filters, db, { cap }) {
     WITH due AS (
       SELECT b.id, b.bill_no, b.bill_date::text AS bill_date, b.scheme_label AS category_label,
              p.name AS patient_name, p.file_no, b.patient_payable AS payable, m.credited,
-             b.paid_amount AS paid, m.refunded,
-             GREATEST(b.patient_payable - m.credited, 0) - (b.paid_amount - m.refunded)
-               AS outstanding,
-             ${TODAY} - b.bill_date AS days, b.created_at
+             b.paid_amount AS paid, m.refunded, ${DUE_OUTSTANDING} AS outstanding,
+             ${DUE_DAYS} AS days, b.created_at
         FROM bills b
         JOIN patients p ON p.id = b.patient_id
         ${SCHEME_JOIN}
-        CROSS JOIN LATERAL (
-          SELECT COALESCE((SELECT SUM(c.patient_payable) FROM bills c
-                            WHERE c.original_bill_id = b.id AND c.status = 'final'), 0) AS credited,
-                 COALESCE((SELECT SUM(x.amount) FROM payments x JOIN bills c ON c.id = x.bill_id
-                            WHERE c.original_bill_id = b.id AND x.direction = 'out'), 0) AS refunded
-        ) m
-       WHERE ${FINAL} AND b.bill_type = 'invoice' AND b.paid_amount < b.patient_payable
+        ${DUE_MONEY}
+       WHERE ${DUE_BILLS}
          AND ${scope.sql}
     )`;
   const { rows } = await db.query(
@@ -1201,7 +1195,8 @@ export async function reportCatalog(db = pool) {
     ),
     db.query(
       `SELECT id, name FROM doctors
-        WHERE role = $1 OR id IN (SELECT doctor_id FROM service_items WHERE doctor_id IS NOT NULL)
+        WHERE COALESCE(is_active, TRUE)
+          AND (role = $1 OR id IN (SELECT doctor_id FROM service_items WHERE doctor_id IS NOT NULL))
         ORDER BY lower(name), id`,
       [ROLES.CONSULTANT],
     ),
