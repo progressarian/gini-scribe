@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
+import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { getPool, one, query } from "../../helpers/db.mjs";
-import { USERS } from "../../fixtures/data.mjs";
+import { CONSULTANTS, USERS } from "../../fixtures/data.mjs";
 import { assertTestDatabase } from "../../setup/guard.mjs";
 import {
   desk,
@@ -72,7 +73,24 @@ const esc = (value) =>
     .replace(/'/g, "&#39;");
 
 const totalOf = (html, label) =>
-  new RegExp(`<td>${label}</td><td class="bp-num">([^<]*)</td>`).exec(html)?.[1] ?? null;
+  new RegExp(
+    `<td class="bp-total-name">${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}</td><td class="bp-num">([^<]*)</td>`,
+  ).exec(html)?.[1] ?? null;
+
+async function pdfPages(pdf) {
+  const document = await getDocument({ data: new Uint8Array(pdf) }).promise;
+  const pages = [];
+  for (let at = 1; at <= document.numPages; at += 1) {
+    const content = await (await document.getPage(at)).getTextContent();
+    pages.push(
+      content.items
+        .map((item) => item.str)
+        .join(" ")
+        .replace(/\s+/g, " "),
+    );
+  }
+  return pages;
+}
 
 const paise = (amount) => Math.round(Number(amount) * 100);
 
@@ -169,22 +187,31 @@ test.describe.serial("P4-23 bill PDF", () => {
     expect(html).toContain(`Ankle brace ${tag}`);
     expect(html).toContain(`P4 footer ${tag}`);
     expect(html).not.toContain("SAC/HSN");
-    expect(html).not.toContain("GSTIN");
+    expect(html).not.toContain("GST NO");
     expect(html).not.toContain("Category");
     expect(html).not.toContain("DRAFT");
     expect(html).not.toContain("CANCELLED");
 
     const stored = await storedTotals(ids.general);
-    expect(totalOf(html, "Actual amount")).toBe(billPdf.money(paise(stored.actual_amount)));
-    expect(totalOf(html, "Discount")).toBe(billPdf.money(paise(stored.discount_amount)));
-    expect(totalOf(html, "Patient payable")).toBe(billPdf.money(paise(stored.patient_payable)));
-    expect(totalOf(html, "Claimed from payer")).toBe(billPdf.money(paise(stored.claim_amount)));
-    expect(totalOf(html, "Paid")).toBe(billPdf.money(paise(stored.paid_amount)));
-    expect(totalOf(html, "Round-off")).toBe(billPdf.signedMoney(paise(stored.round_off)));
-    expect(totalOf(html, "Balance")).toBe(
-      billPdf.signedMoney(paise(stored.patient_payable) - paise(stored.paid_amount)),
+    expect(totalOf(html, "Billed Amount (₹)")).toBe(
+      billPdf.amountText(paise(stored.actual_amount)),
     );
-    expect(totalOf(html, "Balance")).toBe(billPdf.signedMoney(0));
+    expect(totalOf(html, "Discount (₹)")).toBe(
+      paise(stored.discount_amount) ? billPdf.amountText(paise(stored.discount_amount)) : null,
+    );
+    expect(totalOf(html, "Total Payable Amount (₹)")).toBe(
+      billPdf.amountText(paise(stored.patient_payable)),
+    );
+    expect(paise(stored.claim_amount)).toBe(0);
+    expect(totalOf(html, "Claimed From Payer (₹)")).toBeNull();
+    expect(totalOf(html, "Paid Amount(₹)")).toBe(billPdf.amountText(paise(stored.paid_amount)));
+    expect(totalOf(html, "Round Off (₹)")).toBe(
+      paise(stored.round_off) ? billPdf.signedAmountText(paise(stored.round_off)) : null,
+    );
+    expect(totalOf(html, "Net Payable Amount(₹)")).toBe(
+      billPdf.signedAmountText(paise(stored.patient_payable) - paise(stored.paid_amount)),
+    );
+    expect(totalOf(html, "Net Payable Amount(₹)")).toBe(billPdf.signedAmountText(0));
   });
 
   test("2. a CGHS Paid bill prints the category and only the last four of the card", async () => {
@@ -201,7 +228,7 @@ test.describe.serial("P4-23 bill PDF", () => {
     expect(html).not.toContain(CARD);
     expect(html).not.toContain("7788990011");
     expect(html).toContain(`CGHS ${tag}`);
-    expect(html).toContain(billPdf.money(130000));
+    expect(html).toContain(billPdf.amountText(130000));
   });
 
   test("3. a CGHS Referral bill prints the referral number masked, with nothing to pay", async () => {
@@ -232,7 +259,7 @@ test.describe.serial("P4-23 bill PDF", () => {
     expect(html).toContain("XXXX1234");
     expect(html).not.toContain(REFERRAL);
     expect(html).not.toContain(CARD);
-    expect(html).toContain(billPdf.money(200000));
+    expect(html).toContain(billPdf.amountText(200000));
   });
 
   test("4. the category is left off when the category doesn't print on the bill", async () => {
@@ -288,7 +315,7 @@ test.describe.serial("P4-23 bill PDF", () => {
     expect(on).toContain("GST %");
     expect(on).toContain("CGST");
     expect(on).toContain("SGST");
-    expect(on).toContain("Tax (CGST + SGST)");
+    expect(on).toContain("Tax (₹)");
     expect(on).toContain(GSTIN);
     expect(on).toContain(`P4 Hospital ${tag}`);
     const line = await one(
@@ -384,13 +411,21 @@ test.describe.serial("P4-23 bill PDF", () => {
 
     const stored = await storedTotals(id);
     const html = await htmlFor(id);
-    expect(totalOf(html, "Round-off")).toBe(billPdf.signedMoney(paise(stored.round_off)));
-    expect(totalOf(html, "Claimed from payer")).toBe(billPdf.money(paise(stored.claim_amount)));
-    expect(totalOf(html, "Patient payable")).toBe(billPdf.money(paise(stored.patient_payable)));
-    expect(totalOf(html, "Discount")).toBe(billPdf.money(paise(stored.discount_amount)));
-    expect(totalOf(html, "Actual amount")).toBe(billPdf.money(paise(stored.actual_amount)));
-    expect(totalOf(html, "Balance")).toBe(
-      billPdf.signedMoney(paise(stored.patient_payable) - paise(stored.paid_amount)),
+    expect(totalOf(html, "Round Off (₹)")).toBe(billPdf.signedAmountText(paise(stored.round_off)));
+    expect(totalOf(html, "Claimed From Payer (₹)")).toBe(
+      billPdf.amountText(paise(stored.claim_amount)),
+    );
+    expect(totalOf(html, "Total Payable Amount (₹)")).toBe(
+      billPdf.amountText(paise(stored.patient_payable)),
+    );
+    expect(totalOf(html, "Discount (₹)")).toBe(
+      paise(stored.discount_amount) ? billPdf.amountText(paise(stored.discount_amount)) : null,
+    );
+    expect(totalOf(html, "Billed Amount (₹)")).toBe(
+      billPdf.amountText(paise(stored.actual_amount)),
+    );
+    expect(totalOf(html, "Net Payable Amount(₹)")).toBe(
+      billPdf.signedAmountText(paise(stored.patient_payable) - paise(stored.paid_amount)),
     );
   });
 
@@ -429,7 +464,7 @@ test.describe.serial("P4-23 bill PDF", () => {
     const html = await htmlFor(id);
     const stored = await storedTotals(id);
     expect(paise(stored.tax_amount)).toBe(18000);
-    expect(totalOf(html, "Tax \\(CGST \\+ SGST\\)")).toBe(billPdf.money(paise(stored.tax_amount)));
+    expect(totalOf(html, "Tax (₹)")).toBe(billPdf.amountText(paise(stored.tax_amount)));
     expect(html).toContain("SAC/HSN");
     expect(html).toContain("999312");
     expect(html).toContain(GSTIN);
@@ -439,7 +474,9 @@ test.describe.serial("P4-23 bill PDF", () => {
         paise(stored.tax_amount) +
         paise(stored.round_off),
     ).toBe(paise(stored.patient_payable));
-    expect(totalOf(html, "Patient payable")).toBe(billPdf.money(paise(stored.patient_payable)));
+    expect(totalOf(html, "Total Payable Amount (₹)")).toBe(
+      billPdf.amountText(paise(stored.patient_payable)),
+    );
 
     const plain = await htmlFor(ids.general);
     expect(plain).not.toContain("SAC/HSN");
@@ -478,8 +515,8 @@ test.describe.serial("P4-23 bill PDF", () => {
       expect(html).not.toContain("<b>");
       expect(fieldOf(html, "UHID")).toContain("&lt;script&gt;");
       expect(fieldOf(html, "Payer")).toBe(`P4 payer ${ESCAPED}`);
-      expect(fieldOf(html, "Billed by")).toBe(`P4 Hospital ${ESCAPED}`);
-      expect(fieldOf(html, "GSTIN")).toBe(GSTIN);
+      expect(html).toContain(`<div class="bp-org-line">P4 Hospital ${ESCAPED}, `);
+      expect(html).toContain(`GST NO: ${GSTIN}`);
       expect(cellsOf(html)).toContain(esc(`P4-${NASTY}`.replace(/\s+/g, "")));
       expect(cellsOf(html)).toContain("&lt;td&gt;9993&lt;/td&gt;");
       expect(html).toContain(LONG);
@@ -492,5 +529,79 @@ test.describe.serial("P4-23 bill PDF", () => {
         [ids.pensioner],
       );
     }
+  });
+  test("12. the bill names the consultant, the operator who finalised it and the payable in words", async () => {
+    const doctor = await one(`SELECT name FROM doctors WHERE id = $1`, [CONSULTANTS.banshali.id]);
+    const html = await htmlFor(ids.paidBill);
+    expect(fieldOf(html, "Consult Name")).toBe(esc(doctor.name));
+    expect(fieldOf(html, "Department")).toBe("OPD");
+    expect(html).toContain(
+      `<span class="bp-operator-label">OPERATOR NAME:</span> ${USERS.reception.short_name} [ `,
+    );
+    expect(html).toContain('<span class="bp-words-mark">(₹)</span> Seven Hundred Rupees Only');
+    expect(html).toContain("AUTHORIZED SIGNATORY");
+    expect(html).toContain("TOTAL(₹)");
+
+    const view = await billPdf.billView(ids.paidBill, db);
+    const draft = billPdf.buildBillHtml({ ...view, bill: { ...view.bill, status: "draft" } });
+    expect(draft).not.toContain("OPERATOR NAME");
+  });
+
+  test("13. a long bill repeats the table header on every page and keeps the totals with the last rows", async () => {
+    const lines = Array.from({ length: 25 }, (_, index) => ({
+      id: String(index + 1),
+      bill_code: `P4-LONG-${index + 1}`,
+      bill_name: `Long line ${index + 1} ${tag}`,
+      quantity: 1,
+      rate: 50000,
+      actual: 50000,
+      discount: 0,
+      taxable: 50000,
+      cgst: 0,
+      sgst: 0,
+      patient_payable: 50000,
+    }));
+    const view = {
+      bill: {
+        id: "long",
+        bill_type: "invoice",
+        status: "final",
+        bill_no: `LONG-${tag}`,
+        bill_date: "2026-09-28",
+        lines,
+        totals: {
+          actual: 1250000,
+          discount: 0,
+          tax: 0,
+          round_off: 0,
+          payable: 1250000,
+          claim: 0,
+          adjustment: 0,
+          paid: 1250000,
+        },
+      },
+      patient: { name: `P4 Patient ${tag}`, file_no: `F4-${tag}` },
+      category: null,
+      settings: { bill_footer: `P4 footer ${tag}`, gst_enabled: false },
+      issued: null,
+      payments: [],
+      hospital: null,
+      logo: "",
+    };
+    const pdf = await rendered(() => billPdf.renderBillPdf(billPdf.buildBillHtml(view)));
+    const pages = await pdfPages(pdf);
+    expect(pages.length).toBeGreaterThan(1);
+    for (const [index, text] of pages.entries()) {
+      expect(text).toContain("PARTICULARS");
+      expect(text).toContain("RATE");
+      expect(text).toContain(`Page ${index + 1} of ${pages.length}`);
+    }
+    const last = pages[pages.length - 1];
+    expect(last).toContain(`Long line 25 ${tag}`);
+    expect(last).toContain("BILLED AMOUNT");
+    expect(last).toContain("TOTAL PAYABLE AMOUNT");
+    expect(last).toContain("NET PAYABLE AMOUNT");
+    expect(last).toContain("AUTHORIZED SIGNATORY");
+    expect(pages.slice(0, -1).join(" ")).not.toContain("BILLED AMOUNT");
   });
 });

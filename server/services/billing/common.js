@@ -24,6 +24,8 @@ export const nameKey = (name) =>
     .replace(/\s+/g, " ")
     .toLowerCase();
 
+export const likePattern = (text) => `%${text.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+
 export const NAME_KEY_SQL = `lower(regexp_replace(btrim(name), '\\s+', ' ', 'g'))`;
 
 const NUMBER_TEXT = /^-?\d+(\.\d+)?$/;

@@ -157,6 +157,7 @@ test.describe.serial("P1-34 test catalogue page stops editing price", () => {
       .click();
     const dialog = page.getByRole("dialog");
     const field = (label) => dialog.getByLabel(label, { exact: true });
+    await expect(dialog).toBeVisible({ timeout: 45000 });
     await expect(field("Name")).toHaveValue(UNBILLED);
     await expect(field("Kind")).toHaveValue("test");
     await expect(field("Catalogue test")).toHaveValue(seed.unbilled.id);

@@ -39,6 +39,7 @@ import {
 } from "../services/billing/billingRequests.js";
 import {
   BILLING_ROLES,
+  CONSULTANT_FEES_PAGE_SIZE_MAX,
   DISCOUNT_KINDS,
   DISCOUNT_METHODS,
   DUE_AGES,
@@ -191,21 +192,32 @@ const itemFields = {
     z.null(),
   ]),
 };
-export const billingItemCreateSchema = z.strictObject({
-  code: itemFields.code,
-  name: itemFields.name,
-  subgroup_id: itemFields.subgroup_id,
-  base_price: itemFields.base_price,
-  kind: itemFields.kind,
-  unit: itemFields.unit.optional(),
-  allow_quantity: itemFields.allow_quantity.optional(),
-  max_quantity: itemFields.max_quantity.optional(),
-  tax_code_id: itemFields.tax_code_id.optional(),
-  price_includes_tax: itemFields.price_includes_tax.optional(),
-  doctor_id: itemFields.doctor_id.optional(),
-  visit_type: itemFields.visit_type.optional(),
-  test_catalog_id: itemFields.test_catalog_id.optional(),
-});
+export const billingItemCreateSchema = z
+  .strictObject({
+    code: itemFields.code,
+    name: itemFields.name,
+    subgroup_id: itemFields.subgroup_id.optional(),
+    base_price: itemFields.base_price,
+    kind: itemFields.kind,
+    unit: itemFields.unit.optional(),
+    allow_quantity: itemFields.allow_quantity.optional(),
+    max_quantity: itemFields.max_quantity.optional(),
+    tax_code_id: itemFields.tax_code_id.optional(),
+    price_includes_tax: itemFields.price_includes_tax.optional(),
+    doctor_id: itemFields.doctor_id.optional(),
+    visit_type: itemFields.visit_type.optional(),
+    test_catalog_id: itemFields.test_catalog_id.optional(),
+  })
+  .superRefine((item, ctx) => {
+    if (item.subgroup_id === undefined && item.kind !== "consultation") {
+      ctx.addIssue({
+        code: "invalid_type",
+        expected: "number",
+        path: ["subgroup_id"],
+        message: "Invalid input",
+      });
+    }
+  });
 export const billingItemUpdateSchema = atLeastOne(
   z.strictObject({ ...itemFields, reason: text(500) }).partial(),
 );
@@ -611,10 +623,34 @@ export const billingDiscountListQuerySchema = z.strictObject({
   method: z.enum(DISCOUNT_METHODS).optional(),
 });
 
+const pageNumber = z
+  .string()
+  .trim()
+  .regex(/^[1-9]\d{0,8}$/, "must be a whole number, 1 or more");
+const consultantFeePaging = {
+  q: z.string().trim().max(100).optional(),
+  page: z.union([pageNumber, blank]).optional(),
+  page_size: z
+    .union([
+      pageNumber.refine(
+        (n) => Number(n) <= CONSULTANT_FEES_PAGE_SIZE_MAX,
+        `can be at most ${CONSULTANT_FEES_PAGE_SIZE_MAX}`,
+      ),
+      blank,
+    ])
+    .optional(),
+};
+
 export const billingConsultantFeeGridQuerySchema = z.strictObject({
   doctorId: queryId.optional(),
   schemeCode: code.optional(),
   date: date.refine(realDate, "must be a date like 2026-10-01").optional(),
+  ...consultantFeePaging,
+});
+
+export const billingConsultantFeeNotPricedQuerySchema = z.strictObject({
+  doctorId: queryId.optional(),
+  ...consultantFeePaging,
 });
 
 export const billingConsultantFeeSaveSchema = z.strictObject({
@@ -703,6 +739,8 @@ export const BILLING_FIELD_LABELS = {
   fileName: "File name",
   limit: "Page size",
   offset: "Offset",
+  page: "Page",
+  page_size: "Page size",
   activeOnly: "Active only",
   schemeCode: "Category",
   doctorId: "Doctor",

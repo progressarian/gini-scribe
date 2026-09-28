@@ -577,6 +577,12 @@ export async function cancelTestIn(client, input) {
   }
 
   if (target.chargeId) {
+    const { rows: owner } = await client.query(
+      `SELECT visit_id FROM giniflow_bill_charges WHERE id = $1`,
+      [target.chargeId],
+    );
+    if (!owner.length) throw bad("Charge not found", 404);
+    await lockVisit(client, owner[0].visit_id);
     const { rows } = await client.query(
       `SELECT c.*, v.patient_id, v.visit_date::text AS visit_date
          FROM giniflow_bill_charges c JOIN giniflow_visits v ON v.id = c.visit_id
@@ -588,7 +594,6 @@ export async function cancelTestIn(client, input) {
     if (charge.payment_status !== "pending") {
       throw bad("This charge is already paid — the refund is done in HealthRay", 409);
     }
-    await lockVisit(client, charge.visit_id);
     await client.query(`DELETE FROM giniflow_bill_charges WHERE id = $1`, [charge.id]);
     await recordCancellation(client, {
       visitId: charge.visit_id,

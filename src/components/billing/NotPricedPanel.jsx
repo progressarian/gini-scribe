@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { Link } from "react-router-dom";
 import { useBillingNotPriced, useSetBillingItemActive } from "../../queries/hooks/useBillingMaster";
 import { toast } from "../../stores/uiStore";
 import Pagination from "../ui/Pagination";
@@ -66,16 +67,6 @@ const LISTS = [
     find: (t, needle) => matches(needle, t.test_name, t.category, t.item_code),
   },
   {
-    key: "consultants",
-    title: "Consultants without a fee",
-    short: "need a consultation fee",
-    about:
-      "Consultants with no consultation item of their own for a visit type. Where the hospital default covers them, their visits are billed at the default fee meanwhile.",
-    allClear: "Every consultant has a fee for each visit type.",
-    rowsOf: (data) => data.consultants,
-    find: (c, needle) => matches(needle, c.name, c.visit_type, c.item_code),
-  },
-  {
     key: "reports",
     title: "Lab reports not in the catalogue",
     short: "need a catalogue test",
@@ -135,57 +126,6 @@ function TestRows({ rows, onCreate }) {
   );
 }
 
-function ConsultantRows({ rows, onCreate }) {
-  return (
-    <table className="flow-table" aria-label="Consultants without a fee">
-      <thead>
-        <tr>
-          <th>Consultant</th>
-          <th>Visit type</th>
-          <th>Billed meanwhile</th>
-          <th>Status</th>
-          <th className="bill-items__actions-head">Action</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((c) => {
-          const label = `${c.name} (${c.visit_type})`;
-          return (
-            <tr key={`${c.doctor_id}-${c.visit_type}`}>
-              <td data-label="Consultant">{c.name}</td>
-              <td data-label="Visit type">{c.visit_type}</td>
-              <td data-label="Billed meanwhile">
-                {c.default_covers ? "Hospital default fee" : "Nothing — no fee"}
-              </td>
-              <td data-label="Status">
-                {c.status === "no_item" ? (
-                  <Status tone="todo">No item</Status>
-                ) : (
-                  <Status tone="off">{c.item_code} is off</Status>
-                )}
-              </td>
-              <td data-label="" className="bill-items__actions">
-                <RowAction
-                  row={c}
-                  label={label}
-                  onCreate={() =>
-                    onCreate({
-                      name: `Consultation — ${c.name} (${c.visit_type})`,
-                      kind: "consultation",
-                      doctor_id: c.doctor_id,
-                      visit_type: c.visit_type,
-                    })
-                  }
-                />
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
-  );
-}
-
 function ReportRows({ rows }) {
   return (
     <table className="flow-table" aria-label="Lab reports not in the catalogue">
@@ -215,7 +155,7 @@ function ReportRows({ rows }) {
   );
 }
 
-const ROWS = { tests: TestRows, consultants: ConsultantRows, reports: ReportRows };
+const ROWS = { tests: TestRows, reports: ReportRows };
 
 export default function NotPricedPanel({ onCreate }) {
   const { data, isLoading, isError } = useBillingNotPriced();
@@ -244,8 +184,18 @@ export default function NotPricedPanel({ onCreate }) {
     setPage(1);
   };
 
+  const feesMissing = data.consultants.length;
+
   return (
     <div className="bill-notpriced">
+      {feesMissing ? (
+        <p className="fset__cardsub bill-np-fees">
+          <Link to="/settings/consultant-fees?view=not-priced">
+            {feesMissing} doctor {feesMissing === 1 ? "fee" : "fees"} missing — set them on the
+            Consultant fees page →
+          </Link>
+        </p>
+      ) : null}
       <div className="bill-np-tiles" role="tablist" aria-label="Not priced lists">
         {LISTS.map((l) => {
           const count = l.rowsOf(data).length;

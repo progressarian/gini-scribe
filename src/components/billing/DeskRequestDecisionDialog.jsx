@@ -5,6 +5,7 @@ import {
 } from "../../queries/hooks/useBillingRequests";
 import { requestErrorOf } from "./format";
 import useDialog from "./useDialog";
+import BillDialogLayer from "./BillDialogLayer";
 
 export default function DeskRequestDecisionDialog({ request, mode, subject, onClose, onDone }) {
   const approve = useApproveDeskRequest();
@@ -33,54 +34,56 @@ export default function DeskRequestDecisionDialog({ request, mode, subject, onCl
   };
 
   return (
-    <div className="flow-dialog-backdrop" onClick={onClose} role="presentation">
-      <form
-        ref={ref}
-        className="flow-card bill-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        onClick={(e) => e.stopPropagation()}
-        onSubmit={submit}
-      >
-        <h2 id={titleId} className="bill-dialog__title">
-          {rejecting ? `Reject request for ${subject}` : `Bill ${subject} again?`}
-        </h2>
-        <p className="fset__cardsub">
-          {rejecting
-            ? "The desk sees this note, so say why — a rejection without a note is refused."
-            : "The desk may add this item to the visit once more. One approval allows one extra line."}
-        </p>
-        <p className="dreq__quote">{request.reason}</p>
-        <div className="fset__field">
-          <label htmlFor={noteId}>{rejecting ? "Note" : "Note for the desk"}</label>
-          <textarea
-            id={noteId}
-            className="jb-assign"
-            rows={3}
-            maxLength={1000}
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-          />
-        </div>
-        {error ? (
-          <p className="bill-dialog__error" role="alert">
-            {error}
+    <BillDialogLayer>
+      <div className="flow-dialog-backdrop" onClick={onClose} role="presentation">
+        <form
+          ref={ref}
+          className="flow-card bill-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          onClick={(e) => e.stopPropagation()}
+          onSubmit={submit}
+        >
+          <h2 id={titleId} className="bill-dialog__title">
+            {rejecting ? `Reject request for ${subject}` : `Bill ${subject} again?`}
+          </h2>
+          <p className="fset__cardsub">
+            {rejecting
+              ? "The desk sees this note, so say why — a rejection without a note is refused."
+              : "The desk may add this item to the visit once more. One approval allows one extra line."}
           </p>
-        ) : null}
-        <div className="bill-dialog__actions">
-          <button type="button" className="flow-btn flow-btn-ghost" onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            type="submit"
-            className={`flow-btn ${rejecting ? "flow-btn-red" : "flow-btn-primary"}`}
-            disabled={decide.isPending}
-          >
-            {rejecting ? "Reject request" : "Approve request"}
-          </button>
-        </div>
-      </form>
-    </div>
+          <p className="dreq__quote">{request.reason}</p>
+          <div className="fset__field">
+            <label htmlFor={noteId}>{rejecting ? "Note" : "Note for the desk"}</label>
+            <textarea
+              id={noteId}
+              className="jb-assign"
+              rows={3}
+              maxLength={1000}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
+          </div>
+          {error ? (
+            <p className="bill-dialog__error" role="alert">
+              {error}
+            </p>
+          ) : null}
+          <div className="bill-dialog__actions">
+            <button type="button" className="flow-btn flow-btn-ghost" onClick={onClose}>
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className={`flow-btn ${rejecting ? "flow-btn-red" : "flow-btn-primary"}`}
+              disabled={decide.isPending}
+            >
+              {rejecting ? "Reject request" : "Approve request"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </BillDialogLayer>
   );
 }

@@ -111,11 +111,15 @@
   margin: 1px;
 }
 .bill-dialog {
+  box-sizing: border-box;
   width: 100%;
   max-width: 460px;
   max-height: 90vh;
+  overflow-x: hidden;
   overflow-y: auto;
   border-radius: 10px;
+  white-space: normal;
+  text-align: left;
 }
 .bill-dialog--wide {
   max-width: 640px;
@@ -131,6 +135,7 @@
   font-size: 15px;
   font-weight: 700;
   margin: 0 0 6px;
+  overflow-wrap: anywhere;
 }
 .bill-dialog__list {
   margin: 4px 0 10px 18px;
@@ -144,6 +149,7 @@
 }
 .bill-dialog__actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 12px;
@@ -495,4 +501,15 @@
 .bill-import__done {
   padding-left: 10px;
   margin-bottom: 10px;
+}
+.bill-dialog-layer {
+  position: fixed;
+  z-index: 600;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  min-height: 0;
+  padding: 0;
+  background: none;
 }

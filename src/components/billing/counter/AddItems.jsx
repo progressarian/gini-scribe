@@ -10,15 +10,21 @@ import {
 import { errorOf } from "../format";
 import { requestKindText, requestStatusText } from "./lineText";
 
-export default function AddItems({ bill, onBill }) {
-  const [search, setSearch] = useState("");
+const BLANK_PROPOSAL = { name: "", group: "", reason: "" };
+
+export default function AddItems({ bill, onBill, form }) {
+  const search = form.value.search;
+  const setSearch = (next) => form.set("search", next);
   const [debounced, setDebounced] = useState("");
   const [error, setError] = useState(null);
   const [note, setNote] = useState(null);
-  const [asking, setAsking] = useState(null);
-  const [reason, setReason] = useState("");
-  const [wantsNew, setWantsNew] = useState(false);
-  const [proposed, setProposed] = useState({ name: "", group: "", reason: "" });
+  const again = form.value.again;
+  const asking = again?.item ?? null;
+  const reason = again?.reason ?? "";
+  const setReason = (next) => form.set("again", (was) => was && { ...was, reason: next });
+  const wantsNew = form.value.newItem !== null;
+  const proposed = form.value.newItem ?? BLANK_PROPOSAL;
+  const setProposed = (next) => form.set("newItem", next);
   const [blocked, setBlocked] = useState({});
 
   const { data, isFetching } = useItemSearch(debounced);
@@ -77,8 +83,7 @@ export default function AddItems({ bill, onBill }) {
         bill_id: bill.id,
         reason: reason.trim(),
       });
-      setAsking(null);
-      setReason("");
+      form.drop("again");
       setNote(`Asked an admin to bill ${asking.name} again.`);
     } catch (e) {
       setError(errorOf(e, "That request could not be sent"));
@@ -96,8 +101,7 @@ export default function AddItems({ bill, onBill }) {
         visit_id: bill.visit_id,
         bill_id: bill.id,
       });
-      setWantsNew(false);
-      setProposed({ name: "", group: "", reason: "" });
+      form.drop("newItem");
       setNote("Asked an admin to create that item.");
     } catch (e) {
       setError(errorOf(e, "That request could not be sent"));
@@ -107,8 +111,7 @@ export default function AddItems({ bill, onBill }) {
   const openNewItem = () => {
     setError(null);
     setNote(null);
-    setProposed({ name: search.trim(), group: "", reason: "" });
-    setWantsNew(true);
+    setProposed({ ...BLANK_PROPOSAL, name: search.trim() });
   };
 
   if (bill.status !== "draft") return null;
@@ -152,9 +155,8 @@ export default function AddItems({ bill, onBill }) {
                     className="st-btn st-btn-g"
                     disabled={settling}
                     onClick={() => {
-                      setReason("");
                       setError(null);
-                      setAsking(item);
+                      form.set("again", { item: { id: item.id, name: item.name }, reason: "" });
                     }}
                   >
                     Ask admin to bill again
@@ -208,7 +210,7 @@ export default function AddItems({ bill, onBill }) {
           >
             Send request
           </button>
-          <button type="button" className="st-btn st-btn-g" onClick={() => setWantsNew(false)}>
+          <button type="button" className="st-btn st-btn-g" onClick={() => form.drop("newItem")}>
             Cancel
           </button>
         </form>
@@ -275,7 +277,7 @@ export default function AddItems({ bill, onBill }) {
           </label>
         }
         onConfirm={askRepeat}
-        onCancel={() => setAsking(null)}
+        onCancel={() => form.drop("again")}
       />
     </section>
   );

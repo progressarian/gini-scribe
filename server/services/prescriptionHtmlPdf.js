@@ -78,7 +78,7 @@ const PAGE_NUMBER_FOOTER = `
 
 // The rendering half, without the prescription's own template — the warm
 // browser is the expensive part and there is now more than one thing to print.
-export async function renderHtmlToPdf(html, { margin, pageNumbers = true } = {}) {
+export async function renderHtmlToPdf(html, { margin, pageNumbers = true, footerTemplate } = {}) {
   const browser = await getBrowser();
   const page = await browser.newPage();
   try {
@@ -101,7 +101,7 @@ export async function renderHtmlToPdf(html, { margin, pageNumbers = true } = {})
       },
       displayHeaderFooter: pageNumbers,
       headerTemplate: pageNumbers ? "<div></div>" : undefined,
-      footerTemplate: pageNumbers ? PAGE_NUMBER_FOOTER : undefined,
+      footerTemplate: pageNumbers ? footerTemplate || PAGE_NUMBER_FOOTER : undefined,
     });
     return Buffer.isBuffer(pdf) ? pdf : Buffer.from(pdf);
   } finally {

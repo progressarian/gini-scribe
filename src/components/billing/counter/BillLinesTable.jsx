@@ -53,10 +53,12 @@ function QuantityCell({ bill, line, onBill, onError }) {
   );
 }
 
-export default function BillLinesTable({ bill, onBill }) {
+export default function BillLinesTable({ bill, onBill, form }) {
   const remove = useRemoveBillLine();
-  const [going, setGoing] = useState(null);
-  const [reason, setReason] = useState("");
+  const removing = form.value.removing;
+  const going = removing ? bill.lines.find((line) => line.id === removing.lineId) || null : null;
+  const reason = going ? removing.reason : "";
+  const setReason = (next) => form.set("removing", (was) => was && { ...was, reason: next });
   const [error, setError] = useState(null);
   const atReception = bill.lines.filter((line) => line.order_state);
   const receptionWay =
@@ -75,8 +77,7 @@ export default function BillLinesTable({ bill, onBill }) {
           reason: reason.trim(),
         }),
       );
-      setGoing(null);
-      setReason("");
+      form.drop("removing");
     } catch (e) {
       setError(errorOf(e, "That line could not be removed"));
     }
@@ -130,8 +131,7 @@ export default function BillLinesTable({ bill, onBill }) {
                         aria-label={`Remove ${line.bill_name}`}
                         onClick={() => {
                           setError(null);
-                          setReason("");
-                          setGoing(line);
+                          form.set("removing", { lineId: line.id, reason: "" });
                         }}
                       >
                         Remove
@@ -170,7 +170,7 @@ export default function BillLinesTable({ bill, onBill }) {
           </label>
         }
         onConfirm={drop}
-        onCancel={() => setGoing(null)}
+        onCancel={() => form.drop("removing")}
       />
     </section>
   );

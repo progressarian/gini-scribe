@@ -8,6 +8,7 @@ import { gotoReady } from "../../helpers/browser.mjs";
 const tag = crypto.randomBytes(3).toString("hex");
 const TEST_NAME = `P130 Ferritin ${tag}`;
 const OFF_TEST_NAME = `P130 Lipase ${tag}`;
+const ESC_TEST_NAME = `P130 Amylase ${tag}`;
 const DOCTOR = `Dr P130 ${tag}`;
 const REPORT = `P130 Report ${tag}`;
 const seed = {};
@@ -16,12 +17,11 @@ const dialog = (page) => page.getByRole("dialog");
 const viewSwitch = (page) => page.getByRole("group", { name: "Services view" });
 const field = (page, label) => dialog(page).getByLabel(label, { exact: true });
 const tests = (page) => page.getByRole("table", { name: "Tests without an item" });
-const consultants = (page) => page.getByRole("table", { name: "Consultants without a fee" });
+const feesLink = (page) => page.getByRole("link", { name: /doctor fees? missing/ });
 const reports = (page) => page.getByRole("table", { name: "Lab reports not in the catalogue" });
 
 const LIST_TAB = {
   tests: /^\d+\s*Tests without an item/,
-  consultants: /^\d+\s*Consultants without a fee/,
   reports: /^\d+\s*Lab reports not in the catalogue/,
 };
 
@@ -61,6 +61,7 @@ test.describe.serial("P1-30 not priced tab", () => {
     ).json();
     seed.test = await buildCatalogTest({ test_name: TEST_NAME, price: 320 });
     seed.offTest = await buildCatalogTest({ test_name: OFF_TEST_NAME, price: 500 });
+    seed.escTest = await buildCatalogTest({ test_name: ESC_TEST_NAME, price: 210 });
     const offItem = await (
       await api.post("/api/billing/master/items", {
         data: {
@@ -96,7 +97,7 @@ test.describe.serial("P1-30 not priced tab", () => {
     await query(`DELETE FROM service_items WHERE code LIKE $1`, [`P130%${tag}`]);
     await query(`DELETE FROM service_subgroups WHERE code LIKE $1`, [`P130%${tag}`]);
     await query(`DELETE FROM service_groups WHERE code LIKE $1`, [`P130%${tag}`]);
-    for (const t of [seed.test, seed.offTest].filter(Boolean)) {
+    for (const t of [seed.test, seed.offTest, seed.escTest].filter(Boolean)) {
       await query(`DELETE FROM giniflow_test_catalog WHERE id = $1`, [t.id]);
     }
     if (seed.doctor) await query(`DELETE FROM doctors WHERE id = $1`, [seed.doctor.id]);
@@ -109,7 +110,7 @@ test.describe.serial("P1-30 not priced tab", () => {
     await api.dispose();
     await openNotPriced(page);
     await expect(viewSwitch(page).getByRole("button", { name: /^Not priced/ })).toHaveText(
-      `Not priced · ${list.tests.length + list.consultants.length}`,
+      `Not priced · ${list.tests.length}`,
     );
     await expect(viewSwitch(page).getByRole("button", { name: /^Not priced/ })).toHaveAttribute(
       "aria-pressed",
@@ -119,15 +120,14 @@ test.describe.serial("P1-30 not priced tab", () => {
     const row = tests(page).getByRole("row", { name: new RegExp(TEST_NAME) });
     await expect(row).toContainText("₹320");
     await expect(row).toContainText("No item");
-    await showList(page, "consultants", DOCTOR);
-    for (const visit of ["New", "Follow Up"]) {
-      await expect(
-        consultants(page).getByRole("button", {
-          name: `Create item for ${DOCTOR} (${visit})`,
-          exact: true,
-        }),
-      ).toBeVisible();
-    }
+    const tabs = page.getByRole("tablist", { name: "Not priced lists" }).getByRole("tab");
+    await expect(tabs).toHaveCount(2);
+    await expect(page.getByRole("tab", { name: /Consultants without a fee/ })).toHaveCount(0);
+    await expect(page.getByRole("table", { name: "Consultants without a fee" })).toHaveCount(0);
+    expect(list.consultants.length).toBeGreaterThanOrEqual(2);
+    await expect(feesLink(page)).toHaveText(
+      `${list.consultants.length} doctor fees missing — set them on the Consultant fees page →`,
+    );
     const report = list.reportsNotInCatalogue.find((r) => r.name === REPORT);
     expect(report).toBeTruthy();
     await showList(page, "reports", REPORT);
@@ -161,32 +161,23 @@ test.describe.serial("P1-30 not priced tab", () => {
     expect(item).toEqual({ kind: "test", test_catalog_id: seed.test.id, base_price: "320.00" });
   });
 
-  test("3. creating a consultant fee from its row pre-fills the form and removes the row", async ({
-    page,
-  }) => {
+  test("3. the doctor fees line links to the Consultant fees page", async ({ page }) => {
     await openNotPriced(page);
-    await showList(page, "consultants", DOCTOR);
-    const create = consultants(page).getByRole("button", {
-      name: `Create item for ${DOCTOR} (New)`,
-      exact: true,
-    });
-    await create.click();
-    await expect(field(page, "Kind")).toHaveValue("consultation");
-    await expect(field(page, "Consultant")).toHaveValue(String(seed.doctor.id));
-    await expect(field(page, "Visit type")).toHaveValue("New");
-    await expect(field(page, "Name")).toHaveValue(`Consultation — ${DOCTOR} (New)`);
-    await field(page, "Code").fill(`P130C_${tag}`);
-    await field(page, "Price (₹)").fill("800");
-    await field(page, "Subgroup").selectOption(String(seed.subgroup.id));
-    await dialog(page).getByRole("button", { name: "Add item", exact: true }).click();
-    await expect(dialog(page)).toHaveCount(0);
-    await expect(create).toHaveCount(0);
-    await expect(
-      consultants(page).getByRole("button", {
-        name: `Create item for ${DOCTOR} (Follow Up)`,
-        exact: true,
-      }),
-    ).toBeVisible();
+    await expect(feesLink(page)).toHaveAttribute(
+      "href",
+      "/settings/consultant-fees?view=not-priced",
+    );
+    await feesLink(page).click();
+    await expect(page).toHaveURL(/\/settings\/consultant-fees\?view=not-priced$/);
+    const notPriced = page.getByRole("table", { name: "Not priced" });
+    for (const visit of ["New", "Follow Up"]) {
+      await expect(
+        notPriced.getByRole("button", {
+          name: `Create item for ${DOCTOR} (${visit})`,
+          exact: true,
+        }),
+      ).toBeVisible();
+    }
   });
 
   test("4. a test whose item is off offers to activate it, and the row goes", async ({ page }) => {
@@ -212,17 +203,16 @@ test.describe.serial("P1-30 not priced tab", () => {
 
   test("5. closing a pre-filled form without changes creates nothing", async ({ page }) => {
     await openNotPriced(page);
-    await showList(page, "consultants", DOCTOR);
-    await consultants(page)
-      .getByRole("button", { name: `Create item for ${DOCTOR} (Follow Up)`, exact: true })
+    await showList(page, "tests", ESC_TEST_NAME);
+    await tests(page)
+      .getByRole("button", { name: `Create item for ${ESC_TEST_NAME}`, exact: true })
       .click();
     await expect(dialog(page)).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(dialog(page)).toHaveCount(0);
-    const n = await one(
-      `SELECT count(*)::int AS n FROM service_items WHERE doctor_id = $1 AND visit_type = 'Follow Up'`,
-      [seed.doctor.id],
-    );
+    const n = await one(`SELECT count(*)::int AS n FROM service_items WHERE test_catalog_id = $1`, [
+      seed.escTest.id,
+    ]);
     expect(n.n).toBe(0);
   });
 

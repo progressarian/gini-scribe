@@ -18,6 +18,7 @@ import "../flow/FlowSettings.css";
 import "./billing.css";
 import "./billingUi.css";
 import "./cghsRegister.css";
+import BillDialogLayer from "../../components/billing/BillDialogLayer";
 
 const TABS = [
   { key: "pending", label: "Pending" },
@@ -187,107 +188,109 @@ function ClearDialog({ bills, onClose, onDone }) {
   };
 
   return (
-    <div className="flow-dialog-backdrop" onClick={onClose} role="presentation">
-      <form
-        ref={ref}
-        className="flow-card bill-dialog cghs-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        onClick={(e) => e.stopPropagation()}
-        onSubmit={submit}
-      >
-        <h2 id={titleId} className="bill-dialog__title">
-          {bills.length === 1 ? `Mark bill ${bills[0].bill_no} cleared` : "Clear selected bills"}
-        </h2>
-        <p className="fset__cardsub">
-          {billsText(bills.length)} · {fromPaise(selected)} claimed from{" "}
-          {payers.length === 1 ? payers[0] : "more than one payer"}.
-        </p>
-        {payers.length > 1 ? (
-          <p className="bill-dialog__error" role="alert">
-            These bills are claimed from different payers ({payers.join(", ")}) — clear each payer's
-            bills separately.
-          </p>
-        ) : null}
-        {tooMany ? (
-          <p className="bill-dialog__error" role="alert">
-            One payment can clear at most {CLAIM_BILLS_AT_ONCE} bills — narrow the filters and clear
-            this payment in parts, each part under the same reference.
-          </p>
-        ) : null}
-        <div className="bill-form">
-          <div className="fset__field">
-            <label htmlFor={`${id}-on`}>Date received</label>
-            <input
-              id={`${id}-on`}
-              type="date"
-              className="jb-assign"
-              max={indiaToday()}
-              required
-              value={receivedOn}
-              onChange={(e) => setReceivedOn(e.target.value)}
-            />
-          </div>
-          <div className="fset__field">
-            <label htmlFor={`${id}-ref`}>Reference (UTR)</label>
-            <input
-              id={`${id}-ref`}
-              className="jb-assign"
-              maxLength={60}
-              required
-              value={reference}
-              onChange={(e) => setReference(e.target.value)}
-            />
-          </div>
-          <div className="fset__field">
-            <label htmlFor={`${id}-amt`}>Amount received (₹)</label>
-            <input
-              id={`${id}-amt`}
-              className="jb-assign"
-              inputMode="decimal"
-              required
-              value={amount}
-              onChange={(e) => setAmount(moneyTyped(e.target.value))}
-            />
-          </div>
-          <div className="fset__field">
-            <label htmlFor={`${id}-note`}>Note</label>
-            <textarea
-              id={`${id}-note`}
-              className="jb-assign"
-              rows={2}
-              maxLength={1000}
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-            />
-          </div>
-        </div>
-        <p
-          className={`cghs-difference${difference === 0 ? " cghs-difference--ok" : ""}`}
-          aria-live="polite"
+    <BillDialogLayer>
+      <div className="flow-dialog-backdrop" onClick={onClose} role="presentation">
+        <form
+          ref={ref}
+          className="flow-card bill-dialog cghs-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          onClick={(e) => e.stopPropagation()}
+          onSubmit={submit}
         >
-          {difference === null
-            ? "Enter the amount received."
-            : difference === 0
-              ? "The amount matches the selected claims."
-              : `Difference ${fromPaise(Math.abs(difference))} ${difference > 0 ? "more" : "less"} than claimed — CGHS pays each claim in full, so check the amount and the bills chosen.`}
-        </p>
-        {error ? (
-          <p className="bill-dialog__error" role="alert">
-            {error}
+          <h2 id={titleId} className="bill-dialog__title">
+            {bills.length === 1 ? `Mark bill ${bills[0].bill_no} cleared` : "Clear selected bills"}
+          </h2>
+          <p className="fset__cardsub">
+            {billsText(bills.length)} · {fromPaise(selected)} claimed from{" "}
+            {payers.length === 1 ? payers[0] : "more than one payer"}.
           </p>
-        ) : null}
-        <div className="bill-dialog__actions">
-          <button type="button" className="flow-btn flow-btn-ghost" onClick={onClose}>
-            Cancel
-          </button>
-          <button type="submit" className="flow-btn flow-btn-primary" disabled={!ready}>
-            Save
-          </button>
-        </div>
-      </form>
-    </div>
+          {payers.length > 1 ? (
+            <p className="bill-dialog__error" role="alert">
+              These bills are claimed from different payers ({payers.join(", ")}) — clear each
+              payer's bills separately.
+            </p>
+          ) : null}
+          {tooMany ? (
+            <p className="bill-dialog__error" role="alert">
+              One payment can clear at most {CLAIM_BILLS_AT_ONCE} bills — narrow the filters and
+              clear this payment in parts, each part under the same reference.
+            </p>
+          ) : null}
+          <div className="bill-form">
+            <div className="fset__field">
+              <label htmlFor={`${id}-on`}>Date received</label>
+              <input
+                id={`${id}-on`}
+                type="date"
+                className="jb-assign"
+                max={indiaToday()}
+                required
+                value={receivedOn}
+                onChange={(e) => setReceivedOn(e.target.value)}
+              />
+            </div>
+            <div className="fset__field">
+              <label htmlFor={`${id}-ref`}>Reference (UTR)</label>
+              <input
+                id={`${id}-ref`}
+                className="jb-assign"
+                maxLength={60}
+                required
+                value={reference}
+                onChange={(e) => setReference(e.target.value)}
+              />
+            </div>
+            <div className="fset__field">
+              <label htmlFor={`${id}-amt`}>Amount received (₹)</label>
+              <input
+                id={`${id}-amt`}
+                className="jb-assign"
+                inputMode="decimal"
+                required
+                value={amount}
+                onChange={(e) => setAmount(moneyTyped(e.target.value))}
+              />
+            </div>
+            <div className="fset__field">
+              <label htmlFor={`${id}-note`}>Note</label>
+              <textarea
+                id={`${id}-note`}
+                className="jb-assign"
+                rows={2}
+                maxLength={1000}
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+              />
+            </div>
+          </div>
+          <p
+            className={`cghs-difference${difference === 0 ? " cghs-difference--ok" : ""}`}
+            aria-live="polite"
+          >
+            {difference === null
+              ? "Enter the amount received."
+              : difference === 0
+                ? "The amount matches the selected claims."
+                : `Difference ${fromPaise(Math.abs(difference))} ${difference > 0 ? "more" : "less"} than claimed — CGHS pays each claim in full, so check the amount and the bills chosen.`}
+          </p>
+          {error ? (
+            <p className="bill-dialog__error" role="alert">
+              {error}
+            </p>
+          ) : null}
+          <div className="bill-dialog__actions">
+            <button type="button" className="flow-btn flow-btn-ghost" onClick={onClose}>
+              Cancel
+            </button>
+            <button type="submit" className="flow-btn flow-btn-primary" disabled={!ready}>
+              Save
+            </button>
+          </div>
+        </form>
+      </div>
+    </BillDialogLayer>
   );
 }
 
@@ -314,54 +317,56 @@ function UndoDialog({ row, onClose, onDone }) {
   };
 
   return (
-    <div className="flow-dialog-backdrop" onClick={onClose} role="presentation">
-      <form
-        ref={ref}
-        className="flow-card bill-dialog cghs-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        onClick={(e) => e.stopPropagation()}
-        onSubmit={submit}
-      >
-        <h2 id={titleId} className="bill-dialog__title">
-          Undo payment {settlement.reference}?
-        </h2>
-        <p className="fset__cardsub">
-          Every bill this payment cleared ({fromPaise(settlement.total)} received on{" "}
-          {settlement.received_on}) goes back to Pending. Use this only for a wrong entry.
-        </p>
-        <div className="fset__field">
-          <label htmlFor={reasonId}>Reason</label>
-          <textarea
-            id={reasonId}
-            className="jb-assign"
-            rows={3}
-            maxLength={1000}
-            required
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-          />
-        </div>
-        {error ? (
-          <p className="bill-dialog__error" role="alert">
-            {error}
+    <BillDialogLayer>
+      <div className="flow-dialog-backdrop" onClick={onClose} role="presentation">
+        <form
+          ref={ref}
+          className="flow-card bill-dialog cghs-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          onClick={(e) => e.stopPropagation()}
+          onSubmit={submit}
+        >
+          <h2 id={titleId} className="bill-dialog__title">
+            Undo payment {settlement.reference}?
+          </h2>
+          <p className="fset__cardsub">
+            Every bill this payment cleared ({fromPaise(settlement.total)} received on{" "}
+            {settlement.received_on}) goes back to Pending. Use this only for a wrong entry.
           </p>
-        ) : null}
-        <div className="bill-dialog__actions">
-          <button type="button" className="flow-btn flow-btn-ghost" onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            type="submit"
-            className="flow-btn flow-btn-red"
-            disabled={!reason.trim() || undo.isPending}
-          >
-            Undo payment
-          </button>
-        </div>
-      </form>
-    </div>
+          <div className="fset__field">
+            <label htmlFor={reasonId}>Reason</label>
+            <textarea
+              id={reasonId}
+              className="jb-assign"
+              rows={3}
+              maxLength={1000}
+              required
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+            />
+          </div>
+          {error ? (
+            <p className="bill-dialog__error" role="alert">
+              {error}
+            </p>
+          ) : null}
+          <div className="bill-dialog__actions">
+            <button type="button" className="flow-btn flow-btn-ghost" onClick={onClose}>
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="flow-btn flow-btn-red"
+              disabled={!reason.trim() || undo.isPending}
+            >
+              Undo payment
+            </button>
+          </div>
+        </form>
+      </div>
+    </BillDialogLayer>
   );
 }
 

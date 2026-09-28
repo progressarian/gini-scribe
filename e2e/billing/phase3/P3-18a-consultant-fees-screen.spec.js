@@ -30,6 +30,11 @@ const cellOf = (page, key, doctor, visit) =>
   page.getByRole("table", { name: "Consultant fees" }).getByRole("button", {
     name: new RegExp(`^${esc(col(key))} for ${esc(doctor)} \\(${visit}\\):`),
   });
+const showView = (page, name) =>
+  page
+    .getByRole("group", { name: "Consultant fees view" })
+    .getByRole("button", { name: new RegExp(`^${name}`) })
+    .click();
 const dialog = (page) => page.getByRole("dialog");
 
 async function openFees(page, role = "reception_admin") {
@@ -140,7 +145,15 @@ test.describe.serial("P3-18a consultant fees screen", () => {
          (SELECT id FROM service_items WHERE subgroup_id = $1)`,
       [seed.subgroup?.id ?? 0],
     );
-    await query(`DELETE FROM service_items WHERE subgroup_id = $1`, [seed.subgroup?.id ?? 0]);
+    await query(
+      `DELETE FROM service_item_price_history WHERE service_item_id IN
+         (SELECT id FROM service_items WHERE doctor_id = ANY ($1))`,
+      [[seed.nofee ?? 0, seed.both ?? 0]],
+    );
+    await query(`DELETE FROM service_items WHERE subgroup_id = $1 OR doctor_id = ANY ($2)`, [
+      seed.subgroup?.id ?? 0,
+      [seed.nofee ?? 0, seed.both ?? 0],
+    ]);
     await query(`DELETE FROM service_subgroups WHERE code = $1`, [`P318AS_${T}`]);
     await query(`DELETE FROM service_groups WHERE code = $1`, [`P318AG_${T}`]);
     await query(`DELETE FROM patient_schemes WHERE parent_code = $1`, [TOP.code]);
@@ -317,6 +330,7 @@ test.describe.serial("P3-18a consultant fees screen", () => {
   }) => {
     await openFees(page);
     await page.getByLabel("Doctor", { exact: true }).selectOption(String(seed.nofee));
+    await showView(page, "Not priced");
     const list = page.getByRole("table", { name: "Not priced" });
     await expect(list.getByRole("row")).toHaveCount(3);
     await list.getByRole("button", { name: `Create item for ${NOFEE} (New)` }).click();
@@ -325,11 +339,12 @@ test.describe.serial("P3-18a consultant fees screen", () => {
     await expect(box).toBeVisible();
     await box.getByLabel("Price (₹)", { exact: true }).pressSequentially("8a00");
     await expect(box.getByLabel("Price (₹)", { exact: true })).toHaveValue("800");
-    await box.getByLabel("Subgroup", { exact: true }).selectOption(String(seed.subgroup.id));
+    await expect(box.getByLabel("Subgroup", { exact: true })).toHaveCount(0);
     await box.getByRole("button", { name: "Create item", exact: true }).click();
     await expect(box).toBeHidden();
     await expect(list.getByRole("row")).toHaveCount(2);
     await expect(list).toContainText("Follow Up");
+    await showView(page, "Fees");
     const table = page.getByRole("table", { name: "Consultant fees" });
     await expect(table.getByRole("rowheader")).toHaveCount(1);
     await expect(table.getByRole("row").nth(1)).toContainText("₹800");
@@ -486,12 +501,12 @@ test.describe.serial("P3-18a consultant fees screen", () => {
   }) => {
     await openFees(page);
     await page.getByLabel("Doctor", { exact: true }).selectOption(String(seed.both));
+    await showView(page, "Not priced");
     const list = page.getByRole("table", { name: "Not priced" });
     await expect(list.getByRole("row")).toHaveCount(3);
     const create = async () => {
       const box = dialog(page);
       await box.getByLabel("Price (₹)", { exact: true }).fill("400");
-      await box.getByLabel("Subgroup", { exact: true }).selectOption(String(seed.subgroup.id));
       await box.getByRole("button", { name: "Create item", exact: true }).click();
       await expect(box).toBeHidden();
     };

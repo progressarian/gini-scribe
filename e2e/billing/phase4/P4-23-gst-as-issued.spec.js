@@ -51,16 +51,16 @@ const gstOff = () => settings.updateSettings({ gst_enabled: false }, admin, db);
 function expectTaxBlock(html, { gstin, name }) {
   expect(html).toContain("SAC/HSN");
   expect(html).toContain("CGST");
-  expect(html).toContain("Tax (CGST + SGST)");
-  expect(html).toContain(gstin);
+  expect(html).toContain("Tax (₹)");
+  expect(html).toContain(`GST NO: ${gstin}`);
   expect(html).toContain(name);
 }
 
 function expectNoTaxBlock(html) {
   expect(html).not.toContain("SAC/HSN");
   expect(html).not.toContain("CGST");
-  expect(html).not.toContain("GSTIN");
-  expect(html).not.toContain("Billed by");
+  expect(html).not.toContain("GST NO");
+  expect(html).not.toContain("Tax (₹)");
 }
 
 async function taxedItem(code, rate) {

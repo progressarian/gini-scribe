@@ -80,49 +80,53 @@ Choose **Financial year 2026-27**, fill in each row below, and press **Set up** 
 
 A **code** is permanent and has no spaces. A **name** can be changed later.
 
+Doctor consultation fees are **not** set up here. They have their own page (see 2.3), and they need no group or sub-group; the app files them under **Out-patient Consultation › Consultation** by itself.
+
 ### 2.1 Groups — **+ Add group**
 
-| Code | Name                     |
-| ---- | ------------------------ |
-| OPD  | Out-patient Consultation |
-| LAB  | Laboratory               |
-| CARD | Cardiology Tests         |
-| PROC | Procedures               |
+| Code | Name             |
+| ---- | ---------------- |
+| LAB  | Laboratory       |
+| CARD | Cardiology Tests |
+| PROC | Procedures       |
 
 ### 2.2 Sub-groups — select a group, then **+ Subgroup**
 
-| Group                    | Code       | Name                          |
-| ------------------------ | ---------- | ----------------------------- |
-| Out-patient Consultation | OPD-CONS   | Consultation                  |
-| Laboratory               | LAB-BIO    | Biochemistry                  |
-| Laboratory               | LAB-HAEM   | Haematology                   |
-| Cardiology Tests         | CARD-HEART | ECG and Heart                 |
-| Procedures               | PROC-DRS   | Dressing and Minor Procedures |
+| Group            | Code       | Name                          |
+| ---------------- | ---------- | ----------------------------- |
+| Laboratory       | LAB-BIO    | Biochemistry                  |
+| Laboratory       | LAB-HAEM   | Haematology                   |
+| Cardiology Tests | CARD-HEART | ECG and Heart                 |
+| Procedures       | PROC-DRS   | Dressing and Minor Procedures |
 
-### 2.3 Hospital consultation fee — select **Consultation**, then **+ Add item**
+### 2.3 Doctor fees — **Settings → Consultant fees**
 
-This fee is used for any doctor who has no fee of their own.
+All doctor fees are set on the **Consultant fees** page. At the top it has two views: **Fees** (the price grid) and **Not priced** (doctors with no fee yet).
 
-| Field      | New visit                         | Follow-up visit                     |
-| ---------- | --------------------------------- | ----------------------------------- |
-| Name       | Consultation — Hospital (New)     | Consultation — Hospital (Follow Up) |
-| Code       | CONS-DEF-NEW                      | CONS-DEF-FU                         |
-| Kind       | Consultation                      | Consultation                        |
-| Price (₹)  | 800                               | 500                                 |
-| Consultant | Hospital default (any consultant) | Hospital default (any consultant)   |
-| Visit type | New                               | Follow Up                           |
+**First, the hospital default fee.** It is charged for any doctor who has no fee of their own.
 
-### 2.4 "Not priced" — fill the gaps in one click
+1. Open **Consultant fees → Not priced**.
+2. The first rows are **Hospital default · New** and **Hospital default · Follow Up**. Press **Create item** on each. The name and code are already filled in; type only the price:
 
-Press **Not priced** at the top. It lists what doctors and the lab can order but billing has no price for yet.
+| Row                          | Price (₹) |
+| ---------------------------- | --------- |
+| Hospital default · New       | 800       |
+| Hospital default · Follow Up | 500       |
 
-**Consultants without a fee.** Press **Create item** for a consultant:
+Now every doctor without a fee of their own shows **"Hospital default fee"** under _Billed meanwhile_.
 
-| Field     | New visit     | Follow-up visit |
-| --------- | ------------- | --------------- |
-| Code      | CONS-DR01-NEW | CONS-DR01-FU    |
-| Subgroup  | Consultation  | Consultation    |
-| Price (₹) | 1000          | 600             |
+**Then, a doctor who charges a different fee.** In the same list, find the doctor (use **Search doctors without a fee**), press **Create item**, and type the price:
+
+| Row                     | Price (₹) |
+| ----------------------- | --------- |
+| Your doctor · New       | 1000      |
+| Your doctor · Follow Up | 600       |
+
+The list shows 25 doctors per page; use **Next** or the search box to find the rest.
+
+### 2.4 "Not priced" on the Services page — tests
+
+On **Services**, press **Not priced**. It lists the tests the floor can order that have no price yet. (A line at the top links to the Consultant fees page for any doctor fees still missing.)
 
 **Tests without an item.** Press **Create item** on each test. The name and test link are already filled in.
 
@@ -229,7 +233,7 @@ CGHS sub-categories use these rates automatically; the screen shows them as **Fr
 
 ## Step 5 — Consultant fees
 
-**Settings → Consultant fees.** One grid holds every doctor's New and Follow-up fee for every category. Click a cell to change it.
+**Settings → Consultant fees → Fees.** One grid holds every doctor's New and Follow-up fee for every category. Click a cell to change it. Use the **search box** (doctor name or code) and the **Doctor** and **Category** filters to find a doctor; the grid shows 25 doctors per page.
 
 Click the consultant's **New** row, **CGHS Paid** column:
 

@@ -12,15 +12,16 @@ import { errorOf } from "../format";
 import { claimBadgeText } from "./lineText";
 import { finaliseBlockers } from "./finaliseChecks";
 
-export default function BillActions({ bill, onBill, schemes, payLater, needsCategory }) {
+export default function BillActions({ bill, onBill, schemes, payLater, needsCategory, form }) {
   const { data: settings } = useDeskSettings();
   const finalise = useFinaliseBill();
   const cancel = useCancelBill();
   const reread = useRereadBill();
   const [error, setError] = useState(null);
   const [note, setNote] = useState(null);
-  const [cancelling, setCancelling] = useState(false);
-  const [reason, setReason] = useState("");
+  const cancelling = form.value.cancelReason !== null && bill.status === "final";
+  const reason = form.value.cancelReason ?? "";
+  const setReason = (next) => form.set("cancelReason", next);
 
   const blockers = finaliseBlockers(bill, { schemes, settings, payLater, needsCategory });
   const badge = claimBadgeText(bill.claim_status, bill.claim_cleared_on);
@@ -48,6 +49,7 @@ export default function BillActions({ bill, onBill, schemes, payLater, needsCate
         ...(payLater ? { pay_later: true } : {}),
       });
       onBill(made);
+      form.clear();
       if (printing) printing.location.replace(billPdfHref(made.id));
       else window.open(billPdfHref(made.id), "_blank", "noopener");
     } catch (e) {
@@ -77,8 +79,7 @@ export default function BillActions({ bill, onBill, schemes, payLater, needsCate
           reason: reason.trim(),
         }),
       );
-      setCancelling(false);
-      setReason("");
+      form.clear();
     } catch (e) {
       setError(errorOf(e, "This bill could not be cancelled"));
     }
@@ -97,6 +98,20 @@ export default function BillActions({ bill, onBill, schemes, payLater, needsCate
             onClick={save}
           >
             Save draft
+          </button>
+        )}
+
+        {form.dirty && (
+          <button
+            type="button"
+            className="st-btn st-btn-g"
+            onClick={() => {
+              form.clear();
+              setError(null);
+              setNote("Form cleared.");
+            }}
+          >
+            Clear form
           </button>
         )}
 
@@ -129,7 +144,6 @@ export default function BillActions({ bill, onBill, schemes, payLater, needsCate
             onClick={() => {
               setError(null);
               setReason("");
-              setCancelling(true);
             }}
           >
             Cancel unpaid bill
@@ -168,7 +182,7 @@ export default function BillActions({ bill, onBill, schemes, payLater, needsCate
           </label>
         }
         onConfirm={drop}
-        onCancel={() => setCancelling(false)}
+        onCancel={() => form.drop("cancelReason")}
       />
     </section>
   );

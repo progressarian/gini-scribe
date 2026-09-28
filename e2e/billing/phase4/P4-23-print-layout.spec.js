@@ -184,10 +184,10 @@ test.describe.serial("P4-23 the printed bill lays out on paper", () => {
       await page.setContent(html, { waitUntil: "load" });
       await page.evaluate(() => document.fonts.ready);
       const fit = await page.evaluate(() => {
-        const card = document.querySelector(".rx-page");
+        const card = document.querySelector(".bp-page");
         const table = document.querySelector("table.bp-lines");
         const section = table.parentElement;
-        const inner = section.clientWidth - 44;
+        const inner = section.clientWidth;
         const cells = [
           ...table.querySelectorAll(":scope > thead th, :scope > tbody > tr:not(.bp-closing) > td"),
         ];
@@ -236,7 +236,7 @@ test.describe.serial("P4-23 the printed bill lays out on paper", () => {
   function expectPagesHold(pages) {
     expect(pages.length).toBeGreaterThanOrEqual(2);
     pages.forEach((text, index) => {
-      expect(text, `page ${index + 1} has the table header`).toContain("Patient pays");
+      expect(text, `page ${index + 1} has the table header`).toContain("PARTICULARS");
       expect(text, `page ${index + 1} is numbered`).toContain(
         `Page ${index + 1} of ${pages.length}`,
       );
@@ -255,7 +255,12 @@ test.describe.serial("P4-23 the printed bill lays out on paper", () => {
     await gstOn();
     const pages = await pdfPages(longBill);
     const last = pages.length - 1;
-    for (const label of ["Actual amount", "Tax (CGST + SGST)", "Patient payable", "Balance"]) {
+    for (const label of [
+      "BILLED AMOUNT",
+      "TAX (₹)",
+      "TOTAL PAYABLE AMOUNT",
+      "NET PAYABLE AMOUNT",
+    ]) {
       expect(pagesWith(pages, label), label).toEqual([last]);
     }
     expect(pages[last]).toContain(`Row${rowNo(ROWS - 1)}`);
@@ -275,7 +280,7 @@ test.describe.serial("P4-23 the printed bill lays out on paper", () => {
       const pages = await printedPages(() => renderHtmlToPdf(html));
       const last = pagesWith(pages, `Fin${rowNo(count - 1)}`);
       expect(last, `${count} lines: the last row is printed once`).toHaveLength(1);
-      for (const label of ["Actual amount", "Balance", `P4 footer ${tag}`]) {
+      for (const label of ["BILLED AMOUNT", "NET PAYABLE AMOUNT", `P4 footer ${tag}`]) {
         if (pagesWith(pages, label).join() !== last.join()) {
           misplaced.push(`${count} lines: ${label}`);
         }

@@ -196,10 +196,13 @@ test.describe.serial("P4-38 floor trial rehearsal", () => {
       await expect(unpriced).not.toContainText(day.tests.hba1c);
       await expect(unpriced).not.toContainText(day.tests.lipid);
 
-      await admin.getByRole("tab", { name: /Consultants without a fee/ }).click();
+      await gotoReady(admin, "/settings/consultant-fees", () =>
+        admin.getByRole("table", { name: "Consultant fees" }),
+      );
       for (const doctor of ["Dr E2E Rahul", "Dr E2E Beant"]) {
-        await admin.getByLabel("Search this list").fill(doctor);
-        await expect(admin.getByRole("tabpanel")).not.toContainText(doctor);
+        await expect(
+          admin.getByRole("button", { name: new RegExp(`^Create item for ${doctor} \\(`) }),
+        ).toHaveCount(0);
       }
     });
 
@@ -311,8 +314,8 @@ test.describe.serial("P4-38 floor trial rehearsal", () => {
       expect(text).toContain(bill.bill_no);
       expect(text).toContain(gen.name);
       expect(text).toContain(`Consultation Dr Rahul New ${tag}`);
-      expect(text).toContain("Patient payable ₹ 1,305.00");
-      expect(text).toContain("Balance ₹ 0.00");
+      expect(text).toContain("TOTAL PAYABLE AMOUNT (₹) 1,305.00");
+      expect(text).toContain("NET PAYABLE AMOUNT(₹) 0.00");
 
       const receipt = await actions(desk)
         .getByRole("link", { name: "Print receipt" })

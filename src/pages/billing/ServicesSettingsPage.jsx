@@ -178,9 +178,7 @@ export default function ServicesSettingsPage() {
     );
   }, [createTest, notPriced.data, setParams]);
 
-  const notPricedCount = notPriced.data
-    ? notPriced.data.tests.length + notPriced.data.consultants.length
-    : null;
+  const notPricedCount = notPriced.data ? notPriced.data.tests.length : null;
   const [history, setHistory] = useState(null);
   const [blocked, setBlocked] = useState(null);
   const [deactivating, setDeactivating] = useState(false);

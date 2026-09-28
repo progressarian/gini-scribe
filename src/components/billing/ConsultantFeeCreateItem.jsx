@@ -1,8 +1,9 @@
 import { cloneElement, useId, useState } from "react";
-import { useBillingGroups, useCreateBillingItem } from "../../queries/hooks/useBillingMaster";
+import { useCreateBillingItem } from "../../queries/hooks/useBillingMaster";
 import { toast } from "../../stores/uiStore";
 import { codeTyped, moneyTyped, requestErrorOf } from "./format";
 import useDialog from "./useDialog";
+import BillDialogLayer from "./BillDialogLayer";
 
 function Field({ label, className = "", children }) {
   const id = useId();
@@ -14,16 +15,18 @@ function Field({ label, className = "", children }) {
   );
 }
 
-const suggestedCode = (doctor) =>
-  `CONS-${doctor.doctor_id}-${doctor.visit_type === "New" ? "NEW" : "FU"}`;
+const visitCode = (visitType) => (visitType === "New" ? "NEW" : "FU");
 
-export default function ConsultantFeeCreateItem({ doctor, subgroupId, onClose, onCreated }) {
-  const { data: groups = [] } = useBillingGroups({ activeOnly: true });
+const suggestedCode = (doctor) =>
+  `CONS-${doctor.doctor_id ?? "DEFAULT"}-${visitCode(doctor.visit_type)}`;
+
+const whoOf = (doctor) => doctor.doctor_name ?? "Hospital default";
+
+export default function ConsultantFeeCreateItem({ doctor, onClose, onCreated }) {
   const create = useCreateBillingItem();
   const [form, setForm] = useState(() => ({
-    name: `Consultation — ${doctor.doctor_name} (${doctor.visit_type})`,
+    name: `Consultation — ${whoOf(doctor)} (${doctor.visit_type})`,
     code: suggestedCode(doctor),
-    subgroup_id: subgroupId ? String(subgroupId) : "",
     base_price: "",
   }));
   const [error, setError] = useState("");
@@ -39,7 +42,6 @@ export default function ConsultantFeeCreateItem({ doctor, subgroupId, onClose, o
       await create.mutateAsync({
         code: form.code.trim(),
         name: form.name.trim(),
-        subgroup_id: Number(form.subgroup_id),
         base_price: form.base_price.trim(),
         kind: "consultation",
         doctor_id: doctor.doctor_id,
@@ -53,90 +55,74 @@ export default function ConsultantFeeCreateItem({ doctor, subgroupId, onClose, o
   };
 
   return (
-    <div className="flow-dialog-backdrop" onClick={onClose} role="presentation">
-      <form
-        ref={ref}
-        className="flow-card bill-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        onClick={(e) => e.stopPropagation()}
-        onSubmit={submit}
-      >
-        <h2 id={titleId} className="bill-dialog__title">
-          {doctor.visit_type} consultation item for {doctor.doctor_name}
-        </h2>
-        <p className="fset__cardsub">
-          The General fee: what this doctor's {doctor.visit_type} visit costs a patient with no
-          category.
-        </p>
-        <div className="bill-form">
-          <Field label="Price (₹)" className="fset__field--narrow">
-            <input
-              className="jb-assign"
-              inputMode="decimal"
-              value={form.base_price}
-              onChange={set("base_price", moneyTyped)}
-              required
-              autoFocus
-            />
-          </Field>
-          <Field label="Code" className="bill-form__code">
-            <input
-              className="jb-assign"
-              maxLength={40}
-              value={form.code}
-              onChange={set("code", codeTyped)}
-              required
-            />
-          </Field>
-        </div>
-        <div className="bill-form">
-          <Field label="Name">
-            <input
-              className="jb-assign"
-              maxLength={200}
-              value={form.name}
-              onChange={set("name")}
-              required
-            />
-          </Field>
-          <Field label="Subgroup">
-            <select
-              className="jb-assign"
-              value={form.subgroup_id}
-              onChange={set("subgroup_id")}
-              required
-            >
-              <option value="">Choose a subgroup</option>
-              {groups.map((g) => (
-                <optgroup key={g.id} label={g.name}>
-                  {g.subgroups
-                    .filter((s) => s.is_active)
-                    .map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                </optgroup>
-              ))}
-            </select>
-          </Field>
-        </div>
-        {error ? (
-          <p className="bill-dialog__error" role="alert">
-            {error}
+    <BillDialogLayer>
+      <div className="flow-dialog-backdrop" onClick={onClose} role="presentation">
+        <form
+          ref={ref}
+          className="flow-card bill-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          onClick={(e) => e.stopPropagation()}
+          onSubmit={submit}
+        >
+          <h2 id={titleId} className="bill-dialog__title">
+            {doctor.doctor_id
+              ? `${doctor.visit_type} consultation item for ${doctor.doctor_name}`
+              : `Hospital default ${doctor.visit_type} consultation item`}
+          </h2>
+          <p className="fset__cardsub">
+            {doctor.doctor_id
+              ? `The General fee: what this doctor's ${doctor.visit_type} visit costs a patient with no category.`
+              : `The General fee for a ${doctor.visit_type} visit with any doctor who has no ${doctor.visit_type} fee of their own.`}
           </p>
-        ) : null}
-        <div className="bill-dialog__actions">
-          <button type="button" className="flow-btn flow-btn-ghost" onClick={onClose}>
-            Cancel
-          </button>
-          <button type="submit" className="flow-btn flow-btn-primary" disabled={create.isPending}>
-            Create item
-          </button>
-        </div>
-      </form>
-    </div>
+          <div className="bill-form">
+            <Field label="Price (₹)" className="fset__field--narrow">
+              <input
+                className="jb-assign"
+                inputMode="decimal"
+                value={form.base_price}
+                onChange={set("base_price", moneyTyped)}
+                required
+                autoFocus
+              />
+            </Field>
+            <Field label="Code" className="bill-form__code">
+              <input
+                className="jb-assign"
+                maxLength={40}
+                value={form.code}
+                onChange={set("code", codeTyped)}
+                required
+              />
+            </Field>
+          </div>
+          <div className="bill-form">
+            <Field label="Name">
+              <input
+                className="jb-assign"
+                maxLength={200}
+                value={form.name}
+                onChange={set("name")}
+                required
+              />
+            </Field>
+          </div>
+          {error ? (
+            <p className="bill-dialog__error" role="alert">
+              {error}
+            </p>
+          ) : null}
+          <div className="bill-dialog__actions">
+            <button type="button" className="flow-btn flow-btn-ghost" onClick={onClose}>
+              Cancel
+            </button>
+            <button type="submit" className="flow-btn flow-btn-primary" disabled={create.isPending}>
+              Create item
+            </button>
+          </div>
+        </form>
+      </div>
+    </BillDialogLayer>
   );
 }

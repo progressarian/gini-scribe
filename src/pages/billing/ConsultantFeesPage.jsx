@@ -2,10 +2,18 @@ import { useEffect, useId, useRef, useState } from "react";
 import {
   useBillingCategories,
   useBillingConsultantFees,
+  useBillingConsultantFeesNotPriced,
   useBillingItemChoices,
   useSetBillingItemActive,
 } from "../../queries/hooks/useBillingMaster";
+import { useSearchParams } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
+import useAuthStore from "../../stores/authStore";
+import DeleteDoctorModal from "../../components/doctors/DeleteDoctorModal";
 import { toast } from "../../stores/uiStore";
+import { CONSULTANT_FEES_PAGE_SIZE } from "../../../shared/billingVocab";
+import useDebounced from "../../hooks/useDebounced";
+import Pagination from "../../components/ui/Pagination";
 import ConsultantFeeCopy from "../../components/billing/ConsultantFeeCopy";
 import ConsultantFeeCreateItem from "../../components/billing/ConsultantFeeCreateItem";
 import ConsultantFeeEditor from "../../components/billing/ConsultantFeeEditor";
@@ -110,64 +118,96 @@ function ActivateButton({ doctor }) {
   );
 }
 
-function NotPriced({ doctors, headingRef, buttonRefs, onCreate }) {
+function SearchBox({ label, value, onChange }) {
+  return (
+    <input
+      type="search"
+      className="jb-assign bill-np-search"
+      aria-label={label}
+      placeholder={label}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  );
+}
+
+function NotPriced({ list, doctors, search, paging, headingRef, buttonRefs, onCreate, onRemove }) {
   return (
     <section className="flow-card bill-stack cf-notpriced" aria-labelledby="cf-notpriced-title">
-      <div className="fset__cardhead">
+      <div className="fset__cardhead cf-head">
         <h2 id="cf-notpriced-title" className="flow-sec-title" ref={headingRef} tabIndex={-1}>
           Not priced
         </h2>
-        <span className="fset__count bill-count--todo">{doctors.length}</span>
+        <span className="fset__count bill-count--todo">{list.count}</span>
+        {search}
       </div>
       <div className="fset__cardsub">
         These doctors have no consultation item for a visit type, so they have no fee to set here.
         Where the hospital default covers them, their visits are billed at the default fee
         meanwhile.
+        {doctors.some((d) => !d.doctor_id)
+          ? " The hospital default is the fee for any doctor without one of their own."
+          : ""}
       </div>
-      <div className="fset__scroll">
-        <table className="flow-table" aria-label="Not priced">
-          <thead>
-            <tr>
-              <th>Doctor</th>
-              <th>Visit type</th>
-              <th>Billed meanwhile</th>
-              <th className="bill-items__actions-head">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {doctors.map((d, index) => (
-              <tr key={`${d.doctor_id}-${d.visit_type}`}>
-                <td data-label="Doctor">
-                  {d.doctor_name}
-                  {d.doctor_active === false ? (
-                    <span className="flow-muted"> (inactive)</span>
-                  ) : null}
-                </td>
-                <td data-label="Visit type">{d.visit_type}</td>
-                <td data-label="Billed meanwhile">
-                  {d.default_covers ? "Hospital default fee" : "Nothing — no fee"}
-                </td>
-                <td data-label="" className="bill-items__actions">
-                  {d.status === "item_deactivated" ? <ActivateButton doctor={d} /> : null}
-                  <button
-                    type="button"
-                    className="flow-btn flow-btn-primary flow-btn-mini"
-                    aria-label={`Create item for ${d.doctor_name} (${d.visit_type})`}
-                    ref={(node) => {
-                      const key = `${d.doctor_id}-${d.visit_type}`;
-                      if (node) buttonRefs.current.set(key, node);
-                      else buttonRefs.current.delete(key);
-                    }}
-                    onClick={() => onCreate({ doctor: d, index })}
-                  >
-                    Create item
-                  </button>
-                </td>
+      {!doctors.length ? (
+        <div className="fset__cardsub">No doctor without a fee matches that search.</div>
+      ) : (
+        <div className="fset__scroll">
+          <table className="flow-table" aria-label="Not priced">
+            <thead>
+              <tr>
+                <th>Doctor</th>
+                <th>Visit type</th>
+                <th>Billed meanwhile</th>
+                <th className="bill-items__actions-head">Action</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {doctors.map((d, index) => (
+                <tr key={`${d.doctor_id}-${d.visit_type}`}>
+                  <td data-label="Doctor">
+                    {d.doctor_id ? d.doctor_name : "Hospital default"}
+                    {d.doctor_active === false ? (
+                      <span className="flow-muted"> (inactive)</span>
+                    ) : null}
+                  </td>
+                  <td data-label="Visit type">{d.visit_type}</td>
+                  <td data-label="Billed meanwhile">
+                    {d.default_covers ? "Hospital default fee" : "Nothing — no fee"}
+                  </td>
+                  <td data-label="" className="bill-items__actions">
+                    {d.status === "item_deactivated" ? <ActivateButton doctor={d} /> : null}
+                    <button
+                      type="button"
+                      className="flow-btn flow-btn-primary flow-btn-mini"
+                      aria-label={`Create item for ${d.doctor_id ? d.doctor_name : "Hospital default"} (${d.visit_type})`}
+                      ref={(node) => {
+                        const key = `${d.doctor_id}-${d.visit_type}`;
+                        if (node) buttonRefs.current.set(key, node);
+                        else buttonRefs.current.delete(key);
+                      }}
+                      onClick={() => onCreate({ doctor: d, index })}
+                    >
+                      Create item
+                    </button>
+                    {onRemove && d.doctor_id && d.doctor_active !== false ? (
+                      <button
+                        type="button"
+                        className="flow-btn flow-btn-ghost flow-btn-mini cf-grid__remove"
+                        aria-label={`Delete doctor ${d.doctor_name}`}
+                        onClick={() => onRemove({ id: d.doctor_id, name: d.doctor_name })}
+                      >
+                        Delete doctor
+                      </button>
+                    ) : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {paging}
     </section>
   );
 }
@@ -181,8 +221,43 @@ export default function ConsultantFeesPage() {
   const [creating, setCreating] = useState(null);
   const [copying, setCopying] = useState(false);
   const [focusAfter, setFocusAfter] = useState(null);
-  const { data: grid, isLoading, isError } = useBillingConsultantFees({ doctorId, schemeCode });
-  const notPriced = grid?.not_priced ?? [];
+  const [feeSearch, setFeeSearch] = useState("");
+  const [removing, setRemoving] = useState(null);
+  const isAdmin = useAuthStore((s) => s.currentDoctor?.role) === "admin";
+  const queryClient = useQueryClient();
+  const [feePage, setFeePage] = useState(1);
+  const [feePageSize, setFeePageSize] = useState(CONSULTANT_FEES_PAGE_SIZE);
+  const [npSearch, setNpSearch] = useState("");
+  const [npPage, setNpPage] = useState(1);
+  const [npPageSize, setNpPageSize] = useState(CONSULTANT_FEES_PAGE_SIZE);
+  const feeQ = useDebounced(feeSearch.trim(), 300);
+  const npQ = useDebounced(npSearch.trim(), 300);
+  const {
+    data: grid,
+    isLoading,
+    isError,
+    isFetching,
+  } = useBillingConsultantFees({
+    doctorId,
+    schemeCode,
+    q: feeQ,
+    page: feePage,
+    page_size: feePageSize,
+  });
+  const { data: unpriced, isFetching: npFetching } = useBillingConsultantFeesNotPriced({
+    doctorId,
+    q: npQ,
+    page: npPage,
+    page_size: npPageSize,
+  });
+  const notPriced = [
+    ...(unpriced?.missing_defaults ?? []).map((visit_type) => ({
+      doctor_id: null,
+      doctor_name: null,
+      visit_type,
+    })),
+    ...(unpriced?.rows ?? []),
+  ];
   const createRefs = useRef(new Map());
   const notPricedRef = useRef(null);
   const feesRef = useRef(null);
@@ -197,6 +272,38 @@ export default function ConsultantFeesPage() {
     target?.focus();
   }, [focusAfter, notPriced]);
 
+  useEffect(() => {
+    if (unpriced && !unpriced.rows.length && unpriced.total_doctors && npPage > 1) {
+      setNpPage(Math.ceil(unpriced.total_doctors / unpriced.page_size));
+    }
+  }, [unpriced, npPage]);
+
+  useEffect(() => {
+    if (grid && grid.total && feePage > 1 && !grid.rows.some((r) => !r.is_default)) {
+      setFeePage(Math.ceil(grid.total / grid.page_size));
+    }
+  }, [grid, feePage]);
+
+  const missingDefaults = unpriced?.missing_defaults ?? [];
+  const [params, setParams] = useSearchParams();
+  const view = params.get("view") === "not-priced" && unpriced?.count ? "not-priced" : "fees";
+  const showView = (next) =>
+    setParams(
+      (current) => {
+        const copy = new URLSearchParams(current);
+        if (next === "fees") copy.delete("view");
+        else copy.set("view", next);
+        return copy;
+      },
+      { replace: true },
+    );
+
+  const pickDoctor = (value) => {
+    setDoctorId(value);
+    setFeePage(1);
+    setNpPage(1);
+  };
+
   const categories = tree.filter((top) => top.code !== RESERVED);
   const labels = new Map(
     categories.flatMap((top) => [
@@ -205,10 +312,6 @@ export default function ConsultantFeesPage() {
     ]),
   );
   const parentOf = (column) => labels.get(column.parent_code) ?? column.parent_code;
-  const subgroupFor = (doctor) =>
-    (grid?.rows ?? []).find((r) => r.doctor_id === doctor.doctor_id)?.item.subgroup_id ??
-    grid?.rows?.[0]?.item.subgroup_id ??
-    null;
   const copyFrom = schemeCode && schemeCode !== RESERVED ? schemeCode : "";
 
   return (
@@ -231,7 +334,7 @@ export default function ConsultantFeesPage() {
                 ? "Could not load the doctors — the grid below still shows every doctor."
                 : ""
             }
-            onChange={(e) => setDoctorId(e.target.value)}
+            onChange={(e) => pickDoctor(e.target.value)}
           >
             <option value="">All doctors</option>
             {(choices?.consultants ?? []).map((d) => (
@@ -248,7 +351,10 @@ export default function ConsultantFeesPage() {
                 ? "Could not load the categories — the grid below still shows every category."
                 : ""
             }
-            onChange={(e) => setSchemeCode(e.target.value)}
+            onChange={(e) => {
+              setSchemeCode(e.target.value);
+              setFeePage(1);
+            }}
           >
             <option value="">All categories</option>
             {categories.flatMap((top) => [
@@ -272,16 +378,44 @@ export default function ConsultantFeesPage() {
         </div>
       </div>
 
-      {notPriced.length ? (
-        <NotPriced
-          doctors={notPriced}
-          headingRef={notPricedRef}
-          buttonRefs={createRefs}
-          onCreate={setCreating}
-        />
+      {unpriced?.count ? (
+        <div className="bill-views" role="group" aria-label="Consultant fees view">
+          <button
+            type="button"
+            aria-pressed={view === "fees"}
+            className={`bill-views__tab${view === "fees" ? " bill-views__tab--on" : ""}`}
+            onClick={() => showView("fees")}
+          >
+            Fees
+          </button>
+          <button
+            type="button"
+            aria-pressed={view === "not-priced"}
+            className={`bill-views__tab${view === "not-priced" ? " bill-views__tab--on" : ""}`}
+            onClick={() => showView("not-priced")}
+          >
+            Not priced · {unpriced.count}
+          </button>
+        </div>
       ) : null}
 
-      {isError ? (
+      {view === "fees" && missingDefaults.length ? (
+        <div className="flow-card cf-default-note" role="status">
+          <span>
+            The hospital default {missingDefaults.join(" and ")} fee is not set yet, so doctors
+            without a fee of their own are billed nothing.
+          </span>
+          <button
+            type="button"
+            className="flow-btn flow-btn-primary flow-btn-mini"
+            onClick={() => showView("not-priced")}
+          >
+            Set it now
+          </button>
+        </div>
+      ) : null}
+
+      {view === "not-priced" ? null : isError ? (
         <div className="flow-card fset__cardsub">Could not load the consultant fees.</div>
       ) : isLoading || !grid ? (
         <div className="flow-card fset__cardsub">Loading…</div>
@@ -291,8 +425,16 @@ export default function ConsultantFeesPage() {
             <h2 className="flow-sec-title" ref={feesRef} tabIndex={-1}>
               Fees
             </h2>
-            <span className="fset__count">{grid.rows.length}</span>
+            <span className="fset__count">{grid.total}</span>
             <span className="flow-muted bill-rates__on">as of {grid.date}</span>
+            <SearchBox
+              label="Search doctor or item code"
+              value={feeSearch}
+              onChange={(value) => {
+                setFeeSearch(value);
+                setFeePage(1);
+              }}
+            />
           </div>
           {grid.rows.length ? (
             <div className="cf-legend" aria-hidden="true">
@@ -307,9 +449,11 @@ export default function ConsultantFeesPage() {
           ) : null}
           {!grid.rows.length ? (
             <div className="fset__cardsub">
-              {doctorId
-                ? "This doctor has no consultation item yet."
-                : "No consultant has a consultation item yet."}
+              {feeQ
+                ? "No doctor or item code matches that search."
+                : doctorId
+                  ? "This doctor has no consultation item yet."
+                  : "No consultant has a consultation item yet."}
             </div>
           ) : (
             <div className="fset__scroll cf-scroll">
@@ -340,6 +484,18 @@ export default function ConsultantFeesPage() {
                           <span className="flow-muted"> (inactive)</span>
                         ) : null}
                         <div className="flow-muted bill-items__sub">{row.item.code}</div>
+                        {isAdmin && !row.is_default && row.doctor_active !== false ? (
+                          <button
+                            type="button"
+                            className="flow-btn flow-btn-ghost flow-btn-mini cf-grid__remove"
+                            aria-label={`Delete doctor ${row.doctor_name}`}
+                            onClick={() =>
+                              setRemoving({ id: row.doctor_id, name: row.doctor_name })
+                            }
+                          >
+                            Delete doctor
+                          </button>
+                        ) : null}
                       </th>
                       <td className="cf-grid__visit">
                         <span className="bill-tree__badge">{row.visit_type}</span>
@@ -360,8 +516,49 @@ export default function ConsultantFeesPage() {
               </table>
             </div>
           )}
+          <Pagination
+            page={feePage}
+            pageSize={feePageSize}
+            total={grid.total}
+            onChange={setFeePage}
+            onPageSizeChange={setFeePageSize}
+            disabled={isFetching}
+            unit="doctors"
+          />
         </div>
       )}
+
+      {view === "not-priced" ? (
+        <NotPriced
+          list={unpriced}
+          doctors={notPriced}
+          headingRef={notPricedRef}
+          buttonRefs={createRefs}
+          onCreate={setCreating}
+          onRemove={isAdmin ? setRemoving : null}
+          search={
+            <SearchBox
+              label="Search doctors without a fee"
+              value={npSearch}
+              onChange={(value) => {
+                setNpSearch(value);
+                setNpPage(1);
+              }}
+            />
+          }
+          paging={
+            <Pagination
+              page={npPage}
+              pageSize={npPageSize}
+              total={unpriced.total_doctors}
+              onChange={setNpPage}
+              onPageSizeChange={setNpPageSize}
+              disabled={npFetching}
+              unit="doctors"
+            />
+          }
+        />
+      ) : null}
 
       {editing ? (
         <ConsultantFeeEditor
@@ -375,7 +572,6 @@ export default function ConsultantFeesPage() {
       {creating ? (
         <ConsultantFeeCreateItem
           doctor={creating.doctor}
-          subgroupId={subgroupFor(creating.doctor)}
           onClose={() => setCreating(null)}
           onCreated={() => {
             setFocusAfter(creating.index);
@@ -389,6 +585,16 @@ export default function ConsultantFeesPage() {
           from={copyFrom}
           date={grid?.date}
           onClose={() => setCopying(false)}
+        />
+      ) : null}
+      {removing ? (
+        <DeleteDoctorModal
+          doctor={removing}
+          onClose={() => setRemoving(null)}
+          onDone={async () => {
+            setRemoving(null);
+            await queryClient.invalidateQueries();
+          }}
         />
       ) : null}
     </div>

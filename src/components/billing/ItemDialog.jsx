@@ -2,6 +2,7 @@ import { cloneElement, useId, useState } from "react";
 import { useCreateBillingItem, useUpdateBillingItem } from "../../queries/hooks/useBillingMaster";
 import { codeTyped, digitsTyped, errorOf, moneyTyped } from "./format";
 import useDialog from "./useDialog";
+import BillDialogLayer from "./BillDialogLayer";
 
 function Field({ label, hint, className = "", children }) {
   const id = useId();
@@ -82,6 +83,7 @@ export default function ItemDialog({
   const update = useUpdateBillingItem();
   const busy = create.isPending || update.isPending;
   const editing = Boolean(item);
+  const consultation = form.kind === "consultation";
   const set = (key) => (e) =>
     setForm({
       ...form,
@@ -105,7 +107,9 @@ export default function ItemDialog({
     const payload = payloadOf(form);
     try {
       if (!editing) {
-        await create.mutateAsync(payload);
+        await create.mutateAsync(
+          consultation && !payload.subgroup_id ? { ...payload, subgroup_id: undefined } : payload,
+        );
         return onClose(`Added ${payload.name}`);
       }
       const changes = Object.fromEntries(
@@ -142,249 +146,257 @@ export default function ItemDialog({
   );
 
   return (
-    <div className="flow-dialog-backdrop" onClick={requestClose} role="presentation">
-      <form
-        ref={ref}
-        className="flow-card bill-dialog bill-dialog--wide bill-item-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="item-dialog-title"
-        onClick={(e) => e.stopPropagation()}
-        onSubmit={submit}
-      >
-        <h2 id="item-dialog-title" className="bill-dialog__title">
-          {editing ? `Edit ${item.name}` : "Add item"}
-        </h2>
-        <h3 className="bill-item__section">Details</h3>
-        <div className="bill-form">
-          <Field label="Name" className="bill-item__span3">
-            <input
-              className="jb-assign"
-              maxLength={200}
-              placeholder="e.g. HbA1c (glycated haemoglobin)"
-              value={form.name}
-              onChange={set("name")}
-              required
-            />
-          </Field>
-          <Field label="Code" hint="No spaces" className="bill-form__code">
-            <input
-              className="jb-assign"
-              maxLength={40}
-              placeholder="e.g. LAB-HBA1C"
-              value={form.code}
-              onChange={set("code")}
-              required
-            />
-          </Field>
-          <Field
-            label="Subgroup"
-            hint="Required: every item sits in a subgroup, for reports and pricing rules"
-            className="bill-item__span2"
-          >
-            <select
-              className="jb-assign"
-              value={form.subgroup_id}
-              onChange={set("subgroup_id")}
-              required
-            >
-              <option value="">Choose a subgroup</option>
-              {groups.map((g) => (
-                <optgroup key={g.id} label={g.name}>
-                  {g.subgroups
-                    .filter((s) => s.is_active || String(s.id) === form.subgroup_id)
-                    .map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                </optgroup>
-              ))}
-            </select>
-          </Field>
-          <Field label="Kind" className="bill-item__span2">
-            <select className="jb-assign" value={form.kind} onChange={set("kind")}>
-              {(choices?.kinds ?? [form.kind]).map((k) => (
-                <option key={k} value={k}>
-                  {k.charAt(0).toUpperCase() + k.slice(1)}
-                </option>
-              ))}
-            </select>
-          </Field>
-        </div>
-
-        <h3 className="bill-item__section">Price and tax</h3>
-        <div className="bill-form">
-          <Field label="Price (₹)">
-            <input
-              className="jb-assign"
-              inputMode="decimal"
-              placeholder="e.g. 450"
-              value={form.base_price}
-              onChange={set("base_price")}
-              required
-            />
-          </Field>
-          <Field label="Unit" hint="What one quantity is">
-            <input
-              className="jb-assign"
-              maxLength={30}
-              placeholder="e.g. each, tablet, session"
-              value={form.unit}
-              onChange={set("unit")}
-            />
-          </Field>
-          <Field label="Tax code" className="bill-item__span2">
-            <select className="jb-assign" value={form.tax_code_id} onChange={set("tax_code_id")}>
-              <option value="">No tax</option>
-              {taxOptions.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.label}
-                </option>
-              ))}
-            </select>
-          </Field>
-          {priceChanged ? (
-            <Field
-              label="Reason for the price change"
-              className="bill-form__reason bill-item__span4"
-            >
+    <BillDialogLayer>
+      <div className="flow-dialog-backdrop" onClick={requestClose} role="presentation">
+        <form
+          ref={ref}
+          className="flow-card bill-dialog bill-dialog--wide bill-item-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="item-dialog-title"
+          onClick={(e) => e.stopPropagation()}
+          onSubmit={submit}
+        >
+          <h2 id="item-dialog-title" className="bill-dialog__title">
+            {editing ? `Edit ${item.name}` : "Add item"}
+          </h2>
+          <h3 className="bill-item__section">Details</h3>
+          <div className="bill-form">
+            <Field label="Name" className="bill-item__span3">
               <input
                 className="jb-assign"
-                maxLength={500}
-                value={reason}
-                placeholder={`${item.base_price} → ${form.base_price.trim()}`}
-                onChange={(e) => setReason(e.target.value)}
+                maxLength={200}
+                placeholder="e.g. HbA1c (glycated haemoglobin)"
+                value={form.name}
+                onChange={set("name")}
                 required
               />
             </Field>
-          ) : null}
-        </div>
-        <div className="bill-item__options">
-          <label className="fset__check">
-            <input type="checkbox" checked={form.allow_quantity} onChange={set("allow_quantity")} />
-            Quantity can be more than 1
-          </label>
-          {form.allow_quantity ? (
-            <Field label="Max quantity" className="bill-item__maxqty">
+            <Field label="Code" hint="No spaces" className="bill-form__code">
               <input
                 className="jb-assign"
-                inputMode="numeric"
-                maxLength={9}
-                placeholder="No limit"
-                value={form.max_quantity}
-                onChange={set("max_quantity")}
+                maxLength={40}
+                placeholder="e.g. LAB-HBA1C"
+                value={form.code}
+                onChange={set("code")}
+                required
               />
             </Field>
-          ) : null}
-          {form.tax_code_id ? (
-            <label className="fset__check">
-              <input
-                type="checkbox"
-                checked={form.price_includes_tax}
-                onChange={set("price_includes_tax")}
-              />
-              Price includes tax
-            </label>
-          ) : null}
-        </div>
-
-        {form.kind === "consultation" ? (
-          <>
-            <h3 className="bill-item__section">Consultation</h3>
-            <div className="bill-form">
-              <Field label="Consultant" className="bill-item__span2">
-                <select className="jb-assign" value={form.doctor_id} onChange={set("doctor_id")}>
-                  <option value="">Hospital default (any consultant)</option>
-                  {consultants.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.label}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Visit type" className="bill-item__span2">
-                <select
-                  className="jb-assign"
-                  value={form.visit_type}
-                  onChange={set("visit_type")}
-                  required
-                >
-                  <option value="">Choose a visit type</option>
-                  {(choices?.visitTypes ?? []).map((v) => (
-                    <option key={v} value={v}>
-                      {v}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            </div>
-          </>
-        ) : null}
-
-        {form.kind === "test" ? (
-          <>
-            <h3 className="bill-item__section">Test</h3>
-            <div className="bill-form">
+            {consultation ? null : (
               <Field
-                label="Catalogue test"
-                hint="Links the bill line to the test the floor orders"
-                className="bill-item__span4"
+                label="Subgroup"
+                hint="Required: every item sits in a subgroup, for reports and pricing rules"
+                className="bill-item__span2"
               >
                 <select
                   className="jb-assign"
-                  value={form.test_catalog_id}
-                  onChange={set("test_catalog_id")}
+                  value={form.subgroup_id}
+                  onChange={set("subgroup_id")}
                   required
                 >
-                  <option value="">Choose a test</option>
-                  {tests.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.label}
-                    </option>
+                  <option value="">Choose a subgroup</option>
+                  {groups.map((g) => (
+                    <optgroup key={g.id} label={g.name}>
+                      {g.subgroups
+                        .filter((s) => s.is_active || String(s.id) === form.subgroup_id)
+                        .map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name}
+                          </option>
+                        ))}
+                    </optgroup>
                   ))}
                 </select>
               </Field>
-            </div>
-          </>
-        ) : null}
+            )}
+            <Field label="Kind" className="bill-item__span2">
+              <select className="jb-assign" value={form.kind} onChange={set("kind")}>
+                {(choices?.kinds ?? [form.kind]).map((k) => (
+                  <option key={k} value={k}>
+                    {k.charAt(0).toUpperCase() + k.slice(1)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
 
-        {error ? (
-          <p className="bill-dialog__error" role="alert">
-            {error}
-          </p>
-        ) : null}
-        {confirmDiscard ? (
-          <div
-            key="discard"
-            className="bill-dialog__actions bill-dialog__discard"
-            role="group"
-            aria-label="Discard changes?"
-          >
-            <span>Discard your changes?</span>
-            <button
-              type="button"
-              className="flow-btn flow-btn-ghost"
-              autoFocus
-              onClick={() => setConfirmDiscard(false)}
+          <h3 className="bill-item__section">Price and tax</h3>
+          <div className="bill-form">
+            <Field label="Price (₹)">
+              <input
+                className="jb-assign"
+                inputMode="decimal"
+                placeholder="e.g. 450"
+                value={form.base_price}
+                onChange={set("base_price")}
+                required
+              />
+            </Field>
+            <Field label="Unit" hint="What one quantity is">
+              <input
+                className="jb-assign"
+                maxLength={30}
+                placeholder="e.g. each, tablet, session"
+                value={form.unit}
+                onChange={set("unit")}
+              />
+            </Field>
+            <Field label="Tax code" className="bill-item__span2">
+              <select className="jb-assign" value={form.tax_code_id} onChange={set("tax_code_id")}>
+                <option value="">No tax</option>
+                {taxOptions.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {priceChanged ? (
+              <Field
+                label="Reason for the price change"
+                className="bill-form__reason bill-item__span4"
+              >
+                <input
+                  className="jb-assign"
+                  maxLength={500}
+                  value={reason}
+                  placeholder={`${item.base_price} → ${form.base_price.trim()}`}
+                  onChange={(e) => setReason(e.target.value)}
+                  required
+                />
+              </Field>
+            ) : null}
+          </div>
+          <div className="bill-item__options">
+            <label className="fset__check">
+              <input
+                type="checkbox"
+                checked={form.allow_quantity}
+                onChange={set("allow_quantity")}
+              />
+              Quantity can be more than 1
+            </label>
+            {form.allow_quantity ? (
+              <Field label="Max quantity" className="bill-item__maxqty">
+                <input
+                  className="jb-assign"
+                  inputMode="numeric"
+                  maxLength={9}
+                  placeholder="No limit"
+                  value={form.max_quantity}
+                  onChange={set("max_quantity")}
+                />
+              </Field>
+            ) : null}
+            {form.tax_code_id ? (
+              <label className="fset__check">
+                <input
+                  type="checkbox"
+                  checked={form.price_includes_tax}
+                  onChange={set("price_includes_tax")}
+                />
+                Price includes tax
+              </label>
+            ) : null}
+          </div>
+
+          {form.kind === "consultation" ? (
+            <>
+              <h3 className="bill-item__section">Consultation</h3>
+              <div className="bill-form">
+                <Field label="Consultant" className="bill-item__span2">
+                  <select className="jb-assign" value={form.doctor_id} onChange={set("doctor_id")}>
+                    <option value="">Hospital default (any consultant)</option>
+                    {consultants.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Visit type" className="bill-item__span2">
+                  <select
+                    className="jb-assign"
+                    value={form.visit_type}
+                    onChange={set("visit_type")}
+                    required
+                  >
+                    <option value="">Choose a visit type</option>
+                    {(choices?.visitTypes ?? []).map((v) => (
+                      <option key={v} value={v}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+            </>
+          ) : null}
+
+          {form.kind === "test" ? (
+            <>
+              <h3 className="bill-item__section">Test</h3>
+              <div className="bill-form">
+                <Field
+                  label="Catalogue test"
+                  hint="Links the bill line to the test the floor orders"
+                  className="bill-item__span4"
+                >
+                  <select
+                    className="jb-assign"
+                    value={form.test_catalog_id}
+                    onChange={set("test_catalog_id")}
+                    required
+                  >
+                    <option value="">Choose a test</option>
+                    {tests.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+            </>
+          ) : null}
+
+          {error ? (
+            <p className="bill-dialog__error" role="alert">
+              {error}
+            </p>
+          ) : null}
+          {confirmDiscard ? (
+            <div
+              key="discard"
+              className="bill-dialog__actions bill-dialog__discard"
+              role="group"
+              aria-label="Discard changes?"
             >
-              Keep editing
-            </button>
-            <button type="button" className="flow-btn flow-btn-red" onClick={() => onClose()}>
-              Discard
-            </button>
-          </div>
-        ) : (
-          <div key="actions" className="bill-dialog__actions">
-            <button type="button" className="flow-btn flow-btn-ghost" onClick={() => onClose()}>
-              Cancel
-            </button>
-            <button type="submit" className="flow-btn flow-btn-primary" disabled={busy}>
-              {editing ? "Save" : "Add item"}
-            </button>
-          </div>
-        )}
-      </form>
-    </div>
+              <span>Discard your changes?</span>
+              <button
+                type="button"
+                className="flow-btn flow-btn-ghost"
+                autoFocus
+                onClick={() => setConfirmDiscard(false)}
+              >
+                Keep editing
+              </button>
+              <button type="button" className="flow-btn flow-btn-red" onClick={() => onClose()}>
+                Discard
+              </button>
+            </div>
+          ) : (
+            <div key="actions" className="bill-dialog__actions">
+              <button type="button" className="flow-btn flow-btn-ghost" onClick={() => onClose()}>
+                Cancel
+              </button>
+              <button type="submit" className="flow-btn flow-btn-primary" disabled={busy}>
+                {editing ? "Save" : "Add item"}
+              </button>
+            </div>
+          )}
+        </form>
+      </div>
+    </BillDialogLayer>
   );
 }

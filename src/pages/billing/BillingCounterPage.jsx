@@ -23,6 +23,13 @@ import BillActions from "../../components/billing/counter/BillActions";
 import DuesList from "../../components/billing/counter/DuesList";
 import EarlierDues from "../../components/billing/counter/EarlierDues";
 import ShiftPanel from "../../components/billing/counter/ShiftPanel";
+import { dropStaleForms, useSavedForm } from "../../components/billing/counter/useSavedForm";
+import {
+  BILL_FORM,
+  BILL_FORM_PREFIX,
+  SHIFT_FORM_PREFIX,
+  billFormKey,
+} from "../../components/billing/counter/counterForm";
 import { errorOf } from "../../components/billing/format";
 import "../../styles/giniflow-station.css";
 import "./billingCounter.css";
@@ -115,7 +122,6 @@ export default function BillingCounterPage() {
   const [debounced, setDebounced] = useState("");
   const [bill, setBill] = useState(null);
   const [error, setError] = useState(null);
-  const [payLater, setPayLater] = useState(false);
   const [tab, setTab] = useState(TABS.bill.key);
   const [duePatient, setDuePatient] = useState(null);
   const [fresh, setFresh] = useState(0);
@@ -123,6 +129,14 @@ export default function BillingCounterPage() {
   const [removedDoctor, setRemovedDoctor] = useState(null);
   const opened = useRef(null);
   const [listWidth, setListWidth] = useListWidth();
+  const form = useSavedForm(billFormKey(bill?.id), BILL_FORM);
+  const payLater = form.value.payLater;
+  const setPayLater = (on) => form.set("payLater", on);
+
+  useEffect(() => {
+    dropStaleForms(BILL_FORM_PREFIX);
+    dropStaleForms(SHIFT_FORM_PREFIX);
+  }, []);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebounced(search), 250);
@@ -179,14 +193,12 @@ export default function BillingCounterPage() {
     if (!wanted) {
       opened.current = null;
       setBill(null);
-      setPayLater(false);
       return;
     }
     if (opened.current === wanted) return;
     opened.current = wanted;
     setBill(null);
     setError(null);
-    setPayLater(false);
     setNeedsSub(false);
     setRemovedDoctor(null);
     const handlers = {
@@ -343,14 +355,15 @@ export default function BillingCounterPage() {
                       needsCategory={needsCategory}
                       suggestions={bill.suggestions}
                       onBill={setBill}
+                      form={form}
                     />
                     <div className="bc-bill">
                       <div className="bc-bill__work">
                         <PreviousBills bills={earlier} onOpen={openEarlier} />
-                        <BillLinesTable bill={bill} onBill={setBill} />
-                        <AddItems bill={bill} onBill={setBill} />
+                        <BillLinesTable bill={bill} onBill={setBill} form={form} />
+                        <AddItems bill={bill} onBill={setBill} form={form} />
                         <NotPricedTests tests={notPriced} />
-                        <DiscountCodeBox bill={bill} onBill={setBill} />
+                        <DiscountCodeBox bill={bill} onBill={setBill} form={form} />
                       </div>
                       <div className="bc-bill__summary">
                         <TotalsAndPayment
@@ -359,6 +372,7 @@ export default function BillingCounterPage() {
                           schemes={schemes || []}
                           payLater={payLater}
                           onPayLater={setPayLater}
+                          form={form}
                         />
                         <BillActions
                           bill={bill}
@@ -366,6 +380,7 @@ export default function BillingCounterPage() {
                           schemes={schemes || []}
                           payLater={payLater}
                           needsCategory={needsCategory}
+                          form={form}
                         />
                       </div>
                     </div>

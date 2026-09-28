@@ -797,6 +797,9 @@ export async function payOut(creditNoteId, input, ctx, db = pool) {
       [id],
     );
     creditNoteRow(rows[0]);
+    await client.query(`SELECT id FROM bills WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`, [
+      [rows[0].original_bill_id, id],
+    ]);
     const original = await lockRow(client, SPEC, rows[0].original_bill_id);
     const note = creditNoteRow(await lockRow(client, SPEC, id));
     if (note.version !== version) {

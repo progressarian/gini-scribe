@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { getPool, one, query } from "../../helpers/db.mjs";
 import { USERS } from "../../fixtures/data.mjs";
 import { assertTestDatabase } from "../../setup/guard.mjs";
@@ -26,6 +27,86 @@ const fieldOf = (html, label) =>
   new RegExp(`<div class="bp-label">${label}</div><div class="bp-value">([^<]*)</div>`).exec(
     html,
   )?.[1] ?? null;
+
+const rowOf = (html, receiptNo) =>
+  new RegExp(
+    `<td class="bp-code">${receiptNo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}</td>((?:<td[^>]*>[^<]*</td>)*)</tr>`,
+  )
+    .exec(html)?.[1]
+    ?.match(/<td[^>]*>([^<]*)<\/td>/g)
+    ?.map((cell) => cell.replace(/<[^>]+>/g, "")) ?? null;
+
+async function pdfPages(pdf) {
+  const document = await getDocument({ data: new Uint8Array(pdf) }).promise;
+  const pages = [];
+  for (let at = 1; at <= document.numPages; at += 1) {
+    const content = await (await document.getPage(at)).getTextContent();
+    pages.push(
+      content.items
+        .map((item) => item.str)
+        .join(" ")
+        .replace(/\s+/g, " "),
+    );
+  }
+  return pages;
+}
+
+function sampleViews(lineCount, paymentCount) {
+  const lines = Array.from({ length: lineCount }, (_, index) => ({
+    id: String(index + 1),
+    bill_code: `P4-R-${index + 1}`,
+    bill_name: `Receipt line ${index + 1} ${tag}`,
+    quantity: 1,
+    rate: 30000,
+    actual: 30000,
+    discount: 0,
+    taxable: 30000,
+    cgst: 0,
+    sgst: 0,
+    patient_payable: 30000,
+  }));
+  const payable = lineCount * 30000;
+  const bill = {
+    id: "sample",
+    bill_type: "invoice",
+    status: "final",
+    bill_no: `B-${tag}`,
+    bill_date: "2026-09-28",
+    lines,
+    totals: {
+      actual: payable,
+      discount: 0,
+      tax: 0,
+      round_off: 0,
+      payable,
+      claim: 0,
+      adjustment: 0,
+      paid: payable,
+    },
+  };
+  return Array.from({ length: paymentCount }, (_, index) => ({
+    payment: {
+      id: String(index + 1),
+      receipt_no: `R-${tag}-${index + 1}`,
+      received_at: new Date().toISOString(),
+      amount: Math.round(payable / paymentCount),
+      mode: ["cash", "card", "upi"][index % 3],
+      reference: null,
+      direction: "in",
+      received_by_name: "Desk",
+    },
+    bill,
+    patient: { name: `P4 Patient ${tag}`, file_no: `F4-${tag}` },
+    category: null,
+    issued: null,
+    settings: { bill_footer: `P4 footer ${tag}`, gst_enabled: false },
+    hospital: null,
+    logo: "",
+  }));
+}
+
+const pageCount = async (pdf) =>
+  (await getDocument({ data: new Uint8Array(pdf) }).promise).numPages;
 
 const closeOpenShifts = () =>
   query(
@@ -94,7 +175,7 @@ test.describe.serial("P4-24 receipt PDF", () => {
     await settings.updateSettings({ bill_footer: footerWas }, admin, db);
   });
 
-  test("1. one receipt prints per payment, each with its own receipt number", async () => {
+  test("1. every payment prints as one row on a single receipt, each with its own receipt number", async () => {
     const taken = await payments.listPayments(ids.bill, db);
     expect(taken).toHaveLength(3);
     const views = await receiptPdf.receiptViews(ids.bill, null, db);
@@ -106,8 +187,15 @@ test.describe.serial("P4-24 receipt PDF", () => {
 
     const html = await htmlFor(ids.bill, null);
     for (const number of numbers) expect(html).toContain(number);
-    expect(html.split("page-break-before:always")).toHaveLength(3);
-    expect(html.split("Received with thanks")).toHaveLength(4);
+    expect(html).not.toContain("page-break-before");
+    expect(html.split("PAYMENT RECEIPT")).toHaveLength(2);
+    expect(html.split("OPERATOR NAME")).toHaveLength(2);
+    expect(fieldOf(html, "Receipt Nos")).toBe(numbers.join(", "));
+    const total = views.reduce((sum, view) => sum + view.payment.amount, 0);
+    expect(html).toContain(`TOTAL(₹)</td><td class="bp-num">${billPdf.amountText(total)}</td>`);
+    expect(html).toContain(
+      '<span class="bp-words-mark">(₹)</span> One Thousand Three Hundred Rupees Only',
+    );
   });
 
   test("2. each receipt carries the bill number, the patient, the amount, the mode and who took it", async () => {
@@ -115,15 +203,30 @@ test.describe.serial("P4-24 receipt PDF", () => {
     const views = await receiptPdf.receiptViews(ids.bill, null, db);
     for (const view of views) {
       const html = receiptPdf.buildReceiptHtml(view);
-      expect(fieldOf(html, "Receipt number")).toBe(view.payment.receipt_no);
-      expect(fieldOf(html, "Bill number")).toBe(bill.bill_no);
-      expect(fieldOf(html, "Patient")).toBe(`P4 Patient ${tag}`);
+      expect(fieldOf(html, "Receipt No")).toBe(view.payment.receipt_no);
+      expect(fieldOf(html, "Bill No")).toBe(bill.bill_no);
+      expect(fieldOf(html, "Patient Name")).toBe(`P4 Patient ${tag}`);
       expect(fieldOf(html, "UHID")).toBe(`F4-${tag}`);
-      expect(fieldOf(html, "Amount received")).toBe(billPdf.money(view.payment.amount));
-      expect(fieldOf(html, "Mode")).toBe(receiptPdf.modeText(view.payment.mode));
-      expect(fieldOf(html, "Received by")).toBe(USERS.reception.short_name);
-      expect(fieldOf(html, "Receipt date")).toBe(billPdf.momentText(view.payment.received_at));
+      expect(fieldOf(html, "Date")).toBe(billPdf.stampText(view.payment.received_at));
+      const [when, mode, , amount] = rowOf(html, view.payment.receipt_no);
+      expect(when).toBe(billPdf.stampText(view.payment.received_at));
+      expect(mode).toBe(receiptPdf.modeText(view.payment.mode));
+      expect(amount).toBe(billPdf.amountText(view.payment.amount));
+      expect(html).toContain(
+        `OPERATOR NAME:</span> ${USERS.reception.short_name} [ ${billPdf.stampText(view.payment.received_at)} ]`,
+      );
       expect(html).toContain(`P4 footer ${tag}`);
+      expect(html).toContain(
+        `Bill Payable Amount(₹)</td><td class="bp-num">${billPdf.amountText(bill.totals.payable)}`,
+      );
+    }
+    const html = await htmlFor(ids.bill, null);
+    expect(html).toContain('<div class="bp-subtitle">PARTICULARS</div>');
+    expect(html).toContain("PAYMENT DETAILS");
+    expect(bill.lines.length).toBeGreaterThan(0);
+    for (const line of bill.lines) {
+      expect(html).toContain(`<td class="bp-item">${line.bill_name}</td>`);
+      expect(html).toContain(`<td class="bp-num">${billPdf.amountText(line.actual)}</td>`);
     }
     const amounts = views.map((view) => view.payment.amount).sort((a, b) => a - b);
     expect(amounts).toEqual([40000, 40000, 50000]);
@@ -161,8 +264,12 @@ test.describe.serial("P4-24 receipt PDF", () => {
     expect(byNumber[0].payment.id).toBe(wanted.id);
 
     const html = await htmlFor(ids.bill, { payment_id: wanted.id });
-    expect(html).not.toContain("page-break-before:always");
-    expect(html.split("Received with thanks")).toHaveLength(2);
+    expect(html).not.toContain("page-break-before");
+    expect(html.split("OPERATOR NAME")).toHaveLength(2);
+    expect(rowOf(html, wanted.receipt_no)).not.toBeNull();
+    for (const other of views.filter((view) => view.payment.id !== wanted.id)) {
+      expect(html).not.toContain(other.payment.receipt_no);
+    }
   });
 
   test("5. a payment that isn't on this bill, and a bill with no payment, are refused in plain words", async () => {
@@ -188,12 +295,14 @@ test.describe.serial("P4-24 receipt PDF", () => {
     expect(all.pdf.subarray(0, 5).toString()).toBe("%PDF-");
     expect(all.receipts).toHaveLength(3);
     expect(all.filename).toMatch(/^Receipt_.+\.pdf$/);
+    expect(await pageCount(all.pdf)).toBe(1);
 
     const single = await rendered(() =>
       receiptPdf.generateReceiptPdf(ids.bill, { receipt_no: all.receipts[0].receipt_no }, desk, db),
     );
     expect(single.receipts).toHaveLength(1);
     expect(single.pdf.subarray(0, 5).toString()).toBe("%PDF-");
+    expect(await pageCount(single.pdf)).toBe(1);
     const stored = await one(`SELECT amount FROM payments WHERE id = $1`, [
       single.receipts[0].payment_id,
     ]);
@@ -220,17 +329,44 @@ test.describe.serial("P4-24 receipt PDF", () => {
     };
     const html = receiptPdf.buildReceiptHtml(view);
     expect(html).not.toContain("<script>");
-    expect(fieldOf(html, "Received by")).toBe(`Desk ${ESCAPED}`);
-    expect(fieldOf(html, "Reference")).toBe("&lt;/td&gt;&lt;td&gt;stolen");
-    expect(fieldOf(html, "Receipt number")).toBe(`R/${ESCAPED}`);
-    expect(fieldOf(html, "Bill number")).toBe(`B/${ESCAPED}`);
+    const [, , reference] = rowOf(html, `R/${ESCAPED}`);
+    expect(reference).toBe("&lt;/td&gt;&lt;td&gt;stolen");
+    expect(html).toContain(`OPERATOR NAME:</span> Desk ${ESCAPED} [ `);
+    expect(fieldOf(html, "Receipt No")).toBe(`R/${ESCAPED}`);
+    expect(fieldOf(html, "Bill No")).toBe(`B/${ESCAPED}`);
     expect(fieldOf(html, "UHID")).toBe(`F/${ESCAPED}`);
-    expect(fieldOf(html, "Patient")).toBe(`${LONG} ${ESCAPED}`);
+    expect(fieldOf(html, "Patient Name")).toBe(`${LONG} ${ESCAPED}`);
     expect(html).toContain(`Footer ${ESCAPED}`);
     expect((html.match(/<td[ >]/g) ?? []).length).toBe((html.match(/<\/td>/g) ?? []).length);
 
     const name = receiptPdf.buildReceiptFileName([view]);
     expect(name).toMatch(/^Receipt_[a-z0-9_]+_[a-z0-9_]+\.pdf$/);
     expect(name.length).toBeLessThanOrEqual(100);
+  });
+  test("8. a 3-payment receipt on a 4-line bill is one page, and a 25-line receipt runs on cleanly", async () => {
+    const short = await rendered(() =>
+      billPdf.renderBillPdf(receiptPdf.buildReceiptsHtml(sampleViews(4, 3))),
+    );
+    expect(await pageCount(short)).toBe(1);
+
+    const long = await rendered(() =>
+      billPdf.renderBillPdf(receiptPdf.buildReceiptsHtml(sampleViews(25, 3))),
+    );
+    const pages = await pdfPages(long);
+    expect(pages.length).toBeGreaterThan(1);
+    for (const [index, text] of pages.entries()) {
+      expect(text).toContain("PARTICULARS");
+      expect(text).toContain(`Page ${index + 1} of ${pages.length}`);
+    }
+    for (let line = 1; line <= 25; line += 1) {
+      const found = pages.filter((text) => text.includes(`Receipt line ${line} ${tag}`));
+      expect(found, `line ${line} prints once`).toHaveLength(1);
+    }
+    const last = pages[pages.length - 1];
+    expect(last).toContain(`Receipt line 25 ${tag}`);
+    for (const label of ["PAYMENT DETAILS", "BILL PAYABLE AMOUNT", "AUTHORIZED SIGNATORY"]) {
+      expect(last).toContain(label);
+      expect(pages.slice(0, -1).join(" ")).not.toContain(label);
+    }
   });
 });

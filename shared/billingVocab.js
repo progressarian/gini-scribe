@@ -2,6 +2,8 @@ export const INT_MAX = 2147483647;
 export const MONEY_MAX = 9999999999.99;
 export const YES_NO = ["yes", "no"];
 export const ITEM_KINDS = ["consultation", "test", "procedure", "medicine", "other"];
+export const CONSULTATION_DEFAULT_GROUP = { code: "OPD", name: "Out-patient Consultation" };
+export const CONSULTATION_DEFAULT_SUBGROUP = { code: "OPD-CONS", name: "Consultation" };
 export const DISCOUNT_KINDS = ["percent", "flat", "fixed_price"];
 export const PATIENT_PAYS = ["full", "amount", "percent", "nothing"];
 export const REMAINDERS = ["claim", "adjustment"];
@@ -40,9 +42,18 @@ export const DUE_SORTS = [
 ];
 export const DUES_PAGE_SIZE = 50;
 export const DUES_PAGE_SIZE_MAX = 200;
+export const CONSULTANT_FEES_PAGE_SIZE = 25;
+export const CONSULTANT_FEES_PAGE_SIZE_MAX = 100;
 
 export function financialYearOf(date) {
   const [year, month] = date.split("-").map(Number);
   const start = month >= 4 ? year : year - 1;
   return `${start}-${String((start + 1) % 100).padStart(2, "0")}`;
 }
+export const BILL_DEPARTMENT = "OPD";
+export const BILL_DOCUMENT_TITLES = {
+  invoice: `${BILL_DEPARTMENT} BILL`,
+  tax_invoice: "TAX INVOICE",
+  credit_note: "CREDIT NOTE",
+  receipt: "PAYMENT RECEIPT",
+};

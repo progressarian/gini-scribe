@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "../../services/api";
 
 const MASTER = "/api/billing/master";
@@ -31,6 +31,7 @@ export const billingKeys = {
   ],
   discounts: (filters) => ["billing", "discounts", filters ?? {}],
   consultantFees: (filters) => ["billing", "consultant-fees", filters ?? {}],
+  consultantFeesNotPriced: (filters) => ["billing", "consultant-fees-not-priced", filters ?? {}],
   usage: (kind, key) => ["billing", "usage", kind, key],
   settings: () => ["billing", "settings"],
   series: () => ["billing", "series"],
@@ -363,6 +364,16 @@ export function useBillingConsultantFees(filters = {}) {
   return useQuery({
     queryKey: billingKeys.consultantFees(params),
     queryFn: () => read(`${MASTER}/consultant-fees`, params),
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useBillingConsultantFeesNotPriced(filters = {}) {
+  const params = withoutBlanks(filters);
+  return useQuery({
+    queryKey: billingKeys.consultantFeesNotPriced(params),
+    queryFn: () => read(`${MASTER}/consultant-fees/not-priced`, params),
+    placeholderData: keepPreviousData,
   });
 }
 

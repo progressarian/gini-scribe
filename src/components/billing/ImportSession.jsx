@@ -16,6 +16,7 @@ import ImportRows from "./ImportRows";
 import useDialog from "./useDialog";
 import { requestErrorOf } from "./format";
 import { OUTCOME_TEXT, STATUS_TEXT, labelOf, ordered, plural, saveBlob, when } from "./importText";
+import BillDialogLayer from "./BillDialogLayer";
 
 const GONE = new Set([404, 410]);
 
@@ -55,57 +56,59 @@ function CommitDialog({ open, session, busy, error, onCancel, onConfirm }) {
   if (!open) return null;
   const { plan } = session.live;
   return (
-    <div className="flow-dialog-backdrop" onClick={onCancel} role="presentation">
-      <div
-        ref={ref}
-        className="flow-card bill-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="import-commit-title"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 id="import-commit-title" className="bill-dialog__title">
-          Commit {session.file_name}?
-        </h2>
-        <p>
-          Only the rows counted as saved change Scribe. Kept rows stay exactly as they are in
-          Scribe, whatever this file says.
-        </p>
-        <ul className="bill-dialog__list" aria-label="What will happen">
-          {planLines(plan).map((line) => (
-            <li key={line}>{line}</li>
-          ))}
-        </ul>
-        {plan.undecided ? (
+    <BillDialogLayer>
+      <div className="flow-dialog-backdrop" onClick={onCancel} role="presentation">
+        <div
+          ref={ref}
+          className="flow-card bill-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="import-commit-title"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <h2 id="import-commit-title" className="bill-dialog__title">
+            Commit {session.file_name}?
+          </h2>
+          <p>
+            Only the rows counted as saved change Scribe. Kept rows stay exactly as they are in
+            Scribe, whatever this file says.
+          </p>
+          <ul className="bill-dialog__list" aria-label="What will happen">
+            {planLines(plan).map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+          {plan.undecided ? (
+            <p className="flow-muted">
+              {plural(plan.undecided, "change")} you haven't decided will be kept, not saved. Choose
+              Override on a row to save its change.
+            </p>
+          ) : null}
           <p className="flow-muted">
-            {plural(plan.undecided, "change")} you haven't decided will be kept, not saved. Choose
-            Override on a row to save its change.
+            A row that changed in Scribe since the upload fails instead of being overwritten, and is
+            listed afterwards.
           </p>
-        ) : null}
-        <p className="flow-muted">
-          A row that changed in Scribe since the upload fails instead of being overwritten, and is
-          listed afterwards.
-        </p>
-        {error ? (
-          <p className="bill-dialog__error" role="alert">
-            {error}
-          </p>
-        ) : null}
-        <div className="bill-dialog__actions">
-          <button type="button" className="flow-btn flow-btn-ghost" onClick={onCancel}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="flow-btn flow-btn-primary"
-            disabled={busy || !plan.save}
-            onClick={onConfirm}
-          >
-            Yes, save {plural(plan.save, "row")}
-          </button>
+          {error ? (
+            <p className="bill-dialog__error" role="alert">
+              {error}
+            </p>
+          ) : null}
+          <div className="bill-dialog__actions">
+            <button type="button" className="flow-btn flow-btn-ghost" onClick={onCancel}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="flow-btn flow-btn-primary"
+              disabled={busy || !plan.save}
+              onClick={onConfirm}
+            >
+              Yes, save {plural(plan.save, "row")}
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </BillDialogLayer>
   );
 }
 

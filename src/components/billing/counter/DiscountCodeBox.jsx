@@ -2,10 +2,10 @@ import { useState } from "react";
 import { useAddCode, useRemoveCode } from "../../../queries/hooks/useBilling";
 import { codeTyped, errorOf, fromPaise } from "../format";
 
-export default function DiscountCodeBox({ bill, onBill }) {
+export default function DiscountCodeBox({ bill, onBill, form }) {
   const addCode = useAddCode();
   const removeCode = useRemoveCode();
-  const [code, setCode] = useState("");
+  const code = form.value.code;
   const [accepted, setAccepted] = useState(null);
   const [refused, setRefused] = useState(null);
 
@@ -29,7 +29,7 @@ export default function DiscountCodeBox({ bill, onBill }) {
     try {
       onBill(await addCode.mutateAsync({ billId: bill.id, visitId: bill.visit_id, code: wanted }));
       setAccepted(`${wanted} applied`);
-      setCode("");
+      form.drop("code");
     } catch (e) {
       setRefused(errorOf(e, `The code ${wanted} could not be used on this bill`));
     }
@@ -59,7 +59,7 @@ export default function DiscountCodeBox({ bill, onBill }) {
               className="bc-field__in"
               value={code}
               placeholder="Enter a code"
-              onChange={(e) => setCode(codeTyped(e.target.value))}
+              onChange={(e) => form.set("code", codeTyped(e.target.value))}
             />
           </label>
           <button

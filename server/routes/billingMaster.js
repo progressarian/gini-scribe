@@ -15,6 +15,7 @@ import {
   billingConsultantFeeClearQuerySchema,
   billingConsultantFeeCopySchema,
   billingConsultantFeeGridQuerySchema,
+  billingConsultantFeeNotPricedQuerySchema,
   billingConsultantFeeSaveSchema,
   billingDiscountCreateSchema,
   billingDiscountListQuerySchema,
@@ -388,6 +389,14 @@ router.get(
   master,
   validateQuery(billingConsultantFeeGridQuerySchema, BILLING_FIELD_LABELS),
   run("Billing consultant fees grid", 200, (req) => consultantFees.consultantFeeGrid(req.query)),
+);
+router.get(
+  `${BASE}/consultant-fees/not-priced`,
+  master,
+  validateQuery(billingConsultantFeeNotPricedQuerySchema, BILLING_FIELD_LABELS),
+  run("Billing consultant fees not priced", 200, (req) =>
+    consultantFees.consultantFeeNotPriced(req.query),
+  ),
 );
 router.put(
   `${BASE}/consultant-fees`,

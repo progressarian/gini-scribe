@@ -18,6 +18,13 @@
 .fset.bill-ui .cf-notpriced {
   margin-top: 0;
 }
+.fset.bill-ui .cf-head,
+.fset.bill-ui .cf-fees .fset__cardhead {
+  flex-wrap: wrap;
+}
+.fset.bill-ui.cf-page .pgn {
+  margin-top: 12px;
+}
 .fset.bill-ui .cf-notpriced .flow-table td.bill-items__actions {
   width: 1%;
   white-space: nowrap;
@@ -193,4 +200,16 @@
   .fset.bill-ui .cf-scroll {
     max-height: 70vh;
   }
+}
+.cf-default-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-left: 3px solid var(--fam, #d68910);
+}
+.cf-grid__remove {
+  margin-top: 4px;
+  color: var(--fre, #d94f4f);
 }

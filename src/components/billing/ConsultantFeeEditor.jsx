@@ -7,6 +7,7 @@ import { toast } from "../../stores/uiStore";
 import { codeTyped, moneyTyped, requestErrorOf } from "./format";
 import { cellSummary, whoOf } from "./consultantFeeText";
 import useDialog from "./useDialog";
+import BillDialogLayer from "./BillDialogLayer";
 
 const text = (v) => (v === null || v === undefined ? "" : String(v));
 const TYPED = { fee: moneyTyped, patient_value: moneyTyped, bill_code: codeTyped };
@@ -123,154 +124,160 @@ export default function ConsultantFeeEditor({ target, parentLabel, today, date, 
   };
 
   return (
-    <div className="flow-dialog-backdrop" onClick={onClose} role="presentation">
-      <form
-        ref={ref}
-        className="flow-card bill-dialog cf-editor"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        onClick={(e) => e.stopPropagation()}
-        onSubmit={submit}
-      >
-        <h2 id={titleId} className="bill-dialog__title">
-          {column.display_label} · {who}
-        </h2>
-        <p className="fset__cardsub cf-editor__now">Now: {cellSummary(cell, parentLabel)}.</p>
-        <div className="bill-form">
-          <Field label="Fee (₹)" className="fset__field--narrow cf-editor__money">
-            <input
-              className="jb-assign"
-              inputMode="decimal"
-              placeholder={String(cell.fee ?? "")}
-              value={form.fee}
-              onChange={set("fee")}
-            />
-          </Field>
-          <Field label="Patient pays">
-            <select className="jb-assign" value={form.patient_pays} onChange={set("patient_pays")}>
-              {cell.own_rule ? null : <option value="">As inherited</option>}
-              {Object.entries(PAYS_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </Field>
-          {takesValue ? (
-            <Field
-              label={form.patient_pays === "amount" ? "Amount (₹)" : "Percent (%)"}
-              className="fset__field--narrow cf-editor__money"
-            >
+    <BillDialogLayer>
+      <div className="flow-dialog-backdrop" onClick={onClose} role="presentation">
+        <form
+          ref={ref}
+          className="flow-card bill-dialog cf-editor"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          onClick={(e) => e.stopPropagation()}
+          onSubmit={submit}
+        >
+          <h2 id={titleId} className="bill-dialog__title">
+            {column.display_label} · {who}
+          </h2>
+          <p className="fset__cardsub cf-editor__now">Now: {cellSummary(cell, parentLabel)}.</p>
+          <div className="bill-form">
+            <Field label="Fee (₹)" className="fset__field--narrow cf-editor__money">
               <input
                 className="jb-assign"
                 inputMode="decimal"
-                value={form.patient_value}
-                onChange={set("patient_value")}
+                placeholder={String(cell.fee ?? "")}
+                value={form.fee}
+                onChange={set("fee")}
+              />
+            </Field>
+            <Field label="Patient pays">
+              <select
+                className="jb-assign"
+                value={form.patient_pays}
+                onChange={set("patient_pays")}
+              >
+                {cell.own_rule ? null : <option value="">As inherited</option>}
+                {Object.entries(PAYS_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {takesValue ? (
+              <Field
+                label={form.patient_pays === "amount" ? "Amount (₹)" : "Percent (%)"}
+                className="fset__field--narrow cf-editor__money"
+              >
+                <input
+                  className="jb-assign"
+                  inputMode="decimal"
+                  value={form.patient_value}
+                  onChange={set("patient_value")}
+                  required
+                />
+              </Field>
+            ) : null}
+            {hasRest ? (
+              <Field label="The rest goes to">
+                <select className="jb-assign" value={form.remainder} onChange={set("remainder")}>
+                  <option value="claim">
+                    Claim{column.effective_payer_name ? ` (${column.effective_payer_name})` : ""}
+                  </option>
+                  <option value="adjustment">Adjustment</option>
+                </select>
+              </Field>
+            ) : null}
+          </div>
+          <div className="bill-form">
+            <Field label="Bill name">
+              <input
+                className="jb-assign"
+                maxLength={200}
+                placeholder={cell.bill_name ?? ""}
+                value={form.bill_name}
+                onChange={set("bill_name")}
+              />
+            </Field>
+            <Field label="Bill code" className="bill-form__code">
+              <input
+                className="jb-assign"
+                maxLength={40}
+                placeholder={cell.bill_code ?? ""}
+                value={form.bill_code}
+                onChange={set("bill_code")}
+              />
+            </Field>
+          </div>
+          <div className="bill-form">
+            <Field label="Valid from">
+              <input
+                type="date"
+                className="jb-assign"
+                value={form.valid_from}
+                onChange={set("valid_from")}
                 required
               />
             </Field>
-          ) : null}
-          {hasRest ? (
-            <Field label="The rest goes to">
-              <select className="jb-assign" value={form.remainder} onChange={set("remainder")}>
-                <option value="claim">
-                  Claim{column.effective_payer_name ? ` (${column.effective_payer_name})` : ""}
-                </option>
-                <option value="adjustment">Adjustment</option>
-              </select>
+            <Field label="Valid to">
+              <input
+                type="date"
+                className="jb-assign"
+                min={form.valid_from || undefined}
+                value={form.valid_to}
+                onChange={set("valid_to")}
+              />
             </Field>
-          ) : null}
-        </div>
-        <div className="bill-form">
-          <Field label="Bill name">
-            <input
-              className="jb-assign"
-              maxLength={200}
-              placeholder={cell.bill_name ?? ""}
-              value={form.bill_name}
-              onChange={set("bill_name")}
-            />
-          </Field>
-          <Field label="Bill code" className="bill-form__code">
-            <input
-              className="jb-assign"
-              maxLength={40}
-              placeholder={cell.bill_code ?? ""}
-              value={form.bill_code}
-              onChange={set("bill_code")}
-            />
-          </Field>
-        </div>
-        <div className="bill-form">
-          <Field label="Valid from">
-            <input
-              type="date"
-              className="jb-assign"
-              value={form.valid_from}
-              onChange={set("valid_from")}
-              required
-            />
-          </Field>
-          <Field label="Valid to">
-            <input
-              type="date"
-              className="jb-assign"
-              min={form.valid_from || undefined}
-              value={form.valid_to}
-              onChange={set("valid_to")}
-            />
-          </Field>
-        </div>
-        {error ? (
-          <p className="bill-dialog__error" role="alert">
-            {error}
-          </p>
-        ) : null}
-        {clearing ? (
-          <div
-            className="bill-dialog__actions bill-dialog__discard"
-            role="group"
-            aria-label="Clear this cell?"
-          >
-            <span>Clear this cell's own fee and rule? It goes back to what it inherits.</span>
-            <button
-              type="button"
-              className="flow-btn flow-btn-ghost"
-              autoFocus
-              onClick={() => setClearing(false)}
-            >
-              Keep
-            </button>
-            <button
-              type="button"
-              className="flow-btn flow-btn-red"
-              disabled={clear.isPending}
-              onClick={clearCell}
-            >
-              Clear
-            </button>
           </div>
-        ) : (
-          <div className="bill-dialog__actions">
-            {hasOwn ? (
+          {error ? (
+            <p className="bill-dialog__error" role="alert">
+              {error}
+            </p>
+          ) : null}
+          {clearing ? (
+            <div
+              className="bill-dialog__actions bill-dialog__discard"
+              role="group"
+              aria-label="Clear this cell?"
+            >
+              <span>Clear this cell's own fee and rule? It goes back to what it inherits.</span>
               <button
                 type="button"
-                className="flow-btn flow-btn-red cf-editor__clear"
-                onClick={() => setClearing(true)}
+                className="flow-btn flow-btn-ghost"
+                autoFocus
+                onClick={() => setClearing(false)}
+              >
+                Keep
+              </button>
+              <button
+                type="button"
+                className="flow-btn flow-btn-red"
+                disabled={clear.isPending}
+                onClick={clearCell}
               >
                 Clear
               </button>
-            ) : null}
-            <button type="button" className="flow-btn flow-btn-ghost" onClick={onClose}>
-              Cancel
-            </button>
-            <button type="submit" className="flow-btn flow-btn-primary" disabled={save.isPending}>
-              Save
-            </button>
-          </div>
-        )}
-      </form>
-    </div>
+            </div>
+          ) : (
+            <div className="bill-dialog__actions">
+              {hasOwn ? (
+                <button
+                  type="button"
+                  className="flow-btn flow-btn-red cf-editor__clear"
+                  onClick={() => setClearing(true)}
+                >
+                  Clear
+                </button>
+              ) : null}
+              <button type="button" className="flow-btn flow-btn-ghost" onClick={onClose}>
+                Cancel
+              </button>
+              <button type="submit" className="flow-btn flow-btn-primary" disabled={save.isPending}>
+                Save
+              </button>
+            </div>
+          )}
+        </form>
+      </div>
+    </BillDialogLayer>
   );
 }

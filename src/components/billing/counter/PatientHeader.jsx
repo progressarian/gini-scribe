@@ -13,10 +13,11 @@ const readFile = (file) =>
 
 const labelOf = (entry) => entry.category.display_label || entry.category.label;
 
-export default function PatientHeader({ patient, bill, needsCategory, suggestions, onBill }) {
+export default function PatientHeader({ patient, bill, needsCategory, suggestions, onBill, form }) {
   const { data: schemes } = usePatientSchemeList();
   const setCategory = useSetBillCategory();
-  const [chosen, setChosen] = useState(bill.category || "");
+  const current = bill.category || "";
+  const chosen = form.value.chosen ?? current;
   const [cardNo, setCardNo] = useState("");
   const [referralNo, setReferralNo] = useState("");
   const [error, setError] = useState(null);
@@ -25,9 +26,13 @@ export default function PatientHeader({ patient, bill, needsCategory, suggestion
   const fileRef = useRef(null);
 
   useEffect(() => {
-    setChosen(bill.category || "");
     setChoices([]);
   }, [bill.id, bill.category]);
+
+  useEffect(() => {
+    setCardNo("");
+    setReferralNo("");
+  }, [form.clears]);
 
   const list = useMemo(() => schemes || [], [schemes]);
   const subsOf = (code) => list.filter((s) => s.parent_code === code);
@@ -43,6 +48,9 @@ export default function PatientHeader({ patient, bill, needsCategory, suggestion
     setChoices([]);
     try {
       onBill(await setCategory.mutateAsync({ billId: bill.id, visitId: bill.visit_id, ...body }));
+      if (body.category !== undefined) {
+        form.set("chosen", (was) => (was === body.category ? null : was));
+      }
       return true;
     } catch (e) {
       setError(errorOf(e, "That could not be saved"));
@@ -127,7 +135,7 @@ export default function PatientHeader({ patient, bill, needsCategory, suggestion
           <select
             className="bc-field__in"
             value={chosen}
-            onChange={(e) => setChosen(e.target.value)}
+            onChange={(e) => form.set("chosen", e.target.value === current ? null : e.target.value)}
           >
             <option value="">General (no category)</option>
             {list

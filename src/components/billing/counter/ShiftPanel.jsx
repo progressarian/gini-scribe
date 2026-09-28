@@ -8,6 +8,9 @@ import {
 } from "../../../queries/hooks/useBilling";
 import { errorOf, moneyTyped, rupees } from "../format";
 import { PAYMENT_MODE_LABEL, shiftStateText } from "./lineText";
+import useAuthStore from "../../../stores/authStore";
+import { SHIFT_FORM, shiftFormKey } from "./counterForm";
+import { useSavedForm } from "./useSavedForm";
 
 const clock = (iso) =>
   iso
@@ -25,9 +28,12 @@ export default function ShiftPanel() {
   const { data: mine } = useMyShifts();
   const openShift = useOpenShift();
   const closeShift = useCloseShift();
-  const [opening, setOpening] = useState("");
-  const [counted, setCounted] = useState("");
-  const [note, setNote] = useState("");
+  const userId = useAuthStore((s) => s.currentDoctor?.id);
+  const form = useSavedForm(shiftFormKey(userId), SHIFT_FORM);
+  const { opening, counted, note } = form.value;
+  const setOpening = (next) => form.set("opening", next);
+  const setCounted = (next) => form.set("counted", next);
+  const setNote = (next) => form.set("note", next);
   const [closing, setClosing] = useState(false);
   const [error, setError] = useState(null);
   const [done, setDone] = useState(null);
@@ -42,7 +48,7 @@ export default function ShiftPanel() {
     setDone(null);
     try {
       await openShift.mutateAsync(opening.trim() ? { opening_cash: opening.trim() } : {});
-      setOpening("");
+      form.clear();
     } catch (e) {
       setError(errorOf(e, "That shift could not be opened"));
     }
@@ -56,8 +62,7 @@ export default function ShiftPanel() {
         ...(note.trim() ? { note: note.trim() } : {}),
       });
       setClosing(false);
-      setCounted("");
-      setNote("");
+      form.clear();
       setDone(
         `Shift closed. Expected ${rupees(closed.expected_cash)}, counted ${rupees(
           closed.counted_cash,

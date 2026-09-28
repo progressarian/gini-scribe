@@ -1,7 +1,7 @@
 import pool from "../../config/db.js";
 import { CAPABILITIES as CAP, hasCapability } from "../../../shared/permissions.js";
 import { writeAudit, writeAuditMany } from "./audit.js";
-import { auditFields, lockRow, wholeNumber } from "./common.js";
+import { auditFields, likePattern, lockRow, wholeNumber } from "./common.js";
 import { IMPORT_SHEETS } from "./importColumns.js";
 import { explain, IMPORT_LOCK, markConflicts, recordFailure, writeSheets } from "./importCommit.js";
 import { errorFile, errorFileName } from "./importErrorFile.js";
@@ -108,8 +108,6 @@ function cleanSearch(value) {
   }
   return text || null;
 }
-
-const likePattern = (text) => `%${text.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 
 function refusedFile(problems) {
   return httpError(

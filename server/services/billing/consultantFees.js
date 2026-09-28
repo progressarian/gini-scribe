@@ -1,14 +1,16 @@
 import pool from "../../config/db.js";
 import {
+  CONSULTANT_FEES_PAGE_SIZE,
+  CONSULTANT_FEES_PAGE_SIZE_MAX,
   CONSULTATION_VISIT_TYPES,
   PATIENT_PAYS,
   RESERVED_CATEGORY_CODES,
 } from "../../../shared/billingVocab.js";
-import { isLabOnlyDoctor } from "../../../shared/labOnly.js";
+import { LAB_ONLY_DOCTOR } from "../../../shared/labOnly.js";
 import { indiaToday } from "./categoryResolver.js";
 import { refuseRemovedItem } from "./removedDoctors.js";
 import { httpError, inTransaction } from "./transaction.js";
-import { cleanDate, hasField, INT_MAX, readNumber } from "./common.js";
+import { cleanDate, hasField, INT_MAX, likePattern, readNumber, wholeNumber } from "./common.js";
 import { deleteRate, saveRate } from "./categoryRates.js";
 import { createPaymentRule, deletePaymentRule, updatePaymentRule } from "./paymentRules.js";
 
@@ -259,41 +261,123 @@ const GENERAL_COLUMN = {
   has_sub_categories: false,
 };
 
-async function loadRows(db, doctorId) {
-  const { rows: doctors } = await db.query(
-    `SELECT d.id, d.name, d.short_name, d.role, COALESCE(d.is_active, TRUE) AS is_active
-       FROM doctors d
-      WHERE ((d.role = 'consultant' AND COALESCE(d.is_active, TRUE))
-             OR EXISTS (SELECT 1 FROM service_items i
-                         WHERE i.kind = 'consultation' AND i.is_active AND i.doctor_id = d.id))
-        AND ($1::int IS NULL OR d.id = $1)
-      ORDER BY d.name, d.id`,
-    [doctorId],
+const HAS_ITEM = (doctor) => `EXISTS (SELECT 1 FROM service_items i
+                     WHERE i.kind = 'consultation' AND i.is_active AND i.doctor_id = ${doctor})`;
+
+const DOCTOR_SET = `
+  SELECT d.id, d.name, d.short_name, COALESCE(d.is_active, TRUE) AS is_active
+    FROM doctors d
+   WHERE ((d.role = 'consultant' AND COALESCE(d.is_active, TRUE)) OR ${HAS_ITEM("d.id")})
+     AND lower(btrim(d.name)) <> lower($1)
+     AND ($2::int IS NULL OR d.id = $2)`;
+
+function cleanPaging(options) {
+  const asked = ["q", "page", "page_size"].some(
+    (key) => hasField(options, key) && options[key] !== "",
   );
-  if (doctorId && !doctors.length) {
-    const { rows } = await db.query(`SELECT 1 FROM doctors WHERE id = $1`, [doctorId]);
-    if (!rows.length) throw httpError(404, "That doctor doesn't exist");
-  }
-  const { rows: items } = await db.query(
+  if (!asked) return null;
+  const q = typeof options.q === "string" ? options.q.trim() : "";
+  if (q.length > 100) throw httpError(400, "Search can be at most 100 characters");
+  const page = wholeNumber(options.page, "Page", { min: 1 }) ?? 1;
+  const size =
+    wholeNumber(options.page_size, "Page size", {
+      min: 1,
+      max: CONSULTANT_FEES_PAGE_SIZE_MAX,
+    }) ?? CONSULTANT_FEES_PAGE_SIZE;
+  return { q: q ? likePattern(q) : null, page, size, limit: size, offset: (page - 1) * size };
+}
+
+const EVERYTHING = { q: null, limit: null, offset: 0 };
+
+async function checkDoctor(db, doctorId) {
+  if (!doctorId) return;
+  const { rows } = await db.query(`SELECT 1 FROM doctors WHERE id = $1`, [doctorId]);
+  if (!rows.length) throw httpError(404, "That doctor doesn't exist");
+}
+
+async function pricedDoctors(db, doctorId, paging) {
+  const { rows } = await db.query(
+    `WITH found AS (
+       SELECT d.* FROM (${DOCTOR_SET}) d
+        WHERE ${HAS_ITEM("d.id")}
+          AND ($3::text IS NULL OR d.name ILIKE $3 ESCAPE '\\' OR d.short_name ILIKE $3 ESCAPE '\\'
+               OR EXISTS (SELECT 1 FROM service_items i
+                           WHERE i.kind = 'consultation' AND i.is_active AND i.doctor_id = d.id
+                             AND i.code ILIKE $3 ESCAPE '\\'))
+     )
+     SELECT (SELECT count(*) FROM found)::int AS total, p.*
+       FROM (SELECT 1) one
+       LEFT JOIN LATERAL (
+         SELECT * FROM found ORDER BY name, id LIMIT $4 OFFSET $5
+       ) p ON TRUE`,
+    [LAB_ONLY_DOCTOR, doctorId, paging.q, paging.limit, paging.offset],
+  );
+  return { doctors: rows.filter((r) => r.id !== null), total: rows[0].total };
+}
+
+async function pricedItems(db, doctorIds) {
+  const { rows } = await db.query(
     `SELECT i.id, i.code, i.name, i.base_price, i.doctor_id, i.visit_type, i.subgroup_id
        FROM service_items i
       WHERE i.kind = 'consultation' AND i.is_active
-        AND ($1::int IS NULL OR i.doctor_id = $1)
+        AND (i.doctor_id = ANY ($1::int[]) OR i.doctor_id IS NULL)
       ORDER BY i.id`,
-    [doctorId],
+    [doctorIds],
   );
-  const { rows: retired } = await db.query(
-    `SELECT DISTINCT ON (i.doctor_id, i.visit_type) i.id, i.code, i.doctor_id, i.visit_type
-       FROM service_items i
-      WHERE i.kind = 'consultation' AND NOT i.is_active AND i.doctor_id IS NOT NULL
-        AND ($1::int IS NULL OR i.doctor_id = $1)
-      ORDER BY i.doctor_id, i.visit_type, i.id DESC`,
-    [doctorId],
+  return rows.map((i) => ({ ...i, base_price: Number(i.base_price) }));
+}
+
+async function unpricedDoctors(db, doctorId, paging) {
+  const { rows } = await db.query(
+    `WITH missing AS (
+       SELECT d.id, d.name, d.short_name, d.is_active, v.visit_type, v.ord
+         FROM (${DOCTOR_SET}) d
+        CROSS JOIN unnest($3::text[]) WITH ORDINALITY AS v(visit_type, ord)
+        WHERE NOT EXISTS (SELECT 1 FROM service_items i
+                           WHERE i.kind = 'consultation' AND i.is_active
+                             AND i.doctor_id = d.id AND i.visit_type = v.visit_type)
+          AND ($4::text IS NULL OR d.name ILIKE $4 ESCAPE '\\' OR d.short_name ILIKE $4 ESCAPE '\\')
+     ),
+     page AS (
+       SELECT id FROM (SELECT DISTINCT id, name FROM missing) per
+        ORDER BY name, id
+        LIMIT $5 OFFSET $6
+     ),
+     totals AS (
+       SELECT count(DISTINCT id)::int AS total_doctors, count(*)::int AS total FROM missing
+     )
+     SELECT t.total_doctors, t.total, m.id, m.name, m.short_name, m.is_active, m.visit_type,
+            old.id AS item_id, old.code AS item_code,
+            EXISTS (SELECT 1 FROM service_items f
+                     WHERE f.kind = 'consultation' AND f.is_active
+                       AND f.doctor_id IS NULL AND f.visit_type = m.visit_type) AS default_covers
+       FROM totals t
+       LEFT JOIN (missing m JOIN page p ON p.id = m.id) ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT i.id, i.code FROM service_items i
+          WHERE i.kind = 'consultation' AND NOT i.is_active
+            AND i.doctor_id = m.id AND i.visit_type = m.visit_type
+          ORDER BY i.id DESC LIMIT 1
+       ) old ON TRUE
+      ORDER BY m.name, m.id, m.ord`,
+    [LAB_ONLY_DOCTOR, doctorId, CONSULTATION_VISIT_TYPES, paging.q, paging.limit, paging.offset],
   );
   return {
-    doctors: doctors.filter((d) => !isLabOnlyDoctor(d.name)),
-    items: items.map((i) => ({ ...i, base_price: Number(i.base_price) })),
-    retired,
+    rows: rows
+      .filter((r) => r.id !== null)
+      .map((r) => ({
+        doctor_id: r.id,
+        doctor_name: r.name,
+        short_name: r.short_name,
+        doctor_active: r.is_active,
+        visit_type: r.visit_type,
+        status: r.item_id ? "item_deactivated" : "no_item",
+        item_id: r.item_id,
+        item_code: r.item_code,
+        default_covers: r.default_covers,
+      })),
+    total: rows[0].total,
+    total_doctors: rows[0].total_doctors,
   };
 }
 
@@ -305,6 +389,38 @@ const itemShape = (item) => ({
   subgroup_id: item.subgroup_id,
 });
 
+const whoOf = (doctor, visitType) => ({
+  doctor_id: doctor.id,
+  doctor_name: doctor.name,
+  short_name: doctor.short_name,
+  doctor_active: doctor.is_active,
+  visit_type: visitType,
+});
+
+function defaultRows(defaults, cells) {
+  return CONSULTATION_VISIT_TYPES.filter((v) => defaults.has(v)).map((visitType) => {
+    const item = defaults.get(visitType);
+    return {
+      doctor_id: null,
+      doctor_name: null,
+      short_name: null,
+      doctor_active: null,
+      visit_type: visitType,
+      is_default: true,
+      item: itemShape(item),
+      cells: cells.get(item.id),
+    };
+  });
+}
+
+const DEFAULT_LABEL = "hospital default";
+
+function defaultMatches(item, q) {
+  if (!q) return true;
+  const needle = q.toLowerCase();
+  return DEFAULT_LABEL.includes(needle) || item.code.toLowerCase().includes(needle);
+}
+
 export async function consultantFeeGrid(options = {}, db = pool) {
   const doctorId = cleanId(options.doctorId ?? options.doctor_id, "doctor");
   const rawScheme = options.schemeCode ?? options.scheme_code;
@@ -313,69 +429,90 @@ export async function consultantFeeGrid(options = {}, db = pool) {
       ? null
       : cleanCategory(rawScheme);
   const date = cleanDate(options.date, "Date") ?? indiaToday();
+  const paging = cleanPaging(options);
+  await checkDoctor(db, doctorId);
   const onlyGeneral = schemeCode !== null && RESERVED_CATEGORY_CODES.includes(schemeCode);
   const categories = onlyGeneral ? [] : await loadColumns(db, schemeCode);
   const columns = [GENERAL_COLUMN, ...categories];
-  const { doctors, items, retired } = await loadRows(db, doctorId);
+  const { doctors, total } = await pricedDoctors(db, doctorId, paging ?? EVERYTHING);
+  const loaded = await pricedItems(
+    db,
+    doctors.map((d) => d.id),
+  );
+  const search = typeof options.q === "string" ? options.q.trim() : "";
+  const defaults = new Map(
+    loaded
+      .filter((i) => i.doctor_id === null && !doctorId && (!paging || defaultMatches(i, search)))
+      .map((i) => [i.visit_type, i]),
+  );
+  const items = loaded.filter((i) => i.doctor_id !== null || defaults.has(i.visit_type));
   const cells = await cellsFor(
     db,
     items,
     categories.map((c) => c.code),
     date,
   );
-  const itemFor = (id, visitType) =>
-    items.find((i) => i.doctor_id === id && i.visit_type === visitType) ?? null;
-  const defaults = new Map(items.filter((i) => i.doctor_id === null).map((i) => [i.visit_type, i]));
-  const rows = [];
-  const notPriced = [];
-  for (const doctor of doctors) {
-    for (const visitType of CONSULTATION_VISIT_TYPES) {
-      const item = itemFor(doctor.id, visitType);
-      const who = {
-        doctor_id: doctor.id,
-        doctor_name: doctor.name,
-        short_name: doctor.short_name,
-        doctor_active: doctor.is_active,
-        visit_type: visitType,
-      };
-      if (item) {
-        rows.push({ ...who, is_default: false, item: itemShape(item), cells: cells.get(item.id) });
-        continue;
-      }
-      const old = retired.find((r) => r.doctor_id === doctor.id && r.visit_type === visitType);
-      notPriced.push({
-        ...who,
-        status: old ? "item_deactivated" : "no_item",
-        item_id: old?.id ?? null,
-        item_code: old?.code ?? null,
-        default_covers: defaults.has(visitType),
-      });
-    }
-  }
-  if (!doctorId) {
-    for (const visitType of CONSULTATION_VISIT_TYPES) {
-      const item = defaults.get(visitType);
-      if (!item) continue;
-      rows.push({
-        doctor_id: null,
-        doctor_name: null,
-        short_name: null,
-        doctor_active: null,
-        visit_type: visitType,
-        is_default: true,
-        item: itemShape(item),
-        cells: cells.get(item.id),
-      });
-    }
-  }
-  return {
+  const doctorRows = doctors.flatMap((doctor) =>
+    CONSULTATION_VISIT_TYPES.flatMap((visitType) => {
+      const item = items.find((i) => i.doctor_id === doctor.id && i.visit_type === visitType);
+      if (!item) return [];
+      return [
+        {
+          ...whoOf(doctor, visitType),
+          is_default: false,
+          item: itemShape(item),
+          cells: cells.get(item.id),
+        },
+      ];
+    }),
+  );
+  const base = {
     date,
     today: indiaToday(),
     visit_types: CONSULTATION_VISIT_TYPES,
     patient_pays: PATIENT_PAYS,
     columns,
-    rows,
+  };
+  if (paging) {
+    return {
+      ...base,
+      rows: [...defaultRows(defaults, cells), ...doctorRows],
+      total,
+      page: paging.page,
+      page_size: paging.size,
+    };
+  }
+  const { rows: notPriced } = await unpricedDoctors(db, doctorId, EVERYTHING);
+  return {
+    ...base,
+    rows: [...doctorRows, ...defaultRows(defaults, cells)],
     not_priced: notPriced,
+  };
+}
+
+export async function consultantFeeNotPriced(options = {}, db = pool) {
+  const doctorId = cleanId(options.doctorId ?? options.doctor_id, "doctor");
+  const paging = cleanPaging({ page: "1", ...options });
+  await checkDoctor(db, doctorId);
+  const [found, whole, defaults] = await Promise.all([
+    unpricedDoctors(db, doctorId, paging),
+    paging.q ? unpricedDoctors(db, doctorId, { ...EVERYTHING, limit: 1 }) : null,
+    db.query(
+      `SELECT DISTINCT visit_type FROM service_items
+        WHERE kind = 'consultation' AND is_active AND doctor_id IS NULL`,
+    ),
+  ]);
+  const covered = new Set(defaults.rows.map((r) => r.visit_type));
+  const missingDefaults = doctorId ? [] : CONSULTATION_VISIT_TYPES.filter((v) => !covered.has(v));
+  const search = typeof options.q === "string" ? options.q.trim().toLowerCase() : "";
+  return {
+    rows: found.rows,
+    missing_defaults: DEFAULT_LABEL.includes(search) ? missingDefaults : [],
+    total: found.total,
+    total_doctors: found.total_doctors,
+    count: (whole ?? found).total + missingDefaults.length,
+    page: paging.page,
+    page_size: paging.size,
   };
 }
 

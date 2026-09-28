@@ -5,6 +5,11 @@ import { looksLikeSameTest, normalizeTestName } from "./testNames.js";
 import { checkItemPrices } from "./paymentRules.js";
 import { writeAudit } from "./audit.js";
 import { refuseRemoved } from "./removedDoctors.js";
+import { createGroup, createSubgroup } from "./serviceGroups.js";
+import {
+  CONSULTATION_DEFAULT_GROUP,
+  CONSULTATION_DEFAULT_SUBGROUP,
+} from "../../../shared/billingVocab.js";
 import { httpError, inTransaction } from "./transaction.js";
 import {
   assertCodeFree,
@@ -170,6 +175,40 @@ async function checkSubgroup(client, subgroupId) {
   if (!rows[0].is_active)
     throw httpError(409, `${rows[0].name} is deactivated; reactivate it first`);
   return rows[0];
+}
+
+async function consultationSubgroup(client, ctx) {
+  await client.query(`SELECT pg_advisory_xact_lock(hashtext('billing.consultation_subgroup'))`);
+  const busiest = await client.query(
+    `SELECT s.id FROM service_subgroups s
+       JOIN service_items i ON i.subgroup_id = s.id AND i.kind = 'consultation' AND i.is_active
+      WHERE s.is_active
+      GROUP BY s.id
+      ORDER BY count(*) DESC, s.id
+      LIMIT 1`,
+  );
+  if (busiest.rows.length) return busiest.rows[0].id;
+  const named = await client.query(
+    `SELECT id, name, is_active FROM service_subgroups WHERE lower(code) = lower($1)`,
+    [CONSULTATION_DEFAULT_SUBGROUP.code],
+  );
+  if (named.rows.length) {
+    if (!named.rows[0].is_active) {
+      throw httpError(409, `${named.rows[0].name} is deactivated; reactivate it first`);
+    }
+    return named.rows[0].id;
+  }
+  const group = await client.query(`SELECT id FROM service_groups WHERE lower(code) = lower($1)`, [
+    CONSULTATION_DEFAULT_GROUP.code,
+  ]);
+  const groupId =
+    group.rows[0]?.id ?? (await createGroup(CONSULTATION_DEFAULT_GROUP, ctx, client)).id;
+  const subgroup = await createSubgroup(
+    { ...CONSULTATION_DEFAULT_SUBGROUP, group_id: groupId },
+    ctx,
+    client,
+  );
+  return subgroup.id;
 }
 
 async function checkTaxCode(client, taxCodeId) {
@@ -368,6 +407,9 @@ export async function createItem(input, ctx, db = pool) {
   const values = cleanInput(input, { partial: false });
   if (hasField(input, "is_active")) values.is_active = cleanActive(input.is_active);
   return inTransaction(async (client) => {
+    if (values.kind === "consultation" && !values.subgroup_id) {
+      values.subgroup_id = await consultationSubgroup(client, ctx);
+    }
     await validate(client, { ...values, is_active: values.is_active ?? true });
     const keys = Object.keys(values);
     const { rows } = await client

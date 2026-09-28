@@ -9,8 +9,7 @@ import {
 import { errorOf, fromPaise, moneyTyped } from "../format";
 import { PAYMENT_MODE_LABEL } from "./lineText";
 import { balanceOf, payLaterAllowed } from "./finaliseChecks";
-
-const emptyRow = () => ({ mode: "cash", amount: "", reference: "" });
+import { emptyPaymentRow } from "./counterForm";
 
 const paiseOf = (typed) => Math.round(Number(typed || 0) * 100);
 
@@ -21,12 +20,13 @@ const REFERENCE_HINT = {
   upi: "e.g. UPI transaction ID",
 };
 
-export default function TotalsAndPayment({ bill, onBill, schemes, payLater, onPayLater }) {
+export default function TotalsAndPayment({ bill, onBill, schemes, payLater, onPayLater, form }) {
   const { data: settings } = useDeskSettings();
   const { data: shift } = useCurrentShift();
   const take = useTakePayments();
   const reread = useRereadBill();
-  const [rows, setRows] = useState([emptyRow()]);
+  const rows = form.value.rows;
+  const setRows = (next) => form.set("rows", next);
   const [error, setError] = useState(null);
   const [note, setNote] = useState(null);
   const [capped, setCapped] = useState(null);
@@ -75,12 +75,12 @@ export default function TotalsAndPayment({ bill, onBill, schemes, payLater, onPa
             })),
         }),
       );
-      setRows([emptyRow()]);
+      form.drop("rows", "payLater");
       setCapped(null);
       setNote("Payment taken.");
     } catch (e) {
       if (e?.paymentTaken) {
-        setRows([emptyRow()]);
+        form.drop("rows", "payLater");
         setError(
           "The payment was taken, but this bill could not be read back — press Save draft to see it.",
         );
@@ -230,7 +230,7 @@ export default function TotalsAndPayment({ bill, onBill, schemes, payLater, onPa
             type="button"
             className="bc-pay__split"
             disabled={rows.length >= 10 || remaining <= 0}
-            onClick={() => setRows([...rows, emptyRow()])}
+            onClick={() => setRows([...rows, emptyPaymentRow()])}
           >
             <Plus size={14} aria-hidden="true" />
             Split payment
@@ -289,6 +289,11 @@ export default function TotalsAndPayment({ bill, onBill, schemes, payLater, onPa
         </div>
       )}
 
+      {form.restored && (
+        <div className="bc-note" role="status">
+          Restored what you&apos;d typed before the page reloaded.
+        </div>
+      )}
       {note && <div className="bc-note">{note}</div>}
       {error && <div className="bc-err">{error}</div>}
     </section>

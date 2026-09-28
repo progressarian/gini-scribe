@@ -17,6 +17,7 @@ import DiscountItemPicker from "./DiscountItemPicker";
 import { KIND_LABEL, ROLE_LABEL, offLabel } from "./discountText";
 import { codeTyped, digitsTyped, moneyTyped, requestErrorOf } from "./format";
 import useDialog from "./useDialog";
+import BillDialogLayer from "./BillDialogLayer";
 
 const METHOD_CHOICE = {
   code: "Code — the desk enters it",
@@ -304,340 +305,351 @@ export default function DiscountForm({ rule, onClose }) {
   const byCode = form.method === "code";
 
   return (
-    <div className="flow-dialog-backdrop" onClick={requestClose} role="presentation">
-      <form
-        ref={ref}
-        className="flow-card bill-dialog disc-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        onClick={(e) => e.stopPropagation()}
-        onSubmit={submit}
-      >
-        <h2 id={titleId} className="bill-dialog__title">
-          {editing ? `Edit discount ${rule.name}` : "New discount"}
-        </h2>
+    <BillDialogLayer>
+      <div className="flow-dialog-backdrop" onClick={requestClose} role="presentation">
+        <form
+          ref={ref}
+          className="flow-card bill-dialog disc-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          onClick={(e) => e.stopPropagation()}
+          onSubmit={submit}
+        >
+          <h2 id={titleId} className="bill-dialog__title">
+            {editing ? `Edit discount ${rule.name}` : "New discount"}
+          </h2>
 
-        <fieldset className="disc-section">
-          <legend>Type and value</legend>
-          <div className="bill-form">
-            <Field label="Name">
-              <input
-                className="jb-assign"
-                maxLength={200}
-                placeholder="e.g. Senior citizen 10% off"
-                value={form.name}
-                onChange={set("name")}
-                required
-              />
-            </Field>
-            <Field label="How it applies">
-              <select className="jb-assign" value={form.method} onChange={set("method")}>
-                {DISCOUNT_METHODS.map((m) => (
-                  <option key={m} value={m}>
-                    {METHOD_CHOICE[m]}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            {byCode ? (
-              <Field label="Code" className="fset__field--narrow disc-field--code">
+          <fieldset className="disc-section">
+            <legend>Type and value</legend>
+            <div className="bill-form">
+              <Field label="Name">
                 <input
                   className="jb-assign"
-                  maxLength={40}
-                  autoComplete="off"
-                  placeholder="e.g. SENIOR10"
-                  value={form.code}
-                  onChange={set("code")}
+                  maxLength={200}
+                  placeholder="e.g. Senior citizen 10% off"
+                  value={form.name}
+                  onChange={set("name")}
+                  required
                 />
               </Field>
-            ) : null}
-          </div>
-          <div className="bill-form">
-            <Field label="Kind">
-              <select className="jb-assign" value={form.kind} onChange={set("kind")}>
-                {DISCOUNT_KINDS.map((k) => (
-                  <option key={k} value={k}>
-                    {KIND_LABEL[k]}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field
-              label={
-                form.kind === "percent" ? "Percent" : form.kind === "flat" ? "₹ off" : "Price ₹"
-              }
-              className="fset__field--narrow"
-            >
-              <input
-                className="jb-assign"
-                inputMode="decimal"
-                maxLength={14}
-                placeholder={
-                  form.kind === "percent"
-                    ? "e.g. 10"
-                    : form.kind === "flat"
-                      ? "e.g. 200"
-                      : "e.g. 500"
+              <Field label="How it applies">
+                <select className="jb-assign" value={form.method} onChange={set("method")}>
+                  {DISCOUNT_METHODS.map((m) => (
+                    <option key={m} value={m}>
+                      {METHOD_CHOICE[m]}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              {byCode ? (
+                <Field label="Code" className="fset__field--narrow disc-field--code">
+                  <input
+                    className="jb-assign"
+                    maxLength={40}
+                    autoComplete="off"
+                    placeholder="e.g. SENIOR10"
+                    value={form.code}
+                    onChange={set("code")}
+                  />
+                </Field>
+              ) : null}
+            </div>
+            <div className="bill-form">
+              <Field label="Kind">
+                <select className="jb-assign" value={form.kind} onChange={set("kind")}>
+                  {DISCOUNT_KINDS.map((k) => (
+                    <option key={k} value={k}>
+                      {KIND_LABEL[k]}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field
+                label={
+                  form.kind === "percent" ? "Percent" : form.kind === "flat" ? "₹ off" : "Price ₹"
                 }
-                value={form.value}
-                onChange={set("value")}
-              />
-            </Field>
-            {form.kind === "percent" ? (
-              <Field label="Largest discount ₹" hint="Empty = no limit">
+                className="fset__field--narrow"
+              >
                 <input
                   className="jb-assign"
                   inputMode="decimal"
                   maxLength={14}
-                  placeholder="e.g. 500"
-                  value={form.max_discount}
-                  onChange={set("max_discount")}
+                  placeholder={
+                    form.kind === "percent"
+                      ? "e.g. 10"
+                      : form.kind === "flat"
+                        ? "e.g. 200"
+                        : "e.g. 500"
+                  }
+                  value={form.value}
+                  onChange={set("value")}
                 />
               </Field>
-            ) : null}
-            <Field label="Applies to">
-              <select className="jb-assign" value={form.applies_per} onChange={set("applies_per")}>
-                <option value="line">Each line</option>
-                <option value="bill" disabled={form.kind === "fixed_price"}>
-                  The whole bill
-                </option>
-              </select>
-            </Field>
-          </div>
-        </fieldset>
-
-        <fieldset className="disc-section">
-          <legend>What it covers</legend>
-          <p className="fset__hint">
-            {form.applies_per === "bill"
-              ? "On the whole bill it comes off the total of the lines it covers. Nothing chosen means every line."
-              : "Nothing chosen means every service."}
-          </p>
-          <Checks
-            legend="Groups and subgroups"
-            options={groupOptions}
-            chosen={[
-              ...form.group_ids.map((id) => `g${id}`),
-              ...form.subgroup_ids.map((id) => `s${id}`),
-            ]}
-            onToggle={(value) =>
-              toggle(value[0] === "s" ? "subgroup_ids" : "group_ids")(Number(value.slice(1)))
-            }
-            scroll
-          />
-          <div className="disc-checks">
-            <DiscountItemPicker
-              label="Items"
-              chosenIds={form.service_item_ids}
-              onPick={(item) => {
-                setKnown((k) => ({ ...k, [item.id]: item.name }));
-                toggle("service_item_ids")(item.id);
-              }}
-            />
-            <ChosenItems items={items} onRemove={toggle("service_item_ids")} />
-          </div>
-          <Checks
-            legend="Doctors"
-            hint="A coupon for these consultants only; it never applies to a line without a doctor."
-            options={doctorOptions}
-            chosen={form.doctor_ids}
-            onToggle={toggle("doctor_ids")}
-            scroll
-          />
-          <Checks
-            legend="Visit types"
-            options={VISIT_TYPES.map((v) => ({ value: v, label: v }))}
-            chosen={form.visit_types}
-            onToggle={toggle("visit_types")}
-          />
-        </fieldset>
-
-        <fieldset className="disc-section">
-          <legend>Who gets it</legend>
-          <Checks
-            legend="Categories"
-            hint="Nothing chosen means every category. A category covers its sub-categories."
-            options={categoryOptions}
-            chosen={form.scheme_codes}
-            onToggle={toggle("scheme_codes")}
-            scroll
-          />
-          <div className="bill-form">
-            <Field label="From age" className="fset__field--narrow" hint="Empty = any age">
-              <input
-                className="jb-assign"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                maxLength={3}
-                placeholder="e.g. 60"
-                value={form.min_age}
-                onChange={set("min_age")}
-              />
-            </Field>
-            <Field label="To age" className="fset__field--narrow" hint="Empty = any age">
-              <input
-                className="jb-assign"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                maxLength={3}
-                placeholder="e.g. 80"
-                value={form.max_age}
-                onChange={set("max_age")}
-              />
-            </Field>
-            <Field label="Gender">
-              <select className="jb-assign" value={form.gender} onChange={set("gender")}>
-                <option value="">Any</option>
-                {GENDERS.map((g) => (
-                  <option key={g} value={g}>
-                    {g}
+              {form.kind === "percent" ? (
+                <Field label="Largest discount ₹" hint="Empty = no limit">
+                  <input
+                    className="jb-assign"
+                    inputMode="decimal"
+                    maxLength={14}
+                    placeholder="e.g. 500"
+                    value={form.max_discount}
+                    onChange={set("max_discount")}
+                  />
+                </Field>
+              ) : null}
+              <Field label="Applies to">
+                <select
+                  className="jb-assign"
+                  value={form.applies_per}
+                  onChange={set("applies_per")}
+                >
+                  <option value="line">Each line</option>
+                  <option value="bill" disabled={form.kind === "fixed_price"}>
+                    The whole bill
                   </option>
-                ))}
-              </select>
-            </Field>
-          </div>
-        </fieldset>
+                </select>
+              </Field>
+            </div>
+          </fieldset>
 
-        <fieldset className="disc-section">
-          <legend>When and how much</legend>
-          <div className="bill-form">
-            <Field label="Valid from">
-              <input
-                type="date"
-                className="jb-assign"
-                value={form.valid_from}
-                onChange={set("valid_from")}
+          <fieldset className="disc-section">
+            <legend>What it covers</legend>
+            <p className="fset__hint">
+              {form.applies_per === "bill"
+                ? "On the whole bill it comes off the total of the lines it covers. Nothing chosen means every line."
+                : "Nothing chosen means every service."}
+            </p>
+            <Checks
+              legend="Groups and subgroups"
+              options={groupOptions}
+              chosen={[
+                ...form.group_ids.map((id) => `g${id}`),
+                ...form.subgroup_ids.map((id) => `s${id}`),
+              ]}
+              onToggle={(value) =>
+                toggle(value[0] === "s" ? "subgroup_ids" : "group_ids")(Number(value.slice(1)))
+              }
+              scroll
+            />
+            <div className="disc-checks">
+              <DiscountItemPicker
+                label="Items"
+                chosenIds={form.service_item_ids}
+                onPick={(item) => {
+                  setKnown((k) => ({ ...k, [item.id]: item.name }));
+                  toggle("service_item_ids")(item.id);
+                }}
               />
-            </Field>
-            <Field label="Valid to">
-              <input
-                type="date"
-                className="jb-assign"
-                min={form.valid_from || undefined}
-                value={form.valid_to}
-                onChange={set("valid_to")}
-              />
-            </Field>
-          </div>
-          <div className="bill-form">
-            {LIMITS.map(([key, label, example]) => (
-              <Field key={key} label={label} hint="Empty = no limit">
+              <ChosenItems items={items} onRemove={toggle("service_item_ids")} />
+            </div>
+            <Checks
+              legend="Doctors"
+              hint="A coupon for these consultants only; it never applies to a line without a doctor."
+              options={doctorOptions}
+              chosen={form.doctor_ids}
+              onToggle={toggle("doctor_ids")}
+              scroll
+            />
+            <Checks
+              legend="Visit types"
+              options={VISIT_TYPES.map((v) => ({ value: v, label: v }))}
+              chosen={form.visit_types}
+              onToggle={toggle("visit_types")}
+            />
+          </fieldset>
+
+          <fieldset className="disc-section">
+            <legend>Who gets it</legend>
+            <Checks
+              legend="Categories"
+              hint="Nothing chosen means every category. A category covers its sub-categories."
+              options={categoryOptions}
+              chosen={form.scheme_codes}
+              onToggle={toggle("scheme_codes")}
+              scroll
+            />
+            <div className="bill-form">
+              <Field label="From age" className="fset__field--narrow" hint="Empty = any age">
+                <input
+                  className="jb-assign"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={3}
+                  placeholder="e.g. 60"
+                  value={form.min_age}
+                  onChange={set("min_age")}
+                />
+              </Field>
+              <Field label="To age" className="fset__field--narrow" hint="Empty = any age">
+                <input
+                  className="jb-assign"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={3}
+                  placeholder="e.g. 80"
+                  value={form.max_age}
+                  onChange={set("max_age")}
+                />
+              </Field>
+              <Field label="Gender">
+                <select className="jb-assign" value={form.gender} onChange={set("gender")}>
+                  <option value="">Any</option>
+                  {GENDERS.map((g) => (
+                    <option key={g} value={g}>
+                      {g}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+          </fieldset>
+
+          <fieldset className="disc-section">
+            <legend>When and how much</legend>
+            <div className="bill-form">
+              <Field label="Valid from">
+                <input
+                  type="date"
+                  className="jb-assign"
+                  value={form.valid_from}
+                  onChange={set("valid_from")}
+                />
+              </Field>
+              <Field label="Valid to">
+                <input
+                  type="date"
+                  className="jb-assign"
+                  min={form.valid_from || undefined}
+                  value={form.valid_to}
+                  onChange={set("valid_to")}
+                />
+              </Field>
+            </div>
+            <div className="bill-form">
+              {LIMITS.map(([key, label, example]) => (
+                <Field key={key} label={label} hint="Empty = no limit">
+                  <input
+                    className="jb-assign"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={9}
+                    placeholder={example}
+                    value={form[key]}
+                    onChange={set(key)}
+                  />
+                </Field>
+              ))}
+            </div>
+          </fieldset>
+
+          <fieldset className="disc-section">
+            <legend>Control</legend>
+            <div className="bill-form">
+              <Field label="Priority" className="fset__field--narrow" hint="Smaller wins a tie">
                 <input
                   className="jb-assign"
                   inputMode="numeric"
                   pattern="[0-9]*"
                   maxLength={9}
-                  placeholder={example}
-                  value={form[key]}
-                  onChange={set(key)}
+                  placeholder="100"
+                  value={form.priority}
+                  onChange={set("priority")}
                 />
               </Field>
-            ))}
-          </div>
-        </fieldset>
+              <label className="fset__check">
+                <input type="checkbox" checked={form.stackable} onChange={set("stackable")} />
+                Stacks with other discounts
+              </label>
+              <label className="fset__check">
+                <input
+                  type="checkbox"
+                  checked={form.applies_on_scheme_rate}
+                  onChange={set("applies_on_scheme_rate")}
+                />
+                Also on payment-rule lines (lowers what the patient pays; the claim stays)
+              </label>
+            </div>
+            {byCode ? (
+              <Checks
+                legend="Who may enter this code"
+                hint="Nothing chosen means every billing role."
+                options={BILLING_ROLES.map((r) => ({ value: r, label: ROLE_LABEL[r] ?? r }))}
+                chosen={form.allowed_roles}
+                onToggle={toggle("allowed_roles")}
+              />
+            ) : null}
+          </fieldset>
 
-        <fieldset className="disc-section">
-          <legend>Control</legend>
-          <div className="bill-form">
-            <Field label="Priority" className="fset__field--narrow" hint="Smaller wins a tie">
-              <input
-                className="jb-assign"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                maxLength={9}
-                placeholder="100"
-                value={form.priority}
-                onChange={set("priority")}
-              />
-            </Field>
-            <label className="fset__check">
-              <input type="checkbox" checked={form.stackable} onChange={set("stackable")} />
-              Stacks with other discounts
-            </label>
-            <label className="fset__check">
-              <input
-                type="checkbox"
-                checked={form.applies_on_scheme_rate}
-                onChange={set("applies_on_scheme_rate")}
-              />
-              Also on payment-rule lines (lowers what the patient pays; the claim stays)
-            </label>
-          </div>
-          {byCode ? (
-            <Checks
-              legend="Who may enter this code"
-              hint="Nothing chosen means every billing role."
-              options={BILLING_ROLES.map((r) => ({ value: r, label: ROLE_LABEL[r] ?? r }))}
-              chosen={form.allowed_roles}
-              onToggle={toggle("allowed_roles")}
-            />
+          {error ? (
+            <p className="bill-dialog__error" role="alert">
+              {error}
+            </p>
           ) : null}
-        </fieldset>
-
-        {error ? (
-          <p className="bill-dialog__error" role="alert">
-            {error}
-          </p>
-        ) : null}
-        {confirmDiscard ? (
-          <div
-            key="discard"
-            className="bill-dialog__actions bill-dialog__discard"
-            role="group"
-            aria-label="Discard changes?"
-          >
-            <span>Discard your changes?</span>
-            <button
-              type="button"
-              className="flow-btn flow-btn-ghost"
-              autoFocus
-              onClick={() => setConfirmDiscard(false)}
+          {confirmDiscard ? (
+            <div
+              key="discard"
+              className="bill-dialog__actions bill-dialog__discard"
+              role="group"
+              aria-label="Discard changes?"
             >
-              Keep editing
-            </button>
-            <button type="button" className="flow-btn flow-btn-red" onClick={() => onClose()}>
-              Discard
-            </button>
-          </div>
-        ) : confirmEvery && everyBill ? (
-          <div
-            key="every"
-            className="bill-dialog__actions bill-dialog__discard"
-            role="group"
-            aria-label="Discount every bill?"
-          >
-            <span>
-              Nothing is chosen under what it covers or who gets it, so this automatic discount
-              comes off every bill for every patient.
-            </span>
-            <button
-              type="button"
-              className="flow-btn flow-btn-ghost"
-              autoFocus
-              onClick={() => setConfirmEvery(false)}
+              <span>Discard your changes?</span>
+              <button
+                type="button"
+                className="flow-btn flow-btn-ghost"
+                autoFocus
+                onClick={() => setConfirmDiscard(false)}
+              >
+                Keep editing
+              </button>
+              <button type="button" className="flow-btn flow-btn-red" onClick={() => onClose()}>
+                Discard
+              </button>
+            </div>
+          ) : confirmEvery && everyBill ? (
+            <div
+              key="every"
+              className="bill-dialog__actions bill-dialog__discard"
+              role="group"
+              aria-label="Discount every bill?"
             >
-              Go back
-            </button>
-            <button type="button" className="flow-btn flow-btn-red" disabled={busy} onClick={save}>
-              Save for every bill
-            </button>
-          </div>
-        ) : (
-          <div key="actions" className="bill-dialog__actions">
-            <button type="button" className="flow-btn flow-btn-ghost" onClick={() => onClose()}>
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="flow-btn flow-btn-primary"
-              disabled={busy || !form.name.trim() || !form.value.trim()}
-            >
-              {editing ? "Save discount" : "Add discount"}
-            </button>
-          </div>
-        )}
-      </form>
-    </div>
+              <span>
+                Nothing is chosen under what it covers or who gets it, so this automatic discount
+                comes off every bill for every patient.
+              </span>
+              <button
+                type="button"
+                className="flow-btn flow-btn-ghost"
+                autoFocus
+                onClick={() => setConfirmEvery(false)}
+              >
+                Go back
+              </button>
+              <button
+                type="button"
+                className="flow-btn flow-btn-red"
+                disabled={busy}
+                onClick={save}
+              >
+                Save for every bill
+              </button>
+            </div>
+          ) : (
+            <div key="actions" className="bill-dialog__actions">
+              <button type="button" className="flow-btn flow-btn-ghost" onClick={() => onClose()}>
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="flow-btn flow-btn-primary"
+                disabled={busy || !form.name.trim() || !form.value.trim()}
+              >
+                {editing ? "Save discount" : "Add discount"}
+              </button>
+            </div>
+          )}
+        </form>
+      </div>
+    </BillDialogLayer>
   );
 }

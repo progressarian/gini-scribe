@@ -3,6 +3,7 @@ import { useCopyBillingConsultantFees } from "../../queries/hooks/useBillingMast
 import { toast } from "../../stores/uiStore";
 import { requestErrorOf } from "./format";
 import useDialog from "./useDialog";
+import BillDialogLayer from "./BillDialogLayer";
 
 function Field({ label, children }) {
   const id = useId();
@@ -75,88 +76,90 @@ export default function ConsultantFeeCopy({ tree, from: initialFrom, date, onClo
   };
 
   return (
-    <div className="flow-dialog-backdrop" onClick={onClose} role="presentation">
-      <form
-        ref={ref}
-        className="flow-card bill-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        onClick={(e) => e.stopPropagation()}
-        onSubmit={review}
-      >
-        <h2 id={titleId} className="bill-dialog__title">
-          Copy a column
-        </h2>
-        <p className="fset__cardsub">
-          Copies every doctor's own fee, bill name, bill code and patient-pays rule from one
-          category to another. Inherited values are not copied.
-        </p>
-        <div className="bill-form">
-          <Field label="Copy from">
-            <select className="jb-assign" value={form.from} onChange={set("from")} required>
-              <option value="">Choose a category</option>
-              <CategoryOptions tree={tree} />
-            </select>
-          </Field>
-          <Field label="Copy to">
-            <select className="jb-assign" value={form.to} onChange={set("to")} required>
-              <option value="">Choose a category</option>
-              <CategoryOptions tree={tree} />
-            </select>
-          </Field>
-          <Field label="Starting (optional)">
-            <input
-              type="date"
-              className="jb-assign"
-              value={form.valid_from}
-              onChange={set("valid_from")}
-            />
-          </Field>
-        </div>
-        {error ? (
-          <p className="bill-dialog__error" role="alert">
-            {error}
+    <BillDialogLayer>
+      <div className="flow-dialog-backdrop" onClick={onClose} role="presentation">
+        <form
+          ref={ref}
+          className="flow-card bill-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          onClick={(e) => e.stopPropagation()}
+          onSubmit={review}
+        >
+          <h2 id={titleId} className="bill-dialog__title">
+            Copy a column
+          </h2>
+          <p className="fset__cardsub">
+            Copies every doctor's own fee, bill name, bill code and patient-pays rule from one
+            category to another. Inherited values are not copied.
           </p>
-        ) : null}
-        {confirming ? (
-          <div
-            className="bill-dialog__actions bill-dialog__discard"
-            role="group"
-            aria-label="Confirm the copy"
-          >
-            <span>
-              Copy {labels.get(form.from)} to {labels.get(form.to)}? Each doctor's own fee there is
-              replaced{form.valid_from ? ` from ${form.valid_from}` : ""}.
-            </span>
-            <button
-              type="button"
-              className="flow-btn flow-btn-ghost"
-              autoFocus
-              onClick={() => setConfirming(false)}
-            >
-              Back
-            </button>
-            <button
-              type="button"
-              className="flow-btn flow-btn-primary"
-              disabled={copy.isPending}
-              onClick={run}
-            >
-              Copy
-            </button>
+          <div className="bill-form">
+            <Field label="Copy from">
+              <select className="jb-assign" value={form.from} onChange={set("from")} required>
+                <option value="">Choose a category</option>
+                <CategoryOptions tree={tree} />
+              </select>
+            </Field>
+            <Field label="Copy to">
+              <select className="jb-assign" value={form.to} onChange={set("to")} required>
+                <option value="">Choose a category</option>
+                <CategoryOptions tree={tree} />
+              </select>
+            </Field>
+            <Field label="Starting (optional)">
+              <input
+                type="date"
+                className="jb-assign"
+                value={form.valid_from}
+                onChange={set("valid_from")}
+              />
+            </Field>
           </div>
-        ) : (
-          <div className="bill-dialog__actions">
-            <button type="button" className="flow-btn flow-btn-ghost" onClick={onClose}>
-              Cancel
-            </button>
-            <button type="submit" className="flow-btn flow-btn-primary">
-              Copy…
-            </button>
-          </div>
-        )}
-      </form>
-    </div>
+          {error ? (
+            <p className="bill-dialog__error" role="alert">
+              {error}
+            </p>
+          ) : null}
+          {confirming ? (
+            <div
+              className="bill-dialog__actions bill-dialog__discard"
+              role="group"
+              aria-label="Confirm the copy"
+            >
+              <span>
+                Copy {labels.get(form.from)} to {labels.get(form.to)}? Each doctor's own fee there
+                is replaced{form.valid_from ? ` from ${form.valid_from}` : ""}.
+              </span>
+              <button
+                type="button"
+                className="flow-btn flow-btn-ghost"
+                autoFocus
+                onClick={() => setConfirming(false)}
+              >
+                Back
+              </button>
+              <button
+                type="button"
+                className="flow-btn flow-btn-primary"
+                disabled={copy.isPending}
+                onClick={run}
+              >
+                Copy
+              </button>
+            </div>
+          ) : (
+            <div className="bill-dialog__actions">
+              <button type="button" className="flow-btn flow-btn-ghost" onClick={onClose}>
+                Cancel
+              </button>
+              <button type="submit" className="flow-btn flow-btn-primary">
+                Copy…
+              </button>
+            </div>
+          )}
+        </form>
+      </div>
+    </BillDialogLayer>
   );
 }

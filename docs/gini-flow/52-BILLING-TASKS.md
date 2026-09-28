@@ -2656,26 +2656,23 @@ and a full rehearsal of the trial day on the test system.
   - **Still open — the same deadlock class elsewhere (P4C-07):** the HealthRay sync transaction (`machineSync`) updates orders before its auto-cancel locks bills (order → bill); floor stations that hold the visit `FOR UPDATE` and then open the draft can deadlock with a desk line insert; `approvalFor` locks the visit's bills without an order after already holding one; a category claim meeting a standing reception claim on one order leaves the order to reception. Postgres ends a deadlock by failing one request — no bad data — but the floor would see an error.
   - **Review:** (2026-09-28, by a sub-agent against the committed code) The lock order is right on the four paths it fixed. Rerun with two real connections, none deadlock; with `lockBillsOf` or `FOR NO KEY UPDATE` reverted, P4C-06 tests 1–4 each fail with `40P01`. P4C-04/05/06 passed 34/34. `FOR NO KEY UPDATE` is safe: stations and the sync still hold the visit `FOR UPDATE`, draft uniqueness is the index plus the 23505 fallback, and "never twice" is the advisory lock. The reception-claim changes were walked through submitted, approved, rejected and split claims; no double charge, lost claim or wrongly opened gate. **Found — all moved to P4C-07:** (1) money-wrong: a floor cancel of one test from a paid draft's order leaves the draft stuck for good, and can open the gate with money uncollected; (2) an `approvalFor` deadlock; (3) the machineSync and station deadlocks confirmed with real `40P01`, including a test silently left off the bill.
 
-- [~] **P4C-07 · Remaining lock-order paths and the partial floor cancel** — `Items 1–4 done; item 5 open` (from the P4C-06 build and review; merged 2026-09-28)
+- [x] **P4C-07 · Remaining lock-order paths and the partial floor cancel** — `Done` (from the P4C-06 build and review; merged 2026-09-28)
   - **Where:**
-    - `server/services/giniflow/testCancel.js`: `cancelOrderIn`, plus new helpers `draftsHolding` and `orderMoney`.
+    - `server/services/giniflow/testCancel.js`: `cancelOrderIn`, plus new helpers `draftsHolding` and `orderMoney`; the charge branch of `cancelTestIn` locks the visit before the charge.
     - `server/services/billing/bills.js`: new `lockVisitBills`, called by `openDraftIn` and `addLine`; `approvalFor` gains `ORDER BY id`; `resettleTestOrders` is exported.
+    - `server/services/billing/payments.js`: `payOut` locks the original bill and the credit note in id order.
     - `visitLines.js`: `linesForOrder` rethrows `40P01`.
-    - `moStation.orderTests`, `journey.checkInWithJourney` and `machineSync` lock the visit `FOR NO KEY UPDATE`; `machineSync` also locks the visit's bills in id order right after the visit.
-    - Spec: `e2e/billing/phase4/P4C-07-lock-order-and-partial-cancel.spec.js`. P4C-06 test 4's harness takes `floorWaits: false`.
-  - **Result:** Done 2026-09-28 for items 1–4 (built by a sub-agent).
-    - **1. Partial floor cancel.** The order is released from the draft bills holding its lines. Only reception's own money is capped at the new total. The test and its line are deleted, the bill is repriced, and the drafts are re-settled; `amount_paid` is never written by hand. A whole-order cancel also re-settles.
-      - D2: the order is paid ₹250; the bill is ₹750 with ₹650 paid; ₹100 more is taken and it finalises.
-      - D: the order stays part-paid at ₹250 of ₹550 and the gate stays closed until ₹300 is collected.
-    - **2.** `addLine` and `openDraftIn` lock every bill on the visit in id order before the target bill.
-    - **3.** A deadlocked `linesForOrder` fails its station instead of committing the order with no bill line. The stations' visit lock no longer blocks a desk line insert.
-    - **4.** machineSync locks the visit's bills in id order. This is covered by the regression suites only.
-    - 7 tests; 4 deliberate breaks each failed a test. After merging with P4C-08/09, 150/150 across P4C-04…09, P4-38b, P4-18, P4-4x, P4-31, P4-27 and all P4B. No schema change. **The API and the worker need a restart.**
-  - **Still open:**
-    - (5) `payOut` locks the original bill before the credit note, out of id order.
-    - The charge-path cancel locks charge → visit.
-    - Item 4 has no two-connection test.
-    - A category claim meeting a standing reception claim on one order still leaves the order to reception.
+    - `moStation.orderTests`, `journey.checkInWithJourney` and `machineSync` lock the visit `FOR NO KEY UPDATE`; `machineSync` also locks the visit's bills in id order.
+    - Specs: `P4C-07-lock-order-and-partial-cancel.spec.js` and `P4C-07b-sync-refund-and-charge-lock-order.spec.js`.
+  - **Result:** Done 2026-09-28 (built by sub-agents).
+    - **1. Partial floor cancel.** The order is released from the drafts holding its lines. Only reception's own money is capped at the new total. The test and its line are deleted, the bill is repriced and the drafts are re-settled; `amount_paid` is never written by hand. The D2 stuck draft and the D gate opening unpaid are both fixed.
+    - **2.** `addLine` and `openDraftIn` lock the visit's bills in id order.
+    - **3.** A deadlocked `linesForOrder` fails its station instead of dropping the test from the bill. The stations' visit lock no longer blocks a desk line insert.
+    - **4.** machineSync locks the visit's bills in id order. It is proven by a stored-HealthRay-bill race against `takePayments`, which gives a real `40P01` when the lock is reverted.
+    - **5.** `payOut` locks bills in id order; it deadlocked with a floor cancel when the credit note sorted first.
+    - **6.** The charge cancel locks visit → charge, like the sync. HEAD deadlocked; now the sync waits and doesn't resurrect the charge.
+    - **Category claim vs standing reception claim:** reproduced with the valve on, and left as designed. The order's money is fully accounted for, the gate opens only when reception's claim is approved, and it can't happen with the valve off.
+    - 11 tests; 7 deliberate breaks each failed a test. 116/116 twice, and 26/26 again after merging into main. No schema change. **The API and the worker need a restart.**
 - [x] **P4C-08 · Admin deletes a doctor; billing under that doctor stops** — `Done` (asked 2026-09-28)
   - **Where:** migration `server/migrations/2026-10-25_doctor_removal.sql` (`removed_at`, `removed_by`, `removed_reason` and a check tying them together). New `server/services/doctorRemoval.js` and `server/services/billing/removedDoctors.js`. In `server/routes/auth.js`: admin-only `GET /doctors/removed` and `GET|POST|DELETE /doctors/:id/removal`. In billing: `bills.js`, `visitLines.js`, `priceLine.js`, `priceBill.js`, `discountRules.js`, `serviceItems.js`, `categoryRates.js`, `consultantFees.js`, `importValidate.js`, `reports.js`. On the client: `DoctorManagementPage.jsx`, `BillingCounterPage.jsx`, `finaliseChecks.js`. Specs: `P4C-08-billing-stops-under-a-removed-doctor.spec.js` and `P4C-08-delete-doctor-page.spec.js`. P1-17 and P2-05 were reworded. Plan §5.1 records the rule.
   - **Why:** an admin must be able to remove a doctor who has left, and from then on nothing can be billed under them, with no manual clean-up.
@@ -2733,6 +2730,30 @@ and a full rehearsal of the trial day on the test system.
     - Tests: 13, and 17 deliberate breaks each failed one. P1-02 and P1-38 are updated.
     - **The API and the worker need a restart.**
   - **Still open:** the earlier-dues strip reuses `listDues`, which keeps its 500-row limit per patient. That is harmless.
+
+- [x] **P4C-11 · The counter keeps unsent input across a page refresh** — `Done` (asked 2026-09-28)
+  - **Where:**
+    - `src/components/billing/counter/useSavedForm.js` and `counterForm.js` (new)
+    - `AddItems.jsx`, `BillActions.jsx`, `BillLinesTable.jsx`, `DiscountCodeBox.jsx`, `PatientHeader.jsx`, `ShiftPanel.jsx`, `TotalsAndPayment.jsx`
+    - `BillingCounterPage.jsx`
+    - spec `e2e/billing/phase4/P4C-11-counter-form-survives-refresh.spec.js`
+  - **Why:** a mistaken page refresh lost everything typed but not yet sent: payment rows, codes, reasons, cash counts.
+  - **Result:** Done 2026-09-28 (built by sub-agents).
+    - **Per bill** (`billing.counter.form.<billId>`, with a version and savedAt; writes debounced and flushed when the page closes; shape checked on read; keys dropped after 24h):
+      - payment rows, including split rows
+      - pay later
+      - a code not yet applied
+      - a category not yet confirmed
+      - item search
+      - the bill-again reason and the new-item request
+      - open remove-line and cancel reasons
+    - **Per desk:** the shift's opening cash, counted cash and note.
+    - **Never stored:** CGHS card and referral numbers (DPDP), or server data.
+    - **Cleared automatically** when its action succeeds. A value is restored only for the same bill, so pay later is not carried to the next patient.
+    - **Clear form** empties everything unsent, on screen and in storage, and never touches server data. A note shows when values were restored.
+    - 10 tests; 3 deliberate breaks each failed a test. P4-27…36, P4-38c, P4C-09, P4C-10 and P4-32 are green.
+    - Client only; no restart needed.
+  - **Still open:** running the whole counter suite in one batch trips the API's 3000-requests-per-15-minutes limit for the reception test user. Run it in smaller groups.
 
 ---
 
