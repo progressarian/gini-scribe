@@ -1,9 +1,10 @@
 // Lightweight confirmation modal for destructive actions (e.g. deleting
 // an uploaded document). Pass `open` + handlers; render anywhere in the
-// tree. Kept simple on purpose — no portal, no focus trap — because it's
+// tree (it portals to body). Kept simple on purpose — no focus trap — because it's
 // only used for click-initiated deletes that are dismissable with
 // Escape / backdrop click.
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 
 // `message` takes a node, so a dialog that needs to collect something (a
 // reason, a note) can pass fields here rather than hand-rolling a second modal.
@@ -37,7 +38,7 @@ export default function ConfirmModal({
   const confirmBg = danger ? "#dc2626" : "#2563eb";
   const confirmHoverBg = danger ? "#b91c1c" : "#1d4ed8";
 
-  return (
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -138,6 +139,7 @@ export default function ConfirmModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

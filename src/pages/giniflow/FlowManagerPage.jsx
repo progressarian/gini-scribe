@@ -1092,6 +1092,26 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
     : [];
   const steps = preArrival.length ? allSteps.filter((s) => !preArrival.includes(s)) : allSteps;
   const labTrack = data?.labTrack || [];
+  const labGroups = labTrack
+    .filter((step) => step.group)
+    .reduce((groups, step) => {
+      const g = groups.find((x) => x.key === step.group.key);
+      if (g) g.steps.push(step);
+      else groups.push({ ...step.group, steps: [step] });
+      return groups;
+    }, [])
+    .sort((a, b) => a.index - b.index);
+  const labStepRow = (step, key) => (
+    <div className="tstep" key={key}>
+      <div className={`ts-dot ${step.isCurrent ? "tsd-now" : "tsd-done"}`}>
+        {step.isCurrent ? "●" : "✓"}
+      </div>
+      <div className="ts-body">
+        <div className="ts-name">{step.label}</div>
+        <div className="ts-time">{clockAt(step.enteredAt)}</div>
+      </div>
+    </div>
+  );
   const machineTrack = data?.machineTrack || [];
   const machineLive = (m) =>
     m.state === "running" ? (minutesSince(m.startedAt, now) ?? m.minutes) : m.minutes;
@@ -1295,16 +1315,16 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
           {labTrack.length > 0 && (
             <>
               <div className="ts-track-hd">🧪 Lab track — runs alongside the journey above</div>
-              {labTrack.map((step, i) => (
-                <div className="tstep" key={`lab-${step.status}-${i}`}>
-                  <div className={`ts-dot ${step.isCurrent ? "tsd-now" : "tsd-done"}`}>
-                    {step.isCurrent ? "●" : "✓"}
+              {labTrack
+                .filter((step) => !step.group)
+                .map((step, i) => labStepRow(step, `lab-${step.status}-${i}`))}
+              {labGroups.map((g) => (
+                <Fragment key={`lab-group-${g.key}`}>
+                  <div className="ts-group-hd">
+                    {g.done ? "✓" : "●"} {g.title}
                   </div>
-                  <div className="ts-body">
-                    <div className="ts-name">{step.label}</div>
-                    <div className="ts-time">{clockAt(step.enteredAt)}</div>
-                  </div>
-                </div>
+                  {g.steps.map((step, i) => labStepRow(step, `lab-${g.key}-${i}`))}
+                </Fragment>
               ))}
             </>
           )}

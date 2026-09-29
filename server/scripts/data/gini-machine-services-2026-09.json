@@ -1,0 +1,58 @@
+{
+  "group": {
+    "code": "MACHINE",
+    "name": "Machine tests"
+  },
+  "subgroups": [
+    {
+      "code": "MACHINE-CARDIO",
+      "name": "Cardiology"
+    },
+    {
+      "code": "MACHINE-EYE",
+      "name": "Eye"
+    },
+    {
+      "code": "MACHINE-VASC",
+      "name": "Vascular and neuropathy"
+    }
+  ],
+  "items": [
+    {
+      "code": "MAC-ECG",
+      "name": "ECG",
+      "catalog_name": "ECG",
+      "subgroup": "MACHINE-CARDIO"
+    },
+    {
+      "code": "MAC-TMT",
+      "name": "TMT (Treadmill Test)",
+      "catalog_name": "TMT",
+      "subgroup": "MACHINE-CARDIO"
+    },
+    {
+      "code": "MAC-ECHO",
+      "name": "2D Echo",
+      "catalog_name": "2D Echo",
+      "subgroup": "MACHINE-CARDIO"
+    },
+    {
+      "code": "MAC-FUNDUS",
+      "name": "Fundus Imaging",
+      "catalog_name": "Fundus",
+      "subgroup": "MACHINE-EYE"
+    },
+    {
+      "code": "MAC-ABI",
+      "name": "ABI (Ankle Brachial Index)",
+      "catalog_name": "ABI",
+      "subgroup": "MACHINE-VASC"
+    },
+    {
+      "code": "MAC-VPT",
+      "name": "VPT (Vibration Perception Threshold)",
+      "catalog_name": "VPT",
+      "subgroup": "MACHINE-VASC"
+    }
+  ]
+}

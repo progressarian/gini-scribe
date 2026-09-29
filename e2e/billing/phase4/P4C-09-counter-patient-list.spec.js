@@ -153,8 +153,8 @@ async function list(role = "reception", q = tag) {
 }
 
 const names = (rows) => rows.map((row) => row.name);
-const rowOf = (body, label) =>
-  [...body.onFloor, ...body.left, ...body.notArrived].find((row) => row.name === nameOf(label));
+const everyone = (body) => [...body.toBill, ...body.billed, ...body.waiting];
+const rowOf = (body, label) => everyone(body).find((row) => row.name === nameOf(label));
 
 const counter = (page) =>
   gotoReady(page, "/giniflow/station/billing", () =>
@@ -162,7 +162,8 @@ const counter = (page) =>
   );
 const patientList = (page) => page.getByRole("complementary", { name: "Today's patients" });
 const rowButton = (page, label) => patientList(page).getByRole("button", { name: nameOf(label) });
-const notArrivedToggle = (page) => patientList(page).getByRole("button", { name: /^Not arrived/ });
+const notArrivedToggle = (page) =>
+  patientList(page).getByRole("button", { name: /^Nothing to bill yet/ });
 
 test.describe.serial("P4C-09 billing counter patient list", () => {
   test.describe.configure({ retries: 1 });
@@ -183,7 +184,7 @@ test.describe.serial("P4C-09 billing counter patient list", () => {
     await bill("Blocked", final({ payable: 300 }));
     await bill("Dispensed", final({ payable: 500, paid: 200 }));
     await bill("Exited", final({ payable: 600, paid: 600 }));
-    await bill("NoShowDraft", { status: "draft" });
+    await bill("NoShowDraft", { status: "draft", payable: 200 });
     await bill("NoShowPaid", final({ payable: 300, paid: 300 }));
     await bill("CancelledDue", final({ payable: 250 }));
     await bill("CancelledClaim", final({ payable: 0, claim: 900, claimStatus: "pending" }));
@@ -193,52 +194,43 @@ test.describe.serial("P4C-09 billing counter patient list", () => {
     await tearDown(ids);
   });
 
-  test("1. arrived patients are on the floor, earliest arrival first", async () => {
+  test("1. patients who owe money come first, earliest arrival first", async () => {
     const { body } = await list();
-    expect(names(body.onFloor)).toEqual(
-      [
-        "FloorEarly",
-        "FloorLate",
-        "Online",
-        "Samples",
-        "Claim",
-        "Cleared",
-        "DueDraft",
-        "DraftClaim",
-        "ClaimPaid",
-        "CancelledOnly",
-      ].map(nameOf),
-    );
+    const toBill = names(body.toBill);
+    expect(toBill[0]).toBe(nameOf("DueDraft"));
+    expect(toBill.slice(1).sort()).toEqual(["NoShowDraft", "CancelledDue"].map(nameOf).sort());
   });
 
-  test("2. patients who left today sit below, then no-shows and cancels with an open bill", async () => {
+  test("2. settled, claimed and finished patients sit below as billed today / exited", async () => {
     const { body } = await list();
-    const left = names(body.left);
-    expect(left.slice(0, 2)).toEqual(["Dispensed", "Exited"].map(nameOf));
-    expect(left.slice(2).sort()).toEqual(
-      ["NoShowDraft", "CancelledDue", "CancelledClaim"].map(nameOf).sort(),
+    expect(names(body.billed)).toEqual(
+      ["Dispensed", "Exited", "Claim", "Cleared", "DraftClaim", "ClaimPaid"].map(nameOf),
     );
+    expect(body.billed.find((row) => row.name === nameOf("Dispensed")).hints.due).toBe(30000);
   });
 
-  test("3. booked and confirmed patients are listed apart as not arrived", async () => {
+  test("3. arrived patients with nothing to bill, then those not arrived, are listed apart", async () => {
     const { body } = await list();
-    expect(names(body.notArrived).sort()).toEqual(
-      ["Booked", "Confirmed", "Patient"].map(nameOf).sort(),
+    const waiting = names(body.waiting);
+    expect(waiting.slice(0, 5)).toEqual(
+      ["FloorEarly", "FloorLate", "Online", "Samples", "CancelledOnly"].map(nameOf),
     );
-    expect(names([...body.onFloor, ...body.left])).not.toContain(nameOf("Booked"));
+    expect(waiting.slice(5).sort()).toEqual(["Booked", "Confirmed", "Patient"].map(nameOf).sort());
+    expect(names([...body.toBill, ...body.billed])).not.toContain(nameOf("Booked"));
   });
 
-  test("4. a no-show or cancel with nothing open, or only a paid bill, does not show", async () => {
+  test("4. a no-show or cancel with nothing to pay, or only a paid or claimed bill, does not show", async () => {
     const { body } = await list();
-    const all = names([...body.onFloor, ...body.left, ...body.notArrived]);
+    const all = names(everyone(body));
     expect(all).not.toContain(nameOf("NoShowPaid"));
     expect(all).not.toContain(nameOf("NoShowNone"));
+    expect(all).not.toContain(nameOf("CancelledClaim"));
   });
 
   test("5. a blocked patient never shows, even with money due", async () => {
     for (const q of [tag, ""]) {
       const { body } = await list("reception", q);
-      const all = names([...body.onFloor, ...body.left, ...body.notArrived]);
+      const all = names(everyone(body));
       expect(all).toContain(nameOf("FloorLate"));
       expect(all).not.toContain(nameOf("Blocked"));
     }
@@ -286,9 +278,9 @@ test.describe.serial("P4C-09 billing counter patient list", () => {
 
   test("10. search finds a patient who has not arrived", async () => {
     const { body } = await list("reception", `F4Booked-${tag}`);
-    expect(names(body.notArrived)).toEqual([nameOf("Booked")]);
-    expect(body.onFloor).toEqual([]);
-    expect(body.left).toEqual([]);
+    expect(names(body.waiting)).toEqual([nameOf("Booked")]);
+    expect(body.toBill).toEqual([]);
+    expect(body.billed).toEqual([]);
   });
 
   test("11. the desk roles read the list; roles without the billing desk are refused", async () => {
@@ -363,7 +355,7 @@ test.describe.serial("P4C-09 billing counter patient list", () => {
     await expect(rowButton(page, "FloorLate")).not.toContainText("Samples only");
   });
 
-  test("14. the not-arrived section starts collapsed and opens and closes on click", async ({
+  test("14. the nothing-to-bill section starts collapsed and opens and closes on click", async ({
     page,
   }) => {
     await loginAs(page, "reception");
@@ -371,7 +363,8 @@ test.describe.serial("P4C-09 billing counter patient list", () => {
     const toggle = notArrivedToggle(page);
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
     await expect(rowButton(page, "Booked")).toBeHidden();
-    await expect(rowButton(page, "FloorLate")).toBeVisible();
+    await expect(rowButton(page, "FloorLate")).toBeHidden();
+    await expect(rowButton(page, "Dispensed")).toBeVisible();
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
     await expect(rowButton(page, "Booked")).toBeVisible();
@@ -395,22 +388,28 @@ test.describe.serial("P4C-09 billing counter patient list", () => {
     await expect(notArrivedToggle(page)).toHaveAttribute("aria-expanded", "false");
   });
 
-  test("16. the floor list runs by arrival with the patients who left below it", async ({
+  test("16. the to-bill list runs by arrival with the billed patients below it", async ({
     page,
   }) => {
     await loginAs(page, "reception");
     await counter(page);
     await page.getByRole("searchbox", { name: "Search today's patients" }).fill(tag);
-    await expect(rowButton(page, "FloorEarly")).toBeVisible();
+    await expect(rowButton(page, "Dispensed")).toBeVisible();
     const order = await patientList(page)
-      .locator(".bc-list__body > .bc-row .bc-row__name, .bc-list__body > .bc-group")
+      .locator(".bc-list__body .bc-row .bc-row__name, .bc-list__body .bc-group")
       .allInnerTexts();
     const at = (text) =>
-      order.findIndex((entry) => entry.toLowerCase().startsWith(text.toLowerCase()));
-    expect(at(nameOf("FloorEarly"))).toBeLessThan(at(nameOf("FloorLate")));
-    expect(at(nameOf("CancelledOnly"))).toBeLessThan(at("Left today"));
-    expect(at("Left today")).toBeLessThan(at(nameOf("Dispensed")));
-    expect(at(nameOf("Dispensed"))).toBeLessThan(at(nameOf("NoShowDraft")));
+      order.findIndex((entry) =>
+        entry
+          .replace(/^[▾▸]\s*/, "")
+          .toLowerCase()
+          .startsWith(text.toLowerCase()),
+      );
+    expect(at(nameOf("DueDraft"))).toBeLessThan(at(nameOf("NoShowDraft")));
+    expect(at(nameOf("NoShowDraft"))).toBeLessThan(at("Billed today"));
+    expect(at("Billed today")).toBeLessThan(at(nameOf("Dispensed")));
+    expect(at(nameOf("Dispensed"))).toBeLessThan(at(nameOf("Exited")));
+    expect(at(nameOf("Exited"))).toBeLessThan(at(nameOf("Claim")));
   });
 
   test("17. a role without the billing desk cannot open the counter", async ({ page }) => {

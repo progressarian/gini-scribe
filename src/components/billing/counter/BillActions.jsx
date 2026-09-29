@@ -4,20 +4,33 @@ import {
   billPdfHref,
   receiptPdfHref,
   useCancelBill,
+  useDeleteDraft,
   useDeskSettings,
   useFinaliseBill,
   useRereadBill,
+  useSaveDraft,
 } from "../../../queries/hooks/useBilling";
 import { errorOf } from "../format";
 import { claimBadgeText } from "./lineText";
 import { finaliseBlockers } from "./finaliseChecks";
 
-export default function BillActions({ bill, onBill, schemes, payLater, needsCategory, form }) {
+export default function BillActions({
+  bill,
+  onBill,
+  onDeleted,
+  schemes,
+  payLater,
+  needsCategory,
+  form,
+}) {
   const { data: settings } = useDeskSettings();
   const finalise = useFinaliseBill();
   const cancel = useCancelBill();
   const reread = useRereadBill();
+  const deleteDraft = useDeleteDraft();
+  const saveDraft = useSaveDraft();
   const [error, setError] = useState(null);
+  const [deleting, setDeleting] = useState(null);
   const [note, setNote] = useState(null);
   const cancelling = form.value.cancelReason !== null && bill.status === "final";
   const reason = form.value.cancelReason ?? "";
@@ -29,10 +42,10 @@ export default function BillActions({ bill, onBill, schemes, payLater, needsCate
   const save = async () => {
     setError(null);
     try {
-      onBill(await reread.mutateAsync({ billId: bill.id }));
+      onBill(await saveDraft.mutateAsync({ billId: bill.id, visitId: bill.visit_id }));
       setNote("Draft saved.");
     } catch (e) {
-      setError(errorOf(e, "This bill could not be read again"));
+      setError(errorOf(e, "This draft could not be saved"));
     }
   };
 
@@ -85,6 +98,22 @@ export default function BillActions({ bill, onBill, schemes, payLater, needsCate
     }
   };
 
+  const erase = async () => {
+    setError(null);
+    try {
+      await deleteDraft.mutateAsync({
+        billId: bill.id,
+        visitId: bill.visit_id,
+        reason: deleting.trim(),
+      });
+      form.clear();
+      setDeleting(null);
+      onDeleted();
+    } catch (e) {
+      setError(errorOf(e, "This draft could not be deleted"));
+    }
+  };
+
   return (
     <section className="bc-card bc-actions" aria-label="Bill actions">
       <div className="bc-head__row">
@@ -94,10 +123,24 @@ export default function BillActions({ bill, onBill, schemes, payLater, needsCate
           <button
             type="button"
             className="st-btn st-btn-g"
-            disabled={reread.isPending}
+            disabled={saveDraft.isPending}
             onClick={save}
           >
             Save draft
+          </button>
+        )}
+
+        {bill.status === "draft" && bill.bill_type === "invoice" && (
+          <button
+            type="button"
+            className="st-btn st-btn-red"
+            onClick={() => {
+              setError(null);
+              setNote(null);
+              setDeleting("");
+            }}
+          >
+            Delete draft
           </button>
         )}
 
@@ -183,6 +226,28 @@ export default function BillActions({ bill, onBill, schemes, payLater, needsCate
         }
         onConfirm={drop}
         onCancel={() => form.drop("cancelReason")}
+      />
+
+      <ConfirmModal
+        open={deleting !== null}
+        title="Delete this draft bill?"
+        confirmLabel="Delete draft"
+        cancelLabel="Keep it"
+        busy={deleteDraft.isPending}
+        error={error}
+        message={
+          <label className="bc-field">
+            <span className="bc-field__lbl">Why is this draft being deleted? (optional)</span>
+            <textarea
+              className="bc-field__in"
+              rows={2}
+              value={deleting ?? ""}
+              onChange={(e) => setDeleting(e.target.value)}
+            />
+          </label>
+        }
+        onConfirm={erase}
+        onCancel={() => setDeleting(null)}
       />
     </section>
   );

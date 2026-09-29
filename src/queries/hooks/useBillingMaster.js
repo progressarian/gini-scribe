@@ -14,6 +14,7 @@ export const billingKeys = {
   notPriced: () => ["billing", "items", "not-priced"],
   itemChoices: () => ["billing", "items", "choices"],
   priceHistory: (itemId) => ["billing", "items", itemId, "price-history"],
+  itemAliases: (itemId) => ["billing", "items", itemId, "aliases"],
   categories: (activeOnly) => ["billing", "categories", activeOnly ? "active" : "all"],
   categoryRules: (schemeCode, activeOnly) => [
     "billing",
@@ -160,6 +161,30 @@ export function useBillingPriceHistory(itemId) {
     queryFn: () => read(`${MASTER}/items/${itemId}/price-history`),
     enabled: Boolean(itemId),
   });
+}
+
+export function useBillingItemAliases(itemId) {
+  return useQuery({
+    queryKey: billingKeys.itemAliases(itemId),
+    queryFn: () => read(`${MASTER}/items/${itemId}/aliases`),
+    enabled: Boolean(itemId),
+  });
+}
+
+export function useAddBillingItemAlias() {
+  return useBillingMutation(
+    async ({ itemId, name }) =>
+      (await api.post(`${MASTER}/items/${itemId}/aliases`, { name })).data,
+    PRICE_KEYS,
+  );
+}
+
+export function useRemoveBillingItemAlias() {
+  return useBillingMutation(
+    async ({ itemId, aliasId }) =>
+      (await api.delete(`${MASTER}/items/${itemId}/aliases/${aliasId}`)).data,
+    PRICE_KEYS,
+  );
 }
 
 export function useCreateBillingItem() {

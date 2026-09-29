@@ -110,6 +110,12 @@ export default function BillLinesTable({ bill, onBill, form }) {
                 <tr key={line.id}>
                   <td data-label="Item">
                     {line.bill_name}
+                    {line.source === "lab_case" && (
+                      <>
+                        {" "}
+                        <span className="badge b-blu">from lab report</span>
+                      </>
+                    )}
                     {line.order_state && (
                       <>
                         {" "}
@@ -157,10 +163,9 @@ export default function BillLinesTable({ bill, onBill, form }) {
         confirmLabel="Remove line"
         busy={remove.isPending}
         error={error}
-        confirmDisabled={!reason.trim()}
         message={
           <label className="bc-field">
-            <span className="bc-field__lbl">Why is this line being removed?</span>
+            <span className="bc-field__lbl">Why is this line being removed? (optional)</span>
             <textarea
               className="bc-field__in"
               rows={2}

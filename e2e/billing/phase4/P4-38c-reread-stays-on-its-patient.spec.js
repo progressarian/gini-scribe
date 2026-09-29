@@ -41,11 +41,11 @@ test.describe("P4-38c the counter's re-read stays on its own patient", () => {
     });
     await bills.addLine(draft.id, { item_id: day.items.dressing }, desk, db);
     await expect.poll(() => held, { timeout: 25000 }).not.toBeNull();
-    await page.getByRole("button", { name: /^Not arrived/ }).click();
-    await page
-      .getByRole("button", { name: new RegExp(second.name) })
-      .first()
-      .click();
+    const next = page.getByRole("button", { name: new RegExp(second.name) }).first();
+    if (!(await next.isVisible())) {
+      await page.getByRole("button", { name: /^Nothing to bill yet/ }).click();
+    }
+    await next.click();
     await expect(page.getByText(`Consultation Dr Rahul Follow Up ${tag}`).first()).toBeVisible({
       timeout: 20000,
     });

@@ -1105,9 +1105,45 @@ export async function getScribeLabMarks(visitId, db = pool) {
     "Results ready",
     "Report uploaded",
   ];
+  const labelOf = (r) => (r.src === "order" ? LABEL : ACTION)[r.key];
+
+  if (refs.size >= 2) {
+    const shortTests = (tests) => {
+      const list = (tests || []).filter(Boolean);
+      if (!list.length) return "tests";
+      const shown = list.slice(0, 2).join(", ");
+      return list.length > 2 ? `${shown} +${list.length - 2}` : shown;
+    };
+    const groups = [];
+    for (const r of rows) {
+      const label = labelOf(r);
+      if (!label) continue;
+      let g = groups.find((x) => x.ref === r.ref);
+      if (!g) {
+        g = { ref: r.ref, src: r.src, tests: r.tests, reached: new Map() };
+        groups.push(g);
+      }
+      const at = new Date(r.at);
+      if (!g.reached.has(label) || g.reached.get(label) < at) g.reached.set(label, at);
+    }
+    return groups.flatMap((g, i) => {
+      const title = `${g.src === "order" ? `Order ${i + 1}` : `Lab case ${g.ref}`} · ${shortTests(g.tests)}`;
+      const done = g.reached.has("Report uploaded");
+      return order
+        .filter((label) => g.reached.has(label))
+        .map((label) => ({
+          status: `lab:${label}`,
+          label,
+          enteredAt: g.reached.get(label).toISOString(),
+          partial: false,
+          group: { key: g.ref, index: i, title, done },
+        }));
+    });
+  }
+
   const reached = new Map();
   for (const r of rows) {
-    const label = (r.src === "order" ? LABEL : ACTION)[r.key];
+    const label = labelOf(r);
     if (!label) continue;
     const byRef = reached.get(label) || new Map();
     const at = new Date(r.at);
@@ -1118,12 +1154,11 @@ export async function getScribeLabMarks(visitId, db = pool) {
     .filter((label) => reached.has(label))
     .map((label) => {
       const byRef = reached.get(label);
-      const done = byRef.size >= refs.size;
       return {
         status: `lab:${label}`,
-        label: done || refs.size < 2 ? label : `${label} (${byRef.size} of ${refs.size})`,
+        label,
         enteredAt: new Date(Math.max(...[...byRef.values()].map((d) => d.getTime()))).toISOString(),
-        partial: !done,
+        partial: false,
       };
     });
 }

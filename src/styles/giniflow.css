@@ -1306,6 +1306,12 @@
   padding-top: 8px;
   border-top: 1px dashed var(--bd);
 }
+.gf .ts-group-hd {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink2);
+  margin: 8px 0 2px;
+}
 
 .gf.gf--page .stats,
 .gf.gf--page .board-wrap {

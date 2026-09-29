@@ -109,7 +109,7 @@ const STATIONS = [
     icon: "🧾",
     name: "Billing Counter",
     desc: "Raise the bill · confirm the category · take payment · print",
-    href: "/giniflow/station/billing",
+    href: "/giniflow/station/reception?tab=bill",
     cap: CAP.BILLING_DESK,
   },
   {

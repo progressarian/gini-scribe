@@ -435,6 +435,13 @@ export async function sweep(tag) {
         AND NOT EXISTS (SELECT 1 FROM bills b WHERE b.claim_settlement_id = s.id)`,
     [settlements],
   );
+  await query(
+    `DELETE FROM lab_cases
+      WHERE patient_id = ANY($1)
+         OR appointment_id IN (SELECT id FROM appointments WHERE patient_id = ANY($1))
+         OR raw_list_json -> 'patient' ->> 'healthray_uid' ~ $2`,
+    [patients, filed],
+  );
   await query(`DELETE FROM giniflow_lab_orders WHERE visit_id = ANY($1)`, [visits]);
   await query(`DELETE FROM giniflow_visit_events WHERE visit_id = ANY($1)`, [visits]);
   await query(`DELETE FROM giniflow_visits WHERE id = ANY($1)`, [visits]);

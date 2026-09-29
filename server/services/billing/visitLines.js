@@ -1,15 +1,31 @@
 import pool from "../../config/db.js";
 import { billingVisitType } from "../../../shared/billingVisitType.js";
-import { collectiblePaise, paise } from "../../../shared/labPayment.js";
+import {
+  CLAIM_STATE,
+  collectiblePaise,
+  paise,
+  PAYMENT_STATUS,
+} from "../../../shared/labPayment.js";
 import { writeAudit } from "./audit.js";
-import { addLineIn, billLabel, openDraftIn, repriceBillIn } from "./bills.js";
+import { addLineIn, billLabel, holdConsultation, openDraftIn, repriceBillIn } from "./bills.js";
 import { addsConsultation, getSettings } from "./billingSettings.js";
 import { UNCOVERED_SQL } from "./payments.js";
+import { priceBill } from "./priceBill.js";
 import { removedDoctor } from "./removedDoctors.js";
+import { catalogTestsFor, TEST_MATCHES_SQL } from "./testMatch.js";
 import { httpError, inTransaction } from "./transaction.js";
 import { auditFields } from "./common.js";
 
 const ON_ANY_BILL = "bl.bill_id";
+
+const FIRST_BILL_AT_SQL = (visitExpr) => `LEAST(
+  (SELECT min(created_at) FROM bills WHERE visit_id = ${visitExpr}),
+  (SELECT min((da.before ->> 'created_at')::timestamptz) FROM billing_audit da
+    WHERE da.entity = 'bills' AND da.action = 'delete'
+      AND da.before ->> 'visit_id' = ${visitExpr}::text))`;
+
+const NOT_DISCARDED = (audit) =>
+  `COALESCE((${audit}.after ->> 'discarded')::boolean, FALSE) = FALSE`;
 
 const rupees = (amount) => (amount / 100).toFixed(2);
 
@@ -75,12 +91,6 @@ async function consultationItem(client, visit) {
   return rows[0] ? { ...rows[0], visit_type: visitType, chosen_doctor_id: doctorId } : null;
 }
 
-async function holdConsultation(client, visitId) {
-  await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
-    `billing-consultation:${visitId}`,
-  ]);
-}
-
 async function alreadyOnVisit(client, visitId, serviceItemId) {
   const { rows } = await client.query(
     `SELECT id FROM bill_lines WHERE visit_id = $1 AND service_item_id = $2 AND is_live LIMIT 1`,
@@ -143,8 +153,9 @@ async function consultationSettled(client, visitId) {
      UNION ALL
      SELECT 1 FROM billing_audit
       WHERE entity = 'bill_lines' AND action = 'delete'
-        AND at >= (SELECT min(created_at) FROM bills WHERE visit_id = $1)
+        AND at >= ${FIRST_BILL_AT_SQL("$1")}
         AND before ->> 'visit_id' = $1::text AND before ->> 'source' = 'visit'
+        AND ${NOT_DISCARDED("billing_audit")}
         AND NOT EXISTS (SELECT 1 FROM bills b
                          WHERE b.id::text = before ->> 'bill_id' AND b.status = 'cancelled')
      LIMIT 1`,
@@ -182,15 +193,138 @@ export async function consultationForDesk(visitId, ctx, db = pool) {
   }
 }
 
+const NO_SUGGESTION = {
+  shown: false,
+  visit_type: null,
+  suggested: null,
+  choices: [],
+  removed_doctor: null,
+};
+
+async function consultationOnVisit(db, visitId) {
+  const { rows } = await db.query(
+    `SELECT 1 FROM bill_lines l
+       JOIN service_items i ON i.id = l.service_item_id
+       JOIN bills b ON b.id = l.bill_id
+      WHERE l.visit_id = $1 AND l.is_live AND i.kind = 'consultation' AND b.status <> 'cancelled'
+      LIMIT 1`,
+    [visitId],
+  );
+  return rows.length > 0;
+}
+
+async function doctorConsultations(db, visitType) {
+  const { rows } = await db.query(
+    `SELECT i.id, i.name, i.doctor_id, d.name AS doctor_name
+       FROM service_items i JOIN doctors d ON d.id = i.doctor_id
+      WHERE i.kind = 'consultation' AND i.is_active AND i.visit_type = $1
+        AND d.is_active IS NOT FALSE
+      ORDER BY d.name, i.id`,
+    [visitType],
+  );
+  return rows;
+}
+
+async function doctorName(db, doctorId) {
+  if (!doctorId) return null;
+  const { rows } = await db.query(`SELECT name FROM doctors WHERE id = $1`, [doctorId]);
+  return rows[0]?.name ?? null;
+}
+
+export async function suggestionPrice(db, bill, choice, role) {
+  try {
+    const priced = await priceBill(
+      {
+        patientId: bill.patient_id,
+        ...(bill.appointment_id ? { appointmentId: bill.appointment_id } : {}),
+        category: bill.scheme_code,
+        date: bill.bill_date,
+        role,
+        lines: [{ item: choice.item_id, quantity: 1, doctorId: choice.doctor_id }],
+      },
+      db,
+    );
+    return priced.lines[0].patient_payable;
+  } catch (error) {
+    if (!error.status) throw error;
+    return null;
+  }
+}
+
+export async function consultationSuggestion(billId, ctx, db = pool) {
+  const { rows } = await db.query(
+    `SELECT id, visit_id, patient_id, appointment_id, scheme_code, bill_date, status, bill_type
+       FROM bills WHERE id = $1`,
+    [cleanUuid(billId, "bill")],
+  );
+  if (!rows.length) throw httpError(404, "That bill no longer exists");
+  const bill = rows[0];
+  if (bill.status !== "draft" || bill.bill_type !== "invoice" || !bill.visit_id) {
+    return NO_SUGGESTION;
+  }
+  const visit = await visitFor(db, bill.visit_id);
+  const visitType = visit.appointment_id ? billingVisitType(visit.visit_type) : null;
+  if (!visitType || (await consultationOnVisit(db, visit.id))) return NO_SUGGESTION;
+  const booked = await consultationItem(db, visit);
+  const suggested =
+    booked && !booked.removed
+      ? {
+          item_id: booked.id,
+          name: booked.name,
+          doctor_id: booked.doctor_id ?? booked.chosen_doctor_id,
+          doctor_name: await doctorName(db, booked.doctor_id ?? booked.chosen_doctor_id),
+        }
+      : null;
+  const others = (await doctorConsultations(db, visitType))
+    .filter((row) => row.id !== suggested?.item_id)
+    .map((row) => ({
+      item_id: row.id,
+      name: row.name,
+      doctor_id: row.doctor_id,
+      doctor_name: row.doctor_name,
+    }));
+  const choices = [];
+  for (const choice of suggested ? [suggested, ...others] : others) {
+    choices.push({ ...choice, price: await suggestionPrice(db, bill, choice, ctx?.role) });
+  }
+  return {
+    shown: true,
+    visit_type: visitType,
+    suggested: suggested ? choices[0] : null,
+    choices,
+    removed_doctor: booked?.removed ?? null,
+  };
+}
+
 async function itemsForTests(client, testNames) {
   const { rows } = await client.query(
-    `SELECT c.test_name, i.id, i.name
-       FROM giniflow_test_catalog c
-       JOIN service_items i ON i.test_catalog_id = c.id AND i.is_active
-      WHERE c.test_name = ANY($1::text[])`,
+    `SELECT m.test_name, i.id, i.name
+       FROM (${TEST_MATCHES_SQL("$1::text[]")}) m
+       JOIN service_items i ON i.test_catalog_id = m.catalog_id AND i.is_active`,
     [testNames],
   );
   return new Map(rows.map((row) => [row.test_name, row]));
+}
+
+async function adoptLabCaseLine(client, bill, itemId, labOrderId, ctx) {
+  if (!labOrderId) return false;
+  const { rows } = await client.query(
+    `UPDATE bill_lines SET source = 'lab_order', lab_order_id = $3, updated_at = NOW(),
+            updated_by = $4
+      WHERE bill_id = $1 AND service_item_id = $2 AND is_live AND source = 'lab_case'
+      RETURNING id`,
+    [bill.id, itemId, labOrderId, ctx?.actorId ?? null],
+  );
+  if (!rows.length) return false;
+  await writeAudit(client, {
+    entity: "bill_lines",
+    entityId: rows[0].id,
+    action: "update",
+    before: { source: "lab_case", lab_order_id: null },
+    after: { source: "lab_order", lab_order_id: labOrderId, bill_no: bill.bill_no },
+    ...auditFields(ctx),
+  });
+  return true;
 }
 
 export async function linesForOrder(visitId, { labOrderId, testNames = [] } = {}, ctx, db = pool) {
@@ -214,6 +348,7 @@ export async function linesForOrder(visitId, { labOrderId, testNames = [] } = {}
           await inTransaction(async (client) => {
             const bill = await openDraftIn(client, visitId, ctx);
             billId = bill.id;
+            if (await adoptLabCaseLine(client, bill, item.id, labOrderId, ctx)) return;
             await addLineIn(
               client,
               bill,
@@ -238,14 +373,92 @@ export async function linesForOrder(visitId, { labOrderId, testNames = [] } = {}
   }
 }
 
+export const REMOVED_BY_DESK_SQL = (visitExpr, itemExpr) => `EXISTS (
+  SELECT 1 FROM billing_audit ra
+   WHERE ra.entity = 'bill_lines' AND ra.action = 'delete'
+     AND ra.at >= ${FIRST_BILL_AT_SQL(visitExpr)}
+     AND ra.before ->> 'visit_id' = ${visitExpr}::text
+     AND ra.before ->> 'service_item_id' = ${itemExpr}::text
+     AND ${NOT_DISCARDED("ra")}
+     AND NOT EXISTS (SELECT 1 FROM bills rb
+                      WHERE rb.id::text = ra.before ->> 'bill_id' AND rb.status = 'cancelled'))`;
+
+const sqlText = (values) => values.map((value) => `'${value}'`).join(", ");
+
+const SETTLED_AT_RECEPTION = `(o.amount_paid > 0
+  OR o.claim_state IN (${sqlText([CLAIM_STATE.SUBMITTED, CLAIM_STATE.APPROVED])})
+  OR (o.amount_total > 0 AND o.payment_status IN (${sqlText([
+    PAYMENT_STATUS.PAID,
+    PAYMENT_STATUS.CLAIM_APPROVED,
+    PAYMENT_STATUS.CLAIM_SUBMITTED,
+  ])})))`;
+
+async function testsToPrefill(client, visitId) {
+  const { rows } = await client.query(
+    `WITH ordered AS (
+       SELECT o.id AS order_id, t.test_name
+         FROM giniflow_lab_orders o
+         JOIN giniflow_lab_order_tests t ON t.lab_order_id = o.id
+        WHERE o.visit_id = $1 AND t.status <> 'cancelled' AND NOT ${SETTLED_AT_RECEPTION})
+     SELECT DISTINCT ON (i.id) d.order_id, d.test_name, i.id AS item_id
+       FROM ordered d
+       JOIN (${TEST_MATCHES_SQL("ARRAY(SELECT test_name FROM ordered)")}) m
+         ON m.test_name = d.test_name
+       JOIN service_items i ON i.test_catalog_id = m.catalog_id AND i.is_active
+      WHERE NOT EXISTS (SELECT 1 FROM bill_lines l JOIN bills lb ON lb.id = l.bill_id
+                         WHERE l.visit_id = $1 AND l.service_item_id = i.id AND l.is_live
+                           AND NOT (l.source = 'lab_case' AND lb.status = 'draft'))
+        AND NOT ${REMOVED_BY_DESK_SQL("$1", "i.id")}
+      ORDER BY i.id, d.order_id, d.test_name`,
+    [visitId],
+  );
+  return rows;
+}
+
+const byOrder = (rows) =>
+  rows.reduce((orders, row) => {
+    orders.set(row.order_id, [...(orders.get(row.order_id) ?? []), row.test_name]);
+    return orders;
+  }, new Map());
+
+export async function testsForDesk(visitId, ctx, db = pool) {
+  try {
+    return await inTransaction(async (client) => {
+      const id = cleanUuid(visitId, "visit");
+      await client.query(`SELECT id FROM giniflow_visits WHERE id = $1 FOR NO KEY UPDATE`, [id]);
+      if (!(await testsToPrefill(client, id)).length) return { ok: true, added: [] };
+      await openDraftIn(client, id, ctx);
+      await client.query(
+        `SELECT id FROM giniflow_lab_orders WHERE visit_id = $1 ORDER BY id FOR UPDATE`,
+        [id],
+      );
+      const added = [];
+      const skipped = [];
+      for (const [labOrderId, testNames] of byOrder(await testsToPrefill(client, id))) {
+        const result = await linesForOrder(id, { labOrderId, testNames }, ctx, client);
+        added.push(...result.added);
+        skipped.push(...(result.skipped ?? []));
+      }
+      return { ok: true, added, skipped };
+    }, db);
+  } catch (error) {
+    return report(`no test lines at the counter for visit ${visitId}`, error);
+  }
+}
+
 export async function notPricedForVisit(visitId, db = pool) {
   const { rows } = await db.query(
-    `SELECT DISTINCT t.test_name
-       FROM giniflow_lab_orders o
-       JOIN giniflow_lab_order_tests t ON t.lab_order_id = o.id
-       LEFT JOIN giniflow_test_catalog c ON c.test_name = t.test_name
-       LEFT JOIN service_items i ON i.test_catalog_id = c.id AND i.is_active
-      WHERE o.visit_id = $1 AND i.id IS NULL
+    `WITH ordered AS (
+       SELECT DISTINCT t.test_name
+         FROM giniflow_lab_orders o
+         JOIN giniflow_lab_order_tests t ON t.lab_order_id = o.id
+        WHERE o.visit_id = $1)
+     SELECT o.test_name
+       FROM ordered o
+       LEFT JOIN (${TEST_MATCHES_SQL("ARRAY(SELECT test_name FROM ordered)")}) m
+         ON m.test_name = o.test_name
+       LEFT JOIN service_items i ON i.test_catalog_id = m.catalog_id AND i.is_active
+      WHERE i.id IS NULL
       ORDER BY 1`,
     [cleanUuid(visitId, "visit")],
   );
@@ -285,7 +498,8 @@ export async function refuseOrderOnBill(client, labOrderId) {
 
 export async function releaseOrderLines(client, labOrderId, testNames = null, ctx = null) {
   const { rows } = await client.query(
-    `SELECT l.id, l.bill_id, l.bill_name, l.is_live, b.status, b.bill_no, c.test_name
+    `SELECT l.id, l.bill_id, l.bill_name, l.is_live, b.status, b.bill_no, c.test_name,
+            i.test_catalog_id
        FROM bill_lines l
        JOIN bills b ON b.id = l.bill_id
        JOIN service_items i ON i.id = l.service_item_id
@@ -293,7 +507,12 @@ export async function releaseOrderLines(client, labOrderId, testNames = null, ct
       WHERE l.lab_order_id = $1`,
     [labOrderId],
   );
-  const going = testNames ? rows.filter((row) => testNames.includes(row.test_name)) : rows;
+  const matched = testNames
+    ? new Set([...(await catalogTestsFor(client, testNames)).values()].filter(Boolean))
+    : null;
+  const going = testNames
+    ? rows.filter((row) => testNames.includes(row.test_name) || matched.has(row.test_catalog_id))
+    : rows;
   const live = going.filter((row) => row.is_live);
   const billed = live.filter((row) => row.status !== "draft");
   if (billed.length) {

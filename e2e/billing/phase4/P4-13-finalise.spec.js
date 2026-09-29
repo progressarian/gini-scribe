@@ -3,6 +3,7 @@ import { getPool, one, query } from "../../helpers/db.mjs";
 import { USERS } from "../../fixtures/data.mjs";
 import { assertTestDatabase } from "../../setup/guard.mjs";
 import {
+  autoConsultation,
   desk,
   discountCode,
   extraVisit,
@@ -62,7 +63,12 @@ test.describe.serial("P4-13 finalise", () => {
   });
 
   test("1. a whole visit: check in, two tests, an item, a code, a category, a final bill", async () => {
-    await reception.markArrived(ids.visit, USERS.reception.id, db);
+    const autoBefore = await autoConsultation(true);
+    try {
+      await reception.markArrived(ids.visit, USERS.reception.id, db);
+    } finally {
+      await autoConsultation(autoBefore);
+    }
     const order = await labOrder(ids, [ids.hba1cName, ids.abiName]);
     const raised = await visitLines.linesForOrder(
       ids.visit,

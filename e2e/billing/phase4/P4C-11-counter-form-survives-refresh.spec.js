@@ -110,9 +110,12 @@ test.describe.serial("P4C-11 the counter form survives a refresh", () => {
   });
 
   test.afterAll(async () => {
-    await closeShifts();
-    await setPayLater(payLaterBefore).catch(() => {});
-    await tearDown(ids);
+    try {
+      await setPayLater(payLaterBefore).catch(() => {});
+      await tearDown(ids);
+    } finally {
+      await closeShifts();
+    }
   });
 
   test("1. the shift's opening cash survives a reload, and is cleared once the shift opens", async ({
@@ -234,7 +237,7 @@ test.describe.serial("P4C-11 the counter form survives a refresh", () => {
 
     const untouched = page.getByRole("button", { name: `P4 First ${tag}` });
     if (!(await untouched.isVisible())) {
-      await page.getByRole("button", { name: /^Not arrived/ }).click();
+      await page.getByRole("button", { name: /^Nothing to bill yet/ }).click();
     }
     await untouched.click();
     await expect(page.getByRole("heading", { name: `P4 First ${tag}` })).toBeVisible();
@@ -242,7 +245,7 @@ test.describe.serial("P4C-11 the counter form survives a refresh", () => {
 
     const other = page.getByRole("button", { name: `P4 Second ${tag}` });
     if (!(await other.isVisible())) {
-      await page.getByRole("button", { name: /^Not arrived/ }).click();
+      await page.getByRole("button", { name: /^Nothing to bill yet/ }).click();
     }
     await other.click();
     await expect(page.getByRole("heading", { name: `P4 Second ${tag}` })).toBeVisible();

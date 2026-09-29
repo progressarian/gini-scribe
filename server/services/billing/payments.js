@@ -1,4 +1,5 @@
 import pool from "../../config/db.js";
+import { markDraftSaved } from "./draftSaves.js";
 import {
   CLAIM_STATE,
   collectiblePaise,
@@ -13,6 +14,7 @@ import { nextNumber, seriesFor } from "./billNumber.js";
 import { cashOutShift, DRAWER_MODE, openShiftIdFor, PAYMENT_MODES } from "./cashShifts.js";
 import { DUE_BILLS, DUE_DAYS, DUE_MONEY, DUE_OUTSTANDING, shapeDue } from "./dues.js";
 import { httpError, inTransaction } from "./transaction.js";
+import { TEST_MATCHES_SQL } from "./testMatch.js";
 import {
   auditFields,
   cleanDate,
@@ -279,15 +281,19 @@ async function lockOrder(client, orderId) {
 
 export const UNCOVERED_SQL = (billParam, orderExpr) => `
   COALESCE((SELECT SUM(t.price) FROM (
-             SELECT t.test_name, t.price,
-                    ROW_NUMBER() OVER (PARTITION BY t.test_name ORDER BY t.price, t.id) AS nth
-               FROM giniflow_lab_order_tests t WHERE t.lab_order_id = ${orderExpr}) t
+             SELECT t.price, m.catalog_id,
+                    ROW_NUMBER() OVER (PARTITION BY COALESCE(m.catalog_id::text, t.test_name)
+                                       ORDER BY t.price, t.id) AS nth
+               FROM giniflow_lab_order_tests t
+               LEFT JOIN (${TEST_MATCHES_SQL(`ARRAY(SELECT x.test_name FROM giniflow_lab_order_tests x
+                                                WHERE x.lab_order_id = ${orderExpr})`)}) m
+                 ON m.test_name = t.test_name
+              WHERE t.lab_order_id = ${orderExpr}) t
              WHERE t.nth > COALESCE((
                SELECT SUM(bl.quantity) FROM bill_lines bl
                  JOIN service_items si ON si.id = bl.service_item_id
-                 JOIN giniflow_test_catalog tc ON tc.id = si.test_catalog_id
                 WHERE bl.bill_id = ${billParam} AND bl.lab_order_id = ${orderExpr}
-                  AND bl.is_live AND tc.test_name = t.test_name), 0)), 0)`;
+                  AND bl.is_live AND si.test_catalog_id = t.catalog_id), 0)), 0)`;
 
 async function uncoveredPaise(client, billId, orderId) {
   const { rows } = await client.query(`SELECT ${UNCOVERED_SQL("$1", "$2")} AS uncovered`, [
@@ -601,6 +607,7 @@ export async function takePayments(billId, input, ctx, db = pool) {
       });
     }
     const opened = await settleTestOrders(client, after, ctx);
+    if (after.status === "draft") await markDraftSaved(client, after.id);
     const money = await moneyOn(client, after.id);
     return {
       bill_id: after.id,

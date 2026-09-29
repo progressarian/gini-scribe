@@ -3,6 +3,7 @@ import { useCreateBillingItem, useUpdateBillingItem } from "../../queries/hooks/
 import { codeTyped, digitsTyped, errorOf, moneyTyped } from "./format";
 import useDialog from "./useDialog";
 import BillDialogLayer from "./BillDialogLayer";
+import AlsoBilledAs from "./AlsoBilledAs";
 
 function Field({ label, hint, className = "", children }) {
   const id = useId();
@@ -357,6 +358,7 @@ export default function ItemDialog({
                   </select>
                 </Field>
               </div>
+              {editing && item.kind === "test" ? <AlsoBilledAs item={item} /> : null}
             </>
           ) : null}
 

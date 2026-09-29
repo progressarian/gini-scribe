@@ -32,10 +32,11 @@ function useVisitMutation(mutationFn) {
   });
 }
 
-export function useCounterPatients(q = "") {
+export function useCounterPatients(q = "", { enabled = true } = {}) {
   return useQuery({
     queryKey: [...COUNTER_PATIENTS, q],
     queryFn: () => read(`${DESK}/counter/patients`, q ? { q } : undefined),
+    enabled,
     refetchInterval: pollInterval,
     refetchIntervalInBackground: false,
     placeholderData: (prev) => prev,
@@ -98,20 +99,55 @@ export function usePatientSchemeList() {
   });
 }
 
-export function useDeskSettings() {
+export function useDeskSettings({ enabled = true } = {}) {
   return useQuery({
     queryKey: billingKeys.deskSettings(),
     queryFn: () => read(`${DESK}/desk-settings`),
+    enabled,
     staleTime: 5 * 60 * 1000,
   });
 }
 
-export function useItemSearch(q) {
+export const ITEM_SEARCH_MIN = 2;
+export const ITEM_SEARCH_LIMIT = 20;
+
+export function useItemSearch(q, visitId) {
   return useQuery({
-    queryKey: billingKeys.deskItems(q),
-    queryFn: () => read(`${DESK}/items/search`, q ? { q } : undefined),
+    queryKey: [...billingKeys.deskItems(q), visitId ?? null],
+    queryFn: () =>
+      read(`${DESK}/items/search`, {
+        q,
+        limit: ITEM_SEARCH_LIMIT,
+        ...(visitId ? { visit_id: visitId } : {}),
+      }),
+    enabled: q.length >= ITEM_SEARCH_MIN,
     staleTime: 60 * 1000,
   });
+}
+
+export function useConsultationSuggestion(billId, version, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: [...billingKeys.bill(billId), "consultation-suggestion", version ?? 0],
+    queryFn: () => read(`${DESK}/consultation-suggestion`, { bill_id: billId }),
+    enabled: !!billId && enabled,
+  });
+}
+
+export function useLabCaseTests(billId, version, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: [...billingKeys.bill(billId), "lab-case-tests", version ?? 0],
+    queryFn: () => read(`${DESK}/lab-case-tests`, { bill_id: billId }),
+    enabled: !!billId && enabled,
+    refetchInterval: 60 * 1000,
+    refetchIntervalInBackground: false,
+  });
+}
+
+export function useAddLabCaseTests() {
+  return useVisitMutation(
+    async ({ billId, itemIds }) =>
+      (await api.post(`${DESK}/bills/${billId}/lab-case-lines`, { item_ids: itemIds })).data,
+  );
 }
 
 export function useAddBillLine() {
@@ -145,6 +181,25 @@ export function useCancelBill() {
   return useVisitMutation(
     async ({ billId, reason }) =>
       (await api.post(`${DESK}/bills/${billId}/cancel`, { reason })).data,
+  );
+}
+
+export function useDeleteDraft() {
+  return useVisitMutation(
+    async ({ billId, reason }) =>
+      (await api.post(`${DESK}/bills/${billId}/delete-draft`, { reason })).data,
+  );
+}
+
+export function useSaveDraft() {
+  return useVisitMutation(
+    async ({ billId }) => (await api.post(`${DESK}/bills/${billId}/save-draft`, {})).data,
+  );
+}
+
+export function useDiscardDraft() {
+  return useVisitMutation(
+    async ({ billId }) => (await api.post(`${DESK}/bills/${billId}/discard-draft`, {})).data,
   );
 }
 

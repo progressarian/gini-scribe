@@ -97,13 +97,7 @@ test.describe.serial("P4-10 add, change and remove lines", () => {
     expect(Number(stored.lines) * 100).toBe(after.totals.payable);
   });
 
-  test("5. removing a line needs a reason, and is audited", async () => {
-    await refused(
-      bills.removeLine(ids.bill, ids.braceLine, {}, desk, db),
-      400,
-      /why/i,
-      "a removal with no reason",
-    );
+  test("5. removing a line records its reason when one is given, and is audited", async () => {
     const bill = await bills.removeLine(
       ids.bill,
       ids.braceLine,

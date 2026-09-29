@@ -104,11 +104,14 @@ test.describe.serial("P4-32 totals and payment", () => {
   });
 
   test.afterAll(async () => {
-    await closeShifts();
-    await restoreGst();
-    if (autoBefore !== undefined) await autoConsultation(autoBefore);
-    await tearDown(ids);
-    await setPayLater(payLaterBefore).catch(() => {});
+    try {
+      await restoreGst();
+      if (autoBefore !== undefined) await autoConsultation(autoBefore);
+      await tearDown(ids);
+      await setPayLater(payLaterBefore).catch(() => {});
+    } finally {
+      await closeShifts();
+    }
   });
 
   test("1. every total on screen is the total the server holds", async ({ page }) => {
@@ -289,7 +292,7 @@ test.describe.serial("P4-32 totals and payment", () => {
 
       const untouched = page.getByRole("button", { name: `P4 Untouched ${tag}` });
       if (!(await untouched.isVisible())) {
-        await page.getByRole("button", { name: /^Not arrived/ }).click();
+        await page.getByRole("button", { name: /^Nothing to bill yet/ }).click();
       }
       await untouched.click();
       await expect(page.getByRole("heading", { name: `P4 Untouched ${tag}` })).toBeVisible();

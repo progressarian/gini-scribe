@@ -1823,3 +1823,49 @@
   font-size: 12.5px;
   color: var(--ui-muted);
 }
+.fset.bill-ui .bill-aliases__about {
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+.fset.bill-ui .bill-aliases {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+}
+.fset.bill-ui .bill-aliases__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--ui-line);
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+.fset.bill-ui .bill-aliases__add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.fset.bill-ui .bill-aliases__add label {
+  flex: 1 1 100%;
+  font-size: 12px;
+  font-weight: 600;
+}
+.fset.bill-ui .bill-aliases__add .jb-assign {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.fset.bill-ui .bill-np-link {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.fset.bill-ui .bill-np-link .jb-assign {
+  flex: 1 1 160px;
+  min-width: 0;
+}

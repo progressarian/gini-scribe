@@ -349,11 +349,13 @@ test.describe.serial("P4C-10 dues", () => {
     const link = page.getByRole("link", { name: `Take payment on bill ${made.D.bill_no}` });
     await expect(link).toHaveAttribute(
       "href",
-      `/giniflow/station/billing?visit=${made.D.visit_id}&bill=${made.D.id}`,
+      `/giniflow/station/reception?tab=bill&visit=${made.D.visit_id}&bill=${made.D.id}`,
     );
     await link.click();
     await expect(page).toHaveURL(
-      new RegExp(`/giniflow/station/billing\\?visit=${made.D.visit_id}&bill=${made.D.id}$`),
+      new RegExp(
+        `/giniflow/station/reception\\?tab=bill&visit=${made.D.visit_id}&bill=${made.D.id}$`,
+      ),
     );
     await expect(page.getByText(made.D.bill_no).first()).toBeVisible();
     await expect(page.getByRole("heading", { name: `P4 DuesAncient ${tag}` })).toBeVisible();

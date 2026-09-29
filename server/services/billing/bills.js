@@ -23,9 +23,11 @@ import {
   settleTestOrders,
 } from "./payments.js";
 import { priceBill } from "./priceBill.js";
+import { visitConsultationType } from "./serviceItems.js";
 import { refuseRemoved, removedDoctor } from "./removedDoctors.js";
 import { httpError, inTransaction } from "./transaction.js";
 import { auditFields, hasField, INT_MAX, lockRow, readNumber, wholeNumber } from "./common.js";
+import { markDraftSaved } from "./draftSaves.js";
 
 const BILL_COLUMNS = `id, bill_no, series, fy, bill_type, original_bill_id, patient_id, visit_id,
   appointment_id,
@@ -33,7 +35,7 @@ const BILL_COLUMNS = `id, bill_no, series, fy, bill_type, original_bill_id, pati
   scheme_ref_enc, referral_no_enc, referral_doc_id, patient_age, pay_later,
   actual_amount, discount_amount, tax_amount, patient_payable, claim_amount,
   adjustment_amount, round_off, paid_amount, claim_status, version,
-  finalised_by, finalised_at, cancelled_by, cancelled_at, cancel_reason, created_at`;
+  finalised_by, finalised_at, cancelled_by, cancelled_at, cancel_reason, created_at, saved_at`;
 
 const SPEC = { table: "bills", noun: "bill", columns: BILL_COLUMNS };
 
@@ -43,7 +45,7 @@ const LINE_COLUMNS = `id, bill_id, visit_id, line_no, service_item_id, source, l
   payable_discount, bill_discount, tax_code, sac_hsn, tax_rate_pct, taxable, cgst, sgst,
   payment_rule_id, payment_rule, patient_payable, claim_amount, adjustment_amount`;
 
-export const LINE_SOURCES = ["visit", "lab_order", "added"];
+export const LINE_SOURCES = ["visit", "lab_order", "added", "lab_case"];
 
 export const TEXT_MAX = 1000;
 export const NUMBER_TEXT_MAX = 60;
@@ -81,6 +83,11 @@ function cleanReason(value, message) {
   if (text.length > TEXT_MAX)
     throw httpError(400, `${message} — keep it under ${TEXT_MAX} letters`);
   return text;
+}
+
+function optionalReason(value, message) {
+  const text = typeof value === "string" ? value.trim() : "";
+  return text ? cleanReason(text, message) : null;
 }
 
 function cleanCodeText(value) {
@@ -188,6 +195,8 @@ function shapeBill(row, lines = [], extra = {}) {
     pay_later: row.pay_later,
     claim_status: row.claim_status,
     version: row.version,
+    saved: row.saved_at != null,
+    saved_at: row.saved_at,
     totals: {
       actual: paise(row.actual_amount),
       discount: paise(row.discount_amount),
@@ -495,6 +504,12 @@ async function lockVisitBills(client, visitId) {
   await client.query(`SELECT id FROM bills WHERE visit_id = $1 ORDER BY id FOR UPDATE`, [visitId]);
 }
 
+export async function holdConsultation(client, visitId) {
+  await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
+    `billing-consultation:${visitId}`,
+  ]);
+}
+
 export async function openDraftIn(client, visitId, ctx) {
   const visit = await visitFacts(client, visitId);
   await lockVisitBills(client, visitId);
@@ -514,8 +529,9 @@ export async function openDraftIn(client, visitId, ctx) {
   try {
     const { rows } = await client.query(
       `INSERT INTO bills (patient_id, visit_id, appointment_id, bill_date, scheme_code,
-                          scheme_label, payer_name, patient_age, created_by, updated_by)
-       VALUES ($1, $2, $3, $4::date, $5, $6, $7, $8, $9, $9)
+                          scheme_label, payer_name, patient_age, created_by, updated_by, saved_at)
+       VALUES ($1, $2, $3, $4::date, $5, $6, $7, $8, $9, $9,
+               CASE WHEN $10::boolean THEN NULL ELSE NOW() END)
        RETURNING ${BILL_COLUMNS}`,
       [
         visit.patient_id,
@@ -527,6 +543,7 @@ export async function openDraftIn(client, visitId, ctx) {
         category.payer,
         resolution.age,
         ctx?.actorId ?? null,
+        Boolean(ctx?.unsavedDraft),
       ],
     );
     await client.query("RELEASE SAVEPOINT billing_draft");
@@ -565,10 +582,17 @@ async function removedDoctorOfVisit(client, visitId) {
   return removedDoctor(visit.appointment_doctor_id ?? visit.assigned_doctor_id, client);
 }
 
+async function keepFirstSnapshot(client, bill) {
+  if (!bill.saved_at) return;
+  const { rows } = await client.query(`SELECT saved_snapshot FROM bills WHERE id = $1`, [bill.id]);
+  if (!rows[0].saved_snapshot) await markDraftSaved(client, bill.id);
+}
+
 export async function openDraft(visitId, ctx, db = pool) {
   const id = cleanUuid(visitId, "visit");
   return inTransaction(async (client) => {
     const bill = await openDraftIn(client, id, ctx);
+    await keepFirstSnapshot(client, bill);
     const resolution = await resolutionFor(client, {
       patientId: bill.patient_id,
       appointmentId: bill.appointment_id,
@@ -629,7 +653,7 @@ export async function listVisitBills(visitId, db = pool) {
 
 async function itemFor(client, itemId) {
   const { rows } = await client.query(
-    `SELECT id, name, kind, is_active, allow_quantity, max_quantity FROM service_items
+    `SELECT id, name, kind, visit_type, is_active, allow_quantity, max_quantity FROM service_items
       WHERE id = $1`,
     [itemId],
   );
@@ -666,6 +690,15 @@ async function approvalFor(client, bill, item, repeatRequestId, ctx) {
   return approval.id;
 }
 
+const VISIT_LABELS = { New: "New Patient", "Follow Up": "Follow Up" };
+
+async function refuseOtherConsultation(client, bill, item) {
+  if (item.kind !== "consultation" || !item.visit_type) return;
+  const wanted = await visitConsultationType(bill.visit_id, client);
+  if (!wanted || wanted === item.visit_type) return;
+  throw httpError(409, `This is a ${VISIT_LABELS[wanted]} visit — add the ${wanted} consultation`);
+}
+
 async function refuseRemovedConsultant(client, bill, itemId, doctorId) {
   const { rows } = await client.query(
     `SELECT d.id, d.name, i.name AS item
@@ -700,6 +733,7 @@ export async function addLineIn(client, bill, input, ctx) {
     throw httpError(400, "A test-order line must name its order, and no other line may");
   }
   const item = await itemFor(client, itemId);
+  await refuseOtherConsultation(client, bill, item);
   const repeatRequestId = await approvalFor(
     client,
     bill,
@@ -823,26 +857,30 @@ export async function changeQuantity(billId, lineId, input, ctx, db = pool) {
   }, db);
 }
 
+async function dropLineIn(client, bill, before, after, ctx) {
+  if (await lastLineOfOrder(client, before)) {
+    await releaseTestOrders(client, bill, ctx, [before.lab_order_id]);
+  }
+  await client.query(`DELETE FROM bill_line_discounts WHERE bill_line_id = $1`, [before.id]);
+  await client.query(`DELETE FROM bill_lines WHERE id = $1`, [before.id]);
+  await writeAudit(client, {
+    entity: "bill_lines",
+    entityId: before.id,
+    action: "delete",
+    before,
+    after,
+    ...auditFields(ctx),
+  });
+}
+
 export async function removeLine(billId, lineId, input, ctx, db = pool) {
-  const reason = cleanReason(input?.reason, "Say why this line is being removed");
+  const reason = optionalReason(input?.reason, "The reason for removing this line");
   return inTransaction(async (client) => {
     const bill = assertDraft(await lockBill(client, billId));
     const before = await lineOf(client, bill, lineId);
-    if (await lastLineOfOrder(client, before)) {
-      await releaseTestOrders(client, bill, ctx, [before.lab_order_id]);
-    }
-    await client.query(`DELETE FROM bill_line_discounts WHERE bill_line_id = $1`, [before.id]);
-    await client.query(`DELETE FROM bill_lines WHERE id = $1`, [before.id]);
+    await dropLineIn(client, bill, before, { removed: true, reason }, ctx);
     const saved = await reprice(client, bill, await billCodes(client, bill.id), ctx);
     await resettleTestOrders(client, saved.bill, ctx);
-    await writeAudit(client, {
-      entity: "bill_lines",
-      entityId: before.id,
-      action: "delete",
-      before,
-      after: { removed: true, reason },
-      ...auditFields(ctx),
-    });
     return withLines(client, saved.bill, { codes: await billCodes(client, bill.id) });
   }, db);
 }
@@ -1170,5 +1208,200 @@ export async function cancelBill(billId, input, ctx, db = pool) {
       ...auditFields(ctx),
     });
     return withLines(client, rows[0]);
+  }, db);
+}
+
+async function refusePendingRequest(client, bill) {
+  const { rows } = await client.query(
+    `SELECT id FROM billing_requests WHERE bill_id = $1 AND status = 'pending' LIMIT 1`,
+    [bill.id],
+  );
+  if (rows.length) {
+    throw httpError(
+      409,
+      "A desk request on this draft is waiting for an admin — wait for the answer before deleting it",
+    );
+  }
+}
+
+async function detachRequests(client, bill, ctx) {
+  const { rows } = await client.query(
+    `UPDATE billing_requests SET bill_id = NULL, updated_at = NOW(), updated_by = $2
+      WHERE bill_id = $1
+      RETURNING id`,
+    [bill.id, ctx?.actorId ?? null],
+  );
+  for (const row of rows) {
+    await writeAudit(client, {
+      entity: "billing_requests",
+      entityId: row.id,
+      action: "update",
+      before: { bill_id: bill.id },
+      after: { bill_id: null, draft_deleted: true },
+      ...auditFields(ctx),
+    });
+  }
+}
+
+async function lockDraftOfVisit(client, id) {
+  const { rows: found } = await client.query(`SELECT visit_id FROM bills WHERE id = $1`, [id]);
+  if (!found.length) throw httpError(404, "That bill no longer exists");
+  const visitId = found[0].visit_id;
+  if (visitId) {
+    await holdConsultation(client, visitId);
+    await client.query(`SELECT id FROM giniflow_visits WHERE id = $1 FOR NO KEY UPDATE`, [visitId]);
+    await lockVisitBills(client, visitId);
+  }
+  const bill = assertDraft(await lockBill(client, id));
+  if (bill.bill_type !== "invoice") throw httpError(409, "Only a draft bill can be deleted");
+  return bill;
+}
+
+async function deleteDraftIn(client, bill, after, ctx) {
+  if ((await takenOn(client, bill.id)) > 0) {
+    throw httpError(409, "Money was taken on this draft — finalise it or refund it first");
+  }
+  await refusePendingRequest(client, bill);
+  const released = await releaseTestOrders(client, bill, ctx);
+  const { rows: lines } = await client.query(
+    `SELECT ${LINE_COLUMNS} FROM bill_lines WHERE bill_id = $1 ORDER BY line_no, id FOR UPDATE`,
+    [bill.id],
+  );
+  const lineIds = lines.map((line) => line.id);
+  await client.query(`DELETE FROM bill_line_discounts WHERE bill_line_id = ANY($1::uuid[])`, [
+    lineIds,
+  ]);
+  await client.query(`DELETE FROM bill_lines WHERE bill_id = $1`, [bill.id]);
+  for (const line of lines) {
+    await writeAudit(client, {
+      entity: "bill_lines",
+      entityId: line.id,
+      action: "delete",
+      before: line,
+      after: { removed: true, ...after },
+      ...auditFields(ctx),
+    });
+  }
+  await resettleTestOrders(client, bill, ctx);
+  await detachRequests(client, bill, ctx);
+  await client.query(`DELETE FROM bills WHERE id = $1`, [bill.id]);
+  await writeAudit(client, {
+    entity: SPEC.table,
+    entityId: bill.id,
+    action: "delete",
+    before: bill,
+    after: { deleted: true, ...after, lines: lines.length },
+    ...auditFields(ctx),
+  });
+  return {
+    deleted: true,
+    bill_id: bill.id,
+    visit_id: bill.visit_id,
+    removed: lines.map((line) => line.bill_name),
+    released: released.length,
+  };
+}
+
+export async function deleteDraft(billId, input, ctx, db = pool) {
+  const reason = optionalReason(input?.reason, "The reason for deleting this draft");
+  const id = cleanUuid(billId, "bill");
+  return inTransaction(async (client) => {
+    const bill = await lockDraftOfVisit(client, id);
+    return deleteDraftIn(client, bill, { reason }, ctx);
+  }, db);
+}
+
+export async function saveDraft(billId, ctx, db = pool) {
+  return inTransaction(async (client) => {
+    const bill = assertDraft(await lockBill(client, billId));
+    await markDraftSaved(client, bill.id);
+    const { rows } = await client.query(`SELECT ${BILL_COLUMNS} FROM bills WHERE id = $1`, [
+      bill.id,
+    ]);
+    return withLines(client, rows[0], { codes: await billCodes(client, bill.id) });
+  }, db);
+}
+
+const snapshotKey = (line) =>
+  [line.service_item_id, line.source, line.lab_order_id ?? "", line.doctor_id ?? ""].join("|");
+
+const DISCARDED = { discarded: true, reason: "Discarded without saving" };
+
+async function restoreSavedIn(client, bill, ctx) {
+  const { rows: stored } = await client.query(`SELECT saved_snapshot FROM bills WHERE id = $1`, [
+    bill.id,
+  ]);
+  const snapshot = stored[0].saved_snapshot;
+  if (!snapshot) return bill;
+  await refusePendingRequest(client, bill);
+  const wanted = [...snapshot.lines];
+  for (const line of await liveLines(client, bill.id)) {
+    const at = wanted.findIndex((kept) => snapshotKey(kept) === snapshotKey(line));
+    if (at === -1) {
+      await dropLineIn(client, bill, line, { removed: true, ...DISCARDED }, ctx);
+      continue;
+    }
+    const [kept] = wanted.splice(at, 1);
+    if (Number(line.quantity) !== kept.quantity) {
+      await client.query(
+        `UPDATE bill_lines SET quantity = $2, listed_actual = ROUND($2 * rate, 2),
+            updated_at = NOW(), updated_by = $3
+          WHERE id = $1`,
+        [line.id, kept.quantity, ctx?.actorId ?? null],
+      );
+    }
+  }
+  const { header } = snapshot;
+  const { rows: restored } = await client.query(
+    `UPDATE bills SET scheme_code = $2, scheme_label = $3, payer_name = $4, scheme_ref_enc = $5,
+        referral_no_enc = $6, referral_doc_id = $7, updated_at = NOW(), updated_by = $8
+      WHERE id = $1 RETURNING ${BILL_COLUMNS}`,
+    [
+      bill.id,
+      header.scheme_code,
+      header.scheme_label,
+      header.payer_name,
+      header.scheme_ref_enc,
+      header.referral_no_enc,
+      header.referral_doc_id,
+      ctx?.actorId ?? null,
+    ],
+  );
+  let current = restored[0];
+  for (const line of wanted) {
+    const added = await addLineIn(
+      client,
+      current,
+      {
+        item_id: line.service_item_id,
+        quantity: line.quantity,
+        source: line.source,
+        lab_order_id: line.lab_order_id,
+        doctor_id: line.doctor_id,
+      },
+      ctx,
+    );
+    current = added.bill;
+  }
+  const saved = await reprice(client, current, snapshot.codes, ctx);
+  await resettleTestOrders(client, saved.bill, ctx);
+  await writeAudit(client, {
+    entity: SPEC.table,
+    entityId: bill.id,
+    action: "update",
+    before: bill,
+    after: { ...saved.bill, ...DISCARDED },
+    ...auditFields(ctx),
+  });
+  return saved.bill;
+}
+
+export async function discardDraft(billId, ctx, db = pool) {
+  const id = cleanUuid(billId, "bill");
+  return inTransaction(async (client) => {
+    const bill = await lockDraftOfVisit(client, id);
+    if (!bill.saved_at) return deleteDraftIn(client, bill, DISCARDED, ctx);
+    const restored = await restoreSavedIn(client, bill, ctx);
+    return withLines(client, restored, { codes: await billCodes(client, bill.id) });
   }, db);
 }

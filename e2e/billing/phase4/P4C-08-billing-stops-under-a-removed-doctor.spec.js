@@ -565,7 +565,8 @@ test.describe.serial("P4C-08 billing stops under a removed doctor", () => {
       [ours.gone],
     );
     expect(audit.reason).toBe("Left the hospital");
-    const other = await draftOf(ours.visitS.visit);
+    const followUp = await extraVisit(ids, "C8R", { visitType: "Follow Up", doctorId: ours.stays });
+    const other = await draftOf(followUp.visit);
     await refused(
       bills.addLine(other.id, { item_id: ours.goneFu }, desk, db),
       409,

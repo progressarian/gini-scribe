@@ -244,7 +244,8 @@ test.describe.serial("P4-38c counter fixes found by the floor-trial rehearsal", 
     await openCounter(page, patient.visit);
     const box = region(page, "Add items");
     const results = box.getByRole("list", { name: "Item search results" });
-    await expect(results.getByRole("listitem").first()).toBeVisible();
+    await box.getByLabel("Search items").fill(tag);
+    await expect(results.getByRole("listitem").nth(1)).toBeVisible();
     await box.getByLabel("Search items").fill(`Dressing ${tag}`);
     await results.getByRole("button", { name: "Add", exact: true }).first().click();
     const added = page.getByRole("table", { name: "Bill lines" }).getByRole("row");

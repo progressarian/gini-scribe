@@ -8,7 +8,7 @@ export default function NotPricedTests({ tests }) {
       </h3>
       <div className="bc-hint">
         Ordered on the floor but no billing item exists for them, so they cannot go on this bill.
-        Ask an admin to create the item.
+        Ask an admin to link this name to a service or create the item.
       </div>
       <ul className="bc-list">
         {tests.map((name) => (

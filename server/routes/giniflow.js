@@ -379,7 +379,11 @@ router.get("/giniflow/visits/:id/timeline", async (req, res) => {
       labTrack: [...labTrack, ...scribeLabMarks]
         .sort((a, b) => new Date(a.enteredAt) - new Date(b.enteredAt))
         .map((m, i, all) => {
-          const scribe = all.filter((x) => x.status.startsWith("lab:"));
+          if (m.group) {
+            const last = all.filter((x) => x.group?.key === m.group.key).at(-1);
+            return { ...m, isCurrent: !reportsReadyAt && !m.group.done && last === m };
+          }
+          const scribe = all.filter((x) => x.status.startsWith("lab:") && !x.group);
           const firstPartial = scribe.find((x) => x.partial);
           const current = reportsReadyAt
             ? null

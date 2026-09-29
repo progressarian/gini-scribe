@@ -221,6 +221,7 @@ export const billingItemCreateSchema = z
 export const billingItemUpdateSchema = atLeastOne(
   z.strictObject({ ...itemFields, reason: text(500) }).partial(),
 );
+export const billingItemAliasCreateSchema = z.strictObject({ name });
 
 const categoryFields = {
   label: name,
@@ -301,6 +302,7 @@ export const billingSettingsUpdateSchema = atLeastOne(
       legal_name: z.union([text(200), z.null()]),
       bill_footer: z.union([text(1000), z.null()]),
       auto_add_consultation: flag,
+      auto_add_lab_case_tests: flag,
     })
     .partial(),
 );
@@ -727,6 +729,7 @@ export const BILLING_FIELD_LABELS = {
   max_codes_per_bill: "Most codes on one bill",
   gst_enabled: "Charge GST on bills",
   auto_add_consultation: "Add the consultation automatically",
+  auto_add_lab_case_tests: "Add today's lab report tests automatically",
   gstin: "GSTIN",
   state_code: "State code",
   legal_name: "Legal name",
@@ -902,12 +905,14 @@ const deskObject = (fields, message) => z.strictObject({ ...NO_PRICE, ...fields 
 
 export const billingDraftOpenSchema = deskObject({}, objectOnly("Send the request as an object"));
 
+const DESK_LINE_SOURCES = LINE_SOURCES.filter((source) => source !== "lab_case");
+
 export const billingLineAddSchema = deskObject(
   {
     item_id: id,
     quantity: count.optional(),
     source: z
-      .enum(LINE_SOURCES, { message: `must be one of: ${LINE_SOURCES.join(", ")}` })
+      .enum(DESK_LINE_SOURCES, { message: `must be one of: ${DESK_LINE_SOURCES.join(", ")}` })
       .optional(),
     lab_order_id: optionalUuid.optional(),
     doctor_id: z.union([id, z.null()]).optional(),
@@ -918,7 +923,13 @@ export const billingLineAddSchema = deskObject(
 
 export const billingLineQuantitySchema = deskObject({ quantity: count });
 
-export const billingLineRemoveSchema = deskObject({ reason });
+export const billingLineRemoveSchema = deskObject({
+  reason: z.string().trim().max(BILL_TEXT_MAX).optional(),
+});
+
+export const billingDraftDeleteSchema = deskObject({
+  reason: z.string().trim().max(BILL_TEXT_MAX).optional(),
+});
 
 export const billingCodeAddSchema = deskObject({ code });
 
@@ -983,7 +994,26 @@ export const billingPaymentsTakeSchema = z.strictObject(
 export const billingItemSearchQuerySchema = z.strictObject({
   q: z.string().max(100).optional(),
   limit: count.optional(),
+  visit_id: uuid.optional(),
 });
+
+export const billingConsultationSuggestionQuerySchema = z.strictObject({
+  bill_id: uuid,
+});
+
+export const billingLabCaseTestsQuerySchema = z.strictObject({
+  bill_id: uuid,
+});
+
+export const billingLabCaseLinesAddSchema = deskObject(
+  {
+    item_ids: z
+      .array(id, { error: "must be a list of items" })
+      .min(1, "list is empty: choose a test to add")
+      .max(50, "can be at most 50 at once"),
+  },
+  objectOnly("Send the tests as an object, like { item_ids: [12] }"),
+);
 
 export const billingDuesQuerySchema = z.strictObject({
   patient_id: id.optional(),
@@ -1102,6 +1132,7 @@ export const billingRequestRejectSchema = z.strictObject(
 export const BILLING_DESK_LABELS = {
   ...BILLING_FIELD_LABELS,
   item_id: "Item",
+  item_ids: "Tests",
   quantity: "Quantity",
   source: "Line source",
   lab_order_id: "Test order",

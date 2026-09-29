@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import ConfirmModal from "../../ui/ConfirmModal";
 import {
+  ITEM_SEARCH_LIMIT,
+  ITEM_SEARCH_MIN,
   useAddBillLine,
   useItemSearch,
   useMyRequests,
@@ -27,7 +29,7 @@ export default function AddItems({ bill, onBill, form }) {
   const setProposed = (next) => form.set("newItem", next);
   const [blocked, setBlocked] = useState({});
 
-  const { data, isFetching } = useItemSearch(debounced);
+  const { data, isFetching } = useItemSearch(debounced, bill.visit_id);
   const { data: requests } = useMyRequests(bill.visit_id);
   const addLine = useAddBillLine();
   const repeat = useRepeatRequest();
@@ -44,8 +46,13 @@ export default function AddItems({ bill, onBill, form }) {
     return seen;
   }, [bill.lines, blocked]);
 
-  const items = data?.items || [];
+  const searching = debounced.length >= ITEM_SEARCH_MIN;
+  const items = searching ? data?.items || [] : [];
   const settling = search.trim() !== debounced || isFetching;
+  const consultationType = searching ? data?.consultation_type : null;
+  const showsConsultations =
+    !!consultationType &&
+    (data.consultations_hidden || items.some((item) => item.kind === "consultation"));
   const mine = (requests || []).filter(
     (request) => !request.visit_id || request.visit_id === bill.visit_id,
   );
@@ -130,7 +137,13 @@ export default function AddItems({ bill, onBill, form }) {
         />
       </label>
 
-      {debounced && !isFetching && !items.length && (
+      {search.trim().length < ITEM_SEARCH_MIN && (
+        <div className="bc-hint bc-search-hint" role="status">
+          Type at least {ITEM_SEARCH_MIN} letters of a service name or code
+        </div>
+      )}
+
+      {searching && data && !isFetching && !items.length && (
         <div className="bc-empty-search">
           <span>No item matches “{debounced}”.</span>
           <button type="button" className="st-btn st-btn-g" onClick={openNewItem}>
@@ -139,8 +152,14 @@ export default function AddItems({ bill, onBill, form }) {
         </div>
       )}
 
+      {showsConsultations && (
+        <div className="bc-hint bc-search-hint" role="status">
+          Showing {consultationType} consultations for this visit
+        </div>
+      )}
+
       {!!items.length && (
-        <ul className="bc-results" aria-label="Item search results">
+        <ul className="bc-results bc-results--scroll" aria-label="Item search results">
           {items.map((item) => {
             const stop = billed[item.id];
             return (
@@ -175,6 +194,12 @@ export default function AddItems({ bill, onBill, form }) {
             );
           })}
         </ul>
+      )}
+
+      {searching && !!items.length && data?.more && (
+        <div className="bc-hint bc-search-hint" role="status">
+          Showing first {ITEM_SEARCH_LIMIT} — keep typing to narrow
+        </div>
       )}
 
       {wantsNew && (

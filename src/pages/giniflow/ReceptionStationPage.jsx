@@ -1,5 +1,5 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import {
   useReceptionQueue,
   useClearPayment,
@@ -22,6 +22,10 @@ import {
   useGiniflowResumeVisit,
 } from "../../queries/hooks/useGiniflowQueue";
 import LiveBadge from "../../components/giniflow/LiveBadge";
+import BillingDesk, { DESK_TABS } from "../../components/billing/counter/BillingDesk";
+import { BillBadge } from "../../components/billing/counter/PatientList";
+import { receptionBillHref } from "../../components/billing/counter/billHref";
+import { useCounterPatients, useDeskSettings } from "../../queries/hooks/useBilling";
 import "../../styles/giniflow-station.css";
 import useAuthStore from "../../stores/authStore";
 import { CAPABILITIES as CAPS, hasCapability } from "../../../shared/permissions.js";
@@ -1117,6 +1121,8 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   const checkIn = useCheckIn();
   const checkInWalkIn = useCheckInWalkIn();
   const saving = checkIn.isPending || checkInWalkIn.isPending;
+  const canBill = useCanBill();
+  const [billFor, setBillFor] = useState(null);
   const { data: bill, isLoading: billLoading } = useHealthrayBill(arrival.patientId);
   const billRef = useRef(null);
   billRef.current = bill || null;
@@ -1232,7 +1238,9 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
         visitId = created.visitId;
       }
       const r = await checkIn.mutateAsync({ visitId, visitTypeId, steps: list, sendWhatsapp });
-      onDone({ ...arrival, visitId }, r, sendWhatsapp);
+      const stayOpen = canBill && Boolean(visitId);
+      if (stayOpen) setBillFor(visitId);
+      onDone({ ...arrival, visitId }, r, sendWhatsapp, stayOpen);
     } catch (e) {
       onFailed(e);
     }
@@ -1257,6 +1265,11 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
             <div className="wi-head">
               <strong>What is this visit?</strong>
             </div>
+            {billFor && (
+              <div className="dp-hint" role="status">
+                ✓ {arrival.name} is checked in — open their bill to take the payment.
+              </div>
+            )}
             {billNote(bill, billLoading) && (
               <div className="dp-hint">{billNote(bill, billLoading)}</div>
             )}
@@ -1317,24 +1330,35 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
           </div>
         </div>
 
-        <div className="dp-foot">
-          <button
-            className="btn-full st-btn st-btn-grn"
-            disabled={saving || !list.length}
-            onClick={() => submit(false)}
-          >
-            {arrival.phone ? "✓ Check in only" : "✓ Check in"}
-          </button>
-          {arrival.phone && (
-            <button
-              className="st-btn st-btn-g"
-              disabled={saving || !list.length}
-              onClick={() => submit(true)}
-            >
-              Check in + send WhatsApp
+        {billFor ? (
+          <div className="dp-foot">
+            <Link className="btn-full st-btn st-btn-grn" to={receptionBillHref({ visit: billFor })}>
+              Open bill →
+            </Link>
+            <button type="button" className="st-btn st-btn-g" onClick={onClose}>
+              Close
             </button>
-          )}
-        </div>
+          </div>
+        ) : (
+          <div className="dp-foot">
+            <button
+              className="btn-full st-btn st-btn-grn"
+              disabled={saving || !list.length}
+              onClick={() => submit(false)}
+            >
+              {arrival.phone ? "✓ Check in only" : "✓ Check in"}
+            </button>
+            {arrival.phone && (
+              <button
+                className="st-btn st-btn-g"
+                disabled={saving || !list.length}
+                onClick={() => submit(true)}
+              >
+                Check in + send WhatsApp
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1509,26 +1533,44 @@ function ArrivalRow({ arrival, children, note, warning, wide }) {
   );
 }
 
-function BillButton({ visitId }) {
-  const canBill = hasCapability(
+const useCanBill = () =>
+  hasCapability(
     useAuthStore((st) => st.currentDoctor?.role),
     CAPS.BILLING_DESK,
   );
-  if (!canBill || !visitId) return null;
-  return (
-    <Link
-      className="st-btn st-btn-ghost"
-      to={`/giniflow/station/billing?visit=${visitId}`}
-      target="_blank"
-      rel="noopener noreferrer"
-      title="Open the billing counter for this patient — the desk list stays open here"
-    >
-      Bill
-    </Link>
+
+function useBillStates(enabled) {
+  const { data } = useCounterPatients("", { enabled });
+  return useMemo(
+    () =>
+      new Map(
+        [...(data?.onFloor || []), ...(data?.left || []), ...(data?.notArrived || [])].map(
+          (row) => [String(row.visitId), row.bill ?? null],
+        ),
+      ),
+    [data],
   );
 }
 
-function ExpectedRow({ arrival, onAct, onCheckIn, busy }) {
+function BillButton({ visitId, bills }) {
+  const canBill = useCanBill();
+  if (!canBill || !visitId) return null;
+  const key = String(visitId);
+  return (
+    <>
+      {bills?.has(key) && <BillBadge bill={bills.get(key)} />}
+      <Link
+        className="st-btn st-btn-ghost"
+        to={receptionBillHref({ visit: visitId })}
+        title="Open this patient's bill on the Bill tab"
+      >
+        Bill
+      </Link>
+    </>
+  );
+}
+
+function ExpectedRow({ arrival, onAct, onCheckIn, busy, bills }) {
   const [reason, setReason] = useState(null);
 
   if (reason !== null) {
@@ -1588,7 +1630,7 @@ function ExpectedRow({ arrival, onAct, onCheckIn, busy }) {
       <button className="st-btn st-btn-ghost" disabled={busy} onClick={() => setReason("")}>
         Cancel
       </button>
-      <BillButton visitId={arrival.visitId} />
+      <BillButton visitId={arrival.visitId} bills={bills} />
     </ArrivalRow>
   );
 }
@@ -1676,6 +1718,7 @@ export function ArrivalsTab({
   // The arrival being planned. Nothing is written until it is confirmed.
   const [arriving, setArriving] = useState(null);
   const [journeyFor, setJourneyFor] = useState(null);
+  const bills = useBillStates(useCanBill());
   const expected = data?.expected || [];
   const onFloor = data?.onFloor || [];
   // The list holds everyone who is not expected and not a no-show, so it counts
@@ -1749,8 +1792,8 @@ export function ArrivalsTab({
           onClose={() => setArriving(null)}
           onFailed={onFailed}
           onNote={onNote}
-          onDone={(arrival, result, sentWhatsapp) => {
-            setArriving(null);
+          onDone={(arrival, result, sentWhatsapp, stayOpen) => {
+            if (!stayOpen) setArriving(null);
             onCheckedIn(arrival, result, sentWhatsapp);
           }}
         />
@@ -1776,6 +1819,7 @@ export function ArrivalsTab({
               onAct={onAct}
               onCheckIn={setArriving}
               busy={busy}
+              bills={bills}
             />
           ))}
         </div>
@@ -1866,7 +1910,7 @@ export function ArrivalsTab({
                         : "⏸ Pause"}
                 </button>
               )}
-              <BillButton visitId={a.visitId} />
+              <BillButton visitId={a.visitId} bills={bills} />
               <span className="ar-since">
                 {a.paused
                   ? `${pauseReasonLabel(a.pausedReason) || "On break"} · on break since ${clock(a.pausedAt)}`
@@ -1977,8 +2021,106 @@ function HealthraySync({ onNote }) {
   );
 }
 
+const TAB = {
+  arrivals: "arrivals",
+  payments: "payments",
+};
+
+const DESK_TAB_KEYS = Object.keys(DESK_TABS);
+
+function useReceptionTab(canBill) {
+  const [params, setParams] = useSearchParams();
+  const { data: deskSettings } = useDeskSettings({ enabled: canBill });
+  const requested = params.get("tab") || TAB.arrivals;
+  const isDesk = DESK_TAB_KEYS.includes(requested);
+  const duesOff = deskSettings && !deskSettings.allow_pay_later;
+  const tab =
+    isDesk && !canBill
+      ? TAB.arrivals
+      : requested === DESK_TABS.dues.key && duesOff
+        ? DESK_TABS.bill.key
+        : isDesk || Object.values(TAB).includes(requested)
+          ? requested
+          : TAB.arrivals;
+  const deskTabs = canBill
+    ? [
+        DESK_TABS.bill,
+        ...(duesOff || (!deskSettings && tab !== DESK_TABS.dues.key) ? [] : [DESK_TABS.dues]),
+        DESK_TABS.shift,
+      ]
+    : [];
+
+  const setTab = useCallback(
+    (key) =>
+      setParams((current) => {
+        const next = new URLSearchParams(current);
+        next.set("tab", key);
+        return next;
+      }),
+    [setParams],
+  );
+
+  const openBill = useCallback(
+    (next, options) => setParams({ tab: DESK_TABS.bill.key, ...next }, options),
+    [setParams],
+  );
+
+  return {
+    tab,
+    deskTabs,
+    setTab,
+    openBill,
+    visitId: params.get("visit") || "",
+    patientId: params.get("patient") || "",
+    billId: params.get("bill") || "",
+  };
+}
+
+function ReceptionTabs({ tab, setTab, deskTabs, arrivalsCount, paymentsCount }) {
+  return (
+    <div className="st-tabs rc-tabs" role="tablist" aria-label="Reception">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={tab === TAB.arrivals}
+        className={`st-tab${tab === TAB.arrivals ? " on" : ""}`}
+        onClick={() => setTab(TAB.arrivals)}
+      >
+        Arrivals <span className="st-tab-n">{arrivalsCount}</span>
+      </button>
+      {deskTabs.map((entry) => (
+        <button
+          key={entry.key}
+          type="button"
+          role="tab"
+          id={entry.tabId}
+          aria-controls={tab === entry.key ? entry.panelId : undefined}
+          aria-selected={tab === entry.key}
+          className={`st-tab${tab === entry.key ? " on" : ""}`}
+          onClick={() => setTab(entry.key)}
+        >
+          {entry.label}
+        </button>
+      ))}
+      <button
+        type="button"
+        role="tab"
+        aria-selected={tab === TAB.payments}
+        className={`st-tab${tab === TAB.payments ? " on" : ""}`}
+        onClick={() => setTab(TAB.payments)}
+      >
+        Payments <span className="st-tab-n">{paymentsCount}</span>
+      </button>
+    </div>
+  );
+}
+
 export default function ReceptionStationPage() {
-  const [tab, setTab] = useState("arrivals");
+  const canBill = useCanBill();
+  const desk = useReceptionTab(canBill);
+  const { tab, setTab } = desk;
+  const onDesk = DESK_TAB_KEYS.includes(tab);
+  const sentPatient = useLocation().state?.duePatient ?? null;
   const [search, setSearch] = useState("");
   const [term, setTerm] = useState("");
   const [paySearch, setPaySearch] = useState("");
@@ -2234,6 +2376,16 @@ export default function ReceptionStationPage() {
           )}${sentWhatsapp && result.whatsappSent ? " · WhatsApp sent" : ""}`,
     );
 
+  const tabs = (
+    <ReceptionTabs
+      tab={tab}
+      setTab={setTab}
+      deskTabs={desk.deskTabs}
+      arrivalsCount={counts.expected}
+      paymentsCount={payCounts.pending}
+    />
+  );
+
   return (
     <div className="gf">
       <StationNotice station="reception" />
@@ -2251,7 +2403,7 @@ export default function ReceptionStationPage() {
         }}
         onCancel={() => setNotOnBill(null)}
       />
-      <div className="rail">
+      <div className="rail rc-rail">
         <div className="rl">Reception</div>
         <div className="rsep" />
         <span className="rail-title">
@@ -2271,119 +2423,116 @@ export default function ReceptionStationPage() {
         </div>
       </div>
 
-      <div className="scroll">
-        <div className="inner">
-          <div className="st-tabs" role="tablist">
-            <button
-              role="tab"
-              aria-selected={tab === "arrivals"}
-              className={`st-tab${tab === "arrivals" ? " on" : ""}`}
-              onClick={() => setTab("arrivals")}
-            >
-              Arrivals <span className="st-tab-n">{counts.expected}</span>
-            </button>
-            <button
-              role="tab"
-              aria-selected={tab === "payments"}
-              className={`st-tab${tab === "payments" ? " on" : ""}`}
-              onClick={() => setTab("payments")}
-            >
-              Payments <span className="st-tab-n">{payCounts.pending}</span>
-            </button>
-          </div>
+      {onDesk ? (
+        <div className="rc-desk">
+          <div className="rc-desk__tabs">{tabs}</div>
+          <BillingDesk
+            tab={tab}
+            visitId={desk.visitId}
+            patientId={desk.patientId}
+            billId={desk.billId}
+            sentPatient={sentPatient}
+            onOpen={desk.openBill}
+          />
+        </div>
+      ) : (
+        <div className="scroll">
+          <div className="inner">
+            {tabs}
 
-          <div className="stats">
-            {tab === "arrivals" ? (
-              <>
-                <div className="stat">
-                  <div className="sv sv-amb">{counts.expected}</div>
-                  <div>
-                    <div className="sl">Expected</div>
-                    <div className="ss">booked, not here yet</div>
-                  </div>
-                </div>
-                <div className="stat">
-                  <div className="sv sv-grn">{counts.onFloorHere ?? counts.onFloor}</div>
-                  <div>
-                    <div className="sl">On the floor</div>
-                    <div className="ss">
-                      in the building
-                      {counts.onFloorAway > 0 ? ` · ${counts.onFloorAway} on break` : ""}
-                      {counts.onFloorLeft > 0 ? ` · ${counts.onFloorLeft} left today` : ""}
+            <div className="stats">
+              {tab === TAB.arrivals ? (
+                <>
+                  <div className="stat">
+                    <div className="sv sv-amb">{counts.expected}</div>
+                    <div>
+                      <div className="sl">Expected</div>
+                      <div className="ss">booked, not here yet</div>
                     </div>
                   </div>
-                </div>
-                <div className="stat">
-                  <div className="sv sv-ink">{counts.notComing}</div>
-                  <div>
-                    <div className="sl">Not coming</div>
-                    <div className="ss">no-show or cancelled</div>
+                  <div className="stat">
+                    <div className="sv sv-grn">{counts.onFloorHere ?? counts.onFloor}</div>
+                    <div>
+                      <div className="sl">On the floor</div>
+                      <div className="ss">
+                        in the building
+                        {counts.onFloorAway > 0 ? ` · ${counts.onFloorAway} on break` : ""}
+                        {counts.onFloorLeft > 0 ? ` · ${counts.onFloorLeft} left today` : ""}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </>
+                  <div className="stat">
+                    <div className="sv sv-ink">{counts.notComing}</div>
+                    <div>
+                      <div className="sl">Not coming</div>
+                      <div className="ss">no-show or cancelled</div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="stat">
+                    <div className="sv sv-red">{payCounts.pending}</div>
+                    <div>
+                      <div className="sl">Payment pending</div>
+                      <div className="ss">tests ordered today</div>
+                    </div>
+                  </div>
+                  <div className="stat">
+                    <div className="sv sv-tl">{payCounts.awaitingSample}</div>
+                    <div>
+                      <div className="sl">Sample pending</div>
+                      <div className="ss">payment done, lab waiting</div>
+                    </div>
+                  </div>
+                  <div className="stat">
+                    <div className="sv sv-grn">{payCounts.cleared}</div>
+                    <div>
+                      <div className="sl">Cleared</div>
+                      <div className="ss">lab collecting</div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {tab === TAB.arrivals ? (
+              <ArrivalsTab
+                onCheckedIn={onCheckedIn}
+                onFailed={(e) => failed(e, "Could not check this patient in — nothing was changed")}
+                onNote={showToast}
+                search={search}
+                setSearch={setSearch}
+                data={arrivals}
+                isLoading={arrivalsLoading}
+                onAct={onAct}
+                onPauseToggle={onPauseToggle}
+                breakBusy={pauseVisit.isPending || resumeVisit.isPending}
+                busy={arrivalAction.isPending}
+              />
             ) : (
-              <>
-                <div className="stat">
-                  <div className="sv sv-red">{payCounts.pending}</div>
-                  <div>
-                    <div className="sl">Payment pending</div>
-                    <div className="ss">tests ordered today</div>
-                  </div>
-                </div>
-                <div className="stat">
-                  <div className="sv sv-tl">{payCounts.awaitingSample}</div>
-                  <div>
-                    <div className="sl">Sample pending</div>
-                    <div className="ss">payment done, lab waiting</div>
-                  </div>
-                </div>
-                <div className="stat">
-                  <div className="sv sv-grn">{payCounts.cleared}</div>
-                  <div>
-                    <div className="sl">Cleared</div>
-                    <div className="ss">lab collecting</div>
-                  </div>
-                </div>
-              </>
+              <PaymentsTab
+                data={data}
+                isLoading={isLoading}
+                onClear={onClear}
+                onClearAll={onClearAll}
+                pending={clearPayment.isPending || cancelTest.isPending}
+                actorId={actorId}
+                search={paySearch}
+                setSearch={setPaySearch}
+                onClearCharge={onClearCharge}
+                chargePending={clearCharge.isPending || cancelCharge.isPending}
+                onCancelTest={onCancelTest}
+                onCancelCharge={onCancelCharge}
+                canCancelTest={canCancelTest}
+                onClearHealthrayLab={onClearHealthrayLab}
+                onCancelHealthrayCase={onCancelHealthrayCase}
+                healthrayLabPending={journeyStep.isPending || cancelCase.isPending}
+              />
             )}
           </div>
-
-          {tab === "arrivals" ? (
-            <ArrivalsTab
-              onCheckedIn={onCheckedIn}
-              onFailed={(e) => failed(e, "Could not check this patient in — nothing was changed")}
-              onNote={showToast}
-              search={search}
-              setSearch={setSearch}
-              data={arrivals}
-              isLoading={arrivalsLoading}
-              onAct={onAct}
-              onPauseToggle={onPauseToggle}
-              breakBusy={pauseVisit.isPending || resumeVisit.isPending}
-              busy={arrivalAction.isPending}
-            />
-          ) : (
-            <PaymentsTab
-              data={data}
-              isLoading={isLoading}
-              onClear={onClear}
-              onClearAll={onClearAll}
-              pending={clearPayment.isPending || cancelTest.isPending}
-              actorId={actorId}
-              search={paySearch}
-              setSearch={setPaySearch}
-              onClearCharge={onClearCharge}
-              chargePending={clearCharge.isPending || cancelCharge.isPending}
-              onCancelTest={onCancelTest}
-              onCancelCharge={onCancelCharge}
-              canCancelTest={canCancelTest}
-              onClearHealthrayLab={onClearHealthrayLab}
-              onCancelHealthrayCase={onCancelHealthrayCase}
-              healthrayLabPending={journeyStep.isPending || cancelCase.isPending}
-            />
-          )}
         </div>
-      </div>
+      )}
 
       {toast && <div className="toast show">{toast}</div>}
     </div>

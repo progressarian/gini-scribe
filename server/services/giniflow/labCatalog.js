@@ -1,7 +1,7 @@
 import pool from "../../config/db.js";
 import { rangeText } from "../../../shared/labFormula.js";
 
-const FLAT = (col) => `lower(regexp_replace(${col}, '[^a-zA-Z0-9]+', '', 'g'))`;
+export const FLAT = (col) => `lower(regexp_replace(${col}, '[^a-zA-Z0-9]+', '', 'g'))`;
 
 const CATALOG_SQL = `
 WITH RECURSIVE want AS (

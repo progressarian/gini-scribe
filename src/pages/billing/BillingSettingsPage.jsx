@@ -125,6 +125,7 @@ const pickGeneral = (s) => ({
   discount_stacking: s.discount_stacking,
   allow_pay_later: s.allow_pay_later,
   auto_add_consultation: s.auto_add_consultation,
+  auto_add_lab_case_tests: s.auto_add_lab_case_tests,
   max_codes_per_bill: text(s.max_codes_per_bill),
   bill_footer: text(s.bill_footer),
 });
@@ -189,6 +190,19 @@ function GeneralCard({ settings }) {
       </label>
       <p id="bill-settings-consultation-hint" className="fset__hint">
         When off, the desk adds the consultation from Add items.
+      </p>
+      <label className="fset__check bill-settings__check">
+        <input
+          type="checkbox"
+          checked={form.auto_add_lab_case_tests}
+          onChange={set("auto_add_lab_case_tests")}
+          aria-describedby="bill-settings-lab-case-hint"
+        />
+        Add tests from today's lab report to the bill automatically
+      </label>
+      <p id="bill-settings-lab-case-hint" className="fset__hint">
+        Priced tests the lab registered today are added when the bill opens. When off, the desk adds
+        them from the "From today's lab report" card.
       </p>
       <Field label="Bill footer">
         {(id) => (

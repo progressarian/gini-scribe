@@ -13,7 +13,15 @@ const readFile = (file) =>
 
 const labelOf = (entry) => entry.category.display_label || entry.category.label;
 
-export default function PatientHeader({ patient, bill, needsCategory, suggestions, onBill, form }) {
+export default function PatientHeader({
+  patient,
+  bill,
+  needsCategory,
+  suggestions,
+  onBill,
+  onClose,
+  form,
+}) {
   const { data: schemes } = usePatientSchemeList();
   const setCategory = useSetBillCategory();
   const current = bill.category || "";
@@ -100,6 +108,14 @@ export default function PatientHeader({ patient, bill, needsCategory, suggestion
           {bill.category_label || (needsCategory ? "Category not confirmed" : "General")}
         </span>
         {bill.payer_name && <span className="bc-head__payer">Payer: {bill.payer_name}</span>}
+        <button
+          type="button"
+          className="st-btn st-btn-g bc-head__close"
+          aria-label={`Close ${patient?.name || "this patient"}`}
+          onClick={onClose}
+        >
+          ✕ Close
+        </button>
       </div>
 
       {offered.length > 0 && (

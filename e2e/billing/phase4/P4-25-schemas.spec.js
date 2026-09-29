@@ -227,8 +227,9 @@ test.describe("P4-25 phase 4 request schemas", () => {
     await refused(schemas.billingLineAddSchema, {}, /item/i, "a line with no item");
   });
 
-  test("a reason is asked for when a line or a bill is taken back", async () => {
-    await refused(schemas.billingLineRemoveSchema, { reason: "  " }, /blank/i, "a blank reason");
+  test("a reason is asked for when a bill is taken back; a line's reason is optional", async () => {
+    await accepted(schemas.billingLineRemoveSchema, {}, "a line removed with no reason");
+    await accepted(schemas.billingLineRemoveSchema, { reason: "  " }, "a blank line reason");
     await refused(schemas.billingCancelSchema, {}, /reason/i, "cancelling with no reason");
     await refused(
       schemas.billingCancelSchema,

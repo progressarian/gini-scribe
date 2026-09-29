@@ -1,11 +1,13 @@
 import pool from "../../config/db.js";
 import { isLabOnlyDoctor } from "../../../shared/labOnly.js";
+import { billingVisitType } from "../../../shared/billingVisitType.js";
 import { CONSULTATION_VISIT_TYPES, ITEM_KINDS } from "./importColumns.js";
 import { looksLikeSameTest, normalizeTestName } from "./testNames.js";
 import { checkItemPrices } from "./paymentRules.js";
 import { writeAudit } from "./audit.js";
 import { refuseRemoved } from "./removedDoctors.js";
 import { createGroup, createSubgroup } from "./serviceGroups.js";
+import { orderedNamesNotPriced } from "./serviceItemAliases.js";
 import {
   CONSULTATION_DEFAULT_GROUP,
   CONSULTATION_DEFAULT_SUBGROUP,
@@ -336,32 +338,49 @@ function cleanReason(value) {
 
 export const DESK_SEARCH_LIMIT = 30;
 
+export async function visitConsultationType(visitId, db = pool) {
+  if (!visitId) return null;
+  const { rows } = await db.query(
+    `SELECT a.visit_type FROM giniflow_visits v
+       JOIN appointments a ON a.id = v.appointment_id
+      WHERE v.id = $1`,
+    [visitId],
+  );
+  return rows.length ? billingVisitType(rows[0].visit_type) : null;
+}
+
 export async function searchDeskItems(filters = {}, db = pool) {
   const q = typeof filters.q === "string" ? filters.q.trim() : "";
   const asked = cleanId(filters.limit, "limit") ?? DESK_SEARCH_LIMIT;
   const limit = Math.min(asked, DESK_SEARCH_LIMIT);
-  const params = [limit];
+  const consultationType = await visitConsultationType(filters.visitId, db);
+  const params = [limit + 1, consultationType];
   let match = "";
   if (q) {
     params.push(`%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
-    match = `AND (i.name ILIKE $2 OR i.code ILIKE $2)`;
+    match = `AND (i.name ILIKE $3 OR i.code ILIKE $3)`;
   }
   const { rows } = await db.query(
-    `SELECT i.id, i.code, i.name, i.kind, i.unit, i.allow_quantity, i.max_quantity,
-            i.doctor_id, s.name AS subgroup_name, g.name AS group_name
-       FROM service_items i
-       JOIN service_subgroups s ON s.id = i.subgroup_id
-       JOIN service_groups g ON g.id = s.group_id
-      WHERE i.is_active AND s.is_active AND g.is_active ${match}
-      ORDER BY i.name, i.id
-      LIMIT $1`,
+    `WITH found AS (
+       SELECT i.id, i.code, i.name, i.kind, i.unit, i.allow_quantity, i.max_quantity,
+              i.doctor_id, i.visit_type, s.name AS subgroup_name, g.name AS group_name,
+              ($2::text IS NULL OR i.kind <> 'consultation' OR i.visit_type = $2::text) AS shown
+         FROM service_items i
+         JOIN service_subgroups s ON s.id = i.subgroup_id
+         JOIN service_groups g ON g.id = s.group_id
+        WHERE i.is_active AND s.is_active AND g.is_active ${match})
+     SELECT * FROM found ORDER BY NOT shown, name, id LIMIT $1`,
     params,
   );
+  const shown = rows.filter((row) => row.shown);
   return {
-    items: rows.map((row) => ({
+    items: shown.slice(0, limit).map(({ shown: kept, ...row }) => ({
       ...row,
       max_quantity: row.max_quantity === null ? null : Number(row.max_quantity),
     })),
+    more: shown.length > limit,
+    consultation_type: consultationType,
+    consultations_hidden: rows.some((row) => !row.shown),
   };
 }
 
@@ -388,6 +407,10 @@ export async function listItems(filters = {}, db = pool) {
     `SELECT ${COLUMNS.map((c) => `i.${c}`).join(", ")},
             s.name AS subgroup_name, s.group_id, g.name AS group_name,
             t.code AS tax_code, d.name AS doctor_name, c.test_name,
+            COALESCE((SELECT json_agg(json_build_object('id', a.id, 'name', a.name)
+                                      ORDER BY lower(a.name), a.id)
+                        FROM service_item_aliases a WHERE a.service_item_id = i.id), '[]')
+              AS aliases,
             count(*) OVER ()::int AS total
        FROM service_items i
        JOIN service_subgroups s ON s.id = i.subgroup_id
@@ -596,6 +619,7 @@ export async function notPricedList(db = pool) {
 
   const status = (row) => (row.item_id ? "item_deactivated" : "no_item");
   return {
+    orderedNames: await orderedNamesNotPriced(db),
     tests: tests.map(({ item_active, ...row }) => ({
       ...row,
       catalogue_price: row.catalogue_price === null ? null : Number(row.catalogue_price),

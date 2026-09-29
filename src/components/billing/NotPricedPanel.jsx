@@ -1,6 +1,12 @@
 import { useId, useState } from "react";
 import { Link } from "react-router-dom";
-import { useBillingNotPriced, useSetBillingItemActive } from "../../queries/hooks/useBillingMaster";
+import {
+  useAddBillingItemAlias,
+  useBillingItems,
+  useBillingNotPriced,
+  useSetBillingItemActive,
+} from "../../queries/hooks/useBillingMaster";
+import useDebounced from "../../hooks/useDebounced";
 import { toast } from "../../stores/uiStore";
 import Pagination from "../ui/Pagination";
 import { errorOf, rupees } from "./format";
@@ -76,7 +82,115 @@ const LISTS = [
     rowsOf: (data) => data.reportsNotInCatalogue,
     find: (r, needle) => matches(needle, r.name, ...r.possibly_same_as),
   },
+  {
+    key: "ordered",
+    title: "Ordered names with no price",
+    short: "need linking to a service",
+    about:
+      "Names the floor ordered in the last 30 days that billing can't match to an active test service. Link each to the service it is billed as, or create the item.",
+    allClear: "Every name ordered in the last 30 days has a price.",
+    rowsOf: (data) => data.orderedNames ?? [],
+    find: (r, needle) => matches(needle, r.test_name, r.suggestion?.code, r.suggestion?.name),
+  },
 ];
+
+const SERVICE_SEARCH_MIN = 2;
+
+function LinkResults({ q, onLink, busy, label }) {
+  const { data, isLoading, isError } = useBillingItems({
+    q,
+    kind: "test",
+    active: "true",
+    limit: 20,
+  });
+  if (isLoading) return <p className="flow-muted">Searching…</p>;
+  if (isError) return <p className="flow-muted">Could not search the services.</p>;
+  if (!data.items.length) return <p className="flow-muted">No active test service matches.</p>;
+  return (
+    <ul className="bill-aliases" aria-label={`Services for ${label}`}>
+      {data.items.map((item) => (
+        <li key={item.id}>
+          <button
+            type="button"
+            className="flow-btn flow-btn-ghost flow-btn-mini"
+            disabled={busy}
+            onClick={() => onLink(item)}
+          >
+            Link to {item.code} — {item.name}
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function LinkToService({ row }) {
+  const [q, setQ] = useState("");
+  const settled = useDebounced(q.trim(), 250);
+  const add = useAddBillingItemAlias();
+
+  const link = async (item) => {
+    try {
+      await add.mutateAsync({ itemId: item.id ?? item.item_id, name: row.test_name });
+      toast(`${row.test_name} is now billed as ${item.code}`, "success");
+    } catch (e) {
+      toast(errorOf(e), "error");
+    }
+  };
+
+  return (
+    <div className="bill-np-link" role="group" aria-label={`Link ${row.test_name} to a service`}>
+      {row.suggestion ? (
+        <button
+          type="button"
+          className="flow-btn flow-btn-primary flow-btn-mini"
+          disabled={add.isPending}
+          onClick={() => link(row.suggestion)}
+        >
+          Link to {row.suggestion.code}
+        </button>
+      ) : null}
+      <input
+        type="search"
+        className="jb-assign"
+        aria-label={`Search services for ${row.test_name}`}
+        placeholder="Search test services"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+      />
+      {settled.length >= SERVICE_SEARCH_MIN ? (
+        <LinkResults q={settled} busy={add.isPending} onLink={link} label={row.test_name} />
+      ) : null}
+    </div>
+  );
+}
+
+function OrderedRows({ rows }) {
+  return (
+    <table className="flow-table" aria-label="Ordered names with no price">
+      <thead>
+        <tr>
+          <th>Ordered as</th>
+          <th>Times ordered</th>
+          <th>Last ordered</th>
+          <th>Link to service</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r.test_name}>
+            <td data-label="Ordered as">{r.test_name}</td>
+            <td data-label="Times ordered">{r.times_ordered}</td>
+            <td data-label="Last ordered">{r.last_ordered}</td>
+            <td data-label="Link to service">
+              <LinkToService row={r} />
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
 
 function TestRows({ rows, onCreate }) {
   return (
@@ -155,7 +269,7 @@ function ReportRows({ rows }) {
   );
 }
 
-const ROWS = { tests: TestRows, reports: ReportRows };
+const ROWS = { tests: TestRows, reports: ReportRows, ordered: OrderedRows };
 
 export default function NotPricedPanel({ onCreate }) {
   const { data, isLoading, isError } = useBillingNotPriced();

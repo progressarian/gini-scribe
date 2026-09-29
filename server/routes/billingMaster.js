@@ -22,6 +22,7 @@ import {
   billingDiscountUpdateSchema,
   billingGroupCreateSchema,
   billingGroupUpdateSchema,
+  billingItemAliasCreateSchema,
   billingItemCreateSchema,
   billingItemListQuerySchema,
   billingItemUpdateSchema,
@@ -38,6 +39,7 @@ import { httpError } from "../services/billing/transaction.js";
 import { USAGE_KINDS, whereUsed } from "../services/billing/usage.js";
 import * as groups from "../services/billing/serviceGroups.js";
 import * as items from "../services/billing/serviceItems.js";
+import * as aliases from "../services/billing/serviceItemAliases.js";
 import * as rules from "../services/billing/categoryRules.js";
 import * as rates from "../services/billing/categoryRates.js";
 import * as paymentRules from "../services/billing/paymentRules.js";
@@ -169,6 +171,24 @@ router.get(
   `${BASE}/items/:id/price-history`,
   master,
   run("Billing price history", 200, (req) => items.priceHistory(idParam(req))),
+);
+router.get(
+  `${BASE}/items/:id/aliases`,
+  master,
+  run("Billing item aliases", 200, (req) => aliases.listAliases(idParam(req))),
+);
+router.post(
+  `${BASE}/items/:id/aliases`,
+  master,
+  validate(billingItemAliasCreateSchema, BILLING_FIELD_LABELS),
+  run("Billing item alias add", 201, (req) => aliases.addAlias(idParam(req), req.body, ctx(req))),
+);
+router.delete(
+  `${BASE}/items/:id/aliases/:aliasId`,
+  master,
+  run("Billing item alias remove", 200, (req) =>
+    aliases.removeAlias(idParam(req), idParam(req, "aliasId"), ctx(req)),
+  ),
 );
 router.post(
   `${BASE}/items`,

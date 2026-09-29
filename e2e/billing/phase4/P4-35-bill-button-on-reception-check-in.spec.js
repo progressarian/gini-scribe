@@ -7,7 +7,7 @@ const tag = crypto.randomBytes(3).toString("hex");
 const EXPECTED = { visitId: 930001, name: `P435 Expected ${tag}` };
 const ON_FLOOR = { visitId: 930002, name: `P435 OnFloor ${tag}` };
 const NOT_COMING = { visitId: 930003, name: `P435 NotComing ${tag}` };
-const BILL_URL = (visitId) => `/giniflow/station/billing?visit=${visitId}`;
+const BILL_URL = (visitId) => `/giniflow/station/reception?tab=bill&visit=${visitId}`;
 
 const arrival = (seed, extra) => ({
   visitId: seed.visitId,
@@ -144,19 +144,22 @@ test.describe.serial("P4-35 Bill button on reception check-in", () => {
     await expect(bill(page, EXPECTED)).toHaveAttribute("href", BILL_URL(EXPECTED.visitId));
   });
 
-  test("6. pressing Bill opens the billing counter for that patient, in a second tab", async ({
+  test("6. pressing Bill switches to the Bill tab for that patient, in the same window", async ({
     page,
   }) => {
     await openArrivals(page, "reception");
-    const navigations = [];
-    page.context().on("request", (request) => {
-      if (request.isNavigationRequest()) navigations.push(request.url());
-    });
-    const [popup] = await Promise.all([page.waitForEvent("popup"), bill(page, ON_FLOOR).click()]);
-    expect(navigations.some((url) => url.endsWith(BILL_URL(ON_FLOOR.visitId)))).toBe(true);
-    expect(navigations.some((url) => url.endsWith(BILL_URL(EXPECTED.visitId)))).toBe(false);
-    await popup.close();
-    await expect(page).toHaveURL(/\/giniflow\/station\/reception/);
+    let popups = 0;
+    page.context().on("page", () => popups++);
+    await bill(page, ON_FLOOR).click();
+    await expect(page).toHaveURL(
+      new RegExp(`/giniflow/station/reception\\?tab=bill&visit=${ON_FLOOR.visitId}$`),
+    );
+    await expect(page.getByRole("tab", { name: "Bill", exact: true })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(popups).toBe(0);
+    await page.getByRole("tab", { name: /Arrivals/ }).click();
     await expect(row(page, ON_FLOOR)).toBeVisible();
   });
 });

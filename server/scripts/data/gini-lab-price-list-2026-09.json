@@ -1,0 +1,650 @@
+[
+  {
+    "sr": 1,
+    "pdf_name": "DENGUE NS1 IGG IGM",
+    "name": "Dengue NS1 IgG IgM",
+    "code": "LAB-DENGUE",
+    "price": 1200,
+    "subgroup": "LAB-SERO"
+  },
+  {
+    "sr": 2,
+    "pdf_name": "CHIKUNGUNIYA IGG IGM",
+    "name": "Chikungunya IgG IgM",
+    "code": "LAB-CHIKUNGUNYA",
+    "price": 1000,
+    "subgroup": "LAB-SERO"
+  },
+  {
+    "sr": 3,
+    "pdf_name": "25-HYDROXY VITAMIN D",
+    "name": "25-Hydroxy Vitamin D",
+    "code": "LAB-VITD",
+    "price": 800,
+    "catalog_name": "Vitamin D",
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 4,
+    "pdf_name": "ACTH (ADRENOCORTICOTROPIC HORMONE)",
+    "name": "ACTH (Adrenocorticotropic Hormone)",
+    "code": "LAB-ACTH",
+    "price": 600,
+    "subgroup": "LAB-HORM"
+  },
+  {
+    "sr": 5,
+    "pdf_name": "AMH ( ANTI-MULLERIAN HORMONE)",
+    "name": "AMH (Anti-Mullerian Hormone)",
+    "code": "LAB-AMH",
+    "price": 1300,
+    "subgroup": "LAB-HORM"
+  },
+  {
+    "sr": 6,
+    "pdf_name": "AMYLASE SERUM",
+    "name": "Serum Amylase",
+    "code": "LAB-AMYLASE",
+    "price": 200,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 7,
+    "pdf_name": "Anti-TG Antibodies",
+    "name": "Anti-TG Antibodies",
+    "code": "LAB-ANTI-TG",
+    "price": 700,
+    "subgroup": "LAB-HORM"
+  },
+  {
+    "sr": 8,
+    "pdf_name": "ANTI-TPO",
+    "name": "Anti-TPO",
+    "code": "LAB-ANTI-TPO",
+    "price": 600,
+    "subgroup": "LAB-HORM"
+  },
+  {
+    "sr": 9,
+    "pdf_name": "ANTI-TSHR (TRABS)",
+    "name": "Anti-TSHR (TRAb)",
+    "code": "LAB-TRAB",
+    "price": 1500,
+    "subgroup": "LAB-HORM"
+  },
+  {
+    "sr": 10,
+    "pdf_name": "BETA CROSS LAPS",
+    "name": "Beta CrossLaps",
+    "code": "LAB-BETA-CTX",
+    "price": 1000,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 11,
+    "pdf_name": "BILLIRUBIN TOTAL",
+    "name": "Bilirubin Total",
+    "code": "LAB-BILI-T",
+    "price": 150,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 12,
+    "pdf_name": "BLOOD GLUCOSE",
+    "name": "Blood Glucose",
+    "code": "LAB-GLUCOSE",
+    "price": 50,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 13,
+    "pdf_name": "BLOOD UREA NITROGEN",
+    "name": "Blood Urea Nitrogen (BUN)",
+    "code": "LAB-BUN",
+    "price": 100,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 14,
+    "pdf_name": "C-PEPTIDE",
+    "name": "C-Peptide",
+    "code": "LAB-C-PEPTIDE",
+    "price": 600,
+    "subgroup": "LAB-HORM"
+  },
+  {
+    "sr": 15,
+    "pdf_name": "CALCIUM",
+    "name": "Calcium",
+    "code": "LAB-CALCIUM",
+    "price": 75,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 16,
+    "pdf_name": "CALCIUM CREATININE RATIO",
+    "name": "Calcium Creatinine Ratio",
+    "code": "LAB-CA-CREAT-RATIO",
+    "price": 400,
+    "subgroup": "LAB-URINE"
+  },
+  {
+    "sr": 17,
+    "pdf_name": "CHLORIDE",
+    "name": "Chloride",
+    "code": "LAB-CHLORIDE",
+    "price": 150,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 18,
+    "pdf_name": "CHOLESTROL",
+    "name": "Cholesterol",
+    "code": "LAB-CHOLESTEROL",
+    "price": 250,
+    "catalog_name": "Total cholesterol",
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 19,
+    "pdf_name": "COMPLETE BLOOD COUNT (CBC)",
+    "name": "Complete Blood Count (CBC)",
+    "code": "LAB-CBC",
+    "price": 350,
+    "subgroup": "LAB-HAEM"
+  },
+  {
+    "sr": 20,
+    "pdf_name": "CORTISOL",
+    "name": "Cortisol",
+    "code": "LAB-CORTISOL",
+    "price": 350,
+    "subgroup": "LAB-HORM"
+  },
+  {
+    "sr": 21,
+    "pdf_name": "DHEAS",
+    "name": "DHEAS",
+    "code": "LAB-DHEAS",
+    "price": 600,
+    "subgroup": "LAB-HORM"
+  },
+  {
+    "sr": 22,
+    "pdf_name": "E2 / ESTRADIOL",
+    "name": "Estradiol (E2)",
+    "code": "LAB-E2",
+    "price": 400,
+    "subgroup": "LAB-HORM"
+  },
+  {
+    "sr": 23,
+    "pdf_name": "VDRL",
+    "name": "VDRL",
+    "code": "LAB-VDRL",
+    "price": 200,
+    "subgroup": "LAB-SERO"
+  },
+  {
+    "sr": 24,
+    "pdf_name": "ELECTROLYTES",
+    "name": "Electrolytes",
+    "code": "LAB-ELECTROLYTES",
+    "price": 400,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 25,
+    "pdf_name": "ESR",
+    "name": "ESR",
+    "code": "LAB-ESR",
+    "price": 150,
+    "subgroup": "LAB-HAEM"
+  },
+  {
+    "sr": 26,
+    "pdf_name": "FERRITIN",
+    "name": "Ferritin",
+    "code": "LAB-FERRITIN",
+    "price": 400,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 27,
+    "pdf_name": "FIB 4 INDEX",
+    "name": "FIB-4 Index",
+    "code": "LAB-FIB4",
+    "price": 500,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 28,
+    "pdf_name": "TYPHIDOT IGG IGM",
+    "name": "Typhidot IgG IgM",
+    "code": "LAB-TYPHIDOT",
+    "price": 700,
+    "subgroup": "LAB-SERO"
+  },
+  {
+    "sr": 29,
+    "pdf_name": "FSH",
+    "name": "FSH",
+    "code": "LAB-FSH",
+    "price": 350,
+    "subgroup": "LAB-HORM"
+  },
+  {
+    "sr": 30,
+    "pdf_name": "TROPONIN T",
+    "name": "Troponin T",
+    "code": "LAB-TROP-T",
+    "price": 1500,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 31,
+    "pdf_name": "TROPONIN I",
+    "name": "Troponin I",
+    "code": "LAB-TROP-I",
+    "price": 1500,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 32,
+    "pdf_name": "GLUCOSE TOLRANCE TEST (GTT)",
+    "name": "Glucose Tolerance Test (GTT)",
+    "code": "LAB-GTT",
+    "price": 500,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 33,
+    "pdf_name": "GROWTH HORMONE",
+    "name": "Growth Hormone",
+    "code": "LAB-GH",
+    "price": 300,
+    "subgroup": "LAB-HORM"
+  },
+  {
+    "sr": 34,
+    "pdf_name": "HBA1C",
+    "name": "HbA1c",
+    "code": "LAB-HBA1C",
+    "price": 350,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 35,
+    "pdf_name": "HEAMOGLOBIN",
+    "name": "Haemoglobin",
+    "code": "LAB-HB",
+    "price": 150,
+    "subgroup": "LAB-HAEM"
+  },
+  {
+    "sr": 36,
+    "pdf_name": "INSULIN",
+    "name": "Insulin",
+    "code": "LAB-INSULIN",
+    "price": 400,
+    "catalog_name": "Fasting Insulin",
+    "subgroup": "LAB-HORM"
+  },
+  {
+    "sr": 37,
+    "pdf_name": "IRON SERUM",
+    "name": "Serum Iron",
+    "code": "LAB-IRON",
+    "price": 150,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 38,
+    "pdf_name": "IRON STUDIES",
+    "name": "Iron Studies",
+    "code": "LAB-IRON-STUDIES",
+    "price": 400,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 39,
+    "pdf_name": "IRON STUDIES WITH FERRITINE",
+    "name": "Iron Studies with Ferritin",
+    "code": "LAB-IRON-STUDIES-FERRITIN",
+    "price": 700,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 40,
+    "pdf_name": "KIDNEY FUNCTION TEST (BUN,CREAT,U/A)",
+    "name": "Kidney Function Test (KFT)",
+    "code": "LAB-KFT",
+    "price": 300,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 41,
+    "pdf_name": "LH (Luteinizing Hormone)",
+    "name": "LH (Luteinizing Hormone)",
+    "code": "LAB-LH",
+    "price": 350,
+    "subgroup": "LAB-HORM"
+  },
+  {
+    "sr": 42,
+    "pdf_name": "LIPID PROFILE",
+    "name": "Lipid Profile",
+    "code": "LAB-LIPID",
+    "price": 450,
+    "catalog_name": "Lipid panel",
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 43,
+    "pdf_name": "LIVER FUNCTION TEST",
+    "name": "Liver Function Test (LFT)",
+    "code": "LAB-LFT",
+    "price": 550,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 44,
+    "pdf_name": "LIVER FUNCTION TEST WITH GGT",
+    "name": "Liver Function Test with GGT",
+    "code": "LAB-LFT-GGT",
+    "price": 600,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 45,
+    "pdf_name": "MAGNESIUM",
+    "name": "Magnesium",
+    "code": "LAB-MAGNESIUM",
+    "price": 100,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 46,
+    "pdf_name": "OSMOLALITY SERUM",
+    "name": "Serum Osmolality",
+    "code": "LAB-OSMO-SERUM",
+    "price": 400,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 47,
+    "pdf_name": "OSMOLALITY URINE",
+    "name": "Urine Osmolality",
+    "code": "LAB-OSMO-URINE",
+    "price": 400,
+    "subgroup": "LAB-URINE"
+  },
+  {
+    "sr": 48,
+    "pdf_name": "P1NP",
+    "name": "P1NP",
+    "code": "LAB-P1NP",
+    "price": 900,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 49,
+    "pdf_name": "PHOSPHOROUS",
+    "name": "Phosphorus",
+    "code": "LAB-PHOSPHORUS",
+    "price": 75,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 50,
+    "pdf_name": "POTASSIUM",
+    "name": "Potassium",
+    "code": "LAB-POTASSIUM",
+    "price": 150,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 51,
+    "pdf_name": "PRO-BNP",
+    "name": "Pro-BNP",
+    "code": "LAB-PRO-BNP",
+    "price": 1500,
+    "catalog_name": "NT-proBNP",
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 52,
+    "pdf_name": "PROLACTIN",
+    "name": "Prolactin",
+    "code": "LAB-PROLACTIN",
+    "price": 350,
+    "subgroup": "LAB-HORM"
+  },
+  {
+    "sr": 53,
+    "pdf_name": "PTH (PARATHYROID HORMONE",
+    "name": "PTH (Parathyroid Hormone)",
+    "code": "LAB-PTH",
+    "price": 700,
+    "subgroup": "LAB-HORM"
+  },
+  {
+    "sr": 54,
+    "pdf_name": "RENAL FUNCTION TEST",
+    "name": "Renal Function Test (RFT)",
+    "code": "LAB-RFT",
+    "price": 500,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 55,
+    "pdf_name": "SERUM ALBUMIN",
+    "name": "Serum Albumin",
+    "code": "LAB-ALBUMIN",
+    "price": 120,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 56,
+    "pdf_name": "SERUM CREATININE",
+    "name": "Serum Creatinine",
+    "code": "LAB-CREATININE",
+    "price": 100,
+    "catalog_name": "Creatinine",
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 57,
+    "pdf_name": "SGOT (SERUM GLUTAMIC OXALOACETIC TRANSAMINASE)",
+    "name": "SGOT (AST)",
+    "code": "LAB-SGOT",
+    "price": 150,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 58,
+    "pdf_name": "SGPT (SERUM GLUTAMIC PYRUVIC TRANSAMINASE)",
+    "name": "SGPT (ALT)",
+    "code": "LAB-SGPT",
+    "price": 150,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 59,
+    "pdf_name": "SODIUM",
+    "name": "Sodium",
+    "code": "LAB-SODIUM",
+    "price": 150,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 60,
+    "pdf_name": "SYNACTHEN STIMULATION TEST-CORTISOL (0 60 MIN)",
+    "name": "Synacthen Stimulation Test - Cortisol (0, 60 min)",
+    "code": "LAB-SYNACTHEN",
+    "price": 700,
+    "subgroup": "LAB-HORM"
+  },
+  {
+    "sr": 61,
+    "pdf_name": "TESTOSTERONE TOTAL",
+    "name": "Testosterone Total",
+    "code": "LAB-TESTOSTERONE",
+    "price": 450,
+    "subgroup": "LAB-HORM"
+  },
+  {
+    "sr": 62,
+    "pdf_name": "TFT (TOTAL THYROID PROFILE)",
+    "name": "Total Thyroid Profile (TFT)",
+    "code": "LAB-TFT",
+    "price": 450,
+    "subgroup": "LAB-HORM"
+  },
+  {
+    "sr": 63,
+    "pdf_name": "THYROGLOBULIN (TG2)",
+    "name": "Thyroglobulin (TG2)",
+    "code": "LAB-THYROGLOBULIN",
+    "price": 1200,
+    "subgroup": "LAB-HORM"
+  },
+  {
+    "sr": 64,
+    "pdf_name": "TOTAL T3",
+    "name": "Total T3",
+    "code": "LAB-T3",
+    "price": 150,
+    "subgroup": "LAB-HORM"
+  },
+  {
+    "sr": 65,
+    "pdf_name": "TOTAL T4",
+    "name": "Total T4",
+    "code": "LAB-T4",
+    "price": 150,
+    "subgroup": "LAB-HORM"
+  },
+  {
+    "sr": 66,
+    "pdf_name": "TSH",
+    "name": "TSH",
+    "code": "LAB-TSH",
+    "price": 200,
+    "subgroup": "LAB-HORM"
+  },
+  {
+    "sr": 67,
+    "pdf_name": "URIC ACID",
+    "name": "Uric Acid",
+    "code": "LAB-URIC-ACID",
+    "price": 120,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 68,
+    "pdf_name": "URINE ALBUMIN/CREATININE RATIO",
+    "name": "Urine Albumin/Creatinine Ratio (UACR)",
+    "code": "LAB-UACR",
+    "price": 500,
+    "subgroup": "LAB-URINE"
+  },
+  {
+    "sr": 69,
+    "pdf_name": "URINE CREATININE",
+    "name": "Urine Creatinine",
+    "code": "LAB-URINE-CREAT",
+    "price": 200,
+    "subgroup": "LAB-URINE"
+  },
+  {
+    "sr": 70,
+    "pdf_name": "URINE ROUTINE & MICROSCOPY",
+    "name": "Urine Routine & Microscopy",
+    "code": "LAB-URINE-RM",
+    "price": 100,
+    "subgroup": "LAB-URINE",
+    "catalog_name": "Urine R/M"
+  },
+  {
+    "sr": 71,
+    "pdf_name": "URINE TOTAL PROTEIN",
+    "name": "Urine Total Protein",
+    "code": "LAB-URINE-PROTEIN",
+    "price": 150,
+    "subgroup": "LAB-URINE"
+  },
+  {
+    "sr": 72,
+    "pdf_name": "VITAMIN B12",
+    "name": "Vitamin B12",
+    "code": "LAB-B12",
+    "price": 600,
+    "subgroup": "LAB-BIO"
+  },
+  {
+    "sr": 73,
+    "pdf_name": "TRIGLYCERIDE",
+    "name": "Triglyceride",
+    "code": "LAB-TRIGLYCERIDE",
+    "price": 200,
+    "subgroup": "LAB-BIO",
+    "catalog_name": "TG"
+  },
+  {
+    "sr": 74,
+    "pdf_name": "FE SODIUM",
+    "name": "FE Sodium",
+    "code": "LAB-FE-SODIUM",
+    "price": 600,
+    "subgroup": "LAB-URINE"
+  },
+  {
+    "sr": 75,
+    "pdf_name": "FE POTASSIUM",
+    "name": "FE Potassium",
+    "code": "LAB-FE-POTASSIUM",
+    "price": 600,
+    "subgroup": "LAB-URINE"
+  },
+  {
+    "sr": 76,
+    "pdf_name": "HIV I & II",
+    "name": "HIV I & II",
+    "code": "LAB-HIV",
+    "price": 300,
+    "subgroup": "LAB-SERO"
+  },
+  {
+    "sr": 77,
+    "pdf_name": "HCV RAPID",
+    "name": "HCV Rapid",
+    "code": "LAB-HCV",
+    "price": 300,
+    "subgroup": "LAB-SERO"
+  },
+  {
+    "sr": 78,
+    "pdf_name": "HBSAG RAPID",
+    "name": "HBsAg Rapid",
+    "code": "LAB-HBSAG",
+    "price": 300,
+    "subgroup": "LAB-SERO"
+  },
+  {
+    "sr": 79,
+    "pdf_name": "MALARIA PARASITE",
+    "name": "Malaria Parasite",
+    "code": "LAB-MALARIA",
+    "price": 600,
+    "subgroup": "LAB-HAEM"
+  },
+  {
+    "sr": 80,
+    "pdf_name": "BLOOD GROUP",
+    "name": "Blood Group",
+    "code": "LAB-BLOOD-GROUP",
+    "price": 100,
+    "subgroup": "LAB-HAEM"
+  }
+]

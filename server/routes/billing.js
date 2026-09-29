@@ -8,10 +8,14 @@ import {
   billingCancelSchema,
   billingCategorySetSchema,
   billingCodeAddSchema,
+  billingConsultationSuggestionQuerySchema,
+  billingDraftDeleteSchema,
   billingDraftOpenSchema,
   billingDuesQuerySchema,
   billingFinaliseSchema,
   billingItemSearchQuerySchema,
+  billingLabCaseLinesAddSchema,
+  billingLabCaseTestsQuerySchema,
   billingLineAddSchema,
   billingLineQuantitySchema,
   billingLineRemoveSchema,
@@ -40,7 +44,17 @@ import * as payments from "../services/billing/payments.js";
 import { duesToday } from "../services/billing/dues.js";
 import * as shifts from "../services/billing/cashShifts.js";
 import * as requests from "../services/billing/billingRequests.js";
-import { consultationForDesk, notPricedForVisit } from "../services/billing/visitLines.js";
+import {
+  consultationForDesk,
+  consultationSuggestion,
+  notPricedForVisit,
+  testsForDesk,
+} from "../services/billing/visitLines.js";
+import {
+  addLabCaseTests,
+  labCaseSuggestion,
+  labCaseTestsForDesk,
+} from "../services/billing/labCaseLines.js";
 import { deskSettings } from "../services/billing/billingSettings.js";
 import { searchDeskItems } from "../services/billing/serviceItems.js";
 import { counterPatients } from "../services/billing/counterPatients.js";
@@ -122,7 +136,23 @@ router.get(
   `${BASE}/items/search`,
   desk,
   validateQuery(billingItemSearchQuerySchema, BILLING_DESK_LABELS),
-  run("Item search", 200, (req) => searchDeskItems({ q: req.query.q, limit: req.query.limit })),
+  run("Item search", 200, (req) =>
+    searchDeskItems({ q: req.query.q, limit: req.query.limit, visitId: req.query.visit_id }),
+  ),
+);
+
+router.get(
+  `${BASE}/consultation-suggestion`,
+  desk,
+  validateQuery(billingConsultationSuggestionQuerySchema, BILLING_DESK_LABELS),
+  run("Consultation suggestion", 200, (req) => consultationSuggestion(req.query.bill_id, ctx(req))),
+);
+
+router.get(
+  `${BASE}/lab-case-tests`,
+  desk,
+  validateQuery(billingLabCaseTestsQuerySchema, BILLING_DESK_LABELS),
+  run("Lab report tests", 200, (req) => labCaseSuggestion(req.query.bill_id, ctx(req))),
 );
 
 router.get(
@@ -146,8 +176,11 @@ router.post(
   desk,
   validate(billingDraftOpenSchema, BILLING_DESK_LABELS),
   run("Open draft bill", 200, async (req) => {
-    await consultationForDesk(req.params.visitId, ctx(req));
-    return bills.openDraft(req.params.visitId, ctx(req));
+    const opening = { ...ctx(req), unsavedDraft: true };
+    await consultationForDesk(req.params.visitId, opening);
+    await testsForDesk(req.params.visitId, opening);
+    await labCaseTestsForDesk(req.params.visitId, opening);
+    return bills.openDraft(req.params.visitId, opening);
   }),
 );
 
@@ -168,6 +201,13 @@ router.post(
   desk,
   validate(billingLineAddSchema, BILLING_DESK_LABELS),
   run("Add bill line", 200, (req) => bills.addLine(req.params.billId, req.body, ctx(req))),
+);
+
+router.post(
+  `${BASE}/bills/:billId/lab-case-lines`,
+  desk,
+  validate(billingLabCaseLinesAddSchema, BILLING_DESK_LABELS),
+  run("Add lab report tests", 200, (req) => addLabCaseTests(req.params.billId, req.body, ctx(req))),
 );
 
 router.patch(
@@ -215,6 +255,27 @@ router.post(
   desk,
   validate(billingFinaliseSchema, BILLING_DESK_LABELS),
   run("Finalise bill", 200, (req) => bills.finaliseBill(req.params.billId, req.body, ctx(req))),
+);
+
+router.post(
+  `${BASE}/bills/:billId/save-draft`,
+  desk,
+  validate(billingDraftOpenSchema, BILLING_DESK_LABELS),
+  run("Save draft bill", 200, (req) => bills.saveDraft(req.params.billId, ctx(req))),
+);
+
+router.post(
+  `${BASE}/bills/:billId/discard-draft`,
+  desk,
+  validate(billingDraftOpenSchema, BILLING_DESK_LABELS),
+  run("Discard draft bill", 200, (req) => bills.discardDraft(req.params.billId, ctx(req))),
+);
+
+router.post(
+  `${BASE}/bills/:billId/delete-draft`,
+  desk,
+  validate(billingDraftDeleteSchema, BILLING_DESK_LABELS),
+  run("Delete draft bill", 200, (req) => bills.deleteDraft(req.params.billId, req.body, ctx(req))),
 );
 
 router.post(

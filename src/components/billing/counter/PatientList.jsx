@@ -11,18 +11,35 @@ const BILL_BADGE = {
   [STATE.CLAIM_CLEARED]: { tone: "paid", label: () => "Cleared" },
 };
 
+export function BillBadge({ bill }) {
+  const badge = BILL_BADGE[bill?.state] || BILL_BADGE[STATE.NONE];
+  return <span className={`bc-badge bc-badge--${badge.tone}`}>{badge.label(bill)}</span>;
+}
+
 function Badges({ row }) {
-  const bill = BILL_BADGE[row.bill?.state] || BILL_BADGE[STATE.NONE];
   return (
     <span className="bc-row__badges">
       {row.online && <span className="bc-badge bc-badge--online">Online</span>}
       {row.samplesOnly && <span className="bc-badge bc-badge--samples">Samples only</span>}
-      <span className={`bc-badge bc-badge--${bill.tone}`}>{bill.label(row.bill)}</span>
+      <BillBadge bill={row.bill} />
     </span>
   );
 }
 
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+function hintsOf(hints) {
+  if (!hints) return [];
+  return [
+    hints.consultation && "Consultation done — not billed",
+    hints.tests > 0 && `${plural(hints.tests, "test")} ordered`,
+    hints.notPriced > 0 && `${hints.notPriced} not priced`,
+    hints.due > 0 && `${fromPaise(hints.due)} due`,
+  ].filter(Boolean);
+}
+
 function VisitRow({ row, active, onPick }) {
+  const hints = hintsOf(row.hints);
   return (
     <button
       type="button"
@@ -34,6 +51,7 @@ function VisitRow({ row, active, onPick }) {
         <span className="bc-row__name">{row.name}</span>
         {row.statusLabel ? <span className="bc-row__status">{row.statusLabel}</span> : null}
       </span>
+      {hints.length > 0 && <span className="bc-row__hints">{hints.join(" · ")}</span>}
       <span className="bc-row__meta">
         {row.age}
         {(row.sex || "")[0] || ""} · {row.fileNo || "—"}
@@ -49,50 +67,91 @@ function Rows({ rows, visitId, onPick }) {
   ));
 }
 
-export default function PatientList({ data, isLoading, visitId, searching, onPick }) {
-  const onFloor = data?.onFloor || [];
-  const left = data?.left || [];
-  const notArrived = data?.notArrived || [];
-  const [open, setOpen] = useState(false);
+export const counterRows = (data) => [
+  ...(data?.toBill || []),
+  ...(data?.billed || []),
+  ...(data?.waiting || []),
+];
 
-  useEffect(() => {
-    setOpen(searching);
-  }, [searching]);
-
+function Group({ id, label, rows, open, onToggle, empty, isLoading, visitId, onPick }) {
   return (
-    <div className="bc-list__body">
-      <div className="bc-group">
-        On the floor<span className="bc-count">{onFloor.length}</span>
-      </div>
-      {isLoading && <div className="bc-list__empty">Loading…</div>}
-      {!isLoading && !onFloor.length && <div className="bc-list__empty">Nobody on the floor.</div>}
-      <Rows rows={onFloor} visitId={visitId} onPick={onPick} />
-
-      {left.length > 0 && (
-        <>
-          <div className="bc-group">
-            Left today<span className="bc-count">{left.length}</span>
-          </div>
-          <Rows rows={left} visitId={visitId} onPick={onPick} />
-        </>
-      )}
-
+    <>
       <button
         type="button"
         className="bc-group bc-group--toggle"
         aria-expanded={open}
-        aria-controls="bc-not-arrived"
-        onClick={() => setOpen((value) => !value)}
+        aria-controls={id}
+        onClick={onToggle}
       >
         <span className="bc-group__caret" aria-hidden="true">
           {open ? "▾" : "▸"}
         </span>
-        Not arrived<span className="bc-count">{notArrived.length}</span>
+        {label}
+        <span className="bc-count">{rows.length}</span>
       </button>
-      <div id="bc-not-arrived" hidden={!open}>
-        {!notArrived.length && <div className="bc-list__empty">Nobody waiting to arrive.</div>}
-        <Rows rows={notArrived} visitId={visitId} onPick={onPick} />
+      <div id={id} hidden={!open}>
+        {isLoading && <div className="bc-list__empty">Loading…</div>}
+        {!isLoading && !rows.length && <div className="bc-list__empty">{empty}</div>}
+        <Rows rows={rows} visitId={visitId} onPick={onPick} />
       </div>
+    </>
+  );
+}
+
+export default function PatientList({ data, isLoading, visitId, searching, onPick }) {
+  const toBill = data?.toBill || [];
+  const billed = data?.billed || [];
+  const waiting = data?.waiting || [];
+  const matchToBill = searching && toBill.length > 0;
+  const matchBilled = searching && billed.length > 0;
+  const matchWaiting = searching && waiting.length > 0;
+  const [open, setOpen] = useState({ toBill: true, billed: true, waiting: false });
+  const toggle = (key) => () => setOpen((was) => ({ ...was, [key]: !was[key] }));
+
+  useEffect(() => {
+    setOpen((was) => ({ ...was, waiting: matchWaiting }));
+  }, [matchWaiting]);
+
+  useEffect(() => {
+    if (matchToBill) setOpen((was) => ({ ...was, toBill: true }));
+  }, [matchToBill]);
+
+  useEffect(() => {
+    if (matchBilled) setOpen((was) => ({ ...was, billed: true }));
+  }, [matchBilled]);
+
+  const shared = { isLoading, visitId, onPick };
+  return (
+    <div className="bc-list__body">
+      <Group
+        id="bc-to-bill"
+        label="To bill"
+        rows={toBill}
+        open={open.toBill}
+        onToggle={toggle("toBill")}
+        empty="Nobody to bill."
+        {...shared}
+      />
+      <Group
+        id="bc-billed"
+        label="Billed today / Exited"
+        rows={billed}
+        open={open.billed}
+        onToggle={toggle("billed")}
+        empty="Nobody billed or exited yet."
+        {...shared}
+        isLoading={false}
+      />
+      <Group
+        id="bc-waiting"
+        label="Nothing to bill yet"
+        rows={waiting}
+        open={open.waiting}
+        onToggle={toggle("waiting")}
+        empty="Nobody waiting."
+        {...shared}
+        isLoading={false}
+      />
     </div>
   );
 }

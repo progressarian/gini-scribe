@@ -7,6 +7,7 @@ import { toast } from "../../stores/uiStore";
 import { fromPaise, requestErrorOf } from "../../components/billing/format";
 import { saveBlob } from "../../components/billing/importText";
 import { dueAgeText } from "../../components/billing/counter/lineText";
+import { receptionBillHref } from "../../components/billing/counter/billHref";
 import "../../styles/flow.css";
 import "../flow/FlowSettings.css";
 import "./billing.css";
@@ -28,12 +29,8 @@ const NO_FILTERS = {
 
 const billsText = (count) => (count === 1 ? "1 bill" : `${count} bills`);
 
-const counterHref = (row) => {
-  const params = new URLSearchParams();
-  if (row.visit_id) params.set("visit", row.visit_id);
-  params.set("bill", row.bill_id);
-  return `/giniflow/station/billing?${params}`;
-};
+const counterHref = (row) =>
+  receptionBillHref({ ...(row.visit_id ? { visit: row.visit_id } : {}), bill: row.bill_id });
 
 function Filters({ filters, options, onChange }) {
   const id = useId();

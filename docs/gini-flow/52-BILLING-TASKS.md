@@ -2564,6 +2564,8 @@ floor. Nothing about the existing "Clear payment" changes.
 
   - **Review of the rehearsal fixes:** (2026-09-25, by a sub-agent) Five problems, each proven by a test that failed first. (1) `consultationForDesk` added a consultation to a new draft on a visit already billed final without one; it now also refuses when the visit has a final invoice (a cancel still re-adds it). (2) It locked `giniflow_visits FOR UPDATE`, which **deadlocked** against a desk adding or removing a line on the same draft — the foreign key takes `FOR KEY SHARE` on that row, and Postgres could kill the desk's own add; it now takes a per-visit transaction advisory lock shared with `draftAtCheckIn`. (3) `draftAtCheckIn` brought back a consultation the desk had removed when the patient was checked in again (no-show undo, or the flow sync resurrecting a cancel); it now uses the same `consultationSettled` guard. (4) The "desk removed it" audit lookup was bounded by `visit_date - 1` and forgot earlier removals; it is now bounded by the visit's first bill, independent of timezone (the audit is append-only and written in the same transaction, so it is a sound record). (5) **The counter's 15 s re-read could put one patient's bill on the next patient's screen**, or overwrite a newer version with an older one; the re-read now applies only to the same bill at an equal or newer version, and responses for a patient no longer selected are ignored. Judged fine: check-in stays safe (billing after the commit, failures swallowed; proven with a throwing pool and two simultaneous check-ins); the re-read doesn't clobber payment rows, quantities or the category select and stays far under the rate limit; General readiness matches the server and a bare parent is still refused. New specs `P4-38b-consultation-guards` (6) and `P4-38c-reread-stays-on-its-patient` (1); P4-38b 11/11 and P4-38c 11/11, twice. `visitLines.js` needs an API restart. The full rehearsal spec couldn't start — other runs held the reception user's shift — and needs a quiet window.
 
+  - **Rehearsal re-run after the Reception merge:** (2026-09-29) Passes again (1.7 min) against a fresh API with P4C-12…P4C-15. Every stop on the way was the spec lagging the new screens, not a counter bug: check-in now offers "Open bill →" and needs Close; the Bill step opens in the same window (`tab=bill&visit=…`); `pickPatient` goes to the Bill tab and searches, since Dues and Shift hide the list and a patient with nothing to bill sits in the collapsed group; the PDF text check tolerates the new "(₹)" spacing. Before it could start, the test DB needed a full `rebuild.mjs` (empty step catalogue) and leftover open cash shifts closed. **The real floor trial is still to run.**
+
 - [x] **P4-39 · Update the plan status** — `Done`
   - **E2E test:** No new spec — run `npm run test:e2e:billing`; the whole suite must be green before the phase is marked built.
   - **Result:** Done 2026-09-25. `npm run test:e2e:billing`: **1183 passed, 1 failed, 2 flaky** (34.6 min). The failure, P2-11 test 0, checked for a `const SESSIONS` line that the P1-38 fix had just removed from `billingImport.js` (the import routes now use the house `${BASE}/sessions…` form so the permission sweep reads them); the obsolete line was dropped and the test passes — 1184/1184. The two flaky tests (P3-18a test 7, a Category filter slow to appear; P4-33 test 4) passed on retry. `52-BILLING-PLAN.md`: the status line marks Phase 4 built except P4-38, and a new **§0d "Phase 4 as built"** records where it differs from the plan.
@@ -2770,6 +2772,176 @@ and a full rehearsal of the trial day on the test system.
     - 8 tests; 3 deliberate breaks each failed a test.
     - P4-38 now compares the bill PDF's "(₹)" labels regardless of spacing.
     - **Needs an API and worker restart after deploy.**
+- [x] **P4C-13 · Billing Counter inside the Reception station** — `Done` (asked 2026-09-29; the Payments tab stays until money moves to bills)
+  - **Where:**
+    - `src/components/billing/counter/BillingDesk.jsx` (the counter body, extracted) and `billHref.js`
+    - `ReceptionStationPage.jsx` (tabs in the URL)
+    - `BillingCounterPage.jsx` (now a redirect)
+    - `PatientList.jsx` (exports `BillBadge`), `useBilling.js` (an `enabled` option)
+    - `billingCounter.css` and `giniflow-station.css` (screen-size rules)
+    - `StationsLauncherPage.jsx`, `DuesRegisterPage.jsx`
+    - spec `P4C-13-billing-inside-reception.spec.js`; P4-35 and P4C-10 #11 updated
+  - **Result:** Done 2026-09-29 (built by a sub-agent).
+    - Reception tabs are Arrivals · Bill · Dues · Shift · Payments. Bill, Dues and Shift need BILLING_DESK; Dues shows only when pay later is on.
+    - The tab is in the URL (`?tab=…&visit=&bill=`). There is one page-level live connection.
+    - Arrivals rows show the bill badge and a same-window Bill link. "Open bill →" appears after check-in.
+    - `/giniflow/station/billing` redirects to `reception?tab=bill`, keeping visit/patient/bill and the dues-register patient. The launcher tile and Dues "Take payment" point to the Bill tab.
+    - At ≤900px the list folds into "Patients · N ▾"; at ≤600px buttons go full width, tabs scroll and the Reception bar wraps.
+    - The Payments tab is untouched.
+    - P4C-13: 11 tests; 3 deliberate breaks each failed a test. P4-27…36, P4-35, P4-38c, P4C-08…12, P4C-03 and P5-05 pass. P4C-12 + P4C-13 re-ran 19/19 on a fresh API.
+  - **Still open:**
+    - The Payments tab is to be replaced by bill payments later.
+    - `scripts/smoke-giniflow-render.mjs` was already broken (it reads the repo `.env`, and its SSR loader fails).
+    - Splitting ReceptionStationPage.jsx into files was skipped: about 30 shared local helpers make it risky.
+- [x] **P4C-14 · Bill tab lists who needs a bill first** — `Done` (asked 2026-09-29; the consultation is no longer added automatically, so the desk must see who the doctor has seen)
+  - **Where:**
+    - `server/services/billing/counterPatients.js`: three LATERAL joins in the one query; rows gain `group` and `hints`; the response gains `toBill`, `billed`, `waiting`, and `onFloor`/`left`/`notArrived`/`bill` stay for the Arrivals badge
+    - `PatientList.jsx` (groups, hints, `counterRows`), `BillingDesk.jsx`, `billingCounter.css` (`.bc-row__hints`)
+    - spec `P4C-14-bill-tab-to-bill-groups.spec.js`; P4C-09 rewritten; P4-27, P4C-11, P4-32 and P4-38c-reread use the new toggle name
+  - **Result:** Done 2026-09-29 (built by a sub-agent).
+    - **To bill** (by arrival), any of:
+      - consultation done with no consultation line on a final bill
+      - tests ordered and not settled or billed on a final bill, including tests with no item
+      - money due, or a draft with live lines
+    - **Billed today:** nothing outstanding, and a final bill or a settled test order exists.
+    - **Nothing to bill yet** (collapsed): checked in with nothing, then not arrived. Search opens it only on a match inside it. Empty auto-drafts now land here.
+    - **"Consultation done"** means the status or an event is at `doctor_done` … `dispensed`, or an `exited` that the counter's "Patient left" or the samples-only close didn't write. Samples-only visits never count. The HealthRay-completed path is covered.
+    - **Hints:** "Consultation done — not billed", "N tests ordered", "N not priced", "₹X due".
+    - No-shows and cancels show only when they are To bill. Blocked patients never show. The Arrivals tab is unchanged.
+    - 12 tests; 3 deliberate breaks each failed a test. Regressions pass. P4C-14 + P4C-13 re-ran 23/23 on a fresh API. **Needs an API restart.**
+  - **Still open:**
+    - A test with no item stays To bill until the Payments tab takes the money.
+    - A no-show or cancel whose only bill is a pending CGHS claim is now hidden from the Bill tab (the Arrivals badge still shows it).
+- [x] **P4C-15 · Prefill priced tests; search-only Add items** — `Done` (asked 2026-09-29: 5 ordered tests — "HBA1C", "Complete Blood Count (CBC)"… — all showed as "no price" although HbA1c has an item; Add items listed every service)
+  - **Where:**
+    - new `server/services/billing/testMatch.js` (`TEST_MATCHES_SQL`, `catalogTestsFor`); `labCatalog.js` exports `FLAT`
+    - `visitLines.js`: `itemsForTests` (so `linesForOrder`), `notPricedForVisit`, `releaseOrderLines`, new `testsForDesk`
+    - `payments.js` (`UNCOVERED_SQL`), `counterPatients.js` (`day_tests` CTE for the priced / on-final hints)
+    - `routes/billing.js` (open-draft route calls `testsForDesk` after `consultationForDesk`)
+    - `serviceItems.js` (`searchDeskItems` returns `more`), `useBilling.js` (`ITEM_SEARCH_MIN` 2, `ITEM_SEARCH_LIMIT` 20), `AddItems.jsx`, `billingCounter.css` (`.bc-results--scroll`, `.bc-search-hint`)
+    - spec `P4C-15-prefill-priced-tests-and-item-search.spec.js`
+  - **Result:** Done 2026-09-29 (built by a sub-agent).
+    - **One matcher** everywhere billing decides priced / which item. Tiers, first tier that finds anything wins: exact name → normalised name (`FLAT`: case, spaces, punctuation, brackets ignored) → bracket code ("Complete Blood Count (CBC)" ↔ "CBC", as `looksLikeSameTest`), a trailing " - X" code, same word set, or a `lab_report_catalog` name/alias. Only exactly one active catalogue test counts; ambiguous or unknown names stay unpriced. All in SQL, batched.
+    - **Prefill on open:** opening a visit's bill adds every ordered test that now has an active item, via `linesForOrder` (lock order visit → bills → orders → lines, audit, never-twice). Skipped: orders paid or claimed at reception, cancelled tests, items already on a live line, and tests the desk removed. The consultation stays manual.
+    - **Reception money:** `UNCOVERED_SQL` pairs tests with lines by matched catalogue id, so reception never collects again for a test the bill charges under a different spelling.
+    - **Add items:** nothing below 2 letters ("Type at least 2 letters of a service name or code"); server search on name or code, active items, 20 at a time with "Showing first 20 — keep typing to narrow"; results scroll inside a 320px box. Debounce, bill-again greying, "Request new item" and the saved search text are kept.
+    - 11 tests; 3 deliberate breaks (exact matching, no settled check, full list when empty) each failed a test. P4-07, 08, 10, 18, 29, 30, P4-38b (both), P4C-04…07b, 09, 11, 12, 13, 14 and P1-30 pass. P4C-13 + 14 + 15 re-ran 34/34 on a fresh API. **Needs an API and worker restart.**
+  - **Still open:**
+    - "Settled" is per order: when one test of an order was paid through a final bill, a later-priced test on that order is not prefilled; the desk adds it by hand.
+    - "Renal Function Test (RFT)" stays unpriced until the catalogue has an RFT test or a report alias that links it to KFT.
+- [x] **P4C-16 · Consultation search and add match the visit type** — `Done` (asked 2026-09-29: "if the patient is new then show only new visit type services, not follow up? and vice versa?"; no override — a wrong visit type is fixed at check-in)
+  - **Where:**
+    - `serviceItems.js`: new `visitConsultationType` (giniflow_visits → appointments → `billingVisitType`); `searchDeskItems` takes `visitId` and returns `consultation_type` and `consultations_hidden`
+    - `schemas/billing.js` (`visit_id` on the item search), `routes/billing.js`
+    - `bills.js`: `itemFor` reads `visit_type`; `refuseOtherConsultation` in `addLineIn`, before the bill-again approval is used
+    - `useBilling.js` (`useItemSearch(q, visitId)`), `AddItems.jsx` (the hint)
+    - spec `P4C-16-consultation-matches-visit-type.spec.js`; P4C-08 test 14 uses a Follow Up visit for its Follow Up item
+  - **Result:** Done 2026-09-29 (built by a sub-agent).
+    - **Search:** with a visit, consultations show only when their type matches the visit's billing type (New / Follow Up). Other items are unchanged. No booking, an Investigation visit, or no visit shows every consultation. The 2-letter minimum, 20 + `more` and the scroll box are kept.
+    - **Hint:** "Showing New consultations for this visit" (or Follow Up) when consultations are in the results or were hidden.
+    - **Hard stop:** `addLineIn` refuses a consultation of the other type with 409 "This is a New Patient visit — add the New consultation" / "This is a Follow Up visit — add the Follow Up consultation". It covers the desk add, an approved bill-again (the approval stays unused) and every other path. The automatic consultation already picks the matching type.
+    - A blank appointment visit type counts as New, as before.
+    - 7 tests; 3 deliberate breaks (no search filter, no add guard, raw visit type compared) each failed a test. P4-07, 12, 17, 19, 20, 23, 27–32, 38 (rehearsal, 38b both, 38c-reread), 41, 42, P4C-07, 07b, 08 (both), 09, 11, 12, 13, 14, 15, P1-18, P3-17a, P3-18b and P5-10 pass. **Needs an API restart.**
+  - **Still open:**
+    - A consultation line added before check-in corrected the visit type stays on the bill; the desk removes it by hand. Billing it again is refused even with an approval.
+    - `service_items_consultation_check` forbids untyped consultations, so the "untyped always shows" branch is dead code.
+    - Old spec failures, not from P4C-16: P4-13 test 1 expects the automatic consultation (off since P4C-12); P4-38c-counter-fixes test 10 expects results before any search (search-only since P4C-15).
+- [x] **P4C-17 · One-click consultation at the counter** — `Done` (asked 2026-09-29: less time per bill; the consultation stays manual since P4C-12, so offer it as one click instead)
+  - **Where:**
+    - `visitLines.js`: new `consultationSuggestion` (reuses `visitFor`, `consultationItem`, `priceBill`)
+    - `routes/billing.js`: `GET /billing/consultation-suggestion?bill_id=` (BILLING_DESK); `schemas/billing.js`: `billingConsultationSuggestionQuerySchema`
+    - `serviceItems.js`: `searchDeskItems` loses the dead untyped-consultation branch
+    - new `ConsultationSuggestion.jsx`; `BillingDesk.jsx` (card above Add items); `useBilling.js` (`useConsultationSuggestion`, keyed on bill id + version); `billingCounter.css` (`.bc-consult`)
+    - spec `P4C-17-one-click-consultation.spec.js`; P4-13 #1 switches auto on around check-in; P4-38c-counter-fixes #10 types a search first; P4C-11, P4-32, P4-33, P4-34 delete their shift after the fixture teardown
+  - **Result:** Done 2026-09-29 (built by a sub-agent).
+    - On a visit's draft invoice with no consultation, a "Consultation" card above Add items offers one button: "Add Follow Up consultation — Dr X ₹1,000". It picks the doctor and item the automatic path would (appointment doctor, else assigned; their own item, else the hospital default) and shows the price the patient would pay for that line, from `priceBill` (category rate or consultant fee, payment rule, automatic discounts). No price is shown until a category is confirmed.
+    - **Change doctor** (a labelled select) lists the suggested item first, then active consultations of the visit's type from doctors who are not removed, each with its price.
+    - Nothing is added until the click. The click uses the normal add-line path (P4C-16 type guard, P4C-08 refusals, audit, lock order) with source `added`.
+    - Hidden when the visit already has a live consultation on any non-cancelled bill, has no booking, is an Investigation visit, or the bill is not a draft. It comes back after the desk removes the consultation. The P4-38b guards on the automatic path are unchanged. With `auto_add_consultation` on, the line is added automatically and the card hides.
+    - A removed booked doctor gets no suggestion and no note while auto is off (P4C-12 #6); the desk picks another doctor from Change doctor.
+    - 10 tests; 3 deliberate breaks (wrong type in Change doctor, base price instead of payable, auto-add on open) each failed a test. P4C-12, 13, 14, 15, 16, P4-38b (both), P4C-07, P4C-08 (both), P4-13, P4-38c (both), P4C-11, P4-29, P4-30, P4-32, P4-33, P4-34 and the P4-38 rehearsal pass. **Needs an API restart.**
+  - **Still open:**
+    - Hospital-default consultation items appear in Change doctor only when one is the suggestion (they have no doctor to label them by).
+    - Whether a removed booked doctor should get a note while auto is off (the response already carries `removed_doctor`).
+- [x] **P4C-20 · Delete draft bill at the counter** — `Done` (asked 2026-09-29: a Delete draft button on the Bill tab)
+  - **Where:**
+    - `bills.js`: new `deleteDraft` (lock order advisory → visit → bills → orders → lines), `holdConsultation` moved here and exported, `refusePendingRequest`, `detachRequests`
+    - `visitLines.js`: `FIRST_BILL_AT_SQL` — the "desk removed it" bound is the visit's first bill including deleted drafts (from the bills delete audit); used by `consultationSettled` and `REMOVED_BY_DESK_SQL`
+    - `routes/billing.js`: `POST /billing/bills/:billId/delete-draft` (BILLING_DESK); `schemas/billing.js`: `billingDraftDeleteSchema`
+    - `useBilling.js` (`useDeleteDraft`), `BillActions.jsx` (button + dialog), `BillingDesk.jsx` (`reopenVisit`)
+    - spec `P4C-20-delete-draft.spec.js`
+  - **Result:** Done 2026-09-29 (built by a sub-agent).
+    - "Delete draft" beside Save draft on a draft invoice; the dialog "Delete this draft bill?" takes an optional reason. After it, the saved form is cleared and the visit reopens on a fresh empty draft.
+    - Hard delete, no migration: a draft has no number, so deleting the row keeps dues, reports, the CGHS register, counter hints and previous bills right with no reader changes. Every line gets the same audit row as Remove line, and the bill gets a `bills`/`delete` audit row with the reason (or null).
+    - Nothing automatic comes back (consultation with auto on, prefilled order tests, lab-case tests). The P4C-17 and P4C-19 cards still offer them; ordered tests come back from Add items. Test orders are released.
+    - Refused: not a draft invoice; money taken ("Money was taken on this draft — finalise it or refund it first"); a pending desk request on the draft. Answered requests keep their history with `bill_id` cleared.
+    - 12 tests; 3 deliberate breaks (old guard bound, no money check, no form clear) each failed a test. P4C-07, 07b, 09, 10, 11, 12–19, P4-29, P4-32, P4-38b (both), P4-38c (both), P5-05 and the P4-38 rehearsal pass. **Needs an API and worker restart.**
+  - **Still open:**
+    - Whether a pending desk request should block the delete or just be detached.
+    - Ordered tests are not on either one-click card after a delete; the desk re-adds them from Add items.
+- [x] **P4C-19 · Bill tests from today's HealthRay lab case** — `Done` (asked 2026-09-29: Balwinder Kaur P_181957 had TSH in the in-house lab, ordered and registered in HealthRay; the visit had 0 Scribe orders, so the TSH never reached the bill. User chose "both": automatic plus one click)
+  - **Where:**
+    - migration `2026-10-28_billing_lab_case_tests.sql` (`billing_settings.auto_add_lab_case_tests BOOLEAN NOT NULL DEFAULT TRUE`; `bill_lines_source_check` gains `'lab_case'`; idempotent)
+    - new `server/services/billing/labCaseLines.js` (`VISIT_LAB_CASE_TESTS_SQL`, `ON_PATIENT_DAY_BILL_SQL`, `labCaseTestsForDesk`, `labCaseSuggestion`, `addLabCaseTests`)
+    - `visitLines.js`: `REMOVED_BY_DESK_SQL` (shared P4C-15 guard), `suggestionPrice` exported, `adoptLabCaseLine` in `linesForOrder`, `testsToPrefill` ignores draft `lab_case` lines; `testsHold.js`: `CASE_NOT_CANCELLED_SQL`
+    - `bills.js` (`LINE_SOURCES`), `billingSettings.js` (`addsLabCaseTests`), `schemas/billing.js` (lab-case query/add schemas; the desk line schema refuses `lab_case`)
+    - `routes/billing.js`: open-draft calls `labCaseTestsForDesk` after `testsForDesk`; `GET /billing/lab-case-tests?bill_id=`, `POST /billing/bills/:billId/lab-case-lines` (BILLING_DESK)
+    - `counterPatients.js` (`DAY_TESTS` takes lab-case names; `case_tests_owed`); `serviceItemAliases.js` (no-price list includes lab-case names)
+    - new `LabCaseTests.jsx`; `BillingDesk.jsx`, `BillLinesTable.jsx` ("from lab report" badge), `BillingSettingsPage.jsx`, `useBilling.js`, `billingCounter.css`
+    - spec `P4C-19-bill-from-lab-case.spec.js`; `p4-bills-fixture.mjs` `sweep` deletes the fixture's `lab_cases`
+  - **Result:** Done 2026-09-29 (built by a sub-agent).
+    - **Which cases:** `lab_cases.appointment_id` = the visit's appointment, else same `case_date` and patient (`patient_id`, or the HealthRay UHID while `patient_id` is empty); cases on another visit's appointment and cancelled cases are left out.
+    - **Automatic on open** (setting on, default): lab-case tests that resolve to an active priced item are added with source `lab_case` through `addLineIn`. Skipped: already on a live line of any bill for the patient that day; on any Scribe order of the visit; removed by the desk; cancelled case.
+    - **"From today's lab report" card** on a draft: lab-case tests not on the bill (desk-removed marked, late cases, everything when the setting is off) with service and patient price; Add each, "Add all (N)"; unpriced names "no price — link it in Settings → Services". Server re-checks (409). Hidden on final bills and when empty.
+    - **Reception money:** `UNCOVERED_SQL` counts only order lines; a later Scribe order of the same test takes over the draft's lab-case line, so nothing is collected twice.
+    - 13 tests; 4 deliberate breaks each failed a test. P4C-04, 05, 07, 07b, 09, 12–18, P4-32, P4-38b (both), P1-11, 23, 27, 28, 30, 33 and the P4-38 rehearsal pass. **Needs the migration first, then an API and worker restart.**
+  - **Still open:**
+    - The UHID fallback (as the other lab-case readers) vs waiting for `patient_id`/appointment for money.
+    - A Scribe order raised after the lab-case line is on a final bill is still collected at reception.
+    - With the default on, tests HealthRay already billed are prefilled; consider turning the setting off until money moves to Scribe.
+    - The P4C-18 no-price list grows with outsourced lab-case names.
+- [x] **P4C-18 · "Also billed as" names for services** — `Done` (asked 2026-09-29: "LIPID PROFILE" is ordered but LAB-LIPID ₹450 is linked to lab test "Lipid panel"; "Microalbumin/Creatinine Ratio" should be LAB-UACR — both showed under "Ordered tests with no price" and were never prefilled)
+  - **Where:**
+    - migration `2026-10-27_service_item_aliases.sql` (`service_item_aliases`: item FK cascade, name, `flat_name` = FLAT key, unique on `flat_name`, created_at/by)
+    - `testMatch.js`: tier 0 before all others — ordered name's FLAT = an alias of an **active test** item → that item's test; prefill, `notPricedForVisit`, `UNCOVERED_SQL`, `counterPatients`, `releaseOrderLines` get it through `TEST_MATCHES_SQL`/`catalogTestsFor`
+    - new `serviceItemAliases.js` (`listAliases`, `addAlias`, `removeAlias`, `orderedNamesNotPriced`); `serviceItems.js` (`listItems` returns `aliases`, `notPricedList` returns `orderedNames`)
+    - `routes/billingMaster.js`: `GET/POST /billing/master/items/:id/aliases`, `DELETE …/aliases/:aliasId` (BILLING_MASTER); `schemas/billing.js`: `billingItemAliasCreateSchema`
+    - new `AlsoBilledAs.jsx` in `ItemDialog.jsx`; `NotPricedPanel.jsx` (third tile); `useBillingMaster.js`; `billingUi.css`; `NotPricedTests.jsx` hint
+    - new `server/scripts/link-ordered-names.mjs "NAME=CODE" … [--apply]`
+    - spec `P4C-18-also-billed-as-names.spec.js`; P1-30 expects 3 not-priced tiles
+  - **Result:** Done 2026-09-29 (built by a sub-agent).
+    - **Also billed as** (Settings → Services, edit a test item): names the floor orders the test under; add / remove, saved at once, audited. Refused: non-test item, blank or punctuation-only, a name already on another item (409 naming it), another active service's lab-test name, its own lab-test name. Case, spaces and punctuation are ignored (FLAT).
+    - **Matching:** an alias wins over every other tier; a deactivated item's alias does not price. Removing the alias makes the name unpriced again.
+    - **Not priced → "Ordered names with no price":** names ordered in the last 30 days (IST, cancelled tests left out) that match no active test service, with times ordered, last ordered and a suggested service. "Link to CODE" or a server-side search adds the alias; the row goes and the count drops.
+    - **Counter hint:** "Ask an admin to link this name to a service or create the item."
+    - 11 tests; 3 deliberate breaks (no alias tier, no duplicate refusal, inactive item's alias matches) each failed a test. P4C-04, 05, 07, 12–17, P4-38b (both), P1-17, 18, 24, 25, 26, 29, 30 and the P4-38 rehearsal pass. **Needs the migration first, then an API and worker restart** — the matcher joins the new table, so new code before the migration breaks billing.
+  - **Still open:**
+    - "Glucose Fasting": Blood Glucose ₹50 or FBS — not linked until decided.
+    - The Services "Not priced · N" button still counts only catalogue tests without an item, not ordered names.
+- [x] **Data · CGHS and Himachal Govt rates (CGHS Tier II, 13 Feb 2026, NABH PW)** — `Done` (asked 2026-09-29: load the CGHS rate list for CGHS and Himachal Govt, replacing the existing CGHS rates)
+  - **Where:** `server/scripts/load-cghs-rates.mjs` with `server/scripts/data/cghs-rates-2026-02.json`: Gini's services mapped by hand to the CGHS list (64 lab tests, 3 of them marked "check": KFT/RFT → LB123, Iron Studies with Ferritin → LB097), the consultation (CN003 Super speciality ₹700 on every active consultation item), and 16 services with no CGHS equivalent (listed with the reason). Dry run by default; one transaction; `deleteRate`/`saveRate`, so audit, overlap and payment-rule price checks apply; a payment rule a new rate would break refuses the whole run and names it.
+  - **What it does:** removes every existing rate on CGHS, its sub-categories (a sub-category's own rate would override the parent) and Himachal Govt, then sets the CGHS rate, bill name and CGHS code (bill code) on the parent CGHS category and on Himachal Govt, from today. Finalised bills keep their saved amounts.
+  - **Tested** on a production-shaped copy of the test DB: old parent, sub-category and Himachal rates removed; 130 rates saved (₹25,592 per category); a second run gives the same result; a CGHS Paid "pays ₹100" rule refused the run with every conflicting item listed.
+  - **Applied to production 2026-09-29 by the user:** categories CGHS, CGHS Paid, CGHS Pensioner, CGHS Referral and Himachal Government; 3 old rates removed (HbA1c ₹450 CG101 on CGHS; Dr. Anil Bhansali New/Follow Up ₹900 on CGHS Paid); 138 rates saved (64 lab tests and 5 consultation items, on CGHS and on Himachal Govt).
+  - **Round 2 (asked 2026-09-29: "same as the document"), applied to production by the user:** 6 machine services created (X-Ray already had RAD-XRAY-CHEST ₹300, so the CGHS X-Ray rate RI034 ₹207 went on that; an empty MACHINE-RAD subgroup was left behind); CGHS loader removed the 138 round-1 rates and saved 160 (80 per category).
+  - **Round 2 plan:** new `server/scripts/add-machine-services.mjs` + `data/gini-machine-services-2026-09.json` creates group MACHINE (Cardiology, Eye, Radiology, Vascular and neuropathy) and services MAC-ECG, MAC-TMT, MAC-ECHO, MAC-FUNDUS, MAC-XRAY, MAC-ABI, MAC-VPT linked to the machine tests, at today's reception price. The CGHS data then adds ECG CI001 ₹158, TMT CI002 ₹1,008, 2D Echo RI001 ₹1,328, Fundus OI011 ₹450, X-Ray RI034 ₹207 (chest, one film — check); tests CGHS prices in parts at the parts added together with both codes (Dengue LB269+LB270 ₹1,080, Electrolytes LB092+LB093+LB094 ₹351, Iron Studies LB068+LB075 ₹495, LFT with GGT LB124+LB139 ₹585); Chikungunya LB333 and Typhidot LB263 (IgM only — check). 75 rates per category. Consultation stays CN003 ₹700 (endocrinology is a super speciality). No CGHS rate (not in the document): ABI, VPT, P1NP, Beta CrossLaps, Synacthen, FE Sodium/Potassium, FIB-4, Total T3/T4, Urine Creatinine, Calcium Creatinine Ratio. Tested on a production-shaped copy: 7 services, 150 rates, both re-runs unchanged.
+- [x] **Data · GINI in-house lab price list** — `Done` (asked 2026-09-29: "GINI PRICE LIST. NEW.pdf" — 80 in-house lab tests, the General (base) price for appointment, walk-in and regular patients)
+  - **Where:** `server/scripts/add-lab-price-list.mjs` with `server/scripts/data/gini-lab-price-list-2026-09.json` (80 rows: PDF name, clean name, code, price, subgroup, and `catalog_name` where the PDF name is an existing lab test under another name). Dry run by default, `--apply` saves; one transaction; uses `createGroup`/`createSubgroup`/`createItem`/`updateItem`, so validation, audit and price history apply; refuses on any code or name clash; lists similar and unlinked lab tests for review.
+  - **Result:** applied to production 2026-09-29 by the user. Under the existing LAB group: new subgroups Serology, Hormones and Urine tests beside Biochemistry and Haematology (Biochemistry 38, Hormones 22, Urine 8, Serology 7, Haematology 5). 65 new lab tests in the lab's test list; 78 new services; CBC ₹200 → ₹350 and HbA1c ₹500 → ₹350. Linked to existing lab tests: CBC, HbA1c, KFT, LFT, UACR, Vit B12, TSH, Vitamin D, Total cholesterol, Fasting Insulin, Lipid panel, NT-proBNP, Creatinine, TG, Urine R/M. Tested first on a copy of the test DB (80 saved, ₹36,990 = the PDF total; a second run 80 unchanged; a price correction logged).
+  - **Still open:**
+    - "Vit D" (₹900 list price) duplicates "Vitamin D"; FBS and Post-meal (₹80) vs Blood Glucose ₹50; HDL, LDL, FT3, FT4, eGFR, HOMA-IR, hs-CRP have no price in the PDF; machine tests need their own list.
+    - Categories without their own rate still fall back to this General price (CGHS, Himachal Govt, insurance should not) — decision pending.
+    - IPD multipliers (ward ×1.3, private room / ICU ×1.5) — not built; Scribe billing is OPD only.
+- [x] **Bill tab: "Billed today / Exited" as one group, all groups collapsible** — (asked 2026-09-29: "exited patients or done patients should be one category"; then "still exited patients showing in To bill"; then "add collapsible in all 3 group")
+  - `counterPatients.js` `groupOf`: a patient who has left the floor (`FINISHED_STATUSES`: dispensed, exited) is always in the billed group, whatever the bill state — most were billed in HealthRay and flooded To bill. Their row keeps its hints ("Consultation done — not billed", "₹1,500 due"), and the Dues tab still lists unpaid bills. The API key stays `billed`; the heading reads "Billed today / Exited".
+  - `PatientList.jsx`: all three groups are toggle buttons (`aria-expanded`/`aria-controls`). To bill and Billed today / Exited start open, Nothing to bill yet starts collapsed; a search opens any group with a match.
+  - P4C-14 #1, #2, #8 and new #9b; P4C-09 #1, #2, #16 updated. Breaks (finished patients left in To bill; a dead To bill toggle) each failed a test. P4C-09, 11, 13, 14, P4-32, P4-38c-reread and the P4-38 rehearsal pass. **Needs an API restart.**
+- [x] **Close the chosen patient on the Bill tab** — (asked 2026-09-29: "if i selected any patients then how can i deselect?") The patient header has a "✕ Close" button (`PatientHeader.jsx` `onClose` → `pick(null)` in `BillingDesk.jsx`): it drops `visit`/`bill`/`patient` from the URL, keeps the Bill tab and the list, and shows "No patient chosen". The draft stays saved on the server. P4C-14 #10b; removing the wiring failed it. P4C-13 + P4C-14 24/24. Client only.
+- [x] **Removing a bill line: reason optional** — (asked 2026-09-29) The Remove-line dialog reads "Why is this line being removed? (optional)" and no longer disables Remove line until a reason is typed. `billingLineRemoveSchema` takes an optional reason; `removeLine` stores it in the audit when given, `null` otherwise (nothing reads it back; the "desk removed it" guards key on the audit row, not the reason). Cancelling a whole bill still needs a reason. P4-10 and P4-25 updated; P4-10, P4-25 and P4-29 pass. **Needs an API restart.**
+- [x] **Test hygiene · cash shifts left open** — (found 2026-09-29) A regression batch left the reception fixture's shift open (P4-32 test 3 opens ₹1000 and its `afterAll` should delete it; P4C-11 test 1 also left one at ₹1234 — its `afterAll` deletes the shift before `tearDown` removes test 7's payment, so the DELETE fails silently). This blocks the P4-38 rehearsal ("reception fixture user already has an open shift"). Make every shift-opening spec close or delete its shift in `afterAll`, even on failure. **Result:** (2026-09-29, with P4C-17) P4C-11, P4-32, P4-33 and P4-34 now tear the fixture down first (which deletes its payments) and delete the shift in a `finally`; no open shift is left after P4C-11, P4-32, P4-33, P4-34 or the P4-38 rehearsal.
+- [x] **Test DB · incomplete reference snapshot** — (2026-09-29) A broken mid-run rebuild left `e2e_reference_snapshot` with 3 tables (no `flow_step_catalog` or `flow_visit_types`), so every reset restored an empty step catalogue and check-in could not start a journey. Fixed with a full `node e2e/setup/rebuild.mjs`. If check-in's button is ever disabled in tests, check `select count(*) from flow_step_catalog` first.
+- [x] **Confirm dialog placement** — (2026-09-29) `src/components/ui/ConfirmModal.jsx` now portals to `document.body`. Inside the counter's container-query cards, `position: fixed` was relative to the card, so the Remove-line dialog opened clipped at the top. Counter fields inside page-level dialogs are styled in `billingCounter.css`.
+- [x] **Dues and Shift tabs without the patient list** — (2026-09-29) The list shows only on the Bill tab; Dues and Shift use the full width (`bc-layout--solo`). The phone bill-lines table no longer keeps the 460px table minimum.
 - [x] **Payment rule form wording** — (2026-09-29) The form shows "Rule for <category>". "Applies to" options read All services (default) / One group / One subgroup / One item, and the rules table shows "All services". P3-18 is 20/20.
 
 ---

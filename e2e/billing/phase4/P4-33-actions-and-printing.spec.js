@@ -47,8 +47,11 @@ test.describe.serial("P4-33 actions and printing", () => {
   });
 
   test.afterAll(async () => {
-    await closeShifts();
-    await tearDown(ids);
+    try {
+      await tearDown(ids);
+    } finally {
+      await closeShifts();
+    }
   });
 
   test("1. Save draft reads the bill back from the server", async ({ page }) => {

@@ -39,7 +39,6 @@ test.describe.serial("P4-27 page shell", () => {
     await loginAs(page, "reception");
     await counter(page);
     await expect(page.getByText("Pick a patient from the list to open their bill.")).toBeVisible();
-    await page.getByRole("button", { name: /^Not arrived/ }).click();
     await page.getByRole("button", { name: PATIENT }).click();
     await expect(header(page)).toBeVisible();
     await expect(page.getByRole("table", { name: "Bill lines" })).toBeVisible();

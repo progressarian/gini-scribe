@@ -72,10 +72,10 @@ async function openCounter(page, visitId) {
 }
 
 async function pickPatient(page, patient) {
-  await page
-    .getByRole("complementary", { name: "Today's patients" })
-    .getByRole("button", { name: new RegExp(patient.name) })
-    .click();
+  await tab(page, "Bill").click();
+  const list = page.getByRole("complementary", { name: "Today's patients" });
+  await list.getByRole("searchbox", { name: "Search today's patients" }).fill(patient.name);
+  await list.getByRole("button", { name: new RegExp(patient.name) }).click();
   await expect(header(page).getByRole("heading", { name: patient.name })).toBeVisible();
   await expect(actions(page)).toBeVisible();
 }
@@ -99,6 +99,8 @@ async function checkIn(page, patient) {
     .getByRole("button", { name: /Check in/ })
     .first()
     .click();
+  await expect(panel.getByRole("link", { name: "Open bill →" })).toBeVisible();
+  await panel.getByRole("button", { name: "Close", exact: true }).click();
   await expect(panel).toHaveCount(0);
   await expect
     .poll(
@@ -243,17 +245,15 @@ test.describe.serial("P4-38 floor trial rehearsal", () => {
       await orderTests(later.visit, [day.tests.hba1c]);
 
       await reception.getByPlaceholder("Search today — name, file no or phone").fill(gen.name);
-      const [counter] = await Promise.all([
-        deskContext.waitForEvent("page"),
-        reception
-          .locator(".ar-row")
-          .filter({ hasText: gen.name })
-          .getByRole("link", { name: "Bill", exact: true })
-          .click(),
-      ]);
-      await expect(counter).toHaveURL(new RegExp(`visit=${gen.visit}`));
-      await expect(header(counter).getByRole("heading", { name: gen.name })).toBeVisible();
-      await counter.close();
+      await reception
+        .locator(".ar-row")
+        .filter({ hasText: gen.name })
+        .getByRole("link", { name: "Bill", exact: true })
+        .click();
+      await expect(reception).toHaveURL(
+        new RegExp(`tab=bill.*visit=${gen.visit}|visit=${gen.visit}.*tab=bill`),
+      );
+      await expect(header(reception).getByRole("heading", { name: gen.name })).toBeVisible();
       await reception.close();
     });
 

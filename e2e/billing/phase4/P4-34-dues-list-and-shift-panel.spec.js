@@ -75,9 +75,12 @@ test.describe.serial("P4-34 dues list and shift panel", () => {
   });
 
   test.afterAll(async () => {
-    await closeShifts();
-    await tearDown(ids);
-    await setPayLater(payLaterBefore).catch(() => {});
+    try {
+      await tearDown(ids);
+      await setPayLater(payLaterBefore).catch(() => {});
+    } finally {
+      await closeShifts();
+    }
   });
 
   test("1. the Dues tab is there only while pay-later is allowed", async ({ page }) => {

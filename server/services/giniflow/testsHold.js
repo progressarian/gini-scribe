@@ -32,11 +32,13 @@ const CASE_NOT_ON_BILL_SQL = (lc) =>
                    AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(bx.items, '[]'::jsonb)) bi
                                     WHERE bi->>'category' = 'lab' AND ${LIVE_BILL_ITEM_SQL("bi")})))`;
 
-export const LIVE_LAB_CASE_SQL = (lc = "lc") =>
+export const CASE_NOT_CANCELLED_SQL = (lc = "lc") =>
   `(NOT EXISTS (SELECT 1 FROM giniflow_lab_case_actions cx
                  WHERE cx.case_no = ${lc}.case_no AND cx.action = 'cancelled')
-    AND lower(COALESCE(${lc}.case_status, ${lc}.raw_list_json->>'case_status', '')) <> 'cancelled'
-    AND NOT ${CASE_NOT_ON_BILL_SQL(lc)})`;
+    AND lower(COALESCE(${lc}.case_status, ${lc}.raw_list_json->>'case_status', '')) <> 'cancelled')`;
+
+export const LIVE_LAB_CASE_SQL = (lc = "lc") =>
+  `(${CASE_NOT_CANCELLED_SQL(lc)} AND NOT ${CASE_NOT_ON_BILL_SQL(lc)})`;
 
 const CASE_STARTED_ACTIONS = [
   "drawing_started",

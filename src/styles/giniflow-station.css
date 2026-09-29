@@ -4769,6 +4769,56 @@
   color: #fff;
 }
 
+.gf .rc-desk {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.gf .rc-desk__tabs {
+  flex-shrink: 0;
+  width: 100%;
+  max-width: 1480px;
+  margin: 0 auto;
+  padding: 14px 14px 10px;
+}
+@media (max-width: 900px) {
+  .gf .rc-rail {
+    height: auto;
+    min-height: 44px;
+    flex-wrap: wrap;
+    row-gap: 4px;
+    padding: 6px 12px;
+  }
+  .gf .rc-rail .rr {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    min-width: 0;
+  }
+}
+@media (max-width: 600px) {
+  .gf .rc-rail .rr {
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .gf .rc-rail .tr-live {
+    font-size: 9px;
+    white-space: normal;
+  }
+  .gf .rc-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .gf .rc-tabs .st-tab {
+    flex: 0 0 auto;
+  }
+  .gf .rc-desk__tabs {
+    padding: 10px 12px 8px;
+  }
+}
+
 .gf .ar-controls {
   display: flex;
   align-items: center;

@@ -1,0 +1,585 @@
+{
+  "source": "CGHS Rate list 13 Feb 2026, Tier II (Applicable to GHM), NABH PW",
+  "consultation": {
+    "cghs_code": "CN003",
+    "cghs_name": "Consultation OPD- Super speciality",
+    "rate": 700
+  },
+  "rates": [
+    {
+      "item_code": "LAB-ACTH",
+      "cghs_code": "LB159",
+      "cghs_name": "Adrenocorticotropic Hormone (ACTH)",
+      "rate": 1080,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-ALBUMIN",
+      "cghs_code": "LB072",
+      "cghs_name": "Albumin",
+      "rate": 45,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-AMH",
+      "cghs_code": "LB281",
+      "cghs_name": "AMH (Anti- Mullerian Hormone)",
+      "rate": 900,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-AMYLASE",
+      "cghs_code": "LB088",
+      "cghs_name": "Serum Amylase",
+      "rate": 270,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-ANTI-TG",
+      "cghs_code": "LB240",
+      "cghs_name": "Thyroglobulin antibody",
+      "rate": 630,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-ANTI-TPO",
+      "cghs_code": "LB174",
+      "cghs_name": "Thyroid peroxidase antibody (TPO)",
+      "rate": 630,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-B12",
+      "cghs_code": "LB127",
+      "cghs_name": "Vitamin B12 Assay",
+      "rate": 540,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-BILI-T",
+      "cghs_code": "LB067",
+      "cghs_name": "Serum Bilirubin total & direct",
+      "rate": 135,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-BLOOD-GROUP",
+      "cghs_code": "LB036",
+      "cghs_name": "Blood Group & Rh Type",
+      "rate": 81,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-BUN",
+      "cghs_code": "LB057",
+      "cghs_name": "Blood Urea Nitrogen (BUN) / Urea",
+      "rate": 90,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-C-PEPTIDE",
+      "cghs_code": "LB167",
+      "cghs_name": "C-Peptide (Connecting Peptide)",
+      "rate": 675,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-CALCIUM",
+      "cghs_code": "LB077",
+      "cghs_name": "Serum Calcium -Total",
+      "rate": 135,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-CBC",
+      "cghs_code": "LB012",
+      "cghs_name": "Complete Haemogram/CBC (Hb, RBC Count and Indices, TLC, DLC, Platelet, ESR, Peripheral Smear Examination)",
+      "rate": 270,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-CHIKUNGUNYA",
+      "cghs_code": "LB333",
+      "cghs_name": "Chikungunya Ig M",
+      "rate": 900,
+      "match": "check"
+    },
+    {
+      "item_code": "LAB-CHLORIDE",
+      "cghs_code": "LB094",
+      "cghs_name": "Chloride",
+      "rate": 135,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-CHOLESTEROL",
+      "cghs_code": "LB074",
+      "cghs_name": "Serum Cholesterol",
+      "rate": 135,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-CORTISOL",
+      "cghs_code": "LB165",
+      "cghs_name": "Cortisol",
+      "rate": 495,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-CREATININE",
+      "cghs_code": "LB058",
+      "cghs_name": "Serum Creatinine",
+      "rate": 90,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-DENGUE",
+      "cghs_code": "LB269+LB270",
+      "cghs_name": "Dengue NS1 Ag + Dengue IgM and IgG",
+      "rate": 1080,
+      "match": "parts"
+    },
+    {
+      "item_code": "LAB-DHEAS",
+      "cghs_code": "LB171",
+      "cghs_name": "Dehydroepiandrosterone sulfate (DHEAS)",
+      "rate": 900,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-E2",
+      "cghs_code": "LB239",
+      "cghs_name": "Estradiol (E2)",
+      "rate": 360,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-ELECTROLYTES",
+      "cghs_code": "LB092+LB093+LB094",
+      "cghs_name": "Serum Sodium + Serum Potassium + Chloride",
+      "rate": 351,
+      "match": "parts"
+    },
+    {
+      "item_code": "LAB-ESR",
+      "cghs_code": "LB010",
+      "cghs_name": "Erythrocyte Sedimentation Rate (ESR)",
+      "rate": 90,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-FERRITIN",
+      "cghs_code": "LB126",
+      "cghs_name": "Serum Ferritin",
+      "rate": 315,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-FSH",
+      "cghs_code": "LB163",
+      "cghs_name": "Follicle stimulating hormone (FSH)",
+      "rate": 360,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-GH",
+      "cghs_code": "LB173",
+      "cghs_name": "Growth Hormone",
+      "rate": 540,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-GLUCOSE",
+      "cghs_code": "LB055",
+      "cghs_name": "Blood Glucose Random / Blood Glucose Fasting /Blood Glucose PP",
+      "rate": 36,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-GTT",
+      "cghs_code": "LB101",
+      "cghs_name": "Glucose Tolerance Test (GTT)",
+      "rate": 270,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-HB",
+      "cghs_code": "LB007",
+      "cghs_name": "Haemoglobin (Hb)",
+      "rate": 45,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-HBA1C",
+      "cghs_code": "LB122",
+      "cghs_name": "Glycosylated Haemoglobin (HbA1c)",
+      "rate": 270,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-HBSAG",
+      "cghs_code": "LB042",
+      "cghs_name": "Hepatitis B Surface Antigen (HBsAg)",
+      "rate": 270,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-HCV",
+      "cghs_code": "LB043",
+      "cghs_name": "Hepatitis C Virus (HCV)",
+      "rate": 450,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-HIV",
+      "cghs_code": "LB044",
+      "cghs_name": "Human Immunodeficiency Virus- HIV I and II",
+      "rate": 347,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-INSULIN",
+      "cghs_code": "LB168",
+      "cghs_name": "Insulin",
+      "rate": 450,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-IRON",
+      "cghs_code": "LB068",
+      "cghs_name": "Serum Iron",
+      "rate": 225,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-IRON-STUDIES",
+      "cghs_code": "LB068+LB075",
+      "cghs_name": "Serum Iron + Total Iron Binding Capacity (TIBC)",
+      "rate": 495,
+      "match": "parts"
+    },
+    {
+      "item_code": "LAB-IRON-STUDIES-FERRITIN",
+      "cghs_code": "LB097",
+      "cghs_name": "Anaemia Profile (Hb, Serum Iron, TIBC, Ferritin, Transferrin Saturation)",
+      "rate": 1188,
+      "match": "check"
+    },
+    {
+      "item_code": "LAB-KFT",
+      "cghs_code": "LB123",
+      "cghs_name": "Kidney Function Test (KFT)",
+      "rate": 450,
+      "match": "check"
+    },
+    {
+      "item_code": "LAB-LFT",
+      "cghs_code": "LB124",
+      "cghs_name": "Liver Function Test (LFT)",
+      "rate": 450,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-LFT-GGT",
+      "cghs_code": "LB124+LB139",
+      "cghs_name": "Liver Function Test (LFT) + Gamma-Glutamyl Transpeptidase (GGTP)",
+      "rate": 585,
+      "match": "parts"
+    },
+    {
+      "item_code": "LAB-LH",
+      "cghs_code": "LB162",
+      "cghs_name": "Luteinizing hormone (LH)",
+      "rate": 360,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-LIPID",
+      "cghs_code": "LB125",
+      "cghs_name": "Lipid Profile (Total cholesterol ,Triglycerides, LDL, HDL,VLDL)",
+      "rate": 441,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-MAGNESIUM",
+      "cghs_code": "LB091",
+      "cghs_name": "Serum Magnesium",
+      "rate": 270,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-MALARIA",
+      "cghs_code": "LB018",
+      "cghs_name": "Smear for Malaria/Filaria Parasite",
+      "rate": 90,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-OSMO-SERUM",
+      "cghs_code": "LB226",
+      "cghs_name": "Osmolality serum",
+      "rate": 405,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-OSMO-URINE",
+      "cghs_code": "LB225",
+      "cghs_name": "Osmolality urine",
+      "rate": 405,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-PHOSPHORUS",
+      "cghs_code": "LB079",
+      "cghs_name": "Serum Phosphorus",
+      "rate": 135,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-POTASSIUM",
+      "cghs_code": "LB093",
+      "cghs_name": "Serum Potassium",
+      "rate": 108,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-PRO-BNP",
+      "cghs_code": "LB243",
+      "cghs_name": "N-terminal pro BNP (NT-pro BNP / Brain natriuretic peptide (BNP)",
+      "rate": 1863,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-PROLACTIN",
+      "cghs_code": "LB164",
+      "cghs_name": "Prolactin",
+      "rate": 360,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-PTH",
+      "cghs_code": "LB166",
+      "cghs_name": "PTH(Parathormone)",
+      "rate": 900,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-RFT",
+      "cghs_code": "LB123",
+      "cghs_name": "Kidney Function Test (KFT)",
+      "rate": 450,
+      "match": "check"
+    },
+    {
+      "item_code": "LAB-SGOT",
+      "cghs_code": "LB087",
+      "cghs_name": "Serum Glutamic Oxaloacetic Transaminase (SGOT) /Aspartate Aminotransferase",
+      "rate": 90,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-SGPT",
+      "cghs_code": "LB086",
+      "cghs_name": "Serum Glutamic Pyruvic Transaminase (SGPT) / Alanine Aminotransferase (ALT)",
+      "rate": 90,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-SODIUM",
+      "cghs_code": "LB092",
+      "cghs_name": "Serum Sodium",
+      "rate": 108,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-TESTOSTERONE",
+      "cghs_code": "LB098",
+      "cghs_name": "Serum Testosterone",
+      "rate": 360,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-TFT",
+      "cghs_code": "LB160",
+      "cghs_name": "T3, T4, TSH -Thyroid Function Test (TFT)",
+      "rate": 405,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-THYROGLOBULIN",
+      "cghs_code": "LB175",
+      "cghs_name": "Thyroglobulin",
+      "rate": 630,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-TRAB",
+      "cghs_code": "LB315",
+      "cghs_name": "TSH Receptor Antibody",
+      "rate": 1080,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-TRIGLYCERIDE",
+      "cghs_code": "LB100",
+      "cghs_name": "Triglycerides",
+      "rate": 135,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-TROP-I",
+      "cghs_code": "LB111",
+      "cghs_name": "Troponin I",
+      "rate": 630,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-TROP-T",
+      "cghs_code": "LB112",
+      "cghs_name": "Troponin T",
+      "rate": 630,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-TSH",
+      "cghs_code": "LB161",
+      "cghs_name": "Thyroid stimulating hormone (TSH)",
+      "rate": 180,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-TYPHIDOT",
+      "cghs_code": "LB263",
+      "cghs_name": "Typhidot IgM",
+      "rate": 360,
+      "match": "check"
+    },
+    {
+      "item_code": "LAB-UACR",
+      "cghs_code": "LB246",
+      "cghs_name": "Protein Creatinine Ratio (PCR), Urine / Albumin Creatinine Ratio (ACR), Urine",
+      "rate": 137,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-URIC-ACID",
+      "cghs_code": "LB066",
+      "cghs_name": "Serum Uric Acid",
+      "rate": 135,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-URINE-PROTEIN",
+      "cghs_code": "LB063",
+      "cghs_name": "Urine Total Proteins",
+      "rate": 63,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-URINE-RM",
+      "cghs_code": "LB001",
+      "cghs_name": "Urine Routine- pH, Specific Gravity, Sugar, Protein and Microscopy",
+      "rate": 90,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-VDRL",
+      "cghs_code": "LB045",
+      "cghs_name": "Venereal Disease Research Laboratory Test (VDRL)",
+      "rate": 90,
+      "match": "exact"
+    },
+    {
+      "item_code": "LAB-VITD",
+      "cghs_code": "LB154",
+      "cghs_name": "Calcidiol / 25-hydroxycholecalciferol / Vitamin D3 assay (Vit D3)",
+      "rate": 900,
+      "match": "exact"
+    },
+    {
+      "item_code": "MAC-ECG",
+      "cghs_code": "CI001",
+      "cghs_name": "Electrocardiogram (ECG)",
+      "rate": 158,
+      "match": "exact"
+    },
+    {
+      "item_code": "MAC-ECHO",
+      "cghs_code": "RI001",
+      "cghs_name": "2D echocardiography",
+      "rate": 1328,
+      "match": "exact"
+    },
+    {
+      "item_code": "MAC-FUNDUS",
+      "cghs_code": "OI011",
+      "cghs_name": "Fundus Photo Test /disc photo for glaucoma- Both Eyes",
+      "rate": 450,
+      "match": "exact"
+    },
+    {
+      "item_code": "MAC-TMT",
+      "cghs_code": "CI002",
+      "cghs_name": "Treadmill Test (TMT)",
+      "rate": 1008,
+      "match": "exact"
+    },
+    {
+      "item_code": "RAD-XRAY-CHEST",
+      "cghs_code": "RI034",
+      "cghs_name": "X Ray Chest PA /AP/ Oblique view (one film)",
+      "rate": 207,
+      "match": "exact"
+    }
+  ],
+  "no_cghs_rate": [
+    {
+      "item_code": "LAB-BETA-CTX",
+      "why": "not in the CGHS list"
+    },
+    {
+      "item_code": "LAB-CA-CREAT-RATIO",
+      "why": "not in the CGHS list (LB230 urinary calcium ₹135 is one part)"
+    },
+    {
+      "item_code": "LAB-FE-POTASSIUM",
+      "why": "not in the CGHS list"
+    },
+    {
+      "item_code": "LAB-FE-SODIUM",
+      "why": "not in the CGHS list"
+    },
+    {
+      "item_code": "LAB-FIB4",
+      "why": "not in the CGHS list (a calculation)"
+    },
+    {
+      "item_code": "LAB-P1NP",
+      "why": "not in the CGHS list"
+    },
+    {
+      "item_code": "LAB-SYNACTHEN",
+      "why": "not in the CGHS list"
+    },
+    {
+      "item_code": "LAB-T3",
+      "why": "CGHS has FT3 (LB266 ₹113) and TFT, not Total T3"
+    },
+    {
+      "item_code": "LAB-T4",
+      "why": "CGHS has FT4 (LB267 ₹113) and TFT, not Total T4"
+    },
+    {
+      "item_code": "LAB-URINE-CREAT",
+      "why": "not in the CGHS list"
+    },
+    {
+      "item_code": "MAC-ABI",
+      "why": "not in the CGHS list"
+    },
+    {
+      "item_code": "MAC-VPT",
+      "why": "not in the CGHS list"
+    }
+  ]
+}
