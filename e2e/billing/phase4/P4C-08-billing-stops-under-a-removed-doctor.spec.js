@@ -6,6 +6,7 @@ import { CONSULTANTS, USERS } from "../../fixtures/data.mjs";
 import { assertTestDatabase } from "../../setup/guard.mjs";
 import { repoRoot } from "../../setup/testEnv.mjs";
 import {
+  autoConsultation,
   desk,
   discountCode,
   extraVisit,
@@ -101,9 +102,12 @@ const errorsOf = (preview, name) =>
     .rows.filter((r) => r.status === "error")
     .flatMap((r) => r.errors.map((e) => `${e.column}: ${e.message}`));
 
+let autoBefore;
+
 test.describe.serial("P4C-08 billing stops under a removed doctor", () => {
   test.beforeAll(async () => {
     ids = await setUp(tag);
+    autoBefore = await autoConsultation(true);
     await payRule(ids, ids.pensioner, { name: "pensioner pays nothing", patient_pays: "nothing" });
     ours.gone = await doctor(GONE);
     ours.stays = await doctor(STAYS);
@@ -137,6 +141,7 @@ test.describe.serial("P4C-08 billing stops under a removed doctor", () => {
 
   test.afterAll(async () => {
     try {
+      if (autoBefore !== undefined) await autoConsultation(autoBefore);
       await tearDown(ids);
     } finally {
       await dropDoctors();

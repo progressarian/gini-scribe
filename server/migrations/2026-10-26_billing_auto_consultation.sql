@@ -1,0 +1,2 @@
+ALTER TABLE billing_settings
+  ADD COLUMN IF NOT EXISTS auto_add_consultation BOOLEAN NOT NULL DEFAULT FALSE;

@@ -2755,6 +2755,23 @@ and a full rehearsal of the trial day on the test system.
     - Client only; no restart needed.
   - **Still open:** running the whole counter suite in one batch trips the API's 3000-requests-per-15-minutes limit for the reception test user. Run it in smaller groups.
 
+- [x] **P4C-12 · Consultation not added automatically** — `Done` (asked 2026-09-29: "Please don't auto-select… it makes confusion")
+  - **Where:**
+    - migration `server/migrations/2026-10-26_billing_auto_consultation.sql` (`billing_settings.auto_add_consultation BOOLEAN NOT NULL DEFAULT FALSE`; applied to production 2026-09-29)
+    - `billingSettings.js` (`addsConsultation`), `visitLines.js` (`draftAtCheckIn`, `consultationForDesk`), `bills.js` (`openDraft`), `schemas/billing.js`
+    - `BillingSettingsPage.jsx` (a checkbox in the "Bills" card)
+    - fixtures `autoConsultation` in `p4-bills-fixture.mjs` and `p438-floor-day.mjs`
+    - spec `P4C-12-consultation-not-added-automatically.spec.js`
+  - **Result:** Done 2026-09-29 (built by a sub-agent).
+    - A new admin setting, **"Add the doctor's consultation to the bill automatically"**, off by default.
+    - When off, check-in still opens the draft but adds no consultation line, and opening or re-reading the draft adds none. The desk adds it from Add items, and a second one goes to bill-again.
+    - When on, behaviour is exactly as before. The removed-doctor note shows only when it is on.
+    - Specs that test the automatic line switch it on and restore it: the P4-38 family, P4-07, P4-17, P4-31, P4-32, P4-41, P4-42 and P4C-08.
+    - 8 tests; 3 deliberate breaks each failed a test.
+    - P4-38 now compares the bill PDF's "(₹)" labels regardless of spacing.
+    - **Needs an API and worker restart after deploy.**
+- [x] **Payment rule form wording** — (2026-09-29) The form shows "Rule for <category>". "Applies to" options read All services (default) / One group / One subgroup / One item, and the rules table shows "All services". P3-18 is 20/20.
+
 ---
 
 ## Phase 4b — Refunds and credit notes

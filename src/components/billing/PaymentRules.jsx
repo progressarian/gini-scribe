@@ -12,7 +12,7 @@ import "../../pages/billing/paymentRules.css";
 const SCOPE_NOUN = { group: "Group", subgroup: "Subgroup", item: "Item" };
 
 const scopeText = (rule) =>
-  rule.scope === "category" ? "Whole category" : `${SCOPE_NOUN[rule.scope]}: ${rule.scope_label}`;
+  rule.scope === "category" ? "All services" : `${SCOPE_NOUN[rule.scope]}: ${rule.scope_label}`;
 const visitsText = (rule) => (rule.visit_types?.length ? rule.visit_types.join(", ") : "Any visit");
 const paysText = (rule) =>
   rule.patient_pays === "amount"

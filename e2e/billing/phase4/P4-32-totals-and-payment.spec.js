@@ -5,7 +5,15 @@ import { gotoReady } from "../../helpers/browser.mjs";
 import { assertTestDatabase } from "../../setup/guard.mjs";
 import { USERS } from "../../fixtures/data.mjs";
 import { fromPaise } from "../../../src/components/billing/format.js";
-import { desk, extraVisit, newTag, payRule, setUp, tearDown } from "./p4-bills-fixture.mjs";
+import {
+  autoConsultation,
+  desk,
+  extraVisit,
+  newTag,
+  payRule,
+  setUp,
+  tearDown,
+} from "./p4-bills-fixture.mjs";
 
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 const bills = await import("../../../server/services/billing/bills.js");
@@ -64,6 +72,8 @@ const restoreGst = () =>
     gstBefore ?? { gst_enabled: false, gstin: null, state_code: null, legal_name: null },
   ).catch(() => {});
 
+let autoBefore;
+
 test.describe.serial("P4-32 totals and payment", () => {
   test.describe.configure({ retries: 1 });
 
@@ -73,6 +83,7 @@ test.describe.serial("P4-32 totals and payment", () => {
       (await query(`SELECT allow_pay_later FROM billing_settings`)).rows[0]?.allow_pay_later ??
       false;
     ids = await setUp(tag);
+    autoBefore = await autoConsultation(true);
     await payRule(ids, ids.pensioner, { name: "pensioner pays nothing", patient_pays: "nothing" });
 
     ids.bill = (await bills.openDraft(ids.visit, desk, db)).id;
@@ -95,6 +106,7 @@ test.describe.serial("P4-32 totals and payment", () => {
   test.afterAll(async () => {
     await closeShifts();
     await restoreGst();
+    if (autoBefore !== undefined) await autoConsultation(autoBefore);
     await tearDown(ids);
     await setPayLater(payLaterBefore).catch(() => {});
   });

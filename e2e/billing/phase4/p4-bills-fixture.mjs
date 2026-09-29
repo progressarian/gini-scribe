@@ -13,6 +13,14 @@ export const newTag = () => crypto.randomBytes(3).toString("hex");
 
 export const desk = { actorId: USERS.reception.id, ip: "10.9.4.1", role: "reception" };
 
+export async function autoConsultation(on) {
+  const { auto_add_consultation: before } = await one(
+    `SELECT auto_add_consultation FROM billing_settings`,
+  );
+  await query(`UPDATE billing_settings SET auto_add_consultation = $1`, [on]);
+  return before;
+}
+
 export const failure = (promise) => promise.then(() => null).catch((error) => error);
 
 export async function refused(promise, status, message, label) {

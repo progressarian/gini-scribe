@@ -117,12 +117,13 @@ async function build(tag) {
               AS legal_name,
             CASE WHEN bill_footer ~ 'rehearsal [0-9a-f]{6}$' THEN NULL ELSE bill_footer END
               AS bill_footer,
-            allow_pay_later, gst_enabled
+            allow_pay_later, gst_enabled, auto_add_consultation
        FROM billing_settings`,
   );
   await query(
     `UPDATE billing_settings
-        SET legal_name = $1, bill_footer = $2, allow_pay_later = TRUE, gst_enabled = FALSE`,
+        SET legal_name = $1, bill_footer = $2, allow_pay_later = TRUE, gst_enabled = FALSE,
+            auto_add_consultation = TRUE`,
     [`Gini Advanced Care Hospital (rehearsal ${tag})`, `Get well soon — rehearsal ${tag}`],
   );
 
@@ -422,12 +423,14 @@ export async function tearDownDay(day) {
     if (day.settingsBefore) {
       await query(
         `UPDATE billing_settings
-            SET legal_name = $1, bill_footer = $2, allow_pay_later = $3, gst_enabled = $4`,
+            SET legal_name = $1, bill_footer = $2, allow_pay_later = $3, gst_enabled = $4,
+                auto_add_consultation = $5`,
         [
           day.settingsBefore.legal_name,
           day.settingsBefore.bill_footer,
           day.settingsBefore.allow_pay_later,
           day.settingsBefore.gst_enabled,
+          day.settingsBefore.auto_add_consultation,
         ],
       );
     }

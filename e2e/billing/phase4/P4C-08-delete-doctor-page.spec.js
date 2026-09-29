@@ -5,7 +5,14 @@ import { anonymousApi, apiAs, loginAs } from "../../helpers/auth.mjs";
 import { gotoReady } from "../../helpers/browser.mjs";
 import { PIN, USERS } from "../../fixtures/data.mjs";
 import { assertTestDatabase } from "../../setup/guard.mjs";
-import { desk, extraVisit, newTag, setUp, tearDown } from "./p4-bills-fixture.mjs";
+import {
+  autoConsultation,
+  desk,
+  extraVisit,
+  newTag,
+  setUp,
+  tearDown,
+} from "./p4-bills-fixture.mjs";
 
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 const visitLines = await import("../../../server/services/billing/visitLines.js");
@@ -54,6 +61,8 @@ async function dropDoctors() {
 async function logIn(api, id) {
   return api.post("/api/auth/login", { data: { doctor_id: id, pin: PIN } });
 }
+
+let autoBefore;
 
 test.describe.serial("P4C-08 delete a doctor from Doctor Management", () => {
   test.beforeAll(async () => {
@@ -215,6 +224,7 @@ test.describe.serial("P4C-08 the billing counter under a removed doctor", () => 
 
   test.beforeAll(async () => {
     ids = await setUp(fixtureTag);
+    autoBefore = await autoConsultation(true);
     ours.counter = await doctor(COUNTER_DOCTOR);
     ours.item = (
       await one(
@@ -237,6 +247,7 @@ test.describe.serial("P4C-08 the billing counter under a removed doctor", () => 
 
   test.afterAll(async () => {
     try {
+      if (autoBefore !== undefined) await autoConsultation(autoBefore);
       await tearDown(ids);
     } finally {
       await dropDoctors();

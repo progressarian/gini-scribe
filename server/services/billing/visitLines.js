@@ -3,7 +3,7 @@ import { billingVisitType } from "../../../shared/billingVisitType.js";
 import { collectiblePaise, paise } from "../../../shared/labPayment.js";
 import { writeAudit } from "./audit.js";
 import { addLineIn, billLabel, openDraftIn, repriceBillIn } from "./bills.js";
-import { getSettings } from "./billingSettings.js";
+import { addsConsultation, getSettings } from "./billingSettings.js";
 import { UNCOVERED_SQL } from "./payments.js";
 import { removedDoctor } from "./removedDoctors.js";
 import { httpError, inTransaction } from "./transaction.js";
@@ -94,9 +94,10 @@ export async function draftAtCheckIn(visitId, ctx, db = pool) {
     return await inTransaction(async (client) => {
       const visit = await visitFor(client, visitId);
       await holdConsultation(client, visit.id);
-      const settled = await consultationSettled(client, visit.id);
+      const automatic = await addsConsultation(client);
+      const settled = automatic && (await consultationSettled(client, visit.id));
       const bill = await openDraftIn(client, visitId, ctx);
-      const item = await consultationItem(client, visit);
+      const item = automatic ? await consultationItem(client, visit) : null;
       if (item?.removed) {
         return {
           ok: true,
@@ -156,6 +157,7 @@ export async function consultationForDesk(visitId, ctx, db = pool) {
   try {
     return await inTransaction(async (client) => {
       const visit = await visitFor(client, cleanUuid(visitId, "visit"));
+      if (!(await addsConsultation(client))) return { ok: true, added: [] };
       await holdConsultation(client, visit.id);
       const item = await consultationItem(client, visit);
       if (item?.removed) return { ok: true, added: [], removed_doctor: item.removed };

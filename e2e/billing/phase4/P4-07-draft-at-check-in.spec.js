@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { getPool, one, query } from "../../helpers/db.mjs";
 import { CONSULTANTS, USERS } from "../../fixtures/data.mjs";
 import { assertTestDatabase } from "../../setup/guard.mjs";
-import { newTag, setUp, tearDown } from "./p4-bills-fixture.mjs";
+import { autoConsultation, newTag, setUp, tearDown } from "./p4-bills-fixture.mjs";
 
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 const reception = await import("../../../server/services/giniflow/receptionStation.js");
@@ -51,12 +51,16 @@ const linesOf = (billId) =>
     [billId],
   ).then((r) => r.rows);
 
+let autoBefore;
+
 test.describe.serial("P4-07 draft at check-in", () => {
   test.beforeAll(async () => {
     ids = await setUp(tag);
+    autoBefore = await autoConsultation(true);
   });
 
   test.afterAll(async () => {
+    if (autoBefore !== undefined) await autoConsultation(autoBefore);
     for (const extra of extras) {
       await query(
         `DELETE FROM bill_lines WHERE bill_id IN (SELECT id FROM bills WHERE patient_id = $1)`,

@@ -17,9 +17,9 @@ export const PAYS_LABEL = {
   nothing: "Nothing",
 };
 const SCOPE_LABEL = {
-  category: "The whole category",
-  group: "A group",
-  subgroup: "A subgroup",
+  category: "All services",
+  group: "One group",
+  subgroup: "One subgroup",
   item: "One item",
 };
 const SCOPE_KEY = { group: "group_id", subgroup: "subgroup_id", item: "service_item_id" };
@@ -478,6 +478,9 @@ export default function PaymentRuleForm({ category, payer, rule, onDone }) {
       onSubmit={submit}
       noValidate
     >
+      <p className="pr-form__for">
+        Rule for <strong>{category.display_label || category.label}</strong>
+      </p>
       <div className="bill-form">
         <Field label="Rule name">
           {(id) => (

@@ -76,15 +76,22 @@ const CLEANERS = {
   state_code: cleanStateCode,
   legal_name: (v) => cleanText(v, "Legal name", 200),
   bill_footer: (v) => cleanText(v, "Bill footer", 1000),
+  auto_add_consultation: (v) => cleanFlag(v, "Add the consultation automatically"),
 };
 
 const COLUMNS = `discount_stacking, allow_pay_later, max_codes_per_bill, gst_enabled, gstin,
-                 state_code, legal_name, bill_footer, updated_at, updated_by`;
+                 state_code, legal_name, bill_footer, auto_add_consultation,
+                 updated_at, updated_by`;
 
 export async function getSettings(db = pool) {
   const { rows } = await db.query(`SELECT ${COLUMNS} FROM billing_settings`);
   if (!rows.length) throw httpError(500, "Billing settings are missing");
   return rows[0];
+}
+
+export async function addsConsultation(db = pool) {
+  const { rows } = await db.query("SELECT auto_add_consultation FROM billing_settings");
+  return rows[0]?.auto_add_consultation === true;
 }
 
 export async function deskSettings(db = pool) {

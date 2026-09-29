@@ -3,7 +3,7 @@ import { paise } from "../../../shared/labPayment.js";
 import { decryptAadhaarFull, encryptAadhaar } from "../../utils/aadhaarCrypt.js";
 import { writeAudit } from "./audit.js";
 import { nextNumber, seriesFor } from "./billNumber.js";
-import { getSettings } from "./billingSettings.js";
+import { addsConsultation, getSettings } from "./billingSettings.js";
 import {
   announceUsed,
   liveLineFor,
@@ -578,7 +578,9 @@ export async function openDraft(visitId, ctx, db = pool) {
       codes: await billCodes(client, bill.id),
       needs_category: !bill.scheme_code && resolution.needs_sub_category,
       suggestions: bill.scheme_code ? [] : resolution.suggestions,
-      removed_doctor: await removedDoctorOfVisit(client, id),
+      removed_doctor: (await addsConsultation(client))
+        ? await removedDoctorOfVisit(client, id)
+        : null,
     });
   }, db);
 }

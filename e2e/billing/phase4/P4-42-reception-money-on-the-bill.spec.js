@@ -3,6 +3,7 @@ import { getPool, one, query } from "../../helpers/db.mjs";
 import { USERS } from "../../fixtures/data.mjs";
 import { assertTestDatabase } from "../../setup/guard.mjs";
 import {
+  autoConsultation,
   desk,
   extraVisit,
   failure,
@@ -133,9 +134,12 @@ const stateOf = async (billId, orderId) => {
 const paidOn = (label, amount, way) =>
   `HbA1c ${tag} was already paid ₹${amount} at reception, so it can't also be paid on ${label} — ${way}`;
 
+let autoBefore;
+
 test.describe.serial("P4-42 reception money on the bill", () => {
   test.beforeAll(async () => {
     ids = await setUp(tag);
+    autoBefore = await autoConsultation(true);
     ids.later = await subCategory(ids, "Later", { allow_pay_later: true });
     ids.mixed = await subCategory(ids, "Mixed", { allow_pay_later: true });
     await payRule(ids, ids.mixed, {
@@ -152,6 +156,7 @@ test.describe.serial("P4-42 reception money on the bill", () => {
 
   test.afterAll(async () => {
     setValve(valveAtStart);
+    if (autoBefore !== undefined) await autoConsultation(autoBefore);
     await tearDown(ids);
     await closeOpenShifts();
     await query(`DELETE FROM cash_shifts WHERE user_id = $1`, [USERS.reception.id]).catch(() => {});

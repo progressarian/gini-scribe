@@ -300,6 +300,7 @@ export const billingSettingsUpdateSchema = atLeastOne(
       ]),
       legal_name: z.union([text(200), z.null()]),
       bill_footer: z.union([text(1000), z.null()]),
+      auto_add_consultation: flag,
     })
     .partial(),
 );
@@ -725,6 +726,7 @@ export const BILLING_FIELD_LABELS = {
   discount_stacking: "When several discounts apply",
   max_codes_per_bill: "Most codes on one bill",
   gst_enabled: "Charge GST on bills",
+  auto_add_consultation: "Add the consultation automatically",
   gstin: "GSTIN",
   state_code: "State code",
   legal_name: "Legal name",

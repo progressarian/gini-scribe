@@ -314,8 +314,9 @@ test.describe.serial("P4-38 floor trial rehearsal", () => {
       expect(text).toContain(bill.bill_no);
       expect(text).toContain(gen.name);
       expect(text).toContain(`Consultation Dr Rahul New ${tag}`);
-      expect(text).toContain("TOTAL PAYABLE AMOUNT (₹) 1,305.00");
-      expect(text).toContain("NET PAYABLE AMOUNT(₹) 0.00");
+      const flat = text.replace(/\s*\(\s*₹\s*\)\s*/g, " (₹) ");
+      expect(flat).toContain("TOTAL PAYABLE AMOUNT (₹) 1,305.00");
+      expect(flat).toContain("NET PAYABLE AMOUNT (₹) 0.00");
 
       const receipt = await actions(desk)
         .getByRole("link", { name: "Print receipt" })

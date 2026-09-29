@@ -4,7 +4,14 @@ import { loginAs } from "../../helpers/auth.mjs";
 import { gotoReady } from "../../helpers/browser.mjs";
 import { assertTestDatabase } from "../../setup/guard.mjs";
 import { fromPaise } from "../../../src/components/billing/format.js";
-import { desk, discountCode, newTag, setUp, tearDown } from "./p4-bills-fixture.mjs";
+import {
+  autoConsultation,
+  desk,
+  discountCode,
+  newTag,
+  setUp,
+  tearDown,
+} from "./p4-bills-fixture.mjs";
 
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 const bills = await import("../../../server/services/billing/bills.js");
@@ -28,11 +35,14 @@ const totalRow = (page, label) =>
     .filter({ has: page.getByRole("rowheader", { name: label, exact: true }) })
     .getByRole("cell");
 
+let autoBefore;
+
 test.describe.serial("P4-31 discount code box", () => {
   test.describe.configure({ retries: 1 });
 
   test.beforeAll(async () => {
     ids = await setUp(tag);
+    autoBefore = await autoConsultation(true);
     await discountCode(ids, CODE, { kind: "percent", value: 10 });
     await discountCode(ids, null, {
       name: `P4 auto ${tag}`,
@@ -46,6 +56,7 @@ test.describe.serial("P4-31 discount code box", () => {
   });
 
   test.afterAll(async () => {
+    if (autoBefore !== undefined) await autoConsultation(autoBefore);
     await tearDown(ids);
   });
 

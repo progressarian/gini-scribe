@@ -3,6 +3,7 @@ import { getPool, one, query } from "../../helpers/db.mjs";
 import { USERS } from "../../fixtures/data.mjs";
 import { assertTestDatabase } from "../../setup/guard.mjs";
 import {
+  autoConsultation,
   desk,
   extraVisit,
   newTag,
@@ -65,9 +66,12 @@ const raise = (visit, orderId, names) =>
 const drawIt = (orderId) =>
   labStation.advanceSample(orderId, { to: "drawing", actorId: USERS.lab.id }, db);
 
+let autoBefore;
+
 test.describe.serial("P4-17 paid test lines open the gate", () => {
   test.beforeAll(async () => {
     ids = await setUp(tag);
+    autoBefore = await autoConsultation(true);
     await payRule(ids, ids.pensioner, { name: "pensioner claims", patient_pays: "nothing" });
     await payRule(ids, ids.paid, {
       name: "paid part",
@@ -88,6 +92,7 @@ test.describe.serial("P4-17 paid test lines open the gate", () => {
   });
 
   test.afterAll(async () => {
+    if (autoBefore !== undefined) await autoConsultation(autoBefore);
     await tearDown(ids);
     await closeOpenShifts();
     await query(`DELETE FROM cash_shifts WHERE user_id = $1`, [USERS.reception.id]).catch(() => {});

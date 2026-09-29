@@ -124,6 +124,7 @@ function useSettingsForm(settings, pick) {
 const pickGeneral = (s) => ({
   discount_stacking: s.discount_stacking,
   allow_pay_later: s.allow_pay_later,
+  auto_add_consultation: s.auto_add_consultation,
   max_codes_per_bill: text(s.max_codes_per_bill),
   bill_footer: text(s.bill_footer),
 });
@@ -177,6 +178,18 @@ function GeneralCard({ settings }) {
         <input type="checkbox" checked={form.allow_pay_later} onChange={set("allow_pay_later")} />
         Allow pay later (a category can override this)
       </label>
+      <label className="fset__check bill-settings__check">
+        <input
+          type="checkbox"
+          checked={form.auto_add_consultation}
+          onChange={set("auto_add_consultation")}
+          aria-describedby="bill-settings-consultation-hint"
+        />
+        Add the doctor's consultation to the bill automatically
+      </label>
+      <p id="bill-settings-consultation-hint" className="fset__hint">
+        When off, the desk adds the consultation from Add items.
+      </p>
       <Field label="Bill footer">
         {(id) => (
           <textarea
