@@ -135,7 +135,14 @@ test.describe.serial("P4C-13 the billing counter inside the reception station", 
       await loginAs(page, role);
       await openReception(page);
       const names = await page.getByRole("tablist", { name: "Reception" }).getByRole("tab");
-      await expect(names).toHaveText([/^Arrivals/, "Bill", "Dues", "Shift", /^Payments/]);
+      await expect(names).toHaveText([
+        /^Arrivals/,
+        "Bill",
+        "Dues",
+        "Shift",
+        /^Refunds/,
+        /^Payments/,
+      ]);
       await expect(arrivalsTab(page)).toHaveAttribute("aria-selected", "true");
     }
 

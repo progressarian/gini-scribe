@@ -146,6 +146,9 @@ function DuesTable({ rows }) {
             </td>
             <td data-label="Patient pays" className="cghs-num">
               {fromPaise(Math.max(0, row.payable - row.credited))}
+              {row.credited > 0 ? (
+                <div className="flow-muted">{fromPaise(row.credited)} credited</div>
+              ) : null}
             </td>
             <td data-label="Paid" className="cghs-num">
               {fromPaise(row.paid - row.refunded)}

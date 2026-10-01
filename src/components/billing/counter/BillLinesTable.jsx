@@ -1,16 +1,22 @@
 import { useEffect, useState } from "react";
 import ConfirmModal from "../../ui/ConfirmModal";
-import { useChangeLineQuantity, useRemoveBillLine } from "../../../queries/hooks/useBilling";
-import { errorOf, fromPaise } from "../format";
+import {
+  useChangeLineQuantity,
+  useRemoveBillLine,
+  useSetLinePrice,
+} from "../../../queries/hooks/useBilling";
+import useAuthStore from "../../../stores/authStore";
+import { CAPABILITIES, hasCapability } from "../../../../shared/permissions.js";
+import { errorOf, fromPaise, moneyTyped } from "../format";
 import { ORDER_STATE_NOTE, orderStateText, paymentRuleText } from "./lineText";
 
-function QuantityCell({ bill, line, onBill, onError }) {
+function QuantityCell({ bill, line, locked, onBill, onError }) {
   const change = useChangeLineQuantity();
   const [value, setValue] = useState(String(line.quantity));
 
   useEffect(() => setValue(String(line.quantity)), [line.quantity]);
 
-  if (bill.status !== "draft" || !line.allow_quantity)
+  if (bill.status !== "draft" || !line.allow_quantity || locked)
     return <td data-label="Qty">{line.quantity}</td>;
 
   const commit = async () => {
@@ -53,8 +59,36 @@ function QuantityCell({ bill, line, onBill, onError }) {
   );
 }
 
+function PriceNote({ line, mayChange, onChange }) {
+  if (!line.price_per_patient) return null;
+  return (
+    <div className="bc-hint bc-line-price">
+      {line.agreed_rate === null
+        ? line.rate > 0
+          ? "Category rate for this patient"
+          : "Needs this patient's price"
+        : `Price for this patient${line.agreed_by_name ? ` · set by ${line.agreed_by_name}` : ""}`}
+      {mayChange && (
+        <>
+          {" "}
+          <button type="button" className="st-btn st-btn-g" onClick={onChange}>
+            Change price
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function BillLinesTable({ bill, onBill, form }) {
   const remove = useRemoveBillLine();
+  const setPrice = useSetLinePrice();
+  const me = useAuthStore((st) => st.currentDoctor);
+  const admin = hasCapability(me?.role, CAPABILITIES.ADMIN);
+  const [pricing, setPricing] = useState(null);
+  const mayChangePrice = (line) => line.agreed_rate === null || line.agreed_by === me?.id || admin;
+  const mayRemove = (line) => line.source !== "ordered" || line.added_by === me?.id || admin;
+  const ordered = (line) => line?.source === "ordered";
   const removing = form.value.removing;
   const going = removing ? bill.lines.find((line) => line.id === removing.lineId) || null : null;
   const reason = going ? removing.reason : "";
@@ -65,6 +99,24 @@ export default function BillLinesTable({ bill, onBill, form }) {
     bill.status === "draft"
       ? "remove it from this bill"
       : "cancel this bill and bill it again without it";
+
+  const savePrice = async () => {
+    setError(null);
+    try {
+      onBill(
+        await setPrice.mutateAsync({
+          billId: bill.id,
+          visitId: bill.visit_id,
+          lineId: pricing.line.id,
+          agreed_rate: pricing.rate.trim(),
+          reason: pricing.reason.trim(),
+        }),
+      );
+      setPricing(null);
+    } catch (e) {
+      setError(errorOf(e, "That price could not be saved"));
+    }
+  };
 
   const drop = async () => {
     setError(null);
@@ -122,15 +174,41 @@ export default function BillLinesTable({ bill, onBill, form }) {
                         <span className="badge b-amb">{orderStateText(line.order_state)}</span>
                       </>
                     )}
+                    {ordered(line) && (
+                      <>
+                        {" "}
+                        <span className="badge b-blu">
+                          ordered{line.added_by_name ? ` by ${line.added_by_name}` : ""}
+                        </span>
+                      </>
+                    )}
+                    <PriceNote
+                      line={line}
+                      mayChange={bill.status === "draft" && mayChangePrice(line)}
+                      onChange={() => {
+                        setError(null);
+                        setPricing({
+                          line,
+                          rate: line.agreed_rate === null ? "" : String(line.agreed_rate / 100),
+                          reason: "",
+                        });
+                      }}
+                    />
                   </td>
                   <td data-label="Bill code">{line.bill_code || "—"}</td>
-                  <QuantityCell bill={bill} line={line} onBill={onBill} onError={setError} />
+                  <QuantityCell
+                    bill={bill}
+                    line={line}
+                    locked={!mayRemove(line)}
+                    onBill={onBill}
+                    onError={setError}
+                  />
                   <td data-label="Actual">{fromPaise(line.actual)}</td>
                   <td data-label="Discount">{fromPaise(line.discount)}</td>
                   <td data-label="Payment rule">{paymentRuleText(line.payment_rule)}</td>
                   <td data-label="Patient pays">{fromPaise(line.patient_payable)}</td>
                   <td data-label="" className="bc-cell-actions">
-                    {bill.status === "draft" && (
+                    {bill.status === "draft" && mayRemove(line) && (
                       <button
                         type="button"
                         className="st-btn st-btn-red"
@@ -165,7 +243,9 @@ export default function BillLinesTable({ bill, onBill, form }) {
         error={error}
         message={
           <label className="bc-field">
-            <span className="bc-field__lbl">Why is this line being removed? (optional)</span>
+            <span className="bc-field__lbl">
+              Why is this line being removed? {ordered(going) ? "(required)" : "(optional)"}
+            </span>
             <textarea
               className="bc-field__in"
               rows={2}
@@ -174,8 +254,45 @@ export default function BillLinesTable({ bill, onBill, form }) {
             />
           </label>
         }
+        confirmDisabled={ordered(going) && !reason.trim()}
         onConfirm={drop}
         onCancel={() => form.drop("removing")}
+      />
+
+      <ConfirmModal
+        open={!!pricing}
+        title={pricing ? `Price of ${pricing.line.bill_name} for this patient` : ""}
+        confirmLabel="Save price"
+        variant="primary"
+        busy={setPrice.isPending}
+        error={error}
+        confirmDisabled={!pricing?.rate.trim() || !pricing?.reason.trim()}
+        message={
+          pricing && (
+            <>
+              <label className="bc-field">
+                <span className="bc-field__lbl">Price ₹</span>
+                <input
+                  className="bc-field__in"
+                  inputMode="decimal"
+                  value={pricing.rate}
+                  onChange={(e) => setPricing({ ...pricing, rate: moneyTyped(e.target.value) })}
+                />
+              </label>
+              <label className="bc-field">
+                <span className="bc-field__lbl">Why is the price changing?</span>
+                <textarea
+                  className="bc-field__in"
+                  rows={2}
+                  value={pricing.reason}
+                  onChange={(e) => setPricing({ ...pricing, reason: e.target.value })}
+                />
+              </label>
+            </>
+          )
+        }
+        onConfirm={savePrice}
+        onCancel={() => setPricing(null)}
       />
     </section>
   );

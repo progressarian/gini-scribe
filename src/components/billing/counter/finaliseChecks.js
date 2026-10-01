@@ -1,6 +1,7 @@
 import { fromPaise } from "../format";
 
-export const balanceOf = (bill) => Math.max(0, bill.totals.payable - bill.totals.paid);
+export const balanceOf = (bill) =>
+  bill.credits ? bill.credits.balance : Math.max(0, bill.totals.payable - bill.totals.paid);
 
 const schemeOf = (bill, schemes = []) => {
   const scheme = (schemes || []).find((entry) => entry.code === bill.category) || null;

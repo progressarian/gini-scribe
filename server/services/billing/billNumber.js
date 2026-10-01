@@ -12,6 +12,11 @@ const SERIES_OF = { bill: "MAIN", receipt: "RCPT", credit_note: "CN" };
 
 export const seriesFor = (kind) => SERIES_OF[kind];
 
+const MISSING_SERIES = {
+  CN: (fy) =>
+    `The credit note number series (CN) for ${fy} isn't set up yet — an admin adds it in Billing settings, under Number series, and then the refund can be approved`,
+};
+
 function cleanSeries(value) {
   const series = typeof value === "string" ? value.trim().toUpperCase() : "";
   if (!BILL_SERIES.includes(series)) {
@@ -48,10 +53,14 @@ export async function nextNumber(client, series, date, ctx = null) {
     );
     const row = rows[0];
     if (!row) {
-      throw httpError(409, `Ask the admin to set the bill series for ${fy}`, {
-        series: name,
-        fy,
-      });
+      throw httpError(
+        409,
+        MISSING_SERIES[name]?.(fy) ?? `Ask the admin to set the bill series for ${fy}`,
+        {
+          series: name,
+          fy,
+        },
+      );
     }
     const no = Number(row.next_no);
     if (String(no).length > row.number_width) {

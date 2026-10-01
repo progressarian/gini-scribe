@@ -1,5 +1,6 @@
 import pool from "../../config/db.js";
 import { billingVisitType } from "../../../shared/billingVisitType.js";
+import { paise } from "../../../shared/labPayment.js";
 import {
   CONSULTATION_VISIT_TYPES,
   RESERVED_CATEGORY_CODES,
@@ -244,7 +245,7 @@ const BILL_MISS_MESSAGES = {
     `The code ${rule.code} only applies to lines where the patient pays in full, and this bill has none`,
 };
 
-const wholeBillPrice = (rule) => rule.kind === "fixed_price";
+const wholeBillPrice = (rule) => rule.kind === "fixed_price" && !rule.requires_all_items;
 
 function billCodeOutcome(rule, lines) {
   if (wholeBillPrice(rule)) {
@@ -363,15 +364,63 @@ function allocate(amount, scope, remaining) {
   return shares.filter((s) => s.share > 0);
 }
 
-function billSteps(rules, lines, stacking) {
+function packageScope(rule, lines, claimed) {
+  const scope = [];
+  for (const itemId of rule.service_item_ids) {
+    const index = lines.findIndex(
+      (line, at) =>
+        line.item_id === itemId &&
+        !claimed.has(at) &&
+        !scope.includes(at) &&
+        billRuleMiss(rule, line) === null,
+    );
+    if (index === -1) return null;
+    scope.push(index);
+  }
+  return scope;
+}
+
+function packageTakes(rule, scope, remaining, stacking) {
+  if (rule.kind !== "fixed_price") return ruleTakes(rule, scope, remaining, stacking);
+  const base = scope.reduce((sum, index) => sum + remaining[index], 0);
+  return Math.max(0, base - paise(rule.value));
+}
+
+function packageSteps(rules, lines, remaining, stacking) {
+  const claimed = new Set();
+  const found = rules
+    .map((rule) => {
+      const scope = packageScope(rule, lines, claimed);
+      return scope && { rule, scope, amount: packageTakes(rule, scope, remaining, stacking) };
+    })
+    .filter((candidate) => candidate?.amount > 0)
+    .sort((a, b) => b.amount - a.amount || byPriority(a.rule, b.rule));
+  const steps = [];
+  for (const candidate of found) {
+    if (candidate.scope.some((index) => claimed.has(index))) continue;
+    const shares = allocate(candidate.amount, candidate.scope, remaining);
+    for (const { index, share } of shares) remaining[index] -= share;
+    candidate.scope.forEach((index) => claimed.add(index));
+    steps.push({ rule: candidate.rule, amount: candidate.amount, shares });
+  }
+  return steps;
+}
+
+function billSteps(allRules, lines, stacking) {
+  const remaining = lines.map((line) => line.patient_payable);
+  const rules = allRules.filter((rule) => !rule.requires_all_items);
+  const steps = packageSteps(
+    allRules.filter((rule) => rule.requires_all_items),
+    lines,
+    remaining,
+    stacking,
+  );
   const scopes = new Map(
     rules.map((rule) => [
       rule.id,
       lines.flatMap((line, index) => (billRuleMiss(rule, line) === null ? [index] : [])),
     ]),
   );
-  const remaining = lines.map((line) => line.patient_payable);
-  const steps = [];
   const take = (found) => {
     if (!found) return;
     const shares = allocate(found.amount, scopes.get(found.rule.id), remaining);
@@ -468,6 +517,7 @@ export async function priceBill(input = {}, source = pool) {
     visitType: line.visitType ?? visitType,
     doctorId: line.doctorId ?? doctorId,
     kept: line.kept === true,
+    agreedRate: line.agreedRate ?? null,
   }));
   const context = { category, patient: who.patient, date, role: input.role, codesOnBill: 0 };
   const { admitted, refused, priced, lineCodes } = await admitCodes(

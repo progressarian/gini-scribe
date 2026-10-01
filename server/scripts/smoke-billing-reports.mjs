@@ -238,7 +238,12 @@ async function refund(billId, itemId) {
   const bill = await fresh(billId);
   const line = bill.lines.find((l) => l.service_item_id === itemId);
   const asked = await requests.createRefundRequest(
-    { bill_id: billId, lines: [{ line_id: line.id }], reason: `Not needed ${tag}` },
+    {
+      bill_id: billId,
+      lines: [{ line_id: line.id }],
+      reason_code: "patient_declined",
+      reason: `Not needed ${tag}`,
+    },
     desk,
     client,
   );

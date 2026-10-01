@@ -1,0 +1,401 @@
+[
+ {
+  "orig_sr": 1,
+  "name": "Amputation",
+  "price": 8000,
+  "sub": "Orthopaedic",
+  "orig_name": "AMPUTATION"
+ },
+ {
+  "orig_sr": 2,
+  "name": "Amputation of 1st Toe (Single Toe)",
+  "price": 4000,
+  "sub": "Orthopaedic",
+  "orig_name": "AMPUTATION  OF 1ST (SINGLE TOE)"
+ },
+ {
+  "orig_sr": 3,
+  "name": "Amputation of 1st Metatarsal Bones",
+  "price": 4000,
+  "sub": "Orthopaedic",
+  "orig_name": "AMPUTATION  OF 1ST metatarsal bones"
+ },
+ {
+  "orig_sr": 4,
+  "name": "Amputation (Single Toe)",
+  "price": 3000,
+  "sub": "Orthopaedic",
+  "orig_name": "AMPUTATION (SINGLE TOE)"
+ },
+ {
+  "orig_sr": 5,
+  "name": "Any Other Procedure",
+  "price": 500,
+  "sub": "Other Procedures",
+  "orig_name": "ANY OTHER PROCEDURE"
+ },
+ {
+  "orig_sr": 6,
+  "name": "Any Other Procedure - Major",
+  "price": 2000,
+  "sub": "Other Procedures",
+  "orig_name": "ANY OTHER PROCEDURE - MAJOR"
+ },
+ {
+  "orig_sr": 7,
+  "name": "Any Other Procedure - Minor",
+  "price": 1000,
+  "sub": "Other Procedures",
+  "orig_name": "ANY OTHER PROCEDURE - MINOR"
+ },
+ {
+  "orig_sr": 8,
+  "name": "Bone Cutting",
+  "price": 1500,
+  "sub": "Orthopaedic",
+  "orig_name": "BONE CUTTING"
+ },
+ {
+  "orig_sr": 9,
+  "name": "Bone Removal Charges",
+  "price": 5000,
+  "sub": "Orthopaedic",
+  "orig_name": "BONE REMOVAL CHARGES"
+ },
+ {
+  "orig_sr": 10,
+  "name": "Cannulation",
+  "price": 500,
+  "sub": "Nursing Procedures",
+  "orig_name": "CANNULAZATION"
+ },
+ {
+  "orig_sr": 11,
+  "name": "Carbuncle Back Procedure",
+  "price": 2000,
+  "sub": "Wound Care",
+  "orig_name": "carbuncle back procedure"
+ },
+ {
+  "orig_sr": 12,
+  "name": "Cast Removal",
+  "price": 1000,
+  "sub": "Orthopaedic",
+  "orig_name": "CAST REMOVAL"
+ },
+ {
+  "orig_sr": 13,
+  "name": "Cast Repair",
+  "price": 1500,
+  "sub": "Orthopaedic",
+  "orig_name": "CAST REPAIR"
+ },
+ {
+  "orig_sr": 14,
+  "name": "Cast: Above Elbow",
+  "price": 7500,
+  "sub": "Orthopaedic",
+  "orig_name": "CAST: ABOVE ELBOW"
+ },
+ {
+  "orig_sr": 15,
+  "name": "Cast: Above Knee",
+  "price": 7500,
+  "sub": "Orthopaedic",
+  "orig_name": "CAST: ABOVE KNEE"
+ },
+ {
+  "orig_sr": 16,
+  "name": "Cast: Below Elbow",
+  "price": 6500,
+  "sub": "Orthopaedic",
+  "orig_name": "CAST: BELOW ELBOW"
+ },
+ {
+  "orig_sr": 17,
+  "name": "Cast: Below Knee",
+  "price": 6500,
+  "sub": "Orthopaedic",
+  "orig_name": "CAST: BELOW KNEE"
+ },
+ {
+  "orig_sr": 18,
+  "name": "Catheterization",
+  "price": 500,
+  "sub": "Nursing Procedures",
+  "orig_name": "catharization"
+ },
+ {
+  "orig_sr": 19,
+  "name": "Catheter Removal",
+  "price": 500,
+  "sub": "Nursing Procedures",
+  "orig_name": "catharization REMOVEL"
+ },
+ {
+  "orig_sr": 20,
+  "name": "Cleaning",
+  "price": 1500,
+  "sub": "Wound Care",
+  "orig_name": null
+ },
+ {
+  "orig_sr": 21,
+  "name": "Clonidine Stimulation Test",
+  "price": 0,
+  "sub": "Stimulation Tests",
+  "orig_name": "CLONIDINE STIMULATION TEST"
+ },
+ {
+  "orig_sr": 22,
+  "name": "CSF Drain",
+  "price": 1000,
+  "sub": "Wound Care",
+  "orig_name": "CSF DRAIN"
+ },
+ {
+  "orig_sr": 23,
+  "name": "Debridement",
+  "price": 1500,
+  "sub": "Wound Care",
+  "orig_name": "DEBRIDEMENT"
+ },
+ {
+  "orig_sr": 24,
+  "name": "Debridement - Grade 1",
+  "price": 1000,
+  "sub": "Wound Care",
+  "orig_name": "DEBRIDEMENT  - GRADE 1"
+ },
+ {
+  "orig_sr": 25,
+  "name": "Debridement - Grade 2",
+  "price": 2000,
+  "sub": "Wound Care",
+  "orig_name": "DEBRIDEMENT  - GRADE 2"
+ },
+ {
+  "orig_sr": 26,
+  "name": "Debridement - Grade 3",
+  "price": 3000,
+  "sub": "Wound Care",
+  "orig_name": "DEBRIDEMENT  - GRADE 3"
+ },
+ {
+  "orig_sr": 27,
+  "name": "Debridement - Grade 4",
+  "price": 4000,
+  "sub": "Wound Care",
+  "orig_name": "DEBRIDEMENT  - GRADE 4"
+ },
+ {
+  "orig_sr": 28,
+  "name": "Deep Incision",
+  "price": 0,
+  "sub": "Wound Care",
+  "orig_name": "DEEP INCISION"
+ },
+ {
+  "orig_sr": 29,
+  "name": "Drainage",
+  "price": 1000,
+  "sub": "Wound Care",
+  "orig_name": "DRANAIGE"
+ },
+ {
+  "orig_sr": 30,
+  "name": "Dressing",
+  "price": 500,
+  "sub": "Wound Care",
+  "orig_name": "DRESSING"
+ },
+ {
+  "orig_sr": 31,
+  "name": "Enema",
+  "price": 0,
+  "sub": "Nursing Procedures",
+  "orig_name": "ENEMA"
+ },
+ {
+  "orig_sr": 32,
+  "name": "Enema + Fecal Out",
+  "price": 1000,
+  "sub": "Nursing Procedures",
+  "orig_name": "ENEMA+FECAL OUT"
+ },
+ {
+  "orig_sr": 33,
+  "name": "Fibre Glass Cast",
+  "price": 6500,
+  "sub": "Orthopaedic",
+  "orig_name": "FIBRE GLASS CAST"
+ },
+ {
+  "orig_sr": 34,
+  "name": "Fibre Glass Slab",
+  "price": 0,
+  "sub": "Orthopaedic",
+  "orig_name": "FIBRO GLASS SLAB"
+ },
+ {
+  "orig_sr": 35,
+  "name": "Flap Cutting",
+  "price": 0,
+  "sub": "Wound Care",
+  "orig_name": "flap cutting"
+ },
+ {
+  "orig_sr": 36,
+  "name": "I and D (Incision and Drainage)",
+  "price": 1000,
+  "sub": "Wound Care",
+  "orig_name": "I and D"
+ },
+ {
+  "orig_sr": 37,
+  "name": "ICD Insertion (Chest)",
+  "price": 0,
+  "sub": "Nursing Procedures",
+  "orig_name": "ICD INSERTION CHEST PROCEDURE"
+ },
+ {
+  "orig_sr": 38,
+  "name": "IDD",
+  "price": 2500,
+  "sub": "Wound Care",
+  "orig_name": null
+ },
+ {
+  "orig_sr": 39,
+  "name": "Incision",
+  "price": 500,
+  "sub": "Wound Care",
+  "orig_name": "INCION"
+ },
+ {
+  "orig_sr": 40,
+  "name": "Incision & Dressing",
+  "price": 500,
+  "sub": "Wound Care",
+  "orig_name": "INCION & DRESSING"
+ },
+ {
+  "orig_sr": 42,
+  "name": "Nail Cutting",
+  "price": 500,
+  "sub": "Nail Care",
+  "orig_name": "NAIL CUTTING"
+ },
+ {
+  "orig_sr": 43,
+  "name": "Nail Excision",
+  "price": 1000,
+  "sub": "Nail Care",
+  "orig_name": "NAIL EXCISION"
+ },
+ {
+  "orig_sr": 45,
+  "name": "Nail Removal (Per Nail)",
+  "price": 1000,
+  "sub": "Nail Care",
+  "orig_name": "NAIL REMOVAL (PER NAIL)"
+ },
+ {
+  "orig_sr": 46,
+  "name": "RT / NG Tube Insertion",
+  "price": 500,
+  "sub": "Nursing Procedures",
+  "orig_name": "NASAL GASTRIC TUBE"
+ },
+ {
+  "orig_sr": 47,
+  "name": "Nebulization",
+  "price": 300,
+  "sub": "Nursing Procedures",
+  "orig_name": "nebulization"
+ },
+ {
+  "orig_sr": 50,
+  "name": "Procedure - Major",
+  "price": 1500,
+  "sub": "Other Procedures",
+  "orig_name": "PROCEDURE - MAJOR"
+ },
+ {
+  "orig_sr": 52,
+  "name": "Removal of Sutures",
+  "price": 0,
+  "sub": "Wound Care",
+  "orig_name": "REMOVEAL OF STUTURES"
+ },
+ {
+  "orig_sr": 54,
+  "name": "Shaving",
+  "price": 500,
+  "sub": "Nursing Procedures",
+  "orig_name": "SHAVING"
+ },
+ {
+  "orig_sr": 55,
+  "name": "Shoe Modification",
+  "price": 2000,
+  "sub": "Other Procedures",
+  "orig_name": "SHOE MODIFICATION"
+ },
+ {
+  "orig_sr": 56,
+  "name": "SNRB",
+  "price": 0,
+  "sub": "Other Procedures",
+  "orig_name": null
+ },
+ {
+  "orig_sr": 58,
+  "name": "Stitching",
+  "price": 500,
+  "sub": "Wound Care",
+  "orig_name": "STICHING"
+ },
+ {
+  "orig_sr": 60,
+  "name": "Sumag Dressing",
+  "price": 1000,
+  "sub": "Wound Care",
+  "orig_name": "SUMAG DRESSING"
+ },
+ {
+  "orig_sr": 61,
+  "name": "Suturing",
+  "price": 1000,
+  "sub": "Wound Care",
+  "orig_name": "SUTUR"
+ },
+ {
+  "orig_sr": 62,
+  "name": "Triptorelin Stimulation Test",
+  "price": 0,
+  "sub": "Stimulation Tests",
+  "orig_name": "TRIPTORELIN STIMULATION TEST"
+ },
+ {
+  "orig_sr": 63,
+  "name": "VAC (Vacuum Assisted Closure)",
+  "price": 11860,
+  "sub": "Wound Care",
+  "orig_name": "VAC"
+ },
+ {
+  "orig_sr": 64,
+  "name": "Vasectomy",
+  "price": 16000,
+  "sub": "Other Procedures",
+  "orig_name": "VASECTOMY (DR. NITIN AGGARWAL)"
+ },
+ {
+  "orig_sr": 65,
+  "name": "Xanthelasma Treatment (Per Eye)",
+  "price": 500,
+  "sub": "Other Procedures",
+  "orig_name": "XANTHELASMA TREATMENT (PER EYE)"
+ }
+]

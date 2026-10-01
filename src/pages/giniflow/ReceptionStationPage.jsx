@@ -24,13 +24,21 @@ import {
 import LiveBadge from "../../components/giniflow/LiveBadge";
 import BillingDesk, { DESK_TABS } from "../../components/billing/counter/BillingDesk";
 import { BillBadge } from "../../components/billing/counter/PatientList";
+import { approvedRefundText, useRefundsToPay } from "../../components/billing/counter/RefundsBoard";
 import { receptionBillHref } from "../../components/billing/counter/billHref";
 import { useCounterPatients, useDeskSettings } from "../../queries/hooks/useBilling";
 import "../../styles/giniflow-station.css";
 import useAuthStore from "../../stores/authStore";
 import { CAPABILITIES as CAPS, hasCapability } from "../../../shared/permissions.js";
 import CancelTestControl from "../../components/giniflow/CancelTestControl";
+import {
+  cancelledText,
+  cancelledToastMs,
+  REFUND_TOAST_MS,
+  TOAST_MS,
+} from "../../lib/testCancelText.js";
 import ConfirmModal from "../../components/ui/ConfirmModal";
+import OrderedServicesPanel from "../../components/billing/OrderedServicesPanel";
 import StationNotice from "../../components/giniflow/StationNotice";
 import JourneyBuilder from "../../components/giniflow/JourneyBuilder";
 import { useFlowStepCatalog, useFlowVisitTypes } from "../../queries/hooks/useFlow";
@@ -1367,6 +1375,33 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
 // The stops a patient still has, opened from their row. An ECG or an X-Ray has
 // no board column, so nothing but this can complete it — the board would show
 // them "with the consultant" for the whole time they were at the X-Ray.
+function ProceduresPanel({ arrival, onClose }) {
+  const canBill = useCanBill();
+  return (
+    <div className="detail-overlay">
+      <div className="detail-pane ci-pane" role="dialog" aria-label="Procedures">
+        <div className="dp-head">
+          <div className="dp-name">{arrival.name}</div>
+          <div className="dp-meta">{identity(arrival)} · procedures priced for this patient</div>
+          <div className="dp-acts">
+            <button className="rbtn" onClick={onClose}>
+              ← Back
+            </button>
+          </div>
+        </div>
+        <div className="dp-sec">
+          <OrderedServicesPanel station="reception" visitId={arrival.visitId} readOnly={!canBill} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const proceduresText = (services) =>
+  services
+    ? `🩹 ${services.count} procedure${services.count === 1 ? "" : "s"} · ₹${rupeesFromPaise(services.total)}`
+    : "🩹 + Procedure";
+
 function JourneyPanel({ arrival, onClose }) {
   const { data, isLoading } = useJourney(arrival.visitId);
   const { data: timeline } = useGiniflowTimeline(arrival.visitId);
@@ -1718,7 +1753,9 @@ export function ArrivalsTab({
   // The arrival being planned. Nothing is written until it is confirmed.
   const [arriving, setArriving] = useState(null);
   const [journeyFor, setJourneyFor] = useState(null);
-  const bills = useBillStates(useCanBill());
+  const [proceduresFor, setProceduresFor] = useState(null);
+  const canBill = useCanBill();
+  const bills = useBillStates(canBill);
   const expected = data?.expected || [];
   const onFloor = data?.onFloor || [];
   // The list holds everyone who is not expected and not a no-show, so it counts
@@ -1785,6 +1822,9 @@ export function ArrivalsTab({
       )}
 
       {journeyFor && <JourneyPanel arrival={journeyFor} onClose={() => setJourneyFor(null)} />}
+      {proceduresFor && (
+        <ProceduresPanel arrival={proceduresFor} onClose={() => setProceduresFor(null)} />
+      )}
 
       {arriving && (
         <CheckInPanel
@@ -1853,6 +1893,16 @@ export function ArrivalsTab({
                   {categoryLabel(a.schemeCode)}
                   {a.schemeOpdFee !== null ? ` · ₹${a.schemeOpdFee}` : ""}
                 </span>
+              )}
+              {(a.orderedServices || canBill) && (
+                <button
+                  type="button"
+                  className={`badge ${a.orderedServices ? "b-tl" : "b-ink"} ar-procs`}
+                  title="Procedures priced for this patient"
+                  onClick={() => setProceduresFor(a)}
+                >
+                  {proceduresText(a.orderedServices)}
+                </button>
               )}
               {/* Where they are in their OWN journey, which the columns cannot
                   show: a patient with an ECG and an X-Ray still to do reads the
@@ -2047,6 +2097,7 @@ function useReceptionTab(canBill) {
         DESK_TABS.bill,
         ...(duesOff || (!deskSettings && tab !== DESK_TABS.dues.key) ? [] : [DESK_TABS.dues]),
         DESK_TABS.shift,
+        DESK_TABS.refunds,
       ]
     : [];
 
@@ -2076,7 +2127,7 @@ function useReceptionTab(canBill) {
   };
 }
 
-function ReceptionTabs({ tab, setTab, deskTabs, arrivalsCount, paymentsCount }) {
+function ReceptionTabs({ tab, setTab, deskTabs, arrivalsCount, paymentsCount, refundsCount }) {
   return (
     <div className="st-tabs rc-tabs" role="tablist" aria-label="Reception">
       <button
@@ -2100,6 +2151,11 @@ function ReceptionTabs({ tab, setTab, deskTabs, arrivalsCount, paymentsCount }) 
           onClick={() => setTab(entry.key)}
         >
           {entry.label}
+          {entry.key === DESK_TABS.refunds.key && (
+            <span className="st-tab-n" aria-label={`${refundsCount} to pay back`}>
+              {refundsCount}
+            </span>
+          )}
         </button>
       ))}
       <button
@@ -2206,12 +2262,15 @@ export default function ReceptionStationPage() {
   };
   const counts = arrivals?.counts || { expected: 0, onFloor: 0, notComing: 0 };
 
-  const showToast = (msg) => {
+  const showToast = (msg, ms = TOAST_MS) => {
     setToast(msg);
     clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(""), 3500);
+    toastTimer.current = setTimeout(() => setToast(""), ms);
   };
   useEffect(() => () => clearTimeout(toastTimer.current), []);
+  const refundsToPay = useRefundsToPay(canBill, (rows) =>
+    showToast(approvedRefundText(rows), REFUND_TOAST_MS),
+  );
 
   const failed = (e, fallback) =>
     showToast(e?.response?.data?.detail || e?.response?.data?.error || fallback);
@@ -2222,9 +2281,12 @@ export default function ReceptionStationPage() {
     cancelTest.mutate(
       { orderId: order.orderId, testId: test.id, ...body },
       {
-        onSuccess: () => {
+        onSuccess: (r) => {
           done();
-          showToast(`✕ ${test.name} cancelled for ${order.name}`);
+          showToast(
+            cancelledText(`✕ ${test.name} cancelled for ${order.name}`, r),
+            cancelledToastMs(r),
+          );
         },
         onError: (e) => failed(e, "Could not cancel — nothing was changed"),
       },
@@ -2383,6 +2445,7 @@ export default function ReceptionStationPage() {
       deskTabs={desk.deskTabs}
       arrivalsCount={counts.expected}
       paymentsCount={payCounts.pending}
+      refundsCount={refundsToPay}
     />
   );
 

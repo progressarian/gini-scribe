@@ -8,6 +8,7 @@ import { writeAudit } from "./audit.js";
 import { refuseRemoved } from "./removedDoctors.js";
 import { createGroup, createSubgroup } from "./serviceGroups.js";
 import { orderedNamesNotPriced } from "./serviceItemAliases.js";
+import { TEST_MATCHES_SQL } from "./testMatch.js";
 import {
   CONSULTATION_DEFAULT_GROUP,
   CONSULTATION_DEFAULT_SUBGROUP,
@@ -44,6 +45,7 @@ const COLUMNS = [
   "doctor_id",
   "visit_type",
   "test_catalog_id",
+  "price_per_patient",
   "is_active",
   "created_at",
   "updated_at",
@@ -119,6 +121,7 @@ const CLEANERS = {
   doctor_id: (v) => cleanId(v, "doctor"),
   visit_type: cleanVisitType,
   test_catalog_id: cleanUuid,
+  price_per_patient: (v) => cleanFlag(v, "Price decided per patient"),
 };
 
 const CREATE_DEFAULTS = {
@@ -130,6 +133,7 @@ const CREATE_DEFAULTS = {
   doctor_id: null,
   visit_type: null,
   test_catalog_id: null,
+  price_per_patient: false,
 };
 
 function cleanInput(input, { partial }) {
@@ -165,6 +169,12 @@ function checkShape(item) {
   }
   if (item.kind !== "test" && item.test_catalog_id) {
     throw httpError(400, "Only test items are linked to the test catalogue");
+  }
+  if (item.price_per_patient && ["test", "consultation"].includes(item.kind)) {
+    throw httpError(
+      400,
+      "Tests and consultations have a fixed price; only other services can be priced per patient",
+    );
   }
 }
 
@@ -363,7 +373,8 @@ export async function searchDeskItems(filters = {}, db = pool) {
   const { rows } = await db.query(
     `WITH found AS (
        SELECT i.id, i.code, i.name, i.kind, i.unit, i.allow_quantity, i.max_quantity,
-              i.doctor_id, i.visit_type, s.name AS subgroup_name, g.name AS group_name,
+              i.doctor_id, i.visit_type, i.price_per_patient,
+              s.name AS subgroup_name, g.name AS group_name,
               ($2::text IS NULL OR i.kind <> 'consultation' OR i.visit_type = $2::text) AS shown
          FROM service_items i
          JOIN service_subgroups s ON s.id = i.subgroup_id
@@ -580,13 +591,19 @@ export async function notPricedList(db = pool) {
     `SELECT name, COALESCE(aliases, '{}') AS aliases FROM lab_report_catalog
       WHERE is_active ORDER BY name`,
   );
+  const { rows: resolved } = await db.query(
+    `SELECT m.test_name
+       FROM (${TEST_MATCHES_SQL("$1::text[]")}) m
+       JOIN giniflow_test_catalog c ON c.id = m.catalog_id AND c.is_active`,
+    [reports.flatMap((report) => [report.name, ...report.aliases])],
+  );
+  const matchedByBilling = new Set(resolved.map((row) => row.test_name));
   const reportsNotInCatalogue = reports
     .map((report) => {
-      const matches = [report.name, ...report.aliases]
-        .map((name) => inCatalogue.get(normalizeTestName(name)))
-        .filter(Boolean);
-      if (matches.some((m) => m.is_active)) return null;
       const names = [report.name, ...report.aliases];
+      if (names.some((name) => matchedByBilling.has(name))) return null;
+      const matches = names.map((name) => inCatalogue.get(normalizeTestName(name))).filter(Boolean);
+      if (matches.some((m) => m.is_active)) return null;
       return {
         name: report.name,
         status: matches.length ? "retired_in_catalogue" : "not_in_catalogue",

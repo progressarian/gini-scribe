@@ -143,7 +143,12 @@ test.describe.serial("P5-08 collection and dues reports", () => {
     );
     const dressing = final.lines.find((line) => line.service_item_id === ids.dressing);
     const asked = await requests.createRefundRequest(
-      { bill_id: final.id, lines: [{ line_id: dressing.id }], reason: "Dressing not done" },
+      {
+        bill_id: final.id,
+        lines: [{ line_id: dressing.id }],
+        reason_code: "doctor_cancelled",
+        reason: "Dressing not done",
+      },
       desk,
       db,
     );

@@ -22,6 +22,11 @@ function Badges({ row }) {
       {row.online && <span className="bc-badge bc-badge--online">Online</span>}
       {row.samplesOnly && <span className="bc-badge bc-badge--samples">Samples only</span>}
       <BillBadge bill={row.bill} />
+      {row.refundPending && <span className="bc-badge bc-badge--draft">Refund pending</span>}
+      {row.payBack > 0 && (
+        <span className="bc-badge bc-badge--due">{fromPaise(row.payBack)} to pay back</span>
+      )}
+      {row.refunded > 0 && <span className="bc-badge bc-badge--claim">Refunded</span>}
     </span>
   );
 }

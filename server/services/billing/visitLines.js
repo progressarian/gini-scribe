@@ -1,14 +1,10 @@
 import pool from "../../config/db.js";
 import { billingVisitType } from "../../../shared/billingVisitType.js";
-import {
-  CLAIM_STATE,
-  collectiblePaise,
-  paise,
-  PAYMENT_STATUS,
-} from "../../../shared/labPayment.js";
+import { collectiblePaise, paise } from "../../../shared/labPayment.js";
 import { writeAudit } from "./audit.js";
 import { addLineIn, billLabel, holdConsultation, openDraftIn, repriceBillIn } from "./bills.js";
 import { addsConsultation, getSettings } from "./billingSettings.js";
+import { linkLine, SETTLED_AT_RECEPTION } from "./orderLinks.js";
 import { UNCOVERED_SQL } from "./payments.js";
 import { priceBill } from "./priceBill.js";
 import { removedDoctor } from "./removedDoctors.js";
@@ -306,25 +302,18 @@ async function itemsForTests(client, testNames) {
   return new Map(rows.map((row) => [row.test_name, row]));
 }
 
-async function adoptLabCaseLine(client, bill, itemId, labOrderId, ctx) {
+async function adoptUnlinkedLine(client, bill, itemId, labOrderId, ctx) {
   if (!labOrderId) return false;
-  const { rows } = await client.query(
-    `UPDATE bill_lines SET source = 'lab_order', lab_order_id = $3, updated_at = NOW(),
-            updated_by = $4
-      WHERE bill_id = $1 AND service_item_id = $2 AND is_live AND source = 'lab_case'
-      RETURNING id`,
-    [bill.id, itemId, labOrderId, ctx?.actorId ?? null],
+  const { rows: found } = await client.query(
+    `SELECT id, source FROM bill_lines
+      WHERE bill_id = $1 AND service_item_id = $2 AND is_live AND lab_order_id IS NULL
+        AND source IN ('lab_case', 'added')
+      ORDER BY source = 'added', line_no
+      LIMIT 1 FOR UPDATE`,
+    [bill.id, itemId],
   );
-  if (!rows.length) return false;
-  await writeAudit(client, {
-    entity: "bill_lines",
-    entityId: rows[0].id,
-    action: "update",
-    before: { source: "lab_case", lab_order_id: null },
-    after: { source: "lab_order", lab_order_id: labOrderId, bill_no: bill.bill_no },
-    ...auditFields(ctx),
-  });
-  return true;
+  if (!found.length) return false;
+  return linkLine(client, bill, found[0], labOrderId, ctx);
 }
 
 export async function linesForOrder(visitId, { labOrderId, testNames = [] } = {}, ctx, db = pool) {
@@ -348,7 +337,7 @@ export async function linesForOrder(visitId, { labOrderId, testNames = [] } = {}
           await inTransaction(async (client) => {
             const bill = await openDraftIn(client, visitId, ctx);
             billId = bill.id;
-            if (await adoptLabCaseLine(client, bill, item.id, labOrderId, ctx)) return;
+            if (await adoptUnlinkedLine(client, bill, item.id, labOrderId, ctx)) return;
             await addLineIn(
               client,
               bill,
@@ -382,16 +371,6 @@ export const REMOVED_BY_DESK_SQL = (visitExpr, itemExpr) => `EXISTS (
      AND ${NOT_DISCARDED("ra")}
      AND NOT EXISTS (SELECT 1 FROM bills rb
                       WHERE rb.id::text = ra.before ->> 'bill_id' AND rb.status = 'cancelled'))`;
-
-const sqlText = (values) => values.map((value) => `'${value}'`).join(", ");
-
-const SETTLED_AT_RECEPTION = `(o.amount_paid > 0
-  OR o.claim_state IN (${sqlText([CLAIM_STATE.SUBMITTED, CLAIM_STATE.APPROVED])})
-  OR (o.amount_total > 0 AND o.payment_status IN (${sqlText([
-    PAYMENT_STATUS.PAID,
-    PAYMENT_STATUS.CLAIM_APPROVED,
-    PAYMENT_STATUS.CLAIM_SUBMITTED,
-  ])})))`;
 
 async function testsToPrefill(client, visitId) {
   const { rows } = await client.query(
@@ -496,10 +475,41 @@ export async function refuseOrderOnBill(client, labOrderId) {
   });
 }
 
-export async function releaseOrderLines(client, labOrderId, testNames = null, ctx = null) {
+async function detachFinalLines(client, billed, ctx) {
+  await client.query(
+    `UPDATE bill_lines SET lab_order_id = NULL, source = 'added', updated_at = NOW(),
+            updated_by = $2
+      WHERE id = ANY($1::uuid[])`,
+    [billed.map((row) => row.id), ctx?.actorId ?? null],
+  );
+  for (const row of billed) {
+    await writeAudit(client, {
+      entity: "bill_lines",
+      entityId: row.id,
+      action: "update",
+      before: row,
+      after: { lab_order_id: null, source: "added", reason: "The test was cancelled on the floor" },
+      ...auditFields(ctx),
+    });
+  }
+  return billed.map((row) => ({
+    line_id: row.id,
+    bill_id: row.bill_id,
+    bill_no: row.bill_no,
+    bill_name: row.bill_name,
+  }));
+}
+
+export async function releaseOrderLines(
+  client,
+  labOrderId,
+  testNames = null,
+  ctx = null,
+  { keepFinal = false } = {},
+) {
   const { rows } = await client.query(
-    `SELECT l.id, l.bill_id, l.bill_name, l.is_live, b.status, b.bill_no, c.test_name,
-            i.test_catalog_id
+    `SELECT l.id, l.bill_id, l.bill_name, l.is_live, l.lab_order_id, l.source, b.status,
+            b.bill_no, c.test_name, i.test_catalog_id
        FROM bill_lines l
        JOIN bills b ON b.id = l.bill_id
        JOIN service_items i ON i.id = l.service_item_id
@@ -515,7 +525,7 @@ export async function releaseOrderLines(client, labOrderId, testNames = null, ct
     : rows;
   const live = going.filter((row) => row.is_live);
   const billed = live.filter((row) => row.status !== "draft");
-  if (billed.length) {
+  if (billed.length && !keepFinal) {
     throw httpError(
       409,
       `${billed[0].bill_name} is on bill ${billed[0].bill_no}, so it can't be cancelled here — cancel that bill first`,
@@ -530,11 +540,13 @@ export async function releaseOrderLines(client, labOrderId, testNames = null, ct
       [dropped.map((row) => row.id)],
     );
   }
-  if (!live.length) return { removed: [] };
-  const ids = live.map((row) => row.id);
+  const onFinal = billed.length ? await detachFinalLines(client, billed, ctx) : [];
+  const drafts = live.filter((row) => row.status === "draft");
+  if (!drafts.length) return { removed: [], onFinal };
+  const ids = drafts.map((row) => row.id);
   await client.query(`DELETE FROM bill_line_discounts WHERE bill_line_id = ANY($1::uuid[])`, [ids]);
   await client.query(`DELETE FROM bill_lines WHERE id = ANY($1::uuid[])`, [ids]);
-  for (const row of live) {
+  for (const row of drafts) {
     await writeAudit(client, {
       entity: "bill_lines",
       entityId: row.id,
@@ -544,8 +556,8 @@ export async function releaseOrderLines(client, labOrderId, testNames = null, ct
       ...auditFields(ctx),
     });
   }
-  for (const billId of [...new Set(live.map((row) => row.bill_id))]) {
+  for (const billId of [...new Set(drafts.map((row) => row.bill_id))]) {
     await repriceBillIn(client, billId, ctx);
   }
-  return { removed: live.map((row) => row.bill_name) };
+  return { removed: drafts.map((row) => row.bill_name), onFinal };
 }

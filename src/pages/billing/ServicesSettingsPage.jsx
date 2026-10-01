@@ -146,7 +146,17 @@ export default function ServicesSettingsPage() {
   const [kind, setKind] = useState("");
   const [status, setStatus] = useState("all");
   const [editing, setEditing] = useState(null);
-  const [view, setView] = useState("items");
+  const view = params.get("view") === "not-priced" ? "not-priced" : "items";
+  const setView = (next) =>
+    setParams(
+      (current) => {
+        const kept = new URLSearchParams(current);
+        if (next === "not-priced") kept.set("view", next);
+        else kept.delete("view");
+        return kept;
+      },
+      { replace: true },
+    );
   const notPriced = useBillingNotPriced();
   const createTest = params.get("createTest");
 

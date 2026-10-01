@@ -131,24 +131,28 @@ function shapePayment(row) {
 const PAYMENT_COLUMNS = `id, bill_id, direction, mode, amount, reference, receipt_no, shift_id,
   received_by, received_at`;
 
-const MONEY_SQL = `
-  SELECT b.patient_payable,
+export const MONEY_COLUMNS = `b.patient_payable,
          GREATEST(b.paid_amount,
                   COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.bill_id = b.id), 0))
            AS paid_in,
          COALESCE((SELECT SUM(c.patient_payable) FROM bills c WHERE c.original_bill_id = b.id), 0)
            AS credited,
          COALESCE((SELECT SUM(p.amount) FROM payments p JOIN bills c ON c.id = p.bill_id
-                    WHERE c.original_bill_id = b.id), 0) AS paid_out
-    FROM bills b WHERE b.id = $1`;
+                    WHERE c.original_bill_id = b.id), 0) AS paid_out`;
+
+const MONEY_SQL = `SELECT ${MONEY_COLUMNS} FROM bills b WHERE b.id = $1`;
 
 export async function moneyOn(client, billId) {
   const { rows } = await client.query(MONEY_SQL, [billId]);
   if (!rows.length) throw httpError(404, "That bill no longer exists");
-  const payable = paise(rows[0].patient_payable);
-  const paidIn = paise(rows[0].paid_in);
-  const credited = paise(rows[0].credited);
-  const paidOut = paise(rows[0].paid_out);
+  return moneyFrom(rows[0]);
+}
+
+export function moneyFrom(row) {
+  const payable = paise(row.patient_payable);
+  const paidIn = paise(row.paid_in);
+  const credited = paise(row.credited);
+  const paidOut = paise(row.paid_out);
   const held = paidIn - paidOut;
   const owed = Math.max(0, payable - credited);
   return {
@@ -403,6 +407,14 @@ export async function settleTestOrders(client, bill, ctx) {
     if (done) opened.push(done);
   }
   return opened;
+}
+
+export async function paidByBillAlone(client, billId, orderId) {
+  const last = await lastSettle(client, billId, orderId);
+  if (!last || last.released) return false;
+  const order = await lockOrder(client, orderId);
+  const part = order ? receptionPart(order, last) : null;
+  return Boolean(part) && part.cash === 0 && part.claim === 0;
 }
 
 const settleOf = (row) => (row.settle?.before && row.settle.after ? row.settle : null);
@@ -689,28 +701,52 @@ async function refundOf(db, creditNoteId) {
   return rows[0] ?? null;
 }
 
+export const noteDue = (note, money) =>
+  Math.max(0, Math.min(paise(note.patient_payable) - paise(note.paid_amount), money.refundable));
+
 async function dueOn(db, note) {
   const money = await moneyOn(db, note.original_bill_id);
-  const left = paise(note.patient_payable) - paise(note.paid_amount);
-  return { money, due: Math.max(0, Math.min(left, money.refundable)) };
+  return { money, due: noteDue(note, money) };
+}
+
+function spendNewestFirst(rows, amount, fits = () => true) {
+  let left = amount;
+  for (const row of rows) {
+    if (!left) break;
+    if (!fits(row)) continue;
+    const spent = Math.min(row.left, left);
+    row.left -= spent;
+    left -= spent;
+  }
+  return left;
 }
 
 export async function refundShares(db, billId, due) {
-  const money = await moneyOn(db, billId);
-  const { rows } = await db.query(
-    `SELECT mode, amount FROM payments WHERE bill_id = $1
-      ORDER BY received_at DESC, receipt_no DESC NULLS LAST, id DESC`,
-    [billId],
-  );
-  let earlier = money.paid_out;
+  const [{ rows: paidIn }, { rows: paidOut }] = await Promise.all([
+    db.query(
+      `SELECT mode, amount FROM payments WHERE bill_id = $1
+        ORDER BY received_at DESC, receipt_no DESC NULLS LAST, id DESC`,
+      [billId],
+    ),
+    db.query(
+      `SELECT p.mode, SUM(p.amount) AS amount
+         FROM payments p JOIN bills c ON c.id = p.bill_id
+        WHERE c.original_bill_id = $1
+        GROUP BY p.mode ORDER BY p.mode`,
+      [billId],
+    ),
+  ]);
+  const rows = paidIn.map((row) => ({ mode: row.mode, left: paise(row.amount) }));
+  let otherModes = 0;
+  for (const out of paidOut) {
+    otherModes += spendNewestFirst(rows, paise(out.amount), (row) => row.mode === out.mode);
+  }
+  spendNewestFirst(rows, otherModes);
   let left = due;
   const shares = new Map();
   for (const row of rows) {
     if (!left) break;
-    const amount = paise(row.amount);
-    const spent = Math.min(earlier, amount);
-    earlier -= spent;
-    const take = Math.min(amount - spent, left);
+    const take = Math.min(row.left, left);
     if (take <= 0) continue;
     shares.set(row.mode, (shares.get(row.mode) ?? 0) + take);
     left -= take;

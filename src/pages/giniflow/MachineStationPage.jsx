@@ -19,6 +19,7 @@ import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
 import LiveBadge from "../../components/giniflow/LiveBadge";
 import StationNotice from "../../components/giniflow/StationNotice";
 import CancelTestControl from "../../components/giniflow/CancelTestControl";
+import { cancelledText, cancelledToastMs, TOAST_MS } from "../../lib/testCancelText.js";
 import LabResultsForm from "../../components/giniflow/LabResultsForm";
 import PdfViewerModal from "../../components/visit/PdfViewerModal";
 import {
@@ -594,10 +595,10 @@ export default function MachineStationPage({ station = "machine", label = "Machi
     cancelStart.isPending ||
     cancelTest.isPending;
 
-  const showToast = (msg) => {
+  const showToast = (msg, ms = TOAST_MS) => {
     setToast(msg);
     clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(""), 3500);
+    toastTimer.current = setTimeout(() => setToast(""), ms);
   };
 
   const rowsFor = (rung) => data?.[rung.bucket] || [];
@@ -708,10 +709,13 @@ export default function MachineStationPage({ station = "machine", label = "Machi
     cancelTest.mutate(
       { orderId: order.orderId, ...body },
       {
-        onSuccess: () => {
+        onSuccess: (r) => {
           done();
           setOpenId(null);
-          showToast(`✕ ${order.tests.join(", ")} cancelled for ${order.name}`);
+          showToast(
+            cancelledText(`✕ ${order.tests.join(", ")} cancelled for ${order.name}`, r),
+            cancelledToastMs(r),
+          );
         },
         onError: (e) =>
           showToast(e?.response?.data?.error || "Could not cancel — nothing was changed"),

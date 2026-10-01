@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import OrderedServicesPanel from "../../components/billing/OrderedServicesPanel";
 import { Line, LineChart, ResponsiveContainer, Tooltip, YAxis } from "recharts";
 import { CHAIN } from "../../../shared/giniflowStatus";
 import { UNDRAWN_SAMPLE_STATUSES } from "../../../shared/labStages.js";
@@ -1575,6 +1576,11 @@ export default function MoStationPage() {
                         .join(" · ")}
                     </div>
                   )}
+                </div>
+
+                <div className="dp-sec">
+                  <div className="dp-sec-title">🩹 Procedures</div>
+                  <OrderedServicesPanel station="mo" visitId={activeId} onToast={showToast} />
                 </div>
               </div>
 

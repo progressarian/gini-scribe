@@ -8,7 +8,7 @@ export const GENERAL_RULES = [
   "Do not rename or delete sheets or header cells (column order does not matter). Orange headers are required; blue headers are optional. The 'if left blank' column below says what an empty cell means.",
   "The two grey rows at the top of each sheet are examples: their first cell starts with EXAMPLE and they are never imported. Type over them with your own rows, or delete them.",
   "Every test is its own item (HbA1c, Lipid Profile, ABI, VPT, 2D Echo…). There is no general 'lab test' item.",
-  "There are no packages. Each ordered test is always billed on its own line at its own price.",
+  "Each ordered test is always billed on its own line. A package (e.g. ABI + VPT for ₹600) is an automatic discount set up on the Discounts page, not an import row.",
   "Dates are written YYYY-MM-DD, for example 2026-10-01.",
   "Amounts are plain numbers: write the digits only, without a ₹ sign or commas (1200, not 1,200).",
   "Codes are unique and have no spaces. Category codes use lower-case letters, digits and _ only. The category code general is reserved: it means patients with no category.",

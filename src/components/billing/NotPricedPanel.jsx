@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   useAddBillingItemAlias,
   useBillingItems,
@@ -147,7 +147,7 @@ function LinkToService({ row }) {
           disabled={add.isPending}
           onClick={() => link(row.suggestion)}
         >
-          Link to {row.suggestion.code}
+          Link to {row.suggestion.code} — {row.suggestion.name}
         </button>
       ) : null}
       <input
@@ -273,7 +273,8 @@ const ROWS = { tests: TestRows, reports: ReportRows, ordered: OrderedRows };
 
 export default function NotPricedPanel({ onCreate }) {
   const { data, isLoading, isError } = useBillingNotPriced();
-  const [picked, setPicked] = useState(null);
+  const [params, setParams] = useSearchParams();
+  const picked = params.get("list");
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
@@ -293,7 +294,14 @@ export default function NotPricedPanel({ onCreate }) {
   const Rows = ROWS[list.key];
 
   const pick = (key) => {
-    setPicked(key);
+    setParams(
+      (current) => {
+        const kept = new URLSearchParams(current);
+        kept.set("list", key);
+        return kept;
+      },
+      { replace: true },
+    );
     setQ("");
     setPage(1);
   };

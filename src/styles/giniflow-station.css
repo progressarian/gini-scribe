@@ -5006,6 +5006,11 @@
   border-color: var(--blu);
   color: var(--blu);
 }
+.gf button.ar-procs {
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+}
 
 /* The same journey line on a board card. */
 .gf .pc-journey {

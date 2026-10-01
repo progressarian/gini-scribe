@@ -820,7 +820,8 @@ export const ARRIVAL_SELECT = `
          v.assigned_sd_id, v.assigned_doctor_id,
          COALESCE(asd.short_name, asd.name) AS assigned_sd_name,
          COALESCE(adoc.short_name, adoc.name) AS assigned_doctor_name,
-         jr.steps AS journey_steps
+         jr.steps AS journey_steps,
+         ordered.count AS ordered_count, ordered.total AS ordered_total
     FROM giniflow_visits v
     JOIN patients p ON p.id = v.patient_id
     LEFT JOIN appointments ap ON ap.id = v.appointment_id
@@ -878,6 +879,12 @@ export const ARRIVAL_SELECT = `
        ORDER BY t.max_time_min, t.id LIMIT 1
     ) sugg ON TRUE
     LEFT JOIN LATERAL (${JOURNEY_STEPS_SQL("v")}) jr ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT COUNT(*)::int AS count, COALESCE(SUM(l.patient_payable), 0) AS total
+        FROM bill_lines l JOIN bills b ON b.id = l.bill_id
+       WHERE l.visit_id = v.id AND l.source = 'ordered' AND l.is_live
+         AND b.status <> 'cancelled'
+    ) ordered ON TRUE
     LEFT JOIN LATERAL (
       SELECT occurred_at, (e.meta->>'walkIn')::boolean AS walk_in FROM giniflow_visit_events e
        WHERE e.visit_id = v.id AND e.status = 'checked_in'
@@ -948,6 +955,9 @@ export const shapeArrival = (r, now) => ({
   assignedDoctorId: r.assigned_doctor_id || null,
   assignedDoctorName: r.assigned_doctor_name || null,
   journey: journeyProgress(r.journey_steps, r.current_status, r.resume_status),
+  orderedServices: r.ordered_count
+    ? { count: r.ordered_count, total: Math.round(Number(r.ordered_total) * 100) }
+    : null,
 });
 
 const firstName = (name) =>

@@ -27,7 +27,11 @@ export const BILL_STATUS_LABEL = { draft: "Draft", final: "Final", cancelled: "C
 
 export const billStatusText = (status) => BILL_STATUS_LABEL[status] ?? status;
 
-export const REQUEST_KIND_LABEL = { new_item: "New item", repeat_item: "Bill again" };
+export const REQUEST_KIND_LABEL = {
+  new_item: "New item",
+  repeat_item: "Bill again",
+  refund: "Refund",
+};
 
 export const requestKindText = (kind) => REQUEST_KIND_LABEL[kind] ?? kind;
 
@@ -41,6 +45,17 @@ export const REQUEST_STATUS_LABEL = {
 export const requestStatusText = (status) => REQUEST_STATUS_LABEL[status] ?? status;
 
 export const PAYMENT_MODE_LABEL = { cash: "Cash", card: "Card", upi: "UPI" };
+
+export const REFUND_MODE_LABEL = { as_paid: "Back the way it was paid", ...PAYMENT_MODE_LABEL };
+
+export const refundModeText = (mode) => REFUND_MODE_LABEL[mode] ?? mode ?? "";
+
+const MODE_WORD = { cash: "cash", card: "card", upi: "UPI" };
+
+export const refundLegsText = (legs, money) =>
+  (legs || [])
+    .map((leg) => `${money(leg.amount)} by ${MODE_WORD[leg.mode] ?? leg.mode}`)
+    .join(", ");
 
 export const CLAIM_BADGE = { pending: "CGHS pending", cleared: "CGHS cleared" };
 

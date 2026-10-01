@@ -9,7 +9,7 @@ import {
   useNewItemRequest,
   useRepeatRequest,
 } from "../../../queries/hooks/useBilling";
-import { errorOf } from "../format";
+import { errorOf, moneyTyped } from "../format";
 import { requestKindText, requestStatusText } from "./lineText";
 
 const BLANK_PROPOSAL = { name: "", group: "", reason: "" };
@@ -28,6 +28,7 @@ export default function AddItems({ bill, onBill, form }) {
   const proposed = form.value.newItem ?? BLANK_PROPOSAL;
   const setProposed = (next) => form.set("newItem", next);
   const [blocked, setBlocked] = useState({});
+  const [prices, setPrices] = useState({});
 
   const { data, isFetching } = useItemSearch(debounced, bill.visit_id);
   const { data: requests } = useMyRequests(bill.visit_id);
@@ -57,7 +58,7 @@ export default function AddItems({ bill, onBill, form }) {
     (request) => !request.visit_id || request.visit_id === bill.visit_id,
   );
 
-  const add = async (itemId, repeatRequestId) => {
+  const add = async (itemId, repeatRequestId, agreedRate) => {
     setError(null);
     setNote(null);
     try {
@@ -67,8 +68,10 @@ export default function AddItems({ bill, onBill, form }) {
           visitId: bill.visit_id,
           item_id: itemId,
           ...(repeatRequestId ? { repeat_request_id: repeatRequestId } : {}),
+          ...(agreedRate ? { agreed_rate: agreedRate } : {}),
         }),
       );
+      setPrices((was) => ({ ...was, [itemId]: "" }));
     } catch (e) {
       const detail = e?.response?.data || {};
       if (detail.service_item_id) {
@@ -181,14 +184,28 @@ export default function AddItems({ bill, onBill, form }) {
                     Ask admin to bill again
                   </button>
                 ) : (
-                  <button
-                    type="button"
-                    className="st-btn st-btn-grn"
-                    disabled={addLine.isPending || settling}
-                    onClick={() => add(item.id)}
-                  >
-                    Add
-                  </button>
+                  <>
+                    {item.price_per_patient && (
+                      <input
+                        className="bc-field__in bc-result__price"
+                        inputMode="decimal"
+                        placeholder="₹ price"
+                        aria-label={`${item.name}: price for this patient`}
+                        value={prices[item.id] ?? ""}
+                        onChange={(e) =>
+                          setPrices((was) => ({ ...was, [item.id]: moneyTyped(e.target.value) }))
+                        }
+                      />
+                    )}
+                    <button
+                      type="button"
+                      className="st-btn st-btn-grn"
+                      disabled={addLine.isPending || settling}
+                      onClick={() => add(item.id, undefined, prices[item.id]?.trim())}
+                    >
+                      Add
+                    </button>
+                  </>
                 )}
               </li>
             );

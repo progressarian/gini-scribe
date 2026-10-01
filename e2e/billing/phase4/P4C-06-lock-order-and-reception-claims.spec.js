@@ -351,7 +351,7 @@ test.describe.serial("P4C-06 lock order and reception claims", () => {
     expect(bill.totals).toMatchObject({ payable: 80000, paid: 25000 });
   });
 
-  test("5. a floor cancel still removes a draft line, refuses a final bill's and frees a cancelled bill's", async () => {
+  test("5. a floor cancel still removes a draft line, asks a refund for a final bill's and frees a cancelled bill's", async () => {
     const onDraft = await billedOrder("CancelDraft", [hba1c(), abi()], { dressingAfter: 1 });
     await cancelOnFloor(onDraft.order);
     expect(await orderGone(onDraft.order)).toBe(true);
@@ -362,12 +362,25 @@ test.describe.serial("P4C-06 lock order and reception claims", () => {
     const onFinal = await billedOrder("CancelFinal", [hba1c()]);
     await payOnBill(onFinal.billId, 250);
     const final = await finalise(onFinal.billId);
-    const refusal = await failure(cancelOnFloor(onFinal.order));
+    const refusal = await failure(
+      testCancel.cancelTest(
+        {
+          target: { orderId: onFinal.order },
+          reason: "cancelled_in_healthray",
+          source: "healthray",
+          actorRole: "system",
+        },
+        db,
+      ),
+    );
     expect(refusal?.status).toBe(409);
     expect(refusal.message).toBe(
       `HbA1c ${tag} is on bill ${final.bill_no}, so it can't be cancelled here — cancel that bill first`,
     );
     expect(await orderGone(onFinal.order)).toBe(false);
+    const floor = await cancelOnFloor(onFinal.order);
+    expect(floor.refunds).toMatchObject([{ status: "raised", bill_no: final.bill_no }]);
+    expect(await orderGone(onFinal.order)).toBe(true);
 
     const onCancelled = await billedOrder("CancelCancelled", [hba1c()]);
     await bills.setCategory(onCancelled.billId, { category: ids.pensioner }, desk, db);

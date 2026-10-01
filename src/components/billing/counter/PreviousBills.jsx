@@ -1,9 +1,35 @@
-import { billPdfHref } from "../../../queries/hooks/useBilling";
+import { useState } from "react";
+import { billPdfHref, creditNotePdfHref } from "../../../queries/hooks/useBilling";
 import { fromPaise } from "../format";
 import { billStatusText } from "./lineText";
+import RefundDialog from "./RefundDialog";
+
+function Credits({ bill }) {
+  const credits = bill.credits;
+  if (!credits) return null;
+  const waiting = credits.request?.status === "pending";
+  if (!credits.notes.length && !waiting) return null;
+  return (
+    <ul className="bc-refund__credits" aria-label={`Refunds on bill ${bill.bill_no}`}>
+      {credits.notes.map((cn) => (
+        <li key={cn.id}>
+          <a href={creditNotePdfHref(cn.id)} target="_blank" rel="noreferrer">
+            Refunded {fromPaise(cn.refunded)} on {cn.bill_no}
+          </a>
+          {cn.payable !== cn.refunded && (
+            <span className="bc-head__meta"> · credited {fromPaise(cn.payable)}</span>
+          )}
+        </li>
+      ))}
+      {waiting && <li className="bc-head__meta">Refund requested — waiting for admin</li>}
+    </ul>
+  );
+}
 
 export default function PreviousBills({ bills, onOpen }) {
-  if (!bills.length) return null;
+  const [refunding, setRefunding] = useState(null);
+  const shown = bills.filter((b) => b.bill_type !== "credit_note");
+  if (!shown.length) return null;
 
   return (
     <section className="bc-card" aria-label="Earlier bills on this visit">
@@ -22,9 +48,12 @@ export default function PreviousBills({ bills, onOpen }) {
             </tr>
           </thead>
           <tbody>
-            {bills.map((b) => (
+            {shown.map((b) => (
               <tr key={b.id}>
-                <td data-label="Bill">{b.bill_no || "Not numbered"}</td>
+                <td data-label="Bill">
+                  {b.bill_no || "Not numbered"}
+                  <Credits bill={b} />
+                </td>
                 <td data-label="Status">{billStatusText(b.status)}</td>
                 <td data-label="Actual">{fromPaise(b.totals.actual)}</td>
                 <td data-label="Discount">{fromPaise(b.totals.discount)}</td>
@@ -39,6 +68,16 @@ export default function PreviousBills({ bills, onOpen }) {
                       onClick={() => onOpen(b)}
                     >
                       Open
+                    </button>
+                  )}
+                  {b.status === "final" && b.credits?.request?.status !== "pending" && (
+                    <button
+                      type="button"
+                      className="st-btn st-btn-g"
+                      aria-label={`Refund on bill ${b.bill_no}`}
+                      onClick={() => setRefunding(b)}
+                    >
+                      Refund…
                     </button>
                   )}
                   <a
@@ -56,6 +95,13 @@ export default function PreviousBills({ bills, onOpen }) {
           </tbody>
         </table>
       </div>
+      {refunding && (
+        <RefundDialog
+          bill={refunding}
+          onClose={() => setRefunding(null)}
+          onSent={() => setRefunding(null)}
+        />
+      )}
     </section>
   );
 }

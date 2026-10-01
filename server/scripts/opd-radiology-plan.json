@@ -1,0 +1,1466 @@
+[
+ {
+  "orig_sr": 1,
+  "name": "2D ECHO",
+  "orig_name": null,
+  "price": 2200,
+  "sub": "Cardiac",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 3,
+  "name": "ANKLE AP/LAT",
+  "orig_name": null,
+  "price": 342,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 4,
+  "name": "ARTERIAL DOPPLER (L) FOOT",
+  "orig_name": null,
+  "price": 1500,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 5,
+  "name": "ARTERIAL DOPPLER B/L LOWER LIMB",
+  "orig_name": null,
+  "price": 3300,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 6,
+  "name": "B/L KNEE STANDING AP",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 7,
+  "name": "B/L KNEE STANDING AP/L",
+  "orig_name": null,
+  "price": 900,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 8,
+  "name": "B/L KNEE STANDING L",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 9,
+  "name": "Bed Side X Ray",
+  "orig_name": null,
+  "price": 0,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 10,
+  "name": "C SPINE",
+  "orig_name": null,
+  "price": 0,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 11,
+  "name": "CAROTID DOPPLER",
+  "orig_name": "CARODIT DOPPLAR",
+  "price": 1500,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 12,
+  "name": "CECT Abdomen",
+  "orig_name": null,
+  "price": 6500,
+  "sub": "CT",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 13,
+  "name": "CECT Abdomen+Pelvis",
+  "orig_name": null,
+  "price": 9000,
+  "sub": "CT",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 14,
+  "name": "CECT ADRENAL PROTOCOL",
+  "orig_name": null,
+  "price": 9000,
+  "sub": "CT",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 15,
+  "name": "CECT PELVIS",
+  "orig_name": null,
+  "price": 0,
+  "sub": "CT",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 17,
+  "name": "X-RAY (L) WRIST",
+  "orig_name": "Chect X Ray (L) WRIST",
+  "price": 175,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 18,
+  "name": "X-RAY (L) WRIST AP",
+  "orig_name": "Chect X Ray (L) WRIST AP",
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 19,
+  "name": "X-RAY (L) WRIST AP/LAT",
+  "orig_name": "Chect X Ray (L) WRIST AP/LAT",
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 20,
+  "name": "X-RAY (R) WRIST AP/LAT",
+  "orig_name": "Chect X Ray (R) WRIST AP/LAT/",
+  "price": 342,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 24,
+  "name": "COLOUR ARTERIAL DOPPLER B/L LOWER LIMB",
+  "orig_name": null,
+  "price": 1500,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 25,
+  "name": "COLOUR DOPPLER THYROID",
+  "orig_name": null,
+  "price": 2000,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 26,
+  "name": "CT HEAD",
+  "orig_name": null,
+  "price": 1500,
+  "sub": "CT",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 27,
+  "name": "DTPA Scan",
+  "orig_name": null,
+  "price": 0,
+  "sub": "Nuclear Medicine",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 29,
+  "name": "FIBRO SCAN",
+  "orig_name": null,
+  "price": 1000,
+  "sub": "Other",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 30,
+  "name": "FINV PACKAGE - 2D Echo",
+  "orig_name": null,
+  "price": 1000,
+  "sub": "Cardiac",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 31,
+  "name": "FOOT X-RAY AP LATERAL",
+  "orig_name": "FOOT X-RAY  AP LATERAL",
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 32,
+  "name": "FOOT X-RAY B/L AP LATERAL",
+  "orig_name": null,
+  "price": 200,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 33,
+  "name": "LEFT FOOT X-RAY AP",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 34,
+  "name": "LEFT FOOT X-RAY AP/L",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 35,
+  "name": "LEFT FOREARM AP",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 36,
+  "name": "LEFT FOREARM LAT.",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 37,
+  "name": "LEFT HAND AP",
+  "orig_name": "left hand ap",
+  "price": 0,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 38,
+  "name": "LEFT LEG ANKLE",
+  "orig_name": null,
+  "price": 0,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 39,
+  "name": "LOWER LIMB DOPPLER SINGLE",
+  "orig_name": null,
+  "price": 1500,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 40,
+  "name": "MAMMOGRAPHY",
+  "orig_name": "MAMOGRAPHY",
+  "price": 1650,
+  "sub": "Other",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 41,
+  "name": "MRI BRAIN",
+  "orig_name": null,
+  "price": 3000,
+  "sub": "MRI",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 42,
+  "name": "MRI BRAIN WITH CONTRAST",
+  "orig_name": null,
+  "price": 0,
+  "sub": "MRI",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 43,
+  "name": "MRI CERVICAL SPINE",
+  "orig_name": null,
+  "price": 0,
+  "sub": "MRI",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 44,
+  "name": "MRI LEFT ANKLE",
+  "orig_name": null,
+  "price": 0,
+  "sub": "MRI",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 45,
+  "name": "MRI LEFT FOOT",
+  "orig_name": null,
+  "price": 4500,
+  "sub": "MRI",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 46,
+  "name": "MRI LEFT FOOT FOR CHARCOT FOOT",
+  "orig_name": null,
+  "price": 4800,
+  "sub": "MRI",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 47,
+  "name": "MRI LEFT WRIST",
+  "orig_name": null,
+  "price": 0,
+  "sub": "MRI",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 48,
+  "name": "MRI LUMBAR SPINE",
+  "orig_name": null,
+  "price": 300,
+  "sub": "MRI",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 49,
+  "name": "MRI RIGHT FOOT",
+  "orig_name": null,
+  "price": 0,
+  "sub": "MRI",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 50,
+  "name": "MRI RIGHT KNEE",
+  "orig_name": null,
+  "price": 3500,
+  "sub": "MRI",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 51,
+  "name": "MRI SELLA WITH CONTRAST",
+  "orig_name": "MRI SELLA WITH CONTARST",
+  "price": 9000,
+  "sub": "MRI",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 52,
+  "name": "MRI SPINE L/S SPINE",
+  "orig_name": null,
+  "price": 0,
+  "sub": "MRI",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 53,
+  "name": "NCCT HEAD",
+  "orig_name": null,
+  "price": 5000,
+  "sub": "CT",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 54,
+  "name": "NCCT HEAD SCAN",
+  "orig_name": null,
+  "price": 0,
+  "sub": "CT",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 55,
+  "name": "NCCT WHOLE ABDOMEN",
+  "orig_name": null,
+  "price": 3750,
+  "sub": "CT",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 56,
+  "name": "NCV UPPER LIMB",
+  "orig_name": "NCV UPPAR LIMB",
+  "price": 0,
+  "sub": "Other",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 57,
+  "name": "NCV+MRI LUMBAR SPINE",
+  "orig_name": null,
+  "price": 0,
+  "sub": "Other",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 58,
+  "name": "Parathyroid sestamibi scan",
+  "orig_name": null,
+  "price": 0,
+  "sub": "Nuclear Medicine",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 59,
+  "name": "PENILE DOPPLER",
+  "orig_name": null,
+  "price": 0,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 60,
+  "name": "PENILE ULTRASOUND",
+  "orig_name": null,
+  "price": 0,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 61,
+  "name": "RENAL DOPPLER",
+  "orig_name": null,
+  "price": 0,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 62,
+  "name": "RIGHT ANKLE AP/LAT",
+  "orig_name": "RIGHT ANCLE AP/LAT",
+  "price": 342,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 63,
+  "name": "RIGHT FOOT X-RAY",
+  "orig_name": null,
+  "price": 450,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 64,
+  "name": "RIGHT FOOT X-RAY AP",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 65,
+  "name": "RIGHT FOOT X-RAY AP/L",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 66,
+  "name": "RIGHT FOOT X-RAY L",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 67,
+  "name": "RIGHT FOOT X-RAY lat.",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 68,
+  "name": "RIGHT HAND AP/LAT. X RAY",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 69,
+  "name": "RIGHT Hemithorax",
+  "orig_name": null,
+  "price": 0,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 70,
+  "name": "RIGHT LEG ANKLE",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 71,
+  "name": "RIGHT LEG ANKLE AP/LAT",
+  "orig_name": "RIGHT LEG ANKLEAP/LAT",
+  "price": 0,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 72,
+  "name": "STRESS ECHO",
+  "orig_name": null,
+  "price": 0,
+  "sub": "Cardiac",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 73,
+  "name": "TECH 99 SCAN (THYROID SCAN)",
+  "orig_name": null,
+  "price": 4000,
+  "sub": "Nuclear Medicine",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 76,
+  "name": "TRIPLE PHASE CECT",
+  "orig_name": "TRIPLA PHASE CECT",
+  "price": 7200,
+  "sub": "CT",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 77,
+  "name": "TVS",
+  "orig_name": null,
+  "price": 0,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 78,
+  "name": "ULTRASOUND CHEST",
+  "orig_name": null,
+  "price": 1000,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 79,
+  "name": "USG B/L BREAST",
+  "orig_name": null,
+  "price": 1870,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 80,
+  "name": "USG B/L CAROTID ARTERY DOPPLER",
+  "orig_name": "USG B/L CARODIT ARTERY DOPPLER",
+  "price": 0,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 81,
+  "name": "USG CHEST",
+  "orig_name": "USG CHEAST",
+  "price": 0,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 82,
+  "name": "USG CT KUB",
+  "orig_name": null,
+  "price": 3500,
+  "sub": "CT",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 83,
+  "name": "USG DEXA SCAN",
+  "orig_name": null,
+  "price": 2250,
+  "sub": "Other",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 84,
+  "name": "USG FOR ET",
+  "orig_name": null,
+  "price": 0,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 85,
+  "name": "USG KUB",
+  "orig_name": null,
+  "price": 750,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 86,
+  "name": "USG KUB WITH PRV",
+  "orig_name": null,
+  "price": 1100,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 87,
+  "name": "USG KUB WITH PRVU",
+  "orig_name": null,
+  "price": 1125,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 88,
+  "name": "USG LIVER",
+  "orig_name": null,
+  "price": 900,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 89,
+  "name": "USG LOWER LEG",
+  "orig_name": null,
+  "price": 3000,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 90,
+  "name": "USG NECK",
+  "orig_name": null,
+  "price": 1125,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 91,
+  "name": "USG PELVIC ORGAN FOR STRUMA OVARII",
+  "orig_name": null,
+  "price": 1000,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 92,
+  "name": "USG PELVIS",
+  "orig_name": null,
+  "price": 1125,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 93,
+  "name": "USG PELVIS ET THICKNESS OVARIAN SIZE AND VOLUME FOLLICULAR",
+  "orig_name": "usg pelvis et thickness ovarian size and volume follicular",
+  "price": 0,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 94,
+  "name": "USG RIGHT CALF MUSCLE",
+  "orig_name": "USG RIGHT CAFT MUSCLE",
+  "price": 0,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 95,
+  "name": "USG RIGHT GROIN RIGHT",
+  "orig_name": "USG RIGHT GRAIN RIGHT",
+  "price": 900,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 96,
+  "name": "USG SCROTUM FOR TART AND KUB FOR ADRENAL MASS",
+  "orig_name": "usg scrotum for tart and kub for adrenal mass",
+  "price": 3375,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 97,
+  "name": "USG TESTES FOR TART",
+  "orig_name": null,
+  "price": 1500,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 98,
+  "name": "USG TVS",
+  "orig_name": null,
+  "price": 0,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 99,
+  "name": "USG UTERUS AND OVARIES",
+  "orig_name": null,
+  "price": 0,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 100,
+  "name": "USG venous doppler LOWER LIMBS",
+  "orig_name": "USG veneous doppler  LOWER LIMBS",
+  "price": 4000,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 101,
+  "name": "USG venous doppler B/L",
+  "orig_name": "USG veneous doppler B/L",
+  "price": 0,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 102,
+  "name": "USG WA + PVRU",
+  "orig_name": "USG WA  + PVRU",
+  "price": 0,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 103,
+  "name": "USG WHOLE ABDOMEN",
+  "orig_name": null,
+  "price": 1125,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 104,
+  "name": "USG WHOLE ABDOMEN & KUB",
+  "orig_name": null,
+  "price": 900,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 105,
+  "name": "USG WHOLE ABDOMEN & PELVIS",
+  "orig_name": null,
+  "price": 900,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 106,
+  "name": "USG WHOLE ABDOMEN FOR PANCREAS",
+  "orig_name": null,
+  "price": 900,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 107,
+  "name": "USG WHOLE ABDOMEN KUB PELVIS",
+  "orig_name": "usg whole abdomen kub pelvis",
+  "price": 0,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 108,
+  "name": "USG WHOLE ABDOMEN PROSTATE",
+  "orig_name": null,
+  "price": 1125,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 109,
+  "name": "USG WHOLE ABDOMEN WITH PRV",
+  "orig_name": null,
+  "price": 1275,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 110,
+  "name": "USG WHOLE ABDOMEN(ATUYLYA)",
+  "orig_name": null,
+  "price": 600,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 111,
+  "name": "VENOUS DOPPLER b/l lower limb",
+  "orig_name": null,
+  "price": 4000,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 112,
+  "name": "VENOUS DOPPLER(l) FOOT",
+  "orig_name": null,
+  "price": 1500,
+  "sub": "Ultrasound & Doppler",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 113,
+  "name": "WRIST AP OBLIQUE",
+  "orig_name": "WRIST AP OBLIG",
+  "price": 600,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 114,
+  "name": "X RAY",
+  "orig_name": "x Ray",
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 115,
+  "name": "X RAY (L) HAND AP/LAT",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 116,
+  "name": "X Ray (L) Knee AP VIEW",
+  "orig_name": null,
+  "price": 200,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 118,
+  "name": "X Ray (L) WRIST AP VIEW",
+  "orig_name": null,
+  "price": 200,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 119,
+  "name": "X RAY (R) LEG LAT.",
+  "orig_name": "X RAY (R)  LEG LAT.",
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 120,
+  "name": "X RAY (R) HAND AP/LAT",
+  "orig_name": null,
+  "price": 0,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 121,
+  "name": "X RAY (R) LEG AP",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 122,
+  "name": "X RAY ANKLE LAT. VIEW",
+  "orig_name": "X RAY ANKLET  LAT. VIEW",
+  "price": 600,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 123,
+  "name": "X RAY B/L KNEE AP STANDING LAT. VIEW",
+  "orig_name": null,
+  "price": 400,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 124,
+  "name": "X RAY BOTH KNEE AP LAT. VIEW",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 125,
+  "name": "X RAY KNEE AP LAT. VIEW",
+  "orig_name": null,
+  "price": 600,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 126,
+  "name": "X RAY L SHOULDER AP",
+  "orig_name": "x ray L shoulder AP",
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 127,
+  "name": "X RAY L/S SPINE AP",
+  "orig_name": "x ray L/S spine AP",
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 128,
+  "name": "X RAY L/S SPINE AP LAT.",
+  "orig_name": "x ray L/S spine AP lat.",
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 129,
+  "name": "X RAY L/S SPINE LAT.",
+  "orig_name": "x ray L/S spine lat.",
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 130,
+  "name": "X RAY LEFT WRIST",
+  "orig_name": null,
+  "price": 200,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 131,
+  "name": "X RAY LEFT WRIST ap",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 132,
+  "name": "X RAY PBH",
+  "orig_name": null,
+  "price": 0,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 133,
+  "name": "X RAY PNS",
+  "orig_name": null,
+  "price": 200,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 134,
+  "name": "X-RAY LUMBAR SPINE LAT",
+  "orig_name": "X-RAY  LUMBAR SPINE LAT",
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 135,
+  "name": "X-RAY (L) FOOT AP",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 136,
+  "name": "X-RAY (L) FOOT LAT",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 137,
+  "name": "X-RAY (L) KNEE",
+  "orig_name": null,
+  "price": 600,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 138,
+  "name": "X-RAY (L) KNEE AP",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 139,
+  "name": "X-RAY (L) KNEE AP/LAT",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 140,
+  "name": "X-RAY (L) KNEE LAT",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 141,
+  "name": "X-RAY (R) FOOT LAT",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 142,
+  "name": "X-RAY (R) KNEE",
+  "orig_name": "X-RAY \u00ae KNEE",
+  "price": 600,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 143,
+  "name": "X-RAY (R) KNEE AP",
+  "orig_name": "X-RAY \u00ae KNEE AP",
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 144,
+  "name": "X-RAY (R) KNEE LAT",
+  "orig_name": "X-RAY \u00ae KNEE LAT",
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 145,
+  "name": "X-RAY ABDOMEN ERECT STANDING",
+  "orig_name": "X-RAY ABDOMEN\nERECT STANDING",
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 146,
+  "name": "X-RAY ANKLE",
+  "orig_name": null,
+  "price": 600,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 147,
+  "name": "X-RAY ANKLE AP",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 148,
+  "name": "X-RAY ANKLE AP (L)",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 149,
+  "name": "X-RAY ANKLE LAT",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 150,
+  "name": "X-RAY ANKLE LAT (L)",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 151,
+  "name": "X-RAY ANKLE LAT/AP",
+  "orig_name": null,
+  "price": 900,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 152,
+  "name": "X-RAY B/L KNEE STANDING",
+  "orig_name": "X-RAY B/L KNEE\nSTANDING",
+  "price": 900,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 153,
+  "name": "X-RAY B/L KNEE STANDING (AP)",
+  "orig_name": "X-RAY B/L KNEE\nSTANDING (AP)",
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 154,
+  "name": "X-RAY B/L KNEE STANDING (AP/LAT)",
+  "orig_name": "X-RAY B/L KNEE\nSTANDING (AP/LAT)",
+  "price": 900,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 155,
+  "name": "X-RAY C-SPINE",
+  "orig_name": null,
+  "price": 600,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 156,
+  "name": "X-RAY C-SPINE AP",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 157,
+  "name": "X-RAY C-SPINE LAT",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 159,
+  "name": "X-RAY ELBOW",
+  "orig_name": null,
+  "price": 600,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 160,
+  "name": "X-RAY ELBOW AP",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 161,
+  "name": "X-RAY ELBOW AP/LAT",
+  "orig_name": null,
+  "price": 0,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 162,
+  "name": "X-RAY ELBOW LAT",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 163,
+  "name": "X-RAY HAND",
+  "orig_name": null,
+  "price": 600,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 164,
+  "name": "X-RAY HAND AP",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 165,
+  "name": "X-RAY HAND LAT",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 166,
+  "name": "X-RAY L-S SPINE",
+  "orig_name": null,
+  "price": 600,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 167,
+  "name": "X-RAY L-S SPINE AP",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 168,
+  "name": "X-RAY L-S SPINE AP/LAT",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 169,
+  "name": "X-RAY L-S SPINE LAT",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 171,
+  "name": "X-RAY LEG",
+  "orig_name": null,
+  "price": 600,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 172,
+  "name": "X-RAY LEG AP",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 173,
+  "name": "X-RAY LEG LAT",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 174,
+  "name": "X-RAY PELVIS",
+  "orig_name": null,
+  "price": 0,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 175,
+  "name": "X-RAY PELVIS BOTH/HIP",
+  "orig_name": "X-RAY PELVIS\nBOTH/HIP",
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 176,
+  "name": "X-RAY PELVIS AP",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 177,
+  "name": "X-RAY PELVIS B/L AP",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 178,
+  "name": "X-RAY PELVIS WITH HIP",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 179,
+  "name": "X-RAY SHOULDER",
+  "orig_name": null,
+  "price": 600,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 180,
+  "name": "X-RAY SHOULDER (R)",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 181,
+  "name": "X-RAY SHOULDER AP",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 182,
+  "name": "X-RAY SHOULDER AP (R)",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 183,
+  "name": "X-RAY SHOULDER LAT",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 184,
+  "name": "X-RAY SPINE",
+  "orig_name": null,
+  "price": 200,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 185,
+  "name": "X-RAY SPINE AP/LAT",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 186,
+  "name": "X-RAY SPINE L",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 187,
+  "name": "X-RAY thorax",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 188,
+  "name": "X-RAY WRIST",
+  "orig_name": null,
+  "price": 600,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 189,
+  "name": "X-RAY WRIST AP",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 190,
+  "name": "X-RAY WRIST LAT",
+  "orig_name": null,
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 191,
+  "name": "X-RAY FOOT",
+  "orig_name": "X-RAYFOOT",
+  "price": 600,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 192,
+  "name": "X-RAY FOOT AP",
+  "orig_name": "X-RAYFOOT AP",
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 193,
+  "name": "X-RAY FOOT LAT/AP",
+  "orig_name": "X-RAYFOOT LAT/AP",
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 194,
+  "name": "X-RAY FOOT LAT/OB",
+  "orig_name": "X-RAYFOOT LAT/OB",
+  "price": 300,
+  "sub": "X-Ray",
+  "kind": "procedure"
+ }
+]

@@ -8,6 +8,8 @@ const DESK = "/api/billing";
 const DUES = billingKeys.dues().slice(0, -1);
 const SHIFTS_MINE = billingKeys.myShifts().slice(0, -1);
 const COUNTER_PATIENTS = ["giniflow", "reception", "billing-counter"];
+const REFUND_BOARD = ["billing", "refund-board"];
+const REFUND_BOARD_POLL_MS = 20 * 1000;
 
 const read = async (url, params) => (await api.get(url, params ? { params } : undefined)).data;
 
@@ -143,6 +145,16 @@ export function useLabCaseTests(billId, version, { enabled = true } = {}) {
   });
 }
 
+export function useHealthrayBillLines(billId, version, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: [...billingKeys.bill(billId), "healthray-bill-lines", version ?? 0],
+    queryFn: () => read(`${DESK}/healthray-bill-lines`, { bill_id: billId }),
+    enabled: !!billId && enabled,
+    refetchInterval: 60 * 1000,
+    refetchIntervalInBackground: false,
+  });
+}
+
 export function useAddLabCaseTests() {
   return useVisitMutation(
     async ({ billId, itemIds }) =>
@@ -154,6 +166,14 @@ export function useAddBillLine() {
   return useVisitMutation(
     async ({ billId, visitId, ...body }) =>
       (await api.post(`${DESK}/bills/${billId}/lines`, body)).data,
+  );
+}
+
+export function useSetLinePrice() {
+  return useVisitMutation(
+    async ({ billId, lineId, agreed_rate, reason }) =>
+      (await api.post(`${DESK}/bills/${billId}/lines/${lineId}/price`, { agreed_rate, reason }))
+        .data,
   );
 }
 
@@ -313,4 +333,82 @@ export function useNewItemRequest() {
 
 export function useRepeatRequest() {
   return useRequestMutation(async (body) => (await api.post(`${DESK}/requests/repeat`, body)).data);
+}
+
+export const creditNotePdfHref = (creditNoteId) =>
+  `${API_URL}${DESK}/credit-notes/${creditNoteId}/credit-note.pdf?token=${encodeURIComponent(authToken())}`;
+
+export const refundReceiptPdfHref = (creditNoteId) =>
+  `${API_URL}${DESK}/credit-notes/${creditNoteId}/refund-receipt.pdf?token=${encodeURIComponent(authToken())}`;
+
+const refundsKey = (billId) => [...billingKeys.bill(billId), "refunds"];
+
+export function useCreditableLines(billId, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: [...billingKeys.bill(billId), "creditable"],
+    queryFn: () => read(`${DESK}/bills/${billId}/creditable`),
+    enabled: !!billId && enabled,
+  });
+}
+
+export function useRefundPreview(body, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: [...billingKeys.bill(body?.bill_id), "refund-preview", body],
+    queryFn: async () => (await api.post(`${DESK}/refunds/preview`, body)).data,
+    enabled: !!body?.bill_id && enabled,
+    retry: false,
+    placeholderData: (prev) => prev,
+  });
+}
+
+export function useBillRefunds(billId, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: refundsKey(billId),
+    queryFn: () => read(`${DESK}/bills/${billId}/refunds`),
+    enabled: !!billId && enabled,
+    refetchInterval: 15 * 1000,
+    refetchIntervalInBackground: false,
+  });
+}
+
+function useRefundMutation(mutationFn) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSettled: (_data, _error, variables) => {
+      queryClient.invalidateQueries({ queryKey: refundsKey(variables?.billId) });
+      queryClient.invalidateQueries({ queryKey: billingKeys.visitBills(variables?.visitId) });
+      queryClient.invalidateQueries({ queryKey: billingKeys.currentShift() });
+      queryClient.invalidateQueries({ queryKey: DUES });
+      queryClient.invalidateQueries({ queryKey: COUNTER_PATIENTS });
+      queryClient.invalidateQueries({ queryKey: ["billing", "requests"] });
+      queryClient.invalidateQueries({ queryKey: REFUND_BOARD });
+    },
+  });
+}
+
+export function useRefundBoard(filters = {}, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: [...REFUND_BOARD, filters],
+    queryFn: () => read(`${DESK}/refunds`, filters),
+    enabled,
+    refetchInterval: REFUND_BOARD_POLL_MS,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
+    placeholderData: (prev) => prev,
+  });
+}
+
+export function useRefundRequest() {
+  return useRefundMutation(
+    async ({ billId, visitId, ...body }) =>
+      (await api.post(`${DESK}/requests/refund`, { bill_id: billId, ...body })).data,
+  );
+}
+
+export function usePayOut() {
+  return useRefundMutation(
+    async ({ creditNoteId, version, payments }) =>
+      (await api.post(`${DESK}/credit-notes/${creditNoteId}/pay-out`, { version, payments })).data,
+  );
 }

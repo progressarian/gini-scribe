@@ -1,5 +1,6 @@
 import pool from "../../config/db.js";
 import { paise } from "../../../shared/labPayment.js";
+import { CAPABILITIES, hasCapability } from "../../../shared/permissions.js";
 import { decryptAadhaarFull, encryptAadhaar } from "../../utils/aadhaarCrypt.js";
 import { writeAudit } from "./audit.js";
 import { nextNumber, seriesFor } from "./billNumber.js";
@@ -26,8 +27,18 @@ import { priceBill } from "./priceBill.js";
 import { visitConsultationType } from "./serviceItems.js";
 import { refuseRemoved, removedDoctor } from "./removedDoctors.js";
 import { httpError, inTransaction } from "./transaction.js";
-import { auditFields, hasField, INT_MAX, lockRow, readNumber, wholeNumber } from "./common.js";
+import {
+  auditFields,
+  hasField,
+  INT_MAX,
+  lockRow,
+  MONEY_MAX,
+  readNumber,
+  wholeNumber,
+} from "./common.js";
 import { markDraftSaved } from "./draftSaves.js";
+import { billCredits } from "./creditNotes.js";
+import { orderToLink } from "./orderLinks.js";
 
 const BILL_COLUMNS = `id, bill_no, series, fy, bill_type, original_bill_id, patient_id, visit_id,
   appointment_id,
@@ -43,9 +54,10 @@ const LINE_COLUMNS = `id, bill_id, visit_id, line_no, service_item_id, source, l
   doctor_id, is_live, repeat_request_id, credited_line_id, group_code, subgroup_code, item_code, bill_code,
   bill_name, quantity, base_rate, rate, listed_actual, actual_amount, listed_discount, discount,
   payable_discount, bill_discount, tax_code, sac_hsn, tax_rate_pct, taxable, cgst, sgst,
-  payment_rule_id, payment_rule, patient_payable, claim_amount, adjustment_amount`;
+  payment_rule_id, payment_rule, patient_payable, claim_amount, adjustment_amount,
+  agreed_rate, agreed_by, agreed_at, created_by`;
 
-export const LINE_SOURCES = ["visit", "lab_order", "added", "lab_case"];
+export const LINE_SOURCES = ["visit", "lab_order", "added", "lab_case", "ordered"];
 
 export const TEXT_MAX = 1000;
 export const NUMBER_TEXT_MAX = 60;
@@ -169,6 +181,14 @@ function shapeLine(row) {
     adjustment: paise(row.adjustment_amount),
     order_state: row.order_state ?? null,
     removed_doctor: row.removed_doctor ?? null,
+    price_per_patient: row.price_per_patient ?? false,
+    agreed_rate:
+      row.agreed_rate === null || row.agreed_rate === undefined ? null : paise(row.agreed_rate),
+    agreed_by: row.agreed_by ?? null,
+    agreed_by_name: row.agreed_by_name ?? null,
+    agreed_at: row.agreed_at ?? null,
+    added_by: row.created_by ?? null,
+    added_by_name: row.created_by_name ?? null,
   };
 }
 
@@ -290,10 +310,14 @@ async function liveLines(client, billId, { all = false } = {}) {
       .map((column) => `l.${column}`)
       .join(", ")},
             COALESCE(i.allow_quantity, FALSE) AS allow_quantity, i.max_quantity,
+            COALESCE(i.price_per_patient, FALSE) AS price_per_patient,
             CASE WHEN i.kind = 'consultation' AND rd.is_active IS FALSE
-                 THEN json_build_object('id', rd.id, 'name', rd.name) END AS removed_doctor
+                 THEN json_build_object('id', rd.id, 'name', rd.name) END AS removed_doctor,
+            setter.name AS agreed_by_name, adder.name AS created_by_name
        FROM bill_lines l LEFT JOIN service_items i ON i.id = l.service_item_id
        LEFT JOIN doctors rd ON rd.id = COALESCE(i.doctor_id, l.doctor_id)
+       LEFT JOIN doctors setter ON setter.id = l.agreed_by
+       LEFT JOIN doctors adder ON adder.id = l.created_by
       WHERE l.bill_id = $1 AND (l.is_live OR $2)
       ORDER BY l.line_no, l.created_at, l.id`,
     [billId, all],
@@ -439,6 +463,7 @@ async function reprice(client, bill, codes, ctx) {
         quantity: Number(line.quantity),
         doctorId: line.doctor_id,
         kept: true,
+        agreedRate: line.agreed_rate,
       })),
     },
     client,
@@ -630,6 +655,7 @@ export async function readBill(billId, db = pool) {
     codes: await billCodes(db, id),
     discounts: await billDiscounts(db, id),
     claim_cleared_on: clearedOn.get(rows[0].id) ?? null,
+    credits: await billCredits(db, rows[0]),
   });
 }
 
@@ -645,6 +671,7 @@ export async function listVisitBills(visitId, db = pool) {
     bills.push(
       shapeBill(row, await shownLines(db, row.id, { all: showsEveryLine(row) }), {
         claim_cleared_on: clearedOn.get(row.id) ?? null,
+        credits: await billCredits(db, row),
       }),
     );
   }
@@ -653,8 +680,9 @@ export async function listVisitBills(visitId, db = pool) {
 
 async function itemFor(client, itemId) {
   const { rows } = await client.query(
-    `SELECT id, name, kind, visit_type, is_active, allow_quantity, max_quantity FROM service_items
-      WHERE id = $1`,
+    `SELECT id, name, kind, visit_type, is_active, allow_quantity, max_quantity, price_per_patient,
+            test_catalog_id
+       FROM service_items WHERE id = $1`,
     [itemId],
   );
   if (!rows.length) throw httpError(404, "That item doesn't exist");
@@ -720,6 +748,41 @@ function refuseRemovedLines(lines) {
   );
 }
 
+function cleanAgreedRate(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const rate = readNumber(value, "The patient's price must be an amount");
+  if (rate === undefined || rate < 0) {
+    throw httpError(400, "The patient's price must be an amount of ₹0 or more");
+  }
+  if (rate > MONEY_MAX) {
+    throw httpError(400, `The patient's price is too large (at most ₹${MONEY_MAX})`);
+  }
+  if (Number(rate.toFixed(2)) !== rate) {
+    throw httpError(400, "The patient's price can have at most 2 decimals (paise)");
+  }
+  return rate;
+}
+
+function refuseMissingPrice(saved, lineId) {
+  const index = saved.lines.findIndex((line) => line.id === lineId);
+  const priced = saved.priced?.lines?.[index];
+  if (priced?.price_missing) {
+    throw httpError(400, `Enter this patient's price for ${priced.item_name}`, {
+      code: "price_needed",
+    });
+  }
+}
+
+const isAdmin = (ctx) => hasCapability(ctx?.role, CAPABILITIES.ADMIN);
+
+export function mayChangeOrderedLine(line, ctx) {
+  return line.source !== "ordered" || line.created_by === ctx?.actorId || isAdmin(ctx);
+}
+
+function mayChangePrice(line, ctx) {
+  return line.agreed_by === null || line.agreed_by === ctx?.actorId || isAdmin(ctx);
+}
+
 export async function addLineIn(client, bill, input, ctx) {
   assertDraft(bill);
   const itemId = cleanItemId(input?.item_id ?? input?.item);
@@ -733,7 +796,23 @@ export async function addLineIn(client, bill, input, ctx) {
     throw httpError(400, "A test-order line must name its order, and no other line may");
   }
   const item = await itemFor(client, itemId);
+  const agreedRate = cleanAgreedRate(input?.agreed_rate);
+  if (agreedRate !== null && !item.price_per_patient) {
+    throw httpError(
+      400,
+      `${item.name} has a fixed price; it can't be given a price for this patient`,
+    );
+  }
   await refuseOtherConsultation(client, bill, item);
+  if (
+    source === "ordered" &&
+    (await liveLineFor(client, { visitId: bill.visit_id, serviceItemId: item.id }))
+  ) {
+    throw httpError(
+      409,
+      `${item.name} is already ordered for this patient — change its quantity, or remove it and add it again`,
+    );
+  }
   const repeatRequestId = await approvalFor(
     client,
     bill,
@@ -741,30 +820,38 @@ export async function addLineIn(client, bill, input, ctx) {
     input?.repeat_request_id ? cleanUuid(input.repeat_request_id, "approval") : null,
     ctx,
   );
+  const linkedOrderId =
+    source === "added" && !labOrderId ? await orderToLink(client, bill, item) : null;
   const { rows: seats } = await client.query(
     `SELECT COALESCE(MAX(line_no), 0) + 1 AS next FROM bill_lines WHERE bill_id = $1`,
     [bill.id],
   );
   const { rows } = await client.query(
     `INSERT INTO bill_lines (bill_id, visit_id, line_no, service_item_id, source, lab_order_id,
-                             doctor_id, repeat_request_id, bill_name, quantity, created_by, updated_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)
+                             doctor_id, repeat_request_id, bill_name, quantity, created_by, updated_by,
+                             agreed_rate, agreed_by, agreed_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, $12,
+             CASE WHEN $12::numeric IS NULL THEN NULL ELSE COALESCE($13::int, $11::int) END,
+             CASE WHEN $12::numeric IS NULL THEN NULL ELSE NOW() END)
      RETURNING ${LINE_COLUMNS}`,
     [
       bill.id,
       bill.visit_id,
       seats[0].next,
       item.id,
-      source,
-      labOrderId,
+      linkedOrderId ? "lab_order" : source,
+      labOrderId ?? linkedOrderId,
       doctorId,
       repeatRequestId,
       item.name,
       quantity,
       ctx?.actorId ?? null,
+      agreedRate,
+      input?.agreed_by ?? null,
     ],
   );
   const saved = await reprice(client, bill, await billCodes(client, bill.id), ctx);
+  refuseMissingPrice(saved, rows[0].id);
   await writeAudit(client, {
     entity: "bill_lines",
     entityId: rows[0].id,
@@ -772,6 +859,7 @@ export async function addLineIn(client, bill, input, ctx) {
     after: { ...rows[0], bill_no: bill.bill_no },
     ...auditFields(ctx),
   });
+  if (linkedOrderId) await resettleTestOrders(client, saved.bill, ctx);
   return {
     bill: saved.bill,
     line_id: rows[0].id,
@@ -830,6 +918,12 @@ export async function changeQuantity(billId, lineId, input, ctx, db = pool) {
   return inTransaction(async (client) => {
     const bill = assertDraft(await lockBill(client, billId));
     const before = await lineOf(client, bill, lineId);
+    if (!mayChangeOrderedLine(before, ctx)) {
+      throw httpError(
+        403,
+        `${before.bill_name} was ordered for this patient; only whoever ordered it or an admin can change it`,
+      );
+    }
     const item = await itemFor(client, before.service_item_id);
     if (quantity !== 1 && !item.allow_quantity) {
       throw httpError(400, `${item.name} is billed one at a time; its quantity must be 1`);
@@ -878,9 +972,63 @@ export async function removeLine(billId, lineId, input, ctx, db = pool) {
   return inTransaction(async (client) => {
     const bill = assertDraft(await lockBill(client, billId));
     const before = await lineOf(client, bill, lineId);
+    if (!mayChangeOrderedLine(before, ctx)) {
+      throw httpError(
+        403,
+        `${before.bill_name} was ordered for this patient; only whoever ordered it or an admin can remove it`,
+      );
+    }
+    if (before.source === "ordered" && !reason) {
+      throw httpError(400, "Say why this ordered service is being removed");
+    }
     await dropLineIn(client, bill, before, { removed: true, reason }, ctx);
     const saved = await reprice(client, bill, await billCodes(client, bill.id), ctx);
     await resettleTestOrders(client, saved.bill, ctx);
+    return withLines(client, saved.bill, { codes: await billCodes(client, bill.id) });
+  }, db);
+}
+
+export async function setLinePrice(billId, lineId, input, ctx, db = pool) {
+  const rate = cleanAgreedRate(input?.agreed_rate);
+  if (rate === null) throw httpError(400, "Enter this patient's price");
+  const reason = cleanReason(input?.reason, "Say why the price is being changed");
+  return inTransaction(async (client) => {
+    const bill = assertDraft(await lockBill(client, billId));
+    const before = await lineOf(client, bill, lineId);
+    const item = await itemFor(client, before.service_item_id);
+    if (!item.price_per_patient) {
+      throw httpError(
+        400,
+        `${item.name} has a fixed price; it can't be given a price for this patient`,
+      );
+    }
+    if (!mayChangePrice(before, ctx)) {
+      throw httpError(
+        403,
+        `Only whoever set ${before.bill_name}'s price or an admin can change it`,
+      );
+    }
+    await client.query(
+      `UPDATE bill_lines SET agreed_rate = $2, agreed_by = $3, agreed_at = NOW(),
+          updated_at = NOW(), updated_by = $3
+        WHERE id = $1`,
+      [before.id, rate, ctx?.actorId ?? null],
+    );
+    const saved = await reprice(client, bill, await billCodes(client, bill.id), ctx);
+    await resettleTestOrders(client, saved.bill, ctx);
+    await writeAudit(client, {
+      entity: "bill_lines",
+      entityId: before.id,
+      action: "update",
+      before: { agreed_rate: before.agreed_rate, agreed_by: before.agreed_by },
+      after: {
+        agreed_rate: rate,
+        agreed_by: ctx?.actorId ?? null,
+        reason,
+        role: ctx?.role ?? null,
+      },
+      ...auditFields(ctx),
+    });
     return withLines(client, saved.bill, { codes: await billCodes(client, bill.id) });
   }, db);
 }
@@ -1097,6 +1245,14 @@ export async function finaliseBill(billId, input, ctx, db = pool) {
     await recheckCodes(client, bill, codes, ctx);
     const saved = await reprice(client, bill, codes, ctx);
     saved.priced.lines.forEach(assertBillLineBalances);
+    const unpriced = saved.priced.lines.find((line) => line.price_missing);
+    if (unpriced) {
+      throw httpError(
+        409,
+        `${unpriced.item_name} needs this patient's price before the bill can be made final`,
+        { code: "price_needed" },
+      );
+    }
     await refuseReceptionMoney(client, saved.bill);
     const category = await categoryRules(client, saved.bill.scheme_code);
     if (category.requires_referral && !saved.bill.referral_no_enc) {
@@ -1258,6 +1414,16 @@ async function lockDraftOfVisit(client, id) {
 }
 
 async function deleteDraftIn(client, bill, after, ctx) {
+  const { rows: ordered } = await client.query(
+    `SELECT bill_name FROM bill_lines WHERE bill_id = $1 AND is_live AND source = 'ordered' LIMIT 1`,
+    [bill.id],
+  );
+  if (ordered.length) {
+    throw httpError(
+      409,
+      `${ordered[0].bill_name} was ordered for this patient, so this draft can't be deleted; whoever ordered it or an admin must remove it first`,
+    );
+  }
   if ((await takenOn(client, bill.id)) > 0) {
     throw httpError(409, "Money was taken on this draft — finalise it or refund it first");
   }
@@ -1336,6 +1502,7 @@ async function restoreSavedIn(client, bill, ctx) {
   await refusePendingRequest(client, bill);
   const wanted = [...snapshot.lines];
   for (const line of await liveLines(client, bill.id)) {
+    if (line.source === "ordered") continue;
     const at = wanted.findIndex((kept) => snapshotKey(kept) === snapshotKey(line));
     if (at === -1) {
       await dropLineIn(client, bill, line, { removed: true, ...DISCARDED }, ctx);
@@ -1348,6 +1515,18 @@ async function restoreSavedIn(client, bill, ctx) {
             updated_at = NOW(), updated_by = $3
           WHERE id = $1`,
         [line.id, kept.quantity, ctx?.actorId ?? null],
+      );
+    }
+    const keptRate = kept.agreed_rate ?? null;
+    const lineRate = line.agreed_rate === null ? null : Number(line.agreed_rate);
+    if (keptRate !== lineRate) {
+      await client.query(
+        `UPDATE bill_lines SET agreed_rate = $2,
+            agreed_by = CASE WHEN $2::numeric IS NULL THEN NULL ELSE $4::int END,
+            agreed_at = CASE WHEN $2::numeric IS NULL THEN NULL ELSE agreed_at END,
+            updated_at = NOW(), updated_by = $3
+          WHERE id = $1`,
+        [line.id, keptRate, ctx?.actorId ?? null, kept.agreed_by ?? null],
       );
     }
   }
@@ -1378,6 +1557,8 @@ async function restoreSavedIn(client, bill, ctx) {
         source: line.source,
         lab_order_id: line.lab_order_id,
         doctor_id: line.doctor_id,
+        agreed_rate: line.agreed_rate ?? null,
+        agreed_by: line.agreed_by ?? null,
       },
       ctx,
     );

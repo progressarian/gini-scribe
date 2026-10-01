@@ -71,6 +71,7 @@ const NOTE_LINE_COLUMNS = `id, line_no, credited_line_id, service_item_id, sourc
   tax_code, sac_hsn, tax_rate_pct, payment_rule, patient_payable, claim_amount, adjustment_amount`;
 
 export const REFUND_LINES_MAX = 100;
+export const FLOOR_CANCEL_WAITING = "floor_cancel_waiting_on";
 const QUANTITY_MAX = 999999.99;
 const ROUND_OFF = { min: -49, max: 50 };
 
@@ -92,7 +93,7 @@ export function cleanRefundMode(value) {
   if (value === undefined || value === null || value === "") return AS_PAID;
   const mode = typeof value === "string" ? value.trim().toLowerCase() : "";
   if (!REFUND_MODES.includes(mode)) {
-    throw httpError(400, `Money can go back only as one of: ${REFUND_MODES.join(", ")}`);
+    throw httpError(400, "Money can go back only as one of: as paid, cash, card, UPI");
   }
   return mode;
 }
@@ -676,4 +677,91 @@ export async function listCreditNotes(billId, db = pool) {
   const notes = [];
   for (const row of rows) notes.push(await shapeCreditNote(db, row));
   return notes;
+}
+
+const CREDIT_SUMMARY_SQL = `
+  SELECT c.id, c.bill_no, c.bill_date::text AS bill_date, c.patient_payable, c.paid_amount,
+         c.version, r.approved_mode
+    FROM bills c LEFT JOIN billing_requests r ON r.credit_note_id = c.id
+   WHERE c.original_bill_id = $1 AND c.bill_type = 'credit_note'
+   ORDER BY c.created_at, c.id`;
+
+const LATEST_REFUND_SQL = `
+  SELECT id, status, reason, reason_code, requested_mode, approved_mode, mode_reason,
+         decision_note, requested_at, decided_at, credit_note_id
+    FROM billing_requests
+   WHERE bill_id = $1 AND kind = 'refund'
+   ORDER BY requested_at DESC, id DESC
+   LIMIT 1`;
+
+const CANCELLED_NOT_REFUNDED_SQL = `
+  SELECT l.id, l.bill_name, l.quantity, l.patient_payable, w.after
+    FROM bill_lines l
+    JOIN LATERAL (
+      SELECT a.after FROM billing_audit a
+       WHERE a.entity = 'bill_lines' AND a.entity_id = l.id::text
+         AND a.after ? '${FLOOR_CANCEL_WAITING}'
+       ORDER BY a.at DESC LIMIT 1
+    ) w ON TRUE
+   WHERE l.bill_id = $1 AND l.credited_line_id IS NULL
+     AND NOT EXISTS (SELECT 1 FROM bill_lines x WHERE x.credited_line_id = l.id)
+     AND NOT EXISTS (SELECT 1 FROM billing_requests r
+                      WHERE r.bill_id = l.bill_id AND r.kind = 'refund'
+                        AND r.refund_lines @> jsonb_build_array(
+                              jsonb_build_object('line_id', l.id::text)))
+   ORDER BY l.line_no, l.id`;
+
+const shapeCancelled = (row) => ({
+  line_id: row.id,
+  bill_name: row.bill_name,
+  quantity: Number(row.quantity),
+  patient_payable: paise(row.patient_payable),
+  reason_code: row.after.refund_reason_code ?? null,
+  note: row.after.refund_note ?? null,
+});
+
+export async function billCredits(db, bill) {
+  if (bill?.bill_type !== "invoice" || bill.status === "draft") return null;
+  const money = await moneyOn(db, bill.id);
+  const [{ rows: notes }, { rows: requests }, { rows: cancelled }] = await Promise.all([
+    db.query(CREDIT_SUMMARY_SQL, [bill.id]),
+    db.query(LATEST_REFUND_SQL, [bill.id]),
+    db.query(CANCELLED_NOT_REFUNDED_SQL, [bill.id]),
+  ]);
+  const shaped = notes.map((row) => {
+    const left = paise(row.patient_payable) - paise(row.paid_amount);
+    return {
+      id: row.id,
+      bill_no: row.bill_no,
+      bill_date: row.bill_date,
+      version: row.version,
+      payable: paise(row.patient_payable),
+      refunded: paise(row.paid_amount),
+      due: row.approved_mode ? Math.max(0, Math.min(left, money.refundable)) : 0,
+      approved_mode: row.approved_mode ?? null,
+    };
+  });
+  const unpaid = shaped.reduce((sum, note) => sum + note.payable - note.refunded, 0);
+  const request = requests[0] ?? null;
+  return {
+    credited: money.credited,
+    refunded: money.paid_out,
+    balance: money.balance,
+    to_pay_back: Math.max(0, Math.min(unpaid, money.refundable)),
+    notes: shaped,
+    cancelled_not_refunded: cancelled.map(shapeCancelled),
+    request: request && {
+      id: request.id,
+      status: request.status,
+      reason: request.reason,
+      reason_code: request.reason_code ?? null,
+      requested_mode: request.requested_mode,
+      approved_mode: request.approved_mode ?? null,
+      mode_reason: request.mode_reason ?? null,
+      decision_note: request.decision_note ?? null,
+      requested_at: request.requested_at,
+      decided_at: request.decided_at ?? null,
+      credit_note_id: request.credit_note_id ?? null,
+    },
+  };
 }

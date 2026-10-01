@@ -11,6 +11,7 @@ import {
   field,
   headerHtml,
   infoGridHtml,
+  isCreditNote,
   itemsTableHtml,
   modeText,
   numericDateText,
@@ -28,6 +29,7 @@ import {
 } from "./billPdf.js";
 import { BILL_DOCUMENT_TITLES } from "../../../shared/billingVocab.js";
 import { listPayments } from "./payments.js";
+import { readCreditNote } from "./creditNotes.js";
 import { httpError } from "./transaction.js";
 
 export { modeText };
@@ -44,9 +46,14 @@ export async function receiptViews(billId, input, db = pool) {
       ? all.filter((payment) => payment.receipt_no === input.receipt_no)
       : all;
   if (!wanted.length) {
+    const credit = isCreditNote(bill);
     throw httpError(
       404,
-      all.length ? "That payment isn't on this bill" : "No payment has been taken on this bill yet",
+      all.length
+        ? `That payment isn't on this ${credit ? "credit note" : "bill"}`
+        : credit
+          ? "No money has been paid back on this credit note yet"
+          : "No payment has been taken on this bill yet",
     );
   }
   const receivers = wanted.map((payment) => payment.received_by).filter(Boolean);
@@ -63,6 +70,8 @@ export async function receiptViews(billId, input, db = pool) {
     category: view.category,
     settings: view.settings,
     issued: view.issued,
+    original_bill_no: view.original_bill_no,
+    refund_reason: view.refund_reason,
     hospital: view.hospital,
     logo: view.logo,
   }));
@@ -95,6 +104,68 @@ function paymentsHtml(payments) {
   return `<table class="bp-grid bp-payments"><thead><tr>${head}</tr></thead><tbody>${rows}${total}</tbody></table>`;
 }
 
+function refundsHtml(payments) {
+  const head = ["No.", "Date / Time", "Mode", "Reference", "Amount"]
+    .map(
+      (heading, index) =>
+        `<th class="${index === 0 ? "bp-sno" : index === 4 ? "bp-num" : ""}">${escapeHtml(heading)}</th>`,
+    )
+    .join("");
+  const rows = payments
+    .map(
+      (payment, index) =>
+        `<tr><td class="bp-sno">${index + 1}</td><td>${escapeHtml(stampText(payment.received_at))}</td><td>${escapeHtml(modeText(payment.mode))}</td><td>${escapeHtml(payment.reference ?? "")}</td><td class="bp-num">${amountText(payment.amount)}</td></tr>`,
+    )
+    .join("");
+  const total = totalRowHtml(
+    4,
+    payments.reduce((sum, payment) => sum + payment.amount, 0),
+  );
+  return `<table class="bp-grid bp-payments"><thead><tr>${head}</tr></thead><tbody>${rows}${total}</tbody></table>`;
+}
+
+function refundSummaryHtml(note) {
+  return totalsTableHtml([
+    ["Credit Note Amount(₹)", amountText(note.totals.payable)],
+    ["Refunded To Date(₹)", amountText(note.totals.paid)],
+  ]);
+}
+
+function refundBodyHtml(views) {
+  const first = views[0];
+  const { bill, patient } = first;
+  const payments = views.map((view) => view.payment);
+  const total = payments.reduce((sum, payment) => sum + payment.amount, 0);
+  const last = payments[payments.length - 1];
+  const left = [
+    field("Patient Name", patient?.name ?? null, true),
+    field("Age/Gender", ageSexText(bill, patient)),
+    field("UHID", uhidOf(patient)),
+  ];
+  if (first.refund_reason) left.push(field("Reason", first.refund_reason));
+  const right = [
+    field("Credit Note No", bill.bill_no, true),
+    field("Date", receiptDateText(payments)),
+    field("Against Bill", first.original_bill_no),
+  ];
+  const gst = printsTax(first);
+  const tail = `<div class="bp-closing">
+    <div class="bp-subtitle bp-subtitle-after">REFUND DETAILS</div>
+    ${refundsHtml(payments)}
+    ${closingHtml(first, {
+      totals: refundSummaryHtml(bill),
+      words: total,
+      operator: { name: last.received_by_name ?? null, at: last.received_at },
+    })}
+  </div>`;
+  return `<div class="bp-page">
+  ${headerHtml(first, billHeaderIdentity(first, gst))}
+  ${titleHtml(BILL_DOCUMENT_TITLES.refund_receipt)}
+  ${infoGridHtml(left, right)}
+  <div class="bp-subtitle">CREDITED ITEMS</div>${itemsTableHtml(first, gst, tail)}
+</div>`;
+}
+
 function billSummaryHtml(bill) {
   if (!bill?.totals) return "";
   return totalsTableHtml([
@@ -106,6 +177,7 @@ function billSummaryHtml(bill) {
 
 function receiptBodyHtml(views) {
   const first = views[0];
+  if (isCreditNote(first.bill)) return refundBodyHtml(views);
   const { bill, patient } = first;
   const payments = views.map((view) => view.payment);
   const total = payments.reduce((sum, payment) => sum + paymentAmount(payment), 0);
@@ -152,18 +224,29 @@ export function buildReceiptsHtml(views) {
     throw httpError(500, "There is no payment to print a receipt for");
   }
   const first = views[0];
-  const title =
-    views.length === 1 ? `Receipt ${first.payment.receipt_no || ""}`.trim() : "Receipts";
+  const title = isCreditNote(first.bill)
+    ? `Refund ${first.bill.bill_no || ""}`.trim()
+    : views.length === 1
+      ? `Receipt ${first.payment.receipt_no || ""}`.trim()
+      : "Receipts";
   return documentHtml({ title, body: receiptBodyHtml(views) });
 }
 
 export function buildReceiptFileName(views) {
   const first = views[0];
+  if (isCreditNote(first.bill)) {
+    return `Refund_${slug(first.bill.bill_no, "credit_note")}_${slug(first.patient?.name, "patient")}.pdf`;
+  }
   const number =
     views.length === 1
       ? first.payment.receipt_no || `payment-${String(first.payment.id ?? "").slice(0, 8)}`
       : first.bill?.bill_no || "bill";
   return `Receipt_${slug(number, "receipt")}_${slug(first.patient?.name, "patient")}.pdf`;
+}
+
+export async function generateRefundReceiptPdf(creditNoteId, input, ctx, db = pool) {
+  await readCreditNote(creditNoteId, db);
+  return generateReceiptPdf(creditNoteId, input, ctx, db);
 }
 
 export async function generateReceiptPdf(billId, input, ctx, db = pool) {

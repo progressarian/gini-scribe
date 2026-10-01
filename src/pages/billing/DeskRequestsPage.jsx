@@ -10,6 +10,8 @@ import { toast } from "../../stores/uiStore";
 import DeskRequestDecisionDialog from "../../components/billing/DeskRequestDecisionDialog";
 import DeskRequestItemDialog from "../../components/billing/DeskRequestItemDialog";
 import Pagination from "../../components/ui/Pagination";
+import { fromPaise } from "../../components/billing/format";
+import { refundLegsText, refundModeText } from "../../components/billing/counter/lineText";
 import "../../styles/flow.css";
 import "../flow/FlowSettings.css";
 import "./billing.css";
@@ -20,9 +22,11 @@ const when = (value) =>
   value ? new Date(value).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "";
 
 export const subjectOf = (request) =>
-  request.kind === "new_item"
-    ? (request.proposed_name ?? "a new item")
-    : (request.item?.name ?? "that item");
+  request.kind === "refund"
+    ? `refund on bill ${request.bill_no ?? ""}`.trim()
+    : request.kind === "new_item"
+      ? (request.proposed_name ?? "a new item")
+      : (request.item?.name ?? "that item");
 
 const billLabel = (billNo) => (billNo ? `bill ${billNo}` : "this visit's draft bill");
 
@@ -41,7 +45,48 @@ function Patient({ request }) {
   );
 }
 
+function RefundWanted({ request }) {
+  const { refund } = request;
+  const preview = refund.preview;
+  return (
+    <>
+      <strong>Bill {request.bill_no}</strong>
+      <span className="bill-status dreq__tag dreq__tag--refund">Refund</span>
+      {preview ? (
+        <>
+          <ul className="dreq__lines" aria-label={`Lines to refund on bill ${request.bill_no}`}>
+            {preview.lines.map((line) => (
+              <li key={line.line_id}>
+                {line.bill_name} × {line.quantity} — {fromPaise(line.patient_payable)}
+              </li>
+            ))}
+          </ul>
+          <div className="dreq__muted">
+            {preview.refund.due > 0
+              ? `${fromPaise(preview.refund.due)} goes back — ${refundLegsText(preview.refund.legs, fromPaise)}`
+              : "No money goes back"}
+          </div>
+          {preview.refund.against_balance > 0 ? (
+            <div className="dreq__muted">
+              {fromPaise(preview.refund.against_balance)} reduces the balance still owed first
+            </div>
+          ) : null}
+          {preview.tests_done.length ? (
+            <div className="dreq__muted">
+              Already done: {preview.tests_done.join(", ")} — approving needs your note
+            </div>
+          ) : null}
+        </>
+      ) : refund.preview_error ? (
+        <div className="dreq__muted">{refund.preview_error}</div>
+      ) : null}
+      <div className="dreq__muted">Asked for: {refundModeText(refund.requested_mode)}</div>
+    </>
+  );
+}
+
 function Wanted({ request }) {
+  if (request.kind === "refund") return <RefundWanted request={request} />;
   const newItem = request.kind === "new_item";
   return (
     <>
@@ -69,6 +114,25 @@ function Answer({ request }) {
       <>
         <span className="bill-status dreq__answer--no">Rejected</span>
         <div className="dreq__muted">{request.decision_note}</div>
+      </>
+    );
+  }
+  if (request.kind === "refund") {
+    const note = request.refund.credit_note;
+    return (
+      <>
+        <span className="bill-status dreq__answer--yes">Refund approved</span>
+        {note ? (
+          <div className="dreq__muted">
+            Credit note {note.bill_no} · credited {fromPaise(note.payable)} · refunded{" "}
+            {fromPaise(note.refunded)}
+          </div>
+        ) : null}
+        <div className="dreq__muted">
+          {refundModeText(request.refund.approved_mode)}
+          {request.refund.mode_reason ? ` — ${request.refund.mode_reason}` : ""}
+        </div>
+        {request.decision_note ? <div className="dreq__muted">{request.decision_note}</div> : null}
       </>
     );
   }
@@ -118,7 +182,13 @@ function PendingRow({ request, onAct }) {
         <button
           type="button"
           className="flow-btn flow-btn-primary flow-btn-mini"
-          aria-label={newItem ? `Create item for ${subject}` : `Approve billing ${subject} again`}
+          aria-label={
+            newItem
+              ? `Create item for ${subject}`
+              : request.kind === "refund"
+                ? `Approve ${subject}`
+                : `Approve billing ${subject} again`
+          }
           onClick={() => onAct(request, newItem ? "create" : "approve")}
         >
           <Check size={14} aria-hidden="true" />
@@ -186,9 +256,9 @@ export default function DeskRequestsPage() {
           </span>
         </div>
         <div className="fset__cardsub">
-          The billing desk asks here when an item is missing from the master, or when a patient
-          needs an item billed a second time on one visit. A new-item request carries no price — you
-          set the price when you create the item.
+          The billing desk asks here when an item is missing from the master, when a patient needs
+          an item billed a second time on one visit, or when money should go back on a final bill. A
+          new-item request carries no price — you set the price when you create the item.
         </div>
         {pending.isLoading ? (
           <div className="fset__cardsub">Loading…</div>

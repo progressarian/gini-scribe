@@ -1,0 +1,310 @@
+[
+ {
+  "orig_sr": 1,
+  "name": "DAY CARE CHARGES",
+  "price": 3000,
+  "sub": "Day Care Services",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 2,
+  "name": "FROM 01:00PM TO 02:00 PM",
+  "price": 1000,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 3,
+  "name": "FROM 01:00PM TO 03:00 PM",
+  "price": 1500,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 4,
+  "name": "FROM 012:50PM TO 03:00 PM",
+  "price": 1000,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 5,
+  "name": "FROM 02:00PM TO 03:00 PM",
+  "price": 1000,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 6,
+  "name": "FROM 02:00PM TO 04:30 PM",
+  "price": 0,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 7,
+  "name": "FROM 03:00PM TO 04:00 PM",
+  "price": 1000,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 8,
+  "name": "FROM 04:00PM TO 06:00 PM",
+  "price": 2000,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 9,
+  "name": "FROM 09:00AM TO 11:00 AM",
+  "price": 1000,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 10,
+  "name": "FROM 09:00AM TO 2:00 PM",
+  "price": 5000,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 11,
+  "name": "FROM 09:45AM TO 11:11AM",
+  "price": 1500,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 14,
+  "name": "FROM 1:00PM  PM TO 4:00 PM",
+  "price": 3000,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 15,
+  "name": "FROM 1:10PM  PM TO 1:30 PM",
+  "price": 500,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 16,
+  "name": "FROM 1:10PM  PM TO 2:00 PM",
+  "price": 1000,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 17,
+  "name": "FROM 1:30PM  PM TO 3:30 PM",
+  "price": 1000,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 18,
+  "name": "FROM 1:30PM  PM TO 4:00 PM",
+  "price": 1500,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 19,
+  "name": "FROM 10:00 am PM TO 12:00 pm",
+  "price": 2000,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 20,
+  "name": "FROM 10:00AM TO 01:00 PM",
+  "price": 1000,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 21,
+  "name": "FROM 10:35  PM TO 12:00 PM",
+  "price": 1500,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 22,
+  "name": "FROM 11:00 AM  TO 2:00 PM",
+  "price": 1500,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 23,
+  "name": "FROM 11:00 AM TO 01:00 PM",
+  "price": 1500,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 26,
+  "name": "FROM 11:15am TO 13:45 PM",
+  "price": 0,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 27,
+  "name": "FROM 11:15am TO 14:15 PM",
+  "price": 0,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 28,
+  "name": "FROM 11:15am TO 7:30 PM",
+  "price": 0,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 29,
+  "name": "FROM 2:00PM  PM TO 4:00 PM",
+  "price": 0,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 30,
+  "name": "FROM 2:15  PM TO 4:15 PM",
+  "price": 2000,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 31,
+  "name": "FROM 2:16  PM TO 3:16 PM",
+  "price": 1000,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 32,
+  "name": "FROM 2:30  PM TO 3:30 PM",
+  "price": 0,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 33,
+  "name": "FROM 2:30  PM TO 4:30 PM",
+  "price": 1000,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 37,
+  "name": "FROM 3:05  PM TO 4:05 PM",
+  "price": 1000,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 38,
+  "name": "FROM 3:15  PM TO 5:15 PM",
+  "price": 0,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 39,
+  "name": "FROM 5:00PM  PM TO 6:30 PM",
+  "price": 1500,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 40,
+  "name": "FROM 5:30  PM TO 7:00 PM",
+  "price": 1000,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 41,
+  "name": "FROM 6:00PM  PM TO 7:00 PM",
+  "price": 0,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 42,
+  "name": "FROM 6:00PM  PM TO 7:40 PM",
+  "price": 1500,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 43,
+  "name": "FROM 6:30PM  PM TO 7:30 PM",
+  "price": 0,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 44,
+  "name": "FROM 7:00PM  PM TO 8:00 PM",
+  "price": 1000,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 45,
+  "name": "FROM 7PM TO 7:30 PM",
+  "price": 1000,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 46,
+  "name": "FROM 7PM TO 9PM",
+  "price": 0,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 47,
+  "name": "FROM 9 AM TO 1 PM",
+  "price": 4000,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 48,
+  "name": "From 9 AM to 7PM",
+  "price": 0,
+  "sub": "Time Slots",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 49,
+  "name": "MEDICAL OFFICER",
+  "price": 0,
+  "sub": "Day Care Services",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 50,
+  "name": "MONITOR CHARGES (Day Care)",
+  "price": 0,
+  "sub": "Day Care Services",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 51,
+  "name": "NURSING CHARGE",
+  "price": 0,
+  "sub": "Day Care Services",
+  "kind": "other"
+ }
+]

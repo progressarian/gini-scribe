@@ -1,15 +1,19 @@
 import pool from "../../config/db.js";
 import { releaseOrderLines } from "../billing/visitLines.js";
+import { refundCancelledTest } from "../billing/billingRequests.js";
 import { resettleTestOrders } from "../billing/bills.js";
 import { releaseTestOrders } from "../billing/payments.js";
 import { derivePaymentStatus, opensLabGate } from "../../../shared/labPayment.js";
 import { machineForTest, machinesOnBillLine } from "../../../shared/machineStages.js";
 import {
   CANCELLABLE_ORDER_STATUSES,
+  CANCEL_LABEL_KEPT_IN_REFUND_NOTE,
   NOTE_REQUIRED_CANCEL_REASON,
+  REFUND_REASON_FOR_CANCEL,
   TEST_CANCEL_REASON_VALUES,
   SYNC_CANCEL_REASONS,
   NOT_ON_BILL_REASON,
+  testCancelReasonLabel,
 } from "../../../shared/testCancelReasons.js";
 import { getMachines } from "./machineCatalog.js";
 import {
@@ -335,6 +339,8 @@ async function cancelOrderIn(client, visit, order, input, machines) {
   };
 
   let refundLeft = null;
+  let onFinal = [];
+  const keepFinal = { keepFinal: input.source !== "healthray" };
   const moneyCtx = { role: input.actorRole || "system", actorId: input.actorId ?? null };
   const drafts = await draftsHolding(client, order.id);
   if (partial) {
@@ -349,7 +355,13 @@ async function cancelOrderIn(client, visit, order, input, machines) {
       amount_claimed: Number(held.amount_claimed) || 0,
       claim_state: held.claim_state,
     });
-    await releaseOrderLines(client, order.id, [single.name], { actorId: input.actorId ?? null });
+    ({ onFinal } = await releaseOrderLines(
+      client,
+      order.id,
+      [single.name],
+      { actorId: input.actorId ?? null },
+      keepFinal,
+    ));
     await client.query(`DELETE FROM giniflow_lab_order_tests WHERE id = $1`, [single.id]);
     await client.query(
       `UPDATE giniflow_lab_orders
@@ -389,7 +401,13 @@ async function cancelOrderIn(client, visit, order, input, machines) {
     const after = await orderMoney(client, order.id);
     refundLeft = money((Number(order.amount_paid) || 0) - (Number(after.amount_paid) || 0));
   } else {
-    await releaseOrderLines(client, order.id, null, { actorId: input.actorId ?? null });
+    ({ onFinal } = await releaseOrderLines(
+      client,
+      order.id,
+      null,
+      { actorId: input.actorId ?? null },
+      keepFinal,
+    ));
     await client.query(`DELETE FROM giniflow_lab_orders WHERE id = $1`, [order.id]);
     for (const draft of drafts) await resettleTestOrders(client, draft, moneyCtx);
   }
@@ -425,7 +443,36 @@ async function cancelOrderIn(client, visit, order, input, machines) {
       snapshot,
     });
   }
-  return { tests: going.map((t) => t.name), machineId, wholeOrder: !partial };
+  return { tests: going.map((t) => t.name), machineId, wholeOrder: !partial, onFinal };
+}
+
+async function refundNoteFor(client, input, kind) {
+  const { rows } = input.actorId
+    ? await client.query(`SELECT name FROM doctors WHERE id = $1`, [input.actorId])
+    : { rows: [] };
+  const station = input.stationLabel || kind;
+  return [
+    CANCEL_LABEL_KEPT_IN_REFUND_NOTE.includes(input.reason)
+      ? testCancelReasonLabel(input.reason)
+      : null,
+    String(input.note || "").trim() || null,
+    `Cancelled at the ${station} station by ${rows[0]?.name || "the floor"}`,
+  ]
+    .filter(Boolean)
+    .join(" — ");
+}
+
+async function refundFinalLines(client, input, kind, onFinal) {
+  if (!onFinal?.length) return [];
+  return refundCancelledTest(
+    {
+      lines: onFinal,
+      reasonCode: REFUND_REASON_FOR_CANCEL[input.reason],
+      note: await refundNoteFor(client, input, kind),
+    },
+    { actorId: input.actorId ?? null, role: input.actorRole || null },
+    client,
+  );
 }
 
 export async function cancelTest(input, db = pool) {
@@ -492,6 +539,7 @@ export async function cancelTestIn(client, input) {
       { ...input, testId: target.testId },
       machines,
     );
+    const refunds = await refundFinalLines(client, input, order.kind, done.onFinal);
     let casesCancelled = [];
     if (order.kind === "lab" && target.caseNos?.length) {
       const { rows: left } = await client.query(
@@ -518,6 +566,15 @@ export async function cancelTestIn(client, input) {
         reason: input.reason,
         note: input.note || null,
         source: input.source,
+        ...(refunds.length
+          ? {
+              refunds: refunds.map((r) => ({
+                status: r.status,
+                request_id: r.request_id,
+                bill_no: r.bill_no,
+              })),
+            }
+          : {}),
       },
       input.actorRole,
       input.actorId,
@@ -534,6 +591,7 @@ export async function cancelTestIn(client, input) {
       tests: done.tests,
       cases: casesCancelled,
       wholeOrder: done.wholeOrder,
+      refunds,
     };
   }
 

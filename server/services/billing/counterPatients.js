@@ -46,7 +46,8 @@ const COUNTER_SELECT = `
          ${labOnlyPredicate("gv", "$2")} AS samples_only,
          COALESCE(a.booking_type ~* '${ONLINE_BOOKING}', FALSE) AS online,
          bs.drafts, bs.finals, bs.pending_claims, bs.cleared_claims, bs.due,
-         bs.draft_due, bs.open_drafts, cs.seen, cs.consultation_billed,
+         bs.draft_due, bs.open_drafts, bs.pay_back, bs.refunds_pending, bs.paid_back,
+         cs.seen, cs.consultation_billed,
          ts.tests_owed, ts.not_priced, ts.settled_orders, lcs.case_tests_owed
     FROM (${ARRIVAL_SELECT}) a
     JOIN giniflow_visits gv ON gv.id = a.id
@@ -60,6 +61,15 @@ const COUNTER_SELECT = `
              COALESCE(SUM(GREATEST(GREATEST(b.patient_payable - m.credited, 0)
                                    - (b.paid_amount - m.refunded), 0))
                         FILTER (WHERE b.status = 'final'), 0) AS due,
+             COALESCE(SUM(LEAST(GREATEST((b.paid_amount - m.refunded)
+                                         - GREATEST(b.patient_payable - m.credited, 0), 0),
+                                m.credited - m.refunded))
+                        FILTER (WHERE b.status = 'final'), 0) AS pay_back,
+             COALESCE(SUM(m.refunded) FILTER (WHERE b.status = 'final'), 0) AS paid_back,
+             COUNT(*) FILTER (WHERE b.status = 'final' AND EXISTS (
+               SELECT 1 FROM billing_requests rr
+                WHERE rr.bill_id = b.id AND rr.kind = 'refund' AND rr.status = 'pending'))::int
+               AS refunds_pending,
              COALESCE(SUM(GREATEST(b.patient_payable - b.paid_amount, 0))
                         FILTER (WHERE b.status = 'draft'), 0) AS draft_due,
              COUNT(*) FILTER (WHERE b.status = 'draft' AND EXISTS (
@@ -193,6 +203,9 @@ export async function counterPatients(visitDate, q = "", now = new Date(), db = 
       samplesOnly: Boolean(r.samples_only),
       bill: billState(r),
       hints,
+      payBack: paise(r.pay_back),
+      refundPending: r.refunds_pending > 0,
+      refunded: paise(r.paid_back),
       group: groupOf(r, hints, arrival.status),
     };
   });

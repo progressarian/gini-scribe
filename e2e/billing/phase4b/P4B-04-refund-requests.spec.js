@@ -102,9 +102,9 @@ test.describe.serial("P4B-04 refund requests: ask and approve", () => {
       "an unknown mode",
     );
     await refused(
-      askRefund(ids.bill.id, [{ line_id: brace.id }], { reason: " " }),
+      askRefund(ids.bill.id, [{ line_id: brace.id }], { reason_code: "other", reason: " " }),
       400,
-      null,
+      /Write the reason when you choose Other/,
       "no reason",
     );
   });

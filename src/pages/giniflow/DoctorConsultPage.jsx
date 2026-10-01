@@ -15,6 +15,7 @@ import FastPathBar from "./consult/FastPathBar";
 import ProposalsStrip from "./consult/ProposalsStrip";
 import RxSection from "./consult/RxSection";
 import TestsSection from "./consult/TestsSection";
+import ProceduresSection from "./consult/ProceduresSection";
 import MedCardSection from "./consult/MedCardSection";
 import FinalizeBar from "./consult/FinalizeBar";
 import TrendModal from "./consult/TrendModal";
@@ -42,6 +43,7 @@ const NAV = [
   { id: "s-labs", label: "📊 Labs & graphs" },
   { id: "s-rx", label: "💊 Prescription" },
   { id: "s-tests", label: "🔬 Tests" },
+  { id: "s-procedures", label: "🩹 Procedures" },
   { id: "s-medcard", label: "🗒 Medicine card" },
   { id: "s-plan", label: "📝 Care plan" },
 ];
@@ -332,6 +334,7 @@ export default function DoctorConsultPage() {
             onToast={showToast}
             onUnsaved={markUnsaved}
           />
+          <ProceduresSection visitId={visitId} readOnly={readOnly} onToast={showToast} />
           <MedCardSection visitId={visitId} onToast={showToast} />
           <CarePlanSection
             consult={consult}

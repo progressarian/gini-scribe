@@ -18,12 +18,15 @@ import NotPricedTests from "./NotPricedTests";
 import AddItems from "./AddItems";
 import ConsultationSuggestion from "./ConsultationSuggestion";
 import LabCaseTests from "./LabCaseTests";
+import HealthrayBillLines from "./HealthrayBillLines";
 import DiscountCodeBox from "./DiscountCodeBox";
 import TotalsAndPayment from "./TotalsAndPayment";
 import BillActions from "./BillActions";
+import BillRefunds from "./BillRefunds";
 import DuesList from "./DuesList";
 import EarlierDues from "./EarlierDues";
 import ShiftPanel from "./ShiftPanel";
+import RefundsBoard from "./RefundsBoard";
 import LeaveDraftDialog from "./LeaveDraftDialog";
 import { dropStaleForms, useSavedForm } from "./useSavedForm";
 import { BILL_FORM, BILL_FORM_PREFIX, SHIFT_FORM_PREFIX, billFormKey } from "./counterForm";
@@ -35,6 +38,12 @@ export const DESK_TABS = {
   bill: { key: "bill", label: "Bill", tabId: "bc-tab-bill", panelId: "bc-panel-bill" },
   dues: { key: "dues", label: "Dues", tabId: "bc-tab-dues", panelId: "bc-panel-dues" },
   shift: { key: "shift", label: "Shift", tabId: "bc-tab-shift", panelId: "bc-panel-shift" },
+  refunds: {
+    key: "refunds",
+    label: "Refunds",
+    tabId: "bc-tab-refunds",
+    panelId: "bc-panel-refunds",
+  },
 };
 
 const LIST_WIDTH = { min: 220, max: 560, initial: 300, step: 16, key: "billing.counter.listWidth" };
@@ -182,7 +191,11 @@ function useLeaveGuard(bill) {
   const followReread = (before, after) =>
     setBaseline((current) => (current === before.version ? after.version : current));
 
-  return { dialog, followReread };
+  const release = () => {
+    held.current = false;
+  };
+
+  return { dialog, followReread, release };
 }
 
 function Panel({ tab, children }) {
@@ -249,6 +262,19 @@ export default function BillingDesk({ tab, visitId, patientId, billId, sentPatie
   };
 
   const openVisitDraft = () => reopenVisit(visitId);
+
+  const refreshBill = () => {
+    if (!bill) return;
+    reread.mutate(
+      { billId: bill.id },
+      {
+        onSuccess: (found) =>
+          setBill((current) =>
+            current?.id === found.id && found.version >= current.version ? found : current,
+          ),
+      },
+    );
+  };
 
   const takePaymentOn = (due) => {
     setDuePatient({ name: due.patient.name, fileNo: due.patient.file_no });
@@ -439,6 +465,7 @@ export default function BillingDesk({ tab, visitId, patientId, billId, sentPatie
                         onBill={setBill}
                         needsCategory={needsCategory}
                       />
+                      <HealthrayBillLines key={`hr-${bill.id}`} bill={bill} onBill={setBill} />
                       <AddItems bill={bill} onBill={setBill} form={form} />
                       <NotPricedTests tests={notPriced} />
                       <DiscountCodeBox bill={bill} onBill={setBill} form={form} />
@@ -455,12 +482,18 @@ export default function BillingDesk({ tab, visitId, patientId, billId, sentPatie
                       <BillActions
                         bill={bill}
                         onBill={setBill}
-                        onDeleted={() => reopenVisit(bill.visit_id)}
+                        onDeleted={() => {
+                          leave.release();
+                          setBill(null);
+                          pick(null);
+                        }}
+                        onRefunded={refreshBill}
                         schemes={schemes || []}
                         payLater={payLater}
                         needsCategory={needsCategory}
                         form={form}
                       />
+                      <BillRefunds bill={bill} onRefunded={refreshBill} />
                     </div>
                   </div>
                 </>
@@ -477,6 +510,12 @@ export default function BillingDesk({ tab, visitId, patientId, billId, sentPatie
           {tab === DESK_TABS.shift.key && (
             <Panel tab={DESK_TABS.shift}>
               <ShiftPanel />
+            </Panel>
+          )}
+
+          {tab === DESK_TABS.refunds.key && (
+            <Panel tab={DESK_TABS.refunds}>
+              <RefundsBoard onOpen={takePaymentOn} />
             </Panel>
           )}
         </div>

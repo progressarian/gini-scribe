@@ -10,6 +10,7 @@ import {
   billingCodeAddSchema,
   billingConsultationSuggestionQuerySchema,
   billingDraftDeleteSchema,
+  billingLinePriceSchema,
   billingDraftOpenSchema,
   billingDuesQuerySchema,
   billingFinaliseSchema,
@@ -22,8 +23,14 @@ import {
   billingMyShiftsQuerySchema,
   billingNewItemRequestSchema,
   billingPaymentsTakeSchema,
+  billingPayOutSchema,
+  billingPdfQuerySchema,
   billingPreviewSchema,
   billingReceiptQuerySchema,
+  billingRefundPreviewSchema,
+  billingRefundBoardQuerySchema,
+  billingRefundReceiptQuerySchema,
+  billingRefundRequestSchema,
   billingRepeatRequestSchema,
   billingRequestApproveSchema,
   billingRequestListQuerySchema,
@@ -37,11 +44,13 @@ import {
 import { billingRoute, sendFailure } from "./billingHttp.js";
 import { auditContext } from "../services/billing/audit.js";
 import { priceBill } from "../services/billing/priceBill.js";
-import { generateBillPdf } from "../services/billing/billPdf.js";
-import { generateReceiptPdf } from "../services/billing/receiptPdf.js";
+import { generateBillPdf, generateCreditNotePdf } from "../services/billing/billPdf.js";
+import { generateReceiptPdf, generateRefundReceiptPdf } from "../services/billing/receiptPdf.js";
+import * as creditNotes from "../services/billing/creditNotes.js";
 import * as bills from "../services/billing/bills.js";
 import * as payments from "../services/billing/payments.js";
 import { duesToday } from "../services/billing/dues.js";
+import { refundBoard } from "../services/billing/refundBoard.js";
 import * as shifts from "../services/billing/cashShifts.js";
 import * as requests from "../services/billing/billingRequests.js";
 import {
@@ -55,6 +64,7 @@ import {
   labCaseSuggestion,
   labCaseTestsForDesk,
 } from "../services/billing/labCaseLines.js";
+import { healthrayBillSuggestion } from "../services/billing/healthrayBillLines.js";
 import { deskSettings } from "../services/billing/billingSettings.js";
 import { searchDeskItems } from "../services/billing/serviceItems.js";
 import { counterPatients } from "../services/billing/counterPatients.js";
@@ -153,6 +163,13 @@ router.get(
   desk,
   validateQuery(billingLabCaseTestsQuerySchema, BILLING_DESK_LABELS),
   run("Lab report tests", 200, (req) => labCaseSuggestion(req.query.bill_id, ctx(req))),
+);
+
+router.get(
+  `${BASE}/healthray-bill-lines`,
+  desk,
+  validateQuery(billingLabCaseTestsQuerySchema, BILLING_DESK_LABELS),
+  run("HealthRay bill lines", 200, (req) => healthrayBillSuggestion(req.query.bill_id, ctx(req))),
 );
 
 router.get(
@@ -258,6 +275,15 @@ router.post(
 );
 
 router.post(
+  `${BASE}/bills/:billId/lines/:lineId/price`,
+  desk,
+  validate(billingLinePriceSchema, BILLING_DESK_LABELS),
+  run("Set this patient's price", 200, (req) =>
+    bills.setLinePrice(req.params.billId, req.params.lineId, req.body, ctx(req)),
+  ),
+);
+
+router.post(
   `${BASE}/bills/:billId/save-draft`,
   desk,
   validate(billingDraftOpenSchema, BILLING_DESK_LABELS),
@@ -314,6 +340,88 @@ router.get(
       { payment_id: req.query.payment_id, receipt_no: req.query.receipt_no },
       ctx(req),
     ),
+  ),
+);
+
+router.get(
+  `${BASE}/bills/:billId/creditable`,
+  desk,
+  run("Lines left to refund", 200, (req) => creditNotes.creditableLines(req.params.billId)),
+);
+
+router.get(
+  `${BASE}/bills/:billId/refunds`,
+  desk,
+  run("Bill refunds", 200, async (req) => ({
+    requests: await requests.listRequests({
+      billId: req.params.billId,
+      kind: "refund",
+      newestFirst: true,
+    }),
+    credit_notes: await creditNotes.listCreditNotes(req.params.billId),
+  })),
+);
+
+router.get(
+  `${BASE}/refunds`,
+  desk,
+  validateQuery(billingRefundBoardQuerySchema, BILLING_DESK_LABELS),
+  run("Refunds", 200, (req) =>
+    refundBoard({
+      from: req.query.from,
+      to: req.query.to,
+      q: req.query.q,
+      limit: req.query.limit,
+    }),
+  ),
+);
+
+router.post(
+  `${BASE}/refunds/preview`,
+  desk,
+  validate(billingRefundPreviewSchema, BILLING_DESK_LABELS),
+  run("Refund preview", 200, (req) => creditNotes.previewCredit(req.body.bill_id, req.body)),
+);
+
+router.post(
+  `${BASE}/requests/refund`,
+  desk,
+  validate(billingRefundRequestSchema, BILLING_DESK_LABELS),
+  run("Refund request", 201, (req) => requests.createRefundRequest(req.body, ctx(req))),
+);
+
+router.get(
+  `${BASE}/refund-requests/:id`,
+  desk,
+  run("Read request", 200, (req) => requests.getRequest(req.params.id)),
+);
+
+router.get(
+  `${BASE}/credit-notes/:id`,
+  desk,
+  run("Read credit note", 200, (req) => creditNotes.readCreditNote(req.params.id)),
+);
+
+router.post(
+  `${BASE}/credit-notes/:id/pay-out`,
+  desk,
+  validate(billingPayOutSchema, BILLING_DESK_LABELS),
+  run("Pay out refund", 201, (req) => payments.payOut(req.params.id, req.body, ctx(req))),
+);
+
+router.get(
+  `${BASE}/credit-notes/:id/credit-note.pdf`,
+  desk,
+  validateQuery(billingPdfQuerySchema, BILLING_DESK_LABELS),
+  pdfRoute("Credit note PDF", (req) => generateCreditNotePdf(req.params.id, ctx(req))),
+);
+
+router.get(
+  `${BASE}/credit-notes/:id/refund-receipt.pdf`,
+  desk,
+  validateQuery(billingRefundReceiptQuerySchema, BILLING_DESK_LABELS),
+  pdfRoute("Refund receipt PDF", (req) =>
+    generateRefundReceiptPdf(req.params.id, { payment_id: req.query.payment_id }, ctx(req)),
   ),
 );
 

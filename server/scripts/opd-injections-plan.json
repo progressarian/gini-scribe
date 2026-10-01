@@ -1,0 +1,152 @@
+[
+ {
+  "orig_sr": 2,
+  "name": "Inj. Ertapenem",
+  "price": 500,
+  "sub": "Drug Injections"
+ },
+ {
+  "orig_sr": 3,
+  "name": "Hand Injection by Dr. Bhansali",
+  "price": 500,
+  "sub": "Joint & Hand Injections"
+ },
+ {
+  "orig_sr": 4,
+  "name": "Hand Injection by Dr. Harjoban",
+  "price": 2000,
+  "sub": "Joint & Hand Injections"
+ },
+ {
+  "orig_sr": 5,
+  "name": "HYTAS ONE",
+  "price": 0,
+  "sub": "Drug Injections"
+ },
+ {
+  "orig_sr": 6,
+  "name": "IM Injection",
+  "price": 100,
+  "sub": "Administration"
+ },
+ {
+  "orig_sr": 9,
+  "name": "Inj. Gera 1 G",
+  "price": 0,
+  "sub": "Drug Injections"
+ },
+ {
+  "orig_sr": 10,
+  "name": "Injection",
+  "price": 100,
+  "sub": "Administration"
+ },
+ {
+  "orig_sr": 11,
+  "name": "Injection by Dr. Bhansali",
+  "price": 500,
+  "sub": "Joint & Hand Injections"
+ },
+ {
+  "orig_sr": 12,
+  "name": "Injection by Dr. Harjoban",
+  "price": 3000,
+  "sub": "Joint & Hand Injections"
+ },
+ {
+  "orig_sr": 13,
+  "name": "Injection Charges",
+  "price": 0,
+  "sub": "Administration"
+ },
+ {
+  "orig_sr": 14,
+  "name": "Intra Articular",
+  "price": 2000,
+  "sub": "Joint & Hand Injections"
+ },
+ {
+  "orig_sr": 17,
+  "name": "IRON INFUSION",
+  "price": 1000,
+  "sub": "Drug Injections"
+ },
+ {
+  "orig_sr": 18,
+  "name": "IRON INFUSION WITH OTHER INJECTIONS",
+  "price": 2000,
+  "sub": "Drug Injections"
+ },
+ {
+  "orig_sr": 19,
+  "name": "IRON INJECTION",
+  "price": 1000,
+  "sub": "Drug Injections"
+ },
+ {
+  "orig_sr": 20,
+  "name": "IV INFUSION",
+  "price": 500,
+  "sub": "Administration"
+ },
+ {
+  "orig_sr": 21,
+  "name": "IV INFUSION WITH OTHER INJECTIONS",
+  "price": 2000,
+  "sub": "Administration"
+ },
+ {
+  "orig_sr": 22,
+  "name": "IV INJECTION",
+  "price": 100,
+  "sub": "Administration"
+ },
+ {
+  "orig_sr": 23,
+  "name": "LONGER ACTING INJECTION",
+  "price": 3000,
+  "sub": "Drug Injections"
+ },
+ {
+  "orig_sr": 24,
+  "name": "MOUNJARO INJ.",
+  "price": 100,
+  "sub": "Drug Injections"
+ },
+ {
+  "orig_sr": 25,
+  "name": "NEFCM",
+  "price": 1000,
+  "sub": "Drug Injections"
+ },
+ {
+  "orig_sr": 26,
+  "name": "SHORT ACTING INJECTION",
+  "price": 3000,
+  "sub": "Drug Injections"
+ },
+ {
+  "orig_sr": 27,
+  "name": "Shoulder Injection by Dr. Harjoban",
+  "price": 2000,
+  "sub": "Joint & Hand Injections"
+ },
+ {
+  "orig_sr": 28,
+  "name": "SUBCUTANEOUS",
+  "price": 100,
+  "sub": "Administration"
+ },
+ {
+  "orig_sr": 29,
+  "name": "Vaccination",
+  "price": 500,
+  "sub": "Vaccination"
+ },
+ {
+  "orig_sr": 30,
+  "name": "Verapamil",
+  "price": 1000,
+  "sub": "Drug Injections"
+ }
+]

@@ -10,6 +10,17 @@ import {
   returnRxToQueue,
 } from "../services/giniflow/rxStation.js";
 import { fetchRxFile, regenerateRx } from "../services/giniflow/printRx.js";
+import {
+  addOrderedService,
+  orderedServiceChoices,
+  orderedServicesFor,
+  removeOrderedService,
+} from "../services/billing/orderedServices.js";
+import {
+  orderedServiceAddSchema,
+  orderedServiceChoicesQuerySchema,
+  orderedServiceRemoveSchema,
+} from "../schemas/billing.js";
 import { validate, validateQuery } from "../middleware/validate.js";
 import { CAPABILITIES as CAP } from "../../shared/permissions.js";
 import { giniflowReportReviewSchema } from "../schemas/index.js";
@@ -214,6 +225,7 @@ import {
 import { sendFlowCheckin } from "../services/msg91.js";
 import { syncBillingForVisitId, healthrayBillSteps } from "../services/giniflow/machineSync.js";
 import { cancelTest } from "../services/giniflow/testCancel.js";
+import { announceRequest } from "../services/billing/billingRequests.js";
 import { getMachines } from "../services/giniflow/machineCatalog.js";
 import { getFloorSettings, setFloorSetting } from "../services/giniflow/floorSettings.js";
 import { machinesForStation } from "../../shared/machineStages.js";
@@ -933,22 +945,29 @@ const receptionGate = requireCapability(CAP.GINIFLOW_STATION_RECEPTION);
 const cancelGate = requireCapability(CAP.GINIFLOW_TEST_CANCEL);
 
 const cancelRoute =
-  (label, targetOf, { source = "station", expectKind = null, before = null } = {}) =>
+  (
+    label,
+    targetOf,
+    { source = "station", expectKind = null, before = null, stationLabel = null } = {},
+  ) =>
   async (req, res) => {
     try {
       if (before) await before(req);
-      res.json(
-        await cancelTest({
-          target: targetOf(req),
-          reason: req.body.reason,
-          note: req.body.note,
-          refundAmount: req.body.refundAmount ?? null,
-          source,
-          expectKind,
-          actorId: req.doctor?.doctor_id ?? null,
-          actorRole: req.doctor?.role || null,
-        }),
-      );
+      const result = await cancelTest({
+        target: targetOf(req),
+        reason: req.body.reason,
+        note: req.body.note,
+        refundAmount: req.body.refundAmount ?? null,
+        source,
+        expectKind,
+        stationLabel: stationLabel ?? (source === "reception" ? "reception" : null),
+        actorId: req.doctor?.doctor_id ?? null,
+        actorRole: req.doctor?.role || null,
+      });
+      for (const refund of result.refunds || []) {
+        if (refund.status === "raised") announceRequest("created", refund.request_id);
+      }
+      res.json(result);
     } catch (e) {
       handleError(res, e, label);
     }
@@ -1750,6 +1769,8 @@ const machineGate = requireCapability(CAP.GINIFLOW_STATION_MACHINE);
 const echoGate = requireCapability(CAP.GINIFLOW_STATION_ECHO);
 const xrayGate = requireCapability(CAP.GINIFLOW_STATION_XRAY);
 
+const STATION_LABEL = { machine: "machine room", echo: "echo", xray: "X-ray" };
+
 function mountMachineStationRoutes(
   router,
   { prefix, gate, station, reportRemoveCap, extraReports = false },
@@ -1834,6 +1855,7 @@ function mountMachineStationRoutes(
     validate(giniflowTestCancelSchema),
     cancelRoute(`Gini Flow ${prefix} cancel test`, (req) => ({ orderId: req.params.orderId }), {
       expectKind: "machine",
+      stationLabel: STATION_LABEL[prefix],
       before: (req) => assertOrderInStation(req.params.orderId, station),
     }),
   );
@@ -2713,5 +2735,69 @@ router.post(
     }
   },
 );
+
+const deskGate = requireCapability(CAP.BILLING_DESK);
+
+const orderedCtx = (req) => ({
+  actorId: req.doctor?.doctor_id ?? null,
+  role: req.doctor?.role ?? null,
+  ip: req.ip ?? null,
+});
+
+const ORDERED_SERVICE_ROUTES = [
+  ["doctor", [doctorGate], [doctorGate, requireOwnVisit]],
+  ["mo", [moGate], [moGate]],
+  ["reception", [receptionGate], [deskGate]],
+];
+
+for (const [station, readGates, writeGates] of ORDERED_SERVICE_ROUTES) {
+  const base = `/giniflow/stations/${station}/:visitId/services`;
+  const label = `Gini Flow ${station} ordered services`;
+  router.get(base, ...readGates, async (req, res) => {
+    try {
+      res.json(await orderedServicesFor(req.params.visitId));
+    } catch (e) {
+      handleError(res, e, label);
+    }
+  });
+  router.get(
+    `${base}/choices`,
+    ...readGates,
+    validateQuery(orderedServiceChoicesQuerySchema),
+    async (req, res) => {
+      try {
+        res.json(await orderedServiceChoices(req.params.visitId, { q: req.query.q ?? "" }));
+      } catch (e) {
+        handleError(res, e, label);
+      }
+    },
+  );
+  router.post(base, ...writeGates, validate(orderedServiceAddSchema), async (req, res) => {
+    try {
+      res.json(await addOrderedService(req.params.visitId, req.body, orderedCtx(req)));
+    } catch (e) {
+      handleError(res, e, label);
+    }
+  });
+  router.post(
+    `${base}/:lineId/remove`,
+    ...writeGates,
+    validate(orderedServiceRemoveSchema),
+    async (req, res) => {
+      try {
+        res.json(
+          await removeOrderedService(
+            req.params.visitId,
+            req.params.lineId,
+            req.body,
+            orderedCtx(req),
+          ),
+        );
+      } catch (e) {
+        handleError(res, e, label);
+      }
+    },
+  );
+}
 
 export default router;

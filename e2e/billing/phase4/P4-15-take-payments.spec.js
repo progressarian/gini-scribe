@@ -3,6 +3,7 @@ import { getPool, one, query } from "../../helpers/db.mjs";
 import { USERS } from "../../fixtures/data.mjs";
 import { assertTestDatabase } from "../../setup/guard.mjs";
 import {
+  autoConsultation,
   desk,
   extraVisit,
   failure,
@@ -84,7 +85,12 @@ test.describe.serial("P4-15 take payments", () => {
   });
 
   test("1. a whole visit: check in, two tests, finalise, a card and a cash payment", async () => {
-    await reception.markArrived(ids.visit, USERS.reception.id, db);
+    const autoBefore = await autoConsultation(true);
+    try {
+      await reception.markArrived(ids.visit, USERS.reception.id, db);
+    } finally {
+      await autoConsultation(autoBefore);
+    }
     ids.labOrder = await pricedOrder(ids.visit, [{ name: ids.hba1cName, price: 250 }]);
     ids.machineOrder = await pricedOrder(ids.visit, [{ name: ids.abiName, price: 400 }], "machine");
     await visitLines.linesForOrder(

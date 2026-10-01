@@ -18,6 +18,7 @@ import LabResultsForm from "../LabResultsForm";
 import PdfViewerModal from "../../visit/PdfViewerModal";
 import StationNotice from "../StationNotice";
 import CancelTestControl from "../CancelTestControl";
+import { cancelledText, cancelledToastMs, TOAST_MS } from "../../../lib/testCancelText.js";
 import useAuthStore from "../../../stores/authStore";
 import { CAPABILITIES as CAP, hasCapability } from "../../../../shared/permissions.js";
 import { refundOnTestCancel } from "../../../../shared/labPayment.js";
@@ -1402,10 +1403,10 @@ export default function LabRoom({ room = null }) {
 
   const unifiedTotal = Object.values(queueCounts).reduce((a, b) => a + b, 0) + healthray.length;
 
-  const showToast = (msg) => {
+  const showToast = (msg, ms = TOAST_MS) => {
     setToast(msg);
     clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(""), 3500);
+    toastTimer.current = setTimeout(() => setToast(""), ms);
   };
 
   const onAdvance = (order, to, thenBreak = false) =>
@@ -1437,7 +1438,10 @@ export default function LabRoom({ room = null }) {
         onSuccess: (r) => {
           done();
           if (r.wholeOrder) closePane();
-          showToast(`✕ ${test.name} cancelled for ${order.name}`);
+          showToast(
+            cancelledText(`✕ ${test.name} cancelled for ${order.name}`, r),
+            cancelledToastMs(r),
+          );
         },
         onError: cancelFailed,
       },

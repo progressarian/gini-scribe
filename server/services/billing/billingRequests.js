@@ -1,16 +1,33 @@
 import pool from "../../config/db.js";
 import { writeAudit } from "./audit.js";
-import { checkRefund, cleanRefundMode, creditNoteIn, readCreditNote } from "./creditNotes.js";
+import {
+  checkRefund,
+  cleanRefundMode,
+  creditNoteIn,
+  FLOOR_CANCEL_WAITING,
+  previewCredit,
+  readCreditNote,
+} from "./creditNotes.js";
 import { createItem } from "./serviceItems.js";
 import { httpError, inTransaction } from "./transaction.js";
 import { auditFields, cleanName, hasField, INT_MAX, lockRow, readNumber } from "./common.js";
 import { publishBillingRequest } from "../giniflow/realtimeBus.js";
+import { endVisitAfterRefund } from "./refundVisitExit.js";
+import { paise } from "../../../shared/labPayment.js";
+import {
+  NOTE_REQUIRED_REFUND_REASON,
+  REFUND_REASONS,
+  REFUND_REASON_VALUES,
+  refundReasonLabel,
+  refundReasonText,
+} from "../../../shared/refundReasons.js";
 
 const COLUMNS = [
   "id",
   "kind",
   "status",
   "reason",
+  "reason_code",
   "proposed_name",
   "proposed_group",
   "patient_id",
@@ -141,11 +158,18 @@ const shape = (row) =>
       row.kind === "refund"
         ? {
             lines: row.refund_lines,
+            reason_code: row.reason_code ?? null,
+            reason_label: row.reason_code ? refundReasonLabel(row.reason_code) : null,
             requested_mode: row.requested_mode,
             approved_mode: row.approved_mode ?? null,
             mode_reason: row.mode_reason ?? null,
             credit_note: row.credit_note_id
-              ? { id: row.credit_note_id, bill_no: row.credit_note_no ?? null }
+              ? {
+                  id: row.credit_note_id,
+                  bill_no: row.credit_note_no ?? null,
+                  payable: paise(row.credit_note_payable),
+                  refunded: paise(row.credit_note_refunded),
+                }
               : null,
           }
         : null,
@@ -156,7 +180,8 @@ const LIST_SQL = `
          p.name AS patient_name, p.file_no AS patient_file_no, p.age AS patient_age,
          i.code AS item_code, i.name AS item_name,
          ci.code AS created_item_code, ci.name AS created_item_name,
-         b.bill_no, cn.bill_no AS credit_note_no,
+         b.bill_no, cn.bill_no AS credit_note_no, cn.patient_payable AS credit_note_payable,
+         cn.paid_amount AS credit_note_refunded,
          rq.name AS requested_by_name, dq.name AS decided_by_name,
          l.id AS used_line_id, l.bill_id AS used_bill_id, ub.bill_no AS used_bill_no,
          v.visit_date::text AS visit_date,
@@ -205,6 +230,7 @@ export async function listRequests(filters = {}, db = pool) {
     add("r.requested_by = ?", cleanWholeId(filters.requestedBy, "user"));
   }
   if (filters.visitId) add("r.visit_id = ?", cleanUuid(filters.visitId, "visit"));
+  if (filters.billId) add("r.bill_id = ?", cleanUuid(filters.billId, "bill"));
   if (filters.kind) {
     if (!KINDS[filters.kind]) {
       throw httpError(400, `Kind must be one of: ${Object.keys(KINDS).join(", ")}`);
@@ -219,7 +245,36 @@ export async function listRequests(filters = {}, db = pool) {
      LIMIT $${params.length}`,
     params,
   );
-  return rows.map(shape);
+  return withRefundPreviews(rows.map(shape), db);
+}
+
+export async function refundPreviewOf(request, db) {
+  try {
+    const preview = await previewCredit(
+      request.bill_id,
+      { lines: request.refund.lines, mode: request.refund.requested_mode },
+      db,
+    );
+    return { preview, preview_error: null };
+  } catch (error) {
+    if (!Number.isInteger(error?.status) || error.status >= 500) throw error;
+    return { preview: null, preview_error: error.message };
+  }
+}
+
+async function withRefundPreviews(requests, db) {
+  const shown = [];
+  for (const request of requests) {
+    if (request?.kind !== "refund" || request.status !== "pending") {
+      shown.push(request);
+      continue;
+    }
+    shown.push({
+      ...request,
+      refund: { ...request.refund, ...(await refundPreviewOf(request, db)) },
+    });
+  }
+  return shown;
 }
 
 export async function listPendingRequests(db = pool) {
@@ -233,19 +288,21 @@ export async function listMyRequests(filters = {}, ctx, db = pool) {
   );
 }
 
-export async function announceUsed(requestId, db = pool) {
+export async function announceRequest(action, requestId, db = pool) {
   if (!requestId || joinedToCaller(db)) return;
   try {
-    announce("used", await getRequest(requestId, db), db);
+    announce(action, await getRequest(requestId, db), db);
   } catch (e) {
-    console.warn("[billing requests] live update not sent:", "used", requestId, e?.message);
+    console.warn("[billing requests] live update not sent:", action, requestId, e?.message);
   }
 }
+
+export const announceUsed = (requestId, db = pool) => announceRequest("used", requestId, db);
 
 export async function getRequest(id, db = pool) {
   const { rows } = await db.query(`${LIST_SQL} WHERE r.id = $1`, [cleanUuid(id, "request")]);
   if (!rows.length) throw httpError(404, "That request no longer exists");
-  return shape(rows[0]);
+  return (await withRefundPreviews([shape(rows[0])], db))[0];
 }
 
 async function readVisit(client, visitId) {
@@ -444,13 +501,31 @@ async function refundWaiting(client, billId) {
 }
 
 const refundWaitingError = (bill) =>
-  httpError(409, `A refund on ${billLabel(bill)} is already waiting for an admin's answer`);
+  httpError(409, `A refund on ${billLabel(bill)} is already waiting for an admin's answer`, {
+    code: "refund_waiting",
+  });
+
+export function cleanRefundReason(input) {
+  const code = typeof input?.reason_code === "string" ? input.reason_code.trim() : "";
+  if (!code) throw httpError(400, "Choose why the money is going back");
+  if (!REFUND_REASON_VALUES.includes(code)) {
+    throw httpError(
+      400,
+      `The reason must be one of: ${REFUND_REASONS.map((r) => r.label).join(", ")}`,
+    );
+  }
+  const note = cleanText(input?.note ?? input?.reason, "The note", { required: false });
+  if (code === NOTE_REQUIRED_REFUND_REASON && !note) {
+    throw httpError(400, "Write the reason when you choose Other");
+  }
+  return { code, note, reason: refundReasonText(code, note) };
+}
 
 export async function createRefundRequest(input, ctx, db = pool) {
   refusePrice(input);
   const actorId = actorOf(ctx, "ask for a refund");
   const billId = cleanUuid(input?.bill_id, "bill");
-  const reason = cleanReason(input?.reason);
+  const { code: reasonCode, reason } = cleanRefundReason(input);
   const requestedMode = cleanRefundMode(input?.requested_mode);
   const request = await inTransaction(async (client) => {
     const checked = await checkRefund(client, billId, input);
@@ -469,6 +544,7 @@ export async function createRefundRequest(input, ctx, db = pool) {
           refund_lines: JSON.stringify(checked.refund_lines),
           requested_mode: requestedMode,
           reason,
+          reason_code: reasonCode,
           requested_by: actorId,
         },
         ctx,
@@ -483,6 +559,148 @@ export async function createRefundRequest(input, ctx, db = pool) {
   }, db);
   announce("created", request, db);
   return request;
+}
+
+const REFUNDABLE_LINES_SQL = `
+  SELECT l.id, l.bill_id
+    FROM bill_lines l JOIN bills b ON b.id = l.bill_id
+   WHERE b.bill_type = 'invoice' AND b.status = 'final'
+     AND (l.id = ANY($1::uuid[])
+          OR (l.lab_order_id = $2::uuid AND ($3::int[] IS NULL OR l.service_item_id = ANY($3::int[]))))
+     AND l.quantity > COALESCE((SELECT SUM(x.quantity) FROM bill_lines x
+                                 WHERE x.credited_line_id = l.id), 0)
+   ORDER BY l.line_no, l.id`;
+
+export async function requestLineRefund(input, ctx, db = pool) {
+  const lineIds = Array.isArray(input?.line_ids)
+    ? input.line_ids.map((id) => cleanUuid(id, "line"))
+    : [];
+  const orderId = cleanOptionalUuid(input?.lab_order_id, "test order");
+  const itemIds = Array.isArray(input?.service_item_ids)
+    ? input.service_item_ids.map(cleanItemId)
+    : null;
+  if (!lineIds.length && !orderId) {
+    throw httpError(400, "Name the bill lines or the test order to refund");
+  }
+  const { rows } = await db.query(REFUNDABLE_LINES_SQL, [lineIds, orderId, itemIds]);
+  if (!rows.length) {
+    throw httpError(409, "Nothing on a final bill is left to refund for that", {
+      code: "nothing_to_refund",
+    });
+  }
+  const billIds = [...new Set(rows.map((row) => row.bill_id))];
+  if (billIds.length > 1) {
+    throw httpError(409, "Those lines are on different bills — ask for each bill's refund", {
+      code: "several_bills",
+      bill_id: billIds,
+    });
+  }
+  return createRefundRequest(
+    {
+      bill_id: billIds[0],
+      lines: rows.map((row) => ({ line_id: row.id })),
+      reason_code: input?.reason_code,
+      note: input?.note,
+      requested_mode: input?.requested_mode,
+    },
+    ctx,
+    db,
+  );
+}
+
+const rupeesText = (amount) =>
+  `₹${(amount / 100).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+
+function raisedMessage(billNo, preview) {
+  const { due } = preview.refund;
+  if (due > 0) {
+    return `Refund request raised for ${rupeesText(due)} on bill ${billNo} — waiting for admin approval`;
+  }
+  return `Refund request raised on bill ${billNo} — ${rupeesText(preview.totals.payable)} comes off what is still owed, waiting for admin approval`;
+}
+
+async function waitingOn(client, bill, lineIds) {
+  const { rows } = await client.query(
+    `SELECT id, refund_lines FROM billing_requests
+      WHERE kind = 'refund' AND status = 'pending' AND bill_id = $1
+      LIMIT 1`,
+    [bill.bill_id],
+  );
+  if (!rows.length) return null;
+  const asked = new Set((rows[0].refund_lines || []).map((line) => line.line_id));
+  const leftOut = lineIds.filter((id) => !asked.has(id));
+  const included = !leftOut.length;
+  return {
+    leftOut,
+    status: included ? "included" : "waiting",
+    request_id: rows[0].id,
+    bill_id: bill.bill_id,
+    bill_no: bill.bill_no,
+    message: included
+      ? `This test is already in the refund request waiting on bill ${bill.bill_no}`
+      : `A refund request on bill ${bill.bill_no} is already waiting — ask the admin to include this test`,
+  };
+}
+
+export async function refundCancelledTest({ lines, reasonCode, note }, ctx, client) {
+  const byBill = new Map();
+  for (const line of lines || []) {
+    const bill = byBill.get(line.bill_id) ?? { bill_id: line.bill_id, bill_no: line.bill_no };
+    bill.line_ids = [...(bill.line_ids ?? []), line.line_id];
+    byBill.set(line.bill_id, bill);
+  }
+  const outcomes = [];
+  const leftWaiting = async (waiting) => {
+    const { leftOut, ...outcome } = waiting;
+    for (const lineId of leftOut) {
+      await writeAudit(client, {
+        entity: "bill_lines",
+        entityId: lineId,
+        action: "update",
+        after: {
+          [FLOOR_CANCEL_WAITING]: waiting.request_id,
+          refund_reason_code: reasonCode,
+          refund_note: note ?? null,
+        },
+        ...auditFields(ctx),
+      });
+    }
+    outcomes.push(outcome);
+  };
+  for (const bill of byBill.values()) {
+    const waiting = await waitingOn(client, bill, bill.line_ids);
+    if (waiting) {
+      await leftWaiting(waiting);
+      continue;
+    }
+    let request;
+    try {
+      request = await requestLineRefund(
+        { line_ids: bill.line_ids, reason_code: reasonCode, note },
+        ctx,
+        client,
+      );
+    } catch (error) {
+      if (error.code !== "refund_waiting") throw error;
+      await leftWaiting(await waitingOn(client, bill, bill.line_ids));
+      continue;
+    }
+    const preview = await previewCredit(
+      request.bill_id,
+      { lines: request.refund.lines, mode: request.refund.requested_mode },
+      client,
+    );
+    outcomes.push({
+      status: "raised",
+      request_id: request.id,
+      bill_id: request.bill_id,
+      bill_no: request.bill_no,
+      amount: preview.totals.payable,
+      due: preview.refund.due,
+      message: raisedMessage(request.bill_no, preview),
+    });
+  }
+  return outcomes;
 }
 
 function cleanModeChange(before, input) {
@@ -597,7 +815,8 @@ export async function approveRequest(id, input, ctx, db = pool) {
     return after;
   }, db);
   announce("approved", request, db);
-  return request;
+  if (request.kind !== "refund" || joinedToCaller(db)) return request;
+  return { ...request, visit_left: await endVisitAfterRefund(request, { ...ctx, actorId }, db) };
 }
 
 export async function rejectRequest(id, input, ctx, db = pool) {

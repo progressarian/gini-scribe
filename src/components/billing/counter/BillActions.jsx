@@ -13,11 +13,13 @@ import {
 import { errorOf } from "../format";
 import { claimBadgeText } from "./lineText";
 import { finaliseBlockers } from "./finaliseChecks";
+import RefundDialog from "./RefundDialog";
 
 export default function BillActions({
   bill,
   onBill,
   onDeleted,
+  onRefunded,
   schemes,
   payLater,
   needsCategory,
@@ -32,6 +34,9 @@ export default function BillActions({
   const [error, setError] = useState(null);
   const [deleting, setDeleting] = useState(null);
   const [note, setNote] = useState(null);
+  const [refunding, setRefunding] = useState(false);
+  const credited = (bill.credits?.notes?.length ?? 0) > 0;
+  const refundWaiting = bill.credits?.request?.status === "pending";
   const cancelling = form.value.cancelReason !== null && bill.status === "final";
   const reason = form.value.cancelReason ?? "";
   const setReason = (next) => form.set("cancelReason", next);
@@ -180,7 +185,21 @@ export default function BillActions({
           </a>
         )}
 
-        {bill.status === "final" && bill.totals.paid === 0 && (
+        {bill.status === "final" && bill.bill_type === "invoice" && !refundWaiting && (
+          <button
+            type="button"
+            className="st-btn st-btn-g"
+            onClick={() => {
+              setError(null);
+              setNote(null);
+              setRefunding(true);
+            }}
+          >
+            Refund…
+          </button>
+        )}
+
+        {bill.status === "final" && bill.totals.paid === 0 && !credited && (
           <button
             type="button"
             className="st-btn st-btn-red"
@@ -204,6 +223,18 @@ export default function BillActions({
 
       {note && <div className="bc-note">{note}</div>}
       {error && <div className="bc-err">{error}</div>}
+
+      {refunding && (
+        <RefundDialog
+          bill={bill}
+          onClose={() => setRefunding(false)}
+          onSent={() => {
+            setRefunding(false);
+            setNote("Refund requested — waiting for admin.");
+            onRefunded?.();
+          }}
+        />
+      )}
 
       <ConfirmModal
         open={cancelling}

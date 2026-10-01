@@ -331,6 +331,7 @@ test.describe.serial("P4C-20 delete a draft bill at the counter", () => {
     const draft = await openDraft(visits.C20Earlier.visit);
     expect(draft.id).not.toBe(final.id);
     await bills.addLine(draft.id, { item_id: ids.dressing }, desk, db);
+    await bills.saveDraft(draft.id, desk, db);
     let row = await counterRow("C20Earlier");
     expect(row.group).toBe("toBill");
 
@@ -360,7 +361,7 @@ test.describe.serial("P4C-20 delete a draft bill at the counter", () => {
     expect(await billExists(draft.id)).toBe(true);
   });
 
-  test("9. the counter: Delete draft asks with an optional reason, then shows a fresh empty draft", async ({
+  test("9. the counter: Delete draft asks with an optional reason, then closes the patient", async ({
     page,
   }) => {
     const draft = await openDraft(visits.C20Ui.visit);
@@ -388,16 +389,12 @@ test.describe.serial("P4C-20 delete a draft bill at the counter", () => {
       .fill("Opened on the wrong visit");
     await dialog(page).getByRole("button", { name: "Delete draft" }).click();
     await expect(dialog(page)).toHaveCount(0);
-    await expect(billLines(page)).toContainText("Nothing on this bill yet.");
+    await expect(page.getByText("Pick a patient from the list to open their bill.")).toBeVisible();
     await expect.poll(() => billExists(draft.id)).toBe(false);
     const [billAudit] = await auditOf("bills", [draft.id]);
     expect(billAudit.after.reason).toBe("Opened on the wrong visit");
-    const fresh = await one(`SELECT id FROM bills WHERE visit_id = $1 AND status = 'draft'`, [
-      visits.C20Ui.visit,
-    ]);
-    expect(fresh.id).not.toBe(draft.id);
     expect(await page.evaluate((key) => localStorage.getItem(key), formKey)).toBeNull();
-    await expect(page).toHaveURL(new RegExp(`visit=${visits.C20Ui.visit}`));
+    await expect(page).not.toHaveURL(new RegExp(`visit=${visits.C20Ui.visit}`));
     await expect(page).not.toHaveURL(new RegExp(draft.id));
   });
 
@@ -454,7 +451,7 @@ test.describe.serial("P4C-20 delete a draft bill at the counter", () => {
     expect(box.x).toBeGreaterThanOrEqual(0);
     expect(box.x + box.width).toBeLessThanOrEqual(390);
     await dialog(page).getByRole("button", { name: "Delete draft" }).click();
-    await expect(billLines(page)).toContainText("Nothing on this bill yet.");
+    await expect.poll(() => billExists(draft.id)).toBe(false);
     expect(await sideways()).toBeLessThanOrEqual(1);
   });
 });

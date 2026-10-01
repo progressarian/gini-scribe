@@ -58,6 +58,7 @@ const formOf = (rule) => ({
   priority: text(rule?.priority),
   stackable: rule?.stackable ?? false,
   applies_on_scheme_rate: rule?.applies_on_scheme_rate ?? false,
+  requires_all_items: rule?.requires_all_items ?? false,
   allowed_roles: rule?.allowed_roles ?? [],
 });
 
@@ -89,6 +90,7 @@ const payloadOf = (form) => {
     priority: form.priority.trim(),
     stackable: form.stackable,
     applies_on_scheme_rate: form.applies_on_scheme_rate,
+    requires_all_items: form.requires_all_items,
     allowed_roles: byCode
       ? listOrNull(BILLING_ROLES.filter((r) => form.allowed_roles.includes(r)))
       : null,
@@ -198,7 +200,12 @@ export default function DiscountForm({ rule, onClose }) {
     setForm((f) => ({
       ...f,
       [key]: value,
-      ...(key === "kind" && value === "fixed_price" ? { applies_per: "line" } : {}),
+      ...(key === "kind" && value === "fixed_price" && !f.requires_all_items
+        ? { applies_per: "line" }
+        : {}),
+      ...(key === "requires_all_items" && value
+        ? { method: "auto", applies_per: "bill", group_ids: [], subgroup_ids: [] }
+        : {}),
     }));
   };
   const set = (key) => (e) =>
@@ -405,7 +412,10 @@ export default function DiscountForm({ rule, onClose }) {
                   onChange={set("applies_per")}
                 >
                   <option value="line">Each line</option>
-                  <option value="bill" disabled={form.kind === "fixed_price"}>
+                  <option
+                    value="bill"
+                    disabled={form.kind === "fixed_price" && !form.requires_all_items}
+                  >
                     The whole bill
                   </option>
                 </select>
@@ -420,6 +430,15 @@ export default function DiscountForm({ rule, onClose }) {
                 ? "On the whole bill it comes off the total of the lines it covers. Nothing chosen means every line."
                 : "Nothing chosen means every service."}
             </p>
+            <label className="fset__check">
+              <input
+                type="checkbox"
+                checked={form.requires_all_items}
+                onChange={set("requires_all_items")}
+              />
+              Package: only when every chosen item is on the bill (with a fixed price, the chosen
+              items together cost that amount)
+            </label>
             <Checks
               legend="Groups and subgroups"
               options={groupOptions}

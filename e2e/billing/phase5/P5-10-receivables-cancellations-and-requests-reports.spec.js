@@ -71,7 +71,12 @@ test.describe.serial("P5-10 receivables, coupons, cancellations and requests rep
     const final = await bills.finaliseBill(opened.id, { version: taken.version }, mine, db);
     const brace = final.lines.find((line) => line.service_item_id === ids.brace);
     const asked = await requests.createRefundRequest(
-      { bill_id: final.id, lines: [{ line_id: brace.id }], reason: "Brace returned" },
+      {
+        bill_id: final.id,
+        lines: [{ line_id: brace.id }],
+        reason_code: "patient_declined",
+        reason: "Brace returned",
+      },
       desk,
       db,
     );

@@ -117,7 +117,18 @@ export async function removeAlias(itemId, aliasId, ctx, db = pool) {
   }, db);
 }
 
-const GENERIC_WORDS = new Set(["test", "total", "serum", "blood", "urine", "level", "levels"]);
+const GENERIC_WORDS = new Set([
+  "test",
+  "total",
+  "serum",
+  "blood",
+  "urine",
+  "level",
+  "levels",
+  "anti",
+  "antibody",
+  "antibodies",
+]);
 
 const wordsOf = (name) =>
   new Set(
@@ -133,6 +144,7 @@ function overlap(a, b) {
   const wb = wordsOf(b);
   if (!wa.size || !wb.size) return 0;
   const shared = [...wa].filter((word) => wb.has(word)).length;
+  if (shared < 2 && (shared < wb.size || shared * 2 < wa.size)) return 0;
   const covered = shared / Math.min(wa.size, wb.size);
   return covered < 0.5 ? 0 : covered + shared / Math.max(wa.size, wb.size) / 10;
 }

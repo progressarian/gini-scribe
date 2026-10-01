@@ -45,10 +45,13 @@ import {
   DUE_AGES,
   DUE_SORTS,
   PATIENT_PAYS,
+  REFUND_MODES,
   REMAINDERS,
   VISIT_TYPES,
   YES_NO,
 } from "../../shared/billingVocab.js";
+import { NOTE_REQUIRED_REFUND_REASON, REFUND_REASON_VALUES } from "../../shared/refundReasons.js";
+import { REFUND_LINES_MAX } from "../services/billing/creditNotes.js";
 import {
   BILLS_AT_ONCE as CLAIM_BILLS_AT_ONCE,
   FILTER_TEXT_MAX as CLAIM_FILTER_MAX,
@@ -606,6 +609,7 @@ const discountFields = {
   priority,
   stackable: flag,
   applies_on_scheme_rate: flag,
+  requires_all_items: flag,
   allowed_roles: z.union([
     z.array(z.enum(BILLING_ROLES, { message: `must be from: ${BILLING_ROLES.join(", ")}` })),
     z.null(),
@@ -768,6 +772,7 @@ export const BILLING_FIELD_LABELS = {
   applies_per: "Applies per",
   stackable: "Stackable",
   applies_on_scheme_rate: "Also on payment-rule lines",
+  requires_all_items: "Package",
   allowed_roles: "Roles",
   fee: "Fee",
   from_scheme_code: "Copy from",
@@ -905,7 +910,9 @@ const deskObject = (fields, message) => z.strictObject({ ...NO_PRICE, ...fields 
 
 export const billingDraftOpenSchema = deskObject({}, objectOnly("Send the request as an object"));
 
-const DESK_LINE_SOURCES = LINE_SOURCES.filter((source) => source !== "lab_case");
+const DESK_LINE_SOURCES = LINE_SOURCES.filter(
+  (source) => source !== "lab_case" && source !== "ordered",
+);
 
 export const billingLineAddSchema = deskObject(
   {
@@ -917,11 +924,30 @@ export const billingLineAddSchema = deskObject(
     lab_order_id: optionalUuid.optional(),
     doctor_id: z.union([id, z.null()]).optional(),
     repeat_request_id: optionalUuid.optional(),
+    agreed_rate: numberValue.optional(),
   },
   objectOnly("Send the line as an object, like { item_id: 12 }"),
 );
 
 export const billingLineQuantitySchema = deskObject({ quantity: count });
+
+export const billingLinePriceSchema = deskObject({
+  agreed_rate: numberValue,
+  reason: z.string().trim().min(1).max(BILL_TEXT_MAX),
+});
+
+export const orderedServiceAddSchema = z.strictObject({
+  item_id: id,
+  agreed_rate: numberValue.optional(),
+});
+
+export const orderedServiceRemoveSchema = z.strictObject({
+  reason: z.string().trim().min(1).max(BILL_TEXT_MAX),
+});
+
+export const orderedServiceChoicesQuerySchema = z.strictObject({
+  q: z.string().trim().max(100).optional(),
+});
 
 export const billingLineRemoveSchema = deskObject({
   reason: z.string().trim().max(BILL_TEXT_MAX).optional(),
@@ -1022,6 +1048,18 @@ export const billingDuesQuerySchema = z.strictObject({
   limit: count.optional(),
 });
 
+export const billingRefundBoardQuerySchema = z
+  .strictObject({
+    from: realDateText.optional(),
+    to: realDateText.optional(),
+    q: z.string().trim().max(100, "keep it under 100 letters").optional(),
+    limit: count.optional(),
+  })
+  .refine(
+    (query) => !(query.from && query.to && query.from > query.to),
+    "the start date is after the end date",
+  );
+
 export const billingReceiptQuerySchema = z
   .strictObject({
     payment_id: uuid.optional(),
@@ -1100,9 +1138,15 @@ export const billingRequestListQuerySchema = z.strictObject({
   limit: count.optional(),
 });
 
+const refundMode = z.enum(REFUND_MODES, {
+  message: `must be one of: ${REFUND_MODES.join(", ")}`,
+});
+
 export const billingRequestApproveSchema = z.strictObject(
   {
     note: text(REQUEST_TEXT_MAX).optional(),
+    approved_mode: refundMode.optional(),
+    mode_reason: z.union([text(REQUEST_TEXT_MAX), z.null()]).optional(),
     item: z
       .strictObject({
         name: itemFields.name.optional(),
@@ -1128,6 +1172,84 @@ export const billingRequestRejectSchema = z.strictObject(
   { note: requestReason },
   objectOnly("Send the answer as an object"),
 );
+
+const refundQuantity = z.union([
+  z.number().positive("must be more than 0").max(999999.99).refine(twoDecimals, {
+    message: "can have at most 2 decimals",
+  }),
+  z
+    .string()
+    .trim()
+    .regex(MONEY_TEXT, { message: "must be a number like 1 or 0.5", abort: true })
+    .refine((v) => Number(v) > 0, "must be more than 0"),
+  z.null(),
+]);
+
+const refundLine = z.strictObject(
+  { line_id: uuid, quantity: refundQuantity.optional() },
+  objectOnly('must be a line, like { line_id: "…", quantity: 1 }'),
+);
+
+const refundChoice = {
+  bill_id: uuid,
+  whole_bill: z.literal(true, { message: "must be true, or leave it out" }).optional(),
+  lines: z
+    .array(refundLine, { error: "must be a list of lines" })
+    .min(1, "list is empty: choose the lines to refund, or the whole bill")
+    .max(REFUND_LINES_MAX, `can be at most ${REFUND_LINES_MAX} at once`)
+    .optional(),
+};
+
+const oneChoice = (body) => Boolean(body.whole_bill) !== Boolean(body.lines);
+const ONE_CHOICE = "choose the whole bill or the lines to refund, not both";
+
+export const billingRefundPreviewSchema = z
+  .strictObject(
+    { ...NO_PRICE_OR_AMOUNT, ...refundChoice, mode: refundMode.optional() },
+    objectOnly("Send the refund as an object"),
+  )
+  .refine(oneChoice, ONE_CHOICE);
+
+export const billingRefundRequestSchema = z
+  .strictObject(
+    {
+      ...NO_PRICE_OR_AMOUNT,
+      ...refundChoice,
+      reason_code: z.enum(REFUND_REASON_VALUES, {
+        error: (issue) =>
+          issue.input === undefined
+            ? "is required: choose why the money is going back"
+            : `must be one of: ${REFUND_REASON_VALUES.join(", ")}`,
+      }),
+      note: z.union([text(REQUEST_TEXT_MAX), z.null()]).optional(),
+      requested_mode: refundMode.optional(),
+    },
+    objectOnly("Send the refund request as an object"),
+  )
+  .refine(oneChoice, ONE_CHOICE)
+  .refine(
+    (body) => body.reason_code !== NOTE_REQUIRED_REFUND_REASON || Boolean(body.note?.trim()),
+    { message: "write the reason when you choose Other", path: ["note"] },
+  );
+
+export const billingPayOutSchema = z.strictObject(
+  {
+    version: whole,
+    payments: z
+      .array(takenPayment, { error: "must be a list of refunds" })
+      .min(1, "list is empty: enter the money being paid back")
+      .max(PAYMENTS_AT_ONCE, `can be at most ${PAYMENTS_AT_ONCE} at once`),
+    ...NO_PRICE,
+  },
+  objectOnly("Send the pay-out as an object"),
+);
+
+export const billingRefundReceiptQuerySchema = z.strictObject({
+  payment_id: uuid.optional(),
+  token: z.string().optional(),
+});
+
+export const billingPdfQuerySchema = z.strictObject({ token: z.string().optional() });
 
 export const BILLING_DESK_LABELS = {
   ...BILLING_FIELD_LABELS,
@@ -1162,6 +1284,14 @@ export const BILLING_DESK_LABELS = {
   to: "To",
   payment_id: "Payment",
   receipt_no: "Receipt number",
+  whole_bill: "Whole bill",
+  lines: "Lines",
+  line_id: "Line",
+  reason_code: "Reason",
+  requested_mode: "Refund mode",
+  approved_mode: "Refund mode",
+  mode_reason: "Why another mode",
+  mode: "Refund mode",
   item: "Item",
   price: "Price",
   rate: "Rate",

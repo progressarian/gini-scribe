@@ -15,8 +15,10 @@ import { sendMedicineCard } from "../msg91.js";
 import {
   BOARD_COLUMNS,
   STATUS_LABEL,
+  chainIndex,
   compareQueue,
   columnForStatus,
+  isChainStatus,
   slaKeyForStatus,
 } from "../../../shared/giniflowStatus.js";
 import { LAB_ONLY_DOCTOR, labOnlyHiddenPredicate } from "./labOnlyVisits.js";
@@ -695,7 +697,13 @@ export async function dispenseAll(visitId, { actorId = null, actorName = null } 
 // is what the medicine reports count.
 export async function endVisit(
   visitId,
-  { actorId = null, actorRole = "pharmacy", explained = false } = {},
+  {
+    actorId = null,
+    actorRole = "pharmacy",
+    explained = false,
+    onlyBefore = null,
+    meta = null,
+  } = {},
   db = pool,
 ) {
   const client = await db.connect();
@@ -714,6 +722,11 @@ export async function endVisit(
       // Two people closing the same patient is one statement, not an error.
       await client.query("COMMIT");
       return { visitId, currentStatus: from, unchanged: true };
+    }
+
+    if (onlyBefore && !(isChainStatus(from) && chainIndex(from) < chainIndex(onlyBefore))) {
+      await client.query("COMMIT");
+      return { visitId, currentStatus: from, unchanged: true, tooLate: true };
     }
 
     // The Rx desk's own button reads "Explained — patient leaving", so pressing it
@@ -756,6 +769,7 @@ export async function endVisit(
         source: "counter_end_visit",
         from,
         ...(explainedNow ? { explained: true } : {}),
+        ...meta,
       },
     });
 

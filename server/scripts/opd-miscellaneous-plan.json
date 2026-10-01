@@ -1,0 +1,219 @@
+[
+ {
+  "orig_sr": 2,
+  "name": "Ambulance Charges",
+  "price": 700,
+  "sub": "Admin & Charges",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 3,
+  "name": "Ambulance Charges - Gini Health to Sector 38A",
+  "price": 0,
+  "sub": "Admin & Charges",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 4,
+  "name": "Anterior Doppler Test",
+  "price": 1500,
+  "sub": "Imaging",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 5,
+  "name": "Blood Arrangement",
+  "price": 2500,
+  "sub": "Packages & Other",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 7,
+  "name": "Bone Scan",
+  "price": 5500,
+  "sub": "Imaging",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 8,
+  "name": "Cannula",
+  "price": 100,
+  "sub": "Consumables & Equipment",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 9,
+  "name": "Catheterization (Misc)",
+  "price": 0,
+  "sub": "Packages & Other",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 10,
+  "name": "Certificate",
+  "price": 0,
+  "sub": "Admin & Charges",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 11,
+  "name": "Collection Charges (Misc)",
+  "price": 0,
+  "sub": "Admin & Charges",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 12,
+  "name": "Consumables",
+  "price": 300,
+  "sub": "Consumables & Equipment",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 13,
+  "name": "Diet Package - 1 Month",
+  "price": 0,
+  "sub": "Packages & Other",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 14,
+  "name": "Electrical Muscle Stimulation/TENS",
+  "price": 0,
+  "sub": "Physiotherapy",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 18,
+  "name": "File Charges",
+  "price": 50,
+  "sub": "Admin & Charges",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 19,
+  "name": "Foley's Catheter",
+  "price": 750,
+  "sub": "Consumables & Equipment",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 20,
+  "name": "Gloves",
+  "price": 0,
+  "sub": "Consumables & Equipment",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 22,
+  "name": "Home Collection (Misc)",
+  "price": 1000,
+  "sub": "Admin & Charges",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 23,
+  "name": "Home Visit",
+  "price": 0,
+  "sub": "Admin & Charges",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 24,
+  "name": "Hot Pack",
+  "price": 0,
+  "sub": "Physiotherapy",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 25,
+  "name": "Infusion Pump",
+  "price": 0,
+  "sub": "Consumables & Equipment",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 26,
+  "name": "IPD Patient Dress",
+  "price": 1000,
+  "sub": "Admin & Charges",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 28,
+  "name": "Medical Certificate",
+  "price": 500,
+  "sub": "Admin & Charges",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 30,
+  "name": "Monitor Charges",
+  "price": 1000,
+  "sub": "Consumables & Equipment",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 31,
+  "name": "Nebulization (Misc)",
+  "price": 600,
+  "sub": "Packages & Other",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 32,
+  "name": "Oxygen",
+  "price": 0,
+  "sub": "Consumables & Equipment",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 38,
+  "name": "Physiotherapy Session",
+  "price": 1300,
+  "sub": "Physiotherapy",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 41,
+  "name": "Physiotherapy - 10 Days",
+  "price": 1300,
+  "sub": "Physiotherapy",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 43,
+  "name": "Plaster",
+  "price": 0,
+  "sub": "Consumables & Equipment",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 44,
+  "name": "Prime Cardiac Care",
+  "price": 0,
+  "sub": "Packages & Other",
+  "kind": "other"
+ },
+ {
+  "orig_sr": 45,
+  "name": "Ultrasonic Therapy",
+  "price": 0,
+  "sub": "Physiotherapy",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 46,
+  "name": "USG Whole Abdomen",
+  "price": 0,
+  "sub": "Imaging",
+  "kind": "procedure"
+ },
+ {
+  "orig_sr": 47,
+  "name": "Venous & Arterial Doppler Mapping Test",
+  "price": 0,
+  "sub": "Imaging",
+  "kind": "procedure"
+ }
+]

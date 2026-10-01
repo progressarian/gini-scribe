@@ -10,6 +10,7 @@ import { BILL_DEPARTMENT, BILL_DOCUMENT_TITLES } from "../../../shared/billingVo
 import { rupeesInWords } from "./amountInWords.js";
 import { getSettings } from "./billingSettings.js";
 import { readBill } from "./bills.js";
+import { readCreditNote } from "./creditNotes.js";
 import { httpError } from "./transaction.js";
 
 const RUPEES = new Intl.NumberFormat("en-IN", {
@@ -320,7 +321,9 @@ const VISIT_SQL = `
            WHERE b.id = $1) AS finalised_by_name,
          (SELECT COALESCE(SUM(p.amount), 0) FROM payments p
             LEFT JOIN bills c ON c.id = p.bill_id
-           WHERE p.direction = 'out' AND (p.bill_id = $1 OR c.original_bill_id = $1)) AS refunded`;
+           WHERE p.direction = 'out' AND (p.bill_id = $1 OR c.original_bill_id = $1)) AS refunded,
+         (SELECT r.reason FROM billing_requests r WHERE r.credit_note_id = $1) AS refund_reason,
+         (SELECT o.bill_date::text FROM bills o WHERE o.id = $3) AS original_bill_date`;
 
 export async function letterhead() {
   const [footer, logo] = await Promise.all([getPrescriptionFooter(), getPrescriptionLogo()]);
@@ -368,6 +371,8 @@ export async function billView(billId, db = pool) {
     consultant: visit.consultant ?? null,
     visit_type: visit.visit_type ?? null,
     original_bill_no: visit.original_bill_no ?? null,
+    original_bill_date: visit.original_bill_date ?? null,
+    refund_reason: visit.refund_reason ?? null,
     finalised_by_name: visit.finalised_by_name ?? null,
     refunded: Math.round(Number(visit.refunded ?? 0) * 100),
     hospital: marks.hospital,
@@ -398,6 +403,20 @@ const BANNER = {
   },
 };
 
+export function creditBannerHtml(view) {
+  if (!isCreditNote(view?.bill)) return "";
+  const against = [
+    `Credit note against bill ${view.original_bill_no || ""}`.trim(),
+    view.original_bill_date ? `dated ${numericDateText(view.original_bill_date)}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const reason = hasValue(view.refund_reason) ? `Reason: ${view.refund_reason}` : "";
+  return `<div class="bp-banner">${escapeHtml(against)}${
+    reason ? `<span class="bp-banner-note">${escapeHtml(reason)}</span>` : ""
+  }</div>`;
+}
+
 function bannerHtml(bill) {
   const banner = BANNER[bill.status];
   if (!banner) return "";
@@ -427,7 +446,7 @@ export function billHeaderIdentity(view, gst) {
   return { legalName: legal_name ?? null, gstin: gst ? (gstin ?? null) : null };
 }
 
-const isCreditNote = (bill) => bill?.bill_type === "credit_note";
+export const isCreditNote = (bill) => bill?.bill_type === "credit_note";
 
 function documentTitle(bill, gst) {
   if (isCreditNote(bill)) return BILL_DOCUMENT_TITLES.credit_note;
@@ -545,8 +564,28 @@ export const totalsTableHtml = (rows) =>
     )
     .join("")}</tbody></table>`;
 
+function creditTotalsHtml(view, gst) {
+  const { bill } = view;
+  const rows = [["Credited Amount (₹)", amountText(bill.totals.actual)]];
+  if (bill.totals.discount > 0) rows.push(["Discount (₹)", amountText(bill.totals.discount)]);
+  if (gst) rows.push(["Tax Reversed (₹)", amountText(bill.totals.tax)]);
+  if (bill.totals.round_off !== 0) {
+    rows.push(["Round Off (₹)", signedAmountText(bill.totals.round_off)]);
+  }
+  if (bill.totals.claim > 0) rows.push(["Claim Reduced (₹)", amountText(bill.totals.claim)]);
+  if (bill.totals.adjustment > 0) {
+    rows.push(["Hospital Adjustment (₹)", amountText(bill.totals.adjustment)]);
+  }
+  rows.push(
+    ["Credit Note Amount (₹)", amountText(bill.totals.payable)],
+    ["Refunded Amount(₹)", amountText(view.refunded ?? 0)],
+  );
+  return totalsTableHtml(rows);
+}
+
 function totalsHtml(view, gst) {
   const { bill } = view;
+  if (isCreditNote(bill)) return creditTotalsHtml(view, gst);
   const rows = [["Billed Amount (₹)", amountText(bill.totals.actual)]];
   if (bill.totals.discount > 0) rows.push(["Discount (₹)", amountText(bill.totals.discount)]);
   if (gst) rows.push(["Tax (₹)", amountText(bill.totals.tax)]);
@@ -587,6 +626,7 @@ export function buildBillHtml(view) {
   const body = `<div class="bp-page">
   ${headerHtml(view, billHeaderIdentity(view, gst))}
   ${titleHtml(documentTitle(bill, gst))}
+  ${creditBannerHtml(view)}
   ${bannerHtml(bill)}
   ${infoHtml(view)}
   ${itemsTableHtml(view, gst, closing)}
@@ -596,7 +636,13 @@ export function buildBillHtml(view) {
 
 export function buildBillFileName(bill, patient) {
   const number = bill?.bill_no || `draft-${String(bill?.id ?? "").slice(0, 8)}`;
-  return `Bill_${slug(number, "bill")}_${slug(patient?.name, "patient")}.pdf`;
+  const kind = isCreditNote(bill) ? "CreditNote" : "Bill";
+  return `${kind}_${slug(number, "bill")}_${slug(patient?.name, "patient")}.pdf`;
+}
+
+export async function generateCreditNotePdf(creditNoteId, ctx, db = pool) {
+  await readCreditNote(creditNoteId, db);
+  return generateBillPdf(creditNoteId, ctx, db);
 }
 
 export async function generateBillPdf(billId, ctx, db = pool) {

@@ -149,7 +149,12 @@ export async function seedReports(tag) {
 
   const brace = creditD.bill.lines.find((line) => line.service_item_id === ids.brace);
   const refund = await requests.createRefundRequest(
-    { bill_id: creditD.bill.id, lines: [{ line_id: brace.id }], reason: "Brace not needed" },
+    {
+      bill_id: creditD.bill.id,
+      lines: [{ line_id: brace.id }],
+      reason_code: "patient_declined",
+      reason: "Brace not needed",
+    },
     desk,
     db,
   );

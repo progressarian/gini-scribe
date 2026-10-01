@@ -1,7 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
 import api from "../../services/api";
-import useAuthStore from "../../stores/authStore";
-import { CAPABILITIES as CAP, hasCapability } from "../../../shared/permissions.js";
 import "../../styles/giniflow-station.css";
 
 // Every station a person can open, with what is waiting at each. The summary is
@@ -105,14 +103,6 @@ const STATIONS = [
     href: "/giniflow/station/pharmacy",
   },
   {
-    key: "billing",
-    icon: "🧾",
-    name: "Billing Counter",
-    desc: "Raise the bill · confirm the category · take payment · print",
-    href: "/giniflow/station/reception?tab=bill",
-    cap: CAP.BILLING_DESK,
-  },
-  {
     key: "referrals",
     icon: "↗",
     name: "Referrals",
@@ -136,11 +126,8 @@ export default function StationsLauncherPage() {
     placeholderData: (prev) => prev,
   });
 
-  const role = useAuthStore((st) => st.currentDoctor?.role);
   const stations = data?.stations || {};
-  const visible = STATIONS.filter((s) =>
-    s.cap ? hasCapability(role, s.cap) : stations[s.key] || !s.href,
-  );
+  const visible = STATIONS.filter((s) => stations[s.key] || !s.href);
   const today = new Date().toLocaleDateString("en-IN", {
     weekday: "short",
     day: "numeric",

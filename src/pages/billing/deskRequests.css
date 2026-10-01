@@ -59,6 +59,17 @@
   color: #6d28d9;
   background: #f5f3ff;
 }
+.fset.bill-ui .dreq__tag--refund {
+  color: #b45309;
+  background: #fffbeb;
+}
+.fset.bill-ui .dreq__lines {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ui-ink2);
+}
 .fset.bill-ui .dreq__answer--yes {
   color: #15803d;
   background: #edfcf0;

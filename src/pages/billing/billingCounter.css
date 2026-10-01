@@ -265,21 +265,21 @@ body.bc-resizing {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
   max-width: 1320px;
   margin: 0 auto;
-  padding: 16px 18px 28px;
+  padding: 12px 14px 20px;
 }
 .gf .bc-card {
   background: var(--white);
   border: 1px solid var(--bd);
-  border-radius: 10px;
+  border-radius: 8px;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-  padding: 14px 16px;
+  padding: 10px 12px;
 }
 .gf .bc-card__title {
-  margin: 0 0 10px;
-  font-size: 13.5px;
+  margin: 0 0 8px;
+  font-size: 12.5px;
   font-weight: 600;
   text-transform: none;
   letter-spacing: 0;
@@ -306,16 +306,16 @@ body.bc-resizing {
 }
 .gf .bc-bill {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  grid-template-columns: minmax(0, 1fr) minmax(290px, 340px);
   align-items: start;
-  gap: 14px;
+  gap: 10px;
 }
 .gf .bc-bill__work,
 .gf .bc-bill__summary {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
 }
 .gf .bc-bill__summary {
   position: sticky;
@@ -337,7 +337,7 @@ body.bc-resizing {
 }
 .gf .bc-head__name {
   margin: 0;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
 }
 .gf .bc-head__meta {
@@ -501,15 +501,15 @@ body.bc-resizing {
 .gf .bc-totals {
   min-width: 0;
   max-width: none;
-  font-size: 13px;
+  font-size: 12.5px;
 }
 .gf .bc-totals th,
 .gf .bc-totals td {
-  padding: 5px 0;
+  padding: 3px 0;
   border-bottom: 0;
 }
 .gf .bc-totals th {
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 500;
   text-align: left;
   text-transform: none;
@@ -523,7 +523,7 @@ body.bc-resizing {
 }
 .gf .bc-t--minor th,
 .gf .bc-t--minor td {
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--ink3);
 }
 .gf .bc-t--strong th,
@@ -895,10 +895,10 @@ body.bc-resizing {
 }
 .gf .bc-main .bc-field {
   flex: 1 1 200px;
-  gap: 6px;
+  gap: 4px;
 }
 .gf .bc-main .bc-field__lbl {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   text-transform: none;
   letter-spacing: 0;
@@ -907,12 +907,12 @@ body.bc-resizing {
 .gf .bc-main .bc-field__in {
   width: 100%;
   min-width: 0;
-  height: 36px;
-  padding: 0 10px;
-  font-size: 13px;
+  height: 32px;
+  padding: 0 9px;
+  font-size: 12.5px;
   color: var(--ink);
   border-color: var(--bd2);
-  border-radius: 8px;
+  border-radius: 6px;
 }
 .gf .bc-main textarea.bc-field__in {
   height: auto;
@@ -930,15 +930,15 @@ body.bc-resizing {
   gap: 10px;
 }
 .gf .bc-main .st-btn {
-  min-height: 36px;
-  padding: 0 14px;
-  font-size: 12.5px;
-  border-radius: 8px;
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 12px;
+  border-radius: 6px;
   justify-content: center;
 }
 .gf .bc-main .bc-qty {
-  width: 72px;
-  height: 32px;
+  width: 64px;
+  height: 28px;
   padding: 0 8px;
   font-size: 12.5px;
   border-radius: 7px;
@@ -979,16 +979,23 @@ body.bc-resizing {
 }
 
 .gf .bc-main .ltable {
-  font-size: 12.5px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 .gf .bc-main .ltable th {
-  padding: 7px 8px;
+  padding: 6px 8px;
   font-size: 10.5px;
   white-space: nowrap;
+  background: var(--bg);
 }
 .gf .bc-main .ltable td {
-  padding: 8px;
+  padding: 5px 8px;
   vertical-align: middle;
+}
+.gf .bc-main .ltable td .st-btn {
+  min-height: 26px;
+  padding: 0 9px;
+  font-size: 11.5px;
 }
 .gf .bc-main .ltable td.bc-cell-actions {
   width: 1%;
@@ -1187,4 +1194,94 @@ body > [role="dialog"][aria-modal="true"] .bc-field__in {
 body > [role="dialog"][aria-modal="true"] .bc-field__in:focus {
   outline: 2px solid #2563eb33;
   border-color: #2563eb;
+}
+body > [role="dialog"][aria-modal="true"] .bc-refund {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+body > [role="dialog"][aria-modal="true"] .bc-refund__set {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+body > [role="dialog"][aria-modal="true"] .bc-refund__set legend {
+  width: 100%;
+  margin-bottom: 4px;
+}
+body > [role="dialog"][aria-modal="true"] .bc-refund__choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: #0f172a;
+}
+body > [role="dialog"][aria-modal="true"] .bc-refund__lines {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+body > [role="dialog"][aria-modal="true"] .bc-refund__qty {
+  margin: 4px 0 0 24px;
+}
+body > [role="dialog"][aria-modal="true"] .bc-refund__preview {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #f1f5f9;
+  color: #0f172a;
+}
+body > [role="dialog"][aria-modal="true"] .bc-head__meta,
+body > [role="dialog"][aria-modal="true"] .bc-hint {
+  font-size: 12px;
+  color: #64748b;
+}
+body > [role="dialog"][aria-modal="true"] .bc-err {
+  font-size: 12px;
+  color: #b91c1c;
+}
+.gf .bc-refund__note {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 0;
+  border-top: 1px solid var(--bd2);
+  font-size: 12px;
+}
+.gf .bc-refund__credits {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 11px;
+}
+.gf .bc-refunds {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.gf .bc-refunds .bc-card__title .bc-group--toggle {
+  position: static;
+  padding: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink);
+  background: none;
+  border: 0;
+}
+.gf .bc-refunds .bc-cell-actions .st-btn + .st-btn {
+  margin-left: 6px;
+}
+@container (max-width: 620px) {
+  .gf .bc-refunds .bc-cell-actions .st-btn + .st-btn {
+    margin: 6px 0 0;
+  }
 }

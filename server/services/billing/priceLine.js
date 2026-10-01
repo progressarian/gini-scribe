@@ -55,7 +55,30 @@ const pick = (own, parent, base) =>
       ? { value: parent, source: "parent" }
       : { value: base, source: "base" };
 
-export async function lineActual({ item, quantity, category, date, kept } = {}, db = pool) {
+function cleanAgreedRate(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const rate = Number(value);
+  if (!Number.isFinite(rate) || rate < 0 || rate > MONEY_MAX) {
+    throw httpError(400, "The patient's price must be an amount of ₹0 or more");
+  }
+  return paise(rate);
+}
+
+function rateFor(row, agreed) {
+  const categoryRate = pick(
+    row.own_rate === null ? null : paise(row.own_rate),
+    row.parent_rate === null ? null : paise(row.parent_rate),
+    null,
+  );
+  if (categoryRate.value !== null) return categoryRate;
+  if (agreed !== null) return { value: agreed, source: "agreed" };
+  return { value: paise(row.base_price), source: "base" };
+}
+
+export async function lineActual(
+  { item, quantity, category, date, kept, agreedRate } = {},
+  db = pool,
+) {
   const itemId = cleanItem(item);
   const count = wholeNumber(quantity, "Quantity", { min: 1 }) ?? 1;
   const on = cleanDate(date, "Date") ?? indiaToday();
@@ -64,6 +87,7 @@ export async function lineActual({ item, quantity, category, date, kept } = {}, 
     `SELECT i.id, i.code, i.name, i.kind, i.subgroup_id, sg.group_id, sg.code AS subgroup_code,
             g.code AS group_code, i.doctor_id, i.visit_type,
             i.unit, i.allow_quantity, i.max_quantity, i.base_price, i.price_includes_tax,
+            i.price_per_patient,
             i.is_active, dr.name AS doctor_name, dr.is_active IS FALSE AS doctor_removed,
             t.id AS tax_id, t.code AS tax_code, t.sac_hsn AS tax_sac_hsn,
             t.rate_pct AS tax_rate_pct, t.is_active AS tax_active,
@@ -93,11 +117,7 @@ export async function lineActual({ item, quantity, category, date, kept } = {}, 
   }
   checkQuantity(row, count);
   if (code) await checkBillable(db, code);
-  const rate = pick(
-    row.own_rate === null ? null : paise(row.own_rate),
-    row.parent_rate === null ? null : paise(row.parent_rate),
-    paise(row.base_price),
-  );
+  const rate = rateFor(row, cleanAgreedRate(agreedRate));
   const billName = pick(row.own_bill_name, row.parent_bill_name, row.name);
   const billCode = pick(row.own_bill_code, row.parent_bill_code, null);
   const actual = count * rate.value;
@@ -122,6 +142,8 @@ export async function lineActual({ item, quantity, category, date, kept } = {}, 
     base_price: paise(row.base_price),
     rate: rate.value,
     rate_source: rate.source,
+    price_per_patient: row.price_per_patient,
+    price_missing: row.price_per_patient && rate.source === "base",
     bill_name: billName.value,
     bill_name_source: billName.source,
     bill_code: billCode.value,

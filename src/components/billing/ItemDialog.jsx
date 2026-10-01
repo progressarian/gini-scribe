@@ -32,8 +32,11 @@ const formOf = (item, subgroupId, prefill = {}) => ({
   doctor_id: text(item?.doctor_id),
   visit_type: text(item?.visit_type),
   test_catalog_id: text(item?.test_catalog_id),
+  price_per_patient: item?.price_per_patient ?? false,
   ...Object.fromEntries(Object.entries(prefill).map(([key, value]) => [key, text(value)])),
 });
+
+const FIXED_PRICE_KINDS = ["test", "consultation"];
 
 const payloadOf = (form) => {
   const consultation = form.kind === "consultation";
@@ -52,6 +55,7 @@ const payloadOf = (form) => {
     doctor_id: consultation && form.doctor_id ? Number(form.doctor_id) : null,
     visit_type: consultation ? form.visit_type || null : null,
     test_catalog_id: form.kind === "test" ? form.test_catalog_id || null : null,
+    price_per_patient: FIXED_PRICE_KINDS.includes(form.kind) ? false : form.price_per_patient,
   };
 };
 
@@ -299,6 +303,16 @@ export default function ItemDialog({
                 Price includes tax
               </label>
             ) : null}
+            {FIXED_PRICE_KINDS.includes(form.kind) ? null : (
+              <label className="fset__check">
+                <input
+                  type="checkbox"
+                  checked={form.price_per_patient}
+                  onChange={set("price_per_patient")}
+                />
+                Price decided per patient (whoever adds it for a patient enters the price)
+              </label>
+            )}
           </div>
 
           {form.kind === "consultation" ? (

@@ -123,6 +123,10 @@ export default function TotalsAndPayment({ bill, onBill, schemes, payLater, onPa
           {total("Round-off", bill.totals.round_off, "round", "minor")}
           {total("Patient payable", bill.totals.payable, "payable", "strong")}
           {total("Paid", bill.totals.paid, "paid", "minor")}
+          {bill.credits?.credited > 0 &&
+            total("Credited", bill.credits.credited, "credited", "minor")}
+          {bill.credits?.refunded > 0 &&
+            total("Refunded", bill.credits.refunded, "refunded", "minor")}
           {total("Balance", balance, "balance", balance > 0 ? "due" : "clear")}
         </tbody>
       </table>

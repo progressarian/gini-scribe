@@ -698,8 +698,9 @@ function SeriesCard() {
         <h2 className="flow-sec-title">Number series</h2>
       </div>
       <div className="fset__cardsub">
-        Bill and receipt numbers start again each financial year (April–March). The next number can
-        only go up, so a number is never used twice.
+        Bill, receipt and credit note numbers start again each financial year (April–March). Set up
+        all three before the year starts — a refund can't be approved without a credit note series.
+        The next number can only go up, so a number is never used twice.
       </div>
       <div className="bill-form bill-set__fy">
         <div className="fset__field fset__field--narrow bill-rates__asof">

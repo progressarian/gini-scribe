@@ -57,6 +57,7 @@ const COLUMNS = [
   "priority",
   "stackable",
   "applies_on_scheme_rate",
+  "requires_all_items",
   "allowed_roles",
   "is_active",
   "created_at",
@@ -187,6 +188,7 @@ const CLEANERS = {
   stackable: (v) => (v === undefined || v === null ? false : cleanFlag(v, "Stackable")),
   applies_on_scheme_rate: (v) =>
     v === undefined || v === null ? false : cleanFlag(v, "Also on payment-rule lines"),
+  requires_all_items: (v) => (v === undefined || v === null ? false : cleanFlag(v, "Package")),
   allowed_roles: cleanRoles,
 };
 const EDITABLE = Object.keys(CLEANERS);
@@ -209,6 +211,28 @@ function moneyProblem(value, label) {
   if (value < 0) return `${label} can't be negative`;
   if (value > MONEY_MAX) return `${label} is too large (at most ${MONEY_MAX})`;
   if (Number(value.toFixed(2)) !== value) return `${label} can have at most 2 decimals (paise)`;
+  return null;
+}
+
+function packageProblem(rule) {
+  if (rule.method !== "auto") {
+    return { field: "method", message: "A package applies by itself, so it must be automatic" };
+  }
+  if (rule.applies_per !== "bill") {
+    return {
+      field: "applies_per",
+      message: "A package prices several lines together, so it applies to the whole bill",
+    };
+  }
+  if ((rule.service_item_ids ?? []).length < 2) {
+    return { field: "service_item_ids", message: "Choose at least two items for a package" };
+  }
+  if (rule.group_ids || rule.subgroup_ids) {
+    return {
+      field: "service_item_ids",
+      message: "A package is made of items; leave groups and subgroups empty",
+    };
+  }
   return null;
 }
 
@@ -263,7 +287,10 @@ export function discountShapeProblem(rule) {
       );
     }
   }
-  if (rule.kind === "fixed_price" && rule.applies_per === "bill") {
+  if (rule.requires_all_items) {
+    const packaged = packageProblem(rule);
+    if (packaged) return problem(packaged.field, packaged.message);
+  } else if (rule.kind === "fixed_price" && rule.applies_per === "bill") {
     return problem(
       "applies_per",
       "A fixed price sets the price of each line, so it can't apply to the whole bill",

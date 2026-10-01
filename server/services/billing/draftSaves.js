@@ -6,8 +6,8 @@ export async function draftSnapshot(client, billId) {
     [billId],
   );
   const { rows: lines } = await client.query(
-    `SELECT service_item_id, quantity, source, lab_order_id, doctor_id
-       FROM bill_lines WHERE bill_id = $1 AND is_live
+    `SELECT service_item_id, quantity, source, lab_order_id, doctor_id, agreed_rate, agreed_by
+       FROM bill_lines WHERE bill_id = $1 AND is_live AND source <> 'ordered'
       ORDER BY line_no, created_at, id`,
     [billId],
   );
@@ -21,7 +21,11 @@ export async function draftSnapshot(client, billId) {
   return {
     header: bills[0],
     codes: codes.map((row) => row.code),
-    lines: lines.map((line) => ({ ...line, quantity: Number(line.quantity) })),
+    lines: lines.map((line) => ({
+      ...line,
+      quantity: Number(line.quantity),
+      agreed_rate: line.agreed_rate === null ? null : Number(line.agreed_rate),
+    })),
   };
 }
 

@@ -49,8 +49,13 @@ export default function DuesList({ onTakePayment }) {
                   </td>
                   <td data-label="Date">{row.bill_date}</td>
                   <td data-label="Waiting">{dueAgeText(row.days)}</td>
-                  <td data-label="Patient pays">{fromPaise(row.payable)}</td>
-                  <td data-label="Paid">{fromPaise(row.paid)}</td>
+                  <td data-label="Patient pays">
+                    {fromPaise(Math.max(0, row.payable - row.credited))}
+                    {row.credited > 0 && (
+                      <span className="bc-head__meta"> · {fromPaise(row.credited)} credited</span>
+                    )}
+                  </td>
+                  <td data-label="Paid">{fromPaise(row.paid - row.refunded)}</td>
                   <td data-label="Outstanding">{fromPaise(row.outstanding)}</td>
                   <td data-label="" className="bc-cell-actions">
                     <button

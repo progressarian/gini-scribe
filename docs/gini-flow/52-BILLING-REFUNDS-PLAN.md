@@ -109,3 +109,26 @@ credited.
 | P4B-11 | Desk requests inbox: refund requests                                                                     |
 | P4B-12 | Dues list and bill views show credits and refunds                                                        |
 | P4B-13 | Smoke script, full suite, plan status                                                                    |
+
+## As built (2026-09-30)
+
+Phase 4b is built as planned, with these differences and additions:
+
+- **The `CN` series is not seeded.** The migration adds no `bill_series` row. An
+  admin sets up "Credit notes" for each financial year in Billing settings →
+  Number series, like Bills and Receipts. Until then an approval is refused with
+  "The credit note number series (CN) for 2026-27 isn't set up yet …" and the
+  request stays pending.
+- **Split refunds** go back newest payment first, and each earlier pay-out is
+  taken from its own mode first — so the desk may pay the card share before the
+  cash share and still see the right amount left in each mode.
+- **Refund reasons** are a fixed list (long wait, doctor cancelled, machine or
+  station not available, patient declined, billed by mistake, other) — P4B-14.
+- **A floor cancel of a paid test raises the refund request itself** (P4B-15).
+  When a refund is already waiting on that bill, the test is still cancelled and
+  the bill's Refunds card lists it under "Cancelled on the floor — not refunded
+  yet", with a one-click "Refund these…" once the waiting request is answered.
+- **A long-wait or declined consultation refund ends the visit** when the doctor
+  hasn't started (`with_doctor` or later counts as seen) — P4B-16.
+- **Reports:** revenue and collections already net off credit notes and
+  pay-outs (Phase 5).

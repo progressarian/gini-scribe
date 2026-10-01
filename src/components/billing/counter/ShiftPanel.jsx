@@ -115,6 +115,9 @@ export default function ShiftPanel() {
           <div className="bc-hint">
             Open since {clock(shift.opened_at)} · {shift.payment_count} payments on{" "}
             {shift.bill_count} bills
+            {shift.refund_count > 0
+              ? ` · ${shift.refund_count} refund${shift.refund_count === 1 ? "" : "s"} paid out`
+              : ""}
           </div>
           <table className="ltable bc-totals" aria-label="Drawer">
             <tbody>
@@ -122,6 +125,12 @@ export default function ShiftPanel() {
               {Object.entries(PAYMENT_MODE_LABEL).map(([mode, label]) =>
                 figure(`${label} collected`, shift.collected[mode], mode),
               )}
+              {figure("Cash paid back", shift.refunded?.cash ?? 0, "refunded-cash")}
+              {Object.entries(PAYMENT_MODE_LABEL)
+                .filter(([mode]) => mode !== "cash" && (shift.refunded?.[mode] ?? 0) > 0)
+                .map(([mode, label]) =>
+                  figure(`${label} paid back`, shift.refunded[mode], `refunded-${mode}`),
+                )}
               {figure("Expected in the drawer", shift.expected_cash, "expected")}
             </tbody>
           </table>

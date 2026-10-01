@@ -81,6 +81,7 @@ export async function askRefund(billId, lines, extra = {}) {
     {
       bill_id: billId,
       ...(lines === "whole" ? { whole_bill: true } : { lines }),
+      reason_code: "patient_declined",
       reason: "The patient asked for the money back",
       ...extra,
     },

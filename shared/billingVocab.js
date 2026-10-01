@@ -56,4 +56,5 @@ export const BILL_DOCUMENT_TITLES = {
   tax_invoice: "TAX INVOICE",
   credit_note: "CREDIT NOTE",
   receipt: "PAYMENT RECEIPT",
+  refund_receipt: "REFUND RECEIPT",
 };

@@ -445,9 +445,19 @@ test.describe.serial("P4C-07 lock order and the partial floor cancel", () => {
     await payOnBill(billed.billId, 650);
     await finalise(billed.billId);
     const refusal = await failure(
-      cancelOnFloor(billed.order, db, await testIdOf(billed.order, ids.abiName)),
+      testCancel.cancelTest(
+        {
+          target: { orderId: billed.order, testId: await testIdOf(billed.order, ids.abiName) },
+          reason: "patient_declined",
+          source: "station",
+          actorId: null,
+          actorRole: "reception",
+        },
+        db,
+      ),
     );
-    expect(refusal?.status).toBe(409);
+    expect(refusal?.status).toBe(401);
     expect(await money(billed.order)).toMatchObject({ status: "paid", total: 650, paid: 650 });
+    expect(await liveLinesOf(billed.order)).toHaveLength(2);
   });
 });
