@@ -9,6 +9,7 @@ import {
   openDraftIn,
   PAID_AT_RECEPTION_REASON,
   repriceBillIn,
+  swapAutoConsultationIn,
 } from "./bills.js";
 import { addsConsultation, getSettings } from "./billingSettings.js";
 import { linkLine, SETTLED_AT_RECEPTION } from "./orderLinks.js";
@@ -68,7 +69,11 @@ async function visitFor(client, visitId) {
   const { rows } = await client.query(
     `SELECT v.id, v.patient_id, v.appointment_id, v.assigned_doctor_id,
             v.visit_date::text AS visit_date,
-            a.visit_type, a.doctor_id AS appointment_doctor_id
+            a.visit_type,
+            COALESCE(a.doctor_id,
+                     (SELECT d.id FROM doctors d
+                       WHERE lower(btrim(d.name)) = lower(btrim(a.doctor_name))
+                       ORDER BY d.is_active IS NOT FALSE DESC, d.id LIMIT 1)) AS appointment_doctor_id
        FROM giniflow_visits v
        LEFT JOIN appointments a ON a.id = v.appointment_id
       WHERE v.id = $1`,
@@ -109,7 +114,8 @@ export async function draftAtCheckIn(visitId, ctx, db = pool) {
     return await inTransaction(async (client) => {
       const visit = await visitFor(client, visitId);
       await holdConsultation(client, visit.id);
-      const automatic = await addsConsultation(client);
+      const automatic =
+        (await addsConsultation(client)) && (await healthrayBilledConsultation(client, visit));
       const settled = automatic && (await consultationSettled(client, visit.id));
       const bill = await openDraftIn(client, visitId, ctx);
       const item = automatic ? await consultationItem(client, visit) : null;
@@ -177,6 +183,14 @@ export async function consultationForDesk(visitId, ctx, db = pool) {
       await holdConsultation(client, visit.id);
       const item = await consultationItem(client, visit);
       if (item?.removed) return { ok: true, added: [], removed_doctor: item.removed };
+      if (item?.doctor_id) {
+        const swapped = await swapAutoConsultationIn(client, visit.id, item, ctx);
+        if (swapped)
+          return { ok: true, bill_id: swapped.bill.id, added: [item.name], replaced: true };
+      }
+      if (!(await healthrayBilledConsultation(client, visit))) {
+        return { ok: true, added: [], waiting_for_healthray: true };
+      }
       if (
         !item ||
         (await consultationSettled(client, visit.id)) ||

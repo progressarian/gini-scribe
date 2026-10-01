@@ -91,9 +91,8 @@ const DuesRegisterPage = lazyWithRetry(() => import("./pages/billing/DuesRegiste
 const TestCatalogPage = lazyWithRetry(() => import("./pages/TestCatalogPage"));
 const SettingsLayout = lazyWithRetry(() => import("./pages/SettingsLayout"));
 const MedicineCollectionPage = lazyWithRetry(() => import("./pages/MedicineCollectionPage"));
-const FlowCheckinPage = lazyWithRetry(() => import("./pages/flow/FlowCheckinPage"));
-const FlowCoordinatorPage = lazyWithRetry(() => import("./pages/flow/FlowCoordinatorPage"));
 const GiniFlowManagerPage = lazyWithRetry(() => import("./pages/giniflow/FlowManagerPage"));
+const GiniFlowReportsPage = lazyWithRetry(() => import("./pages/giniflow/FlowReportsPage"));
 const GiniFlowStationsPage = lazyWithRetry(() => import("./pages/giniflow/StationsLauncherPage"));
 const GiniFlowTriagePage = lazyWithRetry(() => import("./pages/giniflow/TriageBoardPage"));
 const GiniFlowVitalsPage = lazyWithRetry(() => import("./pages/giniflow/VitalsStationPage"));
@@ -116,9 +115,7 @@ const GiniFlowRxPage = lazyWithRetry(() => import("./pages/giniflow/RxStationPag
 const GiniFlowReferralsPage = lazyWithRetry(() => import("./pages/giniflow/ReferralsStationPage"));
 const FlowMyPatientsPage = lazyWithRetry(() => import("./pages/flow/FlowMyPatientsPage"));
 const FlowConsultantsPage = lazyWithRetry(() => import("./pages/flow/FlowConsultantsPage"));
-const FlowStationPage = lazyWithRetry(() => import("./pages/flow/FlowStationPage"));
 const PatientJourneyPage = lazyWithRetry(() => import("./pages/PatientJourneyPage"));
-const FlowReportsPage = lazyWithRetry(() => import("./pages/flow/FlowReportsPage"));
 const FlowAdminPage = lazyWithRetry(() => import("./pages/flow/FlowAdminPage"));
 const RouteFallback = () => (
   <div
@@ -250,10 +247,14 @@ const router = createBrowserRouter([
                 element: <Navigate to="/settings/tests" replace />,
               },
               { path: "/medicine-collection", element: lazyEl(MedicineCollectionPage) },
-              { path: "/flow/checkin", element: lazyEl(FlowCheckinPage) },
-              { path: "/flow/coordinator", element: lazyEl(FlowCoordinatorPage) },
+              {
+                path: "/flow/checkin",
+                element: <Navigate to="/giniflow/station/reception" replace />,
+              },
+              { path: "/flow/coordinator", element: <Navigate to="/giniflow/manager" replace /> },
               { path: "/giniflow/stations", element: lazyEl(GiniFlowStationsPage) },
               { path: "/giniflow/manager", element: lazyEl(GiniFlowManagerPage) },
+              { path: "/giniflow/reports", element: lazyEl(GiniFlowReportsPage) },
               { path: "/giniflow/triage", element: lazyEl(GiniFlowTriagePage) },
               { path: "/giniflow/station/vitals", element: lazyEl(GiniFlowVitalsPage) },
               { path: "/giniflow/station/reception", element: lazyEl(GiniFlowReceptionPage) },
@@ -289,9 +290,15 @@ const router = createBrowserRouter([
               { path: "/crm/import", element: lazyEl(DoctorImportPage) },
               { path: "/flow/my-patients", element: lazyEl(FlowMyPatientsPage) },
               { path: "/flow/consultants", element: lazyEl(FlowConsultantsPage) },
-              { path: "/flow/station", element: lazyEl(FlowStationPage) },
-              { path: "/flow/station/:role", element: lazyEl(FlowStationPage) },
-              { path: "/flow/reports", element: lazyEl(FlowReportsPage) },
+              { path: "/flow/station", element: <Navigate to="/giniflow/stations" replace /> },
+              {
+                path: "/flow/station/vitals",
+                element: <Navigate to="/giniflow/station/vitals" replace />,
+              },
+              {
+                path: "/flow/station/:role",
+                element: <Navigate to="/giniflow/stations" replace />,
+              },
               { path: "/flow/admin", element: <Navigate to="/settings/flow" replace /> },
             ],
           },

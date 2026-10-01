@@ -500,6 +500,15 @@ export function fetchAppointments(doctorId, date, page = 1, perPage = 100) {
   );
 }
 
+export async function fetchPatientList({ search = "", page = 1, perPage = 25 } = {}) {
+  if (!orgDoctorId) await loadPersistedState();
+  if (!orgDoctorId) await healthrayLogin();
+  const query = search ? `&search=${encodeURIComponent(search)}` : "";
+  return healthrayFetch(
+    `/doctor/walkin_patient_list?organization_id=${ORG_ID}&is_data=1&id=${orgDoctorId}&page=${page}&per_page=${perPage}${query}`,
+  );
+}
+
 export function fetchClinicalNotes(appointmentId, doctorId) {
   return healthrayFetch(
     `/appointment/medical_clinical_notes?appointmentId=${appointmentId}&organization_id=${ORG_ID}&doctorId=${doctorId}`,

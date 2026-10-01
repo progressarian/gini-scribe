@@ -24,6 +24,7 @@ import {
   billingNewItemRequestSchema,
   billingPaidAtReceptionQuerySchema,
   billingPaymentsTakeSchema,
+  billingClearHealthraySchema,
   billingPayOutSchema,
   billingPdfQuerySchema,
   billingPreviewSchema,
@@ -65,7 +66,10 @@ import {
   labCaseSuggestion,
   labCaseTestsForDesk,
 } from "../services/billing/labCaseLines.js";
-import { healthrayBillSuggestion } from "../services/billing/healthrayBillLines.js";
+import {
+  healthrayBillSuggestion,
+  healthrayLinesForDesk,
+} from "../services/billing/healthrayBillLines.js";
 import { paidAtReception } from "../services/billing/receptionOrders.js";
 import { deskSettings } from "../services/billing/billingSettings.js";
 import { searchDeskItems } from "../services/billing/serviceItems.js";
@@ -213,6 +217,7 @@ router.post(
     await consultationForDesk(req.params.visitId, opening);
     await testsForDesk(req.params.visitId, opening);
     await labCaseTestsForDesk(req.params.visitId, opening);
+    await healthrayLinesForDesk(req.params.visitId, opening);
     await bills.clearReceptionLines(req.params.visitId, opening);
     return bills.openDraft(req.params.visitId, opening);
   }),
@@ -336,6 +341,15 @@ router.post(
   desk,
   validate(billingPaymentsTakeSchema, BILLING_DESK_LABELS),
   run("Take payment", 201, (req) => payments.takePayments(req.params.billId, req.body, ctx(req))),
+);
+
+router.post(
+  `${BASE}/bills/:billId/clear-healthray`,
+  desk,
+  validate(billingClearHealthraySchema, BILLING_DESK_LABELS),
+  run("Mark paid in HealthRay", 201, (req) =>
+    payments.clearInHealthray(req.params.billId, req.body, ctx(req)),
+  ),
 );
 
 router.get(

@@ -2,7 +2,11 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { API_URL, WEB_PORT, buildTestEnv, repoRoot } from "./testEnv.mjs";
 
-const env = buildTestEnv({ VITE_API_URL: API_URL, VITE_DEV_API_URL: API_URL });
+const env = buildTestEnv({
+  VITE_API_URL: API_URL,
+  VITE_DEV_API_URL: API_URL,
+  VITE_CACHE_DIR: "node_modules/.vite-e2e",
+});
 
 const child = spawn(
   process.execPath,

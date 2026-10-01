@@ -776,57 +776,6 @@
 /* Day report panel (GF-26) — the numbers stay put until dismissed. */
 /* Sits above the station-performance strip, not on top of it — anchored to the
    footer's own height so it stays clear if that strip ever changes. */
-.gf .report-panel {
-  position: fixed;
-  right: 14px;
-  bottom: calc(var(--perf-h, 68px) + 12px);
-  max-height: calc(100vh - var(--perf-h, 68px) - 70px);
-  display: flex;
-  flex-direction: column;
-  width: 300px;
-  background: var(--white);
-  border: 1px solid var(--bd);
-  border-radius: var(--r-lg);
-  box-shadow: var(--sh-md);
-  z-index: 250;
-  overflow: hidden;
-}
-.gf .rp-hd {
-  background: var(--nv);
-  color: #fff;
-  padding: 9px 12px;
-  font-size: 12px;
-  display: flex;
-  align-items: center;
-}
-.gf .rp-hd .tb-cls {
-  margin-left: auto;
-}
-.gf .rp-body {
-  padding: 10px 12px;
-  overflow-y: auto;
-}
-.gf .rp-line {
-  font-size: 11px;
-  color: var(--ink2);
-  margin-bottom: 9px;
-  line-height: 1.5;
-}
-.gf .rp-grid {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 4px 10px;
-  font-size: 10px;
-  color: var(--ink3);
-}
-.gf .rp-grid span:nth-child(even) {
-  font-family: var(--fm);
-  color: var(--ink);
-  font-weight: 600;
-}
-
-/* Drawer backdrop (GF-16): clicking outside closes, and the board behind it is
-   visibly inert rather than merely unreachable. */
 .gf .drawer-backdrop {
   position: fixed;
   inset: 0;

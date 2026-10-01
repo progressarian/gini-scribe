@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { getPool, one, query } from "../../helpers/db.mjs";
 import { apiAs, loginAs } from "../../helpers/auth.mjs";
+import { closePdfViewer, expectPdfInViewer } from "../../helpers/pdfViewer.mjs";
 import { gotoReady } from "../../helpers/browser.mjs";
 import { assertTestDatabase } from "../../setup/guard.mjs";
 import { USERS } from "../../fixtures/data.mjs";
@@ -67,7 +68,7 @@ test.describe.serial("P4-38c counter fixes found by the floor-trial rehearsal", 
   }) => {
     await openCounter(page, day.patients.gen.visit);
     const box = region(page, "Discount codes");
-    await box.getByLabel("Discount code").fill(day.code);
+    await box.getByLabel("Discount code", { exact: true }).fill(day.code);
     await box.getByRole("button", { name: "Apply code" }).click();
     const chip = box.getByRole("list", { name: "Codes on this bill" }).getByRole("listitem");
     await expect(chip).toContainText(day.code);
@@ -106,11 +107,9 @@ test.describe.serial("P4-38c counter fixes found by the floor-trial rehearsal", 
     await openCounter(page, patient.visit);
     await ensureSeries(day);
     await region(page, "Totals and payment").getByLabel("Pay later").check();
-    const [pdf] = await Promise.all([
-      page.context().waitForEvent("page"),
-      region(page, "Bill actions").getByRole("button", { name: "Finalise & print" }).click(),
-    ]);
-    await pdf.close();
+    await region(page, "Bill actions").getByRole("button", { name: "Finalise & print" }).click();
+    await expectPdfInViewer(page, `/bills/${draft.id}/bill.pdf`);
+    await closePdfViewer(page);
     await expect(region(page, "Bill lines").getByRole("heading")).not.toHaveText("Bill ItemsDraft");
     const first = await one(`SELECT bill_no FROM bills WHERE id = $1`, [draft.id]);
     await expect(region(page, "Bill lines").getByRole("heading")).toHaveText(
@@ -132,11 +131,9 @@ test.describe.serial("P4-38c counter fixes found by the floor-trial rehearsal", 
     await openCounter(page, patient.visit);
     await ensureSeries(day);
     await region(page, "Totals and payment").getByLabel("Pay later").check();
-    const [pdf] = await Promise.all([
-      page.context().waitForEvent("page"),
-      region(page, "Bill actions").getByRole("button", { name: "Finalise & print" }).click(),
-    ]);
-    await pdf.close();
+    await region(page, "Bill actions").getByRole("button", { name: "Finalise & print" }).click();
+    await expectPdfInViewer(page, "/bill.pdf");
+    await closePdfViewer(page);
     await expect(
       region(page, "Bill actions").getByRole("button", { name: "Cancel unpaid bill" }),
     ).toBeVisible();
@@ -209,8 +206,9 @@ test.describe.serial("P4-38c counter fixes found by the floor-trial rehearsal", 
     await region(page, "Totals and payment").getByLabel("Pay later").check();
     const finalise = region(page, "Bill actions").getByRole("button", { name: "Finalise & print" });
     await expect(finalise).toBeEnabled();
-    const [pdf] = await Promise.all([page.context().waitForEvent("page"), finalise.click()]);
-    await pdf.close();
+    await finalise.click();
+    await expectPdfInViewer(page, "/bill.pdf");
+    await closePdfViewer(page);
     await expect(
       region(page, "Bill actions").getByRole("button", { name: "Cancel unpaid bill" }),
     ).toBeVisible();

@@ -44,6 +44,7 @@ import {
   DISCOUNT_METHODS,
   DUE_AGES,
   DUE_SORTS,
+  HEALTHRAY_MODE,
   PATIENT_PAYS,
   REFUND_MODES,
   REMAINDERS,
@@ -990,20 +991,31 @@ const paymentAmount = z.union([
     .refine(withinMoney, TOO_MUCH),
 ]);
 
-const takenPayment = z
-  .strictObject(
-    {
-      mode: z.enum(PAYMENT_MODES, { message: `must be one of: ${PAYMENT_MODES.join(", ")}` }),
-      amount: paymentAmount,
-      reference: z.union([z.string().trim().max(PAYMENT_REFERENCE_MAX), z.null()]).optional(),
-      ...NO_PRICE,
-    },
-    objectOnly('must be a payment, like { mode: "cash", amount: 500 }'),
-  )
-  .refine(
-    (entry) => entry.mode === DRAWER_MODE || Boolean(entry.reference),
-    "needs its reference number when it isn't cash",
-  );
+const paymentEntry = (modes) =>
+  z
+    .strictObject(
+      {
+        mode: z.enum(modes, { message: `must be one of: ${modes.join(", ")}` }),
+        amount: paymentAmount,
+        reference: z.union([z.string().trim().max(PAYMENT_REFERENCE_MAX), z.null()]).optional(),
+        ...NO_PRICE,
+      },
+      objectOnly('must be a payment, like { mode: "cash", amount: 500 }'),
+    )
+    .refine(
+      (entry) =>
+        entry.mode === DRAWER_MODE || entry.mode === HEALTHRAY_MODE || Boolean(entry.reference),
+      "needs its reference number when it isn't cash",
+    );
+
+const takenPayment = paymentEntry(PAYMENT_MODES);
+
+const paidOutPayment = paymentEntry([...PAYMENT_MODES, HEALTHRAY_MODE]);
+
+export const billingClearHealthraySchema = deskObject(
+  { version: whole },
+  objectOnly("Send the bill's version as an object"),
+);
 
 export const billingPaymentsTakeSchema = z.strictObject(
   {
@@ -1240,7 +1252,7 @@ export const billingPayOutSchema = z.strictObject(
   {
     version: whole,
     payments: z
-      .array(takenPayment, { error: "must be a list of refunds" })
+      .array(paidOutPayment, { error: "must be a list of refunds" })
       .min(1, "list is empty: enter the money being paid back")
       .max(PAYMENTS_AT_ONCE, `can be at most ${PAYMENTS_AT_ONCE} at once`),
     ...NO_PRICE,

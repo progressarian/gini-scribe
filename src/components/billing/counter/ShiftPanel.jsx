@@ -134,6 +134,11 @@ export default function ShiftPanel() {
               {figure("Expected in the drawer", shift.expected_cash, "expected")}
             </tbody>
           </table>
+          {shift.healthray?.collected > 0 && (
+            <div className="bc-hint" aria-label="Paid in HealthRay">
+              Paid in HealthRay {rupees(shift.healthray.collected)} (not in the drawer)
+            </div>
+          )}
 
           <div className="bc-head__row">
             <label className="bc-field">

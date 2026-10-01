@@ -7,10 +7,14 @@ import {
   usePayOut,
 } from "../../../queries/hooks/useBilling";
 import { errorOf, fromPaise, moneyTyped } from "../format";
-import { PAYMENT_MODE_LABEL, refundLegsText, refundModeText } from "./lineText";
+import { payOutText, refundLegsText, refundModeText } from "./lineText";
+import { HEALTHRAY_MODE } from "../../../../shared/billingVocab.js";
 import RefundDialog from "./RefundDialog";
+import { PdfButton } from "./PdfViewer";
 
 const paiseOf = (typed) => Math.round(Number(typed || 0) * 100);
+
+const needsReference = (mode) => mode !== "cash" && mode !== HEALTHRAY_MODE;
 
 const toRupees = (paise) => (Math.max(0, paise) / 100).toFixed(2).replace(/\.00$/, "");
 
@@ -41,7 +45,7 @@ function PayOut({ note, bill, onPaid }) {
   const entered = rows.reduce((sum, row) => sum + paiseOf(row.amount), 0);
   const cashOut = rows.some((row) => row.mode === "cash" && paiseOf(row.amount) > 0);
   const missingReference = rows.some(
-    (row) => paiseOf(row.amount) > 0 && row.mode !== "cash" && !row.reference.trim(),
+    (row) => paiseOf(row.amount) > 0 && needsReference(row.mode) && !row.reference.trim(),
   );
   const over = rows.some((row) => paiseOf(row.amount) > row.most);
 
@@ -91,7 +95,7 @@ function PayOut({ note, bill, onPaid }) {
         {rows.map((row, index) => (
           <div className="bc-pay__line" key={`${row.mode}-${index}`}>
             <div className="bc-pay__linehead">
-              <span>{PAYMENT_MODE_LABEL[row.mode]} refund</span>
+              <span>{payOutText(row.mode)}</span>
             </div>
             <div className="bc-pay__fields">
               <label className="bc-field">
@@ -106,7 +110,7 @@ function PayOut({ note, bill, onPaid }) {
                   />
                 </span>
               </label>
-              {row.mode !== "cash" && (
+              {needsReference(row.mode) && (
                 <label className="bc-field bc-pay__ref">
                   <span className="bc-field__lbl">Reference</span>
                   <input
@@ -233,23 +237,23 @@ export default function BillRefunds({ bill, onRefunded }) {
             </div>
           )}
           <div className="bc-head__row">
-            <a
+            <PdfButton
               className="st-btn st-btn-g"
               href={creditNotePdfHref(cn.id)}
-              target="_blank"
-              rel="noreferrer"
+              title={`Credit note ${cn.bill_no}`}
+              fileName={`CreditNote_${cn.bill_no}.pdf`}
             >
               Print credit note
-            </a>
+            </PdfButton>
             {cn.totals.refunded > 0 && (
-              <a
+              <PdfButton
                 className="st-btn st-btn-g"
                 href={refundReceiptPdfHref(cn.id)}
-                target="_blank"
-                rel="noreferrer"
+                title={`Refund receipt ${cn.bill_no}`}
+                fileName={`RefundReceipt_${cn.bill_no}.pdf`}
               >
                 Print refund receipt
-              </a>
+              </PdfButton>
             )}
           </div>
           {cn.refund.due > 0 && (

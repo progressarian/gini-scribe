@@ -699,6 +699,8 @@ async function realignVisitToAppointment(appointmentId) {
 }
 
 // ── Insert or update appointment ────────────────────────────────────────────
+const HEALTHRAY_ID_UNIQUE = "appointments_healthray_id_key";
+
 export async function upsertAppointment(existingId, data) {
   const {
     patientId,
@@ -791,8 +793,9 @@ export async function upsertAppointment(existingId, data) {
     return rows[0].id;
   }
 
-  const { rows } = await pool.query(
-    `INSERT INTO appointments
+  const inserted = await pool
+    .query(
+      `INSERT INTO appointments
        (patient_id, patient_name, file_no, phone, doctor_name,
         appointment_date, time_slot, visit_type, status, is_walkin,
         age, sex, notes, healthray_id, opd_vitals, biomarkers, compliance,
@@ -808,38 +811,49 @@ export async function upsertAppointment(existingId, data) {
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16::jsonb,$17::jsonb,$18,$19::jsonb,$20::jsonb,$21::jsonb,$22,$23::jsonb,$24::jsonb,$25::jsonb,$26,$27,
              (SELECT scheme_code FROM patients WHERE id = $1))
      RETURNING id`,
-    [
-      patientId,
-      name,
-      fileNo,
-      phone,
-      localDoctorName,
-      apptDate,
-      timeSlot,
-      visitType,
-      status,
-      isWalkin,
-      age,
-      sex,
-      notes,
-      healthrayId,
-      JSON.stringify(opdVitals),
-      JSON.stringify(biomarkers),
-      JSON.stringify(compliance),
-      clinicalRaw,
-      JSON.stringify(healthrayDiagnoses),
-      JSON.stringify(healthrayMedications),
-      JSON.stringify(healthrayLabs),
-      healthrayAdvice,
-      JSON.stringify(healthrayInvestigations || []),
-      healthrayFollowUp ? JSON.stringify(healthrayFollowUp) : null,
-      JSON.stringify(healthrayPreviousMedications || []),
-      healthrayFollowUpWith || null,
-      familyMemberId || null,
-    ],
-  );
+      [
+        patientId,
+        name,
+        fileNo,
+        phone,
+        localDoctorName,
+        apptDate,
+        timeSlot,
+        visitType,
+        status,
+        isWalkin,
+        age,
+        sex,
+        notes,
+        healthrayId,
+        JSON.stringify(opdVitals),
+        JSON.stringify(biomarkers),
+        JSON.stringify(compliance),
+        clinicalRaw,
+        JSON.stringify(healthrayDiagnoses),
+        JSON.stringify(healthrayMedications),
+        JSON.stringify(healthrayLabs),
+        healthrayAdvice,
+        JSON.stringify(healthrayInvestigations || []),
+        healthrayFollowUp ? JSON.stringify(healthrayFollowUp) : null,
+        JSON.stringify(healthrayPreviousMedications || []),
+        healthrayFollowUpWith || null,
+        familyMemberId || null,
+      ],
+    )
+    .catch((e) => {
+      if (e.code === "23505" && e.constraint === HEALTHRAY_ID_UNIQUE) return null;
+      throw e;
+    });
+  if (!inserted) {
+    const { rows: taken } = await pool.query(
+      `SELECT id FROM appointments WHERE healthray_id = $1`,
+      [healthrayId],
+    );
+    return upsertAppointment(taken[0].id, data);
+  }
   noteSyncedWhileBlocked(patientId, "healthray_sync");
-  return rows[0].id;
+  return inserted.rows[0].id;
 }
 
 const SOURCE_PRIORITY = {

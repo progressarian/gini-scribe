@@ -29,11 +29,20 @@ export const VISIT_LAB_CASE_TESTS_SQL = (v) => `
      AND btrim(n.test_name) <> ''
      AND ${CASE_NOT_CANCELLED_SQL("lc")}`;
 
-export const ON_PATIENT_DAY_BILL_SQL = (v, catalogExpr, statuses = ["draft", "final"]) => `EXISTS (
+export const PAID_DRAFT_SQL = (b) =>
+  `(${b}.status = 'draft' AND ${b}.paid_amount > 0 AND ${b}.paid_amount >= ${b}.patient_payable)`;
+
+export const ON_PATIENT_DAY_BILL_SQL = (
+  v,
+  catalogExpr,
+  statuses = ["draft", "final"],
+  { paidDrafts = false } = {},
+) => `EXISTS (
   SELECT 1 FROM bill_lines pl
     JOIN bills pb ON pb.id = pl.bill_id
     JOIN service_items ps ON ps.id = pl.service_item_id
-   WHERE pl.is_live AND pb.status IN (${statuses.map((status) => `'${status}'`).join(", ")})
+   WHERE pl.is_live AND (pb.status IN (${statuses.map((status) => `'${status}'`).join(", ")})
+                         ${paidDrafts ? `OR ${PAID_DRAFT_SQL("pb")}` : ""})
      AND ps.test_catalog_id = ${catalogExpr}
      AND (pl.visit_id = ${v}.id
           OR (pb.patient_id = ${v}.patient_id AND pb.bill_date = ${v}.visit_date)))`;

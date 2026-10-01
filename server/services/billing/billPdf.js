@@ -6,7 +6,11 @@ import { escapeHtml } from "../../templates/prescriptionTemplate.js";
 import { getPrescriptionFooter, normalizeHospital } from "../prescriptionFooter.js";
 import { getPrescriptionLogo } from "../prescriptionLogo.js";
 import { renderHtmlToPdf } from "../prescriptionHtmlPdf.js";
-import { BILL_DEPARTMENT, BILL_DOCUMENT_TITLES } from "../../../shared/billingVocab.js";
+import {
+  BILL_DEPARTMENT,
+  BILL_DOCUMENT_TITLES,
+  HEALTHRAY_MODE,
+} from "../../../shared/billingVocab.js";
 import { rupeesInWords } from "./amountInWords.js";
 import { getSettings } from "./billingSettings.js";
 import { readBill } from "./bills.js";
@@ -282,12 +286,18 @@ export const ageSexText = (bill, patient) => {
 
 export const uhidOf = (patient) => patient?.file_no || patient?.health_id || null;
 
-const MODE_LABEL = { cash: "Cash", card: "Card", upi: "UPI" };
+const MODE_LABEL = { cash: "Cash", card: "Card", upi: "UPI", healthray: "Paid in HealthRay" };
+
+const REFUND_MODE_LABEL = { healthray: "Refunded in HealthRay" };
 
 export const modeText = (mode) => MODE_LABEL[mode] ?? String(mode ?? "");
 
+export const refundModeText = (mode) => REFUND_MODE_LABEL[mode] ?? modeText(mode);
+
 export const paymentModeText = (payment) =>
-  payment?.direction === "out" ? `${modeText(payment.mode)} (refund)` : modeText(payment?.mode);
+  payment?.direction === "out"
+    ? (REFUND_MODE_LABEL[payment.mode] ?? `${modeText(payment.mode)} (refund)`)
+    : modeText(payment?.mode);
 
 export const paymentAmount = (payment) =>
   payment?.direction === "out" ? -payment.amount : (payment?.amount ?? 0);
@@ -323,6 +333,8 @@ const VISIT_SQL = `
             LEFT JOIN bills c ON c.id = p.bill_id
            WHERE p.direction = 'out' AND (p.bill_id = $1 OR c.original_bill_id = $1)) AS refunded,
          (SELECT r.reason FROM billing_requests r WHERE r.credit_note_id = $1) AS refund_reason,
+         (SELECT COALESCE(SUM(p.amount), 0) FROM payments p
+           WHERE p.bill_id = $1 AND p.direction = 'in' AND p.mode = '${HEALTHRAY_MODE}') AS healthray_paid,
          (SELECT o.bill_date::text FROM bills o WHERE o.id = $3) AS original_bill_date`;
 
 export async function letterhead() {
@@ -375,6 +387,7 @@ export async function billView(billId, db = pool) {
     refund_reason: visit.refund_reason ?? null,
     finalised_by_name: visit.finalised_by_name ?? null,
     refunded: Math.round(Number(visit.refunded ?? 0) * 100),
+    healthray_paid: Math.round(Number(visit.healthray_paid ?? 0) * 100),
     hospital: marks.hospital,
     logo: marks.logo,
   };
@@ -599,8 +612,11 @@ function totalsHtml(view, gst) {
   rows.push(
     ["Total Payable Amount (₹)", amountText(bill.totals.payable)],
     ["Paid Amount(₹)", amountText(bill.totals.paid)],
-    ["Net Payable Amount(₹)", signedAmountText(balanceOf(bill))],
   );
+  if ((view.healthray_paid ?? 0) > 0) {
+    rows.push([`${modeText(HEALTHRAY_MODE)} (₹)`, amountText(view.healthray_paid)]);
+  }
+  rows.push(["Net Payable Amount(₹)", signedAmountText(balanceOf(bill))]);
   if ((view.refunded ?? 0) > 0) rows.push(["Refunded Amount(₹)", amountText(view.refunded)]);
   return totalsTableHtml(rows);
 }

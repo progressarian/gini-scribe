@@ -14,6 +14,7 @@ import { errorOf } from "../format";
 import { claimBadgeText } from "./lineText";
 import { finaliseBlockers } from "./finaliseChecks";
 import RefundDialog from "./RefundDialog";
+import PdfViewer, { PdfButton } from "./PdfViewer";
 
 export default function BillActions({
   bill,
@@ -35,6 +36,7 @@ export default function BillActions({
   const [deleting, setDeleting] = useState(null);
   const [note, setNote] = useState(null);
   const [refunding, setRefunding] = useState(false);
+  const [printing, setPrinting] = useState(null);
   const credited = (bill.credits?.notes?.length ?? 0) > 0;
   const refundWaiting = bill.credits?.request?.status === "pending";
   const cancelling = form.value.cancelReason !== null && bill.status === "final";
@@ -57,8 +59,6 @@ export default function BillActions({
   const makeFinal = async () => {
     setError(null);
     setNote(null);
-    const printing = window.open("", "_blank");
-    if (printing) printing.opener = null;
     try {
       const made = await finalise.mutateAsync({
         billId: bill.id,
@@ -68,10 +68,12 @@ export default function BillActions({
       });
       onBill(made);
       form.clear();
-      if (printing) printing.location.replace(billPdfHref(made.id));
-      else window.open(billPdfHref(made.id), "_blank", "noopener");
+      setPrinting({
+        href: billPdfHref(made.id),
+        title: `Bill ${made.bill_no}`,
+        fileName: `Bill_${made.bill_no}.pdf`,
+      });
     } catch (e) {
-      printing?.close();
       const version = e?.response?.data?.version;
       setError(
         errorOf(e, "This bill could not be made final") +
@@ -175,14 +177,14 @@ export default function BillActions({
         )}
 
         {bill.totals.paid > 0 && (
-          <a
+          <PdfButton
             className="st-btn st-btn-g"
             href={receiptPdfHref(bill.id)}
-            target="_blank"
-            rel="noreferrer"
+            title={`Receipt ${bill.bill_no || ""}`.trim()}
+            fileName={`Receipt_${bill.bill_no || bill.id}.pdf`}
           >
             Print receipt
-          </a>
+          </PdfButton>
         )}
 
         {bill.status === "final" && bill.bill_type === "invoice" && !refundWaiting && (
@@ -223,6 +225,8 @@ export default function BillActions({
 
       {note && <div className="bc-note">{note}</div>}
       {error && <div className="bc-err">{error}</div>}
+
+      <PdfViewer pdf={printing} onClose={() => setPrinting(null)} />
 
       {refunding && (
         <RefundDialog

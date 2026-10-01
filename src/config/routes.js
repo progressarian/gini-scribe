@@ -39,12 +39,7 @@ export const ROUTE_MAP = {
 // Gate a page on the capability its OWN API calls need. A page listed more
 // loosely than its endpoints renders for a role that then 403s on every fetch;
 // listed more tightly, the API stays reachable to roles the UI hides it from.
-import {
-  CAPABILITIES as CAP,
-  ROLES,
-  STATION_CAPABILITY,
-  normalizeRole,
-} from "../../shared/permissions.js";
+import { CAPABILITIES as CAP, ROLES, normalizeRole } from "../../shared/permissions.js";
 
 export const PAGE_CAPABILITIES = {
   // Patient identity — reachable with lookup alone, because clicking a result in
@@ -128,17 +123,8 @@ export const PAGE_CAPABILITIES = {
   "/analytics": CAP.ANALYTICS,
   "/ci": CAP.ANALYTICS,
   // Patient Flow Management
-  "/flow/checkin": CAP.FLOW_RECEPTION,
-  "/flow/coordinator": CAP.FLOW_BOARD,
   "/flow/my-patients": CAP.FLOW_MY_PATIENTS,
   "/flow/consultants": CAP.FLOW_CONSULTANTS,
-  // Consultants have no station desk — the bare path redirects them to their
-  // own worklist, which is the desk they do have.
-  "/flow/station": [CAP.FLOW_STATION, CAP.FLOW_MY_PATIENTS],
-  ...Object.fromEntries(
-    Object.entries(STATION_CAPABILITY).map(([slug, cap]) => [`/flow/station/${slug}`, cap]),
-  ),
-  "/flow/reports": CAP.FLOW_REPORTS,
   // Gini Flow. Its own capability, not FLOW_*, so the two boards can be granted
   // independently while both run. See docs/gini-flow/00-OVERVIEW.md §2.4.
   // The launcher shows only the stations a role can open, so viewing the board
@@ -148,6 +134,7 @@ export const PAGE_CAPABILITIES = {
   // VIEW to reach `/api/giniflow*` for their station and still must not open
   // the floor board.
   "/giniflow/manager": CAP.GINIFLOW_BOARD,
+  "/giniflow/reports": CAP.GINIFLOW_BOARD,
   // The pre-OPD triage board writes the clinical category, so it is narrower
   // than the read-only board above: coordinator and admin.
   "/giniflow/triage": CAP.GINIFLOW_TRIAGE,

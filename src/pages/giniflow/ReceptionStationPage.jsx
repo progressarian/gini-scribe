@@ -1398,9 +1398,7 @@ function ProceduresPanel({ arrival, onClose }) {
 }
 
 const proceduresText = (services) =>
-  services
-    ? `🩹 ${services.count} procedure${services.count === 1 ? "" : "s"} · ₹${rupeesFromPaise(services.total)}`
-    : "🩹 + Procedure";
+  `🩹 ${services.count} procedure${services.count === 1 ? "" : "s"} · ₹${rupeesFromPaise(services.total)}`;
 
 function JourneyPanel({ arrival, onClose }) {
   const { data, isLoading } = useJourney(arrival.visitId);
@@ -1706,7 +1704,10 @@ function WalkInPanel({ onClose, onCheckIn, busy }) {
         </div>
       )}
       {term.length >= 2 && results.length === 0 && !isFetching && (
-        <div className="empty-note">Nobody matches “{term}”.</div>
+        <div className="empty-note">
+          Nobody matches “{term}”. A patient HealthRay knows but Scribe does not comes in on its own
+          once they are booked in HealthRay for today.
+        </div>
       )}
 
       {results.map((p) => (
@@ -1732,6 +1733,52 @@ function WalkInPanel({ onClose, onCheckIn, busy }) {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+const matchesTerm = (item, term) => {
+  const t = term.trim().toLowerCase();
+  return (
+    t.length >= 2 &&
+    [item.fileNo, item.name].some((v) =>
+      String(v || "")
+        .toLowerCase()
+        .includes(t),
+    )
+  );
+};
+
+function NotInScribe({ items }) {
+  if (!items.length) return null;
+  return (
+    <div className="workflow-note is-warn" role="status">
+      <span className="wn-ico">⚠</span>
+      <div>
+        <strong>{items.length} booked in HealthRay, not in Scribe yet.</strong> They appear here on
+        their own once the sync catches up. If a name stays on this list for more than 10 minutes,
+        tell an administrator.
+        <ul className="nis-list">
+          {items.map((i) => (
+            <li key={i.healthrayId}>
+              <strong>{i.name || "Name not given"}</strong> · {i.fileNo || "no UHID"} ·{" "}
+              {i.doctor || "no doctor"} · slot {clock(i.slotAt)} · in HealthRay since{" "}
+              {clock(i.firstSeenAt)}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+function NotFoundHelp({ term, notInScribe }) {
+  const pending = notInScribe.find((i) => matchesTerm(i, term));
+  return (
+    <div className="empty-note">
+      {pending
+        ? `${pending.name || "This patient"} (${pending.fileNo || "no UHID"}) is booked in HealthRay with ${pending.doctor || "a doctor"} at ${clock(pending.slotAt)} but has not reached Scribe yet. They appear here once the sync catches up.`
+        : `Nobody on today's list matches “${term}”. If they are booked in HealthRay for today, they appear here within about 3 minutes. If not, create today's visit in HealthRay first — Scribe takes patients from HealthRay's appointment list.`}
     </div>
   );
 }
@@ -1767,6 +1814,8 @@ export function ArrivalsTab({
   const alreadyLeft = onFloor.length - notFinished.length;
   const notComing = data?.notComing || [];
   const searching = (data?.query || "").length >= 2;
+  const { data: healthray } = useReceptionHealthray();
+  const notInScribe = healthray?.notInScribe?.items || [];
 
   return (
     <>
@@ -1819,6 +1868,11 @@ export function ArrivalsTab({
             });
           }}
         />
+      )}
+
+      <NotInScribe items={notInScribe} />
+      {searching && !isLoading && expected.length === 0 && onFloor.length === 0 && (
+        <NotFoundHelp term={data.query} notInScribe={notInScribe} />
       )}
 
       {journeyFor && <JourneyPanel arrival={journeyFor} onClose={() => setJourneyFor(null)} />}
@@ -1894,10 +1948,10 @@ export function ArrivalsTab({
                   {a.schemeOpdFee !== null ? ` · ₹${a.schemeOpdFee}` : ""}
                 </span>
               )}
-              {(a.orderedServices || canBill) && (
+              {a.orderedServices && (
                 <button
                   type="button"
-                  className={`badge ${a.orderedServices ? "b-tl" : "b-ink"} ar-procs`}
+                  className="badge b-tl ar-procs"
                   title="Procedures priced for this patient"
                   onClick={() => setProceduresFor(a)}
                 >
@@ -2047,17 +2101,27 @@ function HealthraySync({ onNote }) {
     });
 
   const blocked = !!data?.blockedUntil;
+  const quiet = !!data?.syncQuiet;
   return (
     <>
       <span
-        className={`tr-live${blocked || workerLate ? " is-stale" : ""}`}
-        title={blocked ? data.blockedReason || "" : "Last appointment data received from HealthRay"}
+        className={`tr-live${blocked || workerLate || quiet ? " is-stale" : ""}`}
+        role={quiet ? "alert" : undefined}
+        title={
+          blocked
+            ? data.blockedReason || ""
+            : quiet
+              ? "No successful HealthRay sync for over 15 minutes. New walk-ins will not appear until it recovers — tell an administrator."
+              : "Last successful sync with HealthRay"
+        }
       >
         {blocked
           ? `HealthRay blocked · retry ${clock(data.blockedUntil)}`
           : workerLate
             ? "Refresh waiting — the background sync is not responding"
-            : `HealthRay synced ${syncedAt(data?.lastSyncedAt)}`}
+            : quiet
+              ? `HealthRay sync stopped · last ${syncedAt(data?.lastSyncedAt)}`
+              : `HealthRay synced ${syncedAt(data?.lastSyncedAt)}`}
       </span>
       <button
         type="button"

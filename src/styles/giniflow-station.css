@@ -803,6 +803,17 @@
 .gf .workflow-note .wn-ico {
   font-size: 16px;
 }
+.gf .workflow-note.is-warn {
+  background: var(--amb-l);
+  border-color: var(--amb-b);
+  color: var(--amb);
+  align-items: flex-start;
+}
+.gf .nis-list {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  line-height: 1.6;
+}
 .gf .test-order-card {
   background: var(--white);
   border: 1px solid var(--bd);

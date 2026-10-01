@@ -30,7 +30,7 @@ test.describe
   test.beforeAll(async () => {
     ids = await setUp(tag);
     autoBefore = await autoConsultation(false);
-    visit = await extraVisit(ids, "C24", { visitType: "Follow Up" });
+    visit = await extraVisit(ids, "C24", { visitType: "Follow Up", healthray: false });
     billId = (await bills.openDraft(visit.visit, desk, db)).id;
   });
 

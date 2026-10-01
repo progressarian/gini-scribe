@@ -536,7 +536,17 @@ function Summary({ summary, categories, filter, onFilter }) {
   );
 }
 
-function GhmFilters({ view, date, doctor, doctors, collectionFilter, activeCount, onApply }) {
+function GhmFilters({
+  view,
+  date,
+  doctor,
+  doctors,
+  collectionFilter,
+  activeCount,
+  defaultDate,
+  onApply,
+  onReset,
+}) {
   const [draft, setDraft] = useState({ date, doctor, collectionFilter });
 
   useEffect(() => {
@@ -554,9 +564,10 @@ function GhmFilters({ view, date, doctor, doctors, collectionFilter, activeCount
     <FilterPopover
       activeCount={activeCount}
       onApply={() => onApply(draft)}
-      onReset={() =>
-        setDraft({ date: view === "lookup" ? "" : date, doctor: "All", collectionFilter: "all" })
-      }
+      onReset={() => {
+        setDraft({ date: defaultDate, doctor: "All", collectionFilter: "all" });
+        onReset();
+      }}
       hint={
         view === "lookup"
           ? "Patient Lookup searches every patient on every date, so it has no date filter — each row shows that patient's most recent appointment."
@@ -2155,13 +2166,17 @@ export default function GHMPage() {
     searchQ !== "" ||
     date !== tabDefaultDate(view);
 
-  const resetFilters = () => {
+  const resetFilterFields = () => {
     setDoctor("All");
     setCollectionFilter("all");
     setPillFilter("");
+    setDate(tabDefaultDate(view));
+  };
+
+  const resetFilters = () => {
+    resetFilterFields();
     setSearch("");
     setDebouncedSearch("");
-    setDate(tabDefaultDate(view));
   };
 
   const buildQuery = useCallback(
@@ -2531,6 +2546,8 @@ export default function GHMPage() {
                 setDoctor(next.doctor);
                 setCollectionFilter(next.collectionFilter);
               }}
+              defaultDate={tabDefaultDate(view)}
+              onReset={resetFilterFields}
             />
             {filtersActive && (
               <button

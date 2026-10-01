@@ -293,10 +293,12 @@ Duplicates, in the existing code, which this plan does not change:
   on a pooled backend four times on 19 Sep. `withCronXactLock`, which older notes describe, is not in
   the code. **Built 19 Sep, off by default:** `tryAcquireCronLease` (`cron/lowPriority.js`), an
   `app_kv` lease `cron_lease:918273645` with owner and expiry, renewed every 30 s, TTL 2 min, which
-  refuses to start while any session holds the old advisory lock. It's wired for the HealthRay
-  sync behind `SCRIBE_CRON_LEASE=1`. It stays off until local and production switch **together**:
-  appointments are inserted check-then-insert with no unique index on `healthray_id`, so an
-  old-code process and a new-code process running at once could insert an appointment twice.
+  refuses to start while any session holds the old advisory lock. **On by default since 1 Oct**
+  (`SCRIBE_CRON_LEASE=0` turns it off) for every cron family. `appointments.healthray_id` already
+  carries `appointments_healthray_id_key UNIQUE`, so an old-code and a new-code process running at
+  once cannot insert an appointment twice; `upsertAppointment` turns that conflict into an update.
+  The old advisory lock is honoured only for the first 15 minutes after a process starts, so a lock
+  stranded on a pooled backend no longer stops the sync.
 - **Paid-invoice field unconfirmed** (D5). The repricing pass needs the `get_transactions` field that
   says an invoice is fully paid. Until it is found in a real payload, D5 stays `dry`.
 - **Every bill reader must honour the switches.** The 11:18 block came from a bill reader outside the

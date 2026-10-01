@@ -12,6 +12,7 @@ import {
 } from "./common.js";
 import { CAPABILITIES, hasAnyCapability } from "../../../shared/permissions.js";
 import { paise } from "../../../shared/labPayment.js";
+import { HEALTHRAY_MODE } from "../../../shared/billingVocab.js";
 
 export const PAYMENT_MODES = ["cash", "card", "upi"];
 export const DRAWER_MODE = "cash";
@@ -109,7 +110,8 @@ const SHIFT_SQL = `
          s.counted_cash, s.difference, s.note, s.updated_by,
          u.name AS user_name, u.short_name AS user_short_name,
          ${TOTAL_COLUMNS},
-         t.payment_count, t.bill_count, t.refund_count, t.credit_note_count
+         t.payment_count, t.bill_count, t.refund_count, t.credit_note_count,
+         hr.healthray_collected, hr.healthray_refunded
     FROM cash_shifts s
     LEFT JOIN doctors u ON u.id = s.user_id
     LEFT JOIN LATERAL (
@@ -120,7 +122,14 @@ const SHIFT_SQL = `
              COUNT(DISTINCT p.bill_id) FILTER (WHERE p.direction = 'out') AS credit_note_count
         FROM payments p
        WHERE p.shift_id = s.id
-    ) t ON TRUE`;
+    ) t ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(SUM(h.amount) FILTER (WHERE h.direction = 'in'), 0) AS healthray_collected,
+             COALESCE(SUM(h.amount) FILTER (WHERE h.direction = 'out'), 0) AS healthray_refunded
+        FROM payments h
+       WHERE h.mode = '${HEALTHRAY_MODE}' AND h.received_by = s.user_id
+         AND h.received_at >= s.opened_at AND h.received_at <= COALESCE(s.closed_at, NOW())
+    ) hr ON TRUE`;
 
 const IST_DAY = `(s.opened_at AT TIME ZONE 'Asia/Kolkata')::date`;
 
@@ -154,6 +163,10 @@ function shape(row) {
     bill_count: Number(row.bill_count ?? 0),
     refund_count: Number(row.refund_count ?? 0),
     credit_note_count: Number(row.credit_note_count ?? 0),
+    healthray: {
+      collected: money(row.healthray_collected),
+      refunded: money(row.healthray_refunded),
+    },
     expected_cash: isOpen ? drawerOf(openingCash, collected, refunded) : money(row.expected_cash),
     counted_cash: row.counted_cash === null ? null : money(row.counted_cash),
     difference: row.difference === null ? null : money(row.difference),

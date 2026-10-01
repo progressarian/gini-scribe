@@ -475,6 +475,7 @@ export default function BillingDesk({ tab, visitId, patientId, billId, sentPatie
                     <div className="bc-bill__summary">
                       <TotalsAndPayment
                         bill={bill}
+                        patient={selected || duePatient || sentPatient}
                         onBill={setBill}
                         schemes={schemes || []}
                         payLater={payLater}

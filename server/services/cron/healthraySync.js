@@ -53,6 +53,7 @@ import {
 import { createLogger } from "../logger.js";
 import { WAITING_ROLE } from "../flow/journey.js";
 import { tryAcquireCronLock, yieldToApp, CRON_LOCK_KEYS } from "./lowPriority.js";
+import { recordHealthraySyncOk, recordHealthrayNotInScribe } from "../giniflow/healthrayRefresh.js";
 const { log, error } = createLogger("HealthRay Sync");
 
 // Pause between items so user HTTP requests get event-loop time between
@@ -60,7 +61,7 @@ const { log, error } = createLogger("HealthRay Sync");
 const YIELD_BETWEEN_ITEMS_MS = 300;
 
 // ── Build patient data from HealthRay appointment ───────────────────────────
-function buildPatientData(appt) {
+export function buildPatientData(appt) {
   const fm = appt.family_member || {};
   const pat = appt.patient || {};
 
@@ -1313,6 +1314,13 @@ async function runSync(date, prefetched = null, opts = {}) {
       }
     }
 
+    if (
+      date === toISTDate(new Date().toISOString()) &&
+      apptFetches.every((s) => s.status === "fulfilled")
+    ) {
+      await recordHealthraySyncOk().catch((e) => error("Sync", `heartbeat: ${e.message}`));
+    }
+
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     log(
       "Sync",
@@ -1813,6 +1821,7 @@ export async function syncAppointmentStatuses(date) {
     let updated = 0;
     let rxFetched = 0;
     let vitalsSynced = 0;
+    const notInScribe = [];
     for (const settled of apptFetches) {
       if (settled.status === "rejected") continue;
       const appts = settled.value || [];
@@ -1824,7 +1833,19 @@ export async function syncAppointmentStatuses(date) {
         const newStatus = mapStatus(appt.status);
         if (!newStatus) continue;
         const existing = await findAppointment(healthrayId, fileNo, apptDate);
-        if (!existing) continue;
+        if (!existing) {
+          if (apptDate === date && !["cancelled", "no_show"].includes(newStatus)) {
+            notInScribe.push({
+              healthrayId,
+              fileNo,
+              name: appt.patient_name || null,
+              doctor: appt.doctor_name || null,
+              slotAt: appt.app_date_time || null,
+              status: newStatus,
+            });
+          }
+          continue;
+        }
 
         // Persist HealthRay billing flags (already in this payload — no extra
         // call) so the OPD/Flow screens can show Paid/Due without hitting
@@ -1909,6 +1930,15 @@ export async function syncAppointmentStatuses(date) {
         ]);
         updated++;
       }
+    }
+
+    if (
+      date === toISTDate(new Date().toISOString()) &&
+      apptFetches.every((s) => s.status === "fulfilled")
+    ) {
+      await recordHealthrayNotInScribe(date, notInScribe).catch((e) =>
+        error("Status Sync", `not-in-scribe list: ${e.message}`),
+      );
     }
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);

@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import { getPool, query } from "../../helpers/db.mjs";
 import { loginAs } from "../../helpers/auth.mjs";
 import { gotoReady } from "../../helpers/browser.mjs";
+import { closePdfViewer, expectPdfInViewer } from "../../helpers/pdfViewer.mjs";
 import { assertTestDatabase } from "../../setup/guard.mjs";
 import { USERS } from "../../fixtures/data.mjs";
 import { fromPaise } from "../../../src/components/billing/format.js";
@@ -218,12 +219,12 @@ test.describe.serial("P4-32 totals and payment", () => {
     await expect(pad(page).getByLabel("Amount")).toHaveCount(0);
     await expect(finaliseButton(page)).toBeEnabled();
 
-    const popup = page.waitForEvent("popup").catch(() => null);
     await finaliseButton(page).click();
+    await expectPdfInViewer(page, `/api/billing/bills/${free.bill}/bill.pdf`);
+    await closePdfViewer(page);
     await expect(
       page.getByRole("region", { name: "Bill actions" }).getByText("CGHS pending"),
     ).toBeVisible();
-    await popup;
 
     const saved = await bills.readBill(free.bill, db);
     expect(saved.status).toBe("final");

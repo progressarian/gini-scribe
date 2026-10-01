@@ -165,7 +165,7 @@ function PdfFrame({ src }) {
   );
 }
 
-const PdfViewerModal = memo(function PdfViewerModal({ doc, src, onClose }) {
+const PdfViewerModal = memo(function PdfViewerModal({ doc, src, onClose, printable = false }) {
   const [url, setUrl] = useState(null);
   const [loading, setLoading] = useState(!src);
   const [error, setError] = useState(null);
@@ -181,6 +181,38 @@ const PdfViewerModal = memo(function PdfViewerModal({ doc, src, onClose }) {
   const overlayMouseDownRef = useRef(false);
   const zoomRef = useRef(null);
   const fitScaleRef = useRef(1);
+  const printFrameRef = useRef(null);
+
+  useEffect(() => () => printFrameRef.current?.remove(), []);
+
+  const openInNewTab = (target, name) => {
+    const win = window.open("", "_blank");
+    if (win) {
+      win.document.write(
+        `<!DOCTYPE html><html><head><title>${name}</title></head><body style="margin:0;padding:0;overflow:hidden"><iframe src="${target}" style="width:100vw;height:100vh;border:none"></iframe></body></html>`,
+      );
+      win.document.close();
+    }
+  };
+
+  const printDocument = (target, name) => {
+    printFrameRef.current?.remove();
+    const frame = document.createElement("iframe");
+    frame.className = "pdf-print-frame";
+    frame.title = `Print ${name}`;
+    frame.setAttribute("aria-hidden", "true");
+    frame.onload = () => {
+      try {
+        frame.contentWindow.focus();
+        frame.contentWindow.print();
+      } catch {
+        openInNewTab(target, name);
+      }
+    };
+    frame.src = target;
+    document.body.appendChild(frame);
+    printFrameRef.current = frame;
+  };
 
   const isPannable = zoom != null && zoom > fitScale + 0.001;
 
@@ -486,20 +518,32 @@ const PdfViewerModal = memo(function PdfViewerModal({ doc, src, onClose }) {
                 </a>
                 <button
                   className="pdf-btn"
-                  onClick={() => {
-                    const blobUrl = typeof url === "string" ? url : url.url;
-                    const win = window.open("", "_blank");
-                    if (win) {
-                      win.document.write(
-                        `<!DOCTYPE html><html><head><title>${viewDoc.file_name || "Document"}</title></head><body style="margin:0;padding:0;overflow:hidden"><iframe src="${blobUrl}" style="width:100vw;height:100vh;border:none"></iframe></body></html>`,
-                      );
-                      win.document.close();
-                    }
-                  }}
+                  onClick={() =>
+                    openInNewTab(
+                      typeof url === "string" ? url : url.url,
+                      viewDoc.file_name || "Document",
+                    )
+                  }
                   title="Open in new tab"
                 >
                   ↗
                 </button>
+                {printable && (
+                  <button
+                    type="button"
+                    className="pdf-btn"
+                    onClick={() =>
+                      printDocument(
+                        typeof url === "string" ? url : url.url,
+                        viewDoc.file_name || "Document",
+                      )
+                    }
+                    title="Print"
+                    aria-label="Print"
+                  >
+                    🖨
+                  </button>
+                )}
               </>
             )}
             <button className="pdf-btn pdf-btn-close" onClick={onClose}>

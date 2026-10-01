@@ -6,6 +6,7 @@ import { requireCapability } from "../middleware/auth.js";
 import { validate, validateQuery } from "../middleware/validate.js";
 import {
   giniflowDateQuerySchema,
+  giniflowReportQuerySchema,
   giniflowSearchQuerySchema,
   giniflowSlaUpdateSchema,
   giniflowPrioritySchema,
@@ -44,6 +45,7 @@ import { addClient, removeClient, hubStatus } from "../services/giniflow/eventHu
 import { trackByToken } from "../services/giniflow/journey.js";
 import { getMachineTrack } from "../services/giniflow/machineStation.js";
 import { getTestsHold } from "../services/giniflow/testsHold.js";
+import { getFlowReport } from "../services/giniflow/reports.js";
 
 const router = Router();
 
@@ -468,28 +470,14 @@ router.patch(
 );
 
 router.get(
-  "/giniflow/day-report",
+  "/giniflow/reports",
   requireCapability(CAP.GINIFLOW_BOARD),
-  validateQuery(giniflowDateQuerySchema),
+  validateQuery(giniflowReportQuerySchema),
   async (req, res) => {
     try {
-      const date = await resolveDate(req.query.date);
-      const sla = await getSlaConfig();
-      const board = await getDayBoard(date, sla, boardClock(date));
-      const stats = await getDayStats(date, board, sla);
-      const bottleneck = getBottleneck(board.columns);
-
-      const parts = [
-        stats.avgCompletedMinutes
-          ? `avg journey ${stats.avgCompletedMinutes}m`
-          : "no completed visits yet",
-        `${stats.completed} completed`,
-        `${stats.overBudget} over SLA`,
-        bottleneck ? `bottleneck: ${bottleneck.label}` : "no bottleneck",
-      ];
-      res.json({ date, summary: parts.join(" · "), stats, bottleneck });
+      res.json(await getFlowReport(req.query.start, req.query.end, await getSlaConfig()));
     } catch (e) {
-      handleError(res, e, "Gini Flow day report");
+      handleError(res, e, "Gini Flow reports");
     }
   },
 );

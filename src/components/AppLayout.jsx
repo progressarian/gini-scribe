@@ -161,13 +161,6 @@ const NAV_ITEMS = [
   // in the middle of a collection. Capability already keeps Flow Floor away from
   // them; this holds even if that is ever widened.
   // Patient Flow Management
-  { path: "/flow/checkin", label: "🏥 Flow Check-in", cap: C["/flow/checkin"], show: () => true },
-  {
-    path: "/flow/coordinator",
-    label: "📋 Flow Floor",
-    cap: C["/flow/coordinator"],
-    show: (s) => !isLabDesk(s.role),
-  },
   // Gini Flow. Runs alongside the old Flow Floor board until parity is signed
   // off, then that one and its FLOW_* keys are deleted (docs/gini-flow/).
   // One way in: the launcher lists every station this role can open, with live
@@ -184,16 +177,12 @@ const NAV_ITEMS = [
     cap: C["/giniflow/manager"],
     show: (s) => !isLabDesk(s.role),
   },
-  // One tab for all six station desks — the page's own switcher is the
-  // sub-navigation, showing only the desks this role can work.
   {
-    path: "/flow/station",
-    label: "⚖️ Stations",
-    cap: C["/flow/station"],
+    path: "/giniflow/reports",
+    label: "📊 Flow Reports",
+    cap: C["/giniflow/reports"],
     show: () => true,
-    match: (p) => p.startsWith("/flow/station") || p === "/flow/my-patients",
   },
-  { path: "/flow/reports", label: "📊 Flow Reports", cap: C["/flow/reports"], show: () => true },
   {
     path: "/billing/reports",
     label: "💹 Billing Reports",

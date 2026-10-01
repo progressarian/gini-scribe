@@ -1,13 +1,17 @@
 import { useState } from "react";
 import { CreditCard, Plus, X } from "lucide-react";
+import ConfirmModal from "../../ui/ConfirmModal";
 import {
+  useBillPayments,
+  useClearInHealthray,
   useCurrentShift,
   useDeskSettings,
   useRereadBill,
   useTakePayments,
 } from "../../../queries/hooks/useBilling";
+import { HEALTHRAY_MODE } from "../../../../shared/billingVocab.js";
 import { errorOf, fromPaise, moneyTyped } from "../format";
-import { PAYMENT_MODE_LABEL } from "./lineText";
+import { HEALTHRAY_LABEL, PAYMENT_MODE_LABEL } from "./lineText";
 import { balanceOf, payLaterAllowed } from "./finaliseChecks";
 import { emptyPaymentRow } from "./counterForm";
 
@@ -20,11 +24,28 @@ const REFERENCE_HINT = {
   upi: "e.g. UPI transaction ID",
 };
 
-export default function TotalsAndPayment({ bill, onBill, schemes, payLater, onPayLater, form }) {
+const healthrayPaidOf = (payments) =>
+  (payments || [])
+    .filter((payment) => payment.direction === "in" && payment.mode === HEALTHRAY_MODE)
+    .reduce((sum, payment) => sum + payment.amount, 0);
+
+export default function TotalsAndPayment({
+  bill,
+  patient,
+  onBill,
+  schemes,
+  payLater,
+  onPayLater,
+  form,
+}) {
   const { data: settings } = useDeskSettings();
   const { data: shift } = useCurrentShift();
+  const { data: billPayments } = useBillPayments(bill.id);
   const take = useTakePayments();
+  const clear = useClearInHealthray();
   const reread = useRereadBill();
+  const [confirming, setConfirming] = useState(false);
+  const [clearError, setClearError] = useState(null);
   const rows = form.value.rows;
   const setRows = (next) => form.set("rows", next);
   const [error, setError] = useState(null);
@@ -101,6 +122,42 @@ export default function TotalsAndPayment({ bill, onBill, schemes, payLater, onPa
     }
   };
 
+  const clearInHealthray = async () => {
+    setClearError(null);
+    setError(null);
+    setNote(null);
+    try {
+      onBill(
+        await clear.mutateAsync({ billId: bill.id, visitId: bill.visit_id, version: bill.version }),
+      );
+      form.drop("rows", "payLater");
+      setCapped(null);
+      setConfirming(false);
+      setNote(`Marked ${fromPaise(balance)} as paid in HealthRay.`);
+    } catch (e) {
+      if (e?.paymentTaken) {
+        form.drop("rows", "payLater");
+        setConfirming(false);
+        setError(
+          "The bill was marked paid in HealthRay, but it could not be read back — press Save draft to see it.",
+        );
+        return;
+      }
+      setClearError(errorOf(e, "This bill could not be marked as paid in HealthRay"));
+      if (e?.response?.data?.version) {
+        try {
+          onBill(await reread.mutateAsync({ billId: bill.id }));
+        } catch {
+          setClearError("This bill changed and could not be read again — open it again");
+        }
+      }
+    }
+  };
+
+  const healthrayPaid = healthrayPaidOf(billPayments);
+  const clearable =
+    bill.bill_type !== "credit_note" && (bill.status === "draft" || bill.status === "final");
+
   const shown = (label, amount, key, tone) => (amount ? total(label, amount, key, tone) : null);
   const total = (label, amount, key, tone = "") => (
     <tr key={key} className={tone ? `bc-t bc-t--${tone}` : "bc-t"}>
@@ -129,10 +186,22 @@ export default function TotalsAndPayment({ bill, onBill, schemes, payLater, onPa
             {total("Amount Due", balance, "balance", balance > 0 ? "due" : "clear")}
           </tbody>
         </table>
-        {bill.status !== "cancelled" && balance === 0 && bill.lines.length > 0 && (
-          <div className="bc-pay__clear">No payment is needed on this bill.</div>
-        )}
+        {bill.status !== "cancelled" &&
+          balance === 0 &&
+          bill.lines.length > 0 &&
+          healthrayPaid === 0 && (
+            <div className="bc-pay__clear">No payment is needed on this bill.</div>
+          )}
       </div>
+
+      {bill.status !== "cancelled" && balance === 0 && healthrayPaid > 0 && (
+        <div className="bc-card bc-pay__take">
+          <h3 className="bc-card__heading">Payment</h3>
+          <button type="button" className="bc-pay__hr bc-pay__hr--done" disabled>
+            ✓ {HEALTHRAY_LABEL} — {fromPaise(healthrayPaid)}
+          </button>
+        </div>
+      )}
 
       {bill.status !== "cancelled" && balance > 0 && (
         <div className="bc-card bc-pay__take">
@@ -278,6 +347,20 @@ export default function TotalsAndPayment({ bill, onBill, schemes, payLater, onPa
             ) : null}
           </button>
 
+          {clearable && (
+            <button
+              type="button"
+              className="bc-pay__hr"
+              disabled={take.isPending || clear.isPending}
+              onClick={() => {
+                setClearError(null);
+                setConfirming(true);
+              }}
+            >
+              {HEALTHRAY_LABEL}
+            </button>
+          )}
+
           {allowsLater && bill.status === "draft" && (
             <label className="bc-pay__later">
               <input
@@ -298,6 +381,45 @@ export default function TotalsAndPayment({ bill, onBill, schemes, payLater, onPa
       )}
       {note && <div className="bc-note">{note}</div>}
       {error && <div className="bc-err">{error}</div>}
+
+      <ConfirmModal
+        open={confirming}
+        title="Mark as paid in HealthRay?"
+        variant="primary"
+        confirmLabel={clear.isPending ? "Marking…" : `Mark ${fromPaise(balance)} paid`}
+        cancelLabel="Cancel"
+        busy={clear.isPending}
+        error={clearError}
+        message={
+          <div className="bc-hr-confirm">
+            <dl className="bc-hr-confirm__facts">
+              <div>
+                <dt>Patient</dt>
+                <dd>
+                  {patient?.name || "—"}
+                  {patient?.fileNo ? ` · ${patient.fileNo}` : ""}
+                </dd>
+              </div>
+              <div>
+                <dt>Bill</dt>
+                <dd>{bill.bill_no || "Draft"}</dd>
+              </div>
+              <div>
+                <dt>Amount</dt>
+                <dd>{fromPaise(balance)}</dd>
+              </div>
+            </dl>
+            <p>
+              This clears the bill in Scribe. No money is taken here and it is not added to the cash
+              drawer.
+            </p>
+          </div>
+        }
+        onConfirm={clearInHealthray}
+        onCancel={() => {
+          if (!clear.isPending) setConfirming(false);
+        }}
+      />
     </section>
   );
 }

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { refundReceiptPdfHref, useRefundBoard } from "../../../queries/hooks/useBilling";
 import { errorOf, fromPaise } from "../format";
 import { refundLegsText, refundModeText } from "./lineText";
+import { PdfButton } from "./PdfViewer";
 
 const SEARCH_MIN = 2;
 
@@ -143,14 +144,14 @@ function RefundRow({ row, onOpen }) {
           {row.group === "to_pay" ? "Open to pay out" : "Open"}
         </button>
         {row.group === "paid" && row.amounts.paid_back > 0 && (
-          <a
+          <PdfButton
             className="st-btn st-btn-g"
             href={refundReceiptPdfHref(row.credit_note.id)}
-            target="_blank"
-            rel="noreferrer"
+            title={`Refund receipt ${row.credit_note.bill_no || ""}`.trim()}
+            fileName={`RefundReceipt_${row.credit_note.bill_no || row.credit_note.id}.pdf`}
           >
             Print refund receipt
-          </a>
+          </PdfButton>
         )}
       </td>
     </tr>

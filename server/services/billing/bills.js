@@ -973,6 +973,39 @@ async function dropLineIn(client, bill, before, after, ctx) {
   });
 }
 
+export const REPLACED_DEFAULT_CONSULTATION = "Replaced by the consultant's own consultation";
+
+export async function swapAutoConsultationIn(client, visitId, item, ctx) {
+  const { rows } = await client.query(
+    `SELECT l.id, l.bill_id FROM bill_lines l
+       JOIN bills b ON b.id = l.bill_id AND b.status = 'draft' AND b.bill_type = 'invoice'
+       JOIN service_items i ON i.id = l.service_item_id
+      WHERE l.visit_id = $1 AND l.is_live AND l.source = 'visit'
+        AND i.kind = 'consultation' AND i.doctor_id IS NULL
+        AND l.agreed_rate IS NULL AND l.service_item_id <> $2
+        AND NOT EXISTS (SELECT 1 FROM bills f WHERE f.visit_id = $1
+                          AND f.bill_type = 'invoice' AND f.status = 'final')
+      LIMIT 1`,
+    [visitId, item.id],
+  );
+  if (!rows.length) return null;
+  const bill = assertDraft(await lockBill(client, rows[0].bill_id));
+  const before = await lineOf(client, bill, rows[0].id);
+  await dropLineIn(
+    client,
+    bill,
+    before,
+    { removed: true, reason: REPLACED_DEFAULT_CONSULTATION },
+    ctx,
+  );
+  return addLineIn(
+    client,
+    bill,
+    { item_id: item.id, source: "visit", doctor_id: item.doctor_id ?? item.chosen_doctor_id },
+    ctx,
+  );
+}
+
 export async function removeLine(billId, lineId, input, ctx, db = pool) {
   const reason = optionalReason(input?.reason, "The reason for removing this line");
   return inTransaction(async (client) => {

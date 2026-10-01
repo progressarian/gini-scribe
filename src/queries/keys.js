@@ -55,7 +55,6 @@ export const qk = {
     stepCatalog: () => ["flow", "step-catalog"],
     template: (visitType) => ["flow", "template", visitType],
     staff: (role) => ["flow", "staff", role || null],
-    reports: (start, end) => ["flow", "reports", start, end],
     appointments: (date, q, doctor) => ["flow", "appointments", date, q || null, doctor || null],
   },
   home: {

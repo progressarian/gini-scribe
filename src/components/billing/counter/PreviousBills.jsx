@@ -3,6 +3,7 @@ import { billPdfHref, creditNotePdfHref } from "../../../queries/hooks/useBillin
 import { fromPaise } from "../format";
 import { billStatusText } from "./lineText";
 import RefundDialog from "./RefundDialog";
+import { PdfButton } from "./PdfViewer";
 
 function Credits({ bill }) {
   const credits = bill.credits;
@@ -13,9 +14,14 @@ function Credits({ bill }) {
     <ul className="bc-refund__credits" aria-label={`Refunds on bill ${bill.bill_no}`}>
       {credits.notes.map((cn) => (
         <li key={cn.id}>
-          <a href={creditNotePdfHref(cn.id)} target="_blank" rel="noreferrer">
+          <PdfButton
+            className="bc-linkbtn"
+            href={creditNotePdfHref(cn.id)}
+            title={`Credit note ${cn.bill_no}`}
+            fileName={`CreditNote_${cn.bill_no}.pdf`}
+          >
             Refunded {fromPaise(cn.refunded)} on {cn.bill_no}
-          </a>
+          </PdfButton>
           {cn.payable !== cn.refunded && (
             <span className="bc-head__meta"> · credited {fromPaise(cn.payable)}</span>
           )}
@@ -80,15 +86,15 @@ export default function PreviousBills({ bills, onOpen }) {
                       Refund…
                     </button>
                   )}
-                  <a
+                  <PdfButton
                     className="st-btn"
                     href={billPdfHref(b.id)}
-                    target="_blank"
-                    rel="noreferrer"
+                    title={`Bill ${b.bill_no || "draft"}`}
+                    fileName={`Bill_${b.bill_no || b.id}.pdf`}
                     aria-label={`Print bill ${b.bill_no || "draft"}`}
                   >
                     Print
-                  </a>
+                  </PdfButton>
                 </td>
               </tr>
             ))}

@@ -9,7 +9,8 @@ import { sortDiagnoses } from "../utils/diagnosisSort.js";
 import { encryptAadhaar, decryptAadhaar, decryptAadhaarFull } from "../utils/aadhaarCrypt.js";
 import { isKnownScheme } from "../services/patientSchemes.js";
 import { validate } from "../middleware/validate.js";
-import { patientCreateSchema } from "../schemas/index.js";
+import { patientCreateSchema, patientHealthrayFetchSchema } from "../schemas/index.js";
+import { fetchHealthrayPatientByUhid } from "../services/healthray/patientImport.js";
 import { recordReferralSource } from "../crm/registration.js";
 import { requireDoctor, requireCapability } from "../middleware/auth.js";
 import { CAPABILITIES as CAP } from "../../shared/permissions.js";
@@ -532,6 +533,47 @@ router.get("/patients/:id", async (req, res) => {
     handleError(res, e, "Patient detail");
   }
 });
+
+const HEALTHRAY_FETCH_WINDOW_MS = 10 * 60 * 1000;
+const HEALTHRAY_FETCH_PER_WINDOW = 30;
+const healthrayFetchesBy = new Map();
+
+const healthrayFetchAllowed = (doctorId) => {
+  const now = Date.now();
+  const recent = (healthrayFetchesBy.get(doctorId) || []).filter(
+    (t) => now - t < HEALTHRAY_FETCH_WINDOW_MS,
+  );
+  if (recent.length >= HEALTHRAY_FETCH_PER_WINDOW) return false;
+  healthrayFetchesBy.set(doctorId, [...recent, now]);
+  return true;
+};
+
+router.post(
+  "/patients/healthray-fetch",
+  requireCapability([CAP.RECEPTION_OPS, CAP.OBT_OPS]),
+  validate(patientHealthrayFetchSchema),
+  async (req, res) => {
+    if (!healthrayFetchAllowed(req.doctor.id))
+      return res.status(429).json({
+        error: "Too many HealthRay lookups in a few minutes. Wait a little and search again.",
+      });
+    try {
+      const result = await fetchHealthrayPatientByUhid(req.body.uhid);
+      if (result.status === "not_found")
+        return res.status(404).json({
+          error: `${req.body.uhid.toUpperCase()} is not registered in HealthRay. Check the UHID.`,
+        });
+      res.json(result);
+    } catch (e) {
+      if (e.healthrayBlocked)
+        return res.status(503).json({
+          error: "HealthRay is not reachable right now. Try again in a few minutes.",
+        });
+      console.error("HealthRay patient fetch error:", e?.message);
+      res.status(502).json({ error: "Could not fetch the patient from HealthRay. Try again." });
+    }
+  },
+);
 
 // Create or update patient
 router.post("/patients", validate(patientCreateSchema), async (req, res) => {

@@ -1508,7 +1508,6 @@ export default function FlowManagerPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [statFilter, setStatFilter] = useState(null);
   const [openVisit, setOpenVisit] = useState(null);
-  const [report, setReport] = useState(null);
   const [slaError, setSlaError] = useState("");
   const [date, setDate] = useState(null);
   const [search, setSearch] = useState("");
@@ -1517,9 +1516,6 @@ export default function FlowManagerPage() {
   const [pendingMove, setPendingMove] = useState(null);
   const toastTimer = useRef(null);
 
-  const perfRef = useRef(null);
-  const rootRef = useRef(null);
-  const reportRef = useRef(null);
   const debouncedSearch = useDebounced(search, 250);
   const { data: searchData, isFetching: searching } = useGiniflowSearch(debouncedSearch, date);
   const { data, isLoading, isError, error, dataUpdatedAt } = useGiniflowBoard(date);
@@ -1553,22 +1549,6 @@ export default function FlowManagerPage() {
     () => (data?.serverTime ? dataUpdatedAt - new Date(data.serverTime).getTime() : 0),
     [data?.serverTime, dataUpdatedAt],
   );
-
-  // The day-report panel is anchored above the performance strip; measure it
-  // rather than guessing, so the panel cannot cover the footer tiles.
-  useEffect(() => {
-    const el = perfRef.current;
-    const root = rootRef.current;
-    if (!el || !root) return undefined;
-    const apply = () => root.style.setProperty("--perf-h", `${el.offsetHeight}px`);
-    apply();
-    const ro = new ResizeObserver(apply);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [report]);
-
-  const closeReport = useCallback(() => setReport(null), []);
-  useDismissable(!!report, closeReport, reportRef);
 
   const [notifying, setNotifying] = useState(false);
 
@@ -1750,18 +1730,6 @@ export default function FlowManagerPage() {
       ),
   });
 
-  // GF-26: a toast that vanishes in 3s is no place for the day's numbers.
-  const dayReport = async () => {
-    try {
-      const { data: r } = await api.get("/api/giniflow/day-report", {
-        params: date ? { date } : {},
-      });
-      setReport(r);
-    } catch {
-      showToast("Day report unavailable");
-    }
-  };
-
   if (isLoading && !data) return <div className="gf gf-loading">Loading floor…</div>;
   if (expired)
     return (
@@ -1804,7 +1772,7 @@ export default function FlowManagerPage() {
   const canUseCardMenu = canManageQueue && !date;
 
   return (
-    <div className="gf gf--page" ref={rootRef}>
+    <div className="gf gf--page">
       <header className="rail">
         <div className="rail-head">
           <h1 className="rail-title">🔀 Flow Manager</h1>
@@ -1821,9 +1789,9 @@ export default function FlowManagerPage() {
           </div>
         </div>
         <div className="rr">
-          <button className="rbtn" data-gf-toggle onClick={dayReport}>
+          <a className="rbtn" href="/giniflow/reports">
             📊 Day report
-          </button>
+          </a>
           <button className="rbtn" data-gf-toggle onClick={() => setDrawerOpen(true)}>
             ⚙ Time budgets
           </button>
@@ -2039,7 +2007,7 @@ export default function FlowManagerPage() {
         </div>
       </div>
 
-      <div className="perf" ref={perfRef}>
+      <div className="perf">
         {stationAverages.map((s) => (
           <div
             className="pf"
@@ -2091,37 +2059,6 @@ export default function FlowManagerPage() {
         onSave={saveSla.mutate}
         error={slaError}
       />
-      {report && (
-        <div className="report-panel" ref={reportRef} role="dialog" aria-label="Day report">
-          <div className="rp-hd">
-            <strong>Day report · {report.date}</strong>
-            <button className="tb-cls" onClick={closeReport} aria-label="Close">
-              ✕
-            </button>
-          </div>
-          <div className="rp-body">
-            <div className="rp-line">{report.summary}</div>
-            <div className="rp-grid">
-              <span>In building</span>
-              <span>{report.stats.inBuilding}</span>
-              <span>Completed</span>
-              <span>{report.stats.completed}</span>
-              <span>Avg journey</span>
-              <span>
-                {report.stats.avgCompletedMinutes ?? "—"}m / {report.stats.journeyTargetMinutes}m
-              </span>
-              <span>Over budget</span>
-              <span>{report.stats.overBudget}</span>
-              <span>Blocked</span>
-              <span>{report.stats.blocked}</span>
-              <span>Within SLA</span>
-              <span>
-                {report.stats.withinSlaPct ?? "—"}% of {report.stats.slaTransitions} transitions
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
       {pendingMove && (
         <div
           className="tmodal open"

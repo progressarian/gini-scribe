@@ -287,7 +287,7 @@ test.describe.serial("P4C-14 the Bill tab lists who needs a bill first", () => {
     await expect(row.locator(".bc-badge")).toHaveText("Draft");
   });
 
-  test("12. adding the consultation and paying moves the patient to billed today", async () => {
+  test("12. adding the consultation and paying it in full moves the patient to billed today, before and after finalising", async () => {
     const draft = await bills.openDraft(visits.Seen.visit, desk, db);
     await bills.addLine(draft.id, { item_id: ids.consultNew }, desk, db);
     let body = await list();
@@ -301,7 +301,8 @@ test.describe.serial("P4C-14 the Bill tab lists who needs a bill first", () => {
       db,
     );
     body = await list();
-    expect(rowOf(body, "Seen").group).toBe("toBill");
+    expect(rowOf(body, "Seen").group).toBe("billed");
+    expect(rowOf(body, "Seen").hints).toMatchObject({ consultation: false, due: 0 });
     await bills.finaliseBill(draft.id, { version: paid.version }, desk, db);
     body = await list();
     expect(rowOf(body, "Seen").group).toBe("billed");

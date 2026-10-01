@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { one, query } from "../../helpers/db.mjs";
 import { loginAs } from "../../helpers/auth.mjs";
+import { closePdfViewer, expectPdfInViewer } from "../../helpers/pdfViewer.mjs";
 import { gotoReady } from "../../helpers/browser.mjs";
 import { assertTestDatabase } from "../../setup/guard.mjs";
 import { newTag, setUp, tearDown } from "../phase4/p4-bills-fixture.mjs";
@@ -161,8 +162,9 @@ test.describe.serial("P4B-19 the credit note series is set up in Billing setting
       [ids.bill.id],
     );
     expect(paid.mode).toBe("cash");
-    const receipt = refunds(page).getByRole("link", { name: "Print refund receipt" });
-    const href = await receipt.getAttribute("href");
+    await refunds(page).getByRole("button", { name: "Print refund receipt" }).click();
+    const href = await expectPdfInViewer(page, "/refund-receipt.pdf?token=");
+    await closePdfViewer(page);
     const pdf = await request.get(new URL(href, page.url()).toString());
     expect(pdf.status()).toBe(200);
     expect(pdf.headers()["content-type"]).toContain("application/pdf");

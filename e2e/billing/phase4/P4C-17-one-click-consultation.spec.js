@@ -164,7 +164,7 @@ test.describe.serial("P4C-17 one-click consultation at the counter", () => {
       ["quiet", "C17Quiet", { visitType: "Follow Up" }],
       ["phone", "C17Phone", { visitType: "Follow Up" }],
       ["auto", "C17Auto", { visitType: "Follow Up" }],
-      ["unbilled", "C17Unbilled", { visitType: "Follow Up" }],
+      ["unbilled", "C17Unbilled", { visitType: "Follow Up", healthray: false }],
     ]) {
       visits[key] = await extraVisit(ids, label, options);
       if (key !== "unbilled") {

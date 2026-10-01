@@ -60,3 +60,13 @@ export function useGiniflowTimeline(visitId) {
     enabled: !!visitId,
   });
 }
+
+export function useGiniflowReports(start, end) {
+  return useQuery({
+    queryKey: ["giniflow", "reports", start, end],
+    queryFn: async () => (await api.get("/api/giniflow/reports", { params: { start, end } })).data,
+    enabled: !!start && !!end,
+    placeholderData: (prev) => prev,
+    staleTime: 60_000,
+  });
+}

@@ -36,6 +36,9 @@ const PAGES = Object.fromEntries(
       for (const [name, sheet] of Object.entries(SHEET_BY_IMPORT)) {
         if (src.includes(name) && !sheets.includes(sheet)) sheets.push(sheet);
       }
+      for (const m of src.matchAll(/^import\s+"\.\/([^"]+\.css)";/gm)) {
+        sheets.push(`${PAGE_DIR}/${m[1]}`);
+      }
       return [file, sheets];
     }),
 );

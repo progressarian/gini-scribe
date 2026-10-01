@@ -3,8 +3,9 @@ import { paise } from "../../../shared/labPayment.js";
 import { FLAT } from "../giniflow/labCatalog.js";
 import { TEST_MATCHES_SQL } from "./testMatch.js";
 import { heldCatalogs } from "./receptionOrders.js";
-import { httpError } from "./transaction.js";
-import { suggestionPrice } from "./visitLines.js";
+import { httpError, inTransaction } from "./transaction.js";
+import { addLineIn, openDraftIn } from "./bills.js";
+import { REMOVED_BY_DESK_SQL, suggestionPrice } from "./visitLines.js";
 import { isLiveBillItem } from "../giniflow/patientBill.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -47,19 +48,17 @@ async function itemsFor(db, names) {
   return new Map(rows.map((row) => [row.name, row.item_id]));
 }
 
-export async function healthrayBillSuggestion(billId, ctx, db = pool) {
-  const bill = await draftOf(db, billId);
-  if (bill.status !== "draft" || bill.bill_type !== "invoice" || !bill.visit_id) return NOTHING;
+async function candidatesFor(db, bill) {
   const { rows: stored } = await db.query(
     `SELECT items, read_at FROM giniflow_patient_bills
       WHERE patient_id = $1 AND bill_date = $2::date AND status = 'billed'`,
     [bill.patient_id, bill.visit_date],
   );
-  if (!stored.length) return NOTHING;
+  if (!stored.length) return null;
   const lines = (stored[0].items || []).filter(
     (line) => isLiveBillItem(line) && line.category !== "consultation" && line.desc,
   );
-  if (!lines.length) return NOTHING;
+  if (!lines.length) return null;
   const matched = await itemsFor(
     db,
     lines.map((line) => line.desc),
@@ -69,17 +68,18 @@ export async function healthrayBillSuggestion(billId, ctx, db = pool) {
     `SELECT i.id, i.code, i.name, i.price_per_patient, i.test_catalog_id,
             EXISTS (SELECT 1 FROM bill_lines l JOIN bills b ON b.id = l.bill_id
                      WHERE l.visit_id = $2 AND l.service_item_id = i.id AND l.is_live
-                       AND b.status <> 'cancelled') AS on_visit
+                       AND b.status <> 'cancelled') AS on_visit,
+            ${REMOVED_BY_DESK_SQL("$2::uuid", "i.id")} AS removed
        FROM service_items i WHERE i.id = ANY($1::int[])`,
     [ids, bill.visit_id],
   );
   const byId = new Map(items.map((item) => [item.id, item]));
   const held = await heldCatalogs(db, {
     visitId: bill.visit_id,
-    billId: bill.id,
+    billId: bill.id ?? null,
     catalogIds: items.map((item) => item.test_catalog_id),
   });
-  const suggested = [];
+  const due = [];
   const notMatched = [];
   const seen = new Set();
   for (const line of lines) {
@@ -90,6 +90,18 @@ export async function healthrayBillSuggestion(billId, ctx, db = pool) {
     }
     if (item.on_visit || seen.has(item.id) || held.has(item.test_catalog_id)) continue;
     seen.add(item.id);
+    due.push({ line, item });
+  }
+  return { readAt: stored[0].read_at, due, notMatched };
+}
+
+export async function healthrayBillSuggestion(billId, ctx, db = pool) {
+  const bill = await draftOf(db, billId);
+  if (bill.status !== "draft" || bill.bill_type !== "invoice" || !bill.visit_id) return NOTHING;
+  const found = await candidatesFor(db, bill);
+  if (!found) return NOTHING;
+  const suggested = [];
+  for (const { line, item } of found.due) {
     suggested.push({
       desc: line.desc,
       amount: paise(line.amount || 0),
@@ -104,9 +116,52 @@ export async function healthrayBillSuggestion(billId, ctx, db = pool) {
     });
   }
   return {
-    shown: suggested.length + notMatched.length > 0,
-    read_at: stored[0].read_at,
+    shown: suggested.length + found.notMatched.length > 0,
+    read_at: found.readAt,
     lines: suggested,
-    not_matched: notMatched,
+    not_matched: found.notMatched,
   };
+}
+
+export async function healthrayLinesForDesk(visitId, ctx, db = pool) {
+  try {
+    return await inTransaction(async (client) => {
+      const id = typeof visitId === "string" ? visitId.trim() : "";
+      if (!UUID.test(id)) throw httpError(400, "Choose a valid visit");
+      const { rows: visits } = await client.query(
+        `SELECT id, patient_id, visit_date::text AS visit_date
+           FROM giniflow_visits WHERE id = $1 FOR NO KEY UPDATE`,
+        [id],
+      );
+      if (!visits.length) return { ok: true, added: [], skipped: [] };
+      const [visit] = visits;
+      const found = await candidatesFor(client, {
+        id: null,
+        visit_id: visit.id,
+        patient_id: visit.patient_id,
+        visit_date: visit.visit_date,
+      });
+      const due = (found?.due ?? []).filter(({ item }) => !item.price_per_patient && !item.removed);
+      const added = [];
+      const skipped = [];
+      for (const { line, item } of due) {
+        try {
+          await inTransaction(async (inner) => {
+            const bill = await openDraftIn(inner, visit.id, ctx);
+            await addLineIn(inner, bill, { item_id: item.id, source: "added" }, ctx);
+          }, client);
+          added.push(line.desc);
+        } catch (error) {
+          if (error.code === "40P01") throw error;
+          skipped.push({ line: line.desc, message: error.message });
+        }
+      }
+      return { ok: true, added, skipped };
+    }, db);
+  } catch (error) {
+    console.error(
+      `[billing] no HealthRay bill lines at the counter for visit ${visitId}: ${error.message}`,
+    );
+    return { ok: false, error: error.message, added: [], skipped: [] };
+  }
 }

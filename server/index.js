@@ -76,6 +76,8 @@ import { startCronJobs } from "./services/cron/index.js";
 import { startSheetsCron } from "./services/cron/sheetsSync.js";
 import { startTodaysShowCron } from "./services/cron/todaysShowSync.js";
 import { startGenieSyncCron } from "./services/cron/genieSync.js";
+import { startReadOnlyGuardCron } from "./services/cron/readOnlyGuard.js";
+import { startHealthrayPatientsCron } from "./services/cron/healthrayPatientsSync.js";
 
 // Cron/sync jobs run in a separate worker process (see server/worker.js) so
 // heavy HealthRay sync work cannot starve the API's DB pool or event loop.
@@ -263,6 +265,8 @@ app.listen(PORT, () => {
     startSheetsCron();
     startTodaysShowCron();
     startGenieSyncCron();
+    startReadOnlyGuardCron();
+    startHealthrayPatientsCron();
   } else {
     console.log("ℹ️  cron jobs disabled in API process — run `npm run worker` separately");
   }

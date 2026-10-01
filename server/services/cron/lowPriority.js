@@ -24,6 +24,7 @@ export const CRON_LOCK_KEYS = {
   ANALYTICS_SNAPSHOT: 918273656,
   STALE_VISIT_SWEEP: 918273657,
   IMPORT_SESSION_SWEEP: 918273658,
+  HEALTHRAY_PATIENTS: 918273659,
 };
 
 /**
@@ -71,11 +72,13 @@ export async function tryAcquireCronLock(label = "cron", key) {
   }
 }
 
-export const cronLeaseEnabled = () => process.env.SCRIBE_CRON_LEASE === "1";
+export const cronLeaseEnabled = () => process.env.SCRIBE_CRON_LEASE !== "0";
 
 const LEASE_TTL_MS = 2 * 60_000;
 const LEASE_RENEW_MS = 30_000;
 const LEASE_OWNER = `${hostname()}:${process.pid}`;
+const LEGACY_LOCK_GRACE_MS = 15 * 60_000;
+const leaseStartedAt = Date.now();
 
 const logSkip = (label, why) => {
   const now = Date.now();
@@ -98,7 +101,7 @@ export async function tryAcquireCronLease(
       LIMIT 1`,
     [key],
   );
-  if (legacy.rowCount) {
+  if (legacy.rowCount && Date.now() - leaseStartedAt < LEGACY_LOCK_GRACE_MS) {
     logSkip(label, `the old advisory lock is held by backend ${legacy.rows[0].pid}`);
     return null;
   }

@@ -3,6 +3,7 @@ import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { one, query } from "../../helpers/db.mjs";
 import { apiAs, loginAs } from "../../helpers/auth.mjs";
 import { gotoReady } from "../../helpers/browser.mjs";
+import { closePdfViewer, expectPdfInViewer } from "../../helpers/pdfViewer.mjs";
 import { assertTestDatabase } from "../../setup/guard.mjs";
 import { USERS } from "../../fixtures/data.mjs";
 import { rupees } from "../../../src/components/billing/format.js";
@@ -133,14 +134,12 @@ async function takePayment(page) {
 
 async function finalise(page) {
   await ensureSeries(day);
-  const [pdf] = await Promise.all([
-    page.context().waitForEvent("page"),
-    actions(page).getByRole("button", { name: "Finalise & print" }).click(),
-  ]);
+  const pages = page.context().pages().length;
+  await actions(page).getByRole("button", { name: "Finalise & print" }).click();
   await expect(actions(page).getByRole("button", { name: "Finalise & print" })).toHaveCount(0);
-  await pdf.waitForURL(/\/bill\.pdf/, { waitUntil: "commit" });
-  const url = pdf.url();
-  await pdf.close();
+  const url = await expectPdfInViewer(page, "/bill.pdf");
+  await closePdfViewer(page);
+  expect(page.context().pages()).toHaveLength(pages);
   return url;
 }
 
@@ -267,11 +266,11 @@ test.describe.serial("P4-38 floor trial rehearsal", () => {
       await expect(lineRow(desk, `HbA1c ${tag}`)).toContainText(rupees(PRICES.hba1c));
       await expect(region(desk, "Ordered tests with no price")).toContainText(day.tests.loose);
 
-      await codes(desk).getByLabel("Discount code").fill(`NOPE${day.T}`);
+      await codes(desk).getByLabel("Discount code", { exact: true }).fill(`NOPE${day.T}`);
       await codes(desk).getByRole("button", { name: "Apply code" }).click();
       await expect(codes(desk).locator(".bc-err")).toContainText(`NOPE${day.T}`);
 
-      await codes(desk).getByLabel("Discount code").fill(day.code);
+      await codes(desk).getByLabel("Discount code", { exact: true }).fill(day.code);
       await codes(desk).getByRole("button", { name: "Apply code" }).click();
       await expect(codes(desk).getByText(`${day.code} applied`)).toBeVisible();
       await expect(codes(desk)).toContainText(day.codeName);
@@ -318,9 +317,9 @@ test.describe.serial("P4-38 floor trial rehearsal", () => {
       expect(flat).toContain("TOTAL PAYABLE AMOUNT (₹) 1,305.00");
       expect(flat).toContain("NET PAYABLE AMOUNT (₹) 0.00");
 
-      const receipt = await actions(desk)
-        .getByRole("link", { name: "Print receipt" })
-        .getAttribute("href");
+      await actions(desk).getByRole("button", { name: "Print receipt" }).click();
+      const receipt = await expectPdfInViewer(desk, `/bills/${bill.id}/receipt.pdf`);
+      await closePdfViewer(desk);
       const receiptText = await pdfText(await desk.request.get(receipt));
       expect(receiptText).toContain(bill.bill_no);
       expect(receiptText).toContain(`UPI${day.T}01`);
@@ -521,7 +520,7 @@ test.describe.serial("P4-38 floor trial rehearsal", () => {
       await expect(region(desk, "Bill lines").getByRole("heading")).toHaveText(
         `Bill Items${day.genBill.bill_no}`,
       );
-      await expect(actions(desk).getByRole("link", { name: "Print receipt" })).toBeVisible();
+      await expect(actions(desk).getByRole("button", { name: "Print receipt" })).toBeVisible();
       await expect(actions(desk).getByRole("button", { name: "Cancel unpaid bill" })).toHaveCount(
         0,
       );

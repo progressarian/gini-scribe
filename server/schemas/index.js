@@ -114,6 +114,13 @@ const phoneField = optStr.refine((v) => !v || !/[A-Za-z]/.test(v), {
   message: "Phone number cannot contain letters",
 });
 
+export const patientHealthrayFetchSchema = z.object({
+  uhid: z
+    .string()
+    .trim()
+    .regex(/^P_\d+$/i, "Enter a HealthRay UHID such as P_34080."),
+});
+
 export const patientCreateSchema = z
   .object({
     name: optStr,
@@ -593,6 +600,18 @@ export const reassignSingleSchema = z.object({
 // The board's date is optional and defaults to the IST today. It is validated
 // rather than pattern-matched in the route so a malformed value returns 400
 // instead of silently showing today's board under yesterday's heading.
+const reportDay = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "dates must be YYYY-MM-DD")
+  .refine((d) => !Number.isNaN(Date.parse(d)), "that is not a real date");
+
+export const giniflowReportQuerySchema = z
+  .object({ start: reportDay, end: reportDay })
+  .refine((q) => q.start <= q.end, { message: "The start date must be on or before the end date" })
+  .refine((q) => (Date.parse(q.end) - Date.parse(q.start)) / 86400000 < 92, {
+    message: "Choose a range of 92 days or fewer",
+  });
+
 export const giniflowDateQuerySchema = z.object({
   date: z
     .string()

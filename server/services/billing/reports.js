@@ -1,6 +1,6 @@
 import pool from "../../config/db.js";
 import { paise } from "../../../shared/labPayment.js";
-import { BILLING_ROLES } from "../../../shared/billingVocab.js";
+import { BILLING_ROLES, HEALTHRAY_MODE } from "../../../shared/billingVocab.js";
 import { ROLES } from "../../../shared/permissions.js";
 import { KINDS as REQUEST_KINDS } from "./billingRequests.js";
 import { PAYMENT_MODES } from "./cashShifts.js";
@@ -380,7 +380,7 @@ async function revenueCategories(filters, db) {
   ];
 }
 
-const MODE_LABELS = { cash: "Cash", card: "Card", upi: "UPI" };
+const MODE_LABELS = { cash: "Cash", card: "Card", upi: "UPI", healthray: "Paid in HealthRay" };
 
 const PAYMENT_COLUMNS = {
   day: { instant: "m.received_at" },
@@ -425,7 +425,7 @@ async function collections(filters, db) {
        LEFT JOIN doctors su ON su.id = s.user_id
       ORDER BY r.day, array_position($${scope.params.length + 1}::text[], r.mode),
                lower(u.name), s.opened_at, r.shift_id`,
-    [...scope.params, PAYMENT_MODES],
+    [...scope.params, [...PAYMENT_MODES, HEALTHRAY_MODE]],
   );
   const { sets, total } = splitSets(rows, dims);
   const pick = (key) => sets.get(key) ?? [];
@@ -455,7 +455,10 @@ async function collections(filters, db) {
       ],
       pick("shift_id").map((row) => ({
         ...row,
-        label: row.shift_id === null ? "No shift (card / UPI)" : (row.shift_user_name ?? "Shift"),
+        label:
+          row.shift_id === null
+            ? "No shift (card / UPI / HealthRay)"
+            : (row.shift_user_name ?? "Shift"),
       })),
       total,
     ),

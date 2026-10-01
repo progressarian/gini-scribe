@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import { getPool, query } from "../../helpers/db.mjs";
 import { loginAs } from "../../helpers/auth.mjs";
 import { gotoReady } from "../../helpers/browser.mjs";
+import { closePdfViewer, expectPdfInViewer } from "../../helpers/pdfViewer.mjs";
 import { assertTestDatabase } from "../../setup/guard.mjs";
 import { USERS } from "../../fixtures/data.mjs";
 import { desk, extraVisit, newTag, payRule, setUp, tearDown } from "./p4-bills-fixture.mjs";
@@ -79,23 +80,17 @@ test.describe.serial("P4-33 actions and printing", () => {
     await pad(page).getByRole("button", { name: "Take payment" }).click();
     await expect(pad(page).getByText("Payment taken")).toBeVisible();
 
-    const [popup] = await Promise.all([
-      page.waitForEvent("popup"),
-      actions(page).getByRole("button", { name: "Finalise & print" }).click(),
-    ]);
-    await expect
-      .poll(() => popup.url(), { message: "the bill PDF opens" })
-      .toContain(`/api/billing/bills/${ids.bill}/bill.pdf`);
-    await popup.close();
+    await actions(page).getByRole("button", { name: "Finalise & print" }).click();
+    await expectPdfInViewer(page, `/api/billing/bills/${ids.bill}/bill.pdf`);
+    await closePdfViewer(page);
 
     const saved = await bills.readBill(ids.bill, db);
     expect(saved.status).toBe("final");
     expect(saved.bill_no).toBeTruthy();
 
-    await expect(actions(page).getByRole("link", { name: "Print receipt" })).toHaveAttribute(
-      "href",
-      new RegExp(`/api/billing/bills/${ids.bill}/receipt.pdf`),
-    );
+    await actions(page).getByRole("button", { name: "Print receipt" }).click();
+    await expectPdfInViewer(page, `/api/billing/bills/${ids.bill}/receipt.pdf`);
+    await closePdfViewer(page);
     await expect(actions(page).getByRole("button", { name: "Cancel unpaid bill" })).toHaveCount(0);
   });
 
@@ -103,6 +98,8 @@ test.describe.serial("P4-33 actions and printing", () => {
     await loginAs(page, "reception");
     await open(page, free.visit);
     await actions(page).getByRole("button", { name: "Finalise & print" }).click();
+    await expectPdfInViewer(page, `/api/billing/bills/${free.bill}/bill.pdf`);
+    await closePdfViewer(page);
     await expect(actions(page).getByRole("button", { name: "Cancel unpaid bill" })).toBeVisible();
 
     await actions(page).getByRole("button", { name: "Cancel unpaid bill" }).click();
@@ -131,25 +128,17 @@ test.describe.serial("P4-33 actions and printing", () => {
     await expect(table.getByText(`Ankle brace ${tag}`)).toHaveCount(0);
 
     await bills.addLine(stale.bill, { item_id: ids.brace }, desk, db);
-    const [refused] = await Promise.all([
-      page.waitForEvent("popup"),
-      actions(page).getByRole("button", { name: "Finalise & print" }).click(),
-    ]);
+    await actions(page).getByRole("button", { name: "Finalise & print" }).click();
     await expect(
       actions(page).getByText("changed while you were working", { exact: false }),
     ).toBeVisible();
     await expect(table.getByText(`Ankle brace ${tag}`)).toBeVisible();
     expect((await bills.readBill(stale.bill, db)).status).toBe("draft");
-    await refused.close().catch(() => {});
+    await expect(page.locator(".pdf-modal")).toHaveCount(0);
 
-    const [popup] = await Promise.all([
-      page.waitForEvent("popup"),
-      actions(page).getByRole("button", { name: "Finalise & print" }).click(),
-    ]);
-    await expect
-      .poll(() => popup.url(), { message: "the bill PDF opens" })
-      .toContain(`/api/billing/bills/${stale.bill}/bill.pdf`);
-    await popup.close();
+    await actions(page).getByRole("button", { name: "Finalise & print" }).click();
+    await expectPdfInViewer(page, `/api/billing/bills/${stale.bill}/bill.pdf`);
+    await closePdfViewer(page);
     await expect.poll(async () => (await bills.readBill(stale.bill, db)).status).toBe("final");
   });
 });

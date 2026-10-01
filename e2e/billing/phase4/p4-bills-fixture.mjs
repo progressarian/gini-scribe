@@ -254,6 +254,7 @@ async function build(tag, { visitType = "New Patient" } = {}) {
       [ids.patient, ids.day, ids.appointment, CONSULTANTS.banshali.id],
     )
   ).id;
+  await healthrayBill(ids, ids.patient, [HEALTHRAY_CONSULTATION]);
 
   const series = async (name, prefix) => {
     await query(
@@ -281,7 +282,7 @@ export async function subCategory(ids, label, extra = {}) {
 export async function extraVisit(
   ids,
   label,
-  { visitType = "New Patient", doctorId = CONSULTANTS.banshali.id } = {},
+  { visitType = "New Patient", doctorId = CONSULTANTS.banshali.id, healthray = true } = {},
 ) {
   const name = `P4 ${label} ${ids.tag}`;
   const fileNo = `F4${label}-${ids.tag}`;
@@ -308,15 +309,24 @@ export async function extraVisit(
       [patient, ids.day, appointment, doctorId],
     )
   ).id;
+  if (healthray) await healthrayBill(ids, patient, [HEALTHRAY_CONSULTATION]);
   return { patient, appointment, visit };
 }
 
 export async function healthrayBill(ids, patient, items) {
   await query(
     `INSERT INTO giniflow_patient_bills (patient_id, bill_date, status, items)
-     VALUES ($1, $2::date, 'billed', $3::jsonb)`,
+     VALUES ($1, $2::date, 'billed', $3::jsonb)
+     ON CONFLICT (patient_id, bill_date) DO UPDATE SET status = 'billed', items = EXCLUDED.items`,
     [patient, ids.day, JSON.stringify(items)],
   );
+}
+
+export async function noHealthrayBill(ids, patient) {
+  await query(`DELETE FROM giniflow_patient_bills WHERE patient_id = $1 AND bill_date = $2::date`, [
+    patient,
+    ids.day,
+  ]);
 }
 
 export const HEALTHRAY_CONSULTATION = {

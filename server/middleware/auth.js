@@ -206,7 +206,6 @@ const ROUTE_CAPABILITIES = [
   ["/api/flow/patient-appointment", CAP.FLOW_RECEPTION],
   ["/api/flow/patient-billing", CAP.FLOW_RECEPTION],
   ["/api/flow/queue", [CAP.FLOW_STATION, CAP.FLOW_PHARMACY, CAP.FLOW_COORDINATOR]],
-  ["/api/flow/reports", CAP.FLOW_REPORTS],
   ["/api/flow/demo", CAP.ADMIN],
   // One-off backfill/repair endpoints. Was a PUBLIC_PREFIX (unauthenticated).
   ["/api/admin", CAP.ADMIN],

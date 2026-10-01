@@ -26,6 +26,10 @@ export default function FindPage() {
   const { doctorsList, fetchDoctorsList, currentDoctor } = useAuthStore();
   const canExportDirectory = hasCapability(currentDoctor?.role, CAPABILITIES.ADMIN);
   const [exporting, setExporting] = useState(false);
+  const canFetchFromHealthray =
+    hasCapability(currentDoctor?.role, CAPABILITIES.RECEPTION_OPS) ||
+    hasCapability(currentDoctor?.role, CAPABILITIES.OBT_OPS);
+  const [hrFetch, setHrFetch] = useState({ busy: false, error: "", uhid: "" });
 
   const exportDirectory = async () => {
     setExporting(true);
@@ -138,6 +142,39 @@ export default function FindPage() {
     searchPatientsDB(searchQuery, searchPeriod, val);
     setTodayApptDoctor(val);
     fetchTodayAppointments();
+  };
+
+  const searchedUhid = /^P_\d+$/i.test((searchQuery || "").trim())
+    ? searchQuery.trim().toUpperCase()
+    : "";
+
+  const autoFetched = useRef(new Set());
+  useEffect(() => {
+    if (!searchedUhid || !canFetchFromHealthray || searchLoading || dbPatients.length) return;
+    if (autoFetched.current.has(searchedUhid)) return;
+    const timer = setTimeout(() => {
+      autoFetched.current.add(searchedUhid);
+      fetchFromHealthray();
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [searchedUhid, canFetchFromHealthray, searchLoading, dbPatients.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fetchFromHealthray = async () => {
+    setHrFetch({ busy: true, error: "", uhid: searchedUhid });
+    try {
+      const { data } = await api.post("/api/patients/healthray-fetch", { uhid: searchedUhid });
+      setHrFetch({ busy: false, error: "", uhid: "" });
+      toast(`${data.patient?.name || searchedUhid} added from HealthRay`, "success");
+      setSearchPeriod("");
+      setSearchDoctor("");
+      searchPatientsDB(searchQuery, "", "");
+    } catch (e) {
+      setHrFetch({
+        busy: false,
+        uhid: searchedUhid,
+        error: e?.response?.data?.error || "Could not fetch the patient from HealthRay. Try again.",
+      });
+    }
   };
 
   const fmtTime = (slot) => {
@@ -686,6 +723,27 @@ export default function FindPage() {
             {searchQuery ? "No patients found" : "Search or use filters above"}
           </div>
           <div className="find__empty-hint">Try name, phone number, or file number</div>
+          {searchedUhid && canFetchFromHealthray && (
+            <div className="find__hr-fetch">
+              <div className="find__empty-hint" role="status">
+                {hrFetch.busy
+                  ? `Looking up ${searchedUhid} in HealthRay…`
+                  : hrFetch.error && hrFetch.uhid === searchedUhid
+                    ? "Not added from HealthRay."
+                    : `Checking HealthRay for ${searchedUhid}…`}
+              </div>
+              {hrFetch.error && hrFetch.uhid === searchedUhid && !hrFetch.busy && (
+                <button type="button" className="find__book-btn" onClick={fetchFromHealthray}>
+                  Try HealthRay again
+                </button>
+              )}
+              {hrFetch.error && hrFetch.uhid === searchedUhid && (
+                <div className="find__hr-fetch-error" role="alert">
+                  {hrFetch.error}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       ) : (
         <>

@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { one, query } from "../../helpers/db.mjs";
 import { apiAs, loginAs } from "../../helpers/auth.mjs";
+import { closePdfViewer, expectPdfInViewer } from "../../helpers/pdfViewer.mjs";
 import { gotoReady } from "../../helpers/browser.mjs";
 import { USERS } from "../../fixtures/data.mjs";
 import { assertTestDatabase } from "../../setup/guard.mjs";
@@ -364,8 +365,9 @@ test.describe.serial("P4B-20 reception Refunds tab", () => {
     const done = rowOf(page, "Paid back", "RfDone");
     await expect(done).toContainText("₹800 paid back");
     await expect(done).toContainText(`Paid back`);
-    const link = done.getByRole("link", { name: "Print refund receipt" });
-    const href = await link.getAttribute("href");
+    await done.getByRole("button", { name: "Print refund receipt" }).click();
+    const href = await expectPdfInViewer(page, "/refund-receipt.pdf?token=");
+    await closePdfViewer(page);
     expect(href).toContain(
       `/api/billing/credit-notes/${ids.doneReq.credit_note.id}/refund-receipt.pdf?token=`,
     );
@@ -373,7 +375,7 @@ test.describe.serial("P4B-20 reception Refunds tab", () => {
     expect(response.status()).toBe(200);
     expect(response.headers()["content-type"]).toContain("application/pdf");
     await expect(
-      rowOf(page, "Paid back", "RfLater").getByRole("link", { name: "Print refund receipt" }),
+      rowOf(page, "Paid back", "RfLater").getByRole("button", { name: "Print refund receipt" }),
     ).toHaveCount(0);
     await expect(rowOf(page, "Paid back", "RfLater")).toContainText("₹800 off what is owed");
   });
@@ -501,7 +503,7 @@ test.describe.serial("P4B-20 reception Refunds tab", () => {
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
     expect(sideways).toBeLessThanOrEqual(1);
-    const receipt = rowOf(page, "Paid back", "RfDone").getByRole("link", {
+    const receipt = rowOf(page, "Paid back", "RfDone").getByRole("button", {
       name: "Print refund receipt",
     });
     await receipt.scrollIntoViewIfNeeded();

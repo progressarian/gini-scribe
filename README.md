@@ -40,11 +40,11 @@ Around that core sit the OPD queue, the patient-flow (station) module, lab and d
 
 Three processes share one PostgreSQL database:
 
-| Process | Entry point | Role |
-|---|---|---|
-| **Client** | `src/main.jsx` → `src/router.jsx` | React 18 + Vite SPA. react-router, TanStack Query, Zustand |
-| **API** | `server/index.js` | Express. Mounts every `server/routes/*.js` under `/api`, and serves the built SPA from `dist/` |
-| **Worker** | `server/worker.js` | All cron/sync loops — HealthRay, lab, Genie, Google Sheets |
+| Process    | Entry point                       | Role                                                                                           |
+| ---------- | --------------------------------- | ---------------------------------------------------------------------------------------------- |
+| **Client** | `src/main.jsx` → `src/router.jsx` | React 18 + Vite SPA. react-router, TanStack Query, Zustand                                     |
+| **API**    | `server/index.js`                 | Express. Mounts every `server/routes/*.js` under `/api`, and serves the built SPA from `dist/` |
+| **Worker** | `server/worker.js`                | All cron/sync loops — HealthRay, lab, Genie, Google Sheets                                     |
 
 ```
         Browser (React SPA)
@@ -76,17 +76,17 @@ Cron runs in the **worker**, not the API, so a heavy HealthRay sync can't starve
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Frontend | React 18, Vite 5, react-router 7, TanStack Query 5, Zustand 5, Recharts |
-| Backend | Node.js 20, Express 4, Zod (validation), pg |
-| Database | PostgreSQL (Railway) |
-| File storage | Supabase Storage (signed URLs) |
-| Speech-to-text | Deepgram (streaming), OpenAI Whisper (batch) |
-| AI | Anthropic Claude — extraction, vision OCR, Rx review, summaries, SQL agent |
-| Scraping / PDF | Puppeteer (HealthRay report rendering), pdfkit, pdfjs-dist |
-| Messaging | MSG91 (WhatsApp), Firebase (push) |
-| Deployment | Railway (Docker) |
+| Layer          | Technology                                                                 |
+| -------------- | -------------------------------------------------------------------------- |
+| Frontend       | React 18, Vite 5, react-router 7, TanStack Query 5, Zustand 5, Recharts    |
+| Backend        | Node.js 20, Express 4, Zod (validation), pg                                |
+| Database       | PostgreSQL (Railway)                                                       |
+| File storage   | Supabase Storage (signed URLs)                                             |
+| Speech-to-text | Deepgram (streaming), OpenAI Whisper (batch)                               |
+| AI             | Anthropic Claude — extraction, vision OCR, Rx review, summaries, SQL agent |
+| Scraping / PDF | Puppeteer (HealthRay report rendering), pdfkit, pdfjs-dist                 |
+| Messaging      | MSG91 (WhatsApp), Firebase (push)                                          |
+| Deployment     | Railway (Docker)                                                           |
 
 No TypeScript, no test runner, no linter. Prettier is the only formatter.
 
@@ -174,16 +174,15 @@ Also on the clinical side: **Quick mode** (one voice pass producing both MO and 
 
 Tracks a patient physically moving through the OPD, from check-in to pharmacy exit. Screens under `/flow/*`:
 
-| Route | Who uses it |
-|---|---|
-| `/flow/checkin` | Reception — check the patient in and build their journey |
-| `/flow/coordinator` | Floor coordinator — live dashboard of everyone in the building |
-| `/flow/station/:role` | Station queues — vitals, MO, lab, dietitian, Rx |
-| `/flow/reports` | Wait-time and bottleneck analytics |
-| `/flow/admin` | Journey templates and station configuration |
-| `/visit/:token` | **Public** — the patient's own journey tracker (opaque token, no login) |
+| Route                 | Who uses it                                                             |
+| --------------------- | ----------------------------------------------------------------------- |
+| `/flow/checkin`       | Reception — check the patient in and build their journey                |
+| `/flow/coordinator`   | Floor coordinator — live dashboard of everyone in the building          |
+| `/flow/station/:role` | Station queues — vitals, MO, lab, dietitian, Rx                         |
+| `/flow/admin`         | Journey templates and station configuration                             |
+| `/visit/:token`       | **Public** — the patient's own journey tracker (opaque token, no login) |
 
-Server side lives in `server/services/flow/` and `server/routes/flow.js`. The design rationale is in `docs/FLOW_MANAGEMENT_PLAN.md` and `docs/FLOW_INTEGRATION_PLAN.md`.
+Wait-time and bottleneck reports moved to Gini Flow at `/giniflow/reports` (`server/services/giniflow/reports.js`). Server side lives in `server/services/flow/` and `server/routes/flow.js`. The design rationale is in `docs/FLOW_MANAGEMENT_PLAN.md` and `docs/FLOW_INTEGRATION_PLAN.md`.
 
 ---
 
@@ -235,19 +234,19 @@ Two things worth knowing before writing queries:
 
 Every file in `server/routes/` is mounted under `/api`, so paths are flat rather than nested by router. A representative slice:
 
-| Area | Endpoints |
-|---|---|
-| Auth | `POST /api/auth/login`, `/api/auth/logout`, `GET /api/auth/me`, plus patient-side `/api/patient/auth/*` |
-| Patients | `GET/POST /api/patients`, `GET /api/patients/:id`, `/api/patients/check-duplicate` |
-| Consultations | `POST /api/consultations` (transactional), `GET /api/consultations/:id`, `/:id/prescription` |
-| Clinical data | `/api/patients/:id/vitals`, `/labs`, `/medications`, `/documents`, `/history` |
-| Active visit | `GET/POST/PUT/DELETE /api/active-visit`, `GET /api/active-visits` |
-| Flow | `/api/flow/*` — check-in, stations, journeys, active visits, reports |
-| OPD & appointments | `/api/opd/*`, `/api/appointments`, `/api/appointment-slots`, `/api/walkins`, `/api/ghm-appointments` |
-| Patient requests | `/api/refills`, `/api/dose-change-requests`, `/api/lab-requests`, `/api/side-effects` |
-| Analytics | `/api/outcomes/*`, `/api/reports/*`, `/api/dashboard/*` |
-| AI | `/api/ai/*`, `/api/extract/*`, `/api/reasoning/*`, `/api/genie-chat/*`, `/api/summary/*` |
-| Sync | `/api/sync/*` — HealthRay/Genie sync triggers and backfills |
+| Area               | Endpoints                                                                                               |
+| ------------------ | ------------------------------------------------------------------------------------------------------- |
+| Auth               | `POST /api/auth/login`, `/api/auth/logout`, `GET /api/auth/me`, plus patient-side `/api/patient/auth/*` |
+| Patients           | `GET/POST /api/patients`, `GET /api/patients/:id`, `/api/patients/check-duplicate`                      |
+| Consultations      | `POST /api/consultations` (transactional), `GET /api/consultations/:id`, `/:id/prescription`            |
+| Clinical data      | `/api/patients/:id/vitals`, `/labs`, `/medications`, `/documents`, `/history`                           |
+| Active visit       | `GET/POST/PUT/DELETE /api/active-visit`, `GET /api/active-visits`                                       |
+| Flow               | `/api/flow/*` — check-in, stations, journeys, active visits, reports                                    |
+| OPD & appointments | `/api/opd/*`, `/api/appointments`, `/api/appointment-slots`, `/api/walkins`, `/api/ghm-appointments`    |
+| Patient requests   | `/api/refills`, `/api/dose-change-requests`, `/api/lab-requests`, `/api/side-effects`                   |
+| Analytics          | `/api/outcomes/*`, `/api/reports/*`, `/api/dashboard/*`                                                 |
+| AI                 | `/api/ai/*`, `/api/extract/*`, `/api/reasoning/*`, `/api/genie-chat/*`, `/api/summary/*`                |
+| Sync               | `/api/sync/*` — HealthRay/Genie sync triggers and backfills                                             |
 
 Request bodies are validated with Zod schemas from `server/schemas/index.js` via `middleware/validate.js`.
 
@@ -257,29 +256,29 @@ Request bodies are validated with Zod schemas from `server/schemas/index.js` via
 
 Both the API and the worker load the **repo-root `.env`** (`server/loadEnv.js` resolves it relative to `server/`, not the working directory). There is no separate `server/.env`. `VITE_*` variables are inlined into the browser bundle at build time. See `.env.example` for the full annotated list.
 
-| Variable | Required | Description |
-|---|---|---|
-| `DATABASE_URL` | Yes | PostgreSQL connection string |
-| `PORT` | No | API port (default 3001); also the Vite dev port (default 3000) |
-| `JWT_SECRET` | Yes | Session token signing |
-| `JWT_ACCESS_EXPIRES_IN` | No | Access token TTL (default `15m`), both doctor and patient sessions |
-| `JWT_REFRESH_EXPIRES_IN_DOCTOR` | No | Refresh token TTL, doctor sessions (default `7d`) |
-| `JWT_REFRESH_EXPIRES_IN_PATIENT` | No | Refresh token TTL, patient sessions (default `30d`) |
-| `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` | Yes | File storage |
-| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `DEEPGRAM_API_KEY` | Yes | Server-side AI and transcription |
-| `VITE_ANTHROPIC_KEY`, `VITE_DEEPGRAM_KEY`, `VITE_OPENAI_KEY` | Yes | Browser-side extraction and transcription |
-| `GENIE_SUPABASE_URL` / `GENIE_SUPABASE_SERVICE_KEY` | No | Genie sync; disabled with a warning if unset |
-| `VITE_GENIE_SUPABASE_URL` / `VITE_GENIE_SUPABASE_ANON_KEY` | No | Browser Supabase client for the realtime lab/reception inboxes |
-| `HEALTHRAY_MOBILE` / `_PASSWORD` / `_CAPTCHA` / `_ORG_ID` | No | HealthRay HIS login |
-| `HEALTHRAY_PROXY_URL` | No | Static-IP egress proxy — the permanent fix for WAF 403 blocks |
-| `LAB_HEALTHRAY_*` | No | Credentials and rate limits for the separate lab API |
-| `GOOGLE_CREDENTIALS` | No | Service-account JSON for Sheets appointment import |
-| `MSG91_*`, `FIREBASE_SERVICE_ACCOUNT` | No | WhatsApp and push notifications |
-| `HOSPITAL_PHONE` / `HOSPITAL_NAME` | No | Shown on the patient chat's "call clinic" card |
-| `RUN_CRON_IN_API` | No | `1` runs cron inside the API process instead of the worker |
-| `SCRIBE_MANUAL_FLOOR` | No | The floor is manual by default — Scribe is the system of record. Set to `0` (and only `0`) to hand the flow back to the HealthRay sync |
-| `SCRIBE_BILL_TAKES_TEST_PAYMENTS` | No | Off by default: reception's Payments tab takes money for tests exactly as before. Set to `1` (and only `1`) once the Billing Counter is live on the floor — reception then refuses to take money for any test that is on a live bill line ("HbA1c is on bill …, take the payment there"), so one test is paid once. Leave it off until then: every priced test ordered on the floor already gets a draft bill line, so turning it on early stops reception collecting for tests (task P4-40) |
-| `AADHAAR_ENCRYPTION_KEY` | No | Encrypts stored Aadhaar numbers |
+| Variable                                                     | Required | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                                               | Yes      | PostgreSQL connection string                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `PORT`                                                       | No       | API port (default 3001); also the Vite dev port (default 3000)                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `JWT_SECRET`                                                 | Yes      | Session token signing                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `JWT_ACCESS_EXPIRES_IN`                                      | No       | Access token TTL (default `15m`), both doctor and patient sessions                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `JWT_REFRESH_EXPIRES_IN_DOCTOR`                              | No       | Refresh token TTL, doctor sessions (default `7d`)                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `JWT_REFRESH_EXPIRES_IN_PATIENT`                             | No       | Refresh token TTL, patient sessions (default `30d`)                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `SUPABASE_URL` / `SUPABASE_SERVICE_KEY`                      | Yes      | File storage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `DEEPGRAM_API_KEY`    | Yes      | Server-side AI and transcription                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `VITE_ANTHROPIC_KEY`, `VITE_DEEPGRAM_KEY`, `VITE_OPENAI_KEY` | Yes      | Browser-side extraction and transcription                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `GENIE_SUPABASE_URL` / `GENIE_SUPABASE_SERVICE_KEY`          | No       | Genie sync; disabled with a warning if unset                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `VITE_GENIE_SUPABASE_URL` / `VITE_GENIE_SUPABASE_ANON_KEY`   | No       | Browser Supabase client for the realtime lab/reception inboxes                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `HEALTHRAY_MOBILE` / `_PASSWORD` / `_CAPTCHA` / `_ORG_ID`    | No       | HealthRay HIS login                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `HEALTHRAY_PROXY_URL`                                        | No       | Static-IP egress proxy — the permanent fix for WAF 403 blocks                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `LAB_HEALTHRAY_*`                                            | No       | Credentials and rate limits for the separate lab API                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `GOOGLE_CREDENTIALS`                                         | No       | Service-account JSON for Sheets appointment import                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `MSG91_*`, `FIREBASE_SERVICE_ACCOUNT`                        | No       | WhatsApp and push notifications                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `HOSPITAL_PHONE` / `HOSPITAL_NAME`                           | No       | Shown on the patient chat's "call clinic" card                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `RUN_CRON_IN_API`                                            | No       | `1` runs cron inside the API process instead of the worker                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `SCRIBE_MANUAL_FLOOR`                                        | No       | The floor is manual by default — Scribe is the system of record. Set to `0` (and only `0`) to hand the flow back to the HealthRay sync                                                                                                                                                                                                                                                                                                                                                       |
+| `SCRIBE_BILL_TAKES_TEST_PAYMENTS`                            | No       | Off by default: reception's Payments tab takes money for tests exactly as before. Set to `1` (and only `1`) once the Billing Counter is live on the floor — reception then refuses to take money for any test that is on a live bill line ("HbA1c is on bill …, take the payment there"), so one test is paid once. Leave it off until then: every priced test ordered on the floor already gets a draft bill line, so turning it on early stops reception collecting for tests (task P4-40) |
+| `AADHAAR_ENCRYPTION_KEY`                                     | No       | Encrypts stored Aadhaar numbers                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 
 ---
 

@@ -122,7 +122,6 @@ export const CAPABILITIES = {
   // the hand-over controls on top; consultants get the read-only roll-call.
   FLOW_CONSULTANTS: "FLOW_CONSULTANTS",
   FLOW_PHARMACY: "FLOW_PHARMACY", // pharmacy dispense + confirm-exit (stops the clock)
-  FLOW_REPORTS: "FLOW_REPORTS", // wait-time / bottleneck analytics
 
   // Gini Flow — the replacement floor system (docs/gini-flow/). Deliberately its
   // own keys rather than reusing FLOW_*: access to the two boards is granted
@@ -263,7 +262,6 @@ export const ROLE_CAPABILITIES = {
     // My Patients only. The floor-wide roll-call is folded into that page as a
     // second column, so a consultant has one desk, not two.
     C.FLOW_MY_PATIENTS,
-    C.FLOW_REPORTS,
     C.GINIFLOW_VIEW,
     C.GINIFLOW_BOARD,
     C.GINIFLOW_STATION_MO,
@@ -447,7 +445,6 @@ export const ROLE_CAPABILITIES = {
     C.FLOW_RECEPTION,
     C.FLOW_COORDINATOR,
     C.FLOW_BOARD,
-    C.FLOW_REPORTS,
     C.FLOW_FLOOR_VIEW,
     C.FLOW_STATION,
     C.FLOW_STATION_VITALS,

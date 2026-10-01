@@ -13,7 +13,11 @@ import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "../giniflow/labOnlyVisits.js"
 import { searchDayVisits } from "../giniflow/board.js";
 import { IST_TODAY } from "../giniflow/statusEngine.js";
 import { TEST_MATCHES_SQL } from "./testMatch.js";
-import { ON_PATIENT_DAY_BILL_SQL, VISIT_LAB_CASE_TESTS_SQL } from "./labCaseLines.js";
+import {
+  ON_PATIENT_DAY_BILL_SQL,
+  PAID_DRAFT_SQL,
+  VISIT_LAB_CASE_TESTS_SQL,
+} from "./labCaseLines.js";
 import { REMOVED_BY_DESK_SQL } from "./visitLines.js";
 import { HELD_AT_RECEPTION, RECEPTION_MONEY_SQL, SETTLED_AT_RECEPTION } from "./orderLinks.js";
 
@@ -46,14 +50,16 @@ const COUNTER_SELECT = `
   SELECT a.*,
          ${labOnlyPredicate("gv", "$2")} AS samples_only,
          COALESCE(a.booking_type ~* '${ONLINE_BOOKING}', FALSE) AS online,
-         bs.drafts, bs.finals, bs.pending_claims, bs.cleared_claims, bs.due,
+         bs.drafts, bs.paid_drafts, bs.finals, bs.pending_claims, bs.cleared_claims, bs.due,
          bs.draft_due, bs.open_drafts, bs.pay_back, bs.refunds_pending, bs.paid_back,
          cs.seen, cs.consultation_billed,
          ts.tests_owed, ts.not_priced, ts.settled_orders, lcs.case_tests_owed
     FROM (${ARRIVAL_SELECT}) a
     JOIN giniflow_visits gv ON gv.id = a.id
     LEFT JOIN LATERAL (
-      SELECT COUNT(*) FILTER (WHERE b.status = 'draft')::int AS drafts,
+      SELECT COUNT(*) FILTER (WHERE b.status = 'draft' AND NOT ${PAID_DRAFT_SQL("b")})::int
+               AS drafts,
+             COUNT(*) FILTER (WHERE ${PAID_DRAFT_SQL("b")})::int AS paid_drafts,
              COUNT(*) FILTER (WHERE b.status = 'final')::int AS finals,
              COUNT(*) FILTER (WHERE b.status = 'final' AND b.claim_status = 'pending')::int
                AS pending_claims,
@@ -73,7 +79,7 @@ const COUNTER_SELECT = `
                AS refunds_pending,
              COALESCE(SUM(GREATEST(b.patient_payable - b.paid_amount, 0))
                         FILTER (WHERE b.status = 'draft'), 0) AS draft_due,
-             COUNT(*) FILTER (WHERE b.status = 'draft' AND EXISTS (
+             COUNT(*) FILTER (WHERE b.status = 'draft' AND NOT ${PAID_DRAFT_SQL("b")} AND EXISTS (
                SELECT 1 FROM bill_lines dl WHERE dl.bill_id = b.id AND dl.is_live))::int
                AS open_drafts
         FROM bills b
@@ -97,7 +103,8 @@ const COUNTER_SELECT = `
                        JOIN bills b ON b.id = l.bill_id
                        JOIN service_items si ON si.id = l.service_item_id
                       WHERE l.visit_id = a.id AND l.is_live AND si.kind = 'consultation'
-                        AND b.bill_type = 'invoice' AND b.status = 'final')
+                        AND b.bill_type = 'invoice'
+                        AND (b.status = 'final' OR ${PAID_DRAFT_SQL("b")}))
                AS consultation_billed
     ) cs ON TRUE
     LEFT JOIN LATERAL (
@@ -116,7 +123,8 @@ const COUNTER_SELECT = `
                  EXISTS (SELECT 1 FROM service_items si
                           WHERE si.test_catalog_id = dm.catalog_id AND si.is_active) AS priced,
                  EXISTS (SELECT 1 FROM bill_lines bl
-                           JOIN bills fb ON fb.id = bl.bill_id AND fb.status = 'final'
+                           JOIN bills fb ON fb.id = bl.bill_id
+                                AND (fb.status = 'final' OR ${PAID_DRAFT_SQL("fb")})
                            JOIN service_items si ON si.id = bl.service_item_id
                           WHERE bl.lab_order_id = o.id AND bl.is_live
                             AND si.test_catalog_id = dm.catalog_id) AS on_final
@@ -134,7 +142,7 @@ const COUNTER_SELECT = `
         JOIN LATERAL (SELECT ci.id FROM service_items ci
                        WHERE ci.test_catalog_id = cm.catalog_id AND ci.is_active
                        ORDER BY ci.id LIMIT 1) ci ON TRUE
-       WHERE NOT ${ON_PATIENT_DAY_BILL_SQL("cv", "cm.catalog_id", ["final"])}
+       WHERE NOT ${ON_PATIENT_DAY_BILL_SQL("cv", "cm.catalog_id", ["final"], { paidDrafts: true })}
          AND NOT EXISTS (SELECT 1 FROM giniflow_lab_orders co
                            JOIN giniflow_lab_order_tests cot ON cot.lab_order_id = co.id
                            JOIN day_tests com ON com.test_name = cot.test_name
@@ -148,7 +156,7 @@ function billState(r) {
   if (r.drafts > 0) return { state: STATE.DRAFT, due: 0 };
   if (r.pending_claims > 0) return { state: STATE.CLAIM_PENDING, due: 0 };
   if (r.cleared_claims > 0) return { state: STATE.CLAIM_CLEARED, due: 0 };
-  if (r.finals > 0) return { state: STATE.PAID, due: 0 };
+  if (r.finals > 0 || r.paid_drafts > 0) return { state: STATE.PAID, due: 0 };
   return { state: STATE.NONE, due: 0 };
 }
 
@@ -166,7 +174,7 @@ function groupOf(r, hints, status) {
   if (hints.consultation || hints.tests > 0 || hints.due > 0 || r.open_drafts > 0) {
     return COUNTER_GROUP.TO_BILL;
   }
-  if (r.finals > 0 || r.settled_orders > 0) return COUNTER_GROUP.BILLED;
+  if (r.finals > 0 || r.paid_drafts > 0 || r.settled_orders > 0) return COUNTER_GROUP.BILLED;
   return COUNTER_GROUP.WAITING;
 }
 

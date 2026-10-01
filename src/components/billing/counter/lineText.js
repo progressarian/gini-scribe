@@ -1,4 +1,4 @@
-import { ORDER_STATE } from "../../../../shared/billingVocab.js";
+import { HEALTHRAY_MODE, ORDER_STATE } from "../../../../shared/billingVocab.js";
 
 export const ORDER_STATE_LABEL = {
   [ORDER_STATE.CLAIM_AT_RECEPTION]: "Claim at reception",
@@ -14,7 +14,7 @@ export const ORDER_STATE_NOTE = {
 
 export const orderStateText = (state) => ORDER_STATE_LABEL[state] ?? null;
 
-const PAID_MODE_WORD = { cash: "cash", card: "card", upi: "UPI" };
+const PAID_MODE_WORD = { cash: "cash", card: "card", upi: "UPI", [HEALTHRAY_MODE]: "HealthRay" };
 
 export const paidText = (modes) =>
   modes?.length
@@ -58,16 +58,33 @@ export const requestStatusText = (status) => REQUEST_STATUS_LABEL[status] ?? sta
 
 export const PAYMENT_MODE_LABEL = { cash: "Cash", card: "Card", upi: "UPI" };
 
-export const REFUND_MODE_LABEL = { as_paid: "Back the way it was paid", ...PAYMENT_MODE_LABEL };
+export const HEALTHRAY_LABEL = "Paid in HealthRay";
+
+export const PAID_MODE_LABEL = { ...PAYMENT_MODE_LABEL, [HEALTHRAY_MODE]: HEALTHRAY_LABEL };
+
+export const paymentModeText = (mode) => PAID_MODE_LABEL[mode] ?? mode ?? "";
+
+const PAY_OUT_LABEL = { [HEALTHRAY_MODE]: "Refunded in HealthRay" };
+
+export const payOutText = (mode) => PAY_OUT_LABEL[mode] ?? `${paymentModeText(mode)} refund`;
+
+export const REFUND_MODE_LABEL = {
+  as_paid: "Back the way it was paid",
+  ...PAYMENT_MODE_LABEL,
+  [HEALTHRAY_MODE]: "Refunded in HealthRay",
+};
 
 export const refundModeText = (mode) => REFUND_MODE_LABEL[mode] ?? mode ?? "";
 
 const MODE_WORD = { cash: "cash", card: "card", upi: "UPI" };
 
+const legText = (leg, money) =>
+  leg.mode === HEALTHRAY_MODE
+    ? `${money(leg.amount)} in HealthRay`
+    : `${money(leg.amount)} by ${MODE_WORD[leg.mode] ?? leg.mode}`;
+
 export const refundLegsText = (legs, money) =>
-  (legs || [])
-    .map((leg) => `${money(leg.amount)} by ${MODE_WORD[leg.mode] ?? leg.mode}`)
-    .join(", ");
+  (legs || []).map((leg) => legText(leg, money)).join(", ");
 
 export const CLAIM_BADGE = { pending: "CGHS pending", cleared: "CGHS cleared" };
 

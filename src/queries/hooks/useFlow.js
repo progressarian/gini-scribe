@@ -136,15 +136,6 @@ export function useFlowStartFromAppointment() {
   });
 }
 
-export function useFlowReports(start, end) {
-  return useQuery({
-    queryKey: qk.flow.reports(start, end),
-    queryFn: async () =>
-      (await api.get(`/api/flow/reports?start=${start}&end=${end || start}`)).data,
-    enabled: !!start,
-  });
-}
-
 // ── Mutations ── (invalidate the whole flow family so every open view refreshes)
 function useFlowMutation(mutationFn) {
   const qc = useQueryClient();

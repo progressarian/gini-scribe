@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import { getPool, query } from "../../helpers/db.mjs";
 import { loginAs } from "../../helpers/auth.mjs";
 import { gotoReady } from "../../helpers/browser.mjs";
+import { closePdfViewer, expectPdfInViewer } from "../../helpers/pdfViewer.mjs";
 import { assertTestDatabase } from "../../setup/guard.mjs";
 import { USERS } from "../../fixtures/data.mjs";
 import {
@@ -328,10 +329,10 @@ test.describe.serial("P4C-11 the counter form survives a refresh", () => {
     await settle(page);
     expect(await stored(page, billKey(bill.bill))).toContain(CODE);
 
-    const popup = page.waitForEvent("popup").catch(() => null);
     await page.getByRole("button", { name: "Finalise & print" }).click();
+    await expectPdfInViewer(page, `/api/billing/bills/${bill.bill}/bill.pdf`);
+    await closePdfViewer(page);
     await expect(actions(page).getByText("CGHS pending")).toBeVisible();
-    await popup;
     await settle(page);
     expect(await stored(page, billKey(bill.bill))).toBeNull();
     expect((await bills.readBill(bill.bill, db)).status).toBe("final");

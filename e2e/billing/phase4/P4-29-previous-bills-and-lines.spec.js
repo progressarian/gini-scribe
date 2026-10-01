@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { getPool } from "../../helpers/db.mjs";
 import { loginAs } from "../../helpers/auth.mjs";
+import { closePdfViewer, expectPdfInViewer } from "../../helpers/pdfViewer.mjs";
 import { gotoReady } from "../../helpers/browser.mjs";
 import { assertTestDatabase } from "../../setup/guard.mjs";
 import { fromPaise } from "../../../src/components/billing/format.js";
@@ -79,10 +80,9 @@ test.describe.serial("P4-29 previous bills and lines", () => {
     await expect(row.getByRole("cell").nth(1)).toHaveText(billStatusText(finalBill.status));
     await expect(row.getByRole("cell").nth(2)).toHaveText(fromPaise(finalBill.totals.actual));
     await expect(row.getByRole("cell").nth(4)).toHaveText(fromPaise(finalBill.totals.payable));
-    await expect(row.getByRole("link", { name: /Print/ })).toHaveAttribute(
-      "href",
-      new RegExp(`/api/billing/bills/${finalBill.id}/bill.pdf`),
-    );
+    await row.getByRole("button", { name: `Print bill ${finalBill.bill_no}` }).click();
+    await expectPdfInViewer(page, `/api/billing/bills/${finalBill.id}/bill.pdf`);
+    await closePdfViewer(page);
   });
 
   test("3. an ordered test nobody can bill yet is named", async ({ page }) => {

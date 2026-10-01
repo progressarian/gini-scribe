@@ -291,7 +291,8 @@ test.describe.serial("P4C-22 paid at reception shown, not charged", () => {
     );
     await query(
       `INSERT INTO giniflow_patient_bills (patient_id, bill_date, status, items)
-       VALUES ($1, $2::date, 'billed', $3::jsonb)`,
+       VALUES ($1, $2::date, 'billed', $3::jsonb)
+       ON CONFLICT (patient_id, bill_date) DO UPDATE SET status = 'billed', items = EXCLUDED.items`,
       [
         patient,
         ids.day,
@@ -303,7 +304,7 @@ test.describe.serial("P4C-22 paid at reception shown, not charged", () => {
     );
 
     const opened = await openAtDesk(visit);
-    expect(opened.lines).toEqual([]);
+    expect(opened.lines.map((line) => line.service_item_id)).toEqual([ids.brace]);
     const labCase = await labCaseLines.labCaseTestsForDesk(visit, desk, db);
     expect(labCase.added).toEqual([]);
 
@@ -314,11 +315,11 @@ test.describe.serial("P4C-22 paid at reception shown, not charged", () => {
       db,
     );
     expect(explicit.added).toEqual([]);
-    expect(await itemsOn(visit)).toEqual([]);
+    expect(await itemsOn(visit)).toEqual([ids.brace]);
 
     const healthray = await call("get", `/api/billing/healthray-bill-lines?bill_id=${opened.id}`);
     expect(healthray.status).toBe(200);
-    expect(healthray.body.lines.map((line) => line.item_id)).toEqual([ids.brace]);
+    expect(healthray.body.lines).toEqual([]);
 
     const refusedAdd = await call("post", `/api/billing/bills/${opened.id}/lines`, {
       item_id: items.hba1c,
@@ -331,7 +332,7 @@ test.describe.serial("P4C-22 paid at reception shown, not charged", () => {
       item_id: items.tsh,
     });
     expect(other.status).toBe(200);
-    expect(await itemsOn(visit)).toEqual([items.tsh]);
+    expect((await itemsOn(visit)).sort()).toEqual([ids.brace, items.tsh].sort());
   });
 
   test("4. part paid at reception: the card shows what is still due there, and the tests stay off the bill", async () => {

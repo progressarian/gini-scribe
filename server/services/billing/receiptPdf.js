@@ -17,6 +17,7 @@ import {
   numericDateText,
   paymentAmount,
   paymentModeText,
+  refundModeText,
   printsTax,
   renderBillPdf,
   signedAmountText,
@@ -114,7 +115,7 @@ function refundsHtml(payments) {
   const rows = payments
     .map(
       (payment, index) =>
-        `<tr><td class="bp-sno">${index + 1}</td><td>${escapeHtml(stampText(payment.received_at))}</td><td>${escapeHtml(modeText(payment.mode))}</td><td>${escapeHtml(payment.reference ?? "")}</td><td class="bp-num">${amountText(payment.amount)}</td></tr>`,
+        `<tr><td class="bp-sno">${index + 1}</td><td>${escapeHtml(stampText(payment.received_at))}</td><td>${escapeHtml(refundModeText(payment.mode))}</td><td>${escapeHtml(payment.reference ?? "")}</td><td class="bp-num">${amountText(payment.amount)}</td></tr>`,
     )
     .join("");
   const total = totalRowHtml(

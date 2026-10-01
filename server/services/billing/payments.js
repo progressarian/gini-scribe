@@ -8,7 +8,7 @@ import {
   paise,
   rupeesFromPaise,
 } from "../../../shared/labPayment.js";
-import { AS_PAID, ORDER_STATE } from "../../../shared/billingVocab.js";
+import { AS_PAID, HEALTHRAY_MODE, ORDER_STATE } from "../../../shared/billingVocab.js";
 import { writeAudit } from "./audit.js";
 import { nextNumber, seriesFor } from "./billNumber.js";
 import { cashOutShift, DRAWER_MODE, openShiftIdFor, PAYMENT_MODES } from "./cashShifts.js";
@@ -35,7 +35,13 @@ const SPEC = { table: "bills", noun: "bill", columns: BILL_COLUMNS };
 const ORDER_COLUMNS = `id, visit_id, payment_status, sample_status, amount_total, amount_paid,
   amount_claimed, claim_state, version`;
 
-const MODE_LABEL = { cash: "cash", card: "card", upi: "UPI" };
+const MODE_LABEL = { cash: "cash", card: "card", upi: "UPI", healthray: "HealthRay" };
+
+const PAY_OUT_MODES = [...PAYMENT_MODES, HEALTHRAY_MODE];
+
+const NO_REFERENCE = [DRAWER_MODE, HEALTHRAY_MODE];
+
+const shiftFor = (mode, shiftId) => (mode === HEALTHRAY_MODE ? null : shiftId);
 
 export const PAYMENTS_AT_ONCE = 10;
 export const REFERENCE_MAX = 60;
@@ -51,6 +57,7 @@ const TAKING = {
   amount: "The amount taken",
   positive: "The amount taken must be more than zero",
   mode: "A payment must be taken as one of",
+  modes: PAYMENT_MODES,
   reference: (mode) => `A ${MODE_LABEL[mode]} payment needs its reference number`,
   none: "Enter the payment being taken",
   many: `At most ${PAYMENTS_AT_ONCE} payments can be taken at once`,
@@ -60,6 +67,7 @@ const PAYING_BACK = {
   amount: "The amount paid back",
   positive: "The amount paid back must be more than zero",
   mode: "Money can only go back as one of",
+  modes: PAY_OUT_MODES,
   reference: (mode) => `A ${MODE_LABEL[mode]} refund needs the reversal's reference number`,
   none: "Enter the money being paid back",
   many: `At most ${PAYMENTS_AT_ONCE} refunds can be paid out at once`,
@@ -88,13 +96,13 @@ function cleanLimit(value) {
 
 function cleanPayment(entry, words) {
   const mode = typeof entry?.mode === "string" ? entry.mode.trim().toLowerCase() : "";
-  if (!PAYMENT_MODES.includes(mode)) {
-    throw httpError(400, `${words.mode}: ${PAYMENT_MODES.join(", ")}`);
+  if (!words.modes.includes(mode)) {
+    throw httpError(400, `${words.mode}: ${words.modes.join(", ")}`);
   }
   const amount = paise(cleanMoney(entry?.amount, words.amount));
   if (amount <= 0) throw httpError(400, words.positive);
   const reference = typeof entry?.reference === "string" ? entry.reference.trim() : "";
-  if (mode !== DRAWER_MODE && !reference) {
+  if (!NO_REFERENCE.includes(mode) && !reference) {
     throw httpError(400, words.reference(mode));
   }
   if (reference.length > REFERENCE_MAX) {
@@ -551,10 +559,30 @@ export async function releaseTestOrders(client, bill, ctx, orderIds = null) {
   return released;
 }
 
-export async function takePayments(billId, input, ctx, db = pool) {
+function billVersion(input) {
   const version = wholeNumber(input?.version, "Version", { min: 0 });
   if (version === undefined) throw httpError(400, "Send the bill's version so nothing is lost");
+  return version;
+}
+
+export async function takePayments(billId, input, ctx, db = pool) {
+  const version = billVersion(input);
   const wanted = cleanPayments(input);
+  return collectOnBill(billId, version, () => wanted, ctx, db);
+}
+
+export async function clearInHealthray(billId, input, ctx, db = pool) {
+  const version = billVersion(input);
+  return collectOnBill(
+    billId,
+    version,
+    (outstanding) => [{ mode: HEALTHRAY_MODE, amount: outstanding, reference: null }],
+    ctx,
+    db,
+  );
+}
+
+async function collectOnBill(billId, version, plan, ctx, db) {
   const id = cleanUuid(billId, "bill");
   return inTransaction(async (client) => {
     const bill = await lockRow(client, SPEC, id);
@@ -571,8 +599,9 @@ export async function takePayments(billId, input, ctx, db = pool) {
     }
     await refuseReceptionMoney(client, bill);
     const outstanding = (await moneyOn(client, bill.id)).balance;
-    const asked = wanted.reduce((sum, payment) => sum + payment.amount, 0);
     if (!outstanding) throw httpError(409, `Nothing is left to collect on ${billLabel(bill)}`);
+    const wanted = plan(outstanding);
+    const asked = wanted.reduce((sum, payment) => sum + payment.amount, 0);
     if (asked > outstanding) {
       throw httpError(
         409,
@@ -602,7 +631,7 @@ export async function takePayments(billId, input, ctx, db = pool) {
           rupees(payment.amount),
           payment.reference,
           receipt.number,
-          shiftId,
+          shiftFor(payment.mode, shiftId),
           ctx?.actorId ?? null,
         ],
       );
@@ -904,7 +933,7 @@ export async function payOut(creditNoteId, input, ctx, db = pool) {
           payment.mode,
           rupees(payment.amount),
           payment.reference,
-          shiftId,
+          shiftFor(payment.mode, shiftId),
           ctx?.actorId ?? null,
         ],
       );

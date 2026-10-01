@@ -264,6 +264,27 @@ export function useTakePayments() {
   });
 }
 
+export function useClearInHealthray() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ billId, version }) => {
+      await api.post(`${DESK}/bills/${billId}/clear-healthray`, { version });
+      try {
+        return await read(`${DESK}/bills/${billId}`);
+      } catch (e) {
+        e.paymentTaken = true;
+        throw e;
+      }
+    },
+    onSettled: (_bill, _error, variables) => {
+      queryClient.invalidateQueries({ queryKey: billingKeys.visitBills(variables?.visitId) });
+      queryClient.invalidateQueries({ queryKey: billingKeys.billPayments(variables?.billId) });
+      queryClient.invalidateQueries({ queryKey: DUES });
+      queryClient.invalidateQueries({ queryKey: COUNTER_PATIENTS });
+    },
+  });
+}
+
 export function useBillPayments(billId) {
   return useQuery({
     queryKey: billingKeys.billPayments(billId),

@@ -1261,6 +1261,16 @@ body > [role="dialog"][aria-modal="true"] .bc-err {
   list-style: none;
   font-size: 11px;
 }
+.gf .bc-linkbtn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--blu);
+  font: inherit;
+  text-decoration: underline;
+  text-align: left;
+  cursor: pointer;
+}
 .gf .bc-refunds {
   display: flex;
   flex-direction: column;
@@ -1927,4 +1937,61 @@ body > [role="dialog"][aria-modal="true"] .bc-err {
   .gf .bc-offer .st-btn {
     margin-left: auto;
   }
+}
+.gf .bc-pay__hr {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 36px;
+  margin-top: 8px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink2);
+  background: var(--white);
+  border: 1px solid var(--bd2);
+  border-radius: 10px;
+  cursor: pointer;
+}
+.gf .bc-pay__hr:hover:not(:disabled) {
+  background: var(--tl-l);
+}
+.gf .bc-pay__hr:focus-visible {
+  outline: 2px solid var(--tl);
+  outline-offset: 2px;
+}
+.gf .bc-pay__hr:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.gf .bc-pay__hr--done:disabled {
+  opacity: 1;
+  color: var(--grn);
+  border-color: var(--grn);
+  cursor: default;
+}
+.bc-hr-confirm__facts {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 10px;
+}
+.bc-hr-confirm__facts > div {
+  display: flex;
+  gap: 8px;
+}
+.bc-hr-confirm__facts dt {
+  min-width: 64px;
+  color: #64748b;
+}
+.bc-hr-confirm__facts dd {
+  margin: 0;
+  font-weight: 600;
+  color: #0f172a;
+  overflow-wrap: anywhere;
+}
+.bc-hr-confirm p {
+  margin: 0;
 }

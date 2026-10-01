@@ -18,6 +18,7 @@ export const STACKING_MODES = ["best_only", "per_rule"];
 export const BILL_SERIES = ["MAIN", "RCPT", "CN"];
 export const REFUND_MODES = ["as_paid", "cash", "card", "upi"];
 export const AS_PAID = "as_paid";
+export const HEALTHRAY_MODE = "healthray";
 export const ORDER_STATE = {
   CLAIM_AT_RECEPTION: "claim_at_reception",
   PAID_AT_RECEPTION: "paid_at_reception",

@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { one } from "../../helpers/db.mjs";
 import { loginAs } from "../../helpers/auth.mjs";
+import { closePdfViewer, expectPdfInViewer } from "../../helpers/pdfViewer.mjs";
 import { gotoReady } from "../../helpers/browser.mjs";
 import { assertTestDatabase } from "../../setup/guard.mjs";
 import { newTag, setUp, tearDown } from "../phase4/p4-bills-fixture.mjs";
@@ -156,15 +157,14 @@ test.describe.serial("P4B-10 counter: Refund… and pay out", () => {
     await expect(refunds(page)).toContainText(`Paid back ₹800 on ${cn}.`);
     await expect(refunds(page)).toContainText("refunded ₹800");
     await expect(payOut).toHaveCount(0);
-    const receipt = refunds(page).getByRole("link", { name: "Print refund receipt" });
-    await expect(receipt).toHaveAttribute(
-      "href",
+    await refunds(page).getByRole("button", { name: "Print refund receipt" }).click();
+    expect(await expectPdfInViewer(page, "/refund-receipt.pdf?token=")).toMatch(
       /\/credit-notes\/.+\/refund-receipt\.pdf\?token=/,
     );
-    await expect(refunds(page).getByRole("link", { name: "Print credit note" })).toHaveAttribute(
-      "href",
-      /credit-note\.pdf\?token=/,
-    );
+    await closePdfViewer(page);
+    await refunds(page).getByRole("button", { name: "Print credit note" }).click();
+    await expectPdfInViewer(page, "/credit-note.pdf?token=");
+    await closePdfViewer(page);
     await expect(pad(page)).toContainText("Credited");
     const out = await one(
       `SELECT p.mode, p.amount, p.reference, p.direction FROM payments p
