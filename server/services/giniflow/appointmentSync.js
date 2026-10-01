@@ -675,11 +675,21 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
         let currentStatus = appt.current_status;
 
         if (!visitId) {
+          await client.query(
+            `UPDATE giniflow_visits SET appointment_id = NULL
+              WHERE appointment_id = $1 AND visit_date <> $2::date
+                AND current_status IN ('no_show', 'cancelled')`,
+            [appt.id, day],
+          );
           const created = await client.query(
             `INSERT INTO giniflow_visits
                (patient_id, visit_date, appointment_id, appointment_time, current_status,
                 assigned_doctor_id)
-             VALUES ($1, $2::date, $3, $4::time, 'booked', $5)
+             VALUES ($1, $2::date,
+                     CASE WHEN EXISTS (SELECT 1 FROM giniflow_visits held
+                                        WHERE held.appointment_id = $3)
+                          THEN NULL ELSE $3 END,
+                     $4::time, 'booked', $5)
              ON CONFLICT (patient_id, visit_date) DO UPDATE
                SET appointment_id = COALESCE(giniflow_visits.appointment_id, EXCLUDED.appointment_id)
              RETURNING id, current_status`,

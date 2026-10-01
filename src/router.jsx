@@ -5,17 +5,13 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import RequireCapability from "./components/RequireCapability";
 import RoleHome from "./components/RoleHome";
 import LoginPage from "./pages/LoginPage";
+import { isChunkLoadError } from "./lib/chunkErrors";
 const lazyWithRetry = (importer) =>
   lazy(async () => {
     try {
       return await importer();
     } catch (err) {
-      const msg = String(err?.message || err);
-      const isChunkError =
-        /Failed to fetch dynamically imported module/i.test(msg) ||
-        /Importing a module script failed/i.test(msg) ||
-        /error loading dynamically imported module/i.test(msg);
-      if (isChunkError && typeof window !== "undefined") {
+      if (isChunkLoadError(err) && typeof window !== "undefined") {
         const KEY = "__chunk_reload_at__";
         const last = Number(sessionStorage.getItem(KEY) || 0);
         if (Date.now() - last > 10000) {

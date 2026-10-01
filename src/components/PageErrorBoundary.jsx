@@ -1,5 +1,6 @@
 import { Component } from "react";
 import "./PageErrorBoundary.css";
+import { isChunkLoadError } from "../lib/chunkErrors";
 
 export default class PageErrorBoundary extends Component {
   constructor(props) {
@@ -24,7 +25,12 @@ export default class PageErrorBoundary extends Component {
             <div className="page-error__title">This section encountered an error</div>
             <div className="page-error__msg">{this.state.error?.message || "Unexpected error"}</div>
             <button
-              onClick={() => this.setState({ hasError: false, error: null })}
+              type="button"
+              onClick={() =>
+                isChunkLoadError(this.state.error)
+                  ? window.location.reload()
+                  : this.setState({ hasError: false, error: null })
+              }
               className="page-error__btn"
             >
               Try Again
