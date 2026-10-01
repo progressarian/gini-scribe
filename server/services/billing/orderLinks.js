@@ -14,6 +14,31 @@ export const SETTLED_AT_RECEPTION = `(o.amount_paid > 0
     PAYMENT_STATUS.CLAIM_SUBMITTED,
   ])})))`;
 
+const STANDING_CLAIMS_SQL = sqlText([CLAIM_STATE.SUBMITTED, CLAIM_STATE.APPROVED]);
+
+export const RECEPTION_MONEY_SQL = (order) => `(
+  SELECT GREATEST(${order}.amount_paid - COALESCE(SUM(
+           (s.meta -> 'after' ->> 'amount_paid')::numeric
+           - (s.meta -> 'before' ->> 'amount_paid')::numeric) FILTER (WHERE s.live), 0), 0) AS cash,
+         CASE WHEN ${order}.claim_state IN (${STANDING_CLAIMS_SQL})
+               AND NOT COALESCE(bool_or(s.live AND s.bill_claim > 0), FALSE)
+              THEN ${order}.amount_claimed ELSE 0 END AS claim,
+         COUNT(*) FILTER (WHERE s.live)::int AS bill_settles,
+         COUNT(*)::int AS bill_events
+    FROM (SELECT DISTINCT ON (e.meta ->> 'bill_id') e.meta,
+                 e.meta ? 'before' AND e.meta ? 'after'
+                   AND NOT COALESCE((e.meta ->> 'released')::boolean, FALSE) AS live,
+                 COALESCE((e.meta ->> 'bill_claim')::numeric,
+                          CASE WHEN e.meta -> 'after' ->> 'claim_state' IN (${STANDING_CLAIMS_SQL})
+                               THEN (e.meta -> 'after' ->> 'amount_claimed')::numeric
+                               ELSE 0 END) AS bill_claim
+            FROM giniflow_lab_order_events e
+           WHERE e.lab_order_id = ${order}.id AND e.track = 'payment' AND e.meta ? 'bill_id'
+           ORDER BY e.meta ->> 'bill_id', e.occurred_at DESC, e.seq DESC) s)`;
+
+export const HELD_AT_RECEPTION = (money) =>
+  `NOT (${money}.bill_settles > 0 AND ${money}.cash = 0 AND ${money}.claim = 0)`;
+
 const OPEN_ORDERS_SQL = `
   WITH ordered AS MATERIALIZED (
     SELECT o.id AS order_id, o.created_at, ${SETTLED_AT_RECEPTION} AS settled, t.test_name

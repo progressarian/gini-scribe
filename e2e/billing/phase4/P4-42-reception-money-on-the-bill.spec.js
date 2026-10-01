@@ -172,45 +172,18 @@ test.describe.serial("P4-42 reception money on the bill", () => {
 
     const draft = await bills.openDraft(placed.visit, desk, db);
     expect(draft.id).not.toBe(placed.billId);
-    const readded = await bills.addLine(
-      draft.id,
-      { item_id: ids.hba1c, source: "lab_order", lab_order_id: placed.order },
-      desk,
-      db,
+    const attempt = await failure(
+      bills.addLine(
+        draft.id,
+        { item_id: ids.hba1c, source: "lab_order", lab_order_id: placed.order },
+        desk,
+        db,
+      ),
     );
-    expect(readded.totals.payable).toBe(25000);
-    expect(readded.lines[0].order_state).toBe(ORDER_STATE.PAID_AT_RECEPTION);
-
-    const attempt = await failure(payOnBill(draft.id, 250));
+    expect(attempt).toMatchObject({ status: 409, code: "paid_at_reception" });
+    expect((await bills.readBill(draft.id, db)).lines).toEqual([]);
     const both = [placed.billId, draft.id];
     expect(await hospitalHolds(placed.order, both), "what the hospital holds for ₹250").toBe(250);
-    expect(attempt?.status).toBe(409);
-    expect(attempt.message).toBe(
-      paidOn("this visit's draft bill", "250.00", "remove it from this bill"),
-    );
-    expect(attempt).toMatchObject({
-      code: "order_paid",
-      order_state: ORDER_STATE.PAID_AT_RECEPTION,
-      lab_order_id: placed.order,
-    });
-
-    const chosen = await bills.setCategory(draft.id, { category: ids.later }, desk, db);
-    const final = await failure(
-      bills.finaliseBill(draft.id, { version: chosen.version, pay_later: true }, desk, db),
-    );
-    expect(final?.message).toBe(attempt.message);
-    expect((await bills.readBill(draft.id, db)).status).toBe("draft");
-
-    const line = (await bills.readBill(draft.id, db)).lines[0];
-    const emptied = await bills.removeLine(
-      draft.id,
-      line.id,
-      { reason: "paid at reception" },
-      desk,
-      db,
-    );
-    expect(emptied.totals.payable).toBe(0);
-    expect(await hospitalHolds(placed.order, both)).toBe(250);
   });
 
   test("2. with the valve off, a test reception collected is flagged and refused on the bill", async () => {

@@ -2,17 +2,14 @@ import pool from "../../config/db.js";
 import { paise } from "../../../shared/labPayment.js";
 import { FLAT } from "../giniflow/labCatalog.js";
 import { TEST_MATCHES_SQL } from "./testMatch.js";
+import { heldCatalogs } from "./receptionOrders.js";
 import { httpError } from "./transaction.js";
 import { suggestionPrice } from "./visitLines.js";
+import { isLiveBillItem } from "../giniflow/patientBill.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const NOTHING = { shown: false, read_at: null, lines: [], not_matched: [] };
-
-const isLive = (line) =>
-  !line.cancelled &&
-  !line.removed &&
-  !(Number(line.amount) > 0 && Number(line.refunded || 0) >= Number(line.amount));
 
 async function draftOf(db, billId) {
   const id = typeof billId === "string" ? billId.trim() : "";
@@ -60,7 +57,7 @@ export async function healthrayBillSuggestion(billId, ctx, db = pool) {
   );
   if (!stored.length) return NOTHING;
   const lines = (stored[0].items || []).filter(
-    (line) => isLive(line) && line.category !== "consultation" && line.desc,
+    (line) => isLiveBillItem(line) && line.category !== "consultation" && line.desc,
   );
   if (!lines.length) return NOTHING;
   const matched = await itemsFor(
@@ -69,7 +66,7 @@ export async function healthrayBillSuggestion(billId, ctx, db = pool) {
   );
   const ids = [...new Set([...matched.values()].filter(Boolean))];
   const { rows: items } = await db.query(
-    `SELECT i.id, i.code, i.name, i.price_per_patient,
+    `SELECT i.id, i.code, i.name, i.price_per_patient, i.test_catalog_id,
             EXISTS (SELECT 1 FROM bill_lines l JOIN bills b ON b.id = l.bill_id
                      WHERE l.visit_id = $2 AND l.service_item_id = i.id AND l.is_live
                        AND b.status <> 'cancelled') AS on_visit
@@ -77,6 +74,11 @@ export async function healthrayBillSuggestion(billId, ctx, db = pool) {
     [ids, bill.visit_id],
   );
   const byId = new Map(items.map((item) => [item.id, item]));
+  const held = await heldCatalogs(db, {
+    visitId: bill.visit_id,
+    billId: bill.id,
+    catalogIds: items.map((item) => item.test_catalog_id),
+  });
   const suggested = [];
   const notMatched = [];
   const seen = new Set();
@@ -86,7 +88,7 @@ export async function healthrayBillSuggestion(billId, ctx, db = pool) {
       notMatched.push({ desc: line.desc, amount: paise(line.amount || 0) });
       continue;
     }
-    if (item.on_visit || seen.has(item.id)) continue;
+    if (item.on_visit || seen.has(item.id) || held.has(item.test_catalog_id)) continue;
     seen.add(item.id);
     suggested.push({
       desc: line.desc,

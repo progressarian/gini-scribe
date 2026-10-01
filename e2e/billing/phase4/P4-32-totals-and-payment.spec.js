@@ -119,19 +119,23 @@ test.describe.serial("P4-32 totals and payment", () => {
     await open(page, ids.visit);
     const bill = await bills.readBill(ids.bill, db);
     const shown = [
-      ["Actual", bill.totals.actual],
+      ["Subtotal", bill.totals.actual],
       ["Discount", bill.totals.discount],
-      ["Patient payable", bill.totals.payable],
-      ["Claimed", bill.totals.claim],
-      ["Adjustment", bill.totals.adjustment],
-      ["Round-off", bill.totals.round_off],
+      ["Total", bill.totals.payable],
+      ["Claimed", bill.totals.claim, true],
+      ["Adjustment", bill.totals.adjustment, true],
+      ["Round-off", bill.totals.round_off, true],
       ["Paid", bill.totals.paid],
-      ["Balance", bill.totals.payable - bill.totals.paid],
+      ["Amount Due", bill.totals.payable - bill.totals.paid],
     ];
-    for (const [label, amount] of shown) {
+    for (const [label, amount, hiddenWhenZero] of shown) {
+      if (hiddenWhenZero && !amount) {
+        await expect(totalRow(page, label)).toHaveCount(0);
+        continue;
+      }
       await expect(totalRow(page, label).getByRole("cell")).toHaveText(fromPaise(amount));
     }
-    await expect(totalRow(page, "Tax")).toHaveCount(0);
+    await expect(totalRow(page, "GST")).toHaveCount(0);
   });
 
   test("2. the tax row appears only when GST is switched on", async ({ page }) => {
@@ -144,7 +148,7 @@ test.describe.serial("P4-32 totals and payment", () => {
     try {
       await loginAs(page, "reception");
       await open(page, ids.visit);
-      await expect(totalRow(page, "Tax")).toHaveCount(1);
+      await expect(totalRow(page, "GST")).toHaveCount(1);
     } finally {
       await restoreGst();
     }
@@ -171,17 +175,17 @@ test.describe.serial("P4-32 totals and payment", () => {
   test("4. Finalise is enabled only once the finalise checks would pass", async ({ page }) => {
     await loginAs(page, "reception");
     await open(page, ids.visit);
-    await expect(totalRow(page, "Balance").getByRole("cell")).toHaveText(fromPaise(250000));
+    await expect(totalRow(page, "Amount Due").getByRole("cell")).toHaveText(fromPaise(250000));
     await expect(finaliseButton(page)).toBeDisabled();
 
     await pad(page).getByLabel("Amount").fill("300");
-    await expect(pad(page).getByText(`Remaining ${fromPaise(220000)}`)).toBeVisible();
+    await expect(pad(page).getByLabel("Remaining balance")).toHaveText(fromPaise(220000));
     await pad(page).getByLabel("Amount").fill("2500");
-    await expect(pad(page).getByText(`Remaining ${fromPaise(0)}`)).toBeVisible();
+    await expect(pad(page).getByLabel("Remaining balance")).toHaveText(fromPaise(0));
     await pad(page).getByRole("button", { name: "Take payment" }).click();
 
     await expect(totalRow(page, "Paid").getByRole("cell")).toHaveText(fromPaise(250000));
-    await expect(totalRow(page, "Balance").getByRole("cell")).toHaveText(fromPaise(0));
+    await expect(totalRow(page, "Amount Due").getByRole("cell")).toHaveText(fromPaise(0));
     await expect(finaliseButton(page)).toBeEnabled();
     const saved = await bills.readBill(ids.bill, db);
     expect(saved.totals.paid).toBe(250000);
@@ -209,7 +213,7 @@ test.describe.serial("P4-32 totals and payment", () => {
   }) => {
     await loginAs(page, "reception");
     await open(page, free.visit);
-    await expect(totalRow(page, "Patient payable").getByRole("cell")).toHaveText(fromPaise(0));
+    await expect(totalRow(page, "Total").getByRole("cell")).toHaveText(fromPaise(0));
     await expect(pad(page).getByText("No payment is needed on this bill")).toBeVisible();
     await expect(pad(page).getByLabel("Amount")).toHaveCount(0);
     await expect(finaliseButton(page)).toBeEnabled();
@@ -253,7 +257,7 @@ test.describe.serial("P4-32 totals and payment", () => {
     const bill = await freshBill("Stale", ids.dressing, ids.paid);
     await loginAs(page, "reception");
     await open(page, bill.visit);
-    await expect(totalRow(page, "Balance").getByRole("cell")).toHaveText(fromPaise(250000));
+    await expect(totalRow(page, "Amount Due").getByRole("cell")).toHaveText(fromPaise(250000));
 
     const held = await bills.readBill(bill.bill, db);
     await payments.takePayments(

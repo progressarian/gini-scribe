@@ -15,6 +15,7 @@ import { IST_TODAY } from "../giniflow/statusEngine.js";
 import { TEST_MATCHES_SQL } from "./testMatch.js";
 import { ON_PATIENT_DAY_BILL_SQL, VISIT_LAB_CASE_TESTS_SQL } from "./labCaseLines.js";
 import { REMOVED_BY_DESK_SQL } from "./visitLines.js";
+import { HELD_AT_RECEPTION, RECEPTION_MONEY_SQL, SETTLED_AT_RECEPTION } from "./orderLinks.js";
 
 const ONLINE_BOOKING = "(tele|online|video)";
 
@@ -104,9 +105,12 @@ const COUNTER_SELECT = `
              COUNT(t.id) FILTER (WHERE NOT o.settled AND NOT t.on_final
                                    AND NOT t.priced)::int AS not_priced,
              COUNT(DISTINCT o.id) FILTER (WHERE o.settled)::int AS settled_orders
-        FROM (SELECT lo.id,
-                     lo.payment_status IN (${SETTLED_ORDER}) AND lo.amount_total > 0 AS settled
-                FROM giniflow_lab_orders lo WHERE lo.visit_id = a.id) o
+        FROM (SELECT o.id,
+                     (o.payment_status IN (${SETTLED_ORDER}) AND o.amount_total > 0)
+                     OR (${SETTLED_AT_RECEPTION} AND ${HELD_AT_RECEPTION("rm")}) AS settled
+                FROM giniflow_lab_orders o
+                CROSS JOIN LATERAL ${RECEPTION_MONEY_SQL("o")} rm
+               WHERE o.visit_id = a.id) o
         JOIN LATERAL (
           SELECT ot.id,
                  EXISTS (SELECT 1 FROM service_items si

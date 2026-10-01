@@ -176,17 +176,18 @@ test.describe.serial("P4-41 one claim per test", () => {
     const placed = await onTheBill("Readded");
     await removeTest(placed.billId);
     await claim(placed.order, 150);
-    const readded = await bills.addLine(
-      placed.billId,
-      { item_id: ids.hba1c, source: "lab_order", lab_order_id: placed.order },
-      desk,
-      db,
+    const attempt = await failure(
+      bills.addLine(
+        placed.billId,
+        { item_id: ids.hba1c, source: "lab_order", lab_order_id: placed.order },
+        desk,
+        db,
+      ),
     );
-    expect(readded.totals.payable).toBe(25000);
-    const attempt = await failure(payOnBill(placed.billId, 250));
     await decide(placed.order, "claim_approved");
     expect(await hospitalPaid(placed), "what the hospital holds for a ₹250 test").toBe(150);
-    expect(attempt?.message).toBe(standingOn("this visit's draft bill", "draft"));
+    expect(attempt?.code).toBe("paid_at_reception");
+    expect(attempt.message).toMatch(/has its insurance claim at reception — it's listed under/);
   });
 
   test("3. a category claim on the bill is not raised beside the order's own claim", async () => {
@@ -229,13 +230,13 @@ test.describe.serial("P4-41 one claim per test", () => {
     const placed = await onTheBill("Rejected");
     await removeTest(placed.billId);
     await claim(placed.order, 150);
+    await decide(placed.order, "claim_rejected");
     await bills.addLine(
       placed.billId,
       { item_id: ids.hba1c, source: "lab_order", lab_order_id: placed.order },
       desk,
       db,
     );
-    await decide(placed.order, "claim_rejected");
     const paid = await payOnBill(placed.billId, 250);
     expect(paid.orders).toHaveLength(1);
     const row = await orderRow(placed.order);

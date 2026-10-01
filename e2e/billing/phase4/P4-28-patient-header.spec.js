@@ -22,7 +22,7 @@ const open = (page, visitId) =>
 const header = (page) => page.getByRole("region", { name: "Patient", exact: true });
 
 const patientPays = (page) =>
-  page.getByRole("table", { name: "Bill lines" }).getByRole("row").nth(1).getByRole("cell").nth(6);
+  page.getByRole("table", { name: "Bill lines" }).getByRole("row").nth(1).getByRole("cell").nth(5);
 
 test.describe.serial("P4-28 patient header", () => {
   test.describe.configure({ retries: 1 });

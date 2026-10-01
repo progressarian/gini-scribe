@@ -1031,6 +1031,10 @@ export const billingLabCaseTestsQuerySchema = z.strictObject({
   bill_id: uuid,
 });
 
+export const billingPaidAtReceptionQuerySchema = z.strictObject({
+  visit_id: uuid,
+});
+
 export const billingLabCaseLinesAddSchema = deskObject(
   {
     item_ids: z

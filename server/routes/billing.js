@@ -22,6 +22,7 @@ import {
   billingLineRemoveSchema,
   billingMyShiftsQuerySchema,
   billingNewItemRequestSchema,
+  billingPaidAtReceptionQuerySchema,
   billingPaymentsTakeSchema,
   billingPayOutSchema,
   billingPdfQuerySchema,
@@ -65,6 +66,7 @@ import {
   labCaseTestsForDesk,
 } from "../services/billing/labCaseLines.js";
 import { healthrayBillSuggestion } from "../services/billing/healthrayBillLines.js";
+import { paidAtReception } from "../services/billing/receptionOrders.js";
 import { deskSettings } from "../services/billing/billingSettings.js";
 import { searchDeskItems } from "../services/billing/serviceItems.js";
 import { counterPatients } from "../services/billing/counterPatients.js";
@@ -173,6 +175,20 @@ router.get(
 );
 
 router.get(
+  `${BASE}/suggested-codes`,
+  desk,
+  validateQuery(billingLabCaseTestsQuerySchema, BILLING_DESK_LABELS),
+  run("Suggested discount codes", 200, (req) => bills.suggestCodes(req.query.bill_id, ctx(req))),
+);
+
+router.get(
+  `${BASE}/paid-at-reception`,
+  desk,
+  validateQuery(billingPaidAtReceptionQuerySchema, BILLING_DESK_LABELS),
+  run("Paid at reception", 200, (req) => paidAtReception(req.query.visit_id)),
+);
+
+router.get(
   `${BASE}/counter/patients`,
   desk,
   validateQuery(giniflowArrivalsQuerySchema, BILLING_DESK_LABELS),
@@ -197,6 +213,7 @@ router.post(
     await consultationForDesk(req.params.visitId, opening);
     await testsForDesk(req.params.visitId, opening);
     await labCaseTestsForDesk(req.params.visitId, opening);
+    await bills.clearReceptionLines(req.params.visitId, opening);
     return bills.openDraft(req.params.visitId, opening);
   }),
 );
@@ -210,7 +227,10 @@ router.get(
 router.get(
   `${BASE}/bills/:billId`,
   desk,
-  run("Read bill", 200, (req) => bills.readBill(req.params.billId)),
+  run("Read bill", 200, async (req) => {
+    await bills.clearReceptionLinesOfBill(req.params.billId, ctx(req));
+    return bills.readBill(req.params.billId);
+  }),
 );
 
 router.post(

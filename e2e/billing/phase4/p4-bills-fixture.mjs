@@ -311,6 +311,20 @@ export async function extraVisit(
   return { patient, appointment, visit };
 }
 
+export async function healthrayBill(ids, patient, items) {
+  await query(
+    `INSERT INTO giniflow_patient_bills (patient_id, bill_date, status, items)
+     VALUES ($1, $2::date, 'billed', $3::jsonb)`,
+    [patient, ids.day, JSON.stringify(items)],
+  );
+}
+
+export const HEALTHRAY_CONSULTATION = {
+  desc: "Consultation",
+  amount: 1000,
+  category: "consultation",
+};
+
 export async function payRule(ids, scheme_code, values) {
   const columns = {
     scheme_code,

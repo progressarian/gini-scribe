@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { COUNTER_BILL_STATE as STATE } from "../../../../shared/billingVocab.js";
 import { fromPaise } from "../format";
+import { initialsOf } from "./PatientHeader";
 
 const BILL_BADGE = {
   [STATE.NONE]: { tone: "none", label: () => "No bill" },
@@ -52,6 +53,9 @@ function VisitRow({ row, active, onPick }) {
       aria-current={active ? "true" : undefined}
       onClick={() => onPick(row.visitId)}
     >
+      <span className="bc-avatar" aria-hidden="true">
+        {initialsOf(row.name)}
+      </span>
       <span className="bc-row__top">
         <span className="bc-row__name">{row.name}</span>
         {row.statusLabel ? <span className="bc-row__status">{row.statusLabel}</span> : null}

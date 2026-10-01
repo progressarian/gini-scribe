@@ -278,7 +278,7 @@ test.describe.serial("P4-38 floor trial rehearsal", () => {
       const gross = PRICES.rahulNew + PRICES.hba1c;
       const payable = gross * 0.9;
       await expect(total(desk, "Discount")).toHaveText(rupees(gross * 0.1));
-      await expect(total(desk, "Patient payable")).toHaveText(rupees(payable));
+      await expect(total(desk, "Total")).toHaveText(rupees(payable));
 
       await pad(desk).getByLabel("Mode").selectOption("upi");
       await pad(desk).getByLabel("Amount").fill("1000");
@@ -294,7 +294,7 @@ test.describe.serial("P4-38 floor trial rehearsal", () => {
         .nth(1)
         .fill(String(payable - 1000));
       await takePayment(desk);
-      await expect(total(desk, "Balance")).toHaveText(rupees(0));
+      await expect(total(desk, "Amount Due")).toHaveText(rupees(0));
 
       const hba1c = await orderOf(gen.visit, day.tests.hba1c);
       expect(hba1c.payment_status).not.toBe("pending");
@@ -331,7 +331,7 @@ test.describe.serial("P4-38 floor trial rehearsal", () => {
       const offer = desk.getByRole("button", { name: "Open the new draft bill" });
       await expect(offer).toBeVisible({ timeout: 30000 });
       await offer.click();
-      await expect(region(desk, "Bill lines").getByRole("heading")).toHaveText("This bill · draft");
+      await expect(region(desk, "Bill lines").getByRole("heading")).toHaveText("Bill ItemsDraft");
       await expect(lineRow(desk, `Lipid profile ${tag}`)).toContainText(rupees(PRICES.lipid));
       await expect(lineRow(desk, `Consultation Dr Rahul New ${tag}`)).toHaveCount(0);
       await expect(region(desk, "Earlier bills on this visit")).toContainText(day.genBill.bill_no);
@@ -356,7 +356,7 @@ test.describe.serial("P4-38 floor trial rehearsal", () => {
         "placeholder",
         "CGHS-40011234",
       );
-      await expect(total(desk, "Patient payable")).toHaveText(rupees(PRICES.beantFollowUp / 2));
+      await expect(total(desk, "Total")).toHaveText(rupees(PRICES.beantFollowUp / 2));
       await expect(total(desk, "Claimed")).toHaveText(rupees(PRICES.beantFollowUp / 2));
       await pay(desk, [{ mode: "card", amount: PRICES.beantFollowUp / 2, reference: "SLIP 7781" }]);
       await finalise(desk);
@@ -399,7 +399,7 @@ test.describe.serial("P4-38 floor trial rehearsal", () => {
         });
       await expect(header(desk).getByText("Referral scan (on file)")).toBeVisible();
       await expect(blockers(desk)).toHaveCount(0);
-      await expect(total(desk, "Patient payable")).toHaveText(rupees(0));
+      await expect(total(desk, "Total")).toHaveText(rupees(0));
       await finalise(desk);
       expect((await billOf(ref.visit, "final")).claim_status).toBe("pending");
     });
@@ -409,7 +409,7 @@ test.describe.serial("P4-38 floor trial rehearsal", () => {
       await header(desk)
         .getByRole("button", { name: `CGHS ${tag} › Pensioner` })
         .click();
-      await expect(total(desk, "Patient payable")).toHaveText(rupees(0));
+      await expect(total(desk, "Total")).toHaveText(rupees(0));
       await expect(pad(desk).getByText("No payment is needed on this bill.")).toBeVisible();
       await expect(actions(desk).getByRole("button", { name: "Finalise & print" })).toBeEnabled();
       expect((await orderOf(pens.visit, day.tests.hba1c)).sample_status).toBe("payment_pending");
@@ -483,7 +483,7 @@ test.describe.serial("P4-38 floor trial rehearsal", () => {
 
     await test.step("Pay later: final with a balance, on the Dues tab, paid from there in cash", async () => {
       const owed = PRICES.rahulFollowUp + 2 * PRICES.dressing + PRICES.newItem + PRICES.hba1c;
-      await expect(total(desk, "Patient payable")).toHaveText(rupees(owed));
+      await expect(total(desk, "Total")).toHaveText(rupees(owed));
       await pad(desk).getByLabel("Pay later").check();
       await finalise(desk);
       const bill = await billOf(later.visit, "final");
@@ -519,7 +519,7 @@ test.describe.serial("P4-38 floor trial rehearsal", () => {
         .getByRole("button", { name: `Open bill ${day.genBill.bill_no}` })
         .click();
       await expect(region(desk, "Bill lines").getByRole("heading")).toHaveText(
-        `This bill · ${day.genBill.bill_no}`,
+        `Bill Items${day.genBill.bill_no}`,
       );
       await expect(actions(desk).getByRole("link", { name: "Print receipt" })).toBeVisible();
       await expect(actions(desk).getByRole("button", { name: "Cancel unpaid bill" })).toHaveCount(

@@ -38,7 +38,8 @@ import {
 } from "./common.js";
 import { markDraftSaved } from "./draftSaves.js";
 import { billCredits } from "./creditNotes.js";
-import { orderToLink } from "./orderLinks.js";
+import { lockVisitOrders, orderToLink, SETTLED_AT_RECEPTION } from "./orderLinks.js";
+import { PAID_AT_RECEPTION, receptionHolds, refuseReceptionTest } from "./receptionOrders.js";
 
 const BILL_COLUMNS = `id, bill_no, series, fy, bill_type, original_bill_id, patient_id, visit_id,
   appointment_id,
@@ -160,6 +161,8 @@ function shapeLine(row) {
     repeat_request_id: row.repeat_request_id,
     credited_line_id: row.credited_line_id,
     group_code: row.group_code,
+    group_name: row.group_name ?? null,
+    item_kind: row.item_kind ?? null,
     subgroup_code: row.subgroup_code,
     item_code: row.item_code,
     bill_code: row.bill_code,
@@ -313,8 +316,11 @@ async function liveLines(client, billId, { all = false } = {}) {
             COALESCE(i.price_per_patient, FALSE) AS price_per_patient,
             CASE WHEN i.kind = 'consultation' AND rd.is_active IS FALSE
                  THEN json_build_object('id', rd.id, 'name', rd.name) END AS removed_doctor,
-            setter.name AS agreed_by_name, adder.name AS created_by_name
+            setter.name AS agreed_by_name, adder.name AS created_by_name,
+            sg.name AS group_name, i.kind AS item_kind
        FROM bill_lines l LEFT JOIN service_items i ON i.id = l.service_item_id
+       LEFT JOIN service_subgroups ssg ON ssg.id = i.subgroup_id
+       LEFT JOIN service_groups sg ON sg.id = ssg.group_id
        LEFT JOIN doctors rd ON rd.id = COALESCE(i.doctor_id, l.doctor_id)
        LEFT JOIN doctors setter ON setter.id = l.agreed_by
        LEFT JOIN doctors adder ON adder.id = l.created_by
@@ -445,29 +451,28 @@ async function saveTotals(client, bill, totals, ctx) {
   return rows[0];
 }
 
+const pricingInput = (bill, lines, codes, ctx) => ({
+  patientId: bill.patient_id,
+  ...(bill.appointment_id ? { appointmentId: bill.appointment_id } : {}),
+  category: bill.scheme_code,
+  date: bill.bill_date,
+  role: ctx?.role,
+  codes,
+  lines: lines.map((line) => ({
+    item: line.service_item_id,
+    quantity: Number(line.quantity),
+    doctorId: line.doctor_id,
+    kept: true,
+    agreedRate: line.agreed_rate,
+  })),
+});
+
 async function reprice(client, bill, codes, ctx) {
   const lines = await liveLines(client, bill.id);
   if (!lines.length) {
     return { priced: null, lines: [], bill: await saveTotals(client, bill, ZERO_TOTALS, ctx) };
   }
-  const priced = await priceBill(
-    {
-      patientId: bill.patient_id,
-      ...(bill.appointment_id ? { appointmentId: bill.appointment_id } : {}),
-      category: bill.scheme_code,
-      date: bill.bill_date,
-      role: ctx?.role,
-      codes,
-      lines: lines.map((line) => ({
-        item: line.service_item_id,
-        quantity: Number(line.quantity),
-        doctorId: line.doctor_id,
-        kept: true,
-        agreedRate: line.agreed_rate,
-      })),
-    },
-    client,
-  );
+  const priced = await priceBill(pricingInput(bill, lines, codes, ctx), client);
   priced.lines.forEach(assertBillLineBalances);
   const { rows: highest } = await client.query(
     `SELECT COALESCE(MAX(line_no), 0) AS top FROM bill_lines WHERE bill_id = $1`,
@@ -804,6 +809,7 @@ export async function addLineIn(client, bill, input, ctx) {
     );
   }
   await refuseOtherConsultation(client, bill, item);
+  await refuseReceptionTest(client, bill, item, labOrderId);
   if (
     source === "ordered" &&
     (await liveLineFor(client, { visitId: bill.visit_id, serviceItemId: item.id }))
@@ -988,6 +994,93 @@ export async function removeLine(billId, lineId, input, ctx, db = pool) {
   }, db);
 }
 
+export const PAID_AT_RECEPTION_REASON = "Paid at reception";
+
+async function receptionLinesOn(client, bill) {
+  const flagged = await orderStatesOn(client, bill.id);
+  const lines = await liveLines(client, bill.id);
+  const { rows: tests } = await client.query(
+    `SELECT id, test_catalog_id FROM service_items
+      WHERE id = ANY($1::int[]) AND kind = 'test' AND test_catalog_id IS NOT NULL`,
+    [lines.filter((line) => !line.lab_order_id).map((line) => line.service_item_id)],
+  );
+  const catalogOf = new Map(tests.map((row) => [row.id, row.test_catalog_id]));
+  const going = [];
+  for (const line of lines) {
+    const catalogId = line.lab_order_id ? null : catalogOf.get(line.service_item_id);
+    const held =
+      flagged.has(line.id) ||
+      (catalogId &&
+        (await receptionHolds(client, { visitId: bill.visit_id, billId: bill.id, catalogId })));
+    if (held) going.push(line);
+  }
+  return going;
+}
+
+const RECEPTION_DRAFT_SQL = `
+  SELECT b.id FROM bills b
+   WHERE b.visit_id = $1 AND b.status = 'draft' AND b.bill_type = 'invoice'
+     AND EXISTS (SELECT 1 FROM bill_lines l WHERE l.bill_id = b.id AND l.is_live)
+     AND EXISTS (SELECT 1 FROM giniflow_lab_orders o
+                  WHERE o.visit_id = $1 AND o.sample_status <> 'cancelled'
+                    AND ${SETTLED_AT_RECEPTION})`;
+
+async function clearReceptionIn(client, visitId, ctx) {
+  await client.query(`SELECT id FROM giniflow_visits WHERE id = $1 FOR NO KEY UPDATE`, [visitId]);
+  await lockVisitBills(client, visitId);
+  const { rows } = await client.query(
+    `SELECT ${BILL_COLUMNS} FROM bills
+      WHERE visit_id = $1 AND status = 'draft' AND bill_type = 'invoice' FOR UPDATE`,
+    [visitId],
+  );
+  if (!rows.length) return [];
+  let bill = rows[0];
+  await lockVisitOrders(client, visitId);
+  const removed = [];
+  for (const line of await receptionLinesOn(client, bill)) {
+    try {
+      bill = await inTransaction(async (inner) => {
+        const before = await lineOf(inner, bill, line.id);
+        await dropLineIn(
+          inner,
+          bill,
+          before,
+          { removed: true, reason: PAID_AT_RECEPTION_REASON },
+          ctx,
+        );
+        return (await reprice(inner, bill, await billCodes(inner, bill.id), ctx)).bill;
+      }, client);
+      removed.push(line.bill_name);
+    } catch (error) {
+      if (!error.status) throw error;
+    }
+  }
+  if (removed.length) await resettleTestOrders(client, bill, ctx);
+  return removed;
+}
+
+export async function clearReceptionLines(visitId, ctx, db = pool) {
+  try {
+    const id = cleanUuid(visitId, "visit");
+    const { rows } = await db.query(RECEPTION_DRAFT_SQL, [id]);
+    if (!rows.length) return [];
+    return await inTransaction((client) => clearReceptionIn(client, id, ctx), db);
+  } catch (error) {
+    console.error(`[billing] reception-paid lines left on visit ${visitId}: ${error.message}`);
+    return [];
+  }
+}
+
+export async function clearReceptionLinesOfBill(billId, ctx, db = pool) {
+  const id = typeof billId === "string" ? billId.trim().toLowerCase() : "";
+  if (!UUID.test(id)) return [];
+  const { rows } = await db.query(
+    `SELECT visit_id FROM bills WHERE id = $1 AND status = 'draft' AND bill_type = 'invoice'`,
+    [id],
+  );
+  return rows[0]?.visit_id ? clearReceptionLines(rows[0].visit_id, ctx, db) : [];
+}
+
 export async function setLinePrice(billId, lineId, input, ctx, db = pool) {
   const rate = cleanAgreedRate(input?.agreed_rate);
   if (rate === null) throw httpError(400, "Enter this patient's price");
@@ -1069,6 +1162,91 @@ export async function addCode(billId, input, ctx, db = pool) {
     });
     return withLines(client, saved.bill, { codes: await billCodes(client, bill.id) });
   }, db);
+}
+
+const MAX_SUGGESTED_CODES = 5;
+const MAX_CODES_TRIED = 40;
+
+export async function suggestCodes(billId, ctx, db = pool) {
+  const id = cleanUuid(billId, "bill");
+  const { rows } = await db.query(`SELECT ${BILL_COLUMNS} FROM bills WHERE id = $1`, [id]);
+  if (!rows.length) throw httpError(404, "That bill no longer exists");
+  const bill = rows[0];
+  if (bill.status !== "draft") return { codes: [] };
+  const lines = await liveLines(db, id);
+  if (!lines.length) return { codes: [] };
+  const onBill = await billCodes(db, id);
+  const { rows: rules } = await db.query(
+    `SELECT code FROM discount_rules
+      WHERE is_active AND method = 'code' AND code IS NOT NULL
+        AND (valid_from IS NULL OR valid_from <= COALESCE($1::date, (now() AT TIME ZONE 'Asia/Kolkata')::date))
+        AND (valid_to IS NULL OR valid_to >= COALESCE($1::date, (now() AT TIME ZONE 'Asia/Kolkata')::date))
+        AND NOT (lower(code) = ANY($2::text[]))
+      ORDER BY priority, lower(name), id
+      LIMIT ${MAX_CODES_TRIED}`,
+    [bill.bill_date, onBill.map((code) => code.toLowerCase())],
+  );
+  if (!rules.length) return { codes: [] };
+  const base = await priceBill(pricingInput(bill, lines, onBill, ctx), db);
+  const found = [];
+  for (const { code } of rules) {
+    const priced = await priceBill(pricingInput(bill, lines, [...onBill, code], ctx), db).catch(
+      () => null,
+    );
+    if (!priced) continue;
+    const applied = priced.applied_codes.find((entry) => sameCode(entry.code, code));
+    const saves = base.totals.payable - priced.totals.payable;
+    if (applied?.amount > 0 && saves > 0) {
+      found.push({ code, rule_id: applied.rule_id, name: applied.name, saves });
+    }
+  }
+  const best = found.sort((a, b) => b.saves - a.saves).slice(0, MAX_SUGGESTED_CODES);
+  return { codes: await withReasons(db, best) };
+}
+
+async function withReasons(db, codes) {
+  if (!codes.length) return codes;
+  const { rows } = await db.query(
+    `SELECT d.id, d.min_age, d.max_age, d.gender, d.visit_types, d.requires_all_items,
+            (SELECT array_agg(CASE WHEN p.code IS NULL THEN s.label ELSE p.label || ' › ' || s.label END)
+               FROM patient_schemes s LEFT JOIN patient_schemes p ON p.code = s.parent_code
+              WHERE s.code = ANY(d.scheme_codes)) AS categories,
+            (SELECT array_agg(i.name ORDER BY i.name) FROM service_items i
+              WHERE i.id = ANY(d.service_item_ids)) AS items,
+            (SELECT array_agg(g.name ORDER BY g.name) FROM service_groups g
+              WHERE g.id = ANY(d.group_ids)) AS groups,
+            (SELECT array_agg(g.name ORDER BY g.name) FROM service_subgroups g
+              WHERE g.id = ANY(d.subgroup_ids)) AS subgroups
+       FROM discount_rules d WHERE d.id = ANY($1::int[])`,
+    [codes.map((entry) => entry.rule_id)],
+  );
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  return codes.map((entry) => ({ ...entry, because: reasonsOf(byId.get(entry.rule_id)) }));
+}
+
+const listed = (names, most = 2) =>
+  names.length > most
+    ? `${names.slice(0, most).join(", ")} +${names.length - most}`
+    : names.join(", ");
+
+function reasonsOf(rule) {
+  if (!rule) return [];
+  const age =
+    rule.min_age !== null && rule.max_age !== null
+      ? `Age ${rule.min_age}–${rule.max_age}`
+      : rule.min_age !== null
+        ? `Age ${rule.min_age}+`
+        : rule.max_age !== null
+          ? `Age up to ${rule.max_age}`
+          : null;
+  const services = [...(rule.items || []), ...(rule.subgroups || []), ...(rule.groups || [])];
+  return [
+    rule.categories?.length && listed(rule.categories),
+    age,
+    rule.gender && `${rule.gender[0].toUpperCase()}${rule.gender.slice(1).toLowerCase()} patients`,
+    rule.visit_types?.length && `${rule.visit_types.join(" / ")} visit`,
+    services.length && `${rule.requires_all_items ? "Package: " : "On "}${listed(services)}`,
+  ].filter(Boolean);
 }
 
 export async function removeCode(billId, input, ctx, db = pool) {
@@ -1561,8 +1739,11 @@ async function restoreSavedIn(client, bill, ctx) {
         agreed_by: line.agreed_by ?? null,
       },
       ctx,
-    );
-    current = added.bill;
+    ).catch((error) => {
+      if (error.code === PAID_AT_RECEPTION) return null;
+      throw error;
+    });
+    if (added) current = added.bill;
   }
   const saved = await reprice(client, current, snapshot.codes, ctx);
   await resettleTestOrders(client, saved.bill, ctx);

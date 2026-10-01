@@ -72,7 +72,7 @@ test.describe.serial("P4-31 discount code box", () => {
     const saved = await bills.readBill(ids.bill, db);
     expect(saved.totals.discount).toBe(35000);
     await expect(totalRow(page, "Discount")).toHaveText(fromPaise(saved.totals.discount));
-    await expect(totalRow(page, "Patient payable")).toHaveText(fromPaise(saved.totals.payable));
+    await expect(totalRow(page, "Total")).toHaveText(fromPaise(saved.totals.payable));
   });
 
   test("2. an applied code is a chip that can be taken off again", async ({ page }) => {

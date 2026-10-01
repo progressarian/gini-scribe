@@ -13,6 +13,17 @@ const readFile = (file) =>
 
 const labelOf = (entry) => entry.category.display_label || entry.category.label;
 
+const SEX_WORD = { M: "Male", F: "Female" };
+
+export const initialsOf = (name) =>
+  (name || "?")
+    .replace(/^(mrs?|ms|dr|smt|shri)\.?\s+/i, "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((word) => word[0].toUpperCase())
+    .join("");
+
 export default function PatientHeader({
   patient,
   bill,
@@ -97,16 +108,23 @@ export default function PatientHeader({
   return (
     <section className="bc-card bc-head" aria-label="Patient">
       <div className="bc-head__top">
-        <h2 className="bc-head__name">{patient?.name || "—"}</h2>
-        <div className="bc-head__meta">
-          {patient?.fileNo || "—"}
-          {" · "}
-          {bill.patient_age ?? patient?.age ?? "—"}
-          {(patient?.sex || "")[0] || ""}
+        <span className="bc-avatar bc-avatar--lg" aria-hidden="true">
+          {initialsOf(patient?.name)}
+        </span>
+        <div className="bc-head__who">
+          <h2 className="bc-head__name">{patient?.name || "—"}</h2>
+          <div className="bc-head__meta">
+            {patient?.fileNo || "—"}
+            {" • "}
+            {bill.patient_age ?? patient?.age ?? "—"}
+            {(patient?.sex || "")[0] || ""}
+            {SEX_WORD[(patient?.sex || "")[0]] ? ` • ${SEX_WORD[(patient?.sex || "")[0]]}` : ""}
+          </div>
         </div>
         <span className="badge b-ink bc-head__cat">
           {bill.category_label || (needsCategory ? "Category not confirmed" : "General")}
         </span>
+        {patient?.statusLabel && <span className="bc-head__state">{patient.statusLabel}</span>}
         {bill.payer_name && <span className="bc-head__payer">Payer: {bill.payer_name}</span>}
         <button
           type="button"

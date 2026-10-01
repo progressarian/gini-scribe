@@ -173,10 +173,21 @@ const shape = (r) => ({
 const isAwaitingSample = (o) =>
   opensLabGate(o.paymentStatus) && ["ordered", "payment_pending", "paid"].includes(o.sampleStatus);
 
-const paymentCounts = (orders) => {
-  const pending = orders.filter((o) => !opensLabGate(o.paymentStatus)).length;
-  const awaitingSample = orders.filter(isAwaitingSample).length;
-  return { pending, awaitingSample, cleared: orders.length - pending - awaitingSample };
+const visitsOf = (rows) => new Set(rows.map((row) => row.visitId));
+
+const paymentCounts = (orders, charges = [], healthrayLab = []) => {
+  const pendingOrders = orders.filter((o) => !opensLabGate(o.paymentStatus));
+  const waiting = visitsOf([...pendingOrders, ...charges, ...healthrayLab]);
+  const awaitingSample = visitsOf(orders.filter(isAwaitingSample));
+  const cleared = [...visitsOf(orders)].filter(
+    (visitId) => !waiting.has(visitId) && !awaitingSample.has(visitId),
+  );
+  return {
+    pending: pendingOrders.length,
+    awaitingSample: awaitingSample.size,
+    cleared: cleared.length,
+    pendingPatients: waiting.size,
+  };
 };
 
 const CHARGE_SELECT = `
@@ -350,7 +361,7 @@ export async function getPaymentQueue(visitDate, db = pool, { q = "" } = {}) {
     },
     healthrayLab,
     counts: {
-      ...paymentCounts(allOrders),
+      ...paymentCounts(allOrders, pendingCharges(allCharges), allHealthrayLab),
       charges: pendingCharges(allCharges).length,
       healthrayLab: allHealthrayLab.length,
     },

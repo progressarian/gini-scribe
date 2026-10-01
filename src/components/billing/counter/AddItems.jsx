@@ -14,6 +14,8 @@ import { requestKindText, requestStatusText } from "./lineText";
 
 const BLANK_PROPOSAL = { name: "", group: "", reason: "" };
 
+export const ITEM_SEARCH_ID = "bc-item-search";
+
 export default function AddItems({ bill, onBill, form }) {
   const search = form.value.search;
   const setSearch = (next) => form.set("search", next);
@@ -132,6 +134,7 @@ export default function AddItems({ bill, onBill, form }) {
       <label className="bc-field">
         <span className="bc-field__lbl">Search items</span>
         <input
+          id={ITEM_SEARCH_ID}
           className="bc-field__in"
           type="search"
           value={search}

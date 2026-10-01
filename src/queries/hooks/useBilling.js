@@ -155,6 +155,25 @@ export function useHealthrayBillLines(billId, version, { enabled = true } = {}) 
   });
 }
 
+export function useSuggestedCodes(billId, version, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: [...billingKeys.bill(billId), "suggested-codes", version ?? 0],
+    queryFn: () => read(`${DESK}/suggested-codes`, { bill_id: billId }),
+    enabled: !!billId && enabled,
+    staleTime: 30 * 1000,
+  });
+}
+
+export function usePaidAtReception(visitId, version) {
+  return useQuery({
+    queryKey: [...billingKeys.visitBills(visitId), "paid-at-reception", version ?? 0],
+    queryFn: () => read(`${DESK}/paid-at-reception`, { visit_id: visitId }),
+    enabled: !!visitId,
+    refetchInterval: 15 * 1000,
+    refetchIntervalInBackground: false,
+  });
+}
+
 export function useAddLabCaseTests() {
   return useVisitMutation(
     async ({ billId, itemIds }) =>

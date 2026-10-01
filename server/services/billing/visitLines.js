@@ -2,7 +2,14 @@ import pool from "../../config/db.js";
 import { billingVisitType } from "../../../shared/billingVisitType.js";
 import { collectiblePaise, paise } from "../../../shared/labPayment.js";
 import { writeAudit } from "./audit.js";
-import { addLineIn, billLabel, holdConsultation, openDraftIn, repriceBillIn } from "./bills.js";
+import {
+  addLineIn,
+  billLabel,
+  holdConsultation,
+  openDraftIn,
+  PAID_AT_RECEPTION_REASON,
+  repriceBillIn,
+} from "./bills.js";
 import { addsConsultation, getSettings } from "./billingSettings.js";
 import { linkLine, SETTLED_AT_RECEPTION } from "./orderLinks.js";
 import { UNCOVERED_SQL } from "./payments.js";
@@ -11,6 +18,7 @@ import { removedDoctor } from "./removedDoctors.js";
 import { catalogTestsFor, TEST_MATCHES_SQL } from "./testMatch.js";
 import { httpError, inTransaction } from "./transaction.js";
 import { auditFields } from "./common.js";
+import { isLiveBillItem } from "../giniflow/patientBill.js";
 
 const ON_ANY_BILL = "bl.bill_id";
 
@@ -59,6 +67,7 @@ export async function deskSettings(db = pool) {
 async function visitFor(client, visitId) {
   const { rows } = await client.query(
     `SELECT v.id, v.patient_id, v.appointment_id, v.assigned_doctor_id,
+            v.visit_date::text AS visit_date,
             a.visit_type, a.doctor_id AS appointment_doctor_id
        FROM giniflow_visits v
        LEFT JOIN appointments a ON a.id = v.appointment_id
@@ -197,6 +206,17 @@ const NO_SUGGESTION = {
   removed_doctor: null,
 };
 
+async function healthrayBilledConsultation(db, visit) {
+  const { rows } = await db.query(
+    `SELECT items FROM giniflow_patient_bills
+      WHERE patient_id = $1 AND bill_date = $2::date AND status = 'billed'`,
+    [visit.patient_id, visit.visit_date],
+  );
+  return rows.some((row) =>
+    (row.items || []).some((line) => line.category === "consultation" && isLiveBillItem(line)),
+  );
+}
+
 async function consultationOnVisit(db, visitId) {
   const { rows } = await db.query(
     `SELECT 1 FROM bill_lines l
@@ -261,6 +281,7 @@ export async function consultationSuggestion(billId, ctx, db = pool) {
   const visit = await visitFor(db, bill.visit_id);
   const visitType = visit.appointment_id ? billingVisitType(visit.visit_type) : null;
   if (!visitType || (await consultationOnVisit(db, visit.id))) return NO_SUGGESTION;
+  if (!(await healthrayBilledConsultation(db, visit))) return NO_SUGGESTION;
   const booked = await consultationItem(db, visit);
   const suggested =
     booked && !booked.removed
@@ -369,6 +390,7 @@ export const REMOVED_BY_DESK_SQL = (visitExpr, itemExpr) => `EXISTS (
      AND ra.before ->> 'visit_id' = ${visitExpr}::text
      AND ra.before ->> 'service_item_id' = ${itemExpr}::text
      AND ${NOT_DISCARDED("ra")}
+     AND ra.after ->> 'reason' IS DISTINCT FROM '${PAID_AT_RECEPTION_REASON}'
      AND NOT EXISTS (SELECT 1 FROM bills rb
                       WHERE rb.id::text = ra.before ->> 'bill_id' AND rb.status = 'cancelled'))`;
 

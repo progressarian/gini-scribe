@@ -265,13 +265,17 @@ test.describe.serial("P4C-21 hand-added test lines settle their order", () => {
     await bills.deleteDraft(open.id, {}, desk, db);
   });
 
-  test("3. an order already paid at reception is not linked, so nothing is paid twice", async () => {
+  test("3. an order already paid at reception is not billed again (P4C-22)", async () => {
     const { visit } = visits.C21Reception;
     const orderId = await order(visit, ["hba1c"], { status: "paid", paid: 200 });
     const draft = await bills.openDraft(visit, desk, db);
-    await addByHand(draft.id, "hba1c");
-    expect(await lineOf(visit, "hba1c")).toMatchObject({ source: "added", lab_order_id: null });
-    await finaliseAndPay(draft.id);
+    const api = await apiAs("reception");
+    const response = await api.post(`/api/billing/bills/${draft.id}/lines`, {
+      data: { item_id: items.hba1c },
+    });
+    await api.dispose();
+    expect(response.status()).toBe(409);
+    expect(await lineOf(visit, "hba1c")).toBeUndefined();
     expect(await orderRow(orderId)).toMatchObject({ payment_status: "paid", amount_paid: 200 });
   });
 

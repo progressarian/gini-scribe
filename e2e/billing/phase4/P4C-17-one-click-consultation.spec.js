@@ -9,6 +9,8 @@ import {
   autoConsultation,
   desk,
   extraVisit,
+  HEALTHRAY_CONSULTATION,
+  healthrayBill,
   newTag,
   payRule,
   setUp,
@@ -162,8 +164,12 @@ test.describe.serial("P4C-17 one-click consultation at the counter", () => {
       ["quiet", "C17Quiet", { visitType: "Follow Up" }],
       ["phone", "C17Phone", { visitType: "Follow Up" }],
       ["auto", "C17Auto", { visitType: "Follow Up" }],
+      ["unbilled", "C17Unbilled", { visitType: "Follow Up" }],
     ]) {
       visits[key] = await extraVisit(ids, label, options);
+      if (key !== "unbilled") {
+        await healthrayBill(ids, visits[key].patient, [HEALTHRAY_CONSULTATION]);
+      }
     }
   });
 
@@ -174,6 +180,15 @@ test.describe.serial("P4C-17 one-click consultation at the counter", () => {
     } finally {
       await dropDoctors();
     }
+  });
+
+  test("0. nothing is suggested until today's HealthRay bill has a consultation", async () => {
+    const draft = await openDraft(visits.unbilled.visit);
+    expect((await suggestion(draft.id)).shown).toBe(false);
+    await healthrayBill(ids, visits.unbilled.patient, [
+      { desc: "CBC", amount: 300, category: "lab" },
+    ]);
+    expect((await suggestion(draft.id)).shown).toBe(false);
   });
 
   test("1. a General Follow Up visit suggests the booked doctor's Follow Up consultation at its price", async ({

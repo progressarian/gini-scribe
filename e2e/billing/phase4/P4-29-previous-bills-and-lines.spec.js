@@ -56,13 +56,15 @@ test.describe.serial("P4-29 previous bills and lines", () => {
     await expect(lineRows(page)).toHaveCount(bill.lines.length);
     for (const [index, line] of bill.lines.entries()) {
       const cells = lineRows(page).nth(index).getByRole("cell");
-      await expect(cells.nth(0)).toHaveText(line.bill_name);
-      await expect(cells.nth(1)).toHaveText(line.bill_code || "—");
+      await expect(cells.nth(0)).toContainText(line.bill_name);
+      if (line.bill_code) await expect(cells.nth(0)).toContainText(line.bill_code);
+      if (line.payment_rule && line.payment_rule !== "full") {
+        await expect(cells.nth(0)).toContainText(paymentRuleText(line.payment_rule));
+      }
       await expect(cells.nth(2)).toHaveText(String(line.quantity));
-      await expect(cells.nth(3)).toHaveText(fromPaise(line.actual));
+      await expect(cells.nth(3)).toHaveText(fromPaise(line.rate));
       await expect(cells.nth(4)).toHaveText(fromPaise(line.discount));
-      await expect(cells.nth(5)).toHaveText(paymentRuleText(line.payment_rule));
-      await expect(cells.nth(6)).toHaveText(fromPaise(line.patient_payable));
+      await expect(cells.nth(5)).toHaveText(fromPaise(line.patient_payable));
     }
   });
 
@@ -100,7 +102,7 @@ test.describe.serial("P4-29 previous bills and lines", () => {
 
     await dressing.getByRole("spinbutton").fill("3");
     await dressing.getByRole("spinbutton").blur();
-    await expect(dressing.getByRole("cell").nth(3)).toHaveText(fromPaise(150000));
+    await expect(dressing.getByRole("cell").nth(5)).toHaveText(fromPaise(150000));
     const saved = await bills.readBill(ids.bill, db);
     expect(saved.lines.find((l) => l.bill_name.includes("Dressing")).quantity).toBe(3);
   });

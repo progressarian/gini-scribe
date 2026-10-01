@@ -23,7 +23,6 @@ const testCancel = await import("../../../server/services/giniflow/testCancel.js
 const labStation = await import("../../../server/services/giniflow/labStation.js");
 const reception = await import("../../../server/services/giniflow/receptionStation.js");
 const labPayment = await import("../../../shared/labPayment.js");
-const { ORDER_STATE } = await import("../../../shared/billingVocab.js");
 
 const db = getPool();
 const tag = newTag();
@@ -567,20 +566,22 @@ test.describe.serial("P4C-06 lock order and reception claims", () => {
     expect(await withValveOn(() => clear(billed.order))).toMatchObject({ paymentStatus: "paid" });
     expect(await money(billed.order)).toMatchObject({ status: "paid", paid: 650 });
 
-    const readded = await bills.addLine(
-      billed.billId,
-      { item_id: ids.abi, source: "lab_order", lab_order_id: billed.order },
-      desk,
-      db,
+    const attempt = await refused(
+      bills.addLine(
+        billed.billId,
+        { item_id: ids.abi, source: "lab_order", lab_order_id: billed.order },
+        desk,
+        db,
+      ),
+      409,
+      null,
+      "re-adding the test reception was paid for (P4C-22)",
     );
-    const state = (item) =>
-      readded.lines.find((line) => line.service_item_id === item).order_state ?? null;
-    expect(state(ids.abi)).toBe(ORDER_STATE.PAID_AT_RECEPTION);
-    expect(state(ids.hba1c)).toBeNull();
-    const attempt = await failure(finalise(billed.billId));
-    expect(attempt?.code).toBe("order_paid");
+    expect(attempt.code).toBe("paid_at_reception");
     expect(attempt.message).toBe(
-      `ABI ${tag} was already paid ₹400.00 at reception, so it can't also be paid on this visit's draft bill — remove it from this bill`,
+      `ABI ${tag} was already paid at reception — it's listed under Paid at reception and isn't charged on this bill`,
     );
+    const kept = await bills.readBill(billed.billId, db);
+    expect(kept.lines.find((line) => line.service_item_id === ids.hba1c).order_state).toBeNull();
   });
 });

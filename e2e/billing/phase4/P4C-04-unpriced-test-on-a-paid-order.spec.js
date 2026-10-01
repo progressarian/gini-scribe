@@ -23,7 +23,6 @@ const reception = await import("../../../server/services/giniflow/receptionStati
 const requests = await import("../../../server/services/billing/billingRequests.js");
 const refunds = await import("../phase4b/p4b-refunds.mjs");
 const labPayment = await import("../../../shared/labPayment.js");
-const { ORDER_STATE } = await import("../../../shared/billingVocab.js");
 
 const db = getPool();
 const tag = newTag();
@@ -230,18 +229,18 @@ test.describe.serial("P4C-04 unpriced test on a paid order", () => {
     expect(await clear(mixed.order)).toMatchObject({ paymentStatus: "paid" });
     expect(await money(mixed.order)).toMatchObject({ status: "paid", paid: 650 });
 
-    const readded = await bills.addLine(
-      mixed.billId,
-      { item_id: ids.abi, source: "lab_order", lab_order_id: mixed.order },
-      desk,
-      db,
+    await refused(
+      bills.addLine(
+        mixed.billId,
+        { item_id: ids.abi, source: "lab_order", lab_order_id: mixed.order },
+        desk,
+        db,
+      ),
+      409,
+      new RegExp(`^ABI ${tag} was already paid at reception — it's listed under Paid at reception`),
+      "re-adding the test reception was paid for (P4C-22)",
     );
-    expect(lineFor(readded, ids.abi).order_state).toBe(ORDER_STATE.PAID_AT_RECEPTION);
-    const attempt = await failure(payOnBill(mixed.billId, 400));
-    expect(attempt?.status).toBe(409);
-    expect(attempt.message).toMatch(
-      new RegExp(`^ABI ${tag} was already paid ₹400\\.00 at reception`),
-    );
+    expect(await money(mixed.order)).toMatchObject({ status: "paid", paid: 650 });
   });
 
   test("6. a Pensioner's claim covers only the priced test, and a cancel gives back exactly that", async () => {

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, X } from "lucide-react";
+import { CreditCard, Plus, X } from "lucide-react";
 import {
   useCurrentShift,
   useDeskSettings,
@@ -101,43 +101,42 @@ export default function TotalsAndPayment({ bill, onBill, schemes, payLater, onPa
     }
   };
 
+  const shown = (label, amount, key, tone) => (amount ? total(label, amount, key, tone) : null);
   const total = (label, amount, key, tone = "") => (
     <tr key={key} className={tone ? `bc-t bc-t--${tone}` : "bc-t"}>
       <th scope="row">{label}</th>
       <td>{fromPaise(amount)}</td>
     </tr>
   );
-  const progress = balance > 0 ? Math.min(100, Math.round((entered / balance) * 100)) : 0;
   const over = entered - balance;
 
   return (
-    <section className="bc-card bc-pay" aria-label="Totals and payment">
-      <h3 className="bc-card__title">Totals</h3>
-      <table className="ltable bc-totals" aria-label="Totals">
-        <tbody>
-          {total("Actual", bill.totals.actual, "actual")}
-          {total("Discount", bill.totals.discount, "discount", "minor")}
-          {settings?.gst_enabled ? total("Tax", bill.totals.tax, "tax", "minor") : null}
-          {total("Claimed", bill.totals.claim, "claim", "minor")}
-          {total("Adjustment", bill.totals.adjustment, "adjustment", "minor")}
-          {total("Round-off", bill.totals.round_off, "round", "minor")}
-          {total("Patient payable", bill.totals.payable, "payable", "strong")}
-          {total("Paid", bill.totals.paid, "paid", "minor")}
-          {bill.credits?.credited > 0 &&
-            total("Credited", bill.credits.credited, "credited", "minor")}
-          {bill.credits?.refunded > 0 &&
-            total("Refunded", bill.credits.refunded, "refunded", "minor")}
-          {total("Balance", balance, "balance", balance > 0 ? "due" : "clear")}
-        </tbody>
-      </table>
-
-      {bill.status !== "cancelled" && balance === 0 && bill.lines.length > 0 && (
-        <div className="bc-pay__clear">No payment is needed on this bill.</div>
-      )}
+    <section className="bc-pay" aria-label="Totals and payment">
+      <div className="bc-card bc-sum">
+        <h3 className="bc-card__heading">Bill Summary</h3>
+        <table className="bc-totals" aria-label="Totals">
+          <tbody>
+            {total("Subtotal", bill.totals.actual, "actual")}
+            {total("Discount", bill.totals.discount, "discount")}
+            {settings?.gst_enabled ? total("GST", bill.totals.tax, "tax") : null}
+            {shown("Claimed", bill.totals.claim, "claim")}
+            {shown("Adjustment", bill.totals.adjustment, "adjustment")}
+            {shown("Round-off", bill.totals.round_off, "round")}
+            {total("Total", bill.totals.payable, "payable", "strong")}
+            {total("Paid", bill.totals.paid, "paid")}
+            {bill.credits?.credited > 0 && total("Credited", bill.credits.credited, "credited")}
+            {bill.credits?.refunded > 0 && total("Refunded", bill.credits.refunded, "refunded")}
+            {total("Amount Due", balance, "balance", balance > 0 ? "due" : "clear")}
+          </tbody>
+        </table>
+        {bill.status !== "cancelled" && balance === 0 && bill.lines.length > 0 && (
+          <div className="bc-pay__clear">No payment is needed on this bill.</div>
+        )}
+      </div>
 
       {bill.status !== "cancelled" && balance > 0 && (
-        <div className="bc-pay__take">
-          <h3 className="bc-card__title">Payment</h3>
+        <div className="bc-card bc-pay__take">
+          <h3 className="bc-card__heading">Payment</h3>
           {!shift?.is_open && (
             <div className="bc-pay__warn">
               No shift is open, so cash can&apos;t be taken yet — open one on the Shift tab.
@@ -182,7 +181,7 @@ export default function TotalsAndPayment({ bill, onBill, schemes, payLater, onPa
                       </select>
                     </label>
                     <label className="bc-field">
-                      <span className="bc-field__lbl">Amount</span>
+                      <span className="bc-field__lbl">Amount Received</span>
                       <span className="bc-pay__money">
                         <span aria-hidden="true">₹</span>
                         <input
@@ -204,7 +203,7 @@ export default function TotalsAndPayment({ bill, onBill, schemes, payLater, onPa
                       aria-label={`Fill payment ${index + 1} with the ${fromPaise(Math.max(0, rest))} still due`}
                       onClick={() => setAmount(index, toRupees(rest))}
                     >
-                      Rest
+                      Full
                     </button>
                     {capped?.index === index && (
                       <p id={`bc-pay-cap-${index}`} className="bc-pay__cap" role="status">
@@ -240,29 +239,27 @@ export default function TotalsAndPayment({ bill, onBill, schemes, payLater, onPa
             Split payment
           </button>
 
-          <div className="bc-pay__progress">
-            <div className="bc-pay__progresstext">
-              <span>
-                {fromPaise(entered)} of {fromPaise(balance)} entered
-              </span>
-              {over > 0 ? (
-                <span className="bc-pay__over">{fromPaise(over)} more than due</span>
-              ) : (
-                <span
-                  className={remaining === 0 ? "bc-pay__left bc-pay__left--done" : "bc-pay__left"}
-                  aria-label="Remaining balance"
-                >
-                  Remaining {fromPaise(Math.max(0, remaining))}
-                </span>
-              )}
+          <dl className="bc-pay__mini">
+            <div>
+              <dt>Due</dt>
+              <dd>{fromPaise(balance)}</dd>
             </div>
-            <div className="bc-pay__bar" aria-hidden="true">
-              <span
-                className={over > 0 ? "bc-pay__fill bc-pay__fill--over" : "bc-pay__fill"}
-                style={{ width: `${progress}%` }}
-              />
+            <div>
+              <dt>Receiving</dt>
+              <dd>{fromPaise(entered)}</dd>
             </div>
-          </div>
+            {over > 0 ? (
+              <div className="bc-pay__over">
+                <dt>Too much</dt>
+                <dd>{fromPaise(over)} more than due</dd>
+              </div>
+            ) : (
+              <div className={remaining === 0 ? "bc-pay__left--done" : "bc-pay__left"}>
+                <dt>Balance</dt>
+                <dd aria-label="Remaining balance">{fromPaise(Math.max(0, remaining))}</dd>
+              </div>
+            )}
+          </dl>
 
           {missingReference && (
             <div className="bc-hint">Add the reference for each card or UPI payment.</div>
@@ -274,6 +271,7 @@ export default function TotalsAndPayment({ bill, onBill, schemes, payLater, onPa
             disabled={entered <= 0 || entered > balance || missingReference || take.isPending}
             onClick={pay}
           >
+            <CreditCard size={18} aria-hidden="true" />
             {take.isPending ? "Taking payment…" : "Take payment"}
             {entered > 0 && !take.isPending ? (
               <span className="bc-pay__goamt">{fromPaise(entered)}</span>

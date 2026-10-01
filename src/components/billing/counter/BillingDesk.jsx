@@ -14,6 +14,7 @@ import PatientList, { counterRows } from "./PatientList";
 import PatientHeader from "./PatientHeader";
 import PreviousBills from "./PreviousBills";
 import BillLinesTable from "./BillLinesTable";
+import PaidAtReception from "./PaidAtReception";
 import NotPricedTests from "./NotPricedTests";
 import AddItems from "./AddItems";
 import ConsultationSuggestion from "./ConsultationSuggestion";
@@ -453,6 +454,7 @@ export default function BillingDesk({ tab, visitId, patientId, billId, sentPatie
                     <div className="bc-bill__work">
                       <PreviousBills bills={earlier} onOpen={openEarlier} />
                       <BillLinesTable bill={bill} onBill={setBill} form={form} />
+                      <AddItems bill={bill} onBill={setBill} form={form} />
                       <ConsultationSuggestion
                         key={bill.id}
                         bill={bill}
@@ -466,8 +468,8 @@ export default function BillingDesk({ tab, visitId, patientId, billId, sentPatie
                         needsCategory={needsCategory}
                       />
                       <HealthrayBillLines key={`hr-${bill.id}`} bill={bill} onBill={setBill} />
-                      <AddItems bill={bill} onBill={setBill} form={form} />
                       <NotPricedTests tests={notPriced} />
+                      <PaidAtReception bill={bill} onChanged={refreshBill} />
                       <DiscountCodeBox bill={bill} onBill={setBill} form={form} />
                     </div>
                     <div className="bc-bill__summary">

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import ConfirmModal from "../../ui/ConfirmModal";
 import {
   useChangeLineQuantity,
@@ -9,6 +10,7 @@ import useAuthStore from "../../../stores/authStore";
 import { CAPABILITIES, hasCapability } from "../../../../shared/permissions.js";
 import { errorOf, fromPaise, moneyTyped } from "../format";
 import { ORDER_STATE_NOTE, orderStateText, paymentRuleText } from "./lineText";
+import { ITEM_SEARCH_ID } from "./AddItems";
 
 function QuantityCell({ bill, line, locked, onBill, onError }) {
   const change = useChangeLineQuantity();
@@ -17,7 +19,11 @@ function QuantityCell({ bill, line, locked, onBill, onError }) {
   useEffect(() => setValue(String(line.quantity)), [line.quantity]);
 
   if (bill.status !== "draft" || !line.allow_quantity || locked)
-    return <td data-label="Qty">{line.quantity}</td>;
+    return (
+      <td data-label="Qty" className="bc-num">
+        {line.quantity}
+      </td>
+    );
 
   const commit = async () => {
     const quantity = Number(value);
@@ -41,7 +47,7 @@ function QuantityCell({ bill, line, locked, onBill, onError }) {
   };
 
   return (
-    <td data-label="Qty">
+    <td data-label="Qty" className="bc-num">
       <span className="sr-only">{line.quantity}</span>
       <input
         className="bc-qty"
@@ -59,7 +65,7 @@ function QuantityCell({ bill, line, locked, onBill, onError }) {
   );
 }
 
-function PriceNote({ line, mayChange, onChange }) {
+function PriceNote({ line }) {
   if (!line.price_per_patient) return null;
   return (
     <div className="bc-hint bc-line-price">
@@ -68,17 +74,63 @@ function PriceNote({ line, mayChange, onChange }) {
           ? "Category rate for this patient"
           : "Needs this patient's price"
         : `Price for this patient${line.agreed_by_name ? ` · set by ${line.agreed_by_name}` : ""}`}
-      {mayChange && (
-        <>
-          {" "}
-          <button type="button" className="st-btn st-btn-g" onClick={onChange}>
-            Change price
-          </button>
-        </>
-      )}
     </div>
   );
 }
+
+const RADIOLOGY = /radio|x-?ray|ultra|usg|scan|echo|imaging/i;
+
+function categoryOf(line) {
+  if (line.item_kind === "consultation")
+    return { tone: "cons", label: "Consultation", noun: "consultation" };
+  if (line.item_kind === "test") {
+    return RADIOLOGY.test(line.group_name || "")
+      ? { tone: "rad", label: "Radiology", noun: "radiology test" }
+      : { tone: "lab", label: "Lab", noun: "lab test" };
+  }
+  if (line.item_kind === "procedure")
+    return { tone: "proc", label: "Procedure", noun: "procedure" };
+  return { tone: "other", label: "Other", noun: "other item" };
+}
+
+const counted = (count, noun) => `${count} ${noun}${count === 1 ? "" : "s"}`;
+
+function includesText(lines) {
+  const counts = new Map();
+  for (const line of lines) {
+    const { noun } = categoryOf(line);
+    counts.set(noun, (counts.get(noun) || 0) + 1);
+  }
+  const parts = [...counts].map(([noun, count]) => counted(count, noun));
+  const listed =
+    parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : parts[0];
+  return `This bill includes ${listed}.`;
+}
+
+function LineActions({ actions }) {
+  return (
+    <div className="bc-line-acts">
+      {actions.map((action) => (
+        <button
+          key={action.label}
+          type="button"
+          className={action.danger ? "bc-icon-btn bc-icon-btn--danger" : "bc-icon-btn"}
+          aria-label={action.aria}
+          title={action.label}
+          onClick={action.run}
+        >
+          <action.Icon size={16} aria-hidden="true" />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+const focusItemSearch = () => {
+  const input = document.getElementById(ITEM_SEARCH_ID);
+  input?.scrollIntoView({ block: "center", behavior: "smooth" });
+  input?.focus({ preventScroll: true });
+};
 
 export default function BillLinesTable({ bill, onBill, form }) {
   const remove = useRemoveBillLine();
@@ -94,11 +146,8 @@ export default function BillLinesTable({ bill, onBill, form }) {
   const reason = going ? removing.reason : "";
   const setReason = (next) => form.set("removing", (was) => was && { ...was, reason: next });
   const [error, setError] = useState(null);
-  const atReception = bill.lines.filter((line) => line.order_state);
-  const receptionWay =
-    bill.status === "draft"
-      ? "remove it from this bill"
-      : "cancel this bill and bill it again without it";
+  const final = bill.status !== "draft";
+  const atReception = final ? bill.lines.filter((line) => line.order_state) : [];
 
   const savePrice = async () => {
     setError(null);
@@ -135,102 +184,142 @@ export default function BillLinesTable({ bill, onBill, form }) {
     }
   };
 
+  const actionsFor = (line) =>
+    bill.status !== "draft"
+      ? []
+      : [
+          line.price_per_patient &&
+            mayChangePrice(line) && {
+              label: "Change price",
+              Icon: Pencil,
+              aria: `Change price of ${line.bill_name}`,
+              run: () => {
+                setError(null);
+                setPricing({
+                  line,
+                  rate: line.agreed_rate === null ? "" : String(line.agreed_rate / 100),
+                  reason: "",
+                });
+              },
+            },
+          mayRemove(line) && {
+            label: "Remove",
+            Icon: Trash2,
+            aria: `Remove ${line.bill_name}`,
+            danger: true,
+            run: () => {
+              setError(null);
+              form.set("removing", { lineId: line.id, reason: "" });
+            },
+          },
+        ].filter(Boolean);
+
   return (
-    <section className="bc-card" aria-label="Bill lines">
-      <h3 className="bc-card__title">
-        This bill{bill.bill_no ? ` · ${bill.bill_no}` : " · draft"}
-      </h3>
+    <section className="bc-card bc-items" aria-label="Bill lines">
+      <div className="bc-card__bar">
+        <h3 className="bc-card__heading">
+          Bill Items
+          <span className="bc-card__sub">{bill.bill_no || "Draft"}</span>
+        </h3>
+        {bill.status === "draft" && (
+          <button type="button" className="bc-addbtn" onClick={focusItemSearch}>
+            <Plus size={15} aria-hidden="true" />
+            Add Service/Test
+          </button>
+        )}
+      </div>
       {!bill.lines.length ? (
         <div className="empty-note">Nothing on this bill yet.</div>
       ) : (
-        <div className="ltablewrap bc-stack">
-          <table className="ltable" aria-label="Bill lines">
-            <thead>
-              <tr>
-                <th>Item</th>
-                <th>Bill code</th>
-                <th>Qty</th>
-                <th>Actual</th>
-                <th>Discount</th>
-                <th>Payment rule</th>
-                <th>Patient pays</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {bill.lines.map((line) => (
-                <tr key={line.id}>
-                  <td data-label="Item">
-                    {line.bill_name}
-                    {line.source === "lab_case" && (
-                      <>
-                        {" "}
-                        <span className="badge b-blu">from lab report</span>
-                      </>
-                    )}
-                    {line.order_state && (
-                      <>
-                        {" "}
-                        <span className="badge b-amb">{orderStateText(line.order_state)}</span>
-                      </>
-                    )}
-                    {ordered(line) && (
-                      <>
-                        {" "}
-                        <span className="badge b-blu">
-                          ordered{line.added_by_name ? ` by ${line.added_by_name}` : ""}
-                        </span>
-                      </>
-                    )}
-                    <PriceNote
-                      line={line}
-                      mayChange={bill.status === "draft" && mayChangePrice(line)}
-                      onChange={() => {
-                        setError(null);
-                        setPricing({
-                          line,
-                          rate: line.agreed_rate === null ? "" : String(line.agreed_rate / 100),
-                          reason: "",
-                        });
-                      }}
-                    />
-                  </td>
-                  <td data-label="Bill code">{line.bill_code || "—"}</td>
-                  <QuantityCell
-                    bill={bill}
-                    line={line}
-                    locked={!mayRemove(line)}
-                    onBill={onBill}
-                    onError={setError}
-                  />
-                  <td data-label="Actual">{fromPaise(line.actual)}</td>
-                  <td data-label="Discount">{fromPaise(line.discount)}</td>
-                  <td data-label="Payment rule">{paymentRuleText(line.payment_rule)}</td>
-                  <td data-label="Patient pays">{fromPaise(line.patient_payable)}</td>
-                  <td data-label="" className="bc-cell-actions">
-                    {bill.status === "draft" && mayRemove(line) && (
-                      <button
-                        type="button"
-                        className="st-btn st-btn-red"
-                        aria-label={`Remove ${line.bill_name}`}
-                        onClick={() => {
-                          setError(null);
-                          form.set("removing", { lineId: line.id, reason: "" });
-                        }}
-                      >
-                        Remove
-                      </button>
-                    )}
-                  </td>
+        <>
+          <div className="ltablewrap bc-stack">
+            <table className="ltable bc-itable" aria-label="Bill lines">
+              <thead>
+                <tr>
+                  <th className="bc-lineno">#</th>
+                  <th>Service / Test</th>
+                  <th>Category</th>
+                  <th className="bc-num">Qty</th>
+                  <th className="bc-num">Rate (₹)</th>
+                  <th className="bc-num">Discount (₹)</th>
+                  <th className="bc-num">Patient Pays (₹)</th>
+                  <th>
+                    <span className="sr-only">Actions</span>
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {bill.lines.map((line, index) => {
+                  const category = categoryOf(line);
+                  return (
+                    <tr key={line.id}>
+                      <th scope="row" className="bc-lineno">
+                        {index + 1}
+                      </th>
+                      <td data-label="Service / Test">
+                        <div className="bc-item__name">{line.bill_name}</div>
+                        <div className="bc-item__sub">
+                          {[
+                            line.bill_code,
+                            line.payment_rule &&
+                              line.payment_rule !== "full" &&
+                              paymentRuleText(line.payment_rule),
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </div>
+                        {line.source === "lab_case" && (
+                          <span className="badge b-blu">from lab report</span>
+                        )}
+                        {final && line.order_state && (
+                          <span className="badge b-amb">{orderStateText(line.order_state)}</span>
+                        )}
+                        {ordered(line) && (
+                          <span className="badge b-blu">
+                            ordered{line.added_by_name ? ` by ${line.added_by_name}` : ""}
+                          </span>
+                        )}
+                        <PriceNote line={line} />
+                      </td>
+                      <td data-label="Category">
+                        <span className={`bc-cat bc-cat--${category.tone}`}>{category.label}</span>
+                      </td>
+                      <QuantityCell
+                        bill={bill}
+                        line={line}
+                        locked={!mayRemove(line)}
+                        onBill={onBill}
+                        onError={setError}
+                      />
+                      <td data-label="Rate" className="bc-num">
+                        {fromPaise(line.rate)}
+                      </td>
+                      <td data-label="Discount" className="bc-num">
+                        {fromPaise(line.discount)}
+                      </td>
+                      <td data-label="Patient pays" className="bc-num bc-num--strong">
+                        {fromPaise(line.patient_payable)}
+                      </td>
+                      <td data-label="" className="bc-cell-actions">
+                        <LineActions actions={actionsFor(line)} />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="bc-items__info">{includesText(bill.lines)}</p>
+          <div className="bc-items__total">
+            <span>Total (Patient Payable)</span>
+            <strong>{fromPaise(bill.totals.payable)}</strong>
+          </div>
+        </>
       )}
       {atReception.map((line) => (
         <div className="bc-hint" role="note" key={line.id}>
-          {line.bill_name} {ORDER_STATE_NOTE[line.order_state]} — {receptionWay}.
+          {line.bill_name} {ORDER_STATE_NOTE[line.order_state]} — cancel this bill and bill it again
+          without it.
         </div>
       ))}
       {error && <div className="bc-err">{error}</div>}

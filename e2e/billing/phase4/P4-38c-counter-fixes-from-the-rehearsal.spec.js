@@ -111,18 +111,16 @@ test.describe.serial("P4-38c counter fixes found by the floor-trial rehearsal", 
       region(page, "Bill actions").getByRole("button", { name: "Finalise & print" }).click(),
     ]);
     await pdf.close();
-    await expect(region(page, "Bill lines").getByRole("heading")).not.toHaveText(
-      "This bill · draft",
-    );
+    await expect(region(page, "Bill lines").getByRole("heading")).not.toHaveText("Bill ItemsDraft");
     const first = await one(`SELECT bill_no FROM bills WHERE id = $1`, [draft.id]);
     await expect(region(page, "Bill lines").getByRole("heading")).toHaveText(
-      `This bill · ${first.bill_no}`,
+      `Bill Items${first.bill_no}`,
     );
     await orderTests(patient.visit, [day.tests.lipid]);
     const offer = page.getByRole("button", { name: "Open the new draft bill" });
     await expect(offer).toBeVisible({ timeout: 25000 });
     await offer.click();
-    await expect(region(page, "Bill lines").getByRole("heading")).toHaveText("This bill · draft");
+    await expect(region(page, "Bill lines").getByRole("heading")).toHaveText("Bill ItemsDraft");
     await expect(lineRow(page, `Lipid profile ${tag}`)).toBeVisible();
     await expect(region(page, "Earlier bills on this visit")).toContainText(first.bill_no);
   });
@@ -151,7 +149,7 @@ test.describe.serial("P4-38c counter fixes found by the floor-trial rehearsal", 
     const again = page.getByRole("button", { name: "Start a new bill for this visit" });
     await expect(again).toBeVisible();
     await again.click();
-    await expect(region(page, "Bill lines").getByRole("heading")).toHaveText("This bill · draft");
+    await expect(region(page, "Bill lines").getByRole("heading")).toHaveText("Bill ItemsDraft");
     await expect(region(page, "Earlier bills on this visit")).toContainText(first.bill_no);
   });
 
@@ -178,7 +176,7 @@ test.describe.serial("P4-38c counter fixes found by the floor-trial rehearsal", 
     const earlier = region(page, "Earlier bills on this visit");
     await earlier.getByRole("button", { name: `Open bill ${first.bill_no}` }).click();
     await expect(region(page, "Bill lines").getByRole("heading")).toHaveText(
-      `This bill · ${first.bill_no}`,
+      `Bill Items${first.bill_no}`,
     );
     await expect(page.getByRole("heading", { name: patient.name })).toBeVisible();
     await region(page, "Bill actions").getByRole("button", { name: "Cancel unpaid bill" }).click();

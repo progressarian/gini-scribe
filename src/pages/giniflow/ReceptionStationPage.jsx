@@ -2258,7 +2258,9 @@ export default function ReceptionStationPage() {
   };
   const payCounts = {
     ...baseCounts,
-    pending: baseCounts.pending + (baseCounts.charges || 0) + (baseCounts.healthrayLab || 0),
+    pending:
+      baseCounts.pendingPatients ??
+      baseCounts.pending + (baseCounts.charges || 0) + (baseCounts.healthrayLab || 0),
   };
   const counts = arrivals?.counts || { expected: 0, onFloor: 0, notComing: 0 };
 
