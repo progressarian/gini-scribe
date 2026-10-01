@@ -140,7 +140,11 @@ router.post("/auth/login", loginLimiter, validate(loginSchema), async (req, res)
       doctor,
     });
   } catch (e) {
-    handleError(res, e, "Login");
+    console.error("Login error:", e?.message, e?.code || "", e?.stack || "");
+    res.status(500).json({
+      error:
+        "Unable to sign in right now. Please try again. If it keeps failing, contact an administrator.",
+    });
   }
 });
 

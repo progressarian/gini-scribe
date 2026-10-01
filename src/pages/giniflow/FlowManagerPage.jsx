@@ -1208,6 +1208,31 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
     return { ...step, label: label[0].toUpperCase() + label.slice(1) };
   };
 
+  const stepTimes = (step) => {
+    const arrived = clockAt(step.enteredAt);
+    const atStation =
+      step.stationAt && step.stationAt !== step.enteredAt ? clockAt(step.stationAt) : null;
+    const queued = atStation && step.waitStatus !== "checked_in" ? `Queued ${arrived} · ` : "";
+    const start = atStation || arrived;
+    if (step.isCurrent) return `${queued}Since ${start}`;
+    const left = step.leftAt && !step.timestampOnly ? clockAt(step.leftAt) : null;
+    return `${queued}${start}${left && left !== start ? ` – ${left}` : ""}`;
+  };
+
+  const withCheckIn = (step) =>
+    step.waitStatus === "checked_in" && step.stationAt && step.stationAt !== step.enteredAt
+      ? [
+          {
+            status: "checked_in",
+            label: STATUS_LABEL.checked_in,
+            timestampOnly: true,
+            enteredAt: step.enteredAt,
+            isCurrent: false,
+          },
+          step,
+        ]
+      : [step];
+
   const stepRow = (step, i) => (
     <div className="tstep" key={`${step.status}-${i}`}>
       <div className={`ts-dot ${step.isCurrent ? "tsd-now" : "tsd-done"}`}>
@@ -1218,9 +1243,7 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
           {step.label}
           {step.visits > 1 && <span className="ts-visits">· {step.visits} visits</span>}
         </div>
-        <div className="ts-time">
-          {step.isCurrent ? `Since ${clockAt(step.enteredAt)}` : clockAt(step.enteredAt)}
-        </div>
+        <div className="ts-time">{stepTimes(step)}</div>
         {!step.timestampOnly && (
           <span
             className={`ts-dur ${
@@ -1300,7 +1323,7 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
           {preArrival.length > 0 && (
             <div className="ts-track-hd">🏥 The consultation journey — from check-in</div>
           )}
-          {steps.map(stepRow)}
+          {steps.flatMap(withCheckIn).map(stepRow)}
           {stillToCome.map((step) => (
             <div className="tstep" key={step.status}>
               <div className="ts-dot tsd-next">○</div>

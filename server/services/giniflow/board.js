@@ -812,7 +812,8 @@ const runLabel = (station, label) =>
 
 export function testSegmentsFor(f, now = new Date()) {
   if (!f || (!f.vitalsAt && !f.labOnly)) return [];
-  const base = f.vitalsAt ? new Date(f.vitalsAt) : null;
+  const freedAt = f.vitalsDoneAt || f.vitalsAt;
+  const base = freedAt ? new Date(freedAt) : null;
   const hasLab = !!f.labOrderedAt;
   const machines = f.machineOrders || [];
   const hasMachine = machines.length > 0;
@@ -951,6 +952,9 @@ export async function getTestSegments(visitId, now = new Date(), db = pool) {
                           WHERE e.visit_id = v.id AND e.status = v.current_status)
               END AS end_at,
               m.steps AS machine_steps, m.vitals_at, m.lab_undrawn, m.lab_open,
+              (SELECT min(e.occurred_at) FROM giniflow_visit_events e
+                WHERE e.visit_id = v.id AND e.status = 'vitals_done'
+                  AND e.actor_role <> 'system' AND e.occurred_at >= m.vitals_at) AS vitals_done_at,
               m.lab_drawn_at, m.lab_ordered_at, m.lab_unpaid,
               (SELECT max(lb.completed_at) FROM giniflow_visit_steps lb
                 WHERE lb.visit_id = v.id AND lb.step_catalog_id = 'lab_billing'
@@ -1037,6 +1041,7 @@ export async function getTestSegments(visitId, now = new Date(), db = pool) {
       labOnly: !!r.lab_only,
       endAt: r.end_at,
       vitalsAt: r.vitals_at,
+      vitalsDoneAt: r.vitals_done_at,
       testsOrderedAt: earliest(r.orders_created_at, r.lab_ordered_at),
       labOrderedAt: r.lab_ordered_at,
       labPaidAt: r.has_lab_order

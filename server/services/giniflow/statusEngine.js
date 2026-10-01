@@ -610,6 +610,8 @@ export async function getStationTimes(
       actorRole: entry.actorRole,
       meta: entry.meta,
       enteredAt: (wait?.enteredAt ?? entry.enteredAt).toISOString(),
+      stationAt: entry.isWait ? null : entry.enteredAt.toISOString(),
+      waitStatus: wait?.status ?? null,
       leftAt: entry.leftAt ? entry.leftAt.toISOString() : null,
       waitMinutes,
       waitBudget,
