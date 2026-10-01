@@ -26,6 +26,11 @@ const EXEC = {
   role: "growth_executive",
 };
 const DOC_A = "aaaaaaaa-0000-0000-0000-000000000001";
+const NOW = new Date();
+const MONTH_START = Date.UTC(NOW.getUTCFullYear(), NOW.getUTCMonth(), 1);
+const RECORDED = new Date(
+  Math.max(MONTH_START, Math.floor((NOW.getTime() - 60_000) / 1000) * 1000),
+).toISOString();
 
 let pass = 0,
   fail = 0;
@@ -40,12 +45,12 @@ const payload = {
   doctor_id: DOC_A,
   visit_type: "in_person",
   purpose: "Intro call",
-  occurred_at: "2026-09-16T09:30:00.000Z",
+  occurred_at: RECORDED,
   discussion_notes: "Interested in ICU tie-up",
   outcome: "positive",
   follow_up_required: true,
   next_visit_date: "2026-10-01",
-  client_created_at: "2026-09-16T09:30:00.000Z",
+  client_created_at: RECORDED,
 };
 const first = await logVisit(EXEC, payload);
 eq(first.duplicate, false, "first send creates the visit");
@@ -71,16 +76,8 @@ const { rows: ts } = await pool.query(
   "SELECT occurred_at, client_created_at, synced_at FROM crm.visits WHERE id=$1",
   [id],
 );
-eq(
-  ts[0].occurred_at.toISOString(),
-  "2026-09-16T09:30:00.000Z",
-  "occurred_at is what the rep recorded",
-);
-eq(
-  ts[0].client_created_at.toISOString(),
-  "2026-09-16T09:30:00.000Z",
-  "client_created_at preserved",
-);
+eq(ts[0].occurred_at.toISOString(), RECORDED, "occurred_at is what the rep recorded");
+eq(ts[0].client_created_at.toISOString(), RECORDED, "client_created_at preserved");
 ok(
   `synced_at is server time (${ts[0].synced_at.toISOString().slice(0, 10)}), distinct from occurred_at`,
 );
