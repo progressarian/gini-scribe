@@ -128,6 +128,8 @@ test.describe.serial("P3-09 line pricing: actual amount", () => {
         is_active: true,
       },
       price_includes_tax: true,
+      price_per_patient: false,
+      price_missing: false,
     });
     for (const none of [null, undefined, "", "general", " GENERAL "]) {
       const line = await price("meet", { category: none });

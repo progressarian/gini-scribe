@@ -109,6 +109,10 @@ test.describe("P4-38b the consultation guard at check-in and at the counter", ()
     await query(`UPDATE giniflow_visits SET visit_date = visit_date + 3 WHERE id = $1`, [
       patient.visit,
     ]);
+    await query(
+      `UPDATE giniflow_patient_bills SET bill_date = bill_date + 3 WHERE patient_id = $1`,
+      [patient.id],
+    );
     await visitLines.consultationForDesk(patient.visit, desk, db);
     const draft = await bills.openDraft(patient.visit, desk, db);
     expect(draft.lines).toHaveLength(1);

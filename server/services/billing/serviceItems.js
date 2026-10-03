@@ -9,6 +9,7 @@ import { refuseRemoved } from "./removedDoctors.js";
 import { createGroup, createSubgroup } from "./serviceGroups.js";
 import { orderedNamesNotPriced } from "./serviceItemAliases.js";
 import { TEST_MATCHES_SQL } from "./testMatch.js";
+import { FLAT } from "../giniflow/labCatalog.js";
 import {
   CONSULTATION_DEFAULT_GROUP,
   CONSULTATION_DEFAULT_SUBGROUP,
@@ -29,6 +30,8 @@ import {
   lockRow,
   readNumber,
 } from "./common.js";
+
+export const HEALTHRAY_REVIEW_SUBGROUP = "HR-REVIEW";
 
 const COLUMNS = [
   "id",
@@ -634,8 +637,34 @@ export async function notPricedList(db = pool) {
     [CONSULTATION_VISIT_TYPES],
   );
 
+  const { rows: fromHealthray } = await db.query(
+    `SELECT i.id AS item_id, i.code AS item_code, i.name, i.kind, i.created_at::date::text AS added_on,
+            (SELECT COUNT(*)::int FROM bill_lines l WHERE l.service_item_id = i.id) AS times_billed,
+            hr.amounts, hr.last_seen
+       FROM service_items i
+       JOIN service_subgroups s ON s.id = i.subgroup_id AND s.code = $1
+       LEFT JOIN LATERAL (
+         SELECT json_agg(json_build_object('amount', a.amount, 'times', a.n) ORDER BY a.n DESC)
+                  AS amounts,
+                max(a.last)::text AS last_seen
+           FROM (SELECT (x->>'amount')::numeric AS amount, COUNT(*)::int AS n, max(b.bill_date) AS last
+                   FROM giniflow_patient_bills b
+                   CROSS JOIN LATERAL jsonb_array_elements(b.items) x
+                  WHERE b.bill_date >= CURRENT_DATE - 60
+                    AND ${FLAT("x->>'desc'")} = ${FLAT("i.name")}
+                  GROUP BY 1) a
+       ) hr ON TRUE
+      WHERE i.is_active
+      ORDER BY times_billed DESC, i.name`,
+    [HEALTHRAY_REVIEW_SUBGROUP],
+  );
+
   const status = (row) => (row.item_id ? "item_deactivated" : "no_item");
   return {
+    fromHealthray: fromHealthray.map((row) => ({
+      ...row,
+      amounts: (row.amounts ?? []).map((a) => ({ amount: Number(a.amount), times: a.times })),
+    })),
     orderedNames: await orderedNamesNotPriced(db),
     tests: tests.map(({ item_active, ...row }) => ({
       ...row,

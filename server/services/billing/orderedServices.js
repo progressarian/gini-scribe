@@ -125,7 +125,7 @@ export async function addOrderedService(visitId, input, ctx, db = pool) {
       { item_id: input.item_id, source: "ordered", agreed_rate: input.agreed_rate },
       ctx,
     );
-    if (!bill.saved_at) await markDraftSaved(client, bill.id);
+    if (!bill.saved_at) await markDraftSaved(client, bill.id, ctx);
   }, db);
   return orderedServicesFor(id, db);
 }

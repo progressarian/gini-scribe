@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { CheckCircle2, ChevronDown, ChevronUp } from "lucide-react";
 import { usePaidAtReception } from "../../../queries/hooks/useBilling";
 import { fromPaise } from "../format";
-import { claimText, paidText } from "./lineText";
+import { claimText } from "./lineText";
 
 const clock = (value) =>
   value
@@ -15,7 +15,7 @@ const clock = (value) =>
 
 const totalText = (data) =>
   [
-    data.total_paid > 0 && `${fromPaise(data.total_paid)} paid`,
+    data.total_paid > 0 && `${fromPaise(data.total_paid)} cleared`,
     data.total_claimed > 0 && `${fromPaise(data.total_claimed)} claimed`,
   ]
     .filter(Boolean)
@@ -40,7 +40,7 @@ export default function PaidAtReception({ bill, onChanged }) {
 
   if (!orders.length) return null;
 
-  const payments = `${orders.length} payment${orders.length === 1 ? "" : "s"}`;
+  const payments = `${orders.length} order${orders.length === 1 ? "" : "s"}`;
 
   return (
     <section className="bc-card bc-paid" aria-label="Paid at reception">
@@ -51,7 +51,7 @@ export default function PaidAtReception({ bill, onChanged }) {
         onClick={() => setOpen(!open)}
       >
         <CheckCircle2 size={18} aria-hidden="true" className="bc-paid__tick" />
-        <span className="bc-paid__title">Already Paid</span>
+        <span className="bc-paid__title">Cleared at reception</span>
         <span className="bc-paid__meta">
           · {data.total_paid > 0 ? fromPaise(data.total_paid) : totalText(data)} · {payments}
         </span>
@@ -70,9 +70,10 @@ export default function PaidAtReception({ bill, onChanged }) {
                   <span className="bc-paid__tests">{order.tests.join(", ")}</span>
                   <span className="bc-paid__how">
                     {[
-                      order.paid > 0 && `${fromPaise(order.paid)} · ${paidText(order.modes)}`,
+                      order.paid > 0 && `${fromPaise(order.paid)} · Cleared on Payments tab`,
                       order.claim && claimText(order.claim, fromPaise),
                       clock(order.paid_at),
+                      order.cleared_by && `by ${order.cleared_by}`,
                     ]
                       .filter(Boolean)
                       .join(" • ")}
@@ -87,16 +88,16 @@ export default function PaidAtReception({ bill, onChanged }) {
                   className={order.still_due > 0 ? "bc-pill bc-pill--due" : "bc-pill bc-pill--paid"}
                 >
                   {order.still_due > 0
-                    ? "Part paid"
+                    ? "Part cleared"
                     : order.claim && !order.paid
                       ? "Claimed"
-                      : "Paid"}
+                      : "Cleared"}
                 </span>
               </li>
             ))}
           </ul>
           <p className="bc-paid__note">
-            {totalText(data)} at reception — not part of this bill
+            {totalText(data)} on the Payments tab — not part of this bill
             {data.still_due > 0 && ` · ${fromPaise(data.still_due)} still due at reception`}
           </p>
         </>

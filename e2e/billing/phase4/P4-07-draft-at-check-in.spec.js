@@ -2,7 +2,14 @@ import { test, expect } from "@playwright/test";
 import { getPool, one, query } from "../../helpers/db.mjs";
 import { CONSULTANTS, USERS } from "../../fixtures/data.mjs";
 import { assertTestDatabase } from "../../setup/guard.mjs";
-import { autoConsultation, newTag, setUp, tearDown } from "./p4-bills-fixture.mjs";
+import {
+  autoConsultation,
+  HEALTHRAY_CONSULTATION,
+  healthrayBill,
+  newTag,
+  setUp,
+  tearDown,
+} from "./p4-bills-fixture.mjs";
 
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 const reception = await import("../../../server/services/giniflow/receptionStation.js");
@@ -70,6 +77,7 @@ test.describe.serial("P4-07 draft at check-in", () => {
       await query(`DELETE FROM giniflow_visit_events WHERE visit_id = $1`, [extra.visit]);
       await query(`DELETE FROM giniflow_visits WHERE id = $1`, [extra.visit]);
       await query(`DELETE FROM appointments WHERE patient_id = $1`, [extra.patient]);
+      await query(`DELETE FROM giniflow_patient_bills WHERE patient_id = $1`, [extra.patient]);
       await query(`DELETE FROM patients WHERE id = $1`, [extra.patient]);
     }
     await tearDown(ids);
@@ -96,14 +104,12 @@ test.describe.serial("P4-07 draft at check-in", () => {
     expect(await linesOf(draft.id)).toHaveLength(1);
   });
 
-  test("3. a Tele visit is billed as a Follow Up, on the hospital's default item", async () => {
+  test("3. a Tele visit with no doctor gets no consultation: there is no hospital default", async () => {
     const { visit } = await extraVisit("Tele", { visitType: "Tele", doctorId: null });
     await reception.markArrived(visit, USERS.reception.id, db);
     const draft = await draftOf(visit);
-    const lines = await linesOf(draft.id);
-    expect(lines).toHaveLength(1);
-    expect(lines[0].service_item_id).toBe(ids.consultFu);
-    expect(Number(lines[0].actual_amount)).toBe(1000);
+    expect(draft).not.toBeNull();
+    expect(await linesOf(draft.id)).toEqual([]);
   });
 
   test("4. an Investigation visit gets a draft with no consultation line", async () => {
@@ -135,6 +141,7 @@ test.describe.serial("P4-07 draft at check-in", () => {
       [broken, `P4 broken rule ${tag}`, ids.consultDoctorNew],
     );
     const { patient, visit } = await extraVisit("Bad", { visitType: "New Patient" });
+    await healthrayBill(ids, patient, [HEALTHRAY_CONSULTATION]);
     await query(`UPDATE patients SET scheme_code = $2 WHERE id = $1`, [patient, broken]);
     const result = await reception.markArrived(visit, USERS.reception.id, db);
     expect(result.status).toBe("checked_in");

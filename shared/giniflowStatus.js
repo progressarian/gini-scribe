@@ -84,6 +84,7 @@ export const STATUS_LABEL = {
   // rendered the raw key.
   reports_reviewed: "Reports read by the MO",
   test_cancelled: "Test cancelled",
+  test_restored: "Cancelled test restored",
   paused: "Stepped out — clock held",
   resumed: "Back — clock running",
   doctor_done: "Waiting for Prescription Explain",
@@ -215,6 +216,7 @@ export const MARKER_STATUSES = [
   "paused",
   "resumed",
   "test_cancelled",
+  "test_restored",
 ];
 
 // A patient who stepped out — lunch, a phone call, the bank — and came back.

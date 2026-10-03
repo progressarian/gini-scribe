@@ -1,3 +1,5 @@
+import { writeAudit } from "./audit.js";
+import { auditFields } from "./common.js";
 export async function draftSnapshot(client, billId) {
   const { rows: bills } = await client.query(
     `SELECT scheme_code, scheme_label, payer_name, scheme_ref_enc, referral_no_enc,
@@ -29,9 +31,17 @@ export async function draftSnapshot(client, billId) {
   };
 }
 
-export async function markDraftSaved(client, billId) {
+export async function markDraftSaved(client, billId, ctx) {
+  const snapshot = await draftSnapshot(client, billId);
   await client.query(`UPDATE bills SET saved_at = NOW(), saved_snapshot = $2 WHERE id = $1`, [
     billId,
-    await draftSnapshot(client, billId),
+    snapshot,
   ]);
+  await writeAudit(client, {
+    entity: "bills",
+    entityId: billId,
+    action: "update",
+    after: { draft_saved: true, lines: snapshot.lines.length },
+    ...auditFields(ctx),
+  });
 }

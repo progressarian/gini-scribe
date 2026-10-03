@@ -61,7 +61,7 @@ function checkReadme({ ws, rows, raw }) {
     .join("\n");
   for (const needle of [
     "Every test is its own item",
-    "There are no packages",
+    "A package (e.g. ABI + VPT at one combined price) is an automatic discount",
     "YYYY-MM-DD",
     "Codes are unique",
     "A discount code may never be the same as a bill code",

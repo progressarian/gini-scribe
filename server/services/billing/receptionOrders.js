@@ -34,6 +34,11 @@ const HELD_ORDERS_SQL = `
            WHERE e.lab_order_id = h.id AND e.track = 'payment'
              AND e.status = ANY($2::text[]) AND NOT COALESCE(e.meta ? 'bill_id', FALSE))
            AS paid_at,
+         (SELECT d.name FROM giniflow_lab_order_events e
+            LEFT JOIN doctors d ON d.id = e.actor_id
+           WHERE e.lab_order_id = h.id AND e.track = 'payment'
+             AND e.status = ANY($2::text[]) AND NOT COALESCE(e.meta ? 'bill_id', FALSE)
+           ORDER BY e.occurred_at DESC LIMIT 1) AS cleared_by,
          json_agg(json_build_object(
            'name', t.test_name,
            'price', t.price,
@@ -65,6 +70,7 @@ function heldOrder(row) {
     tests: (open.length ? open : row.tests).map((test) => test.name),
     paid: cash,
     paid_at: row.paid_at,
+    cleared_by: row.cleared_by ?? null,
     modes: [],
     claim: claim ? { state: row.claim_state, amount: claim, insurer: row.insurer ?? null } : null,
     still_due: due,

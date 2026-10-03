@@ -457,8 +457,10 @@ test.describe.serial("P4C-22 paid at reception shown, not charged", () => {
     const card = () => page.getByRole("region", { name: "Paid at reception" });
     await gotoReady(page, `${RECEPTION}?tab=bill&visit=${visit}`, card);
     await expect(card()).toContainText(nameOf("hba1c"));
-    await expect(card()).toContainText("₹2,302 · Paid");
-    await expect(card()).toContainText("₹2,302 paid at reception — not part of this bill");
+    await expect(card()).toContainText("₹2,302 · Cleared on Payments tab");
+    await expect(card()).toContainText(
+      "₹2,302 cleared on the Payments tab — not part of this bill",
+    );
     await expect(card()).not.toContainText("still due");
     const lines = page.getByRole("region", { name: "Bill lines" });
     await expect(lines).toContainText(`Consultation New ${tag}`);

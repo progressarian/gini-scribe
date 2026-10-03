@@ -121,7 +121,8 @@ test.describe.serial("P1-30 not priced tab", () => {
     await expect(row).toContainText("₹320");
     await expect(row).toContainText("No item");
     const tabs = page.getByRole("tablist", { name: "Not priced lists" }).getByRole("tab");
-    await expect(tabs).toHaveCount(3);
+    await expect(tabs).toHaveCount(4);
+    await expect(page.getByRole("tab", { name: /Added from HealthRay bills/ })).toHaveCount(1);
     await expect(page.getByRole("tab", { name: /Consultants without a fee/ })).toHaveCount(0);
     await expect(page.getByRole("table", { name: "Consultants without a fee" })).toHaveCount(0);
     expect(list.consultants.length).toBeGreaterThanOrEqual(2);

@@ -30,7 +30,7 @@ test.describe
   test.beforeAll(async () => {
     ids = await setUp(tag);
     autoBefore = await autoConsultation(false);
-    visit = await extraVisit(ids, "C24", { visitType: "Follow Up", healthray: false });
+    visit = await extraVisit(ids, "C24", { visitType: "New Patient", healthray: false });
     billId = (await bills.openDraft(visit.visit, desk, db)).id;
   });
 
@@ -39,7 +39,7 @@ test.describe
     await tearDown(ids);
   });
 
-  test("1. a booked Follow Up with no HealthRay bill yet suggests nothing", async () => {
+  test("1. a booked New-patient visit with no HealthRay bill yet suggests nothing", async () => {
     expect((await suggestion()).shown).toBe(false);
   });
 
@@ -56,19 +56,19 @@ test.describe
     expect((await suggestion()).shown).toBe(false);
   });
 
-  test("4. once HealthRay bills the consultation, the booked doctor's consultation is suggested", async () => {
+  test("4. once HealthRay bills the consultation, the booked doctor's own consultation is suggested", async () => {
     await query(`UPDATE giniflow_patient_bills SET items = $2::jsonb WHERE patient_id = $1`, [
       visit.patient,
       JSON.stringify([HEALTHRAY_CONSULTATION]),
     ]);
     const body = await suggestion();
     expect(body.shown).toBe(true);
-    expect(body.visit_type).toBe("Follow Up");
-    expect(body.suggested?.item_id).toBe(ids.consultFu);
+    expect(body.visit_type).toBe("New");
+    expect(body.suggested?.item_id).toBe(ids.consultDoctorNew);
   });
 
   test("5. once the consultation is on the bill, it is no longer suggested", async () => {
-    await bills.addLine(billId, { item_id: ids.consultFu }, desk, db);
+    await bills.addLine(billId, { item_id: ids.consultDoctorNew }, desk, db);
     expect((await suggestion()).shown).toBe(false);
   });
 });

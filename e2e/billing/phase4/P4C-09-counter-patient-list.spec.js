@@ -25,6 +25,7 @@ const ARRIVAL_KEYS = [
   "journey",
   "minutesLate",
   "name",
+  "orderedServices",
   "patientId",
   "paused",
   "pausedAt",

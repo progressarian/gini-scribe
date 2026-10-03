@@ -65,17 +65,17 @@ function QuantityCell({ bill, line, locked, onBill, onError }) {
   );
 }
 
+function priceNoteText(line) {
+  if (line.agreed_rate === null) {
+    return line.rate > 0 ? "Category rate for this patient" : "Needs this patient's price";
+  }
+  if (!line.agreed_by) return "Price from HealthRay bill";
+  return `Price for this patient${line.agreed_by_name ? ` · set by ${line.agreed_by_name}` : ""}`;
+}
+
 function PriceNote({ line }) {
-  if (!line.price_per_patient) return null;
-  return (
-    <div className="bc-hint bc-line-price">
-      {line.agreed_rate === null
-        ? line.rate > 0
-          ? "Category rate for this patient"
-          : "Needs this patient's price"
-        : `Price for this patient${line.agreed_by_name ? ` · set by ${line.agreed_by_name}` : ""}`}
-    </div>
-  );
+  if (!line.price_per_patient && line.agreed_rate === null) return null;
+  return <div className="bc-hint bc-line-price">{priceNoteText(line)}</div>;
 }
 
 const RADIOLOGY = /radio|x-?ray|ultra|usg|scan|echo|imaging/i;
@@ -138,7 +138,8 @@ export default function BillLinesTable({ bill, onBill, form }) {
   const me = useAuthStore((st) => st.currentDoctor);
   const admin = hasCapability(me?.role, CAPABILITIES.ADMIN);
   const [pricing, setPricing] = useState(null);
-  const mayChangePrice = (line) => line.agreed_rate === null || line.agreed_by === me?.id || admin;
+  const mayChangePrice = (line) =>
+    line.agreed_rate === null || !line.agreed_by || line.agreed_by === me?.id || admin;
   const mayRemove = (line) => line.source !== "ordered" || line.added_by === me?.id || admin;
   const ordered = (line) => line?.source === "ordered";
   const removing = form.value.removing;
@@ -188,7 +189,7 @@ export default function BillLinesTable({ bill, onBill, form }) {
     bill.status !== "draft"
       ? []
       : [
-          line.price_per_patient &&
+          (line.price_per_patient || line.agreed_rate !== null) &&
             mayChangePrice(line) && {
               label: "Change price",
               Icon: Pencil,

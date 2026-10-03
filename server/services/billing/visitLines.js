@@ -88,13 +88,13 @@ async function consultationItem(client, visit) {
   const visitType = billingVisitType(visit.visit_type);
   if (!visitType) return null;
   const doctorId = visit.appointment_doctor_id ?? visit.assigned_doctor_id ?? null;
+  if (!doctorId) return null;
   const removed = await removedDoctor(doctorId, client);
   if (removed) return { removed };
   const { rows } = await client.query(
     `SELECT id, name, doctor_id FROM service_items
-      WHERE kind = 'consultation' AND is_active AND visit_type = $1
-        AND (doctor_id = $2 OR doctor_id IS NULL)
-      ORDER BY (doctor_id IS NULL)
+      WHERE kind = 'consultation' AND is_active AND visit_type = $1 AND doctor_id = $2
+      ORDER BY id
       LIMIT 1`,
     [visitType, doctorId],
   );
@@ -405,6 +405,9 @@ export const REMOVED_BY_DESK_SQL = (visitExpr, itemExpr) => `EXISTS (
      AND ra.before ->> 'service_item_id' = ${itemExpr}::text
      AND ${NOT_DISCARDED("ra")}
      AND ra.after ->> 'reason' IS DISTINCT FROM '${PAID_AT_RECEPTION_REASON}'
+     AND NOT EXISTS (SELECT 1 FROM giniflow_test_cancellations rc
+                      WHERE rc.order_id::text = ra.before ->> 'lab_order_id'
+                        AND rc.restored_at IS NOT NULL)
      AND NOT EXISTS (SELECT 1 FROM bills rb
                       WHERE rb.id::text = ra.before ->> 'bill_id' AND rb.status = 'cancelled'))`;
 

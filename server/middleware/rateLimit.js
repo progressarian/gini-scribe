@@ -22,7 +22,7 @@ export const ipLimiter = rateLimit({
 
 export const userLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 3000,
+  max: Number(process.env.API_USER_RATE_LIMIT) || 3000,
   keyGenerator: (req) => `user_${req.doctor?.doctor_id}`,
   standardHeaders: true,
   legacyHeaders: false,

@@ -83,6 +83,7 @@ import {
   giniflowInteractionAckSchema,
   giniflowRxPasteSchema,
   giniflowStartCancelSchema,
+  giniflowTestRestoreSchema,
   giniflowTestCancelSchema,
   giniflowCaseCancelSchema,
   giniflowStationReleaseSchema,
@@ -225,6 +226,7 @@ import {
 import { sendFlowCheckin } from "../services/msg91.js";
 import { syncBillingForVisitId, healthrayBillSteps } from "../services/giniflow/machineSync.js";
 import { cancelTest } from "../services/giniflow/testCancel.js";
+import { listCancelled, restoreTest } from "../services/giniflow/testRestore.js";
 import { announceRequest } from "../services/billing/billingRequests.js";
 import { getMachines } from "../services/giniflow/machineCatalog.js";
 import { getFloorSettings, setFloorSetting } from "../services/giniflow/floorSettings.js";
@@ -1540,6 +1542,8 @@ router.get(
   },
 );
 
+mountCancelledTestRoutes(router, { prefix: "lab", gate: labGate, station: "lab" });
+
 router.post(
   "/giniflow/stations/lab/case/cancel-test",
   labGate,
@@ -1771,10 +1775,42 @@ const xrayGate = requireCapability(CAP.GINIFLOW_STATION_XRAY);
 
 const STATION_LABEL = { machine: "machine room", echo: "echo", xray: "X-ray" };
 
+function mountCancelledTestRoutes(router, { prefix, gate, station }) {
+  router.get(`/giniflow/stations/${prefix}/cancelled`, gate, async (req, res) => {
+    try {
+      res.json({ cancelled: await listCancelled(station) });
+    } catch (e) {
+      handleError(res, e, `Gini Flow ${prefix} cancelled tests`);
+    }
+  });
+
+  router.post(
+    `/giniflow/stations/${prefix}/cancelled/:orderId/restore`,
+    gate,
+    cancelGate,
+    validate(giniflowTestRestoreSchema),
+    async (req, res) => {
+      try {
+        res.json(
+          await restoreTest({
+            orderId: req.params.orderId,
+            station,
+            actorId: req.doctor?.doctor_id ?? null,
+            actorRole: req.doctor?.role || null,
+          }),
+        );
+      } catch (e) {
+        handleError(res, e, `Gini Flow ${prefix} restore test`);
+      }
+    },
+  );
+}
+
 function mountMachineStationRoutes(
   router,
   { prefix, gate, station, reportRemoveCap, extraReports = false },
 ) {
+  mountCancelledTestRoutes(router, { prefix, gate, station });
   router.get(
     `/giniflow/stations/${prefix}/queue`,
     gate,

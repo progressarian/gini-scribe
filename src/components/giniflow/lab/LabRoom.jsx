@@ -14,6 +14,8 @@ import {
 import { useGiniflowLive } from "../../../queries/hooks/useGiniflowLive";
 import LiveBadge from "../LiveBadge";
 import "../../../styles/giniflow-station.css";
+import "../../../pages/giniflow/MachineStationPage.css";
+import CancelledTestsPanel from "../CancelledTestsPanel";
 import LabResultsForm from "../LabResultsForm";
 import PdfViewerModal from "../../visit/PdfViewerModal";
 import StationNotice from "../StationNotice";
@@ -1923,6 +1925,7 @@ export default function LabRoom({ room = null }) {
               hospital lab registers a case of their own.
             </div>
           )}
+          <CancelledTestsPanel station="lab" canRestore={canCancelTest} onToast={showToast} />
         </div>
       </div>
 

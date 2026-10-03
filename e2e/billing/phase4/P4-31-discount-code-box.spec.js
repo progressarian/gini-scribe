@@ -65,7 +65,7 @@ test.describe.serial("P4-31 discount code box", () => {
     await open(page);
     await expect(totalRow(page, "Discount")).toHaveText(fromPaise(0));
 
-    await box(page).getByLabel("Discount code").fill(CODE);
+    await box(page).getByLabel("Discount code", { exact: true }).fill(CODE);
     await box(page).getByRole("button", { name: "Apply code" }).click();
 
     await expect(box(page).getByText(`${CODE} applied`)).toBeVisible();
@@ -90,7 +90,7 @@ test.describe.serial("P4-31 discount code box", () => {
   test("3. a refused code says why, in the server's words", async ({ page }) => {
     await loginAs(page, "reception");
     await open(page);
-    await box(page).getByLabel("Discount code").fill(`NOPE${tag.toUpperCase()}`);
+    await box(page).getByLabel("Discount code", { exact: true }).fill(`NOPE${tag.toUpperCase()}`);
     await box(page).getByRole("button", { name: "Apply code" }).click();
     await expect(box(page).getByText(`NOPE${tag.toUpperCase()}`, { exact: false })).toBeVisible();
     await expect(totalRow(page, "Discount")).toHaveText(fromPaise(0));
@@ -112,7 +112,7 @@ test.describe.serial("P4-31 discount code box", () => {
   test("5. there is no manual discount field anywhere on the counter", async ({ page }) => {
     await loginAs(page, "reception");
     await open(page);
-    await expect(box(page).getByLabel("Discount code")).toHaveCount(1);
+    await expect(box(page).getByLabel("Discount code", { exact: true })).toHaveCount(1);
     await expect(box(page).getByRole("spinbutton")).toHaveCount(0);
     await expect(page.getByLabel(/discount amount/i)).toHaveCount(0);
     await expect(page.getByLabel(/manual discount/i)).toHaveCount(0);

@@ -22,6 +22,7 @@ import CancelTestControl from "../../components/giniflow/CancelTestControl";
 import { cancelledText, cancelledToastMs, TOAST_MS } from "../../lib/testCancelText.js";
 import LabResultsForm from "../../components/giniflow/LabResultsForm";
 import PdfViewerModal from "../../components/visit/PdfViewerModal";
+import CancelledTestsPanel from "../../components/giniflow/CancelledTestsPanel";
 import {
   machineHandsOver,
   MACHINE_RUNGS,
@@ -1166,6 +1167,15 @@ export default function MachineStationPage({ station = "machine", label = "Machi
                 </div>
               </div>
             )}
+            <CancelledTestsPanel
+              station={station}
+              canRestore={canCancelTest}
+              onToast={showToast}
+              uploading={upload.isPending}
+              onUpload={(row, file) =>
+                onUpload({ orderId: row.orderId, name: row.patient.name }, file)
+              }
+            />
           </div>
         </div>
 

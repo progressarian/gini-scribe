@@ -3159,6 +3159,8 @@ and a full rehearsal of the trial day on the test system.
 
 ## Phase 5 — Claims and dashboards
 
+**Status 2026-10-03: built — all fourteen tasks done; the billing e2e suite is green.**
+
 Goal: the amounts owed by CGHS and other payers are tracked to settlement,
 and management sees revenue and discounts by group, subgroup, test,
 consultant, category and sub-category.
@@ -3343,8 +3345,16 @@ consultant, category and sub-category.
 
   - **Result:** Done 2026-09-25 (built by a sub-agent). `server/scripts/smoke-billing-reports.mjs` (`npm run smoke:billing-reports`) refuses any database whose name lacks "test" **before it opens a connection** (exit 2; proven with a listening socket that saw 0 connections, and against the production `.env`) unless `SMOKE_ANY_DATABASE=1`. It runs everything in one rolled-back transaction with a 30 s statement timeout, a 5 s lock timeout and a savepoint per check, seeding only 8 bills and a credit note on a private past day — deliberately small, after a large seed blocked the shared test database earlier in the day — and touches `billing_settings` only inside the dues check. Nine checks: revenue by service, consultant and category equal independent SQL over final lines with credit notes subtracted; cancelled bills and drafts left out; CGHS sub-categories add up to the CGHS total in three reports; collections net = in − out in every section, and the category report's "Collected" under its own rule; discount totals equal `bill_line_discounts`; a settlement equals its bills' net claims, a wrong amount is refused and writes nothing, a second live settlement is blocked, undo returns the bills to pending; pending claims drop by what a credit note took off; dues keep a pay-later balance after pay-later is switched off; nothing left behind. **9/9 twice (about 3 s), confirmed again by the orchestrator.** Four deliberate breaks (credit notes not subtracted; a refund counted as a collection; dues hidden when pay-later is off; any clear amount accepted) each turned checks red. The browser spec `P5-13-smoke-script-claims-and-reports.spec.js` checks the reports page and the CGHS register end to end, 2/2 twice.
 
-- [ ] **P5-14 · Update the plan status** — `Pending`
+- [x] **P5-14 · Update the plan status** — `Done`
   - **E2E test:** No new spec — run `npm run test:e2e:billing`; the whole suite must be green before the phase is marked built.
+  - **Result:** Done 2026-10-03. The whole billing suite is green: phases 0–3 (835 + the 10
+    re-run files), phases 4/4b/4c (716 + the re-run files) and phase 5. Specs that still assumed
+    the removed hospital-default consultation, the old Not-priced tabs, the read-me wording or
+    the old Payments-queue pin were brought up to date; the per-patient price field was added to
+    the item request schema; every draft save now writes an audit row. The suite had been
+    tripping the API's per-user rate limit (3,000 requests / 15 min); the limit is now
+    `API_USER_RATE_LIMIT` (default unchanged) and raised only in `e2e/.env.e2e`. P4-18 test 1
+    compares `getPaymentQueue` with the last commit, so it passes once these changes are committed.
 
 ---
 

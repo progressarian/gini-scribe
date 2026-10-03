@@ -10,7 +10,7 @@ const BRACKET_KEYS = (x) => String.raw`CASE
       THEN ARRAY[${FLAT(String.raw`substring(${x} from '\s-\s+([^-()]+)$')`)}]
     ELSE '{}'::text[] END`;
 
-const WORD_KEY = (x) => String.raw`(
+export const WORD_KEY = (x) => String.raw`(
   SELECT string_agg(ws.w, ' ' ORDER BY ws.w)
     FROM (SELECT CASE WHEN p = 'vitamin' THEN 'vit' ELSE p END AS w
             FROM regexp_split_to_table(lower(regexp_replace(${x}, '\([^)]*\)', ' ', 'g')),

@@ -77,7 +77,7 @@ export async function billSuppressor(db, visitId) {
   const { rows } = await db.query(
     `SELECT kind, test_name, machine_id, bill_line
        FROM giniflow_test_cancellations
-      WHERE visit_id = $1 AND reason <> $2`,
+      WHERE visit_id = $1 AND reason <> $2 AND restored_at IS NULL`,
     [visitId, NOT_ON_BILL_REASON],
   );
   return ({ kind, testName, machineId, line }) =>

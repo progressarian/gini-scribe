@@ -686,7 +686,7 @@ export async function listVisitBills(visitId, db = pool) {
 async function itemFor(client, itemId) {
   const { rows } = await client.query(
     `SELECT id, name, kind, visit_type, is_active, allow_quantity, max_quantity, price_per_patient,
-            test_catalog_id
+            test_catalog_id, base_price
        FROM service_items WHERE id = $1`,
     [itemId],
   );
@@ -802,7 +802,7 @@ export async function addLineIn(client, bill, input, ctx) {
   }
   const item = await itemFor(client, itemId);
   const agreedRate = cleanAgreedRate(input?.agreed_rate);
-  if (agreedRate !== null && !item.price_per_patient) {
+  if (agreedRate !== null && !item.price_per_patient && Number(item.base_price) > 0) {
     throw httpError(
       400,
       `${item.name} has a fixed price; it can't be given a price for this patient`,
@@ -837,7 +837,8 @@ export async function addLineIn(client, bill, input, ctx) {
                              doctor_id, repeat_request_id, bill_name, quantity, created_by, updated_by,
                              agreed_rate, agreed_by, agreed_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, $12,
-             CASE WHEN $12::numeric IS NULL THEN NULL ELSE COALESCE($13::int, $11::int) END,
+             CASE WHEN $12::numeric IS NULL OR $14::boolean THEN NULL
+                  ELSE COALESCE($13::int, $11::int) END,
              CASE WHEN $12::numeric IS NULL THEN NULL ELSE NOW() END)
      RETURNING ${LINE_COLUMNS}`,
     [
@@ -854,6 +855,7 @@ export async function addLineIn(client, bill, input, ctx) {
       ctx?.actorId ?? null,
       agreedRate,
       input?.agreed_by ?? null,
+      input?.price_from_healthray === true,
     ],
   );
   const saved = await reprice(client, bill, await billCodes(client, bill.id), ctx);
@@ -1122,7 +1124,7 @@ export async function setLinePrice(billId, lineId, input, ctx, db = pool) {
     const bill = assertDraft(await lockBill(client, billId));
     const before = await lineOf(client, bill, lineId);
     const item = await itemFor(client, before.service_item_id);
-    if (!item.price_per_patient) {
+    if (!item.price_per_patient && Number(item.base_price) > 0) {
       throw httpError(
         400,
         `${item.name} has a fixed price; it can't be given a price for this patient`,
@@ -1691,7 +1693,7 @@ export async function deleteDraft(billId, input, ctx, db = pool) {
 export async function saveDraft(billId, ctx, db = pool) {
   return inTransaction(async (client) => {
     const bill = assertDraft(await lockBill(client, billId));
-    await markDraftSaved(client, bill.id);
+    await markDraftSaved(client, bill.id, ctx);
     const { rows } = await client.query(`SELECT ${BILL_COLUMNS} FROM bills WHERE id = $1`, [
       bill.id,
     ]);

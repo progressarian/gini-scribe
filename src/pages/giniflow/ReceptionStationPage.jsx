@@ -537,7 +537,9 @@ const isCashOnly = (o) => !(Number(o.claimed) > 0) && (o.claimState || "none") =
 const statusOf = (o) =>
   o.kind === "charge"
     ? "HealthRay charge"
-    : SAMPLE_LABEL[o.sampleStatus] || String(o.sampleStatus || "").replace(/_/g, " ");
+    : o.kind === "healthray_case"
+      ? `HealthRay lab case ${o.caseNos}`
+      : SAMPLE_LABEL[o.sampleStatus] || String(o.sampleStatus || "").replace(/_/g, " ");
 
 const byBillLine = (orders) => {
   const rows = [];
@@ -871,6 +873,24 @@ const chargeAsOrder = (c) => ({
   paidAt: c.paidAt,
 });
 
+const healthrayCaseAsOrder = (lab) => ({
+  orderId: `case:${lab.visitId}`,
+  visitId: lab.visitId,
+  name: lab.name,
+  fileNo: lab.fileNo,
+  age: lab.age,
+  sex: lab.sex,
+  kind: "healthray_case",
+  caseNos: lab.cases.map((c) => c.caseNo).join(", "),
+  tests: lab.cases.flatMap((c) => c.tests || []).map((name) => ({ name })),
+  paid: lab.labBill?.total ?? 0,
+  total: lab.labBill?.total ?? 0,
+  claimed: 0,
+  claimState: "none",
+  sampleStatus: null,
+  paidAt: lab.clearedAt,
+});
+
 export function PaymentsTab({
   data,
   isLoading,
@@ -896,6 +916,7 @@ export function PaymentsTab({
     ...(data?.awaitingSample || []),
     ...(data?.cleared || []),
     ...(data?.charges?.cleared || []).map(chargeAsOrder),
+    ...(data?.healthrayLabCleared || []).map(healthrayCaseAsOrder),
   ]);
   const searching = (data?.query || "").length >= 2;
 

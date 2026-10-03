@@ -378,6 +378,9 @@ const markerLabel = (row) => {
   const base = STATUS_LABEL[row.status] || row.status;
   if (row.status === "paused" && isSampleBreak(row.meta?.reason)) return "On break — sample given";
   if (row.status === "resumed" && row.meta?.cancelled) return "Break cancelled — sample undone";
+  if (row.status === "test_restored") {
+    return row.meta?.tests?.length ? `${base} — ${row.meta.tests.join(", ")}` : base;
+  }
   if (row.status !== "test_cancelled") return base;
   const what = [...(row.meta?.tests || []), ...(row.meta?.cases || []).map((c) => `case ${c}`)];
   const reason = testCancelReasonLabel(row.meta?.reason);

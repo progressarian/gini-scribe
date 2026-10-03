@@ -174,7 +174,14 @@ async function build(tag, { visitType = "New Patient" } = {}) {
 
   const consultations = [
     ["consultNew", `P4-CN-${tag}`, `Consultation New ${tag}`, 1500, "New", null],
-    ["consultFu", `P4-CF-${tag}`, `Consultation Follow Up ${tag}`, 1000, "Follow Up", null],
+    [
+      "consultFu",
+      `P4-CF-${tag}`,
+      `Consultation Follow Up ${tag}`,
+      1000,
+      "Follow Up",
+      CONSULTANTS.banshali.id,
+    ],
     [
       "consultDoctorNew",
       `P4-CDN-${tag}`,

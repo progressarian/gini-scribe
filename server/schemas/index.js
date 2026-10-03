@@ -677,6 +677,8 @@ export const giniflowCaseCancelSchema = giniflowTestCancelSchema.extend({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD"),
 });
 
+export const giniflowTestRestoreSchema = z.strictObject({});
+
 export const giniflowStartCancelSchema = z.object({
   reason: z.string().trim().max(160).nullish(),
   room: z.enum(["collection", "processing"]).nullish(),

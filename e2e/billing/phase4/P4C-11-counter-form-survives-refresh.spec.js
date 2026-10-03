@@ -149,13 +149,13 @@ test.describe.serial("P4C-11 the counter form survives a refresh", () => {
     await expect(pad(page).getByText(RESTORED)).toHaveCount(0);
     await typeSplitPayment(page);
     await pad(page).getByLabel("Pay later").check();
-    await codeBox(page).getByLabel("Discount code").fill(CODE);
+    await codeBox(page).getByLabel("Discount code", { exact: true }).fill(CODE);
     await settle(page);
 
     await reload(page);
     await expectSplitPayment(page);
     await expect(pad(page).getByLabel("Pay later")).toBeChecked();
-    await expect(codeBox(page).getByLabel("Discount code")).toHaveValue(CODE);
+    await expect(codeBox(page).getByLabel("Discount code", { exact: true })).toHaveValue(CODE);
     await expect(pad(page).getByText(RESTORED)).toBeVisible();
 
     const saved = await bills.readBill(bill.bill, db);
@@ -191,7 +191,7 @@ test.describe.serial("P4C-11 the counter form survives a refresh", () => {
 
     await header(page).getByLabel("Card number").fill(CARD_NO);
     await header(page).getByLabel("Referral number").fill(REFERRAL_NO);
-    await codeBox(page).getByLabel("Discount code").fill(CODE);
+    await codeBox(page).getByLabel("Discount code", { exact: true }).fill(CODE);
     await settle(page);
 
     expect(await stored(page, billKey(bill.bill))).toContain(CODE);
@@ -201,7 +201,7 @@ test.describe.serial("P4C-11 the counter form survives a refresh", () => {
     }
 
     await reload(page);
-    await expect(codeBox(page).getByLabel("Discount code")).toHaveValue(CODE);
+    await expect(codeBox(page).getByLabel("Discount code", { exact: true })).toHaveValue(CODE);
     await expect(header(page).getByLabel("Card number")).toHaveValue("");
     await expect(header(page).getByLabel("Referral number")).toHaveValue("");
     for (const entry of await everyStoredValue(page)) {
@@ -224,7 +224,7 @@ test.describe.serial("P4C-11 the counter form survives a refresh", () => {
     await open(page, first.visit);
     await typeSplitPayment(page);
     await pad(page).getByLabel("Pay later").check();
-    await codeBox(page).getByLabel("Discount code").fill(CODE);
+    await codeBox(page).getByLabel("Discount code", { exact: true }).fill(CODE);
     await header(page).getByLabel("Category").selectOption(ids.pensioner);
     await settle(page);
 
@@ -232,7 +232,7 @@ test.describe.serial("P4C-11 the counter form survives a refresh", () => {
     await expect(page.getByRole("heading", { name: `P4 Second ${tag}` })).toBeVisible();
     await expectEmptyPad(page);
     await expect(pad(page).getByLabel("Pay later")).not.toBeChecked();
-    await expect(codeBox(page).getByLabel("Discount code")).toHaveValue("");
+    await expect(codeBox(page).getByLabel("Discount code", { exact: true })).toHaveValue("");
     await expect(header(page).getByLabel("Category")).toHaveValue(ids.paid);
     expect(await stored(page, billKey(second.bill))).toBeNull();
 
@@ -252,7 +252,7 @@ test.describe.serial("P4C-11 the counter form survives a refresh", () => {
     await expect(page.getByRole("heading", { name: `P4 Second ${tag}` })).toBeVisible();
     await expectEmptyPad(page);
     await expect(pad(page).getByLabel("Pay later")).not.toBeChecked();
-    await expect(codeBox(page).getByLabel("Discount code")).toHaveValue("");
+    await expect(codeBox(page).getByLabel("Discount code", { exact: true })).toHaveValue("");
   });
 
   test("6. Clear form empties everything, and a reload after it restores nothing", async ({
@@ -265,7 +265,7 @@ test.describe.serial("P4C-11 the counter form survives a refresh", () => {
 
     await typeSplitPayment(page);
     await pad(page).getByLabel("Pay later").check();
-    await codeBox(page).getByLabel("Discount code").fill(CODE);
+    await codeBox(page).getByLabel("Discount code", { exact: true }).fill(CODE);
     await header(page).getByLabel("Category").selectOption(ids.pensioner);
     await page.getByRole("region", { name: "Add items" }).getByLabel("Search items").fill("zz");
     await settle(page);
@@ -278,7 +278,7 @@ test.describe.serial("P4C-11 the counter form survives a refresh", () => {
     await expect(clearButton(page)).toHaveCount(0);
     await expectEmptyPad(page);
     await expect(pad(page).getByLabel("Pay later")).not.toBeChecked();
-    await expect(codeBox(page).getByLabel("Discount code")).toHaveValue("");
+    await expect(codeBox(page).getByLabel("Discount code", { exact: true })).toHaveValue("");
     await expect(header(page).getByLabel("Category")).toHaveValue(ids.paid);
     await expect(
       page.getByRole("region", { name: "Add items" }).getByLabel("Search items"),
@@ -287,7 +287,7 @@ test.describe.serial("P4C-11 the counter form survives a refresh", () => {
 
     await reload(page);
     await expectEmptyPad(page);
-    await expect(codeBox(page).getByLabel("Discount code")).toHaveValue("");
+    await expect(codeBox(page).getByLabel("Discount code", { exact: true })).toHaveValue("");
     await expect(clearButton(page)).toHaveCount(0);
 
     const saved = await bills.readBill(bill.bill, db);
@@ -325,7 +325,7 @@ test.describe.serial("P4C-11 the counter form survives a refresh", () => {
     await loginAs(page, "reception");
     await open(page, bill.visit);
 
-    await codeBox(page).getByLabel("Discount code").fill(CODE);
+    await codeBox(page).getByLabel("Discount code", { exact: true }).fill(CODE);
     await settle(page);
     expect(await stored(page, billKey(bill.bill))).toContain(CODE);
 
@@ -351,7 +351,7 @@ test.describe.serial("P4C-11 the counter form survives a refresh", () => {
     await open(page, bill.visit);
 
     await typeSplitPayment(page);
-    await codeBox(page).getByLabel("Discount code").fill(CODE);
+    await codeBox(page).getByLabel("Discount code", { exact: true }).fill(CODE);
     await settle(page);
     await expectSplitPayment(page);
     await expect(clearButton(page)).toBeVisible();
@@ -362,7 +362,7 @@ test.describe.serial("P4C-11 the counter form survives a refresh", () => {
 
     await reload(page);
     await expectEmptyPad(page);
-    await expect(codeBox(page).getByLabel("Discount code")).toHaveValue("");
+    await expect(codeBox(page).getByLabel("Discount code", { exact: true })).toHaveValue("");
   });
 
   test("10. a saved form older than a day, or from another version, is dropped on load", async ({
@@ -387,7 +387,7 @@ test.describe.serial("P4C-11 the counter form survives a refresh", () => {
 
     await reload(page);
     await expectEmptyPad(page);
-    await expect(codeBox(page).getByLabel("Discount code")).toHaveValue("");
+    await expect(codeBox(page).getByLabel("Discount code", { exact: true })).toHaveValue("");
     expect(await stored(page, billKey(stale.bill))).toBeNull();
     expect(await stored(page, billKey(versioned.bill))).toBeNull();
   });

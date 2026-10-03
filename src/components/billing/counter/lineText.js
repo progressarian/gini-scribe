@@ -14,13 +14,6 @@ export const ORDER_STATE_NOTE = {
 
 export const orderStateText = (state) => ORDER_STATE_LABEL[state] ?? null;
 
-const PAID_MODE_WORD = { cash: "cash", card: "card", upi: "UPI", [HEALTHRAY_MODE]: "HealthRay" };
-
-export const paidText = (modes) =>
-  modes?.length
-    ? `Paid by ${modes.map((mode) => PAID_MODE_WORD[mode] ?? mode).join(" and ")}`
-    : "Paid";
-
 const CLAIM_STATE_WORD = { submitted: "Claim submitted", approved: "Claim approved" };
 
 export const claimText = (claim, money) =>

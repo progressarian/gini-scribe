@@ -386,15 +386,7 @@ test.describe.serial("P4C-17 one-click consultation at the counter", () => {
     const offered = body.choices.map((choice) => choice.item_id);
     expect(offered).toContain(ours.otherFu);
     expect(offered).not.toContain(ours.goneFu);
-    expect(offered).not.toContain(ids.consultFu);
-
-    const api = await apiAs("reception");
-    const refused = await api.post(`/api/billing/bills/${draft.id}/lines`, {
-      data: { item_id: ids.consultFu },
-    });
-    expect(refused.status()).toBe(409);
-    expect((await refused.json()).error).toMatch(new RegExp(`^${GONE} was removed, so `));
-    await api.dispose();
+    expect(offered).toContain(ids.consultFu);
 
     await loginAs(page, "reception");
     await openCounter(page, visits.gone.visit);

@@ -283,6 +283,15 @@ async function build(tag) {
         assigned_doctor_id: doctor.id,
       })
     ).id;
+    await query(
+      `INSERT INTO giniflow_patient_bills (patient_id, bill_date, status, items)
+       VALUES ($1, $2::date, 'billed', $3::jsonb)`,
+      [
+        id,
+        day.date,
+        JSON.stringify([{ desc: "Consultation", amount: 1000, category: "consultation" }]),
+      ],
+    );
     day.patients[key] = { id, name, fileNo, appointment, visit, doctor, visitType };
     return day.patients[key];
   };

@@ -109,21 +109,16 @@ test.describe.serial("P1-18 not-priced list", () => {
     const { reports } = await mine();
     expect(reports).toEqual([
       { name: `Old Test ${tag}`, status: "retired_in_catalogue", possibly_same_as: [] },
-      {
-        name: `Vitamin B12 ${tag}`,
-        status: "not_in_catalogue",
-        possibly_same_as: [`Vit B12 ${tag}`],
-      },
       { name: `Vitamin K ${tag}`, status: "not_in_catalogue", possibly_same_as: [] },
     ]);
-    const cbc = (await svc.notPricedList(db)).reportsNotInCatalogue.find(
-      (r) => r.name === `Complete Blood Count (CBC${tag})`,
+    expect(
+      reports.map((r) => r.name),
+      "a report name billing already resolves to a catalogue test needs no fixing",
+    ).not.toContain(`Vitamin B12 ${tag}`);
+    const listed = (await svc.notPricedList(db)).reportsNotInCatalogue.map((r) => r.name);
+    expect(listed, "a bracketed short name already resolves to the catalogue test").not.toContain(
+      `Complete Blood Count (CBC${tag})`,
     );
-    expect(cbc, "a bracketed short name points at the catalogue test").toEqual({
-      name: `Complete Blood Count (CBC${tag})`,
-      status: "not_in_catalogue",
-      possibly_same_as: [`CBC${tag}`],
-    });
   });
 
   test("4. active consultants missing a New or Follow Up item are listed per visit type", async () => {

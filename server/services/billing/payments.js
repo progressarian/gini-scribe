@@ -648,7 +648,7 @@ async function collectOnBill(billId, version, plan, ctx, db) {
       });
     }
     const opened = await settleTestOrders(client, after, ctx);
-    if (after.status === "draft") await markDraftSaved(client, after.id);
+    if (after.status === "draft") await markDraftSaved(client, after.id, ctx);
     const money = await moneyOn(client, after.id);
     return {
       bill_id: after.id,

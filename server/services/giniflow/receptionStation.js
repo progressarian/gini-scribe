@@ -219,8 +219,9 @@ const shapeCharge = (r) => ({
   createdAt: r.created_at ? new Date(r.created_at).toISOString() : null,
 });
 
-const HEALTHRAY_LAB_SELECT = `
+const HEALTHRAY_LAB_SELECT = (stepStatuses) => `
   SELECT v.id AS visit_id, v.visit_date::text AS visit_date,
+         lb.completed_at AS cleared_at,
          p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
          lb.id AS lab_billing_step_id,
          bs.id AS billing_step_id, bs.status AS billing_status,
@@ -235,7 +236,7 @@ const HEALTHRAY_LAB_SELECT = `
     JOIN patients p ON p.id = v.patient_id
     JOIN giniflow_visit_steps lb
       ON lb.visit_id = v.id AND lb.step_catalog_id = 'lab_billing'
-     AND lb.status IN ('pending', 'in_progress')
+     AND lb.status IN (${stepStatuses})
     LEFT JOIN giniflow_visit_steps bs
       ON bs.visit_id = v.id AND bs.step_catalog_id = 'billing'
     JOIN lab_cases lc
@@ -282,6 +283,7 @@ const shapeHealthrayLab = (r) => ({
   billingStepId: r.billing_step_id && r.billing_status !== "done" ? r.billing_step_id : null,
   cases: r.cases || [],
   registeredAt: r.registered_at ? new Date(r.registered_at).toISOString() : null,
+  clearedAt: r.cleared_at ? new Date(r.cleared_at).toISOString() : null,
 });
 
 export async function getPaymentQueue(visitDate, db = pool, { q = "" } = {}) {
@@ -314,21 +316,25 @@ export async function getPaymentQueue(visitDate, db = pool, { q = "" } = {}) {
   });
   const { rows: chargeRows } = await db.query(CHARGE_SELECT, [visitDate]);
   const allCharges = chargeRows.map(shapeCharge);
-  const { rows: hrLabRows } = await db.query(HEALTHRAY_LAB_SELECT, [
-    visitDate,
-    LAB_ONLY_DOCTOR,
-    await hideLabOnlyPatients(db),
-  ]);
+  const labParams = [visitDate, LAB_ONLY_DOCTOR, await hideLabOnlyPatients(db)];
+  const { rows: hrLabRows } = await db.query(
+    HEALTHRAY_LAB_SELECT("'pending', 'in_progress'"),
+    labParams,
+  );
   const allHealthrayLab = hrLabRows.map(shapeHealthrayLab);
+  const { rows: hrLabDoneRows } = await db.query(HEALTHRAY_LAB_SELECT("'done'"), labParams);
+  const allHealthrayLabCleared = hrLabDoneRows.map(shapeHealthrayLab);
   const query = String(q || "").trim();
   let orders = allOrders;
   let charges = allCharges;
   let healthrayLab = allHealthrayLab;
+  let healthrayLabCleared = allHealthrayLabCleared;
   if (query.length >= 2) {
     const hits = new Set((await searchDayVisits(visitDate, query, db)).map((r) => r.visitId));
     orders = allOrders.filter((o) => hits.has(o.visitId));
     charges = allCharges.filter((c) => hits.has(c.visitId));
     healthrayLab = allHealthrayLab.filter((l) => hits.has(l.visitId));
+    healthrayLabCleared = allHealthrayLabCleared.filter((l) => hits.has(l.visitId));
   }
   const pendingCharges = (list) => list.filter((c) => c.paymentStatus === "pending");
 
@@ -360,6 +366,7 @@ export async function getPaymentQueue(visitDate, db = pool, { q = "" } = {}) {
       cleared: charges.filter((c) => c.paymentStatus === "paid"),
     },
     healthrayLab,
+    healthrayLabCleared,
     counts: {
       ...paymentCounts(allOrders, pendingCharges(allCharges), allHealthrayLab),
       charges: pendingCharges(allCharges).length,

@@ -55,9 +55,19 @@ test.describe.serial("P4C-26 the automatic consultation follows the patient's do
     expect(await consultationsOn(visit)).toEqual([ids.consultDoctorNew]);
   });
 
-  test("2. a default consultation added before the doctor was known is swapped once they are", async () => {
+  test("2. no doctor known means no consultation is added at all — never a hospital default", async () => {
+    const { visit } = await visitWithoutDoctorLink("C26None", null);
+    const result = await consultationForDesk(visit, desk, db);
+    expect(result.added).toEqual([]);
+    expect(await consultationsOn(visit)).toEqual([]);
+  });
+
+  test("3. a leftover default consultation is swapped for the doctor's own once they are known", async () => {
     const { visit } = await visitWithoutDoctorLink("C26Late", null);
-    await consultationForDesk(visit, desk, db);
+    const draft = await bills.openDraft(visit, desk, db);
+    const added = await bills.addLine(draft.id, { item_id: ids.consultNew }, desk, db);
+    const leftover = added.lines.find((line) => line.service_item_id === ids.consultNew);
+    await query(`UPDATE bill_lines SET source = 'visit' WHERE id = $1`, [leftover.id]);
     expect(await consultationsOn(visit)).toEqual([ids.consultNew]);
 
     await query(`UPDATE giniflow_visits SET assigned_doctor_id = $2 WHERE id = $1`, [
@@ -79,7 +89,7 @@ test.describe.serial("P4C-26 the automatic consultation follows the patient's do
     expect(await consultationsOn(visit)).toEqual([ids.consultDoctorNew]);
   });
 
-  test("3. no consultation is added automatically until HealthRay has billed one", async () => {
+  test("4. no consultation is added automatically until HealthRay has billed one", async () => {
     const quiet = await extraVisit(ids, "C26NoHr", { visitType: "New Patient", healthray: false });
     const waiting = await consultationForDesk(quiet.visit, desk, db);
     expect(waiting).toMatchObject({ ok: true, added: [], waiting_for_healthray: true });
@@ -95,7 +105,7 @@ test.describe.serial("P4C-26 the automatic consultation follows the patient's do
     expect(await consultationsOn(quiet.visit)).toEqual([ids.consultDoctorNew]);
   });
 
-  test("4. check-in adds the consultation only when HealthRay has billed it", async () => {
+  test("5. check-in adds the consultation only when HealthRay has billed it", async () => {
     const billed = await extraVisit(ids, "C26InBilled", { visitType: "New Patient" });
     const unbilled = await extraVisit(ids, "C26InNot", {
       visitType: "New Patient",

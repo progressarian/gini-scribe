@@ -10,6 +10,7 @@ import {
   healthrayCaseTestNames,
 } from "./journey.js";
 import { isSameLabTest } from "../billing/testNames.js";
+import { catalogTestsFor } from "../billing/testMatch.js";
 import { followHealthrayCases } from "./labCaseReconcile.js";
 import { machineFor } from "../../../shared/machineStages.js";
 import { getMachines } from "./machineCatalog.js";
@@ -64,8 +65,20 @@ const UNCONFIRMED_TESTS_SQL = `EXISTS (
    WHERE us.visit_id = v.id AND us.status = 'pending' AND us.source IN ('template', 'added')
      AND (us.step_catalog_id = ANY(ARRAY[${LAB_TEST_STEP_IDS.map((id) => `'${id}'`).join(", ")}])
           OR COALESCE(uc.machine, FALSE)))`;
+const NEWER_THAN_BILL_SQL = (fileNoExpr) => `EXISTS (
+  SELECT 1 FROM giniflow_patient_bills nb
+   WHERE nb.patient_id = v.patient_id AND nb.bill_date = v.visit_date AND nb.status = 'billed'
+     AND (EXISTS (SELECT 1 FROM lab_cases lc
+                   WHERE lc.case_date = v.visit_date AND lc.fetched_at > nb.read_at
+                     AND (lc.patient_id = v.patient_id
+                          OR (lc.patient_id IS NULL
+                              AND lc.raw_list_json->'patient'->>'healthray_uid' = ${fileNoExpr})))
+          OR EXISTS (SELECT 1 FROM appointments na
+                      WHERE na.patient_id = v.patient_id AND na.appointment_date = v.visit_date
+                        AND na.created_at > nb.read_at)))`;
 const BILL_TIER_SQL = `(CASE
   WHEN NOT ${BILLED_SQL} AND ${UNCONFIRMED_TESTS_SQL} THEN 'A'
+  WHEN ${NEWER_THAN_BILL_SQL("(SELECT fp.file_no FROM patients fp WHERE fp.id = v.patient_id)")} THEN 'A'
   WHEN NOT ${BILLED_SQL} THEN 'B'
   WHEN ${REFUNDABLE_OPEN_SQL} OR ${TESTS_TRIMMED_SQL} THEN 'C'
   ELSE 'D' END)`;
@@ -136,6 +149,7 @@ const TARGET_SELECT = `
                      prior.healthray_patient_id, lab.healthray_patient_id) AS hr_patient_id,
             ${REFUNDABLE_OPEN_SQL} AS refundable_open,
             ${TESTS_TRIMMED_SQL} AS tests_trimmed,
+            ${NEWER_THAN_BILL_SQL("p.file_no")} AS newer_than_bill,
             p.name,
             v.machine_scan_at,
             v.created_at AS visit_created_at
@@ -221,7 +235,11 @@ export async function syncMachineOrdersForVisit(visit, db = pool, { slotWaitMs }
     },
     db,
     {
-      ...(visit.refundable_open || visit.tests_trimmed ? { maxAgeMin: OPEN_TESTS_RESCAN_MIN } : {}),
+      ...(visit.newer_than_bill
+        ? { maxAgeMin: 0 }
+        : visit.refundable_open || visit.tests_trimmed
+          ? { maxAgeMin: OPEN_TESTS_RESCAN_MIN }
+          : {}),
       slotWaitMs,
     },
   );
@@ -257,8 +275,15 @@ export async function syncMachineOrdersForVisit(visit, db = pool, { slotWaitMs }
       !(await labCaseAlreadyReported(client, visit.visit_id))
     ) {
       const onHealthrayCase = await healthrayCaseTestNames(client, visit.visit_id);
+      const catalogOf = await catalogTestsFor(client, [
+        ...onHealthrayCase,
+        ...liveLabLines.map((l) => l.name),
+      ]);
+      const caseCatalogs = new Set(onHealthrayCase.map((t) => catalogOf.get(t)).filter(Boolean));
       const missing = (await notYetOrdered(client, visit.visit_id, liveLabLines)).filter(
-        (l) => !onHealthrayCase.some((t) => isSameLabTest(t, l.name)),
+        (l) =>
+          !onHealthrayCase.some((t) => isSameLabTest(t, l.name)) &&
+          !caseCatalogs.has(catalogOf.get(l.name)),
       );
       if (missing.length) {
         const r = await raiseOrdersFromSteps(client, visit.visit_id, [

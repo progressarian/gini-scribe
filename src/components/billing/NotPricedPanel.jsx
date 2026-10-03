@@ -64,6 +64,16 @@ const matches = (needle, ...values) =>
 
 const LISTS = [
   {
+    key: "healthray",
+    title: "Added from HealthRay bills",
+    short: "added automatically — review",
+    about:
+      "Services Scribe created on its own because HealthRay billed a name Scribe didn't have. Each bill used that bill's HealthRay amount. Give each a fixed price and its real group, or mark it the same as a test Scribe already has.",
+    allClear: "Nothing was added from HealthRay bills.",
+    rowsOf: (data) => data.fromHealthray ?? [],
+    find: (r, needle) => matches(needle, r.name, r.item_code),
+  },
+  {
     key: "tests",
     title: "Tests without an item",
     short: "need a billing item",
@@ -269,7 +279,100 @@ function ReportRows({ rows }) {
   );
 }
 
-const ROWS = { tests: TestRows, reports: ReportRows, ordered: OrderedRows };
+const usualAmount = (amounts) => {
+  if (!amounts.length) return "—";
+  const [top, ...rest] = amounts;
+  return `${rupees(top.amount)} × ${top.times}${rest.length ? ` (+${rest.length} other amount${rest.length === 1 ? "" : "s"})` : ""}`;
+};
+
+function SameAsTest({ row }) {
+  const [q, setQ] = useState("");
+  const settled = useDebounced(q.trim(), 250);
+  const add = useAddBillingItemAlias();
+  const retire = useSetBillingItemActive();
+
+  const link = async (item) => {
+    try {
+      await add.mutateAsync({ itemId: item.id ?? item.item_id, name: row.name });
+      await retire.mutateAsync({ id: row.item_id, is_active: false });
+      toast(
+        `${row.name} is now billed as ${item.code}; ${row.item_code} is switched off`,
+        "success",
+      );
+    } catch (e) {
+      toast(errorOf(e), "error");
+    }
+  };
+
+  return (
+    <div className="bill-link">
+      <input
+        type="search"
+        className="jb-assign"
+        aria-label={`Find the test ${row.name} is the same as`}
+        placeholder="Same as which test?"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+      />
+      {settled.length >= SERVICE_SEARCH_MIN ? (
+        <LinkResults
+          q={settled}
+          busy={add.isPending || retire.isPending}
+          onLink={link}
+          label={row.name}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function HealthrayRows({ rows }) {
+  return (
+    <table className="flow-table" aria-label="Added from HealthRay bills">
+      <thead>
+        <tr>
+          <th>Service</th>
+          <th>Kind</th>
+          <th>Times billed</th>
+          <th>HealthRay's usual amount</th>
+          <th>Last seen</th>
+          <th className="bill-items__actions-head">Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r.item_id}>
+            <td data-label="Service">
+              {r.name}
+              <div className="flow-muted">{r.item_code}</div>
+            </td>
+            <td data-label="Kind">{r.kind}</td>
+            <td data-label="Times billed">{r.times_billed}</td>
+            <td data-label="HealthRay's usual amount">{usualAmount(r.amounts)}</td>
+            <td data-label="Last seen">{r.last_seen ?? r.added_on}</td>
+            <td data-label="" className="bill-items__actions">
+              <Link
+                className="flow-btn flow-btn-primary flow-btn-mini"
+                to={`/settings/services?q=${encodeURIComponent(r.item_code)}`}
+                aria-label={`Edit ${r.item_code}`}
+              >
+                Edit
+              </Link>
+              {r.kind === "test" || r.kind === "other" ? <SameAsTest row={r} /> : null}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+const ROWS = {
+  healthray: HealthrayRows,
+  tests: TestRows,
+  reports: ReportRows,
+  ordered: OrderedRows,
+};
 
 export default function NotPricedPanel({ onCreate }) {
   const { data, isLoading, isError } = useBillingNotPriced();
