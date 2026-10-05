@@ -3,12 +3,14 @@ import { auditFields } from "./common.js";
 export async function draftSnapshot(client, billId) {
   const { rows: bills } = await client.query(
     `SELECT scheme_code, scheme_label, payer_name, scheme_ref_enc, referral_no_enc,
-            referral_doc_id
+            referral_doc_id, manual_discount_kind, manual_discount_value, manual_discount_reason,
+            manual_discount_by
        FROM bills WHERE id = $1`,
     [billId],
   );
   const { rows: lines } = await client.query(
-    `SELECT service_item_id, quantity, source, lab_order_id, doctor_id, agreed_rate, agreed_by
+    `SELECT service_item_id, quantity, source, lab_order_id, doctor_id, agreed_rate, agreed_by,
+            manual_discount_kind, manual_discount_value, manual_discount_reason, manual_discount_by
        FROM bill_lines WHERE bill_id = $1 AND is_live AND source <> 'ordered'
       ORDER BY line_no, created_at, id`,
     [billId],
@@ -27,6 +29,8 @@ export async function draftSnapshot(client, billId) {
       ...line,
       quantity: Number(line.quantity),
       agreed_rate: line.agreed_rate === null ? null : Number(line.agreed_rate),
+      manual_discount_value:
+        line.manual_discount_value === null ? null : Number(line.manual_discount_value),
     })),
   };
 }

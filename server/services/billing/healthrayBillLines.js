@@ -14,7 +14,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const NOTHING = { shown: false, read_at: null, lines: [], not_matched: [] };
 
-async function draftOf(db, billId) {
+export async function draftOf(db, billId) {
   const id = typeof billId === "string" ? billId.trim() : "";
   if (!UUID.test(id)) throw httpError(400, "Choose a valid bill");
   const { rows } = await db.query(
@@ -67,6 +67,10 @@ async function candidatesFor(db, bill) {
   if (!stored.length) return null;
   const lines = (stored[0].items || []).filter((line) => isLiveBillItem(line) && line.desc);
   if (!lines.length) return null;
+  return { readAt: stored[0].read_at, ...(await matchLines(db, bill, lines)) };
+}
+
+export async function matchLines(db, bill, lines) {
   const matched = await itemsFor(
     db,
     lines.map((line) => line.desc),
@@ -101,16 +105,12 @@ async function candidatesFor(db, bill) {
     seen.add(item.id);
     due.push({ line, item });
   }
-  return { readAt: stored[0].read_at, due, notMatched };
+  return { due, notMatched };
 }
 
-export async function healthrayBillSuggestion(billId, ctx, db = pool) {
-  const bill = await draftOf(db, billId);
-  if (bill.status !== "draft" || bill.bill_type !== "invoice" || !bill.visit_id) return NOTHING;
-  const found = await candidatesFor(db, bill);
-  if (!found) return NOTHING;
+export async function suggestedLines(db, bill, due, ctx) {
   const suggested = [];
-  for (const { line, item } of found.due) {
+  for (const { line, item } of due) {
     suggested.push({
       desc: line.desc,
       amount: paise(line.amount || 0),
@@ -124,6 +124,18 @@ export async function healthrayBillSuggestion(billId, ctx, db = pool) {
         : await suggestionPrice(db, bill, { item_id: item.id }, ctx?.role),
     });
   }
+  return suggested;
+}
+
+export const isOpenDraft = (bill) =>
+  bill.status === "draft" && bill.bill_type === "invoice" && Boolean(bill.visit_id);
+
+export async function healthrayBillSuggestion(billId, ctx, db = pool) {
+  const bill = await draftOf(db, billId);
+  if (!isOpenDraft(bill)) return NOTHING;
+  const found = await candidatesFor(db, bill);
+  if (!found) return NOTHING;
+  const suggested = await suggestedLines(db, bill, found.due, ctx);
   return {
     shown: suggested.length + found.notMatched.length > 0,
     read_at: found.readAt,
@@ -138,11 +150,11 @@ export const REVIEW_SUBGROUP = {
   name: "From HealthRay — needs review",
 };
 
-const plainName = (text) =>
+export const plainName = (text) =>
   String(text ?? "")
     .replace(/\s+/g, " ")
     .trim();
-const nameKey = (text) =>
+export const nameKey = (text) =>
   plainName(text)
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "");
@@ -218,7 +230,7 @@ async function itemOnVisit(client, visitId, itemId) {
   return rows[0];
 }
 
-async function namesPaidAtReception(client, visitId) {
+export async function namesPaidAtReception(client, visitId) {
   const held = await paidAtReception(visitId, client);
   return new Set(held.orders.flatMap((order) => order.tests).map(nameKey));
 }

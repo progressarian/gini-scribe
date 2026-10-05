@@ -590,8 +590,8 @@ async function discounts(filters, db) {
       ],
       pick("rule_id").map((row) => ({
         ...row,
-        label: row.rule_name ?? (row.rule_id === null ? "No rule" : `#${row.rule_id}`),
-        method: row.code ? "code" : "auto",
+        label: row.rule_name ?? (row.rule_id === null ? "Manual discount" : `#${row.rule_id}`),
+        method: row.rule_id === null ? "manual" : row.code ? "code" : "auto",
       })),
       total,
     ),
@@ -631,7 +631,7 @@ async function discounts(filters, db) {
   ];
 }
 
-const METHOD_LABELS = { auto: "Automatic", code: "Code" };
+const METHOD_LABELS = { auto: "Automatic", code: "Code", manual: "Manual" };
 
 async function discountGroups(filters, db) {
   const scope = reportScope(filters, LINE_COLUMNS);

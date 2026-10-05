@@ -187,7 +187,40 @@ export const ROLE_NAV_ALLOWLIST = {
   [ROLES.HEAD_OF_GROWTH]: ["/crm/home", "/crm/import"],
 };
 
+const STATION_ROLE_HIDDEN_NAV = [
+  "/find",
+  "/dashboard",
+  "/quick",
+  "/mo",
+  "/consultant",
+  "/plan",
+  "/docs",
+  "/refills",
+  "/dose-change-requests",
+  "/lab-requests",
+  "/side-effects",
+  "/reception-inbox",
+  "/history",
+  "/outcomes",
+  "/ai",
+  "/genie-chats",
+  "/app-patients",
+  "/reports",
+  "/analytics",
+  "/ci",
+  "/ghm",
+  "/giniflow/manager",
+  "/giniflow/reports",
+];
+
+export const ROLE_NAV_HIDDEN = {
+  [ROLES.CONSULTANT]: STATION_ROLE_HIDDEN_NAV,
+  [ROLES.MO]: STATION_ROLE_HIDDEN_NAV,
+};
+
 export const ROLE_HOME = {
+  [ROLES.CONSULTANT]: "/giniflow/station/doctor",
+  [ROLES.MO]: "/giniflow/station/mo",
   [ROLES.OBT]: "/obt-dashboard",
   [ROLES.RX]: "/giniflow/station/rx",
   [ROLES.ECHO_TECH]: "/giniflow/station/echo",
@@ -199,6 +232,14 @@ export const ROLE_HOME = {
 
 export function navAllowlistForRole(role) {
   return ROLE_NAV_ALLOWLIST[normalizeRole(role)] || null;
+}
+
+export function navHiddenForRole(role) {
+  return ROLE_NAV_HIDDEN[normalizeRole(role)] || [];
+}
+
+export function isPathHiddenForRole(role, pathname) {
+  return navHiddenForRole(role).some((p) => pathname === p || pathname.startsWith(p + "/"));
 }
 
 export function homeForRole(role) {

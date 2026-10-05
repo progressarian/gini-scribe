@@ -6,6 +6,7 @@ import {
   useStartVitals,
   useReleaseVitals,
   useSaveAllergy,
+  useSkipVitals,
 } from "../../queries/hooks/useGiniflowVitals";
 import { useVoiceVitals } from "../../hooks/useVoiceVitals";
 import { SPOKEN_EXAMPLE, flagLargeChanges } from "../../../shared/giniflowVitalsSpeech";
@@ -242,10 +243,16 @@ function DoneRow({ d, active, onPick }) {
       onClick={() => onPick(d.visitId)}
     >
       <div className="si-name">{d.name}</div>
-      <div className="si-meta">
-        {clock(d.recordedAt)} · {d.bp ? `BP ${d.bp}` : "BP —"}
-        {d.weight ? ` · ${d.weight} kg` : ""}
-      </div>
+      {d.notTakenReason ? (
+        <div className="si-meta">
+          {clock(d.recordedAt)} · <span className="si-na">Vitals NA</span> · {d.notTakenReason}
+        </div>
+      ) : (
+        <div className="si-meta">
+          {clock(d.recordedAt)} · {d.bp ? `BP ${d.bp}` : "BP —"}
+          {d.weight ? ` · ${d.weight} kg` : ""}
+        </div>
+      )}
       <div className="si-nowat">now: {d.nowAt}</div>
     </button>
   );
@@ -291,6 +298,9 @@ export default function VitalsStationPage() {
   const [allergy, setAllergy] = useState({ status: "not_known", list: [], draft: "" });
   const startVitals = useStartVitals();
   const releaseVitals = useReleaseVitals();
+  const skipVitals = useSkipVitals();
+  const [naOpen, setNaOpen] = useState(false);
+  const [naReason, setNaReason] = useState("");
 
   // Both the search and the group filter are applied by the server, so these
   // are the rows as sent. `term` is kept only for the wording of the empty
@@ -359,6 +369,8 @@ export default function VitalsStationPage() {
       list: parseAllergyNote(patient?.allergyNote),
       draft: "",
     });
+    setNaOpen(false);
+    setNaReason("");
   }, [patient?.visitId]);
 
   const showToast = (msg) => {
@@ -512,6 +524,28 @@ export default function VitalsStationPage() {
         },
         onError: (e) =>
           showToast(e?.response?.data?.error || "Could not save — nothing was recorded"),
+      },
+    );
+  };
+
+  const closeWithoutVitals = () => {
+    const reason = naReason.trim();
+    if (reason.length < 3) return showToast("Write a remark before closing without vitals");
+    const who = patient?.name?.split(" ")[0] || "Patient";
+    skipVitals.mutate(
+      { visitId: selectedId, reason },
+      {
+        onSuccess: (res) => {
+          showToast(
+            res?.movedTo === "ready_for_doctor"
+              ? `✓ ${who} closed with vitals NA — moved to the consultant's queue`
+              : `✓ ${who} closed with vitals NA — moved to the Chief Endocrinologist queue`,
+          );
+          const next = queue.find((q) => q.visitId !== selectedId);
+          setSelected(next ? next.visitId : null);
+        },
+        onError: (e) =>
+          showToast(e?.response?.data?.error || "Could not close — nothing was changed"),
       },
     );
   };
@@ -698,10 +732,64 @@ export default function VitalsStationPage() {
                       {releaseVitals.isPending ? "Sending…" : "← Back to queue"}
                     </button>
                   )}
+                  {!correcting && (
+                    <button
+                      type="button"
+                      className={`vna-toggle${naOpen ? " on" : ""}`}
+                      aria-expanded={naOpen}
+                      aria-controls="vna-panel"
+                      onClick={() => setNaOpen((o) => !o)}
+                    >
+                      Vitals NA
+                    </button>
+                  )}
                 </div>
               </div>
 
               <div className="sd-body">
+                {!correcting && naOpen && (
+                  <div className="vna" id="vna-panel">
+                    <label className="vna-title" htmlFor="vna-reason">
+                      Close without vitals (NA)
+                    </label>
+                    <div className="vna-sub">
+                      No readings are recorded. {patient.name} moves on to the{" "}
+                      {patient.skipsChief ? "consultant's" : "Chief Endocrinologist"} queue with
+                      this remark.
+                    </div>
+                    <textarea
+                      id="vna-reason"
+                      className="vf-inp"
+                      maxLength={300}
+                      placeholder="Remark — e.g. 3-day follow-up, vitals NA in HealthRay"
+                      value={naReason}
+                      onChange={(e) => setNaReason(e.target.value)}
+                      autoFocus
+                    />
+                    <div className="vna-acts">
+                      <button
+                        type="button"
+                        className="vna-cancel"
+                        onClick={() => {
+                          setNaOpen(false);
+                          setNaReason("");
+                        }}
+                        disabled={skipVitals.isPending}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="vna-confirm"
+                        onClick={closeWithoutVitals}
+                        disabled={naReason.trim().length < 3 || skipVitals.isPending}
+                      >
+                        {skipVitals.isPending ? "Closing…" : "Close with vitals NA"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <div className="voice-bar">
                   <button
                     className={`voice-pill${voice.listening ? " listening" : ""}`}

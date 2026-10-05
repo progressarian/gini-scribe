@@ -87,6 +87,7 @@ import {
   giniflowTestCancelSchema,
   giniflowCaseCancelSchema,
   giniflowStationReleaseSchema,
+  giniflowVitalsSkipSchema,
 } from "../schemas/index.js";
 import {
   getVitalsQueue,
@@ -95,6 +96,7 @@ import {
   saveAllergy,
   startVitals,
   releaseVitals,
+  skipVitals,
 } from "../services/giniflow/vitalsStation.js";
 import {
   getPaymentQueue,
@@ -245,7 +247,11 @@ import {
   suggestedCaseRows,
   saveResults,
 } from "../services/giniflow/labResults.js";
-import { hasCapability, hasAnyCapability } from "../../shared/permissions.js";
+import {
+  GINIFLOW_LAUNCHER_CAPABILITY,
+  hasCapability,
+  hasAnyCapability,
+} from "../../shared/permissions.js";
 
 const router = Router();
 
@@ -327,6 +333,24 @@ router.post("/giniflow/stations/vitals/:visitId/release", vitalsGate, async (req
     vitalsError(res, e, "Gini Flow vitals release");
   }
 });
+
+router.post(
+  "/giniflow/stations/vitals/:visitId/skip",
+  vitalsGate,
+  validate(giniflowVitalsSkipSchema),
+  async (req, res) => {
+    try {
+      res.json(
+        await skipVitals(req.params.visitId, {
+          reason: req.body.reason,
+          actorId: req.doctor?.doctor_id ?? null,
+        }),
+      );
+    } catch (e) {
+      vitalsError(res, e, "Gini Flow vitals skip");
+    }
+  },
+);
 
 router.post(
   "/giniflow/stations/vitals/:visitId",
@@ -901,35 +925,17 @@ router.post(
 // ── Launcher ────────────────────────────────────────────────────────────────
 // Every station's count in one call, filtered to the stations this role may
 // open. A tile that appears and then 403s is worse than no tile.
-const STATION_CAPS = {
-  manager: CAP.GINIFLOW_BOARD,
-  vitals: CAP.GINIFLOW_STATION_VITALS,
-  reception: CAP.GINIFLOW_STATION_RECEPTION,
-  lab: CAP.GINIFLOW_STATION_LAB,
-  lab_collect: CAP.GINIFLOW_STATION_LAB_COLLECT,
-  lab_process: CAP.GINIFLOW_STATION_LAB_PROCESS,
-  machine: CAP.GINIFLOW_STATION_MACHINE,
-  echo: CAP.GINIFLOW_STATION_ECHO,
-  xray: CAP.GINIFLOW_STATION_XRAY,
-  mo_sd: CAP.GINIFLOW_STATION_MO,
-  doctor: CAP.GINIFLOW_STATION_DOCTOR,
-  rx: CAP.GINIFLOW_STATION_RX,
-  pharmacy: CAP.GINIFLOW_STATION_PHARMACY,
-  triage: CAP.GINIFLOW_TRIAGE,
-  referrals: CAP.GINIFLOW_REFERRALS,
-};
-
 router.get(
   "/giniflow/stations/summary",
   validateQuery(giniflowDateQuerySchema),
   async (req, res) => {
     try {
       const date = await resolveDate(req.query.date);
-      const summary = await getStationSummary(date);
       const role = req.doctor?.role;
       const allowed = Object.fromEntries(
-        Object.entries(STATION_CAPS).filter(([, cap]) => hasCapability(role, cap)),
+        Object.entries(GINIFLOW_LAUNCHER_CAPABILITY).filter(([, cap]) => hasCapability(role, cap)),
       );
+      const summary = await getStationSummary(date, undefined, { stations: Object.keys(allowed) });
       res.json({
         date,
         stations: Object.fromEntries(Object.keys(allowed).map((k) => [k, summary[k]])),

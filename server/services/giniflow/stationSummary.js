@@ -9,66 +9,28 @@ import { getPharmacyQueue } from "./pharmacyStation.js";
 import { getVitalsQueue } from "./vitalsStation.js";
 import { getMachineQueue } from "./machineStation.js";
 
-// The counts on the launcher tiles. One query set for the whole floor, so the
-// landing screen costs the same whether a coordinator holds one station or all
-// of them.
-//
-// Counts are computed for every station, then the route filters to the ones the
-// signed-in role may actually open — a number is not sensitive, but a tile that
-// appears and then 403s is worse than no tile.
-export async function getStationSummary(visitDate, db = pool) {
-  const sla = await getSlaConfig(db);
-  const board = await getDayBoard(visitDate, sla, boardClock(visitDate), db);
-  const bottleneck = getBottleneck(board.columns);
+const PIECES_BY_STATION = {
+  triage: ["triage"],
+  vitals: ["vitals"],
+  reception: ["payments", "arrivals"],
+  lab: ["collection", "processing"],
+  lab_collect: ["collection"],
+  lab_process: ["processing"],
+  machine: ["machines"],
+  echo: ["machines"],
+  xray: ["machines"],
+  pharmacy: ["pharmacy"],
+  referrals: ["referrals"],
+};
 
-  const col = (key) => board.columns.find((c) => c.key === key)?.count ?? 0;
-  const atRisk = board.onFloor.filter((c) => !c.finished && c.statusColour === "red").length;
+const EMPTY_QUEUE = { counts: {} };
 
-  const now = new Date();
-  const [payments, arrivals, collection, processing, pharmacyQueue, vitalsQueue] =
-    await Promise.all([
-      getPaymentQueue(visitDate, db),
-      getArrivals(visitDate, "", now, db),
-      getLabQueue(visitDate, null, db, { room: "collection" }),
-      getLabQueue(visitDate, null, db, { room: "processing" }),
-      getPharmacyQueue(visitDate, now, db),
-      getVitalsQueue(visitDate, now, db),
-    ]);
-
-  // Referrals are parallel to the chain, so they are not a board column and the
-  // count cannot come from `col()`. "Open" is every referral raised today whose
-  // loop is not closed — a referral has no SLA, so this is a workload, not a
-  // warning (19 §2).
-  const { rows: referrals } = await db.query(
-    `SELECT count(*)::int AS today,
-            count(*) FILTER (WHERE r.status <> 'completed')::int AS open
-       FROM giniflow_referrals r
-       JOIN giniflow_visits v ON v.id = r.visit_id
-      WHERE v.visit_date = $1::date`,
-    [visitDate],
-  );
-
-  // Triage works TOMORROW, not the day the rest of these count, so it gets its
-  // own read rather than a slice of the board above.
-  const triage = await getTriageSummary(db);
-
-  const pay = payments.counts;
-  const paymentPending = pay.pending + (pay.charges || 0) + (pay.healthrayLab || 0);
-  const toCheckIn = arrivals.counts.expected;
-  const toCollect = collection.counts.pending + collection.counts.drawing;
-  const toSend = collection.counts.collecting;
-  const toReceive = processing.counts.sent;
-  const inLab = processing.counts.received + processing.counts.processing;
-  const toUpload = processing.counts.ready;
-  const toDispense = pharmacyQueue.counts.toDispense;
-  const inVitalsQueue = vitalsQueue.counts.atStation + vitalsQueue.counts.waiting;
-  const onBreak = vitalsQueue.counts.onBreak;
-
+async function loadMachineCounts(visitDate, db) {
   const catalogue = await getMachines(db);
   const sideStationIds = [
     ...new Set(catalogue.map((m) => m.station).filter((st) => st && st !== "machine_room")),
   ];
-  const machineCounts = Object.fromEntries(
+  const counts = Object.fromEntries(
     await Promise.all(
       ["machine_room", ...sideStationIds].map(async (station) => {
         const { counts } = await getMachineQueue(visitDate, null, db, { station });
@@ -79,8 +41,91 @@ export async function getStationSummary(visitDate, db = pool) {
       }),
     ),
   );
+  return { catalogue, sideStationIds, counts };
+}
+
+async function loadBoard(visitDate, db) {
+  const sla = await getSlaConfig(db);
+  return getDayBoard(visitDate, sla, boardClock(visitDate), db);
+}
+
+async function loadReferrals(visitDate, db) {
+  const { rows } = await db.query(
+    `SELECT count(*)::int AS today,
+            count(*) FILTER (WHERE r.status <> 'completed')::int AS open
+       FROM giniflow_referrals r
+       JOIN giniflow_visits v ON v.id = r.visit_id
+      WHERE v.visit_date = $1::date`,
+    [visitDate],
+  );
+  return rows[0];
+}
+
+const PIECE_LOADERS = {
+  board: (date, db) => loadBoard(date, db),
+  payments: (date, db) => getPaymentQueue(date, db),
+  arrivals: (date, db) => getArrivals(date, "", new Date(), db),
+  collection: (date, db) => getLabQueue(date, null, db, { room: "collection" }),
+  processing: (date, db) => getLabQueue(date, null, db, { room: "processing" }),
+  pharmacy: (date, db) => getPharmacyQueue(date, new Date(), db),
+  vitals: (date, db) => getVitalsQueue(date, new Date(), db),
+  referrals: (date, db) => loadReferrals(date, db),
+  triage: (_date, db) => getTriageSummary(db),
+  machines: (date, db) => loadMachineCounts(date, db),
+};
+
+export async function getStationSummary(visitDate, db = pool, { stations } = {}) {
+  const wanted = stations || Object.keys(PIECES_BY_STATION);
+  const needed = new Set(["board", ...wanted.flatMap((k) => PIECES_BY_STATION[k] || [])]);
+  const loaded = Object.fromEntries(
+    await Promise.all(
+      [...needed].map(async (piece) => [piece, await PIECE_LOADERS[piece](visitDate, db)]),
+    ),
+  );
+
+  const board = loaded.board;
+  const bottleneck = getBottleneck(board.columns);
+  const col = (key) => board.columns.find((c) => c.key === key)?.count ?? 0;
+  const atRisk = board.onFloor.filter((c) => !c.finished && c.statusColour === "red").length;
+
+  const payments = loaded.payments || EMPTY_QUEUE;
+  const arrivals = loaded.arrivals || EMPTY_QUEUE;
+  const collection = loaded.collection || EMPTY_QUEUE;
+  const processing = loaded.processing || EMPTY_QUEUE;
+  const pharmacyQueue = loaded.pharmacy || EMPTY_QUEUE;
+  const vitalsQueue = loaded.vitals || EMPTY_QUEUE;
+  const referral = loaded.referrals || { today: 0, open: 0 };
+  const triage = loaded.triage || {
+    today_total: 0,
+    today_uncategorised: 0,
+    total: 0,
+    uncategorised: 0,
+  };
+  const {
+    catalogue,
+    sideStationIds,
+    counts: machineCounts,
+  } = loaded.machines || {
+    catalogue: [],
+    sideStationIds: [],
+    counts: {},
+  };
+
+  const n = (v) => v || 0;
+  const pay = payments.counts;
+  const paymentPending = n(pay.pending) + n(pay.charges) + n(pay.healthrayLab);
+  const toCheckIn = n(arrivals.counts.expected);
+  const toCollect = n(collection.counts.pending) + n(collection.counts.drawing);
+  const toSend = n(collection.counts.collecting);
+  const toReceive = n(processing.counts.sent);
+  const inLab = n(processing.counts.received) + n(processing.counts.processing);
+  const toUpload = n(processing.counts.ready);
+  const toDispense = n(pharmacyQueue.counts.toDispense);
+  const inVitalsQueue = n(vitalsQueue.counts.atStation) + n(vitalsQueue.counts.waiting);
+  const onBreak = n(vitalsQueue.counts.onBreak);
+
   const machineTile = (station, idle) => {
-    const c = machineCounts[station];
+    const c = machineCounts[station] || { waiting: 0, running: 0, unreported: 0 };
     return {
       count: c.waiting + c.running + c.unreported,
       label: c.running
@@ -165,9 +210,9 @@ export async function getStationSummary(visitDate, db = pool) {
       tone: toDispense ? "blue" : "teal",
     },
     referrals: {
-      count: referrals[0].open,
-      label: referrals[0].today ? `${referrals[0].today} today` : "none today",
-      tone: referrals[0].open ? "blue" : "teal",
+      count: referral.open,
+      label: referral.today ? `${referral.today} today` : "none today",
+      tone: referral.open ? "blue" : "teal",
     },
     bottleneck: bottleneck ? { station: bottleneck.station, label: bottleneck.label } : null,
   };

@@ -128,7 +128,9 @@ app.use((req, res, next) => {
     // rejects for any real artwork.
     p.includes("/prescription-logo");
 
-  const isStationReport = p.startsWith("/api/giniflow/stations/") && /\/reports?$/.test(p);
+  const isStationReport =
+    (p.startsWith("/api/giniflow/stations/") && /\/reports?$/.test(p)) ||
+    (p.startsWith("/api/billing/") && p.endsWith("/scanned-reports"));
 
   const limit = isLarge ? "50mb" : isStationReport ? "7mb" : isMedium ? "5mb" : "1mb";
   express.json({ limit })(req, res, next);

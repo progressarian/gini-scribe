@@ -11,7 +11,7 @@ import {
   useVisitNotPriced,
 } from "../../../queries/hooks/useBilling";
 import PatientList, { counterRows } from "./PatientList";
-import PatientHeader from "./PatientHeader";
+import PatientHeader, { BillOpening } from "./PatientHeader";
 import PreviousBills from "./PreviousBills";
 import BillLinesTable from "./BillLinesTable";
 import PaidAtReception from "./PaidAtReception";
@@ -20,6 +20,7 @@ import AddItems from "./AddItems";
 import ConsultationSuggestion from "./ConsultationSuggestion";
 import LabCaseTests from "./LabCaseTests";
 import HealthrayBillLines from "./HealthrayBillLines";
+import ScannedReportLines from "./ScannedReportLines";
 import DiscountCodeBox from "./DiscountCodeBox";
 import TotalsAndPayment from "./TotalsAndPayment";
 import BillActions from "./BillActions";
@@ -410,7 +411,10 @@ export default function BillingDesk({ tab, visitId, patientId, billId, sentPatie
               )}
               {error && <div className="bc-err">{error}</div>}
               {(visitId || billId) && !bill && !error && (
-                <div className="bc-empty">Opening the bill…</div>
+                <BillOpening
+                  patient={selected || duePatient || sentPatient}
+                  onClose={() => pick(null)}
+                />
               )}
               {newerDraft && (
                 <div className="bc-hint" role="status">
@@ -468,6 +472,7 @@ export default function BillingDesk({ tab, visitId, patientId, billId, sentPatie
                         needsCategory={needsCategory}
                       />
                       <HealthrayBillLines key={`hr-${bill.id}`} bill={bill} onBill={setBill} />
+                      <ScannedReportLines key={`scan-${bill.id}`} bill={bill} onBill={setBill} />
                       <NotPricedTests tests={notPriced} />
                       <PaidAtReception bill={bill} onChanged={refreshBill} />
                       <DiscountCodeBox bill={bill} onBill={setBill} form={form} />

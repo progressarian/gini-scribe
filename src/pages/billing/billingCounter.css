@@ -305,6 +305,84 @@ body.bc-resizing {
   font-size: 14px;
   color: var(--ink);
 }
+.gf .bc-mdisc {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.gf .bc-mdisc__row {
+  display: grid;
+  grid-template-columns: minmax(96px, 120px) minmax(0, 1fr);
+  gap: 8px;
+}
+.gf .bc-mdisc__bill {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+.gf .bc-mdisc__bill:empty {
+  display: none;
+}
+.gf .bc-mdisc__current {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ink);
+}
+.gf .bc-mdisc__current > span {
+  flex: 1 1 200px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.gf .bc-mdisc__form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.gf .bc-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.gf .bc-opening__label {
+  font-size: 13px;
+  color: var(--ink3);
+}
+.gf .bc-opening__line {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+.gf .bc-skel {
+  display: block;
+  height: 12px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--bd) 0%, var(--bd2) 50%, var(--bd) 100%);
+  background-size: 200% 100%;
+  animation: bc-skel 1.2s ease-in-out infinite;
+}
+.gf .bc-skel--name {
+  width: 45%;
+}
+.gf .bc-skel--amount {
+  width: 72px;
+}
+@keyframes bc-skel {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gf .bc-skel {
+    animation: none;
+  }
+}
 .gf .bc-bill {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(290px, 340px);

@@ -1332,7 +1332,14 @@ export async function fetchStoredReport(orderId, db = pool) {
   };
 }
 
-export async function storeReportObject({ base64, fileName, mediaType, kind, patientId }) {
+export async function storeReportObject({
+  base64,
+  fileName,
+  mediaType,
+  kind,
+  patientId,
+  folder = `giniflow/${kind === "machine" ? "machine" : "lab"}`,
+}) {
   const buffer = Buffer.from(base64, "base64");
   // The screen tells the technician 5 MB, so 5 MB is the limit. A service that
   // quietly allows more than the interface promises is a service nobody can
@@ -1343,7 +1350,7 @@ export async function storeReportObject({ base64, fileName, mediaType, kind, pat
   }
 
   const safeName = String(fileName || "report.pdf").replace(/[^a-zA-Z0-9._-]/g, "_");
-  const storagePath = `giniflow/${kind === "machine" ? "machine" : "lab"}/${patientId}/${Date.now()}_${safeName}`;
+  const storagePath = `${folder}/${patientId}/${Date.now()}_${safeName}`;
 
   const resp = await fetch(`${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`, {
     method: "POST",

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useAddBillLine, useConsultationSuggestion } from "../../../queries/hooks/useBilling";
 import { errorOf, fromPaise } from "../format";
+import LoadingCard from "./LoadingCard";
 
 const priceOf = (choice, needsCategory) =>
   needsCategory || choice.price === null ? null : fromPaise(choice.price);
@@ -12,11 +13,16 @@ function choiceText(choice, needsCategory) {
 
 export default function ConsultationSuggestion({ bill, onBill, needsCategory }) {
   const draft = bill.status === "draft";
-  const { data } = useConsultationSuggestion(bill.id, bill.version, { enabled: draft });
+  const { data, isLoading } = useConsultationSuggestion(bill.id, bill.version, {
+    enabled: draft,
+  });
   const addLine = useAddBillLine();
   const [picked, setPicked] = useState("");
   const [error, setError] = useState(null);
 
+  if (draft && isLoading) {
+    return <LoadingCard title="Consultation" text="Checking the consultation…" lines={1} />;
+  }
   if (!draft || !data?.shown) return null;
   const { choices, suggested, visit_type: visitType } = data;
   if (!suggested && !choices.length) return null;

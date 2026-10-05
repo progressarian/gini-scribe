@@ -9,7 +9,12 @@ import useVisitStore from "../stores/visitStore";
 import useUiStore, { toast } from "../stores/uiStore";
 import useMessagingStore from "../stores/messagingStore";
 import PageErrorBoundary from "./PageErrorBoundary";
-import { PAGE_CAPABILITIES, navAllowlistForRole } from "../config/routes";
+import {
+  PAGE_CAPABILITIES,
+  navAllowlistForRole,
+  navHiddenForRole,
+  homeForRole,
+} from "../config/routes";
 import { hasAnyCapability, canViewAnalytics, ROLES } from "../../shared/permissions";
 import { hydrateCategories } from "../../shared/patientCategories.js";
 
@@ -26,7 +31,7 @@ const C = PAGE_CAPABILITIES;
 const isLabDesk = (role) => role === ROLES.LAB || role === ROLES.TECH;
 
 const NAV_ITEMS = [
-  { path: "/", label: "🏠 Home", show: () => true },
+  { path: "/", label: "🏠 Home", show: (s) => !homeForRole(s.role) },
   { path: "/find", label: "🔍 Find", cap: C["/find"], show: () => true },
   { path: "/opd", label: "🏥 OPD", cap: C["/opd"], show: () => true },
   { path: "/dashboard", label: "📋 Patient", cap: C["/dashboard"], show: (s) => s.hasPatient },
@@ -274,6 +279,7 @@ export default function AppLayout() {
   const role = currentDoctor?.role;
   const hasPatient = !!dbPatientId || !!patient.name;
   const navAllowlist = navAllowlistForRole(role);
+  const navHidden = navHiddenForRole(role);
 
   const navState = {
     role,
@@ -443,7 +449,10 @@ export default function AppLayout() {
           {(() => {
             const capable = NAV_ITEMS.filter(
               // t.cap may be one capability or an array (any-of).
-              (t) => (!t.cap || hasAnyCapability(navState.role, t.cap)) && t.show(navState),
+              (t) =>
+                (!t.cap || hasAnyCapability(navState.role, t.cap)) &&
+                t.show(navState) &&
+                !navHidden.includes(t.path),
             );
             const visible = navAllowlist
               ? navAllowlist.map((p) => capable.find((t) => t.path === p)).filter(Boolean)

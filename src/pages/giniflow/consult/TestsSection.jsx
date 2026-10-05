@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useTestPanels, useOrderTests } from "../../../queries/hooks/useGiniflowPrescription";
 import { VoiceButton } from "../../../components/giniflow/VoiceInput";
 
@@ -20,6 +20,47 @@ const monthLabel = (ymd) => {
   return new Date(y, m - 1, 1).toLocaleDateString("en-IN", { month: "short", year: "numeric" });
 };
 
+const searchText = (value) =>
+  (value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+const rupees = (amount) => `₹${Number(amount || 0).toLocaleString("en-IN")}`;
+
+function buildTestIndex(tests) {
+  return tests.map((test) => {
+    const name = searchText(test.name);
+    const words = `${name} ${searchText(test.gloss)}`;
+    return { test, name, words, compact: words.replace(/ /g, "") };
+  });
+}
+
+const MIN_SEARCH_LENGTH = 2;
+
+const byUsageThenName = (a, b) =>
+  (b.uses || 0) - (a.uses || 0) || a.name.localeCompare(b.name, "en", { sensitivity: "base" });
+
+function searchTests(index, query) {
+  const tokens = searchText(query).split(" ").filter(Boolean);
+  const matches =
+    tokens.join("").length < MIN_SEARCH_LENGTH
+      ? index
+      : index.filter((entry) =>
+          tokens.every((token) => entry.words.includes(token) || entry.compact.includes(token)),
+        );
+  return matches.map((entry) => entry.test).sort(byUsageThenName);
+}
+
+const POPULAR_LIMIT = 24;
+
+function pickPopular(tests, panels) {
+  const panelNames = new Set(panels.flatMap((p) => p.tests));
+  const used = tests.filter((t) => t.uses > 0).sort((a, b) => b.uses - a.uses);
+  const curated = tests.filter((t) => !(t.uses > 0) && (panelNames.has(t.name) || t.gloss));
+  return new Set([...used, ...curated].slice(0, POPULAR_LIMIT).map((t) => t.name));
+}
+
 export default function TestsSection({ visitId, consult, readOnly, onToast, onUnsaved }) {
   const { data } = useTestPanels(visitId);
   const orderTests = useOrderTests(visitId);
@@ -31,6 +72,7 @@ export default function TestsSection({ visitId, consult, readOnly, onToast, onUn
   const [filter, setFilter] = useState("");
   const filterRef = useRef(null);
   const [customPrice, setCustomPrice] = useState("");
+  const [showAll, setShowAll] = useState(false);
 
   // A selection is not an order — it lives here until Confirm, so leaving with
   // one is work the page has to ask about.
@@ -40,12 +82,30 @@ export default function TestsSection({ visitId, consult, readOnly, onToast, onUn
   }, [picked, onUnsaved]);
   useEffect(() => () => onUnsaved?.("tests", false), [onUnsaved]);
 
-  const panels = data?.panels || [];
-  const catalog = data?.tests || [];
-
+  const panels = useMemo(() => data?.panels || [], [data]);
   // Tests the MO already ordered. Shown as ordered rather than offered again —
   // ordering the same panel twice bills the patient twice.
   const alreadyOrdered = new Set((consult.orders || []).flatMap((o) => o.tests));
+  const catalog = useMemo(() => data?.tests || [], [data]);
+  const testIndex = useMemo(() => buildTestIndex(catalog), [catalog]);
+  const deferredFilter = useDeferredValue(filter);
+  const matchedTests = useMemo(
+    () => searchTests(testIndex, deferredFilter),
+    [testIndex, deferredFilter],
+  );
+  const popularNames = useMemo(() => pickPopular(catalog, panels), [catalog, panels]);
+  const searching = searchText(filter).replace(/ /g, "").length >= MIN_SEARCH_LENGTH;
+  const visibleTests =
+    searching || showAll
+      ? matchedTests
+      : matchedTests.filter(
+          (t) => popularNames.has(t.name) || selected.has(t.name) || alreadyOrdered.has(t.name),
+        );
+  const priceByName = useMemo(
+    () => new Map([...catalog, ...custom].map((t) => [t.name, Number(t.price) || 0])),
+    [catalog, custom],
+  );
+  const selectedTotal = [...selected].reduce((sum, name) => sum + (priceByName.get(name) || 0), 0);
 
   const toggle = (name) =>
     setSelected((prev) => {
@@ -155,16 +215,34 @@ export default function TestsSection({ visitId, consult, readOnly, onToast, onUn
             })}
           </div>
 
-          <div className="cn-head">Individual tests</div>
+          <div className="cn-head tst-head">
+            {searching ? "Matching tests" : showAll ? "All tests" : "Most used tests"}
+            {!searching && (
+              <button type="button" className="btn-sm" onClick={() => setShowAll((v) => !v)}>
+                {showAll ? "Show most used only" : `Show all ${catalog.length}`}
+              </button>
+            )}
+          </div>
           <div className="tst-heard">
             <input
               ref={filterRef}
+              type="search"
               className="cp-inp tst-filter"
               value={filter}
-              placeholder="Filter tests — type, or dictate with 🎤 Voice"
+              placeholder="Search tests by name or purpose — e.g. TSH, kidney, lipid"
               onChange={(e) => setFilter(e.target.value)}
-              aria-label="Filter tests"
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setFilter("");
+              }}
+              aria-label="Search tests"
             />
+            {filter && (
+              <span className="tst-count" aria-live="polite">
+                {searching
+                  ? `${visibleTests.length} of ${catalog.length} tests`
+                  : `Type at least ${MIN_SEARCH_LENGTH} characters to search`}
+              </span>
+            )}
             {filter && (
               <button type="button" className="btn-sm" onClick={() => setFilter("")}>
                 Clear
@@ -229,36 +307,42 @@ export default function TestsSection({ visitId, consult, readOnly, onToast, onUn
             </div>
           )}
           <div className="tst-list">
-            {catalog
-              .filter(
-                (t) =>
-                  !filter ||
-                  `${t.name} ${t.gloss || ""}`.toLowerCase().includes(filter.toLowerCase().trim()),
-              )
-              .map((t) => (
-                <button
-                  type="button"
-                  key={t.name}
-                  className={`tst-chip${selected.has(t.name) ? " on" : ""}${
-                    alreadyOrdered.has(t.name) ? " done" : ""
-                  }`}
-                  onClick={() => toggle(t.name)}
-                >
-                  <span className="tst-name">
-                    {t.name}
-                    {alreadyOrdered.has(t.name) && " ✓"}
-                  </span>
-                  {/* The reason a consultant picks this test, printed rather
+            {visibleTests.map((t) => (
+              <button
+                type="button"
+                key={t.name}
+                className={`tst-chip${selected.has(t.name) ? " on" : ""}${
+                  alreadyOrdered.has(t.name) ? " done" : ""
+                }`}
+                onClick={() => toggle(t.name)}
+              >
+                <span className="tst-name">
+                  {t.name}
+                  {alreadyOrdered.has(t.name) && " ✓"}
+                </span>
+                {/* The reason a consultant picks this test, printed rather
                       than hidden in a tooltip no tablet can show. */}
-                  {t.gloss && <span className="tst-gloss">{t.gloss}</span>}
-                </button>
-              ))}
+                {t.gloss && <span className="tst-gloss">{t.gloss}</span>}
+                <span
+                  className="tst-price"
+                  title={
+                    t.schemePriced ? `Scheme rate · usual price ${rupees(t.basePrice)}` : undefined
+                  }
+                >
+                  {t.price ? rupees(t.price) : "price not set"}
+                  {t.schemePriced && " · scheme"}
+                </span>
+              </button>
+            ))}
+            {searching && visibleTests.length === 0 && (
+              <div className="cn-empty">No test matches “{filter.trim()}”.</div>
+            )}
           </div>
 
           {selected.size > 0 && (
             <div className="tst-bar">
               <span>
-                📋 <strong>{selected.size} tests selected</strong> for{" "}
+                📋 <strong>{selected.size} tests selected</strong> · {rupees(selectedTotal)} for{" "}
                 {URGENCY.find((u) => u.key === urgency).label.toLowerCase()}
                 {urgency === "next_visit" && consult.nextVisitDate
                   ? ` (${monthLabel(consult.nextVisitDate)})`

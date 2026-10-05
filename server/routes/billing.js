@@ -1,4 +1,10 @@
 import { Router } from "express";
+import {
+  deleteScannedReport,
+  readScannedReport,
+  scanBillReport,
+  scannedBillSuggestion,
+} from "../services/billing/scannedBillReports.js";
 import { requireCapability } from "../middleware/auth.js";
 import { validate, validateQuery } from "../middleware/validate.js";
 import { CAPABILITIES as CAP } from "../../shared/permissions.js";
@@ -11,6 +17,7 @@ import {
   billingConsultationSuggestionQuerySchema,
   billingDraftDeleteSchema,
   billingLinePriceSchema,
+  billingManualDiscountSchema,
   billingDraftOpenSchema,
   billingDuesQuerySchema,
   billingFinaliseSchema,
@@ -28,6 +35,7 @@ import {
   billingPayOutSchema,
   billingPdfQuerySchema,
   billingPreviewSchema,
+  billingReportScanSchema,
   billingReceiptQuerySchema,
   billingRefundPreviewSchema,
   billingRefundBoardQuerySchema,
@@ -179,6 +187,46 @@ router.get(
 );
 
 router.get(
+  `${BASE}/scanned-bill-lines`,
+  desk,
+  validateQuery(billingLabCaseTestsQuerySchema, BILLING_DESK_LABELS),
+  run("Scanned report lines", 200, (req) => scannedBillSuggestion(req.query.bill_id, ctx(req))),
+);
+
+router.post(
+  `${BASE}/bills/:billId/scanned-reports`,
+  desk,
+  validate(billingReportScanSchema, BILLING_DESK_LABELS),
+  run("Scan billing report", 200, (req, res) => {
+    const cancel = new AbortController();
+    res.on("close", () => {
+      if (!res.writableEnded) cancel.abort();
+    });
+    return scanBillReport(req.params.billId, req.body, ctx(req), undefined, {
+      signal: cancel.signal,
+    });
+  }),
+);
+
+router.delete(
+  `${BASE}/scanned-reports/:documentId`,
+  desk,
+  run("Delete scanned report", 200, (req) => deleteScannedReport(req.params.documentId, ctx(req))),
+);
+
+router.get(`${BASE}/scanned-reports/:documentId/file`, desk, async (req, res) => {
+  try {
+    const report = await readScannedReport(req.params.documentId);
+    res.set("Content-Type", report.mimeType);
+    res.set("Content-Disposition", `inline; filename="${encodeURIComponent(report.fileName)}"`);
+    res.set("Cache-Control", "private, max-age=300");
+    return res.send(report.buffer);
+  } catch (e) {
+    return sendFailure("Scanned report", res, e);
+  }
+});
+
+router.get(
   `${BASE}/suggested-codes`,
   desk,
   validateQuery(billingLabCaseTestsQuerySchema, BILLING_DESK_LABELS),
@@ -297,6 +345,24 @@ router.post(
   desk,
   validate(billingFinaliseSchema, BILLING_DESK_LABELS),
   run("Finalise bill", 200, (req) => bills.finaliseBill(req.params.billId, req.body, ctx(req))),
+);
+
+router.post(
+  `${BASE}/bills/:billId/lines/:lineId/discount`,
+  desk,
+  validate(billingManualDiscountSchema, BILLING_DESK_LABELS),
+  run("Set a line discount", 200, (req) =>
+    bills.setLineDiscount(req.params.billId, req.params.lineId, req.body, ctx(req)),
+  ),
+);
+
+router.post(
+  `${BASE}/bills/:billId/discount`,
+  desk,
+  validate(billingManualDiscountSchema, BILLING_DESK_LABELS),
+  run("Set the bill discount", 200, (req) =>
+    bills.setBillDiscount(req.params.billId, req.body, ctx(req)),
+  ),
 );
 
 router.post(

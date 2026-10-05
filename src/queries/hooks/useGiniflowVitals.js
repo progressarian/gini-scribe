@@ -81,3 +81,15 @@ export function useReleaseVitals() {
     },
   });
 }
+
+export function useSkipVitals() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ visitId, reason }) =>
+      (await api.post(`/api/giniflow/stations/vitals/${visitId}/skip`, { reason })).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "vitals"] });
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "board"] });
+    },
+  });
+}

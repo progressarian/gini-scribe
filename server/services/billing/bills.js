@@ -40,6 +40,7 @@ import { markDraftSaved } from "./draftSaves.js";
 import { billCredits } from "./creditNotes.js";
 import { lockVisitOrders, orderToLink, SETTLED_AT_RECEPTION } from "./orderLinks.js";
 import { PAID_AT_RECEPTION, receptionHolds, refuseReceptionTest } from "./receptionOrders.js";
+import { BILL_DISCOUNT_NAME, cleanManualDiscount, manualOf } from "./manualDiscounts.js";
 
 const BILL_COLUMNS = `id, bill_no, series, fy, bill_type, original_bill_id, patient_id, visit_id,
   appointment_id,
@@ -47,7 +48,9 @@ const BILL_COLUMNS = `id, bill_no, series, fy, bill_type, original_bill_id, pati
   scheme_ref_enc, referral_no_enc, referral_doc_id, patient_age, pay_later,
   actual_amount, discount_amount, tax_amount, patient_payable, claim_amount,
   adjustment_amount, round_off, paid_amount, claim_status, version,
-  finalised_by, finalised_at, cancelled_by, cancelled_at, cancel_reason, created_at, saved_at`;
+  finalised_by, finalised_at, cancelled_by, cancelled_at, cancel_reason, created_at, saved_at,
+  manual_discount_kind, manual_discount_value, manual_discount_reason,
+  manual_discount_by, manual_discount_at`;
 
 const SPEC = { table: "bills", noun: "bill", columns: BILL_COLUMNS };
 
@@ -56,7 +59,8 @@ const LINE_COLUMNS = `id, bill_id, visit_id, line_no, service_item_id, source, l
   bill_name, quantity, base_rate, rate, listed_actual, actual_amount, listed_discount, discount,
   payable_discount, bill_discount, tax_code, sac_hsn, tax_rate_pct, taxable, cgst, sgst,
   payment_rule_id, payment_rule, patient_payable, claim_amount, adjustment_amount,
-  agreed_rate, agreed_by, agreed_at, created_by`;
+  agreed_rate, agreed_by, agreed_at, created_by, manual_discount_kind, manual_discount_value, manual_discount_reason,
+  manual_discount_by, manual_discount_at`;
 
 export const LINE_SOURCES = ["visit", "lab_order", "added", "lab_case", "ordered"];
 
@@ -192,6 +196,19 @@ function shapeLine(row) {
     agreed_at: row.agreed_at ?? null,
     added_by: row.created_by ?? null,
     added_by_name: row.created_by_name ?? null,
+    manual_discount: shapeManual(row, row.manual_discount_by_name),
+  };
+}
+
+function shapeManual(row, byName = null) {
+  if (!row.manual_discount_kind) return null;
+  return {
+    kind: row.manual_discount_kind,
+    value: Number(row.manual_discount_value),
+    reason: row.manual_discount_reason ?? null,
+    by: row.manual_discount_by ?? null,
+    by_name: byName,
+    at: row.manual_discount_at ?? null,
   };
 }
 
@@ -234,6 +251,7 @@ function shapeBill(row, lines = [], extra = {}) {
     cancelled_at: row.cancelled_at,
     cancel_reason: row.cancel_reason,
     lines: lines.map(shapeLine),
+    manual_discount: shapeManual(row),
     ...extra,
   };
 }
@@ -317,6 +335,7 @@ async function liveLines(client, billId, { all = false } = {}) {
             CASE WHEN i.kind = 'consultation' AND rd.is_active IS FALSE
                  THEN json_build_object('id', rd.id, 'name', rd.name) END AS removed_doctor,
             setter.name AS agreed_by_name, adder.name AS created_by_name,
+            discounter.name AS manual_discount_by_name,
             sg.name AS group_name, i.kind AS item_kind
        FROM bill_lines l LEFT JOIN service_items i ON i.id = l.service_item_id
        LEFT JOIN service_subgroups ssg ON ssg.id = i.subgroup_id
@@ -324,6 +343,7 @@ async function liveLines(client, billId, { all = false } = {}) {
        LEFT JOIN doctors rd ON rd.id = COALESCE(i.doctor_id, l.doctor_id)
        LEFT JOIN doctors setter ON setter.id = l.agreed_by
        LEFT JOIN doctors adder ON adder.id = l.created_by
+       LEFT JOIN doctors discounter ON discounter.id = l.manual_discount_by
       WHERE l.bill_id = $1 AND (l.is_live OR $2)
       ORDER BY l.line_no, l.created_at, l.id`,
     [billId, all],
@@ -378,37 +398,47 @@ const LINE_VALUES = (line, lineNo) => ({
   adjustment_amount: rupees(line.adjustment),
 });
 
-async function saveLine(client, id, lineNo, line, ctx) {
-  const values = LINE_VALUES(line, lineNo);
-  const keys = Object.keys(values);
+async function saveLines(client, saved, ctx, billManualBy = null) {
+  if (!saved.length) return;
+  const actor = ctx?.actorId ?? null;
+  const appliedBy = (step, manualBy) =>
+    step.method !== "manual"
+      ? actor
+      : ((step.name === BILL_DISCOUNT_NAME ? billManualBy : manualBy) ?? actor);
+  const keys = Object.keys(LINE_VALUES(saved[0].line, 1));
+  const records = saved.map(({ id, lineNo, line }) => ({ id, ...LINE_VALUES(line, lineNo) }));
   await client.query(
-    `UPDATE bill_lines SET ${keys.map((key, i) => `${key} = $${i + 2}`).join(", ")},
-        updated_at = NOW(), updated_by = $${keys.length + 2}
-      WHERE id = $1`,
-    [id, ...keys.map((key) => values[key]), ctx?.actorId ?? null],
+    `UPDATE bill_lines l SET ${keys.map((key) => `${key} = r.${key}`).join(", ")},
+        updated_at = NOW(), updated_by = $2
+       FROM jsonb_populate_recordset(NULL::bill_lines, $1::jsonb) r
+      WHERE l.id = r.id`,
+    [JSON.stringify(records), actor],
   );
-  await client.query(`DELETE FROM bill_line_discounts WHERE bill_line_id = $1`, [id]);
-  const steps = [
-    ...line.discounts,
-    ...line.bill_discounts.map((step) => ({ ...step, taken_from: "bill" })),
-  ];
-  for (const step of steps) {
-    if (!step.amount) continue;
-    await client.query(
-      `INSERT INTO bill_line_discounts
-         (bill_line_id, rule_id, code, method, taken_from, amount, applied_by, created_by, updated_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $7)`,
-      [
-        id,
-        step.rule_id,
-        step.code ?? null,
-        step.method,
-        step.taken_from,
-        rupees(step.amount),
-        ctx?.actorId ?? null,
-      ],
-    );
-  }
+  await client.query(`DELETE FROM bill_line_discounts WHERE bill_line_id = ANY($1::uuid[])`, [
+    saved.map(({ id }) => id),
+  ]);
+  const steps = saved.flatMap(({ id, line, manualBy }) =>
+    [...line.discounts, ...line.bill_discounts.map((step) => ({ ...step, taken_from: "bill" }))]
+      .filter((step) => step.amount)
+      .map((step) => ({
+        bill_line_id: id,
+        rule_id: step.rule_id,
+        code: step.code ?? null,
+        method: step.method,
+        taken_from: step.taken_from,
+        amount: rupees(step.amount),
+        applied_by: appliedBy(step, manualBy),
+      })),
+  );
+  if (!steps.length) return;
+  await client.query(
+    `INSERT INTO bill_line_discounts
+       (bill_line_id, rule_id, code, method, taken_from, amount, applied_by, created_by, updated_by)
+     SELECT r.bill_line_id, r.rule_id, r.code, r.method, r.taken_from, r.amount, r.applied_by, $2, $2
+       FROM jsonb_populate_recordset(NULL::bill_line_discounts, $1::jsonb) WITH ORDINALITY r
+      ORDER BY r.ordinality`,
+    [JSON.stringify(steps), actor],
+  );
 }
 
 async function takenOn(client, billId) {
@@ -464,7 +494,9 @@ const pricingInput = (bill, lines, codes, ctx) => ({
     doctorId: line.doctor_id,
     kept: true,
     agreedRate: line.agreed_rate,
+    manualDiscount: manualOf(line),
   })),
+  manualDiscount: manualOf(bill),
 });
 
 async function reprice(client, bill, codes, ctx) {
@@ -482,21 +514,29 @@ async function reprice(client, bill, codes, ctx) {
     bill.id,
     Number(highest[0].top),
   ]);
-  for (const [index, line] of priced.lines.entries()) {
-    await saveLine(client, lines[index].id, index + 1, line, ctx);
-  }
+  await saveLines(
+    client,
+    priced.lines.map((line, index) => ({
+      id: lines[index].id,
+      lineNo: index + 1,
+      line,
+      manualBy: lines[index].manual_discount_by ?? null,
+    })),
+    ctx,
+    bill.manual_discount_by ?? null,
+  );
   return { priced, lines, bill: await saveTotals(client, bill, priced.totals, ctx) };
 }
 
 async function billDiscounts(client, billId) {
   const { rows } = await client.query(
-    `SELECT d.code, d.method, COALESCE(r.name, d.code) AS name, SUM(d.amount) AS amount
+    `SELECT d.code, d.method, COALESCE(r.name, d.code, 'Manual discount') AS name, SUM(d.amount) AS amount
        FROM bill_line_discounts d
        JOIN bill_lines l ON l.id = d.bill_line_id
        LEFT JOIN discount_rules r ON r.id = d.rule_id
       WHERE l.bill_id = $1 AND l.is_live
-      GROUP BY d.code, d.method, COALESCE(r.name, d.code)
-      ORDER BY d.method, COALESCE(r.name, d.code)`,
+      GROUP BY d.code, d.method, COALESCE(r.name, d.code, 'Manual discount')
+      ORDER BY d.method, COALESCE(r.name, d.code, 'Manual discount')`,
     [billId],
   );
   return rows.map((row) => ({
@@ -509,9 +549,18 @@ async function billDiscounts(client, billId) {
 
 const showsEveryLine = (row) => row.status !== "draft";
 
+async function billManualOf(client, row) {
+  if (!row.manual_discount_kind) return null;
+  const { rows } = await client.query(`SELECT name FROM doctors WHERE id = $1`, [
+    row.manual_discount_by,
+  ]);
+  return shapeManual(row, rows[0]?.name ?? null);
+}
+
 async function withLines(client, row, extra = {}) {
   return shapeBill(row, await shownLines(client, row.id, { all: showsEveryLine(row) }), {
     discounts: await billDiscounts(client, row.id),
+    manual_discount: await billManualOf(client, row),
     ...extra,
   });
 }
@@ -1074,7 +1123,7 @@ async function clearReceptionIn(client, visitId, ctx) {
   const removed = [];
   for (const line of await receptionLinesOn(client, bill)) {
     try {
-      bill = await inTransaction(async (inner) => {
+      await inTransaction(async (inner) => {
         const before = await lineOf(inner, bill, line.id);
         await dropLineIn(
           inner,
@@ -1083,14 +1132,15 @@ async function clearReceptionIn(client, visitId, ctx) {
           { removed: true, reason: PAID_AT_RECEPTION_REASON },
           ctx,
         );
-        return (await reprice(inner, bill, await billCodes(inner, bill.id), ctx)).bill;
       }, client);
       removed.push(line.bill_name);
     } catch (error) {
       if (!error.status) throw error;
     }
   }
-  if (removed.length) await resettleTestOrders(client, bill, ctx);
+  if (!removed.length) return removed;
+  bill = (await reprice(client, bill, await billCodes(client, bill.id), ctx)).bill;
+  await resettleTestOrders(client, bill, ctx);
   return removed;
 }
 
@@ -1114,6 +1164,89 @@ export async function clearReceptionLinesOfBill(billId, ctx, db = pool) {
     [id],
   );
   return rows[0]?.visit_id ? clearReceptionLines(rows[0].visit_id, ctx, db) : [];
+}
+
+const MANUAL_COLUMNS = ["kind", "value", "reason", "by", "at"];
+
+const manualSnapshot = (row) =>
+  Object.fromEntries(MANUAL_COLUMNS.map((key) => [key, row[`manual_discount_${key}`] ?? null]));
+
+function readManualInput(input, label) {
+  const raw = input?.value;
+  if (raw === null || raw === undefined || raw === "" || Number(raw) === 0) return null;
+  return cleanManualDiscount({ kind: input?.kind, value: raw }, label);
+}
+
+const SET_MANUAL = `manual_discount_kind = $2, manual_discount_value = $3,
+  manual_discount_reason = $4, manual_discount_by = $5,
+  manual_discount_at = CASE WHEN $2::text IS NULL THEN NULL ELSE NOW() END`;
+
+const manualValues = (discount, reason, ctx) =>
+  discount
+    ? [discount.kind, discount.value, reason, ctx?.actorId ?? null]
+    : [null, null, null, null];
+
+export async function setLineDiscount(billId, lineId, input, ctx, db = pool) {
+  const reason = optionalReason(input?.reason, "The reason for this discount");
+  return inTransaction(async (client) => {
+    const bill = assertDraft(await lockBill(client, billId));
+    const before = await lineOf(client, bill, lineId);
+    const discount = readManualInput(input, `${before.bill_name}'s discount`);
+    const { rows } = await client.query(
+      `UPDATE bill_lines SET ${SET_MANUAL}, updated_at = NOW(), updated_by = $6
+        WHERE id = $1 RETURNING ${LINE_COLUMNS}`,
+      [before.id, ...manualValues(discount, reason, ctx), ctx?.actorId ?? null],
+    );
+    const saved = await reprice(client, bill, await billCodes(client, bill.id), ctx);
+    await resettleTestOrders(client, saved.bill, ctx);
+    const after = (await liveLines(client, bill.id)).find((line) => line.id === before.id);
+    await writeAudit(client, {
+      entity: "bill_lines",
+      entityId: before.id,
+      action: "update",
+      before: { manual_discount: manualSnapshot(before), bill_discount: before.bill_discount },
+      after: {
+        manual_discount: manualSnapshot(rows[0]),
+        bill_discount: after?.bill_discount ?? null,
+        role: ctx?.role ?? null,
+      },
+      ...auditFields(ctx),
+    });
+    return withLines(client, saved.bill, { codes: await billCodes(client, bill.id) });
+  }, db);
+}
+
+export async function setBillDiscount(billId, input, ctx, db = pool) {
+  const reason = optionalReason(input?.reason, "The reason for this discount");
+  const discount = readManualInput(input, "The bill's discount");
+  return inTransaction(async (client) => {
+    const bill = assertDraft(await lockBill(client, billId));
+    const { rows } = await client.query(
+      `UPDATE bills SET ${SET_MANUAL}, updated_at = NOW(), updated_by = $6
+        WHERE id = $1 RETURNING ${BILL_COLUMNS}`,
+      [bill.id, ...manualValues(discount, reason, ctx), ctx?.actorId ?? null],
+    );
+    const saved = await reprice(client, rows[0], await billCodes(client, bill.id), ctx);
+    await resettleTestOrders(client, saved.bill, ctx);
+    await writeAudit(client, {
+      entity: SPEC.table,
+      entityId: bill.id,
+      action: "update",
+      before: {
+        manual_discount: manualSnapshot(bill),
+        discount_amount: bill.discount_amount,
+        patient_payable: bill.patient_payable,
+      },
+      after: {
+        manual_discount: manualSnapshot(rows[0]),
+        discount_amount: saved.bill.discount_amount,
+        patient_payable: saved.bill.patient_payable,
+        role: ctx?.role ?? null,
+      },
+      ...auditFields(ctx),
+    });
+    return withLines(client, saved.bill, { codes: await billCodes(client, bill.id) });
+  }, db);
 }
 
 export async function setLinePrice(billId, lineId, input, ctx, db = pool) {
@@ -1706,6 +1839,30 @@ const snapshotKey = (line) =>
 
 const DISCARDED = { discarded: true, reason: "Discarded without saving" };
 
+const SAVED_MANUAL = ["kind", "value", "reason", "by"].map((key) => `manual_discount_${key}`);
+
+const savedManual = (saved) =>
+  SAVED_MANUAL.map((column) =>
+    column === "manual_discount_value" && saved?.[column] != null
+      ? Number(saved[column])
+      : (saved?.[column] ?? null),
+  );
+
+const sameManual = (line, saved) =>
+  JSON.stringify(savedManual(line)) === JSON.stringify(savedManual(saved));
+
+async function restoreManual(client, table, id, saved, ctx) {
+  const [kind, value, reason, by] = savedManual(saved);
+  await client.query(
+    `UPDATE ${table} SET manual_discount_kind = $2, manual_discount_value = $3,
+        manual_discount_reason = $4, manual_discount_by = $5,
+        manual_discount_at = CASE WHEN $2::text IS NULL THEN NULL ELSE NOW() END,
+        updated_at = NOW(), updated_by = $6
+      WHERE id = $1`,
+    [id, kind, value, reason, by, ctx?.actorId ?? null],
+  );
+}
+
 async function restoreSavedIn(client, bill, ctx) {
   const { rows: stored } = await client.query(`SELECT saved_snapshot FROM bills WHERE id = $1`, [
     bill.id,
@@ -1722,6 +1879,7 @@ async function restoreSavedIn(client, bill, ctx) {
       continue;
     }
     const [kept] = wanted.splice(at, 1);
+    if (!sameManual(line, kept)) await restoreManual(client, "bill_lines", line.id, kept, ctx);
     if (Number(line.quantity) !== kept.quantity) {
       await client.query(
         `UPDATE bill_lines SET quantity = $2, listed_actual = ROUND($2 * rate, 2),
@@ -1759,7 +1917,11 @@ async function restoreSavedIn(client, bill, ctx) {
       ctx?.actorId ?? null,
     ],
   );
-  let current = restored[0];
+  if (!sameManual(restored[0], header)) {
+    await restoreManual(client, "bills", bill.id, header, ctx);
+  }
+  let current = (await client.query(`SELECT ${BILL_COLUMNS} FROM bills WHERE id = $1`, [bill.id]))
+    .rows[0];
   for (const line of wanted) {
     const added = await addLineIn(
       client,
@@ -1778,7 +1940,12 @@ async function restoreSavedIn(client, bill, ctx) {
       if (error.code === PAID_AT_RECEPTION) return null;
       throw error;
     });
-    if (added) current = added.bill;
+    if (added) {
+      current = added.bill;
+      if (line.manual_discount_kind) {
+        await restoreManual(client, "bill_lines", added.line_id, line, ctx);
+      }
+    }
   }
   const saved = await reprice(client, current, snapshot.codes, ctx);
   await resettleTestOrders(client, saved.bill, ctx);

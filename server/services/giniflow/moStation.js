@@ -661,6 +661,14 @@ export async function getTestPanels(db = pool, visitId = null) {
     `SELECT c.test_name, ${catalogBasePriceSql("c")} AS price, c.gloss
        FROM giniflow_test_catalog c WHERE c.is_active ORDER BY c.test_name`,
   );
+  const { rows: usage } = await db.query(
+    `SELECT t.test_name, COUNT(*)::int AS uses
+       FROM giniflow_lab_order_tests t
+       JOIN giniflow_lab_orders o ON o.id = t.lab_order_id
+      WHERE o.created_at > NOW() - INTERVAL '90 days'
+      GROUP BY t.test_name`,
+  );
+  const usesByName = new Map(usage.map((u) => [u.test_name, u.uses]));
   const schemeCode = visitId ? await schemeForVisit(visitId, db) : null;
   const schemePrices = schemeCode
     ? await testPricesFor(
@@ -688,6 +696,7 @@ export async function getTestPanels(db = pool, visitId = null) {
         // the MO wondering whether the list is wrong.
         basePrice: Number(t.price),
         schemePriced: price !== Number(t.price),
+        uses: usesByName.get(t.test_name) || 0,
       };
     }),
     schemeCode,

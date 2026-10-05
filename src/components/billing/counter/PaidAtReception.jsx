@@ -3,6 +3,7 @@ import { CheckCircle2, ChevronDown, ChevronUp } from "lucide-react";
 import { usePaidAtReception } from "../../../queries/hooks/useBilling";
 import { fromPaise } from "../format";
 import { claimText } from "./lineText";
+import LoadingCard from "./LoadingCard";
 
 const clock = (value) =>
   value
@@ -25,7 +26,7 @@ const orderKey = (orders) =>
   orders.map((order) => `${order.lab_order_id}:${order.paid}:${order.claim?.amount ?? 0}`).join();
 
 export default function PaidAtReception({ bill, onChanged }) {
-  const { data } = usePaidAtReception(bill.visit_id, bill.version);
+  const { data, isLoading } = usePaidAtReception(bill.visit_id, bill.version);
   const orders = data?.orders ?? [];
   const seen = useRef(null);
   const key = orderKey(orders);
@@ -38,6 +39,11 @@ export default function PaidAtReception({ bill, onChanged }) {
     if (before !== null && before !== key && bill.status === "draft") onChanged?.();
   }, [data, key]);
 
+  if (isLoading) {
+    return (
+      <LoadingCard title="Cleared at reception" text="Checking reception payments…" lines={1} />
+    );
+  }
   if (!orders.length) return null;
 
   const payments = `${orders.length} order${orders.length === 1 ? "" : "s"}`;

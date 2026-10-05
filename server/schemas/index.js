@@ -708,6 +708,10 @@ export const giniflowSearchQuerySchema = z.object({
 
 // Vitals are clinical numbers: reject anything outside a physiologically
 // plausible range rather than storing a typo that a doctor may later act on.
+export const giniflowVitalsSkipSchema = z.object({
+  reason: z.string().trim().min(3, "Say why vitals were not taken").max(300),
+});
+
 export const giniflowVitalsSchema = z.object({
   weight: z.number().min(1).max(400).nullish(),
   height: z.number().min(30).max(260).nullish(),

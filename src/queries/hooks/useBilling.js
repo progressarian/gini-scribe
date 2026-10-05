@@ -155,6 +155,53 @@ export function useHealthrayBillLines(billId, version, { enabled = true } = {}) 
   });
 }
 
+const scannedLinesKey = (billId, version) => [
+  ...billingKeys.bill(billId),
+  "scanned-bill-lines",
+  version ?? 0,
+];
+
+export function useScannedBillLines(billId, version, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: scannedLinesKey(billId, version),
+    queryFn: () => read(`${DESK}/scanned-bill-lines`, { bill_id: billId }),
+    enabled: !!billId && enabled,
+  });
+}
+
+export function useScanBillReport() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ billId, base64, mediaType, fileName, signal }) =>
+      (
+        await api.post(
+          `${DESK}/bills/${billId}/scanned-reports`,
+          { base64, mediaType, fileName },
+          { signal },
+        )
+      ).data,
+    onSuccess: (data, { billId, version }) => {
+      queryClient.setQueryData(scannedLinesKey(billId, version), data);
+    },
+  });
+}
+
+export function useDeleteScannedReport() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ documentId }) =>
+      (await api.delete(`${DESK}/scanned-reports/${documentId}`)).data,
+    onSuccess: (_data, { billId }) => {
+      queryClient.invalidateQueries({
+        queryKey: [...billingKeys.bill(billId), "scanned-bill-lines"],
+      });
+    },
+  });
+}
+
+export const scannedReportHref = (documentId) =>
+  `${API_URL}${DESK}/scanned-reports/${documentId}/file?token=${encodeURIComponent(authToken())}`;
+
 export function useSuggestedCodes(billId, version, { enabled = true } = {}) {
   return useQuery({
     queryKey: [...billingKeys.bill(billId), "suggested-codes", version ?? 0],
@@ -193,6 +240,21 @@ export function useSetLinePrice() {
     async ({ billId, lineId, agreed_rate, reason }) =>
       (await api.post(`${DESK}/bills/${billId}/lines/${lineId}/price`, { agreed_rate, reason }))
         .data,
+  );
+}
+
+export function useSetLineDiscount() {
+  return useVisitMutation(
+    async ({ billId, lineId, kind, value, reason }) =>
+      (await api.post(`${DESK}/bills/${billId}/lines/${lineId}/discount`, { kind, value, reason }))
+        .data,
+  );
+}
+
+export function useSetBillDiscount() {
+  return useVisitMutation(
+    async ({ billId, kind, value, reason }) =>
+      (await api.post(`${DESK}/bills/${billId}/discount`, { kind, value, reason })).data,
   );
 }
 

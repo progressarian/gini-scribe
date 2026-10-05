@@ -30,7 +30,7 @@ export function sendFailure(context, res, e) {
 
 export const billingRoute = (context, status, work) => async (req, res) => {
   try {
-    res.status(status).json(await work(req));
+    res.status(status).json(await work(req, res));
   } catch (e) {
     sendFailure(context, res, e);
   }

@@ -40,7 +40,7 @@ export const BillingSchema = z.object({
     .describe("Paid when net_payable is 0; Partial when some paid but net_payable > 0; else Due"),
 });
 
-const BILLING_EXTRACTION_PROMPT = `You are extracting structured data from a hospital OPD bill / invoice PDF.
+const BILLING_EXTRACTION_PROMPT = `You are extracting structured data from a hospital OPD bill / invoice (a PDF or a photo of a printed bill).
 
 Return ONLY the fields in the schema. Rules:
 - Read the PARTICULARS table: one entry per row with desc, unit, rate, amount. Strip currency symbols and thousands separators (₹, commas) — amounts are plain numbers (e.g. "1,500.00" → 1500).
@@ -53,7 +53,11 @@ Return ONLY the fields in the schema. Rules:
 
 // Read a billing PDF (Buffer / Uint8Array) and return the structured object, or
 // null if extraction is unavailable/fails. Nothing is persisted.
-export async function parseBillingPdfWithAi(pdfBuffer, mimeType = "application/pdf") {
+export async function parseBillingPdfWithAi(
+  pdfBuffer,
+  mimeType = "application/pdf",
+  { signal } = {},
+) {
   if (!anthropic) return null;
   if (!pdfBuffer || !pdfBuffer.length) return null;
 
@@ -62,24 +66,30 @@ export async function parseBillingPdfWithAi(pdfBuffer, mimeType = "application/p
     : Buffer.from(pdfBuffer).toString("base64");
 
   try {
-    const response = await anthropic.messages.parse({
-      model: "claude-haiku-4-5",
-      max_tokens: 4000,
-      temperature: 0,
-      system: [
-        { type: "text", text: BILLING_EXTRACTION_PROMPT, cache_control: { type: "ephemeral" } },
-      ],
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "document", source: { type: "base64", media_type: mimeType, data: base64 } },
-            { type: "text", text: "Extract the billing data from this OPD bill." },
-          ],
-        },
-      ],
-      output_config: { format: zodOutputFormat(BillingSchema) },
-    });
+    const response = await anthropic.messages.parse(
+      {
+        model: "claude-haiku-4-5",
+        max_tokens: 4000,
+        temperature: 0,
+        system: [
+          { type: "text", text: BILLING_EXTRACTION_PROMPT, cache_control: { type: "ephemeral" } },
+        ],
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: mimeType.startsWith("image/") ? "image" : "document",
+                source: { type: "base64", media_type: mimeType, data: base64 },
+              },
+              { type: "text", text: "Extract the billing data from this OPD bill." },
+            ],
+          },
+        ],
+        output_config: { format: zodOutputFormat(BillingSchema) },
+      },
+      { signal },
+    );
     if (response?.usage) {
       const u = response.usage;
       log("usage", `in=${u.input_tokens} out=${u.output_tokens}`);

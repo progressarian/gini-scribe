@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import api from "../../../services/api";
 import { usePatientSchemeList, useSetBillCategory } from "../../../queries/hooks/useBilling";
 import { errorOf } from "../format";
+import LoadingCard from "./LoadingCard";
 
-const readFile = (file) =>
+export const readFile = (file) =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => resolve(String(e.target.result).split(",")[1]);
@@ -23,6 +24,58 @@ export const initialsOf = (name) =>
     .slice(0, 2)
     .map((word) => word[0].toUpperCase())
     .join("");
+
+export function BillOpening({ patient, onClose }) {
+  const sex = (patient?.sex || "")[0] || "";
+  return (
+    <>
+      <section className="bc-card bc-head" aria-label="Patient">
+        <div className="bc-head__top">
+          <span className="bc-avatar bc-avatar--lg" aria-hidden="true">
+            {initialsOf(patient?.name)}
+          </span>
+          <div className="bc-head__who">
+            <h2 className="bc-head__name">{patient?.name || "Opening the bill…"}</h2>
+            {patient && (
+              <div className="bc-head__meta">
+                {patient.fileNo || "—"}
+                {" • "}
+                {patient.age ?? "—"}
+                {sex}
+                {SEX_WORD[sex] ? ` • ${SEX_WORD[sex]}` : ""}
+              </div>
+            )}
+          </div>
+          {patient?.statusLabel && <span className="bc-head__state">{patient.statusLabel}</span>}
+          <button
+            type="button"
+            className="st-btn st-btn-g bc-head__close"
+            aria-label={`Close ${patient?.name || "this patient"}`}
+            onClick={onClose}
+          >
+            ✕ Close
+          </button>
+        </div>
+      </section>
+      <div className="bc-bill">
+        <div className="bc-bill__work">
+          <LoadingCard title="Bill Items" text="Opening the bill…" lines={4} />
+          <LoadingCard title="Add items" text="Ready once the bill is open" lines={1} />
+          <LoadingCard
+            title="Lab report, HealthRay bill and reception payments"
+            text="Checking what was ordered, billed and paid today…"
+          />
+          <LoadingCard title="Scanned billing reports" text="Loading scanned reports…" lines={1} />
+          <LoadingCard title="Discounts" text="Checking discounts…" lines={1} />
+        </div>
+        <div className="bc-bill__summary">
+          <LoadingCard title="Bill Summary" text="Working out the totals…" lines={3} />
+          <LoadingCard title="Bill actions" text="Available once the bill is open" lines={1} />
+        </div>
+      </div>
+    </>
+  );
+}
 
 export default function PatientHeader({
   patient,

@@ -11,7 +11,7 @@ export default function PdfViewer({ pdf, onClose }) {
     <PdfViewerModal
       src={{
         url: sameOrigin(pdf.href),
-        mimeType: "application/pdf",
+        mimeType: pdf.mimeType || "application/pdf",
         fileName: pdf.fileName,
         title: pdf.title,
       }}
@@ -22,11 +22,11 @@ export default function PdfViewer({ pdf, onClose }) {
   );
 }
 
-export function PdfButton({ href, title, fileName, children, ...button }) {
+export function PdfButton({ href, title, fileName, mimeType, children, ...button }) {
   const [pdf, setPdf] = useState(null);
   return (
     <>
-      <button type="button" {...button} onClick={() => setPdf({ href, title, fileName })}>
+      <button type="button" {...button} onClick={() => setPdf({ href, title, fileName, mimeType })}>
         {children}
       </button>
       <PdfViewer pdf={pdf} onClose={() => setPdf(null)} />

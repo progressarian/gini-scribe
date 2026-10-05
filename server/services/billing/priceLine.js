@@ -8,7 +8,13 @@ import { applyDiscounts } from "./lineDiscounts.js";
 import { linePayable } from "./linePayable.js";
 import { lineTax } from "./lineTax.js";
 import { assertLineBalances } from "./lineInvariant.js";
-import { checkBillable, cleanDraftRule, draftForLine, ruleForLine } from "./paymentRules.js";
+import {
+  checkBillable,
+  cleanDraftRule,
+  draftForLine,
+  primeItemScope,
+  ruleForLine,
+} from "./paymentRules.js";
 import { refuseRemoved } from "./removedDoctors.js";
 import { httpError } from "./transaction.js";
 import { cleanDate, INT_MAX, MONEY_MAX, readNumber, wholeNumber } from "./common.js";
@@ -75,16 +81,9 @@ function rateFor(row, agreed) {
   return { value: paise(row.base_price), source: "base" };
 }
 
-export async function lineActual(
-  { item, quantity, category, date, kept, agreedRate } = {},
-  db = pool,
-) {
-  const itemId = cleanItem(item);
-  const count = wholeNumber(quantity, "Quantity", { min: 1 }) ?? 1;
-  const on = cleanDate(date, "Date") ?? indiaToday();
-  const code = cleanCategory(category);
-  const { rows } = await db.query(
-    `SELECT i.id, i.code, i.name, i.kind, i.subgroup_id, sg.group_id, sg.code AS subgroup_code,
+const ITEM_SQL = (
+  where,
+) => `SELECT i.id, i.code, i.name, i.kind, i.subgroup_id, sg.group_id, sg.code AS subgroup_code,
             g.code AS group_code, i.doctor_id, i.visit_type,
             i.unit, i.allow_quantity, i.max_quantity, i.base_price, i.price_includes_tax,
             i.price_per_patient,
@@ -101,9 +100,42 @@ export async function lineActual(
        LEFT JOIN doctors dr ON dr.id = i.doctor_id
        ${rateOn("$2")} own ON TRUE
        ${rateOn("(SELECT parent_code FROM patient_schemes WHERE code = $2)")} par ON TRUE
-      WHERE i.id = $1`,
-    [itemId, code, on],
-  );
+      WHERE ${where}`;
+
+export async function primeLineItems(inputs, db) {
+  if (typeof db.prime !== "function") return;
+  const groups = new Map();
+  for (const input of inputs) {
+    try {
+      const itemId = cleanItem(input.item);
+      const code = cleanCategory(input.category);
+      const on = cleanDate(input.date, "Date") ?? indiaToday();
+      const key = JSON.stringify([code, on]);
+      if (!groups.has(key)) groups.set(key, { code, on, ids: new Set() });
+      groups.get(key).ids.add(itemId);
+    } catch {
+      continue;
+    }
+  }
+  for (const { code, on, ids } of groups.values()) {
+    const { rows } = await db.query(ITEM_SQL("i.id = ANY($1::int[])"), [[...ids], code, on]);
+    for (const id of ids) {
+      const found = rows.filter((row) => row.id === id);
+      db.prime(ITEM_SQL("i.id = $1"), [id, code, on], found);
+      if (found.length) primeItemScope(db, found[0]);
+    }
+  }
+}
+
+export async function lineActual(
+  { item, quantity, category, date, kept, agreedRate } = {},
+  db = pool,
+) {
+  const itemId = cleanItem(item);
+  const count = wholeNumber(quantity, "Quantity", { min: 1 }) ?? 1;
+  const on = cleanDate(date, "Date") ?? indiaToday();
+  const code = cleanCategory(category);
+  const { rows } = await db.query(ITEM_SQL("i.id = $1"), [itemId, code, on]);
   if (!rows.length) throw httpError(404, "That item doesn't exist");
   const [row] = rows;
   if (row.doctor_removed && !kept) {

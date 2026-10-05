@@ -1,5 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import api from "../../services/api";
+import useAuthStore from "../../stores/authStore";
+import { GINIFLOW_LAUNCHER_CAPABILITY, hasCapability } from "../../../shared/permissions.js";
 import "../../styles/giniflow-station.css";
 
 // Every station a person can open, with what is waiting at each. The summary is
@@ -118,7 +120,8 @@ const TONE = {
 };
 
 export default function StationsLauncherPage() {
-  const { data, isPending } = useQuery({
+  const role = useAuthStore((s) => s.currentDoctor?.role);
+  const { data, isPending, isError } = useQuery({
     queryKey: ["giniflow", "stations", "summary"],
     queryFn: async () => (await api.get("/api/giniflow/stations/summary")).data,
     refetchInterval: 20_000,
@@ -127,7 +130,9 @@ export default function StationsLauncherPage() {
   });
 
   const stations = data?.stations || {};
-  const visible = STATIONS.filter((s) => stations[s.key] || !s.href);
+  const visible = STATIONS.filter(
+    (s) => !s.href || hasCapability(role, GINIFLOW_LAUNCHER_CAPABILITY[s.key]),
+  );
   const today = new Date().toLocaleDateString("en-IN", {
     weekday: "short",
     day: "numeric",
@@ -146,9 +151,7 @@ export default function StationsLauncherPage() {
         </div>
       )}
 
-      {isPending ? (
-        <div className="land-sub">Loading your stations…</div>
-      ) : visible.length === 0 ? (
+      {visible.length === 0 ? (
         <div className="land-sub">
           No stations are assigned to your role yet — ask an admin for access.
         </div>
@@ -161,7 +164,13 @@ export default function StationsLauncherPage() {
                 <div className="rc-ico">{s.icon}</div>
                 <div className="rc-name">{s.name}</div>
                 <div className="rc-desc">{s.desc}</div>
-                {s.href ? (
+                {s.href && isPending ? (
+                  <div className="rc-count rc-loading" role="status">
+                    Loading…
+                  </div>
+                ) : s.href && isError && !live ? (
+                  <div className="rc-count rc-soon">Count unavailable</div>
+                ) : s.href ? (
                   <div className="rc-count" style={TONE[live?.tone] || TONE.teal}>
                     {live?.label ?? "open the counter"}
                   </div>

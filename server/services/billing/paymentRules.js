@@ -687,6 +687,18 @@ const NO_RULE = {
   from_parent: false,
 };
 
+const ITEM_SCOPE_SQL = `SELECT i.id, i.subgroup_id, sg.group_id
+       FROM service_items i JOIN service_subgroups sg ON sg.id = i.subgroup_id
+      WHERE i.id = $1`;
+
+export function primeItemScope(db, item) {
+  db.prime(
+    ITEM_SCOPE_SQL,
+    [item.id],
+    [{ id: item.id, subgroup_id: item.subgroup_id, group_id: item.group_id }],
+  );
+}
+
 export async function ruleForLine({ category, item, visitType = null, date } = {}, db = pool) {
   const itemId = cleanScopeId(item, "service_item_id");
   if (itemId === null) throw httpError(400, "Choose a valid item");
@@ -698,12 +710,7 @@ export async function ruleForLine({ category, item, visitType = null, date } = {
   if (visitType !== null && visitType !== undefined && !VISIT_TYPES.includes(visitType)) {
     throw httpError(400, `Visit type must be one of: ${VISIT_TYPES.join(", ")}`);
   }
-  const { rows: found } = await db.query(
-    `SELECT i.id, i.subgroup_id, sg.group_id
-       FROM service_items i JOIN service_subgroups sg ON sg.id = i.subgroup_id
-      WHERE i.id = $1`,
-    [itemId],
-  );
+  const { rows: found } = await db.query(ITEM_SCOPE_SQL, [itemId]);
   if (!found.length) throw httpError(404, "That item doesn't exist");
   if (!code || RESERVED_CATEGORY_CODES.includes(code)) return NO_RULE;
   await checkBillable(db, code);

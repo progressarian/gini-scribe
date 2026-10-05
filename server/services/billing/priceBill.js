@@ -13,7 +13,14 @@ import { autoRulesFor, checkCode, CODE_REFUSALS } from "./discountRules.js";
 import { applyDiscounts } from "./lineDiscounts.js";
 import { assertBillLineBalances } from "./lineInvariant.js";
 import { cleanDraftRule } from "./paymentRules.js";
-import { priceLine } from "./priceLine.js";
+import {
+  BILL_DISCOUNT_NAME,
+  cleanManualDiscount,
+  LINE_DISCOUNT_NAME,
+  manualAmount,
+  manualRule,
+} from "./manualDiscounts.js";
+import { primeLineItems, priceLine } from "./priceLine.js";
 import { httpError } from "./transaction.js";
 
 export const MAX_BILL_LINES = 100;
@@ -50,6 +57,10 @@ function readOnce(db) {
       const key = JSON.stringify([text, params ?? []]);
       if (!seen.has(key)) seen.set(key, db.query(text, params));
       return seen.get(key).then((result) => ({ ...result, rows: structuredClone(result.rows) }));
+    },
+    prime(text, params, rows) {
+      const key = JSON.stringify([text, params]);
+      if (!seen.has(key)) seen.set(key, Promise.resolve({ rows, rowCount: rows.length }));
     },
   };
 }
@@ -446,6 +457,35 @@ function billSteps(allRules, lines, stacking) {
   return steps;
 }
 
+function manualSteps(lines, ruleSteps, lineManuals, billManual) {
+  const remaining = lines.map((line) => line.patient_payable);
+  for (const { shares } of ruleSteps) {
+    for (const { index, share } of shares) remaining[index] -= share;
+  }
+  const steps = [];
+  lineManuals.forEach((discount, index) => {
+    if (!discount) return;
+    const amount = manualAmount(discount, remaining[index]);
+    if (!amount) return;
+    remaining[index] -= amount;
+    steps.push({
+      rule: manualRule(discount, LINE_DISCOUNT_NAME),
+      amount,
+      shares: [{ index, share: amount }],
+    });
+  });
+  if (!billManual) return steps;
+  const scope = remaining.flatMap((left, index) => (left > 0 ? [index] : []));
+  const amount = manualAmount(
+    billManual,
+    scope.reduce((sum, index) => sum + remaining[index], 0),
+  );
+  if (!amount) return steps;
+  const shares = allocate(amount, scope, remaining);
+  steps.push({ rule: manualRule(billManual, BILL_DISCOUNT_NAME), amount, shares });
+  return steps;
+}
+
 const stepOf = (rule, amount) => ({
   rule_id: rule.id,
   code: rule.code ?? null,
@@ -510,6 +550,10 @@ export async function priceBill(input = {}, source = pool) {
   const doctorId = input.doctorId ?? who.appointment?.doctor_id ?? null;
   const draftRule = cleanDraftRule(input.draftRule);
   const base = { category, date, patient: who.patient, role: input.role, settings, draftRule };
+  const lineManuals = lineList.map((line, index) =>
+    cleanManualDiscount(line.manualDiscount, `Line ${index + 1}'s discount`),
+  );
+  const billManual = cleanManualDiscount(input.manualDiscount, "The bill's discount");
   const lineInputs = lineList.map((line) => ({
     ...base,
     item: line.item,
@@ -519,6 +563,7 @@ export async function priceBill(input = {}, source = pool) {
     kept: line.kept === true,
     agreedRate: line.agreedRate ?? null,
   }));
+  await primeLineItems(lineInputs, db);
   const context = { category, patient: who.patient, date, role: input.role, codesOnBill: 0 };
   const { admitted, refused, priced, lineCodes } = await admitCodes(
     { codes, context, lineInputs, settings },
@@ -534,7 +579,8 @@ export async function priceBill(input = {}, source = pool) {
       billRules.filter((rule) => !wholeBillPrice(rule)).map((rule) => [rule.id, rule]),
     ).values(),
   ];
-  const steps = billSteps(unique, settled, settings.discount_stacking);
+  const ruleSteps = billSteps(unique, settled, settings.discount_stacking);
+  const steps = [...ruleSteps, ...manualSteps(settled, ruleSteps, lineManuals, billManual)];
   const lines = withBillDiscounts(settled, steps);
   lines.forEach(assertBillLineBalances);
   const totals = totalsOf(lines);

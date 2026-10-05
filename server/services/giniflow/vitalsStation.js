@@ -118,6 +118,7 @@ const DONE_SQL = `
          COALESCE(gv.bp_sys, hv.bp_sys)   AS bp_sys,
          COALESCE(gv.bp_dia, hv.bp_dia)   AS bp_dia,
          (gv.id IS NULL) AS from_healthray,
+         CASE WHEN gv.id IS NULL AND hv.recorded_at IS NULL THEN done_ev.not_taken_reason END AS not_taken_reason,
          v.id AS visit_id, v.current_status,
          p.name, p.file_no, p.age, p.sex
     FROM giniflow_visits v
@@ -133,7 +134,8 @@ const DONE_SQL = `
        ORDER BY recorded_at DESC LIMIT 1
     ) hv ON TRUE
     LEFT JOIN LATERAL (
-      SELECT occurred_at FROM giniflow_visit_events e
+      SELECT occurred_at, meta->>'vitalsNotTakenReason' AS not_taken_reason
+        FROM giniflow_visit_events e
        WHERE e.visit_id = v.id AND e.status = 'vitals_done'
        ORDER BY occurred_at DESC LIMIT 1
     ) done_ev ON TRUE
@@ -260,6 +262,7 @@ export async function getVitalsQueue(
     // Where the patient has got to since — the queue visibly moving is what
     // tells the nurse their work landed.
     nowAt: STATUS_LABEL[r.current_status] || r.current_status,
+    notTakenReason: r.not_taken_reason,
   }));
 
   const groups = {
@@ -408,6 +411,61 @@ export async function saveAllergy(visitId, { status, note = null, actorId = null
 
 export const planSkipsChief = (db, visitId) => planSkips(db, visitId, PLAN_STOP.chief);
 
+async function moveOnFromVitals(client, visitId, actorId, meta) {
+  await advanceStatus(client, {
+    visitId,
+    toStatus: "vitals_done",
+    actorRole: "vitals",
+    actorId,
+    allowSkip: true,
+    meta,
+  });
+  if (!(await planSkipsChief(client, visitId))) return "vitals_done";
+  await client.query("SAVEPOINT straight_to_consultant");
+  try {
+    await advanceStatus(client, {
+      visitId,
+      toStatus: "ready_for_doctor",
+      actorRole: "system",
+      allowSkip: true,
+      meta: { reason: "plan_has_no_chief_step", after: "vitals_done" },
+    });
+    await client.query("RELEASE SAVEPOINT straight_to_consultant");
+    return "ready_for_doctor";
+  } catch {
+    await client.query("ROLLBACK TO SAVEPOINT straight_to_consultant");
+    return "vitals_done";
+  }
+}
+
+export async function skipVitals(visitId, { reason, actorId = null }, db = pool) {
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const visit = await client.query(
+      `SELECT current_status FROM giniflow_visits WHERE id = $1 FOR UPDATE`,
+      [visitId],
+    );
+    if (!visit.rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
+    if (!QUEUE_STATUSES.includes(visit.rows[0].current_status))
+      throw Object.assign(new Error("This patient is no longer waiting for vitals"), {
+        status: 409,
+      });
+    const movedTo = await moveOnFromVitals(client, visitId, actorId, {
+      vitals: null,
+      vitalsNotTaken: true,
+      vitalsNotTakenReason: reason,
+    });
+    await client.query("COMMIT");
+    return { movedTo };
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 export async function saveVitals(
   visitId,
   {
@@ -487,18 +545,10 @@ export async function saveVitals(
       ],
     );
 
-    // Only move a patient forward. A correction to an already-recorded visit
-    // saves the reading without dragging them back through the chain.
-    const from = visit.rows[0].current_status;
-    let movedTo = null;
-    if (["checked_in", "vitals_pending", "with_vitals"].includes(from)) {
-      await advanceStatus(client, {
-        visitId,
-        toStatus: "vitals_done",
-        actorRole: "vitals",
-        actorId,
-        allowSkip: true,
-        meta: {
+    const movedTo = ["checked_in", "vitals_pending", "with_vitals"].includes(
+      visit.rows[0].current_status,
+    )
+      ? await moveOnFromVitals(client, visitId, actorId, {
           vitals: {
             weight,
             height,
@@ -512,26 +562,8 @@ export async function saveVitals(
             temp,
           },
           source,
-        },
-      });
-      movedTo = "vitals_done";
-      if (await planSkipsChief(client, visitId)) {
-        await client.query("SAVEPOINT straight_to_consultant");
-        try {
-          await advanceStatus(client, {
-            visitId,
-            toStatus: "ready_for_doctor",
-            actorRole: "system",
-            allowSkip: true,
-            meta: { reason: "plan_has_no_chief_step", after: "vitals_done" },
-          });
-          await client.query("RELEASE SAVEPOINT straight_to_consultant");
-          movedTo = "ready_for_doctor";
-        } catch {
-          await client.query("ROLLBACK TO SAVEPOINT straight_to_consultant");
-        }
-      }
-    }
+        })
+      : null;
 
     await client.query("COMMIT");
 

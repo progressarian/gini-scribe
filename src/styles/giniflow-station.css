@@ -1126,6 +1126,31 @@
   background: rgba(255, 255, 255, 0.08);
   color: rgba(255, 255, 255, 0.45);
 }
+.gf .rc-loading {
+  min-width: 72px;
+  color: rgba(255, 255, 255, 0.55);
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.06) 0%,
+    rgba(255, 255, 255, 0.16) 50%,
+    rgba(255, 255, 255, 0.06) 100%
+  );
+  background-size: 200% 100%;
+  animation: rc-shimmer 1.2s ease-in-out infinite;
+}
+@keyframes rc-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gf .rc-loading {
+    animation: none;
+  }
+}
 
 @media (max-width: 400px) {
   .gf .role-grid {
@@ -5793,6 +5818,25 @@
   color: inherit;
   opacity: 0.75;
 }
+.gf .tst-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.gf .tst-price {
+  font-family: var(--fm);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ink3);
+}
+.gf .tst-chip.on .tst-price {
+  color: inherit;
+}
+.gf .tst-count {
+  font-size: 11px;
+  color: var(--ink4);
+}
 .gf .tst-heard {
   font-size: 11px;
   color: var(--pu);
@@ -8291,4 +8335,86 @@
   max-height: 60vh;
   overflow-y: auto;
   padding-right: 4px;
+}
+
+.gf .vna {
+  margin-bottom: 14px;
+  border: 1px solid var(--amb-b);
+  border-left: 3px solid var(--amb);
+  background: var(--amb-l);
+  border-radius: var(--r-lg);
+  padding: 11px 14px;
+}
+.gf .vna-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--amb);
+  margin-bottom: 2px;
+}
+.gf .vna-sub {
+  font-size: 11px;
+  color: var(--ink3);
+  margin-bottom: 8px;
+}
+.gf .vna textarea {
+  width: 100%;
+  min-height: 60px;
+  resize: vertical;
+  font-family: var(--fb);
+  font-size: 14px;
+}
+.gf .vna-acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+.gf .vna-toggle {
+  background: var(--amb-l);
+  border: 1.5px solid var(--amb);
+  color: var(--amb);
+  border-radius: var(--r);
+  padding: 7px 13px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: var(--fb);
+}
+.gf .vna-toggle.on,
+.gf .vna-toggle:hover {
+  background: var(--amb);
+  color: #fff;
+}
+.gf .vna-toggle:focus-visible {
+  outline: 2px solid var(--amb);
+  outline-offset: 2px;
+}
+.gf .vna-confirm {
+  background: var(--amb);
+  border: 1px solid var(--amb);
+  color: #fff;
+  border-radius: var(--r);
+  padding: 7px 13px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: var(--fb);
+}
+.gf .vna-confirm:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.gf .vna-cancel {
+  background: var(--white);
+  border: 1px solid var(--bd);
+  color: var(--ink3);
+  border-radius: var(--r);
+  padding: 7px 13px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: var(--fb);
+}
+.gf .si-na {
+  color: var(--amb);
+  font-weight: 600;
 }

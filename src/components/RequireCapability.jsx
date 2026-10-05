@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import useAuthStore from "../stores/authStore";
 import { toast } from "../stores/uiStore";
-import { PAGE_CAPABILITIES } from "../config/routes";
+import { PAGE_CAPABILITIES, isPathHiddenForRole } from "../config/routes";
 import { hasAnyCapability, canViewAnalytics } from "../../shared/permissions";
 
 // Route guard: blocks direct-URL access to pages the current role can't open.
@@ -37,7 +37,8 @@ export default function RequireCapability() {
   // mirroring the same check on /api/analytics.
   const allowed =
     (!requiredCap || hasAnyCapability(role, requiredCap)) &&
-    (location.pathname !== "/analytics" || canViewAnalytics(currentDoctor));
+    (location.pathname !== "/analytics" || canViewAnalytics(currentDoctor)) &&
+    !isPathHiddenForRole(role, location.pathname);
 
   useEffect(() => {
     if (!allowed) toast("You don't have access to this page", "warn");

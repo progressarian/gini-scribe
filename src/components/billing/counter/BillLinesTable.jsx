@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Pencil, Percent, Plus, Trash2 } from "lucide-react";
 import ConfirmModal from "../../ui/ConfirmModal";
 import {
   useChangeLineQuantity,
   useRemoveBillLine,
+  useSetLineDiscount,
   useSetLinePrice,
 } from "../../../queries/hooks/useBilling";
 import useAuthStore from "../../../stores/authStore";
@@ -11,6 +12,11 @@ import { CAPABILITIES, hasCapability } from "../../../../shared/permissions.js";
 import { errorOf, fromPaise, moneyTyped } from "../format";
 import { ORDER_STATE_NOTE, orderStateText, paymentRuleText } from "./lineText";
 import { ITEM_SEARCH_ID } from "./AddItems";
+import ManualDiscountFields, {
+  discountDraft,
+  discountNote,
+  discountProblem,
+} from "./ManualDiscountFields";
 
 function QuantityCell({ bill, line, locked, onBill, onError }) {
   const change = useChangeLineQuantity();
@@ -135,6 +141,8 @@ const focusItemSearch = () => {
 export default function BillLinesTable({ bill, onBill, form }) {
   const remove = useRemoveBillLine();
   const setPrice = useSetLinePrice();
+  const setDiscount = useSetLineDiscount();
+  const [discounting, setDiscounting] = useState(null);
   const me = useAuthStore((st) => st.currentDoctor);
   const admin = hasCapability(me?.role, CAPABILITIES.ADMIN);
   const [pricing, setPricing] = useState(null);
@@ -165,6 +173,25 @@ export default function BillLinesTable({ bill, onBill, form }) {
       setPricing(null);
     } catch (e) {
       setError(errorOf(e, "That price could not be saved"));
+    }
+  };
+
+  const saveDiscount = async (cleared) => {
+    setError(null);
+    try {
+      onBill(
+        await setDiscount.mutateAsync({
+          billId: bill.id,
+          visitId: bill.visit_id,
+          lineId: discounting.line.id,
+          kind: discounting.value.kind,
+          value: cleared ? 0 : discounting.value.value.trim(),
+          reason: cleared ? "" : discounting.value.reason.trim(),
+        }),
+      );
+      setDiscounting(null);
+    } catch (e) {
+      setError(errorOf(e, "That discount could not be saved"));
     }
   };
 
@@ -203,6 +230,15 @@ export default function BillLinesTable({ bill, onBill, form }) {
                 });
               },
             },
+          {
+            label: "Discount",
+            Icon: Percent,
+            aria: `Discount on ${line.bill_name}`,
+            run: () => {
+              setError(null);
+              setDiscounting({ line, value: discountDraft(line.manual_discount) });
+            },
+          },
           mayRemove(line) && {
             label: "Remove",
             Icon: Trash2,
@@ -281,6 +317,11 @@ export default function BillLinesTable({ bill, onBill, form }) {
                           </span>
                         )}
                         <PriceNote line={line} />
+                        {line.manual_discount && (
+                          <div className="bc-hint bc-line-price">
+                            Discount {discountNote(line.manual_discount)}
+                          </div>
+                        )}
                       </td>
                       <td data-label="Category">
                         <span className={`bc-cat bc-cat--${category.tone}`}>{category.label}</span>
@@ -347,6 +388,44 @@ export default function BillLinesTable({ bill, onBill, form }) {
         confirmDisabled={ordered(going) && !reason.trim()}
         onConfirm={drop}
         onCancel={() => form.drop("removing")}
+      />
+
+      <ConfirmModal
+        open={!!discounting}
+        title={discounting ? `Discount on ${discounting.line.bill_name}` : ""}
+        confirmLabel={setDiscount.isPending ? "Saving…" : "Save discount"}
+        variant="primary"
+        busy={setDiscount.isPending}
+        error={error}
+        confirmDisabled={!discounting || Boolean(discountProblem(discounting.value))}
+        message={
+          discounting && (
+            <>
+              <p className="bc-hint">
+                Comes off what the patient pays for this line (
+                {fromPaise(discounting.line.patient_payable)} now), after any automatic discount or
+                code. It can't take the line below ₹0.
+              </p>
+              <ManualDiscountFields
+                id="bc-line-discount"
+                value={discounting.value}
+                onChange={(value) => setDiscounting({ ...discounting, value })}
+              />
+              {discounting.line.manual_discount && (
+                <button
+                  type="button"
+                  className="st-btn st-btn-g"
+                  disabled={setDiscount.isPending}
+                  onClick={() => saveDiscount(true)}
+                >
+                  Remove this discount
+                </button>
+              )}
+            </>
+          )
+        }
+        onConfirm={() => saveDiscount(false)}
+        onCancel={() => setDiscounting(null)}
       />
 
       <ConfirmModal

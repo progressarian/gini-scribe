@@ -917,6 +917,17 @@ const DESK_LINE_SOURCES = LINE_SOURCES.filter(
   (source) => source !== "lab_case" && source !== "ordered",
 );
 
+export const billingReportScanSchema = deskObject(
+  {
+    base64: z.string().min(1, "Choose a file to upload"),
+    mediaType: z.enum(["application/pdf", "image/jpeg", "image/png", "image/webp"], {
+      message: "Upload the bill as a PDF or a photo (JPG, PNG or WebP)",
+    }),
+    fileName: z.string().trim().min(1, "The file needs a name").max(200),
+  },
+  objectOnly("Send the report as an object"),
+);
+
 export const billingLineAddSchema = deskObject(
   {
     item_id: id,
@@ -933,6 +944,15 @@ export const billingLineAddSchema = deskObject(
 );
 
 export const billingLineQuantitySchema = deskObject({ quantity: count });
+
+export const billingManualDiscountSchema = deskObject(
+  {
+    kind: z.enum(["percent", "flat"], { message: "must be percent or flat" }).optional(),
+    value: z.union([numberValue, z.null(), z.literal("")]).optional(),
+    reason: z.union([reason, z.null(), z.literal("")]).optional(),
+  },
+  objectOnly('Send the discount as an object, like { kind: "percent", value: 10 }'),
+);
 
 export const billingLinePriceSchema = deskObject({
   agreed_rate: numberValue,
@@ -1271,6 +1291,9 @@ export const billingPdfQuerySchema = z.strictObject({ token: z.string().optional
 
 export const BILLING_DESK_LABELS = {
   ...BILLING_FIELD_LABELS,
+  base64: "Report file",
+  mediaType: "File type",
+  fileName: "File name",
   item_id: "Item",
   item_ids: "Tests",
   quantity: "Quantity",

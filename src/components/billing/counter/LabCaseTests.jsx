@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useAddLabCaseTests, useLabCaseTests } from "../../../queries/hooks/useBilling";
 import { errorOf, fromPaise } from "../format";
+import LoadingCard from "./LoadingCard";
 
 function serviceText(test, needsCategory) {
   const price = needsCategory || test.price === null ? "" : ` · ${fromPaise(test.price)}`;
@@ -10,10 +11,13 @@ function serviceText(test, needsCategory) {
 
 export default function LabCaseTests({ bill, onBill, needsCategory }) {
   const draft = bill.status === "draft";
-  const { data } = useLabCaseTests(bill.id, bill.version, { enabled: draft });
+  const { data, isLoading } = useLabCaseTests(bill.id, bill.version, { enabled: draft });
   const add = useAddLabCaseTests();
   const [error, setError] = useState(null);
 
+  if (draft && isLoading) {
+    return <LoadingCard title="From today's lab report" text="Checking today's lab report…" />;
+  }
   if (!draft || !data?.shown) return null;
   const { tests, not_priced: notPriced } = data;
 

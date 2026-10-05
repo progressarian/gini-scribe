@@ -325,7 +325,7 @@ export default function DoctorStationPage() {
           // else. The second is what tells a consultant why the doctor queue is
           // empty while the waiting room is full, and who to ask about it.
           if (g.key === "pipeline") {
-            const open = !collapsed.has(g.key);
+            const isOpen = !collapsed.has(g.key);
             return (
               <section className="dgroup" key={g.key}>
                 <GroupHead
@@ -333,11 +333,11 @@ export default function DoctorStationPage() {
                   title={g.title}
                   sub="not ready yet"
                   count={list.length + othersTotal}
-                  open={open}
+                  open={isOpen}
                   onToggle={() => toggleGroup(g.key)}
                   id="dgroup-pipeline"
                 />
-                <div className="dsplit" id="dgroup-pipeline" hidden={!open}>
+                <div className="dsplit" id="dgroup-pipeline" hidden={!isOpen}>
                   <div className="dcol">
                     <h3 className="dcol-head">
                       Mine <span className="dg-count">{list.length}</span>
