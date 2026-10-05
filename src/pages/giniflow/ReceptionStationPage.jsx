@@ -64,6 +64,7 @@ import {
   useJourney,
   useJourneyStep,
 } from "../../queries/hooks/useGiniflowJourney";
+import { CONSULT_CHOICES, keepsForChoice } from "../../../shared/directConsult.js";
 
 // Arrived and done. They stay on the floor list — the desk is asked about them
 // — but they are not in the building.
@@ -1115,32 +1116,13 @@ const billNote = (bill, loading) => {
 
 const CONSULT_CHAIN = ["with_sd", "with_doctor"];
 
-const CONSULT_CHOICES = [
-  { value: "chief", label: "Chief Consultant Only" },
-  { value: "consultant", label: "Consultant Only" },
-  { value: "both", label: "Both" },
-];
-
-const consultSide = (step) => {
-  if (step.catalogId === "wait_sd") return "consultant";
-  if (step.catalogId === "wait_chief") return "chief";
-  if (step.catalogId === "rx_ready") return null;
-  if (step.role === "sd") return "consultant";
-  if (step.role === "chief" || step.role === "mo") return "chief";
-  return null;
-};
-
-const keepsForChoice = (step, choice) => {
-  if (choice === "both") return true;
-  const side = consultSide(step);
-  return !side || side === choice;
-};
-
 function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   const { data: visitTypes = [] } = useFlowVisitTypes();
   const [visitTypeId, setVisitTypeId] = useState(arrival.suggestedVisitTypeId || null);
   const [steps, setSteps] = useState(null);
-  const [consultChoice, setConsultChoice] = useState("both");
+  const [consultChoice, setConsultChoice] = useState(
+    arrival.consultsDirect ? "consultant" : "both",
+  );
   // Answers to the template's conditions. Only the keys this type's template
   // actually uses ever appear, and every one starts true: the journey a desk
   // sees on open is the journey they saw before this gate existed, and saying
@@ -1308,7 +1290,9 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
 
                 <div className="consultation-options">
                   {CONSULT_CHOICES.map((c) => {
-                    const unavailable = !choiceKeepsConsult(c.value);
+                    const unavailable =
+                      !choiceKeepsConsult(c.value) ||
+                      (arrival.consultsDirect && c.value !== "consultant");
                     return (
                       <label key={c.value} className={unavailable ? "is-disabled" : undefined}>
                         <input
@@ -1324,6 +1308,12 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
                     );
                   })}
                 </div>
+                {arrival.consultsDirect && (
+                  <div>
+                    {arrival.assignedDoctorName || "This consultant"} sees patients without the
+                    Chief Endocrinologist step.
+                  </div>
+                )}
               </div>
             )}
 

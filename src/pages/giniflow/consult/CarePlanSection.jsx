@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { VoiceButton } from "../../../components/giniflow/VoiceInput";
 import ReferralChips from "./ReferralChips";
+import { clearDraftField, writeDraftField } from "../../../lib/consultDraft";
 
 // Care plan — gini-doctor-final.html care-plan block.
 //
@@ -25,6 +26,7 @@ export default function CarePlanSection({
   readOnly,
   onToast,
   flushRef,
+  restored,
 }) {
   // getConsult always sends an object, never null — but a blank consult screen
   // mid-clinic is a bad way to find out that changed.
@@ -39,6 +41,8 @@ export default function CarePlanSection({
   }));
   const [savedAt, setSavedAt] = useState(null);
   const dirty = useRef(false);
+  const latestPlan = useRef(null);
+  const appliedRestore = useRef(false);
   // Edits typed but not yet sent. The debounce clears it; leaving the page
   // flushes on it.
   const unsent = useRef(false);
@@ -57,10 +61,31 @@ export default function CarePlanSection({
   // Debounced autosave rather than save-on-blur: a doctor who closes the tab
   // mid-sentence has still said something worth keeping.
   useEffect(() => {
+    if (appliedRestore.current || readOnly || restored?.carePlan === undefined) return;
+    appliedRestore.current = true;
+    dirty.current = true;
+    unsent.current = true;
+    setPlan({
+      ...restored.carePlan,
+      goals: restored.carePlan.goals?.length ? restored.carePlan.goals : [emptyGoal()],
+    });
+  }, [restored, readOnly]);
+
+  useEffect(() => {
+    if (!dirty.current) return;
+    latestPlan.current = JSON.stringify(plan);
+    writeDraftField(visitId, "carePlan", plan);
+  }, [plan, visitId]);
+
+  useEffect(() => {
     if (readOnly || !dirty.current) return undefined;
+    const sent = JSON.stringify(plan);
     const id = setTimeout(() => {
       unsent.current = false;
-      onSave(payload, () => setSavedAt(Date.now()));
+      onSave(payload, () => {
+        setSavedAt(Date.now());
+        if (latestPlan.current === sent) clearDraftField(visitId, "carePlan");
+      });
     }, 900);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -6,6 +6,8 @@ import { buildCounsellingNote } from "./counsellingNote.js";
 import { stoppedToday } from "./pharmacyStation.js";
 import { STATUS_LABEL, slaKeyForStatus } from "../../../shared/giniflowStatus.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
+import { getMachines } from "./machineCatalog.js";
+import { machineForTest } from "../../../shared/machineStages.js";
 
 const QUEUE_STATUSES = ["doctor_done", "rx_pending", "with_rx"];
 const DONE_STATUSES = ["pharmacy_pending", "dispensed", "exited"];
@@ -107,6 +109,7 @@ export async function getRxQueue(visitDate, q = null, now = new Date(), db = poo
 
   const rows = open.map((r) => toRow(r, budgetFor, now));
   return {
+    echoHandovers: await getEchoHandovers(visitDate, search, db),
     atDesk: rows.filter((r) => r.status === "with_rx"),
     waiting: rows
       .filter((r) => r.status !== "with_rx")
@@ -250,6 +253,88 @@ export async function markRxExplained(visitId, actorId = null, db = pool) {
     });
     await client.query("COMMIT");
     return { ok: true, status: "pharmacy_pending" };
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+const ECHO_HANDOVER_SQL = `
+  SELECT v.id, v.current_status, p.name, p.file_no,
+         COALESCE(doc.short_name, doc.name) AS doctor_name,
+         COALESCE(json_agg(json_build_object('test', t.test_name, 'status', o.sample_status))
+                    FILTER (WHERE o.id IS NOT NULL), '[]') AS tests
+    FROM giniflow_visits v
+    JOIN patients p ON p.id = v.patient_id
+    LEFT JOIN doctors doc ON doc.id = v.assigned_doctor_id
+    LEFT JOIN giniflow_lab_orders o
+           ON o.visit_id = v.id AND o.kind = 'machine' AND o.urgency = 'today'
+          AND o.sample_status <> 'cancelled'
+    LEFT JOIN giniflow_lab_order_tests t ON t.lab_order_id = o.id
+   WHERE v.visit_date = $1::date
+     AND v.echo_referral
+     AND v.echo_handed_over_at IS NULL
+     AND v.current_status NOT IN ('cancelled', 'no_show', 'dispensed', 'exited')
+     AND ($2::text IS NULL OR p.name ILIKE '%' || $2 || '%' OR p.file_no ILIKE '%' || $2 || '%')
+   GROUP BY v.id, p.name, p.file_no, doc.short_name, doc.name
+   ORDER BY p.name`;
+
+const echoTestsOf = (tests, machines) =>
+  (tests || []).filter((t) => machineForTest(machines, t.test)?.station === "echo");
+
+export async function getEchoHandovers(visitDate, search = null, db = pool) {
+  const [{ rows }, machines] = await Promise.all([
+    db.query(ECHO_HANDOVER_SQL, [visitDate, search]),
+    getMachines(db),
+  ]);
+  return rows.map((row) => {
+    const echo = echoTestsOf(row.tests, machines);
+    return {
+      visitId: row.id,
+      name: row.name,
+      fileNo: row.file_no,
+      doctorName: row.doctor_name,
+      echoTests: echo.map((t) => t.test),
+      reportReady: echo.length > 0 && echo.every((t) => t.status === "reported"),
+    };
+  });
+}
+
+export async function handOverEchoReport(visitId, actorId = null, db = pool) {
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query(
+      `SELECT v.echo_referral, v.echo_handed_over_at, v.visit_date::text AS visit_date
+         FROM giniflow_visits v WHERE v.id = $1 FOR NO KEY UPDATE`,
+      [visitId],
+    );
+    if (!rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
+    if (!rows[0].echo_referral) {
+      throw Object.assign(new Error("This patient is not an echo referral"), { status: 409 });
+    }
+    if (rows[0].echo_handed_over_at) {
+      throw Object.assign(new Error("The echo report was already handed over"), { status: 409 });
+    }
+    const [mine] = (await getEchoHandovers(rows[0].visit_date, null, client)).filter(
+      (entry) => entry.visitId === visitId,
+    );
+    if (!mine?.reportReady) {
+      throw Object.assign(
+        new Error("The echo report is not uploaded yet — hand it over once it is"),
+        { status: 409 },
+      );
+    }
+    await client.query(
+      `UPDATE giniflow_visits
+          SET echo_handed_over_at = NOW(), echo_handed_over_by = $2, updated_at = NOW()
+        WHERE id = $1`,
+      [visitId, actorId],
+    );
+    await client.query("COMMIT");
+    return { visitId, handedOver: true };
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;

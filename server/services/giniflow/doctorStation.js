@@ -199,6 +199,29 @@ const keyNumbersFor = (biomarkers) => {
     .map((t) => ({ test: t.label, value: String(t.value), unit: t.unit }));
 };
 
+const SECOND_CONSULT_SQL = `
+  SELECT a.id AS appointment_id, a.patient_id, COALESCE(p.name, a.patient_name) AS name,
+         COALESCE(p.file_no, a.file_no) AS file_no, a.age, a.sex, a.time_slot, a.status,
+         a.visit_type,
+         (SELECT COALESCE(od.short_name, od.name)
+            FROM giniflow_visits fv JOIN doctors od ON od.id = fv.assigned_doctor_id
+           WHERE fv.patient_id = a.patient_id AND fv.visit_date = a.appointment_date
+           LIMIT 1) AS floor_doctor
+    FROM appointments a
+    JOIN doctors d ON d.id = $2
+    LEFT JOIN patients p ON p.id = a.patient_id
+   WHERE a.appointment_date = $1::date
+     AND (a.doctor_id = d.id OR lower(btrim(a.doctor_name)) = lower(btrim(d.name)))
+     AND a.status IN ('checkedin', 'in_visit', 'seen', 'completed')
+     AND NOT EXISTS (SELECT 1 FROM giniflow_visits v WHERE v.appointment_id = a.id)
+     AND EXISTS (SELECT 1 FROM giniflow_visits v
+                  WHERE v.patient_id = a.patient_id AND v.visit_date = a.appointment_date
+                    AND v.assigned_doctor_id IS DISTINCT FROM d.id)
+     AND NOT EXISTS (SELECT 1 FROM patients bp WHERE bp.id = a.patient_id AND bp.is_blocked)
+   ORDER BY a.time_slot NULLS LAST, a.id`;
+
+const SECOND_CONSULT_DONE = ["seen", "completed"];
+
 export async function getDoctorQueue(
   visitDate,
   { doctorId = null, scope = "mine", q = null } = {},
@@ -208,7 +231,7 @@ export async function getDoctorQueue(
   const raw = typeof q === "string" && q.trim() ? q.trim() : null;
   const term = raw ? raw.replace(/[%_\\]/g, "\\$&") : null;
 
-  const [{ rows }, sla, { rows: durations }] = await Promise.all([
+  const [{ rows }, sla, { rows: durations }, { rows: secondRows }] = await Promise.all([
     db.query(QUEUE_SQL, [visitDate, QUEUE_STATUSES, term, LAB_ONLY_DOCTOR]),
     getSlaConfig(db),
     // Time actually spent in the room today: the gap between entering
@@ -228,6 +251,9 @@ export async function getDoctorQueue(
         WHERE v.visit_date = $1::date AND e.status = 'with_doctor'`,
       [visitDate],
     ),
+    doctorId && scope !== "all"
+      ? db.query(SECOND_CONSULT_SQL, [visitDate, doctorId])
+      : Promise.resolve({ rows: [] }),
   ]);
   const budgetFor = budgetLookup(sla);
   // The two day-level figures below are averages over every category, so they
@@ -239,6 +265,7 @@ export async function getDoctorQueue(
   // is looking — it has not been claimed by anyone else.
   const mine = (r) => !r.assigned_doctor_id || !doctorId || r.assigned_doctor_id === doctorId;
   const inScope = (r) => scope === "all" || mine(r);
+  const countable = (r) => scope === "all" || !doctorId || r.assigned_doctor_id === doctorId;
 
   const groups = { withMe: [], withOtherDoctor: [], resultsReady: [], pipeline: [], done: [] };
   // Patients in the pipeline who belong to ANOTHER consultant, kept by consultant
@@ -281,7 +308,7 @@ export async function getDoctorQueue(
 
     // The stat tiles keep describing the scope, not the search. They are the
     // day's numbers, and a typed query must not make "Today's patients" jump.
-    if (onScreen) {
+    if (onScreen && countable(row)) {
       counters.total++;
       if (!belongsToOther) counters[group]++;
       // Same distinction: this counts patients the lab is still holding up, not
@@ -339,6 +366,27 @@ export async function getDoctorQueue(
     }
   }
 
+  const needle = raw ? raw.toLowerCase() : null;
+  const secondConsults = secondRows
+    .map((r) => ({
+      appointmentId: r.appointment_id,
+      patientId: r.patient_id,
+      name: r.name,
+      fileNo: r.file_no,
+      age: r.age,
+      sex: r.sex,
+      appointmentTime: (r.time_slot || "").slice(0, 5) || null,
+      visitType: r.visit_type,
+      seen: SECOND_CONSULT_DONE.includes(r.status),
+      status: r.status,
+      floorDoctor: r.floor_doctor,
+    }))
+    .filter((c) => !needle || `${c.name || ""} ${c.fileNo || ""}`.toLowerCase().includes(needle));
+  for (const r of secondRows) {
+    counters.total++;
+    if (SECOND_CONSULT_DONE.includes(r.status)) counters.done++;
+  }
+
   // Priority first, then longest waiting — the board's rule, so a patient the
   // coordinator marked urgent is at the top here too.
   const rank = { urgent: 0, high: 1, normal: 2 };
@@ -360,6 +408,7 @@ export async function getDoctorQueue(
   return {
     groups,
     pipelineOthers,
+    secondConsults,
     query: raw,
     scope,
     counts: {

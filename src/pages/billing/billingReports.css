@@ -65,3 +65,9 @@
     flex: 1 1 100%;
   }
 }
+
+.fset.bill-ui .brep-quick {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}

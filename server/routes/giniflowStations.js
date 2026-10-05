@@ -7,6 +7,7 @@ import {
   getRxPatient,
   startRxExplain,
   markRxExplained,
+  handOverEchoReport,
   returnRxToQueue,
 } from "../services/giniflow/rxStation.js";
 import { fetchRxFile, regenerateRx } from "../services/giniflow/printRx.js";
@@ -38,6 +39,9 @@ import {
   giniflowFinalizeSchema,
   giniflowDoctorQueueQuerySchema,
   giniflowCarePlanSchema,
+  giniflowComplaintSchema,
+  giniflowHistorySchema,
+  giniflowAdviceSchema,
   giniflowProposalDecisionSchema,
   giniflowDateQuerySchema,
   giniflowStationGroupQuerySchema,
@@ -180,6 +184,13 @@ import {
   visitOwnership,
   rowOwnership,
 } from "../services/giniflow/doctorStation.js";
+import {
+  getVisitComplaints,
+  addVisitComplaint,
+  removeVisitComplaint,
+  saveVisitHistory,
+} from "../services/giniflow/visitComplaints.js";
+import { getVisitAdvice, saveVisitAdvice } from "../services/giniflow/visitAdvice.js";
 import {
   getDraft,
   seedDraftFromRegimen,
@@ -620,6 +631,85 @@ router.post(
       res.json(await releaseConsult(req.params.visitId, req.doctor?.doctor_id ?? null));
     } catch (e) {
       doctorError(res, e, "Gini Flow release consult");
+    }
+  },
+);
+
+router.get("/giniflow/stations/doctor/:visitId/complaints", doctorGate, async (req, res) => {
+  try {
+    res.json(await getVisitComplaints(req.params.visitId));
+  } catch (e) {
+    doctorError(res, e, "Gini Flow complaints");
+  }
+});
+
+router.post(
+  "/giniflow/stations/doctor/:visitId/complaints",
+  doctorGate,
+  requireOwnVisit,
+  validate(giniflowComplaintSchema),
+  async (req, res) => {
+    try {
+      res.status(201).json(await addVisitComplaint(req.params.visitId, req.body.label));
+    } catch (e) {
+      doctorError(res, e, "Gini Flow add complaint");
+    }
+  },
+);
+
+router.get("/giniflow/stations/doctor/:visitId/advice", doctorGate, async (req, res) => {
+  try {
+    res.json(await getVisitAdvice(req.params.visitId));
+  } catch (e) {
+    doctorError(res, e, "Gini Flow advice");
+  }
+});
+
+router.put(
+  "/giniflow/stations/doctor/:visitId/advice",
+  doctorGate,
+  requireOwnVisit,
+  validate(giniflowAdviceSchema),
+  async (req, res) => {
+    try {
+      res.json(
+        await saveVisitAdvice(req.params.visitId, req.body.advice, req.doctor?.doctor_id ?? null),
+      );
+    } catch (e) {
+      doctorError(res, e, "Gini Flow advice");
+    }
+  },
+);
+
+router.put(
+  "/giniflow/stations/doctor/:visitId/history",
+  doctorGate,
+  requireOwnVisit,
+  validate(giniflowHistorySchema),
+  async (req, res) => {
+    try {
+      res.json(
+        await saveVisitHistory(req.params.visitId, req.body.history, req.doctor?.doctor_id ?? null),
+      );
+    } catch (e) {
+      doctorError(res, e, "Gini Flow history note");
+    }
+  },
+);
+
+router.delete(
+  "/giniflow/stations/doctor/:visitId/complaints/:complaintId",
+  doctorGate,
+  requireOwnVisit,
+  async (req, res) => {
+    try {
+      const complaintId = Number(req.params.complaintId);
+      if (!Number.isInteger(complaintId) || complaintId <= 0) {
+        return res.status(400).json({ error: "Invalid complaint" });
+      }
+      res.json(await removeVisitComplaint(req.params.visitId, complaintId));
+    } catch (e) {
+      doctorError(res, e, "Gini Flow remove complaint");
     }
   },
 );
@@ -2543,6 +2633,14 @@ router.post("/giniflow/stations/rx/:visitId/explained", rxGate, async (req, res)
     res.json(await markRxExplained(req.params.visitId, req.doctor?.doctor_id ?? null));
   } catch (e) {
     handleError(res, e, "Gini Flow Rx explained");
+  }
+});
+
+router.post("/giniflow/stations/rx/:visitId/echo-handover", rxGate, async (req, res) => {
+  try {
+    res.json(await handOverEchoReport(req.params.visitId, req.doctor?.doctor_id ?? null));
+  } catch (e) {
+    handleError(res, e, "Gini Flow echo report hand-over");
   }
 });
 

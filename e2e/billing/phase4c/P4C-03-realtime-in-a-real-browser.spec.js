@@ -11,6 +11,7 @@ import {
   RT_SUPABASE_URL,
   assertLocalSupabase,
 } from "../../setup/localRealtime.mjs";
+import { openAddItems } from "../../helpers/addItems.mjs";
 
 const tag = crypto.randomBytes(3).toString("hex");
 const T = tag.toUpperCase();
@@ -240,6 +241,7 @@ test.describe.serial("P4C-03 realtime in a real browser", () => {
 
         await localLogin(counter, "reception");
         await openCounter(counter);
+        await openAddItems(counter);
         await counter.getByLabel("Search items").fill(WANTED);
         await counter.getByRole("button", { name: "Request new item" }).click();
         await counter.getByLabel("Why is it needed?").fill(WANTED_REASON);
@@ -276,6 +278,7 @@ test.describe.serial("P4C-03 realtime in a real browser", () => {
         const polls = watchFetches(counter, /\/api\/billing\/requests\/mine$/);
         await localLogin(counter, "reception");
         await openCounter(counter);
+        await openAddItems(counter);
         await counter.getByLabel("Search items").fill(ITEM);
         await counter
           .getByRole("list", { name: "Item search results" })

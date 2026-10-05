@@ -5,6 +5,7 @@ import { gotoReady } from "../../helpers/browser.mjs";
 import { USERS } from "../../fixtures/data.mjs";
 import { assertTestDatabase } from "../../setup/guard.mjs";
 import { autoConsultation, extraVisit, newTag, setUp, tearDown } from "./p4-bills-fixture.mjs";
+import { openAddItems } from "../../helpers/addItems.mjs";
 
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 const requests = await import("../../../server/services/billing/billingRequests.js");
@@ -181,6 +182,7 @@ test.describe.serial("P4C-16 consultation search and add match the visit type", 
   test("7. the counter lists only the visit's consultation type and says so", async ({ page }) => {
     await loginAs(page, "reception");
     await gotoReady(page, `${RECEPTION}?tab=bill&visit=${visits.fu.visit}`, () => addItems(page));
+    await openAddItems(page);
     await searchInput(page).fill(`${tag}`);
     await expect(results(page)).toContainText(`Consultation Follow Up ${tag}`);
     await expect(results(page)).toContainText(`Dressing ${tag}`);
@@ -188,11 +190,13 @@ test.describe.serial("P4C-16 consultation search and add match the visit type", 
     await expect(results(page)).not.toContainText(`Consultation Dr New ${tag}`);
     await expect(addItems(page)).toContainText("Showing Follow Up consultations for this visit");
 
+    await openAddItems(page);
     await searchInput(page).fill(`Consultation New ${tag}`);
     await expect(addItems(page)).toContainText(`No item matches`);
     await expect(addItems(page)).toContainText("Showing Follow Up consultations for this visit");
-    await expect(results(page)).toHaveCount(0);
+    await expect(addItems(page)).not.toContainText(`Consultation Dr New ${tag}`);
 
+    await openAddItems(page);
     await searchInput(page).fill(`Dressing ${tag}`);
     await expect(results(page).getByRole("listitem")).toHaveCount(1);
     await expect(addItems(page)).not.toContainText("consultations for this visit");

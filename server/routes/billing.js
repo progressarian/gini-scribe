@@ -17,6 +17,7 @@ import {
   billingConsultationSuggestionQuerySchema,
   billingDraftDeleteSchema,
   billingLinePriceSchema,
+  billingFinalDiscountSchema,
   billingManualDiscountSchema,
   billingDraftOpenSchema,
   billingDuesQuerySchema,
@@ -161,7 +162,12 @@ router.get(
   desk,
   validateQuery(billingItemSearchQuerySchema, BILLING_DESK_LABELS),
   run("Item search", 200, (req) =>
-    searchDeskItems({ q: req.query.q, limit: req.query.limit, visitId: req.query.visit_id }),
+    searchDeskItems({
+      q: req.query.q,
+      limit: req.query.limit,
+      visitId: req.query.visit_id,
+      category: req.query.category,
+    }),
   ),
 );
 
@@ -362,6 +368,24 @@ router.post(
   validate(billingManualDiscountSchema, BILLING_DESK_LABELS),
   run("Set the bill discount", 200, (req) =>
     bills.setBillDiscount(req.params.billId, req.body, ctx(req)),
+  ),
+);
+
+router.post(
+  `${BASE}/bills/:billId/final-discount/preview`,
+  desk,
+  validate(billingFinalDiscountSchema, BILLING_DESK_LABELS),
+  run("Preview a discount on a final bill", 200, (req) =>
+    creditNotes.previewFinalDiscount(req.params.billId, req.body),
+  ),
+);
+
+router.post(
+  `${BASE}/bills/:billId/final-discount`,
+  desk,
+  validate(billingFinalDiscountSchema, BILLING_DESK_LABELS),
+  run("Discount a final bill", 200, (req) =>
+    creditNotes.discountFinalBill(req.params.billId, req.body, ctx(req)),
   ),
 );
 

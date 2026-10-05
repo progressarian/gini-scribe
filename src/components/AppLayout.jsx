@@ -29,6 +29,7 @@ import "../styles/App.css";
 const C = PAGE_CAPABILITIES;
 
 const isLabDesk = (role) => role === ROLES.LAB || role === ROLES.TECH;
+const isPharmacyDesk = (role) => role === ROLES.PHARMACY || role === ROLES.PHARMACY_ADMIN;
 
 const NAV_ITEMS = [
   { path: "/", label: "🏠 Home", show: (s) => !homeForRole(s.role) },
@@ -96,6 +97,12 @@ const NAV_ITEMS = [
   { path: "/docs", label: "📎 Docs", cap: C["/docs"], show: (s) => s.hasPatient },
   { path: "/lab-portal", label: "🔬 Upload", cap: C["/lab-portal"], show: () => true },
   { path: "/refills", label: "💊 Refills", cap: C["/refills"], show: () => true },
+  {
+    path: "/pharmacy/stock",
+    label: "📦 Stock",
+    cap: C["/pharmacy/stock"],
+    show: () => true,
+  },
   {
     path: "/dose-change-requests",
     label: "⚕️ Dose Reviews",
@@ -174,7 +181,13 @@ const NAV_ITEMS = [
     path: "/giniflow/stations",
     label: "🧭 GF Stations",
     cap: C["/giniflow/stations"],
-    show: () => true,
+    show: (s) => !isPharmacyDesk(s.role),
+  },
+  {
+    path: "/giniflow/station/pharmacy",
+    label: "💊 Pharmacy Station",
+    cap: C["/giniflow/station/pharmacy"],
+    show: (s) => isPharmacyDesk(s.role),
   },
   {
     path: "/giniflow/manager",
@@ -450,7 +463,7 @@ export default function AppLayout() {
             const capable = NAV_ITEMS.filter(
               // t.cap may be one capability or an array (any-of).
               (t) =>
-                (!t.cap || hasAnyCapability(navState.role, t.cap)) &&
+                (!t.cap || hasAnyCapability(navState.doctor, t.cap)) &&
                 t.show(navState) &&
                 !navHidden.includes(t.path),
             );

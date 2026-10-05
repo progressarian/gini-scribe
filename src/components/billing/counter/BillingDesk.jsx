@@ -475,7 +475,6 @@ export default function BillingDesk({ tab, visitId, patientId, billId, sentPatie
                       <ScannedReportLines key={`scan-${bill.id}`} bill={bill} onBill={setBill} />
                       <NotPricedTests tests={notPriced} />
                       <PaidAtReception bill={bill} onChanged={refreshBill} />
-                      <DiscountCodeBox bill={bill} onBill={setBill} form={form} />
                     </div>
                     <div className="bc-bill__summary">
                       <TotalsAndPayment
@@ -486,6 +485,14 @@ export default function BillingDesk({ tab, visitId, patientId, billId, sentPatie
                         payLater={payLater}
                         onPayLater={setPayLater}
                         form={form}
+                        afterSummary={
+                          <DiscountCodeBox
+                            bill={bill}
+                            onBill={setBill}
+                            form={form}
+                            patient={selected || duePatient || sentPatient}
+                          />
+                        }
                       />
                       <BillActions
                         bill={bill}

@@ -120,7 +120,7 @@ const TONE = {
 };
 
 export default function StationsLauncherPage() {
-  const role = useAuthStore((s) => s.currentDoctor?.role);
+  const doctor = useAuthStore((s) => s.currentDoctor);
   const { data, isPending, isError } = useQuery({
     queryKey: ["giniflow", "stations", "summary"],
     queryFn: async () => (await api.get("/api/giniflow/stations/summary")).data,
@@ -131,7 +131,7 @@ export default function StationsLauncherPage() {
 
   const stations = data?.stations || {};
   const visible = STATIONS.filter(
-    (s) => !s.href || hasCapability(role, GINIFLOW_LAUNCHER_CAPABILITY[s.key]),
+    (s) => !s.href || hasCapability(doctor, GINIFLOW_LAUNCHER_CAPABILITY[s.key]),
   );
   const today = new Date().toLocaleDateString("en-IN", {
     weekday: "short",

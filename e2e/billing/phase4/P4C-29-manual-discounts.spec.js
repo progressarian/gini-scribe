@@ -222,7 +222,7 @@ test.describe.serial("P4C-29 manual discounts on a line and on the whole bill", 
     expect(kept.totals.payable).toBe(60000);
   });
 
-  test("8. the counter: a line discount through its dialog, then an additional bill discount", async ({
+  test("8. the counter: a line discount typed inline, then an additional bill discount", async ({
     page,
   }) => {
     const bill = await draftWith("M8", [ids.dressing, ids.brace]);
@@ -234,18 +234,12 @@ test.describe.serial("P4C-29 manual discounts on a line and on the whole bill", 
       `/giniflow/station/reception?tab=bill&visit=${bill.visit_id}`,
       () => lines,
     );
-    await lines.getByRole("button", { name: `Discount on Ankle brace ${tag}` }).click();
-    const dialog = page.getByRole("dialog");
-    await dialog.getByLabel("Type").selectOption("flat");
-    await dialog.getByLabel("Discount ₹").fill("150");
-    await dialog.getByLabel("Reason (optional)").fill("Staff family");
-    await page.screenshot({
-      path: "/tmp/claude-1000/-home-anshul-Desktop-Ankit-Gurjot-gini-scribe/67834387-8e7c-432e-91ff-e0a1700aa415/scratchpad/line-discount-dialog.png",
-    });
-    await dialog.getByRole("button", { name: "Save discount" }).click();
-    await expect(dialog).toHaveCount(0);
+    await lines.getByLabel(`Discount type for Ankle brace ${tag}`).selectOption("flat");
+    const amount = lines.getByLabel(`Discount for Ankle brace ${tag}`);
+    await amount.fill("150");
+    await amount.press("Enter");
     await expect(lines.getByText("Discount ₹150 off · by")).toBeVisible();
-    await expect(lines.getByText("Staff family")).toBeVisible();
+    await expect(lines.getByText("−₹150")).toBeVisible();
 
     const box = page.getByRole("region", { name: "Discount codes" });
     await box.getByRole("button", { name: "+ Additional discount on the bill" }).click();
@@ -254,10 +248,6 @@ test.describe.serial("P4C-29 manual discounts on a line and on the whole bill", 
     await expect(box.getByText(/Additional discount on the bill: 10% off/)).toBeVisible();
     const totals = page.getByRole("table", { name: "Totals" });
     await expect(totals).toContainText("₹1,035");
-    await page.screenshot({
-      path: "/tmp/claude-1000/-home-anshul-Desktop-Ankit-Gurjot-gini-scribe/67834387-8e7c-432e-91ff-e0a1700aa415/scratchpad/bill-discount.png",
-      fullPage: true,
-    });
     await box.getByRole("button", { name: "Remove", exact: true }).click();
     await expect(
       box.getByRole("button", { name: "+ Additional discount on the bill" }),

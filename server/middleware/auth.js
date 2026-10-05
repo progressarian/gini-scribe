@@ -85,6 +85,7 @@ const PUBLIC_PATTERNS = [
 ];
 
 const DOCTOR_ONLY_PREFIXES = [
+  "/api/pharmacy/stock",
   "/api/active-visits",
   "/api/consultations",
   "/api/clinical",
@@ -181,6 +182,7 @@ const ROUTE_CAPABILITIES = [
   ["/api/extract", CAP.CLINICAL_WRITE],
   // Pharmacy counter worklist (docs/medicines-management/).
   ["/api/pharmacy", CAP.MED_COLLECTION],
+  ["/api/pharmacy/stock", CAP.PHARMACY_STOCK_VIEW],
   ["/api/doctors", CAP.RECEPTION_OPS],
   // Slot availability — drives the time-slot picker on both /find and /ghm.
   ["/api/availability", [CAP.RECEPTION_OPS, CAP.OBT_OPS]],
@@ -245,7 +247,7 @@ export const requireAuth = (req, res, next) => {
   // Role-based capability check — applies only to doctor sessions.
   if (req.doctor) {
     const requiredCap = capabilityForPath(req.path);
-    if (requiredCap && !hasAnyCapability(req.doctor.role, requiredCap)) {
+    if (requiredCap && !hasAnyCapability(req.doctor, requiredCap)) {
       return res.status(403).json({ error: "Insufficient permissions" });
     }
     // Narrower than the capability above: the Population analytics surface is
@@ -277,7 +279,7 @@ export const requireDoctor = (req, res, next) => {
 // Accepts an array for an any-of gate, matching ROUTE_CAPABILITIES.
 export const requireCapability = (capability) => (req, res, next) => {
   if (!req.doctor) return res.status(403).json({ error: "Doctor account required" });
-  if (!hasAnyCapability(req.doctor.role, capability)) {
+  if (!hasAnyCapability(req.doctor, capability)) {
     return res.status(403).json({ error: "Insufficient permissions" });
   }
   next();

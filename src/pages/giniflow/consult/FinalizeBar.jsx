@@ -7,10 +7,12 @@ import { useFinalize, useFinalizePreview } from "../../../queries/hooks/useGinif
 // cannot be corrected by a further event. It therefore states what it is about
 // to do, in the prototype's own words, before it will do it.
 
-export default function FinalizeBar({ visitId, onDone, onToast }) {
+export default function FinalizeBar({ visitId, onDone, onToast, requestRef }) {
+  const [printAfter, setPrintAfter] = useState(false);
   const [open, setOpen] = useState(false);
   const { data: preview, isLoading } = useFinalizePreview(visitId, open);
   const finalize = useFinalize(visitId);
+  if (requestRef) requestRef.current = () => setOpen(true);
 
   // A proposal the doctor has not decided blocks the fan-out (addendum v1.1 §3).
   // Not a warning: finalizing used to record every undecided proposal as
@@ -22,14 +24,16 @@ export default function FinalizeBar({ visitId, onDone, onToast }) {
   const unexplained = preview?.interactions?.blocking?.length ?? 0;
   const blocked = (preview?.undecidedProposals ?? 0) > 0 || unexplained > 0;
 
-  const run = () =>
+  const run = (print = false) => {
+    setPrintAfter(print);
     finalize.mutate(undefined, {
       onSuccess: (r) => {
         setOpen(false);
-        onDone(r);
+        onDone(r, { print });
       },
       onError: (e) => onToast(e?.response?.data?.error || "Finalize failed — nothing was written"),
     });
+  };
 
   return (
     <>
@@ -130,11 +134,18 @@ export default function FinalizeBar({ visitId, onDone, onToast }) {
                 {/* The server refuses this too (finalize.js). Disabling the
                     button says why before the click rather than after it. */}
                 <button
+                  className="btn btn-g"
+                  disabled={finalize.isPending || blocked}
+                  onClick={() => run(true)}
+                >
+                  {finalize.isPending && printAfter ? "Finalizing…" : "Finalize & print"}
+                </button>
+                <button
                   className="btn btn-tl"
                   disabled={finalize.isPending || blocked}
-                  onClick={run}
+                  onClick={() => run(false)}
                 >
-                  {finalize.isPending
+                  {finalize.isPending && !printAfter
                     ? "Finalizing…"
                     : unexplained > 0
                       ? `${unexplained} interaction${unexplained === 1 ? "" : "s"} to resolve`

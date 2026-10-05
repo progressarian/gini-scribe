@@ -21,6 +21,15 @@ const dayText = (ms) => new Date(ms).toISOString().slice(0, 10);
 const dayMs = (text) => Date.parse(`${text}T00:00:00Z`);
 
 const RANGES = [
+  { key: "today", label: "Today", range: (today) => ({ from: today, to: today }) },
+  {
+    key: "yesterday",
+    label: "Yesterday",
+    range: (today) => {
+      const day = dayText(dayMs(today) - DAY_MS);
+      return { from: day, to: day };
+    },
+  },
   {
     key: "month",
     label: "This month",
@@ -51,6 +60,9 @@ const RANGES = [
   { key: "all", label: "All dates", openOnly: true, range: (today) => ({ from: "", to: today }) },
   { key: "custom", label: "Custom range", range: null },
 ];
+
+const DEFAULT_RANGE = RANGES.find((r) => r.key === "month");
+const QUICK_RANGES = RANGES.filter((r) => r.key === "today" || r.key === "yesterday");
 
 const IST_TIME = new Intl.DateTimeFormat("en-IN", {
   timeZone: "Asia/Kolkata",
@@ -194,7 +206,7 @@ function DateField({ label, value, onChange }) {
 
 const PERIOD_LABELS = { none: "Whole range", day: "Day", week: "Week", month: "Month" };
 
-function FilterBar({ catalog, report, filters, setFilter, rangeKey, pickRange }) {
+function FilterBar({ catalog, report, filters, setFilter, rangeKey, pickRange, onClear, cleared }) {
   const labels = catalog.filter_labels;
   const allowed = new Set(report.filters);
   const options = catalog.options;
@@ -223,6 +235,19 @@ function FilterBar({ catalog, report, filters, setFilter, rangeKey, pickRange })
             </option>
           ))}
         </select>
+      </div>
+      <div className="brep-quick" role="group" aria-label="Quick dates">
+        {QUICK_RANGES.map((r) => (
+          <button
+            key={r.key}
+            type="button"
+            className={`flow-btn flow-btn-mini ${rangeKey === r.key ? "flow-btn-primary" : "flow-btn-ghost"}`}
+            aria-pressed={rangeKey === r.key}
+            onClick={() => pickRange(r.key)}
+          >
+            {r.label}
+          </button>
+        ))}
       </div>
       <DateField
         label={labels.from}
@@ -301,6 +326,16 @@ function FilterBar({ catalog, report, filters, setFilter, rangeKey, pickRange })
           options={options.users.map((u) => ({ value: String(u.id), label: u.name }))}
         />
       ) : null}
+      <div className="brep-quick">
+        <button
+          type="button"
+          className="flow-btn flow-btn-mini flow-btn-ghost"
+          disabled={cleared}
+          onClick={onClear}
+        >
+          Clear filters
+        </button>
+      </div>
     </div>
   );
 }
@@ -338,13 +373,13 @@ export default function BillingReportsPage() {
 
   useEffect(() => {
     if (!today) return;
-    setFilters((f) => (f.to ? f : { ...f, ...RANGES[0].range(today) }));
+    setFilters((f) => (f.to ? f : { ...f, ...DEFAULT_RANGE.range(today) }));
   }, [today]);
 
   useEffect(() => {
     if (!report || !today || report.open_start || filters.from) return;
     setRangeKey("month");
-    setFilters((f) => ({ ...f, ...RANGES[0].range(today) }));
+    setFilters((f) => ({ ...f, ...DEFAULT_RANGE.range(today) }));
   }, [report, today, filters.from]);
 
   const sent = useMemo(() => sentFor(report, filters), [report, filters]);
@@ -354,6 +389,16 @@ export default function BillingReportsPage() {
   const setFilter = (key, value, dated = false) => {
     if (dated) setRangeKey("custom");
     setFilters((f) => ({ ...f, [key]: value }));
+  };
+
+  const defaults = today ? { ...EMPTY, ...DEFAULT_RANGE.range(today) } : null;
+  const cleared =
+    !defaults ||
+    (rangeKey === DEFAULT_RANGE.key && Object.keys(EMPTY).every((k) => filters[k] === defaults[k]));
+  const clearFilters = () => {
+    if (!defaults) return;
+    setRangeKey(DEFAULT_RANGE.key);
+    setFilters(defaults);
   };
 
   const pickRange = (key) => {
@@ -435,6 +480,8 @@ export default function BillingReportsPage() {
             setFilter={setFilter}
             rangeKey={rangeKey}
             pickRange={pickRange}
+            onClear={clearFilters}
+            cleared={cleared}
           />
         ) : null}
       </div>

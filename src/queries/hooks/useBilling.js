@@ -113,16 +113,17 @@ export function useDeskSettings({ enabled = true } = {}) {
 export const ITEM_SEARCH_MIN = 2;
 export const ITEM_SEARCH_LIMIT = 20;
 
-export function useItemSearch(q, visitId) {
+export function useItemSearch(q, visitId, category, { enabled = true } = {}) {
   return useQuery({
-    queryKey: [...billingKeys.deskItems(q), visitId ?? null],
+    queryKey: [...billingKeys.deskItems(q), visitId ?? null, category ?? null],
     queryFn: () =>
       read(`${DESK}/items/search`, {
         q,
         limit: ITEM_SEARCH_LIMIT,
         ...(visitId ? { visit_id: visitId } : {}),
+        ...(category ? { category } : {}),
       }),
-    enabled: q.length >= ITEM_SEARCH_MIN,
+    enabled: enabled && (q.length === 0 || q.length >= ITEM_SEARCH_MIN),
     staleTime: 60 * 1000,
   });
 }
@@ -487,6 +488,20 @@ function useRefundMutation(mutationFn) {
       queryClient.invalidateQueries({ queryKey: REFUND_BOARD });
     },
   });
+}
+
+export function usePreviewFinalDiscount() {
+  return useMutation({
+    mutationFn: async ({ billId, visitId: _visitId, ...body }) =>
+      (await api.post(`${DESK}/bills/${billId}/final-discount/preview`, body)).data,
+  });
+}
+
+export function useDiscountFinalBill() {
+  return useRefundMutation(
+    async ({ billId, visitId, ...body }) =>
+      (await api.post(`${DESK}/bills/${billId}/final-discount`, body)).data,
+  );
 }
 
 export function useRefundBoard(filters = {}, { enabled = true } = {}) {

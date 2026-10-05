@@ -90,12 +90,14 @@ function Reason({ row }) {
 
 function When({ row }) {
   const decided = row.status === "rejected" ? "Rejected" : "Approved";
+  const discount = row.kind === "discount";
   return (
     <>
       <div>
-        Asked {clock(row.requested_at)} by {row.requested_by?.name ?? "—"}
+        {discount ? "Discount given" : "Asked"} {clock(row.requested_at)} by{" "}
+        {row.requested_by?.name ?? "—"}
       </div>
-      {row.decided_at && (
+      {row.decided_at && !discount && (
         <div className="bc-head__meta">
           {decided} {clock(row.decided_at)} by {row.decided_by?.name ?? "the admin"}
         </div>
@@ -112,7 +114,7 @@ function When({ row }) {
 
 function RefundRow({ row, onOpen }) {
   return (
-    <tr data-request={row.request_id}>
+    <tr data-request={row.key}>
       <td data-label="Patient">
         {row.patient.name}
         <span className="bc-head__meta"> · {row.patient.file_no || "—"}</span>
@@ -121,7 +123,10 @@ function RefundRow({ row, onOpen }) {
         {row.bill_no}
         <span className="bc-head__meta"> · visit {row.visit_date || row.bill_date || "—"}</span>
       </td>
-      <td data-label="Credit note">{row.credit_note?.bill_no || "—"}</td>
+      <td data-label="Credit note">
+        {row.credit_note?.bill_no || "—"}
+        {row.kind === "discount" && <span className="bc-head__meta"> · discount</span>}
+      </td>
       <td data-label="Amount">
         <Amount row={row} />
       </td>
@@ -196,7 +201,7 @@ function Section({ section, rows, count, more, open, onToggle, onOpen }) {
               </thead>
               <tbody>
                 {rows.map((row) => (
-                  <RefundRow key={row.request_id} row={row} onOpen={onOpen} />
+                  <RefundRow key={row.key} row={row} onOpen={onOpen} />
                 ))}
               </tbody>
             </table>
@@ -216,9 +221,12 @@ const NO_FILTERS = {};
 
 export function approvedRefundText(rows) {
   const total = fromPaise(rows.reduce((sum, row) => sum + row.amounts.to_pay, 0));
-  return rows.length === 1
-    ? `Refund approved for ${rows[0].patient.name} — ${total} to pay back`
-    : `${rows.length} refunds approved — ${total} to pay back`;
+  if (rows.length === 1) {
+    return rows[0].kind === "discount"
+      ? `Discount to pay back for ${rows[0].patient.name} — ${total}`
+      : `Refund approved for ${rows[0].patient.name} — ${total} to pay back`;
+  }
+  return `${rows.length} refunds and discounts to pay back — ${total}`;
 }
 
 export function useRefundsToPay(enabled, onApproved) {
@@ -230,8 +238,8 @@ export function useRefundsToPay(enabled, onApproved) {
 
   useEffect(() => {
     if (!rows) return;
-    const fresh = seen.current ? rows.filter((row) => !seen.current.has(row.request_id)) : [];
-    seen.current = new Set(rows.map((row) => row.request_id));
+    const fresh = seen.current ? rows.filter((row) => !seen.current.has(row.key)) : [];
+    seen.current = new Set(rows.map((row) => row.key));
     if (fresh.length) told.current(fresh);
   }, [rows]);
 

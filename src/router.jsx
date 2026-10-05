@@ -66,6 +66,7 @@ const AnalyticsPage = lazyWithRetry(() => import("./pages/AnalyticsPage"));
 const CIPage = lazyWithRetry(() => import("./pages/CIPage"));
 const FindPage = lazyWithRetry(() => import("./pages/FindPage"));
 const RefillsPage = lazyWithRetry(() => import("./pages/RefillsPage"));
+const PharmacyStockPage = lazyWithRetry(() => import("./pages/pharmacy/PharmacyStockPage"));
 const DoseChangeRequestsPage = lazyWithRetry(() => import("./pages/DoseChangeRequestsPage"));
 const LabRequestsPage = lazyWithRetry(() => import("./pages/LabRequestsPage"));
 const SideEffectsPage = lazyWithRetry(() => import("./pages/SideEffectsPage"));
@@ -176,6 +177,7 @@ const router = createBrowserRouter([
               { path: "/", element: <RoleHome>{lazyEl(HomePage)}</RoleHome> },
               { path: "/find", element: lazyEl(FindPage) },
               { path: "/refills", element: lazyEl(RefillsPage) },
+              { path: "/pharmacy/stock", element: lazyEl(PharmacyStockPage) },
               { path: "/dose-change-requests", element: lazyEl(DoseChangeRequestsPage) },
               { path: "/lab-requests", element: lazyEl(LabRequestsPage) },
               { path: "/side-effects", element: lazyEl(SideEffectsPage) },

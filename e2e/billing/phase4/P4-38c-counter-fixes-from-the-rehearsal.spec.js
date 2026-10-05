@@ -7,6 +7,7 @@ import { assertTestDatabase } from "../../setup/guard.mjs";
 import { USERS } from "../../fixtures/data.mjs";
 import { rupees } from "../../../src/components/billing/format.js";
 import { PRICES, ensureSeries, newDayTag, seedDay, tearDownDay } from "./p438-floor-day.mjs";
+import { openAddItems } from "../../helpers/addItems.mjs";
 
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 const visitLines = await import("../../../server/services/billing/visitLines.js");
@@ -240,6 +241,7 @@ test.describe.serial("P4-38c counter fixes found by the floor-trial rehearsal", 
     await openCounter(page, patient.visit);
     const box = region(page, "Add items");
     const results = box.getByRole("list", { name: "Item search results" });
+    await openAddItems(page);
     await box.getByLabel("Search items").fill(tag);
     await expect(results.getByRole("listitem").nth(1)).toBeVisible();
     await box.getByLabel("Search items").fill(`Dressing ${tag}`);

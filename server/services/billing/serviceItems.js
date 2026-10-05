@@ -9,6 +9,7 @@ import { refuseRemoved } from "./removedDoctors.js";
 import { createGroup, createSubgroup } from "./serviceGroups.js";
 import { orderedNamesNotPriced } from "./serviceItemAliases.js";
 import { TEST_MATCHES_SQL } from "./testMatch.js";
+import { itemRates } from "./priceLine.js";
 import { FLAT } from "../giniflow/labCatalog.js";
 import {
   CONSULTATION_DEFAULT_GROUP,
@@ -350,6 +351,7 @@ function cleanReason(value) {
 }
 
 export const DESK_SEARCH_LIMIT = 30;
+const DESK_SEARCH_TERMS = 8;
 
 export async function visitConsultationType(visitId, db = pool) {
   if (!visitId) return null;
@@ -368,31 +370,64 @@ export async function searchDeskItems(filters = {}, db = pool) {
   const limit = Math.min(asked, DESK_SEARCH_LIMIT);
   const consultationType = await visitConsultationType(filters.visitId, db);
   const params = [limit + 1, consultationType];
-  let match = "";
-  if (q) {
-    params.push(`%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
-    match = `AND (i.name ILIKE $3 OR i.code ILIKE $3)`;
-  }
+  const terms = q
+    .split(",")
+    .map((term) => term.split(/\s+/).filter(Boolean).slice(0, 6))
+    .filter((words) => words.length)
+    .slice(0, DESK_SEARCH_TERMS);
+  const termSql = terms.map(
+    (words) =>
+      `(${words
+        .map((word) => {
+          params.push(`%${word.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+          return `(i.name ILIKE $${params.length} OR i.code ILIKE $${params.length})`;
+        })
+        .join(" AND ")})`,
+  );
+  const match = termSql.length ? `AND (${termSql.join(" OR ")})` : "";
+  const termRank =
+    termSql.length > 1
+      ? `CASE ${termSql.map((sql, index) => `WHEN ${sql} THEN ${index}`).join(" ")} END`
+      : "0";
   const { rows } = await db.query(
     `WITH found AS (
        SELECT i.id, i.code, i.name, i.kind, i.unit, i.allow_quantity, i.max_quantity,
               i.doctor_id, i.visit_type, i.price_per_patient,
               s.name AS subgroup_name, g.name AS group_name,
-              ($2::text IS NULL OR i.kind <> 'consultation' OR i.visit_type = $2::text) AS shown
+              ($2::text IS NULL OR i.kind <> 'consultation' OR i.visit_type = $2::text) AS shown,
+              ${termRank} AS term_rank
          FROM service_items i
          JOIN service_subgroups s ON s.id = i.subgroup_id
          JOIN service_groups g ON g.id = s.group_id
-        WHERE i.is_active AND s.is_active AND g.is_active ${match})
-     SELECT * FROM found ORDER BY NOT shown, name, id LIMIT $1`,
+        WHERE i.is_active AND s.is_active AND g.is_active ${match}),
+     used AS (
+       SELECT l.service_item_id, COUNT(*)::int AS uses
+         FROM bill_lines l
+         JOIN bills b ON b.id = l.bill_id
+        WHERE l.service_item_id IN (SELECT id FROM found)
+          AND l.created_at > NOW() - INTERVAL '90 days'
+          AND b.status <> 'cancelled'
+        GROUP BY l.service_item_id)
+     SELECT found.*, COALESCE(used.uses, 0) AS uses
+       FROM found LEFT JOIN used ON used.service_item_id = found.id
+      ORDER BY NOT shown, term_rank, COALESCE(used.uses, 0) DESC, lower(name), id
+      LIMIT $1`,
     params,
   );
-  const shown = rows.filter((row) => row.shown);
+  const shown = rows.filter((row) => row.shown).slice(0, limit);
+  const rates = await itemRates(
+    shown.map((row) => row.id),
+    filters.category,
+    db,
+  );
   return {
-    items: shown.slice(0, limit).map(({ shown: kept, ...row }) => ({
+    items: shown.map(({ shown: kept, term_rank: rank, ...row }) => ({
       ...row,
       max_quantity: row.max_quantity === null ? null : Number(row.max_quantity),
+      rate: rates.get(row.id)?.rate ?? null,
+      rate_source: rates.get(row.id)?.rate_source ?? null,
     })),
-    more: shown.length > limit,
+    more: rows.filter((row) => row.shown).length > limit,
     consultation_type: consultationType,
     consultations_hidden: rows.some((row) => !row.shown),
   };

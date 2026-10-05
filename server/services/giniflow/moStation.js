@@ -13,7 +13,10 @@ import {
 } from "../pricing.js";
 import { slaKeyForStatus, WAIT_SINCE_SQL } from "../../../shared/giniflowStatus.js";
 import { todaysVitals, previousVitals } from "./visitVitals.js";
-import { insertLabStepsForOrder } from "./journey.js";
+import { insertLabStepsForOrder, insertMachineStepsForOrders } from "./journey.js";
+import { consultsDirect } from "../../../shared/directConsult.js";
+import { getMachines } from "./machineCatalog.js";
+import { machineForTest } from "../../../shared/machineStages.js";
 import { ALLERGY_NOT_ASKED } from "../../../shared/giniflowAllergy.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { TESTS_HOLD_SQL, chiefWaitClock } from "./testsHold.js";
@@ -739,7 +742,10 @@ export async function orderTests(
     await assertOwner(client, visitId, actorId);
 
     const { rows: visitRows } = await client.query(
-      `SELECT current_status FROM giniflow_visits WHERE id = $1 FOR NO KEY UPDATE`,
+      `SELECT v.current_status,
+              (SELECT a.doctor_name FROM appointments a WHERE a.id = v.appointment_id) AS booked_doctor,
+              (SELECT d.name FROM doctors d WHERE d.id = v.assigned_doctor_id) AS assigned_doctor
+         FROM giniflow_visits v WHERE v.id = $1 FOR NO KEY UPDATE`,
       [visitId],
     );
     if (!visitRows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
@@ -862,11 +868,40 @@ export async function orderTests(
         [visitId],
       );
       sentToLab = true;
+    } else if (
+      urgency === "today" &&
+      current === "with_doctor" &&
+      consultsDirect(visitRows[0].booked_doctor, visitRows[0].assigned_doctor)
+    ) {
+      await client.query(
+        `INSERT INTO giniflow_visit_events (visit_id, status, actor_role, actor_id, meta)
+         VALUES ($1, 'ready_for_doctor', 'doctor', $2, $3)`,
+        [visitId, actorId, { source: "tests_ordered", lab_order_id: orderId, tests: tests.length }],
+      );
+      await client.query(
+        `UPDATE giniflow_visits SET current_status = 'ready_for_doctor', updated_at = NOW()
+          WHERE id = $1`,
+        [visitId],
+      );
+      sentToLab = true;
     }
 
     // The journey the patient is shown, and the counter they are about to stand
     // at. Only today's tests: a next-visit panel is not a stop on this visit.
-    if (urgency === "today") await insertLabStepsForOrder(client, visitId);
+    if (urgency === "today" && labOrder) await insertLabStepsForOrder(client, visitId);
+    const machineOrders = orders.filter((o) => o.kind === "machine");
+    if (urgency === "today" && machineOrders.length) {
+      const machines = await getMachines(client);
+      const machineIds = [
+        ...new Set(
+          machineOrders
+            .flatMap((o) => o.tests)
+            .map((name) => machineForTest(machines, name)?.id)
+            .filter(Boolean),
+        ),
+      ];
+      if (machineIds.length) await insertMachineStepsForOrders(client, visitId, machineIds);
+    }
 
     await client.query("COMMIT");
     return {

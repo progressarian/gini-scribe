@@ -12,6 +12,7 @@ import {
   setUp,
   tearDown,
 } from "./p4-bills-fixture.mjs";
+import { openAddItems } from "../../helpers/addItems.mjs";
 
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 const visitLines = await import("../../../server/services/billing/visitLines.js");
@@ -124,6 +125,7 @@ test.describe.serial("P4C-12 the consultation is not added automatically", () =>
   test("4. off: the desk adds the consultation from Add items", async ({ page }) => {
     await loginAs(page, "reception");
     await openCounter(page, ids.visit);
+    await openAddItems(page);
     await page.getByLabel("Search items").fill(consultationName());
     const row = results(page).getByRole("listitem").filter({ hasText: consultationName() });
     await expect(row).toHaveCount(1);
@@ -138,6 +140,7 @@ test.describe.serial("P4C-12 the consultation is not added automatically", () =>
   test("5. off: a second consultation goes to bill-again", async ({ page }) => {
     await loginAs(page, "reception");
     await openCounter(page, ids.visit);
+    await openAddItems(page);
     await page.getByLabel("Search items").fill(consultationName());
     const row = results(page).getByRole("listitem").filter({ hasText: consultationName() });
     await expect(row).toHaveCount(1);

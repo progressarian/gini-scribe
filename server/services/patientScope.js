@@ -1,5 +1,5 @@
 import pool from "../config/db.js";
-import { hasOwnPatientList } from "../../shared/permissions.js";
+import { hasOwnPatientList, normalizeRole, ROLES } from "../../shared/permissions.js";
 
 // Who "owns" a patient: the doctor on their most recent appointment. There is no
 // treating-doctor column anywhere — patients has none, refill requests have none,
@@ -38,6 +38,24 @@ export function latestDoctorIs(patientCol, i) {
     WHERE latest.doctor_id = $${i}
        OR ($${i + 1} <> '' AND latest.doctor_name ILIKE $${i + 1})
        OR ($${i + 2} <> '' AND latest.doctor_name ILIKE $${i + 2})
+  )`;
+}
+
+export function opdScope(req) {
+  const scope = doctorScope(req);
+  return {
+    ...scope,
+    mine: normalizeRole(req.doctor?.role) === ROLES.CONSULTANT && !!scope.doctorId,
+  };
+}
+
+export function opdRowIsMine(alias, i) {
+  return `(
+    ${alias}.doctor_id = $${i}
+    OR ($${i + 1} <> '' AND ${alias}.doctor_name ILIKE $${i + 1})
+    OR ($${i + 2} <> '' AND ${alias}.doctor_name ILIKE $${i + 2})
+    OR (${alias}.doctor_id IS NULL AND NULLIF(TRIM(${alias}.doctor_name), '') IS NULL)
+    OR ${alias}.status = 'no_show'
   )`;
 }
 

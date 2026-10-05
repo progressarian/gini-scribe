@@ -18,7 +18,9 @@ import "../../styles/giniflow-station.css";
 import StationNotice from "../../components/giniflow/StationNotice";
 import useAuthStore from "../../stores/authStore";
 import { printRxHref } from "../../queries/hooks/useGiniflowRx";
+import { PdfButton } from "../../components/billing/counter/PdfViewer";
 import { hasCapability, CAPABILITIES } from "../../../shared/permissions";
+import { isPathHiddenForRole } from "../../config/routes";
 
 // The pharmacy station — gini-stations.html `#s-pharmacy` + `#pharmPane`.
 //
@@ -491,9 +493,14 @@ function PharmacyPane({ visitId, onClose, onToast }) {
               ← Back
             </button>
             {canPrintRx && data?.visitId && (
-              <a className="rbtn" href={printRxHref(data.visitId)} target="_blank" rel="noreferrer">
+              <PdfButton
+                className="rbtn"
+                href={printRxHref(data.visitId)}
+                title={`Prescription — ${data.name || "patient"}`}
+                fileName={`Prescription — ${data.name || "patient"}.pdf`}
+              >
                 🖨 Print Rx
-              </a>
+              </PdfButton>
             )}
             {data && !data.finished && (
               <button
@@ -641,6 +648,9 @@ const PHARMACY_FILTERS = [
 ];
 
 export default function PharmacyStationPage() {
+  const stationsHidden = useAuthStore((st) =>
+    isPathHiddenForRole(st.currentDoctor?.role, "/giniflow/stations"),
+  );
   const [toast, setToast] = useState("");
   const [openVisitId, setOpenVisitId] = useState(null);
   const [handoverOf, setHandoverOf] = useState(null);
@@ -711,7 +721,7 @@ export default function PharmacyStationPage() {
   const closePane = useCallback(() => setOpenVisitId(null), []);
 
   return (
-    <div className="gf">
+    <div className="gf gf--ph">
       <StationNotice station="pharmacy" />
       <div className="rail">
         <div className="rl">Pharmacy Station</div>
@@ -727,9 +737,11 @@ export default function PharmacyStationPage() {
         </span>
         <div className="rr">
           <LiveBadge live={live} className="tr-live" />
-          <a className="rbtn" href="/giniflow/stations">
-            ← Stations
-          </a>
+          {!stationsHidden && (
+            <a className="rbtn" href="/giniflow/stations">
+              ← Stations
+            </a>
+          )}
         </div>
       </div>
 

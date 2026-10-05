@@ -2880,6 +2880,41 @@
   border-color: var(--blu);
   color: var(--blu);
 }
+.gf.gf--full {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  height: 100%;
+  background: var(--bg);
+}
+.gf .tr-back.on {
+  background: var(--blu);
+  border-color: var(--blu);
+  color: #fff;
+}
+.gf .cnav-sep {
+  flex: 0 0 1px;
+  align-self: stretch;
+  margin: 2px 4px;
+  background: var(--bd2);
+}
+.gf .cnav button.cnav-act {
+  border-color: var(--grn);
+  color: var(--grn);
+}
+.gf .cnav button.cnav-act:hover:not(:disabled) {
+  background: var(--grn);
+  color: #fff;
+}
+.gf .cnav button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.gf .cnav button.on {
+  background: var(--blu);
+  border-color: var(--blu);
+  color: #fff;
+}
 
 .gf .cbody {
   padding: 12px 16px 60px;
@@ -8417,4 +8452,19 @@
 .gf .si-na {
   color: var(--amb);
   font-weight: 600;
+}
+
+.app:has(.gf--ph) {
+  --pad-x: var(--gutter-x);
+  padding: 0 var(--pad-x) var(--gutter-y);
+}
+.gf.gf--ph .rail {
+  padding: 0 16px;
+  border-radius: 8px;
+  margin-top: 4px;
+}
+.gf.gf--ph .inner {
+  padding: 16px 0 0;
+  gap: 16px;
+  max-width: none;
 }

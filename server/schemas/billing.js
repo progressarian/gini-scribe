@@ -954,6 +954,16 @@ export const billingManualDiscountSchema = deskObject(
   objectOnly('Send the discount as an object, like { kind: "percent", value: 10 }'),
 );
 
+export const billingFinalDiscountSchema = deskObject(
+  {
+    kind: z.enum(["percent", "flat"], { message: "must be percent or flat" }),
+    value: numberValue,
+    reason: z.union([reason, z.null(), z.literal("")]).optional(),
+    line_id: optionalUuid.optional(),
+  },
+  objectOnly('Send the discount as an object, like { kind: "percent", value: 10 }'),
+);
+
 export const billingLinePriceSchema = deskObject({
   agreed_rate: numberValue,
   reason: z.string().trim().min(1).max(BILL_TEXT_MAX),
@@ -1055,6 +1065,7 @@ export const billingItemSearchQuerySchema = z.strictObject({
   q: z.string().max(100).optional(),
   limit: count.optional(),
   visit_id: uuid.optional(),
+  category: z.string().trim().max(60).optional(),
 });
 
 export const billingConsultationSuggestionQuerySchema = z.strictObject({

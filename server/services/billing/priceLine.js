@@ -102,6 +102,22 @@ const ITEM_SQL = (
        ${rateOn("(SELECT parent_code FROM patient_schemes WHERE code = $2)")} par ON TRUE
       WHERE ${where}`;
 
+export async function itemRates(itemIds, category, db = pool) {
+  const ids = [...new Set(itemIds)];
+  if (!ids.length) return new Map();
+  const { rows } = await db.query(ITEM_SQL("i.id = ANY($1::int[])"), [
+    ids,
+    cleanCategory(category),
+    indiaToday(),
+  ]);
+  return new Map(
+    rows.map((row) => {
+      const rate = rateFor(row, null);
+      return [row.id, { rate: rate.value / 100, rate_source: rate.source }];
+    }),
+  );
+}
+
 export async function primeLineItems(inputs, db) {
   if (typeof db.prime !== "function") return;
   const groups = new Map();

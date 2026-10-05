@@ -92,3 +92,66 @@ export function useDecideProposal(visitId) {
     onSuccess: () => invalidateAll(queryClient, visitId),
   });
 }
+
+const complaintsKey = (visitId) => ["giniflow", "doctor", "complaints", visitId];
+
+export function useVisitComplaints(visitId) {
+  return useQuery({
+    queryKey: complaintsKey(visitId),
+    queryFn: async () =>
+      (await api.get(`/api/giniflow/stations/doctor/${visitId}/complaints`)).data,
+    enabled: !!visitId,
+  });
+}
+
+export function useAddComplaint(visitId) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationKey: visitWriteKey(visitId),
+    mutationFn: async (label) =>
+      (await api.post(`/api/giniflow/stations/doctor/${visitId}/complaints`, { label })).data,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: complaintsKey(visitId) }),
+  });
+}
+
+export function useRemoveComplaint(visitId) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationKey: visitWriteKey(visitId),
+    mutationFn: async (complaintId) =>
+      (await api.delete(`/api/giniflow/stations/doctor/${visitId}/complaints/${complaintId}`)).data,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: complaintsKey(visitId) }),
+  });
+}
+
+export function useSaveHistory(visitId) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationKey: visitWriteKey(visitId),
+    mutationFn: async (history) =>
+      (await api.put(`/api/giniflow/stations/doctor/${visitId}/history`, { history })).data,
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: complaintsKey(visitId), refetchType: "none" }),
+  });
+}
+
+const adviceKey = (visitId) => ["giniflow", "doctor", "advice", visitId];
+
+export function useVisitAdvice(visitId) {
+  return useQuery({
+    queryKey: adviceKey(visitId),
+    queryFn: async () => (await api.get(`/api/giniflow/stations/doctor/${visitId}/advice`)).data,
+    enabled: !!visitId,
+  });
+}
+
+export function useSaveAdvice(visitId) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationKey: visitWriteKey(visitId),
+    mutationFn: async (advice) =>
+      (await api.put(`/api/giniflow/stations/doctor/${visitId}/advice`, { advice })).data,
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: adviceKey(visitId), refetchType: "none" }),
+  });
+}

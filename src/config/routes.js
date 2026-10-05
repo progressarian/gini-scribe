@@ -86,6 +86,7 @@ export const PAGE_CAPABILITIES = {
   "/lab-inbox": CAP.LAB_REQUESTS,
   // Medication
   "/refills": CAP.REFILLS,
+  "/pharmacy/stock": CAP.PHARMACY_STOCK_VIEW,
   "/dose-change-requests": CAP.DOSE_REVIEWS,
   "/side-effects": CAP.SIDE_EFFECTS,
   // Reception / operations
@@ -213,9 +214,13 @@ const STATION_ROLE_HIDDEN_NAV = [
   "/giniflow/reports",
 ];
 
+const PHARMACY_HIDDEN_NAV = ["/patient", "/refills", "/dose-change-requests", "/giniflow/stations"];
+
 export const ROLE_NAV_HIDDEN = {
   [ROLES.CONSULTANT]: STATION_ROLE_HIDDEN_NAV,
   [ROLES.MO]: STATION_ROLE_HIDDEN_NAV,
+  [ROLES.PHARMACY]: PHARMACY_HIDDEN_NAV,
+  [ROLES.PHARMACY_ADMIN]: PHARMACY_HIDDEN_NAV,
 };
 
 export const ROLE_HOME = {
@@ -223,6 +228,8 @@ export const ROLE_HOME = {
   [ROLES.MO]: "/giniflow/station/mo",
   [ROLES.OBT]: "/obt-dashboard",
   [ROLES.RX]: "/giniflow/station/rx",
+  [ROLES.PHARMACY]: "/giniflow/station/pharmacy",
+  [ROLES.PHARMACY_ADMIN]: "/pharmacy/stock",
   [ROLES.ECHO_TECH]: "/giniflow/station/echo",
   [ROLES.XRAY_TECH]: "/giniflow/station/xray",
   [ROLES.GROWTH_EXECUTIVE]: "/crm/home",

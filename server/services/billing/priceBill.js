@@ -353,7 +353,7 @@ function largestBillRule(rules, scopes, remaining, stacking) {
   return best;
 }
 
-function allocate(amount, scope, remaining) {
+export function allocate(amount, scope, remaining) {
   const base = scope.reduce((sum, index) => sum + remaining[index], 0);
   const shares = scope.map((index) => {
     const exact = BigInt(amount) * BigInt(remaining[index]);

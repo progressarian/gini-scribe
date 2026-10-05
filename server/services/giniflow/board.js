@@ -36,6 +36,7 @@ import { getMachines } from "./machineCatalog.js";
 import { JOURNEY_STEPS_SQL } from "./journey.js";
 import { journeyProgress } from "../../../shared/journeyOrder.js";
 import { machineForTest } from "../../../shared/machineStages.js";
+import { consultsDirect } from "../../../shared/directConsult.js";
 
 export async function getSlaConfig(db = pool) {
   const { rows } = await db.query(
@@ -420,6 +421,15 @@ const subtitleFor = (row) => {
   if (row.current_status === "with_sd" && row.sd_name) return `${row.sd_name} · workup`;
   if (row.current_status === "with_doctor" && row.doctor_name)
     return `${row.doctor_name} · consult`;
+  if (
+    row.current_status === "ready_for_doctor" &&
+    consultsDirect(row.doctor_full_name) &&
+    row.lab_orders_today > 0
+  ) {
+    return row.reports_outstanding > 0
+      ? `Waiting for reports · then back to ${row.doctor_name || "the doctor"}`
+      : `Back to ${row.doctor_name || "the doctor"} · reports in`;
+  }
   if (row.current_status === "ready_for_doctor")
     return row.results_status === "ready" ? "Results ✓ · SD plan ready" : "SD plan ready";
   if (row.current_status === "with_vitals") return "BP + weight in progress";

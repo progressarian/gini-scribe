@@ -8,13 +8,16 @@ import { indiaToday } from "./categoryResolver.js";
 import { auditFields, lockRow, readNumber } from "./common.js";
 import { ISSUED_GST_COLUMNS, issuedGstReady } from "./issuedGst.js";
 import { moneyOn, refundLegs, refundPlan, releaseTestOrders } from "./payments.js";
-import { httpError } from "./transaction.js";
+import { httpError, inTransaction } from "./transaction.js";
+import { cleanManualDiscount, manualAmount } from "./manualDiscounts.js";
+import { allocate } from "./priceBill.js";
 
 const BILL_COLUMNS = `id, bill_no, series, fy, bill_type, original_bill_id, patient_id, visit_id,
   appointment_id, bill_date::text AS bill_date, status, scheme_code, scheme_label, payer_name,
   patient_age, actual_amount, discount_amount, tax_amount, patient_payable, claim_amount,
   adjustment_amount, round_off, paid_amount, claim_status, version, finalised_by, finalised_at,
-  created_at`;
+  created_at, credit_kind, manual_discount_kind, manual_discount_value, manual_discount_reason,
+  manual_discount_by`;
 
 const SPEC = { table: "bills", noun: "bill", columns: BILL_COLUMNS };
 
@@ -654,6 +657,8 @@ async function shapeCreditNote(db, row) {
       legs: plan.legs,
     },
     lines: lines.map(shapeNoteLine),
+    credit_kind: row.credit_kind,
+    discount: discountOf(row),
     finalised_at: row.finalised_at,
     created_at: row.created_at,
   };
@@ -681,7 +686,9 @@ export async function listCreditNotes(billId, db = pool) {
 
 const CREDIT_SUMMARY_SQL = `
   SELECT c.id, c.bill_no, c.bill_date::text AS bill_date, c.patient_payable, c.paid_amount,
-         c.version, r.approved_mode
+         c.version, c.credit_kind,
+         COALESCE(r.approved_mode, CASE WHEN c.credit_kind = 'discount' THEN '${AS_PAID}' END)
+           AS approved_mode
     FROM bills c LEFT JOIN billing_requests r ON r.credit_note_id = c.id
    WHERE c.original_bill_id = $1 AND c.bill_type = 'credit_note'
    ORDER BY c.created_at, c.id`;
@@ -739,6 +746,7 @@ export async function billCredits(db, bill) {
       refunded: paise(row.paid_amount),
       due: row.approved_mode ? Math.max(0, Math.min(left, money.refundable)) : 0,
       approved_mode: row.approved_mode ?? null,
+      credit_kind: row.credit_kind,
     };
   });
   const unpaid = shaped.reduce((sum, note) => sum + note.payable - note.refunded, 0);
@@ -764,4 +772,167 @@ export async function billCredits(db, bill) {
       credit_note_id: request.credit_note_id ?? null,
     },
   };
+}
+
+const discountOf = (row) =>
+  row.credit_kind === "discount" && row.manual_discount_kind
+    ? {
+        kind: row.manual_discount_kind,
+        value: Number(row.manual_discount_value),
+        reason: row.manual_discount_reason ?? null,
+        by: row.manual_discount_by ?? null,
+      }
+    : null;
+
+const ONLY_PAYABLE = (share) => ({
+  ...Object.fromEntries(PARTS.map((key) => [key, 0])),
+  actual_amount: share,
+  taxable: share,
+  patient_payable: share,
+  listed_actual: 0,
+});
+
+function cleanFinalDiscount(input) {
+  const discount = cleanManualDiscount({ kind: input?.kind, value: input?.value }, "The discount");
+  if (!discount) throw httpError(400, "Enter the discount");
+  const text = typeof input?.reason === "string" ? input.reason.trim() : "";
+  if (text.length > 1000) throw httpError(400, "The reason can be at most 1000 characters");
+  const lineId = input?.line_id ? cleanUuid(input.line_id, "line") : null;
+  return { discount, reason: text || null, lineId };
+}
+
+function planDiscount(loaded, { discount, lineId }) {
+  const { bill, lines } = loaded;
+  if (bill.status !== "final") {
+    throw httpError(409, `${billLabel(bill)} is not final — give the discount on the draft`);
+  }
+  if (lineId && !lines.some((line) => line.id === lineId)) {
+    throw httpError(409, `That line isn't on ${billLabel(bill)}`, { line_id: lineId });
+  }
+  const open = lines
+    .filter((line) => !lineId || line.id === lineId)
+    .map((line) => ({ line, left: line.original.patient_payable - line.credited.patient_payable }))
+    .filter((entry) => entry.left > 0);
+  const base = open.reduce((sum, entry) => sum + entry.left, 0);
+  const amount = manualAmount(discount, base);
+  if (!amount) {
+    throw httpError(
+      409,
+      lineId
+        ? "Nothing is left to discount on that line"
+        : `Nothing is left to discount on ${billLabel(bill)}`,
+    );
+  }
+  const shares = allocate(
+    amount,
+    open.map((_, index) => index),
+    open.map((entry) => entry.left),
+  );
+  return {
+    lines: shares.map(({ index, share }) => ({
+      line: open[index].line,
+      quantity: 0,
+      frees: false,
+      piece: ONLY_PAYABLE(share),
+    })),
+    credits_everything: false,
+    totals: {
+      actual: amount,
+      discount: 0,
+      tax: 0,
+      payable: amount,
+      claim: 0,
+      adjustment: 0,
+      round_off: 0,
+    },
+  };
+}
+
+async function discountOutcome(db, billId, amount) {
+  const money = await moneyOn(db, billId);
+  const owedAfter = Math.max(0, money.payable - money.credited - amount);
+  const back = Math.min(amount, Math.max(0, money.held - owedAfter));
+  return { amount, pay_back: back, off_balance: amount - back };
+}
+
+export async function previewFinalDiscount(billId, input, db = pool) {
+  const wanted = cleanFinalDiscount(input);
+  const loaded = await loadCredit(db, billId, { lock: false });
+  const plan = planDiscount(loaded, wanted);
+  return {
+    bill_id: loaded.bill.id,
+    bill_no: loaded.bill.bill_no,
+    lines: plan.lines.map((entry) => ({
+      line_id: entry.line.id,
+      bill_name: entry.line.name,
+      amount: entry.piece.patient_payable,
+    })),
+    ...(await discountOutcome(db, loaded.bill.id, plan.totals.payable)),
+  };
+}
+
+export async function discountFinalBill(billId, input, ctx, db = pool) {
+  const wanted = cleanFinalDiscount(input);
+  return inTransaction(async (client) => {
+    const loaded = await loadCredit(client, billId, { lock: true });
+    const plan = planDiscount(loaded, wanted);
+    const outcome = await discountOutcome(client, loaded.bill.id, plan.totals.payable);
+    const bill = loaded.bill;
+    const day = indiaToday();
+    const number = await nextNumber(client, seriesFor("credit_note"), day, ctx);
+    const inserted = await insertNote(client, bill, plan, number, day, ctx);
+    const { rows: marked } = await client.query(
+      `UPDATE bills SET credit_kind = 'discount', manual_discount_kind = $2,
+          manual_discount_value = $3, manual_discount_reason = $4, manual_discount_by = $5,
+          manual_discount_at = NOW()
+        WHERE id = $1 RETURNING ${BILL_COLUMNS}`,
+      [
+        inserted.id,
+        wanted.discount.kind,
+        wanted.discount.value,
+        wanted.reason,
+        ctx?.actorId ?? null,
+      ],
+    );
+    const note = marked[0];
+    const noteLines = [];
+    for (const [index, entry] of plan.lines.entries()) {
+      noteLines.push(await insertNoteLine(client, note, index, entry, ctx));
+    }
+    const { rows: updated } = await client.query(
+      `UPDATE bills SET version = version + 1, updated_at = NOW(), updated_by = $2
+        WHERE id = $1 RETURNING ${BILL_COLUMNS}`,
+      [bill.id, ctx?.actorId ?? null],
+    );
+    await writeAudit(client, {
+      entity: SPEC.table,
+      entityId: note.id,
+      action: "create",
+      after: {
+        ...note,
+        lines: noteLines,
+        discount: { ...wanted.discount, reason: wanted.reason, line_id: wanted.lineId },
+        role: ctx?.role ?? null,
+      },
+      ...auditFields(ctx),
+    });
+    await writeAudit(client, {
+      entity: SPEC.table,
+      entityId: bill.id,
+      action: "update",
+      before: bill,
+      after: {
+        ...updated[0],
+        credit_note_id: note.id,
+        credit_note_no: note.bill_no,
+        discount_after_final: outcome,
+      },
+      ...auditFields(ctx),
+    });
+    return {
+      credit_note_id: note.id,
+      credit_note_no: note.bill_no,
+      ...outcome,
+    };
+  }, db);
 }

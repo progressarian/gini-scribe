@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { useDoctorQueue, useStartConsult } from "../../queries/hooks/useGiniflowDoctor";
 import "../../styles/giniflow-station.css";
 import StationNotice from "../../components/giniflow/StationNotice";
+import FullscreenButton from "../../components/giniflow/FullscreenButton";
+import useFullscreen from "../../hooks/useFullscreen";
 
 // The consultant's day list — gini-doctor-v3.html.
 //
@@ -81,6 +83,38 @@ function StatTile({ value, label, sub, tone }) {
 // A group heading that opens and closes its own section. A real button inside
 // the heading, so it keeps the heading semantics for a screen reader and states
 // whether the section is open.
+function SecondConsultCard({ consult, onOpen }) {
+  const href = `/visit?patient=${encodeURIComponent(consult.patientId)}&appt=${encodeURIComponent(consult.appointmentId)}`;
+  return (
+    <a
+      href={href}
+      className="dcard"
+      onClick={(e) => {
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+        e.preventDefault();
+        onOpen(href);
+      }}
+    >
+      <div className="dc-time">{consult.appointmentTime || "—"}</div>
+      <div className="dc-av">{initials(consult.name)}</div>
+      <div className="dc-main">
+        <div className="dc-name">
+          {consult.name}
+          {consult.visitType && <span className="dc-visit">{consult.visitType}</span>}
+        </div>
+        <div className="dc-meta">
+          {consult.age}
+          {(consult.sex || "")[0] || ""} · {consult.fileNo || "—"}
+          {consult.floorDoctor ? ` · floor visit with ${consult.floorDoctor}` : ""}
+        </div>
+      </div>
+      <div className="dc-right">
+        <span className="dc-state">{consult.seen ? "Seen" : "Checked in"}</span>
+      </div>
+    </a>
+  );
+}
+
 function GroupHead({ icon, title, sub, count, open, onToggle, id }) {
   return (
     <h2 className="dg-head">
@@ -193,6 +227,7 @@ function QueueCard({ card, now, group, onOpen }) {
 
 export default function DoctorStationPage() {
   const navigate = useNavigate();
+  const { ref: pageRef, fullscreen, toggle: toggleFullscreen } = useFullscreen();
   const now = useTick();
   const [scope, setScope] = useState("mine");
   const [search, setSearch] = useState("");
@@ -229,6 +264,7 @@ export default function DoctorStationPage() {
   const counts = data?.counts || {};
   const groups = data?.groups || {};
   const pipelineOthers = data?.pipelineOthers || [];
+  const secondConsults = data?.secondConsults || [];
   const othersTotal = pipelineOthers.reduce((n, g) => n + g.cards.length, 0);
 
   // Opening a queued patient claims the room; opening a finished or
@@ -247,7 +283,7 @@ export default function DoctorStationPage() {
   };
 
   return (
-    <div className="gf">
+    <div className={`gf${fullscreen ? " gf--full" : ""}`} ref={pageRef}>
       <StationNotice station="doctor" />
       <div className="top-rail">
         <div className="tr-logo">Gini Flow</div>
@@ -279,6 +315,7 @@ export default function DoctorStationPage() {
               All
             </button>
           </div>
+          <FullscreenButton fullscreen={fullscreen} onToggle={toggleFullscreen} what="queue" />
           <a className="tr-back" href="/giniflow/stations">
             ← Stations
           </a>
@@ -446,6 +483,28 @@ export default function DoctorStationPage() {
             </section>
           );
         })}
+        {secondConsults.length > 0 && (
+          <section className="dgroup">
+            <GroupHead
+              icon="🔁"
+              title="Second consult"
+              sub="checked in with you in HealthRay · opens in Scribe"
+              count={secondConsults.length}
+              open={!collapsed.has("second")}
+              onToggle={() => toggleGroup("second")}
+              id="dgroup-second"
+            />
+            <div id="dgroup-second" hidden={collapsed.has("second")}>
+              {secondConsults.map((consult) => (
+                <SecondConsultCard
+                  key={consult.appointmentId}
+                  consult={consult}
+                  onOpen={(href) => navigate(href)}
+                />
+              ))}
+            </div>
+          </section>
+        )}
       </div>
 
       {toast && <div className="toast show">{toast}</div>}

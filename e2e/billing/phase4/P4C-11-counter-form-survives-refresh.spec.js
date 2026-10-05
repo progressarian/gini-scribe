@@ -14,6 +14,7 @@ import {
   subCategory,
   tearDown,
 } from "./p4-bills-fixture.mjs";
+import { openAddItems } from "../../helpers/addItems.mjs";
 
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 const bills = await import("../../../server/services/billing/bills.js");
@@ -267,6 +268,7 @@ test.describe.serial("P4C-11 the counter form survives a refresh", () => {
     await pad(page).getByLabel("Pay later").check();
     await codeBox(page).getByLabel("Discount code", { exact: true }).fill(CODE);
     await header(page).getByLabel("Category").selectOption(ids.pensioner);
+    await openAddItems(page);
     await page.getByRole("region", { name: "Add items" }).getByLabel("Search items").fill("zz");
     await settle(page);
     await reload(page);
@@ -282,7 +284,7 @@ test.describe.serial("P4C-11 the counter form survives a refresh", () => {
     await expect(header(page).getByLabel("Category")).toHaveValue(ids.paid);
     await expect(
       page.getByRole("region", { name: "Add items" }).getByLabel("Search items"),
-    ).toHaveValue("");
+    ).toHaveCount(0);
     expect(await stored(page, billKey(bill.bill))).toBeNull();
 
     await reload(page);

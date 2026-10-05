@@ -66,10 +66,10 @@ export function BillOpening({ patient, onClose }) {
             text="Checking what was ordered, billed and paid today…"
           />
           <LoadingCard title="Scanned billing reports" text="Loading scanned reports…" lines={1} />
-          <LoadingCard title="Discounts" text="Checking discounts…" lines={1} />
         </div>
         <div className="bc-bill__summary">
           <LoadingCard title="Bill Summary" text="Working out the totals…" lines={3} />
+          <LoadingCard title="Discounts" text="Checking discounts…" lines={1} />
           <LoadingCard title="Bill actions" text="Available once the bill is open" lines={1} />
         </div>
       </div>

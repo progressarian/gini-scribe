@@ -21,6 +21,7 @@ import { advanceStatus, IST_TODAY } from "./statusEngine.js";
 import { recordHealthrayObservation, firstUnrecordedStation } from "./observation.js";
 import { TESTS_HOLD_SQL, testsOpenInScribe } from "./testsHold.js";
 import { canReadBill, syncBillingForVisitId } from "./machineSync.js";
+import { directConsultSql } from "../../../shared/directConsult.js";
 
 // Vitals HealthRay recorded, which its appointment status cannot express.
 //
@@ -506,6 +507,7 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
           AND NOT EXISTS (
                 SELECT 1 FROM patients p WHERE p.id = a.patient_id AND p.is_blocked
               )
+          AND NOT (COALESCE(v.echo_referral, FALSE) AND ${directConsultSql("a.doctor_name")})
         ORDER BY a.patient_id,
                  CASE a.status
                    WHEN 'completed' THEN 4
@@ -546,6 +548,66 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
           WHERE cur.id = v.appointment_id
             AND v.visit_date = $1::date
             AND lower(btrim(cur.doctor_name)) = lower($2)`,
+        [day, LAB_ONLY_DOCTOR],
+      )
+    ).rowCount;
+
+    result.echoReferrals = (
+      await client.query(
+        `UPDATE giniflow_visits v
+            SET echo_referral = TRUE, updated_at = NOW()
+          WHERE v.visit_date = $1::date
+            AND NOT v.echo_referral
+            AND EXISTS (
+                  SELECT 1 FROM appointments k
+                   WHERE k.patient_id = v.patient_id AND k.appointment_date = v.visit_date
+                     AND k.status NOT IN ('cancelled', 'no_show')
+                     AND ${directConsultSql("k.doctor_name")})
+            AND EXISTS (
+                  SELECT 1 FROM appointments o
+                   WHERE o.patient_id = v.patient_id AND o.appointment_date = v.visit_date
+                     AND o.status NOT IN ('cancelled', 'no_show')
+                     AND lower(COALESCE(btrim(o.doctor_name), '')) <> lower($2)
+                     AND btrim(COALESCE(o.doctor_name, '')) <> ''
+                     AND NOT ${directConsultSql("o.doctor_name")})`,
+        [day, LAB_ONLY_DOCTOR],
+      )
+    ).rowCount;
+
+    result.echoRepointed = (
+      await client.query(
+        `UPDATE giniflow_visits v
+            SET appointment_id = other.id,
+                assigned_doctor_id = CASE
+                  WHEN v.assigned_doctor_id IS NULL OR ${directConsultSql("cur_doc.name")}
+                    THEN COALESCE(other_doc.id, v.assigned_doctor_id)
+                  ELSE v.assigned_doctor_id
+                END,
+                updated_at = NOW()
+           FROM giniflow_visits base
+           LEFT JOIN appointments cur ON cur.id = base.appointment_id
+           LEFT JOIN doctors cur_doc ON cur_doc.id = base.assigned_doctor_id
+           CROSS JOIN LATERAL (
+             SELECT a.id, a.doctor_name FROM appointments a
+              WHERE a.patient_id = base.patient_id
+                AND a.appointment_date = base.visit_date
+                AND a.status NOT IN ('cancelled', 'no_show')
+                AND lower(COALESCE(btrim(a.doctor_name), '')) <> lower($2)
+                AND btrim(COALESCE(a.doctor_name, '')) <> ''
+                AND NOT ${directConsultSql("a.doctor_name")}
+              ORDER BY a.id DESC LIMIT 1
+           ) other
+           LEFT JOIN doctors other_doc
+                  ON lower(btrim(other_doc.name)) = lower(btrim(other.doctor_name))
+                 AND other_doc.role = 'consultant'
+                 AND COALESCE(other_doc.is_active, TRUE)
+          WHERE v.id = base.id
+            AND base.visit_date = $1::date
+            AND base.echo_referral
+            AND (base.appointment_id IS NULL
+                 OR ${directConsultSql("cur.doctor_name")}
+                 OR base.assigned_doctor_id IS NULL
+                 OR ${directConsultSql("cur_doc.name")})`,
         [day, LAB_ONLY_DOCTOR],
       )
     ).rowCount;

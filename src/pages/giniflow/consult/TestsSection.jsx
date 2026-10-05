@@ -1,6 +1,7 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useTestPanels, useOrderTests } from "../../../queries/hooks/useGiniflowPrescription";
 import { VoiceButton } from "../../../components/giniflow/VoiceInput";
+import { clearDraftField, writeDraftField } from "../../../lib/consultDraft";
 
 // Tests — gini-doctor-final.html `s-tests`.
 //
@@ -61,7 +62,7 @@ function pickPopular(tests, panels) {
   return new Set([...used, ...curated].slice(0, POPULAR_LIMIT).map((t) => t.name));
 }
 
-export default function TestsSection({ visitId, consult, readOnly, onToast, onUnsaved }) {
+export default function TestsSection({ visitId, consult, readOnly, onToast, onUnsaved, restored }) {
   const { data } = useTestPanels(visitId);
   const orderTests = useOrderTests(visitId);
   // Tests typed in for THIS patient. They ride on the order and are never added
@@ -73,6 +74,26 @@ export default function TestsSection({ visitId, consult, readOnly, onToast, onUn
   const filterRef = useRef(null);
   const [customPrice, setCustomPrice] = useState("");
   const [showAll, setShowAll] = useState(false);
+  const appliedRestore = useRef(false);
+
+  useEffect(() => {
+    if (appliedRestore.current || !restored) return;
+    appliedRestore.current = true;
+    const draft = restored.tests;
+    if (!draft || readOnly) return;
+    setCustom(draft.custom || []);
+    setSelected(new Set(draft.selected || []));
+    if (draft.urgency) setUrgency(draft.urgency);
+  }, [restored, readOnly]);
+
+  useEffect(() => {
+    if (!appliedRestore.current) return;
+    if (selected.size) {
+      writeDraftField(visitId, "tests", { selected: [...selected], custom, urgency });
+    } else {
+      clearDraftField(visitId, "tests");
+    }
+  }, [selected, custom, urgency, visitId]);
 
   // A selection is not an order — it lives here until Confirm, so leaving with
   // one is work the page has to ask about.

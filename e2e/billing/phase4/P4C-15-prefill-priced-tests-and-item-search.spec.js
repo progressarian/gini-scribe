@@ -12,12 +12,14 @@ import {
   setUp,
   tearDown,
 } from "./p4-bills-fixture.mjs";
+import { openAddItems } from "../../helpers/addItems.mjs";
 
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 const bills = await import("../../../server/services/billing/bills.js");
 const payments = await import("../../../server/services/billing/payments.js");
 const testMatch = await import("../../../server/services/billing/testMatch.js");
 const testCancel = await import("../../../server/services/giniflow/testCancel.js");
+const serviceItems = await import("../../../server/services/billing/serviceItems.js");
 
 const db = getPool();
 const tag = newTag();
@@ -303,7 +305,7 @@ test.describe.serial("P4C-15 priced tests are prefilled; Add items searches only
     await expect(unpriced).not.toContainText(ORDERED.hba1c);
   });
 
-  test("10. Add items shows nothing until two letters, then searches the server", async ({
+  test("10. Add items stays closed and silent until opened, then searches from two letters", async ({
     page,
   }) => {
     const searches = [];
@@ -312,14 +314,18 @@ test.describe.serial("P4C-15 priced tests are prefilled; Add items searches only
     });
     await loginAs(page, "reception");
     await gotoReady(page, `${RECEPTION}?tab=bill&visit=${ids.visit}`, () => addItems(page));
-    await expect(addItems(page)).toContainText(HINT);
-    await expect(results(page)).toHaveCount(0);
+    await expect(searchInput(page)).toHaveCount(0);
+    await page.waitForTimeout(600);
+    expect(searches).toEqual([]);
+    await openAddItems(page);
+    await expect(addItems(page)).not.toContainText(HINT);
     await searchInput(page).fill("B");
     await page.waitForTimeout(600);
     await expect(addItems(page)).toContainText(HINT);
     await expect(results(page)).toHaveCount(0);
-    expect(searches).toEqual([]);
+    expect(searches.map((url) => new URL(url).searchParams.get("q"))).not.toContain("B");
 
+    await openAddItems(page);
     await searchInput(page).fill(`Bulk${tag}`);
     await expect(results(page).getByRole("listitem")).toHaveCount(20);
     await expect(addItems(page)).toContainText("Showing first 20 — keep typing to narrow");
@@ -333,17 +339,20 @@ test.describe.serial("P4C-15 priced tests are prefilled; Add items searches only
     });
     expect(box).toEqual({ maxHeight: "320px", overflowY: "auto" });
 
+    await openAddItems(page);
     await searchInput(page).fill(`Bulk${tag} 07`);
     await expect(results(page).getByRole("listitem")).toHaveCount(1);
     await expect(addItems(page)).not.toContainText("Showing first 20");
 
+    await openAddItems(page);
     await searchInput(page).fill(`Nothing-${tag}`);
     await expect(addItems(page).getByRole("button", { name: "Request new item" })).toBeVisible();
-    await expect(results(page)).toHaveCount(0);
+    await expect(results(page).getByText(`Nothing-${tag}`)).toHaveCount(0);
 
+    await openAddItems(page);
     await searchInput(page).fill("");
-    await expect(addItems(page)).toContainText(HINT);
-    await expect(results(page)).toHaveCount(0);
+    await expect(addItems(page)).not.toContainText(HINT);
+    await expect(searchInput(page)).toBeVisible();
   });
 
   test("11. the search endpoint caps its answer and says there is more", async () => {
@@ -356,5 +365,71 @@ test.describe.serial("P4C-15 priced tests are prefilled; Add items searches only
     expect(response.status()).toBe(200);
     expect(body.items).toHaveLength(20);
     expect(body.more).toBe(true);
+  });
+
+  test("11. a comma searches several items at once, in the order they were typed", async ({
+    page,
+  }) => {
+    const found = await serviceItems.searchDeskItems({ q: `rft ${tag}, cbc ${tag}` }, db);
+    expect(found.items.map((item) => item.name)).toEqual([`RFT ${tag}`, `CBC ${tag}`]);
+
+    await loginAs(page, "reception");
+    await gotoReady(page, `${RECEPTION}?tab=bill&visit=${ids.visit}`, () => addItems(page));
+    await openAddItems(page);
+    await searchInput(page).fill(`cbc ${tag}, rft ${tag}`);
+    const names = results(page).locator(".bc-result__name");
+    await expect(names).toHaveText([`CBC ${tag}`, `RFT ${tag}`]);
+  });
+
+  test("12. Add Service/Test opens Add items and puts the cursor in the search", async ({
+    page,
+  }) => {
+    await loginAs(page, "reception");
+    await gotoReady(page, `${RECEPTION}?tab=bill&visit=${ids.visit}`, () => addItems(page));
+    await expect(searchInput(page)).toHaveCount(0);
+    await page
+      .getByRole("region", { name: "Bill lines" })
+      .getByRole("button", { name: "Add Service/Test" })
+      .click();
+    await expect(searchInput(page)).toBeFocused();
+    await addItems(page).getByRole("button", { name: "Add items" }).click();
+    await expect(searchInput(page)).toHaveCount(0);
+  });
+
+  test("13. a search with no match offers the most used items underneath", async ({ page }) => {
+    const { visit } = await extraVisit(ids, "C15Used", { visitType: "Follow Up" });
+    const draft = await bills.openDraft(visit, desk, db);
+    await bills.addLine(draft.id, { item_id: items.rft }, desk, db);
+    await loginAs(page, "reception");
+    await gotoReady(page, `${RECEPTION}?tab=bill&visit=${ids.visit}`, () => addItems(page));
+    await openAddItems(page);
+    await searchInput(page).fill(`Nowhere-${tag}`);
+    await expect(addItems(page).getByRole("button", { name: "Request new item" })).toBeVisible();
+    await expect(addItems(page)).toContainText("Most used in the last 90 days");
+    await expect(results(page).getByText(`RFT ${tag}`)).toBeVisible();
+  });
+
+  test("14. an item with no price takes this patient's price right in the search row", async ({
+    page,
+  }) => {
+    await item("unpriced", "UNPRICED", `Unpriced scan ${tag}`, 0, { kind: "procedure" });
+    const { visit } = await extraVisit(ids, "C15Price", { visitType: "Follow Up" });
+    const draft = await bills.openDraft(visit, desk, db);
+    await loginAs(page, "reception");
+    await gotoReady(page, `${RECEPTION}?tab=bill&visit=${visit}`, () => addItems(page));
+    await openAddItems(page);
+    await searchInput(page).fill(`Unpriced scan ${tag}`);
+    const row = results(page)
+      .getByRole("listitem")
+      .filter({ hasText: `Unpriced scan ${tag}` });
+    await expect(row).not.toContainText("No price");
+    await row.getByLabel(`Unpriced scan ${tag}: price for this patient`).fill("75");
+    await row.getByRole("button", { name: "Add", exact: true }).click();
+    await expect(page.getByRole("table", { name: "Bill lines" })).toContainText(
+      `Unpriced scan ${tag}`,
+    );
+    const after = await bills.readBill(draft.id, db);
+    const line = after.lines.find((entry) => entry.service_item_id === items.unpriced);
+    expect(line).toMatchObject({ patient_payable: 7500, agreed_rate: 7500 });
   });
 });

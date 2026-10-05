@@ -316,6 +316,8 @@ body{font-family:var(--fb);color:var(--ink);background:var(--white);font-size:13
 .rx-summary-tests-list{display:flex;flex-wrap:wrap;gap:4px}
 .rx-summary-test-chip{font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:var(--bg);border:1px solid var(--tlb);color:var(--ink2)}
 
+.rx-complaints{font-size:11.5px;line-height:1.5;color:var(--ink)}
+.rx-advice{margin:0;padding-left:18px;font-size:11.5px;line-height:1.55;color:var(--ink)}
 .rx-section-title{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--ink3);margin-bottom:8px;margin-top:16px;padding-bottom:4px;border-bottom:1px solid var(--bd);break-inside:avoid;break-after:avoid}
 .rx-med-cat{display:flex;align-items:center;gap:6px;font-size:10px;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.08em;background:#f5f7fa;padding:4px 8px;border-left:3px solid var(--tl);margin:10px 0 2px}
 .rx-med-cat-count{font-size:9px;font-weight:600;color:var(--ink3);text-transform:none;letter-spacing:0}
@@ -393,6 +395,9 @@ function buildPrescriptionHtml(data = {}) {
     summary = {},
     visitSummaryText: visitSummaryTextOverride,
     activeDx: activeDxInput = [],
+    complaints = [],
+    history = null,
+    advice = null,
     activeMeds = [],
     latestVitals = {},
     prevVitals = {},
@@ -916,6 +921,20 @@ function buildPrescriptionHtml(data = {}) {
         : ""
     }
 
+    ${
+      complaints.length > 0
+        ? `<div class="rx-section-title">Complaints / Symptoms</div>
+           <div class="rx-complaints">${complaints.map((c) => escape(c)).join(", ")}</div>`
+        : ""
+    }
+
+    ${
+      history
+        ? `<div class="rx-section-title">History</div>
+           <div class="rx-complaints">${escape(history).replace(/\n/g, "<br>")}</div>`
+        : ""
+    }
+
     ${activeDx.length > 0 ? `<div class="rx-section-title">Diagnoses</div>${dxHtml}` : ""}
 
     ${
@@ -934,6 +953,18 @@ function buildPrescriptionHtml(data = {}) {
     ${
       externalMeds.length > 0
         ? `<div class="rx-section-title" style="margin-top:14px">External medicines — prescribed by other doctors</div>${extMedsHtml}`
+        : ""
+    }
+
+    ${
+      advice
+        ? `<div class="rx-section-title">Advice</div>
+           <ul class="rx-advice">${advice
+             .split(/\n+/)
+             .map((line) => line.trim())
+             .filter(Boolean)
+             .map((line) => `<li>${escape(line)}</li>`)
+             .join("")}</ul>`
         : ""
     }
 

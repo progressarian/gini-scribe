@@ -6,6 +6,7 @@ import { cleanDate, likePattern, readNumber } from "./common.js";
 import { MONEY_COLUMNS, moneyFrom, noteDue } from "./payments.js";
 import { refundPreviewOf } from "./billingRequests.js";
 import { httpError } from "./transaction.js";
+import { AS_PAID } from "../../../shared/billingVocab.js";
 
 export const REFUND_GROUPS = ["to_pay", "waiting", "rejected", "paid"];
 const BOARD_LIMIT = 100;
@@ -51,6 +52,50 @@ const BOARD_SQL = `
      AND ($3::text IS NULL OR p.name ILIKE $3 OR p.file_no ILIKE $3 OR b.bill_no ILIKE $3
           OR cn.bill_no ILIKE $3)
    ORDER BY r.requested_at, r.id`;
+
+const DISCOUNT_SQL = `
+  SELECT NULL::uuid AS id, 'approved' AS status,
+         'Discount after the bill was final: '
+           || CASE WHEN cn.manual_discount_kind = 'percent'
+                   THEN trim(trailing '.' FROM trim(trailing '0' FROM cn.manual_discount_value::text)) || '%'
+                   ELSE '₹' || cn.manual_discount_value::text END
+           || COALESCE(' — ' || cn.manual_discount_reason, '') AS reason,
+         NULL::text AS reason_code, '${AS_PAID}' AS requested_mode, '${AS_PAID}' AS approved_mode,
+         NULL::text AS mode_reason, NULL::text AS decision_note,
+         cn.created_at AS requested_at, cn.created_at AS decided_at, NULL::jsonb AS refund_lines,
+         b.id AS bill_id, cn.id AS credit_note_id,
+         cn.manual_discount_by AS requested_by, cn.manual_discount_by AS decided_by,
+         b.visit_id,
+         p.id AS patient_id, p.name AS patient_name, p.file_no,
+         v.visit_date::text AS visit_date,
+         b.bill_no, b.bill_date::text AS bill_date, b.pay_later,
+         cn.bill_no AS credit_note_no, cn.version AS credit_note_version,
+         cn.patient_payable AS note_payable, cn.paid_amount AS note_paid,
+         gv.name AS requested_by_name, gv.name AS decided_by_name,
+         po.paid_at, po.paid_by_name,
+         ${IST_DAY("COALESCE(po.paid_at, cn.created_at)")}::text AS done_day,
+         m.patient_payable, m.paid_in, m.credited, m.paid_out
+    FROM bills cn
+    JOIN bills b ON b.id = cn.original_bill_id
+    LEFT JOIN patients p ON p.id = b.patient_id
+    LEFT JOIN giniflow_visits v ON v.id = b.visit_id
+    LEFT JOIN doctors gv ON gv.id = cn.manual_discount_by
+    LEFT JOIN LATERAL (
+      SELECT x.received_at AS paid_at, d.name AS paid_by_name
+        FROM payments x LEFT JOIN doctors d ON d.id = x.received_by
+       WHERE x.bill_id = cn.id
+       ORDER BY x.received_at DESC, x.id DESC
+       LIMIT 1
+    ) po ON TRUE
+    CROSS JOIN LATERAL (SELECT ${MONEY_COLUMNS} FROM bills b WHERE b.id = cn.original_bill_id) m
+   WHERE cn.bill_type = 'credit_note' AND cn.credit_kind = 'discount'
+     AND (cn.paid_amount < cn.patient_payable
+          OR ${IST_DAY("COALESCE(po.paid_at, cn.created_at)")} BETWEEN $1::date AND $2::date)
+     AND ($3::text IS NULL OR p.name ILIKE $3 OR p.file_no ILIKE $3 OR b.bill_no ILIKE $3
+          OR cn.bill_no ILIKE $3)
+   ORDER BY cn.created_at, cn.id`;
+
+const isDiscount = (row) => !row.id && Boolean(row.credit_note_id);
 
 function cleanLimit(value) {
   const limit = readNumber(value, "Limit must be a whole number");
@@ -103,6 +148,8 @@ function groupOf(row, amounts, range) {
 
 function shapeRow(row, group, amounts) {
   return {
+    key: row.id ?? row.credit_note_id,
+    kind: isDiscount(row) ? "discount" : "refund",
     request_id: row.id,
     status: row.status,
     group,
@@ -177,11 +224,17 @@ export async function refundBoard(filters = {}, db = pool) {
   if (from > to) throw httpError(400, "The start date is after the end date");
   const q = cleanSearch(filters.q);
   const limit = cleanLimit(filters.limit);
-  const { rows } = await db.query(BOARD_SQL, [from, to, q ? likePattern(q) : null]);
+  const params = [from, to, q ? likePattern(q) : null];
+  const [{ rows: requested }, { rows: discounts }] = await Promise.all([
+    db.query(BOARD_SQL, params),
+    db.query(DISCOUNT_SQL, params),
+  ]);
+  const rows = [...requested, ...discounts];
 
   const grouped = Object.fromEntries(REFUND_GROUPS.map((key) => [key, []]));
   for (const row of rows) {
     const amounts = amountsOf(row);
+    if (isDiscount(row) && !amounts.to_pay && !amounts.paid_back) continue;
     const group = groupOf(row, amounts, { from, to });
     if (group) grouped[group].push({ row, entry: shapeRow(row, group, amounts) });
   }

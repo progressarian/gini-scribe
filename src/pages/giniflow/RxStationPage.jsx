@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   useRxQueue,
+  useHandOverEchoReport,
   useRxPatient,
   useStartRxExplain,
   useMarkRxExplained,
@@ -261,6 +262,7 @@ export default function RxStationPage() {
   const explained = useMarkRxExplained();
   const returnToQueue = useReturnRxToQueue();
   const reissue = useReissueRx();
+  const handOver = useHandOverEchoReport();
 
   const onReissue = (visitId) =>
     reissue.mutate(
@@ -274,6 +276,21 @@ export default function RxStationPage() {
   const atDesk = data?.atDesk || [];
   const waiting = data?.waiting || [];
   const done = data?.explained || [];
+  const handovers = data?.echoHandovers || [];
+
+  const onHandOver = (row) =>
+    handOver.mutate(
+      { visitId: row.visitId },
+      {
+        onSuccess: () => {
+          setToast(
+            `✓ Echo report handed over — ${row.name} goes to vitals, then ${row.doctorName || "their doctor"}`,
+          );
+          setTimeout(() => setToast(""), 3500);
+        },
+        onError: (e) => setToast(e?.response?.data?.error || "Could not hand over the report"),
+      },
+    );
 
   const pick = (visitId) => {
     setOpenId(visitId);
@@ -374,6 +391,37 @@ export default function RxStationPage() {
 
           <div className="ar-split">
             <div className="ar-col">
+              {handovers.length > 0 && (
+                <>
+                  <div className="grp-lbl grp-lbl-sp">
+                    🫀 Echo reports to hand over
+                    <span className="grp-split">{handovers.length}</span>
+                  </div>
+                  <div className="grp-hint">
+                    Referred only for an echo — give them the report, then send them to vitals and
+                    their doctor.
+                  </div>
+                  {handovers.map((r) => (
+                    <div className="sq-done" key={r.visitId}>
+                      <div className="si-name">{r.name}</div>
+                      <div className="si-meta">
+                        {r.fileNo || "—"} · {r.echoTests.join(", ") || "Echo"} · then{" "}
+                        {r.doctorName || "their doctor"}
+                      </div>
+                      <button
+                        type="button"
+                        className={`st-btn ${r.reportReady ? "st-btn-grn" : "st-btn-g"}`}
+                        disabled={!r.reportReady || handOver.isPending}
+                        aria-label={`Hand over the echo report to ${r.name}`}
+                        onClick={() => onHandOver(r)}
+                      >
+                        {r.reportReady ? "Hand over report" : "Waiting for echo report"}
+                      </button>
+                    </div>
+                  ))}
+                </>
+              )}
+
               <div className="grp-lbl grp-lbl-sp">
                 🟢 At the desk<span className="grp-split">{atDesk.length}</span>
               </div>

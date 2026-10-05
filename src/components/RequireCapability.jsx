@@ -36,7 +36,7 @@ export default function RequireCapability() {
   // /analytics carries an extra identity-level gate on top of its capability,
   // mirroring the same check on /api/analytics.
   const allowed =
-    (!requiredCap || hasAnyCapability(role, requiredCap)) &&
+    (!requiredCap || hasAnyCapability(currentDoctor, requiredCap)) &&
     (location.pathname !== "/analytics" || canViewAnalytics(currentDoctor)) &&
     !isPathHiddenForRole(role, location.pathname);
 

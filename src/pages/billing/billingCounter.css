@@ -532,6 +532,12 @@ body.bc-resizing {
   flex: 1;
   min-width: 0;
 }
+.gf .bc-result__rate {
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 .gf .bc-empty-search,
 .gf .bc-newitem {
   display: flex;
@@ -2072,4 +2078,320 @@ body > [role="dialog"][aria-modal="true"] .bc-err {
 }
 .bc-hr-confirm p {
   margin: 0;
+}
+
+.gf .bc-ldisc {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.gf .bc-ldisc__kind,
+.gf .bc-ldisc__value {
+  font: inherit;
+  font-size: 12px;
+  height: 26px;
+  padding: 0 4px;
+  color: var(--ink);
+  background: var(--white);
+  border: 1px solid var(--bd2);
+  border-radius: 6px;
+}
+.gf .bc-ldisc__kind {
+  width: 40px;
+}
+.gf .bc-ldisc__value {
+  width: 64px;
+  text-align: right;
+}
+.gf .bc-ldisc__kind:focus-visible,
+.gf .bc-ldisc__value:focus-visible {
+  outline: 2px solid var(--tl);
+  outline-offset: 1px;
+}
+.gf .bc-ldisc__taken {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--ink3);
+}
+
+.gf .bc-layout {
+  font-size: 12.5px;
+}
+@media (min-width: 901px) {
+  .gf .bc-layout .bc-detail {
+    padding: 10px 12px 16px;
+  }
+}
+.gf .bc-layout .bc-detail,
+.gf .bc-layout .bc-panel {
+  gap: 8px;
+}
+.gf .bc-layout .bc-bill {
+  gap: 10px;
+}
+.gf .bc-layout .bc-bill__work,
+.gf .bc-layout .bc-bill__summary,
+.gf .bc-layout .bc-pay {
+  gap: 8px;
+}
+.gf .bc-layout .bc-card {
+  padding: 10px 12px;
+  border-radius: 8px;
+}
+.gf .bc-layout .bc-card__heading {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+.gf .bc-layout .bc-card__title {
+  margin: 0 0 6px;
+  font-size: 12.5px;
+}
+.gf .bc-layout .bc-card__bar {
+  margin-bottom: 8px;
+}
+.gf .bc-layout .bc-hint,
+.gf .bc-layout .bc-err,
+.gf .bc-layout .bc-note {
+  font-size: 11.5px;
+}
+.gf .bc-layout .bc-field__lbl {
+  font-size: 10px;
+}
+.gf .bc-layout .bc-field__in {
+  font-size: 12px;
+  padding: 4px 7px;
+}
+.gf .bc-layout .st-btn {
+  padding: 4px 10px;
+  font-size: 11.5px;
+}
+
+.gf .bc-layout .bc-avatar {
+  width: 28px;
+  height: 28px;
+  font-size: 10.5px;
+}
+.gf .bc-layout .bc-avatar--lg {
+  width: 36px;
+  height: 36px;
+  font-size: 12.5px;
+}
+.gf .bc-layout .bc-row {
+  grid-template-columns: 28px minmax(0, 1fr);
+  column-gap: 8px;
+  row-gap: 2px;
+  padding: 7px 10px;
+}
+.gf .bc-layout .bc-row__name {
+  font-size: 12.5px;
+}
+.gf .bc-layout .bc-head__top {
+  gap: 6px 10px;
+}
+.gf .bc-layout .bc-head__name {
+  font-size: 15px;
+}
+.gf .bc-layout .bc-head__meta {
+  font-size: 11.5px;
+}
+.gf .bc-layout .bc-head__cat,
+.gf .bc-layout .bc-head__state,
+.gf .bc-layout .bc-cat,
+.gf .bc-layout .bc-pill {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+.gf .bc-layout .bc-addbtn {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+@container (min-width: 621px) {
+  .gf .bc-layout .bc-itable {
+    font-size: 12.5px;
+  }
+  .gf .bc-layout .bc-itable thead th {
+    padding: 6px 8px;
+    font-size: 11px;
+  }
+  .gf .bc-layout .bc-itable tbody td,
+  .gf .bc-layout .bc-itable tbody th {
+    padding: 6px 8px;
+  }
+}
+.gf .bc-layout .bc-item__sub {
+  font-size: 11px;
+}
+.gf .bc-layout .bc-icon-btn {
+  width: 26px;
+  height: 26px;
+}
+.gf .bc-layout .bc-items__info {
+  margin: 8px 0 0;
+  padding: 6px 10px;
+  font-size: 11.5px;
+}
+.gf .bc-layout .bc-items__total {
+  padding: 8px 10px 0;
+  font-size: 12.5px;
+}
+.gf .bc-layout .bc-items__total strong {
+  font-size: 15px;
+}
+.gf .bc-layout .bc-labcase {
+  margin: 0 0 6px;
+}
+.gf .bc-layout .bc-labcase__row {
+  padding: 4px 0;
+}
+
+.gf .bc-layout .bc-paid__head {
+  padding: 8px 12px;
+  font-size: 12.5px;
+}
+.gf .bc-layout .bc-paid__row {
+  padding: 8px 12px;
+}
+.gf .bc-layout .bc-paid__note {
+  padding: 6px 12px 8px;
+  font-size: 11.5px;
+}
+
+.gf .bc-layout .bc-sum .bc-totals th,
+.gf .bc-layout .bc-sum .bc-totals td {
+  padding: 4px 0;
+  font-size: 12.5px;
+}
+.gf .bc-layout .bc-sum .bc-t--strong th,
+.gf .bc-layout .bc-sum .bc-t--strong td {
+  padding-top: 8px;
+  font-size: 13.5px;
+}
+.gf .bc-layout .bc-sum .bc-t--due th,
+.gf .bc-layout .bc-sum .bc-t--due td,
+.gf .bc-layout .bc-sum .bc-t--clear th,
+.gf .bc-layout .bc-sum .bc-t--clear td {
+  padding: 7px 10px;
+  font-size: 13.5px;
+}
+.gf .bc-layout .bc-sum .bc-totals tr:has(+ .bc-t--due) th,
+.gf .bc-layout .bc-sum .bc-totals tr:has(+ .bc-t--due) td,
+.gf .bc-layout .bc-sum .bc-totals tr:has(+ .bc-t--clear) th,
+.gf .bc-layout .bc-sum .bc-totals tr:has(+ .bc-t--clear) td {
+  padding-bottom: 8px;
+}
+.gf .bc-layout .bc-pay__take {
+  padding-top: 10px;
+}
+.gf .bc-layout .bc-pay__fields .bc-field__in,
+.gf .bc-layout .bc-pay__rest {
+  height: 32px;
+}
+.gf .bc-layout .bc-pay__mini {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+.gf .bc-layout .bc-pay__go {
+  height: 38px;
+  margin-top: 10px;
+  font-size: 13px;
+}
+.gf .bc-layout .bc-disc .bc-card__heading {
+  margin-bottom: 8px;
+}
+.gf .bc-layout .bc-disc__row .st-btn {
+  min-height: 28px;
+}
+.gf .bc-layout .bc-offers {
+  margin-top: 8px;
+  padding-top: 8px;
+}
+.gf .bc-layout .bc-disc .bc-chips,
+.gf .bc-layout .bc-mdisc__bill {
+  margin-top: 8px;
+}
+.gf .bc-layout .bc-disc__field {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+.gf .bc-layout .bc-disc__field .bc-field__in {
+  width: 100%;
+  min-width: 0;
+}
+.gf .bc-layout .bc-disc__none {
+  flex: 0 0 100%;
+  margin-left: 0;
+}
+
+.gf .bc-layout .bc-result {
+  flex-wrap: nowrap;
+}
+.gf .bc-layout .bc-result__name {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gf .bc-layout .bc-result__meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gf .bc-layout .bc-result__price {
+  flex: 0 0 80px;
+  width: 80px;
+  min-width: 0;
+  height: 26px;
+  padding: 0 6px;
+  text-align: right;
+}
+.gf .bc-layout .bc-result .st-btn {
+  flex: 0 0 auto;
+}
+
+.gf .bc-additems__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.gf .bc-additems__toggle:focus-visible {
+  outline: 2px solid var(--tl);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.gf .bc-layout .bc-additems .bc-card__title {
+  margin: 0;
+}
+.gf .bc-additems__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.gf .bc-additems__body > * {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+.gf .bc-layout .bc-additems__body .bc-empty-search {
+  padding: 6px 10px;
+}
+.gf .bc-layout .bc-additems .bc-requests {
+  margin-top: 8px;
+}
+.gf .bc-additems__body > .bc-field {
+  flex: none;
 }

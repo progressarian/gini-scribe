@@ -37,6 +37,7 @@ export default function TotalsAndPayment({
   payLater,
   onPayLater,
   form,
+  afterSummary = null,
 }) {
   const { data: settings } = useDeskSettings();
   const { data: shift } = useCurrentShift();
@@ -193,6 +194,8 @@ export default function TotalsAndPayment({
             <div className="bc-pay__clear">No payment is needed on this bill.</div>
           )}
       </div>
+
+      {afterSummary}
 
       {bill.status !== "cancelled" && balance === 0 && healthrayPaid > 0 && (
         <div className="bc-card bc-pay__take">

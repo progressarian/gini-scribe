@@ -7,13 +7,14 @@ import {
   useSuggestedCodes,
 } from "../../../queries/hooks/useBilling";
 import { codeTyped, errorOf, fromPaise } from "../format";
+import FinalBillDiscount from "./FinalBillDiscount";
 import ManualDiscountFields, {
   discountDraft,
   discountNote,
   discountProblem,
 } from "./ManualDiscountFields";
 
-export default function DiscountCodeBox({ bill, onBill, form }) {
+export default function DiscountCodeBox({ bill, onBill, form, patient }) {
   const addCode = useAddCode();
   const removeCode = useRemoveCode();
   const code = form.value.code;
@@ -267,6 +268,8 @@ export default function DiscountCodeBox({ bill, onBill, form }) {
         )}
         {extraError && <div className="bc-err">{extraError}</div>}
       </div>
+
+      <FinalBillDiscount bill={bill} patient={patient} onBill={onBill} />
 
       {bill.status !== "draft" && nothing && (
         <div className="bc-disc__none">No discount applied</div>

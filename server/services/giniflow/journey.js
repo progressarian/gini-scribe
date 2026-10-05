@@ -35,6 +35,7 @@ import {
   stepsAllowedByBill,
   syncBillCharges,
 } from "./patientBill.js";
+import { consultsDirect, withoutChief } from "../../../shared/directConsult.js";
 
 const DRAWN_STATUS_SQL = LAB_RUNGS.filter((r) => stageIndexOf(r.key) >= stageIndexOf("collected"))
   .flatMap((r) => r.sampleStatuses)
@@ -471,7 +472,10 @@ export async function checkInWithJourney(
     await client.query("BEGIN");
     const existing = await client.query(
       `SELECT v.current_status, v.patient_id, v.visit_date,
-              (SELECT count(*)::int FROM giniflow_visit_steps s WHERE s.visit_id = v.id) AS steps
+              (SELECT count(*)::int FROM giniflow_visit_steps s WHERE s.visit_id = v.id) AS steps,
+              (SELECT a.doctor_name FROM appointments a WHERE a.id = v.appointment_id) AS booked_doctor,
+              (SELECT d.name FROM doctors d WHERE d.id = v.assigned_doctor_id) AS assigned_doctor,
+              v.echo_referral
          FROM giniflow_visits v WHERE v.id = $1 FOR NO KEY UPDATE`,
       [visitId],
     );
@@ -479,9 +483,13 @@ export async function checkInWithJourney(
     const labAlreadyDone = await sampleTakenBeforeVisit(client, visitId);
     const bill = await storedBill(existing.rows[0].patient_id, existing.rows[0].visit_date, client);
     const machines = await getMachines(client);
-    const steps = stepsAllowedByBill(askedSteps, bill, machines).filter(
+    const allowed = stepsAllowedByBill(askedSteps, bill, machines).filter(
       (s) => !(labAlreadyDone && isEarlierLabStep(s)),
     );
+    const routed = consultsDirect(existing.rows[0].booked_doctor, existing.rows[0].assigned_doctor)
+      ? withoutChief(allowed)
+      : allowed;
+    const steps = existing.rows[0].echo_referral ? echoFirst(routed, machines) : routed;
     const current = existing.rows[0].current_status;
     // A second press at a busy counter must not give the patient two journeys.
     const alreadyPlanned = existing.rows[0].steps > 0;
@@ -633,7 +641,10 @@ export async function ensurePlan(visitId, db = pool) {
             END AS booked_as_followup,
             (a.visit_type ~* '(investigat|lab|test)') AS booked_for_tests,
             (a.visit_type ~* '(tele|online|video)') AS booked_online,
-            (SELECT COUNT(*)::int FROM giniflow_visit_steps s WHERE s.visit_id = v.id) AS steps
+            (SELECT COUNT(*)::int FROM giniflow_visit_steps s WHERE s.visit_id = v.id) AS steps,
+            a.doctor_name AS booked_doctor,
+            (SELECT d.name FROM doctors d WHERE d.id = v.assigned_doctor_id) AS assigned_doctor,
+            v.echo_referral
        FROM giniflow_visits v
        LEFT JOIN appointments a ON a.id = v.appointment_id
       WHERE v.id = $1`,
@@ -656,11 +667,16 @@ export async function ensurePlan(visitId, db = pool) {
     ));
   if (!visitTypeId) return { seeded: false };
 
-  const plan = stepsAllowedByBill(
+  const machines = await getMachines(db);
+  const billed = stepsAllowedByBill(
     (await defaultPlan(visitTypeId, db)).filter((s) => s.included),
     await storedBill(visit.patient_id, visit.visit_date, db),
-    await getMachines(db),
+    machines,
   );
+  const routed = consultsDirect(visit.booked_doctor, visit.assigned_doctor)
+    ? withoutChief(billed)
+    : billed;
+  const plan = visit.echo_referral ? echoFirst(routed, machines) : routed;
   if (!plan.length) return { seeded: false };
 
   const client = await db.connect();
@@ -967,11 +983,23 @@ export async function insertLabStepsForOrder(client, visitId) {
 }
 
 export async function insertMachineStepsForOrders(client, visitId, machineIds) {
+  const { rows } = await client.query(`SELECT echo_referral FROM giniflow_visits WHERE id = $1`, [
+    visitId,
+  ]);
+  const echoReferral = Boolean(rows[0]?.echo_referral);
   return insertAutoSteps(client, visitId, machineIds, (plan) => {
+    if (echoReferral) return plan.find((s) => s.status === "pending")?.step_order;
     const lastTest = plan.findLast((s) => isTestStep(s.step_catalog_id, s.machine));
     return lastTest ? lastTest.step_order + 1 : firstPendingAfterVitals(plan)?.step_order;
   });
 }
+
+const isEchoStep = (step, machines) => machineFor(machines, step.catalogId)?.station === "echo";
+
+export const echoFirst = (steps, machines) => {
+  const echo = steps.filter((step) => isEchoStep(step, machines));
+  return echo.length ? [...echo, ...steps.filter((step) => !echo.includes(step))] : steps;
+};
 
 export async function addLabStepsForArrivedLabCase(patientId, caseDate, db = pool) {
   if (!patientId || !caseDate) return { added: [] };

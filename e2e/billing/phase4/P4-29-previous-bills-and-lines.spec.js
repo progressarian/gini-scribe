@@ -64,7 +64,14 @@ test.describe.serial("P4-29 previous bills and lines", () => {
       }
       await expect(cells.nth(2)).toHaveText(String(line.quantity));
       await expect(cells.nth(3)).toHaveText(fromPaise(line.rate));
-      await expect(cells.nth(4)).toHaveText(fromPaise(line.discount));
+      if (bill.status === "draft") {
+        await expect(cells.nth(4).getByLabel(`Discount for ${line.bill_name}`)).toBeVisible();
+        if (line.discount > 0) {
+          await expect(cells.nth(4)).toContainText(`−${fromPaise(line.discount)}`);
+        }
+      } else {
+        await expect(cells.nth(4)).toHaveText(fromPaise(line.discount));
+      }
       await expect(cells.nth(5)).toHaveText(fromPaise(line.patient_payable));
     }
   });

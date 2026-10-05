@@ -16,6 +16,7 @@ const ROLE_GROUPS = [
   { role: "xray_tech", label: "X-Ray Station", showSpecialty: false },
   { role: "tech", label: "Technicians", showSpecialty: false },
   { role: "pharmacy", label: "Pharmacy", showSpecialty: false },
+  { role: "pharmacy_admin", label: "Pharmacy Admin", showSpecialty: false },
   { role: "rx", label: "Prescription Explainer", showSpecialty: false },
   { role: "reception", label: "Reception", showSpecialty: false },
   { role: "reception_admin", label: "Reception Admin", showSpecialty: false },
@@ -67,7 +68,8 @@ export default function LoginPage() {
     reception: "/opd",
     reception_admin: "/opd",
     coordinator: "/opd",
-    pharmacy: "/refills",
+    pharmacy: "/giniflow/station/pharmacy",
+    pharmacy_admin: "/pharmacy/stock",
     rx: "/giniflow/station/rx",
   };
   const getDefaultRoute = (role) => ROLE_LANDING[role] || "/";

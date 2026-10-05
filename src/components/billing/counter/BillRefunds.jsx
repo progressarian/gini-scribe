@@ -11,6 +11,7 @@ import { payOutText, refundLegsText, refundModeText } from "./lineText";
 import { HEALTHRAY_MODE } from "../../../../shared/billingVocab.js";
 import RefundDialog from "./RefundDialog";
 import { PdfButton } from "./PdfViewer";
+import { discountText } from "./ManualDiscountFields";
 
 const paiseOf = (typed) => Math.round(Number(typed || 0) * 100);
 
@@ -226,9 +227,17 @@ export default function BillRefunds({ bill, onRefunded }) {
       {notes.map((cn) => (
         <div key={cn.id} className="bc-refund__note">
           <div>
-            <strong>Credit note {cn.bill_no}</strong> · credited {fromPaise(cn.totals.payable)} ·
-            refunded {fromPaise(cn.totals.refunded)}
+            <strong>
+              {cn.credit_kind === "discount" ? "Discount credit note" : "Credit note"} {cn.bill_no}
+            </strong>{" "}
+            · credited {fromPaise(cn.totals.payable)} · refunded {fromPaise(cn.totals.refunded)}
           </div>
+          {cn.discount && (
+            <div className="bc-head__meta">
+              Discount after the bill was final: {discountText(cn.discount)}
+              {cn.discount.reason ? ` · ${cn.discount.reason}` : ""}
+            </div>
+          )}
           {cn.refund.approved_mode && (
             <div className="bc-head__meta">
               Approved: {refundModeText(cn.refund.approved_mode)}

@@ -25,6 +25,8 @@ import { computeCarePhase } from "../utils/carePhase.js";
 import { sortDiagnoses } from "../utils/diagnosisSort.js";
 import { generatePatientSummary } from "./patientSummaryAI.js";
 import { datedFollowUp } from "../../shared/followUp.js";
+import { appointmentComplaints, appointmentHistory } from "./giniflow/visitComplaints.js";
+import { appointmentAdvice } from "./giniflow/visitAdvice.js";
 
 const require = createRequire(import.meta.url);
 // Outbound Genie sync removed 2026-05-01 — dual-DB routing replaces it.
@@ -343,6 +345,11 @@ export async function buildVisitPayloadFromDb(pid, { appointmentId } = {}) {
   const patient = patientR.rows[0];
   if (!patient) return null;
   const appt = apptR.rows[0] || null;
+  const [complaints, history, advice] = await Promise.all([
+    appointmentComplaints(pid, appt?.id),
+    appointmentHistory(appt?.id),
+    appointmentAdvice(appt?.id),
+  ]);
 
   // Doctor block — appointments.doctor_name is the canonical reference for
   // who saw the patient. We don't currently join doctors metadata for the
@@ -432,6 +439,9 @@ export async function buildVisitPayloadFromDb(pid, { appointmentId } = {}) {
     // diagnoses alphabetically by diagnosis_id instead of Primary →
     // Complication → Comorbidity → External → Monitoring.
     activeDx: sortDiagnoses(activeDxR.rows),
+    complaints: complaints.map((c) => c.label),
+    history,
+    advice,
     activeMeds: activeMedsR.rows,
     latestVitals,
     prevVitals,

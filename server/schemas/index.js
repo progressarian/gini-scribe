@@ -1067,6 +1067,18 @@ export const giniflowDoctorQueueQuerySchema = z.object({
 // Goals are structured rather than prose: they are what the NEXT visit's
 // in-control / worse classifier measures against, so they must be readable by a
 // machine as well as by the patient.
+export const giniflowComplaintSchema = z.object({
+  label: z.string().trim().min(1, "Enter a complaint").max(200),
+});
+
+export const giniflowAdviceSchema = z.object({
+  advice: z.string().max(4000).nullish(),
+});
+
+export const giniflowHistorySchema = z.object({
+  history: z.string().max(4000).nullish(),
+});
+
 export const giniflowCarePlanSchema = z.object({
   treatment: z.string().max(4000).nullish(),
   lifestyle: z.string().max(4000).nullish(),
@@ -1373,3 +1385,4 @@ export const patientAppUnlinkSchema = z.object({
 
 export * from "./billing.js";
 export * from "./billingReports.js";
+export * from "./pharmacyStock.js";

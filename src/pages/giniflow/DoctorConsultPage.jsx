@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useMutationState } from "@tanstack/react-query";
+import { useIsMutating, useMutationState } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   useConsult,
@@ -8,6 +8,8 @@ import {
   useDecideProposal,
 } from "../../queries/hooks/useGiniflowDoctor";
 import OverviewSection from "./consult/OverviewSection";
+import ComplaintsSection from "./consult/ComplaintsSection";
+import AdviceSection from "./consult/AdviceSection";
 import LabsSection from "./consult/LabsSection";
 import CarePlanSection from "./consult/CarePlanSection";
 import { usePrescription, visitWriteKey } from "../../queries/hooks/useGiniflowPrescription";
@@ -20,6 +22,11 @@ import MedCardSection from "./consult/MedCardSection";
 import FinalizeBar from "./consult/FinalizeBar";
 import TrendModal from "./consult/TrendModal";
 import "../../styles/giniflow-station.css";
+import { clearDraftFields, readDraft, writeDraftNav } from "../../lib/consultDraft";
+import { fetchPrintableRx, printRxHref } from "../../queries/hooks/useGiniflowRx";
+import PdfViewerModal from "../../components/visit/PdfViewerModal";
+import useFullscreen from "../../hooks/useFullscreen";
+import FullscreenButton from "../../components/giniflow/FullscreenButton";
 
 // The consult screen — gini-doctor-final.html.
 //
@@ -40,11 +47,13 @@ const CATEGORY_BADGE = {
 const NAV = [
   { id: "s-proposals", label: "🩺 Chief Endo proposed" },
   { id: "s-overview", label: "📋 Overview" },
+  { id: "s-complaints", label: "🗣 Symptoms / History" },
   { id: "s-labs", label: "📊 Labs & graphs" },
   { id: "s-rx", label: "💊 Prescription" },
   { id: "s-tests", label: "🔬 Tests" },
   { id: "s-procedures", label: "🩹 Procedures" },
   { id: "s-medcard", label: "🗒 Medicine card" },
+  { id: "s-advice", label: "💬 Advice" },
   { id: "s-plan", label: "📝 Care plan" },
 ];
 
@@ -52,10 +61,19 @@ const NAV = [
 // itself is safe — every Rx edit and the care plan are already written — so the
 // guard is only about these three, and it names them rather than asking "are you
 // sure?" about nothing in particular.
+const DRAFT_LABEL = {
+  history: "History note",
+  advice: "Advice",
+  carePlan: "Care plan",
+  tests: "Tests selected but not ordered",
+};
+
 const UNSAVED_LABEL = {
   rx: "a medicine editor is still open",
   add: "a medicine has been filled in but not added",
   tests: "tests are selected but not ordered",
+  history: "the history note is still saving",
+  advice: "the advice is still saving",
 };
 
 const clock = (iso) =>
@@ -82,6 +100,18 @@ export default function DoctorConsultPage() {
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const toastTimer = useRef(null);
   const flushCarePlan = useRef(null);
+  const scrollRef = useRef(null);
+  const navRef = useRef(null);
+  const [activeNav, setActiveNav] = useState(NAV[0].id);
+  const [restored, setRestored] = useState(null);
+  const [restorePrompt, setRestorePrompt] = useState(null);
+  const [printState, setPrintState] = useState(null);
+  const { ref: pageRef, fullscreen, toggle: toggleFullscreen } = useFullscreen();
+  const flushHistory = useRef(null);
+  const flushAdvice = useRef(null);
+  const requestFinalize = useRef(null);
+  const [saveRequested, setSaveRequested] = useState(false);
+  const writing = useIsMutating({ mutationKey: visitWriteKey(visitId) });
 
   const markUnsaved = useCallback(
     (key, on) => setUnsaved((u) => (!!u[key] === !!on ? u : { ...u, [key]: !!on })),
@@ -139,6 +169,135 @@ export default function DoctorConsultPage() {
       onError: (e) => showToast(e?.response?.data?.error || "Decision not saved"),
     });
 
+  const openPrint = async ({ leaveAfter = false } = {}) => {
+    setPrintState({ phase: "preparing", leaveAfter });
+    try {
+      await fetchPrintableRx(visitId);
+      setPrintState({ phase: "ready", leaveAfter, url: printRxHref(visitId) });
+    } catch (e) {
+      setPrintState(null);
+      showToast(e.message || "The prescription could not be opened");
+      if (leaveAfter) navigate("/giniflow/station/doctor");
+    }
+  };
+
+  const saveAll = () => {
+    flushCarePlan.current?.();
+    flushHistory.current?.();
+    flushAdvice.current?.();
+    setSaveRequested(true);
+  };
+
+  const saveAndPrint = () => {
+    saveAll();
+    if (consult?.finalized) openPrint();
+    else requestFinalize.current?.();
+  };
+
+  useEffect(() => {
+    if (!saveRequested || writing > 0) return;
+    setSaveRequested(false);
+    const left = pendingWork.filter((k) => k !== "history" && k !== "advice");
+    showToast(
+      left.length
+        ? `✓ Saved · still open: ${left.map((k) => UNSAVED_LABEL[k]).join(" · ")}`
+        : "✓ All changes saved",
+    );
+  }, [saveRequested, writing, pendingWork]);
+
+  const closePrint = () => {
+    const leaveAfter = printState?.leaveAfter;
+    setPrintState(null);
+    if (leaveAfter) navigate("/giniflow/station/doctor");
+  };
+
+  const jumpLock = useRef(0);
+  const scrollToSection = (id, smooth) => {
+    const scroller = scrollRef.current;
+    const el = document.getElementById(id);
+    if (!scroller || !el) return;
+    const navHeight = navRef.current?.offsetHeight || 0;
+    const top =
+      el.getBoundingClientRect().top -
+      scroller.getBoundingClientRect().top +
+      scroller.scrollTop -
+      navHeight -
+      8;
+    scroller.scrollTo({ top: Math.max(0, top), behavior: smooth ? "smooth" : "auto" });
+  };
+
+  const hasConsult = !!consult;
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    const nav = navRef.current;
+    if (!scroller || !nav) return undefined;
+    let frame = 0;
+    const pick = () => {
+      frame = 0;
+      if (Date.now() < jumpLock.current) return;
+      const line = scroller.getBoundingClientRect().top + nav.offsetHeight + 12;
+      const present = NAV.map((n) => document.getElementById(n.id)).filter(Boolean);
+      if (!present.length) return;
+      const atBottom = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 4;
+      let current = present[0].id;
+      for (const el of present) {
+        if (el.getBoundingClientRect().top <= line) current = el.id;
+      }
+      setActiveNav(atBottom ? present[present.length - 1].id : current);
+    };
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(pick);
+    };
+    const onScrollEnd = () => {
+      jumpLock.current = 0;
+    };
+    pick();
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    scroller.addEventListener("scrollend", onScrollEnd);
+    return () => {
+      scroller.removeEventListener("scroll", onScroll);
+      scroller.removeEventListener("scrollend", onScrollEnd);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [hasConsult]);
+
+  const consultLocked = !!(consult?.finalized || consult?.readOnly);
+  useEffect(() => {
+    if (!hasConsult) return;
+    const draft = readDraft(visitId);
+    const fields = Object.keys(draft.fields).filter((k) => DRAFT_LABEL[k]);
+    if (consultLocked) {
+      clearDraftFields(visitId);
+      setRestored({});
+    } else if (fields.length) {
+      setRestorePrompt({ fields, values: draft.fields });
+    } else {
+      setRestored({});
+    }
+    if (draft.nav && NAV.some((n) => n.id === draft.nav)) {
+      requestAnimationFrame(() => {
+        scrollToSection(draft.nav, false);
+        setActiveNav(draft.nav);
+      });
+    }
+  }, [hasConsult, visitId, consultLocked]);
+
+  useEffect(() => {
+    if (hasConsult) writeDraftNav(visitId, activeNav);
+  }, [activeNav, hasConsult, visitId]);
+
+  useEffect(() => {
+    const nav = navRef.current;
+    const button = nav?.querySelector(`[data-nav="${activeNav}"]`);
+    if (!nav || !button) return;
+    const left =
+      button.getBoundingClientRect().left - nav.getBoundingClientRect().left + nav.scrollLeft;
+    if (left < nav.scrollLeft) nav.scrollLeft = left - 8;
+    else if (left + button.offsetWidth > nav.scrollLeft + nav.clientWidth) {
+      nav.scrollLeft = left + button.offsetWidth - nav.clientWidth + 8;
+    }
+  }, [activeNav]);
+
   if (isLoading) return <div className="gf gf-loading">Opening the consult…</div>;
   if (isError || !consult) return <div className="gf gf-loading">Consult unavailable.</div>;
 
@@ -155,10 +314,14 @@ export default function DoctorConsultPage() {
   const otherConsultant = !!consult.readOnly;
   const readOnly = consult.finalized || otherConsultant;
 
-  const jump = (id) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
+  const jump = (id) => {
+    setActiveNav(id);
+    jumpLock.current = Date.now() + 1000;
+    scrollToSection(id, true);
+  };
 
   return (
-    <div className="gf">
+    <div className={`gf${fullscreen ? " gf--full" : ""}`} ref={pageRef}>
       <div className="top-rail">
         <button
           className="tr-back"
@@ -197,6 +360,7 @@ export default function DoctorConsultPage() {
           {/* "Step out" read as walking away from the work. Nothing is lost —
               the draft is written as it is made, and leaving flushes what the
               care plan's autosave has not sent yet — so the button says so. */}
+          <FullscreenButton fullscreen={fullscreen} onToggle={toggleFullscreen} what="consult" />
           {consult.inRoom && !otherConsultant && (
             <button
               className="tr-back"
@@ -220,7 +384,7 @@ export default function DoctorConsultPage() {
           stays put and everything below it scrolls together. `.gf` is
           height:100vh/overflow:hidden, so a station screen that declares no
           scroll container simply clips. */}
-      <div className="cscroll">
+      <div className="cscroll" ref={scrollRef}>
         {/* The identity strip: who worked this patient up, and the whole "why are
             they here" in one line (plan §5.1). */}
         <div className="chead">
@@ -280,12 +444,41 @@ export default function DoctorConsultPage() {
           {consult.blockedReason && <div className="ch-blocked">🚫 {consult.blockedReason}</div>}
         </div>
 
-        <nav className="cnav">
+        <nav className="cnav" ref={navRef} aria-label="Consult sections">
           {NAV.map((n) => (
-            <button type="button" key={n.id} onClick={() => jump(n.id)}>
+            <button
+              type="button"
+              key={n.id}
+              data-nav={n.id}
+              className={activeNav === n.id ? "on" : undefined}
+              aria-current={activeNav === n.id ? "true" : undefined}
+              onClick={() => jump(n.id)}
+            >
               {n.label}
             </button>
           ))}
+          <span className="cnav-sep" aria-hidden="true" />
+          <button
+            type="button"
+            className="cnav-act"
+            disabled={readOnly || saveRequested}
+            onClick={saveAll}
+          >
+            {saveRequested ? "Saving…" : "💾 Save"}
+          </button>
+          <button
+            type="button"
+            className="cnav-act"
+            disabled={(!consult.finalized && readOnly) || !!printState}
+            title={
+              consult.finalized
+                ? "Open the prescription to print"
+                : "Save, then finalize — the prescription is made when you finalize"
+            }
+            onClick={saveAndPrint}
+          >
+            {printState?.phase === "preparing" ? "Preparing…" : "🖨 Save & Print"}
+          </button>
         </nav>
 
         <div className="cbody">
@@ -315,6 +508,14 @@ export default function DoctorConsultPage() {
             readOnly={readOnly}
           />
           <OverviewSection consult={consult} onTile={setTrendMarker} />
+          <ComplaintsSection
+            restored={restored}
+            flushRef={flushHistory}
+            visitId={visitId}
+            readOnly={readOnly}
+            onToast={showToast}
+            onUnsaved={markUnsaved}
+          />
           <LabsSection
             consult={consult}
             onTrend={(l) =>
@@ -328,6 +529,7 @@ export default function DoctorConsultPage() {
             onUnsaved={markUnsaved}
           />
           <TestsSection
+            restored={restored}
             visitId={visitId}
             consult={consult}
             readOnly={readOnly}
@@ -336,7 +538,16 @@ export default function DoctorConsultPage() {
           />
           <ProceduresSection visitId={visitId} readOnly={readOnly} onToast={showToast} />
           <MedCardSection visitId={visitId} onToast={showToast} />
+          <AdviceSection
+            restored={restored}
+            flushRef={flushAdvice}
+            visitId={visitId}
+            readOnly={readOnly}
+            onToast={showToast}
+            onUnsaved={markUnsaved}
+          />
           <CarePlanSection
+            restored={restored}
             consult={consult}
             visitId={visitId}
             onToast={showToast}
@@ -366,13 +577,15 @@ export default function DoctorConsultPage() {
             </div>
           ) : (
             <FinalizeBar
+              requestRef={requestFinalize}
               visitId={visitId}
               onToast={showToast}
-              onDone={(r) => {
+              onDone={(r, { print } = {}) => {
                 showToast(
                   `✓ Finalized — ${r.medicines} medicine${r.medicines === 1 ? "" : "s"} to the pharmacy`,
                 );
-                navigate("/giniflow/station/doctor");
+                if (print) openPrint({ leaveAfter: true });
+                else navigate("/giniflow/station/doctor");
               }}
             />
           )}
@@ -394,18 +607,84 @@ export default function DoctorConsultPage() {
               </span>
             </p>
             <div className="modal-acts">
-              <button className="st-btn st-btn-g" onClick={() => setConfirmLeave(null)}>
-                Stay
+              <button className="st-btn st-btn-grn" onClick={() => setConfirmLeave(null)}>
+                Keep editing
               </button>
               <button
-                className="st-btn st-btn-grn"
+                className="st-btn st-btn-g"
                 onClick={() => {
                   const go = confirmLeave;
+                  clearDraftFields(visitId);
                   setConfirmLeave(null);
                   go();
                 }}
               >
-                Leave anyway
+                Discard &amp; leave
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {printState?.phase === "preparing" && (
+        <div className="modal-back">
+          <div className="modal-card" role="status" aria-live="polite">
+            <h3 className="modal-title">Preparing the prescription…</h3>
+            <p className="modal-body">
+              The PDF is made just after finalizing. This usually takes a few seconds.
+            </p>
+          </div>
+        </div>
+      )}
+      {printState?.phase === "ready" && (
+        <PdfViewerModal
+          printable
+          src={{
+            url: printState.url,
+            mimeType: "application/pdf",
+            fileName: `Prescription — ${consult.name || "patient"}`,
+            title: `Prescription — ${consult.name || "patient"}`,
+          }}
+          onClose={closePrint}
+        />
+      )}
+      {restorePrompt && (
+        <div className="modal-back">
+          <div
+            className="modal-card"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="restore-title"
+          >
+            <h3 className="modal-title" id="restore-title">
+              Unsaved changes found
+            </h3>
+            <p className="modal-body">
+              These were being written when the page closed or reloaded, and had not reached the
+              server:
+              <span className="fin-gap">
+                {restorePrompt.fields.map((k) => DRAFT_LABEL[k]).join(" · ")}.
+              </span>
+            </p>
+            <div className="modal-acts">
+              <button
+                className="st-btn st-btn-g"
+                onClick={() => {
+                  clearDraftFields(visitId);
+                  setRestorePrompt(null);
+                  setRestored({});
+                }}
+              >
+                Discard
+              </button>
+              <button
+                className="st-btn st-btn-grn"
+                autoFocus
+                onClick={() => {
+                  setRestored(restorePrompt.values);
+                  setRestorePrompt(null);
+                }}
+              >
+                Keep editing
               </button>
             </div>
           </div>

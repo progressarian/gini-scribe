@@ -38,6 +38,7 @@ export const BILL_FORM = {
   code: text(40),
   chosen: { blank: null, valid: (value) => value === null || isText(value, 80) },
   search: text(100),
+  addOpen: { blank: false, valid: (value) => typeof value === "boolean" },
   again: {
     blank: null,
     valid: (value) =>

@@ -332,7 +332,15 @@ const VISIT_SQL = `
          (SELECT COALESCE(SUM(p.amount), 0) FROM payments p
             LEFT JOIN bills c ON c.id = p.bill_id
            WHERE p.direction = 'out' AND (p.bill_id = $1 OR c.original_bill_id = $1)) AS refunded,
-         (SELECT r.reason FROM billing_requests r WHERE r.credit_note_id = $1) AS refund_reason,
+         COALESCE(
+           (SELECT r.reason FROM billing_requests r WHERE r.credit_note_id = $1),
+           (SELECT 'Discount after the bill was final: '
+                   || CASE WHEN n.manual_discount_kind = 'percent'
+                           THEN trim(trailing '.' FROM trim(trailing '0' FROM n.manual_discount_value::text)) || '%'
+                           ELSE '₹' || n.manual_discount_value::text END
+                   || COALESCE(' — ' || n.manual_discount_reason, '')
+              FROM bills n WHERE n.id = $1 AND n.credit_kind = 'discount')
+         ) AS refund_reason,
          (SELECT COALESCE(SUM(p.amount), 0) FROM payments p
            WHERE p.bill_id = $1 AND p.direction = 'in' AND p.mode = '${HEALTHRAY_MODE}') AS healthray_paid,
          (SELECT o.bill_date::text FROM bills o WHERE o.id = $3) AS original_bill_date`;
@@ -543,8 +551,11 @@ export function itemsTableHtml(view, gst, closing = "") {
       }
       cells.push(`<td class="bp-item">${escapeHtml(line.bill_name ?? "")}</td>`);
       if (gst) cells.push(`<td class="bp-sac">${escapeHtml(line.sac_hsn ?? "")}</td>`);
-      cells.push(`<td class="bp-unit">${escapeHtml(unitText(line.quantity))}</td>`);
-      cells.push(`<td class="bp-num">${amountText(line.rate)}</td>`);
+      const amountOnly = Number(line.quantity) === 0;
+      cells.push(
+        `<td class="bp-unit">${amountOnly ? "—" : escapeHtml(unitText(line.quantity))}</td>`,
+      );
+      cells.push(`<td class="bp-num">${amountOnly ? "—" : amountText(line.rate)}</td>`);
       cells.push(`<td class="bp-num">${amountText(line.actual)}</td>`);
       if (discounted) cells.push(`<td class="bp-num">${amountText(line.discount)}</td>`);
       if (gst) {

@@ -25,6 +25,18 @@ export function useRxQueue(date, q = "") {
   });
 }
 
+export function useHandOverEchoReport() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ visitId }) =>
+      (await api.post(`/api/giniflow/stations/rx/${visitId}/echo-handover`)).data,
+    onSuccess: () => {
+      invalidate(queryClient);
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "vitals"] });
+    },
+  });
+}
+
 export function useRxPatient(visitId) {
   return useQuery({
     queryKey: ["giniflow", "rx", "patient", visitId],
@@ -86,4 +98,46 @@ export function useEndVisit(station) {
       queryClient.invalidateQueries({ queryKey: ["giniflow"] });
     },
   });
+}
+
+const RX_READY_TRIES = 12;
+const RX_READY_WAIT_MS = 2000;
+
+async function rxErrorOf(error) {
+  const data = error?.response?.data;
+  if (data instanceof Blob) {
+    try {
+      return JSON.parse(await data.text());
+    } catch {
+      return {};
+    }
+  }
+  return data || {};
+}
+
+export async function fetchPrintableRx(visitId) {
+  let reissued = false;
+  for (let attempt = 0; attempt < RX_READY_TRIES; attempt += 1) {
+    try {
+      const { data } = await api.get(`/api/giniflow/stations/rx/${visitId}/print`, {
+        responseType: "blob",
+      });
+      return data;
+    } catch (error) {
+      const body = await rxErrorOf(error);
+      if (body.reason === "stale" && !reissued) {
+        reissued = true;
+        await api.post(`/api/giniflow/stations/rx/${visitId}/reissue`);
+        continue;
+      }
+      if (body.reason === "not_ready") {
+        await new Promise((resolve) => setTimeout(resolve, RX_READY_WAIT_MS));
+        continue;
+      }
+      throw Object.assign(new Error(body.error || "The prescription could not be opened"), {
+        reason: body.reason,
+      });
+    }
+  }
+  throw new Error("The prescription is still being prepared — try Print Rx again in a minute");
 }

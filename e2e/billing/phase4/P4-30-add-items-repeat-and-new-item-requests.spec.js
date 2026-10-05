@@ -5,6 +5,7 @@ import { gotoReady } from "../../helpers/browser.mjs";
 import { assertTestDatabase } from "../../setup/guard.mjs";
 import { USERS } from "../../fixtures/data.mjs";
 import { desk, newTag, setUp, tearDown } from "./p4-bills-fixture.mjs";
+import { openAddItems } from "../../helpers/addItems.mjs";
 
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 const bills = await import("../../../server/services/billing/bills.js");
@@ -28,6 +29,7 @@ const results = (page) =>
 const mine = (page) => page.getByRole("region", { name: "My requests" });
 
 const search = async (page, text) => {
+  await openAddItems(page);
   await page.getByLabel("Search items").fill(text);
 };
 

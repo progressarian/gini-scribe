@@ -17,6 +17,7 @@ import {
 } from "../services/medication/normalize.js";
 import { markMedicationVisitStatus } from "../services/medication/visitStatus.js";
 import { blockWriteGuard } from "../middleware/blockWriteGuard.js";
+import { opdRowIsMine, opdScope, scopeParams } from "../services/patientScope.js";
 
 // Blocked patients are hidden from working lists — nobody should be calling,
 // booking or preparing for them. They stay findable in /find and on the admin
@@ -368,6 +369,7 @@ router.post("/opd/sync-noshow", async (_req, res) => {
 router.get("/opd/appointments", async (req, res) => {
   try {
     const date = req.query.date || new Date().toISOString().split("T")[0];
+    const scope = opdScope(req);
 
     // 1) Core appointment rows + joined patient fields (no aggregation).
     const { rows } = await pool.query(
@@ -382,8 +384,9 @@ router.get("/opd/appointments", async (req, res) => {
            OR (a.file_no IS NULL AND p.id = a.patient_id)
         WHERE a.appointment_date = $1
           AND NOT EXISTS (SELECT 1 FROM patients bp WHERE bp.id = a.patient_id AND bp.is_blocked)
+          ${scope.mine ? `AND ${opdRowIsMine("a", 2)}` : ""}
         ORDER BY a.time_slot DESC NULLS LAST, a.created_at DESC`,
-      [date],
+      scope.mine ? [date, ...scopeParams(scope)] : [date],
     );
 
     const patientIds = [...new Set(rows.map((r) => r.patient_id).filter((x) => x != null))];
@@ -1008,6 +1011,11 @@ router.get("/opd/appointments-range", async (req, res) => {
     if (specialtyFilter) {
       params.push(specialtyFilter);
       qualWhere += ` AND d.specialty = $${params.length}`;
+    }
+    const scope = opdScope(req);
+    if (scope.mine) {
+      qualWhere += ` AND ${opdRowIsMine("a", params.length + 1)}`;
+      params.push(...scopeParams(scope));
     }
     // Two-step: identify patients with at least one visit in the period
     // (qualifying CTE), then return *all* their visits so the client can show

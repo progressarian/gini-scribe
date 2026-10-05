@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Pencil, Percent, Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import ConfirmModal from "../../ui/ConfirmModal";
 import {
   useChangeLineQuantity,
@@ -12,11 +12,7 @@ import { CAPABILITIES, hasCapability } from "../../../../shared/permissions.js";
 import { errorOf, fromPaise, moneyTyped } from "../format";
 import { ORDER_STATE_NOTE, orderStateText, paymentRuleText } from "./lineText";
 import { ITEM_SEARCH_ID } from "./AddItems";
-import ManualDiscountFields, {
-  discountDraft,
-  discountNote,
-  discountProblem,
-} from "./ManualDiscountFields";
+import { discountNote } from "./ManualDiscountFields";
 
 function QuantityCell({ bill, line, locked, onBill, onError }) {
   const change = useChangeLineQuantity();
@@ -79,6 +75,93 @@ function priceNoteText(line) {
   return `Price for this patient${line.agreed_by_name ? ` · set by ${line.agreed_by_name}` : ""}`;
 }
 
+const manualValue = (line) => (line.manual_discount ? String(line.manual_discount.value) : "");
+
+function DiscountCell({ bill, line, onBill, onError }) {
+  const save = useSetLineDiscount();
+  const [kind, setKind] = useState(line.manual_discount?.kind ?? "percent");
+  const [value, setValue] = useState(manualValue(line));
+
+  useEffect(() => {
+    setKind(line.manual_discount?.kind ?? "percent");
+    setValue(manualValue(line));
+  }, [line.manual_discount?.kind, line.manual_discount?.value]);
+
+  if (bill.status !== "draft") {
+    return (
+      <td data-label="Discount" className="bc-num">
+        {fromPaise(line.discount)}
+      </td>
+    );
+  }
+
+  const commit = async (nextKind, nextValue) => {
+    const number = Number(nextValue || 0);
+    const current = line.manual_discount;
+    const unchanged = current
+      ? current.kind === nextKind && current.value === number
+      : number === 0;
+    if (unchanged) return;
+    if (!Number.isFinite(number) || number < 0 || (nextKind === "percent" && number > 100)) {
+      onError(
+        nextKind === "percent"
+          ? "A percent discount must be between 0 and 100"
+          : "Enter the discount in ₹",
+      );
+      setKind(current?.kind ?? "percent");
+      setValue(manualValue(line));
+      return;
+    }
+    try {
+      onBill(
+        await save.mutateAsync({
+          billId: bill.id,
+          visitId: bill.visit_id,
+          lineId: line.id,
+          kind: nextKind,
+          value: number,
+        }),
+      );
+    } catch (e) {
+      setKind(current?.kind ?? "percent");
+      setValue(manualValue(line));
+      onError(errorOf(e, "That discount could not be saved"));
+    }
+  };
+
+  return (
+    <td data-label="Discount" className="bc-num">
+      <span className="bc-ldisc">
+        <select
+          className="bc-ldisc__kind"
+          aria-label={`Discount type for ${line.bill_name}`}
+          value={kind}
+          disabled={save.isPending}
+          onChange={(e) => {
+            setKind(e.target.value);
+            if (value.trim()) commit(e.target.value, value);
+          }}
+        >
+          <option value="percent">%</option>
+          <option value="flat">₹</option>
+        </select>
+        <input
+          className="bc-ldisc__value"
+          inputMode="decimal"
+          placeholder="0"
+          aria-label={`Discount for ${line.bill_name}`}
+          value={value}
+          disabled={save.isPending}
+          onChange={(e) => setValue(moneyTyped(e.target.value))}
+          onBlur={() => commit(kind, value)}
+          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+        />
+      </span>
+      {line.discount > 0 && <span className="bc-ldisc__taken">−{fromPaise(line.discount)}</span>}
+    </td>
+  );
+}
+
 function PriceNote({ line }) {
   if (!line.price_per_patient && line.agreed_rate === null) return null;
   return <div className="bc-hint bc-line-price">{priceNoteText(line)}</div>;
@@ -138,11 +221,14 @@ const focusItemSearch = () => {
   input?.focus({ preventScroll: true });
 };
 
+const openItemSearch = (form) => {
+  form.set("addOpen", true);
+  requestAnimationFrame(() => requestAnimationFrame(focusItemSearch));
+};
+
 export default function BillLinesTable({ bill, onBill, form }) {
   const remove = useRemoveBillLine();
   const setPrice = useSetLinePrice();
-  const setDiscount = useSetLineDiscount();
-  const [discounting, setDiscounting] = useState(null);
   const me = useAuthStore((st) => st.currentDoctor);
   const admin = hasCapability(me?.role, CAPABILITIES.ADMIN);
   const [pricing, setPricing] = useState(null);
@@ -173,25 +259,6 @@ export default function BillLinesTable({ bill, onBill, form }) {
       setPricing(null);
     } catch (e) {
       setError(errorOf(e, "That price could not be saved"));
-    }
-  };
-
-  const saveDiscount = async (cleared) => {
-    setError(null);
-    try {
-      onBill(
-        await setDiscount.mutateAsync({
-          billId: bill.id,
-          visitId: bill.visit_id,
-          lineId: discounting.line.id,
-          kind: discounting.value.kind,
-          value: cleared ? 0 : discounting.value.value.trim(),
-          reason: cleared ? "" : discounting.value.reason.trim(),
-        }),
-      );
-      setDiscounting(null);
-    } catch (e) {
-      setError(errorOf(e, "That discount could not be saved"));
     }
   };
 
@@ -230,15 +297,6 @@ export default function BillLinesTable({ bill, onBill, form }) {
                 });
               },
             },
-          {
-            label: "Discount",
-            Icon: Percent,
-            aria: `Discount on ${line.bill_name}`,
-            run: () => {
-              setError(null);
-              setDiscounting({ line, value: discountDraft(line.manual_discount) });
-            },
-          },
           mayRemove(line) && {
             label: "Remove",
             Icon: Trash2,
@@ -259,7 +317,7 @@ export default function BillLinesTable({ bill, onBill, form }) {
           <span className="bc-card__sub">{bill.bill_no || "Draft"}</span>
         </h3>
         {bill.status === "draft" && (
-          <button type="button" className="bc-addbtn" onClick={focusItemSearch}>
+          <button type="button" className="bc-addbtn" onClick={() => openItemSearch(form)}>
             <Plus size={15} aria-hidden="true" />
             Add Service/Test
           </button>
@@ -278,7 +336,7 @@ export default function BillLinesTable({ bill, onBill, form }) {
                   <th>Category</th>
                   <th className="bc-num">Qty</th>
                   <th className="bc-num">Rate (₹)</th>
-                  <th className="bc-num">Discount (₹)</th>
+                  <th className="bc-num">Discount</th>
                   <th className="bc-num">Patient Pays (₹)</th>
                   <th>
                     <span className="sr-only">Actions</span>
@@ -336,9 +394,7 @@ export default function BillLinesTable({ bill, onBill, form }) {
                       <td data-label="Rate" className="bc-num">
                         {fromPaise(line.rate)}
                       </td>
-                      <td data-label="Discount" className="bc-num">
-                        {fromPaise(line.discount)}
-                      </td>
+                      <DiscountCell bill={bill} line={line} onBill={onBill} onError={setError} />
                       <td data-label="Patient pays" className="bc-num bc-num--strong">
                         {fromPaise(line.patient_payable)}
                       </td>
@@ -388,44 +444,6 @@ export default function BillLinesTable({ bill, onBill, form }) {
         confirmDisabled={ordered(going) && !reason.trim()}
         onConfirm={drop}
         onCancel={() => form.drop("removing")}
-      />
-
-      <ConfirmModal
-        open={!!discounting}
-        title={discounting ? `Discount on ${discounting.line.bill_name}` : ""}
-        confirmLabel={setDiscount.isPending ? "Saving…" : "Save discount"}
-        variant="primary"
-        busy={setDiscount.isPending}
-        error={error}
-        confirmDisabled={!discounting || Boolean(discountProblem(discounting.value))}
-        message={
-          discounting && (
-            <>
-              <p className="bc-hint">
-                Comes off what the patient pays for this line (
-                {fromPaise(discounting.line.patient_payable)} now), after any automatic discount or
-                code. It can't take the line below ₹0.
-              </p>
-              <ManualDiscountFields
-                id="bc-line-discount"
-                value={discounting.value}
-                onChange={(value) => setDiscounting({ ...discounting, value })}
-              />
-              {discounting.line.manual_discount && (
-                <button
-                  type="button"
-                  className="st-btn st-btn-g"
-                  disabled={setDiscount.isPending}
-                  onClick={() => saveDiscount(true)}
-                >
-                  Remove this discount
-                </button>
-              )}
-            </>
-          )
-        }
-        onConfirm={() => saveDiscount(false)}
-        onCancel={() => setDiscounting(null)}
       />
 
       <ConfirmModal

@@ -45,6 +45,7 @@ export const ROLES = {
   RECEPTION_ADMIN: "reception_admin",
   COORDINATOR: "coordinator",
   PHARMACY: "pharmacy",
+  PHARMACY_ADMIN: "pharmacy_admin",
   // Prescription explainer. Its own role rather than a nurse account: the desk
   // is staffed by people who only explain and print the prescription, and
   // nothing else on the floor is theirs.
@@ -201,6 +202,8 @@ export const CAPABILITIES = {
   BILLING_CLAIMS: "BILLING_CLAIMS",
   BILLING_REPORTS: "BILLING_REPORTS",
   BILLING_DUES: "BILLING_DUES",
+  PHARMACY_STOCK_VIEW: "PHARMACY_STOCK_VIEW",
+  PHARMACY_STOCK_UPLOAD: "PHARMACY_STOCK_UPLOAD",
 };
 
 const C = CAPABILITIES;
@@ -292,6 +295,7 @@ export const ROLE_CAPABILITIES = {
     C.GINIFLOW_STATION_VITALS,
     C.GINIFLOW_STATION_MO,
     C.GINIFLOW_MO_CLOSE,
+    C.GINIFLOW_PRINT_RX,
   ],
   // No REFILLS: working the refill queue is a prescribing decision, so nurses
   // don't approve them. They can still see a patient's refill history in the
@@ -480,6 +484,21 @@ export const ROLE_CAPABILITIES = {
     C.GINIFLOW_STATION_PHARMACY,
     C.GINIFLOW_END_VISIT,
     C.GINIFLOW_PRINT_RX,
+    C.PHARMACY_STOCK_VIEW,
+  ],
+  [ROLES.PHARMACY_ADMIN]: [
+    C.PATIENT_READ,
+    C.PATIENT_CHART,
+    C.REFILLS,
+    C.DOSE_REVIEWS,
+    C.MED_COLLECTION,
+    C.FLOW_PHARMACY,
+    C.GINIFLOW_VIEW,
+    C.GINIFLOW_STATION_PHARMACY,
+    C.GINIFLOW_END_VISIT,
+    C.GINIFLOW_PRINT_RX,
+    C.PHARMACY_STOCK_VIEW,
+    C.PHARMACY_STOCK_UPLOAD,
   ],
   // OBT outbound call team. The ONLY role without PATIENT_CHART: they phone
   // patients to confirm tomorrow's appointment, which needs identity and phone
@@ -536,9 +555,20 @@ export function hasOwnPatientList(role) {
 
 // True if the given role holds the capability. Admin / ALL short-circuits true.
 // (If the master switch is ever flipped back on, everyone is granted everything.)
-export function hasCapability(role, capability) {
+export const DOCTOR_CAPABILITY_OVERRIDES = {
+  3: { grant: [C.GINIFLOW_STATION_ECHO], revoke: [C.GINIFLOW_STATION_MO] },
+};
+
+const roleOf = (who) => (who && typeof who === "object" ? who.role : who);
+const doctorIdOf = (who) =>
+  who && typeof who === "object" ? Number(who.doctor_id ?? who.id) || null : null;
+
+export function hasCapability(who, capability) {
   if (GRANT_ALL_CAPABILITIES) return true;
-  const caps = ROLE_CAPABILITIES[normalizeRole(role)];
+  const override = DOCTOR_CAPABILITY_OVERRIDES[doctorIdOf(who)];
+  if (override?.revoke.includes(capability)) return false;
+  if (override?.grant.includes(capability)) return true;
+  const caps = ROLE_CAPABILITIES[normalizeRole(roleOf(who))];
   if (!caps) return false;
   if (caps === ALL) return true;
   return caps.includes(capability);
@@ -554,10 +584,10 @@ export function hasCapability(role, capability) {
 // (reception/coordinator have FLOW_RECEPTION, clinicians have FLOW_STATION,
 // pharmacy has FLOW_PHARMACY). An any-of gate expresses that without inventing
 // a synthetic "can touch flow" capability that duplicates the other four.
-export function hasAnyCapability(role, capabilities) {
+export function hasAnyCapability(who, capabilities) {
   if (GRANT_ALL_CAPABILITIES) return true;
   const list = Array.isArray(capabilities) ? capabilities : [capabilities];
-  return list.some((c) => hasCapability(role, c));
+  return list.some((c) => hasCapability(who, c));
 }
 
 // ── Flow stations ───────────────────────────────────────────────────────────

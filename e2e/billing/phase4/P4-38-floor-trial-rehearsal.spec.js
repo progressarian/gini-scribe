@@ -8,6 +8,7 @@ import { assertTestDatabase } from "../../setup/guard.mjs";
 import { USERS } from "../../fixtures/data.mjs";
 import { rupees } from "../../../src/components/billing/format.js";
 import { PRICES, ensureSeries, newDayTag, seedDay, tearDownDay } from "./p438-floor-day.mjs";
+import { openAddItems } from "../../helpers/addItems.mjs";
 
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 
@@ -421,6 +422,7 @@ test.describe.serial("P4-38 floor trial rehearsal", () => {
 
     await test.step("Bill again: a second dressing waits for an admin, then goes on once", async () => {
       await pickPatient(desk, later);
+      await openAddItems(desk);
       const search = addItems(desk).getByLabel("Search items");
       await search.fill(`Dressing ${tag}`);
       const results = addItems(desk).getByRole("list", { name: "Item search results" });
@@ -454,6 +456,7 @@ test.describe.serial("P4-38 floor trial rehearsal", () => {
 
     await test.step("New item: nothing found, requested, created by the admin with a price, added", async () => {
       const wanted = `Nebulisation ${tag}`;
+      await openAddItems(desk);
       await addItems(desk).getByLabel("Search items").fill(wanted);
       await addItems(desk).getByRole("button", { name: "Request new item" }).click();
       const form = addItems(desk).getByRole("form", { name: "Request a new item" });

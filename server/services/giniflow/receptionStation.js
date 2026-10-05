@@ -40,6 +40,7 @@ import {
   paise,
   rupeesFromPaise,
 } from "../../../shared/labPayment.js";
+import { consultsDirect } from "../../../shared/directConsult.js";
 
 // Reception: the payment desk between the MO ordering tests and the lab
 // collecting a sample.
@@ -827,6 +828,7 @@ export const ARRIVAL_SELECT = `
          v.priority, v.blocked_reason, v.paused_at, v.paused_reason,
          ap.patient_category AS scheme_code,
          ap.visit_type AS booking_type,
+         ap.doctor_name AS booked_doctor_name,
          (v.appointment_id IS NULL OR COALESCE(checkin_ev.walk_in, FALSE)) AS walk_in,
          opd_fee.rate AS scheme_opd_fee,
          (v.visit_date + COALESCE(v.appointment_time, '00:00'::time))
@@ -838,6 +840,7 @@ export const ARRIVAL_SELECT = `
          v.assigned_sd_id, v.assigned_doctor_id,
          COALESCE(asd.short_name, asd.name) AS assigned_sd_name,
          COALESCE(adoc.short_name, adoc.name) AS assigned_doctor_name,
+         adoc.name AS assigned_doctor_full_name,
          jr.steps AS journey_steps,
          ordered.count AS ordered_count, ordered.total AS ordered_total
     FROM giniflow_visits v
@@ -972,6 +975,7 @@ export const shapeArrival = (r, now) => ({
   assignedSdName: r.assigned_sd_name || null,
   assignedDoctorId: r.assigned_doctor_id || null,
   assignedDoctorName: r.assigned_doctor_name || null,
+  consultsDirect: consultsDirect(r.booked_doctor_name, r.assigned_doctor_full_name),
   journey: journeyProgress(r.journey_steps, r.current_status, r.resume_status),
   orderedServices: r.ordered_count
     ? { count: r.ordered_count, total: Math.round(Number(r.ordered_total) * 100) }

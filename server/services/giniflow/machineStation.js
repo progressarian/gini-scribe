@@ -237,15 +237,17 @@ async function assertReadyToStart(db, visitId, catalogue, machineId) {
     `SELECT p.name,
             ${VITALS_TAKEN_SQL("v")} AS vitals_recorded,
             ${labOnlyPredicate("v", "$2")} AS lab_only,
-            ${BLOOD_NOT_DRAWN_SQL("$3")} AS blood_not_drawn
+            ${BLOOD_NOT_DRAWN_SQL("$3")} AS blood_not_drawn,
+            v.echo_referral
        FROM giniflow_visits v
        JOIN patients p ON p.id = v.patient_id
       WHERE v.id = $1`,
     [visitId, LAB_ONLY_DOCTOR, labStepsAreManual()],
   );
   if (!rows.length) return;
-  const { name, vitals_recorded, lab_only, blood_not_drawn } = rows[0];
-  if (!lab_only && !vitals_recorded) {
+  const { name, vitals_recorded, lab_only, blood_not_drawn, echo_referral: echoReferral } = rows[0];
+  const echoFirst = echoReferral && machine?.station === "echo";
+  if (!lab_only && !echoFirst && !vitals_recorded) {
     throw Object.assign(
       new Error(
         `${name} has no vitals recorded yet — the patient goes to vitals before the ${machineName}`,
