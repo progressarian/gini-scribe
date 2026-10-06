@@ -694,7 +694,7 @@ export const giniflowOutsidePendingQuerySchema = z.object({
   q: z.string().trim().max(60).optional(),
   from: isoDay.optional(),
   to: isoDay.optional(),
-  status: z.enum(["all", "collected", "sent"]).optional(),
+  status: z.enum(["all", "collected", "sent", "uploaded"]).optional(),
   page: z
     .string()
     .regex(/^\d{1,4}$/, "page must be a number")
@@ -924,6 +924,7 @@ export const giniflowReportSchema = z.object({
   fileName: z.string().max(200).optional(),
   mediaType: z.string().max(120).optional(),
   confirmAdditional: z.boolean().optional(),
+  replace: z.boolean().optional(),
 });
 
 export const giniflowPlanSchema = z.object({
@@ -1153,6 +1154,17 @@ const TIMING_CATEGORY = z.enum([
   "fortnightly",
 ]);
 
+export const GINIFLOW_RX_LABELS = {
+  medicineName: "Medicine name",
+  timingCategories: "Timing",
+  timingCategory: "Timing",
+  timeOfDay: "Time of day",
+  reason: "Remarks",
+  patientInstruction: "Patient instruction",
+  prescriberName: "Prescribing doctor",
+  sinceDate: "Since date",
+};
+
 const CLOCK_TIME = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "time must be HH:MM");
 
 export const giniflowRxItemSchema = z.object({
@@ -1165,7 +1177,7 @@ export const giniflowRxItemSchema = z.object({
   frequency: z.string().max(60).nullish(),
   timing: z.string().max(100).nullish(),
   timingCategory: TIMING_CATEGORY.nullish(),
-  timingCategories: z.array(TIMING_CATEGORY).max(6).nullish(),
+  timingCategories: z.array(TIMING_CATEGORY).max(TIMING_CATEGORY.options.length).nullish(),
   timeOfDay: CLOCK_TIME.nullish(),
   route: z.string().max(40).nullish(),
   form: z.string().max(60).nullish(),
@@ -1227,11 +1239,12 @@ export const giniflowMedSearchQuerySchema = z.object({
 export const giniflowExternalMedSchema = z.object({
   medicineName: z.string().trim().min(1).max(200),
   composition: z.string().max(300).nullish(),
+  form: z.string().max(60).nullish(),
   dose: z.string().max(100).nullish(),
   frequency: z.string().max(60).nullish(),
   timing: z.string().max(100).nullish(),
   timingCategory: TIMING_CATEGORY.nullish(),
-  timingCategories: z.array(TIMING_CATEGORY).max(6).nullish(),
+  timingCategories: z.array(TIMING_CATEGORY).max(TIMING_CATEGORY.options.length).nullish(),
   timeOfDay: CLOCK_TIME.nullish(),
   prescriberName: z.string().trim().min(1).max(120),
   prescriberSpecialty: z.string().max(120).nullish(),

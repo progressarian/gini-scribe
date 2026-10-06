@@ -56,7 +56,7 @@ test.describe.serial("P4B-17 reception asks for a refund mode", () => {
     await dropShifts();
   });
 
-  test("1. Refund by defaults to As paid; choosing Card changes the preview and is sent", async ({
+  test("1. Refund by defaults to Keep as deposit; As paid and Card change the preview and are sent", async ({
     page,
   }) => {
     await loginAs(page, "reception");
@@ -67,8 +67,16 @@ test.describe.serial("P4B-17 reception asks for a refund mode", () => {
     );
     await actions(page).getByRole("button", { name: "Refund…" }).click();
     const by = dialog(page).getByLabel("Refund by");
-    await expect(by).toHaveValue("as_paid");
-    await expect(by.locator("option")).toHaveText(["As paid", "Cash", "Card", "UPI"]);
+    await expect(by).toHaveValue("deposit");
+    await expect(by.locator("option")).toHaveText([
+      "Keep as deposit for the patient",
+      "As paid",
+      "Cash",
+      "Card",
+      "UPI",
+    ]);
+    await expect(preview(page)).toContainText("₹800 is kept as deposit for this patient");
+    await by.selectOption("as_paid");
     await expect(preview(page)).toContainText("Patient gets back ₹800 — ₹800 by cash");
     await by.selectOption("card");
     await expect(preview(page)).toContainText("Patient gets back ₹800 — ₹800 by card");

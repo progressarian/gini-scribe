@@ -32,6 +32,7 @@ import {
   billingNewItemRequestSchema,
   billingPaidAtReceptionQuerySchema,
   billingPaymentsTakeSchema,
+  billingDepositReceiveSchema,
   billingClearHealthraySchema,
   billingPayOutSchema,
   billingPdfQuerySchema,
@@ -60,6 +61,8 @@ import { generateReceiptPdf, generateRefundReceiptPdf } from "../services/billin
 import * as creditNotes from "../services/billing/creditNotes.js";
 import * as bills from "../services/billing/bills.js";
 import * as payments from "../services/billing/payments.js";
+import { getDeposit, receiveDeposit } from "../services/billing/deposits.js";
+import { generateDepositReceiptPdf } from "../services/billing/depositReceiptPdf.js";
 import { duesToday } from "../services/billing/dues.js";
 import { refundBoard } from "../services/billing/refundBoard.js";
 import * as shifts from "../services/billing/cashShifts.js";
@@ -465,6 +468,25 @@ router.get(
       ctx(req),
     ),
   ),
+);
+
+router.get(
+  `${BASE}/patients/:patientId/deposit`,
+  desk,
+  run("Patient deposit", 200, (req) => getDeposit(req.params.patientId)),
+);
+
+router.post(
+  `${BASE}/patients/:patientId/deposit`,
+  desk,
+  validate(billingDepositReceiveSchema, BILLING_DESK_LABELS),
+  run("Receive deposit", 201, (req) => receiveDeposit(req.params.patientId, req.body, ctx(req))),
+);
+
+router.get(
+  `${BASE}/deposit-receipts/:paymentId/receipt.pdf`,
+  desk,
+  pdfRoute("Deposit receipt PDF", (req) => generateDepositReceiptPdf(req.params.paymentId)),
 );
 
 router.get(

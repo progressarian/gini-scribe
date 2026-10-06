@@ -408,6 +408,7 @@ export async function updateItem(itemId, patch, db = pool) {
             reason = COALESCE($7, reason),
             patient_instruction = COALESCE($8, patient_instruction),
             route = COALESCE($10, route),
+            form = COALESCE($13, form),
             -- Editing a pending proposal IS the "Adjust" decision (addendum
             -- v1.1 §3): the doctor changed it and kept it, which is not the same
             -- as approving it as proposed. A row that was never a proposal is
@@ -434,6 +435,7 @@ export async function updateItem(itemId, patch, db = pool) {
       patch.route ?? null,
       patch.actorId ?? null,
       slots.length ? slots : null,
+      patch.form || null,
     ],
   );
   if (!rows.length) throw Object.assign(new Error("Draft row not found"), { status: 404 });
@@ -652,9 +654,27 @@ export async function alternativesFor(medicineName, db = pool) {
 // A medicine from another doctor. Written straight to `medications` rather than
 // to the draft: it is not something Gini is prescribing, it is something the
 // patient is already taking, and the interaction check needs it visible now.
+export async function removeExternal(patientId, medicationId, db = pool) {
+  const { rows } = await db.query(
+    `UPDATE medications
+        SET is_active = false, stopped_date = CURRENT_DATE,
+            stop_reason = 'Removed from the medicines typed by doctor', updated_at = NOW()
+      WHERE id = $1 AND patient_id = $2 AND is_active = true AND external_doctor IS NOT NULL
+      RETURNING id, name`,
+    [medicationId, patientId],
+  );
+  if (!rows[0]) {
+    throw Object.assign(new Error("This medicine was already removed or is not a typed medicine"), {
+      status: 404,
+    });
+  }
+  return rows[0];
+}
+
 export async function addExternal(patientId, med, db = pool) {
-  const { name: cleanName, form } = stripFormPrefix(med.medicineName || "");
+  const { name: cleanName, form: detectedForm } = stripFormPrefix(med.medicineName || "");
   const name = cleanName || med.medicineName;
+  const form = med.form || detectedForm;
   // The outside doctor's BD is still BD: the same slots the consultant's own
   // rows carry, so the medicine card files this beside them rather than under
   // "timing not set".
@@ -675,6 +695,7 @@ export async function addExternal(patientId, med, db = pool) {
                    timing = EXCLUDED.timing, timing_category = EXCLUDED.timing_category,
                    when_to_take = COALESCE(EXCLUDED.when_to_take, medications.when_to_take),
                    time_of_day = EXCLUDED.time_of_day,
+                   form = COALESCE(EXCLUDED.form, medications.form),
                    external_doctor = EXCLUDED.external_doctor,
                    external_specialty = EXCLUDED.external_specialty,
                    external_hospital = EXCLUDED.external_hospital,

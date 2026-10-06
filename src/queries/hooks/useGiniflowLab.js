@@ -47,7 +47,13 @@ export function useOutsidePending({ q = "", status = "all", from = "", to = "", 
 export function useUploadReport() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ orderId, file, confirmAdditional = false, outside = false }) => {
+    mutationFn: async ({
+      orderId,
+      file,
+      confirmAdditional = false,
+      outside = false,
+      replace = false,
+    }) => {
       const base64 = await new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(String(reader.result).split(",")[1]);
@@ -60,6 +66,7 @@ export function useUploadReport() {
           {
             base64,
             confirmAdditional,
+            ...(replace ? { replace: true } : {}),
             fileName: file.name,
             mediaType: file.type || "application/pdf",
           },
@@ -191,10 +198,33 @@ export function useMarkLabCaseAction() {
 
 // Admin override: attach a report to a HealthRay-run case the sync has not been
 // able to fetch a PDF for.
+export function useMarkCaseSentOutside() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ caseNo }) =>
+      (
+        await api.post(
+          `/api/giniflow/stations/lab/case/${encodeURIComponent(caseNo)}/sent-outside`,
+          {},
+        )
+      ).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "lab"] });
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "board"] });
+    },
+  });
+}
+
 export function useUploadLabCaseReport() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ caseNo, file, confirmAdditional = false }) => {
+    mutationFn: async ({
+      caseNo,
+      file,
+      confirmAdditional = false,
+      outside = false,
+      replace = false,
+    }) => {
       const base64 = await new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(String(reader.result).split(",")[1]);
@@ -202,12 +232,16 @@ export function useUploadLabCaseReport() {
         reader.readAsDataURL(file);
       });
       return (
-        await api.post(`/api/giniflow/stations/lab/case/${caseNo}/report`, {
-          base64,
-          confirmAdditional,
-          fileName: file.name,
-          mediaType: file.type || "application/pdf",
-        })
+        await api.post(
+          `/api/giniflow/stations/lab/case/${caseNo}/${outside ? "outside-report" : "report"}`,
+          {
+            base64,
+            confirmAdditional,
+            ...(replace ? { replace: true } : {}),
+            fileName: file.name,
+            mediaType: file.type || "application/pdf",
+          },
+        )
       ).data;
     },
     onSuccess: () => {

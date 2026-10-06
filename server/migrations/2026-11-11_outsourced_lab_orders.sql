@@ -12,5 +12,5 @@ ALTER TABLE giniflow_lab_case_actions
   ADD CONSTRAINT giniflow_lab_case_actions_action_check
   CHECK (action = ANY (ARRAY[
     'chased', 'drawing_started', 'sample_taken', 'sample_sent', 'sample_received',
-    'processing', 'results_ready', 'report_uploaded', 'sent_outside'
+    'processing', 'results_ready', 'report_uploaded', 'cancelled', 'sent_outside'
   ]));

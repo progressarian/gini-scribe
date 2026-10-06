@@ -5458,6 +5458,10 @@
   background: var(--white);
   min-width: 0;
 }
+.gf .jb-assign[aria-invalid="true"] {
+  border-color: var(--red);
+  background: var(--red-l);
+}
 .gf .jb-remove {
   background: none;
   border: 0;
@@ -8579,4 +8583,107 @@
 }
 .gf .op-pager > span:first-child {
   margin-right: auto;
+}
+.gf .op-intro {
+  margin: 0 0 4px;
+  font-size: 13px;
+  color: var(--ink3);
+}
+.gf .rx-search-row .rx-type-select {
+  flex: 0 0 140px;
+  min-width: 0;
+}
+.gf .rx-type {
+  font-weight: 700;
+  font-size: 11px;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.gf .op-dates {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+@media (max-width: 900px) {
+  .gf .op-filters input[type="search"],
+  .gf .op-filters select {
+    flex: 1 1 100%;
+  }
+  .gf .op-dates .op-date {
+    flex: 1 1 140px;
+  }
+  .gf .op-dates .op-input {
+    flex: 1;
+    min-width: 0;
+  }
+  .gf .op-table.op-cards {
+    min-width: 0;
+  }
+  .gf .op-cards thead {
+    display: none;
+  }
+  .gf .op-cards,
+  .gf .op-cards tbody,
+  .gf .op-cards tr,
+  .gf .op-cards td {
+    display: block;
+    width: 100%;
+  }
+  .gf .op-cards tr {
+    border: 1px solid var(--bd);
+    border-radius: var(--r);
+    background: var(--white);
+    padding: 10px 12px;
+    margin-bottom: 10px;
+  }
+  .gf .op-cards td {
+    border-bottom: 0;
+    padding: 4px 0;
+  }
+  .gf .op-cards td[data-label]:not([data-label="Patient"]) {
+    display: grid;
+    grid-template-columns: 72px 1fr;
+    gap: 8px;
+  }
+  .gf .op-cards td[data-label]:not([data-label="Patient"])::before {
+    content: attr(data-label);
+    font-size: 12px;
+    color: var(--ink3);
+  }
+  .gf .op-cards .op-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    text-align: left;
+    white-space: normal;
+    padding-top: 8px;
+  }
+  .gf .op-cards .op-actions .st-btn {
+    flex: 1 1 140px;
+    margin-left: 0;
+    min-height: 40px;
+  }
+  .gf .op-actions .st-btn + .st-btn {
+    margin-left: 0;
+  }
+}
+@media (max-width: 640px) {
+  .gf .rx-search-row {
+    flex-wrap: wrap;
+  }
+  .gf .rx-search-row .rx-type-select {
+    flex: 1 1 100%;
+  }
+}
+@media (max-width: 640px) {
+  .gf .lab-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+  .gf .lab-tabs .st-tab {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
 }

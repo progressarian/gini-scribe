@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { DEPOSIT_MODE } from "../../../../shared/billingVocab.js";
 import { refundReceiptPdfHref, useRefundBoard } from "../../../queries/hooks/useBilling";
 import { errorOf, fromPaise } from "../format";
 import { refundLegsText, refundModeText } from "./lineText";
@@ -34,9 +35,10 @@ function Amount({ row }) {
   if (row.group === "waiting" && !row.preview) {
     return <span className="bc-head__meta">{row.preview_error || "—"}</span>;
   }
+  const kept = row.approved_mode === DEPOSIT_MODE;
   const lead =
     row.group === "paid"
-      ? `${fromPaise(paidBack)} paid back`
+      ? `${fromPaise(paidBack)} ${kept ? "kept as deposit" : "paid back"}`
       : row.group === "waiting"
         ? `${fromPaise(toPay)} to go back`
         : `${fromPaise(toPay)} to pay back`;
@@ -104,7 +106,8 @@ function When({ row }) {
       )}
       {row.paid_at && (
         <div className="bc-head__meta">
-          Paid back {clock(row.paid_at)}
+          {row.approved_mode === DEPOSIT_MODE ? "Kept as deposit" : "Paid back"}{" "}
+          {clock(row.paid_at)}
           {row.paid_by ? ` by ${row.paid_by}` : ""}
         </div>
       )}

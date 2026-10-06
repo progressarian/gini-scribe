@@ -25,6 +25,7 @@ import DiscountCodeBox from "./DiscountCodeBox";
 import TotalsAndPayment from "./TotalsAndPayment";
 import BillActions from "./BillActions";
 import BillRefunds from "./BillRefunds";
+import DepositPanel from "./DepositPanel";
 import DuesList from "./DuesList";
 import EarlierDues from "./EarlierDues";
 import ShiftPanel from "./ShiftPanel";
@@ -212,6 +213,7 @@ export default function BillingDesk({ tab, visitId, patientId, billId, sentPatie
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
   const [bill, setBill] = useState(null);
+  const [depositOpen, setDepositOpen] = useState(false);
   const [error, setError] = useState(null);
   const [duePatient, setDuePatient] = useState(null);
   const [fresh, setFresh] = useState(0);
@@ -453,6 +455,14 @@ export default function BillingDesk({ tab, visitId, patientId, billId, sentPatie
                     onBill={setBill}
                     onClose={() => pick(null)}
                     form={form}
+                    onDeposit={() => {
+                      setDepositOpen(true);
+                      requestAnimationFrame(() =>
+                        document
+                          .getElementById("bc-deposit")
+                          ?.scrollIntoView({ behavior: "smooth", block: "nearest" }),
+                      );
+                    }}
                   />
                   <div className="bc-bill">
                     <div className="bc-bill__work">
@@ -509,6 +519,13 @@ export default function BillingDesk({ tab, visitId, patientId, billId, sentPatie
                         form={form}
                       />
                       <BillRefunds bill={bill} onRefunded={refreshBill} />
+                      <DepositPanel
+                        key={`deposit-${bill.patient_id}`}
+                        patientId={bill.patient_id}
+                        patientName={(selected || duePatient || sentPatient)?.name}
+                        open={depositOpen}
+                        onToggle={() => setDepositOpen((was) => !was)}
+                      />
                     </div>
                   </div>
                 </>

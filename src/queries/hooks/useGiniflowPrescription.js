@@ -210,6 +210,12 @@ export const useAckInteraction = (visitId) =>
 export const useAddExternal = (visitId) =>
   useDraftMutation(visitId, async (med) => (await api.post(`${base(visitId)}/external`, med)).data);
 
+export const useRemoveExternal = (visitId) =>
+  useDraftMutation(
+    visitId,
+    async (medicationId) => (await api.delete(`${base(visitId)}/external/${medicationId}`)).data,
+  );
+
 export function useOrderTests(visitId) {
   const queryClient = useQueryClient();
   return useMutation({

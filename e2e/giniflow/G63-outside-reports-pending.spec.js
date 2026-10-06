@@ -113,11 +113,29 @@ test.describe.serial("G63 outside reports pending, across days", () => {
     expect((await pending({}, "reception")).status).toBe(403);
   });
 
+  test("3b. the processing room has the tab too: it uploads but does not mark samples sent", async ({
+    page,
+  }) => {
+    await loginAs(page, "admin");
+    await page.goto("/giniflow/station/lab/processing");
+    await page.getByRole("tab", { name: /Outside reports pending/ }).click();
+    const panel = page.getByRole("region", { name: "Outside reports pending" });
+    await panel.getByLabel("Search outside reports").fill(tag);
+    const todayRow = panel.getByRole("row").filter({ hasText: `TodayOutside ${tag}` });
+    await expect(todayRow).toContainText("Collected — not sent");
+    await expect(todayRow.getByRole("button", { name: "📤 Upload report" })).toBeVisible();
+    await expect(panel.getByRole("button", { name: "📮 Mark sent" })).toHaveCount(0);
+  });
+
   test("4. the lab station shows the list, marks a sample sent and keeps the old report waiting", async ({
     page,
   }) => {
     await loginAs(page, "lab");
     await page.goto("/giniflow/station/lab");
+    const outsideTab = page.getByRole("tab", { name: /Outside reports pending/ });
+    await expect(outsideTab).toContainText(/\d+/);
+    await outsideTab.click();
+    await expect(page).toHaveURL(/view=outside/);
     const panel = page.getByRole("region", { name: "Outside reports pending" });
     await panel.getByLabel("Search outside reports").fill(tag);
     const table = panel.getByRole("table", { name: "Outside reports pending" });
@@ -147,9 +165,105 @@ test.describe.serial("G63 outside reports pending, across days", () => {
     await expect(panel.getByLabel("Search outside reports")).toHaveValue("");
   });
 
-  test("5. an uploaded report leaves the list", async () => {
+  test("4b. the lab station has Today's queue, Outside reports and Cancelled as tabs", async ({
+    page,
+  }) => {
+    await loginAs(page, "lab");
+    await page.goto("/giniflow/station/lab");
+    const tabs = page.getByRole("tablist", { name: "Lab work" });
+    await expect(tabs.getByRole("tab")).toHaveText([
+      "Today's queue",
+      /Outside reports pending/,
+      /Cancelled/,
+    ]);
+    await tabs.getByRole("tab", { name: /Cancelled/ }).click();
+    await expect(page).toHaveURL(/view=cancelled/);
+    const cancelled = page.getByRole("region", { name: "Cancelled tests" });
+    await expect(cancelled.getByText(/cancelled at this station in the last 3 days/)).toBeVisible();
+    await expect(cancelled.getByRole("button", { name: /Cancelled — last 3 days/ })).toHaveCount(0);
+    await tabs.getByRole("tab", { name: "Today's queue" }).click();
+    await expect(page).not.toHaveURL(/view=/);
+    await expect(page.getByRole("region", { name: "Outside reports pending" })).toHaveCount(0);
+  });
+
+  test("5. a report uploaded today stays on the list as done; earlier days drop off", async () => {
     await query(
       `UPDATE giniflow_lab_orders SET sample_status = 'uploaded', uploaded_at = NOW() WHERE id = $1`,
+      [orders.oldSent],
+    );
+    await query(
+      `INSERT INTO giniflow_lab_order_events (lab_order_id, track, status, actor_role, actor_id)
+       VALUES ($1, 'sample', 'uploaded', 'lab', $2)`,
+      [orders.oldSent, USERS.lab.id],
+    );
+    const visitPatient = await one(`SELECT patient_id FROM giniflow_visits WHERE id = $1`, [
+      visits.old,
+    ]);
+    orders.doc = (
+      await one(
+        `INSERT INTO documents (patient_id, doc_type, title, giniflow_lab_order_id)
+         VALUES ($1, 'lab_report', $2, $3) RETURNING id`,
+        [visitPatient.patient_id, `Outside report ${tag}`, orders.oldSent],
+      )
+    ).id;
+    const { body } = await pending({ q: tag });
+    expect(mine(body).map((r) => `${r.status}:${r.orderId}`)).toEqual([
+      `sent:${orders.todayCollected}`,
+      `uploaded:${orders.oldSent}`,
+    ]);
+    const done = mine(body)[1];
+    expect(done.docId).toBe(orders.doc);
+    expect(done.uploadedBy).toBeTruthy();
+    expect(body.counts.uploaded).toBeGreaterThanOrEqual(1);
+    expect(body.counts.pending).toBe(body.counts.all - body.counts.uploaded);
+    expect(
+      mine((await pending({ q: tag, status: "uploaded" })).body).map((r) => r.orderId),
+    ).toEqual([orders.oldSent]);
+  });
+
+  test("6. the uploaded row offers View and Replace; replacing asks first", async ({ page }) => {
+    await loginAs(page, "lab");
+    await page.goto("/giniflow/station/lab?view=outside");
+    const panel = page.getByRole("region", { name: "Outside reports pending" });
+    await panel.getByLabel("Search outside reports").fill(tag);
+    const row = panel.getByRole("row").filter({ hasText: `OldOutside ${tag}` });
+    await expect(row).toContainText("✓ Report uploaded");
+    await expect(row).toContainText("Done");
+    await expect(row.getByRole("button", { name: "View report" })).toBeVisible();
+    await expect(row.getByRole("button", { name: "📤 Upload report" })).toHaveCount(0);
+    await row.locator('input[type="file"]').setInputFiles({
+      name: "new-report.pdf",
+      mimeType: "application/pdf",
+      buffer: Buffer.from("%PDF-1.4"),
+    });
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toContainText(`Replace the report for`);
+    await expect(dialog).toContainText("new-report.pdf");
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(dialog).toHaveCount(0);
+  });
+
+  test("7. replacing is limited to outsourced orders and needs the replace flag", async () => {
+    const api = await apiAs("lab");
+    const body = {
+      base64: Buffer.from("%PDF-1.4").toString("base64"),
+      fileName: "r.pdf",
+      mediaType: "application/pdf",
+    };
+    const replaced = await api.post(`/api/giniflow/stations/lab/${orders.oldSent}/outside-report`, {
+      data: { ...body, replace: true },
+    });
+    expect([200, 503]).toContain(replaced.status());
+    const inHouse = await api.post(`/api/giniflow/stations/lab/${orders.inHouse}/outside-report`, {
+      data: { ...body, replace: true },
+    });
+    expect(inHouse.status()).toBe(403);
+    await api.dispose();
+  });
+
+  test("8. a report uploaded on an earlier day drops off the list", async () => {
+    await query(
+      `UPDATE giniflow_lab_orders SET uploaded_at = NOW() - interval '1 day' WHERE id = $1`,
       [orders.oldSent],
     );
     expect(mine((await pending({ q: tag })).body).map((r) => r.orderId)).toEqual([

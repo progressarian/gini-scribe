@@ -120,7 +120,14 @@ function RowState({ row, canRestore, busy, onAsk, onUpload }) {
   );
 }
 
-export default function CancelledTestsPanel({ station, canRestore, onToast, onUpload, uploading }) {
+export default function CancelledTestsPanel({
+  station,
+  canRestore,
+  onToast,
+  onUpload,
+  uploading,
+  inTab = false,
+}) {
   const { data: rows = [], isLoading, isError, refetch } = useCancelledTests(station);
   const restore = useRestoreTest(station);
   const [open, setOpen] = useState(false);
@@ -145,22 +152,28 @@ export default function CancelledTestsPanel({ station, canRestore, onToast, onUp
 
   return (
     <section className="cx-panel" aria-label="Cancelled tests">
-      <div className="grp-lbl grp-lbl-sp">
-        <button
-          type="button"
-          className="sq-toggle"
-          aria-expanded={open}
-          aria-controls={panelId}
-          onClick={() => setOpen((v) => !v)}
-        >
-          <span className={`sq-chev${open ? " open" : ""}`} aria-hidden="true">
-            ▸
-          </span>
-          Cancelled — last 3 days
-        </button>
-        <span className="grp-split">{waiting}</span>
-      </div>
-      <div id={panelId} hidden={!open}>
+      {inTab ? (
+        <p className="op-intro">
+          Tests cancelled at this station in the last 3 days. Restore one cancelled by mistake.
+        </p>
+      ) : (
+        <div className="grp-lbl grp-lbl-sp">
+          <button
+            type="button"
+            className="sq-toggle"
+            aria-expanded={open}
+            aria-controls={panelId}
+            onClick={() => setOpen((v) => !v)}
+          >
+            <span className={`sq-chev${open ? " open" : ""}`} aria-hidden="true">
+              ▸
+            </span>
+            Cancelled — last 3 days
+          </button>
+          <span className="grp-split">{waiting}</span>
+        </div>
+      )}
+      <div id={panelId} hidden={!inTab && !open}>
         {isLoading ? (
           <div className="empty-note">Loading cancelled tests…</div>
         ) : isError ? (

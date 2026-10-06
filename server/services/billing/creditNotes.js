@@ -7,7 +7,13 @@ import { nextNumber, seriesFor } from "./billNumber.js";
 import { indiaToday } from "./categoryResolver.js";
 import { auditFields, lockRow, readNumber } from "./common.js";
 import { ISSUED_GST_COLUMNS, issuedGstReady } from "./issuedGst.js";
-import { moneyOn, refundLegs, refundPlan, releaseTestOrders } from "./payments.js";
+import {
+  moneyOn,
+  refundLegs,
+  refundPlan,
+  releaseTestOrders,
+  restoreDepositLegs,
+} from "./payments.js";
 import { httpError, inTransaction } from "./transaction.js";
 import { cleanManualDiscount, manualAmount } from "./manualDiscounts.js";
 import { allocate } from "./priceBill.js";
@@ -96,7 +102,10 @@ export function cleanRefundMode(value) {
   if (value === undefined || value === null || value === "") return AS_PAID;
   const mode = typeof value === "string" ? value.trim().toLowerCase() : "";
   if (!REFUND_MODES.includes(mode)) {
-    throw httpError(400, "Money can go back only as one of: as paid, cash, card, UPI");
+    throw httpError(
+      400,
+      "Money can go back only as one of: as paid, cash, card, UPI, kept as deposit",
+    );
   }
   return mode;
 }
@@ -929,10 +938,12 @@ export async function discountFinalBill(billId, input, ctx, db = pool) {
       },
       ...auditFields(ctx),
     });
+    const kept = await restoreDepositLegs(client, note.id, ctx);
     return {
       credit_note_id: note.id,
       credit_note_no: note.bill_no,
       ...outcome,
+      kept_as_deposit: kept,
     };
   }, db);
 }

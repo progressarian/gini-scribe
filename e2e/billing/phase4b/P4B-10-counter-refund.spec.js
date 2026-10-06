@@ -77,6 +77,7 @@ test.describe.serial("P4B-10 counter: Refund… and pay out", () => {
     await openBill(page, ids.whole);
     await expect(actions(page).getByRole("button", { name: "Cancel unpaid bill" })).toHaveCount(0);
     await actions(page).getByRole("button", { name: "Refund…" }).click();
+    await dialog(page).getByLabel("Refund by").selectOption("as_paid");
     await expect(dialog(page)).toContainText(`Refund on bill ${ids.whole.bill_no}`);
     const send = dialog(page).getByRole("button", { name: "Send request" });
     await expect(send).toBeDisabled();
@@ -105,6 +106,7 @@ test.describe.serial("P4B-10 counter: Refund… and pay out", () => {
     await loginAs(page, "reception");
     await openBill(page, ids.part);
     await actions(page).getByRole("button", { name: "Refund…" }).click();
+    await dialog(page).getByLabel("Refund by").selectOption("as_paid");
     await dialog(page).getByLabel("Chosen lines").check();
     await dialog(page)
       .getByRole("checkbox", { name: new RegExp(`Dressing ${tag}`) })
@@ -229,6 +231,7 @@ test.describe.serial("P4B-10 counter: Refund… and pay out", () => {
     await openBill(page, ids.later);
     await expect(actions(page).getByRole("button", { name: "Cancel unpaid bill" })).toHaveCount(0);
     await actions(page).getByRole("button", { name: "Refund…" }).click();
+    await dialog(page).getByLabel("Refund by").selectOption("as_paid");
     const said = dialog(page).getByLabel("What the patient gets back");
     await expect(said).toContainText("Patient gets back ₹300 — ₹300 by cash");
     await expect(said).toContainText("₹1,000 reduces the balance still owed on this bill first.");
@@ -241,6 +244,7 @@ test.describe.serial("P4B-10 counter: Refund… and pay out", () => {
     await loginAs(page, "reception");
     await openBill(page, ids.phone);
     await actions(page).getByRole("button", { name: "Refund…" }).click();
+    await dialog(page).getByLabel("Refund by").selectOption("as_paid");
     await dialog(page)
       .getByRole("combobox", { name: /^Reason/ })
       .selectOption("station_unavailable");

@@ -1,6 +1,11 @@
 # 61 — Patient deposits
 
-Status: planned and reviewed against the code (2026-10-06). Not built.
+Status: **phase 1 built** (2026-10-06) — receive, pay a bill from the deposit, refunds kept as
+deposit (desk default "Keep as deposit", admin "Into the deposit", "as paid" deposit share,
+discounts after finalisation), cash shift and collections report, Deposit panel + header chip.
+Migration `2026-11-12_patient_deposits.sql`; tests `e2e/billing/deposits/D01`, `D02`. Phases 2–4
+not built. Not yet in phase 1: the merge scripts still stop on a patient with a deposit (the
+`RESTRICT` FK) instead of moving the balance — that needs the phase 2 transfer.
 
 A **deposit** is money a patient pays before there is a bill for it. It is held against the
 patient's name and used later: on any of their bills, on another patient's bills with their
@@ -12,12 +17,13 @@ credit note (`payments_direction_guard`).
 
 ## 1. Decisions
 
-| #   | Decision (hospital, 2026-10-06)                                                                                                                        |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| D1  | Deposits are taken in **Scribe** at the billing counter. Scribe holds the balance; deposits taken in HealthRay are not copied in.                      |
-| D2  | Moving a deposit to another patient needs a **photo of the depositor's signed consent form**.                                                          |
-| D3  | Only **reception admin and admin** may transfer a deposit (to another patient or to IPD). Any billing desk may receive a deposit and use it on a bill. |
-| D4  | Leftover deposit can be paid back **after approval** on the Refunds board, like a bill refund. Deposits **never expire**.                              |
+| #   | Decision (hospital, 2026-10-06)                                                                                                                                               |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1  | Deposits are taken in **Scribe** at the billing counter. Scribe holds the balance; deposits taken in HealthRay are not copied in.                                             |
+| D2  | Moving a deposit to another patient needs a **photo of the depositor's signed consent form**.                                                                                 |
+| D3  | Only **reception admin and admin** may transfer a deposit (to another patient or to IPD). Any billing desk may receive a deposit and use it on a bill.                        |
+| D5  | When services on a paid bill are **cancelled**, the refund is **kept as a deposit** for the patient by default, for their later visits, a family member, or an IPD admission. |
+| D4  | Leftover deposit can be paid back **after approval** on the Refunds board, like a bill refund. Deposits **never expire**.                                                     |
 
 Still open — see §11.
 
@@ -134,10 +140,26 @@ by the desk as today.
 The same applies to discount credit notes after finalisation (`discountFinalBill`), which are
 "as paid" by definition: the deposit share goes back to the deposit at once.
 
-**New approved mode `deposit`**: the admin can choose "Into the deposit" for any refund —
-including a bill paid in cash — and the whole credit is restored to the patient's deposit in the
-approval transaction. Choosing cash / card / UPI for a deposit-paid bill still pays it out that
-way (an explicit admin decision, recorded on the request).
+**Cancelled services are kept as a deposit (D5).** When services on a paid bill are cancelled,
+the money is saved for the patient instead of being handed back:
+
+1. The desk cancels the services as today (credit note + refund request). The request form gets
+   a **Where should the money go?** choice, preselected to **Keep as deposit for the patient**
+   (the other choice: pay back by cash / card / UPI).
+2. The admin approves on the Refunds board as today; the approval dialog shows the desk's choice
+   and can change it (new approved mode `deposit`, recorded on the request).
+3. On approval the whole credit goes into the patient's deposit in the same transaction — no
+   cash leaves, no desk pay-out step. The credit note and the refund receipt say "Kept as
+   deposit DEP balance ₹…".
+4. From then on it is ordinary deposit money: used on the patient's next bill (§4.2), moved to a
+   family member with consent (§4.4), or carried into an IPD admission (§4.5).
+
+Example: bill ₹2,000 paid in cash; an ₹800 test is cancelled → credit note ₹800, approved "Keep
+as deposit" → Ritesh's deposit ₹800 → next visit his ₹500 consultation is paid from it (₹300
+left), or his mother's bill, or his IPD bill.
+
+This works whatever the bill was paid with (cash, card, UPI or deposit). Choosing cash / card /
+UPI instead pays the money out as today — an explicit decision, recorded on the request.
 
 ### 4.4 Transfer to another patient — reception admin / admin
 
@@ -265,7 +287,8 @@ lock accounts only; nothing holds an account while waiting for a bill.
 ## 8. Phases
 
 1. **Receive and use** — migration, ledger, receive + receipt, deposit mode on Collect payment,
-   automatic restore on "as paid" / discount / "into the deposit" approvals, cash shift +
+   automatic restore on "as paid" / discount approvals, **cancelled services kept as deposit**
+   (D5: request choice + approval mode), cash shift +
    collections changes, Deposit panel with history, merge-script guard.
 2. **Transfer to another patient** — consent photo, both-patient confirmation, slip.
 3. **Transfer to IPD** — IP number, slip, Deposits report (needed for reconciliation).
@@ -308,5 +331,6 @@ Each phase ships on its own; phase 1 alone covers "a deposit can be used on any 
 1. **Two people for a deposit refund?** Reception admin holds `BILLING_MASTER`, so one person can
    request and approve their own deposit refund, or transfer money with nobody else involved.
    Recommended: the approver of a deposit refund must be a different person from the requester.
-2. **Refund of a deposit-paid bill in cash** — allow the admin to choose cash (as above), or
-   force deposit-paid money back into the deposit only?
+2. **Cash still allowed?** With D5, cancelled services go to the deposit by default. Should the
+   desk / admin still be able to choose cash / card / UPI when the patient insists, or is a
+   deposit the only outcome?

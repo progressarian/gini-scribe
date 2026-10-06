@@ -8,7 +8,13 @@ import {
   paise,
   rupeesFromPaise,
 } from "../../../shared/labPayment.js";
-import { AS_PAID, HEALTHRAY_MODE, ORDER_STATE } from "../../../shared/billingVocab.js";
+import {
+  AS_PAID,
+  DEPOSIT_MODE,
+  HEALTHRAY_MODE,
+  ORDER_STATE,
+} from "../../../shared/billingVocab.js";
+import { holdFor, recordApplied, restoreToDeposit } from "./deposits.js";
 import { writeAudit } from "./audit.js";
 import { nextNumber, seriesFor } from "./billNumber.js";
 import { cashOutShift, DRAWER_MODE, openShiftIdFor, PAYMENT_MODES } from "./cashShifts.js";
@@ -35,13 +41,20 @@ const SPEC = { table: "bills", noun: "bill", columns: BILL_COLUMNS };
 const ORDER_COLUMNS = `id, visit_id, payment_status, sample_status, amount_total, amount_paid,
   amount_claimed, claim_state, version`;
 
-const MODE_LABEL = { cash: "cash", card: "card", upi: "UPI", healthray: "HealthRay" };
+const MODE_LABEL = {
+  cash: "cash",
+  card: "card",
+  upi: "UPI",
+  healthray: "HealthRay",
+  deposit: "deposit",
+};
 
 const PAY_OUT_MODES = [...PAYMENT_MODES, HEALTHRAY_MODE];
 
-const NO_REFERENCE = [DRAWER_MODE, HEALTHRAY_MODE];
+const NO_REFERENCE = [DRAWER_MODE, HEALTHRAY_MODE, DEPOSIT_MODE];
+const NO_DRAWER = [HEALTHRAY_MODE, DEPOSIT_MODE];
 
-const shiftFor = (mode, shiftId) => (mode === HEALTHRAY_MODE ? null : shiftId);
+const shiftFor = (mode, shiftId) => (NO_DRAWER.includes(mode) ? null : shiftId);
 
 export const PAYMENTS_AT_ONCE = 10;
 export const REFERENCE_MAX = 60;
@@ -57,7 +70,7 @@ const TAKING = {
   amount: "The amount taken",
   positive: "The amount taken must be more than zero",
   mode: "A payment must be taken as one of",
-  modes: PAYMENT_MODES,
+  modes: [...PAYMENT_MODES, DEPOSIT_MODE],
   reference: (mode) => `A ${MODE_LABEL[mode]} payment needs its reference number`,
   none: "Enter the payment being taken",
   many: `At most ${PAYMENTS_AT_ONCE} payments can be taken at once`,
@@ -623,6 +636,10 @@ async function collectOnBill(billId, version, plan, ctx, db) {
         "Open your shift first, so this cash is in a drawer that can be counted at the end of it",
       );
     }
+    const fromDeposit = wanted
+      .filter((payment) => payment.mode === DEPOSIT_MODE)
+      .reduce((sum, payment) => sum + payment.amount, 0);
+    await holdFor(client, bill.patient_id, fromDeposit);
     const taken = [];
     for (const payment of wanted) {
       const receipt = await nextNumber(client, seriesFor("receipt"), null, ctx);
@@ -642,6 +659,9 @@ async function collectOnBill(billId, version, plan, ctx, db) {
         ],
       );
       taken.push(shapePayment(rows[0]));
+      if (payment.mode === DEPOSIT_MODE) {
+        await recordApplied(client, { bill, payment: shapePayment(rows[0]) }, ctx);
+      }
     }
     const after = await keepPaidInStep(client, bill, ctx);
     for (const payment of taken) {
@@ -748,6 +768,32 @@ async function refundOf(db, creditNoteId) {
     mode_reason: null,
     decision_note: null,
   };
+}
+
+export async function restoreDepositLegs(client, creditNoteId, ctx) {
+  const { rows } = await client.query(
+    `SELECT n.id, n.bill_no, n.bill_type, n.original_bill_id, n.patient_payable, n.paid_amount,
+            o.patient_id
+       FROM bills n JOIN bills o ON o.id = n.original_bill_id
+      WHERE n.id = $1`,
+    [creditNoteId],
+  );
+  const note = rows[0];
+  if (!note) return 0;
+  const refund = await refundOf(client, note.id);
+  if (!refund?.approved_mode) return 0;
+  const { due } = await dueOn(client, note);
+  if (!due) return 0;
+  const legs = await refundLegs(client, note.original_bill_id, refund.approved_mode, due);
+  const amount = legs
+    .filter((leg) => leg.mode === DEPOSIT_MODE)
+    .reduce((sum, leg) => sum + leg.amount, 0);
+  if (!amount) return 0;
+  if (!note.patient_id) {
+    throw httpError(409, "This bill has no patient, so the refund can't be kept as a deposit");
+  }
+  await restoreToDeposit(client, { note, patientId: note.patient_id, amount }, ctx);
+  return amount;
 }
 
 export const noteDue = (note, money) =>

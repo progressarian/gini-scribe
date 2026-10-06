@@ -119,8 +119,7 @@ test.describe.serial("G62 an outsourced test is sent out and never holds the pat
         .sample_status,
     ).toBe("sent_outside");
     expect((await hold.getTestsHold(visit, db)).count).toBe(1);
-    const card = await queueOrder("collection", outsideOrder);
-    expect(card.nextAction).toEqual({ to: "uploaded", label: "📤 Upload report" });
+    expect(await queueOrder("collection", outsideOrder)).toBeNull();
   });
 
   test("5. with only the outside report pending, the patient can see the doctor and leave", async () => {

@@ -108,9 +108,11 @@ export default function DeskRequestDecisionDialog({ request, mode, subject, onCl
           <p className="fset__cardsub">
             {rejecting
               ? "The desk sees this note, so say why — a rejection without a note is refused."
-              : refund
-                ? "Approving makes the credit note now. The desk then pays the money back from its counter."
-                : "The desk may add this item to the visit once more. One approval allows one extra line."}
+              : refund && refundMode === "deposit"
+                ? "Approving makes the credit note now and keeps the money as this patient's deposit — nothing is paid out at the counter."
+                : refund
+                  ? "Approving makes the credit note now. The desk then pays the money back from its counter."
+                  : "The desk may add this item to the visit once more. One approval allows one extra line."}
           </p>
           <p className="dreq__quote">{request.reason}</p>
           {refund ? <RefundSummary request={request} /> : null}

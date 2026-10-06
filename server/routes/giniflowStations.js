@@ -41,6 +41,7 @@ import {
   giniflowFinalizeSchema,
   giniflowDoctorQueueQuerySchema,
   giniflowCarePlanSchema,
+  GINIFLOW_RX_LABELS,
   giniflowComplaintSchema,
   giniflowHistorySchema,
   giniflowAdviceSchema,
@@ -212,6 +213,7 @@ import {
   searchMedicines,
   alternativesFor,
   addExternal,
+  removeExternal,
 } from "../services/giniflow/prescription.js";
 import { checkVisit, acknowledge } from "../services/giniflow/interactions.js";
 import { buildCard } from "../services/giniflow/medicineCard.js";
@@ -837,7 +839,7 @@ router.post(
   "/giniflow/stations/doctor/:visitId/prescription/items",
   doctorGate,
   requireOwnVisit,
-  validate(giniflowRxItemSchema),
+  validate(giniflowRxItemSchema, GINIFLOW_RX_LABELS),
   async (req, res) => {
     try {
       res.json(await addItem(req.params.visitId, req.body));
@@ -868,7 +870,7 @@ router.patch(
   "/giniflow/stations/doctor/prescription/items/:itemId",
   doctorGate,
   requireOwnRxItem,
-  validate(giniflowRxItemPatchSchema),
+  validate(giniflowRxItemPatchSchema, GINIFLOW_RX_LABELS),
   async (req, res) => {
     try {
       res.json(
@@ -941,13 +943,31 @@ router.post(
   "/giniflow/stations/doctor/:visitId/external",
   doctorGate,
   requireOwnVisit,
-  validate(giniflowExternalMedSchema),
+  validate(giniflowExternalMedSchema, GINIFLOW_RX_LABELS),
   async (req, res) => {
     try {
       const draft = await getDraft(req.params.visitId);
       res.json(await addExternal(draft.patientId, req.body));
     } catch (e) {
       doctorError(res, e, "Gini Flow add external medicine");
+    }
+  },
+);
+
+router.delete(
+  "/giniflow/stations/doctor/:visitId/external/:medicationId",
+  doctorGate,
+  requireOwnVisit,
+  async (req, res) => {
+    try {
+      const medicationId = Number(req.params.medicationId);
+      if (!Number.isInteger(medicationId) || medicationId <= 0) {
+        return res.status(400).json({ error: "Choose a medicine to remove" });
+      }
+      const draft = await getDraft(req.params.visitId);
+      res.json(await removeExternal(draft.patientId, medicationId));
+    } catch (e) {
+      doctorError(res, e, "Gini Flow remove external medicine");
     }
   },
 );
@@ -1702,28 +1722,31 @@ router.post(
 
 // Literal path BEFORE the parameterised ones on this prefix — `/lab/:orderId/...`
 // would otherwise swallow it, which is the bug this file already warns about.
-const reportUpload = (upload, label) => async (req, res) => {
-  try {
-    res.json(
-      await upload(req.params.orderId, {
-        base64: req.body.base64,
-        fileName: req.body.fileName,
-        mediaType: req.body.mediaType,
-        actorId: req.doctor?.doctor_id ?? null,
-        confirmAdditional: req.body.confirmAdditional === true,
-      }),
-    );
-  } catch (e) {
-    if (e.needsConfirmation) {
-      return res.status(409).json({
-        error: e.message,
-        needsConfirmation: e.needsConfirmation,
-        existingUploadedAt: e.existingUploadedAt ?? null,
-      });
+const reportUpload =
+  (upload, label, param = "orderId") =>
+  async (req, res) => {
+    try {
+      res.json(
+        await upload(req.params[param], {
+          base64: req.body.base64,
+          fileName: req.body.fileName,
+          mediaType: req.body.mediaType,
+          actorId: req.doctor?.doctor_id ?? null,
+          confirmAdditional: req.body.confirmAdditional === true,
+          ...(req.body.replace === true ? { replace: true } : {}),
+        }),
+      );
+    } catch (e) {
+      if (e.needsConfirmation) {
+        return res.status(409).json({
+          error: e.message,
+          needsConfirmation: e.needsConfirmation,
+          existingUploadedAt: e.existingUploadedAt ?? null,
+        });
+      }
+      handleError(res, e, label);
     }
-    handleError(res, e, label);
-  }
-};
+  };
 
 router.post(
   "/giniflow/stations/lab/case/:caseNo/sent-outside",
@@ -1747,7 +1770,7 @@ router.post(
   "/giniflow/stations/lab/case/:caseNo/outside-report",
   labGate,
   validate(giniflowReportSchema),
-  reportUpload(uploadOutsideCaseReport, "Gini Flow outside lab case report"),
+  reportUpload(uploadOutsideCaseReport, "Gini Flow outside lab case report", "caseNo"),
 );
 
 router.post(
@@ -2259,7 +2282,7 @@ router.get("/giniflow/stations/mo/:visitId/interactions", moGate, async (req, re
 router.post(
   "/giniflow/stations/mo/:visitId/external-medicines",
   moGate,
-  validate(giniflowExternalMedSchema),
+  validate(giniflowExternalMedSchema, GINIFLOW_RX_LABELS),
   async (req, res) => {
     try {
       // The consultant's own service — one implementation of "a medicine
@@ -2275,7 +2298,7 @@ router.post(
 router.post(
   "/giniflow/stations/mo/:visitId/prescription/items",
   moGate,
-  validate(giniflowRxItemSchema),
+  validate(giniflowRxItemSchema, GINIFLOW_RX_LABELS),
   async (req, res) => {
     try {
       res.json(

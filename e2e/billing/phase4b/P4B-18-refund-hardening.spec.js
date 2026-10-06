@@ -439,6 +439,10 @@ test.describe.serial("P4B-18 refund hardening", () => {
     await expect(dialog.getByRole("checkbox", { name: /Ankle brace/ })).not.toBeChecked();
     await expect(dialog.getByRole("combobox", { name: /^Reason/ })).toHaveValue("patient_declined");
     await expect(dialog.getByLabel("What the patient gets back")).toContainText(
+      "₹250 is kept as deposit for this patient",
+    );
+    await dialog.getByLabel("Refund by").selectOption("as_paid");
+    await expect(dialog.getByLabel("What the patient gets back")).toContainText(
       "Patient gets back ₹250",
     );
     const send = dialog.getByRole("button", { name: "Send request" });

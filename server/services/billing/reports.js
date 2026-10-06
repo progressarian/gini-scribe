@@ -1,6 +1,6 @@
 import pool from "../../config/db.js";
 import { paise } from "../../../shared/labPayment.js";
-import { BILLING_ROLES, HEALTHRAY_MODE } from "../../../shared/billingVocab.js";
+import { BILLING_ROLES, DEPOSIT_MODE, HEALTHRAY_MODE } from "../../../shared/billingVocab.js";
 import { ROLES } from "../../../shared/permissions.js";
 import { KINDS as REQUEST_KINDS } from "./billingRequests.js";
 import { PAYMENT_MODES } from "./cashShifts.js";
@@ -380,7 +380,16 @@ async function revenueCategories(filters, db) {
   ];
 }
 
-const MODE_LABELS = { cash: "Cash", card: "Card", upi: "UPI", healthray: "Paid in HealthRay" };
+const MODE_LABELS = {
+  cash: "Cash",
+  card: "Card",
+  upi: "UPI",
+  healthray: "Paid in HealthRay",
+  cash_deposit: "Cash — deposit taken",
+  card_deposit: "Card — deposit taken",
+  upi_deposit: "UPI — deposit taken",
+};
+const DEPOSIT_MODES = PAYMENT_MODES.map((mode) => `${mode}_deposit`);
 
 const PAYMENT_COLUMNS = {
   day: { instant: "m.received_at" },
@@ -402,10 +411,11 @@ async function collections(filters, db) {
   const dims = ["day", "mode", "received_by", "shift_id"];
   const { rows } = await db.query(
     `WITH base AS (
-       SELECT ${dayOfInstant("m.received_at")} AS day, m.mode, m.received_by, m.shift_id,
-              m.direction, m.amount
-         FROM payments m JOIN bills b ON b.id = m.bill_id ${SCHEME_JOIN}
-        WHERE ${scope.sql}
+       SELECT ${dayOfInstant("m.received_at")} AS day,
+              CASE WHEN m.bill_id IS NULL THEN m.mode || '_deposit' ELSE m.mode END AS mode,
+              m.received_by, m.shift_id, m.direction, m.amount
+         FROM payments m LEFT JOIN bills b ON b.id = m.bill_id ${SCHEME_JOIN}
+        WHERE ${scope.sql} AND m.mode <> '${DEPOSIT_MODE}'
      ), rolled AS (
        SELECT day, mode, received_by, shift_id, ${rolledFlags(dims)},
               COUNT(*) FILTER (WHERE direction = 'in') AS payments_in,
@@ -425,7 +435,7 @@ async function collections(filters, db) {
        LEFT JOIN doctors su ON su.id = s.user_id
       ORDER BY r.day, array_position($${scope.params.length + 1}::text[], r.mode),
                lower(u.name), s.opened_at, r.shift_id`,
-    [...scope.params, [...PAYMENT_MODES, HEALTHRAY_MODE]],
+    [...scope.params, [...PAYMENT_MODES, HEALTHRAY_MODE, ...DEPOSIT_MODES]],
   );
   const { sets, total } = splitSets(rows, dims);
   const pick = (key) => sets.get(key) ?? [];

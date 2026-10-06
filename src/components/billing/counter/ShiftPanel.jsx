@@ -118,6 +118,9 @@ export default function ShiftPanel() {
             {shift.refund_count > 0
               ? ` · ${shift.refund_count} refund${shift.refund_count === 1 ? "" : "s"} paid out`
               : ""}
+            {shift.deposits?.count > 0
+              ? ` · ${shift.deposits.count} deposit${shift.deposits.count === 1 ? "" : "s"} taken (₹${shift.deposits.received.toLocaleString("en-IN", { minimumFractionDigits: 2 })}, included above)`
+              : ""}
           </div>
           <table className="ltable bc-totals" aria-label="Drawer">
             <tbody>

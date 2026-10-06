@@ -135,9 +135,12 @@ test.describe.serial("G64 outsourced HealthRay cases are sent out and listed", (
 
   test("6. lab staff send and upload through the API; an in-house case is refused", async () => {
     const api = await apiAs("lab");
-    const sent = await api.post(`/api/giniflow/stations/lab/case/${cases.hrOutsource}/sent-outside`, {
-      data: {},
-    });
+    const sent = await api.post(
+      `/api/giniflow/stations/lab/case/${cases.hrOutsource}/sent-outside`,
+      {
+        data: {},
+      },
+    );
     expect(sent.status()).toBe(200);
     const body = {
       base64: Buffer.from("%PDF-1.4").toString("base64"),
@@ -155,15 +158,16 @@ test.describe.serial("G64 outsourced HealthRay cases are sent out and listed", (
     );
     expect([200, 503]).toContain(outside.status());
     await api.dispose();
-    expect(await pendingKeys()).toEqual([
-      `sent:${cases.hrOutsource}`,
-      `sent:${cases.outside}`,
-    ]);
+    expect(await pendingKeys()).toEqual([`sent:${cases.hrOutsource}`, `sent:${cases.outside}`]);
   });
 
   test("7. the panel lists the cases and a returned report clears them", async ({ page }) => {
     await loginAs(page, "lab");
     await page.goto("/giniflow/station/lab");
+    const outsideTab = page.getByRole("tab", { name: /Outside reports pending/ });
+    await expect(outsideTab).toContainText(/\d+/);
+    await outsideTab.click();
+    await expect(page).toHaveURL(/view=outside/);
     const panel = page.getByRole("region", { name: "Outside reports pending" });
     await panel.getByLabel("Search outside reports").fill(tag);
     const table = panel.getByRole("table", { name: "Outside reports pending" });
@@ -183,6 +187,10 @@ test.describe.serial("G64 outsourced HealthRay cases are sent out and listed", (
     );
     expect(await pendingKeys()).toEqual([]);
     await page.reload();
+    await expect(page.getByRole("tab", { name: /Outside reports pending/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
     await panel.getByLabel("Search outside reports").fill(tag);
     await expect(panel.getByText("No outside reports match these filters.")).toBeVisible();
   });

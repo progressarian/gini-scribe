@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import api from "../../../services/api";
-import { usePatientSchemeList, useSetBillCategory } from "../../../queries/hooks/useBilling";
-import { errorOf } from "../format";
+import {
+  useDeposit,
+  usePatientSchemeList,
+  useSetBillCategory,
+} from "../../../queries/hooks/useBilling";
+import { errorOf, fromPaise } from "../format";
 import LoadingCard from "./LoadingCard";
 
 export const readFile = (file) =>
@@ -85,8 +89,10 @@ export default function PatientHeader({
   onBill,
   onClose,
   form,
+  onDeposit,
 }) {
   const { data: schemes } = usePatientSchemeList();
+  const { data: deposit } = useDeposit(bill.patient_id);
   const setCategory = useSetBillCategory();
   const current = bill.category || "";
   const chosen = form.value.chosen ?? current;
@@ -179,6 +185,16 @@ export default function PatientHeader({
         </span>
         {patient?.statusLabel && <span className="bc-head__state">{patient.statusLabel}</span>}
         {bill.payer_name && <span className="bc-head__payer">Payer: {bill.payer_name}</span>}
+        {deposit?.balance > 0 && (
+          <button
+            type="button"
+            className="bc-head__deposit"
+            onClick={onDeposit}
+            aria-label={`Deposit ${fromPaise(deposit.balance)} — show the deposit`}
+          >
+            Deposit {fromPaise(deposit.balance)}
+          </button>
+        )}
         <button
           type="button"
           className="st-btn st-btn-g bc-head__close"

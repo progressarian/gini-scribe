@@ -20,21 +20,28 @@ const minutesOf = (steps) => steps.reduce((sum, s) => sum + (Number(s.minutes) |
 function AssignSelect({ step, onChange }) {
   const doctorsList = useAuthStore((s) => s.doctorsList) || [];
   const isDoctor = DOCTOR_ROLES.includes(step.role);
+  const isConsultStep = step.chainStatus === "with_doctor";
   const { data: staff = [] } = useFlowStaff(isDoctor ? null : step.role);
   const options = isDoctor
-    ? doctorsList.map((d) => ({ id: d.id, name: d.short_name || d.name }))
+    ? doctorsList
+        .filter((d) => !isConsultStep || d.role === "consultant")
+        .map((d) => ({ id: d.id, name: d.short_name || d.name }))
     : staff.map((s) => ({ id: s.id, name: s.name }));
+  const missing = isConsultStep && !step.staffId;
 
   return (
     <select
       className="jb-assign"
+      aria-label={isConsultStep ? "Consultant" : `Assign ${step.name}`}
+      aria-invalid={missing || undefined}
+      required={isConsultStep}
       value={step.staffId || ""}
       onChange={(e) => {
         const picked = options.find((o) => String(o.id) === e.target.value);
         onChange({ staffId: picked ? String(picked.id) : null, staffName: picked?.name || null });
       }}
     >
-      <option value="">{step.role || "anyone"}</option>
+      <option value="">{isConsultStep ? "Choose consultant" : step.role || "anyone"}</option>
       {options.map((o) => (
         <option key={o.id} value={o.id}>
           {o.name}

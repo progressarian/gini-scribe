@@ -485,6 +485,38 @@ const uniqueToken = async (client) => {
   return genVisitToken();
 };
 
+const consultantPicked = async (client, steps) => {
+  const picks = steps.filter((s) => s.catalogId && /^\d+$/.test(String(s.staffId ?? "")));
+  if (!picks.length) return null;
+  const { rows } = await client.query(
+    `SELECT d.id
+       FROM unnest($1::text[], $2::int[]) WITH ORDINALITY AS p(catalog_id, staff_id, n)
+       JOIN flow_step_catalog c ON c.id = p.catalog_id AND c.chain_status = 'with_doctor'
+       JOIN doctors d ON d.id = p.staff_id AND d.role = 'consultant' AND COALESCE(d.is_active, TRUE)
+      ORDER BY p.n
+      LIMIT 1`,
+    [picks.map((s) => s.catalogId), picks.map((s) => Number(s.staffId))],
+  );
+  return rows[0]?.id ?? null;
+};
+
+const requireConsultant = async (client, visitId) => {
+  const { rows } = await client.query(
+    `SELECT v.assigned_doctor_id IS NULL
+            AND EXISTS (SELECT 1 FROM giniflow_visit_steps s
+                         WHERE s.visit_id = v.id AND s.chain_status = 'with_doctor'
+                           AND s.status <> 'skipped') AS missing
+       FROM giniflow_visits v WHERE v.id = $1`,
+    [visitId],
+  );
+  if (rows[0]?.missing) {
+    throw Object.assign(
+      new Error("Choose the consultant this patient will see before checking them in."),
+      { status: 400 },
+    );
+  }
+};
+
 // Reception's arrival, in one transaction: the status the board reads, the plan
 // the floor and the patient read, and the token the patient's link needs. The
 // WhatsApp is the caller's job, AFTER the commit — a message that fails must
@@ -581,6 +613,7 @@ export async function checkInWithJourney(
     );
     const forColumn = (status) =>
       assigned.rows.find((r) => r.chain_status === status)?.staff_id ?? null;
+    const doctorId = forColumn("with_doctor") ?? (await consultantPicked(client, askedSteps));
 
     const token = await uniqueToken(client);
     const planned = steps.reduce((sum, s) => sum + clampMinutes(s.minutes), 0);
@@ -605,9 +638,10 @@ export async function checkInWithJourney(
         token,
         actorId,
         forColumn("with_sd"),
-        forColumn("with_doctor"),
+        doctorId,
       ],
     );
+    await requireConsultant(client, visitId);
     const { rows: nowAt } = await client.query(
       `SELECT current_status FROM giniflow_visits WHERE id = $1`,
       [visitId],

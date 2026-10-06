@@ -1,4 +1,4 @@
-import { HEALTHRAY_MODE, ORDER_STATE } from "../../../../shared/billingVocab.js";
+import { DEPOSIT_MODE, HEALTHRAY_MODE, ORDER_STATE } from "../../../../shared/billingVocab.js";
 
 export const ORDER_STATE_LABEL = {
   [ORDER_STATE.CLAIM_AT_RECEPTION]: "Claim at reception",
@@ -53,11 +53,18 @@ export const PAYMENT_MODE_LABEL = { cash: "Cash", card: "Card", upi: "UPI" };
 
 export const HEALTHRAY_LABEL = "Paid in HealthRay";
 
-export const PAID_MODE_LABEL = { ...PAYMENT_MODE_LABEL, [HEALTHRAY_MODE]: HEALTHRAY_LABEL };
+export const PAID_MODE_LABEL = {
+  ...PAYMENT_MODE_LABEL,
+  [HEALTHRAY_MODE]: HEALTHRAY_LABEL,
+  [DEPOSIT_MODE]: "Paid from deposit",
+};
 
 export const paymentModeText = (mode) => PAID_MODE_LABEL[mode] ?? mode ?? "";
 
-const PAY_OUT_LABEL = { [HEALTHRAY_MODE]: "Refunded in HealthRay" };
+const PAY_OUT_LABEL = {
+  [HEALTHRAY_MODE]: "Refunded in HealthRay",
+  [DEPOSIT_MODE]: "Kept as deposit",
+};
 
 export const payOutText = (mode) => PAY_OUT_LABEL[mode] ?? `${paymentModeText(mode)} refund`;
 
@@ -65,16 +72,18 @@ export const REFUND_MODE_LABEL = {
   as_paid: "Back the way it was paid",
   ...PAYMENT_MODE_LABEL,
   [HEALTHRAY_MODE]: "Refunded in HealthRay",
+  [DEPOSIT_MODE]: "Keep as deposit for the patient",
 };
 
 export const refundModeText = (mode) => REFUND_MODE_LABEL[mode] ?? mode ?? "";
 
 const MODE_WORD = { cash: "cash", card: "card", upi: "UPI" };
 
-const legText = (leg, money) =>
-  leg.mode === HEALTHRAY_MODE
-    ? `${money(leg.amount)} in HealthRay`
-    : `${money(leg.amount)} by ${MODE_WORD[leg.mode] ?? leg.mode}`;
+const legText = (leg, money) => {
+  if (leg.mode === HEALTHRAY_MODE) return `${money(leg.amount)} in HealthRay`;
+  if (leg.mode === DEPOSIT_MODE) return `${money(leg.amount)} back into the deposit`;
+  return `${money(leg.amount)} by ${MODE_WORD[leg.mode] ?? leg.mode}`;
+};
 
 export const refundLegsText = (legs, money) =>
   (legs || []).map((leg) => legText(leg, money)).join(", ");

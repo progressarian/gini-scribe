@@ -394,7 +394,9 @@ export async function getLabQueue(
       ORDER BY o.created_at`,
     [visitDate, search, LAB_ONLY_DOCTOR, hideLabOnly],
   );
-  const rows = room === LAB_ROOMS.PROCESSING ? queued.filter((r) => !r.is_outsourced) : queued;
+  const rows = queued.filter(
+    (r) => r.sample_status !== SENT_OUTSIDE && !(room === LAB_ROOMS.PROCESSING && r.is_outsourced),
+  );
 
   const busy = await busyStations(
     db,
@@ -1498,15 +1500,47 @@ export async function uploadReport(
   return { orderId, reportUrl: url, fileName: safeName, bytes };
 }
 
-export async function uploadOutsideReport(orderId, input, db = pool) {
-  const { rows } = await db.query(`SELECT is_outsourced FROM giniflow_lab_orders WHERE id = $1`, [
-    orderId,
-  ]);
+async function replaceOrderReport(order, { base64, fileName, mediaType, actorId }, db) {
+  if (!base64) throw Object.assign(new Error("No file was sent"), { status: 400 });
+  const { url, safeName, bytes } = await storeReportObject({
+    base64,
+    fileName,
+    mediaType: mediaType || "application/pdf",
+    kind: order.kind,
+    patientId: order.patient_id,
+  });
+  await db.query(
+    `UPDATE giniflow_lab_orders SET report_file_url = $2, uploaded_at = NOW(), updated_at = NOW()
+      WHERE id = $1`,
+    [order.id, url],
+  );
+  await db.query(
+    `INSERT INTO giniflow_lab_order_events (lab_order_id, track, status, actor_role, actor_id)
+     VALUES ($1, 'sample', 'report_replaced', 'lab', $2)`,
+    [order.id, actorId],
+  );
+  await promoteLabReport(order.id, db);
+  return { orderId: order.id, reportUrl: url, fileName: safeName, bytes, replaced: true };
+}
+
+export async function uploadOutsideReport(orderId, { replace = false, ...input }, db = pool) {
+  const { rows } = await db.query(
+    `SELECT o.id, o.is_outsourced, o.sample_status, o.kind, v.patient_id
+       FROM giniflow_lab_orders o JOIN giniflow_visits v ON v.id = o.visit_id
+      WHERE o.id = $1`,
+    [orderId],
+  );
   if (!rows.length) throw Object.assign(new Error("Order not found"), { status: 404 });
   if (!rows[0].is_outsourced) {
     throw Object.assign(new Error("Only an outsourced test's report can be uploaded here"), {
       status: 403,
     });
+  }
+  if (replace && rows[0].sample_status === "uploaded") {
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
+      throw Object.assign(new Error("Storage is not configured"), { status: 503 });
+    }
+    return replaceOrderReport(rows[0], input, db);
   }
   return uploadReport(orderId, input, db);
 }
@@ -1893,9 +1927,22 @@ export async function markCaseSentOutside(caseNo, { actorId = null, room = null 
   return { caseNo, action: SENT_OUTSIDE, unchanged: false };
 }
 
-export async function uploadOutsideCaseReport(caseNo, input, db = pool) {
-  await outsideCase(db, caseNo);
-  return uploadLabCaseReport(caseNo, input, db);
+export async function uploadOutsideCaseReport(caseNo, { replace = false, ...input }, db = pool) {
+  const c = await outsideCase(db, caseNo);
+  const { rows } = await db.query(`SELECT pdf_storage_path FROM lab_cases WHERE case_no = $1`, [
+    caseNo,
+  ]);
+  const previous = rows[0]?.pdf_storage_path ?? null;
+  if (!replace || !previous || !c.hasReport) return uploadLabCaseReport(caseNo, input, db);
+  const result = await uploadLabCaseReport(caseNo, { ...input, confirmAdditional: true }, db);
+  if (result.storagePath !== previous) {
+    await db.query(`DELETE FROM documents WHERE storage_path = $1`, [previous]);
+    await fetch(`${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${previous}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` },
+    }).catch(() => {});
+  }
+  return { ...result, replaced: true };
 }
 
 export async function uploadLabCaseReport(

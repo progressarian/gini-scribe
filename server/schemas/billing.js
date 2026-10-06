@@ -44,6 +44,7 @@ import {
   DISCOUNT_METHODS,
   DUE_AGES,
   DUE_SORTS,
+  DEPOSIT_MODE,
   HEALTHRAY_MODE,
   PATIENT_PAYS,
   REFUND_MODES,
@@ -1039,13 +1040,24 @@ const paymentEntry = (modes) =>
     )
     .refine(
       (entry) =>
-        entry.mode === DRAWER_MODE || entry.mode === HEALTHRAY_MODE || Boolean(entry.reference),
+        [DRAWER_MODE, HEALTHRAY_MODE, DEPOSIT_MODE].includes(entry.mode) ||
+        Boolean(entry.reference),
       "needs its reference number when it isn't cash",
     );
 
-const takenPayment = paymentEntry(PAYMENT_MODES);
+const takenPayment = paymentEntry([...PAYMENT_MODES, DEPOSIT_MODE]);
 
 const paidOutPayment = paymentEntry([...PAYMENT_MODES, HEALTHRAY_MODE]);
+
+export const billingDepositReceiveSchema = z.strictObject(
+  {
+    mode: z.enum(PAYMENT_MODES, { message: `must be one of: ${PAYMENT_MODES.join(", ")}` }),
+    amount: paymentAmount,
+    reference: z.union([z.string().trim().max(PAYMENT_REFERENCE_MAX), z.null()]).optional(),
+    note: z.union([z.string().trim().max(300), z.null()]).optional(),
+  },
+  objectOnly('must be a deposit, like { mode: "cash", amount: 2000 }'),
+);
 
 export const billingClearHealthraySchema = deskObject(
   { version: whole },

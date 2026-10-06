@@ -76,6 +76,7 @@ test.describe.serial("P4B-19 the credit note series is set up in Billing setting
     await loginAs(page, "reception");
     await openBill(page, ids.bill);
     await actions(page).getByRole("button", { name: "Refund…" }).click();
+    await dialog(page).getByLabel("Refund by").selectOption("as_paid");
     await dialog(page)
       .getByRole("combobox", { name: /^Reason/ })
       .selectOption("long_wait");

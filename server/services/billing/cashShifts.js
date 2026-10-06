@@ -111,12 +111,18 @@ const SHIFT_SQL = `
          u.name AS user_name, u.short_name AS user_short_name,
          ${TOTAL_COLUMNS},
          t.payment_count, t.bill_count, t.refund_count, t.credit_note_count,
+         t.deposits_received, t.deposits_refunded, t.deposit_count,
          hr.healthray_collected, hr.healthray_refunded
     FROM cash_shifts s
     LEFT JOIN doctors u ON u.id = s.user_id
     LEFT JOIN LATERAL (
       SELECT ${TOTALS},
-             COUNT(*) FILTER (WHERE p.direction = 'in') AS payment_count,
+             COUNT(*) FILTER (WHERE p.direction = 'in' AND p.bill_id IS NOT NULL) AS payment_count,
+             COUNT(*) FILTER (WHERE p.direction = 'in' AND p.bill_id IS NULL) AS deposit_count,
+             COALESCE(SUM(p.amount) FILTER (WHERE p.direction = 'in' AND p.bill_id IS NULL), 0)
+               AS deposits_received,
+             COALESCE(SUM(p.amount) FILTER (WHERE p.direction = 'out' AND p.bill_id IS NULL), 0)
+               AS deposits_refunded,
              COUNT(DISTINCT p.bill_id) FILTER (WHERE p.direction = 'in') AS bill_count,
              COUNT(*) FILTER (WHERE p.direction = 'out') AS refund_count,
              COUNT(DISTINCT p.bill_id) FILTER (WHERE p.direction = 'out') AS credit_note_count
@@ -163,6 +169,11 @@ function shape(row) {
     bill_count: Number(row.bill_count ?? 0),
     refund_count: Number(row.refund_count ?? 0),
     credit_note_count: Number(row.credit_note_count ?? 0),
+    deposits: {
+      count: Number(row.deposit_count ?? 0),
+      received: money(row.deposits_received),
+      refunded: money(row.deposits_refunded),
+    },
     healthray: {
       collected: money(row.healthray_collected),
       refunded: money(row.healthray_refunded),

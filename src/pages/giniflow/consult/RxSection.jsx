@@ -12,12 +12,14 @@ import {
   useAlternatives,
   useDecideItem,
   useAddExternal,
+  useRemoveExternal,
   useParsePaste,
 } from "../../../queries/hooks/useGiniflowPrescription";
 import { VoiceBar, VoiceButton } from "../../../components/giniflow/VoiceInput";
 import InteractionPanel from "./InteractionPanel";
 import { extractDose } from "../../../lib/medName";
 import { dosesFor, DEFAULT_TIMINGS } from "../../../../shared/giniflowMedTiming.js";
+import { MEDICINE_TYPES, medicineTypeFor } from "../../../../shared/medicineTypes.js";
 
 // Prescription — gini-doctor-final.html `s-rx` (which is where
 // gini-prescription-v2.html's mechanics were merged).
@@ -175,6 +177,22 @@ function AlternativesPanel({ name, onClose, onPick }) {
 
 const PAUSE_OPTIONS = [1, 2, 4, 6, 8, 12];
 
+function MedicineTypeField({ value, onChange }) {
+  return (
+    <label>
+      Medicine type
+      <select className="cp-inp" value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">—</option>
+        {MEDICINE_TYPES.map((type) => (
+          <option key={type} value={type}>
+            {type}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 function RowEditor({ item, onSave, onCancel, onPause, onStop }) {
   const [form, setForm] = useState({
     dose: item.dose || "",
@@ -184,6 +202,7 @@ function RowEditor({ item, onSave, onCancel, onPause, onStop }) {
     reason: item.reason || "",
     patientInstruction: item.patient_instruction || "",
     route: item.route || "Oral",
+    form: medicineTypeFor({ form: item.form, name: item.medicine_name }),
   });
   const [stopping, setStopping] = useState(false);
   const [pauseWeeks, setPauseWeeks] = useState(2);
@@ -193,6 +212,10 @@ function RowEditor({ item, onSave, onCancel, onPause, onStop }) {
   return (
     <div className="rx-edit">
       <div className="rx-grid">
+        <MedicineTypeField
+          value={form.form}
+          onChange={(type) => setForm((p) => ({ ...p, form: type }))}
+        />
         <label>
           Dose
           <input className="cp-inp" value={form.dose} onChange={set("dose")} />
@@ -318,9 +341,12 @@ function AddMedicine({ visitId, onAdd, onClose, initialQuery = "" }) {
     frequency: "OD",
     timingCategories: DEFAULT_TIMINGS.OD,
     reason: "",
+    form: "",
   });
+  const [typePicked, setTypePicked] = useState(false);
   const { data, isFetching } = useMedicineSearch(debounced);
   const request = useRequestMedicine();
+  const typeOf = (name, saved) => (typePicked ? form.form : medicineTypeFor({ form: saved, name }));
 
   useEffect(() => {
     const id = setTimeout(() => setDebounced(query), 250);
@@ -331,6 +357,23 @@ function AddMedicine({ visitId, onAdd, onClose, initialQuery = "" }) {
     <div className="rx-add">
       <div className="cn-head">Add a medicine</div>
       <div className="rx-search-row">
+        <select
+          className="cp-inp rx-type-select"
+          aria-label="Medicine type"
+          value={form.form}
+          onChange={(e) => {
+            const type = e.target.value;
+            setForm((p) => ({ ...p, form: type }));
+            setTypePicked(!!type);
+          }}
+        >
+          <option value="">Type</option>
+          {MEDICINE_TYPES.map((type) => (
+            <option key={type} value={type}>
+              {type}
+            </option>
+          ))}
+        </select>
         <input
           className="cp-inp"
           autoFocus
@@ -366,9 +409,16 @@ function AddMedicine({ visitId, onAdd, onClose, initialQuery = "" }) {
               onClick={() => {
                 setPicked(r);
                 const dose = extractDose(r.name) || extractDose(query);
-                if (dose) setForm((p) => ({ ...p, dose: p.dose || dose }));
+                setForm((p) => ({
+                  ...p,
+                  dose: p.dose || dose || "",
+                  form: typeOf(r.name, r.form),
+                }));
               }}
             >
+              {medicineTypeFor({ form: r.form, name: r.name }) && (
+                <span className="rx-type">{medicineTypeFor({ form: r.form, name: r.name })}</span>
+              )}
               <strong>{r.name}</strong>
               <em>
                 {r.composition || r.drugClass || "—"}
@@ -398,7 +448,11 @@ function AddMedicine({ visitId, onAdd, onClose, initialQuery = "" }) {
                   request.mutate({ medicineName: name, visitId: visitId || null });
                   setPicked({ name, composition: null, drugClass: null, stock: null });
                   const dose = extractDose(name);
-                  if (dose) setForm((p) => ({ ...p, dose: p.dose || dose }));
+                  setForm((p) => ({
+                    ...p,
+                    dose: p.dose || dose || "",
+                    form: typeOf(name),
+                  }));
                 }}
               >
                 <strong>+ Add “{debounced.trim()}”</strong>
@@ -409,9 +463,9 @@ function AddMedicine({ visitId, onAdd, onClose, initialQuery = "" }) {
         </div>
       )}
 
-      {picked && (
+      {(picked || typePicked) && (
         <>
-          {request.isPending || request.isSuccess || request.isError ? (
+          {picked && (request.isPending || request.isSuccess || request.isError) ? (
             <div className="cn-empty" role="status">
               {request.isPending
                 ? "Telling the pharmacy…"
@@ -425,7 +479,7 @@ function AddMedicine({ visitId, onAdd, onClose, initialQuery = "" }) {
               Dose
               <input
                 className="cp-inp"
-                autoFocus
+                autoFocus={!!picked}
                 value={form.dose}
                 onChange={(e) => setForm((p) => ({ ...p, dose: e.target.value }))}
               />
@@ -466,6 +520,8 @@ function AddMedicine({ visitId, onAdd, onClose, initialQuery = "" }) {
             <button
               type="button"
               className="btn-sm on"
+              disabled={!picked}
+              title={picked ? undefined : "Pick the medicine from the list first"}
               onClick={() =>
                 onAdd({
                   medicineName: picked.name,
@@ -504,6 +560,7 @@ function ExternalMedicineForm({ onAdd, onClose }) {
     timingCategories: [],
     prescriberName: "",
     prescriberHospital: "",
+    form: "",
   });
   const set = (k) => (e) => setF((prev) => ({ ...prev, [k]: e.target.value }));
   const ready = f.medicineName.trim() && f.prescriberName.trim();
@@ -514,8 +571,23 @@ function ExternalMedicineForm({ onAdd, onClose }) {
       <div className="rx-grid">
         <label>
           Medicine
-          <input className="cp-inp" value={f.medicineName} onChange={set("medicineName")} />
+          <input
+            className="cp-inp"
+            value={f.medicineName}
+            onChange={(e) => {
+              const medicineName = e.target.value;
+              setF((prev) => ({
+                ...prev,
+                medicineName,
+                form: prev.formPicked ? prev.form : medicineTypeFor({ name: medicineName }),
+              }));
+            }}
+          />
         </label>
+        <MedicineTypeField
+          value={f.form}
+          onChange={(type) => setF((prev) => ({ ...prev, form: type, formPicked: true }))}
+        />
         <label>
           Dose
           <input className="cp-inp" value={f.dose} onChange={set("dose")} />
@@ -557,7 +629,10 @@ function ExternalMedicineForm({ onAdd, onClose }) {
           className="btn-sm on"
           disabled={!ready}
           title={ready ? undefined : "The medicine and who prescribed it are both needed"}
-          onClick={() => onAdd(f)}
+          onClick={() => {
+            const { formPicked, ...med } = f;
+            onAdd({ ...med, form: med.form || null });
+          }}
         >
           Add
         </button>
@@ -764,6 +839,7 @@ export default function RxSection({ visitId, readOnly, onToast, onUnsaved, stati
   const remove = useRemoveItem(visitId);
   const decide = useDecideItem(visitId);
   const addExternal = useAddExternal(visitId);
+  const removeExternal = useRemoveExternal(visitId);
   const [addingExternal, setAddingExternal] = useState(false);
   const [pasting, setPasting] = useState(false);
   const [pasteResult, setPasteResult] = useState(null);
@@ -981,6 +1057,11 @@ export default function RxSection({ visitId, readOnly, onToast, onUnsaved, stati
               <div className="rx-num">{i + 1}.</div>
               <div className="rx-main">
                 <div className="rx-name">
+                  {item.form && (
+                    <span className="rx-type">
+                      {medicineTypeFor({ form: item.form }) || item.form}
+                    </span>
+                  )}{" "}
                   {item.medicine_name}
                   {chip && <span className={`rx-chip ${chip.cls}`}>{chip.label}</span>}
                   {item.typed_by_doctor && (
@@ -1230,6 +1311,24 @@ export default function RxSection({ visitId, readOnly, onToast, onUnsaved, stati
           <span className={`rx-inter${m.clinical_note ? " flagged" : ""}`}>
             {m.clinical_note ? `⚠ ${m.clinical_note}` : "interaction not checked"}
           </span>
+          {!readOnly && (
+            <button
+              type="button"
+              className="ra-btn ra-stop"
+              disabled={removeExternal.isPending}
+              aria-label={`Remove ${m.name}`}
+              onClick={() => {
+                if (!window.confirm(`Remove ${m.name} from this patient's typed medicines?`))
+                  return;
+                removeExternal.mutate(m.id, {
+                  onError: fail,
+                  onSuccess: () => onToast(`${m.name} removed`),
+                });
+              }}
+            >
+              Remove
+            </button>
+          )}
         </div>
       ))}
     </section>

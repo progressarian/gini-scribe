@@ -1,7 +1,8 @@
 # 62 — Outsourced tests: collect here, send out, upload the report later
 
-Status: **agreed 6 Oct 2026, building phase 1.** Follows the "Outsourced" label work
-(`service_items.is_outsourced`, migration `2026-11-10_service_item_outsourced.sql`), which only
+Status: **built on local, 6 Oct 2026 — all three phases.** Migrations `2026-11-10_service_item_outsourced.sql` (applied on production) and `2026-11-11_outsourced_lab_orders.sql` (NOT yet applied on production). e2e: G62, G63, G64, P4C-31, P4C-32.
+
+Follows the "Outsourced" label work (`service_items.is_outsourced`, migration `2026-11-10_service_item_outsourced.sql`), which only
 labels tests and changes no flow. Supersedes the unbuilt `48-OFFSITE-TEST-CATEGORY-PLAN.md` for
 lab tests (48's "patient goes elsewhere" machine/imaging case is not covered here).
 

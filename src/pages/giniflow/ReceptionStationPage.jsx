@@ -1263,6 +1263,11 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   }, [consultSteps]);
 
   const list = steps || [];
+  const consultantMissing =
+    !arrival.assignedDoctorId &&
+    list.some((s) => s.chainStatus === "with_doctor") &&
+    !list.some((s) => s.chainStatus === "with_doctor" && s.staffId);
+  const blocked = saving || !list.length || consultantMissing;
   const minutes = list.reduce((sum, s) => sum + (Number(s.minutes) || 0), 0);
   const doneBy = new Date(Date.now() + minutes * 60000).toLocaleTimeString("en-IN", {
     hour: "numeric",
@@ -1386,6 +1391,13 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
                 Add at least one step — a journey with no stops tells the floor nothing.
               </div>
             )}
+
+            {consultantMissing && (
+              <div className="dp-hint" role="alert">
+                No consultant is booked for {arrival.name}. Choose one on the consultant step before
+                checking in.
+              </div>
+            )}
           </div>
         </div>
 
@@ -1402,17 +1414,13 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
           <div className="dp-foot">
             <button
               className="btn-full st-btn st-btn-grn"
-              disabled={saving || !list.length}
+              disabled={blocked}
               onClick={() => submit(false)}
             >
               {arrival.phone ? "✓ Check in only" : "✓ Check in"}
             </button>
             {arrival.phone && (
-              <button
-                className="st-btn st-btn-g"
-                disabled={saving || !list.length}
-                onClick={() => submit(true)}
-              >
+              <button className="st-btn st-btn-g" disabled={blocked} onClick={() => submit(true)}>
                 Check in + send WhatsApp
               </button>
             )}

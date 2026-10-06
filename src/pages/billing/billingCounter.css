@@ -2398,3 +2398,58 @@ body > [role="dialog"][aria-modal="true"] .bc-err {
 .gf .bc-additems__body > .bc-field {
   flex: none;
 }
+
+.gf .bc-layout .bc-deposit .bc-card__title {
+  margin: 0;
+}
+.gf .bc-deposit__balance {
+  margin-left: 8px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.gf .bc-deposit__form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+.gf .bc-deposit__form > .bc-field {
+  flex: 1 1 120px;
+  min-width: 0;
+}
+.gf .bc-deposit__form > .bc-deposit__note {
+  flex-basis: 100%;
+}
+.gf .bc-deposit__form > .bc-hint,
+.gf .bc-deposit__form > .bc-note,
+.gf .bc-deposit__form > .bc-head__row {
+  flex-basis: 100%;
+}
+.gf .bc-deposit__history {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.gf .bc-deposit__scroll {
+  max-height: 260px;
+  overflow: auto;
+}
+.gf .bc-deposit__scroll .ltable {
+  width: 100%;
+}
+.gf .bc-head__deposit {
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--grn, #15803d);
+  background: var(--grn-l, #f0fdf4);
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.gf .bc-head__deposit:focus-visible {
+  outline: 2px solid var(--tl);
+  outline-offset: 2px;
+}

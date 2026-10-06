@@ -1,4 +1,4 @@
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import useAuthStore from "../../stores/authStore";
 import { CAPABILITIES as C, hasCapability } from "../../../shared/permissions.js";
 
@@ -9,8 +9,9 @@ import { CAPABILITIES as C, hasCapability } from "../../../shared/permissions.js
 // the start of the ladder.
 export default function LabStationPage() {
   const role = useAuthStore((s) => s.currentDoctor?.role);
+  const { search } = useLocation();
   const to = hasCapability(role, C.GINIFLOW_STATION_LAB_COLLECT)
     ? "/giniflow/station/lab/collection"
     : "/giniflow/station/lab/processing";
-  return <Navigate to={to} replace />;
+  return <Navigate to={`${to}${search}`} replace />;
 }

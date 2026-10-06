@@ -287,9 +287,18 @@ export const ageSexText = (bill, patient) => {
 
 export const uhidOf = (patient) => patient?.file_no || patient?.health_id || null;
 
-const MODE_LABEL = { cash: "Cash", card: "Card", upi: "UPI", healthray: "Paid in HealthRay" };
+const MODE_LABEL = {
+  cash: "Cash",
+  card: "Card",
+  upi: "UPI",
+  healthray: "Paid in HealthRay",
+  deposit: "Paid from deposit",
+};
 
-const REFUND_MODE_LABEL = { healthray: "Refunded in HealthRay" };
+const REFUND_MODE_LABEL = {
+  healthray: "Refunded in HealthRay",
+  deposit: "Kept as deposit",
+};
 
 export const modeText = (mode) => MODE_LABEL[mode] ?? String(mode ?? "");
 

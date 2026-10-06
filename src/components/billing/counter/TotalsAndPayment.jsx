@@ -5,17 +5,20 @@ import {
   useBillPayments,
   useClearInHealthray,
   useCurrentShift,
+  useDeposit,
   useDeskSettings,
   useRereadBill,
   useTakePayments,
 } from "../../../queries/hooks/useBilling";
-import { HEALTHRAY_MODE } from "../../../../shared/billingVocab.js";
+import { DEPOSIT_MODE, HEALTHRAY_MODE } from "../../../../shared/billingVocab.js";
 import { errorOf, fromPaise, moneyTyped } from "../format";
 import { HEALTHRAY_LABEL, PAYMENT_MODE_LABEL } from "./lineText";
 import { balanceOf, payLaterAllowed } from "./finaliseChecks";
 import { emptyPaymentRow } from "./counterForm";
 
 const paiseOf = (typed) => Math.round(Number(typed || 0) * 100);
+
+const NO_REFERENCE = ["cash", DEPOSIT_MODE];
 
 const toRupees = (paise) => (Math.max(0, paise) / 100).toFixed(2).replace(/\.00$/, "");
 
@@ -42,6 +45,8 @@ export default function TotalsAndPayment({
   const { data: settings } = useDeskSettings();
   const { data: shift } = useCurrentShift();
   const { data: billPayments } = useBillPayments(bill.id);
+  const { data: deposit } = useDeposit(bill.patient_id);
+  const depositAvailable = deposit?.available ?? 0;
   const take = useTakePayments();
   const clear = useClearInHealthray();
   const reread = useRereadBill();
@@ -58,7 +63,17 @@ export default function TotalsAndPayment({
   const remaining = balance - entered;
   const allowsLater = payLaterAllowed(bill, schemes, settings);
   const missingReference = rows.some(
-    (row) => paiseOf(row.amount) > 0 && row.mode !== "cash" && !row.reference.trim(),
+    (row) => paiseOf(row.amount) > 0 && !NO_REFERENCE.includes(row.mode) && !row.reference.trim(),
+  );
+  const depositLeftFor = (index) =>
+    depositAvailable -
+    rows.reduce(
+      (sum, row, at) =>
+        at === index || row.mode !== DEPOSIT_MODE ? sum : sum + paiseOf(row.amount),
+      0,
+    );
+  const depositOver = rows.some(
+    (row, index) => row.mode === DEPOSIT_MODE && paiseOf(row.amount) > depositLeftFor(index),
   );
 
   const change = (index, patch) =>
@@ -67,16 +82,33 @@ export default function TotalsAndPayment({
   const dueFor = (index) =>
     balance - rows.reduce((sum, row, at) => (at === index ? sum : sum + paiseOf(row.amount)), 0);
 
+  const mostFor = (index, mode = rows[index].mode) =>
+    Math.max(
+      0,
+      mode === DEPOSIT_MODE ? Math.min(dueFor(index), depositLeftFor(index)) : dueFor(index),
+    );
+
   const setAmount = (index, typed) => {
     const amount = moneyTyped(typed);
-    const most = Math.max(0, dueFor(index));
+    const most = mostFor(index);
     if (paiseOf(amount) > most) {
       change(index, { amount: toRupees(most) });
-      setCapped({ index, most });
+      setCapped({ index, most, deposit: rows[index].mode === DEPOSIT_MODE });
       return;
     }
     change(index, { amount });
     setCapped(null);
+  };
+
+  const setMode = (index, mode) => {
+    const most = mostFor(index, mode);
+    const typed = rows[index].amount;
+    if (mode === DEPOSIT_MODE && (!typed || paiseOf(typed) > most)) {
+      change(index, { mode, reference: "", amount: most ? toRupees(most) : "" });
+      setCapped(paiseOf(typed) > most ? { index, most, deposit: true } : null);
+      return;
+    }
+    change(index, { mode });
   };
 
   const pay = async () => {
@@ -243,13 +275,18 @@ export default function TotalsAndPayment({
                       <select
                         className="bc-field__in"
                         value={row.mode}
-                        onChange={(e) => change(index, { mode: e.target.value })}
+                        onChange={(e) => setMode(index, e.target.value)}
                       >
                         {Object.entries(PAYMENT_MODE_LABEL).map(([mode, label]) => (
                           <option key={mode} value={mode}>
                             {label}
                           </option>
                         ))}
+                        {(depositAvailable > 0 || row.mode === DEPOSIT_MODE) && (
+                          <option value={DEPOSIT_MODE}>
+                            Deposit ({fromPaise(depositAvailable)} available)
+                          </option>
+                        )}
                       </select>
                     </label>
                     <label className="bc-field">
@@ -279,11 +316,12 @@ export default function TotalsAndPayment({
                     </button>
                     {capped?.index === index && (
                       <p id={`bc-pay-cap-${index}`} className="bc-pay__cap" role="status">
-                        Only {fromPaise(capped.most)} is still due, so this payment was capped at
-                        that.
+                        {capped.deposit
+                          ? `Only ${fromPaise(capped.most)} can come from the deposit here, so this payment was capped at that.`
+                          : `Only ${fromPaise(capped.most)} is still due, so this payment was capped at that.`}
                       </p>
                     )}
-                    {row.mode !== "cash" && (
+                    {!NO_REFERENCE.includes(row.mode) && (
                       <label className="bc-field bc-pay__ref">
                         <span className="bc-field__lbl">Reference</span>
                         <input
@@ -337,10 +375,18 @@ export default function TotalsAndPayment({
             <div className="bc-hint">Add the reference for each card or UPI payment.</div>
           )}
 
+          {depositOver && (
+            <div className="bc-hint" role="alert">
+              The deposit holds {fromPaise(depositAvailable)} — lower the deposit payment.
+            </div>
+          )}
+
           <button
             type="button"
             className="bc-pay__go"
-            disabled={entered <= 0 || entered > balance || missingReference || take.isPending}
+            disabled={
+              entered <= 0 || entered > balance || missingReference || depositOver || take.isPending
+            }
             onClick={pay}
           >
             <CreditCard size={18} aria-hidden="true" />

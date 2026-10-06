@@ -1,3 +1,4 @@
+import { DEPOSIT_MODE } from "../../../../shared/billingVocab.js";
 import { PAYMENT_MODE_LABEL } from "./lineText";
 
 export const BILL_FORM_PREFIX = "billing.counter.form.";
@@ -23,7 +24,7 @@ const text = (max) => ({ blank: "", valid: (value) => isText(value, max) });
 
 const isPaymentRow = (row) =>
   isObject(row) &&
-  Object.hasOwn(PAYMENT_MODE_LABEL, row.mode) &&
+  (Object.hasOwn(PAYMENT_MODE_LABEL, row.mode) || row.mode === DEPOSIT_MODE) &&
   isText(row.amount, 12) &&
   /^\d*(\.\d{0,2})?$/.test(row.amount) &&
   isText(row.reference, 60);

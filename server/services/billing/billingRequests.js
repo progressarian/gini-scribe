@@ -13,6 +13,7 @@ import { httpError, inTransaction } from "./transaction.js";
 import { auditFields, cleanName, hasField, INT_MAX, lockRow, readNumber } from "./common.js";
 import { publishBillingRequest } from "../giniflow/realtimeBus.js";
 import { endVisitAfterRefund } from "./refundVisitExit.js";
+import { restoreDepositLegs } from "./payments.js";
 import { paise } from "../../../shared/labPayment.js";
 import {
   NOTE_REQUIRED_REFUND_REASON,
@@ -734,7 +735,8 @@ async function approveRefund(client, before, input, note, ctx) {
       WHERE id = $1`,
     [before.id, note, approvedMode, modeReason, made.credit_note_id, ctx?.actorId ?? null],
   );
-  return made;
+  const kept = await restoreDepositLegs(client, made.credit_note_id, ctx);
+  return { ...made, kept_as_deposit: kept };
 }
 
 const DECIDED = { approved: "approved", rejected: "rejected", used: "approved and used" };

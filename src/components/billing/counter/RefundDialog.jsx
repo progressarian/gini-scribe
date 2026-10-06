@@ -6,11 +6,12 @@ import {
   useRefundRequest,
 } from "../../../queries/hooks/useBilling";
 import { NOTE_REQUIRED_REFUND_REASON, REFUND_REASONS } from "../../../../shared/refundReasons.js";
-import { AS_PAID } from "../../../../shared/billingVocab.js";
+import { AS_PAID, DEPOSIT_MODE } from "../../../../shared/billingVocab.js";
 import { errorOf, fromPaise, moneyTyped } from "../format";
 import { PAYMENT_MODE_LABEL, refundLegsText } from "./lineText";
 
 const REFUND_BY = [
+  { value: DEPOSIT_MODE, label: "Keep as deposit for the patient" },
   { value: AS_PAID, label: "As paid" },
   ...Object.entries(PAYMENT_MODE_LABEL).map(([value, label]) => ({ value, label })),
 ];
@@ -31,15 +32,24 @@ function PreviewText({ preview, error, loading }) {
   if (error) return <div className="bc-err">{error}</div>;
   if (!preview) return <div className="bc-hint">{loading ? "Working it out…" : ""}</div>;
   const { due, against_balance: against, legs } = preview.refund;
+  const kept = (legs || [])
+    .filter((leg) => leg.mode === DEPOSIT_MODE)
+    .reduce((sum, leg) => sum + leg.amount, 0);
+  const handed = (legs || []).filter((leg) => leg.mode !== DEPOSIT_MODE);
   return (
     <div className="bc-refund__preview" aria-label="What the patient gets back">
-      {due > 0 ? (
+      {due > 0 && kept > 0 && (
         <strong>
-          Patient gets back {fromPaise(due)} — {refundLegsText(legs, fromPaise)}
+          {fromPaise(kept)} is kept as deposit for this patient — usable on their next bill, a
+          family member's bill or an IPD admission.
         </strong>
-      ) : (
-        <strong>Nothing is paid back in money.</strong>
       )}
+      {due > 0 && handed.length > 0 && (
+        <strong>
+          Patient gets back {fromPaise(due - kept)} — {refundLegsText(handed, fromPaise)}
+        </strong>
+      )}
+      {due > 0 ? null : <strong>Nothing is paid back in money.</strong>}
       {against > 0 && (
         <div>{fromPaise(against)} reduces the balance still owed on this bill first.</div>
       )}
@@ -64,7 +74,7 @@ export default function RefundDialog({ bill, prefill = null, onClose, onSent }) 
   const [picked, setPicked] = useState(() => pickedFrom(prefill));
   const [reason, setReason] = useState(prefill?.reason_code ?? "");
   const [note, setNote] = useState(prefill?.note ?? "");
-  const [mode, setMode] = useState(AS_PAID);
+  const [mode, setMode] = useState(DEPOSIT_MODE);
   const [error, setError] = useState(null);
 
   const lines = creditable?.lines || [];

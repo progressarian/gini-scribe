@@ -443,6 +443,7 @@ export async function sweep(tag) {
     lines,
   ]);
   await query(`DELETE FROM bill_lines WHERE id = ANY($1)`, [lines]);
+  await sweepDeposits(patients, bills);
   await query(`DELETE FROM payments WHERE bill_id = ANY($1)`, [bills]);
   await query(
     `DELETE FROM billing_requests
@@ -531,6 +532,26 @@ async function releaseSeries(fy) {
         AND NOT EXISTS (SELECT 1 FROM service_groups WHERE code LIKE 'P4G-%')`,
     [fy],
   );
+}
+
+export async function sweepDeposits(patients, bills = []) {
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SET LOCAL session_replication_role = replica");
+    await client.query(
+      `DELETE FROM deposit_entries WHERE patient_id = ANY($1) OR bill_id = ANY($2)`,
+      [patients, bills],
+    );
+    await client.query(`DELETE FROM payments WHERE deposit_patient_id = ANY($1)`, [patients]);
+    await client.query(`DELETE FROM deposit_accounts WHERE patient_id = ANY($1)`, [patients]);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function tearDown(ids) {

@@ -305,6 +305,28 @@ export function useDiscardDraft() {
   );
 }
 
+export const depositKey = (patientId) => ["billing", "deposit", patientId];
+
+export function useDeposit(patientId) {
+  return useQuery({
+    queryKey: depositKey(patientId),
+    queryFn: () => read(`${DESK}/patients/${patientId}/deposit`),
+    enabled: Boolean(patientId),
+  });
+}
+
+export function useReceiveDeposit() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ patientId, ...body }) =>
+      (await api.post(`${DESK}/patients/${patientId}/deposit`, body)).data,
+    onSettled: (_result, _error, variables) => {
+      queryClient.invalidateQueries({ queryKey: depositKey(variables?.patientId) });
+      queryClient.invalidateQueries({ queryKey: billingKeys.currentShift() });
+    },
+  });
+}
+
 export function useTakePayments() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -323,6 +345,7 @@ export function useTakePayments() {
       queryClient.invalidateQueries({ queryKey: billingKeys.currentShift() });
       queryClient.invalidateQueries({ queryKey: DUES });
       queryClient.invalidateQueries({ queryKey: COUNTER_PATIENTS });
+      queryClient.invalidateQueries({ queryKey: ["billing", "deposit"] });
     },
   });
 }
@@ -440,6 +463,9 @@ export function useRepeatRequest() {
 
 export const creditNotePdfHref = (creditNoteId) =>
   `${API_URL}${DESK}/credit-notes/${creditNoteId}/credit-note.pdf?token=${encodeURIComponent(authToken())}`;
+
+export const depositReceiptPdfHref = (paymentId) =>
+  `${API_URL}${DESK}/deposit-receipts/${paymentId}/receipt.pdf?token=${encodeURIComponent(authToken())}`;
 
 export const refundReceiptPdfHref = (creditNoteId) =>
   `${API_URL}${DESK}/credit-notes/${creditNoteId}/refund-receipt.pdf?token=${encodeURIComponent(authToken())}`;
