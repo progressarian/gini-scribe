@@ -292,10 +292,7 @@ export async function getDoctorQueue(
   for (const row of rows) {
     const isMine = mine(row);
     const group = groupOf(row, isMine);
-    // Another consultant's patient who has not reached anyone yet: shown in the
-    // second column of the pipeline, whatever the scope toggle says, because
-    // that column is exactly the question "who is waiting for someone else".
-    const belongsToOther = !isMine && group === "pipeline";
+    const belongsToOther = scope !== "all" && !isMine && group === "pipeline";
     const onScreen = inScope(row) || belongsToOther;
     // A search is a lookup, not a filter on the day: asked for a file number,
     // the station answers with the patient who has it. Searching "My patients"

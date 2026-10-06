@@ -263,9 +263,7 @@ export default function DoctorStationPage() {
 
   const counts = data?.counts || {};
   const groups = data?.groups || {};
-  const pipelineOthers = data?.pipelineOthers || [];
   const secondConsults = data?.secondConsults || [];
-  const othersTotal = pipelineOthers.reduce((n, g) => n + g.cards.length, 0);
 
   // Opening a queued patient claims the room; opening a finished or
   // still-in-pipeline one is reading ahead, which is exactly what a consultant
@@ -357,10 +355,6 @@ export default function DoctorStationPage() {
           // patients" would be a permanent piece of furniture saying nothing.
           if (!list.length && g.key === "withOtherDoctor") return null;
 
-          // The pipeline answers two different questions, so it is two columns:
-          // who is coming to ME, and who is on the floor waiting for somebody
-          // else. The second is what tells a consultant why the doctor queue is
-          // empty while the waiting room is full, and who to ask about it.
           if (g.key === "pipeline") {
             const isOpen = !collapsed.has(g.key);
             return (
@@ -369,80 +363,24 @@ export default function DoctorStationPage() {
                   icon={g.icon}
                   title={g.title}
                   sub="not ready yet"
-                  count={list.length + othersTotal}
+                  count={list.length}
                   open={isOpen}
                   onToggle={() => toggleGroup(g.key)}
                   id="dgroup-pipeline"
                 />
-                <div className="dsplit" id="dgroup-pipeline" hidden={!isOpen}>
-                  <div className="dcol">
-                    <h3 className="dcol-head">
-                      Mine <span className="dg-count">{list.length}</span>
-                    </h3>
-                    {/* Unassigned patients sit here, not with another
-                        consultant: nobody has claimed them, so they are yours
-                        to pick up. */}
-                    {list.length === 0 && (
-                      <div className="sq-foot">Nobody in your pipeline right now.</div>
-                    )}
-                    {list.map((card) => (
-                      <QueueCard
-                        key={card.visitId}
-                        card={card}
-                        now={now}
-                        group={g.key}
-                        onOpen={(c) => open(c, g.key)}
-                      />
-                    ))}
-                  </div>
-
-                  <div className="dcol dcol-others">
-                    <h3 className="dcol-head">
-                      Waiting for another consultant <span className="dg-count">{othersTotal}</span>
-                    </h3>
-                    {pipelineOthers.length === 0 && (
-                      <div className="sq-foot">
-                        Nobody on the floor is assigned to another consultant.
-                      </div>
-                    )}
-                    {pipelineOthers.map((doc) => {
-                      const key = `other:${doc.doctorId}`;
-                      const openDoc = !collapsed.has(key);
-                      return (
-                        <div className="dsub" key={doc.doctorId}>
-                          <h4 className="dsub-head">
-                            <button
-                              type="button"
-                              className="dsub-toggle"
-                              aria-expanded={openDoc}
-                              aria-controls={`dsub-${doc.doctorId}`}
-                              onClick={() => toggleGroup(key)}
-                            >
-                              <span
-                                className={`dg-chev${openDoc ? " open" : ""}`}
-                                aria-hidden="true"
-                              >
-                                ▸
-                              </span>
-                              🧑‍⚕️ {doc.doctorName}
-                              <span className="dg-count">{doc.cards.length}</span>
-                            </button>
-                          </h4>
-                          <div id={`dsub-${doc.doctorId}`} hidden={!openDoc}>
-                            {doc.cards.map((card) => (
-                              <QueueCard
-                                key={card.visitId}
-                                card={card}
-                                now={now}
-                                group="otherConsultant"
-                                onOpen={(c) => navigate(`/giniflow/station/doctor/${c.visitId}`)}
-                              />
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                <div id="dgroup-pipeline" hidden={!isOpen}>
+                  {list.length === 0 && (
+                    <div className="sq-foot">Nobody in your pipeline right now.</div>
+                  )}
+                  {list.map((card) => (
+                    <QueueCard
+                      key={card.visitId}
+                      card={card}
+                      now={now}
+                      group={g.key}
+                      onOpen={(c) => open(c, g.key)}
+                    />
+                  ))}
                 </div>
               </section>
             );
