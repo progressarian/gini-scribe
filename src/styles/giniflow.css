@@ -1343,3 +1343,35 @@
   height: 40px;
   border-radius: var(--r);
 }
+
+.gf .col-skel {
+  height: 72px;
+  margin-bottom: 8px;
+  border-radius: 10px;
+  background: linear-gradient(
+    90deg,
+    rgba(148, 163, 184, 0.14) 0%,
+    rgba(148, 163, 184, 0.28) 50%,
+    rgba(148, 163, 184, 0.14) 100%
+  );
+  background-size: 200% 100%;
+  animation: col-skel 1.2s ease-in-out infinite;
+}
+@keyframes col-skel {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gf .col-skel {
+    animation: none;
+  }
+}
+.gf .board-loading {
+  padding: 8px 16px 0;
+  font-size: 12px;
+  color: var(--ink3, #64748b);
+}

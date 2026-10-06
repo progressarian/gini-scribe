@@ -8,6 +8,7 @@ if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 const journey = await import("../../server/services/giniflow/journey.js");
 const mo = await import("../../server/services/giniflow/moStation.js");
 const board = await import("../../server/services/giniflow/board.js");
+const sync = await import("../../server/services/giniflow/appointmentSync.js");
 const { consultsDirect, withoutChief } = await import("../../shared/directConsult.js");
 
 const tag = newTag();
@@ -136,5 +137,38 @@ test.describe.serial("G60 Dr Katyal's own patients skip the Chief Endocrinologis
       katyal.visit,
     ]);
     expect((await card()).subtitle).toMatch(/^Back to .* · reports in$/);
+  });
+
+  test("7. HealthRay completing a Dr Katyal appointment never skips his Scribe consult", async () => {
+    const recordFloor = async (visit) => {
+      await query(
+        `INSERT INTO giniflow_visit_events (visit_id, status, actor_role, meta)
+         VALUES ($1, 'checked_in', 'reception', '{}'), ($1, 'vitals_done', 'vitals', '{}')`,
+        [visit],
+      );
+    };
+    const katyal = await visitWith("KatGuard", KATYAL, "ready_for_doctor");
+    const other = await visitWith("OtherGuard", "Dr. Beant Sidhu", "ready_for_doctor");
+    await recordFloor(katyal.visit);
+    await recordFloor(other.visit);
+    await query(`UPDATE appointments SET status = 'completed' WHERE id = ANY($1::int[])`, [
+      [katyal.appointment, other.appointment],
+    ]);
+    await sync.syncAppointmentsToFlow({ date: ids.day, db });
+    const status = async (visit) =>
+      (await one(`SELECT current_status FROM giniflow_visits WHERE id = $1`, [visit]))
+        .current_status;
+    expect(await status(katyal.visit)).toBe("ready_for_doctor");
+    expect(await status(other.visit)).toBe("rx_pending");
+  });
+
+  test("8. HealthRay can still mark a Dr Katyal patient who never arrived as a no-show", async () => {
+    const katyal = await visitWith("KatNoShow", KATYAL, "booked");
+    await query(`UPDATE appointments SET status = 'no_show' WHERE id = $1`, [katyal.appointment]);
+    await sync.syncAppointmentsToFlow({ date: ids.day, db });
+    const row = await one(`SELECT current_status FROM giniflow_visits WHERE id = $1`, [
+      katyal.visit,
+    ]);
+    expect(row.current_status).toBe("no_show");
   });
 });

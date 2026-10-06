@@ -750,6 +750,34 @@ const BOOKING_STATUSES = new Set(["booked", "confirmed", "no_show", "cancelled"]
 
 const ORDERABLE = (key) => key !== "done" && !SIDE_TRACK_COLUMNS.includes(key);
 
+function BoardSkeleton() {
+  return (
+    <div className="gf" aria-busy="true">
+      <div className="board-loading" role="status">
+        Loading floor…
+      </div>
+      <div className="board-wrap">
+        <div className="board">
+          {BOARD_COLUMNS.map((column) => (
+            <div className="col" key={column.key}>
+              <div className="col-hd">
+                <span>{column.icon}</span>
+                <span className="col-name">{column.name}</span>
+                <span className="col-count">…</span>
+              </div>
+              <div className="col-body" aria-hidden="true">
+                {[0, 1, 2].map((n) => (
+                  <div className="col-skel" key={n} />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Column({
   canAssign,
   staff,
@@ -1730,7 +1758,7 @@ export default function FlowManagerPage() {
       ),
   });
 
-  if (isLoading && !data) return <div className="gf gf-loading">Loading floor…</div>;
+  if (isLoading && !data) return <BoardSkeleton />;
   if (expired)
     return (
       <div className="gf gf-loading">

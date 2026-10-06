@@ -59,6 +59,10 @@ then the station, then the report.
   releases his patient from `with_doctor` to `ready_for_doctor` and adds machine steps (and no
   blood-sample step for a machine-only order); the board card reads "Waiting for reports · then
   back to …" / "Back to … · reports in".
+- HealthRay guard (2026-10-06): Dr Katyal consults in Scribe, not HealthRay, so the appointment
+  sync may only write `no_show` / `cancelled` for his visits (`appointmentSync.js`,
+  `DIRECT_CONSULT_HEALTHRAY_WRITES`). A HealthRay "completed" can no longer move his patient past the
+  Scribe consult to the Rx desk. Tests: G60 #7–8.
 - Flow B: migration `2026-11-07_echo_referral_visits.sql` (`echo_referral`,
   `echo_handed_over_at`, `echo_handed_over_by`). The appointment sync flags the pair and points the
   visit at the referring doctor's appointment and doctor, and ignores Dr Katyal's appointment for

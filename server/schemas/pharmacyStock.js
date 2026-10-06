@@ -23,3 +23,13 @@ export const pharmacyStockLinkSchema = z.object({
     .min(2, "Enter the medicine name as it is written on prescriptions")
     .max(200),
 });
+
+export const pharmacyNeededOrderSchema = z.object({
+  medicineKey: z.string().trim().min(1, "Choose the medicine").max(200),
+  medicineName: z.string().trim().min(1, "Choose the medicine").max(200),
+  note: z.string().trim().max(500).nullish(),
+});
+
+export const pharmacyNeededClearSchema = z.object({
+  medicineKey: z.string().trim().min(1, "Choose the medicine").max(200),
+});

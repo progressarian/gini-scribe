@@ -8182,11 +8182,43 @@
 }
 .gf .ep-pause-wrap {
   display: inline-flex;
-  align-items: center;
+  align-items: stretch;
   gap: 4px;
+  margin-left: auto;
 }
 .gf .ep-pause-weeks {
-  padding: 3px 6px;
+  font: inherit;
+  font-size: 12px;
+  min-height: 32px;
+  padding: 0 8px;
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  color: var(--ink2);
+  cursor: pointer;
+}
+.gf .rx-edit .rx-acts .btn-sm {
+  font-size: 12px;
+  min-height: 32px;
+  padding: 0 12px;
+}
+@media (max-width: 640px) {
+  .gf .rx-item .rx-edit {
+    padding: 10px;
+  }
+  .gf .rx-edit .rx-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .gf .rx-edit .rx-acts > .btn-sm,
+  .gf .ep-pause-wrap {
+    flex: 1 1 auto;
+  }
+  .gf .ep-pause-wrap {
+    margin-left: 0;
+  }
+  .gf .ep-pause-wrap > * {
+    flex: 1 1 0;
+  }
 }
 
 /* ── PASTE A PRESCRIPTION ── docs/gini-flow/27-RX-PASTE-PLAN.md §5.

@@ -1134,6 +1134,24 @@ export async function syncLabStepsFromLab(db, visitId) {
   return { billed, drawn };
 }
 
+export async function tickBillingIfConsultPaid(db, billId, visitId) {
+  if (!visitId) return false;
+  const { rowCount } = await db.query(
+    `UPDATE giniflow_visit_steps
+        SET status = 'done',
+            started_at = COALESCE(started_at, NOW()),
+            completed_at = COALESCE(completed_at, NOW())
+      WHERE visit_id = $1 AND step_catalog_id = 'billing'
+        AND status IN ('pending', 'in_progress', 'skipped')
+        AND EXISTS (
+          SELECT 1 FROM bill_lines l
+            JOIN service_items i ON i.id = l.service_item_id
+           WHERE l.bill_id = $2 AND l.is_live AND i.kind = 'consultation')`,
+    [visitId, billId],
+  );
+  return rowCount > 0;
+}
+
 // ── Editing a journey that is already on the floor ─────────────────────────
 
 export async function setStepStatus(stepId, status, db = pool) {

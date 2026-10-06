@@ -428,10 +428,12 @@ export async function getStationTimes(
           (st) => chainIndex(st) > chainIndex(from) && chainIndex(st) < chainIndex(to),
         )
       : [];
+  const chiefNotPlanned = (next) => next?.meta?.reason === "plan_has_no_chief_step";
   const skippedBetween = (row, next) =>
     stationsSkipped(row.status, next.status).filter(
       (st) =>
-        !(st === "with_vitals" && next.status === "vitals_done" && next.actor_role !== "system"),
+        !(st === "with_vitals" && next.status === "vitals_done" && next.actor_role !== "system") &&
+        !(st === "with_sd" && chiefNotPlanned(next)),
     );
 
   // Markers are pulled out before the walk below, not skipped inside it. Left in
@@ -465,7 +467,10 @@ export async function getStationTimes(
       unrecorded: !!next && minutes >= 1 && skippedBetween(row, next).length > 0,
       status: row.status,
       label:
-        (unbudgeted ? LAB_ONLY_LABEL[row.status] : null) || STATUS_LABEL[row.status] || row.status,
+        (unbudgeted ? LAB_ONLY_LABEL[row.status] : null) ||
+        (row.status === "vitals_done" && chiefNotPlanned(next) ? "Vitals done" : null) ||
+        STATUS_LABEL[row.status] ||
+        row.status,
       actorRole: row.actor_role,
       meta: row.meta,
       enteredAt,

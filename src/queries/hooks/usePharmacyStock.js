@@ -11,6 +11,7 @@ export const stockKeys = {
   uploads: ["pharmacy-stock", "uploads"],
   upload: (id) => ["pharmacy-stock", "upload", id],
   links: (itemKey) => ["pharmacy-stock", "links", itemKey],
+  needed: ["pharmacy-stock", "needed"],
 };
 
 export function useStockList(params) {
@@ -112,3 +113,29 @@ export const useRemoveStockLink = () =>
         )
       ).data,
   );
+
+export function useNeededStock() {
+  return useQuery({
+    queryKey: stockKeys.needed,
+    queryFn: async () => (await api.get(`${BASE}/needed`)).data,
+  });
+}
+
+function useNeededMutation(mutationFn) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: stockKeys.needed }),
+  });
+}
+
+export function useMarkNeededOrdered() {
+  return useNeededMutation(async (body) => (await api.post(`${BASE}/needed/ordered`, body)).data);
+}
+
+export function useClearNeededOrdered() {
+  return useNeededMutation(
+    async ({ medicineKey }) =>
+      (await api.post(`${BASE}/needed/ordered/clear`, { medicineKey })).data,
+  );
+}

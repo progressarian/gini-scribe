@@ -503,10 +503,16 @@ export async function resumeItem(itemId, db = pool) {
   return rows[0];
 }
 
+const DOSAGE_FORM =
+  /^(tab|tabs|tablet|tablets|cap|caps|capsule|capsules|inj|injection|syp|syr|syrup|susp|suspension|drop|drops|oint|ointment|gel|cream|sachet)\.?$/i;
+
 export async function searchMedicines(query, db = pool) {
   const q = (query || "").trim();
-  if (q.length < 2) return [];
-  const term = q.replace(/[%_\\]/g, "\\$&");
+  const words = q.split(/\s+/).filter(Boolean);
+  while (words.length && DOSAGE_FORM.test(words[0])) words.shift();
+  const core = words.join(" ");
+  if (core.length < 2) return [];
+  const term = core.replace(/[%_\\]/g, "\\$&");
 
   const { rows } = await db.query(
     `WITH prescribed AS (

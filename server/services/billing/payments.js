@@ -188,6 +188,12 @@ async function keepPaidInStep(client, bill, ctx) {
   return rows[0];
 }
 
+async function tickBillingStep(client, bill) {
+  if (!bill.visit_id) return;
+  const { tickBillingIfConsultPaid } = await import("../giniflow/journey.js");
+  await tickBillingIfConsultPaid(client, bill.id, bill.visit_id);
+}
+
 async function syncLabSteps(client, visitId) {
   if (!visitId) return;
   const { syncLabStepsFromLab } = await import("../giniflow/journey.js");
@@ -650,6 +656,7 @@ async function collectOnBill(billId, version, plan, ctx, db) {
     const opened = await settleTestOrders(client, after, ctx);
     if (after.status === "draft") await markDraftSaved(client, after.id, ctx);
     const money = await moneyOn(client, after.id);
+    if (!money.balance) await tickBillingStep(client, after);
     return {
       bill_id: after.id,
       bill_no: after.bill_no,

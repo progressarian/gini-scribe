@@ -8,6 +8,8 @@ import {
   pharmacyStockHistoryQuerySchema,
   pharmacyStockLinkSchema,
   pharmacyStockListQuerySchema,
+  pharmacyNeededClearSchema,
+  pharmacyNeededOrderSchema,
 } from "../schemas/index.js";
 import { MAX_STOCK_UPLOAD_BYTES } from "../services/pharmacy/stockParse.js";
 import {
@@ -19,6 +21,7 @@ import {
 } from "../services/pharmacy/stockUpload.js";
 import { listStock, stockSummary } from "../services/pharmacy/stockQuery.js";
 import { addLink, getItemLinks, removeLink } from "../services/pharmacy/stockLinks.js";
+import { clearOrdered, listNeeded, markOrdered } from "../services/pharmacy/stockNeeded.js";
 
 const router = Router();
 const BASE = "/pharmacy/stock";
@@ -124,6 +127,26 @@ router.delete(
   `${BASE}/items/:itemKey/links/:medicineKey`,
   canUpload,
   route("Pharmacy stock unlink", (req) => removeLink(req.params.itemKey, req.params.medicineKey)),
+);
+
+router.get(
+  `${BASE}/needed`,
+  canView,
+  route("Medicines needed in stock", () => listNeeded()),
+);
+
+router.post(
+  `${BASE}/needed/ordered`,
+  canUpload,
+  validate(pharmacyNeededOrderSchema),
+  route("Mark a needed medicine ordered", (req) => markOrdered(req.body, actorOf(req))),
+);
+
+router.post(
+  `${BASE}/needed/ordered/clear`,
+  canUpload,
+  validate(pharmacyNeededClearSchema),
+  route("Clear a needed medicine's order mark", (req) => clearOrdered(req.body.medicineKey)),
 );
 
 export default router;

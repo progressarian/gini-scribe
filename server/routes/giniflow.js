@@ -224,11 +224,11 @@ router.get(
       const date = await resolveDate(req.query.date);
       const now = new Date();
       const sla = await getSlaConfig();
-      const board = await getDayBoard(date, sla, boardClock(date, now));
-      const [stats, stationAverages] = await Promise.all([
-        getDayStats(date, board, sla),
+      const [board, stationAverages] = await Promise.all([
+        getDayBoard(date, sla, boardClock(date, now)),
         getStationAverages(date, sla),
       ]);
+      const stats = await getDayStats(date, board, sla);
 
       res.json({
         date,

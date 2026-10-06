@@ -52,7 +52,7 @@ const FREQUENCIES = ["OD", "BD", "TDS", "QID", "SOS", "Weekly", "Fortnightly"];
 // frequency fills in the usual ones so the common case stays one click.
 function TimingPicker({ value, frequency, onChange, disabled }) {
   const chosen = value || [];
-  const need = dosesFor(frequency);
+  const need = frequency ? dosesFor(frequency) : null;
   const toggle = (key) =>
     onChange(chosen.includes(key) ? chosen.filter((k) => k !== key) : [...chosen, key]);
 
@@ -61,8 +61,8 @@ function TimingPicker({ value, frequency, onChange, disabled }) {
       <span className="rx-timings__head">
         Timing
         <em>
-          {chosen.length} of {need}
-          {chosen.length > need ? " — more than the frequency" : ""}
+          {need === null ? `${chosen.length} chosen` : `${chosen.length} of ${need}`}
+          {need !== null && chosen.length > need ? " — more than the frequency" : ""}
         </em>
       </span>
       <div className="rx-timings__chips">
@@ -282,9 +282,9 @@ function RowEditor({ item, onSave, onCancel, onPause, onStop }) {
           </button>
           {/* Pause and stop are different clinical acts: a pause keeps the
               medicine and a resume date, a stop ends it. */}
-          <label className="ep-pause-wrap">
+          <div className="ep-pause-wrap" role="group" aria-label="Pause this medicine">
             <select
-              className="btn-sm ep-pause-weeks"
+              className="ep-pause-weeks"
               value={pauseWeeks}
               onChange={(e) => setPauseWeeks(Number(e.target.value))}
               aria-label="How long to pause for"
@@ -298,7 +298,7 @@ function RowEditor({ item, onSave, onCancel, onPause, onStop }) {
             <button type="button" className="btn-sm ep-pause" onClick={() => onPause(pauseWeeks)}>
               Pause
             </button>
-          </label>
+          </div>
           <button type="button" className="btn-sm ep-stop" onClick={() => setStopping(true)}>
             Stop
           </button>
@@ -347,6 +347,11 @@ function AddMedicine({ onAdd, onClose, initialQuery = "" }) {
             setQuery(text);
           }}
         />
+        {!picked && (
+          <button type="button" className="btn-sm" onClick={onClose}>
+            Cancel
+          </button>
+        )}
       </div>
       {!picked && debounced.length >= 2 && (
         <div className="rx-results">
@@ -379,6 +384,25 @@ function AddMedicine({ onAdd, onClose, initialQuery = "" }) {
           {!isFetching && (data?.results || []).length === 0 && (
             <div className="cn-empty">Nothing matched.</div>
           )}
+          {!isFetching &&
+            !(data?.results || []).some(
+              (r) => r.name.toLowerCase() === debounced.trim().toLowerCase(),
+            ) && (
+              <button
+                type="button"
+                className="rx-result"
+                onClick={() => {
+                  const name = debounced.trim();
+                  setPicked({ name, composition: null, drugClass: null, stock: null });
+                  const dose = extractDose(name);
+                  if (dose) setForm((p) => ({ ...p, dose: p.dose || dose }));
+                }}
+              >
+                <strong>+ Add “{debounced.trim()}”</strong>
+                <em>not in our list — the pharmacy will be told it is needed</em>
+                <span className="rx-unknown">stock —</span>
+              </button>
+            )}
         </div>
       )}
 
@@ -448,11 +472,6 @@ function AddMedicine({ onAdd, onClose, initialQuery = "" }) {
             </button>
           </div>
         </>
-      )}
-      {!picked && (
-        <button type="button" className="btn-sm" onClick={onClose}>
-          Cancel
-        </button>
       )}
     </div>
   );

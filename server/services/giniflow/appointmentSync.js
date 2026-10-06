@@ -23,6 +23,8 @@ import { TESTS_HOLD_SQL, testsOpenInScribe } from "./testsHold.js";
 import { canReadBill, syncBillingForVisitId } from "./machineSync.js";
 import { directConsultSql } from "../../../shared/directConsult.js";
 
+const DIRECT_CONSULT_HEALTHRAY_WRITES = ["no_show", "cancelled"];
+
 // Vitals HealthRay recorded, which its appointment status cannot express.
 //
 // The nurses take vitals on HealthRay's own screen, and HealthRay has no
@@ -480,7 +482,11 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
               a.biomarkers->>'engagedStart' AS engaged_start,
               a.biomarkers->>'engagedEnd' AS engaged_end,
               COALESCE(vt.for_online, FALSE) AS online_journey,
-              doc.id AS booked_doctor_id
+              doc.id AS booked_doctor_id,
+              (${directConsultSql("a.doctor_name")}
+                OR EXISTS (SELECT 1 FROM doctors ad
+                            WHERE ad.id = v.assigned_doctor_id
+                              AND ${directConsultSql("ad.name")})) AS direct_consult
          FROM appointments a
          LEFT JOIN giniflow_visits v
                 ON v.patient_id = a.patient_id AND v.visit_date = a.appointment_date
@@ -664,7 +670,9 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
         continue;
       }
       const mayWrite = (status) =>
-        healthrayMayWrite(status) || (appt.online_journey && status === "exited");
+        appt.direct_consult
+          ? DIRECT_CONSULT_HEALTHRAY_WRITES.includes(status)
+          : healthrayMayWrite(status) || (appt.online_journey && status === "exited");
 
       // Nothing to do for a visit already at or past the target, or for one the
       // floor took off the day: skip it without opening a transaction. A
