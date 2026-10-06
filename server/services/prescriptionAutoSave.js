@@ -288,12 +288,7 @@ export async function buildVisitPayloadFromDb(pid, { appointmentId } = {}) {
     pool.query(
       `SELECT m.*, c.con_name AS prescriber,
               COALESCE(c.visit_date, m.started_date) AS prescribed_date,
-              COALESCE(m.last_prescribed_date, c.visit_date, m.started_date) AS last_prescribed_date,
-              EXISTS (SELECT 1 FROM pharmacy_medicine_requests r
-                       WHERE r.patient_id = m.patient_id
-                         AND UPPER(BTRIM(r.medicine_name)) IN (UPPER(BTRIM(m.name)),
-                                                               UPPER(BTRIM(m.pharmacy_match)))
-                     ) AS typed_by_doctor
+              COALESCE(m.last_prescribed_date, c.visit_date, m.started_date) AS last_prescribed_date
          FROM medications m LEFT JOIN consultations c ON c.id = m.consultation_id
         WHERE m.patient_id=$1 AND m.is_active = true
         ORDER BY COALESCE(c.visit_date, m.started_date) DESC, m.created_at DESC`,

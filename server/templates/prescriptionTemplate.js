@@ -351,7 +351,6 @@ body{font-family:var(--fb);color:var(--ink);background:var(--white);font-size:13
 .rx-med-right{text-align:right;flex-shrink:0;max-width:40%;min-width:0;word-break:break-word;overflow-wrap:break-word}
 .rx-med-dose{font-family:var(--fm);font-size:12px;font-weight:500;word-break:break-word;overflow-wrap:break-word}
 .rx-med-timing{font-size:11px;color:var(--ink3)}
-.rx-typed-badge{font-size:9px;background:#fef3c7;color:#92400e;font-weight:700;padding:1px 6px;border-radius:4px;margin-left:6px}
 .rx-ext-badge{font-size:9px;background:var(--skl);color:var(--sk);font-weight:700;padding:1px 6px;border-radius:4px;margin-left:6px}
 .rx-med-sub{padding-left:38px;background:#fafbfc;border-bottom:none;border-left:3px solid var(--tl);margin-left:14px}
 .rx-med-sub .rx-med-name{font-size:12px;font-weight:600}
@@ -756,7 +755,7 @@ function buildPrescriptionHtml(data = {}) {
         <div class="rx-med" ${rowStyle}>
           <div class="rx-med-num">${num}.</div>
           <div class="rx-med-body">
-            <div class="rx-med-name">${escape(primary || "")} ${tag}${m.typed_by_doctor ? ` <span class="rx-typed-badge">Typed by doctor</span>` : ""}${formLabel ? ` <span style="font-size:10px;font-weight:600;color:var(--ink3);text-transform:uppercase;letter-spacing:.04em">${escape(formLabel)}</span>` : ""}</div>
+            <div class="rx-med-name">${escape(primary || "")} ${tag}${formLabel ? ` <span style="font-size:10px;font-weight:600;color:var(--ink3);text-transform:uppercase;letter-spacing:.04em">${escape(formLabel)}</span>` : ""}</div>
             ${indication ? `<div class="rx-med-brand">${escape(indication)}</div>` : ""}
             ${val(m.instructions) ? `<div class="rx-med-instr">${escape(m.instructions)}</div>` : ""}
           </div>

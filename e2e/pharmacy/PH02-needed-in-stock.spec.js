@@ -202,7 +202,8 @@ test.describe.serial("PH02b a doctor's Add click tells the pharmacy at once", ()
           { id: 2, name: `Listed ${TAG}`, typed_by_doctor: false, is_active: true },
         ],
       });
-      expect(html.match(/rx-typed-badge">Typed by doctor/g) || []).toHaveLength(1);
+      expect(html).toContain(typed);
+      expect(html).not.toContain("rx-typed-badge");
     } finally {
       await query(`DELETE FROM pharmacy_medicine_requests WHERE visit_id = $1`, [visit]);
       await query(`DELETE FROM giniflow_visits WHERE id = $1`, [visit]);
