@@ -885,11 +885,19 @@ export async function placeTestsBeforeDoctors(client, visitId) {
     statusOf: (s) => s.status,
     machineOf: (s) => s.machine,
   });
-  const next = requiredStepsFirst(ranked, {
+  const required = requiredStepsFirst(ranked, {
     idOf: (s) => s.step_catalog_id,
     requiresOf: (s) => s.machine_requires_before,
     statusOf: (s) => s.status,
   });
+  const { rows: visit } = await client.query(
+    `SELECT echo_referral FROM giniflow_visits WHERE id = $1`,
+    [visitId],
+  );
+  const echoed = visit[0]?.echo_referral
+    ? echoFirst(required, await getMachines(client))
+    : required;
+  const next = echoed.every((s, i) => s === plan[i]) ? plan : echoed;
   if (next === plan) return false;
 
   await client.query(`SET CONSTRAINTS giniflow_visit_steps_order DEFERRED`);
@@ -994,7 +1002,8 @@ export async function insertMachineStepsForOrders(client, visitId, machineIds) {
   });
 }
 
-const isEchoStep = (step, machines) => machineFor(machines, step.catalogId)?.station === "echo";
+const isEchoStep = (step, machines) =>
+  machineFor(machines, step.catalogId ?? step.step_catalog_id)?.station === "echo";
 
 export const echoFirst = (steps, machines) => {
   const echo = steps.filter((step) => isEchoStep(step, machines));

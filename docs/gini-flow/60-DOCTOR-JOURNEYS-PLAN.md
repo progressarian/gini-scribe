@@ -1,6 +1,6 @@
 # 60 — Dr Katyal's floor journeys
 
-Status: plan (2026-10-05). Not built.
+Status: Flow A and Flow B built (2026-10-06). Tests: `e2e/giniflow/G60-katyal-flow-a.spec.js`, `G61-echo-referral.spec.js`.
 
 Two routes for Dr Rahul Katyal's patients that today's journey model cannot follow on its own:
 nothing in routing depends on the booked doctor (only the samples-only `LAB_ONLY_DOCTOR`).
@@ -50,10 +50,18 @@ then the station, then the report.
 - The status chain keeps its order; no new statuses.
 - HealthRay stays authoritative for appointments and completion.
 
-## Build order
+## As built
 
-1. Flow A: Dr Katyal plan without the Chief step; consultant test orders release the patient and
-   add machine steps; "back to doctor" shown on the board and tracker. Tests: e2e under
-   `e2e/giniflow/`.
-2. Flow B: pair detection in the appointment sync, "Echo referral" visit type, echo vitals rule,
-   Rx hand-over action. Tests: e2e for the full echo-referral path.
+- `shared/directConsult.js`: Dr Katyal's name rule (`consultsDirect`, SQL `directConsultSql`) and
+  the consult-side helpers reception and the server share (`withoutChief`).
+- Flow A: `journey.ensurePlan` / `checkInWithJourney` drop the Chief steps for his visits;
+  reception defaults to "Consultant Only" and greys out the other choices; `moStation.orderTests`
+  releases his patient from `with_doctor` to `ready_for_doctor` and adds machine steps (and no
+  blood-sample step for a machine-only order); the board card reads "Waiting for reports · then
+  back to …" / "Back to … · reports in".
+- Flow B: migration `2026-11-07_echo_referral_visits.sql` (`echo_referral`,
+  `echo_handed_over_at`, `echo_handed_over_by`). The appointment sync flags the pair and points the
+  visit at the referring doctor's appointment and doctor, and ignores Dr Katyal's appointment for
+  status. Echo steps go first (`echoFirst`, also after `placeTestsBeforeDoctors`); the echo starts
+  without vitals; the vitals queue holds the patient until the Rx desk's "Hand over report"
+  (`rxStation.handOverEchoReport`, refused until every echo order is reported).
