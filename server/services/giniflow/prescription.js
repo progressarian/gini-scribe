@@ -106,7 +106,12 @@ export async function getDraft(visitId, db = pool) {
     { rows: stoppedRows },
   ] = await Promise.all([
     db.query(
-      `SELECT ${ITEM_COLUMNS} FROM giniflow_rx_items WHERE visit_id = $1 ORDER BY sort_order, created_at`,
+      `SELECT ${ITEM_COLUMNS},
+              EXISTS (SELECT 1 FROM pharmacy_medicine_requests r
+                       WHERE r.visit_id = giniflow_rx_items.visit_id
+                         AND UPPER(BTRIM(r.medicine_name)) = UPPER(BTRIM(giniflow_rx_items.medicine_name))
+                     ) AS typed_by_doctor
+         FROM giniflow_rx_items WHERE visit_id = $1 ORDER BY sort_order, created_at`,
       [visitId],
     ),
     db.query(

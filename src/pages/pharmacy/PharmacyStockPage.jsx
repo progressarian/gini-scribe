@@ -58,7 +58,7 @@ function Summary({ summary, withRates }) {
   );
 }
 
-function History({ data, isLoading, isError, onReview }) {
+function History({ data, isLoading, isError, isFetching, onReview, paging }) {
   const uploads = data?.uploads ?? [];
   return (
     <section className="flow-card" aria-labelledby="phs-history-title">
@@ -125,6 +125,15 @@ function History({ data, isLoading, isError, onReview }) {
           </table>
         </div>
       )}
+      <Pagination
+        page={paging.page}
+        pageSize={paging.pageSize}
+        total={data?.total ?? 0}
+        onChange={paging.setPage}
+        onPageSizeChange={paging.setPageSize}
+        disabled={isFetching}
+        unit="uploads"
+      />
     </section>
   );
 }
@@ -143,7 +152,12 @@ export default function PharmacyStockPage() {
   const [linking, setLinking] = useState(null);
   const [uploadError, setUploadError] = useState("");
   const [dismissedId, setDismissedId] = useState(null);
-  const uploads = useStockUploads(canUpload);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historySize, setHistorySize] = useState(10);
+  const uploads = useStockUploads(canUpload, {
+    limit: historySize,
+    offset: (historyPage - 1) * historySize,
+  });
   const pendingId = uploads.data?.uploads.find((u) => u.status === "preview")?.id ?? null;
 
   useEffect(() => {
@@ -413,7 +427,14 @@ export default function PharmacyStockPage() {
           data={uploads.data}
           isLoading={uploads.isLoading}
           isError={uploads.isError}
+          isFetching={uploads.isFetching}
           onReview={review}
+          paging={{
+            page: historyPage,
+            pageSize: historySize,
+            setPage: setHistoryPage,
+            setPageSize: setHistorySize,
+          }}
         />
       ) : null}
 

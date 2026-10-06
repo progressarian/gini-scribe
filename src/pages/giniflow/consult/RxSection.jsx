@@ -8,6 +8,7 @@ import {
   useResumeItem,
   useStopItem,
   useMedicineSearch,
+  useRequestMedicine,
   useAlternatives,
   useDecideItem,
   useAddExternal,
@@ -308,7 +309,7 @@ function RowEditor({ item, onSave, onCancel, onPause, onStop }) {
   );
 }
 
-function AddMedicine({ onAdd, onClose, initialQuery = "" }) {
+function AddMedicine({ visitId, onAdd, onClose, initialQuery = "" }) {
   const [query, setQuery] = useState(initialQuery);
   const [debounced, setDebounced] = useState("");
   const [picked, setPicked] = useState(null);
@@ -319,6 +320,7 @@ function AddMedicine({ onAdd, onClose, initialQuery = "" }) {
     reason: "",
   });
   const { data, isFetching } = useMedicineSearch(debounced);
+  const request = useRequestMedicine();
 
   useEffect(() => {
     const id = setTimeout(() => setDebounced(query), 250);
@@ -393,6 +395,7 @@ function AddMedicine({ onAdd, onClose, initialQuery = "" }) {
                 className="rx-result"
                 onClick={() => {
                   const name = debounced.trim();
+                  request.mutate({ medicineName: name, visitId: visitId || null });
                   setPicked({ name, composition: null, drugClass: null, stock: null });
                   const dose = extractDose(name);
                   if (dose) setForm((p) => ({ ...p, dose: p.dose || dose }));
@@ -408,6 +411,15 @@ function AddMedicine({ onAdd, onClose, initialQuery = "" }) {
 
       {picked && (
         <>
+          {request.isPending || request.isSuccess || request.isError ? (
+            <div className="cn-empty" role="status">
+              {request.isPending
+                ? "Telling the pharmacy…"
+                : request.isSuccess
+                  ? `Pharmacy told: “${picked.name}” is needed in stock.`
+                  : "The pharmacy could not be told. Add it to the prescription and tell them directly."}
+            </div>
+          ) : null}
           <div className="rx-grid">
             <label>
               Dose
@@ -498,7 +510,7 @@ function ExternalMedicineForm({ onAdd, onClose }) {
 
   return (
     <div className="rx-ext-form">
-      <div className="cn-head">Medicine from another doctor</div>
+      <div className="cn-head">Type a medicine</div>
       <div className="rx-grid">
         <label>
           Medicine
@@ -971,6 +983,14 @@ export default function RxSection({ visitId, readOnly, onToast, onUnsaved, stati
                 <div className="rx-name">
                   {item.medicine_name}
                   {chip && <span className={`rx-chip ${chip.cls}`}>{chip.label}</span>}
+                  {item.typed_by_doctor && (
+                    <span
+                      className="rx-chip ch-adjusted"
+                      title="Not in our medicine list — the pharmacy has been told it is needed"
+                    >
+                      Typed by doctor
+                    </span>
+                  )}
                   {item.approval_status === "pending" && (
                     <span className="rx-chip ch-proposed">
                       🩺 Proposed by {item.proposed_by_name || "the Chief Endocrinologist"}
@@ -1148,6 +1168,7 @@ export default function RxSection({ visitId, readOnly, onToast, onUnsaved, stati
       {!readOnly &&
         (adding ? (
           <AddMedicine
+            visitId={visitId}
             initialQuery={spoken}
             onAdd={(item) => {
               add.mutate(item, { onError: fail, onSuccess: () => setAdding(false) });
@@ -1165,7 +1186,7 @@ export default function RxSection({ visitId, readOnly, onToast, onUnsaved, stati
 
       {/* Other doctors' prescriptions: shown, never dispensed. */}
       <div className="cs-head">
-        <h3>🏥 External medicines</h3>
+        <h3>🏥 Medicines typed by doctor</h3>
         <span className="cs-sub">
           from other doctors · shown on the card, not dispensed by Gini
         </span>
@@ -1190,7 +1211,7 @@ export default function RxSection({ visitId, readOnly, onToast, onUnsaved, stati
             className="btn-sm rx-addbtn"
             onClick={() => setAddingExternal(true)}
           >
-            + Medicine from another doctor
+            + Type a medicine
           </button>
         ))}
       {(data?.external || []).map((m) => (

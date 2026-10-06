@@ -233,3 +233,12 @@ export function useFinalize(visitId) {
     },
   });
 }
+
+export function useRequestMedicine() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (body) =>
+      (await api.post("/api/giniflow/stations/doctor/medicine-requests", body)).data,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pharmacy-stock", "needed"] }),
+  });
+}

@@ -7,6 +7,9 @@ import { assertTestDatabase } from "../setup/guard.mjs";
 
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 const { medicineKey } = await import("../../server/services/pharmacy/stockMatch.js");
+const { requestMedicine } = await import("../../server/services/pharmacy/stockNeeded.js");
+const { getDraft } = await import("../../server/services/giniflow/prescription.js");
+const { buildPrescriptionHtml } = await import("../../server/templates/prescriptionTemplate.js");
 
 const PHARMACY_ADMIN = { id: 9301, name: "E2E Pharmacy Admin", role: "pharmacy_admin" };
 const PHARMACY = { id: 9302, name: "E2E Pharmacy", role: "pharmacy" };
@@ -129,5 +132,81 @@ test.describe.serial("PH02 medicines needed in stock", () => {
     const reception = await apiAs("reception");
     expect((await reception.get("/api/pharmacy/stock/needed")).status()).toBe(403);
     await reception.dispose();
+  });
+});
+
+test.describe.serial("PH02b a doctor's Add click tells the pharmacy at once", () => {
+  const REQUESTED = `Dravolin ${TAG}`;
+  let doctorApi;
+
+  test.beforeAll(async () => {
+    doctorApi = await apiAs("banshali");
+  });
+
+  test.afterAll(async () => {
+    await query(`DELETE FROM pharmacy_medicine_requests WHERE medicine_name LIKE $1`, [`%${TAG}%`]);
+    await doctorApi?.dispose();
+  });
+
+  test("1. the click alone lists the medicine, without any prescription being saved", async () => {
+    const send = () =>
+      doctorApi.post("/api/giniflow/stations/doctor/medicine-requests", {
+        data: { medicineName: REQUESTED },
+      });
+    expect((await send()).ok()).toBe(true);
+    const viewer = await login(PHARMACY);
+    const row = (await needed(viewer)).find((item) => item.medicineName === REQUESTED);
+    await viewer.dispose();
+    expect(row).toMatchObject({ status: "not_stocked", prescriptions: 1 });
+  });
+
+  test("2. pharmacy staff cannot raise a request through the doctor's route", async () => {
+    const viewer = await login(PHARMACY);
+    const res = await viewer.post("/api/giniflow/stations/doctor/medicine-requests", {
+      data: { medicineName: REQUESTED },
+    });
+    await viewer.dispose();
+    expect(res.status()).toBe(403);
+  });
+
+  test("3. a doctor-typed medicine carries a 'Typed by doctor' tag on the draft and the print", async () => {
+    const patient = (
+      await one(`INSERT INTO patients (name, file_no) VALUES ($1, $2) RETURNING id`, [
+        `PH02b patient ${TAG}`,
+        `G${TAG}`,
+      ])
+    ).id;
+    const visit = (
+      await one(
+        `INSERT INTO giniflow_visits (patient_id, visit_date, current_status)
+         VALUES ($1, (NOW() AT TIME ZONE 'Asia/Kolkata')::date, 'with_doctor') RETURNING id`,
+        [patient],
+      )
+    ).id;
+    try {
+      const typed = `tab Velorin ${TAG}`;
+      await requestMedicine({ medicineName: typed, visitId: visit }, null);
+      await query(
+        `INSERT INTO giniflow_rx_items (visit_id, medicine_name, change_type, sort_order)
+         VALUES ($1, $2, 'new', 0), ($1, $3, 'new', 1)`,
+        [visit, typed, `Listed ${TAG}`],
+      );
+      const flags = Object.fromEntries(
+        (await getDraft(visit)).items.map((item) => [item.medicine_name, item.typed_by_doctor]),
+      );
+      expect(flags).toEqual({ [typed]: true, [`Listed ${TAG}`]: false });
+      const html = buildPrescriptionHtml({
+        patient: { name: "PH02b" },
+        activeMeds: [
+          { id: 1, name: typed, typed_by_doctor: true, is_active: true },
+          { id: 2, name: `Listed ${TAG}`, typed_by_doctor: false, is_active: true },
+        ],
+      });
+      expect(html.match(/rx-typed-badge">Typed by doctor/g) || []).toHaveLength(1);
+    } finally {
+      await query(`DELETE FROM pharmacy_medicine_requests WHERE visit_id = $1`, [visit]);
+      await query(`DELETE FROM giniflow_visits WHERE id = $1`, [visit]);
+      await query(`DELETE FROM patients WHERE id = $1`, [patient]);
+    }
   });
 });

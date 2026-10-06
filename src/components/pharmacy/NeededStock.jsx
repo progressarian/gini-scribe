@@ -1,4 +1,5 @@
 import { useState } from "react";
+import Pagination from "../ui/Pagination";
 import { requestErrorOf } from "../billing/format";
 import { when } from "../billing/importText";
 import {
@@ -14,7 +15,12 @@ export default function NeededStock({ canOrder }) {
   const mark = useMarkNeededOrdered();
   const clear = useClearNeededOrdered();
   const [error, setError] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
   const items = data?.items ?? [];
+  const lastPage = Math.max(1, Math.ceil(items.length / pageSize));
+  const current = Math.min(page, lastPage);
+  const shown = items.slice((current - 1) * pageSize, current * pageSize);
   const busy = mark.isPending || clear.isPending;
 
   const run = async (action, body, fallback) => {
@@ -61,15 +67,15 @@ export default function NeededStock({ canOrder }) {
               <tr>
                 <th>Medicine</th>
                 <th>Status</th>
-                <th className="phs-num">Patients</th>
-                <th className="phs-num">Prescriptions</th>
+                <th className="phs-count">Patients</th>
+                <th className="phs-count">Prescriptions</th>
                 <th>Prescribed by</th>
                 <th>Last prescribed</th>
                 <th>Order</th>
               </tr>
             </thead>
             <tbody>
-              {items.map((item) => (
+              {shown.map((item) => (
                 <tr key={item.medicineKey}>
                   <td data-label="Medicine">{item.medicineName}</td>
                   <td data-label="Status">
@@ -79,10 +85,10 @@ export default function NeededStock({ canOrder }) {
                       {STATUS_TEXT[item.status]}
                     </span>
                   </td>
-                  <td data-label="Patients" className="phs-num">
+                  <td data-label="Patients" className="phs-count">
                     {item.patients}
                   </td>
-                  <td data-label="Prescriptions" className="phs-num">
+                  <td data-label="Prescriptions" className="phs-count">
                     {item.prescriptions}
                   </td>
                   <td data-label="Prescribed by">{item.doctors.join(", ") || "—"}</td>
@@ -139,6 +145,14 @@ export default function NeededStock({ canOrder }) {
           </table>
         </div>
       )}
+      <Pagination
+        page={current}
+        pageSize={pageSize}
+        total={items.length}
+        onChange={setPage}
+        onPageSizeChange={setPageSize}
+        unit="medicines"
+      />
     </section>
   );
 }

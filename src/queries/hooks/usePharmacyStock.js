@@ -29,10 +29,11 @@ export function useStockSummary() {
   });
 }
 
-export function useStockUploads(enabled) {
+export function useStockUploads(enabled, { limit = 10, offset = 0 } = {}) {
   return useQuery({
-    queryKey: stockKeys.uploads,
-    queryFn: async () => (await api.get(`${BASE}/uploads`)).data,
+    queryKey: [...stockKeys.uploads, limit, offset],
+    queryFn: async () => (await api.get(`${BASE}/uploads`, { params: { limit, offset } })).data,
+    placeholderData: keepPreviousData,
     enabled,
   });
 }

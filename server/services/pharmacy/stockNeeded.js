@@ -31,13 +31,19 @@ export async function listNeeded({ days = NEEDED_DAYS } = {}, db = pool) {
   const [{ rows: items }, { rows: stock }, { rows: marks }] = await Promise.all([
     db.query(
       `SELECT i.medicine_name, i.pharmacy_match, v.patient_id, v.visit_date::text AS visit_date,
-              d.name AS doctor_name
+              d.name AS doctor_name, i.visit_id, NULL::uuid AS request_id
          FROM giniflow_rx_items i
          JOIN giniflow_visits v ON v.id = i.visit_id
          LEFT JOIN doctors d ON d.id = v.assigned_doctor_id
         WHERE v.visit_date >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - $1::int
           AND v.current_status = ANY($2::text[])
-          AND i.change_type = ANY($3::text[])`,
+          AND i.change_type = ANY($3::text[])
+       UNION ALL
+       SELECT r.medicine_name, NULL, r.patient_id,
+              (r.requested_at AT TIME ZONE 'Asia/Kolkata')::date::text, d.name, r.visit_id, r.id
+         FROM pharmacy_medicine_requests r
+         LEFT JOIN doctors d ON d.id = r.requested_by
+        WHERE r.requested_at >= NOW() - make_interval(days => $1::int)`,
       [days, PRESCRIBED_STATUSES, DISPENSABLE],
     ),
     db.query(`SELECT UPPER(medicine_name) AS key, stock_qty FROM pharmacy_inventory`),
@@ -62,15 +68,20 @@ export async function listNeeded({ days = NEEDED_DAYS } = {}, db = pool) {
       medicineKey: key,
       names: new Map(),
       patients: new Set(),
+      prescribed: new Set(),
       doctors: new Set(),
       prescriptions: 0,
       lastPrescribed: null,
       status: known ? "out_of_stock" : "not_stocked",
     };
     group.names.set(item.medicine_name, (group.names.get(item.medicine_name) || 0) + 1);
-    group.patients.add(item.patient_id);
+    if (item.patient_id) group.patients.add(item.patient_id);
     if (item.doctor_name) group.doctors.add(item.doctor_name);
-    group.prescriptions += 1;
+    const seen = item.visit_id || item.request_id;
+    if (!group.prescribed.has(seen)) {
+      group.prescribed.add(seen);
+      group.prescriptions += 1;
+    }
     if (!group.lastPrescribed || item.visit_date > group.lastPrescribed) {
       group.lastPrescribed = item.visit_date;
     }
@@ -103,6 +114,22 @@ export async function listNeeded({ days = NEEDED_DAYS } = {}, db = pool) {
           a.medicineName.localeCompare(b.medicineName),
       ),
   };
+}
+
+export async function requestMedicine({ medicineName, visitId = null }, actorId, db = pool) {
+  const name = String(medicineName || "").trim();
+  const key = medicineKey(name) || name.toUpperCase();
+  if (!name || !key) throw badRequest("Type the medicine name");
+  const { rows } = await db.query(
+    `INSERT INTO pharmacy_medicine_requests (medicine_key, medicine_name, visit_id, patient_id, requested_by)
+     SELECT $1, $2, v.id, v.patient_id, $4
+       FROM (SELECT $3::uuid AS wanted) w
+       LEFT JOIN giniflow_visits v ON v.id = w.wanted
+     ON CONFLICT (visit_id, medicine_key) WHERE visit_id IS NOT NULL DO NOTHING
+     RETURNING id`,
+    [key, name, visitId, actorId],
+  );
+  return { medicineKey: key, medicineName: name, recorded: rows.length > 0 };
 }
 
 export async function markOrdered(

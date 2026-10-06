@@ -115,6 +115,17 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+.flow-table th.phs-num,
+.fset.bill-ui .flow-table thead th.phs-num {
+  text-align: right;
+}
+.phs-count,
+.flow-table th.phs-count,
+.fset.bill-ui .flow-table thead th.phs-count {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 .phs-item {
   display: block;
   font-weight: 600;

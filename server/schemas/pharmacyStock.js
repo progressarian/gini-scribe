@@ -33,3 +33,8 @@ export const pharmacyNeededOrderSchema = z.object({
 export const pharmacyNeededClearSchema = z.object({
   medicineKey: z.string().trim().min(1, "Choose the medicine").max(200),
 });
+
+export const pharmacyMedicineRequestSchema = z.object({
+  medicineName: z.string().trim().min(2, "Type the medicine name").max(200),
+  visitId: z.string().uuid().nullish(),
+});

@@ -25,6 +25,7 @@ import {
 import { validate, validateQuery } from "../middleware/validate.js";
 import { CAPABILITIES as CAP } from "../../shared/permissions.js";
 import { giniflowReportReviewSchema } from "../schemas/index.js";
+import { requestMedicine } from "../services/pharmacy/stockNeeded.js";
 import { parsePaste } from "../services/giniflow/rxPaste.js";
 import { blockActor, blockedResponse } from "../services/patientBlockGuard.js";
 import {
@@ -35,6 +36,7 @@ import {
   giniflowRxPauseSchema,
   giniflowRxStopSchema,
   giniflowMedSearchQuerySchema,
+  pharmacyMedicineRequestSchema,
   giniflowExternalMedSchema,
   giniflowFinalizeSchema,
   giniflowDoctorQueueQuerySchema,
@@ -565,6 +567,19 @@ router.get(
       res.json({ results: await searchMedicines(req.query.q) });
     } catch (e) {
       doctorError(res, e, "Gini Flow medicine search");
+    }
+  },
+);
+
+router.post(
+  "/giniflow/stations/doctor/medicine-requests",
+  requireCapability([CAP.GINIFLOW_STATION_DOCTOR, CAP.GINIFLOW_STATION_MO]),
+  validate(pharmacyMedicineRequestSchema),
+  async (req, res) => {
+    try {
+      res.json(await requestMedicine(req.body, req.doctor?.doctor_id ?? null));
+    } catch (e) {
+      doctorError(res, e, "Gini Flow medicine request");
     }
   },
 );
