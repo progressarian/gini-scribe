@@ -67,3 +67,16 @@ export async function catalogTestsFor(db, names) {
   const { rows } = await db.query(TEST_MATCHES_SQL("$1::text[]"), [wanted]);
   return new Map(rows.map((row) => [row.test_name, row.catalog_id]));
 }
+
+export async function outsourcedTestNames(db, names) {
+  const wanted = [...new Set(names.filter((name) => typeof name === "string" && name))];
+  if (!wanted.length) return new Set();
+  const { rows } = await db.query(
+    `SELECT DISTINCT m.test_name
+       FROM (${TEST_MATCHES_SQL("$1::text[]")}) m
+       JOIN service_items i ON i.test_catalog_id = m.catalog_id
+      WHERE i.is_active AND i.is_outsourced`,
+    [wanted],
+  );
+  return new Set(rows.map((row) => row.test_name));
+}

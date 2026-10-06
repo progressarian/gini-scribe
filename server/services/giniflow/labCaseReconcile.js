@@ -52,7 +52,7 @@ async function moveOrder(client, visitId, order, to, caseNos) {
               WHEN EXISTS (
                 SELECT 1 FROM giniflow_lab_orders o2
                  WHERE o2.visit_id = v.id AND o2.urgency = 'today' AND o2.id <> $2
-                   AND o2.sample_status NOT IN ('uploaded', 'reported', 'cancelled')
+                   AND o2.sample_status NOT IN ('uploaded', 'reported', 'cancelled', 'sent_outside')
               ) THEN 'partial'
               ELSE 'ready' END,
             updated_at = NOW()

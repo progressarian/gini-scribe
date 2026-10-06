@@ -950,7 +950,7 @@ export async function advanceMachineTest(
               SELECT 1 FROM giniflow_lab_orders o2
                WHERE o2.visit_id = v.id AND o2.urgency = 'today'
                  AND o2.id <> $2
-                 AND o2.sample_status NOT IN ('uploaded', 'reported')
+                 AND o2.sample_status NOT IN ('uploaded', 'reported', 'sent_outside')
             )`,
         [row.visit_id, orderId],
       );

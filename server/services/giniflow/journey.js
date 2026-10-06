@@ -1,5 +1,6 @@
 import pool from "../../config/db.js";
 import { draftAtCheckIn, linesForOrder } from "../billing/visitLines.js";
+import { outsourcedTestNames } from "../billing/testMatch.js";
 import {
   CHAIN,
   STATUS_LABEL,
@@ -362,8 +363,40 @@ const benchAlreadyStarted = async (client, visitId) => {
   return rows[0].started || (await sampleTakenBeforeVisit(client, visitId));
 };
 
+async function insertLabOrder(client, visitId, { tests, priceOf, schemeCode, actorId, outside }) {
+  const total = tests.reduce((sum, n) => sum + priceOf[n], 0);
+  const { rows: order } = await client.query(
+    `INSERT INTO giniflow_lab_orders
+       (visit_id, ordered_by, urgency, payment_status, amount_total, sample_status,
+        scheme_code, kind, is_outsourced)
+     VALUES ($1, $2, 'today', 'pending', $3, 'payment_pending', $4, 'lab', $5)
+     RETURNING id`,
+    [visitId, actorId, total, schemeCode, outside],
+  );
+  const labOrderId = order[0].id;
+  await reopenResultsForNewOrder(client, visitId);
+  await client.query(
+    `INSERT INTO giniflow_lab_order_tests (lab_order_id, test_name, price)
+     SELECT $1, * FROM UNNEST($2::text[], $3::numeric[])`,
+    [labOrderId, tests, tests.map((n) => priceOf[n])],
+  );
+  await client.query(
+    `INSERT INTO giniflow_lab_order_events (lab_order_id, track, status, actor_role, actor_id)
+     VALUES ($1, 'payment', 'pending', 'reception', $2)`,
+    [labOrderId, actorId],
+  );
+  await linesForOrder(visitId, { labOrderId, testNames: tests }, { actorId }, client);
+  return labOrderId;
+}
+
 export async function raiseOrdersFromSteps(client, visitId, steps, actorId = null) {
-  const raised = { labOrderId: null, labTests: [], machine: [] };
+  const raised = {
+    labOrderId: null,
+    labTests: [],
+    outsideOrderId: null,
+    outsideTests: [],
+    machine: [],
+  };
   const billed = billedLabTestsOf(steps);
   if (billed.size && (await benchAlreadyStarted(client, visitId))) billed.clear();
   const picked = labTestsOf(steps).filter((n) => !billed.has(n));
@@ -395,31 +428,25 @@ export async function raiseOrdersFromSteps(client, visitId, steps, actorId = nul
     );
     const tests = wantedTests.filter((n) => !already.some((r) => r.test_name === n));
 
-    if (tests.length) {
-      const total = tests.reduce((sum, n) => sum + priceOf[n], 0);
-      const { rows: order } = await client.query(
-        `INSERT INTO giniflow_lab_orders
-           (visit_id, ordered_by, urgency, payment_status, amount_total, sample_status,
-            scheme_code, kind)
-         VALUES ($1, $2, 'today', 'pending', $3, 'payment_pending', $4, 'lab')
-         RETURNING id`,
-        [visitId, actorId, total, schemeCode],
-      );
-      const labOrderId = order[0].id;
-      await reopenResultsForNewOrder(client, visitId);
-      await client.query(
-        `INSERT INTO giniflow_lab_order_tests (lab_order_id, test_name, price)
-         SELECT $1, * FROM UNNEST($2::text[], $3::numeric[])`,
-        [labOrderId, tests, tests.map((n) => priceOf[n])],
-      );
-      await client.query(
-        `INSERT INTO giniflow_lab_order_events (lab_order_id, track, status, actor_role, actor_id)
-         VALUES ($1, 'payment', 'pending', 'reception', $2)`,
-        [labOrderId, actorId],
-      );
-      await linesForOrder(visitId, { labOrderId, testNames: tests }, { actorId }, client);
-      raised.labOrderId = labOrderId;
-      raised.labTests = tests;
+    const outsourced = await outsourcedTestNames(client, tests);
+    const inHouse = tests.filter((n) => !outsourced.has(n));
+    const outside = tests.filter((n) => outsourced.has(n));
+    const order = { priceOf, schemeCode, actorId };
+    if (inHouse.length) {
+      raised.labOrderId = await insertLabOrder(client, visitId, {
+        ...order,
+        tests: inHouse,
+        outside: false,
+      });
+      raised.labTests = inHouse;
+    }
+    if (outside.length) {
+      raised.outsideOrderId = await insertLabOrder(client, visitId, {
+        ...order,
+        tests: outside,
+        outside: true,
+      });
+      raised.outsideTests = outside;
     }
   }
 
@@ -440,7 +467,7 @@ export async function raiseOrdersFromSteps(client, visitId, steps, actorId = nul
 
   // Lab Billing is a stop on the journey once there is a bill to pay. Blood
   // Sample is already there — it is the step that carried the tests.
-  if (raised.labOrderId) await insertLabStepsForOrder(client, visitId);
+  if (raised.labOrderId || raised.outsideOrderId) await insertLabStepsForOrder(client, visitId);
   return raised;
 }
 
@@ -516,7 +543,13 @@ export async function checkInWithJourney(
       });
     }
 
-    let raised = { labOrderId: null, labTests: [], machine: [] };
+    let raised = {
+      labOrderId: null,
+      labTests: [],
+      outsideOrderId: null,
+      outsideTests: [],
+      machine: [],
+    };
     if (!alreadyPlanned) {
       await insertSteps(client, visitId, steps);
       // A plan attached to a patient who is already here has to agree with where

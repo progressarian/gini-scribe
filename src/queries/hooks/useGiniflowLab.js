@@ -23,12 +23,31 @@ export function useLabQueue(date, q = "", group = "all", room = null) {
   });
 }
 
+export function useOutsidePending({ q = "", status = "all", from = "", to = "", page = 1 } = {}) {
+  const search = q.trim().length >= 2 ? q.trim() : "";
+  const params = {
+    ...(search ? { q: search } : {}),
+    ...(status !== "all" ? { status } : {}),
+    ...(from ? { from } : {}),
+    ...(to ? { to } : {}),
+    ...(page > 1 ? { page: String(page) } : {}),
+  };
+  return useQuery({
+    queryKey: ["giniflow", "lab", "outside-pending", params],
+    queryFn: async () =>
+      (await api.get("/api/giniflow/stations/lab/outside-pending", { params })).data,
+    refetchInterval: pollInterval,
+    refetchIntervalInBackground: false,
+    placeholderData: (prev) => prev,
+  });
+}
+
 // Uploading is one call: the file is stored and the order advanced together, so
 // a report can never sit in storage with the MO still waiting.
 export function useUploadReport() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ orderId, file, confirmAdditional = false }) => {
+    mutationFn: async ({ orderId, file, confirmAdditional = false, outside = false }) => {
       const base64 = await new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(String(reader.result).split(",")[1]);
@@ -36,12 +55,15 @@ export function useUploadReport() {
         reader.readAsDataURL(file);
       });
       return (
-        await api.post(`/api/giniflow/stations/lab/${orderId}/report`, {
-          base64,
-          confirmAdditional,
-          fileName: file.name,
-          mediaType: file.type || "application/pdf",
-        })
+        await api.post(
+          `/api/giniflow/stations/lab/${orderId}/${outside ? "outside-report" : "report"}`,
+          {
+            base64,
+            confirmAdditional,
+            fileName: file.name,
+            mediaType: file.type || "application/pdf",
+          },
+        )
       ).data;
     },
     onSuccess: () => {

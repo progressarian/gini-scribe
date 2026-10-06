@@ -23,7 +23,7 @@ import { TESTS_HOLD_SQL } from "./testsHold.js";
 
 import { syncFromStatus } from "./journey.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
-import { REPORTED_LAB_STATUSES } from "../../../shared/labStages.js";
+import { FLOOR_DONE_LAB_STATUSES } from "../../../shared/labStages.js";
 import { MACHINE_RUNGS } from "../../../shared/machineStages.js";
 import pool from "../../config/db.js";
 
@@ -102,7 +102,7 @@ const DOCTOR_STATUSES = ["sd_pending", "with_sd", "ready_for_doctor", "with_doct
 // final rung or it would hold a patient whose machine test is long since filed.
 const REPORTED_SAMPLE_STATUSES = [
   ...new Set([
-    ...REPORTED_LAB_STATUSES,
+    ...FLOOR_DONE_LAB_STATUSES,
     ...MACHINE_RUNGS.filter((r) => r.key === "reported").flatMap((r) => r.sampleStatuses),
   ]),
 ];

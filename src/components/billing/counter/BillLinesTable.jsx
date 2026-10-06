@@ -363,6 +363,7 @@ export default function BillLinesTable({ bill, onBill, form }) {
                             .filter(Boolean)
                             .join(" · ")}
                         </div>
+                        {line.is_outsourced && <span className="badge b-pu">Outsourced</span>}
                         {line.source === "lab_case" && (
                           <span className="badge b-blu">from lab report</span>
                         )}

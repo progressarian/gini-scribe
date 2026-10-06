@@ -15,6 +15,7 @@ import {
   revertStart,
 } from "./stationLock.js";
 import { publish } from "./eventHub.js";
+import { outsourcedTestNames } from "../billing/testMatch.js";
 import { t as clipText } from "../../utils/helpers.js";
 import { promoteLabReport, promoteQuietly } from "./promote.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config/storage.js";
@@ -54,6 +55,9 @@ import {
   FLOOR_ACTION_STAGE,
   markableRungs,
   railForStage,
+  OUTSIDE_SKIPPED_STATUSES,
+  OUTSIDE_STEP,
+  SENT_OUTSIDE,
 } from "../../../shared/labStages.js";
 
 // The COLUMN, not the raw status. `vitals_done` is the last event the sync
@@ -105,6 +109,20 @@ const roomAction = (sampleStatus, room) => {
   return rung ? { to: rung.advanceTo, label: rung.advanceLabel } : null;
 };
 
+const OUTSIDE_UPLOAD = { to: "uploaded", label: "📤 Upload report" };
+
+const outsideAction = (sampleStatus, room) => {
+  if (room === LAB_ROOMS.PROCESSING) return null;
+  if (sampleStatus === "sample_collected") return OUTSIDE_STEP;
+  if (sampleStatus === SENT_OUTSIDE) return OUTSIDE_UPLOAD;
+  return roomAction(sampleStatus, room);
+};
+
+const orderAction = (order, room) =>
+  order.is_outsourced
+    ? outsideAction(order.sample_status, room)
+    : roomAction(order.sample_status, room);
+
 const stepsFor = (sampleStatus, paid) => {
   const reached = paid ? railForStage[stageIndexOf(SAMPLE_STATUS_TO_STAGE[sampleStatus])] : 0;
   return [
@@ -138,6 +156,8 @@ export const OPEN_LAB_CASES_SQL = `
                AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))
       AND lc.raw_detail_json->>'reported_on' IS NULL
       AND lc.pdf_storage_path IS NULL
+      AND NOT EXISTS (SELECT 1 FROM giniflow_lab_case_actions a
+                       WHERE a.case_no = lc.case_no AND a.action = 'sent_outside')
       AND ${LIVE_LAB_CASE_SQL("lc")})`;
 
 const unifiedFromOrder = (o) => ({
@@ -152,6 +172,7 @@ const unifiedFromOrder = (o) => ({
   age: o.age,
   sex: o.sex,
   tests: o.tests.map((t) => t.name),
+  outsourcedTests: o.tests.filter((t) => t.outsourced).map((t) => t.name),
   caseCount: 1,
   since: o.since,
   orderedBy: o.orderedBy,
@@ -174,6 +195,7 @@ const unifiedFromCase = (r) => ({
   age: r.age,
   sex: r.sex,
   tests: r.tests || [],
+  outsourcedTests: r.outsourcedTests || [],
   caseCount: r.cases,
   since: r.stageAt || r.registeredAt || null,
   orderedBy: r.orderedBy || null,
@@ -296,10 +318,10 @@ export async function getLabQueue(
   // there is no sample for the analyzer bench to be missing.
   const awaiting =
     !room || room === LAB_ROOMS.COLLECTION ? await awaitingRegistration(visitDate, search, db) : [];
-  const { rows } = await db.query(
+  const { rows: queued } = await db.query(
     `SELECT o.id, o.visit_id, o.sample_status, o.payment_status, o.urgency,
             o.amount_total, o.amount_paid, o.amount_claimed, o.claim_state,
-            o.created_at, o.updated_at, o.uploaded_at, o.report_file_url,
+            o.created_at, o.updated_at, o.uploaded_at, o.report_file_url, o.is_outsourced,
             p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
             v.current_status,
             (SELECT e.meta->>'source' FROM giniflow_visit_events e
@@ -372,15 +394,41 @@ export async function getLabQueue(
       ORDER BY o.created_at`,
     [visitDate, search, LAB_ONLY_DOCTOR, hideLabOnly],
   );
+  const rows = room === LAB_ROOMS.PROCESSING ? queued.filter((r) => !r.is_outsourced) : queued;
 
   const busy = await busyStations(
     db,
     rows.map((r) => r.visit_id),
   );
+  const outsourced = await outsourcedTestNames(db, [
+    ...rows.flatMap((r) => (r.tests || []).map((t) => t.name)),
+    ...healthray.flatMap((h) => h.tests || []),
+  ]);
+  const outsourcedOf = (names) => (names || []).filter((name) => outsourced.has(name));
+  for (const row of healthray) {
+    row.outsourcedTests = outsourcedOf(row.tests);
+    for (const c of row.caseList || []) {
+      c.outsourcedTests = outsourcedOf(c.tests);
+      c.outsourced =
+        c.caseSource === "outsource" ||
+        (c.tests.length > 0 && c.tests.every((name) => outsourced.has(name)));
+      c.sentOutside = (c.actions || []).some((a) => a.action === SENT_OUTSIDE);
+      if (!c.outsourced) continue;
+      const reportIn = c.reported || c.hasReport;
+      c.nextAction =
+        room === LAB_ROOMS.PROCESSING || c.sentOutside || reportIn
+          ? null
+          : c.collected
+            ? { action: SENT_OUTSIDE, label: OUTSIDE_STEP.label }
+            : c.nextAction;
+      c.canUploadOutside = !reportIn && (c.sentOutside || c.collected);
+      if (c.sentOutside) c.stage = { ...c.stage, label: "📮 Sent to outside lab" };
+    }
+  }
   const orders = rows.map((r) => {
     const paid = opensLabGate(r.payment_status);
     const elsewhere = busyElsewhere(busy, r.visit_id, LAB_STATION);
-    const next = paid ? roomAction(r.sample_status, room) : null;
+    const next = paid ? orderAction(r, room) : null;
     const startHeld = next?.to === "drawing" && !!elsewhere;
     return {
       orderId: r.id,
@@ -392,7 +440,8 @@ export async function getLabQueue(
       sex: r.sex,
       orderedBy: r.ordered_by,
       urgency: r.urgency,
-      tests: r.tests || [],
+      outsourced: !!r.is_outsourced,
+      tests: (r.tests || []).map((t) => ({ ...t, outsourced: outsourced.has(t.name) })),
       amountTotal: Number(r.amount_total) || 0,
       amountPaid: Number(r.amount_paid) || 0,
       paymentStatus: r.payment_status,
@@ -760,6 +809,7 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
             json_agg(
               json_build_object(
                 'caseNo', c.case_no,
+                'caseSource', c.case_source,
                 'tests', COALESCE(c.test_names, ARRAY[]::text[]),
                 'canCancel', ${CASE_CANCELLABLE_SQL("c")},
                 'synced', c.results_synced,
@@ -1117,7 +1167,7 @@ export async function advanceSample(
   try {
     await client.query("BEGIN");
     const { rows } = await client.query(
-      `SELECT o.sample_status, o.payment_status, o.visit_id, o.kind
+      `SELECT o.sample_status, o.payment_status, o.visit_id, o.kind, o.is_outsourced
          FROM giniflow_lab_orders o WHERE o.id = $1 FOR UPDATE`,
       [orderId],
     );
@@ -1129,6 +1179,18 @@ export async function advanceSample(
     // the lab ladder and record a sample nobody drew.
     if (rows[0].kind !== "lab") {
       throw Object.assign(new Error("That order belongs to the machine room, not the lab"), {
+        status: 409,
+      });
+    }
+
+    if (rows[0].is_outsourced && OUTSIDE_SKIPPED_STATUSES.includes(to)) {
+      throw Object.assign(
+        new Error("This test goes to an outside lab — mark it sent to the outside lab instead"),
+        { status: 409 },
+      );
+    }
+    if (!rows[0].is_outsourced && to === SENT_OUTSIDE) {
+      throw Object.assign(new Error("Only an outsourced test is sent to an outside lab"), {
         status: 409,
       });
     }
@@ -1210,7 +1272,7 @@ export async function advanceSample(
                   WHEN EXISTS (
                     SELECT 1 FROM giniflow_lab_orders o2
                      WHERE o2.visit_id = v.id AND o2.urgency = 'today' AND o2.id <> $2
-                       AND o2.sample_status NOT IN ('uploaded', 'reported', 'cancelled')
+                       AND o2.sample_status NOT IN ('uploaded', 'reported', 'cancelled', 'sent_outside')
                   ) THEN 'partial'
                   ELSE 'ready' END,
                 updated_at = NOW()
@@ -1434,6 +1496,19 @@ export async function uploadReport(
   promoteQuietly(promoteLabReport, orderId);
 
   return { orderId, reportUrl: url, fileName: safeName, bytes };
+}
+
+export async function uploadOutsideReport(orderId, input, db = pool) {
+  const { rows } = await db.query(`SELECT is_outsourced FROM giniflow_lab_orders WHERE id = $1`, [
+    orderId,
+  ]);
+  if (!rows.length) throw Object.assign(new Error("Order not found"), { status: 404 });
+  if (!rows[0].is_outsourced) {
+    throw Object.assign(new Error("Only an outsourced test's report can be uploaded here"), {
+      status: 403,
+    });
+  }
+  return uploadReport(orderId, input, db);
 }
 
 // Confirm-and-attribute (06-PHASE-2-PLAN §0.4). Records that a technician acted
@@ -1739,12 +1814,88 @@ export async function markCaseResultsReady(db, { patientId, caseDate, caseNo, uh
         )
         AND NOT EXISTS (
           SELECT 1 FROM giniflow_lab_orders g
-           WHERE g.visit_id = v.id AND g.sample_status <> 'uploaded'
+           WHERE g.visit_id = v.id AND g.sample_status NOT IN ('uploaded', 'sent_outside')
         )
       RETURNING v.id`,
     [patientId, caseDate, caseNo, uhid],
   );
   return { rowCount };
+}
+
+const OUTSIDE_CASE_SQL = `
+  SELECT lc.case_no, lc.case_source, COALESCE(lc.test_names, ARRAY[]::text[]) AS test_names,
+         lc.pdf_storage_path IS NOT NULL AS "hasReport",
+         ${LIVE_LAB_CASE_SQL("lc")} AS live,
+         lc.raw_list_json->>'phlebotomy_status' AS phlebotomy,
+         COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'collected_on' AS "collectedOn",
+         COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'received_on' AS "receivedOn",
+         COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'result_saved_on' AS "resultSavedOn",
+         COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'reported_on' AS "reportedOn",
+         COALESCE((SELECT json_agg(json_build_object('action', a.action))
+                     FROM giniflow_lab_case_actions a WHERE a.case_no = lc.case_no),
+                  '[]'::json) AS actions
+    FROM lab_cases lc WHERE lc.case_no = $1`;
+
+export async function caseIsOutsourced(db, c) {
+  if (c.case_source === "outsource") return true;
+  const names = [...new Set(c.test_names || [])];
+  if (!names.length) return false;
+  const outsourced = await outsourcedTestNames(db, names);
+  return names.every((name) => outsourced.has(name));
+}
+
+const hasCaseAction = (c, action) => (c.actions || []).some((a) => a.action === action);
+
+async function outsideCase(db, caseNo) {
+  const { rows } = await db.query(OUTSIDE_CASE_SQL, [caseNo]);
+  if (!rows.length) throw Object.assign(new Error(`No such lab case: ${caseNo}`), { status: 404 });
+  const c = rows[0];
+  if (!c.live) {
+    throw Object.assign(new Error(`Case ${caseNo} was cancelled — nothing more to record`), {
+      status: 409,
+    });
+  }
+  if (!hasCaseAction(c, SENT_OUTSIDE) && !(await caseIsOutsourced(db, c))) {
+    throw Object.assign(new Error("Only an outsourced test is sent to an outside lab"), {
+      status: 409,
+    });
+  }
+  return c;
+}
+
+export async function markCaseSentOutside(caseNo, { actorId = null, room = null } = {}, db = pool) {
+  if (room === LAB_ROOMS.PROCESSING) {
+    throw Object.assign(new Error("The collection room sends samples to the outside lab"), {
+      status: 403,
+    });
+  }
+  const c = await outsideCase(db, caseNo);
+  if (hasCaseAction(c, SENT_OUTSIDE)) return { caseNo, action: SENT_OUTSIDE, unchanged: true };
+  if (!isCollected(c)) {
+    throw Object.assign(new Error("Collect the sample first, then mark it sent"), {
+      status: 409,
+    });
+  }
+  if (c.reportedOn || c.hasReport || hasCaseAction(c, "report_uploaded")) {
+    throw Object.assign(new Error("The report for this case is already in"), { status: 409 });
+  }
+  await db.query(
+    `INSERT INTO giniflow_lab_case_actions (case_no, action, actor_role, actor_id)
+     VALUES ($1, $2, 'lab', $3)
+     ON CONFLICT (case_no, action) DO NOTHING`,
+    [caseNo, SENT_OUTSIDE, actorId],
+  );
+  const visitId = await resolveVisitForCase(db, caseNo);
+  if (visitId) {
+    publish({ kind: "lab_order", visitId, status: SENT_OUTSIDE });
+    await syncLabStepsFromLab(db, visitId);
+  }
+  return { caseNo, action: SENT_OUTSIDE, unchanged: false };
+}
+
+export async function uploadOutsideCaseReport(caseNo, input, db = pool) {
+  await outsideCase(db, caseNo);
+  return uploadLabCaseReport(caseNo, input, db);
 }
 
 export async function uploadLabCaseReport(

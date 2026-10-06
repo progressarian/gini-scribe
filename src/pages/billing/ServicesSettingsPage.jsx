@@ -25,6 +25,7 @@ import "./billing.css";
 import "./billingUi.css";
 
 const STATUS_FILTER = { active: "true", inactive: "false", all: undefined };
+const LAB_FILTER = { outsourced: "true", inhouse: "false", all: undefined };
 
 const linkOf = (item) => {
   if (item.kind === "consultation") {
@@ -84,6 +85,7 @@ function ItemRow({ item, showPath, onEdit, onHistory, onBlocked }) {
       </td>
       <td>{item.tax_code ?? "—"}</td>
       <td>{linkOf(item)}</td>
+      <td>{item.kind === "test" ? (item.is_outsourced ? "Outsourced" : "In-house") : "—"}</td>
       <td>{item.is_active ? "Yes" : "No"}</td>
       <td className="bill-items__actions">
         <button
@@ -145,6 +147,7 @@ export default function ServicesSettingsPage() {
   const [q, setQ] = useState(() => params.get("q") ?? "");
   const [kind, setKind] = useState("");
   const [status, setStatus] = useState("all");
+  const [lab, setLab] = useState("all");
   const [editing, setEditing] = useState(null);
   const view = params.get("view") === "not-priced" ? "not-priced" : "items";
   const setView = (next) =>
@@ -201,6 +204,7 @@ export default function ServicesSettingsPage() {
     q: q.trim(),
     kind,
     active: STATUS_FILTER[status],
+    outsourced: LAB_FILTER[lab],
     groupId: selected?.level === "group" ? String(selected.id) : undefined,
     subgroupId: selected?.level === "subgroup" ? String(selected.id) : undefined,
   });
@@ -353,6 +357,16 @@ export default function ServicesSettingsPage() {
                 <option value="active">Active only</option>
                 <option value="inactive">Off only</option>
               </select>
+              <select
+                className="jb-assign"
+                aria-label="Lab"
+                value={lab}
+                onChange={(e) => setLab(e.target.value)}
+              >
+                <option value="all">In-house and outsourced</option>
+                <option value="inhouse">In-house tests only</option>
+                <option value="outsourced">Outsourced tests only</option>
+              </select>
             </div>
             {items.isError ? (
               <div className="fset__cardsub">Could not load the items.</div>
@@ -372,6 +386,7 @@ export default function ServicesSettingsPage() {
                       <th>Unit</th>
                       <th>Tax</th>
                       <th>Consultant / test</th>
+                      <th>Lab</th>
                       <th>Active</th>
                       <th className="bill-items__actions-head">Actions</th>
                     </tr>

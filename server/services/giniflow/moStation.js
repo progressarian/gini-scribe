@@ -1,5 +1,6 @@
 import pool from "../../config/db.js";
 import { linesForOrder } from "../billing/visitLines.js";
+import { outsourcedTestNames } from "../billing/testMatch.js";
 import { OPEN_LAB_CASES_SQL } from "./labStation.js";
 import { LAB_SAMPLE_FLOW, UNDRAWN_SAMPLE_STATUSES } from "../../../shared/labStages.js";
 import { finalizeConsult } from "./finalize.js";
@@ -120,13 +121,13 @@ const QUEUE_SQL = `
          hold.tests_pending,
          hold.tests_ready_at,
          (SELECT count(*)::int FROM giniflow_lab_orders o
-           WHERE o.visit_id = v.id AND o.sample_status <> 'uploaded'
+           WHERE o.visit_id = v.id AND o.sample_status NOT IN ('uploaded', 'sent_outside')
              AND ${GATING_ORDER_SQL}) AS open_orders,
          -- How far the slowest outstanding order has got. "Waiting on results"
          -- is not one state: a sample nobody has drawn is the MO's to chase,
          -- one on the analyser is not.
          (SELECT o.sample_status FROM giniflow_lab_orders o
-           WHERE o.visit_id = v.id AND o.sample_status <> 'uploaded'
+           WHERE o.visit_id = v.id AND o.sample_status NOT IN ('uploaded', 'sent_outside')
              AND ${GATING_ORDER_SQL}
            ORDER BY array_position(
              ARRAY[${LAB_STAGE_ORDER_SQL}],
@@ -800,23 +801,26 @@ export async function orderTests(
     // has always been, and it is what every order was before `kind` existed.
     const categoryOf = await testCategoriesFor(catalogueNames, client);
     const kindOf = (name) => (categoryOf[name] === "machine" ? "machine" : "lab");
-    const byKind = new Map();
+    const outsourced = await outsourcedTestNames(client, tests);
+    const groups = new Map();
     for (const name of tests) {
-      const k = kindOf(name);
-      if (!byKind.has(k)) byKind.set(k, []);
-      byKind.get(k).push(name);
+      const kind = kindOf(name);
+      const outside = kind === "lab" && outsourced.has(name);
+      const key = `${kind}:${outside}`;
+      if (!groups.has(key)) groups.set(key, { kind, outside, tests: [] });
+      groups.get(key).tests.push(name);
     }
 
     const orders = [];
-    for (const [kind, kindTests] of byKind) {
+    for (const { kind, outside, tests: kindTests } of groups.values()) {
       const kindTotal = kindTests.reduce((sum, name) => sum + priceOf[name], 0);
       const order = await client.query(
         `INSERT INTO giniflow_lab_orders
            (visit_id, ordered_by, urgency, payment_status, amount_total, sample_status,
-            scheme_code, kind)
-         VALUES ($1, $2, $3, 'pending', $4, 'payment_pending', $5, $6)
+            scheme_code, kind, is_outsourced)
+         VALUES ($1, $2, $3, 'pending', $4, 'payment_pending', $5, $6, $7)
          RETURNING id`,
-        [visitId, actorId, urgency, kindTotal, schemeCode, kind],
+        [visitId, actorId, urgency, kindTotal, schemeCode, kind, outside],
       );
       const id = order.rows[0].id;
       if (urgency === "today") await reopenResultsForNewOrder(client, visitId);
@@ -831,13 +835,16 @@ export async function orderTests(
         [id, actorId],
       );
       await linesForOrder(visitId, { labOrderId: id, testNames: kindTests }, { actorId }, client);
-      orders.push({ id, kind, tests: kindTests, total: kindTotal });
+      orders.push({ id, kind, outside, tests: kindTests, total: kindTotal });
     }
 
     // The lab order is what the rest of this function has always meant by
     // "the order" — the visit event it writes, and the journey steps below.
     // A machine-only confirmation has none, and must not pretend to.
-    const labOrder = orders.find((o) => o.kind === "lab") || null;
+    const labOrder =
+      orders.find((o) => o.kind === "lab" && !o.outside) ||
+      orders.find((o) => o.kind === "lab") ||
+      null;
     const orderId = labOrder?.id ?? orders[0]?.id ?? null;
 
     // Ordering today's tests ends this sitting: the patient goes to reception
@@ -908,7 +915,13 @@ export async function orderTests(
       orderId,
       // Every order this confirmation raised, one per station. `orderId` above
       // stays the lab one so existing callers read what they always read.
-      orders: orders.map((o) => ({ orderId: o.id, kind: o.kind, tests: o.tests, total: o.total })),
+      orders: orders.map((o) => ({
+        orderId: o.id,
+        kind: o.kind,
+        outsourced: o.outside,
+        tests: o.tests,
+        total: o.total,
+      })),
       urgency,
       tests,
       total,

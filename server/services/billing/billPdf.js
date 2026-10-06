@@ -175,6 +175,7 @@ table.bp-grid .bp-unit{text-align:center;white-space:nowrap}
 table.bp-grid .bp-sac,table.bp-grid .bp-code{white-space:nowrap}
 table.bp-grid .bp-num,table.bp-grid .bp-unit,table.bp-grid .bp-sac,table.bp-grid .bp-code{width:1%}
 table.bp-grid .bp-item{min-width:8em;width:auto}
+table.bp-grid .bp-tag{font-size:9px;white-space:nowrap}
 table.bp-grid tr.bp-total{break-before:avoid}
 table.bp-grid>tbody>tr.bp-total>td{font-weight:700;padding-top:4px;padding-bottom:4px}
 table.bp-grid>tbody>tr.bp-total>td.bp-total-label{padding-left:10px}
@@ -549,7 +550,8 @@ export function itemsTableHtml(view, gst, closing = "") {
           `<td class="bp-code">${escapeHtml(line.bill_code ?? line.item_code ?? "")}</td>`,
         );
       }
-      cells.push(`<td class="bp-item">${escapeHtml(line.bill_name ?? "")}</td>`);
+      const outsourced = line.is_outsourced ? ` <span class="bp-tag">(Outsourced)</span>` : "";
+      cells.push(`<td class="bp-item">${escapeHtml(line.bill_name ?? "")}${outsourced}</td>`);
       if (gst) cells.push(`<td class="bp-sac">${escapeHtml(line.sac_hsn ?? "")}</td>`);
       const amountOnly = Number(line.quantity) === 0;
       cells.push(

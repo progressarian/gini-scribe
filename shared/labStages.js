@@ -115,7 +115,7 @@ export const LAB_RUNGS = [
     timerLabel: "since sent",
     sinceLabel: "since sent",
     healthrayAt: null,
-    sampleStatuses: ["sample_sent"],
+    sampleStatuses: ["sent_outside", "sample_sent"],
     advanceTo: "sample_sent",
     advanceLabel: "📤 Mark sent to lab",
     action: "sample_sent",
@@ -326,6 +326,22 @@ export const railForStage = LAB_RUNGS.map((r) => r.rail);
 export const REPORTED_LAB_STATUSES = LAB_RUNGS.filter(
   (r) => stageIndexOf(r.key) >= stageIndexOf("reported"),
 ).flatMap((r) => r.sampleStatuses);
+
+export const SENT_OUTSIDE = "sent_outside";
+
+export const OUTSIDE_STEP = { to: SENT_OUTSIDE, label: "📮 Mark sent to outside lab" };
+
+export const OUTSIDE_UPLOADABLE = ["sample_collected", SENT_OUTSIDE];
+
+export const FLOOR_DONE_LAB_STATUSES = [...REPORTED_LAB_STATUSES, SENT_OUTSIDE];
+
+export const OUTSIDE_SKIPPED_STATUSES = LAB_RUNGS.filter(
+  (r) =>
+    stageIndexOf(r.key) > stageIndexOf("collected") &&
+    stageIndexOf(r.key) < stageIndexOf("reported"),
+)
+  .flatMap((r) => r.sampleStatuses)
+  .filter((status) => status !== SENT_OUTSIDE);
 
 // A tube still in the patient — every sample status before the draw. One
 // definition because more than one station now has to ask the question: the

@@ -354,7 +354,8 @@ export async function sweepLabOnlyExits(client, day, graceMinutes = LAB_ONLY_EXI
              SELECT COALESCE(
                       (COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'reported_on')::timestamptz,
                       (SELECT max(a.created_at) FROM giniflow_lab_case_actions a
-                        WHERE a.case_no = lc.case_no AND a.action = 'report_uploaded')
+                        WHERE a.case_no = lc.case_no
+                          AND a.action IN ('report_uploaded', 'sent_outside'))
                     ) AS reported_at
                FROM lab_cases lc
               WHERE lc.case_date = v.visit_date

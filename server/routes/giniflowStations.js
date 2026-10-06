@@ -49,6 +49,7 @@ import {
   giniflowStationGroupQuerySchema,
   giniflowStationSearchGroupQuerySchema,
   giniflowStationQuerySchema,
+  giniflowOutsidePendingQuerySchema,
   giniflowMoQueueQuerySchema,
   giniflowPaymentSchemaChecked,
   giniflowCheckinSchema,
@@ -104,6 +105,8 @@ import {
   releaseVitals,
   skipVitals,
 } from "../services/giniflow/vitalsStation.js";
+import { labelOutsourcedPayments } from "../services/giniflow/outsourcedLabels.js";
+import { listOutsidePending } from "../services/giniflow/outsidePending.js";
 import {
   getPaymentQueue,
   clearPayment,
@@ -124,6 +127,9 @@ import {
   uploadLabCaseReport,
   deleteLabCaseReport,
   uploadReport,
+  uploadOutsideReport,
+  markCaseSentOutside,
+  uploadOutsideCaseReport,
   fetchStoredReport,
   cancelDrawing,
 } from "../services/giniflow/labStation.js";
@@ -1093,7 +1099,9 @@ router.get(
   async (req, res) => {
     try {
       const date = await resolveDate(req.query.date);
-      const data = await getPaymentQueue(date, undefined, { q: req.query.q || "" });
+      const data = await labelOutsourcedPayments(
+        await getPaymentQueue(date, undefined, { q: req.query.q || "" }),
+      );
       res.json({ date, ...data, serverTime: new Date().toISOString() });
     } catch (e) {
       handleError(res, e, "Gini Flow reception queue");
@@ -1635,6 +1643,19 @@ router.post(
 );
 
 router.get(
+  "/giniflow/stations/lab/outside-pending",
+  labGate,
+  validateQuery(giniflowOutsidePendingQuerySchema),
+  async (req, res) => {
+    try {
+      res.json(await listOutsidePending(req.query));
+    } catch (e) {
+      handleError(res, e, "Gini Flow outside reports pending");
+    }
+  },
+);
+
+router.get(
   "/giniflow/stations/lab/queue",
   labGate,
   validateQuery(giniflowStationQuerySchema),
@@ -1681,6 +1702,54 @@ router.post(
 
 // Literal path BEFORE the parameterised ones on this prefix — `/lab/:orderId/...`
 // would otherwise swallow it, which is the bug this file already warns about.
+const reportUpload = (upload, label) => async (req, res) => {
+  try {
+    res.json(
+      await upload(req.params.orderId, {
+        base64: req.body.base64,
+        fileName: req.body.fileName,
+        mediaType: req.body.mediaType,
+        actorId: req.doctor?.doctor_id ?? null,
+        confirmAdditional: req.body.confirmAdditional === true,
+      }),
+    );
+  } catch (e) {
+    if (e.needsConfirmation) {
+      return res.status(409).json({
+        error: e.message,
+        needsConfirmation: e.needsConfirmation,
+        existingUploadedAt: e.existingUploadedAt ?? null,
+      });
+    }
+    handleError(res, e, label);
+  }
+};
+
+router.post(
+  "/giniflow/stations/lab/case/:caseNo/sent-outside",
+  labGate,
+  labBodyRoom,
+  async (req, res) => {
+    try {
+      res.json(
+        await markCaseSentOutside(req.params.caseNo, {
+          room: req.labRoom,
+          actorId: req.doctor?.doctor_id ?? null,
+        }),
+      );
+    } catch (e) {
+      handleError(res, e, "Gini Flow lab case sent outside");
+    }
+  },
+);
+
+router.post(
+  "/giniflow/stations/lab/case/:caseNo/outside-report",
+  labGate,
+  validate(giniflowReportSchema),
+  reportUpload(uploadOutsideCaseReport, "Gini Flow outside lab case report"),
+);
+
 router.post(
   "/giniflow/stations/lab/case/:caseNo/action",
   labGate,
@@ -1810,32 +1879,19 @@ router.post(
 // Uploading the report is what notifies the MO, so it is one call: store the
 // file, then advance. A file in storage with the order still "results ready"
 // would be a report nobody is told about.
+
 router.post(
   "/giniflow/stations/lab/:orderId/report",
   benchGate,
   validate(giniflowReportSchema),
-  async (req, res) => {
-    try {
-      res.json(
-        await uploadReport(req.params.orderId, {
-          base64: req.body.base64,
-          fileName: req.body.fileName,
-          mediaType: req.body.mediaType,
-          actorId: req.doctor?.doctor_id ?? null,
-          confirmAdditional: req.body.confirmAdditional === true,
-        }),
-      );
-    } catch (e) {
-      if (e.needsConfirmation) {
-        return res.status(409).json({
-          error: e.message,
-          needsConfirmation: e.needsConfirmation,
-          existingUploadedAt: e.existingUploadedAt ?? null,
-        });
-      }
-      handleError(res, e, "Gini Flow lab report upload");
-    }
-  },
+  reportUpload(uploadReport, "Gini Flow lab report upload"),
+);
+
+router.post(
+  "/giniflow/stations/lab/:orderId/outside-report",
+  labGate,
+  validate(giniflowReportSchema),
+  reportUpload(uploadOutsideReport, "Gini Flow outside lab report upload"),
 );
 
 // The uploaded report, inline.

@@ -312,6 +312,7 @@ const LAB_STAGE = {
   drawing: "being drawn at Lab 1 now",
   sample_collected: "sample taken, not sent yet",
   sample_sent: "sent to the lab",
+  sent_outside: "sent to outside lab",
   sample_received: "received at the lab",
   processing: "on the analyser",
   results_ready: "reporting",

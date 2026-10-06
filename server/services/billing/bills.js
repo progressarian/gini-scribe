@@ -189,6 +189,7 @@ function shapeLine(row) {
     order_state: row.order_state ?? null,
     removed_doctor: row.removed_doctor ?? null,
     price_per_patient: row.price_per_patient ?? false,
+    is_outsourced: row.is_outsourced ?? false,
     agreed_rate:
       row.agreed_rate === null || row.agreed_rate === undefined ? null : paise(row.agreed_rate),
     agreed_by: row.agreed_by ?? null,
@@ -332,6 +333,7 @@ async function liveLines(client, billId, { all = false } = {}) {
       .join(", ")},
             COALESCE(i.allow_quantity, FALSE) AS allow_quantity, i.max_quantity,
             COALESCE(i.price_per_patient, FALSE) AS price_per_patient,
+            COALESCE(i.is_outsourced, FALSE) AS is_outsourced,
             CASE WHEN i.kind = 'consultation' AND rd.is_active IS FALSE
                  THEN json_build_object('id', rd.id, 'name', rd.name) END AS removed_doctor,
             setter.name AS agreed_by_name, adder.name AS created_by_name,

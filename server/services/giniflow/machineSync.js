@@ -289,7 +289,7 @@ export async function syncMachineOrdersForVisit(visit, db = pool, { slotWaitMs }
         const r = await raiseOrdersFromSteps(client, visit.visit_id, [
           { catalogId: "blood_sample", billedIn: "healthray", billedTests: missing },
         ]);
-        if (r.labOrderId) {
+        if (r.labOrderId || r.outsideOrderId) {
           raised++;
           log("lab", `${visit.name}: ${missing.length} billed lab test(s) awaiting reception`);
         }

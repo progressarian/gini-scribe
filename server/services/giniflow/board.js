@@ -123,9 +123,9 @@ const MACHINE_HOLD_SQL = (v, p, manualParam) => `
           AS lab_drawing,
         (SELECT count(*)::int FROM giniflow_lab_orders o
           WHERE o.visit_id = ${v}.id AND o.urgency = 'today' AND o.kind = 'lab'
-            AND o.sample_status NOT IN ('uploaded', 'reported'))
+            AND o.sample_status NOT IN ('uploaded', 'reported', 'sent_outside'))
         + (SELECT count(*)::int ${TODAY_CASES(v, p)}
-            AND NOT ${CASE_ACTION("'report_uploaded'")}) AS lab_open,
+            AND NOT ${CASE_ACTION("'report_uploaded', 'sent_outside'")}) AS lab_open,
         (SELECT count(*)::int FROM giniflow_lab_orders o
           WHERE o.visit_id = ${v}.id AND o.urgency = 'today' AND o.kind = 'lab'
             AND o.payment_status NOT IN ('paid', 'claim_approved')
@@ -216,7 +216,7 @@ const BOARD_SQL = `
          -- says so rather than leaving them looking idle (39 §16).
          (SELECT count(*)::int FROM giniflow_lab_orders o
            WHERE o.visit_id = v.id AND o.urgency = 'today'
-             AND o.sample_status NOT IN ('uploaded', 'reported')) AS reports_outstanding,
+             AND o.sample_status NOT IN ('uploaded', 'reported', 'sent_outside')) AS reports_outstanding,
          (SELECT array_agg(t.test_name ORDER BY t.test_name)
             FROM giniflow_lab_orders o
             JOIN giniflow_lab_order_tests t ON t.lab_order_id = o.id
@@ -309,7 +309,7 @@ const BOARD_SQL = `
       SELECT o.sample_status, o.payment_status, o.updated_at AS since,
              (SELECT COUNT(*)::int FROM giniflow_lab_order_tests t WHERE t.lab_order_id = o.id) AS test_count
         FROM giniflow_lab_orders o
-       WHERE o.visit_id = v.id AND o.sample_status <> 'uploaded'
+       WHERE o.visit_id = v.id AND o.sample_status NOT IN ('uploaded', 'sent_outside')
          -- The LAB track. A machine test is an order too, and it holds the
          -- patient the same way — but nothing is drawn for it, so shown here it
          -- reads "Paid · awaiting collection" against a sample that will never
@@ -470,6 +470,7 @@ const LAB_HINT = {
   processing: null,
   sample_received: null,
   sample_sent: "Waiting: lab to receive the sample",
+  sent_outside: "Report awaited from outside lab",
   sample_collected: null,
   drawing: null,
   paid: "Waiting: sample collection",
@@ -494,6 +495,7 @@ const LAB_SUBTITLE = {
   drawing: "🩸 Collecting now at Lab 1",
   sample_collected: "Sample collected",
   sample_sent: "📤 Sent to the lab",
+  sent_outside: "📮 Sent to outside lab",
   sample_received: "📥 Received at the lab",
   processing: "⚙️ Processing in analyzer",
   results_ready: "📤 Results ready — awaiting upload",
@@ -981,7 +983,7 @@ export async function getTestSegments(visitId, now = new Date(), db = pool) {
                   WHERE o.visit_id = v.id AND o.urgency = 'today' AND o.kind = 'lab'
                     AND e.track = 'sample' AND e.status IN ('uploaded', 'reported')),
                 (SELECT max(a.created_at) FROM giniflow_lab_case_actions a
-                  WHERE a.action = 'report_uploaded'
+                  WHERE a.action IN ('report_uploaded', 'sent_outside')
                     AND a.case_no IN (SELECT lc.case_no ${TODAY_CASES("v", "p")}))
               ) AS lab_reported_at,
               (SELECT min(o.created_at) FROM giniflow_lab_orders o
@@ -1077,6 +1079,7 @@ export async function getScribeLabMarks(visitId, db = pool) {
     drawing: "Collection started",
     sample_collected: "Sample collected",
     sample_sent: "Sample sent to the lab",
+    sent_outside: "Sample sent to outside lab",
     sample_received: "Sample received at the lab",
     processing: "Processing",
     results_ready: "Results ready",
@@ -1086,6 +1089,7 @@ export async function getScribeLabMarks(visitId, db = pool) {
     drawing_started: "Collection started",
     sample_taken: "Sample collected",
     sample_sent: "Sample sent to the lab",
+    sent_outside: "Sample sent to outside lab",
     sample_received: "Sample received at the lab",
     processing: "Processing",
     results_ready: "Results ready",

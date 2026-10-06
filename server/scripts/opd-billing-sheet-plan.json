@@ -1,0 +1,2313 @@
+{
+  "source": "OPD Billing Master CLEAN.xlsx",
+  "rows": [
+    {
+      "name": "17OHP",
+      "price": 1260,
+      "outsourced": true,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 1,
+      "names": ["17OHP"],
+      "out_names": ["17OHP"]
+    },
+    {
+      "name": "24 HOURS URINE CREATININE",
+      "price": 300,
+      "outsourced": true,
+      "sub": "Urine tests",
+      "kind": "test",
+      "sheet_sr": 2,
+      "names": ["24 HOURS URINE CREATININE"],
+      "out_names": ["24 HOURS URINE CREATININE"]
+    },
+    {
+      "name": "ABG",
+      "price": 1000,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 4,
+      "names": ["ABG"],
+      "out_names": []
+    },
+    {
+      "name": "ACE (Angiotensin Converting Enzyme)",
+      "price": 1000,
+      "outsourced": true,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 6,
+      "names": ["ACE (Angiotensin Converting Enzyme)", "ACE LEVEL"],
+      "out_names": ["ACE (Angiotensin Converting Enzyme)", "ACE LEVEL"]
+    },
+    {
+      "name": "Activated Partial Thromboplastin Time (Aptt/Pttk)",
+      "price": 500,
+      "outsourced": true,
+      "sub": "Haematology",
+      "kind": "test",
+      "sheet_sr": 8,
+      "names": ["Activated Partial Thromboplastin Time (Aptt/Pttk)"],
+      "out_names": ["Activated Partial Thromboplastin Time (Aptt/Pttk)"]
+    },
+    {
+      "name": "Adreno Corticotropic Hormone (Acth)",
+      "price": 600,
+      "outsourced": false,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 9,
+      "names": ["Adreno Corticotropic Hormone (Acth)"],
+      "out_names": []
+    },
+    {
+      "name": "AFB (Ziehl-Neelsen) Stain",
+      "price": 300,
+      "outsourced": true,
+      "sub": "Microbiology",
+      "kind": "test",
+      "sheet_sr": 10,
+      "names": ["AFB (Ziehl-Neelsen) Stain", "AFB", "AFB ZN (Ziehl-Neelsen) Stain", "ZN STAIN"],
+      "out_names": ["AFB", "AFB ZN (Ziehl-Neelsen) Stain", "ZN STAIN"]
+    },
+    {
+      "name": "AIH PANEL",
+      "price": 5580,
+      "outsourced": true,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 12,
+      "names": ["AIH PANEL", "AIH PANEL(AUTO)", "autoimmune hepatitis panel"],
+      "out_names": ["AIH PANEL"]
+    },
+    {
+      "name": "Alanine Transferase (ALT/SGPT)",
+      "price": 150,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 14,
+      "names": ["Alanine Transferase (ALT/SGPT)"],
+      "out_names": []
+    },
+    {
+      "name": "Albumin Body Fluids",
+      "price": 150,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 15,
+      "names": ["Albumin Body Fluids"],
+      "out_names": []
+    },
+    {
+      "name": "Albumin Serum",
+      "price": 120,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 16,
+      "names": ["Albumin Serum"],
+      "out_names": []
+    },
+    {
+      "name": "Albumin/Creatinine Ratio 24hours Urine",
+      "price": 550,
+      "outsourced": true,
+      "sub": "Urine tests",
+      "kind": "test",
+      "sheet_sr": 17,
+      "names": ["Albumin/Creatinine Ratio 24hours Urine"],
+      "out_names": ["Albumin/Creatinine Ratio 24hours Urine"]
+    },
+    {
+      "name": "Albumin/Creatinine Ratio Random Urine (Microalbumin/Creatinine)",
+      "price": 550,
+      "outsourced": true,
+      "sub": "Urine tests",
+      "kind": "test",
+      "sheet_sr": 18,
+      "names": [
+        "Albumin/Creatinine Ratio Random Urine (Microalbumin/Creatinine)",
+        "Albumin/Creatinine Ratio Random Urine",
+        "Microalbumin/Creatinine Ratio"
+      ],
+      "out_names": ["Albumin/Creatinine Ratio Random Urine"]
+    },
+    {
+      "name": "ALDOSTERONE",
+      "price": 1620,
+      "outsourced": true,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 19,
+      "names": ["ALDOSTERONE"],
+      "out_names": ["ALDOSTERONE"]
+    },
+    {
+      "name": "ALDOSTERONE PRA (DRC)",
+      "price": 6480,
+      "outsourced": true,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 20,
+      "names": ["ALDOSTERONE PRA (DRC)"],
+      "out_names": ["ALDOSTERONE PRA (DRC)"]
+    },
+    {
+      "name": "Alkaline Phosphatase (Alp)",
+      "price": 90,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 22,
+      "names": ["Alkaline Phosphatase (Alp)"],
+      "out_names": []
+    },
+    {
+      "name": "ALKALINE PHOSPHATASE - BONE SPECIFIC (BSAP)",
+      "price": 1770,
+      "outsourced": true,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 21,
+      "names": ["ALKALINE PHOSPHATASE - BONE SPECIFIC (BSAP)"],
+      "out_names": ["ALKALINE PHOSPHATASE - BONE SPECIFIC (BSAP)"]
+    },
+    {
+      "name": "Alpha Feto Protein (Afp) Serum",
+      "price": 810,
+      "outsourced": true,
+      "sub": "Tumour Markers",
+      "kind": "test",
+      "sheet_sr": 24,
+      "names": ["Alpha Feto Protein (Afp) Serum"],
+      "out_names": ["Alpha Feto Protein (Afp) Serum"]
+    },
+    {
+      "name": "AMH (Anti Mullerian Hormone)",
+      "price": 1300,
+      "outsourced": false,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 25,
+      "names": ["AMH (Anti Mullerian Hormone)"],
+      "out_names": []
+    },
+    {
+      "name": "Amylase Serum",
+      "price": 200,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 27,
+      "names": ["Amylase Serum", "AMYLASE"],
+      "out_names": []
+    },
+    {
+      "name": "ANCA (ANTINEUTROPHIL CYTOPLASMIC ANTIBODIES), IFA",
+      "price": 1840,
+      "outsourced": true,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 28,
+      "names": ["ANCA (ANTINEUTROPHIL CYTOPLASMIC ANTIBODIES), IFA"],
+      "out_names": ["ANCA (ANTINEUTROPHIL CYTOPLASMIC ANTIBODIES), IFA"]
+    },
+    {
+      "name": "ANDROSTENEDIONE",
+      "price": 1800,
+      "outsourced": true,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 29,
+      "names": ["ANDROSTENEDIONE"],
+      "out_names": ["ANDROSTENEDIONE"]
+    },
+    {
+      "name": "Anti Cyclic Citrullinated Peptide (Anti-CCP) Antibody",
+      "price": 1440,
+      "outsourced": true,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 30,
+      "names": [
+        "Anti Cyclic Citrullinated Peptide (Anti-CCP) Antibody",
+        "Anti Cyclic Cirullinated Peptide (Anti-CCP) Antibody"
+      ],
+      "out_names": [
+        "Anti Cyclic Cirullinated Peptide (Anti-CCP) Antibody",
+        "Anti Cyclic Citrullinated Peptide (Anti-CCP) Antibody"
+      ]
+    },
+    {
+      "name": "Anti HBs",
+      "price": 510,
+      "outsourced": false,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 31,
+      "names": ["Anti HBs"],
+      "out_names": []
+    },
+    {
+      "name": "ANTI HCV",
+      "price": 420,
+      "outsourced": false,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 32,
+      "names": ["ANTI HCV"],
+      "out_names": []
+    },
+    {
+      "name": "Anti Nuclear Antibody (ANA)",
+      "price": 630,
+      "outsourced": true,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 33,
+      "names": ["Anti Nuclear Antibody (ANA)"],
+      "out_names": ["Anti Nuclear Antibody (ANA)"]
+    },
+    {
+      "name": "Anti Nuclear Antibody / Factor (ANA / ANF) IFA (Hep-2)",
+      "price": 2160,
+      "outsourced": true,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 34,
+      "names": ["Anti Nuclear Antibody / Factor (ANA / ANF) IFA (Hep-2)"],
+      "out_names": ["Anti Nuclear Antibody / Factor (ANA / ANF) IFA (Hep-2)"]
+    },
+    {
+      "name": "Anti Thyroglobulin Antibody (ATG)",
+      "price": 700,
+      "outsourced": false,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 35,
+      "names": ["Anti Thyroglobulin Antibody (ATG)"],
+      "out_names": []
+    },
+    {
+      "name": "Anti Thyroperoxidase Antibody (Anti-TPO)",
+      "price": 600,
+      "outsourced": false,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 36,
+      "names": ["Anti Thyroperoxidase Antibody (Anti-TPO)"],
+      "out_names": []
+    },
+    {
+      "name": "Anti TSHR",
+      "price": 1500,
+      "outsourced": false,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 37,
+      "names": ["Anti TSHR"],
+      "out_names": []
+    },
+    {
+      "name": "Apolipoprotein B",
+      "price": 370,
+      "outsourced": true,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 39,
+      "names": ["Apolipoprotein B", "apolipolipoprotien B"],
+      "out_names": ["apolipolipoprotien B", "Apolipoprotein B"]
+    },
+    {
+      "name": "Asma (Anti Smooth Muscle Antibody)",
+      "price": 4000,
+      "outsourced": true,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 40,
+      "names": ["Asma (Anti Smooth Muscle Antibody)"],
+      "out_names": ["Asma (Anti Smooth Muscle Antibody)"]
+    },
+    {
+      "name": "Aspartate Aminotransferase (AST/SGOT)",
+      "price": 150,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 41,
+      "names": ["Aspartate Aminotransferase (AST/SGOT)"],
+      "out_names": []
+    },
+    {
+      "name": "BETA - HCG",
+      "price": 550,
+      "outsourced": true,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 43,
+      "names": ["BETA - HCG"],
+      "out_names": ["BETA - HCG"]
+    },
+    {
+      "name": "BETA - HCG TUMORMARKER",
+      "price": 660,
+      "outsourced": true,
+      "sub": "Tumour Markers",
+      "kind": "test",
+      "sheet_sr": 44,
+      "names": ["BETA - HCG TUMORMARKER"],
+      "out_names": ["BETA - HCG TUMORMARKER"]
+    },
+    {
+      "name": "Beta Cross Laps",
+      "price": 1000,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 45,
+      "names": ["Beta Cross Laps"],
+      "out_names": []
+    },
+    {
+      "name": "Beta-2 Microglobulin Serum",
+      "price": 2070,
+      "outsourced": true,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 46,
+      "names": ["Beta-2 Microglobulin Serum"],
+      "out_names": ["Beta-2 Microglobulin Serum"]
+    },
+    {
+      "name": "Bicarbonate",
+      "price": 600,
+      "outsourced": true,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 47,
+      "names": ["Bicarbonate"],
+      "out_names": ["Bicarbonate"]
+    },
+    {
+      "name": "Bilirubin Total",
+      "price": 150,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 48,
+      "names": ["Bilirubin Total", "BilirubinTotal"],
+      "out_names": []
+    },
+    {
+      "name": "Biopsy - Large Specimen",
+      "price": 2500,
+      "outsourced": true,
+      "sub": "Histopathology",
+      "kind": "test",
+      "sheet_sr": 50,
+      "names": ["Biopsy - Large Specimen"],
+      "out_names": ["Biopsy - Large Specimen"]
+    },
+    {
+      "name": "Biopsy - Small Specimen",
+      "price": 945,
+      "outsourced": true,
+      "sub": "Histopathology",
+      "kind": "test",
+      "sheet_sr": 49,
+      "names": ["Biopsy - Small Specimen", "Biopsy", "Histopathology biopsy small specimen"],
+      "out_names": ["Biopsy"]
+    },
+    {
+      "name": "BLOOD CULTURE AEROBIC",
+      "price": 1260,
+      "outsourced": true,
+      "sub": "Microbiology",
+      "kind": "test",
+      "sheet_sr": 51,
+      "names": ["BLOOD CULTURE AEROBIC"],
+      "out_names": ["BLOOD CULTURE AEROBIC"]
+    },
+    {
+      "name": "Blood Grouping (ABO) & Rh Factor",
+      "price": 100,
+      "outsourced": false,
+      "sub": "Haematology",
+      "kind": "test",
+      "sheet_sr": 54,
+      "names": ["Blood Grouping (ABO) & Rh Factor", "BLOOD GROUP", "BLOOD GROUP & RH"],
+      "out_names": []
+    },
+    {
+      "name": "Blood Urea Nitrogen (BUN)",
+      "price": 100,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 56,
+      "names": ["Blood Urea Nitrogen (BUN)"],
+      "out_names": []
+    },
+    {
+      "name": "Blood Urea Nitrogen Random Urine",
+      "price": 150,
+      "outsourced": false,
+      "sub": "Urine tests",
+      "kind": "test",
+      "sheet_sr": 57,
+      "names": ["Blood Urea Nitrogen Random Urine"],
+      "out_names": []
+    },
+    {
+      "name": "BODY FLUID ROUTINE/MICRO",
+      "price": 390,
+      "outsourced": true,
+      "sub": "Clinical Pathology",
+      "kind": "test",
+      "sheet_sr": 58,
+      "names": ["BODY FLUID ROUTINE/MICRO"],
+      "out_names": ["BODY FLUID ROUTINE/MICRO"]
+    },
+    {
+      "name": "Bone Profile",
+      "price": 3000,
+      "outsourced": true,
+      "sub": "Packages",
+      "kind": "test",
+      "sheet_sr": 59,
+      "names": ["Bone Profile"],
+      "out_names": ["Bone Profile"]
+    },
+    {
+      "name": "C-Peptide",
+      "price": 600,
+      "outsourced": false,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 62,
+      "names": ["C-Peptide"],
+      "out_names": []
+    },
+    {
+      "name": "CA 125-Ovarian Cancer Marker",
+      "price": 1120,
+      "outsourced": true,
+      "sub": "Tumour Markers",
+      "kind": "test",
+      "sheet_sr": 63,
+      "names": ["CA 125-Ovarian Cancer Marker"],
+      "out_names": ["CA 125-Ovarian Cancer Marker"]
+    },
+    {
+      "name": "Ca15.3-Breast Cancer Marker",
+      "price": 1350,
+      "outsourced": true,
+      "sub": "Tumour Markers",
+      "kind": "test",
+      "sheet_sr": 64,
+      "names": ["Ca15.3-Breast Cancer Marker"],
+      "out_names": ["Ca15.3-Breast Cancer Marker"]
+    },
+    {
+      "name": "Ca19.9- Pancreatic Cancer Marker",
+      "price": 1350,
+      "outsourced": true,
+      "sub": "Tumour Markers",
+      "kind": "test",
+      "sheet_sr": 65,
+      "names": ["Ca19.9- Pancreatic Cancer Marker"],
+      "out_names": ["Ca19.9- Pancreatic Cancer Marker"]
+    },
+    {
+      "name": "Calcitonin",
+      "price": 2070,
+      "outsourced": true,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 66,
+      "names": ["Calcitonin"],
+      "out_names": ["Calcitonin"]
+    },
+    {
+      "name": "CALCIUM",
+      "price": 75,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 67,
+      "names": ["CALCIUM"],
+      "out_names": []
+    },
+    {
+      "name": "Calcium (24 Hrs. Urine)",
+      "price": 200,
+      "outsourced": false,
+      "sub": "Urine tests",
+      "kind": "test",
+      "sheet_sr": 68,
+      "names": ["Calcium (24 Hrs. Urine)"],
+      "out_names": []
+    },
+    {
+      "name": "Calcium (Urine Spot Test)",
+      "price": 150,
+      "outsourced": false,
+      "sub": "Urine tests",
+      "kind": "test",
+      "sheet_sr": 69,
+      "names": ["Calcium (Urine Spot Test)"],
+      "out_names": []
+    },
+    {
+      "name": "Calcium/Creatinine - Ratio Spot Urine",
+      "price": 400,
+      "outsourced": false,
+      "sub": "Urine tests",
+      "kind": "test",
+      "sheet_sr": 70,
+      "names": ["Calcium/Creatinine - Ratio Spot Urine"],
+      "out_names": []
+    },
+    {
+      "name": "CEA",
+      "price": 580,
+      "outsourced": true,
+      "sub": "Tumour Markers",
+      "kind": "test",
+      "sheet_sr": 72,
+      "names": ["CEA"],
+      "out_names": ["CEA"]
+    },
+    {
+      "name": "Ceruloplasmin",
+      "price": 990,
+      "outsourced": true,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 73,
+      "names": ["Ceruloplasmin"],
+      "out_names": ["Ceruloplasmin"]
+    },
+    {
+      "name": "Chikungunya Igg & Igm",
+      "price": 1000,
+      "outsourced": false,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 75,
+      "names": ["Chikungunya Igg & Igm"],
+      "out_names": []
+    },
+    {
+      "name": "Chloride",
+      "price": 150,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 76,
+      "names": ["Chloride"],
+      "out_names": []
+    },
+    {
+      "name": "Chloride Random Urine",
+      "price": 150,
+      "outsourced": false,
+      "sub": "Urine tests",
+      "kind": "test",
+      "sheet_sr": 77,
+      "names": ["Chloride Random Urine"],
+      "out_names": []
+    },
+    {
+      "name": "Cholesterol - LDL Direct",
+      "price": 640,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 78,
+      "names": ["Cholesterol - LDL Direct"],
+      "out_names": []
+    },
+    {
+      "name": "Cholesterol Total Serum",
+      "price": 250,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 79,
+      "names": ["Cholesterol Total Serum"],
+      "out_names": []
+    },
+    {
+      "name": "Chromogranin",
+      "price": 7500,
+      "outsourced": true,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 80,
+      "names": ["Chromogranin"],
+      "out_names": ["chromogranin"]
+    },
+    {
+      "name": "CHROMOSOME ANALYSIS (KARYOTYPE) COUPLE BLOOD (Q026)",
+      "price": 6200,
+      "outsourced": true,
+      "sub": "Molecular & Genetics",
+      "kind": "test",
+      "sheet_sr": 81,
+      "names": ["CHROMOSOME ANALYSIS (KARYOTYPE) COUPLE BLOOD (Q026)"],
+      "out_names": ["CHROMOSOME ANALYSIS (KARYOTYPE) COUPLE BLOOD (Q026)"]
+    },
+    {
+      "name": "CK-MB",
+      "price": 420,
+      "outsourced": true,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 82,
+      "names": ["CK-MB", "CPK M", "CPK MB"],
+      "out_names": ["CK-MB", "CPK M", "CPK MB"]
+    },
+    {
+      "name": "CK: CREATINE KINASE",
+      "price": 270,
+      "outsourced": true,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 83,
+      "names": ["CK: CREATINE KINASE"],
+      "out_names": ["CK: CREATINE KINASE"]
+    },
+    {
+      "name": "Complete Blood Count (CBC)",
+      "price": 350,
+      "outsourced": false,
+      "sub": "Haematology",
+      "kind": "test",
+      "sheet_sr": 84,
+      "names": ["Complete Blood Count (CBC)"],
+      "out_names": []
+    },
+    {
+      "name": "Copper Serum",
+      "price": 1260,
+      "outsourced": true,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 85,
+      "names": ["Copper Serum"],
+      "out_names": ["Copper Serum"]
+    },
+    {
+      "name": "CORTISOL FREE 24 HOUR URINE",
+      "price": 1200,
+      "outsourced": true,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 86,
+      "names": ["CORTISOL FREE 24 HOUR URINE"],
+      "out_names": ["CORTISOL FREE 24 HOUR URINE"]
+    },
+    {
+      "name": "Cortisol Serum Evening",
+      "price": 350,
+      "outsourced": false,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 87,
+      "names": ["Cortisol Serum Evening"],
+      "out_names": []
+    },
+    {
+      "name": "Cortisol Serum Morning",
+      "price": 350,
+      "outsourced": false,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 88,
+      "names": ["Cortisol Serum Morning"],
+      "out_names": []
+    },
+    {
+      "name": "CPK",
+      "price": 420,
+      "outsourced": true,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 89,
+      "names": ["CPK"],
+      "out_names": ["CPK"]
+    },
+    {
+      "name": "Creatinine Serum (with eGFR)",
+      "price": 100,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 92,
+      "names": ["Creatinine Serum (with eGFR)", "CREATININE", "CREATININE EGFR Serum"],
+      "out_names": []
+    },
+    {
+      "name": "CRP QUANTITATIVE",
+      "price": 420,
+      "outsourced": true,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 94,
+      "names": ["CRP QUANTITATIVE"],
+      "out_names": ["CRP QUANTITATIVE"]
+    },
+    {
+      "name": "Culture Aerobic Sputum",
+      "price": 820,
+      "outsourced": true,
+      "sub": "Microbiology",
+      "kind": "test",
+      "sheet_sr": 96,
+      "names": ["Culture Aerobic Sputum"],
+      "out_names": ["Culture Aerobic Sputum"]
+    },
+    {
+      "name": "Culture Aerobic Stool",
+      "price": 730,
+      "outsourced": true,
+      "sub": "Microbiology",
+      "kind": "test",
+      "sheet_sr": 97,
+      "names": ["Culture Aerobic Stool"],
+      "out_names": ["Culture Aerobic Stool"]
+    },
+    {
+      "name": "D-Dimer",
+      "price": 950,
+      "outsourced": true,
+      "sub": "Haematology",
+      "kind": "test",
+      "sheet_sr": 98,
+      "names": ["D-Dimer"],
+      "out_names": ["D-Dimer"]
+    },
+    {
+      "name": "Dehydroepiandrosterone Sulphate (Dheas)",
+      "price": 600,
+      "outsourced": false,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 99,
+      "names": ["Dehydroepiandrosterone Sulphate (Dheas)"],
+      "out_names": []
+    },
+    {
+      "name": "DENGUE NS1 IGG IGM",
+      "price": 1200,
+      "outsourced": false,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 100,
+      "names": ["DENGUE NS1 IGG IGM"],
+      "out_names": []
+    },
+    {
+      "name": "DHT",
+      "price": 2610,
+      "outsourced": true,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 101,
+      "names": ["DHT"],
+      "out_names": ["DHT"]
+    },
+    {
+      "name": "Diabetes Panel (Base+)",
+      "price": 2000,
+      "outsourced": false,
+      "sub": "Packages",
+      "kind": "test",
+      "sheet_sr": 102,
+      "names": ["Diabetes Panel (Base+)", "Diabetes Panel (BASE+_)"],
+      "out_names": []
+    },
+    {
+      "name": "Diabetes Profile (Base)",
+      "price": 1300,
+      "outsourced": false,
+      "sub": "Packages",
+      "kind": "test",
+      "sheet_sr": 103,
+      "names": ["Diabetes Profile (Base)", "DIABETIC PROFILE"],
+      "out_names": []
+    },
+    {
+      "name": "Electrolyte Serum",
+      "price": 400,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 105,
+      "names": ["Electrolyte Serum", "ELECTROLYTES"],
+      "out_names": []
+    },
+    {
+      "name": "Erythrocyte Sedimentation Rate (ESR)",
+      "price": 150,
+      "outsourced": false,
+      "sub": "Haematology",
+      "kind": "test",
+      "sheet_sr": 107,
+      "names": ["Erythrocyte Sedimentation Rate (ESR)"],
+      "out_names": []
+    },
+    {
+      "name": "ERYTHROPOIETIN (EPO) SERUM",
+      "price": 1950,
+      "outsourced": true,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 108,
+      "names": ["ERYTHROPOIETIN (EPO) SERUM", "ERYTHROPOIETIN (EPO )SERUM"],
+      "out_names": ["ERYTHROPOIETIN (EPO )SERUM"]
+    },
+    {
+      "name": "ESTRADIOL (E2)",
+      "price": 350,
+      "outsourced": false,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 109,
+      "names": ["ESTRADIOL (E2)"],
+      "out_names": []
+    },
+    {
+      "name": "FECAL ELASTASE",
+      "price": 4860,
+      "outsourced": true,
+      "sub": "Clinical Pathology",
+      "kind": "test",
+      "sheet_sr": 112,
+      "names": ["FECAL ELASTASE"],
+      "out_names": ["FECAL ELASTASE"]
+    },
+    {
+      "name": "FERRITIN",
+      "price": 400,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 113,
+      "names": ["FERRITIN"],
+      "out_names": []
+    },
+    {
+      "name": "FIB 4 INDEX BLOOD",
+      "price": 500,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 115,
+      "names": ["FIB 4 INDEX BLOOD"],
+      "out_names": []
+    },
+    {
+      "name": "Fibro Scan",
+      "price": 1000,
+      "outsourced": false,
+      "sub": "Other Services",
+      "kind": "procedure",
+      "sheet_sr": 116,
+      "names": ["Fibro Scan"],
+      "out_names": []
+    },
+    {
+      "name": "FINV PACKAGE - BLOOD",
+      "price": 1100,
+      "outsourced": false,
+      "sub": "Packages",
+      "kind": "test",
+      "sheet_sr": 117,
+      "names": ["FINV PACKAGE - BLOOD"],
+      "out_names": []
+    },
+    {
+      "name": "FLUID CULTURE",
+      "price": 360,
+      "outsourced": true,
+      "sub": "Microbiology",
+      "kind": "test",
+      "sheet_sr": 118,
+      "names": ["FLUID CULTURE"],
+      "out_names": ["FLUID CULTURE"]
+    },
+    {
+      "name": "Folate (Folic Acid)",
+      "price": 910,
+      "outsourced": true,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 119,
+      "names": ["Folate (Folic Acid)", "FOLATE", "FOLIC ACID"],
+      "out_names": ["FOLATE", "FOLIC ACID"]
+    },
+    {
+      "name": "Fractional excretion Potassium",
+      "price": 600,
+      "outsourced": false,
+      "sub": "Urine tests",
+      "kind": "test",
+      "sheet_sr": 121,
+      "names": ["Fractional excretion Potassium"],
+      "out_names": []
+    },
+    {
+      "name": "Fractional excretion Sodium",
+      "price": 600,
+      "outsourced": false,
+      "sub": "Urine tests",
+      "kind": "test",
+      "sheet_sr": 122,
+      "names": ["Fractional excretion Sodium"],
+      "out_names": []
+    },
+    {
+      "name": "FREE TESTOSTERONE",
+      "price": 1770,
+      "outsourced": true,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 124,
+      "names": ["FREE TESTOSTERONE"],
+      "out_names": ["FREE TESTOSTERONE"]
+    },
+    {
+      "name": "Fructosamine",
+      "price": 470,
+      "outsourced": true,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 125,
+      "names": ["Fructosamine"],
+      "out_names": ["Fructosamine"]
+    },
+    {
+      "name": "FSH (Follicle Stimulating Hormone)",
+      "price": 350,
+      "outsourced": false,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 126,
+      "names": ["FSH (Follicle Stimulating Hormone)"],
+      "out_names": []
+    },
+    {
+      "name": "FUNGAL EXAMINATION",
+      "price": 320,
+      "outsourced": true,
+      "sub": "Microbiology",
+      "kind": "test",
+      "sheet_sr": 127,
+      "names": ["FUNGAL EXAMINATION"],
+      "out_names": ["FUNGAL EXAMINATION"]
+    },
+    {
+      "name": "GAD 65",
+      "price": 1000,
+      "outsourced": true,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 128,
+      "names": ["GAD 65"],
+      "out_names": ["GAD 65"]
+    },
+    {
+      "name": "GAD 65, IAA, IA2",
+      "price": 2000,
+      "outsourced": true,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 129,
+      "names": ["GAD 65, IAA, IA2"],
+      "out_names": ["GAD 65, IAA, IA2"]
+    },
+    {
+      "name": "Gamma Glutamyl Transferase (GGT)",
+      "price": 100,
+      "outsourced": true,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 131,
+      "names": ["Gamma Glutamyl Transferase (GGT)"],
+      "out_names": ["Gamma Glutamyl Transferase (GGT)"]
+    },
+    {
+      "name": "Gastrin",
+      "price": 1170,
+      "outsourced": true,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 132,
+      "names": ["Gastrin"],
+      "out_names": ["Gastrin"]
+    },
+    {
+      "name": "General Health Check-up",
+      "price": 3000,
+      "outsourced": false,
+      "sub": "Packages",
+      "kind": "test",
+      "sheet_sr": 133,
+      "names": ["General Health Check-up"],
+      "out_names": []
+    },
+    {
+      "name": "Glucose - Random Blood",
+      "price": 50,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 135,
+      "names": ["Glucose - Random Blood"],
+      "out_names": []
+    },
+    {
+      "name": "Glucose 24hrs Urine",
+      "price": 50,
+      "outsourced": false,
+      "sub": "Urine tests",
+      "kind": "test",
+      "sheet_sr": 136,
+      "names": ["Glucose 24hrs Urine"],
+      "out_names": []
+    },
+    {
+      "name": "Glucose Fasting",
+      "price": 50,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 137,
+      "names": ["Glucose Fasting", "FBS"],
+      "out_names": []
+    },
+    {
+      "name": "Glucose Post Prandial - PP",
+      "price": 50,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 138,
+      "names": ["Glucose Post Prandial - PP"],
+      "out_names": []
+    },
+    {
+      "name": "Glucose Random Urine",
+      "price": 100,
+      "outsourced": false,
+      "sub": "Urine tests",
+      "kind": "test",
+      "sheet_sr": 139,
+      "names": ["Glucose Random Urine"],
+      "out_names": []
+    },
+    {
+      "name": "GRAM STAIN",
+      "price": 1170,
+      "outsourced": true,
+      "sub": "Microbiology",
+      "kind": "test",
+      "sheet_sr": 140,
+      "names": ["GRAM STAIN"],
+      "out_names": ["GRAM STAIN"]
+    },
+    {
+      "name": "Growth Hormone (Gh)",
+      "price": 300,
+      "outsourced": false,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 141,
+      "names": ["Growth Hormone (Gh)"],
+      "out_names": []
+    },
+    {
+      "name": "H S CRP",
+      "price": 800,
+      "outsourced": true,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 143,
+      "names": ["H S CRP"],
+      "out_names": ["H S CRP"]
+    },
+    {
+      "name": "HB ELECTROPHORESIS (HPLC)",
+      "price": 810,
+      "outsourced": true,
+      "sub": "Haematology",
+      "kind": "test",
+      "sheet_sr": 144,
+      "names": ["HB ELECTROPHORESIS (HPLC)", "HB ELECTROPHORESIS", "HB Electrophoresis HPLC"],
+      "out_names": ["HB ELECTROPHORESIS", "HB Electrophoresis HPLC"]
+    },
+    {
+      "name": "HBA1C",
+      "price": 350,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 147,
+      "names": ["HBA1C"],
+      "out_names": []
+    },
+    {
+      "name": "HBSAG RAPID",
+      "price": 300,
+      "outsourced": false,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 148,
+      "names": ["HBSAG RAPID"],
+      "out_names": []
+    },
+    {
+      "name": "HCV RAPID",
+      "price": 300,
+      "outsourced": false,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 149,
+      "names": ["HCV RAPID"],
+      "out_names": []
+    },
+    {
+      "name": "Hemoglobin (Hb)",
+      "price": 150,
+      "outsourced": false,
+      "sub": "Haematology",
+      "kind": "test",
+      "sheet_sr": 151,
+      "names": ["Hemoglobin (Hb)"],
+      "out_names": []
+    },
+    {
+      "name": "HEPATITIS A ANTIBODY (ANTI-HAV), IGM",
+      "price": 1060,
+      "outsourced": true,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 152,
+      "names": [
+        "HEPATITIS A ANTIBODY (ANTI-HAV), IGM",
+        "HEPATITIS A ANTIBODY(ANTI-HAC), IGM(HAV IGM)"
+      ],
+      "out_names": ["HEPATITIS A ANTIBODY(ANTI-HAC), IGM(HAV IGM)"]
+    },
+    {
+      "name": "HIV I & II",
+      "price": 300,
+      "outsourced": false,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 154,
+      "names": ["HIV I & II", "HIV", "HIV I&II"],
+      "out_names": []
+    },
+    {
+      "name": "HLAB27",
+      "price": 2880,
+      "outsourced": true,
+      "sub": "Molecular & Genetics",
+      "kind": "test",
+      "sheet_sr": 156,
+      "names": ["HLAB27"],
+      "out_names": ["HLAB27"]
+    },
+    {
+      "name": "Home Collection",
+      "price": 50,
+      "outsourced": false,
+      "sub": "Other Services",
+      "kind": "other",
+      "sheet_sr": 159,
+      "names": ["Home Collection"],
+      "out_names": []
+    },
+    {
+      "name": "Homocysteine",
+      "price": 900,
+      "outsourced": true,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 160,
+      "names": ["Homocysteine"],
+      "out_names": ["Homocysteine"]
+    },
+    {
+      "name": "IA2",
+      "price": 500,
+      "outsourced": true,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 161,
+      "names": ["IA2"],
+      "out_names": ["IA2"]
+    },
+    {
+      "name": "IAA",
+      "price": 500,
+      "outsourced": true,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 162,
+      "names": ["IAA"],
+      "out_names": ["IAA"]
+    },
+    {
+      "name": "IGF-1",
+      "price": 600,
+      "outsourced": true,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 164,
+      "names": ["IGF-1"],
+      "out_names": ["IGF-1"]
+    },
+    {
+      "name": "Immunoglobulin IgG Serum",
+      "price": 400,
+      "outsourced": true,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 166,
+      "names": ["Immunoglobulin IgG Serum", "IGG"],
+      "out_names": ["IMMUNOGLOBULIN IgG serum"]
+    },
+    {
+      "name": "IMMUNOGLOBULIN IgG SUBCLASS 4",
+      "price": 6210,
+      "outsourced": true,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 167,
+      "names": ["IMMUNOGLOBULIN IgG SUBCLASS 4"],
+      "out_names": ["IMMUNOGLOBULIN IgG SUBCLASS 4"]
+    },
+    {
+      "name": "Inhibin B",
+      "price": 1860,
+      "outsourced": true,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 169,
+      "names": ["Inhibin B"],
+      "out_names": ["Inhibin B"]
+    },
+    {
+      "name": "Insulin - Fasting",
+      "price": 400,
+      "outsourced": false,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 170,
+      "names": ["Insulin - Fasting"],
+      "out_names": []
+    },
+    {
+      "name": "Interleukin-6",
+      "price": 2160,
+      "outsourced": true,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 171,
+      "names": ["Interleukin-6"],
+      "out_names": ["Interleukin-6"]
+    },
+    {
+      "name": "Iron Studies",
+      "price": 400,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 172,
+      "names": ["Iron Studies"],
+      "out_names": []
+    },
+    {
+      "name": "JAK 2,GENE MUTATION, PCR QUALITATIVE",
+      "price": 5140,
+      "outsourced": true,
+      "sub": "Molecular & Genetics",
+      "kind": "test",
+      "sheet_sr": 173,
+      "names": ["JAK 2,GENE MUTATION, PCR QUALITATIVE"],
+      "out_names": ["JAK 2,GENE MUTATION, PCR QUALITATIVE"]
+    },
+    {
+      "name": "Karyotype",
+      "price": 5240,
+      "outsourced": true,
+      "sub": "Molecular & Genetics",
+      "kind": "test",
+      "sheet_sr": 174,
+      "names": ["Karyotype"],
+      "out_names": ["Karyotype"]
+    },
+    {
+      "name": "KETONES",
+      "price": 300,
+      "outsourced": false,
+      "sub": "Urine tests",
+      "kind": "test",
+      "sheet_sr": 176,
+      "names": ["KETONES"],
+      "out_names": []
+    },
+    {
+      "name": "KFT (BUNCREAT.U/A)",
+      "price": 300,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 177,
+      "names": ["KFT (BUNCREAT.U/A)"],
+      "out_names": []
+    },
+    {
+      "name": "LDH (Lactate Dehydrogenase) Serum",
+      "price": 100,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 178,
+      "names": ["LDH (Lactate Dehydrogenase) Serum"],
+      "out_names": []
+    },
+    {
+      "name": "Leptospira Antibody IgM",
+      "price": 1800,
+      "outsourced": true,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 179,
+      "names": ["Leptospira Antibody IgM"],
+      "out_names": ["Leptospira Antibody IgM"]
+    },
+    {
+      "name": "LFT",
+      "price": 550,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 180,
+      "names": ["LFT", "Liver Function Test - LFT"],
+      "out_names": []
+    },
+    {
+      "name": "LH (Luteinizing Hormone)",
+      "price": 350,
+      "outsourced": false,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 181,
+      "names": ["LH (Luteinizing Hormone)", "LH (Leutinizing Hormone)"],
+      "out_names": []
+    },
+    {
+      "name": "LIPASE",
+      "price": 520,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 182,
+      "names": ["LIPASE"],
+      "out_names": []
+    },
+    {
+      "name": "LIPID PROFILE",
+      "price": 450,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 184,
+      "names": ["LIPID PROFILE"],
+      "out_names": []
+    },
+    {
+      "name": "Lipoprotein",
+      "price": 900,
+      "outsourced": true,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 185,
+      "names": ["Lipoprotein", "lipoprotien"],
+      "out_names": ["lipoprotien", "Lipoprotein"]
+    },
+    {
+      "name": "Liver Function Test (LFT) with GGT",
+      "price": 600,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 187,
+      "names": ["Liver Function Test (LFT) with GGT"],
+      "out_names": []
+    },
+    {
+      "name": "Liver-Kidney Microsome (Lkm) - 1 Antibody",
+      "price": 2420,
+      "outsourced": false,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 188,
+      "names": ["Liver-Kidney Microsome (Lkm) - 1 Antibody"],
+      "out_names": []
+    },
+    {
+      "name": "Macroprolactin",
+      "price": 350,
+      "outsourced": true,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 191,
+      "names": ["Macroprolactin"],
+      "out_names": ["Macroprolactin"]
+    },
+    {
+      "name": "MAGNESIUM",
+      "price": 100,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 192,
+      "names": ["MAGNESIUM"],
+      "out_names": []
+    },
+    {
+      "name": "Malarial Falciparum And Vivax Antigen (Parasite V & F)",
+      "price": 600,
+      "outsourced": false,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 193,
+      "names": ["Malarial Falciparum And Vivax Antigen (Parasite V & F)"],
+      "out_names": []
+    },
+    {
+      "name": "METANEPHRINES, FREE, PLASMA",
+      "price": 5760,
+      "outsourced": true,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 196,
+      "names": ["METANEPHRINES, FREE, PLASMA"],
+      "out_names": ["METANEPHRINES, FREE, PLASMA"]
+    },
+    {
+      "name": "Microalbumin Urine Spot",
+      "price": 150,
+      "outsourced": false,
+      "sub": "Urine tests",
+      "kind": "test",
+      "sheet_sr": 197,
+      "names": ["Microalbumin Urine Spot"],
+      "out_names": []
+    },
+    {
+      "name": "Oral Glucose Tolerance Test (O-GTT) 2 Samples/3 Samples in Pregnancy",
+      "price": 500,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 200,
+      "names": [
+        "Oral Glucose Tolerance Test (O-GTT) 2 Samples/3 Samples in Pregnancy",
+        "Oral Glucose Tolerance Test (O-GTT) 2"
+      ],
+      "out_names": []
+    },
+    {
+      "name": "Osmolality - Serum",
+      "price": 400,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 201,
+      "names": ["Osmolality - Serum"],
+      "out_names": []
+    },
+    {
+      "name": "Osmolality - Urine",
+      "price": 400,
+      "outsourced": false,
+      "sub": "Urine tests",
+      "kind": "test",
+      "sheet_sr": 202,
+      "names": ["Osmolality - Urine"],
+      "out_names": []
+    },
+    {
+      "name": "OUTSIDE SAMPLE COLLECTION CHARGES",
+      "price": 500,
+      "outsourced": false,
+      "sub": "Other Services",
+      "kind": "other",
+      "sheet_sr": 203,
+      "names": ["OUTSIDE SAMPLE COLLECTION CHARGES"],
+      "out_names": []
+    },
+    {
+      "name": "P1NP",
+      "price": 900,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 204,
+      "names": ["P1NP"],
+      "out_names": []
+    },
+    {
+      "name": "Parathyroid Hormone (PTH)",
+      "price": 700,
+      "outsourced": false,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 205,
+      "names": ["Parathyroid Hormone (PTH)"],
+      "out_names": []
+    },
+    {
+      "name": "Parietal Cell Antibody IFA",
+      "price": 1900,
+      "outsourced": true,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 206,
+      "names": ["Parietal Cell Antibody IFA"],
+      "out_names": ["parietal cell antibody ifa"]
+    },
+    {
+      "name": "PERIPHERAL BLOOD SMEAR EXAMINATION(PBF)",
+      "price": 110,
+      "outsourced": true,
+      "sub": "Haematology",
+      "kind": "test",
+      "sheet_sr": 209,
+      "names": ["PERIPHERAL BLOOD SMEAR EXAMINATION(PBF)"],
+      "out_names": ["PERIPHERAL BLOOD SMEAR EXAMINATION(PBF)"]
+    },
+    {
+      "name": "PHOSPHOLIPASE A2 RECEPTOR ANTIBODY (PLA2R)",
+      "price": 4770,
+      "outsourced": true,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 211,
+      "names": ["PHOSPHOLIPASE A2 RECEPTOR ANTIBODY (PLA2R)"],
+      "out_names": ["PHOSPHOLIPASE A2 RECEPTOR ANTIBODY (PLA2R)"]
+    },
+    {
+      "name": "Phospholipid Antibodies Panel, IgG & IgM",
+      "price": 1500,
+      "outsourced": true,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 212,
+      "names": [
+        "Phospholipid Antibodies Panel, IgG & IgM",
+        "PHOSPHOLIPID ANTYBODIES PANEL , IgG & IgM",
+        "PHOSPHOLIPID ANTIBODIES PANEL , IgG & IgM",
+        "ANTIPHOSPHOLIPID ANTIBODY (APLA)(Z990)"
+      ],
+      "out_names": [
+        "PHOSPHOLIPID ANTYBODIES PANEL , IgG & IgM",
+        "PHOSPHOLIPID ANTIBODIES PANEL , IgG & IgM",
+        "ANTIPHOSPHOLIPID ANTIBODY (APLA)(Z990)"
+      ]
+    },
+    {
+      "name": "PHOSPHORUS",
+      "price": 75,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 213,
+      "names": ["PHOSPHORUS", "PHOSPHOROUS", "Phosphorus Serum"],
+      "out_names": []
+    },
+    {
+      "name": "Phosphorus 24hrs Urine",
+      "price": 150,
+      "outsourced": false,
+      "sub": "Urine tests",
+      "kind": "test",
+      "sheet_sr": 214,
+      "names": ["Phosphorus 24hrs Urine"],
+      "out_names": []
+    },
+    {
+      "name": "Phosphorus Random Urine",
+      "price": 150,
+      "outsourced": false,
+      "sub": "Urine tests",
+      "kind": "test",
+      "sheet_sr": 215,
+      "names": ["Phosphorus Random Urine"],
+      "out_names": []
+    },
+    {
+      "name": "Platelet Count",
+      "price": 150,
+      "outsourced": false,
+      "sub": "Haematology",
+      "kind": "test",
+      "sheet_sr": 217,
+      "names": ["Platelet Count", "PLATELETS"],
+      "out_names": []
+    },
+    {
+      "name": "Potassium",
+      "price": 150,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 220,
+      "names": ["Potassium"],
+      "out_names": []
+    },
+    {
+      "name": "Potassium 24h Urine",
+      "price": 250,
+      "outsourced": false,
+      "sub": "Urine tests",
+      "kind": "test",
+      "sheet_sr": 221,
+      "names": ["Potassium 24h Urine"],
+      "out_names": []
+    },
+    {
+      "name": "Potassium Random Urine",
+      "price": 150,
+      "outsourced": false,
+      "sub": "Urine tests",
+      "kind": "test",
+      "sheet_sr": 222,
+      "names": ["Potassium Random Urine"],
+      "out_names": []
+    },
+    {
+      "name": "Pro B-Type Natriuretic Peptide (Pro BNP)",
+      "price": 1500,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 223,
+      "names": ["Pro B-Type Natriuretic Peptide (Pro BNP)"],
+      "out_names": []
+    },
+    {
+      "name": "Procalcitonin",
+      "price": 2700,
+      "outsourced": true,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 224,
+      "names": ["Procalcitonin"],
+      "out_names": ["Procalcitonin"]
+    },
+    {
+      "name": "PROGESTERONE",
+      "price": 540,
+      "outsourced": true,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 226,
+      "names": ["PROGESTERONE"],
+      "out_names": ["PROGESTERONE"]
+    },
+    {
+      "name": "PROLACTIN (PRL)",
+      "price": 350,
+      "outsourced": false,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 227,
+      "names": ["PROLACTIN (PRL)"],
+      "out_names": []
+    },
+    {
+      "name": "Prostate Specific Antigen (PSA)- FREE",
+      "price": 760,
+      "outsourced": true,
+      "sub": "Tumour Markers",
+      "kind": "test",
+      "sheet_sr": 228,
+      "names": ["Prostate Specific Antigen (PSA)- FREE"],
+      "out_names": ["Prostate Specific Antigen (PSA)- FREE"]
+    },
+    {
+      "name": "Prostate Specific Antigen (PSA)- Total",
+      "price": 600,
+      "outsourced": false,
+      "sub": "Tumour Markers",
+      "kind": "test",
+      "sheet_sr": 229,
+      "names": ["Prostate Specific Antigen (PSA)- Total"],
+      "out_names": []
+    },
+    {
+      "name": "Protein (Urine Spot Test)",
+      "price": 150,
+      "outsourced": true,
+      "sub": "Urine tests",
+      "kind": "test",
+      "sheet_sr": 230,
+      "names": ["Protein (Urine Spot Test)"],
+      "out_names": ["Protein (Urine Spot Test)"]
+    },
+    {
+      "name": "Protein Creatinine Ratio 24h Urine",
+      "price": 900,
+      "outsourced": true,
+      "sub": "Urine tests",
+      "kind": "test",
+      "sheet_sr": 231,
+      "names": ["Protein Creatinine Ratio 24h Urine"],
+      "out_names": ["Protein Creatinine Ratio 24h Urine"]
+    },
+    {
+      "name": "Protein Creatinine Ratio Random Urine",
+      "price": 300,
+      "outsourced": true,
+      "sub": "Urine tests",
+      "kind": "test",
+      "sheet_sr": 232,
+      "names": ["Protein Creatinine Ratio Random Urine"],
+      "out_names": ["Protein Creatinine Ratio Random Urine"]
+    },
+    {
+      "name": "Protein Electrophoresis Serum (M Band)",
+      "price": 680,
+      "outsourced": true,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 233,
+      "names": [
+        "Protein Electrophoresis Serum (M Band)",
+        "Protein ElectrophoresisSerum",
+        "Protein Electrophoresis Serum",
+        "M band for PROTEIN ELECTROPHORESIS"
+      ],
+      "out_names": [
+        "Protein ElectrophoresisSerum",
+        "Protein Electrophoresis Serum",
+        "M band for PROTEIN ELECTROPHORESIS"
+      ]
+    },
+    {
+      "name": "Protein Total",
+      "price": 100,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 234,
+      "names": ["Protein Total"],
+      "out_names": []
+    },
+    {
+      "name": "Protein Total 24 Hours Urine",
+      "price": 450,
+      "outsourced": true,
+      "sub": "Urine tests",
+      "kind": "test",
+      "sheet_sr": 236,
+      "names": ["Protein Total 24 Hours Urine", "24 HOURS URINE PROTEIN"],
+      "out_names": ["Protein Total 24 Hours Urine", "24 HOURS URINE PROTEIN"]
+    },
+    {
+      "name": "PT / INR (Prothrombin Time)",
+      "price": 280,
+      "outsourced": true,
+      "sub": "Haematology",
+      "kind": "test",
+      "sheet_sr": 238,
+      "names": ["PT / INR (Prothrombin Time)", "PTI/INR", "PT"],
+      "out_names": ["PTI/INR", "PT"]
+    },
+    {
+      "name": "PUS CULTURE",
+      "price": 860,
+      "outsourced": true,
+      "sub": "Microbiology",
+      "kind": "test",
+      "sheet_sr": 239,
+      "names": ["PUS CULTURE"],
+      "out_names": ["PUS CULTURE"]
+    },
+    {
+      "name": "QUANTIFERON®-TB GOLD (QFT), INTERFERON GAMMA RELEASE ASSAY (IGRA)",
+      "price": 3840,
+      "outsourced": true,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 240,
+      "names": ["QUANTIFERON®-TB GOLD (QFT), INTERFERON GAMMA RELEASE ASSAY (IGRA)"],
+      "out_names": ["QUANTIFERON®-TB GOLD (QFT), INTERFERON GAMMA RELEASE ASSAY (IGRA)"]
+    },
+    {
+      "name": "RA FACTOR",
+      "price": 320,
+      "outsourced": true,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 241,
+      "names": ["RA FACTOR"],
+      "out_names": ["RA FACTOR"]
+    },
+    {
+      "name": "Renal Function Test (RFT)",
+      "price": 500,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 243,
+      "names": ["Renal Function Test (RFT)"],
+      "out_names": []
+    },
+    {
+      "name": "RETICULOCYTE COUNT",
+      "price": 350,
+      "outsourced": true,
+      "sub": "Haematology",
+      "kind": "test",
+      "sheet_sr": 244,
+      "names": ["RETICULOCYTE COUNT"],
+      "out_names": ["RETICULOCYTE COUNT"]
+    },
+    {
+      "name": "Rh Antibody Titre",
+      "price": 400,
+      "outsourced": false,
+      "sub": "Haematology",
+      "kind": "test",
+      "sheet_sr": 245,
+      "names": ["Rh Antibody Titre"],
+      "out_names": []
+    },
+    {
+      "name": "RUBELLA ANTIBODY IGG & IGM",
+      "price": 1180,
+      "outsourced": true,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 248,
+      "names": ["RUBELLA ANTIBODY IGG & IGM"],
+      "out_names": ["RUBELLA ANTIBODY IGG & IGM"]
+    },
+    {
+      "name": "SEMEN ANALYSIS",
+      "price": 400,
+      "outsourced": true,
+      "sub": "Clinical Pathology",
+      "kind": "test",
+      "sheet_sr": 249,
+      "names": ["SEMEN ANALYSIS"],
+      "out_names": ["SEMEN ANALYSIS"]
+    },
+    {
+      "name": "SHBG",
+      "price": 2250,
+      "outsourced": true,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 250,
+      "names": ["SHBG"],
+      "out_names": ["SHBG"]
+    },
+    {
+      "name": "Sodium 24h Urine",
+      "price": 250,
+      "outsourced": false,
+      "sub": "Urine tests",
+      "kind": "test",
+      "sheet_sr": 252,
+      "names": ["Sodium 24h Urine"],
+      "out_names": []
+    },
+    {
+      "name": "Sodium Serum",
+      "price": 150,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 251,
+      "names": ["Sodium Serum", "Sodium"],
+      "out_names": []
+    },
+    {
+      "name": "Sodium Urine",
+      "price": 150,
+      "outsourced": false,
+      "sub": "Urine tests",
+      "kind": "test",
+      "sheet_sr": 254,
+      "names": ["Sodium Urine"],
+      "out_names": []
+    },
+    {
+      "name": "Spot Sugar",
+      "price": 20,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 256,
+      "names": ["Spot Sugar"],
+      "out_names": []
+    },
+    {
+      "name": "SSA/Ro ANTIBODY, SERUM",
+      "price": 1440,
+      "outsourced": true,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 257,
+      "names": ["SSA/Ro ANTIBODY, SERUM"],
+      "out_names": ["SSA/Ro ANTIBODY, SERUM"]
+    },
+    {
+      "name": "SWAB CULTURE",
+      "price": 360,
+      "outsourced": true,
+      "sub": "Microbiology",
+      "kind": "test",
+      "sheet_sr": 261,
+      "names": ["SWAB CULTURE"],
+      "out_names": ["SWAB CULTURE"]
+    },
+    {
+      "name": "Testosterone Total",
+      "price": 450,
+      "outsourced": false,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 263,
+      "names": ["Testosterone Total"],
+      "out_names": []
+    },
+    {
+      "name": "TFT (Thyroid Function Test) Free (FT3, FT4, TSH)",
+      "price": 600,
+      "outsourced": true,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 265,
+      "names": [
+        "TFT (Thyroid Function Test) Free (FT3, FT4, TSH)",
+        "TFT (Thyroid Function Test) Free",
+        "FREE T3,FREE T4,TSH"
+      ],
+      "out_names": ["TFT (Thyroid Function Test) Free", "FREE T3,FREE T4,TSH"]
+    },
+    {
+      "name": "TFT (Thyroid Function Test) Total",
+      "price": 450,
+      "outsourced": false,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 266,
+      "names": ["TFT (Thyroid Function Test) Total"],
+      "out_names": []
+    },
+    {
+      "name": "TG2 THYROGLOBULIN",
+      "price": 1200,
+      "outsourced": true,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 267,
+      "names": ["TG2 THYROGLOBULIN"],
+      "out_names": ["TG2 THYROGLOBULIN"]
+    },
+    {
+      "name": "Thrombin Time",
+      "price": 450,
+      "outsourced": false,
+      "sub": "Haematology",
+      "kind": "test",
+      "sheet_sr": 268,
+      "names": ["Thrombin Time"],
+      "out_names": []
+    },
+    {
+      "name": "Thyroid Stimulating Hormone (TSH)*",
+      "price": 200,
+      "outsourced": false,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 269,
+      "names": ["Thyroid Stimulating Hormone (TSH)*"],
+      "out_names": []
+    },
+    {
+      "name": "Thyroxine Free (Ft4)",
+      "price": 300,
+      "outsourced": true,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 270,
+      "names": ["Thyroxine Free (Ft4)"],
+      "out_names": ["Thyroxine Free (Ft4)"]
+    },
+    {
+      "name": "Thyroxine Total (T4)",
+      "price": 150,
+      "outsourced": false,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 271,
+      "names": ["Thyroxine Total (T4)"],
+      "out_names": []
+    },
+    {
+      "name": "TISSUE CULTURE",
+      "price": 360,
+      "outsourced": true,
+      "sub": "Microbiology",
+      "kind": "test",
+      "sheet_sr": 272,
+      "names": ["TISSUE CULTURE"],
+      "out_names": ["TISSUE CULTURE"]
+    },
+    {
+      "name": "Total IgE Serum",
+      "price": 730,
+      "outsourced": true,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 273,
+      "names": ["Total IgE Serum"],
+      "out_names": ["Total IgE Serum"]
+    },
+    {
+      "name": "Triglycerides (Tg) Serum",
+      "price": 200,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 274,
+      "names": ["Triglycerides (Tg) Serum"],
+      "out_names": []
+    },
+    {
+      "name": "Triiodothyronine Free (FT3)",
+      "price": 300,
+      "outsourced": true,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 276,
+      "names": ["Triiodothyronine Free (FT3)"],
+      "out_names": ["Triiodothyronine Free (FT3)"]
+    },
+    {
+      "name": "Triiodothyronine Total (T3)",
+      "price": 150,
+      "outsourced": false,
+      "sub": "Hormones",
+      "kind": "test",
+      "sheet_sr": 277,
+      "names": ["Triiodothyronine Total (T3)"],
+      "out_names": []
+    },
+    {
+      "name": "TROP T",
+      "price": 1500,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 279,
+      "names": ["TROP T", "TROP T QUANTITATIVE"],
+      "out_names": []
+    },
+    {
+      "name": "Troponin - I",
+      "price": 1500,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 281,
+      "names": ["Troponin - I", "TROP I"],
+      "out_names": []
+    },
+    {
+      "name": "TTG IGA",
+      "price": 1000,
+      "outsourced": false,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 283,
+      "names": ["TTG IGA"],
+      "out_names": []
+    },
+    {
+      "name": "Typhidot IgG/IgM",
+      "price": 700,
+      "outsourced": false,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 284,
+      "names": ["Typhidot IgG/IgM"],
+      "out_names": []
+    },
+    {
+      "name": "Uric Acid Serum",
+      "price": 120,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 285,
+      "names": ["Uric Acid Serum"],
+      "out_names": []
+    },
+    {
+      "name": "Uric Acid Urine",
+      "price": 100,
+      "outsourced": false,
+      "sub": "Urine tests",
+      "kind": "test",
+      "sheet_sr": 286,
+      "names": ["Uric Acid Urine"],
+      "out_names": []
+    },
+    {
+      "name": "URINE C/S",
+      "price": 370,
+      "outsourced": true,
+      "sub": "Microbiology",
+      "kind": "test",
+      "sheet_sr": 287,
+      "names": ["URINE C/S"],
+      "out_names": ["URINE C/S"]
+    },
+    {
+      "name": "URINE CREATININE",
+      "price": 100,
+      "outsourced": false,
+      "sub": "Urine tests",
+      "kind": "test",
+      "sheet_sr": 288,
+      "names": ["URINE CREATININE", "URINE CREATNINE"],
+      "out_names": []
+    },
+    {
+      "name": "Urine Ketone Bodies",
+      "price": 100,
+      "outsourced": false,
+      "sub": "Urine tests",
+      "kind": "test",
+      "sheet_sr": 289,
+      "names": ["Urine Ketone Bodies"],
+      "out_names": []
+    },
+    {
+      "name": "Urine Microalbumin 24 Hours",
+      "price": 250,
+      "outsourced": false,
+      "sub": "Urine tests",
+      "kind": "test",
+      "sheet_sr": 290,
+      "names": ["Urine Microalbumin 24 Hours"],
+      "out_names": []
+    },
+    {
+      "name": "URINE POTASSIUM CREATININE RATIO",
+      "price": 750,
+      "outsourced": false,
+      "sub": "Urine tests",
+      "kind": "test",
+      "sheet_sr": 292,
+      "names": ["URINE POTASSIUM CREATININE RATIO", "URINE POTAIUM CREATININE RATIO"],
+      "out_names": []
+    },
+    {
+      "name": "Urine Routine and Microscopy",
+      "price": 100,
+      "outsourced": false,
+      "sub": "Urine tests",
+      "kind": "test",
+      "sheet_sr": 293,
+      "names": ["Urine Routine and Microscopy", "URINE ROUTINE MICRO"],
+      "out_names": []
+    },
+    {
+      "name": "VARICELLA ZOSTER VIRUS ANTIBODY, IGG",
+      "price": 1280,
+      "outsourced": true,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 296,
+      "names": ["VARICELLA ZOSTER VIRUS ANTIBODY, IGG"],
+      "out_names": ["VARICELLA ZOSTER VIRUS ANTIBODY, IGG"]
+    },
+    {
+      "name": "VARICELLA ZOSTER VIRUS ANTIBODY, IGG,IGM",
+      "price": 2360,
+      "outsourced": true,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 297,
+      "names": ["VARICELLA ZOSTER VIRUS ANTIBODY, IGG,IGM"],
+      "out_names": ["VARICELLA ZOSTER VIRUS ANTIBODY, IGG,IGM"]
+    },
+    {
+      "name": "Vdrl Qualitative",
+      "price": 200,
+      "outsourced": false,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 299,
+      "names": ["Vdrl Qualitative"],
+      "out_names": []
+    },
+    {
+      "name": "VITAMIN B12",
+      "price": 600,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 300,
+      "names": ["VITAMIN B12"],
+      "out_names": []
+    },
+    {
+      "name": "VITAMIN D 1,25-DIHYDROXY",
+      "price": 3150,
+      "outsourced": true,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 301,
+      "names": ["VITAMIN D 1,25-DIHYDROXY"],
+      "out_names": ["VITAMIN D 1,25-DIHYDROXY"]
+    },
+    {
+      "name": "Vitamin D25 HYDROXY",
+      "price": 800,
+      "outsourced": false,
+      "sub": "Biochemistry",
+      "kind": "test",
+      "sheet_sr": 302,
+      "names": ["Vitamin D25 HYDROXY"],
+      "out_names": []
+    },
+    {
+      "name": "WIDAL",
+      "price": 170,
+      "outsourced": true,
+      "sub": "Serology",
+      "kind": "test",
+      "sheet_sr": 305,
+      "names": ["WIDAL"],
+      "out_names": ["WIDAL"]
+    }
+  ]
+}

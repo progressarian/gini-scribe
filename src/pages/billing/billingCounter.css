@@ -526,6 +526,9 @@ body.bc-resizing {
 .gf .bc-result__name {
   font-weight: 600;
 }
+.gf .bc-result .badge {
+  flex: none;
+}
 .gf .bc-result__meta {
   font-size: 11px;
   color: var(--ink3);

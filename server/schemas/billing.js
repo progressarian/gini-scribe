@@ -189,6 +189,7 @@ const itemFields = {
   tax_code_id: z.union([id, z.null()]),
   price_includes_tax: flag,
   price_per_patient: flag,
+  is_outsourced: flag,
   kind: z.enum(ITEM_KINDS),
   doctor_id: z.union([id, z.null()]),
   visit_type: z.union([z.enum(CONSULTATION_VISIT_TYPES), z.null()]),
@@ -210,6 +211,7 @@ export const billingItemCreateSchema = z
     tax_code_id: itemFields.tax_code_id.optional(),
     price_includes_tax: itemFields.price_includes_tax.optional(),
     price_per_patient: itemFields.price_per_patient.optional(),
+    is_outsourced: itemFields.is_outsourced.optional(),
     doctor_id: itemFields.doctor_id.optional(),
     visit_type: itemFields.visit_type.optional(),
     test_catalog_id: itemFields.test_catalog_id.optional(),
@@ -340,6 +342,7 @@ export const billingItemListQuerySchema = z.strictObject({
   kind: z.enum(ITEM_KINDS).optional(),
   doctorId: queryId.optional(),
   active: trueFalse.optional(),
+  outsourced: trueFalse.optional(),
   limit: z.string().regex(WHOLE_TEXT).optional(),
   offset: z.string().regex(WHOLE_TEXT).optional(),
 });

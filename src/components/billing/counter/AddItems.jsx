@@ -244,6 +244,7 @@ export default function AddItems({ bill, onBill, form }) {
                     <span className="bc-result__name" title={item.name}>
                       {item.name}
                     </span>
+                    {item.is_outsourced && <span className="badge b-pu">Outsourced</span>}
                     <span
                       className="bc-result__meta"
                       title={`${item.code} · ${item.group_name} › ${item.subgroup_name}`}

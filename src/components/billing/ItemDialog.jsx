@@ -33,6 +33,7 @@ const formOf = (item, subgroupId, prefill = {}) => ({
   visit_type: text(item?.visit_type),
   test_catalog_id: text(item?.test_catalog_id),
   price_per_patient: item?.price_per_patient ?? false,
+  is_outsourced: item?.is_outsourced ?? false,
   ...Object.fromEntries(Object.entries(prefill).map(([key, value]) => [key, text(value)])),
 });
 
@@ -56,6 +57,7 @@ const payloadOf = (form) => {
     visit_type: consultation ? form.visit_type || null : null,
     test_catalog_id: form.kind === "test" ? form.test_catalog_id || null : null,
     price_per_patient: FIXED_PRICE_KINDS.includes(form.kind) ? false : form.price_per_patient,
+    is_outsourced: form.kind === "test" ? form.is_outsourced : false,
   };
 };
 
@@ -313,6 +315,16 @@ export default function ItemDialog({
                 Price decided per patient (whoever adds it for a patient enters the price)
               </label>
             )}
+            {form.kind === "test" ? (
+              <label className="fset__check">
+                <input
+                  type="checkbox"
+                  checked={form.is_outsourced}
+                  onChange={set("is_outsourced")}
+                />
+                Outsourced test (sample is sent to an outside lab)
+              </label>
+            ) : null}
           </div>
 
           {form.kind === "consultation" ? (

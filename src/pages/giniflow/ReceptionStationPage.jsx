@@ -59,6 +59,11 @@ import {
 } from "../../../shared/journeyOrder.js";
 import { categoryColor, categoryLabel } from "../../../shared/patientCategories.js";
 import {
+  OutsourcedNote,
+  OutsourcedTag,
+  TestNames,
+} from "../../components/giniflow/OutsourcedTests.jsx";
+import {
   useJourneyPlan,
   useCheckIn,
   useJourney,
@@ -88,6 +93,7 @@ const SAMPLE_LABEL = {
   paid: "Lab collecting",
   drawing: "Being drawn now",
   sample_collected: "Sample taken",
+  sent_outside: "Sent to outside lab",
   processing: "In analyzer",
   results_ready: "Results ready",
   uploaded: "Results uploaded",
@@ -242,7 +248,8 @@ function OrderCard({ order, onClear, pending, actorId, onCancelTest, canCancelTe
       <div className="toc-body">
         {order.tests.map((t) => (
           <span className="toc-test" key={t.name}>
-            {t.name} <span className="tp">{rupees(t.price)}</span>
+            {t.name}
+            {t.outsourced && <OutsourcedTag />} <span className="tp">{rupees(t.price)}</span>
           </span>
         ))}
         {order.tests.length === 0 && <span className="toc-test">No tests listed</span>}
@@ -514,6 +521,11 @@ const refundOnCancel = (order, test) =>
 
 const testNames = (o) => (o.tests || []).map((t) => t.name).join(", ");
 
+const outsourcedIn = (orders) =>
+  orders.flatMap((o) => (o.tests || []).filter((t) => t.outsourced).map((t) => t.name));
+
+const testCount = (orders) => orders.reduce((n, o) => n + (o.tests || []).length, 0);
+
 const placeOnLine = (o) => {
   const at = o.billLine.toLowerCase().indexOf(testNames(o).toLowerCase());
   return at < 0 ? Infinity : at;
@@ -564,6 +576,8 @@ const byBillLine = (orders) => {
       key: r.key,
       orders: sorted,
       label: sorted.map(testNames).join(" + ") || "Tests",
+      outsourced: outsourcedIn(sorted),
+      total: testCount(sorted),
     };
   });
 };
@@ -572,7 +586,13 @@ const clearedRows = (orders) =>
   byBillLine(orders)
     .flatMap((row) =>
       row.orders.length > 1 && !row.orders.every(isCashOnly)
-        ? row.orders.map((o) => ({ key: o.orderId, orders: [o], label: testNames(o) || "Tests" }))
+        ? row.orders.map((o) => ({
+            key: o.orderId,
+            orders: [o],
+            label: testNames(o) || "Tests",
+            outsourced: outsourcedIn([o]),
+            total: testCount([o]),
+          }))
         : [row],
     )
     .map((row) => ({
@@ -584,11 +604,21 @@ const clearedRows = (orders) =>
 const pendingRows = (orders) =>
   byBillLine(orders).flatMap((row) =>
     row.orders.length > 1
-      ? [{ key: row.key, label: row.label, price: sumOf(row.orders, "total") }]
+      ? [
+          {
+            key: row.key,
+            label: row.label,
+            price: sumOf(row.orders, "total"),
+            outsourced: row.outsourced,
+            total: row.total,
+          },
+        ]
       : row.orders[0].tests.map((t) => ({
           key: `${row.key}:${t.name}`,
           label: t.name,
           price: t.price,
+          outsourced: t.outsourced ? [t.name] : [],
+          total: 1,
         })),
   );
 
@@ -656,7 +686,9 @@ function VisitPaymentCard({ orders, onClearAll, pending, onCancelTest, canCancel
       <div className="toc-body">
         {pendingRows(orders).map((row) => (
           <span className="toc-test" key={row.key}>
-            {row.label} <span className="tp">{rupees(row.price)}</span>
+            {row.label}
+            <OutsourcedNote names={row.outsourced} total={row.total} />{" "}
+            <span className="tp">{rupees(row.price)}</span>
           </span>
         ))}
       </div>
@@ -751,7 +783,8 @@ function HealthrayLabCard({ lab, onClear, pending, onCancelCase, canCancelTest }
       {lab.cases.map((c) => (
         <div className="toc-body" key={c.caseNo}>
           <span className="toc-test">
-            Case {c.caseNo} · {(c.tests || []).join(", ")}
+            Case {c.caseNo} ·{" "}
+            <TestNames names={c.tests} outsourced={c.outsourcedTests} separator=", " />
           </span>
         </div>
       ))}
@@ -883,7 +916,12 @@ const healthrayCaseAsOrder = (lab) => ({
   sex: lab.sex,
   kind: "healthray_case",
   caseNos: lab.cases.map((c) => c.caseNo).join(", "),
-  tests: lab.cases.flatMap((c) => c.tests || []).map((name) => ({ name })),
+  tests: lab.cases.flatMap((c) =>
+    (c.tests || []).map((name) => ({
+      name,
+      outsourced: (c.outsourcedTests || []).includes(name),
+    })),
+  ),
   paid: lab.labBill?.total ?? 0,
   total: lab.labBill?.total ?? 0,
   claimed: 0,
@@ -1042,7 +1080,9 @@ export function PaymentsTab({
                         </div>
                         {clearedRows(g.orders).map((row) => (
                           <div className="tc-detail" key={row.key}>
-                            {row.label} · {row.settled} · {row.status}
+                            {row.label}
+                            <OutsourcedNote names={row.outsourced} total={row.total} /> ·{" "}
+                            {row.settled} · {row.status}
                           </div>
                         ))}
                       </div>

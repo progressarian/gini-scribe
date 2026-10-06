@@ -48,6 +48,7 @@ const CASE_STARTED_ACTIONS = [
   "processing",
   "results_ready",
   "report_uploaded",
+  "sent_outside",
 ];
 
 export const ORDER_OUTPUT_SQL = (o) => `(
@@ -80,7 +81,8 @@ const caseMatches = (v, p) =>
               AND lc.raw_list_json->'patient'->>'healthray_uid' = ${p}.file_no))`;
 
 const caseDoneAt = `(SELECT min(a.created_at) FROM giniflow_lab_case_actions a
-                      WHERE a.case_no = lc.case_no AND a.action = 'report_uploaded')`;
+                      WHERE a.case_no = lc.case_no
+                        AND a.action IN ('report_uploaded', 'sent_outside'))`;
 
 const caseTime = (field) =>
   `(COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'${field}')::timestamptz`;
@@ -115,7 +117,7 @@ export const TESTS_HOLD_SQL = (v = "v", p = "p") => `
   SELECT
     (SELECT count(*)::int FROM giniflow_lab_orders o
       WHERE o.visit_id = ${v}.id AND o.urgency = 'today'
-        AND o.sample_status NOT IN ('uploaded', 'reported'))
+        AND o.sample_status NOT IN ('uploaded', 'reported', 'sent_outside'))
     + (SELECT count(*)::int FROM lab_cases lc
         WHERE ${caseMatches(v, p)}
           AND NOT ${caseWorkedAsOrder(v)}
@@ -127,7 +129,7 @@ export const TESTS_HOLD_SQL = (v = "v", p = "p") => `
       (SELECT max(e.occurred_at) FROM giniflow_lab_order_events e
          JOIN giniflow_lab_orders o ON o.id = e.lab_order_id
         WHERE o.visit_id = ${v}.id AND o.urgency = 'today'
-          AND e.track = 'sample' AND e.status IN ('uploaded', 'reported')),
+          AND e.track = 'sample' AND e.status IN ('uploaded', 'reported', 'sent_outside')),
       (SELECT max(${caseDoneAt}) FROM lab_cases lc
         WHERE ${caseMatches(v, p)} AND NOT ${caseWorkedAsOrder(v)}
           AND NOT ${caseFromEarlierLabOnlyVisit(v)}

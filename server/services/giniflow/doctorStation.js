@@ -123,7 +123,8 @@ const QUEUE_SQL = `
          first_ev.occurred_at AS checked_in_at,
          last_ev.occurred_at  AS status_since,
          (SELECT count(*)::int FROM giniflow_lab_orders o
-           WHERE o.visit_id = v.id AND o.sample_status <> 'uploaded') AS open_orders,
+           WHERE o.visit_id = v.id
+             AND o.sample_status NOT IN ('uploaded', 'sent_outside')) AS open_orders,
          ${OPEN_LAB_CASES_SQL} AS open_cases,
          -- Which rail steps this visit has actually passed through. Read from the
          -- log rather than inferred from the current status, so a patient the

@@ -688,6 +688,19 @@ export const giniflowStationReleaseSchema = z.object({
   reason: z.string().trim().min(3, "Say why the patient is being released").max(160),
 });
 
+const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD");
+
+export const giniflowOutsidePendingQuerySchema = z.object({
+  q: z.string().trim().max(60).optional(),
+  from: isoDay.optional(),
+  to: isoDay.optional(),
+  status: z.enum(["all", "collected", "sent"]).optional(),
+  page: z
+    .string()
+    .regex(/^\d{1,4}$/, "page must be a number")
+    .optional(),
+});
+
 export const giniflowStationQuerySchema = z.object({
   group: stationGroup,
   room: z.enum(["collection", "processing"]).optional(),
@@ -879,6 +892,7 @@ export const giniflowSampleSchema = z.object({
     "paid",
     "drawing",
     "sample_collected",
+    "sent_outside",
     "sample_sent",
     "sample_received",
     "processing",
@@ -1120,6 +1134,7 @@ export const giniflowProposalDecisionSchema = z
 
 // ── Gini Flow · consultant prescription (14-CONSULTANT-PRESCRIPTION-PLAN.md) ──
 const TIMING_CATEGORY = z.enum([
+  "fasting",
   "before_breakfast",
   "with_breakfast",
   "after_breakfast",
@@ -1132,6 +1147,7 @@ const TIMING_CATEGORY = z.enum([
   "after_dinner",
   "bedtime",
   "with_meals",
+  "any_time",
   "sos",
   "weekly",
   "fortnightly",

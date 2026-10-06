@@ -16,6 +16,7 @@ import LiveBadge from "../LiveBadge";
 import "../../../styles/giniflow-station.css";
 import "../../../pages/giniflow/MachineStationPage.css";
 import CancelledTestsPanel from "../CancelledTestsPanel";
+import OutsidePendingPanel from "./OutsidePendingPanel";
 import LabResultsForm from "../LabResultsForm";
 import PdfViewerModal from "../../visit/PdfViewerModal";
 import StationNotice from "../StationNotice";
@@ -24,6 +25,7 @@ import { cancelledText, cancelledToastMs, TOAST_MS } from "../../../lib/testCanc
 import useAuthStore from "../../../stores/authStore";
 import { CAPABILITIES as CAP, hasCapability } from "../../../../shared/permissions.js";
 import { refundOnTestCancel } from "../../../../shared/labPayment.js";
+import { OutsourcedTag, TestNames } from "../OutsourcedTests.jsx";
 import {
   LAB_RUNGS,
   visibleRungs,
@@ -33,7 +35,11 @@ import {
   SAMPLE_STATUS_TO_STAGE,
   rungFor,
   stageIndexOf,
+  OUTSIDE_UPLOADABLE,
 } from "../../../../shared/labStages.js";
+
+const orderTestNames = (order) => order.tests.map((t) => t.name);
+const orderOutsourced = (order) => order.tests.filter((t) => t.outsourced).map((t) => t.name);
 
 const STAT_COLOUR = {
   pending: "var(--tl)",
@@ -321,7 +327,13 @@ function LabCard({ order, group, onAdvance, onUpload, onOpen, busy }) {
           {order.orderedBy ? ` · Ordered by ${order.orderedBy}` : ""} · {clock(order.orderedAt)}
         </div>
         <div className="pc-tests">
-          🔬 {order.tests.map((t) => t.name).join(" · ") || "no tests listed"} ·{" "}
+          🔬{" "}
+          {order.tests.length ? (
+            <TestNames names={orderTestNames(order)} outsourced={orderOutsourced(order)} />
+          ) : (
+            "no tests listed"
+          )}{" "}
+          ·{" "}
           <strong>
             {order.tests.length} test{order.tests.length === 1 ? "" : "s"}
           </strong>
@@ -398,6 +410,7 @@ const TEST_STATUS_LABEL = {
   paid: "Ordered",
   drawing: "Collecting",
   sample_collected: "Sample taken",
+  sent_outside: "Sent to outside lab",
   processing: "In analyzer",
   results_ready: "Result ready",
   uploaded: "Uploaded",
@@ -456,7 +469,9 @@ function LabDetailPane({
   // 'uploaded' included: typing the values finishes the order, and the whole
   // point of having both is that the scan can still be attached afterwards —
   // which the upload zone disappearing would have quietly prevented.
-  const canUpload = atTheBench && atLeast(order.sampleStatus, "results") && order.paid;
+  const canUpload =
+    (atTheBench && atLeast(order.sampleStatus, "results") && order.paid) ||
+    (order.outsourced && order.paid && OUTSIDE_UPLOADABLE.includes(order.sampleStatus));
   // Values can be typed once the sample is in the lab's hands, and afterwards —
   // an order finished by an upload can still have its numbers added, and one
   // finished by numbers can be corrected.
@@ -481,7 +496,11 @@ function LabDetailPane({
           <div className="dp-meta">
             {order.age}
             {(order.sex || "")[0] || ""} · {order.fileNo} · Tests:{" "}
-            {order.tests.map((t) => t.name).join(" · ") || "none listed"}
+            {order.tests.length ? (
+              <TestNames names={orderTestNames(order)} outsourced={orderOutsourced(order)} />
+            ) : (
+              "none listed"
+            )}
           </div>
           <div className="dp-acts">
             <button className="rbtn" onClick={onClose}>
@@ -497,7 +516,10 @@ function LabDetailPane({
               <div className="dp-sec-title">Tests ordered</div>
               {order.tests.map((t) => (
                 <div className="test-row" key={t.name}>
-                  <div className="tr-name">{t.name}</div>
+                  <div className="tr-name">
+                    {t.name}
+                    {t.outsourced && <OutsourcedTag />}
+                  </div>
                   <div className="tr-status">
                     <span className="badge b-ink">
                       {TEST_STATUS_LABEL[t.status] || t.status || "Ordered"}
@@ -785,7 +807,11 @@ function DoneHereCard({ row }) {
             .filter(Boolean)
             .join(" · ")}
         </div>
-        {!!row.tests?.length && <div className="pc-tests">🔬 {row.tests.join(" · ")}</div>}
+        {!!row.tests?.length && (
+          <div className="pc-tests">
+            🔬 <TestNames names={row.tests} outsourced={row.outsourcedTests} />
+          </div>
+        )}
       </div>
       <div className="pc-r">
         <div className={`sp ${rung?.pill || "sp-process"}`}>{rung?.stageLabel || row.stage}</div>
@@ -843,7 +869,14 @@ function HealthrayCard({ row, onOpen, readOnly = false }) {
             .filter(Boolean)
             .join(" · ")}
         </div>
-        <div className="pc-tests">🔬 {row.tests.join(" · ") || "No tests listed"}</div>
+        <div className="pc-tests">
+          🔬{" "}
+          {row.tests.length ? (
+            <TestNames names={row.tests} outsourced={row.outsourcedTests} />
+          ) : (
+            "No tests listed"
+          )}
+        </div>
         {blocked && (
           <div className={`lab-blocked${row.busyAt ? " is-held" : ""}`}>
             {row.busyAt ? "🔒" : "⏸"} {blocked}
@@ -1007,7 +1040,10 @@ function HealthrayCasePane({
                   </div>
                   {c.tests.map((t) => (
                     <div className="test-row" key={t}>
-                      <div className="tr-name">{t}</div>
+                      <div className="tr-name">
+                        {t}
+                        {(c.outsourcedTests || []).includes(t) && <OutsourcedTag />}
+                      </div>
                       <div className="tr-status">
                         <span className="badge b-ink">{c.stage.label}</span>
                       </div>
@@ -1493,7 +1529,7 @@ export default function LabRoom({ room = null }) {
   const onUpload = (order, file, refuseWith, confirmAdditional = false) => {
     if (refuseWith) return showToast(refuseWith);
     return upload.mutate(
-      { orderId: order.orderId, file, confirmAdditional },
+      { orderId: order.orderId, file, confirmAdditional, outside: order.outsourced },
       {
         onSuccess: () =>
           showToast(`📤 ${order.name}'s report uploaded — MO and doctor now see "Results ready"`),
@@ -1925,6 +1961,7 @@ export default function LabRoom({ room = null }) {
               hospital lab registers a case of their own.
             </div>
           )}
+          {room !== "processing" && <OutsidePendingPanel onToast={showToast} />}
           <CancelledTestsPanel station="lab" canRestore={canCancelTest} onToast={showToast} />
         </div>
       </div>

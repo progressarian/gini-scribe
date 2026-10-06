@@ -4,7 +4,12 @@ import {
   EXCEPTION_STATUSES,
   TERMINAL_STATUSES,
 } from "../../../shared/giniflowStatus.js";
-import { LAB_RUNGS, stageIndexOf, UNDRAWN_SAMPLE_STATUSES } from "../../../shared/labStages.js";
+import {
+  LAB_RUNGS,
+  SENT_OUTSIDE,
+  stageIndexOf,
+  UNDRAWN_SAMPLE_STATUSES,
+} from "../../../shared/labStages.js";
 import { healthrayTarget } from "../../../shared/manualFloor.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 
@@ -77,7 +82,9 @@ const statusesBefore = (key) =>
 const UNDRAWN = UNDRAWN_SAMPLE_STATUSES;
 
 // Drawn, and no result filed — the analyzer bench's step.
-const UNREPORTED = statusesBefore("reported").filter((s) => !UNDRAWN.includes(s));
+const UNREPORTED = statusesBefore("reported").filter(
+  (s) => !UNDRAWN.includes(s) && s !== SENT_OUTSIDE,
+);
 
 // Where a status sits on the chain, as a number SQL can compare. Built from the
 // chain itself so a status added there cannot silently rank as unknown.
