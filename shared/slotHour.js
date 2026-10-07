@@ -65,3 +65,11 @@ export const slotStartTime = (slot) => {
 // Start hour of an arrival window label ("2 PM to 3 PM") — the bucket key the
 // slot counts are grouped under.
 export const arrivalRangeHour = (label) => slotStartHour(label);
+
+// One doctor's bucket in the slot counts. Names arrive as "Dr. Anil Bhansali",
+// "DR ANIL BHANSALI" or "Anil Bhansali" depending on the source.
+export const slotDoctorKey = (name) =>
+  String(name || "")
+    .toLowerCase()
+    .replace(/^\s*dr(\.\s*|\s+)/, "")
+    .replace(/[^a-z]/g, "");

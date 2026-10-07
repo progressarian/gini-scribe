@@ -68,6 +68,8 @@ export const qk = {
     list: (params) => ["ghm", "list", params],
     biomarkers: (patientIds) => ["ghm", "biomarkers", patientIds],
     lastMo: (patientIds) => ["ghm", "last-mo", patientIds],
+    obtTeam: () => ["ghm", "obt-team"],
+    obtAssignments: (patientIds) => ["ghm", "obt-assignments", patientIds],
     slotCounts: (dates) => ["ghm", "slot-counts", dates],
     categoryCounts: (date) => ["ghm", "category-counts", date || null],
     attemptCounts: (appointmentIds) => ["ghm", "attempt-counts", appointmentIds],
@@ -86,6 +88,7 @@ export const qk = {
     any: {
       list: ["ghm", "list"],
       slotCounts: ["ghm", "slot-counts"],
+      obtAssignments: ["ghm", "obt-assignments"],
       categoryCounts: ["ghm", "category-counts"],
       attemptCounts: ["ghm", "attempt-counts"],
       activeCalls: ["ghm", "active-calls"],

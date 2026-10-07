@@ -2453,3 +2453,63 @@ body > [role="dialog"][aria-modal="true"] .bc-err {
   outline: 2px solid var(--tl);
   outline-offset: 2px;
 }
+.gf .bc-deposit__moves {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gf .bc-deposit__moves .bc-head__row {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.gf .bc-deposit__people {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  margin: 6px 0 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+.gf .bc-deposit__person {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  padding: 6px 8px;
+  font: inherit;
+  text-align: left;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.gf .bc-deposit__person:hover,
+.gf .bc-deposit__person:focus-visible {
+  border-color: var(--tl);
+  outline: none;
+}
+.gf .bc-deposit__pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 6px;
+}
+.gf .bc-deposit__pair > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.gf .bc-deposit__payout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.gf .bc-deposit__payout .bc-field__in {
+  width: auto;
+  min-width: 140px;
+  flex: 1 1 140px;
+}

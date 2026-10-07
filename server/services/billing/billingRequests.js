@@ -46,6 +46,7 @@ const COLUMNS = [
   "approved_mode",
   "mode_reason",
   "credit_note_id",
+  "amount",
 ];
 
 const SPEC = {
@@ -54,7 +55,12 @@ const SPEC = {
   columns: COLUMNS.join(", "),
 };
 
-export const KINDS = { new_item: "new item", repeat_item: "repeat", refund: "refund" };
+export const KINDS = {
+  new_item: "new item",
+  repeat_item: "repeat",
+  refund: "refund",
+  deposit_refund: "deposit refund",
+};
 const PRICE_FIELDS = ["base_price", "price", "rate", "amount", "mrp", "discount"];
 export const TEXT_MAX = 1000;
 const LIST_LIMIT = 200;
@@ -174,6 +180,16 @@ const shape = (row) =>
               : null,
           }
         : null,
+    deposit_refund:
+      row.kind === "deposit_refund"
+        ? {
+            amount: paise(row.amount),
+            requested_mode: row.requested_mode,
+            approved_mode: row.approved_mode ?? null,
+            mode_reason: row.mode_reason ?? null,
+            balance: paise(row.deposit_balance ?? 0),
+          }
+        : null,
   };
 
 const LIST_SQL = `
@@ -186,7 +202,10 @@ const LIST_SQL = `
          rq.name AS requested_by_name, dq.name AS decided_by_name,
          l.id AS used_line_id, l.bill_id AS used_bill_id, ub.bill_no AS used_bill_no,
          v.visit_date::text AS visit_date,
-         (r.kind <> 'refund' AND r.status = 'approved' AND l.id IS NULL) AS usable
+         (SELECT da.balance FROM deposit_accounts da WHERE da.patient_id = r.patient_id)
+           AS deposit_balance,
+         (r.kind NOT IN ('refund', 'deposit_refund') AND r.status = 'approved' AND l.id IS NULL)
+           AS usable
     FROM billing_requests r
     LEFT JOIN patients p ON p.id = r.patient_id
     LEFT JOIN giniflow_visits v ON v.id = r.visit_id
@@ -739,6 +758,45 @@ async function approveRefund(client, before, input, note, ctx) {
   return { ...made, kept_as_deposit: kept };
 }
 
+const DEPOSIT_PAY_MODES = ["cash", "card", "upi"];
+
+async function approveDepositRefund(client, before, input, note, ctx) {
+  if (before.requested_by && before.requested_by === ctx.actorId) {
+    throw httpError(
+      409,
+      "A deposit refund needs a second person — someone other than the one who asked must approve it",
+    );
+  }
+  const approvedMode = String(input?.approved_mode ?? before.requested_mode).toLowerCase();
+  if (!DEPOSIT_PAY_MODES.includes(approvedMode)) {
+    throw httpError(400, "A deposit is paid back by cash, card or UPI");
+  }
+  const modeReason =
+    approvedMode === before.requested_mode
+      ? null
+      : cleanText(
+          input?.mode_reason,
+          "Say why the money goes back another way than the desk asked",
+          {
+            required: true,
+          },
+        );
+  const { rows } = await client.query(
+    `SELECT balance FROM deposit_accounts WHERE patient_id = $1 FOR UPDATE`,
+    [before.patient_id],
+  );
+  if (paise(rows[0]?.balance ?? 0) < paise(before.amount)) {
+    throw httpError(409, "The deposit no longer holds this amount, so it can't be paid back");
+  }
+  await client.query(
+    `UPDATE billing_requests
+        SET status = 'approved', decision_note = $2, approved_mode = $3, mode_reason = $4,
+            decided_by = $5, decided_at = NOW(), updated_at = NOW(), updated_by = $5
+      WHERE id = $1`,
+    [before.id, note, approvedMode, modeReason, ctx.actorId],
+  );
+}
+
 const DECIDED = { approved: "approved", rejected: "rejected", used: "approved and used" };
 
 function checkPending(before) {
@@ -782,6 +840,13 @@ export async function approveRequest(id, input, ctx, db = pool) {
     const before = await lockRow(client, SPEC, requestId);
     checkPending(before);
     let createdItemId = null;
+    if (before.kind === "deposit_refund") {
+      await approveDepositRefund(client, before, input, note, { ...ctx, actorId });
+      const listed = await client.query(`${LIST_SQL} WHERE r.id = $1`, [requestId]);
+      const after = shape(listed.rows[0]);
+      await audit(client, { id: requestId, action: "approve", before, after, ctx });
+      return after;
+    }
     if (before.kind === "refund") {
       const made = await approveRefund(client, before, input, note, { ...ctx, actorId });
       const listed = await client.query(`${LIST_SQL} WHERE r.id = $1`, [requestId]);

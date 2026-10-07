@@ -13,6 +13,7 @@ const bills = await import("../../../server/services/billing/bills.js");
 const payments = await import("../../../server/services/billing/payments.js");
 const shifts = await import("../../../server/services/billing/cashShifts.js");
 const requests = await import("../../../server/services/billing/billingRequests.js");
+const deposits = await import("../../../server/services/billing/deposits.js");
 
 export const db = getPool();
 
@@ -207,7 +208,42 @@ export async function seedReports(tag) {
   ids.visits = [cashA, codeB, claimC, creditD, cancelE, dueF].map((b) => b.visit);
   ids.allBills = [...Object.values(ids.bills), ids.note];
   await backdate(ids, ids.privateDay);
+  await seedDeposits(ids, cashA.patient ?? null);
   return ids;
+}
+
+async function seedDeposits(ids, patientId) {
+  const patient =
+    patientId ??
+    (await one(`SELECT patient_id FROM bills WHERE id = $1`, [ids.bills.cash])).patient_id;
+  await deposits.receiveDeposit(
+    patient,
+    { mode: "upi", amount: 900, reference: `P5-${ids.tag}` },
+    desk,
+    db,
+  );
+  await deposits.transferToIpd(
+    patient,
+    { amount: 400, ipd_number: `IP-P5-${ids.tag}`, reason: "Reports seed" },
+    admin,
+    db,
+  );
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SET LOCAL session_replication_role = replica");
+    await client.query(
+      `UPDATE deposit_entries SET created_at = (($1::date + time '11:20') AT TIME ZONE 'Asia/Kolkata')
+        WHERE patient_id = $2`,
+      [ids.privateDay, patient],
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function backdate(ids, day, billIds = ids.allBills) {

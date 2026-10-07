@@ -39,11 +39,25 @@ export const ownFu = (a) => `COALESCE(
 // dead, and the list still asked the team to ring them. Being seen again is
 // itself the supersede — whether or not the new visit's own follow-up was
 // captured — so a later seen/completed visit disqualifies this one outright.
+export const borrowedFollowUp = (a) => `(
+  COALESCE(${a}.status, '') NOT IN ('seen', 'completed', 'in_visit', 'in-progress')
+  AND (
+    ${a}.healthray_clinical_notes IS NULL
+    OR EXISTS (
+      SELECT 1 FROM appointments earlier
+       WHERE earlier.patient_id = ${a}.patient_id
+         AND earlier.appointment_date < ${a}.appointment_date
+         AND earlier.healthray_clinical_notes = ${a}.healthray_clinical_notes
+    )
+  )
+)`;
+
 export const isLatestFollowUpVisit = (a) => `(${a}.appointment_date = (
   SELECT MAX(prev.appointment_date)
     FROM appointments prev
    WHERE prev.file_no = ${a}.file_no
-     AND ${ownFu("prev")} IS NOT NULL
+     AND prev.own_follow_up_date IS NOT NULL
+     AND NOT ${borrowedFollowUp("prev")}
 )
 AND NOT EXISTS (
   SELECT 1 FROM appointments later
@@ -51,6 +65,31 @@ AND NOT EXISTS (
      AND later.appointment_date > ${a}.appointment_date
      AND later.status IN ('seen', 'completed')
 ))`;
+
+export const preferredSetAt = (a) => `COALESCE(
+  (SELECT MAX(l.changed_at) FROM appointment_change_log l
+    WHERE l.appointment_id = ${a}.id AND l.field = 'preferred_date'),
+  ${a}.updated_at
+)`;
+
+export const bookedAt = (b) => `COALESCE(
+  (SELECT MAX(bl.changed_at) FROM appointment_change_log bl
+    WHERE bl.appointment_id = ${b}.id AND bl.field = 'booking_created'),
+  ${b}.created_at
+)`;
+
+export const preferredSuperseded = (a) => `EXISTS (
+  SELECT 1 FROM appointments nb
+   WHERE nb.file_no = ${a}.file_no
+     AND nb.id <> ${a}.id
+     AND nb.appointment_date IS DISTINCT FROM ${a}.preferred_date
+     AND COALESCE(nb.status, '') <> 'cancelled'
+     AND COALESCE(nb.booking_status, '') <> 'cancelled'
+     AND ${bookedAt("nb")} > ${preferredSetAt(a)}
+)`;
+
+export const livePreferredOn = (a, d) =>
+  `(CASE WHEN ${a}.preferred_date = ${d} THEN NOT ${preferredSuperseded(a)} ELSE FALSE END)`;
 
 // Everyone the day's list covers: booked that date, asked for that date, or
 // due a follow-up on it. The two extra clauses keep one row per patient —
@@ -64,11 +103,14 @@ AND NOT EXISTS (
 // an earlier booking, so the row carries both — the day it is due, and the day
 // the patient is actually coming.
 export const dayWindowWhere = (a = "a") => `WHERE (
-    ${a}.appointment_date = $1 OR ${a}.preferred_date = $1 OR ${ownFu(a)} = $1
+    ${a}.appointment_date = $1 OR ${a}.preferred_date = $1 OR ${a}.own_follow_up_date = $1
+  )
+  AND (
+    ${a}.appointment_date = $1 OR ${livePreferredOn(a, "$1")} OR ${a}.own_follow_up_date = $1
   )
   AND (
     ${a}.appointment_date = $1
-    OR ${a}.preferred_date = $1
+    OR ${livePreferredOn(a, "$1")}
     OR ${a}.file_no IS NULL
     OR ${isLatestFollowUpVisit(a)}
   )

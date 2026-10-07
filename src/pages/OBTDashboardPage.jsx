@@ -33,21 +33,47 @@ function Tile({ label, value, tone = "slate", hint }) {
   );
 }
 
-export default function OBTDashboardPage() {
-  const [date, setDate] = useState(addDaysStr(1));
+function LoadingTiles({ count, label }) {
+  return (
+    <div className="obt-tiles" role="status" aria-label={`Loading ${label}`}>
+      {Array.from({ length: count }, (_, i) => (
+        <div key={i} className="obt-tile obt-tile--loading" aria-hidden="true">
+          <div className="obt-skel obt-skel--value" />
+          <div className="obt-skel obt-skel--label" />
+        </div>
+      ))}
+    </div>
+  );
+}
 
-  const { data, isLoading, isError, error, isFetching } = useQuery({
-    queryKey: ["obtDashboard", date],
-    queryFn: async () => {
-      const { data } = await api.get("/api/obt-dashboard", { params: { date } });
-      return data;
-    },
+function SectionError({ what, error, onRetry }) {
+  return (
+    <div className="obt-error" role="alert">
+      Could not load {what}: {error?.response?.data?.error || error?.message}{" "}
+      <button type="button" className="obt-chip" onClick={onRetry}>
+        Try again
+      </button>
+    </div>
+  );
+}
+
+const usePart = (part, date) =>
+  useQuery({
+    queryKey: ["obtDashboard", part, date],
+    queryFn: async () => (await api.get(`/api/obt-dashboard/${part}`, { params: { date } })).data,
     staleTime: 20_000,
     refetchInterval: 60_000,
   });
 
-  const summary = data?.summary || {};
-  const visitTypes = data?.visitTypes || [];
+export default function OBTDashboardPage() {
+  const [date, setDate] = useState(addDaysStr(1));
+  const calls = usePart("summary", date);
+  const types = usePart("visit-types", date);
+
+  const summary = calls.data?.summary || {};
+  const visitTypes = types.data?.visitTypes || [];
+  const refreshing =
+    (calls.isFetching && !calls.isLoading) || (types.isFetching && !types.isLoading);
 
   return (
     <div className="obt">
@@ -56,7 +82,7 @@ export default function OBTDashboardPage() {
           <h1>📞 OBT Dashboard</h1>
           <span className="obt__datelab">
             {prettyDate(date)}
-            {isFetching && !isLoading ? " · refreshing…" : ""}
+            {refreshing ? " · refreshing…" : ""}
           </span>
         </div>
         <div className="obt__controls">
@@ -77,56 +103,62 @@ export default function OBTDashboardPage() {
           <input
             type="date"
             className="ctrl"
+            aria-label="Dashboard date"
             value={date}
             onChange={(e) => setDate(e.target.value)}
           />
         </div>
       </div>
 
-      {isError && (
-        <div className="obt-error">
-          Could not load the dashboard: {error?.response?.data?.error || error?.message}
+      <h2 className="obt-sect">Calling</h2>
+      {calls.isError ? (
+        <SectionError what="the calling figures" error={calls.error} onRetry={calls.refetch} />
+      ) : calls.isLoading ? (
+        <LoadingTiles count={8} label="calling figures" />
+      ) : (
+        <div className="obt-tiles">
+          <Tile label="Appointments" value={summary.total} tone="slate" />
+          <Tile
+            label="Still to call"
+            value={summary.need_call}
+            tone="orange"
+            hint={`${summary.not_called ?? 0} not called yet`}
+          />
+          <Tile label="Spoke" value={summary.spoke} tone="green" />
+          <Tile label="No answer" value={summary.not_picked} tone="red" />
+          <Tile label="Unreachable" value={summary.unreachable} tone="amber" />
+          <Tile label="Will call later" value={summary.call_later} tone="amber" />
+          <Tile label="Rescheduled" value={summary.rescheduled} tone="blue" />
+          <Tile label="No call needed" value={summary.no_call_needed} tone="slate" />
         </div>
       )}
-      {isLoading && <div className="obt-empty">Loading…</div>}
 
-      {data && (
-        <>
-          <h2 className="obt-sect">Calling</h2>
-          <div className="obt-tiles">
-            <Tile label="Appointments" value={summary.total} tone="slate" />
-            <Tile
-              label="Still to call"
-              value={summary.need_call}
-              tone="orange"
-              hint={`${summary.not_called ?? 0} not called yet`}
-            />
-            <Tile label="Spoke" value={summary.spoke} tone="green" />
-            <Tile label="No answer" value={summary.not_picked} tone="red" />
-            <Tile label="Unreachable" value={summary.unreachable} tone="amber" />
-            <Tile label="Will call later" value={summary.call_later} tone="amber" />
-            <Tile label="Rescheduled" value={summary.rescheduled} tone="blue" />
-            <Tile label="No call needed" value={summary.no_call_needed} tone="slate" />
-          </div>
+      <h2 className="obt-sect">Visit type</h2>
+      {types.isError ? (
+        <SectionError what="the visit types" error={types.error} onRetry={types.refetch} />
+      ) : types.isLoading ? (
+        <LoadingTiles count={3} label="visit types" />
+      ) : (
+        <div className="obt-tiles">
+          {visitTypes.length === 0 && <Tile label="No appointments" value={0} tone="slate" />}
+          {visitTypes.map((v) => (
+            <Tile key={v.type} label={v.type} value={v.count} tone={visitTone(v.type)} />
+          ))}
+        </div>
+      )}
 
-          <h2 className="obt-sect">Visit type</h2>
-          <div className="obt-tiles">
-            {visitTypes.length === 0 && <Tile label="No appointments" value={0} tone="slate" />}
-            {visitTypes.map((v) => (
-              <Tile key={v.type} label={v.type} value={v.count} tone={visitTone(v.type)} />
-            ))}
-          </div>
-
-          <h2 className="obt-sect">Home collection</h2>
-          <div className="obt-tiles">
-            <Tile
-              label="Needs home collection"
-              value={summary.home_collection}
-              tone="purple"
-              hint={`of ${summary.total ?? 0} appointments`}
-            />
-          </div>
-        </>
+      <h2 className="obt-sect">Home collection</h2>
+      {calls.isError ? null : calls.isLoading ? (
+        <LoadingTiles count={1} label="home collection" />
+      ) : (
+        <div className="obt-tiles">
+          <Tile
+            label="Needs home collection"
+            value={summary.home_collection}
+            tone="purple"
+            hint={`of ${summary.total ?? 0} appointments`}
+          />
+        </div>
       )}
     </div>
   );

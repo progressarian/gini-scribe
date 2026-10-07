@@ -20,7 +20,7 @@ import {
 import { retryPendingLabCases } from "../services/cron/labSync.js";
 import { labLogin } from "../services/lab/labHealthrayApi.js";
 import { readSheetTab, readUpcomingAppointments } from "../services/sheets/reader.js";
-import { syncFromSheets } from "../services/cron/sheetsSync.js";
+import { syncFromSheets, upcomingSheetSyncEnabled } from "../services/cron/sheetsSync.js";
 import pool from "../config/db.js";
 import { parsePrescriptionWithAi } from "../services/healthray/parser.js";
 import {
@@ -762,6 +762,10 @@ router.post("/sync/lab/retry", async (req, res) => {
 // Manual trigger: import all 3 upcoming tabs into appointments table
 router.post("/sync/sheets/import", async (req, res) => {
   try {
+    if (!upcomingSheetSyncEnabled())
+      return res
+        .status(409)
+        .json({ error: "The upcoming appointments sheet sync is switched off." });
     const result = await syncFromSheets();
     res.json({ success: true, ...result });
   } catch (e) {

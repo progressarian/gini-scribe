@@ -10,9 +10,9 @@ export function useToast() {
 export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([]);
 
-  const addToast = useCallback((message, type = "error", duration = 5000) => {
+  const addToast = useCallback((message, type = "error", duration = 5000, action = null) => {
     const id = Date.now() + Math.random();
-    setToasts((prev) => [...prev.slice(-4), { id, message, type }]); // keep max 5
+    setToasts((prev) => [...prev.slice(-4), { id, message, type, action }]); // keep max 5
     if (duration > 0) {
       setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), duration);
     }
@@ -32,8 +32,26 @@ export function ToastProvider({ children }) {
               <span className="toast__icon">
                 {t.type === "error" ? "❌" : t.type === "warn" ? "⚠️" : "✅"}
               </span>
-              <span className={`toast__message toast__message--${t.type}`}>{t.message}</span>
-              <button onClick={() => dismiss(t.id)} className="toast__dismiss">
+              <span className={`toast__message toast__message--${t.type}`}>
+                {t.message}
+                {t.action && (
+                  <button
+                    type="button"
+                    className="toast__action"
+                    onClick={() => {
+                      dismiss(t.id);
+                      t.action.onClick();
+                    }}
+                  >
+                    {t.action.label}
+                  </button>
+                )}
+              </span>
+              <button
+                onClick={() => dismiss(t.id)}
+                className="toast__dismiss"
+                aria-label="Dismiss notification"
+              >
                 ×
               </button>
             </div>

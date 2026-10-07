@@ -327,6 +327,71 @@ export function useReceiveDeposit() {
   });
 }
 
+function useDepositMove(send) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: send,
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["billing", "deposit"] });
+      queryClient.invalidateQueries({ queryKey: billingKeys.currentShift() });
+      queryClient.invalidateQueries({ queryKey: REFUND_BOARD });
+      queryClient.invalidateQueries({ queryKey: billingKeys.all });
+    },
+  });
+}
+
+export function useDepositPatientSearch(q) {
+  const term = (q || "").trim();
+  return useQuery({
+    queryKey: ["billing", "deposit-patient-search", term],
+    queryFn: async () =>
+      (await api.get("/api/patients", { params: { q: term, limit: 8 } })).data?.data ?? [],
+    enabled: term.length >= 2,
+    staleTime: 30_000,
+  });
+}
+
+export function useUploadDepositConsent() {
+  return useMutation({
+    mutationFn: async ({ patientId, ...body }) =>
+      (await api.post(`${DESK}/patients/${patientId}/deposit/consent`, body)).data,
+  });
+}
+
+export function useTransferDeposit() {
+  return useDepositMove(
+    async ({ patientId, ...body }) =>
+      (await api.post(`${DESK}/patients/${patientId}/deposit/transfer`, body)).data,
+  );
+}
+
+export function useTransferDepositToIpd() {
+  return useDepositMove(
+    async ({ patientId, ...body }) =>
+      (await api.post(`${DESK}/patients/${patientId}/deposit/ipd`, body)).data,
+  );
+}
+
+export function useRequestDepositRefund() {
+  return useDepositMove(
+    async ({ patientId, ...body }) =>
+      (await api.post(`${DESK}/patients/${patientId}/deposit/refund-request`, body)).data,
+  );
+}
+
+export function usePayOutDepositRefund() {
+  return useDepositMove(
+    async ({ requestId, ...body }) =>
+      (await api.post(`${DESK}/deposit-refunds/${requestId}/pay-out`, body)).data,
+  );
+}
+
+export const depositSlipPdfHref = (entryId) =>
+  `${API_URL}${DESK}/deposit-entries/${entryId}/slip.pdf?token=${encodeURIComponent(authToken())}`;
+
+export const depositConsentHref = (documentId) =>
+  `${API_URL}${DESK}/deposit-consents/${documentId}/file?token=${encodeURIComponent(authToken())}`;
+
 export function useTakePayments() {
   const queryClient = useQueryClient();
   return useMutation({

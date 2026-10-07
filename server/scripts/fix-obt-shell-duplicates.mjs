@@ -1,5 +1,6 @@
 import "../loadEnv.js";
 import pool from "../config/db.js";
+import { DEPOSIT_TABLES, refuseMergeWithDeposit } from "../services/billing/deposits.js";
 
 const APPLY = process.argv.includes("--apply");
 const ALLOW_SEX_MISMATCH = process.argv.includes("--allow-sex-mismatch");
@@ -68,6 +69,7 @@ async function countRefs(client, cols, id) {
 
 async function repoint(client, cols, fromId, toId) {
   for (const { tbl, col } of cols) {
+    if (DEPOSIT_TABLES.includes(tbl)) continue;
     await client.query(`UPDATE "${tbl}" SET "${col}" = $2 WHERE "${col}" = $1`, [fromId, toId]);
   }
 }
@@ -159,6 +161,7 @@ for (const pair of PAIRS) {
       }
     }
 
+    await refuseMergeWithDeposit(client, gni.id, `GNI chart ${gni.file_no}`);
     await repoint(client, patientCols, gni.id, real.id);
     await client.query(`DELETE FROM patients WHERE id = $1`, [gni.id]);
 

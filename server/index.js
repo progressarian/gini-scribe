@@ -58,6 +58,7 @@ import stationTrackingRoutes from "./routes/station-tracking.js";
 import cancellationRoutes from "./routes/cancellations.js";
 import walkinRoutes from "./routes/walkins.js";
 import obtStatusRoutes from "./routes/obt-status.js";
+import obtAssignmentRoutes from "./routes/obtAssignments.js";
 import obtDashboardRoutes from "./routes/obt-dashboard.js";
 import patientAlertRoutes from "./routes/patient-alerts.js";
 import patientBlockRoutes from "./routes/patientBlocks.js";
@@ -131,7 +132,8 @@ app.use((req, res, next) => {
 
   const isStationReport =
     (p.startsWith("/api/giniflow/stations/") && /\/reports?$/.test(p)) ||
-    (p.startsWith("/api/billing/") && p.endsWith("/scanned-reports"));
+    (p.startsWith("/api/billing/") &&
+      (p.endsWith("/scanned-reports") || p.endsWith("/deposit/consent")));
 
   const limit = isLarge ? "50mb" : isStationReport ? "7mb" : isMedium ? "5mb" : "1mb";
   express.json({ limit })(req, res, next);
@@ -213,6 +215,7 @@ app.use("/api", stationTrackingRoutes);
 app.use("/api", cancellationRoutes);
 app.use("/api", walkinRoutes);
 app.use("/api", obtStatusRoutes);
+app.use("/api", obtAssignmentRoutes);
 app.use("/api", obtDashboardRoutes);
 app.use("/api", patientAlertRoutes);
 app.use("/api", patientBlockRoutes);

@@ -134,6 +134,12 @@
   background: #f1f5f9;
 }
 
+.doc-dd__item:disabled {
+  color: #94a3b8;
+  cursor: not-allowed;
+  background: none;
+}
+
 .doc-dd__item--active {
   background: #2563eb;
   color: #fff;
@@ -142,4 +148,9 @@
 
 .doc-dd__item--active:hover {
   background: #1d4ed8;
+}
+
+.doc-dd__btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }

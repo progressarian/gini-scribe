@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import {
+  depositConsentHref,
   depositReceiptPdfHref,
+  depositSlipPdfHref,
   useCurrentShift,
   useDeposit,
   useReceiveDeposit,
@@ -10,6 +12,7 @@ import { errorOf, fromPaise, moneyTyped } from "../format";
 import { when } from "../importText";
 import { PAYMENT_MODE_LABEL } from "./lineText";
 import { PdfButton } from "./PdfViewer";
+import DepositMoves from "./DepositMoves";
 
 const KIND_LABEL = {
   received: "Deposit taken",
@@ -35,6 +38,23 @@ function detailOf(entry) {
       .join(" · ");
   }
   if (entry.kind === "applied") return entry.bill_no ? `Bill ${entry.bill_no}` : "Draft bill";
+  if (entry.kind === "transfer_out" || entry.kind === "transfer_in") {
+    return [
+      entry.kind === "transfer_out" ? "To" : "From",
+      entry.other_patient?.name,
+      entry.other_patient?.file_no && `(${entry.other_patient.file_no})`,
+      entry.relationship && `· ${entry.relationship}`,
+      entry.slip_no && `· ${entry.slip_no}`,
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
+  if (entry.kind === "to_ipd") return `IP ${entry.ipd_number} · ${entry.slip_no}`;
+  if (entry.kind === "refunded") {
+    return [PAYMENT_MODE_LABEL[entry.mode] ?? entry.mode, entry.reference]
+      .filter(Boolean)
+      .join(" · ");
+  }
   if (entry.kind === "restored") {
     return [
       entry.bill_no && `Credit note ${entry.bill_no}`,
@@ -46,7 +66,9 @@ function detailOf(entry) {
   return "";
 }
 
-export default function DepositPanel({ patientId, patientName, open, onToggle }) {
+const SLIP_KINDS = ["transfer_out", "transfer_in", "to_ipd", "refunded"];
+
+export default function DepositPanel({ patientId, patientName, patientFileNo, open, onToggle }) {
   const { data, isLoading, isError, refetch } = useDeposit(patientId);
   const { data: shift } = useCurrentShift();
   const receive = useReceiveDeposit();
@@ -140,6 +162,33 @@ export default function DepositPanel({ patientId, patientName, open, onToggle })
             services can be kept here too.
           </p>
 
+          {data && (data.held > 0 || data.balance > 0) && (
+            <dl className="bc-pay__mini">
+              <div>
+                <dt>Balance</dt>
+                <dd>{fromPaise(data.balance)}</dd>
+              </div>
+              {data.held > 0 && (
+                <div>
+                  <dt>Held for refund</dt>
+                  <dd>{fromPaise(data.held)}</dd>
+                </div>
+              )}
+              <div className="bc-pay__left">
+                <dt>Available</dt>
+                <dd>{fromPaise(data.available)}</dd>
+              </div>
+            </dl>
+          )}
+
+          {data && (
+            <DepositMoves
+              patient={{ id: patientId, name: patientName, file_no: patientFileNo }}
+              deposit={data}
+            />
+          )}
+
+          <div className="bc-field__lbl">Take a deposit</div>
           <form className="bc-deposit__form" onSubmit={submit} aria-label="Take a deposit">
             <label className="bc-field">
               <span className="bc-field__lbl">Mode</span>
@@ -278,6 +327,27 @@ export default function DepositPanel({ patientId, patientName, open, onToggle })
                             <div className="bc-hint">{detailOf(entry)}</div>
                           ) : null}
                           {entry.note ? <div className="bc-hint">{entry.note}</div> : null}
+                          {SLIP_KINDS.includes(entry.kind) ? (
+                            <PdfButton
+                              className="st-btn st-btn-g"
+                              href={depositSlipPdfHref(entry.id)}
+                              title={`Deposit slip ${entry.slip_no || ""}`.trim()}
+                              fileName={`DepositSlip_${entry.slip_no || entry.id}.pdf`}
+                              aria-label={`Print the slip for ${KIND_LABEL[entry.kind].toLowerCase()}`}
+                            >
+                              Slip
+                            </PdfButton>
+                          ) : null}
+                          {entry.consent_document_id ? (
+                            <a
+                              className="st-btn st-btn-g"
+                              href={depositConsentHref(entry.consent_document_id)}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              Consent
+                            </a>
+                          ) : null}
                           {entry.kind === "received" && entry.payment_id ? (
                             <PdfButton
                               className="st-btn st-btn-g"

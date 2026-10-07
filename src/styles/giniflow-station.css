@@ -8687,3 +8687,20 @@
     white-space: nowrap;
   }
 }
+
+.gf .si-tmr-rest {
+  background: var(--blu-l);
+  color: var(--blu);
+}
+.gf .sd-rest-name {
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+.gf .sd-rest-clock {
+  font-family: var(--fm);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--blu);
+  margin-bottom: 6px;
+}

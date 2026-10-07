@@ -1112,6 +1112,111 @@ async function requests(filters, db) {
 
 const LINE_FILTERS = ["category", "sub_category", "group", "subgroup", "consultant", "user"];
 
+const DEPOSIT_MOVES = [
+  col("received", "Deposits taken"),
+  col("applied", "Used on bills"),
+  col("restored", "Refunds kept as deposit"),
+  col("moved_out", "Moved to other patients"),
+  col("moved_in", "Moved in from patients"),
+  col("to_ipd", "Moved to IPD"),
+  col("refunded", "Paid back"),
+  col("net", "Net change"),
+];
+
+const DEPOSIT_SUMS = `
+  COALESCE(SUM(e.amount) FILTER (WHERE e.kind = 'received'), 0) AS received,
+  COALESCE(-SUM(e.amount) FILTER (WHERE e.kind = 'applied'), 0) AS applied,
+  COALESCE(SUM(e.amount) FILTER (WHERE e.kind = 'restored'), 0) AS restored,
+  COALESCE(-SUM(e.amount) FILTER (WHERE e.kind = 'transfer_out'), 0) AS moved_out,
+  COALESCE(SUM(e.amount) FILTER (WHERE e.kind = 'transfer_in'), 0) AS moved_in,
+  COALESCE(-SUM(e.amount) FILTER (WHERE e.kind = 'to_ipd'), 0) AS to_ipd,
+  COALESCE(-SUM(e.amount) FILTER (WHERE e.kind = 'refunded'), 0) AS refunded,
+  COALESCE(SUM(e.amount), 0) AS net`;
+
+async function deposits(filters, db) {
+  const scope = reportScope(filters, {
+    day: { instant: "e.created_at" },
+    user: "e.created_by",
+  });
+  const byDay = await db.query(
+    `SELECT ${dayOfInstant("e.created_at")} AS day, GROUPING(${dayOfInstant("e.created_at")}) AS day_rolled,
+            ${DEPOSIT_SUMS}
+       FROM deposit_entries e
+      WHERE ${scope.sql}
+      GROUP BY GROUPING SETS ((${dayOfInstant("e.created_at")}), ())
+      ORDER BY 1`,
+    scope.params,
+  );
+  const ipd = reportScope(filters, { day: { instant: "e.created_at" }, user: "e.created_by" });
+  const ipdRows = await db.query(
+    `SELECT ${dayOfInstant("e.created_at")}::text AS day_text, e.slip_no, e.ipd_number,
+            p.name AS patient_name, p.file_no, -e.amount AS amount,
+            COALESCE(d.short_name, d.name) AS by_name, e.note
+       FROM deposit_entries e
+       JOIN patients p ON p.id = e.patient_id
+       LEFT JOIN doctors d ON d.id = e.created_by
+      WHERE e.kind = 'to_ipd' AND ${ipd.sql}
+      ORDER BY e.created_at`,
+    ipd.params,
+  );
+  const moved = reportScope(filters, { day: { instant: "e.created_at" }, user: "e.created_by" });
+  const from = moved.bind(filters.from ?? null);
+  const to = moved.bind(filters.to);
+  const held = await db.query(
+    `WITH moved AS (SELECT DISTINCT e.patient_id FROM deposit_entries e WHERE ${moved.sql})
+     SELECT COALESCE(SUM(x.amount) FILTER (
+              WHERE ${from}::date IS NOT NULL
+                AND x.created_at < (${from}::date)::timestamp AT TIME ZONE 'Asia/Kolkata'), 0) AS opening,
+            COALESCE(SUM(x.amount) FILTER (
+              WHERE x.created_at < (${to}::date + 1)::timestamp AT TIME ZONE 'Asia/Kolkata'), 0) AS closing,
+            (SELECT COUNT(*) FROM moved) AS patients
+       FROM deposit_entries x
+      WHERE x.patient_id IN (SELECT patient_id FROM moved)`,
+    moved.params,
+  );
+  const days = byDay.rows.filter((row) => Number(row.day_rolled) === 0);
+  const total = byDay.rows.find((row) => Number(row.day_rolled) === 1) ?? null;
+  return [
+    section(
+      "held",
+      "Deposits held by the patients in these dates",
+      [
+        col("opening", "Held at the start"),
+        col("closing", "Held at the end"),
+        col("patients", "Patients", "count"),
+      ],
+      held.rows,
+      null,
+      {
+        note: "Held at the end = held at the start + taken + refunds kept − used − moved to IPD − paid back. Moves between patients net to zero.",
+      },
+    ),
+    section(
+      "days",
+      "By day",
+      [col("day_text", "Day", "date"), ...DEPOSIT_MOVES],
+      days.map((row) => ({ ...row, day_text: row.day ? String(row.day).slice(0, 10) : null })),
+      total,
+    ),
+    section(
+      "ipd",
+      "Moved to IPD — enter these in HealthRay",
+      [
+        col("day_text", "Day", "date"),
+        col("slip_no", "Slip no.", "text"),
+        col("patient_name", "Patient", "text"),
+        col("file_no", "UHID", "text"),
+        col("ipd_number", "IP / admission no.", "text"),
+        col("amount", "Amount"),
+        col("by_name", "By", "text"),
+        col("note", "Reason", "text"),
+      ],
+      ipdRows.rows,
+      null,
+    ),
+  ];
+}
+
 export const REPORTS = {
   revenue_items: {
     title: "Revenue by service",
@@ -1165,6 +1270,11 @@ export const REPORTS = {
     title: "Desk requests",
     filters: ["user"],
     run: requests,
+  },
+  deposits: {
+    title: "Patient deposits",
+    filters: ["user"],
+    run: deposits,
   },
 };
 

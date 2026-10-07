@@ -10,7 +10,7 @@ import {
 } from "../../queries/hooks/useGiniflowVitals";
 import { useVoiceVitals } from "../../hooks/useVoiceVitals";
 import { SPOKEN_EXAMPLE, flagLargeChanges } from "../../../shared/giniflowVitalsSpeech";
-import { pauseReasonLabel } from "../../../shared/giniflowStatus";
+import { pauseReasonLabel, isResting, VITALS_REST_MINUTES } from "../../../shared/giniflowStatus";
 import { useTick, minutesSince, budgetColour } from "../../lib/giniflowTime";
 import {
   ALLERGY_OPTIONS,
@@ -97,6 +97,11 @@ const outOfRange = (field, value) => {
   return n < lo || n > hi;
 };
 
+const countdown = (until, now) => {
+  const seconds = Math.max(0, Math.ceil((new Date(until).getTime() - now) / 1000));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+};
+
 const PRIORITY_CHIP = {
   urgent: { cls: "pri-urgent", label: "❗ Urgent" },
   high: { cls: "pri-high", label: "⬆ High" },
@@ -174,10 +179,19 @@ function QueueRow({ q, active, now, onPick }) {
   const waited = minutesSince(q.statusSince, now) ?? q.waitMinutes ?? 0;
   const tone = budgetColour(waited, q.waitBudget);
   const chip = PRIORITY_CHIP[q.priority];
+  const resting = isResting(q.restUntil, now);
   return (
     <button
       type="button"
-      className={`sq-item${active ? " active" : ""}${chip ? ` ${chip.cls}` : ""}`}
+      className={`sq-item${active ? " active" : ""}${chip ? ` ${chip.cls}` : ""}${
+        resting ? " is-readonly" : ""
+      }`}
+      disabled={resting}
+      aria-label={
+        resting
+          ? `${q.name}, resting before BP, ready in ${countdown(q.restUntil, now)}`
+          : undefined
+      }
       onClick={() => onPick(q.visitId)}
     >
       <div className="si-slot">{q.slot}</div>
@@ -194,9 +208,15 @@ function QueueRow({ q, active, now, onPick }) {
           biomarkers, and the words say which clock it is: time at the station
           once they have sat down, time queueing until then. */}
       <div className="si-wait">
-        <span className={`si-tmr si-tmr-${tone}`}>
-          ⏱ {waited}m {q.status === "with_vitals" ? "at station" : "waiting"}
-        </span>
+        {resting ? (
+          <span className="si-tmr si-tmr-rest">
+            🛋 Resting {countdown(q.restUntil, now)} · ready {clock(q.restUntil)}
+          </span>
+        ) : (
+          <span className={`si-tmr si-tmr-${tone}`}>
+            ⏱ {waited}m {q.status === "with_vitals" ? "at station" : "waiting"}
+          </span>
+        )}
         {q.checkedInAt && <span className="si-since">in since {clock(q.checkedInAt)}</span>}
       </div>
       {q.priorityReason && <div className="si-reason">❗ {q.priorityReason}</div>}
@@ -328,12 +348,16 @@ export default function VitalsStationPage() {
 
   // Derived, not set in an effect: the screen opens on whoever is at the station
   // with no click and no flash of the empty state.
-  const activeVisitId = selected ?? [...atStation, ...waitingList][0]?.visitId ?? null;
+  const activeVisitId =
+    selected ??
+    [...atStation, ...waitingList.filter((q) => !isResting(q.restUntil, now))][0]?.visitId ??
+    null;
   // A patient reopened from the done list has already left the station, and
   // saveVitals will store the correction without moving them. The bar must say
   // that rather than promising to send them on again.
   const correcting = !!activeVisitId && !queue.some((q) => q.visitId === activeVisitId);
   const { data: patient } = useVitalsPatient(activeVisitId);
+  const restingNow = !!patient && isResting(patient.restUntil, now);
 
   // A different patient means a fresh form — never carry one patient's numbers
   // onto another's record.
@@ -701,7 +725,21 @@ export default function VitalsStationPage() {
 
         <div className="station-detail">
           {!patient && <div className="sd-empty">Select a patient from the queue.</div>}
-          {patient && (
+          {restingNow && (
+            <div className="sd-empty" role="status">
+              <div>
+                <div className="sd-rest-name">
+                  {patient.name} · {patient.fileNo}
+                </div>
+                <div className="sd-rest-clock">🛋 Resting {countdown(patient.restUntil, now)}</div>
+                <div>
+                  BP is taken after {VITALS_REST_MINUTES} minutes of rest from arrival — ready at{" "}
+                  {clock(patient.restUntil)}.
+                </div>
+              </div>
+            </div>
+          )}
+          {patient && !restingNow && (
             <>
               <div className="sd-header">
                 <div className="sdh-body">

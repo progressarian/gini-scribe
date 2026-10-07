@@ -26,6 +26,28 @@ export function followUpTiming(v) {
   return TIMING_INTERVAL.test(s) ? s : "";
 }
 
+const addMonths = (d, n) => {
+  const day = d.getUTCDate();
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth() + n);
+  const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+  d.setUTCDate(Math.min(day, last));
+};
+
+export function followUpDueDate(fromDate, timing) {
+  const from = clean(fromDate);
+  const match = followUpTiming(timing)
+    .toLowerCase()
+    .match(/^(\d{1,2})\s*(day|week|month|year)/);
+  if (!from || !match) return "";
+  const n = Number(match[1]);
+  const d = new Date(`${from}T00:00:00Z`);
+  if (match[2] === "day") d.setUTCDate(d.getUTCDate() + n);
+  else if (match[2] === "week") d.setUTCDate(d.getUTCDate() + 7 * n);
+  else addMonths(d, match[2] === "month" ? n : 12 * n);
+  return d.toISOString().slice(0, 10);
+}
+
 export function effectiveFollowUp(row) {
   const date = effectiveFollowUpDate(row);
   const hr = row?.healthray_follow_up || {};

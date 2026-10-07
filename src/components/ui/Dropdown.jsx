@@ -4,7 +4,16 @@ import AnchoredPopover from "./AnchoredPopover.jsx";
 import useDismissOnOutside from "../../hooks/useDismissOnOutside.js";
 import "./Dropdown.css";
 
-export default function Dropdown({ value, options, onChange, ariaLabel, variant, placeholder }) {
+export default function Dropdown({
+  value,
+  options,
+  onChange,
+  ariaLabel,
+  variant,
+  placeholder,
+  disabled = false,
+  title,
+}) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef(null);
   const listRef = useRef(null);
@@ -40,6 +49,8 @@ export default function Dropdown({ value, options, onChange, ariaLabel, variant,
             : `doc-dd__btn ${variant === "cell" ? "doc-dd__btn--cell" : ""}`
         }
         onClick={() => setOpen((o) => !o)}
+        disabled={disabled}
+        title={title}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={ariaLabel}
@@ -64,6 +75,9 @@ export default function Dropdown({ value, options, onChange, ariaLabel, variant,
                 type="button"
                 role="option"
                 aria-selected={value === o.value}
+                aria-disabled={o.disabled || undefined}
+                disabled={o.disabled}
+                title={o.title}
                 className={`doc-dd__item ${value === o.value ? "doc-dd__item--active" : ""}`}
                 onClick={() => select(o.value)}
               >

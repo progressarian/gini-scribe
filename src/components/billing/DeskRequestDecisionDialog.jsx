@@ -4,6 +4,8 @@ import {
   useRejectDeskRequest,
 } from "../../queries/hooks/useBillingRequests";
 import { REFUND_MODES } from "../../../shared/billingVocab.js";
+
+const DEPOSIT_PAY_MODES = ["cash", "card", "upi"];
 import { fromPaise, requestErrorOf } from "./format";
 import { refundLegsText, refundModeText } from "./counter/lineText";
 import useDialog from "./useDialog";
@@ -47,9 +49,11 @@ export default function DeskRequestDecisionDialog({ request, mode, subject, onCl
   const approve = useApproveDeskRequest();
   const reject = useRejectDeskRequest();
   const rejecting = mode === "reject";
-  const refund = request.kind === "refund";
+  const depositRefund = request.kind === "deposit_refund";
+  const refund = request.kind === "refund" || depositRefund;
   const decide = rejecting ? reject : approve;
-  const asked = request.refund?.requested_mode ?? null;
+  const asked = request.refund?.requested_mode ?? request.deposit_refund?.requested_mode ?? null;
+  const modes = depositRefund ? DEPOSIT_PAY_MODES : REFUND_MODES;
   const [note, setNote] = useState("");
   const [refundMode, setRefundMode] = useState(asked);
   const [modeReason, setModeReason] = useState("");
@@ -108,14 +112,16 @@ export default function DeskRequestDecisionDialog({ request, mode, subject, onCl
           <p className="fset__cardsub">
             {rejecting
               ? "The desk sees this note, so say why — a rejection without a note is refused."
-              : refund && refundMode === "deposit"
-                ? "Approving makes the credit note now and keeps the money as this patient's deposit — nothing is paid out at the counter."
-                : refund
-                  ? "Approving makes the credit note now. The desk then pays the money back from its counter."
-                  : "The desk may add this item to the visit once more. One approval allows one extra line."}
+              : depositRefund
+                ? `Approving lets the desk pay ${fromPaise(request.deposit_refund.amount)} back from ${request.patient?.name ?? "the patient"}'s deposit. It must be approved by someone other than the person who asked.`
+                : refund && refundMode === "deposit"
+                  ? "Approving makes the credit note now and keeps the money as this patient's deposit — nothing is paid out at the counter."
+                  : refund
+                    ? "Approving makes the credit note now. The desk then pays the money back from its counter."
+                    : "The desk may add this item to the visit once more. One approval allows one extra line."}
           </p>
           <p className="dreq__quote">{request.reason}</p>
-          {refund ? <RefundSummary request={request} /> : null}
+          {refund && !depositRefund ? <RefundSummary request={request} /> : null}
           {refund && !rejecting ? (
             <>
               <div className="fset__field">
@@ -126,7 +132,7 @@ export default function DeskRequestDecisionDialog({ request, mode, subject, onCl
                   value={refundMode}
                   onChange={(e) => setRefundMode(e.target.value)}
                 >
-                  {REFUND_MODES.map((value) => (
+                  {modes.map((value) => (
                     <option key={value} value={value}>
                       {refundModeText(value)}
                       {value === asked ? " (asked for)" : ""}

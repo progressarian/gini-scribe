@@ -545,6 +545,10 @@ export async function sweepDeposits(patients, bills = []) {
     );
     await client.query(`DELETE FROM payments WHERE deposit_patient_id = ANY($1)`, [patients]);
     await client.query(`DELETE FROM deposit_accounts WHERE patient_id = ANY($1)`, [patients]);
+    await client.query(
+      `DELETE FROM documents WHERE doc_type = 'deposit_consent' AND patient_id = ANY($1)`,
+      [patients],
+    );
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});

@@ -33,6 +33,11 @@ import {
   billingPaidAtReceptionQuerySchema,
   billingPaymentsTakeSchema,
   billingDepositReceiveSchema,
+  billingDepositConsentSchema,
+  billingDepositIpdSchema,
+  billingDepositPayOutSchema,
+  billingDepositRefundRequestSchema,
+  billingDepositTransferSchema,
   billingClearHealthraySchema,
   billingPayOutSchema,
   billingPdfQuerySchema,
@@ -61,8 +66,20 @@ import { generateReceiptPdf, generateRefundReceiptPdf } from "../services/billin
 import * as creditNotes from "../services/billing/creditNotes.js";
 import * as bills from "../services/billing/bills.js";
 import * as payments from "../services/billing/payments.js";
-import { getDeposit, receiveDeposit } from "../services/billing/deposits.js";
-import { generateDepositReceiptPdf } from "../services/billing/depositReceiptPdf.js";
+import {
+  getDeposit,
+  payOutRefund,
+  readConsent,
+  receiveDeposit,
+  requestRefund,
+  transferToIpd,
+  transferToPatient,
+  uploadConsent,
+} from "../services/billing/deposits.js";
+import {
+  generateDepositReceiptPdf,
+  generateDepositSlipPdf,
+} from "../services/billing/depositReceiptPdf.js";
 import { duesToday } from "../services/billing/dues.js";
 import { refundBoard } from "../services/billing/refundBoard.js";
 import * as shifts from "../services/billing/cashShifts.js";
@@ -481,6 +498,65 @@ router.post(
   desk,
   validate(billingDepositReceiveSchema, BILLING_DESK_LABELS),
   run("Receive deposit", 201, (req) => receiveDeposit(req.params.patientId, req.body, ctx(req))),
+);
+
+router.post(
+  `${BASE}/patients/:patientId/deposit/consent`,
+  master,
+  validate(billingDepositConsentSchema, BILLING_DESK_LABELS),
+  run("Deposit consent", 201, (req) => uploadConsent(req.params.patientId, req.body, ctx(req))),
+);
+
+router.get(`${BASE}/deposit-consents/:documentId/file`, desk, async (req, res) => {
+  try {
+    const consent = await readConsent(req.params.documentId);
+    res.set("Content-Type", consent.mimeType);
+    res.set("Content-Disposition", `inline; filename="${encodeURIComponent(consent.fileName)}"`);
+    res.set("Cache-Control", "private, max-age=300");
+    return res.send(consent.buffer);
+  } catch (e) {
+    return sendFailure("Deposit consent", res, e);
+  }
+});
+
+router.post(
+  `${BASE}/patients/:patientId/deposit/transfer`,
+  master,
+  validate(billingDepositTransferSchema, BILLING_DESK_LABELS),
+  run("Move deposit to a patient", 201, (req) =>
+    transferToPatient(req.params.patientId, req.body, ctx(req)),
+  ),
+);
+
+router.post(
+  `${BASE}/patients/:patientId/deposit/ipd`,
+  master,
+  validate(billingDepositIpdSchema, BILLING_DESK_LABELS),
+  run("Move deposit to IPD", 201, (req) => transferToIpd(req.params.patientId, req.body, ctx(req))),
+);
+
+router.post(
+  `${BASE}/patients/:patientId/deposit/refund-request`,
+  desk,
+  validate(billingDepositRefundRequestSchema, BILLING_DESK_LABELS),
+  run("Deposit refund request", 201, (req) =>
+    requestRefund(req.params.patientId, req.body, ctx(req)),
+  ),
+);
+
+router.post(
+  `${BASE}/deposit-refunds/:requestId/pay-out`,
+  desk,
+  validate(billingDepositPayOutSchema, BILLING_DESK_LABELS),
+  run("Pay out deposit refund", 201, (req) =>
+    payOutRefund(req.params.requestId, req.body, ctx(req)),
+  ),
+);
+
+router.get(
+  `${BASE}/deposit-entries/:entryId/slip.pdf`,
+  desk,
+  pdfRoute("Deposit slip PDF", (req) => generateDepositSlipPdf(req.params.entryId)),
 );
 
 router.get(

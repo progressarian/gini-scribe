@@ -21,6 +21,7 @@ const ARRIVAL_KEYS = [
   "blockedReason",
   "bookingType",
   "checkedInAt",
+  "consultsDirect",
   "fileNo",
   "journey",
   "minutesLate",

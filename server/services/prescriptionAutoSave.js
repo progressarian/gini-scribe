@@ -24,7 +24,8 @@ import { getCanonical } from "../utils/labCanonical.js";
 import { computeCarePhase } from "../utils/carePhase.js";
 import { sortDiagnoses } from "../utils/diagnosisSort.js";
 import { generatePatientSummary } from "./patientSummaryAI.js";
-import { datedFollowUp } from "../../shared/followUp.js";
+import { datedFollowUp, followUpDueDate } from "../../shared/followUp.js";
+import { borrowedFollowUp } from "./ghmDayWindow.js";
 import { appointmentComplaints, appointmentHistory } from "./giniflow/visitComplaints.js";
 import { appointmentAdvice } from "./giniflow/visitAdvice.js";
 
@@ -324,16 +325,16 @@ export async function buildVisitPayloadFromDb(pid, { appointmentId } = {}) {
       [pid],
     ),
     pool.query(`SELECT * FROM goals WHERE patient_id=$1 ORDER BY status, created_at DESC`, [pid]),
-    // Latest appointment carrying biomarkers.followup — same source the OPD
-    // page reads, used as fallback when consultation/healthray follow-up
-    // lacks a date. Never reaches back past the visit being printed: an
-    // earlier appointment's follow-up belongs to that visit, not this one,
-    // and printing it puts a stale date on the prescription.
     pool.query(
-      `SELECT biomarkers, healthray_follow_up, healthray_investigations, follow_up_with
+      `SELECT appointment_date, biomarkers, healthray_follow_up, healthray_investigations,
+              follow_up_with
          FROM appointments
-          WHERE patient_id=$1 AND biomarkers ? 'followup'
-            AND appointment_date >= COALESCE(
+          WHERE patient_id=$1
+            AND (biomarkers ? 'followup'
+                 OR healthray_follow_up->>'date' ~ '^\\d{4}-\\d{2}-\\d{2}'
+                 OR btrim(COALESCE(healthray_follow_up->>'timing', '')) <> '')
+            AND NOT ${borrowedFollowUp("appointments")}
+            AND appointment_date <= COALESCE(
                   (SELECT appointment_date FROM appointments WHERE id=$2::int),
                   appointment_date)
           ORDER BY appointment_date DESC NULLS LAST, id DESC
@@ -415,7 +416,12 @@ export async function buildVisitPayloadFromDb(pid, { appointmentId } = {}) {
   const latestVitals = vitalsR.rows[0] || {};
   const prevVitals = vitalsR.rows[1] || {};
 
-  const fuRow = followupApptR.rows[0] || null;
+  const latestConsultDay = String(consultationsR.rows[0]?.visit_date || "").slice(0, 10);
+  const fuCandidate = followupApptR.rows[0] || null;
+  const fuRow =
+    fuCandidate && !(latestConsultDay && fuCandidate.appointment_date < latestConsultDay)
+      ? fuCandidate
+      : null;
   const fuBio = fuRow?.biomarkers || {};
   const fuInvestigations = (fuRow?.healthray_investigations || []).map((t) =>
     typeof t === "string" ? { name: t, urgency: "routine" } : t,
@@ -427,6 +433,13 @@ export async function buildVisitPayloadFromDb(pid, { appointmentId } = {}) {
           date: fuBio.followup,
           notes: fuRow?.healthray_follow_up?.notes || null,
           timing: fuRow?.healthray_follow_up?.timing || null,
+        }
+      : null) ||
+    (followUpDueDate(fuRow?.appointment_date, fuRow?.healthray_follow_up?.timing)
+      ? {
+          date: followUpDueDate(fuRow.appointment_date, fuRow.healthray_follow_up.timing),
+          notes: fuRow.healthray_follow_up.notes || null,
+          timing: fuRow.healthray_follow_up.timing,
         }
       : null);
 

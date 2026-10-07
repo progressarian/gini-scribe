@@ -1,6 +1,7 @@
 import "../loadEnv.js";
 import pool from "../config/db.js";
 import { cancelTestIn } from "../services/giniflow/testCancel.js";
+import { DEPOSIT_TABLES, refuseMergeWithDeposit } from "../services/billing/deposits.js";
 
 const [dupFileNo, realFileNo, date] = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 const apply = process.argv.includes("--apply");
@@ -114,10 +115,11 @@ try {
     `  visit moved onto ${realFileNo}${hrAppt ? ` and linked to HealthRay appointment ${hrAppt.id}` : ""}`,
   );
 
+  await refuseMergeWithDeposit(client, dup.id, `Walk-in chart ${dup.file_no ?? dup.id}`);
   const cols = await referencingColumns(client);
   const moved = {};
   for (const { tbl, col } of cols) {
-    if (tbl === "patients") continue;
+    if (tbl === "patients" || DEPOSIT_TABLES.includes(tbl)) continue;
     const r = await client.query(`UPDATE "${tbl}" SET "${col}" = $2 WHERE "${col}" = $1`, [
       dup.id,
       real.id,

@@ -167,9 +167,14 @@ test.describe.serial("P4-36 desk requests page", () => {
     const priced = await query(
       `SELECT column_name FROM information_schema.columns
         WHERE table_name = 'billing_requests'
-          AND column_name ~ 'price|rate|amount|fee'`,
+          AND column_name ~ 'price|rate|amount|fee' AND column_name <> 'amount'`,
     );
     expect(priced.rows).toEqual([]);
+    const amountRule = await query(
+      `SELECT pg_get_constraintdef(oid) AS rule FROM pg_constraint
+        WHERE conname = 'billing_requests_amount_check'`,
+    );
+    expect(amountRule.rows[0]?.rule).toMatch(/kind = 'deposit_refund'/);
   });
 
   test("2. a rejection without a note is refused; with a note it is recorded", async ({ page }) => {

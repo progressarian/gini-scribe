@@ -110,6 +110,61 @@ export function useGhmLastMo(patientIds) {
   return useIdBatch(qk.ghm.lastMo, "/api/ghm-appointments/last-mo", patientIds, "patient_ids");
 }
 
+export function useObtTeam() {
+  return useQuery({
+    queryKey: qk.ghm.obtTeam(),
+    queryFn: async () => arr((await api.get("/api/obt-assignments/team")).data),
+    staleTime: 10 * 60 * 1000,
+  });
+}
+
+export function useObtAssignments(patientIds) {
+  return useIdBatch(
+    qk.ghm.obtAssignments,
+    "/api/obt-assignments/lookup",
+    patientIds,
+    "patient_ids",
+  );
+}
+
+export async function fetchObtAssignments(patientIds) {
+  const ids = [...new Set((patientIds || []).filter((id) => Number.isInteger(id)))];
+  const out = {};
+  for (let i = 0; i < ids.length; i += LAST_MO_CHUNK) {
+    const { data } = await api.post("/api/obt-assignments/lookup", {
+      patient_ids: ids.slice(i, i + LAST_MO_CHUNK),
+    });
+    Object.assign(out, data || {});
+  }
+  return out;
+}
+
+export function useAssignCalls() {
+  return useGhmMutation(
+    async ({ patientIds, memberId }) =>
+      (
+        await api.post("/api/obt-assignments/assign", {
+          patient_ids: patientIds,
+          assigned_to_id: memberId || null,
+        })
+      ).data,
+    [qk.ghm.any.obtAssignments, qk.ghm.any.list, qk.ghm.any.changes],
+  );
+}
+
+export function useDivideCalls() {
+  return useGhmMutation(
+    async ({ patientIds, memberIds }) =>
+      (
+        await api.post("/api/obt-assignments/divide", {
+          patient_ids: patientIds,
+          member_ids: memberIds,
+        })
+      ).data,
+    [qk.ghm.any.obtAssignments, qk.ghm.any.list, qk.ghm.any.changes],
+  );
+}
+
 export function useGhmSlotCounts(dates) {
   const key = [...new Set((dates || []).filter(Boolean))].sort().join(",");
   return useQuery({
@@ -178,6 +233,15 @@ export function useCallClaim() {
     },
     onSettled: invalidate,
   });
+  const takeOver = useMutation({
+    mutationFn: async (appointmentId) => {
+      const { data } = await api.post(`/api/ghm-appointments/${appointmentId}/calling`, {
+        release_previous: true,
+      });
+      return data;
+    },
+    onSettled: invalidate,
+  });
   const release = useMutation({
     mutationFn: async (appointmentId) => {
       const { data } = await api.delete(`/api/ghm-appointments/${appointmentId}/calling`);
@@ -185,7 +249,7 @@ export function useCallClaim() {
     },
     onSettled: invalidate,
   });
-  return { claim, release };
+  return { claim, release, takeOver };
 }
 
 export function useCallAttempts(appointmentId) {
@@ -298,6 +362,16 @@ function useGhmMutation(mutationFn, keys, options = {}) {
   });
 }
 
+const SLOT_COUNT_FIELDS = [
+  "preferred_time_slot",
+  "preferred_date",
+  "preferred_doctor",
+  "doctor_name",
+  "time_slot",
+  "appointment_date",
+  "status",
+];
+
 export function usePatchAppointment(listKey, applyOptimistic) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -322,14 +396,20 @@ export function usePatchAppointment(listKey, applyOptimistic) {
         "error",
       );
     },
-    onSettled: () => {
+    onSettled: (_data, _error, { field }) => {
       // The optimistic cell is already correct, so the list is only marked
       // stale — it refetches on the next focus, not under the edit.
       queryClient.invalidateQueries({ queryKey: qk.ghm.any.list, refetchType: "none" });
+      if (field === "call_status") {
+        queryClient.invalidateQueries({ queryKey: qk.ghm.any.activeCalls });
+        queryClient.invalidateQueries({ queryKey: qk.ghm.any.callSessions });
+      }
       queryClient.invalidateQueries({
         queryKey: qk.ghm.any.categoryCounts,
         refetchType: "active",
       });
+      if (SLOT_COUNT_FIELDS.includes(field))
+        queryClient.invalidateQueries({ queryKey: qk.ghm.any.slotCounts });
     },
   });
 }

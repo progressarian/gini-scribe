@@ -1,11 +1,19 @@
 # 61 — Patient deposits
 
-Status: **phase 1 built** (2026-10-06) — receive, pay a bill from the deposit, refunds kept as
-deposit (desk default "Keep as deposit", admin "Into the deposit", "as paid" deposit share,
-discounts after finalisation), cash shift and collections report, Deposit panel + header chip.
-Migration `2026-11-12_patient_deposits.sql`; tests `e2e/billing/deposits/D01`, `D02`. Phases 2–4
-not built. Not yet in phase 1: the merge scripts still stop on a patient with a deposit (the
-`RESTRICT` FK) instead of moving the balance — that needs the phase 2 transfer.
+Status: **all four phases built** (2026-10-07).
+
+- Phase 1 (`2026-11-12_patient_deposits.sql`, applied on production): receive, pay a bill from the
+  deposit, refunds kept as deposit (desk default "Keep as deposit", admin "Into the deposit", "as
+  paid" deposit share, discounts after finalisation), cash shift and collections report, Deposit
+  panel and header chip, deposit receipt.
+- Phases 2–4 (`2026-11-13_deposit_moves.sql`, **not yet applied on production**): move to another
+  patient with the depositor's consent photo, move to IPD with the HealthRay IP number, refund of
+  the balance (held from the request until paid or rejected, approved by a different person on
+  Requests, paid out on the Refunds board or the Deposit panel), DEP slips (`deposit_slip_seq`)
+  and slip PDFs, Patients deposits report, merge scripts stop on a patient with deposit history.
+- Open questions §11 answered with the recommendations: a deposit refund needs a second person;
+  cash refunds stay allowed as an explicit choice.
+- Tests: `e2e/billing/deposits/D01`–`D04`.
 
 A **deposit** is money a patient pays before there is a bill for it. It is held against the
 patient's name and used later: on any of their bills, on another patient's bills with their

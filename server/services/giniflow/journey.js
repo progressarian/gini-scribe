@@ -608,6 +608,10 @@ export async function checkInWithJourney(
         WHERE visit_id = $1
           AND chain_status IN ('with_sd', 'with_doctor')
           AND assigned_staff_id ~ '^[0-9]+$'
+          AND (chain_status <> 'with_doctor'
+               OR EXISTS (SELECT 1 FROM doctors d
+                           WHERE d.id = assigned_staff_id::int AND d.role = 'consultant'
+                             AND COALESCE(d.is_active, TRUE)))
         ORDER BY step_order`,
       [visitId],
     );

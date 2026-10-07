@@ -9,6 +9,8 @@ import { LIVE_LAB_CASE_SQL } from "../services/giniflow/testsHold.js";
 import { handleError } from "../utils/errorHandler.js";
 import { fetchBlockRow, resolvePatientId } from "../services/patientBlockGuard.js";
 import { redactBlock } from "../services/patientBlockView.js";
+import { livePreferredOn } from "../services/ghmDayWindow.js";
+import { actorOf, logBookingCreated } from "../services/appointmentHistory.js";
 import { requireCapability } from "../middleware/auth.js";
 import {
   CAPABILITIES as CAP,
@@ -120,7 +122,7 @@ async function syncAppointmentStatus(appointmentId, newStatus) {
 // status='checkedin') so walk-ins/new patients appear in OPD/GHM. Best-effort:
 // never breaks check-in. Behaves like an existing GHM walk-in insert.
 const FLOW_CREATE_APPOINTMENTS = process.env.FLOW_CREATE_APPOINTMENTS !== "false";
-async function ensureFlowAppointment(v) {
+async function ensureFlowAppointment(v, actor = null) {
   if (v.appointment_id) {
     await syncAppointmentStatus(v.appointment_id, "checkedin");
     return v.appointment_id;
@@ -155,7 +157,7 @@ async function ensureFlowAppointment(v) {
              (patient_id, patient_name, file_no, phone, doctor_name, doctor_id,
               appointment_date, visit_type, status, is_walkin, booking_source)
            VALUES ($1,$2,$3,$4,$5,$6, CURRENT_DATE, 'OPD', 'checkedin', $7, 'flow')
-           RETURNING id`,
+           RETURNING id, appointment_date, time_slot, doctor_name`,
           [
             v.patient_db_id || null,
             v.patient_name,
@@ -167,6 +169,7 @@ async function ensureFlowAppointment(v) {
           ],
         )
       ).rows[0];
+      if (appt) await logBookingCreated(pool, appt, actor || { name: "Reception check-in" });
     }
 
     if (appt) {
@@ -1287,17 +1290,20 @@ router.post("/flow/checkin", async (req, res) => {
     await client.query("COMMIT");
 
     // Mirror to OPD/GHM: link or create an appointment so the visit appears there.
-    await ensureFlowAppointment({
-      id: visit.id,
-      appointment_id,
-      patient_db_id,
-      patient_id,
-      patient_name,
-      patient_phone,
-      visit_type_id,
-      assigned_sd,
-      assigned_sd_name,
-    });
+    await ensureFlowAppointment(
+      {
+        id: visit.id,
+        appointment_id,
+        patient_db_id,
+        patient_id,
+        patient_name,
+        patient_phone,
+        visit_type_id,
+        assigned_sd,
+        assigned_sd_name,
+      },
+      actorOf(req),
+    );
 
     // Best-effort WhatsApp confirmation — never blocks/fails the check-in.
     let whatsappSent = false;
@@ -3485,7 +3491,8 @@ router.get("/flow/appointments", async (req, res) => {
 
     // Same day-membership rule as the GHM list: booked on the date, OR asked to
     // come on the date (preferred_date) while booked for another one.
-    let where = "WHERE (a.appointment_date = $1 OR a.preferred_date = $1)" + NOT_BLOCKED("a");
+    let where =
+      `WHERE (a.appointment_date = $1 OR ${livePreferredOn("a", "$1")})` + NOT_BLOCKED("a");
     if (req.query.doctor) {
       params.push(`%${req.query.doctor}%`);
       where += ` AND (a.doctor_name ILIKE $${params.length} OR a.preferred_doctor ILIKE $${params.length})`;

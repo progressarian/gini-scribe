@@ -1059,6 +1059,63 @@ export const billingDepositReceiveSchema = z.strictObject(
   objectOnly('must be a deposit, like { mode: "cash", amount: 2000 }'),
 );
 
+const depositText = (label, max) =>
+  z
+    .string({ error: label })
+    .trim()
+    .min(1, label)
+    .max(max, `${label} — keep it under ${max} letters`);
+
+export const billingDepositConsentSchema = z.strictObject(
+  {
+    base64: z.string().min(1, "Choose the photo of the signed consent"),
+    mediaType: z.enum(["application/pdf", "image/jpeg", "image/png", "image/webp"], {
+      message: "Upload the signed consent as a photo (JPG, PNG or WebP) or a PDF",
+    }),
+    fileName: z.string().trim().min(1, "The file needs a name").max(200),
+  },
+  objectOnly("Send the consent as an object"),
+);
+
+export const billingDepositTransferSchema = z.strictObject(
+  {
+    to_patient_id: z.coerce.number().int().positive("Choose the patient to move the deposit to"),
+    amount: paymentAmount,
+    relationship: depositText("Say how the two patients are related", 60),
+    reason: depositText("Say why the deposit is being moved", 300),
+    consent_document_id: z.coerce
+      .number()
+      .int()
+      .positive("Upload the depositor's signed consent first"),
+  },
+  objectOnly("Send the transfer as an object"),
+);
+
+export const billingDepositIpdSchema = z.strictObject(
+  {
+    amount: paymentAmount,
+    ipd_number: depositText("Enter the HealthRay IP / admission number", 40),
+    reason: depositText("Say why the deposit is moved to IPD", 300),
+  },
+  objectOnly("Send the IPD transfer as an object"),
+);
+
+export const billingDepositRefundRequestSchema = z.strictObject(
+  {
+    amount: paymentAmount,
+    mode: z.enum(PAYMENT_MODES, { message: `must be one of: ${PAYMENT_MODES.join(", ")}` }),
+    reason: depositText("Say why the deposit is being paid back", 300),
+  },
+  objectOnly("Send the refund request as an object"),
+);
+
+export const billingDepositPayOutSchema = z.strictObject(
+  {
+    reference: z.union([z.string().trim().max(PAYMENT_REFERENCE_MAX), z.null()]).optional(),
+  },
+  objectOnly("Send the pay-out as an object"),
+);
+
 export const billingClearHealthraySchema = deskObject(
   { version: whole },
   objectOnly("Send the bill's version as an object"),

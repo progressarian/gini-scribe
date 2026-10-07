@@ -152,6 +152,7 @@ const ROUTE_CAPABILITIES = [
   ["/api/call-sessions", [CAP.RECEPTION_OPS, CAP.OBT_OPS]],
   ["/api/clinic-holidays", CAP.RECEPTION_OPS],
   ["/api/obt-status", CAP.OBT_OPS],
+  ["/api/obt-assignments", [CAP.RECEPTION_OPS, CAP.OBT_OPS]],
   // Gini Flow. The board is read-only, so one capability covers every route
   // here; the SLA write is separately gated with requireCapability on the route.
   // Station routes carry their own per-station capability on the route itself;

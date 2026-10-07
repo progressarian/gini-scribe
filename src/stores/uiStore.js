@@ -13,8 +13,8 @@ let searchReqId = 0;
 let _toastFn = null;
 
 // Global toast — callable from stores, components, anywhere
-export const toast = (message, type = "success", duration = 4000) => {
-  if (_toastFn) _toastFn(message, type, duration);
+export const toast = (message, type = "success", duration = 4000, action = null) => {
+  if (_toastFn) _toastFn(message, type, duration, action);
 };
 
 // Called once from App to wire up the React toast context

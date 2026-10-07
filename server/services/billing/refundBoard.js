@@ -95,6 +95,79 @@ const DISCOUNT_SQL = `
           OR cn.bill_no ILIKE $3)
    ORDER BY cn.created_at, cn.id`;
 
+const DEPOSIT_SQL = `
+  SELECT r.id, r.status, r.reason, r.requested_mode, r.approved_mode, r.mode_reason,
+         r.decision_note, r.requested_at, r.decided_at, r.amount, r.requested_by, r.decided_by,
+         p.id AS patient_id, p.name AS patient_name, p.file_no,
+         rq.name AS requested_by_name, dq.name AS decided_by_name,
+         po.paid_at, po.paid_by_name, po.entry_id,
+         ${IST_DAY("COALESCE(po.paid_at, r.decided_at)")}::text AS done_day
+    FROM billing_requests r
+    JOIN patients p ON p.id = r.patient_id
+    LEFT JOIN doctors rq ON rq.id = r.requested_by
+    LEFT JOIN doctors dq ON dq.id = r.decided_by
+    LEFT JOIN LATERAL (
+      SELECT x.received_at AS paid_at, d.name AS paid_by_name, e.id AS entry_id
+        FROM deposit_entries e
+        JOIN payments x ON x.id = e.payment_id
+        LEFT JOIN doctors d ON d.id = x.received_by
+       WHERE e.request_id = r.id
+       LIMIT 1
+    ) po ON TRUE
+   WHERE r.kind = 'deposit_refund'
+     AND (r.status IN ('pending', 'approved')
+          OR (r.status = 'used' AND ${IST_DAY("po.paid_at")} BETWEEN $1::date AND $2::date)
+          OR (r.status = 'rejected' AND ${IST_DAY("r.decided_at")} BETWEEN $1::date AND $2::date))
+     AND ($3::text IS NULL OR p.name ILIKE $3 OR p.file_no ILIKE $3)
+   ORDER BY r.requested_at, r.id`;
+
+const DEPOSIT_GROUP = {
+  pending: "waiting",
+  approved: "to_pay",
+  used: "paid",
+  rejected: "rejected",
+};
+
+function shapeDepositRow(row) {
+  const amount = paise(row.amount);
+  const group = DEPOSIT_GROUP[row.status];
+  return {
+    key: row.id,
+    kind: "deposit_refund",
+    request_id: row.id,
+    status: row.status,
+    group,
+    patient: { id: row.patient_id, name: row.patient_name, file_no: row.file_no },
+    visit_id: null,
+    visit_date: null,
+    bill_id: null,
+    bill_no: null,
+    bill_date: null,
+    pay_later: false,
+    reason: { code: null, label: null, note: row.reason ?? null, text: row.reason ?? "" },
+    requested_mode: row.requested_mode,
+    approved_mode: row.approved_mode ?? null,
+    mode_reason: row.mode_reason ?? null,
+    requested_by: person(row.requested_by, row.requested_by_name),
+    requested_at: row.requested_at,
+    decided_by: person(row.decided_by, row.decided_by_name),
+    decided_at: row.decided_at ?? null,
+    decision_note: row.decision_note ?? null,
+    credit_note: null,
+    amounts: {
+      credited: amount,
+      paid_back: row.status === "used" ? amount : 0,
+      to_pay: row.status === "approved" ? amount : 0,
+      against_balance: 0,
+    },
+    paid_at: row.paid_at ?? null,
+    paid_by: row.paid_by_name ?? null,
+    deposit_entry_id: row.entry_id ?? null,
+    preview: null,
+    preview_error: null,
+  };
+}
+
 const isDiscount = (row) => !row.id && Boolean(row.credit_note_id);
 
 function cleanLimit(value) {
@@ -225,9 +298,10 @@ export async function refundBoard(filters = {}, db = pool) {
   const q = cleanSearch(filters.q);
   const limit = cleanLimit(filters.limit);
   const params = [from, to, q ? likePattern(q) : null];
-  const [{ rows: requested }, { rows: discounts }] = await Promise.all([
+  const [{ rows: requested }, { rows: discounts }, { rows: depositRefunds }] = await Promise.all([
     db.query(BOARD_SQL, params),
     db.query(DISCOUNT_SQL, params),
+    db.query(DEPOSIT_SQL, params),
   ]);
   const rows = [...requested, ...discounts];
 
@@ -237,6 +311,10 @@ export async function refundBoard(filters = {}, db = pool) {
     if (isDiscount(row) && !amounts.to_pay && !amounts.paid_back) continue;
     const group = groupOf(row, amounts, { from, to });
     if (group) grouped[group].push({ row, entry: shapeRow(row, group, amounts) });
+  }
+  for (const row of depositRefunds) {
+    const entry = shapeDepositRow(row);
+    grouped[entry.group].push({ row, entry });
   }
 
   const toPayTotal = grouped.to_pay.reduce((sum, { entry }) => sum + entry.amounts.to_pay, 0);
@@ -253,7 +331,9 @@ export async function refundBoard(filters = {}, db = pool) {
   }
 
   const waiting = [];
-  for (const { row, entry } of groups.waiting) waiting.push(await withPreview(entry, row, db));
+  for (const { row, entry } of groups.waiting) {
+    waiting.push(entry.kind === "deposit_refund" ? entry : await withPreview(entry, row, db));
+  }
 
   return {
     from,

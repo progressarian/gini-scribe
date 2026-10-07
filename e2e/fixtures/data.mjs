@@ -11,6 +11,8 @@ export const USERS = {
   reception: { id: 9003, name: "E2E Reception", short_name: "Reception", role: "reception" },
   coordinator: { id: 9004, name: "E2E Coordinator", short_name: "Coord", role: "coordinator" },
   lab: { id: 9005, name: "E2E Lab", short_name: "Lab", role: "lab" },
+  obt_one: { id: 9006, name: "E2E OBT One", short_name: "OBT One", role: "obt" },
+  obt_two: { id: 9007, name: "E2E OBT Two", short_name: "OBT Two", role: "obt" },
 };
 
 export const CONSULTANTS = {

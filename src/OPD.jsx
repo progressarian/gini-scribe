@@ -7232,7 +7232,11 @@ export default function OPD() {
 
   // Apply filters
   const filtered = appointments.filter((a) => {
-    if (filterStatus === "pending" && a.status && a.status !== "pending") return false;
+    if (
+      filterStatus === "pending" &&
+      ["checkedin", "in_visit", "seen", "completed", "no_show", "cancelled"].includes(a.status)
+    )
+      return false;
     if (filterStatus === "checkedin" && a.status !== "checkedin") return false;
     if (filterStatus === "in_visit" && a.status !== "in_visit") return false;
     if (filterStatus === "seen" && a.status !== "seen" && a.status !== "completed") return false;

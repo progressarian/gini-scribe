@@ -472,7 +472,8 @@ export async function reconcileTestSteps(client, visitId, bill, machines) {
                              WHERE s.visit_id = o.visit_id
                                AND s.source IN ('template', 'added')) AS from_checkin,
             EXISTS (SELECT 1 FROM giniflow_lab_order_events e
-                     WHERE e.lab_order_id = o.id AND e.track = 'sample') AS started,
+                     WHERE e.lab_order_id = o.id AND e.track = 'sample'
+                       AND e.status NOT IN ('ordered', 'payment_pending', 'paid')) AS started,
             EXISTS (SELECT 1 FROM giniflow_lab_order_events e
                      WHERE e.lab_order_id = o.id AND e.track = 'payment' AND e.status = 'paid'
                        AND COALESCE((e.meta->>'notOnBill')::boolean, FALSE)) AS cleared_before_bill,

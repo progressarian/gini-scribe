@@ -4,6 +4,7 @@ import { readUpcomingAppointments, parseSheetDate } from "../sheets/reader.js";
 import pool from "../../config/db.js";
 import { ownFu, IST_TODAY } from "../ghmDayWindow.js";
 import { noteSyncedWhileBlocked } from "../patientBlockGuard.js";
+import { SHEET_SYNC_ACTOR, logAppointmentEvent, logBookingCreated } from "../appointmentHistory.js";
 import { createLogger } from "../logger.js";
 import { tryAcquireCronLock, CRON_LOCK_KEYS } from "./lowPriority.js";
 
@@ -275,6 +276,11 @@ async function importSheetPatient(patient, tabDate) {
   noteSyncedWhileBlocked(patientId, "sheets_sync");
 
   if (rows[0]) {
+    await logBookingCreated(
+      pool,
+      { id: rows[0].id, appointment_date: apptDate, time_slot: timeSlot },
+      SHEET_SYNC_ACTOR,
+    );
     await linkPendingFollowUp(fileNo, apptDate, rows[0].id);
     return { id: rows[0].id, action: "created" };
   }
@@ -310,8 +316,8 @@ async function linkPendingFollowUp(fileNo, apptDate, bookingId) {
   if (!fileNo || !apptDate) return null;
 
   const { rows } = await pool.query(
-    `UPDATE appointments SET preferred_date = $2,
-            booking_status = COALESCE(booking_status, 'booked'),
+    `UPDATE appointments a SET preferred_date = $2,
+            booking_status = COALESCE(a.booking_status, 'booked'),
             updated_at = NOW()
       WHERE id = (
         SELECT fu.id FROM appointments fu
@@ -325,17 +331,44 @@ async function linkPendingFollowUp(fileNo, apptDate, bookingId) {
          ORDER BY fu.appointment_date DESC NULLS LAST
          LIMIT 1
       )
-      RETURNING id`,
+      RETURNING a.id, (SELECT booking_status FROM appointments WHERE id = a.id) AS old_status`,
     [fileNo, apptDate, bookingId],
   );
   if (!rows[0]) return null;
 
-  await pool.query(
+  await logAppointmentEvent(pool, {
+    appointmentId: rows[0].id,
+    field: "preferred_date",
+    label: "Preferred Date",
+    newValue: apptDate,
+    actor: SHEET_SYNC_ACTOR,
+  });
+  if (!rows[0].old_status) {
+    await logAppointmentEvent(pool, {
+      appointmentId: rows[0].id,
+      field: "booking_status",
+      label: "Booking Status",
+      newValue: "booked",
+      actor: SHEET_SYNC_ACTOR,
+    });
+  }
+
+  const booking = await pool.query(
     `UPDATE appointments SET booking_status = 'booked',
             preferred_date = COALESCE(preferred_date, $2), updated_at = NOW()
-      WHERE id = $1 AND booking_status IS NULL`,
+      WHERE id = $1 AND booking_status IS NULL
+      RETURNING id`,
     [bookingId, apptDate],
   );
+  if (booking.rows[0]) {
+    await logAppointmentEvent(pool, {
+      appointmentId: bookingId,
+      field: "booking_status",
+      label: "Booking Status",
+      newValue: "booked",
+      actor: SHEET_SYNC_ACTOR,
+    });
+  }
   return rows[0].id;
 }
 
@@ -400,7 +433,14 @@ export async function syncFromSheets() {
 const SYNC_INTERVAL_MS = 30 * 60 * 1000;
 let intervalId = null;
 
+export const upcomingSheetSyncEnabled = () =>
+  ["on", "1", "true", "yes"].includes(String(process.env.SHEETS_UPCOMING_SYNC || "").toLowerCase());
+
 export function startSheetsCron() {
+  if (!upcomingSheetSyncEnabled()) {
+    log("Cron", "Upcoming appointments sheet sync is OFF (set SHEETS_UPCOMING_SYNC=on to enable)");
+    return;
+  }
   log("Cron", "Starting upcoming appointments sync (every 30 min)");
 
   // Run once on startup

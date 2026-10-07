@@ -91,7 +91,9 @@ export default function AddItems({ bill, onBill, form }) {
     !!consultationType &&
     (data.consultations_hidden || items.some((item) => item.kind === "consultation"));
   const mine = (requests || []).filter(
-    (request) => !request.visit_id || request.visit_id === bill.visit_id,
+    (request) =>
+      request.kind !== "deposit_refund" &&
+      (!request.visit_id || request.visit_id === bill.visit_id),
   );
 
   const add = async (itemId, repeatRequestId, agreedRate) => {

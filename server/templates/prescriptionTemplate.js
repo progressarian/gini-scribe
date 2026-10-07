@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 
 import { MED_CATEGORIES, detectMedCategory } from "../config/medicationCategories.js";
 import { sortDiagnoses } from "../utils/diagnosisSort.js";
-import { pickNextVisit } from "../../shared/followUp.js";
+import { followUpDueDate, pickNextVisit } from "../../shared/followUp.js";
 import { DEFAULT_HOSPITAL, normalizeHospital } from "../services/prescriptionFooter.js";
 
 const HOSPITAL_NAME = DEFAULT_HOSPITAL.name;
@@ -863,12 +863,11 @@ function buildPrescriptionHtml(data = {}) {
     : "";
 
   // ── Footer next-visit text
-  // pickNextVisit falls back to the most recent PAST follow-up when nothing
-  // upcoming is on file, which printed a next visit dated before the visit
-  // itself on the patient's own copy. A date that has already passed is not a
-  // next visit — say it is unscheduled instead of naming a wrong day.
-  const nextVisitDate =
-    /^\d{4}-\d{2}-\d{2}/.test(followUp.date || "") && followUp.date >= today ? followUp.date : "";
+  const visitDay = String(consultations?.[0]?.visit_date || today).slice(0, 10);
+  const plannedDate = /^\d{4}-\d{2}-\d{2}/.test(followUp.date || "")
+    ? followUp.date.slice(0, 10)
+    : followUpDueDate(visitDay, followUp.timing || followUp.duration);
+  const nextVisitDate = plannedDate && plannedDate > visitDay ? plannedDate : "";
   const nextVisitText = nextVisitDate
     ? `📅 Next visit: ${fmtDateLong(nextVisitDate)}${labTests.length > 0 ? " · Come with all reports above" : ""}`
     : "📅 Next visit: To be scheduled";

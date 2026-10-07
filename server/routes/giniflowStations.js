@@ -287,7 +287,9 @@ const vitalsGate = requireCapability(CAP.GINIFLOW_STATION_VITALS);
 // reaches them as a 409 with the reason — not a 500 the toast cannot explain.
 const vitalsError = (res, e, label) =>
   e?.status && e.status < 500
-    ? res.status(e.status).json({ error: e.message })
+    ? res
+        .status(e.status)
+        .json({ error: e.message, ...(e.restUntil && { restUntil: e.restUntil }) })
     : handleError(res, e, label);
 
 router.get(
@@ -385,7 +387,7 @@ router.post(
       });
       res.json(saved);
     } catch (e) {
-      handleError(res, e, "Gini Flow vitals save");
+      vitalsError(res, e, "Gini Flow vitals save");
     }
   },
 );

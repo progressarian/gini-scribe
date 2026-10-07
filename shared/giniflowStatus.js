@@ -254,6 +254,16 @@ export const JOURNEY_START_STATUSES = ["checked_in", BREAK_RETURN_STATUS];
 export const JOURNEY_START_SQL = (col) =>
   `${col} = ANY (ARRAY[${JOURNEY_START_STATUSES.map((s) => `'${s}'`).join(", ")}])`;
 
+export const VITALS_REST_MINUTES = 0;
+
+export const vitalsRestUntil = (status, arrivedAt) => {
+  if (!hasNotStarted(status) || !arrivedAt) return null;
+  return new Date(new Date(arrivedAt).getTime() + VITALS_REST_MINUTES * 60000).toISOString();
+};
+
+export const isResting = (restUntil, now = Date.now()) =>
+  !!restUntil && new Date(restUntil).getTime() > now;
+
 export const isMarkerStatus = (status) => MARKER_STATUSES.includes(status);
 
 // For the SQL that has to exclude them. Inlined rather than parameterised

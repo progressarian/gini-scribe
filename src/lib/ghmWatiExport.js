@@ -6,8 +6,8 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 const BLOCK_WIDTH = 26;
 
 const COL_WIDTHS = [
-  22, 12, 14, 14, 12, 14, 12, 12, 14, 12, 6, 6, 20, 14, 14, 14, 14, 14, 26, 22, 18, 16, 12, 16, 22,
-  30,
+  22, 12, 14, 14, 12, 14, 12, 12, 14, 12, 6, 6, 20, 14, 14, 14, 14, 14, 26, 22, 18, 16, 16, 12, 16,
+  22, 30,
 ];
 
 const HEADERS = [
@@ -32,6 +32,7 @@ const HEADERS = [
   "Last Consultant Seen",
   "Prescription Explained By",
   "Call Status",
+  "Assigned To",
   "Called By",
   "Call Date",
   "Home Collection",
@@ -74,7 +75,7 @@ const lastSeenLabel = (seen) => {
   return when ? `${seen.name}${kind} — ${when}` : `${seen.name}${kind}`;
 };
 
-const toSheetRow = (row, fallbackDate, lastSeen = {}) => {
+const toSheetRow = (row, fallbackDate, lastSeen = {}, owners = {}) => {
   const { code, number } = splitCountryCode(row.phone);
   const { start, end } = splitSlot(row.preferred_time_slot);
   return [
@@ -107,6 +108,7 @@ const toSheetRow = (row, fallbackDate, lastSeen = {}) => {
     // job: it is the record of what happened, read alongside Call Date, so a
     // call logged yesterday must still say so here.
     callLabel(row.call_status_any || "pending"),
+    owners[row.patient_id]?.assigned_to || "",
     row.call_made_by || "",
     fmtSheetDate(row.call_date),
     row.home_collection ? "Yes" : "No",
@@ -164,8 +166,10 @@ export const LIST_SHEETS = [
 ];
 
 // One list, one flat block — no New/FU split, because the sheet IS the split.
-export const buildListSheet = (XLSX, rows, date, title, lastSeen = {}) => {
-  const body = (rows || []).filter((r) => r?.phone).map((r) => toSheetRow(r, date, lastSeen));
+export const buildListSheet = (XLSX, rows, date, title, lastSeen = {}, owners = {}) => {
+  const body = (rows || [])
+    .filter((r) => r?.phone)
+    .map((r) => toSheetRow(r, date, lastSeen, owners));
 
   const titleRow = new Array(BLOCK_WIDTH).fill("");
   titleRow[0] = title;
@@ -212,6 +216,7 @@ export const exportWatiWorkbook = async (
   date,
   fileLabel = "wati-appt-confirmation",
   lastSeen = {},
+  owners = {},
 ) => {
   const mod = await import("xlsx-js-style");
   // Interop: the CJS build lands on `default` through Vite, on the namespace
@@ -223,7 +228,7 @@ export const exportWatiWorkbook = async (
   // an empty tab says "nobody in this list", which a missing tab does not.
   const built = LIST_SHEETS.map((list) => ({
     name: list.name,
-    ...buildListSheet(XLSX, (rows || []).filter(list.pick), date, list.name, lastSeen),
+    ...buildListSheet(XLSX, (rows || []).filter(list.pick), date, list.name, lastSeen, owners),
   }));
 
   const counts = { total: 0, lists: {} };

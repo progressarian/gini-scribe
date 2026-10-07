@@ -3,6 +3,12 @@ import { createRequire } from "module";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
 import { validate } from "../middleware/validate.js";
+import {
+  actorOf,
+  logBookingCreated,
+  logFieldChanges,
+  describeBooking,
+} from "../services/appointmentHistory.js";
 import { checkSchemeCap, logCapOverride } from "../services/schemeCap.js";
 import { appointmentCreateSchema, appointmentUpdateSchema } from "../schemas/index.js";
 import {
@@ -289,6 +295,7 @@ router.post("/appointments", validate(appointmentCreateSchema), async (req, res)
         apptDoctorId,
       ],
     );
+    if (rows[0]) await logBookingCreated(pool, rows[0], actorOf(req));
     if (!rows[0] && file_no && apptDate && apptSlot && apptDoctor) {
       const existing = await pool.query(
         `SELECT * FROM appointments
@@ -345,6 +352,14 @@ router.get("/appointments/:id", async (req, res) => {
 router.put("/appointments/:id", validate(appointmentUpdateSchema), async (req, res) => {
   try {
     const { doctor_name, appointment_date, time_slot, visit_type, status, notes } = req.body;
+    const before = (
+      await pool.query(
+        `SELECT doctor_name, appointment_date::text AS appointment_date, time_slot,
+                visit_type, status, notes
+           FROM appointments WHERE id=$1`,
+        [req.params.id],
+      )
+    ).rows[0];
 
     // Enforce availability when the assignment target (doctor/date/slot) changes.
     let newDoctorId;
@@ -403,6 +418,21 @@ router.put("/appointments/:id", validate(appointmentUpdateSchema), async (req, r
       ],
     );
     if (!rows[0]) return res.status(404).json({ error: "Not found" });
+    await logFieldChanges(
+      pool,
+      rows[0].id,
+      before,
+      { doctor_name, appointment_date, time_slot, visit_type, status, notes },
+      {
+        doctor_name: "Assigned Doctor",
+        appointment_date: "Appointment Date",
+        time_slot: "Time Slot",
+        visit_type: "Visit Type",
+        status: "Status",
+        notes: "Notes",
+      },
+      actorOf(req),
+    );
     if (rows[0].patient_id) {
       syncAppointmentToGenie(rows[0].patient_id, pool).catch((e) =>
         console.warn("[Appt] Appointment push skipped:", e.message),
@@ -422,7 +452,26 @@ router.put("/appointments/:id", validate(appointmentUpdateSchema), async (req, r
 // Delete appointment
 router.delete("/appointments/:id", async (req, res) => {
   try {
-    await pool.query("DELETE FROM appointments WHERE id=$1", [req.params.id]);
+    const gone = (
+      await pool.query(
+        `DELETE FROM appointments WHERE id=$1
+         RETURNING id, patient_id, file_no, patient_name, appointment_date::text AS appointment_date,
+                   time_slot, doctor_name, status`,
+        [req.params.id],
+      )
+    ).rows[0];
+    if (gone) {
+      const actor = actorOf(req);
+      await pool.query(
+        `INSERT INTO audit_log (doctor_id, action, entity_type, entity_id, details)
+         VALUES ($1, 'delete_appointment', 'appointment', $2, $3)`,
+        [
+          actor.id,
+          gone.id,
+          JSON.stringify({ ...gone, deleted_by: actor.name, booking: describeBooking(gone) }),
+        ],
+      );
+    }
     res.json({ success: true });
   } catch (e) {
     handleError(res, e, "Appointment delete");

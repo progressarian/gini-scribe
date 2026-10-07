@@ -8,6 +8,11 @@ import {
   slaKeyForStatus,
   compareQueue,
   columnForStatus,
+  JOURNEY_START_SQL,
+  VITALS_REST_MINUTES,
+  NOT_STARTED_STATUSES,
+  vitalsRestUntil,
+  isResting,
 } from "../../../shared/giniflowStatus.js";
 import { ALLERGY_NOT_ASKED } from "../../../shared/giniflowAllergy.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
@@ -43,6 +48,7 @@ const QUEUE_SQL = `
          v.queue_position, v.queue_column, v.paused_at, v.paused_reason,
          p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
          first_ev.occurred_at AS checked_in_at,
+         arrived.occurred_at  AS arrived_at,
          last_ev.occurred_at  AS status_since,
          seq.visit_number,
          bio.biomarkers
@@ -53,6 +59,11 @@ const QUEUE_SQL = `
        WHERE e.visit_id = v.id AND e.status = 'checked_in'
        ORDER BY occurred_at LIMIT 1
     ) first_ev ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT occurred_at FROM giniflow_visit_events e
+       WHERE e.visit_id = v.id AND ${JOURNEY_START_SQL("e.status")}
+       ORDER BY occurred_at DESC LIMIT 1
+    ) arrived ON TRUE
     -- What the current wait is measured from. The board times every card from
     -- its last event, and the station must agree with it: a card the board has
     -- turned red cannot look calm at the station that could act on it.
@@ -173,8 +184,10 @@ export async function getVitalsQueue(
   const waitFields = (r) => {
     const minutes = minutesSince(r.status_since, now);
     const budget = budgetFor(slaKeyForStatus(r.current_status), r.category);
+    const restUntil = vitalsRestUntil(r.current_status, r.arrived_at);
     return {
       statusSince: r.status_since ? new Date(r.status_since).toISOString() : null,
+      restUntil: isResting(restUntil, now.getTime()) ? restUntil : null,
       waitMinutes: minutes,
       waitBudget: budget,
       waitColour: budgetColour(minutes ?? 0, budget),
@@ -228,7 +241,13 @@ export async function getVitalsQueue(
     .map((r) => ({ ...r, statusMinutes: r.waitMinutes }))
     .sort((a, b) => {
       const atStation = (r) => (r.status === "with_vitals" ? 0 : 1);
-      return atStation(a) - atStation(b) || compareQueue(a, b);
+      const resting = (r) => (r.restUntil ? 1 : 0);
+      return (
+        atStation(a) - atStation(b) ||
+        resting(a) - resting(b) ||
+        (a.restUntil && b.restUntil ? a.restUntil.localeCompare(b.restUntil) : 0) ||
+        compareQueue(a, b)
+      );
     });
 
   // Several people work this station at once, so "at the station" is a group,
@@ -243,7 +262,7 @@ export async function getVitalsQueue(
     .filter((r) => r.status !== "with_vitals")
     .map((r, i) => ({
       ...r,
-      slot: i === 0 ? "Next" : (r.appointmentTime || "").slice(0, 5) || "—",
+      slot: i === 0 && !r.restUntil ? "Next" : (r.appointmentTime || "").slice(0, 5) || "—",
     }));
 
   const doneMapped = doneRows.map((r) => ({
@@ -317,6 +336,7 @@ export async function getVitalsPatient(visitId, db = pool) {
             p.name, p.file_no, p.age, p.sex, p.notes,
             p.allergy_status, p.allergy_note,
             first_ev.occurred_at AS checked_in_at,
+            arrived.occurred_at AS arrived_at,
             seq.visit_number
        FROM giniflow_visits v
        JOIN patients p ON p.id = v.patient_id
@@ -325,6 +345,11 @@ export async function getVitalsPatient(visitId, db = pool) {
           WHERE e.visit_id = v.id AND e.status = 'checked_in'
           ORDER BY occurred_at LIMIT 1
        ) first_ev ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT occurred_at FROM giniflow_visit_events e
+          WHERE e.visit_id = v.id AND ${JOURNEY_START_SQL("e.status")}
+          ORDER BY occurred_at DESC LIMIT 1
+       ) arrived ON TRUE
        LEFT JOIN LATERAL (
          SELECT COUNT(*)::int + 1 AS visit_number FROM appointments pa
           WHERE pa.patient_id = v.patient_id AND pa.appointment_date < v.visit_date
@@ -366,6 +391,9 @@ export async function getVitalsPatient(visitId, db = pool) {
     category: visit.category,
     status: visit.current_status,
     checkedInAt: visit.checked_in_at ? new Date(visit.checked_in_at).toISOString() : null,
+    restUntil: isResting(vitalsRestUntil(visit.current_status, visit.arrived_at))
+      ? vitalsRestUntil(visit.current_status, visit.arrived_at)
+      : null,
     allergyStatus: visit.allergy_status || ALLERGY_NOT_ASKED,
     allergyNote: visit.allergy_note || null,
     lastVisit: last[0] || null,
@@ -411,6 +439,33 @@ export async function saveAllergy(visitId, { status, note = null, actorId = null
 }
 
 export const planSkipsChief = (db, visitId) => planSkips(db, visitId, PLAN_STOP.chief);
+
+async function refuseWhileResting(client, visitId) {
+  const { rows } = await client.query(
+    `SELECT p.name,
+            (e.occurred_at + make_interval(mins => $3))::timestamptz AS rest_until,
+            CEIL(EXTRACT(EPOCH FROM (e.occurred_at + make_interval(mins => $3) - NOW())) / 60)::int
+              AS minutes_left
+       FROM giniflow_visits v
+       JOIN patients p ON p.id = v.patient_id
+       JOIN LATERAL (
+         SELECT occurred_at FROM giniflow_visit_events ev
+          WHERE ev.visit_id = v.id AND ${JOURNEY_START_SQL("ev.status")}
+          ORDER BY occurred_at DESC LIMIT 1
+       ) e ON TRUE
+      WHERE v.id = $1 AND v.current_status = ANY($2)
+        AND e.occurred_at + make_interval(mins => $3) > NOW()`,
+    [visitId, NOT_STARTED_STATUSES, VITALS_REST_MINUTES],
+  );
+  if (!rows.length) return;
+  const { name, rest_until: restUntil, minutes_left: minutesLeft } = rows[0];
+  throw Object.assign(
+    new Error(
+      `${name} is resting for ${VITALS_REST_MINUTES} minutes after arrival so the BP reads true — ready in ${minutesLeft} min`,
+    ),
+    { status: 409, restUntil: new Date(restUntil).toISOString() },
+  );
+}
 
 async function moveOnFromVitals(client, visitId, actorId, meta) {
   await advanceStatus(client, {
@@ -495,6 +550,7 @@ export async function saveVitals(
       [visitId],
     );
     if (!visit.rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
+    await refuseWhileResting(client, visitId);
 
     // A save with nothing in it recorded a row of nulls and moved the patient to
     // `vitals_done` — the board showed vitals complete, the MO's brief showed
@@ -652,6 +708,7 @@ export async function startVitals(visitId, actorId = null, db = pool) {
     }
 
     if (["checked_in", "vitals_pending"].includes(rows[0].current_status)) {
+      await refuseWhileResting(client, visitId);
       await advanceStatus(client, {
         visitId,
         toStatus: "with_vitals",

@@ -1,8 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { DEPOSIT_MODE } from "../../../../shared/billingVocab.js";
-import { refundReceiptPdfHref, useRefundBoard } from "../../../queries/hooks/useBilling";
+import {
+  depositSlipPdfHref,
+  refundReceiptPdfHref,
+  usePayOutDepositRefund,
+  useRefundBoard,
+} from "../../../queries/hooks/useBilling";
 import { errorOf, fromPaise } from "../format";
-import { refundLegsText, refundModeText } from "./lineText";
+import { PAYMENT_MODE_LABEL, refundLegsText, refundModeText } from "./lineText";
 import { PdfButton } from "./PdfViewer";
 
 const SEARCH_MIN = 2;
@@ -29,7 +34,73 @@ const clock = (iso) =>
       })
     : "—";
 
+function DepositAmount({ row }) {
+  if (row.group === "rejected") return "—";
+  const amount = row.amounts.credited;
+  const lead =
+    row.group === "paid"
+      ? `${fromPaise(amount)} paid back`
+      : row.group === "waiting"
+        ? `${fromPaise(amount)} to go back`
+        : `${fromPaise(amount)} to pay back`;
+  return (
+    <>
+      <strong>{lead}</strong>
+      <span className="bc-head__meta"> · from the deposit</span>
+    </>
+  );
+}
+
+function DepositPayOut({ row }) {
+  const pay = usePayOutDepositRefund();
+  const [reference, setReference] = useState("");
+  const [error, setError] = useState(null);
+  const mode = row.approved_mode;
+  const needsReference = mode !== "cash";
+  const payOut = async () => {
+    setError(null);
+    try {
+      await pay.mutateAsync({
+        requestId: row.request_id,
+        ...(reference.trim() ? { reference: reference.trim() } : {}),
+      });
+    } catch (e) {
+      setError(errorOf(e, "The refund could not be paid out"));
+    }
+  };
+  return (
+    <div className="bc-deposit__payout">
+      {needsReference && (
+        <input
+          className="bc-field__in"
+          maxLength={60}
+          aria-label={`${PAYMENT_MODE_LABEL[mode]} reference for ${row.patient.name}`}
+          placeholder={`${PAYMENT_MODE_LABEL[mode]} reference`}
+          value={reference}
+          onChange={(e) => setReference(e.target.value)}
+        />
+      )}
+      <button
+        type="button"
+        className="st-btn st-btn-grn"
+        disabled={pay.isPending || (needsReference && !reference.trim())}
+        onClick={payOut}
+      >
+        {pay.isPending
+          ? "Paying back…"
+          : `Pay back ${fromPaise(row.amounts.to_pay)} by ${PAYMENT_MODE_LABEL[mode]}`}
+      </button>
+      {error && (
+        <div className="bc-err" role="alert">
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Amount({ row }) {
+  if (row.kind === "deposit_refund") return <DepositAmount row={row} />;
   const { credited, paid_back: paidBack, to_pay: toPay, against_balance: offBalance } = row.amounts;
   if (row.group === "rejected") return "—";
   if (row.group === "waiting" && !row.preview) {
@@ -123,11 +194,17 @@ function RefundRow({ row, onOpen }) {
         <span className="bc-head__meta"> · {row.patient.file_no || "—"}</span>
       </td>
       <td data-label="Bill">
-        {row.bill_no}
-        <span className="bc-head__meta"> · visit {row.visit_date || row.bill_date || "—"}</span>
+        {row.kind === "deposit_refund" ? (
+          "Deposit"
+        ) : (
+          <>
+            {row.bill_no}
+            <span className="bc-head__meta"> · visit {row.visit_date || row.bill_date || "—"}</span>
+          </>
+        )}
       </td>
       <td data-label="Credit note">
-        {row.credit_note?.bill_no || "—"}
+        {row.kind === "deposit_refund" ? "Deposit refund" : row.credit_note?.bill_no || "—"}
         {row.kind === "discount" && <span className="bc-head__meta"> · discount</span>}
       </td>
       <td data-label="Amount">
@@ -143,15 +220,34 @@ function RefundRow({ row, onOpen }) {
         <When row={row} />
       </td>
       <td data-label="" className="bc-cell-actions">
-        <button
-          type="button"
-          className={`st-btn ${row.group === "to_pay" ? "st-btn-grn" : "st-btn-g"}`}
-          aria-label={`Open bill ${row.bill_no}`}
-          onClick={() => onOpen(row)}
-        >
-          {row.group === "to_pay" ? "Open to pay out" : "Open"}
-        </button>
-        {row.group === "paid" && row.amounts.paid_back > 0 && (
+        {row.kind === "deposit_refund" ? (
+          <>
+            {row.group === "to_pay" && <DepositPayOut row={row} />}
+            {row.group === "waiting" && (
+              <span className="bc-head__meta">An admin approves it in Requests</span>
+            )}
+            {row.group === "paid" && row.deposit_entry_id && (
+              <PdfButton
+                className="st-btn st-btn-g"
+                href={depositSlipPdfHref(row.deposit_entry_id)}
+                title={`Deposit refund ${row.patient.name}`}
+                fileName={`DepositRefund_${row.patient.file_no || row.patient.id}.pdf`}
+              >
+                Print refund receipt
+              </PdfButton>
+            )}
+          </>
+        ) : (
+          <button
+            type="button"
+            className={`st-btn ${row.group === "to_pay" ? "st-btn-grn" : "st-btn-g"}`}
+            aria-label={`Open bill ${row.bill_no}`}
+            onClick={() => onOpen(row)}
+          >
+            {row.group === "to_pay" ? "Open to pay out" : "Open"}
+          </button>
+        )}
+        {row.kind !== "deposit_refund" && row.group === "paid" && row.amounts.paid_back > 0 && (
           <PdfButton
             className="st-btn st-btn-g"
             href={refundReceiptPdfHref(row.credit_note.id)}

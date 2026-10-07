@@ -523,6 +523,7 @@ export default function BillingDesk({ tab, visitId, patientId, billId, sentPatie
                         key={`deposit-${bill.patient_id}`}
                         patientId={bill.patient_id}
                         patientName={(selected || duePatient || sentPatient)?.name}
+                        patientFileNo={(selected || duePatient || sentPatient)?.fileNo}
                         open={depositOpen}
                         onToggle={() => setDepositOpen((was) => !was)}
                       />

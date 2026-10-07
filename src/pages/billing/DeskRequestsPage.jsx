@@ -22,11 +22,13 @@ const when = (value) =>
   value ? new Date(value).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "";
 
 export const subjectOf = (request) =>
-  request.kind === "refund"
-    ? `refund on bill ${request.bill_no ?? ""}`.trim()
-    : request.kind === "new_item"
-      ? (request.proposed_name ?? "a new item")
-      : (request.item?.name ?? "that item");
+  request.kind === "deposit_refund"
+    ? `deposit refund of ${fromPaise(request.deposit_refund?.amount ?? 0)}`
+    : request.kind === "refund"
+      ? `refund on bill ${request.bill_no ?? ""}`.trim()
+      : request.kind === "new_item"
+        ? (request.proposed_name ?? "a new item")
+        : (request.item?.name ?? "that item");
 
 const billLabel = (billNo) => (billNo ? `bill ${billNo}` : "this visit's draft bill");
 
@@ -85,7 +87,22 @@ function RefundWanted({ request }) {
   );
 }
 
+function DepositRefundWanted({ request }) {
+  const wanted = request.deposit_refund;
+  return (
+    <>
+      <span className="bill-status dreq__tag dreq__tag--refund">Deposit refund</span>
+      <div>
+        Pay back <strong>{fromPaise(wanted.amount)}</strong> from the deposit (balance{" "}
+        {fromPaise(wanted.balance)})
+      </div>
+      <div className="dreq__muted">Asked for: {refundModeText(wanted.requested_mode)}</div>
+    </>
+  );
+}
+
 function Wanted({ request }) {
+  if (request.kind === "deposit_refund") return <DepositRefundWanted request={request} />;
   if (request.kind === "refund") return <RefundWanted request={request} />;
   const newItem = request.kind === "new_item";
   return (
@@ -114,6 +131,21 @@ function Answer({ request }) {
       <>
         <span className="bill-status dreq__answer--no">Rejected</span>
         <div className="dreq__muted">{request.decision_note}</div>
+      </>
+    );
+  }
+  if (request.kind === "deposit_refund") {
+    return (
+      <>
+        <span className="bill-status dreq__answer--yes">
+          {request.status === "used" ? "Deposit paid back" : "Deposit refund approved"}
+        </span>
+        <div className="dreq__muted">
+          {fromPaise(request.deposit_refund.amount)} by{" "}
+          {refundModeText(request.deposit_refund.approved_mode)}
+          {request.deposit_refund.mode_reason ? ` — ${request.deposit_refund.mode_reason}` : ""}
+        </div>
+        {request.decision_note ? <div className="dreq__muted">{request.decision_note}</div> : null}
       </>
     );
   }
@@ -185,7 +217,7 @@ function PendingRow({ request, onAct }) {
           aria-label={
             newItem
               ? `Create item for ${subject}`
-              : request.kind === "refund"
+              : request.kind === "refund" || request.kind === "deposit_refund"
                 ? `Approve ${subject}`
                 : `Approve billing ${subject} again`
           }

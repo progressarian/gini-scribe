@@ -15,12 +15,22 @@ import {
   callStatusToday,
   isLatestFollowUpVisit,
   upcomingBookingElsewhere,
+  preferredSuperseded,
+  preferredSetAt,
+  bookedAt,
+  IST_TODAY,
 } from "../services/ghmDayWindow.js";
-import { UNREACHABLE_STATUSES, pgArray } from "../../shared/callStatuses.js";
+import { UNREACHABLE_STATUSES, pgArray, callLabel } from "../../shared/callStatuses.js";
+import {
+  AUDIT_FIELDS,
+  logAppointmentEvent,
+  logBookingCreated,
+} from "../services/appointmentHistory.js";
 import { CATEGORY_VALUES } from "../../shared/patientCategories.js";
 import { listSchemes, isKnownScheme } from "../services/patientSchemes.js";
-import { slotStartHour } from "../../shared/slotHour.js";
+import { slotDoctorKey, slotStartHour } from "../../shared/slotHour.js";
 import { resolveAppointmentId, opensLead } from "../services/ghmLead.js";
+import { editBlockedFor, patientEditBlockedFor } from "../services/obtAssignments.js";
 
 const router = Router();
 
@@ -219,16 +229,43 @@ const closeClaimSession = (client, appointmentId, reason = "released") =>
     `INSERT INTO call_claim_sessions
        (appointment_id, patient_id, called_by, called_by_id, started_at, ended_at,
         duration_secs, ended_reason)
-     SELECT a.id, a.patient_id, a.calling_by, a.calling_by_id, a.calling_since, NOW(),
-            GREATEST(0, EXTRACT(EPOCH FROM (NOW() - a.calling_since))::int),
-            $2
+     SELECT a.id, a.patient_id, a.calling_by, a.calling_by_id, a.calling_since, e.ended_at,
+            GREATEST(0, EXTRACT(EPOCH FROM (e.ended_at - a.calling_since))::int),
+            CASE WHEN ${claimActive("a")} THEN $2 ELSE 'expired' END
        FROM appointments a
+      CROSS JOIN LATERAL (
+        SELECT LEAST(NOW(), a.calling_since + INTERVAL '${CALL_CLAIM_TTL}') AS ended_at
+      ) e
       WHERE a.id = $1 AND a.calling_since IS NOT NULL
         -- 'expired' is only ever true of a claim past its TTL. Without this the
         -- next agent's claim attempt would file the current holder's call as
         -- finished while they are still on it.
         AND ($2 <> 'expired' OR NOT ${claimActive("a")})`,
     [appointmentId, reason],
+  );
+
+const endExpiredClaims = (ids) =>
+  pool.query(
+    `WITH ended AS (
+       UPDATE appointments a
+          SET calling_by = NULL, calling_by_id = NULL, calling_since = NULL
+         FROM (SELECT id, patient_id, calling_by, calling_by_id, calling_since
+                 FROM appointments
+                WHERE id = ANY($1::int[])
+                  AND calling_since IS NOT NULL
+                  AND NOT ${claimActive("appointments")}
+                FOR UPDATE SKIP LOCKED) old
+        WHERE a.id = old.id
+       RETURNING old.id, old.patient_id, old.calling_by, old.calling_by_id, old.calling_since
+     )
+     INSERT INTO call_claim_sessions
+       (appointment_id, patient_id, called_by, called_by_id, started_at, ended_at,
+        duration_secs, ended_reason)
+     SELECT id, patient_id, calling_by, calling_by_id, calling_since,
+            calling_since + INTERVAL '${CALL_CLAIM_TTL}',
+            EXTRACT(EPOCH FROM INTERVAL '${CALL_CLAIM_TTL}')::int, 'expired'
+       FROM ended`,
+    [ids],
   );
 
 const releaseClaim = async (client, appointmentId) => {
@@ -245,6 +282,7 @@ router.post("/ghm-appointments/active-calls", async (req, res) => {
   try {
     const ids = (req.body?.appointment_ids || []).filter((x) => Number.isInteger(x));
     if (!ids.length) return res.json({});
+    await endExpiredClaims(ids.filter((x) => x > 0));
     const r = await pool.query(
       `WITH req AS (SELECT unnest($1::int[]) AS rid)
        SELECT r.rid AS id, ${claimCols("a")}
@@ -272,10 +310,38 @@ router.post("/ghm-appointments/active-calls", async (req, res) => {
 // POST /api/ghm-appointments/:id/calling — take the claim
 router.post("/ghm-appointments/:id/calling", async (req, res) => {
   try {
+    const blocked = await editBlockedFor(req, req.params.id, { call: true });
+    if (blocked) return res.status(403).json({ error: blocked });
     const id = await resolveAppointmentId(req.params.id, { create: true });
     if (!id) return res.status(404).json({ error: NO_APPOINTMENT_ERROR });
     const me = claimant(req);
     if (!me.name) return res.status(401).json({ error: "Sign in to mark a call in progress" });
+
+    const openFlags = await pool.query(
+      `SELECT a.id, a.patient_name, a.file_no,
+              (a.patient_id IS NOT DISTINCT FROM t.patient_id
+               AND a.file_no IS NOT DISTINCT FROM t.file_no) AS same_patient,
+              to_char(a.calling_since AT TIME ZONE 'Asia/Kolkata', 'DD Mon, HH12:MI AM') AS since_label
+         FROM appointments a
+         CROSS JOIN (SELECT patient_id, file_no FROM appointments WHERE id = $1) t
+        WHERE a.calling_since IS NOT NULL
+          AND ${claimActive("a")}
+          AND a.id <> $1
+          AND (a.calling_by_id = $2 OR ($2::int IS NULL AND a.calling_by = $3))
+        ORDER BY a.calling_since DESC`,
+      [id, me.id, me.name],
+    );
+    const otherPatients = openFlags.rows.filter((f) => !f.same_patient);
+    if (otherPatients.length && !req.body?.release_previous) {
+      const open = otherPatients[0];
+      const who = [open.patient_name, open.file_no].filter(Boolean).join(" · ");
+      return res.status(409).json({
+        error: "still_calling",
+        message: `You are still marked as calling ${who} (since ${open.since_label}). End that call before calling another patient.`,
+        open: { id: open.id, patient_name: open.patient_name, file_no: open.file_no },
+      });
+    }
+    for (const f of openFlags.rows) await releaseClaim(pool, f.id);
 
     // A claim that lapsed past the TTL is still a session that happened — record
     // it before overwriting it, marked as expired so its duration reads as a
@@ -367,8 +433,14 @@ router.get("/call-sessions", async (req, res) => {
     if (!appointment_id) return res.status(400).json({ error: "appointment_id required" });
     const patientId = await patientOf(appointment_id);
     const r = await pool.query(
-      `SELECT id, appointment_id, called_by, called_by_id, started_at, ended_at,
-              duration_secs, ended_reason
+      `SELECT id, appointment_id, called_by, called_by_id, started_at,
+              CASE WHEN ended_reason = 'expired'
+                   THEN LEAST(ended_at, started_at + INTERVAL '${CALL_CLAIM_TTL}')
+                   ELSE ended_at END AS ended_at,
+              CASE WHEN ended_reason = 'expired'
+                   THEN LEAST(duration_secs, EXTRACT(EPOCH FROM INTERVAL '${CALL_CLAIM_TTL}')::int)
+                   ELSE duration_secs END AS duration_secs,
+              ended_reason
          FROM call_claim_sessions
         WHERE ($2::int IS NOT NULL AND patient_id = $2::int) OR appointment_id = $1::int
         ORDER BY started_at DESC, id DESC
@@ -414,10 +486,14 @@ router.post("/call-attempts/counts", async (req, res) => {
 router.post("/call-attempts", async (req, res) => {
   const client = await pool.connect();
   try {
-    const { outcome, called_by, notes, duration_mins, reschedule_date } = req.body;
+    const { outcome, notes, duration_mins, reschedule_date } = req.body;
+    const actor = claimant(req);
+    const called_by = String(req.body.called_by || "").trim() || actor.name || null;
     if (!req.body?.appointment_id)
       return res.status(400).json({ error: "appointment_id required" });
     if (!outcome) return res.status(400).json({ error: "outcome required" });
+    const blocked = await editBlockedFor(req, req.body.appointment_id, { call: true }, client);
+    if (blocked) return res.status(403).json({ error: blocked });
 
     await client.query("BEGIN");
 
@@ -473,6 +549,16 @@ router.post("/call-attempts", async (req, res) => {
       [outcome, called_by || null, notes || null, reschedule_date || null, appointment_id],
     );
 
+    await logAppointmentEvent(client, {
+      appointmentId: appointment_id,
+      field: "call_logged",
+      label: "Call logged",
+      newValue: [callLabel(outcome), called_by && `called by ${called_by}`, notes]
+        .filter(Boolean)
+        .join(" · "),
+      actor,
+    });
+
     // The call just happened, so the "calling now" flag has served its purpose.
     await releaseClaim(client, appointment_id);
 
@@ -493,14 +579,35 @@ router.delete("/call-attempts/:id", async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    const found = await client.query("SELECT appointment_id FROM call_attempts WHERE id=$1", [
-      req.params.id,
-    ]);
+    const found = await client.query(
+      "SELECT appointment_id, outcome, called_by, called_at, notes FROM call_attempts WHERE id=$1",
+      [req.params.id],
+    );
     if (!found.rows.length) {
       await client.query("ROLLBACK");
       return res.status(404).json({ error: "Call attempt not found" });
     }
     const apptId = found.rows[0].appointment_id;
+    const blocked = await editBlockedFor(req, apptId, { call: true }, client);
+    if (blocked) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ error: blocked });
+    }
+    const gone = found.rows[0];
+    await logAppointmentEvent(client, {
+      appointmentId: apptId,
+      field: "call_log_deleted",
+      label: "Call log deleted",
+      oldValue: [
+        callLabel(gone.outcome),
+        gone.called_by && `called by ${gone.called_by}`,
+        new Date(gone.called_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
+        gone.notes,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      actor: claimant(req),
+    });
 
     await client.query("DELETE FROM call_attempts WHERE id=$1", [req.params.id]);
 
@@ -717,32 +824,40 @@ router.get("/ghm-appointments/slot-counts", async (req, res) => {
       pool.query(
         `SELECT a.appointment_date::text                        AS date,
                 COALESCE(a.reporting_time_slot, a.time_slot)    AS slot,
+                a.doctor_name                                   AS doctor,
                 COUNT(*)::int                                   AS count
            FROM appointments a
           WHERE a.appointment_date = ANY($1::date[])
             AND COALESCE(a.status, '') <> 'cancelled'
-          GROUP BY 1, 2`,
+          GROUP BY 1, 2, 3`,
         [dates],
       ),
       pool.query(
         `SELECT a.preferred_date::text       AS date,
                 TRIM(a.preferred_time_slot)  AS slot,
+                COALESCE(NULLIF(TRIM(a.preferred_doctor), ''), a.doctor_name) AS doctor,
                 COUNT(*)::int                AS count
            FROM appointments a
           WHERE a.preferred_date = ANY($1::date[])
             AND NULLIF(TRIM(a.preferred_time_slot), '') IS NOT NULL
             AND COALESCE(a.status, '') <> 'cancelled'
-          GROUP BY 1, 2`,
+            AND NOT ${preferredSuperseded("a")}
+          GROUP BY 1, 2, 3`,
         [dates],
       ),
     ]);
 
     const out = {};
+    const add = (bucket, hour, count) => {
+      bucket[hour] = (bucket[hour] || 0) + count;
+    };
     for (const row of [...booked.rows, ...preferred.rows]) {
       const hour = slotStartHour(row.slot);
       if (hour === null) continue;
-      out[row.date] = out[row.date] || {};
-      out[row.date][hour] = (out[row.date][hour] || 0) + row.count;
+      const day = (out[row.date] = out[row.date] || { all: {}, doctors: {} });
+      add(day.all, hour, row.count);
+      const key = slotDoctorKey(row.doctor);
+      if (key) add((day.doctors[key] = day.doctors[key] || {}), hour, row.count);
     }
     res.json(out);
   } catch (e) {
@@ -957,6 +1072,22 @@ router.get("/ghm-appointments", async (req, res) => {
       String(req.query.home_collection || "").toLowerCase(),
     );
     const homeCond = homeOnly ? " AND a.home_collection IS TRUE" : "";
+    const apptMode = String(req.query.appt_mode || "").toLowerCase();
+    const modeCond =
+      apptMode === "online"
+        ? " AND LOWER(COALESCE(a.appointment_type, '')) = 'online'"
+        : apptMode === "physical"
+          ? " AND LOWER(COALESCE(a.appointment_type, '')) <> 'online'"
+          : "";
+    const meId = Number(req.doctor?.doctor_id) || 0;
+    const assignment = (extra = "") =>
+      `(SELECT 1 FROM obt_call_assignments oca
+         WHERE oca.work_date = ${IST_TODAY} AND oca.patient_id = a.patient_id${extra})`;
+    const callsCond =
+      {
+        mine: ` AND EXISTS ${assignment(` AND oca.assigned_to_id = ${meId}`)}`,
+        unassigned: ` AND NOT EXISTS ${assignment()}`,
+      }[String(req.query.calls || "")] || "";
 
     // Summary-pill filter. It narrows the ROWS only — the summary keeps counting
     // the whole date so the pills still show the day's real split while one of
@@ -1018,7 +1149,7 @@ router.get("/ghm-appointments", async (req, res) => {
         .join(" AND ");
       // Lookup is still GHM ops, so blocked patients stay hidden here too — they
       // are reachable from /find and the admin Blocked tab.
-      const searchWhere = `WHERE (${tokenConds})${homeCond}${NOT_BLOCKED("a")}`;
+      const searchWhere = `WHERE (${tokenConds})${homeCond}${modeCond}${NOT_BLOCKED("a")}`;
       const likeParams = tokens.map((t) => `%${t}%`);
       const dIdx = tokens.length + 1;
 
@@ -1176,6 +1307,8 @@ router.get("/ghm-appointments", async (req, res) => {
     // See docs/PATIENT_BLOCKLIST_PLAN.md §4.3
     where += NOT_BLOCKED("a");
     where += homeCond;
+    where += modeCond;
+    where += callsCond;
     if (doctor) {
       params.push(`%${doctor}%`);
       where += ` AND (a.doctor_name ILIKE $${params.length} OR a.preferred_doctor ILIKE $${params.length})`;
@@ -1269,7 +1402,7 @@ router.post("/ghm-appointments", async (req, res) => {
       visit_type = "New",
       appointment_type = "Physical",
       booking_source = "OBT",
-      booked_by_name,
+      booked_by_name: bookedByInput,
       booking_date,
       insurance_taken,
       how_did_you_know,
@@ -1296,6 +1429,10 @@ router.post("/ghm-appointments", async (req, res) => {
       return res
         .status(400)
         .json({ error: "patient_name, appointment_date, doctor_name required" });
+    if (!String(time_slot || "").trim())
+      return res.status(400).json({ error: "Select a time slot before booking." });
+
+    const booked_by_name = String(bookedByInput || "").trim() || claimant(req).name || null;
 
     const altPhones = normalizeAltPhones(alt_phone, phone);
     if (altPhones.error) return res.status(400).json({ error: altPhones.error });
@@ -1353,6 +1490,10 @@ router.post("/ghm-appointments", async (req, res) => {
       actor: blockActor(req),
     });
     if (blockedPatient) return res.status(409).json(blockedResponse(blockedPatient));
+    if (patient_id) {
+      const notYours = await patientEditBlockedFor(req, patient_id);
+      if (notYours) return res.status(403).json({ error: notYours });
+    }
 
     // New patient — create a master record so they're tracked permanently
     if (!patient_id) {
@@ -1617,6 +1758,8 @@ router.post("/ghm-appointments", async (req, res) => {
           ],
         );
 
+    await logBookingCreated(pool, r.rows[0], claimant(req));
+
     // Increment slot booked_count
     if (time_slot && doctor_name) {
       await pool.query(
@@ -1640,8 +1783,20 @@ router.post("/ghm-appointments", async (req, res) => {
 });
 
 // PATCH /api/ghm-appointments/:id — update GHM fields
+const CALL_FIELDS = [
+  "call_status",
+  "call_made_by",
+  "call_date",
+  "call_notes",
+  "call_reschedule_date",
+];
+
 router.patch("/ghm-appointments/:id", async (req, res) => {
   try {
+    const blocked = await editBlockedFor(req, req.params.id, {
+      call: CALL_FIELDS.some((k) => k in req.body),
+    });
+    if (blocked) return res.status(403).json({ error: blocked });
     const id = await resolveAppointmentId(req.params.id, { create: opensLead(req.body) });
     if (!id) return res.status(404).json({ error: NO_APPOINTMENT_ERROR });
     const sentKeys = new Set(Object.keys(req.body));
@@ -1739,6 +1894,31 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
       const alts = normalizeAltPhones(req.body.alt_phone, current.rows[0]?.phone);
       if (alts.error) return res.status(400).json({ error: alts.error });
       req.body.alt_phone = alts.value;
+    }
+
+    if ("booking_status" in req.body || "time_slot" in req.body) {
+      const cur = await pool.query(
+        `SELECT time_slot, booking_status,
+                COALESCE(appointment_date < ${IST_TODAY}, FALSE) AS past
+           FROM appointments WHERE id=$1`,
+        [id],
+      );
+      const slot = String(
+        ("time_slot" in req.body ? req.body.time_slot : cur.rows[0]?.time_slot) || "",
+      ).trim();
+      const wasBooked = cur.rows[0]?.booking_status === "booked";
+      const past = "appointment_date" in req.body ? false : !!cur.rows[0]?.past;
+      if (req.body.booking_status === "booked" && !wasBooked && (!slot || past))
+        return res.status(400).json({
+          error: past
+            ? "This is a past visit. Book the next appointment with a time slot instead."
+            : "Allocate a time slot before marking this patient booked.",
+        });
+      if ("time_slot" in req.body && !("booking_status" in req.body)) {
+        if (slot && !past && !wasBooked) req.body.booking_status = "booked";
+        if (!slot && wasBooked) req.body.booking_status = "";
+        if ("booking_status" in req.body) sentKeys.add("booking_status");
+      }
     }
 
     // The reporting time and the WhatsApp message are generated at booking from
@@ -1903,6 +2083,15 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
       return s.length > 2000 ? `${s.slice(0, 2000)}…` : s;
     };
     const actor = claimant(req);
+    if (req.body.call_status && req.body.call_status !== "pending" && actor.id) {
+      const held = await pool.query(
+        `SELECT a.id FROM appointments a
+          WHERE a.calling_since IS NOT NULL AND a.calling_by_id = $2
+            AND (a.id = $1 OR (a.file_no IS NOT NULL AND a.file_no = $3))`,
+        [id, actor.id, r.rows[0].file_no],
+      );
+      for (const h of held.rows) await releaseClaim(pool, h.id);
+    }
     for (const k of [...trackingNow, ...trackingPatient]) {
       const oldV = logValue(before[k]);
       const newV = logValue(req.body[k] === "" ? null : req.body[k]);
@@ -1927,10 +2116,73 @@ router.get("/appointment-changes", async (req, res) => {
   try {
     const { appointment_id } = req.query;
     if (!appointment_id) return res.status(400).json({ error: "appointment_id required" });
+    const rowId = Number(appointment_id) > 0 ? Number(appointment_id) : 0;
+    const patientId = await patientOf(appointment_id);
     const r = await pool.query(
-      `SELECT * FROM appointment_change_log WHERE appointment_id=$1
-       ORDER BY changed_at DESC, id DESC`,
-      [appointment_id],
+      `WITH rows AS (
+         SELECT a.* FROM appointments a
+          WHERE a.id = $1
+             OR ($2::int IS NOT NULL AND a.patient_id = $2::int)
+             OR a.file_no = (SELECT file_no FROM appointments WHERE id = $1)
+       ),
+       superseding AS (
+         SELECT DISTINCT ON (p.id) p.id AS appointment_id, p.appointment_date AS visit_date,
+                p.preferred_date, nb.appointment_date AS booked_date, ${bookedAt("nb")} AS booked_at,
+                COALESCE((SELECT bl.changed_by FROM appointment_change_log bl
+                           WHERE bl.appointment_id = nb.id AND bl.field = 'booking_created'
+                           ORDER BY bl.changed_at DESC LIMIT 1),
+                         NULLIF(nb.booked_by_name, ''),
+                         CASE nb.source WHEN 'sheets' THEN 'Booking sheet'
+                                        WHEN 'healthray' THEN 'HealthRay' END) AS booked_by
+           FROM rows p
+           JOIN appointments nb
+             ON nb.file_no = p.file_no
+            AND nb.id <> p.id
+            AND nb.appointment_date IS DISTINCT FROM p.preferred_date
+            AND COALESCE(nb.status, '') <> 'cancelled'
+            AND COALESCE(nb.booking_status, '') <> 'cancelled'
+            AND ${bookedAt("nb")} > ${preferredSetAt("p")}
+          WHERE p.preferred_date IS NOT NULL
+          ORDER BY p.id, booked_at ASC
+       )
+       SELECT l.id, l.appointment_id, r.appointment_date AS visit_date,
+              CASE WHEN l.field = ANY($3::text[]) THEN 'audit' ELSE 'change' END AS kind,
+              l.field, l.field_label, l.old_value, l.new_value, l.changed_at,
+              l.changed_by, l.changed_by_id
+         FROM appointment_change_log l JOIN rows r ON r.id = l.appointment_id
+        WHERE l.field <> 'booking_created'
+       UNION ALL
+       SELECT NULL, r.id, r.appointment_date, 'booking',
+              'appointment_date', 'Appointment booked', NULL,
+              CONCAT_WS(' · ', r.appointment_date::text, NULLIF(r.time_slot, '')),
+              COALESCE(bl.changed_at, r.created_at),
+              COALESCE(NULLIF(bl.changed_by, ''), NULLIF(r.booked_by_name, ''),
+                       CASE r.source WHEN 'sheets' THEN 'Booking sheet'
+                                     WHEN 'healthray' THEN 'HealthRay' END),
+              bl.changed_by_id
+         FROM rows r
+         LEFT JOIN LATERAL (
+           SELECT l.changed_at, l.changed_by, l.changed_by_id
+             FROM appointment_change_log l
+            WHERE l.appointment_id = r.id AND l.field = 'booking_created'
+            ORDER BY l.changed_at DESC LIMIT 1
+         ) bl ON TRUE
+        WHERE r.appointment_date IS NOT NULL
+       UNION ALL
+       SELECT NULL, al.entity_id, (al.details->>'appointment_date')::date, 'audit',
+              'appointment_deleted', 'Appointment deleted', NULL,
+              al.details->>'booking', al.created_at, al.details->>'deleted_by', al.doctor_id
+         FROM audit_log al
+        WHERE al.action = 'delete_appointment'
+          AND (al.details->>'file_no' = (SELECT file_no FROM appointments WHERE id = $1)
+               OR ($2::int IS NOT NULL AND (al.details->>'patient_id')::int = $2::int))
+       UNION ALL
+       SELECT NULL, s.appointment_id, s.visit_date, 'superseded',
+              'preferred_date', 'Preferred Date superseded', s.preferred_date::text,
+              CONCAT('Booked for ', s.booked_date::text), s.booked_at, s.booked_by, NULL
+         FROM superseding s
+       ORDER BY changed_at DESC NULLS LAST, id DESC NULLS LAST`,
+      [rowId, patientId, [...AUDIT_FIELDS]],
     );
     res.json(r.rows);
   } catch (e) {
@@ -1954,7 +2206,8 @@ router.delete("/appointment-changes/:id", async (req, res) => {
     await client.query("BEGIN");
 
     const found = await client.query(
-      "SELECT appointment_id, field, old_value, changed_at FROM appointment_change_log WHERE id=$1",
+      `SELECT appointment_id, field, field_label, old_value, new_value, changed_at, changed_by
+         FROM appointment_change_log WHERE id=$1`,
       [req.params.id],
     );
     if (!found.rows.length) {
@@ -1962,8 +2215,31 @@ router.delete("/appointment-changes/:id", async (req, res) => {
       return res.status(404).json({ error: "Change log not found" });
     }
     const { appointment_id, field, old_value, changed_at } = found.rows[0];
+    const blocked = await editBlockedFor(req, appointment_id, {}, client);
+    if (blocked) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ error: blocked });
+    }
+    if (AUDIT_FIELDS.has(field)) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: "This history entry is a permanent record." });
+    }
 
     await client.query("DELETE FROM appointment_change_log WHERE id=$1", [req.params.id]);
+    const removed = found.rows[0];
+    await logAppointmentEvent(client, {
+      appointmentId: appointment_id,
+      field: "history_deleted",
+      label: "History entry deleted",
+      oldValue: [
+        removed.field_label || removed.field,
+        `${removed.old_value || "—"} → ${removed.new_value || "—"}`,
+        removed.changed_by && `by ${removed.changed_by}`,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      actor: claimant(req),
+    });
 
     // Undo the change: if this was the LATEST change for that field, revert the
     // appointment's value back to what it was before (old_value).
