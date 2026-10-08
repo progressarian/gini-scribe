@@ -578,6 +578,7 @@ function GhmFilters({
   modeFilter,
   callsFilter,
   defaultCallsFilter,
+  team,
   activeCount,
   defaultDate,
   onApply,
@@ -672,7 +673,7 @@ function GhmFilters({
           <span>Calls</span>
           <Dropdown
             value={draft.callsFilter}
-            options={CALLS_FILTER_OPTIONS}
+            options={callsFilterOptions(team)}
             onChange={(v) => set("callsFilter", v)}
             ariaLabel="Calls"
           />
@@ -2163,6 +2164,14 @@ const CALLS_FILTER_OPTIONS = [
   { value: "unassigned", label: "Unassigned" },
 ];
 
+const callsFilterOptions = (team) => [
+  ...CALLS_FILTER_OPTIONS,
+  ...team.map((m) => ({ value: `member:${m.id}`, label: `Assigned to ${m.name}` })),
+];
+
+const memberOfFilter = (team, filter) =>
+  team.find((m) => `member:${m.id}` === filter)?.name || null;
+
 const assigneeOptions = (team, current) => [
   { value: "", label: "Unassigned" },
   ...team.map((m) => ({ value: String(m.id), label: m.name })),
@@ -2888,6 +2897,7 @@ export default function GHMPage() {
               modeFilter={modeFilter}
               callsFilter={callsFilter}
               defaultCallsFilter={defaultCallsFilter}
+              team={obtTeam}
               activeCount={activeFilters}
               onApply={(next) => {
                 setDate(next.date || todayStr());
@@ -3101,7 +3111,9 @@ export default function GHMPage() {
                     ? "No patients assigned to you on this list"
                     : callsFilter === "unassigned"
                       ? "Every patient on this list is assigned"
-                      : `No appointments found for ${date}`}
+                      : memberOfFilter(obtTeam, callsFilter)
+                        ? `No patients assigned to ${memberOfFilter(obtTeam, callsFilter)} on this list`
+                        : `No appointments found for ${date}`}
               </div>
               <div className="ghm__empty-sub">
                 {searchQ
@@ -3136,6 +3148,7 @@ export default function GHMPage() {
                     {showVisitStatus && <th style={{ width: 120 }}>Visit Status</th>}
                     <th style={{ minWidth: 170 }}>Patient</th>
                     <th style={{ width: 155 }}>Biomarkers (auto)</th>
+                    <th style={{ minWidth: 130, whiteSpace: "nowrap" }}>Assigned To</th>
                     <th style={{ width: 140 }}>Booking Status</th>
                     <th style={{ width: 100 }}>Visit Type</th>
                     <th style={{ width: 165 }}>Category</th>
@@ -3144,7 +3157,6 @@ export default function GHMPage() {
                     <th style={{ width: 140 }}>Last Consultant Seen</th>
                     <th style={{ width: 120 }}>Last Visit Date</th>
                     {showShowNoShow && <th style={{ width: 150 }}>Show / No Show</th>}
-                    <th style={{ minWidth: 130, whiteSpace: "nowrap" }}>Assigned To</th>
                     {showCallStatus && (
                       <th style={{ minWidth: 175, whiteSpace: "nowrap" }}>Call Status</th>
                     )}
@@ -3368,6 +3380,22 @@ export default function GHMPage() {
                             <BiomarkerCell bio={biomarkers[row.patient_id]} />
                           </td>
 
+                          <td>
+                            {canAssignCalls && row.patient_id ? (
+                              <Dropdown
+                                value={owner ? String(owner.assigned_to_id) : ""}
+                                options={assigneeOptions(obtTeam, owner)}
+                                onChange={(v) => assignRow(row, v)}
+                                variant="cell"
+                                ariaLabel="Assigned to"
+                              />
+                            ) : owner ? (
+                              <span className="assignee">{owner.assigned_to}</span>
+                            ) : (
+                              <span className="muted">Unassigned</span>
+                            )}
+                          </td>
+
                           {/* Booking status — OBT marks a cancellation from the call */}
                           <td>
                             <ColorSelect
@@ -3514,22 +3542,6 @@ export default function GHMPage() {
                               />
                             </td>
                           )}
-
-                          <td>
-                            {canAssignCalls && row.patient_id ? (
-                              <Dropdown
-                                value={owner ? String(owner.assigned_to_id) : ""}
-                                options={assigneeOptions(obtTeam, owner)}
-                                onChange={(v) => assignRow(row, v)}
-                                variant="cell"
-                                ariaLabel="Assigned to"
-                              />
-                            ) : owner ? (
-                              <span className="assignee">{owner.assigned_to}</span>
-                            ) : (
-                              <span className="muted">Unassigned</span>
-                            )}
-                          </td>
 
                           {/* Call status */}
                           {showCallStatus && (

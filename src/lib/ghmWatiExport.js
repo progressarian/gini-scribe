@@ -6,7 +6,7 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 const BLOCK_WIDTH = 26;
 
 const COL_WIDTHS = [
-  22, 12, 14, 14, 12, 14, 12, 12, 14, 12, 6, 6, 20, 14, 14, 14, 14, 14, 26, 22, 18, 16, 16, 12, 16,
+  22, 12, 14, 14, 12, 14, 12, 12, 14, 12, 6, 6, 16, 20, 14, 14, 14, 14, 14, 26, 22, 18, 16, 12, 16,
   22, 30,
 ];
 
@@ -23,6 +23,7 @@ const HEADERS = [
   "UHID",
   "Age",
   "Sex",
+  "Assigned To",
   "Doctor",
   "Last_Visit_Date",
   "Follow_Up_Date",
@@ -32,7 +33,6 @@ const HEADERS = [
   "Last Consultant Seen",
   "Prescription Explained By",
   "Call Status",
-  "Assigned To",
   "Called By",
   "Call Date",
   "Home Collection",
@@ -94,6 +94,7 @@ const toSheetRow = (row, fallbackDate, lastSeen = {}, owners = {}) => {
     row.file_no || "",
     row.disp_age ?? row.age ?? "",
     row.disp_sex || row.sex || "",
+    owners[row.patient_id]?.assigned_to || "",
     row.doctor_name || row.preferred_doctor || "",
     fmtSheetDate(row.last_visit_date),
     fmtSheetDate(row.follow_up_date),
@@ -108,7 +109,6 @@ const toSheetRow = (row, fallbackDate, lastSeen = {}, owners = {}) => {
     // job: it is the record of what happened, read alongside Call Date, so a
     // call logged yesterday must still say so here.
     callLabel(row.call_status_any || "pending"),
-    owners[row.patient_id]?.assigned_to || "",
     row.call_made_by || "",
     fmtSheetDate(row.call_date),
     row.home_collection ? "Yes" : "No",

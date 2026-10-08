@@ -1083,11 +1083,14 @@ router.get("/ghm-appointments", async (req, res) => {
     const assignment = (extra = "") =>
       `(SELECT 1 FROM obt_call_assignments oca
          WHERE oca.work_date = ${IST_TODAY} AND oca.patient_id = a.patient_id${extra})`;
-    const callsCond =
-      {
-        mine: ` AND EXISTS ${assignment(` AND oca.assigned_to_id = ${meId}`)}`,
-        unassigned: ` AND NOT EXISTS ${assignment()}`,
-      }[String(req.query.calls || "")] || "";
+    const callsParam = String(req.query.calls || "");
+    const memberId = Number(callsParam.match(/^member:(\d+)$/)?.[1]) || 0;
+    const callsCond = memberId
+      ? ` AND EXISTS ${assignment(` AND oca.assigned_to_id = ${memberId}`)}`
+      : {
+          mine: ` AND EXISTS ${assignment(` AND oca.assigned_to_id = ${meId}`)}`,
+          unassigned: ` AND NOT EXISTS ${assignment()}`,
+        }[callsParam] || "";
 
     // Summary-pill filter. It narrows the ROWS only — the summary keeps counting
     // the whole date so the pills still show the day's real split while one of

@@ -151,7 +151,7 @@ test.describe("GHM: OBT calls are divided and only the assignee calls", () => {
     ).toBe(true);
   });
 
-  test("7. My patients and Unassigned filter the day list", async () => {
+  test("7. My patients, Unassigned and each team member filter the day list", async () => {
     await admin.post("/api/obt-assignments/assign", {
       data: { patient_ids: [patients[0].id], assigned_to_id: ONE },
     });
@@ -170,6 +170,8 @@ test.describe("GHM: OBT calls are divided and only the assignee calls", () => {
     expect(await listed(obtOne, "mine")).toEqual([patients[0].id]);
     expect(await listed(obtTwo, "mine")).toEqual([patients[1].id]);
     expect(await listed(obtOne, "unassigned")).toEqual([patients[2].id]);
+    expect(await listed(obtOne, `member:${TWO}`)).toEqual([patients[1].id]);
+    expect(await listed(admin, `member:${ONE}`)).toEqual([patients[0].id]);
   });
 
   test("8. an OBT member cannot change an unassigned patient, a lead and reception can", async () => {

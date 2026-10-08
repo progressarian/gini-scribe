@@ -209,9 +209,7 @@ function QueueRow({ q, active, now, onPick }) {
           once they have sat down, time queueing until then. */}
       <div className="si-wait">
         {resting ? (
-          <span className="si-tmr si-tmr-rest">
-            🛋 Resting {countdown(q.restUntil, now)} · ready {clock(q.restUntil)}
-          </span>
+          <span className="si-tmr si-tmr-rest">Rest {countdown(q.restUntil, now)} left</span>
         ) : (
           <span className={`si-tmr si-tmr-${tone}`}>
             ⏱ {waited}m {q.status === "with_vitals" ? "at station" : "waiting"}
@@ -731,7 +729,7 @@ export default function VitalsStationPage() {
                 <div className="sd-rest-name">
                   {patient.name} · {patient.fileNo}
                 </div>
-                <div className="sd-rest-clock">🛋 Resting {countdown(patient.restUntil, now)}</div>
+                <div className="sd-rest-clock">Rest {countdown(patient.restUntil, now)} left</div>
                 <div>
                   BP is taken after {VITALS_REST_MINUTES} minutes of rest from arrival — ready at{" "}
                   {clock(patient.restUntil)}.

@@ -254,7 +254,7 @@ export const JOURNEY_START_STATUSES = ["checked_in", BREAK_RETURN_STATUS];
 export const JOURNEY_START_SQL = (col) =>
   `${col} = ANY (ARRAY[${JOURNEY_START_STATUSES.map((s) => `'${s}'`).join(", ")}])`;
 
-export const VITALS_REST_MINUTES = 0;
+export const VITALS_REST_MINUTES = 15;
 
 export const vitalsRestUntil = (status, arrivedAt) => {
   if (!hasNotStarted(status) || !arrivedAt) return null;

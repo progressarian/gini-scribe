@@ -93,7 +93,7 @@ test.describe.serial("G67 vitals waits 15 minutes of rest after arrival", () => 
     await page.getByLabel("Search today's patients").fill(tag);
     const row = page.getByRole("button", { name: new RegExp(`Resting ${tag}.*resting before BP`) });
     await expect(row).toBeDisabled();
-    await expect(row).toContainText(/Resting 1[0-3]:\d\d · ready/);
+    await expect(row).toContainText(/Rest 1[0-3]:\d\d left/);
     await expect(page.getByRole("button", { name: new RegExp(`Rested ${tag}`) })).toBeEnabled();
   });
 });
