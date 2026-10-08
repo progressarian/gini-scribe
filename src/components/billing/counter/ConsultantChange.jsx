@@ -1,5 +1,7 @@
 import { useState } from "react";
 import ConfirmModal from "../../ui/ConfirmModal";
+import useAuthStore from "../../../stores/authStore";
+import { CAPABILITIES, hasCapability } from "../../../../shared/permissions.js";
 import {
   useConfirmConsultantChange,
   useConsultantChange,
@@ -22,6 +24,7 @@ function outcome(preview) {
 
 export default function ConsultantChange({ visitId, patient, onSettled }) {
   const { data: change } = useConsultantChange(visitId);
+  const me = useAuthStore((st) => st.currentDoctor);
   const confirm = useConfirmConsultantChange();
   const dismiss = useDismissConsultantChange();
   const [step, setStep] = useState(null);
@@ -86,6 +89,10 @@ export default function ConsultantChange({ visitId, patient, onSettled }) {
   }
 
   const leftOver = preview?.left_in_deposit ?? 0;
+  const changedByMe =
+    Boolean(me?.id) &&
+    change.reassigned_by?.id === me.id &&
+    !hasCapability(me.role, CAPABILITIES.ADMIN);
 
   return (
     <div className="bc-hint" role="status" aria-label="Consultant changed">
@@ -100,11 +107,16 @@ export default function ConsultantChange({ visitId, patient, onSettled }) {
         </>
       )}
       {change.reassigned_by?.name ? ` · changed by ${change.reassigned_by.name}` : ""}
+      {changedByMe && (
+        <div>
+          You changed the consultant, so another staff member at the counter must settle the fee.
+        </div>
+      )}
       <div className="bc-head__row">
         <button
           type="button"
           className="st-btn st-btn-blu"
-          disabled={!preview || preview.new_fee === null}
+          disabled={!preview || preview.new_fee === null || changedByMe}
           onClick={() => {
             setNote("");
             setStep("confirm");
@@ -135,8 +147,8 @@ export default function ConsultantChange({ visitId, patient, onSettled }) {
         onCancel={close}
         message={
           preview && (
-            <div className="bc-mdisc">
-              <dl className="bc-pay__mini">
+            <div className="bc-cc">
+              <dl className="bc-cc__who">
                 <div>
                   <dt>Patient</dt>
                   <dd>
@@ -154,13 +166,15 @@ export default function ConsultantChange({ visitId, patient, onSettled }) {
                     {change.from.name} → {change.to.name}
                   </dd>
                 </div>
+              </dl>
+              <dl className="bc-cc__money" aria-label="Fee change">
                 <div>
                   <dt>Billed for {change.from.name}</dt>
                   <dd>{fromPaise(preview.charged)}</dd>
                 </div>
                 <div>
-                  <dt>Into the deposit</dt>
-                  <dd>{fromPaise(preview.to_deposit)}</dd>
+                  <dt>Credited to the deposit</dt>
+                  <dd>+{fromPaise(preview.to_deposit)}</dd>
                 </div>
                 <div>
                   <dt>New fee · {change.to.name}</dt>
@@ -168,41 +182,49 @@ export default function ConsultantChange({ visitId, patient, onSettled }) {
                 </div>
                 <div>
                   <dt>Paid from the deposit</dt>
-                  <dd>{fromPaise(preview.applied_from_deposit)}</dd>
+                  <dd>−{fromPaise(preview.applied_from_deposit)}</dd>
                 </div>
-                <div className="bc-pay__left">
+                <div className="bc-cc__total">
                   <dt>Still to collect</dt>
                   <dd>{fromPaise(preview.to_collect)}</dd>
                 </div>
                 {leftOver > 0 && (
-                  <div>
+                  <div className="bc-cc__total">
                     <dt>Left over</dt>
                     <dd>{fromPaise(leftOver)}</dd>
                   </div>
                 )}
               </dl>
               {leftOver > 0 && (
-                <fieldset className="bc-field">
-                  <legend className="bc-field__lbl">The {fromPaise(leftOver)} left over</legend>
-                  <label>
+                <fieldset className="bc-cc__choices">
+                  <legend className="bc-field__lbl">
+                    What happens to the {fromPaise(leftOver)}
+                  </legend>
+                  <label className="bc-cc__choice">
                     <input
                       type="radio"
                       name="cc-leftover"
                       value="deposit"
                       checked={leftover === "deposit"}
                       onChange={() => setLeftover("deposit")}
-                    />{" "}
-                    Keep in the patient's deposit
+                    />
+                    <span>
+                      <strong>Keep in the patient's deposit</strong>
+                      <small>Used for this patient's next bill.</small>
+                    </span>
                   </label>
-                  <label>
+                  <label className="bc-cc__choice">
                     <input
                       type="radio"
                       name="cc-leftover"
                       value="refund"
                       checked={leftover === "refund"}
                       onChange={() => setLeftover("refund")}
-                    />{" "}
-                    Refund it — needs a second person's approval
+                    />
+                    <span>
+                      <strong>Refund it</strong>
+                      <small>Needs a second person's approval before it is paid back.</small>
+                    </span>
                   </label>
                   {leftover === "refund" && (
                     <label className="bc-field">
@@ -231,7 +253,7 @@ export default function ConsultantChange({ visitId, patient, onSettled }) {
                   onChange={(e) => setNote(e.target.value)}
                 />
               </label>
-              <p className="bc-hint">
+              <p className="bc-cc__warn">
                 A credit note is made for {change.from.name}'s consultation and {change.to.name}'s
                 consultation is added to this visit's draft bill. This can't be undone.
               </p>
@@ -251,7 +273,7 @@ export default function ConsultantChange({ visitId, patient, onSettled }) {
         onConfirm={keepBill}
         onCancel={close}
         message={
-          <div className="bc-mdisc">
+          <div className="bc-cc">
             <p className="bc-hint">
               The patient stays with {change.to.name}, but the bill keeps {change.from.name}'s
               consultation fee.

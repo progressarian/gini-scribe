@@ -14,13 +14,18 @@ const invalidate = (queryClient) => {
   queryClient.invalidateQueries({ queryKey: ["giniflow", "stations", "summary"] });
 };
 
-export function usePharmacyQueue(date, group = "all") {
+export function usePharmacyQueue(date, group = "all", q = "") {
+  const search = q.trim().length >= 2 ? q.trim() : "";
   return useQuery({
-    queryKey: ["giniflow", "pharmacy", "queue", date || "today", group],
+    queryKey: ["giniflow", "pharmacy", "queue", date || "today", group, search],
     queryFn: async () =>
       (
         await api.get("/api/giniflow/stations/pharmacy/queue", {
-          params: { ...(date ? { date } : {}), ...(group && group !== "all" ? { group } : {}) },
+          params: {
+            ...(date ? { date } : {}),
+            ...(group && group !== "all" ? { group } : {}),
+            ...(search ? { q: search } : {}),
+          },
         })
       ).data,
     refetchInterval: pollInterval,

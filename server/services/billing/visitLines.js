@@ -73,9 +73,19 @@ async function visitFor(client, visitId) {
             COALESCE(a.doctor_id,
                      (SELECT d.id FROM doctors d
                        WHERE lower(btrim(d.name)) = lower(btrim(a.doctor_name))
-                       ORDER BY d.is_active IS NOT FALSE DESC, d.id LIMIT 1)) AS appointment_doctor_id
+                       ORDER BY d.is_active IS NOT FALSE DESC, d.id LIMIT 1)) AS appointment_doctor_id,
+            (SELECT d.id FROM giniflow_visit_steps s
+               JOIN doctors d ON d.id::text = s.assigned_staff_id
+              WHERE s.visit_id = v.id AND s.chain_status = 'with_doctor'
+                AND s.status NOT IN ('skipped', 'cancelled')
+              ORDER BY COALESCE(d.is_chief, FALSE) DESC, s.step_catalog_id = 'sd_consult' DESC,
+                       s.step_order
+              LIMIT 1) AS journey_doctor_id,
+            CASE WHEN vt.id IS NULL THEN NULL
+                 WHEN vt.for_followup THEN 'Follow Up' ELSE 'New' END AS journey_visit_type
        FROM giniflow_visits v
        LEFT JOIN appointments a ON a.id = v.appointment_id
+       LEFT JOIN flow_visit_types vt ON vt.id = v.visit_type_id
       WHERE v.id = $1`,
     [visitId],
   );
@@ -83,11 +93,14 @@ async function visitFor(client, visitId) {
   return rows[0];
 }
 
+const consultationVisitType = (visit) =>
+  visit.appointment_id ? billingVisitType(visit.visit_type) : visit.journey_visit_type;
+
 async function consultationItem(client, visit) {
-  if (!visit.appointment_id) return null;
-  const visitType = billingVisitType(visit.visit_type);
-  if (!visitType) return null;
-  const doctorId = visit.appointment_doctor_id ?? visit.assigned_doctor_id ?? null;
+  const visitType = consultationVisitType(visit);
+  if (!visitType || (!visit.appointment_id && !visit.journey_doctor_id)) return null;
+  const doctorId =
+    visit.journey_doctor_id ?? visit.appointment_doctor_id ?? visit.assigned_doctor_id ?? null;
   if (!doctorId) return null;
   const removed = await removedDoctor(doctorId, client);
   if (removed) return { removed };
@@ -189,7 +202,7 @@ export async function consultationForDesk(visitId, ctx, db = pool) {
         if (swapped)
           return { ok: true, bill_id: swapped.bill.id, added: [item.name], replaced: true };
       }
-      if (!(await healthrayBilledConsultation(client, visit))) {
+      if (visit.appointment_id && !(await healthrayBilledConsultation(client, visit))) {
         return { ok: true, added: [], waiting_for_healthray: true };
       }
       if (
@@ -294,9 +307,11 @@ export async function consultationSuggestion(billId, ctx, db = pool) {
     return NO_SUGGESTION;
   }
   const visit = await visitFor(db, bill.visit_id);
-  const visitType = visit.appointment_id ? billingVisitType(visit.visit_type) : null;
+  const visitType = consultationVisitType(visit);
   if (!visitType || (await consultationOnVisit(db, visit.id))) return NO_SUGGESTION;
-  if (!(await healthrayBilledConsultation(db, visit))) return NO_SUGGESTION;
+  if (visit.appointment_id && !(await healthrayBilledConsultation(db, visit))) {
+    return NO_SUGGESTION;
+  }
   const booked = await consultationItem(db, visit);
   const suggested =
     booked && !booked.removed

@@ -119,7 +119,7 @@ test.describe.serial("G69 reassigning the consultant moves the bill with them", 
     });
 
     const sameHand = await failure(
-      change.confirmConsultantChange(open.id, {}, { actorId: coordinator, role: "admin" }, db),
+      change.confirmConsultantChange(open.id, {}, { actorId: coordinator, role: "reception" }, db),
     );
     expect(sameHand?.status).toBe(409);
     expect(sameHand?.message).toMatch(/Someone other than the person who changed the consultant/);
@@ -368,5 +368,32 @@ test.describe.serial("G69 reassigning the consultant moves the bill with them", 
       page.getByText("the Billing Counter will settle the fee difference"),
     ).toBeVisible();
     expect((await pending(visit))?.to_doctor_id).toBe(CONSULTANTS.rahul.id);
+  });
+
+  test("16. an admin can settle a change they made themselves", async () => {
+    const { visit } = await paidConsult("AdminSelf");
+    const moved = await reassign(visit, CONSULTANTS.rahul);
+    const done = await change.confirmConsultantChange(
+      moved.billing.change_id,
+      {},
+      { actorId: coordinator, role: "admin" },
+      db,
+    );
+    expect(done.new_fee).toBe(rupees(2500));
+    expect(await pending(visit)).toBeNull();
+  });
+
+  test("15. a visit with no appointment still finds the new consultant's fee", async () => {
+    const { visit } = await paidConsult("NoAppt");
+    await query(`UPDATE giniflow_visits SET appointment_id = NULL WHERE id = $1`, [visit]);
+    const fee = await change.consultFeeDifference(visit, CONSULTANTS.rahul.id, desk, db);
+    expect(fee).toMatchObject({ new_fee: rupees(2500), difference: rupees(500) });
+
+    const moved = await reassign(visit, CONSULTANTS.rahul);
+    const shown = await change.consultantChangeForVisit(visit, desk, db);
+    expect(shown.preview.new_fee).toBe(rupees(2500));
+    const done = await change.confirmConsultantChange(moved.billing.change_id, {}, desk, db);
+    expect(done.new_fee).toBe(rupees(2500));
+    expect(await liveConsultItems(visit)).toContain(ids.rahulNew);
   });
 });

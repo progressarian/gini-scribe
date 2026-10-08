@@ -1906,7 +1906,8 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
     ) {
       const cur = await pool.query(
         `SELECT time_slot, preferred_time_slot, booking_status,
-                COALESCE(appointment_date < ${IST_TODAY}, FALSE) AS past
+                (COALESCE(appointment_date < ${IST_TODAY}, FALSE)
+                  OR COALESCE(status, '') IN ('completed', 'seen', 'in_visit', 'in-progress')) AS past
            FROM appointments WHERE id=$1`,
         [id],
       );

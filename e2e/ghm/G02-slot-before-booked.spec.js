@@ -132,6 +132,15 @@ test.describe("GHM: a booking needs a time slot", () => {
     expect((await visitRow(id)).booking_status).toBeNull();
   });
 
+  test("6b. a visit seen today is a follow-up row too: HealthRay's time is not the patient's", async () => {
+    const { id } = await appointmentFor(patient, { offset: 0, slot: "08:55", status: "completed" });
+    const refused = await api.patch(`/api/ghm-appointments/${id}`, {
+      data: { booking_status: "booked" },
+    });
+    expect(refused.status()).toBe(400);
+    expect((await refused.json()).error).toMatch(/preferred time/i);
+  });
+
   test("7. cancelling is always allowed", async () => {
     const { id } = await appointmentFor(patient, { offset: 5 });
     const res = await api.patch(`/api/ghm-appointments/${id}`, {

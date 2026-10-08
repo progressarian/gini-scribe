@@ -81,7 +81,11 @@ test.describe
     await openDeposit(page, "reception");
     await actions(page).getByRole("button", { name: "Pay back" }).click();
     const form = panel(page).getByRole("form", { name: "Ask to pay the deposit back" });
+    await form.getByLabel(/^Amount/).fill("99999");
+    await expect(form.getByLabel(/^Amount/)).toHaveValue("1500");
+    await expect(form.getByRole("alert")).toContainText("Only ₹1,500 is in the deposit");
     await form.getByLabel(/^Amount/).fill("400");
+    await expect(form.getByRole("alert")).toHaveCount(0);
     await form.getByLabel(/^Reason/).fill("Patient going home");
     await form.getByRole("button", { name: "Ask for approval" }).click();
     await expect(panel(page)).toContainText("sent for approval");

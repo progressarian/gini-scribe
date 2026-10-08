@@ -957,6 +957,9 @@ export async function advanceMachineTest(
       markedResultsReady = rowCount > 0;
     }
 
+    const { syncMachineSteps } = await import("./journey.js");
+    await syncMachineSteps(client, row.visit_id);
+
     await client.query("COMMIT");
     return { orderId, sampleStatus: finalStatus, markedResultsReady };
   } catch (e) {

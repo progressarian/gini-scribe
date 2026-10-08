@@ -72,6 +72,14 @@ const minutesSince = (from, now) =>
 
 const iso = (value) => (value ? new Date(value).toISOString() : null);
 
+const SEARCH_MATCH_SQL = (param) => `(${param}::text IS NULL
+         OR p.name ILIKE '%' || ${param} || '%'
+         OR COALESCE(p.file_no, '') ILIKE '%' || ${param} || '%'
+         OR COALESCE(p.phone, '') ILIKE '%' || ${param} || '%')`;
+
+export const pharmacySearchTerm = (q) =>
+  q && String(q).trim().length >= 2 ? String(q).trim() : null;
+
 const QUEUE_SQL = `
   SELECT v.id, v.current_status, v.visit_date::text AS visit_date, v.card_sent_at, v.category,
          v.priority, v.priority_reason, v.queue_position, v.queue_column,
@@ -83,7 +91,8 @@ const QUEUE_SQL = `
          last_ev.occurred_at AS status_since,
          done_ev.occurred_at AS dispensed_at,
          med.names, med.gini, med.external, med.low_stock, med.out_of_stock,
-         col.given, col.not_given, col.partial
+         col.given, col.not_given, col.partial,
+         ${SEARCH_MATCH_SQL("$5")} AS matches
     FROM giniflow_visits v
     JOIN patients p ON p.id = v.patient_id
     LEFT JOIN doctors doc ON doc.id = v.assigned_doctor_id
@@ -154,16 +163,17 @@ export async function getPharmacyQueue(
   visitDate,
   now = new Date(),
   db = pool,
-  { group = "all" } = {},
+  { group = "all", q = null } = {},
 ) {
+  const search = pharmacySearchTerm(q);
   // Resolved per row, not once: the pharmacy budget can be overridden per
   // category, and this queue holds every category at the same moment.
   const budgetFor = budgetLookup(await getSlaConfig(db));
   const hideLabOnly = await hideLabOnlyPatients(db);
 
   const [{ rows: waiting }, { rows: finished }] = await Promise.all([
-    db.query(QUEUE_SQL, [visitDate, QUEUE_STATUSES, LAB_ONLY_DOCTOR, hideLabOnly]),
-    db.query(QUEUE_SQL, [visitDate, DONE_STATUSES, LAB_ONLY_DOCTOR, hideLabOnly]),
+    db.query(QUEUE_SQL, [visitDate, QUEUE_STATUSES, LAB_ONLY_DOCTOR, hideLabOnly, search]),
+    db.query(QUEUE_SQL, [visitDate, DONE_STATUSES, LAB_ONLY_DOCTOR, hideLabOnly, search]),
   ]);
 
   const card = (r) => {
@@ -210,6 +220,7 @@ export async function getPharmacyQueue(
       // written by `system`, on a day this station dispensed nobody. A visit was
       // worked here only if it reached `dispensed`, or if a medicine carries a
       // collection record.
+      matches: r.matches === true,
       dispensedHere:
         r.current_status === "dispensed" ||
         (r.given ?? 0) + (r.not_given ?? 0) + (r.partial ?? 0) > 0,
@@ -240,8 +251,11 @@ export async function getPharmacyQueue(
     }))
     .sort((a, b) => (b.dispensedAt || "").localeCompare(a.dispensedAt || ""));
 
-  const handover = await getPendingHandover(visitDate, db);
+  const allHandover = await getPendingHandover(visitDate, db, search);
   const wanted = PHARMACY_GROUPS.includes(group) ? group : "all";
+  const found = toDispense.filter((c) => c.matches);
+  const foundDone = dispensed.filter((c) => c.matches);
+  const handover = allHandover.filter((r) => r.matches);
 
   return {
     counts: {
@@ -255,19 +269,20 @@ export async function getPharmacyQueue(
       stockWarnings: toDispense.filter((c) => c.stock).length,
       dispensed: dispensed.filter((c) => c.dispensedHere).length,
     },
-    toDispense: wanted === "all" || wanted === "toDispense" ? toDispense : [],
-    dispensed: wanted === "all" || wanted === "dispensed" ? dispensed : [],
+    toDispense: wanted === "all" || wanted === "toDispense" ? found : [],
+    dispensed: wanted === "all" || wanted === "dispensed" ? foundDone : [],
     pendingHandover: handover.filter(
       (r) =>
         wanted === "all" || (wanted === "onFloor" && !r.gone) || (wanted === "gone" && !!r.gone),
     ),
     group: wanted,
+    q: search,
     // Whole-day totals for the filter chips, taken before the slice above —
     // counted from the returned lists they would read 0 for every group but one.
     groupCounts: {
-      toDispense: toDispense.length,
+      toDispense: found.length,
       onFloor: handover.filter((r) => !r.gone).length,
-      dispensed: dispensed.length,
+      dispensed: foundDone.length,
       gone: handover.filter((r) => r.gone).length,
     },
   };
@@ -284,10 +299,10 @@ export async function getPharmacyQueue(
 // Read-only and deliberately separate from `toDispense`: these patients have no
 // Gini Flow prescription to close, so the counter cannot run the dispense flow
 // on them — it can only see who is owed medicines.
-async function getPendingHandover(visitDate, db = pool) {
+async function getPendingHandover(visitDate, db = pool, search = null) {
   const { rows } = await db.query(
     `SELECT p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
-            v.current_status,
+            v.current_status, bool_or(${SEARCH_MATCH_SQL("$4")}) AS matches,
             count(*)::int AS medicines,
             array_agg(m.name ORDER BY m.name) AS names,
             min(m.created_at) AS prescribed_at
@@ -308,11 +323,12 @@ async function getPendingHandover(visitDate, db = pool) {
         )
       GROUP BY p.id, p.name, p.file_no, p.age, p.sex, v.current_status
       ORDER BY min(m.created_at)`,
-    [visitDate, LAB_ONLY_DOCTOR, await hideLabOnlyPatients(db)],
+    [visitDate, LAB_ONLY_DOCTOR, await hideLabOnlyPatients(db), search],
   );
 
   return rows.map((r) => ({
     patientId: r.patient_id,
+    matches: r.matches === true,
     name: r.name,
     fileNo: r.file_no,
     age: r.age,

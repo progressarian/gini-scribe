@@ -666,7 +666,16 @@ export default function PharmacyStationPage() {
   const toastTimer = useRef(null);
   const now = useTick();
 
-  const { data, isLoading } = usePharmacyQueue(undefined, filter);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 250);
+    return () => clearTimeout(t);
+  }, [search]);
+  const term = search.trim();
+  const searching = term.length >= 2;
+
+  const { data, isLoading, isFetching } = usePharmacyQueue(undefined, filter, debouncedSearch);
   const live = useGiniflowLive({ date: data?.date });
 
   const showToast = useCallback((msg) => {
@@ -708,8 +717,8 @@ export default function PharmacyStationPage() {
   // Both right-hand groups default closed. Picking one from the filter row makes
   // it the only thing on screen, so it opens too — otherwise the filter lands on
   // a collapsed heading with nothing under it.
-  const doneExpanded = doneOpen || filter === "dispensed";
-  const goneExpanded = goneOpen || filter === "gone";
+  const doneExpanded = doneOpen || filter === "dispensed" || searching;
+  const goneExpanded = goneOpen || filter === "gone" || searching;
 
   // The pane follows the live queue rather than a copy of it, so a card that
   // moves out of "to dispense" while it is open does not go stale.
@@ -788,7 +797,28 @@ export default function PharmacyStationPage() {
                 <div className="ss">visit ended, no pharmacy record</div>
               </div>
             </div>
+            <input
+              className="sq-search sq-search--page"
+              type="search"
+              value={search}
+              placeholder="Search by patient name, file no. or phone"
+              aria-label="Search today's pharmacy patients"
+              onChange={(e) => setSearch(e.target.value)}
+            />
           </div>
+
+          {searching && !isLoading && (
+            <div className="ph-search-state" role="status">
+              {isFetching
+                ? "Searching…"
+                : visibleTotal
+                  ? `${visibleTotal} matching “${term}”`
+                  : `Nobody today matches “${term}”.`}{" "}
+              <button type="button" className="sq-clearfilter" onClick={() => setSearch("")}>
+                Clear search
+              </button>
+            </div>
+          )}
 
           <p className="stats-note">
             A patient reaches the queue below when a consultant taps Finalize on the Gini Flow
@@ -823,6 +853,7 @@ export default function PharmacyStationPage() {
               lookup. Stacked, the second pushed the first off a full day's
               screen. Same `.dsplit` the doctor station uses — one layout, not a
               second one that drifts. */}
+
           {!isLoading && (
             <div
               className="sq-filters sq-filters--page"
@@ -896,7 +927,9 @@ export default function PharmacyStationPage() {
                   {!(shows("toDispense") && toDispense.length) &&
                     !(shows("onFloor") && onFloor.length) && (
                       <div className="empty-note">
-                        Nobody in the building is waiting on medicines.
+                        {searching
+                          ? `Nobody waiting on medicines matches “${term}”.`
+                          : "Nobody in the building is waiting on medicines."}
                       </div>
                     )}
                 </div>
@@ -965,7 +998,11 @@ export default function PharmacyStationPage() {
                     </div>
                   )}
                   {!(shows("dispensed") && dispensed.length) && !(shows("gone") && gone.length) && (
-                    <div className="empty-note">Nothing dispensed yet today.</div>
+                    <div className="empty-note">
+                      {searching
+                        ? `Nobody done today matches “${term}”.`
+                        : "Nothing dispensed yet today."}
+                    </div>
                   )}
                 </div>
               )}
@@ -976,7 +1013,8 @@ export default function PharmacyStationPage() {
               with no explanation reads as a fault rather than an empty filter. */}
           {!isLoading && filter !== "all" && !filterCounts[filter] && (
             <div className="empty-note">
-              Nobody in {PHARMACY_FILTERS.find((f) => f.key === filter)?.label || "this group"}.{" "}
+              Nobody in {PHARMACY_FILTERS.find((f) => f.key === filter)?.label || "this group"}
+              {searching ? ` matching “${term}”` : ""}.{" "}
               <button type="button" className="sq-clearfilter" onClick={() => setFilter("all")}>
                 Show all
               </button>

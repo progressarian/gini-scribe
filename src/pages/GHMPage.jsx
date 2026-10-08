@@ -705,8 +705,12 @@ const COLUMN_CALL_STATUSES = CALL_STATUSES.filter((s) => s.value !== "reschedule
 const callStatusOptions = (value) =>
   value === "rescheduled" ? CALL_STATUSES : COLUMN_CALL_STATUSES;
 
+const VISIT_HAPPENED = ["completed", "seen", "in_visit", "in-progress"];
+
 const bookingStatusOptions = (row) => {
-  const past = !!row.appointment_date && row.appointment_date < todayStr();
+  const past =
+    VISIT_HAPPENED.includes(row.status) ||
+    (!!row.appointment_date && row.appointment_date < todayStr());
   if (row.booking_status === "booked" || (past ? row.preferred_time_slot : row.time_slot))
     return BOOKING_STATUSES;
   const title = past ? "Choose the preferred time first." : "Allocate a time slot first.";

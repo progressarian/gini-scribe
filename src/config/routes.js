@@ -96,6 +96,7 @@ export const PAGE_CAPABILITIES = {
   // /reception-inbox. /opd above stays reception-only.
   "/ghm": [CAP.RECEPTION_OPS, CAP.OBT_OPS],
   "/obt-dashboard": CAP.OBT_OPS,
+  "/staff-management": CAP.ADMIN,
   "/doctor-management": CAP.ADMIN,
   "/admin/blocklist": CAP.ADMIN,
   "/admin/test-catalog": CAP.ADMIN,

@@ -13,7 +13,11 @@ import { advanceStatus, reopenResultsForNewOrder } from "./statusEngine.js";
 import { labStepsAreManual } from "../../../shared/manualFloor.js";
 import { genVisitToken } from "../flow/journey.js";
 import { LAB_RUNGS, stageIndexOf, UNDRAWN_SAMPLE_STATUSES } from "../../../shared/labStages.js";
-import { machineFor } from "../../../shared/machineStages.js";
+import {
+  machineFor,
+  machineForTest,
+  MACHINE_STATUS_TO_STAGE,
+} from "../../../shared/machineStages.js";
 import {
   testsBeforeDoctors,
   requiredStepsFirst,
@@ -1164,7 +1168,10 @@ export async function syncLabStepsFromLab(db, visitId) {
        (SELECT count(*)::int FROM giniflow_lab_orders o
          WHERE o.visit_id = v.id AND o.urgency = 'today' AND o.kind = 'lab') AS orders,
        (SELECT count(*)::int FROM giniflow_lab_orders o
-         WHERE o.visit_id = v.id AND o.urgency = 'today' AND o.kind = 'lab'
+         WHERE o.visit_id = v.id AND o.urgency = 'today'
+           AND o.sample_status <> 'cancelled') AS test_orders,
+       (SELECT count(*)::int FROM giniflow_lab_orders o
+         WHERE o.visit_id = v.id AND o.urgency = 'today' AND o.sample_status <> 'cancelled'
            AND o.payment_status NOT IN ('paid', 'claim_approved')) AS unsettled,
        (SELECT count(*)::int FROM giniflow_lab_orders o
          WHERE o.visit_id = v.id AND o.urgency = 'today' AND o.kind = 'lab'
@@ -1179,7 +1186,7 @@ export async function syncLabStepsFromLab(db, visitId) {
   if (!e) return { billed: false, drawn: false };
 
   const drawn = e.orders > 0 ? e.drawn === e.orders : !!e.hr_collected;
-  const billed = e.orders > 0 && e.unsettled === 0;
+  const billed = e.test_orders > 0 && e.unsettled === 0;
 
   const tick = async (catalogId) =>
     db.query(
@@ -1199,10 +1206,51 @@ export async function syncLabStepsFromLab(db, visitId) {
       [visitId, catalogId],
     );
   if (billed) await tick("lab_billing");
-  else if (e.orders > 0) await reopen("lab_billing");
+  else if (e.test_orders > 0) await reopen("lab_billing");
   if (drawn) await tick("blood_sample");
   else if (e.orders > 0) await reopen("blood_sample");
+  await syncMachineSteps(db, visitId);
   return { billed, drawn };
+}
+
+const MACHINE_STEP_FOR_STAGE = { in_progress: "in_progress", done: "done", reported: "done" };
+
+export async function syncMachineSteps(db, visitId) {
+  const { rows } = await db.query(
+    `SELECT o.sample_status, array_agg(t.test_name) AS names
+       FROM giniflow_lab_orders o
+       JOIN giniflow_lab_order_tests t ON t.lab_order_id = o.id
+      WHERE o.visit_id = $1 AND o.kind = 'machine'
+      GROUP BY o.id, o.sample_status`,
+    [visitId],
+  );
+  const moved = rows
+    .map((row) => ({
+      ...row,
+      step: MACHINE_STEP_FOR_STAGE[MACHINE_STATUS_TO_STAGE[row.sample_status]],
+    }))
+    .filter((row) => row.step);
+  if (!moved.length) return;
+  const machines = await getMachines(db);
+  for (const row of moved) {
+    const machine = row.names.map((name) => machineForTest(machines, name)).find(Boolean);
+    if (!machine) continue;
+    await db.query(
+      `UPDATE giniflow_visit_steps
+          SET status = $3,
+              started_at = COALESCE(started_at, NOW()),
+              completed_at = CASE WHEN $3 = 'done' THEN COALESCE(completed_at, NOW())
+                                  ELSE completed_at END
+        WHERE visit_id = $1 AND step_catalog_id = $2
+          AND status = ANY($4::text[])`,
+      [
+        visitId,
+        machine.id,
+        row.step,
+        row.step === "done" ? ["pending", "in_progress", "skipped"] : ["pending", "skipped"],
+      ],
+    );
+  }
 }
 
 export async function tickBillingIfConsultPaid(db, billId, visitId) {

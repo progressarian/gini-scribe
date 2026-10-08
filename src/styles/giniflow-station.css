@@ -8704,3 +8704,19 @@
   color: var(--blu);
   margin-bottom: 6px;
 }
+.gf input.sq-search--page {
+  flex: 0 1 320px;
+  align-self: center;
+  margin: 0 0 0 auto;
+  min-width: 220px;
+}
+.gf .ph-search-state {
+  font-size: 12px;
+  color: var(--ink2);
+}
+@media (max-width: 760px) {
+  .gf input.sq-search--page {
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+}

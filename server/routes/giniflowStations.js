@@ -2515,12 +2515,13 @@ const pharmacyError = (res, e, label) =>
 router.get(
   "/giniflow/stations/pharmacy/queue",
   pharmacyGate,
-  validateQuery(giniflowStationGroupQuerySchema),
+  validateQuery(giniflowStationSearchGroupQuerySchema),
   async (req, res) => {
     try {
       const date = await resolveDate(req.query.date);
       const data = await getPharmacyQueue(date, new Date(), undefined, {
         group: req.query.group ?? "all",
+        q: req.query.q ?? null,
       });
       res.json({ date, ...data, serverTime: new Date().toISOString() });
     } catch (e) {

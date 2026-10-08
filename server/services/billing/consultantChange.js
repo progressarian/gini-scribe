@@ -1,6 +1,7 @@
 import pool from "../../config/db.js";
 import { billingVisitType } from "../../../shared/billingVisitType.js";
 import { paise } from "../../../shared/labPayment.js";
+import { CAPABILITIES, hasCapability } from "../../../shared/permissions.js";
 import { writeAudit } from "./audit.js";
 import { addLineIn, holdConsultation, openDraftIn, removeLine } from "./bills.js";
 import { creditNoteIn } from "./creditNotes.js";
@@ -42,8 +43,12 @@ const CHANGE_COLUMNS = `c.id, c.visit_id, c.patient_id, c.from_doctor_id, c.to_d
 async function visitFacts(db, visitId) {
   const { rows } = await db.query(
     `SELECT v.id, v.patient_id, v.appointment_id, v.visit_date::text AS visit_date,
-            a.visit_type
-       FROM giniflow_visits v LEFT JOIN appointments a ON a.id = v.appointment_id
+            a.visit_type,
+            CASE WHEN vt.id IS NULL THEN NULL
+                 WHEN vt.for_followup THEN 'Follow Up' ELSE 'New' END AS journey_visit_type
+       FROM giniflow_visits v
+       LEFT JOIN appointments a ON a.id = v.appointment_id
+       LEFT JOIN flow_visit_types vt ON vt.id = v.visit_type_id
       WHERE v.id = $1`,
     [visitId],
   );
@@ -63,7 +68,7 @@ async function doctorOf(db, doctorId) {
 const CONSULT_LINES_SQL = `
   SELECT l.id, l.bill_id, b.status AS bill_status, b.bill_no, b.scheme_code,
          COALESCE(l.doctor_id, i.doctor_id) AS doctor_id,
-         l.patient_payable,
+         l.patient_payable, i.visit_type,
          COALESCE((SELECT SUM(x.patient_payable) FROM bill_lines x WHERE x.credited_line_id = l.id), 0)
            AS credited
     FROM bill_lines l
@@ -81,6 +86,11 @@ async function consultLines(db, visitId, toDoctorId) {
     left: paise(row.patient_payable) - paise(row.credited),
   }));
 }
+
+const visitTypeOf = (visit, lines) =>
+  (visit.appointment_id ? billingVisitType(visit.visit_type) : visit.journey_visit_type) ??
+  lines.find((line) => line.visit_type)?.visit_type ??
+  null;
 
 async function consultItemFor(db, doctorId, visitType) {
   if (!visitType) return null;
@@ -123,7 +133,7 @@ export async function consultFeeDifference(visitId, toDoctorId, ctx, db = pool) 
   const lines = await consultLines(db, visit.id, to.id);
   const finals = lines.filter((line) => line.bill_status === "final");
   const drafts = lines.filter((line) => line.bill_status === "draft");
-  const visitType = visit.appointment_id ? billingVisitType(visit.visit_type) : null;
+  const visitType = visitTypeOf(visit, lines);
   const item = await consultItemFor(db, to.id, visitType);
   const scheme = lines[0]?.scheme_code ?? null;
   const newFee = item ? await priceFor(db, visit, item, to.id, scheme, ctx?.role) : null;
@@ -143,8 +153,7 @@ export async function consultFeeDifference(visitId, toDoctorId, ctx, db = pool) 
 }
 
 async function swapDraftLines(client, visit, lines, to, ctx) {
-  const visitType = visit.appointment_id ? billingVisitType(visit.visit_type) : null;
-  const item = await consultItemFor(client, to.id, visitType);
+  const item = await consultItemFor(client, to.id, visitTypeOf(visit, lines));
   const reason = `Consultant changed to ${to.short_name}`;
   for (const line of lines) {
     await removeLine(line.bill_id, line.id, { reason }, ctx, client);
@@ -334,7 +343,7 @@ export async function confirmConsultantChange(changeId, input, ctx, db = pool) {
   const note = cleanNote(input?.note, "The note", false);
   const done = await inTransaction(async (client) => {
     const change = await lockChange(client, changeId);
-    if (change.reassigned_by && change.reassigned_by === ctx.actorId) {
+    if (change.reassigned_by === ctx.actorId && !hasCapability(ctx.role, CAPABILITIES.ADMIN)) {
       throw httpError(
         409,
         "Someone other than the person who changed the consultant must confirm the fee change",
@@ -346,17 +355,15 @@ export async function confirmConsultantChange(changeId, input, ctx, db = pool) {
     ]);
     const visit = await visitFacts(client, change.visit_id);
     const to = await doctorOf(client, change.to_doctor_id);
-    const visitType = visit.appointment_id ? billingVisitType(visit.visit_type) : null;
-    const item = await consultItemFor(client, to.id, visitType);
+    const lines = await consultLines(client, change.visit_id, to.id);
+    const item = await consultItemFor(client, to.id, visitTypeOf(visit, lines));
     if (!item) {
       throw httpError(
         409,
         `${to.short_name} has no consultation fee for this visit type — add it in Settings → Consultant Fees first`,
       );
     }
-    const finals = (await consultLines(client, change.visit_id, to.id)).filter(
-      (line) => line.bill_status === "final",
-    );
+    const finals = lines.filter((line) => line.bill_status === "final");
     const charged = finals.reduce((sum, line) => sum + line.left, 0);
     let creditNoteId = null;
     let toDeposit = 0;

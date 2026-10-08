@@ -1160,9 +1160,15 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   const { data: visitTypes = [] } = useFlowVisitTypes();
   const [visitTypeId, setVisitTypeId] = useState(arrival.suggestedVisitTypeId || null);
   const [steps, setSteps] = useState(null);
-  const [consultChoice, setConsultChoice] = useState(
-    arrival.consultsDirect ? "consultant" : "both",
+  const bookedDoctor = useAuthStore((st) =>
+    (st.doctorsList || []).find((d) => d.id === arrival.assignedDoctorId),
   );
+  const seesWithoutChief = arrival.consultsDirect || (bookedDoctor && !bookedDoctor.is_chief);
+  const [consultChoice, setConsultChoice] = useState(seesWithoutChief ? "consultant" : "both");
+  const choiceTouched = useRef(false);
+  useEffect(() => {
+    if (!choiceTouched.current) setConsultChoice(seesWithoutChief ? "consultant" : "both");
+  }, [seesWithoutChief]);
   // Answers to the template's conditions. Only the keys this type's template
   // actually uses ever appear, and every one starts true: the journey a desk
   // sees on open is the journey they saw before this gate existed, and saying
@@ -1346,18 +1352,29 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
                           value={c.value}
                           checked={consultChoice === c.value}
                           disabled={unavailable}
-                          onChange={() => setConsultChoice(c.value)}
+                          onChange={() => {
+                            choiceTouched.current = true;
+                            setConsultChoice(c.value);
+                          }}
                         />
                         {c.label}
                       </label>
                     );
                   })}
                 </div>
-                {arrival.consultsDirect && (
+                {arrival.consultsDirect ? (
                   <div>
                     {arrival.assignedDoctorName || "This consultant"} sees patients without the
                     Chief Endocrinologist step.
                   </div>
+                ) : (
+                  seesWithoutChief &&
+                  !choiceTouched.current && (
+                    <div>
+                      Booked with {arrival.assignedDoctorName || "a consultant"}, not the chief, so
+                      the Chief Endocrinologist steps are left out.
+                    </div>
+                  )
                 )}
               </div>
             )}

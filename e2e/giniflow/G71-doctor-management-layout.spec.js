@@ -16,17 +16,17 @@ const istDay = (offset) => {
 const clearTimeOff = () =>
   query(`DELETE FROM doctor_unavailability WHERE doctor_id = $1`, [doctor.id]);
 
-test.describe.serial("G71 Doctor Management: list, tabs and one time-off form", () => {
+test.describe.serial("G71 Staff Management: list, tabs and one time-off form", () => {
   test.beforeAll(clearTimeOff);
   test.afterAll(clearTimeOff);
 
   test.beforeEach(async ({ page }) => {
     await loginAs(page, "admin");
-    await gotoReady(page, "/doctor-management", () =>
-      page.getByRole("heading", { name: "Doctor Management" }),
+    await gotoReady(page, "/staff-management", () =>
+      page.getByRole("heading", { name: "Staff Management" }),
     );
     await page
-      .getByRole("list", { name: "Doctor list" })
+      .getByRole("list", { name: "Staff list" })
       .getByRole("button")
       .filter({ hasText: doctor.name })
       .click();
@@ -34,12 +34,12 @@ test.describe.serial("G71 Doctor Management: list, tabs and one time-off form", 
   });
 
   test("1. search narrows the doctor list", async ({ page }) => {
-    const list = page.getByRole("list", { name: "Doctor list" });
-    await page.getByLabel("Search doctors").fill("E2E Rahul");
+    const list = page.getByRole("list", { name: "Staff list" });
+    await page.getByLabel("Search staff").fill("E2E Rahul");
     await expect(list.getByRole("button")).toHaveCount(1);
-    await page.getByLabel("Search doctors").fill("no such doctor zz");
-    await expect(list.getByText("No doctor matches this search.")).toBeVisible();
-    if (SHOTS) await page.getByLabel("Search doctors").fill("");
+    await page.getByLabel("Search staff").fill("no such doctor zz");
+    await expect(list.getByText("No one matches this search.")).toBeVisible();
+    if (SHOTS) await page.getByLabel("Search staff").fill("");
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/1-schedule.png`, fullPage: true });
   });
 

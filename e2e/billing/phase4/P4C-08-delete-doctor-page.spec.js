@@ -64,7 +64,7 @@ async function logIn(api, id) {
 
 let autoBefore;
 
-test.describe.serial("P4C-08 delete a doctor from Doctor Management", () => {
+test.describe.serial("P4C-08 delete a doctor from Staff Management", () => {
   test.beforeAll(async () => {
     ours.api = await doctor(API_DOCTOR);
     ours.page = await doctor(PAGE_DOCTOR);
@@ -165,17 +165,20 @@ test.describe.serial("P4C-08 delete a doctor from Doctor Management", () => {
   }) => {
     await loginAs(page, "admin");
     await gotoReady(page, "/doctor-management", () =>
-      page.getByRole("heading", { name: "Doctor Management" }),
+      page.getByRole("heading", { name: "Staff Management" }),
     );
     const listed = page
-      .getByRole("list", { name: "Doctor list" })
+      .getByRole("list", { name: "Staff list" })
       .getByRole("button")
       .filter({ hasText: PAGE_DOCTOR });
     await expect(listed).toHaveCount(1);
     await listed.click();
     await expect(page.getByRole("heading", { name: PAGE_DOCTOR })).toBeVisible();
 
-    await page.locator(".docmgmt-dochead").getByRole("button", { name: "Delete doctor" }).click();
+    await page
+      .locator(".docmgmt-dochead")
+      .getByRole("button", { name: "Delete", exact: true })
+      .click();
     const dialog = page.getByRole("dialog", { name: `Delete ${PAGE_DOCTOR}?` });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText("future appointment still booked with them")).toContainText("1");
@@ -189,8 +192,8 @@ test.describe.serial("P4C-08 delete a doctor from Doctor Management", () => {
     await expect(dialog).toBeHidden();
 
     await expect(listed).toHaveCount(0);
-    await page.getByRole("button", { name: "Removed doctors" }).click();
-    const removed = page.getByRole("region", { name: "Removed doctors" });
+    await page.getByRole("button", { name: "Removed staff" }).click();
+    const removed = page.getByRole("region", { name: "Removed staff" });
     const row = removed.getByRole("row").filter({ hasText: PAGE_DOCTOR });
     await expect(row).toContainText("Left in September");
     await expect(row).toContainText(USERS.admin.name);
@@ -215,18 +218,18 @@ test.describe.serial("P4C-08 delete a doctor from Doctor Management", () => {
   test("5. an admin can't delete their own account from the page", async ({ page }) => {
     await loginAs(page, "admin");
     await gotoReady(page, "/doctor-management", () =>
-      page.getByRole("heading", { name: "Doctor Management" }),
+      page.getByRole("heading", { name: "Staff Management" }),
     );
     await page.getByRole("button", { name: "All staff" }).click();
     await page
-      .getByRole("list", { name: "Doctor list" })
+      .getByRole("list", { name: "Staff list" })
       .getByRole("button")
       .filter({ hasText: USERS.admin.name })
       .first()
       .click();
     await expect(page.getByRole("heading", { name: USERS.admin.name })).toBeVisible();
     await expect(
-      page.locator(".docmgmt-dochead").getByRole("button", { name: "Delete doctor" }),
+      page.locator(".docmgmt-dochead").getByRole("button", { name: "Delete", exact: true }),
     ).toBeDisabled();
   });
 });

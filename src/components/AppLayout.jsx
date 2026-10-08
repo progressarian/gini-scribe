@@ -147,11 +147,10 @@ const NAV_ITEMS = [
     show: () => true,
   },
   { path: "/ghm", label: "🏥 GHM Ops", cap: C["/ghm"], show: () => true },
-  // Doctor availability / leave / reassignment
   {
-    path: "/doctor-management",
-    label: "🗓️ Doctors",
-    cap: C["/doctor-management"],
+    path: "/staff-management",
+    label: "👥 Staff",
+    cap: C["/staff-management"],
     show: () => true,
   },
   // Admin: the patient blocklist

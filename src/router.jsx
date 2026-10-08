@@ -221,7 +221,11 @@ const router = createBrowserRouter([
               { path: "/visit", element: lazyEl(VisitPage) },
               { path: "/ghm", element: lazyEl(GHMPage) },
               { path: "/obt-dashboard", element: lazyEl(OBTDashboardPage) },
-              { path: "/doctor-management", element: lazyEl(DoctorManagementPage) },
+              { path: "/staff-management", element: lazyEl(DoctorManagementPage) },
+              {
+                path: "/doctor-management",
+                element: <Navigate to="/staff-management" replace />,
+              },
               { path: "/admin/blocklist", element: lazyEl(PatientBlocklistPage) },
               {
                 path: "/settings",

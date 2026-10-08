@@ -176,13 +176,13 @@ function DoctorList({
     );
 
   return (
-    <aside className="docmgmt-side" aria-label="Doctors">
+    <aside className="docmgmt-side" aria-label="Staff">
       <label className="docmgmt-search">
-        <span className="docmgmt-visually-hidden">Search doctors</span>
+        <span className="docmgmt-visually-hidden">Search staff</span>
         <input
           type="search"
           value={query}
-          placeholder="Search doctors"
+          placeholder="Search staff"
           onChange={(e) => setQuery(e.target.value)}
         />
       </label>
@@ -201,10 +201,10 @@ function DoctorList({
           </button>
         ))}
       </div>
-      <ul className="docmgmt-doclist" aria-label="Doctor list">
+      <ul className="docmgmt-doclist" aria-label="Staff list">
         {visible.length === 0 && (
           <li className="docmgmt-empty">
-            {q ? "No doctor matches this search." : "No doctors to show."}
+            {q ? "No one matches this search." : "No staff to show."}
           </li>
         )}
         {visible.map((d) => (
@@ -230,7 +230,7 @@ function DoctorList({
         aria-pressed={showRemoved}
         onClick={onShowRemoved}
       >
-        Removed doctors
+        Removed staff
       </button>
     </aside>
   );
@@ -279,7 +279,7 @@ export default function DoctorManagementPage() {
   return (
     <div className="docmgmt">
       <div className="docmgmt-head">
-        <h1>Doctor Management</h1>
+        <h1>Staff Management</h1>
         <button
           type="button"
           className="docmgmt-primary"
@@ -308,12 +308,12 @@ export default function DoctorManagementPage() {
           {showRemoved ? (
             <section className="docmgmt-panel" aria-labelledby="docmgmt-removed-title">
               <h2 className="docmgmt-panel-title" id="docmgmt-removed-title">
-                Removed doctors
+                Removed staff
               </h2>
               <RemovedDoctors refresh={removedRefresh} onRestored={fetchDoctorsList} />
             </section>
           ) : !doctor ? (
-            <p className="docmgmt-empty">Select a doctor from the list.</p>
+            <p className="docmgmt-empty">Select a staff member from the list.</p>
           ) : (
             <section className="docmgmt-panel" aria-labelledby="docmgmt-doctor-name">
               <div className="docmgmt-dochead">
@@ -343,11 +343,11 @@ export default function DoctorManagementPage() {
                   }
                   onClick={() => setDeleting(true)}
                 >
-                  Delete doctor
+                  Delete
                 </button>
               </div>
 
-              <div className="docmgmt-tabs" role="tablist" aria-label="Doctor sections">
+              <div className="docmgmt-tabs" role="tablist" aria-label="Staff sections">
                 {TABS.map((t) => (
                   <button
                     key={t.id}
@@ -445,8 +445,8 @@ function RemovedDoctors({ refresh, onRestored }) {
   return (
     <div>
       <p className="docmgmt-hint">
-        Removed doctors can't log in and nothing can be billed under them. Restoring lets them log
-        in again; their consultation items stay off until an admin reactivates them.
+        Removed staff can't log in and nothing can be billed under them. Restoring lets them log in
+        again; their consultation items stay off until an admin reactivates them.
       </p>
       <table className="docmgmt-list">
         <thead>

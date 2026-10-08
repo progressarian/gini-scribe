@@ -21,6 +21,35 @@ const paiseOf = (typed) => Math.round(Number(typed || 0) * 100);
 const idLine = (patient) =>
   [patient?.file_no, patient?.health_id, patient?.phone].filter(Boolean).join(" · ") || "—";
 
+function AmountField({ value, available, onChange }) {
+  const [capped, setCapped] = useState(false);
+  return (
+    <label className="bc-field">
+      <span className="bc-field__lbl">Amount * (up to {fromPaise(available)})</span>
+      <span className="bc-pay__money">
+        <span aria-hidden="true">₹</span>
+        <input
+          className="bc-field__in"
+          inputMode="decimal"
+          value={value}
+          aria-invalid={capped}
+          onChange={(e) => {
+            const typed = moneyTyped(e.target.value);
+            const over = paiseOf(typed) > available;
+            setCapped(over);
+            onChange(over ? String(available / 100) : typed);
+          }}
+        />
+      </span>
+      {capped && (
+        <span className="bc-err" role="alert">
+          Only {fromPaise(available)} is in the deposit, so the amount is set to that.
+        </span>
+      )}
+    </label>
+  );
+}
+
 function Done({ result, onClose }) {
   return (
     <div className="bc-note" role="status">
@@ -175,18 +204,11 @@ function ToPatient({ patient, available, onDone }) {
           </div>
         </div>
       )}
-      <label className="bc-field">
-        <span className="bc-field__lbl">Amount * (up to {fromPaise(available)})</span>
-        <span className="bc-pay__money">
-          <span aria-hidden="true">₹</span>
-          <input
-            className="bc-field__in"
-            inputMode="decimal"
-            value={form.amount}
-            onChange={(e) => change({ amount: moneyTyped(e.target.value) })}
-          />
-        </span>
-      </label>
+      <AmountField
+        value={form.amount}
+        available={available}
+        onChange={(amount) => change({ amount })}
+      />
       <label className="bc-field">
         <span className="bc-field__lbl">Relationship *</span>
         <input
@@ -226,11 +248,6 @@ function ToPatient({ patient, available, onDone }) {
           }}
         />
       </label>
-      {amount > available && (
-        <div className="bc-hint" role="alert">
-          Only {fromPaise(available)} of the deposit is available.
-        </div>
-      )}
       {confirming && to && (
         <div className="bc-note" role="status">
           Move {fromPaise(amount)} from {patient.name} to {to.name}? {patient.name}'s deposit
@@ -293,18 +310,11 @@ function ToIpd({ patient, available, onDone }) {
 
   return (
     <form className="bc-deposit__form" onSubmit={submit} aria-label="Move deposit to IPD">
-      <label className="bc-field">
-        <span className="bc-field__lbl">Amount * (up to {fromPaise(available)})</span>
-        <span className="bc-pay__money">
-          <span aria-hidden="true">₹</span>
-          <input
-            className="bc-field__in"
-            inputMode="decimal"
-            value={form.amount}
-            onChange={(e) => change({ amount: moneyTyped(e.target.value) })}
-          />
-        </span>
-      </label>
+      <AmountField
+        value={form.amount}
+        available={available}
+        onChange={(amount) => change({ amount })}
+      />
       <label className="bc-field">
         <span className="bc-field__lbl">HealthRay IP / admission no. *</span>
         <input
@@ -440,18 +450,11 @@ function PayBack({ patient, available, openRefund, onDone }) {
 
   return (
     <form className="bc-deposit__form" onSubmit={submit} aria-label="Ask to pay the deposit back">
-      <label className="bc-field">
-        <span className="bc-field__lbl">Amount * (up to {fromPaise(available)})</span>
-        <span className="bc-pay__money">
-          <span aria-hidden="true">₹</span>
-          <input
-            className="bc-field__in"
-            inputMode="decimal"
-            value={form.amount}
-            onChange={(e) => setForm((was) => ({ ...was, amount: moneyTyped(e.target.value) }))}
-          />
-        </span>
-      </label>
+      <AmountField
+        value={form.amount}
+        available={available}
+        onChange={(amount) => setForm((was) => ({ ...was, amount }))}
+      />
       <label className="bc-field">
         <span className="bc-field__lbl">Pay back by</span>
         <select
