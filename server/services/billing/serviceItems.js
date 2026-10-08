@@ -390,7 +390,17 @@ export async function searchDeskItems(filters = {}, db = pool) {
         })
         .join(" AND ")})`,
   );
+  const wordStartSql = terms.map(
+    (words) =>
+      `(${words
+        .map((word) => {
+          params.push(`\\m${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
+          return `(i.name ~* $${params.length} OR i.code ~* $${params.length})`;
+        })
+        .join(" AND ")})`,
+  );
   const match = termSql.length ? `AND (${termSql.join(" OR ")})` : "";
+  const wordStart = wordStartSql.length ? wordStartSql.join(" OR ") : "TRUE";
   const termRank =
     termSql.length > 1
       ? `CASE ${termSql.map((sql, index) => `WHEN ${sql} THEN ${index}`).join(" ")} END`
@@ -401,7 +411,8 @@ export async function searchDeskItems(filters = {}, db = pool) {
               i.doctor_id, i.visit_type, i.price_per_patient, i.is_outsourced,
               s.name AS subgroup_name, g.name AS group_name,
               ($2::text IS NULL OR i.kind <> 'consultation' OR i.visit_type = $2::text) AS shown,
-              ${termRank} AS term_rank
+              ${termRank} AS term_rank,
+              (${wordStart}) AS word_start
          FROM service_items i
          JOIN service_subgroups s ON s.id = i.subgroup_id
          JOIN service_groups g ON g.id = s.group_id
@@ -416,7 +427,7 @@ export async function searchDeskItems(filters = {}, db = pool) {
         GROUP BY l.service_item_id)
      SELECT found.*, COALESCE(used.uses, 0) AS uses
        FROM found LEFT JOIN used ON used.service_item_id = found.id
-      ORDER BY NOT shown, term_rank, COALESCE(used.uses, 0) DESC, lower(name), id
+      ORDER BY NOT shown, NOT word_start, term_rank, COALESCE(used.uses, 0) DESC, lower(name), id
       LIMIT $1`,
     params,
   );

@@ -167,6 +167,7 @@ async function consultationSettled(client, visitId) {
         AND at >= ${FIRST_BILL_AT_SQL("$1")}
         AND before ->> 'visit_id' = $1::text AND before ->> 'source' = 'visit'
         AND ${NOT_DISCARDED("billing_audit")}
+        AND NOT ${WITH_DELETED_DRAFT("billing_audit")}
         AND NOT EXISTS (SELECT 1 FROM bills b
                          WHERE b.id::text = before ->> 'bill_id' AND b.status = 'cancelled')
      LIMIT 1`,
@@ -402,14 +403,10 @@ const WITH_DELETED_DRAFT = (audit) => `EXISTS (
    WHERE da.entity = 'bills' AND da.action = 'delete'
      AND da.entity_id = ${audit}.before ->> 'bill_id' AND da.at = ${audit}.at)`;
 
-export const REMOVED_BY_DESK_SQL = (
-  visitExpr,
-  itemExpr,
-  { countDeletedDrafts = true } = {},
-) => `EXISTS (
+export const REMOVED_BY_DESK_SQL = (visitExpr, itemExpr) => `EXISTS (
   SELECT 1 FROM billing_audit ra
    WHERE ra.entity = 'bill_lines' AND ra.action = 'delete'
-     ${countDeletedDrafts ? "" : `AND NOT ${WITH_DELETED_DRAFT("ra")}`}
+     AND NOT ${WITH_DELETED_DRAFT("ra")}
      AND ra.at >= ${FIRST_BILL_AT_SQL(visitExpr)}
      AND ra.before ->> 'visit_id' = ${visitExpr}::text
      AND ra.before ->> 'service_item_id' = ${itemExpr}::text

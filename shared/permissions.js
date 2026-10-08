@@ -558,7 +558,6 @@ export function hasOwnPatientList(role) {
 // (If the master switch is ever flipped back on, everyone is granted everything.)
 export const DOCTOR_CAPABILITY_OVERRIDES = {
   3: { grant: [C.GINIFLOW_STATION_ECHO], revoke: [C.GINIFLOW_STATION_MO] },
-  60: { grant: [C.OBT_ASSIGN], revoke: [] },
 };
 
 const roleOf = (who) => (who && typeof who === "object" ? who.role : who);
@@ -567,6 +566,7 @@ const doctorIdOf = (who) =>
 
 export function hasCapability(who, capability) {
   if (GRANT_ALL_CAPABILITIES) return true;
+  if (capability === C.OBT_ASSIGN && who?.can_assign_calls === true) return true;
   const override = DOCTOR_CAPABILITY_OVERRIDES[doctorIdOf(who)];
   if (override?.revoke.includes(capability)) return false;
   if (override?.grant.includes(capability)) return true;

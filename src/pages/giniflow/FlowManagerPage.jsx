@@ -11,8 +11,6 @@ import {
   STATUS_LABEL,
   STATUS_TO_SLA_KEY,
   BOARD_COLUMNS,
-  ORDERED_COLUMNS,
-  nextColumn,
   PRIORITIES,
   PRIORITY_LABEL,
   PRIORITY_ICON,
@@ -27,6 +25,7 @@ import {
   isSampleBreak,
   pauseReasonLabel,
   SIDE_TRACK_COLUMNS,
+  consultStarted,
 } from "../../../shared/giniflowStatus";
 import {
   useGiniflowBoard,
@@ -42,7 +41,12 @@ import {
   useGiniflowMove,
 } from "../../queries/hooks/useGiniflowQueue";
 import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
-import { useTriageStaff, useAssignVisit } from "../../queries/hooks/useGiniflowTriage";
+import {
+  useTriageStaff,
+  useAssignVisit,
+  useConsultFee,
+} from "../../queries/hooks/useGiniflowTriage";
+import { consultFeeText } from "../../lib/consultFeeText";
 import LiveBadge from "../../components/giniflow/LiveBadge";
 import { dayClock } from "../../lib/giniflowTime";
 import useDebounced from "../../hooks/useDebounced";
@@ -173,42 +177,11 @@ function useTick(intervalMs = 1000) {
   return now;
 }
 
-const COLUMN_NAME = Object.fromEntries(BOARD_COLUMNS.map((c) => [c.key, c.name]));
-
-// Where this card may legally be dragged. Computed from the same chain rule the
-// server enforces, so an impossible drop is never offered rather than being
-// offered and then refused (GF-16: never show an action that cannot work).
-const dropTargetsFor = (card) => ORDERED_COLUMNS.filter((key) => canDropInColumn(card, key));
-
-// Why this card has nowhere to go, in the words of the thing that stopped it.
-// A drop target that greys out with no explanation is the worst of the options
-// the review left open (BQ-02).
-const noMoveReason = (card) => {
-  if (card.blockedReason) return "Blocked — clear it at the station first";
-  if (card.finished) return "This visit is finished";
-  if (!nextColumn(card.column)) return "Last column — nothing after this";
-  return null;
-};
-
-// Dragging is a mouse gesture and the floor board is also driven from a keyboard,
-// so every drag has a menu equivalent: priority, a nudge up or down inside the
-// column, and the same forward move a drop would make.
-function CardMenu({
-  card,
-  canReorder,
-  canMoveUp,
-  canMoveDown,
-  onPriority,
-  onNudge,
-  onMove,
-  onClose,
-}) {
+function CardMenu({ card, onPriority, onClose }) {
   const ref = useRef(null);
   const [pending, setPending] = useState(null);
   const [reason, setReason] = useState(card.priorityReason || "");
   useDismissable(true, onClose, ref);
-  const targets = dropTargetsFor(card);
-  const blocked = noMoveReason(card);
 
   // Raising a priority asks why, the way blocking does (GF-18) — but does not
   // insist: an urgent patient is often self-evident at the desk, and a required
@@ -256,46 +229,60 @@ function CardMenu({
           </button>
         </div>
       )}
-      {/* Position is the only part of this menu a filter can invalidate — a
-          reorder sends the column's whole order, and a filtered column does not
-          know it. Pausing one patient does not, so it stays above and stays
-          available: the coordinator watching a filtered board is exactly who
-          sees someone walk out. */}
-      {canReorder && (
-        <>
-          <div className="pcm-hd">Order in this column</div>
+    </div>
+  );
+}
+
+function ConsultantMenu({ card, staff, onAssign, onClose }) {
+  const ref = useRef(null);
+  const [picked, setPicked] = useState(null);
+  useDismissable(true, onClose, ref);
+  const consultants = staff.filter((d) => d.isChief || String(d.role || "").toLowerCase() !== "mo");
+  const fee = useConsultFee(card.id, picked?.id, Boolean(picked));
+
+  return (
+    <div
+      className="pc-menu assign"
+      ref={ref}
+      role="dialog"
+      aria-label={`Change consultant for ${card.name}`}
+    >
+      <div className="pcm-hd">Change consultant</div>
+      {!consultants.length && <div className="pcm-note">Nobody on today</div>}
+      {consultants.map((d) => (
+        <button
+          key={d.id}
+          type="button"
+          role="menuitemradio"
+          aria-checked={picked?.id === d.id}
+          className={`pcm-item${picked?.id === d.id ? " on" : ""}`}
+          disabled={d.id === card.assignedDoctorId}
+          onClick={() => setPicked({ id: d.id, name: d.shortName })}
+        >
+          <span>
+            {d.shortName}
+            {d.id === card.assignedDoctorId ? " · now" : ""}
+          </span>
+          <span className="pcm-load">{d.assignedToday}</span>
+        </button>
+      ))}
+      {picked && (
+        <div className="pcm-reason">
+          <div className="pcm-note" role="status">
+            {fee.isLoading
+              ? "Checking the consultation fee…"
+              : fee.isError
+                ? "The fee could not be checked — the counter will settle any difference."
+                : fee.data && consultFeeText(fee.data, picked.name)}
+          </div>
           <button
             type="button"
-            role="menuitem"
-            className="pcm-item"
-            disabled={!canMoveUp}
-            onClick={() => onNudge(-1)}
+            className="pcm-apply"
+            onClick={() => onAssign(card.id, picked.id, picked.name)}
           >
-            ↑ Move up
+            Change to {picked.name}
           </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="pcm-item"
-            disabled={!canMoveDown}
-            onClick={() => onNudge(1)}
-          >
-            ↓ Move down
-          </button>
-          <div className="pcm-hd">Send to</div>
-          {targets.length === 0 && <div className="pcm-note">{blocked || "Nowhere from here"}</div>}
-          {targets.map((key) => (
-            <button
-              key={key}
-              type="button"
-              role="menuitem"
-              className="pcm-item"
-              onClick={() => onMove(key)}
-            >
-              → {COLUMN_NAME[key]}
-            </button>
-          ))}
-        </>
+        </div>
       )}
     </div>
   );
@@ -402,11 +389,7 @@ function PatientCard({
   dragging,
   onDragStart,
   onDragEnd,
-  canMoveUp,
-  canMoveDown,
   onPriority,
-  onNudge,
-  onMove,
   onPause,
   onResume,
   onRelease,
@@ -416,6 +399,7 @@ function PatientCard({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
+  const [consultantOpen, setConsultantOpen] = useState(false);
   const isMachine = !!card.machine && isMachineColumn(card.column);
   const trackData = isMachine
     ? card.machine
@@ -700,7 +684,7 @@ function PatientCard({
             data-gf-toggle
             aria-haspopup="menu"
             aria-expanded={menuOpen}
-            aria-label={`Priority and position for ${card.name}`}
+            aria-label={`Priority for ${card.name}`}
             onClick={() => setMenuOpen((v) => !v)}
           >
             ⋮
@@ -709,6 +693,26 @@ function PatientCard({
       )}
       {canMenu && isLab && card.heldByStation && (
         <ReleaseControl card={card} onRelease={onRelease} />
+      )}
+      {canAssign && !isLab && !isTerminalStatus(card.status) && (
+        <div className="pc-consult">
+          <span className={`pc-consult-tag${card.assignedDoctorName ? "" : " none"}`}>
+            {card.assignedDoctorName ? `→ ${card.assignedDoctorName}` : "⏳ No consultant"}
+          </span>
+          {!consultStarted(card.status) && (
+            <button
+              type="button"
+              className="pc-consult-btn"
+              data-gf-toggle
+              aria-haspopup="dialog"
+              aria-expanded={consultantOpen}
+              aria-label={`Change consultant for ${card.name}`}
+              onClick={() => setConsultantOpen((v) => !v)}
+            >
+              {card.assignedDoctorName ? "↺ Change" : "+ Assign"}
+            </button>
+          )}
+        </div>
       )}
       {canAssign && isLabOnly && (
         <button
@@ -734,15 +738,17 @@ function PatientCard({
         />
       )}
       {menuOpen && (
-        <CardMenu
+        <CardMenu card={card} onPriority={act(onPriority)} onClose={() => setMenuOpen(false)} />
+      )}
+      {consultantOpen && (
+        <ConsultantMenu
           card={card}
-          canReorder={canManage}
-          canMoveUp={canMoveUp}
-          canMoveDown={canMoveDown}
-          onPriority={act(onPriority)}
-          onNudge={act(onNudge)}
-          onMove={act(onMove)}
-          onClose={() => setMenuOpen(false)}
+          staff={staff || []}
+          onAssign={(visitId, doctorId, doctorName) => {
+            setConsultantOpen(false);
+            onAssign(visitId, doctorId, doctorName);
+          }}
+          onClose={() => setConsultantOpen(false)}
         />
       )}
     </div>
@@ -847,15 +853,6 @@ function Column({
     onReorder(column.key, ids);
   };
 
-  const nudge = (card, delta) => {
-    const ids = cards.map((c) => c.id);
-    const from = ids.indexOf(card.id);
-    const to = from + delta;
-    if (from === -1 || to < 0 || to >= ids.length) return;
-    ids.splice(to, 0, ids.splice(from, 1)[0]);
-    onReorder(column.key, ids);
-  };
-
   return (
     <div
       className={`col${column.hot ? " hot" : ""}${accepts ? " drop-ok" : ""}${
@@ -905,11 +902,7 @@ function Column({
               dragging={drag?.id === card.id}
               onDragStart={onDragStart}
               onDragEnd={onDragEnd}
-              canMoveUp={ORDERABLE(column.key) && i > 0}
-              canMoveDown={ORDERABLE(column.key) && i < cards.length - 1}
               onPriority={(priority, reason) => onPriority(card.id, priority, reason)}
-              onNudge={(delta) => nudge(card, delta)}
-              onMove={(key) => onMove(card.id, key, card.name)}
               onPause={() => onPause(card.id, card.name)}
               onResume={() => onResume(card.id, card.name)}
               onRelease={(reason) => onRelease(card.id, card.name, reason)}
@@ -1702,7 +1695,9 @@ export default function FlowManagerPage() {
           showToast(
             data?.assignment?.billing?.change_id
               ? `✓ ${doctorName} assigned — the Billing Counter will settle the fee difference`
-              : `✓ ${doctorName} assigned — the patient is back on the board`,
+              : data?.assignment?.billing?.draft
+                ? `✓ ${doctorName} assigned — the draft bill now carries the new fee`
+                : `✓ ${doctorName} assigned`,
           ),
         onError: (e) =>
           showToast(e?.response?.data?.error || "Could not assign that patient — nothing changed"),

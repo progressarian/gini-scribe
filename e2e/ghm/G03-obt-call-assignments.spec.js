@@ -83,6 +83,28 @@ test.describe("GHM: OBT calls are divided and only the assignee calls", () => {
     expect(assign.status()).toBe(403);
   });
 
+  test("2b. an admin can switch call assigning on and off for a team member", async () => {
+    try {
+      const on = await admin.patch(`/api/doctors/${ONE}`, { data: { can_assign_calls: true } });
+      expect(on.ok()).toBeTruthy();
+      const me = await (await obtOne.get("/api/auth/me")).json();
+      expect(me.doctor.can_assign_calls).toBe(true);
+      const assign = await obtOne.post("/api/obt-assignments/assign", {
+        data: { patient_ids: [patients[0].id], assigned_to_id: TWO },
+      });
+      expect(assign.ok()).toBeTruthy();
+      expect(await ownerOf(patients[0].id)).toBe(TWO);
+
+      await admin.patch(`/api/doctors/${ONE}`, { data: { can_assign_calls: false } });
+      const refused = await obtOne.post("/api/obt-assignments/assign", {
+        data: { patient_ids: [patients[1].id], assigned_to_id: TWO },
+      });
+      expect(refused.status()).toBe(403);
+    } finally {
+      await query(`UPDATE doctors SET can_assign_calls = FALSE WHERE id = $1`, [ONE]);
+    }
+  });
+
   test("3. dividing shares only the unassigned patients and evens out the load", async () => {
     await admin.post("/api/obt-assignments/assign", {
       data: { patient_ids: [patients[0].id], assigned_to_id: ONE },

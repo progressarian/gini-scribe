@@ -292,9 +292,9 @@ router.post(
   run("Open draft bill", 200, async (req) => {
     const opening = { ...ctx(req), unsavedDraft: true };
     await consultationForDesk(req.params.visitId, opening);
+    await healthrayLinesForDesk(req.params.visitId, opening);
     await testsForDesk(req.params.visitId, opening);
     await labCaseTestsForDesk(req.params.visitId, opening);
-    await healthrayLinesForDesk(req.params.visitId, opening);
     await bills.clearReceptionLines(req.params.visitId, opening);
     return bills.openDraft(req.params.visitId, opening);
   }),

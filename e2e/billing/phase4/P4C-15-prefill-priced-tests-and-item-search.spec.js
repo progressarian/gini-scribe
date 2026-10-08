@@ -432,4 +432,16 @@ test.describe.serial("P4C-15 priced tests are prefilled; Add items searches only
     const line = after.lines.find((entry) => entry.service_item_id === items.unpriced);
     expect(line).toMatchObject({ patient_payable: 7500, agreed_rate: 7500 });
   });
+
+  test("15. items whose words start with a term come before ones that only contain it", async () => {
+    await item("midWord", "C15MID", `Revx${tag} Therapy`, 100, { kind: "procedure" });
+    await item("firstTerm", "C15VX", `VX${tag} Scan`, 200, { kind: "procedure" });
+    await item("secondTerm", "C15WY", `WY${tag} Test`, 300, { kind: "procedure" });
+    const found = await serviceItems.searchDeskItems({ q: `vx${tag}, wy${tag}` }, db);
+    expect(found.items.map((entry) => entry.name)).toEqual([
+      `VX${tag} Scan`,
+      `WY${tag} Test`,
+      `Revx${tag} Therapy`,
+    ]);
+  });
 });

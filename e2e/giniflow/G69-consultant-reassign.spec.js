@@ -349,4 +349,24 @@ test.describe.serial("G69 reassigning the consultant moves the bill with them", 
     await page.getByRole("button", { name: "🔴🟡✅ Triage" }).click();
     await expect(page.getByRole("button", { name: "🧪 Triage v3" })).toBeVisible();
   });
+
+  test("14. the Flow Manager card shows the consultant and changes it with the fee preview", async ({
+    page,
+  }) => {
+    const { visit } = await paidConsult("Board");
+    await query(`UPDATE giniflow_visits SET current_status = 'sd_pending' WHERE id = $1`, [visit]);
+    await loginAs(page, "admin");
+    await gotoReady(page, "/giniflow/manager", () => page.locator(`[data-card-id="${visit}"]`));
+    const card = page.locator(`[data-card-id="${visit}"]`);
+    await expect(card).toContainText(`→ ${CONSULTANTS.banshali.short_name}`);
+    await card.getByRole("button", { name: `Change consultant for P4 Board ${tag}` }).click();
+    const picker = page.getByRole("dialog", { name: `Change consultant for P4 Board ${tag}` });
+    await picker.getByRole("menuitemradio", { name: /Dr Rahul/ }).click();
+    await expect(picker.getByRole("status")).toContainText("₹500 more to collect");
+    await picker.getByRole("button", { name: "Change to Dr Rahul" }).click();
+    await expect(
+      page.getByText("the Billing Counter will settle the fee difference"),
+    ).toBeVisible();
+    expect((await pending(visit))?.to_doctor_id).toBe(CONSULTANTS.rahul.id);
+  });
 });

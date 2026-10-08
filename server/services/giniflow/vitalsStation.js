@@ -13,6 +13,7 @@ import {
   NOT_STARTED_STATUSES,
   vitalsRestUntil,
   isResting,
+  WAIT_SINCE_SQL,
 } from "../../../shared/giniflowStatus.js";
 import { ALLERGY_NOT_ASKED } from "../../../shared/giniflowAllergy.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
@@ -79,7 +80,8 @@ const QUEUE_SQL = `
     -- turned red cannot look calm at the station that could act on it.
     LEFT JOIN LATERAL (
       SELECT occurred_at FROM giniflow_visit_events e
-       WHERE e.visit_id = v.id ORDER BY occurred_at DESC, id DESC LIMIT 1
+       WHERE e.visit_id = v.id AND ${WAIT_SINCE_SQL("e", "v")}
+       ORDER BY occurred_at DESC, id DESC LIMIT 1
     ) last_ev ON TRUE
     LEFT JOIN LATERAL (
       SELECT COUNT(*)::int + 1 AS visit_number FROM appointments pa

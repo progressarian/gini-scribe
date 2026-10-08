@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useFlowStepCatalog, useFlowStaff } from "../../queries/hooks/useFlow";
 import { useReceptionTestCatalog } from "../../queries/hooks/useGiniflowReception";
 import useAuthStore from "../../stores/authStore";
@@ -120,6 +120,12 @@ export default function JourneyBuilder({
   // scar to prove it. Nothing to filter here.
   const { data: catalog = [] } = useFlowStepCatalog();
   const [custom, setCustom] = useState(null);
+  const doctorsLoaded = useAuthStore((s) => s.doctorsList?.length > 0);
+  const fetchDoctorsList = useAuthStore((s) => s.fetchDoctorsList);
+
+  useEffect(() => {
+    if (!doctorsLoaded) fetchDoctorsList();
+  }, [doctorsLoaded, fetchDoctorsList]);
 
   const replace = (i, patch) =>
     onChange(steps.map((s, idx) => (idx === i ? { ...s, ...patch } : s)));

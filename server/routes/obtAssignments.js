@@ -1,13 +1,12 @@
 import { Router } from "express";
 import { handleError } from "../utils/errorHandler.js";
-import { requireCapability } from "../middleware/auth.js";
-import { CAPABILITIES } from "../../shared/permissions.js";
 import {
   obtTeam,
   assignmentsFor,
   teamCounts,
   assignCalls,
   divideCalls,
+  canAssignCalls,
 } from "../services/obtAssignments.js";
 
 const router = Router();
@@ -41,28 +40,29 @@ router.post("/obt-assignments/counts", async (req, res) => {
   }
 });
 
-router.post(
-  "/obt-assignments/assign",
-  requireCapability(CAPABILITIES.OBT_ASSIGN),
-  async (req, res) => {
-    try {
-      res.json(await assignCalls(req.body?.patient_ids, req.body?.assigned_to_id, actorOf(req)));
-    } catch (e) {
-      handleError(res, e, "OBT assign");
-    }
-  },
-);
+router.post("/obt-assignments/assign", requireCallAssigner, async (req, res) => {
+  try {
+    res.json(await assignCalls(req.body?.patient_ids, req.body?.assigned_to_id, actorOf(req)));
+  } catch (e) {
+    handleError(res, e, "OBT assign");
+  }
+});
 
-router.post(
-  "/obt-assignments/divide",
-  requireCapability(CAPABILITIES.OBT_ASSIGN),
-  async (req, res) => {
-    try {
-      res.json(await divideCalls(req.body?.patient_ids, req.body?.member_ids, actorOf(req)));
-    } catch (e) {
-      handleError(res, e, "OBT divide");
-    }
-  },
-);
+router.post("/obt-assignments/divide", requireCallAssigner, async (req, res) => {
+  try {
+    res.json(await divideCalls(req.body?.patient_ids, req.body?.member_ids, actorOf(req)));
+  } catch (e) {
+    handleError(res, e, "OBT divide");
+  }
+});
+
+async function requireCallAssigner(req, res, next) {
+  try {
+    if (await canAssignCalls(req.doctor)) return next();
+    res.status(403).json({ error: "You don't have access to assign calls." });
+  } catch (e) {
+    handleError(res, e, "OBT assign access");
+  }
+}
 
 export default router;

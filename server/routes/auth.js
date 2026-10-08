@@ -67,7 +67,7 @@ router.post("/convert-heic", async (req, res) => {
 router.get("/doctors", async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT id, name, short_name, specialty, qualification, role, is_chief, vitals_rest FROM doctors WHERE is_active=true ORDER BY role, name",
+      "SELECT id, name, short_name, specialty, qualification, role, is_chief, vitals_rest, COALESCE((to_jsonb(doctors)->>'can_assign_calls')::boolean, FALSE) AS can_assign_calls FROM doctors WHERE is_active=true ORDER BY role, name",
     );
     res.json(result.rows);
   } catch (e) {
@@ -238,7 +238,7 @@ router.get("/auth/me", async (req, res) => {
   if (!req.doctor) return res.json({ authenticated: false });
   try {
     const result = await pool.query(
-      "SELECT id, name, short_name, specialty, qualification, role FROM doctors WHERE id=$1 AND is_active=true",
+      "SELECT id, name, short_name, specialty, qualification, role, COALESCE((to_jsonb(doctors)->>'can_assign_calls')::boolean, FALSE) AS can_assign_calls FROM doctors WHERE id=$1 AND is_active=true",
       [req.doctor.doctor_id],
     );
     if (result.rows.length === 0) return res.json({ authenticated: false });
@@ -284,7 +284,7 @@ router.post("/doctors", requireCapability(CAPABILITIES.ADMIN), async (req, res) 
 // alone, so the Chief toggle and the qualification box save independently.
 router.patch("/doctors/:id", requireCapability(CAPABILITIES.ADMIN), async (req, res) => {
   try {
-    const { is_chief, qualification, vitals_rest } = req.body || {};
+    const { is_chief, qualification, vitals_rest, can_assign_calls } = req.body || {};
     const sets = [];
     const params = [req.params.id];
 
@@ -304,6 +304,14 @@ router.patch("/doctors/:id", requireCapability(CAPABILITIES.ADMIN), async (req, 
       sets.push(`vitals_rest=$${params.length}`);
     }
 
+    if (can_assign_calls !== undefined) {
+      if (typeof can_assign_calls !== "boolean") {
+        return res.status(400).json({ error: "can_assign_calls must be a boolean" });
+      }
+      params.push(can_assign_calls);
+      sets.push(`can_assign_calls=$${params.length}`);
+    }
+
     if (qualification !== undefined) {
       if (qualification !== null && typeof qualification !== "string") {
         return res.status(400).json({ error: "qualification must be a string" });
@@ -319,7 +327,7 @@ router.patch("/doctors/:id", requireCapability(CAPABILITIES.ADMIN), async (req, 
 
     const r = await pool.query(
       `UPDATE doctors SET ${sets.join(", ")} WHERE id=$1
-        RETURNING id, name, short_name, is_chief, qualification, vitals_rest`,
+        RETURNING id, name, short_name, is_chief, qualification, vitals_rest, can_assign_calls`,
       params,
     );
     if (!r.rows.length) return res.status(404).json({ error: "Doctor not found" });

@@ -5,7 +5,16 @@ import { CAPABILITIES, hasCapability, ROLES } from "../../shared/permissions.js"
 
 const NAME = `COALESCE(NULLIF(TRIM(d.short_name), ''), d.name)`;
 
-export const canAssignCalls = (doctor) => hasCapability(doctor, CAPABILITIES.OBT_ASSIGN);
+export async function canAssignCalls(doctor, db = pool) {
+  if (hasCapability(doctor, CAPABILITIES.OBT_ASSIGN)) return true;
+  if (!doctor?.doctor_id) return false;
+  const r = await db.query(
+    `SELECT COALESCE((to_jsonb(d)->>'can_assign_calls')::boolean, FALSE) AS ok
+       FROM doctors d WHERE d.id = $1 AND d.is_active`,
+    [doctor.doctor_id],
+  );
+  return r.rows[0]?.ok === true;
+}
 
 const cleanIds = (ids) => [
   ...new Set((ids || []).map(Number).filter((n) => Number.isInteger(n) && n > 0)),
@@ -58,11 +67,9 @@ const patientIdOfRow = async (rawId, db) => {
   return r.rows[0]?.patient_id ?? null;
 };
 
-const isObtMember = (doctor) => doctor?.role === ROLES.OBT && !canAssignCalls(doctor);
-
 export async function patientEditBlockedFor(req, patientId, { call = false } = {}, db = pool) {
-  if (canAssignCalls(req.doctor)) return null;
-  const obt = isObtMember(req.doctor);
+  if (await canAssignCalls(req.doctor, db)) return null;
+  const obt = req.doctor?.role === ROLES.OBT;
   if (!patientId) return obt ? "Only patients assigned to you can be changed." : null;
   const owner = (await assignmentsFor([patientId], db))[patientId];
   if (owner?.assigned_to_id === req.doctor?.doctor_id) return null;
@@ -74,7 +81,7 @@ export async function patientEditBlockedFor(req, patientId, { call = false } = {
 }
 
 export async function editBlockedFor(req, rawAppointmentId, opts = {}, db = pool) {
-  if (canAssignCalls(req.doctor)) return null;
+  if (await canAssignCalls(req.doctor, db)) return null;
   return patientEditBlockedFor(req, await patientIdOfRow(rawAppointmentId, db), opts, db);
 }
 

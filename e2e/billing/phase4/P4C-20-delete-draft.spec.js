@@ -215,7 +215,7 @@ test.describe.serial("P4C-20 delete a draft bill at the counter", () => {
     expect(paymentStatus).toBe("pending");
   });
 
-  test("2. reopening gives a fresh empty draft; nothing automatic comes back, and the cards still offer them", async () => {
+  test("2. reopening fills the fresh draft again from the same sources; a line removed by hand stays off", async () => {
     const listed = await counterRow("C20All");
     expect(listed.group).toBe("toBill");
     expect(listed.hints.tests).toBeGreaterThan(0);
@@ -231,28 +231,22 @@ test.describe.serial("P4C-20 delete a draft bill at the counter", () => {
       await autoConsultation(false);
     }
     expect(fresh.status).toBe("draft");
-    expect(fresh.lines).toEqual([]);
-    expect(await visitLinesOf(visits.C20All.visit)).toEqual([]);
+    const refilled = await visitLinesOf(visits.C20All.visit);
+    expect(refilled.map((l) => [l.kind, l.source]).sort()).toEqual(
+      [
+        ["consultation", "visit"],
+        ["test", "lab_case"],
+        ["test", "lab_order"],
+      ].sort(),
+    );
 
-    const consult = await call("reception", "get", "/api/billing/consultation-suggestion", {
-      params: { bill_id: fresh.id },
-    });
-    expect(consult.status).toBe(200);
-    expect(consult.body.shown).toBe(true);
-    expect(consult.body.suggested).not.toBeNull();
-
-    const lab = await call("reception", "get", "/api/billing/lab-case-tests", {
-      params: { bill_id: fresh.id },
-    });
-    expect(lab.status).toBe(200);
-    expect(lab.body.tests).toMatchObject([{ item_id: ids.abi, removed: true }]);
-
-    const added = await call("reception", "post", `/api/billing/bills/${fresh.id}/lab-case-lines`, {
-      data: { item_ids: [ids.abi] },
-    });
-    expect(added.status, JSON.stringify(added.body)).toBe(200);
-    const again = await bills.addLine(fresh.id, { item_id: ids.hba1c }, desk, db);
-    expect(again.lines.map((l) => l.service_item_id).sort()).toEqual([ids.abi, ids.hba1c].sort());
+    const hba1c = (await bills.readBill(fresh.id, db)).lines.find(
+      (l) => l.service_item_id === ids.hba1c,
+    );
+    await bills.removeLine(fresh.id, hba1c.id, { reason: "Not today" }, desk, db);
+    const reopened = await openDraft(visits.C20All.visit);
+    expect(reopened.id).toBe(fresh.id);
+    expect(reopened.lines.map((l) => l.service_item_id)).not.toContain(ids.hba1c);
   });
 
   test("3. deleting without a reason stores a null reason", async () => {

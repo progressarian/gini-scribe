@@ -73,7 +73,7 @@ function LetterheadSection({ doctor, onSaved }) {
   );
 }
 
-function ToggleSetting({ doctor, field, checked, label, hint, successText, onSaved }) {
+function ToggleSetting({ doctor, field, checked, disabled, label, hint, successText, onSaved }) {
   const [saving, setSaving] = useState(false);
   const toggle = async (next) => {
     setSaving(true);
@@ -99,7 +99,7 @@ function ToggleSetting({ doctor, field, checked, label, hint, successText, onSav
           type="checkbox"
           className="docmgmt-switch"
           checked={checked}
-          disabled={saving}
+          disabled={saving || disabled}
           onChange={(e) => toggle(e.target.checked)}
         />
       </div>
@@ -111,15 +111,17 @@ function SettingsTab({ doctor, onSaved }) {
   const name = doctor.short_name || doctor.name;
   return (
     <div className="docmgmt-settings">
-      <ToggleSetting
-        doctor={doctor}
-        field="is_chief"
-        checked={!!doctor.is_chief}
-        label="Chief consultant"
-        hint="Used by patient-flow check-in to route patients to a Chief."
-        successText={(on) => `${name} ${on ? "marked as" : "removed as"} Chief`}
-        onSaved={onSaved}
-      />
+      {(doctor.role === "consultant" || doctor.is_chief) && (
+        <ToggleSetting
+          doctor={doctor}
+          field="is_chief"
+          checked={!!doctor.is_chief}
+          label="Chief consultant"
+          hint="Used by patient-flow check-in to route patients to a Chief."
+          successText={(on) => `${name} ${on ? "marked as" : "removed as"} Chief`}
+          onSaved={onSaved}
+        />
+      )}
       {doctor.role === "consultant" && (
         <ToggleSetting
           doctor={doctor}
@@ -133,6 +135,20 @@ function SettingsTab({ doctor, onSaved }) {
           onSaved={onSaved}
         />
       )}
+      <ToggleSetting
+        doctor={doctor}
+        field="can_assign_calls"
+        checked={doctor.can_assign_calls === true || doctor.role === "admin"}
+        disabled={doctor.role === "admin"}
+        label="Can assign GHM calls"
+        hint={
+          doctor.role === "admin"
+            ? "Admins can always assign and unassign patients on the GHM Ops sheet."
+            : "Lets this person assign and unassign patients to the OBT team on the GHM Ops sheet."
+        }
+        successText={(on) => `${name} ${on ? "can now assign" : "can no longer assign"} GHM calls`}
+        onSaved={onSaved}
+      />
       <LetterheadSection doctor={doctor} onSaved={onSaved} />
     </div>
   );
