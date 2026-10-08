@@ -450,7 +450,10 @@ export default function VitalsStationPage() {
   const invalid = Object.keys(BOUNDS).filter((f) => form[f] !== "" && outOfRange(f, form[f]));
   const anyEntered = Object.values(form).some((v) => v !== "");
   const needsRecheck = changeFlags.length > 0 && !rechecked;
-  const canSave = anyEntered && invalid.length === 0 && !needsRecheck && !saveVitals.isPending;
+  const notCalled =
+    !correcting && queue.some((q) => q.visitId === activeVisitId && q.status !== "with_vitals");
+  const canSave =
+    !notCalled && anyEntered && invalid.length === 0 && !needsRecheck && !saveVitals.isPending;
 
   // Claiming the station only makes sense for someone still in the queue.
   // Tapping a patient in the done list opens their reading for correction — it
@@ -1193,34 +1196,49 @@ export default function VitalsStationPage() {
                   </div>
                 )}
 
-                <div className={`done-bar${canSave ? "" : " pending"}`}>
+                <div className={`done-bar${canSave || notCalled ? "" : " pending"}`}>
                   <div className="db-text">
                     <div className="db-title">
-                      {invalid.length
-                        ? "⚠ Check the highlighted readings"
-                        : needsRecheck
-                          ? "⚠ Recheck before saving"
-                          : anyEntered
-                            ? correcting
-                              ? "Correcting a recorded reading"
-                              : "✓ Vitals done"
-                            : "Enter the readings"}
+                      {notCalled
+                        ? "Call the patient to the station first"
+                        : invalid.length
+                          ? "⚠ Check the highlighted readings"
+                          : needsRecheck
+                            ? "⚠ Recheck before saving"
+                            : anyEntered
+                              ? correcting
+                                ? "Correcting a recorded reading"
+                                : "✓ Vitals done"
+                              : "Enter the readings"}
                     </div>
                     <div className="db-sub">
-                      {invalid.length
-                        ? "A value is outside the plausible range — correct it before saving"
-                        : needsRecheck
-                          ? "Confirm you have taken the reading again"
-                          : correcting
-                            ? "Already recorded — saving updates the reading, the patient stays where they are"
-                            : patient?.skipsChief
-                              ? "Patient moves to the consultant's queue — their plan has no Chief Endocrinologist step"
-                              : "Patient moves to the Chief Endocrinologist queue automatically"}
+                      {notCalled
+                        ? "Vitals can be recorded once the patient is at your station"
+                        : invalid.length
+                          ? "A value is outside the plausible range — correct it before saving"
+                          : needsRecheck
+                            ? "Confirm you have taken the reading again"
+                            : correcting
+                              ? "Already recorded — saving updates the reading, the patient stays where they are"
+                              : patient?.skipsChief
+                                ? "Patient moves to the consultant's queue — their plan has no Chief Endocrinologist step"
+                                : "Patient moves to the Chief Endocrinologist queue automatically"}
                     </div>
                   </div>
-                  <button className="db-btn" disabled={!canSave} onClick={submit}>
-                    {saveVitals.isPending ? "Saving…" : correcting ? "Save correction" : "Done →"}
-                  </button>
+                  {notCalled ? (
+                    <button
+                      type="button"
+                      className="db-btn"
+                      disabled={startVitals.isPending}
+                      onClick={() => pick(selectedId)}
+                    >
+                      {startVitals.isPending ? "Calling…" : "Call to station →"}
+                    </button>
+                  ) : (
+                    <button type="button" className="db-btn" disabled={!canSave} onClick={submit}>
+                      {saveVitals.isPending ? "Saving…" : correcting ? "Save correction" : "Done →"}
+                    </button>
+                  )}
                 </div>
               </div>
             </>

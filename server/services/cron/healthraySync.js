@@ -50,6 +50,7 @@ import {
   markAppointmentAsCheckedIn,
   maybeAutoSavePrescription,
 } from "../healthray/db.js";
+import { applySyncedStatus } from "../appointmentStatus.js";
 import { createLogger } from "../logger.js";
 import { WAITING_ROLE } from "../flow/journey.js";
 import { tryAcquireCronLock, yieldToApp, CRON_LOCK_KEYS } from "./lowPriority.js";
@@ -515,11 +516,7 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
           await markAppointmentAsSeen(existing.id, "completed");
           await syncFlowFromAppointment(existing.id, "completed");
         }
-      } else {
-        await pool.query(`UPDATE appointments SET status = $2, updated_at = NOW() WHERE id = $1`, [
-          existing.id,
-          status,
-        ]);
+      } else if (await applySyncedStatus(existing.id, status)) {
         await syncFlowFromAppointment(existing.id, status);
       }
     } else if (isCompleted && existing.patient_id) {
@@ -608,10 +605,7 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
               const hasRxPdf = await hasReceivedPrescriptionPdf(healthrayId, existing.patient_id);
               if (hasRxPdf) await markAppointmentAsSeen(existing.id, "completed");
             } else {
-              await pool.query(
-                `UPDATE appointments SET status = $2, updated_at = NOW() WHERE id = $1`,
-                [existing.id, status],
-              );
+              await applySyncedStatus(existing.id, status);
             }
           } else if (status === "completed" && existing.patient_id) {
             const hasRxPdf = await hasReceivedPrescriptionPdf(healthrayId, existing.patient_id);
@@ -1924,11 +1918,7 @@ export async function syncAppointmentStatuses(date) {
         }
 
         if (existing.status === newStatus) continue;
-        await pool.query(`UPDATE appointments SET status = $2, updated_at = NOW() WHERE id = $1`, [
-          existing.id,
-          newStatus,
-        ]);
-        updated++;
+        if (await applySyncedStatus(existing.id, newStatus)) updated++;
       }
     }
 

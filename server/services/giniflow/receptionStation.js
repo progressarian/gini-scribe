@@ -28,6 +28,7 @@ import {
   testsOnBill,
 } from "./patientBill.js";
 import { blockDetail } from "../patientBlockView.js";
+import { mirrorFloorStatus } from "../appointmentStatus.js";
 import { createWalkinBooking } from "../walkinBooking.js";
 import { LAB_ONLY_DOCTOR, labOnlyHiddenPredicate } from "./labOnlyVisits.js";
 import { hideLabOnlyPatients } from "./floorSettings.js";
@@ -1123,6 +1124,7 @@ async function transition(visitId, toStatus, { actorId, meta = {}, guard }, db =
       actorId,
       meta,
     });
+    await mirrorFloorStatus(client, visitId, toStatus, { actorId, reason: meta.reason });
     await client.query("COMMIT");
     if (toStatus === "checked_in") await draftAtCheckIn(visitId, { actorId }, db);
     return { visitId, status: toStatus, unchanged: false };

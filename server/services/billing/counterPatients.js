@@ -147,7 +147,7 @@ const COUNTER_SELECT = `
                            JOIN giniflow_lab_order_tests cot ON cot.lab_order_id = co.id
                            JOIN day_tests com ON com.test_name = cot.test_name
                           WHERE co.visit_id = cv.id AND com.catalog_id = cm.catalog_id)
-         AND NOT ${REMOVED_BY_DESK_SQL("cv.id", "ci.id")}
+         AND NOT ${REMOVED_BY_DESK_SQL("cv.id", "ci.id", { countDeletedDrafts: false })}
     ) lcs ON TRUE`;
 
 function billState(r) {

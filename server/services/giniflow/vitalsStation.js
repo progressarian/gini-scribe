@@ -551,6 +551,11 @@ export async function saveVitals(
     );
     if (!visit.rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
     await refuseWhileResting(client, visitId);
+    if (NOT_STARTED_STATUSES.includes(visit.rows[0].current_status))
+      throw Object.assign(
+        new Error("Call this patient to the station before recording their vitals"),
+        { status: 409 },
+      );
 
     // A save with nothing in it recorded a row of nulls and moved the patient to
     // `vitals_done` — the board showed vitals complete, the MO's brief showed

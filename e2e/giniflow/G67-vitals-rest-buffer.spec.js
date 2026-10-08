@@ -35,7 +35,7 @@ const queueRow = async (visit) => {
   return { queue, row: queue.waiting.find((r) => r.visitId === visit) };
 };
 
-test.describe.serial("G67 vitals waits 15 minutes of rest after arrival", () => {
+test.describe.serial("G67 vitals waits the rest time after arrival", () => {
   test.skip(VITALS_REST_MINUTES === 0, "The rest before vitals is switched off");
   test.beforeAll(async () => {
     ids = await setUp(tag);
@@ -45,13 +45,29 @@ test.describe.serial("G67 vitals waits 15 minutes of rest after arrival", () => 
 
   test.afterAll(async () => {
     await vitals.releaseVitals(rested, USERS.admin.id, db).catch(() => null);
+    await expect
+      .poll(async () => {
+        await query(
+          `DELETE FROM vitals WHERE patient_id IN
+             (SELECT patient_id FROM giniflow_visits WHERE id = ANY($1))`,
+          [[resting, rested]],
+        );
+        return (
+          await one(
+            `SELECT COUNT(*)::int AS n FROM vitals WHERE patient_id IN
+               (SELECT patient_id FROM giniflow_visits WHERE id = ANY($1))`,
+            [[resting, rested]],
+          )
+        ).n;
+      })
+      .toBe(0);
     await tearDown(ids);
   });
 
   test("1. a patient who arrived 2 minutes ago cannot be called or saved", async () => {
     const started = await failure(vitals.startVitals(resting, USERS.admin.id, db));
     expect(started?.status).toBe(409);
-    expect(started?.message).toMatch(/resting for 15 minutes/);
+    expect(started?.message).toMatch(new RegExp(`resting for ${VITALS_REST_MINUTES} minutes`));
     expect(new Date(started.restUntil).getTime()).toBeGreaterThan(Date.now());
     const saved = await failure(vitals.saveVitals(resting, { weight: 70 }, db));
     expect(saved?.status).toBe(409);
@@ -93,7 +109,31 @@ test.describe.serial("G67 vitals waits 15 minutes of rest after arrival", () => 
     await page.getByLabel("Search today's patients").fill(tag);
     const row = page.getByRole("button", { name: new RegExp(`Resting ${tag}.*resting before BP`) });
     await expect(row).toBeDisabled();
-    await expect(row).toContainText(/Rest 1[0-3]:\d\d left/);
+    await expect(row).toContainText(/Rest \d{1,2}:\d\d left/);
     await expect(page.getByRole("button", { name: new RegExp(`Rested ${tag}`) })).toBeEnabled();
+  });
+
+  test("5. vitals cannot be saved until the patient is called to the station", async ({ page }) => {
+    const refused = await failure(vitals.saveVitals(rested, { weight: 70 }, db));
+    expect(refused?.status).toBe(409);
+    expect(refused?.message).toMatch(/Call this patient to the station/);
+
+    await loginAs(page, "admin");
+    await gotoReady(page, "/giniflow/station/vitals", () =>
+      page.getByRole("heading", { name: /Waiting/ }),
+    );
+    await page.getByLabel("Search today's patients").fill(tag);
+    await page.getByRole("button", { name: new RegExp(`Rested ${tag}`) }).click();
+    await expect(page.getByRole("button", { name: "Done →" })).toBeVisible();
+    await vitals.releaseVitals(rested, USERS.admin.id, db);
+    await page.reload();
+    await page.getByLabel("Search today's patients").fill(tag);
+    await expect(page.getByRole("button", { name: "Call to station →" })).toBeVisible();
+    await expect(page.getByText("Call the patient to the station first")).toBeVisible();
+    await page.getByRole("button", { name: "Call to station →" }).click();
+    await expect(page.getByRole("button", { name: "Done →" })).toBeVisible();
+
+    const saved = await vitals.saveVitals(rested, { weight: 70 }, db);
+    expect(saved.movedTo).toBeTruthy();
   });
 });

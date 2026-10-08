@@ -397,9 +397,19 @@ export async function linesForOrder(visitId, { labOrderId, testNames = [] } = {}
   }
 }
 
-export const REMOVED_BY_DESK_SQL = (visitExpr, itemExpr) => `EXISTS (
+const WITH_DELETED_DRAFT = (audit) => `EXISTS (
+  SELECT 1 FROM billing_audit da
+   WHERE da.entity = 'bills' AND da.action = 'delete'
+     AND da.entity_id = ${audit}.before ->> 'bill_id' AND da.at = ${audit}.at)`;
+
+export const REMOVED_BY_DESK_SQL = (
+  visitExpr,
+  itemExpr,
+  { countDeletedDrafts = true } = {},
+) => `EXISTS (
   SELECT 1 FROM billing_audit ra
    WHERE ra.entity = 'bill_lines' AND ra.action = 'delete'
+     ${countDeletedDrafts ? "" : `AND NOT ${WITH_DELETED_DRAFT("ra")}`}
      AND ra.at >= ${FIRST_BILL_AT_SQL(visitExpr)}
      AND ra.before ->> 'visit_id' = ${visitExpr}::text
      AND ra.before ->> 'service_item_id' = ${itemExpr}::text

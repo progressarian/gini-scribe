@@ -5,6 +5,7 @@ import { noteSyncedWhileBlocked } from "../patientBlockGuard.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config/storage.js";
 import { mapRecordType, toISTDate } from "./mappers.js";
 import { createLogger } from "../logger.js";
+import { applySyncedStatus } from "../appointmentStatus.js";
 import { normalizeTestName } from "../../utils/labNormalization.js";
 import { parseLabDate, collectNoteDates } from "../../utils/labDate.js";
 import { stripFormPrefix, canonicalMedKey, routeForForm } from "../medication/normalize.js";
@@ -750,7 +751,7 @@ export async function upsertAppointment(existingId, data) {
         opd_vitals = $2::jsonb, biomarkers = $3::jsonb, compliance = $10::jsonb,
         healthray_clinical_notes = $4, healthray_diagnoses = $5::jsonb,
         healthray_medications = $6::jsonb, healthray_labs = $7::jsonb,
-        healthray_advice = $8, status = COALESCE($9, status),
+        healthray_advice = $8, status = COALESCE(status, NULLIF($9, 'no_show')),
         healthray_investigations = $22::jsonb,
         healthray_follow_up = COALESCE($23::jsonb, healthray_follow_up),
         healthray_previous_medications = $24::jsonb,
@@ -789,6 +790,7 @@ export async function upsertAppointment(existingId, data) {
         fileNo || null,
       ],
     );
+    if (status) await applySyncedStatus(rows[0].id, status);
     await realignVisitToAppointment(rows[0].id);
     return rows[0].id;
   }

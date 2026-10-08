@@ -23,6 +23,7 @@ import { readTodaysAppt, parseSheetDate } from "../sheets/reader.js";
 import { slotStartHour } from "../../../shared/slotHour.js";
 import pool from "../../config/db.js";
 import { noteSyncedWhileBlocked } from "../patientBlockGuard.js";
+import { noShowBeforeSlot } from "../appointmentStatus.js";
 import { createLogger } from "../logger.js";
 import { tryAcquireCronLock, CRON_LOCK_KEYS } from "./lowPriority.js";
 
@@ -176,14 +177,22 @@ export async function syncTodaysShow() {
     const flippedFileNos = new Set();
 
     if (fileNos.length > 0) {
+      const candidates = await pool.query(
+        `SELECT id, appointment_date::text AS appointment_date, time_slot
+           FROM appointments
+          WHERE appointment_date = ${IST_TODAY_SQL}
+            AND (status IS NULL OR status IN ('scheduled', 'pending'))
+            AND file_no = ANY($1::text[])`,
+        [fileNos],
+      );
+      const due = candidates.rows.filter((r) => !noShowBeforeSlot(r)).map((r) => r.id);
       const res = await pool.query(
         `UPDATE appointments
             SET status = 'no_show', updated_at = NOW()
-          WHERE appointment_date = ${IST_TODAY_SQL}
+          WHERE id = ANY($1::int[])
             AND (status IS NULL OR status IN ('scheduled', 'pending'))
-            AND file_no = ANY($1::text[])
           RETURNING file_no`,
-        [fileNos],
+        [due],
       );
       flipped = res.rowCount;
       for (const r of res.rows) {

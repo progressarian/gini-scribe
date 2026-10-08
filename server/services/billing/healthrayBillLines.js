@@ -6,7 +6,7 @@ import { heldCatalogs, paidAtReception } from "./receptionOrders.js";
 import { createGroup, createSubgroup } from "./serviceGroups.js";
 import { createItem, HEALTHRAY_REVIEW_SUBGROUP } from "./serviceItems.js";
 import { httpError, inTransaction } from "./transaction.js";
-import { addLineIn, openDraftIn } from "./bills.js";
+import { addLineIn, addLinesToDraftIn, openDraftIn } from "./bills.js";
 import { REMOVED_BY_DESK_SQL, suggestionPrice } from "./visitLines.js";
 import { isLiveBillItem } from "../giniflow/patientBill.js";
 
@@ -235,6 +235,12 @@ export async function namesPaidAtReception(client, visitId) {
   return new Set(held.orders.flatMap((order) => order.tests).map(nameKey));
 }
 
+const lineInput = (line, itemId, priced) => ({
+  item_id: itemId,
+  source: "added",
+  ...(priced ? { agreed_rate: String(line.amount), price_from_healthray: true } : {}),
+});
+
 export async function healthrayLinesForDesk(visitId, ctx, db = pool) {
   try {
     return await inTransaction(async (client) => {
@@ -260,16 +266,7 @@ export async function healthrayLinesForDesk(visitId, ctx, db = pool) {
         try {
           await inTransaction(async (inner) => {
             const bill = await openDraftIn(inner, visit.id, ctx);
-            await addLineIn(
-              inner,
-              bill,
-              {
-                item_id: itemId,
-                source: "added",
-                ...(priced ? { agreed_rate: String(line.amount), price_from_healthray: true } : {}),
-              },
-              ctx,
-            );
+            await addLineIn(inner, bill, lineInput(line, itemId, priced), ctx);
           }, client);
           added.push(line.desc);
         } catch (error) {
@@ -277,12 +274,20 @@ export async function healthrayLinesForDesk(visitId, ctx, db = pool) {
           skipped.push({ line: line.desc, message: error.message });
         }
       };
-      for (const { line, item } of found?.due ?? []) {
-        if (item.removed) continue;
-        const priced = needsHealthrayPrice(item);
-        if (priced && !(Number(line.amount) > 0)) continue;
-        await addAt(line, item.id, priced);
-      }
+      const due = (found?.due ?? [])
+        .filter(({ item }) => !item.removed)
+        .map(({ line, item }) => ({ line, item, priced: needsHealthrayPrice(item) }))
+        .filter(({ line, priced }) => !priced || Number(line.amount) > 0);
+      const batch = await addLinesToDraftIn(
+        client,
+        visit.id,
+        due.map(({ line, item, priced }) => lineInput(line, item.id, priced)),
+        ctx,
+      );
+      added.push(...batch.added.map((index) => due[index].line.desc));
+      skipped.push(
+        ...batch.skipped.map(({ index, message }) => ({ line: due[index].line.desc, message })),
+      );
       const unmatched = (found?.notMatched ?? []).filter((line) => line.amount > 0);
       const atReception = unmatched.length
         ? await namesPaidAtReception(client, visit.id)

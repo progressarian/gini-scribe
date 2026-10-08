@@ -839,7 +839,7 @@ function mayChangePrice(line, ctx) {
   return line.agreed_by === null || line.agreed_by === ctx?.actorId || isAdmin(ctx);
 }
 
-export async function addLineIn(client, bill, input, ctx) {
+async function insertLineIn(client, bill, input, ctx) {
   assertDraft(bill);
   const itemId = cleanItemId(input?.item_id ?? input?.item);
   const doctorId = wholeNumber(input?.doctor_id, "Doctor", { min: 1 }) ?? null;
@@ -909,22 +909,89 @@ export async function addLineIn(client, bill, input, ctx) {
       input?.price_from_healthray === true,
     ],
   );
-  const saved = await reprice(client, bill, await billCodes(client, bill.id), ctx);
-  refuseMissingPrice(saved, rows[0].id);
-  await writeAudit(client, {
+  return { line: rows[0], linkedOrderId, repeatRequestId };
+}
+
+const auditLineCreated = (client, bill, line, ctx) =>
+  writeAudit(client, {
     entity: "bill_lines",
-    entityId: rows[0].id,
+    entityId: line.id,
     action: "create",
-    after: { ...rows[0], bill_no: bill.bill_no },
+    after: { ...line, bill_no: bill.bill_no },
     ...auditFields(ctx),
   });
+
+export async function addLineIn(client, bill, input, ctx) {
+  const { line, linkedOrderId, repeatRequestId } = await insertLineIn(client, bill, input, ctx);
+  const saved = await reprice(client, bill, await billCodes(client, bill.id), ctx);
+  refuseMissingPrice(saved, line.id);
+  await auditLineCreated(client, bill, line, ctx);
   if (linkedOrderId) await resettleTestOrders(client, saved.bill, ctx);
   return {
     bill: saved.bill,
-    line_id: rows[0].id,
+    line_id: line.id,
     priced: saved.priced,
     used_approval_id: repeatRequestId,
   };
+}
+
+const ONE_BY_ONE = Symbol("one by one");
+
+async function addEachToDraft(client, visitId, inputs, ctx) {
+  const added = [];
+  const skipped = [];
+  for (const [index, input] of inputs.entries()) {
+    try {
+      await inTransaction(async (inner) => {
+        const bill = await openDraftIn(inner, visitId, ctx);
+        await addLineIn(inner, bill, input, ctx);
+      }, client);
+      added.push(index);
+    } catch (error) {
+      if (error.code === "40P01") throw error;
+      skipped.push({ index, message: error.message });
+    }
+  }
+  return { added, skipped };
+}
+
+export async function addLinesToDraftIn(client, visitId, inputs, ctx) {
+  if (inputs.length < 2) return addEachToDraft(client, visitId, inputs, ctx);
+  try {
+    return await inTransaction(async (outer) => {
+      const bill = await openDraftIn(outer, visitId, ctx);
+      const inserted = [];
+      const skipped = [];
+      for (const [index, input] of inputs.entries()) {
+        try {
+          inserted.push({
+            index,
+            ...(await inTransaction((inner) => insertLineIn(inner, bill, input, ctx), outer)),
+          });
+        } catch (error) {
+          if (error.code === "40P01") throw error;
+          skipped.push({ index, message: error.message });
+        }
+      }
+      if (!inserted.length) return { added: [], skipped };
+      const saved = await reprice(outer, bill, await billCodes(outer, bill.id), ctx);
+      for (const { line } of inserted) {
+        try {
+          refuseMissingPrice(saved, line.id);
+        } catch {
+          throw ONE_BY_ONE;
+        }
+      }
+      for (const { line } of inserted) await auditLineCreated(outer, bill, line, ctx);
+      if (inserted.some((row) => row.linkedOrderId)) {
+        await resettleTestOrders(outer, saved.bill, ctx);
+      }
+      return { added: inserted.map((row) => row.index), skipped };
+    }, client);
+  } catch (error) {
+    if (error !== ONE_BY_ONE) throw error;
+    return addEachToDraft(client, visitId, inputs, ctx);
+  }
 }
 
 export async function addLine(billId, input, ctx, db = pool) {

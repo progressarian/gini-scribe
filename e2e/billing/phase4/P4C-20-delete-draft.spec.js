@@ -216,6 +216,10 @@ test.describe.serial("P4C-20 delete a draft bill at the counter", () => {
   });
 
   test("2. reopening gives a fresh empty draft; nothing automatic comes back, and the cards still offer them", async () => {
+    const listed = await counterRow("C20All");
+    expect(listed.group).toBe("toBill");
+    expect(listed.hints.tests).toBeGreaterThan(0);
+
     await autoConsultation(true);
     let fresh;
     try {

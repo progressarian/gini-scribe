@@ -1,6 +1,6 @@
 import pool from "../../config/db.js";
 import { CASE_NOT_CANCELLED_SQL } from "../giniflow/testsHold.js";
-import { addLineIn, openDraftIn, readBill } from "./bills.js";
+import { addLineIn, addLinesToDraftIn, readBill } from "./bills.js";
 import { addsLabCaseTests } from "./billingSettings.js";
 import { TEST_MATCHES_SQL } from "./testMatch.js";
 import { httpError, inTransaction } from "./transaction.js";
@@ -97,21 +97,20 @@ export async function labCaseTestsForDesk(visitId, ctx, db = pool) {
       if (!(await addsLabCaseTests(client))) return { ok: true, added: [] };
       await client.query(`SELECT id FROM giniflow_visits WHERE id = $1 FOR NO KEY UPDATE`, [id]);
       const due = firstPerItem((await labCaseRows(client, id)).filter((row) => !row.removed));
-      const added = [];
-      const skipped = [];
-      for (const row of due) {
-        try {
-          await inTransaction(async (inner) => {
-            const bill = await openDraftIn(inner, id, ctx);
-            await addLineIn(inner, bill, { item_id: row.item_id, source: "lab_case" }, ctx);
-          }, client);
-          added.push(row.test_name);
-        } catch (error) {
-          if (error.code === "40P01") throw error;
-          skipped.push({ test: row.test_name, message: error.message });
-        }
-      }
-      return { ok: true, added, skipped };
+      const result = await addLinesToDraftIn(
+        client,
+        id,
+        due.map((row) => ({ item_id: row.item_id, source: "lab_case" })),
+        ctx,
+      );
+      return {
+        ok: true,
+        added: result.added.map((index) => due[index].test_name),
+        skipped: result.skipped.map(({ index, message }) => ({
+          test: due[index].test_name,
+          message,
+        })),
+      };
     }, db);
   } catch (error) {
     console.error(
