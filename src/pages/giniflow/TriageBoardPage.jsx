@@ -108,15 +108,23 @@ export default function TriageBoardPage() {
       if (category !== card.category) {
         await setCategory.mutateAsync({ visitId: card.visitId, category });
       }
+      let billing = null;
       if (sdId !== card.assignment.sdId || docId !== card.assignment.doctorId) {
-        await assignVisit.mutateAsync({
+        const saved = await assignVisit.mutateAsync({
           visitId: card.visitId,
           assignedSdId: sdId ?? null,
-          assignedDoctorId: docId ?? null,
+          ...(docId !== card.assignment.doctorId ? { assignedDoctorId: docId ?? null } : {}),
         });
+        billing = saved?.assignment?.billing ?? null;
       }
       setAssigning(null);
-      setToast(`${card.name} updated`);
+      setToast(
+        billing?.change_id
+          ? `${card.name} updated — the Billing Counter will settle the fee difference`
+          : billing?.draft
+            ? `${card.name} updated — the draft bill now carries the new consultant's fee`
+            : `${card.name} updated`,
+      );
     } catch (e) {
       setToast(e.response?.data?.error || "Could not save that");
     }

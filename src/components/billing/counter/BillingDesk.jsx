@@ -18,6 +18,7 @@ import PaidAtReception from "./PaidAtReception";
 import NotPricedTests from "./NotPricedTests";
 import AddItems from "./AddItems";
 import ConsultationSuggestion from "./ConsultationSuggestion";
+import ConsultantChange from "./ConsultantChange";
 import LabCaseTests from "./LabCaseTests";
 import HealthrayBillLines from "./HealthrayBillLines";
 import ScannedReportLines from "./ScannedReportLines";
@@ -466,6 +467,14 @@ export default function BillingDesk({ tab, visitId, patientId, billId, sentPatie
                   />
                   <div className="bc-bill">
                     <div className="bc-bill__work">
+                      {visitId && (
+                        <ConsultantChange
+                          key={`cc-${visitId}`}
+                          visitId={visitId}
+                          patient={selected || duePatient || sentPatient}
+                          onSettled={openVisitDraft}
+                        />
+                      )}
                       <PreviousBills bills={earlier} onOpen={openEarlier} />
                       <BillLinesTable bill={bill} onBill={setBill} form={form} />
                       <AddItems bill={bill} onBill={setBill} form={form} />

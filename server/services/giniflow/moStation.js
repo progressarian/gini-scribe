@@ -109,7 +109,7 @@ const reportsLine = (resultsStatus, hasBiomarkers) => {
 };
 
 const QUEUE_SQL = `
-  SELECT v.id, v.current_status, v.results_status, v.category, v.assigned_sd_id,
+  SELECT v.id, v.current_status, v.results_status, v.category, v.stability, v.stability_reasons, v.assigned_sd_id,
          v.appointment_time::text AS appointment_time, v.blocked_reason, v.paused_at,
          p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
          sd.short_name AS sd_name,
@@ -245,6 +245,7 @@ export async function getMoQueue(visitDate, sdId = null, q = null, now = new Dat
       sex: r.sex,
       visitNumber: r.visit_number,
       category: r.category,
+      stability: r.stability ? { state: r.stability, reasons: r.stability_reasons || [] } : null,
       status: r.current_status,
       resultsStatus: r.results_status,
       sdName: r.sd_name,
@@ -313,7 +314,7 @@ export async function getMoQueue(visitDate, sdId = null, q = null, now = new Dat
 // The brief an MO reads before writing a plan.
 export async function getMoPatient(visitId, db = pool) {
   const { rows } = await db.query(
-    `SELECT v.id, v.current_status, v.results_status, v.category, v.patient_id,
+    `SELECT v.id, v.current_status, v.results_status, v.category, v.stability, v.stability_reasons, v.patient_id,
             v.visit_date::text AS visit_date,
             v.assigned_sd_id, v.blocked_reason,
             p.name, p.file_no, p.age, p.sex, p.notes,
@@ -420,6 +421,7 @@ export async function getMoPatient(visitId, db = pool) {
     sex: v.sex,
     visitNumber: v.visit_number,
     category: v.category,
+    stability: v.stability ? { state: v.stability, reasons: v.stability_reasons || [] } : null,
     status: v.current_status,
     resultsStatus: v.results_status,
     assignedSdId: v.assigned_sd_id,

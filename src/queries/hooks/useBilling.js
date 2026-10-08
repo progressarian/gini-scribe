@@ -68,6 +68,45 @@ export function useOpenDraft() {
   );
 }
 
+const consultantChangeKey = (visitId) => ["billing", "consultant-change", visitId];
+
+export function useConsultantChange(visitId) {
+  return useQuery({
+    queryKey: consultantChangeKey(visitId),
+    queryFn: () => read(`${DESK}/visits/${visitId}/consultant-change`),
+    enabled: !!visitId,
+    refetchInterval: 15 * 1000,
+  });
+}
+
+function useConsultantChangeMutation(mutationFn) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSettled: (_data, _error, variables) => {
+      queryClient.invalidateQueries({ queryKey: consultantChangeKey(variables?.visitId) });
+      queryClient.invalidateQueries({ queryKey: billingKeys.visitBills(variables?.visitId) });
+      queryClient.invalidateQueries({ queryKey: ["billing", "deposit"] });
+      queryClient.invalidateQueries({ queryKey: ["billing", "requests"] });
+      queryClient.invalidateQueries({ queryKey: COUNTER_PATIENTS });
+    },
+  });
+}
+
+export function useConfirmConsultantChange() {
+  return useConsultantChangeMutation(
+    async ({ changeId, visitId: _visitId, ...body }) =>
+      (await api.post(`${DESK}/consultant-changes/${changeId}/confirm`, body)).data,
+  );
+}
+
+export function useDismissConsultantChange() {
+  return useConsultantChangeMutation(
+    async ({ changeId, visitId: _visitId, ...body }) =>
+      (await api.post(`${DESK}/consultant-changes/${changeId}/dismiss`, body)).data,
+  );
+}
+
 export function useRereadBill() {
   return useMutation({ mutationFn: async ({ billId }) => read(`${DESK}/bills/${billId}`) });
 }

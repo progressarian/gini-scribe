@@ -28,6 +28,7 @@ import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
 import LiveBadge from "../../components/giniflow/LiveBadge";
 import ReportsList from "../../components/giniflow/ReportsList";
 import "../../styles/giniflow-station.css";
+import StabilityChip from "../../components/giniflow/StabilityChip";
 import StationNotice from "../../components/giniflow/StationNotice";
 
 const initials = (name = "") =>
@@ -135,11 +136,11 @@ const deltaText = (today, last, row) => {
 };
 
 const CATEGORY = {
-  worse_out_of_range: { icon: "🔴", label: "Worse — out of range" },
-  worse_in_range: { icon: "🟠", label: "Worse — in range" },
-  getting_better: { icon: "🟡", label: "Getting better" },
-  in_control: { icon: "✅", label: "In control" },
-  no_reports: { icon: "🔵", label: "No reports" },
+  worse_out_of_range: { icon: "🔴", label: "HbA1c: Worse — out of range" },
+  worse_in_range: { icon: "🟠", label: "HbA1c: Worse — in range" },
+  getting_better: { icon: "🟡", label: "HbA1c: Getting better" },
+  in_control: { icon: "✅", label: "HbA1c: In control" },
+  no_reports: { icon: "🔵", label: "HbA1c: No reports" },
 };
 
 // Five groups, because "waiting on results" and "no reports at all" need
@@ -977,6 +978,7 @@ export default function MoStationPage() {
                   />
                 </div>
                 <div className="sdh-acts">
+                  <StabilityChip stability={patient.stability} detail />
                   {cat && (
                     <span className="badge b-amb">
                       {cat.icon} {cat.label}

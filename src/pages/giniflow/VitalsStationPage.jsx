@@ -21,13 +21,14 @@ import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
 import LiveBadge from "../../components/giniflow/LiveBadge";
 import "../../styles/giniflow-station.css";
 import StationNotice from "../../components/giniflow/StationNotice";
+import StabilityChip from "../../components/giniflow/StabilityChip";
 
 const CATEGORY_BADGE = {
-  worse_out_of_range: { cls: "b-red", label: "🔴 Red" },
-  worse_in_range: { cls: "b-amb", label: "🟠 Amber" },
-  getting_better: { cls: "b-amb", label: "🟡 Getting better" },
-  in_control: { cls: "b-grn", label: "✅ Green" },
-  no_reports: { cls: "b-blu", label: "🔵 No reports" },
+  worse_out_of_range: { cls: "b-red", label: "🔴 HbA1c: Red" },
+  worse_in_range: { cls: "b-amb", label: "🟠 HbA1c: Amber" },
+  getting_better: { cls: "b-amb", label: "🟡 HbA1c: Getting better" },
+  in_control: { cls: "b-grn", label: "✅ HbA1c: Green" },
+  no_reports: { cls: "b-blu", label: "🔵 HbA1c: No reports" },
 };
 
 // Physiological bounds, matching the server's Zod schema. A typo here becomes a
@@ -754,6 +755,7 @@ export default function VitalsStationPage() {
                   </div>
                 </div>
                 <div className="sdh-acts">
+                  <StabilityChip stability={patient.stability} detail />
                   {badge && <span className={`badge ${badge.cls}`}>{badge.label}</span>}
                   {/* The chair holds one patient, so there has to be a way to
                       give it up without recording a reading — the patient who

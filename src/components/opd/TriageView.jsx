@@ -1,12 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import {
-  targetStatus,
-  classifyBiomarker,
-  classifyComposite,
-  BIO_TIER,
-} from "../../utils/biomarkerClassify.js";
+import { targetStatus, readBio, triageTier, TIER_KEYS } from "../../utils/biomarkerClassify.js";
 import { useIsMobile } from "../../hooks/useIsMobile.js";
 import CustomCalendar from "../ui/CustomCalendar.jsx";
+import api from "../../services/api";
+import { consultFeeText } from "../../lib/consultFeeText.js";
 
 // ── Design tokens — kept in sync with LiveDashboard.jsx ──
 const T = "#009e8c";
@@ -81,8 +78,6 @@ function Shim({ w = "100%", h = 12, r = 6, style }) {
   return <div className="tri-shim" style={{ width: w, height: h, borderRadius: r, ...style }} />;
 }
 
-const TIER_KEYS = ["hba1c", "sbp", "dbp", "fg", "ldl", "tg", "uacr", "egfr"];
-
 const KEY_LABEL = {
   hba1c: "HbA1c",
   sbp: "BP",
@@ -107,118 +102,6 @@ const fmtTime = (ms) => {
   const p = (x) => String(x).padStart(2, "0");
   return `${p(d.getHours())}:${p(d.getMinutes())}`;
 };
-
-function num(v) {
-  if (v == null || v === "") return null;
-  const n = parseFloat(v);
-  return isNaN(n) ? null : n;
-}
-
-function readBio(appt) {
-  const b = appt.biomarkers || {};
-  return {
-    hba1c: num(b.hba1c),
-    sbp: num(b.sbp ?? b.bpSys),
-    dbp: num(b.dbp ?? b.bpDia),
-    fg: num(b.fg ?? b.fbs),
-    ldl: num(b.ldl),
-    tg: num(b.tg),
-    uacr: num(b.uacr),
-    egfr: num(b.egfr),
-  };
-}
-
-// Compute the dashboard's composite outcome for an appointment by comparing
-// `biomarkers` (current) against `prev_biomarkers` (last visit). Same shape
-// LiveDashboard builds in its `m = useMemo()` block — kept identical so
-// triage and the live dashboard agree on every patient's bucket.
-function computeOutcome(appt) {
-  const bio = appt.biomarkers || {};
-  const prevBio = appt.prev_biomarkers || {};
-  const per = {};
-  let anyTrend = false;
-  for (const key of Object.keys(BIO_TIER)) {
-    if (BIO_TIER[key] === 3) continue; // skip Tier-3 (weight, hb, etc.)
-    const c = Number(bio[key]);
-    const p = Number(prevBio[key]);
-    const curV = Number.isFinite(c) ? c : null;
-    const prevV = Number.isFinite(p) ? p : null;
-    if (curV == null && prevV == null) continue;
-    const status = curV != null && prevV != null ? classifyBiomarker(key, curV, prevV) : "unknown";
-    if (status !== "unknown") anyTrend = true;
-    per[key] = { cur: curV, prev: prevV, status };
-  }
-  // Allow `prev_hba1c` (legacy field) when prev_biomarkers doesn't carry it.
-  if (per.hba1c && per.hba1c.prev == null && Number.isFinite(Number(appt.prev_hba1c))) {
-    per.hba1c.prev = Number(appt.prev_hba1c);
-    per.hba1c.status = classifyBiomarker("hba1c", per.hba1c.cur, per.hba1c.prev);
-    if (per.hba1c.status !== "unknown") anyTrend = true;
-  }
-  const composite = classifyComposite(per);
-  // "single" = at least one current reading but no prior to trend against —
-  // matches LiveDashboard's collapse rule so totals line up.
-  return anyTrend ? composite.outcome : "single";
-}
-
-// Patient triage tier — trend-first, target-fallback.
-//
-// Primary signal is the **dashboard's composite outcome** (better / worse /
-// mixed / stable / partial / single). This puts triage and the live
-// dashboard on the same logic so the two views never disagree.
-//
-// Mapping:
-//   worse  → 🔴 Red   (Tier-1 marker is deteriorating — expert help)
-//   mixed  → 🟡 Amber (Flag for review — conflicting signals)
-//   better → ✅ Green when at-target, else 🟡 Amber (improving but still off)
-//   stable → 🔴 Red when chronically off-target (any 'bad' marker),
-//            🟡 Amber when borderline, ✅ Green when at target
-//   single → first reading, no trend yet → fall back to absolute targets
-//   partial→ no readings at all → 🟡 Amber + "no reports" banner
-//
-// `outcome` is also returned so the card can render a Worse/Mixed/Better
-// chip that explains *why* the patient is in this bucket.
-export function triageTier(appt) {
-  const bio = readBio(appt);
-  const present = TIER_KEYS.filter((k) => bio[k] != null);
-  if (present.length === 0) return { tier: "amber", noReports: true, outcome: "partial" };
-
-  let hasBad = false;
-  let hasWarn = false;
-  for (const k of present) {
-    const s = targetStatus(k, bio[k]);
-    if (s === "bad") hasBad = true;
-    else if (s === "warn") hasWarn = true;
-  }
-
-  const outcome = computeOutcome(appt);
-  const isNew =
-    (appt.visit_type || "").toLowerCase().includes("new") ||
-    (appt.visit_count != null && Number(appt.visit_count) <= 1);
-
-  // Trend-first decision (give more weight to live-dashboard logic).
-  if (outcome === "worse") return { tier: "red", noReports: false, outcome };
-  if (outcome === "mixed") return { tier: "amber", noReports: false, outcome };
-
-  if (outcome === "better") {
-    // Improving but still in 'bad' zone → flag for review, not green yet.
-    if (hasBad) return { tier: "amber", noReports: false, outcome };
-    return { tier: "green", noReports: false, outcome };
-  }
-
-  if (outcome === "stable") {
-    // Stuck off-target despite stable trend = senior physician territory.
-    if (hasBad) return { tier: "red", noReports: false, outcome };
-    if (hasWarn) return { tier: "amber", noReports: false, outcome };
-    return { tier: "green", noReports: false, outcome };
-  }
-
-  // single / partial — no trend, use absolute targets.
-  if (hasBad) return { tier: "red", noReports: false, outcome };
-  if (isNew && bio.hba1c != null && bio.hba1c > 9)
-    return { tier: "red", noReports: false, outcome };
-  if (hasWarn) return { tier: "amber", noReports: false, outcome };
-  return { tier: "green", noReports: false, outcome };
-}
 
 // ── presentational primitives ──
 function ParamChip({ label, value, status }) {
@@ -572,6 +455,25 @@ function AssignDoctorModal({ appt, doctors, allAppts, currentDoctor, onClose, on
     return m;
   }, [allAppts]);
   const total = Math.max(1, allAppts.length);
+  const pickedDoctor = doctors.find((d) => d.name === picked);
+  const pickedId = picked && picked !== currentDoctor ? pickedDoctor?.id : null;
+  const [fee, setFee] = useState(null);
+
+  useEffect(() => {
+    if (!pickedId) {
+      setFee(null);
+      return undefined;
+    }
+    let live = true;
+    setFee({ loading: true });
+    api
+      .get(`/api/appointments/${appt.id}/consult-fee`, { params: { doctorId: pickedId } })
+      .then((r) => live && setFee({ data: r.data }))
+      .catch(() => live && setFee({ error: true }));
+    return () => {
+      live = false;
+    };
+  }, [appt.id, pickedId]);
 
   return (
     <div
@@ -736,6 +638,24 @@ function AssignDoctorModal({ appt, doctors, allAppts, currentDoctor, onClose, on
           })}
         </div>
 
+        {fee && (
+          <div
+            role="status"
+            style={{
+              padding: "10px 14px",
+              borderTop: `1px solid ${BD}`,
+              fontSize: 12,
+              color: INK2,
+              lineHeight: 1.5,
+            }}
+          >
+            {fee.loading
+              ? "Checking the consultation fee…"
+              : fee.error
+                ? "The consultation fee could not be checked — the counter will settle any difference."
+                : consultFeeText(fee.data, pickedDoctor?.short_name || picked)}
+          </div>
+        )}
         <div
           style={{
             padding: "12px 14px",

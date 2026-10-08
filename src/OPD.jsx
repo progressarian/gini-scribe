@@ -7181,6 +7181,34 @@ export default function OPD() {
         updateLocal(d);
         showToast("✓ Category & doctor saved");
       });
+  const reassignDoctor = (id, doctorName) => {
+    const doctor = doctors.find((d) => d.name === doctorName);
+    if (!doctor?.id) return patchCategoryDoc(id, null, doctorName);
+    return apiFetch(`/api/appointments/${id}/consultant`, {
+      method: "POST",
+      body: JSON.stringify({ doctorId: doctor.id }),
+    })
+      .then(async (r) => {
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || "Could not change the consultant");
+        return d;
+      })
+      .then((d) => {
+        updateLocal(d.appointment);
+        showToast(
+          d.billing?.change_id
+            ? "✓ Consultant changed — the Billing Counter will settle the fee difference"
+            : d.billing?.draft
+              ? "✓ Consultant changed — the draft bill now carries the new fee"
+              : "✓ Consultant changed",
+        );
+      })
+      .catch((e) => showToast(`✗ ${e.message}`, "err"));
+  };
+  const updateCategoryOrDoctor = (id, patch) =>
+    patch.doctor_name
+      ? reassignDoctor(id, patch.doctor_name)
+      : patchCategoryDoc(id, patch.category ?? null, patch.doctor_name);
   const postVitals = (id, data) =>
     apiFetch(`/api/appointments/${id}/vitals`, { method: "POST", body: JSON.stringify(data) })
       .then((r) => {
@@ -7370,7 +7398,7 @@ export default function OPD() {
             ["list", "📋 Schedule"],
             ["dashboard", "📊 Live Dashboard"],
             ["cohort", "🧭 All-Time Outcomes"],
-            // ["triage", "🔴🟡✅ Triage"],
+            ["triage", "🔴🟡✅ Triage"],
             ["triage-v3", "🧪 Triage v3"],
             ["new-appt", "➕ New Appointment"],
             ["excel", "📊 Import Excel"],
@@ -7777,9 +7805,7 @@ export default function OPD() {
               isFetching={apptsQuery.isFetching}
               isPending={apptsQuery.isPending}
               updatedAt={apptsQuery.dataUpdatedAt}
-              onUpdateAppt={(id, patch) =>
-                patchCategoryDoc(id, patch.category ?? null, patch.doctor_name)
-              }
+              onUpdateAppt={updateCategoryOrDoctor}
               onSelectAppt={(a) => {
                 setSearchQ("");
                 setFilterStatus("all");
@@ -7810,9 +7836,7 @@ export default function OPD() {
               isFetching={apptsQuery.isFetching}
               isPending={apptsQuery.isPending}
               updatedAt={apptsQuery.dataUpdatedAt}
-              onUpdateAppt={(id, patch) =>
-                patchCategoryDoc(id, patch.category ?? null, patch.doctor_name)
-              }
+              onUpdateAppt={updateCategoryOrDoctor}
               onSelectAppt={(a) => {
                 setSearchQ("");
                 setFilterStatus("all");

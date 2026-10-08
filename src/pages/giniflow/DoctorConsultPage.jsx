@@ -22,6 +22,7 @@ import MedCardSection from "./consult/MedCardSection";
 import FinalizeBar from "./consult/FinalizeBar";
 import TrendModal from "./consult/TrendModal";
 import "../../styles/giniflow-station.css";
+import StabilityChip from "../../components/giniflow/StabilityChip";
 import { clearDraftFields, readDraft, writeDraftNav } from "../../lib/consultDraft";
 import { fetchPrintableRx, printRxHref } from "../../queries/hooks/useGiniflowRx";
 import PdfViewerModal from "../../components/visit/PdfViewerModal";
@@ -37,11 +38,11 @@ import FullscreenButton from "../../components/giniflow/FullscreenButton";
 // Sections live in ./consult/ — one file each, so this file stays the shell.
 
 const CATEGORY_BADGE = {
-  worse_out_of_range: { cls: "b-red", label: "🔴 Worse" },
-  worse_in_range: { cls: "b-amb", label: "🟠 Watch" },
-  getting_better: { cls: "b-amb", label: "🟡 Flag" },
-  in_control: { cls: "b-grn", label: "✅ In control" },
-  no_reports: { cls: "b-blu", label: "🔵 No reports" },
+  worse_out_of_range: { cls: "b-red", label: "🔴 HbA1c: Worse" },
+  worse_in_range: { cls: "b-amb", label: "🟠 HbA1c: Watch" },
+  getting_better: { cls: "b-amb", label: "🟡 HbA1c: Flag" },
+  in_control: { cls: "b-grn", label: "✅ HbA1c: In control" },
+  no_reports: { cls: "b-blu", label: "🔵 HbA1c: No reports" },
 };
 
 const NAV = [
@@ -340,6 +341,7 @@ export default function DoctorConsultPage() {
           </span>
         </div>
         <div className="rail-right">
+          <StabilityChip stability={consult.stability} detail />
           {badge && <span className={`badge ${badge.cls}`}>{badge.label}</span>}
           <span
             className={`badge ${otherConsultant ? "b-amb" : readOnly ? "b-grn" : "b-blu"}`}

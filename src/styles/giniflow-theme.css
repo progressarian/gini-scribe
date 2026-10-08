@@ -486,3 +486,38 @@
   font-size: 11px;
   color: #6b7d90;
 }
+
+.gf .stab-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 1px 7px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border: 1px solid transparent;
+}
+.gf .stab-unstable {
+  background: var(--red-l);
+  color: var(--red);
+  border-color: var(--red-b);
+}
+.gf .stab-stable {
+  background: var(--grn-l);
+  color: var(--grn);
+  border-color: var(--grn-b);
+}
+.gf .stab-first,
+.gf .stab-no_reports {
+  background: var(--bg2, #eef1f5);
+  color: var(--ink3);
+}
+.gf .stab-why {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

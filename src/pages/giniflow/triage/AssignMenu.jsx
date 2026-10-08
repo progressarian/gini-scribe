@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { CATEGORY_META } from "../../../../shared/giniflowStatus";
+import { CATEGORY_META, consultStarted } from "../../../../shared/giniflowStatus";
+import { useConsultFee } from "../../../queries/hooks/useGiniflowTriage";
+import { consultFeeText } from "../../../lib/consultFeeText";
 
 // The coordinator's one dialog: which column this patient belongs in, and who
 // is going to work them. Both in one place because they are one decision — the
@@ -35,6 +37,11 @@ export default function AssignMenu({ card, staff, saving, onClose, onSave, onRes
     doctorId !== card.assignment.doctorId;
 
   const toggle = (setter, current, id) => setter(current === id ? null : id);
+  const consultLocked = consultStarted(card.status);
+  const changingDoctor = Boolean(doctorId) && doctorId !== card.assignment.doctorId;
+  const fee = useConsultFee(card.visitId, doctorId, changingDoctor);
+  const chosenName =
+    (staff || []).find((p) => p.id === doctorId)?.shortName || "The new consultant";
 
   return (
     <div className="tmodal open" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -105,6 +112,7 @@ export default function AssignMenu({ card, staff, saving, onClose, onSave, onRes
                 type="button"
                 key={`doc-${person.id}`}
                 className={`sd-opt${doctorId === person.id ? " sel" : ""}`}
+                disabled={consultLocked && person.id !== card.assignment.doctorId}
                 onClick={() => toggle(setDoctorId, doctorId, person.id)}
               >
                 <span className="sd-av">{initials(person.shortName)}</span>
@@ -120,6 +128,22 @@ export default function AssignMenu({ card, staff, saving, onClose, onSave, onRes
                 {doctorId === person.id && <span>✓</span>}
               </button>
             ))}
+
+          {consultLocked && (
+            <p className="dlg-note">
+              {card.assignment.doctorName || "The consultant"} has started the consult, so the
+              consultant can't be changed now.
+            </p>
+          )}
+          {changingDoctor && (
+            <p className="dlg-note" role="status">
+              {fee.isLoading
+                ? "Checking the consultation fee…"
+                : fee.isError
+                  ? "The consultation fee could not be checked — the counter will settle any difference."
+                  : fee.data && consultFeeText(fee.data, chosenName)}
+            </p>
+          )}
 
           <div className="cf-actions" style={{ marginTop: 14 }}>
             {card.categorySource === "coordinator" && (

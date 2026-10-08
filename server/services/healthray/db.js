@@ -739,7 +739,8 @@ export async function upsertAppointment(existingId, data) {
         patient_id = COALESCE($11, patient_id),
         patient_name = COALESCE($12, patient_name),
         phone = COALESCE($13, phone),
-        doctor_name = COALESCE($14, doctor_name),
+        doctor_name = CASE WHEN doctor_set_manually_at IS NOT NULL THEN doctor_name
+                           ELSE COALESCE($14, doctor_name) END,
         time_slot = COALESCE($15, time_slot),
         visit_type = COALESCE($16, visit_type),
         is_walkin = COALESCE($17, is_walkin),

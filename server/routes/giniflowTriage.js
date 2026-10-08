@@ -7,7 +7,9 @@ import {
   giniflowTriageQuerySchema,
   giniflowTriagePatchSchema,
   giniflowDateQuerySchema,
+  giniflowConsultFeeQuerySchema,
 } from "../schemas/index.js";
+import { consultFeeDifference } from "../services/billing/consultantChange.js";
 import { CAPABILITIES as CAP } from "../../shared/permissions.js";
 import {
   getTriageDay,
@@ -82,6 +84,23 @@ router.post(
       res.json(await autoCategoriseDay(date));
     } catch (e) {
       triageError(res, e, "Gini Flow triage auto-categorise");
+    }
+  },
+);
+
+router.get(
+  "/giniflow/triage/:visitId/consult-fee",
+  gate,
+  validateQuery(giniflowConsultFeeQuerySchema),
+  async (req, res) => {
+    try {
+      res.json(
+        await consultFeeDifference(req.params.visitId, Number(req.query.doctorId), {
+          role: req.doctor?.role ?? null,
+        }),
+      );
+    } catch (e) {
+      triageError(res, e, "Gini Flow consultant fee");
     }
   },
 );

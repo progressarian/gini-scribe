@@ -6,6 +6,8 @@
 // short one, and the pre-visit boxes in particular are only shown when the
 // patient actually wrote something.
 
+import StabilityChip from "../../../components/giniflow/StabilityChip";
+
 const REPORT_ICON = { ok: "📊", partial: "⚠", missing: "📭" };
 
 const BioChip = ({ chip }) => (
@@ -55,6 +57,7 @@ export default function TriageCard({ card, onAssign, onUpload, onOpen, busy }) {
         <span className="pill pill-ink">
           {card.isNewPatient ? "New patient · Visit 1" : `Visit ${card.visitNumber}`}
         </span>
+        <StabilityChip stability={card.stability} detail />
         {card.categorySource === "coordinator" && (
           <span
             className="pill pill-ink"

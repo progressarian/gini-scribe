@@ -3,13 +3,23 @@ import api from "../services/api";
 import useAuthStore from "../stores/authStore";
 import { toast } from "../stores/uiStore";
 import DeleteDoctorModal from "../components/doctors/DeleteDoctorModal";
+import { VITALS_REST_MINUTES } from "../../shared/giniflowStatus";
 import "./DoctorManagementPage.css";
 
 const todayISO = () => new Date().toISOString().split("T")[0];
 
-// The degree line under the doctor's name on every prescription and referral
-// letter. The template has always rendered it; until doctors.qualification
-// existed there was nothing to render, so it printed blank.
+const TABS = [
+  { id: "schedule", label: "Schedule" },
+  { id: "timeoff", label: "Time off" },
+  { id: "settings", label: "Settings" },
+];
+
+const ROLE_LABELS = {
+  consultant: "Consultant",
+  mo: "Medical officer",
+  admin: "Admin",
+};
+
 function LetterheadSection({ doctor, onSaved }) {
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
@@ -34,34 +44,179 @@ function LetterheadSection({ doctor, onSaved }) {
   };
 
   return (
-    <>
-      <p className="docmgmt-hint">
-        Printed under {doctor?.short_name || doctor?.name || "the doctor"}&rsquo;s name on every
-        prescription and referral letter, above the specialty. The name, specialty and registration
-        number already come from this record — leave this blank to keep the degree line off the
-        page.
-      </p>
-      <form
-        className="docmgmt-form"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (dirty) save();
-        }}
-      >
-        <label className="docmgmt-docpick">
-          Qualification:
-          <input
-            value={value}
-            maxLength={120}
-            placeholder="e.g. MBBS, MD (Medicine)"
-            onChange={(e) => setValue(e.target.value)}
-          />
-        </label>
+    <form
+      className="docmgmt-setting"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (dirty) save();
+      }}
+    >
+      <div className="docmgmt-setting-text">
+        <label htmlFor="docmgmt-qualification">Qualification on letterhead</label>
+        <p className="docmgmt-hint">
+          Printed under the name on prescriptions and referral letters. Leave blank to omit it.
+        </p>
+      </div>
+      <div className="docmgmt-setting-control">
+        <input
+          id="docmgmt-qualification"
+          value={value}
+          maxLength={120}
+          placeholder="e.g. MBBS, MD (Medicine)"
+          onChange={(e) => setValue(e.target.value)}
+        />
         <button className="docmgmt-primary" type="submit" disabled={!dirty || saving}>
           {saving ? "Saving…" : "Save"}
         </button>
-      </form>
-    </>
+      </div>
+    </form>
+  );
+}
+
+function ToggleSetting({ doctor, field, checked, label, hint, successText, onSaved }) {
+  const [saving, setSaving] = useState(false);
+  const toggle = async (next) => {
+    setSaving(true);
+    try {
+      await api.patch(`/api/doctors/${doctor.id}`, { [field]: next });
+      await onSaved();
+      toast(successText(next), "success");
+    } catch (err) {
+      toast(err?.response?.data?.error || "Update failed", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="docmgmt-setting docmgmt-setting--toggle">
+      <div className="docmgmt-setting-text">
+        <label htmlFor={`docmgmt-${field}`}>{label}</label>
+        <p className="docmgmt-hint">{hint}</p>
+      </div>
+      <div className="docmgmt-setting-control">
+        <input
+          id={`docmgmt-${field}`}
+          type="checkbox"
+          className="docmgmt-switch"
+          checked={checked}
+          disabled={saving}
+          onChange={(e) => toggle(e.target.checked)}
+        />
+      </div>
+    </div>
+  );
+}
+
+function SettingsTab({ doctor, onSaved }) {
+  const name = doctor.short_name || doctor.name;
+  return (
+    <div className="docmgmt-settings">
+      <ToggleSetting
+        doctor={doctor}
+        field="is_chief"
+        checked={!!doctor.is_chief}
+        label="Chief consultant"
+        hint="Used by patient-flow check-in to route patients to a Chief."
+        successText={(on) => `${name} ${on ? "marked as" : "removed as"} Chief`}
+        onSaved={onSaved}
+      />
+      {doctor.role === "consultant" && (
+        <ToggleSetting
+          doctor={doctor}
+          field="vitals_rest"
+          checked={doctor.vitals_rest !== false}
+          label={`${VITALS_REST_MINUTES}-min rest before vitals`}
+          hint={`Patients rest ${VITALS_REST_MINUTES} minutes after arrival before the Vitals station can call them.`}
+          successText={(on) =>
+            `${name}'s patients ${on ? `now rest ${VITALS_REST_MINUTES} minutes` : "no longer rest"} before vitals`
+          }
+          onSaved={onSaved}
+        />
+      )}
+      <LetterheadSection doctor={doctor} onSaved={onSaved} />
+    </div>
+  );
+}
+
+function DoctorList({
+  doctors,
+  filter,
+  setFilter,
+  selectedId,
+  onSelect,
+  showRemoved,
+  onShowRemoved,
+}) {
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const itemMeta = (d) =>
+    [filter === "all" ? ROLE_LABELS[d.role] || d.role : null, d.specialty]
+      .filter(Boolean)
+      .join(" · ");
+  const visible = doctors
+    .filter((d) => filter === "all" || d.role === "consultant")
+    .filter(
+      (d) => !q || d.name?.toLowerCase().includes(q) || d.specialty?.toLowerCase().includes(q),
+    );
+
+  return (
+    <aside className="docmgmt-side" aria-label="Doctors">
+      <label className="docmgmt-search">
+        <span className="docmgmt-visually-hidden">Search doctors</span>
+        <input
+          type="search"
+          value={query}
+          placeholder="Search doctors"
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </label>
+      <div className="docmgmt-filter" role="group" aria-label="Show">
+        {[
+          ["consultants", "Consultants"],
+          ["all", "All staff"],
+        ].map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            aria-pressed={!showRemoved && filter === id}
+            onClick={() => setFilter(id)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <ul className="docmgmt-doclist" aria-label="Doctor list">
+        {visible.length === 0 && (
+          <li className="docmgmt-empty">
+            {q ? "No doctor matches this search." : "No doctors to show."}
+          </li>
+        )}
+        {visible.map((d) => (
+          <li key={d.id}>
+            <button
+              type="button"
+              className="docmgmt-docitem"
+              aria-current={!showRemoved && d.id === selectedId ? "true" : undefined}
+              onClick={() => onSelect(d.id)}
+            >
+              <span className="docmgmt-docitem-name">
+                {d.name}
+                {d.is_chief && <span className="docmgmt-badge">Chief</span>}
+              </span>
+              {itemMeta(d) && <span className="docmgmt-docitem-meta">{itemMeta(d)}</span>}
+            </button>
+          </li>
+        ))}
+      </ul>
+      <button
+        type="button"
+        className="docmgmt-removed-link"
+        aria-pressed={showRemoved}
+        onClick={onShowRemoved}
+      >
+        Removed doctors
+      </button>
+    </aside>
   );
 }
 
@@ -70,32 +225,23 @@ export default function DoctorManagementPage() {
   const fetchDoctorsList = useAuthStore((s) => s.fetchDoctorsList);
   const currentDoctor = useAuthStore((s) => s.currentDoctor);
   const [doctorId, setDoctorId] = useState(null);
-  const [slots, setSlots] = useState([]); // slot_catalog
-  // Bumped after any mutation so every section re-fetches (one-page layout).
+  const [filter, setFilter] = useState("consultants");
+  const [showRemoved, setShowRemoved] = useState(false);
+  const [tab, setTab] = useState("schedule");
+  const [addTimeOff, setAddTimeOff] = useState(0);
   const [refresh, setRefresh] = useState(0);
   const onChange = () => setRefresh((n) => n + 1);
   const [deleting, setDeleting] = useState(false);
-  const [listTarget, setListTarget] = useState(null);
   const [removedRefresh, setRemovedRefresh] = useState(0);
 
-  // On a hard refresh straight to this route, LoginPage never mounts, so the
-  // doctors list may be empty — load it here (same pattern as Find/Dashboard).
   useEffect(() => {
     if (!doctorsList?.length) fetchDoctorsList();
   }, [doctorsList?.length, fetchDoctorsList]);
 
   useEffect(() => {
-    api
-      .get("/api/slot-catalog")
-      .then((r) => setSlots(r.data || []))
-      .catch(() => setSlots([]));
-  }, []);
-
-  // Default to the logged-in user's own profile, so it opens pre-filled.
-  useEffect(() => {
-    if (doctorId) return;
-    if (currentDoctor?.id) setDoctorId(currentDoctor.id);
-    else if (doctorsList?.length) setDoctorId(doctorsList[0].id);
+    if (doctorId || !doctorsList?.length) return;
+    const own = doctorsList.find((d) => d.id === currentDoctor?.id && d.role === "consultant");
+    setDoctorId((own || doctorsList.find((d) => d.role === "consultant") || doctorsList[0]).id);
   }, [currentDoctor, doctorsList, doctorId]);
 
   const doctor = useMemo(
@@ -103,114 +249,137 @@ export default function DoctorManagementPage() {
     [doctorsList, doctorId],
   );
 
+  const select = (id) => {
+    setShowRemoved(false);
+    setDoctorId(id);
+  };
+
+  const openAddTimeOff = () => {
+    setShowRemoved(false);
+    setTab("timeoff");
+    setAddTimeOff((n) => n + 1);
+  };
+
   return (
     <div className="docmgmt">
       <div className="docmgmt-head">
         <h1>Doctor Management</h1>
-        <label className="docmgmt-docpick">
-          Doctor:
-          <select value={doctorId || ""} onChange={(e) => setDoctorId(Number(e.target.value))}>
-            {(doctorsList || []).map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-                {d.specialty ? ` — ${d.specialty}` : ""}
-                {d.is_chief ? " · Chief" : ""}
-              </option>
-            ))}
-          </select>
-        </label>
-        {doctor && (
-          <label
-            className="docmgmt-docpick"
-            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-            title="Mark this doctor as a Chief consultant (used by patient-flow check-in)"
-          >
-            <input
-              type="checkbox"
-              checked={!!doctor.is_chief}
-              onChange={async (e) => {
-                try {
-                  await api.patch(`/api/doctors/${doctor.id}`, { is_chief: e.target.checked });
-                  await fetchDoctorsList();
-                  toast(
-                    `${doctor.short_name || doctor.name} ${e.target.checked ? "marked as" : "removed as"} Chief`,
-                    "success",
-                  );
-                } catch (err) {
-                  toast(err?.response?.data?.error || "Update failed", "error");
-                }
-              }}
-            />
-            Chief consultant
-          </label>
-        )}
-        {doctor && (
-          <button
-            type="button"
-            className="docmgmt-danger"
-            disabled={doctor.id === currentDoctor?.id}
-            title={
-              doctor.id === currentDoctor?.id ? "You can't delete your own account" : undefined
-            }
-            onClick={() => setDeleting(true)}
-          >
-            Delete doctor
-          </button>
-        )}
+        <button
+          type="button"
+          className="docmgmt-primary"
+          disabled={!doctor}
+          onClick={openAddTimeOff}
+        >
+          + Add time off
+        </button>
       </div>
 
-      <section className="docmgmt-section" aria-labelledby="docmgmt-consultants-title">
-        <h2 className="docmgmt-section-title" id="docmgmt-consultants-title">
-          👥 Consultants
-        </h2>
-        <table className="docmgmt-list">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Speciality</th>
-              <th>Chief</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {(doctorsList || [])
-              .filter((d) => d.role === "consultant")
-              .map((d) => (
-                <tr key={d.id}>
-                  <td>{d.name}</td>
-                  <td>{d.specialty || "—"}</td>
-                  <td>{d.is_chief ? "Yes" : "—"}</td>
-                  <td>
-                    <button type="button" className="docmgmt-del" onClick={() => setDoctorId(d.id)}>
-                      Open
-                    </button>{" "}
-                    <button
-                      type="button"
-                      className="docmgmt-danger"
-                      disabled={d.id === currentDoctor?.id}
-                      onClick={() => setListTarget(d)}
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-          </tbody>
-        </table>
-      </section>
-
-      {listTarget && (
-        <DeleteDoctorModal
-          doctor={listTarget}
-          onClose={() => setListTarget(null)}
-          onDone={async () => {
-            if (listTarget.id === doctorId) setDoctorId(currentDoctor?.id ?? null);
-            setListTarget(null);
-            setRemovedRefresh((n) => n + 1);
-            await fetchDoctorsList();
+      <div className="docmgmt-layout">
+        <DoctorList
+          doctors={doctorsList || []}
+          filter={filter}
+          setFilter={(f) => {
+            setFilter(f);
+            setShowRemoved(false);
           }}
+          selectedId={doctorId}
+          onSelect={select}
+          showRemoved={showRemoved}
+          onShowRemoved={() => setShowRemoved(true)}
         />
-      )}
+
+        <main className="docmgmt-main">
+          {showRemoved ? (
+            <section className="docmgmt-panel" aria-labelledby="docmgmt-removed-title">
+              <h2 className="docmgmt-panel-title" id="docmgmt-removed-title">
+                Removed doctors
+              </h2>
+              <RemovedDoctors refresh={removedRefresh} onRestored={fetchDoctorsList} />
+            </section>
+          ) : !doctor ? (
+            <p className="docmgmt-empty">Select a doctor from the list.</p>
+          ) : (
+            <section className="docmgmt-panel" aria-labelledby="docmgmt-doctor-name">
+              <div className="docmgmt-dochead">
+                <div>
+                  <h2 id="docmgmt-doctor-name">
+                    {doctor.name}
+                    {doctor.is_chief && <span className="docmgmt-badge">Chief</span>}
+                  </h2>
+                  <p className="docmgmt-docmeta">
+                    {[
+                      ROLE_LABELS[doctor.role] || doctor.role,
+                      doctor.specialty,
+                      doctor.qualification,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="docmgmt-del"
+                  disabled={doctor.id === currentDoctor?.id}
+                  title={
+                    doctor.id === currentDoctor?.id
+                      ? "You can't delete your own account"
+                      : undefined
+                  }
+                  onClick={() => setDeleting(true)}
+                >
+                  Delete doctor
+                </button>
+              </div>
+
+              <div className="docmgmt-tabs" role="tablist" aria-label="Doctor sections">
+                {TABS.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    role="tab"
+                    id={`docmgmt-tab-${t.id}`}
+                    aria-selected={tab === t.id}
+                    aria-controls="docmgmt-tabpanel"
+                    className={tab === t.id ? "active" : ""}
+                    onClick={() => setTab(t.id)}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+
+              <div
+                id="docmgmt-tabpanel"
+                role="tabpanel"
+                aria-labelledby={`docmgmt-tab-${tab}`}
+                className="docmgmt-tabpanel"
+              >
+                {tab === "schedule" && (
+                  <>
+                    <ProfileTab
+                      doctorId={doctorId}
+                      doctor={doctor}
+                      refresh={refresh}
+                      onChange={onChange}
+                    />
+                    <DayViewTab doctorId={doctorId} refresh={refresh} />
+                  </>
+                )}
+                {tab === "timeoff" && (
+                  <TimeOffTab
+                    doctorId={doctorId}
+                    doctor={doctor}
+                    refresh={refresh}
+                    onChange={onChange}
+                    openSignal={addTimeOff}
+                  />
+                )}
+                {tab === "settings" && <SettingsTab doctor={doctor} onSaved={fetchDoctorsList} />}
+              </div>
+            </section>
+          )}
+        </main>
+      </div>
 
       {deleting && doctor && (
         <DeleteDoctorModal
@@ -218,46 +387,12 @@ export default function DoctorManagementPage() {
           onClose={() => setDeleting(false)}
           onDone={async () => {
             setDeleting(false);
-            setDoctorId(currentDoctor?.id ?? null);
+            setDoctorId(null);
             setRemovedRefresh((n) => n + 1);
             await fetchDoctorsList();
           }}
         />
       )}
-
-      {!doctorId ? (
-        <p className="docmgmt-empty">Select a doctor.</p>
-      ) : (
-        <div className="docmgmt-body">
-          <section className="docmgmt-section">
-            <h2 className="docmgmt-section-title">🖋️ Letterhead</h2>
-            <LetterheadSection doctor={doctor} onSaved={fetchDoctorsList} />
-          </section>
-          <section className="docmgmt-section">
-            <h2 className="docmgmt-section-title">🗓️ Working Profile</h2>
-            <ProfileTab doctorId={doctorId} doctor={doctor} refresh={refresh} onChange={onChange} />
-          </section>
-          <section className="docmgmt-section">
-            <h2 className="docmgmt-section-title">⏸️ Extra Break</h2>
-            <BreakTab doctorId={doctorId} doctor={doctor} refresh={refresh} onChange={onChange} />
-          </section>
-          <section className="docmgmt-section">
-            <h2 className="docmgmt-section-title">🏖️ Time Off — Leave / Holiday / Emergency</h2>
-            <TimeOffTab doctorId={doctorId} doctor={doctor} refresh={refresh} onChange={onChange} />
-          </section>
-          <section className="docmgmt-section">
-            <h2 className="docmgmt-section-title">👁️ Day View</h2>
-            <DayViewTab doctorId={doctorId} refresh={refresh} />
-          </section>
-        </div>
-      )}
-
-      <section className="docmgmt-section" aria-labelledby="docmgmt-removed-title">
-        <h2 className="docmgmt-section-title" id="docmgmt-removed-title">
-          🗑️ Removed doctors
-        </h2>
-        <RemovedDoctors refresh={removedRefresh} onRestored={fetchDoctorsList} />
-      </section>
     </div>
   );
 }
@@ -331,7 +466,7 @@ function RemovedDoctors({ refresh, onRestored }) {
               <td>
                 <button
                   type="button"
-                  className="docmgmt-del"
+                  className="docmgmt-secondary docmgmt-small"
                   disabled={restoring === d.id}
                   onClick={() => restore(d)}
                 >
@@ -436,13 +571,7 @@ function ProfileTab({ doctorId, doctor, refresh, onChange }) {
 
   return (
     <div>
-      <p className="docmgmt-hint">
-        {doctor?.name} is available by default on working days. Set the days off, the working hours,
-        and a recurring lunch break. Leave / holiday / one-off breaks for specific dates are on the
-        other tabs.
-      </p>
-
-      <h3 className="docmgmt-subhead">Working days</h3>
+      <h3 className="docmgmt-subhead first">Working days</h3>
       <div className="docmgmt-slotmulti">
         {WEEKDAYS.map((label, d) => (
           <label key={d} className={isWorking(d) ? "on" : ""}>
@@ -461,14 +590,14 @@ function ProfileTab({ doctorId, doctor, refresh, onChange }) {
         <label>
           To <input type="time" value={workEnd} onChange={(e) => setWorkEnd(e.target.value)} />
         </label>
-        <span className="docmgmt-hint" style={{ padding: 0 }}>
+        <span className="docmgmt-hint">
           {overnight
             ? "Overnight shift — ends next day."
             : "Leave blank = available all day. Overnight (e.g. 17:00–01:00) is supported."}
         </span>
       </div>
 
-      <h3 className="docmgmt-subhead">Lunch break (recurring, every working day)</h3>
+      <h3 className="docmgmt-subhead">Lunch break (every working day)</h3>
       <div className="docmgmt-form wrap">
         <label>
           From{" "}
@@ -477,207 +606,57 @@ function ProfileTab({ doctorId, doctor, refresh, onChange }) {
         <label>
           To <input type="time" value={lunchEnd} onChange={(e) => setLunchEnd(e.target.value)} />
         </label>
-        <span className="docmgmt-hint" style={{ padding: 0 }}>
+        <span className="docmgmt-hint">
           {workStart && workEnd
             ? `Must be within working hours (${workStart}–${workEnd}).`
             : "Optional."}
         </span>
       </div>
 
-      <div style={{ marginTop: 16 }}>
-        <button className="docmgmt-primary" disabled={saving} onClick={save}>
-          {saving ? "Saving…" : "Save Profile"}
+      <div className="docmgmt-form-actions start">
+        <button type="button" className="docmgmt-primary" disabled={saving} onClick={save}>
+          {saving ? "Saving…" : "Save schedule"}
         </button>
       </div>
     </div>
   );
 }
 
-// ───────────────────────── Extra Break (single day) ────────────
-function BreakTab({ doctorId, doctor, refresh, onChange }) {
-  const [list, setList] = useState([]);
-  const [date, setDate] = useState(todayISO());
-  const [pickedSlots, setPickedSlots] = useState([]);
-  const [reason, setReason] = useState("");
-  const [reassign, setReassign] = useState(null);
-  const [fullDayLeave, setFullDayLeave] = useState(null); // blocks adding a break
-  const [daySlots, setDaySlots] = useState([]); // resolved availability for the date
+const TIME_OFF_TYPES = {
+  leave: "Leave",
+  holiday: "Holiday",
+  emergency: "Emergency",
+  break: "Break",
+};
 
-  const load = useCallback(() => {
-    api
-      .get(`/api/doctors/${doctorId}/unavailability`)
-      .then((r) => setList((r.data || []).filter((u) => u.type === "break")))
-      .catch(() => setList([]));
-  }, [doctorId, refresh]);
-  useEffect(load, [load]);
+const prettyDate = (d) =>
+  d
+    ? new Date(`${String(d).slice(0, 10)}T00:00:00`).toLocaleDateString("en-IN", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      })
+    : "—";
 
-  // Resolve the day: which slots are within working hours and currently open.
-  useEffect(() => {
-    setPickedSlots([]);
-    api
-      .get(`/api/doctors/${doctorId}/availability?date=${date}`)
-      .then((r) => setDaySlots(r.data?.slots || []))
-      .catch(() => setDaySlots([]));
-    api
-      .get(`/api/doctors/${doctorId}/unavailability?from=${date}&to=${date}`)
-      .then((r) =>
-        setFullDayLeave(
-          (r.data || []).find((u) => u.slot_labels == null && u.type !== "break") || null,
-        ),
-      )
-      .catch(() => setFullDayLeave(null));
-  }, [doctorId, date, refresh]);
-
-  // Only offer slots inside working hours that are still open (not lunch/leave).
-  const openSlots = daySlots.filter((s) => s.available).map((s) => ({ label: s.slot_label }));
-  const dayOff = daySlots.length > 0 && daySlots.every((s) => s.blocked_by === "day_off");
-
-  const add = async () => {
-    if (date < todayISO()) return toast("Cannot select a past date", "warn");
-    if (fullDayLeave)
-      return toast(
-        `Doctor has full-day ${fullDayLeave.type} on this date — cannot add a break.`,
-        "warn",
-      );
-    if (!pickedSlots.length) return toast("Pick the slot(s) for the break", "warn");
-    try {
-      const { data } = await api.post(`/api/doctors/${doctorId}/break`, {
-        start_date: date,
-        end_date: date,
-        slot_labels: pickedSlots,
-        reason,
-      });
-      setReason("");
-      setPickedSlots([]);
-      onChange?.();
-      if (data.requires_reassignment) {
-        const enriched = await enrichAffected(data.affected, doctorId, doctor);
-        setReassign({ affected: enriched, doctor });
-      } else {
-        toast("Break added", "success");
-      }
-    } catch (e) {
-      toast(
-        e.response?.data?.message ||
-          e.response?.data?.error ||
-          e.response?.data?.details?.[0] ||
-          "Failed",
-        "error",
-      );
-    }
-  };
-  const cancel = async (u) => {
-    await api.patch(`/api/doctors/${doctorId}/unavailability/${u.id}`, { status: "cancelled" });
-    onChange?.();
-  };
-
-  return (
-    <div>
-      <p className="docmgmt-hint">
-        An <strong>extra</strong> one-off break on a single day (the daily lunch break is set in the
-        Profile tab). The chosen slots can't be booked that day and show a “break” label on the Day
-        View.
-      </p>
-      {fullDayLeave && (
-        <div className="docmgmt-leavebanner">
-          🚫 Doctor has full-day {fullDayLeave.type}
-          {fullDayLeave.reason ? ` (${fullDayLeave.reason})` : ""} on this date — a break can't be
-          added. They're already off the whole day.
-        </div>
-      )}
-      <div className="docmgmt-form wrap">
-        <label>
-          Date{" "}
-          <input
-            type="date"
-            min={todayISO()}
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-          />
-        </label>
-        {!dayOff && !fullDayLeave && openSlots.length > 0 && (
-          <SlotMultiSelect slots={openSlots} value={pickedSlots} onChange={setPickedSlots} />
-        )}
-        <input
-          placeholder="Reason (e.g. Meeting)"
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-        />
-        <button
-          className="docmgmt-primary"
-          onClick={add}
-          disabled={!!fullDayLeave || dayOff || openSlots.length === 0}
-        >
-          Add Break
-        </button>
-      </div>
-      {dayOff && (
-        <p className="docmgmt-empty">
-          Doctor is not working this day (day off) — no slots to break.
-        </p>
-      )}
-      {!dayOff && !fullDayLeave && openSlots.length === 0 && (
-        <p className="docmgmt-empty">No open slots on this day to add a break.</p>
-      )}
-
-      <table className="docmgmt-list">
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>Slots</th>
-            <th>Reason</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {list.length === 0 && (
-            <tr>
-              <td colSpan="4" className="docmgmt-empty">
-                No extra breaks added.
-              </td>
-            </tr>
-          )}
-          {list.map((u) => (
-            <tr key={u.id}>
-              <td>{u.start_date?.slice(0, 10)}</td>
-              <td>{(u.slot_labels || []).join(", ")}</td>
-              <td>{u.reason || "Break"}</td>
-              <td>
-                <button className="docmgmt-del" onClick={() => cancel(u)}>
-                  Remove
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      {reassign && (
-        <ReassignModal
-          {...reassign}
-          trigger="break"
-          onClose={() => setReassign(null)}
-          onDone={() => {
-            setReassign(null);
-            toast("Reassignment complete", "success");
-            onChange?.();
-          }}
-        />
-      )}
-    </div>
-  );
-}
-
-// ───────────────── Time Off (leave / holiday / emergency) ───────
-function TimeOffTab({ doctorId, doctor, refresh, onChange }) {
-  const [list, setList] = useState([]);
+function TimeOffTab({ doctorId, doctor, refresh, onChange, openSignal }) {
+  const [list, setList] = useState(null);
+  const [formOpen, setFormOpen] = useState(false);
   const [type, setType] = useState("leave");
   const [start, setStart] = useState(todayISO());
   const [end, setEnd] = useState(todayISO());
   const [fromNow, setFromNow] = useState(true);
   const [reason, setReason] = useState("");
+  const [pickedSlots, setPickedSlots] = useState([]);
+  const [daySlots, setDaySlots] = useState([]);
+  const [fullDayLeave, setFullDayLeave] = useState(null);
+  const [saving, setSaving] = useState(false);
   const [reassign, setReassign] = useState(null);
   const isEmergency = type === "emergency";
+  const isBreak = type === "break";
+
+  useEffect(() => {
+    if (openSignal) setFormOpen(true);
+  }, [openSignal]);
 
   const load = useCallback(() => {
     api
@@ -687,11 +666,67 @@ function TimeOffTab({ doctorId, doctor, refresh, onChange }) {
   }, [doctorId, refresh]);
   useEffect(load, [load]);
 
+  useEffect(() => {
+    if (!isBreak) return;
+    setPickedSlots([]);
+    api
+      .get(`/api/doctors/${doctorId}/availability?date=${start}`)
+      .then((r) => setDaySlots(r.data?.slots || []))
+      .catch(() => setDaySlots([]));
+    api
+      .get(`/api/doctors/${doctorId}/unavailability?from=${start}&to=${start}`)
+      .then((r) =>
+        setFullDayLeave(
+          (r.data || []).find((u) => u.slot_labels == null && u.type !== "break") || null,
+        ),
+      )
+      .catch(() => setFullDayLeave(null));
+  }, [doctorId, start, isBreak, refresh]);
+
+  const openSlots = daySlots.filter((s) => s.available).map((s) => ({ label: s.slot_label }));
+  const dayOff = daySlots.length > 0 && daySlots.every((s) => s.blocked_by === "day_off");
+  const breakBlocked = isBreak && (!!fullDayLeave || dayOff || openSlots.length === 0);
+
+  const failed = (e) =>
+    toast(
+      e.response?.data?.message ||
+        e.response?.data?.error ||
+        e.response?.data?.details?.[0] ||
+        "Could not save the time off",
+      "error",
+    );
+
+  const finish = () => {
+    setReason("");
+    setPickedSlots([]);
+    setFormOpen(false);
+    onChange?.();
+  };
+
   const submit = async () => {
-    if (start < todayISO()) return toast("Cannot select a past date", "warn");
-    if (!end || end < start) return toast("To date must be on or after From", "warn");
+    if (start < todayISO()) return toast("Pick today or a later date", "warn");
+    if (!isBreak && (!end || end < start))
+      return toast("The To date must be on or after the From date", "warn");
+    if (isBreak && fullDayLeave)
+      return toast(`${doctor?.name} is already on ${fullDayLeave.type} that day`, "warn");
+    if (isBreak && !pickedSlots.length) return toast("Pick the slot(s) for the break", "warn");
+    setSaving(true);
     try {
-      if (isEmergency) {
+      if (isBreak) {
+        const { data } = await api.post(`/api/doctors/${doctorId}/break`, {
+          start_date: start,
+          end_date: start,
+          slot_labels: pickedSlots,
+          reason,
+        });
+        finish();
+        if (data.requires_reassignment) {
+          const enriched = await enrichAffected(data.affected, doctorId, doctor);
+          setReassign({ affected: enriched, doctor, trigger: "break" });
+        } else {
+          toast("Break added", "success");
+        }
+      } else if (isEmergency) {
         const { data } = await api.post(`/api/doctors/${doctorId}/emergency-leave`, {
           start_date: start,
           end_date: end,
@@ -699,8 +734,7 @@ function TimeOffTab({ doctorId, doctor, refresh, onChange }) {
           slot_labels: null,
           reason,
         });
-        setReason("");
-        onChange?.();
+        finish();
         if (data.affected?.length) {
           setReassign({
             affected: data.affected,
@@ -719,110 +753,197 @@ function TimeOffTab({ doctorId, doctor, refresh, onChange }) {
           slot_labels: null,
           reason,
         });
-        setReason("");
-        onChange?.();
+        finish();
         if (data.requires_reassignment) {
           const enriched = await enrichAffected(data.affected, doctorId, doctor);
           setReassign({ affected: enriched, doctor, trigger: "planned_leave" });
         } else {
-          toast(`${type === "holiday" ? "Holiday" : "Leave"} added`, "success");
+          toast(`${TIME_OFF_TYPES[type]} added`, "success");
         }
       }
     } catch (e) {
-      toast(
-        e.response?.data?.message ||
-          e.response?.data?.error ||
-          e.response?.data?.details?.[0] ||
-          "Failed",
-        "error",
-      );
+      failed(e);
+    } finally {
+      setSaving(false);
     }
   };
+
   const cancel = async (u) => {
-    await api.patch(`/api/doctors/${doctorId}/unavailability/${u.id}`, { status: "cancelled" });
-    onChange?.();
+    try {
+      await api.patch(`/api/doctors/${doctorId}/unavailability/${u.id}`, { status: "cancelled" });
+      toast(`${TIME_OFF_TYPES[u.type] || "Time off"} cancelled`, "success");
+      onChange?.();
+    } catch (e) {
+      toast(e.response?.data?.error || "Could not cancel it", "error");
+    }
   };
+
+  const submitLabel = isEmergency ? "Mark emergency" : `Add ${TIME_OFF_TYPES[type].toLowerCase()}`;
 
   return (
     <div>
-      <p className="docmgmt-hint">
-        Mark the doctor off for a date range. <strong>Leave</strong> / <strong>Holiday</strong> are
-        planned; <strong>Emergency</strong> is for right now. If patients are already booked you'll
-        be prompted to reassign them.
-      </p>
-      <div className={`docmgmt-form wrap${isEmergency ? " docmgmt-emergency" : ""}`}>
-        <label>
-          Type{" "}
-          <select value={type} onChange={(e) => setType(e.target.value)}>
-            <option value="leave">Leave</option>
-            <option value="holiday">Holiday</option>
-            <option value="emergency">Emergency (now)</option>
-          </select>
-        </label>
-        <label>
-          From{" "}
-          <input
-            type="date"
-            min={todayISO()}
-            value={start}
-            onChange={(e) => {
-              const v = e.target.value;
-              setStart(v);
-              if (end && end < v) setEnd("");
-            }}
-          />
-        </label>
-        <label>
-          To{" "}
-          <input
-            type="date"
-            min={start || todayISO()}
-            value={end}
-            onChange={(e) => setEnd(e.target.value)}
-          />
-        </label>
-        {isEmergency && (
-          <label className="docmgmt-check">
-            <input
-              type="checkbox"
-              checked={fromNow}
-              onChange={(e) => setFromNow(e.target.checked)}
-            />
-            Only remaining time today
-          </label>
-        )}
-        <input placeholder="Reason" value={reason} onChange={(e) => setReason(e.target.value)} />
-        <button className={isEmergency ? "docmgmt-danger" : "docmgmt-primary"} onClick={submit}>
-          {isEmergency ? "Mark Emergency" : type === "holiday" ? "Add Holiday" : "Add Leave"}
-        </button>
-      </div>
+      {formOpen ? (
+        <form
+          className={`docmgmt-timeoff-form${isEmergency ? " docmgmt-emergency" : ""}`}
+          aria-label="Add time off"
+          onSubmit={(e) => {
+            e.preventDefault();
+            submit();
+          }}
+        >
+          <div className="docmgmt-form wrap">
+            <label>
+              Type
+              <select value={type} onChange={(e) => setType(e.target.value)}>
+                <option value="leave">Leave</option>
+                <option value="holiday">Holiday</option>
+                <option value="break">Break (some slots, one day)</option>
+                <option value="emergency">Emergency (now)</option>
+              </select>
+            </label>
+            <label>
+              {isBreak ? "Date" : "From"}
+              <input
+                type="date"
+                min={todayISO()}
+                value={start}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setStart(v);
+                  if (end && end < v) setEnd(v);
+                }}
+              />
+            </label>
+            {!isBreak && (
+              <label>
+                To
+                <input
+                  type="date"
+                  min={start || todayISO()}
+                  value={end}
+                  onChange={(e) => setEnd(e.target.value)}
+                />
+              </label>
+            )}
+            {isEmergency && (
+              <label className="docmgmt-check">
+                <input
+                  type="checkbox"
+                  checked={fromNow}
+                  onChange={(e) => setFromNow(e.target.checked)}
+                />
+                Only the rest of today
+              </label>
+            )}
+            <label>
+              Reason
+              <input
+                placeholder={isBreak ? "e.g. Meeting" : "Optional"}
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+              />
+            </label>
+          </div>
+
+          {isBreak && (
+            <div className="docmgmt-breakslots">
+              {fullDayLeave ? (
+                <p className="docmgmt-leavebanner">
+                  {doctor?.name} is on full-day {fullDayLeave.type}
+                  {fullDayLeave.reason ? ` (${fullDayLeave.reason})` : ""} that day — no break
+                  needed.
+                </p>
+              ) : dayOff ? (
+                <p className="docmgmt-empty">Not a working day — there are no slots to block.</p>
+              ) : openSlots.length === 0 ? (
+                <p className="docmgmt-empty">No open slots left on this day.</p>
+              ) : (
+                <>
+                  <p className="docmgmt-hint">
+                    Slots to block (the daily lunch is set in Schedule)
+                  </p>
+                  <SlotMultiSelect
+                    slots={openSlots}
+                    value={pickedSlots}
+                    onChange={setPickedSlots}
+                  />
+                </>
+              )}
+            </div>
+          )}
+
+          <p className="docmgmt-hint">
+            If patients are already booked in this time, you'll be asked to move them to another
+            doctor.
+          </p>
+          <div className="docmgmt-form-actions">
+            <button type="button" className="docmgmt-secondary" onClick={() => setFormOpen(false)}>
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className={isEmergency ? "docmgmt-danger" : "docmgmt-primary"}
+              disabled={saving || breakBlocked}
+            >
+              {saving ? "Saving…" : submitLabel}
+            </button>
+          </div>
+        </form>
+      ) : (
+        <div className="docmgmt-tabbar">
+          <p className="docmgmt-hint">
+            Leave, holidays, emergencies and one-off breaks. Booking can't use these times.
+          </p>
+          <button type="button" className="docmgmt-secondary" onClick={() => setFormOpen(true)}>
+            + Add time off
+          </button>
+        </div>
+      )}
 
       <table className="docmgmt-list">
         <thead>
           <tr>
             <th>Type</th>
-            <th>From</th>
-            <th>To</th>
+            <th>Dates</th>
+            <th>Time</th>
             <th>Reason</th>
-            <th />
+            <th>
+              <span className="docmgmt-visually-hidden">Actions</span>
+            </th>
           </tr>
         </thead>
         <tbody>
-          {list.length === 0 && (
+          {list === null && (
             <tr>
               <td colSpan="5" className="docmgmt-empty">
-                No time off scheduled.
+                Loading…
               </td>
             </tr>
           )}
-          {list.map((u) => (
+          {list?.length === 0 && (
+            <tr>
+              <td colSpan="5" className="docmgmt-empty">
+                No time off scheduled. Use “Add time off” to mark leave, a holiday or a break.
+              </td>
+            </tr>
+          )}
+          {(list || []).map((u) => (
             <tr key={u.id}>
-              <td>{u.type}</td>
-              <td>{u.start_date?.slice(0, 10)}</td>
-              <td>{u.end_date?.slice(0, 10)}</td>
-              <td>{u.reason || "—"}</td>
               <td>
-                <button className="docmgmt-del" onClick={() => cancel(u)}>
+                <span className={`docmgmt-type docmgmt-type--${u.type}`}>
+                  {TIME_OFF_TYPES[u.type] || u.type}
+                </span>
+              </td>
+              <td>
+                {prettyDate(u.start_date)}
+                {u.end_date && String(u.end_date).slice(0, 10) !== String(u.start_date).slice(0, 10)
+                  ? ` – ${prettyDate(u.end_date)}`
+                  : ""}
+              </td>
+              <td>{u.slot_labels?.length ? u.slot_labels.join(", ") : "Whole day"}</td>
+              <td>{u.reason || "—"}</td>
+              <td className="docmgmt-cell-action">
+                <button type="button" className="docmgmt-del" onClick={() => cancel(u)}>
                   Cancel
                 </button>
               </td>
@@ -846,7 +967,12 @@ function TimeOffTab({ doctorId, doctor, refresh, onChange }) {
   );
 }
 
-// ───────────────────────── Day View (read-only) ────────────────
+const shiftDay = (iso, days) => {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+};
+
 function DayViewTab({ doctorId, refresh }) {
   const [date, setDate] = useState(todayISO());
   const [slots, setSlots] = useState([]);
@@ -886,23 +1012,43 @@ function DayViewTab({ doctorId, refresh }) {
 
   return (
     <div>
-      <p className="docmgmt-hint">What booking sees for this doctor on a given day.</p>
-      <label className="docmgmt-form">
-        Date <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-      </label>
+      <div className="docmgmt-dayhead">
+        <h3 className="docmgmt-subhead">Day preview</h3>
+        <div className="docmgmt-daynav">
+          <button
+            type="button"
+            aria-label="Previous day"
+            onClick={() => setDate(shiftDay(date, -1))}
+          >
+            ‹
+          </button>
+          <label>
+            <span className="docmgmt-visually-hidden">Preview date</span>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => e.target.value && setDate(e.target.value)}
+            />
+          </label>
+          <button type="button" aria-label="Next day" onClick={() => setDate(shiftDay(date, 1))}>
+            ›
+          </button>
+        </div>
+      </div>
+      <p className="docmgmt-hint">What booking sees for this doctor on the chosen day.</p>
 
       {!loading && profile && (
         <div className="docmgmt-dayinfo">
           <span>
-            🕐 Working hours: <strong>{hours}</strong>
+            Hours <strong>{hours}</strong>
           </span>
           {lunch && (
             <span>
-              🍽 Lunch: <strong>{lunch}</strong>
+              Lunch <strong>{lunch}</strong>
             </span>
           )}
           <span>
-            ✅ <strong>{freeCount}</strong>/{visible.length} slots open
+            <strong>{freeCount}</strong>/{visible.length} slots open
           </span>
         </div>
       )}
@@ -912,7 +1058,7 @@ function DayViewTab({ doctorId, refresh }) {
       ) : slots.length === 0 ? (
         <p className="docmgmt-empty">Could not load the day.</p>
       ) : dayOff ? (
-        <p className="docmgmt-empty">🚫 Day off — the doctor is not working this day.</p>
+        <p className="docmgmt-empty">Day off — not a working day.</p>
       ) : (
         <div className="docmgmt-slots">
           {visible.map((s) => (

@@ -715,6 +715,11 @@
   margin-bottom: 3px;
   font-family: var(--fm);
 }
+.gf .pc-stab {
+  display: flex;
+  min-width: 0;
+  margin-bottom: 4px;
+}
 
 /* ── Staleness (GF-23) ── said in the badge only: dimming the board hid live
    data from the floor while the screen was still working. */

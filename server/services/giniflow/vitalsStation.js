@@ -42,13 +42,23 @@ const bmiOf = (weight, height) => {
 const minutesSince = (from, now) =>
   from ? Math.max(0, Math.round((now - new Date(from)) / 60000)) : null;
 
+const REST_SKIPPED_SQL = (v) => `EXISTS (
+  SELECT 1 FROM doctors rd
+   WHERE rd.vitals_rest = false
+     AND rd.id = COALESCE(${v}.assigned_doctor_id,
+       (SELECT COALESCE(ra.doctor_id,
+                 (SELECT d.id FROM doctors d
+                   WHERE lower(btrim(d.name)) = lower(btrim(ra.doctor_name))
+                   ORDER BY d.is_active IS NOT FALSE DESC, d.id LIMIT 1))
+          FROM appointments ra WHERE ra.id = ${v}.appointment_id)))`;
+
 const QUEUE_SQL = `
-  SELECT v.id, v.current_status, v.category, v.appointment_time::text AS appointment_time,
+  SELECT v.id, v.current_status, v.category, v.stability, v.stability_reasons, v.appointment_time::text AS appointment_time,
          v.priority, v.priority_reason, v.blocked_reason,
          v.queue_position, v.queue_column, v.paused_at, v.paused_reason,
          p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
          first_ev.occurred_at AS checked_in_at,
-         arrived.occurred_at  AS arrived_at,
+         CASE WHEN ${REST_SKIPPED_SQL("v")} THEN NULL ELSE arrived.occurred_at END AS arrived_at,
          last_ev.occurred_at  AS status_since,
          seq.visit_number,
          bio.biomarkers
@@ -203,6 +213,7 @@ export async function getVitalsQueue(
     sex: r.sex,
     visitNumber: r.visit_number,
     category: r.category,
+    stability: r.stability ? { state: r.stability, reasons: r.stability_reasons || [] } : null,
     status: r.current_status,
     appointmentTime: r.appointment_time,
     // There is no separate VIP flag in Gini Flow, and borrowing flow_visits.is_vip
@@ -332,11 +343,11 @@ function bioChips(biomarkers) {
 
 export async function getVitalsPatient(visitId, db = pool) {
   const { rows } = await db.query(
-    `SELECT v.id, v.current_status, v.category, v.patient_id,
+    `SELECT v.id, v.current_status, v.category, v.stability, v.stability_reasons, v.patient_id,
             p.name, p.file_no, p.age, p.sex, p.notes,
             p.allergy_status, p.allergy_note,
             first_ev.occurred_at AS checked_in_at,
-            arrived.occurred_at AS arrived_at,
+            CASE WHEN ${REST_SKIPPED_SQL("v")} THEN NULL ELSE arrived.occurred_at END AS arrived_at,
             seq.visit_number
        FROM giniflow_visits v
        JOIN patients p ON p.id = v.patient_id
@@ -389,6 +400,9 @@ export async function getVitalsPatient(visitId, db = pool) {
     sex: visit.sex,
     visitNumber: visit.visit_number,
     category: visit.category,
+    stability: visit.stability
+      ? { state: visit.stability, reasons: visit.stability_reasons || [] }
+      : null,
     status: visit.current_status,
     checkedInAt: visit.checked_in_at ? new Date(visit.checked_in_at).toISOString() : null,
     restUntil: isResting(vitalsRestUntil(visit.current_status, visit.arrived_at))
@@ -454,7 +468,8 @@ async function refuseWhileResting(client, visitId) {
           ORDER BY occurred_at DESC LIMIT 1
        ) e ON TRUE
       WHERE v.id = $1 AND v.current_status = ANY($2)
-        AND e.occurred_at + make_interval(mins => $3) > NOW()`,
+        AND e.occurred_at + make_interval(mins => $3) > NOW()
+        AND NOT ${REST_SKIPPED_SQL("v")}`,
     [visitId, NOT_STARTED_STATUSES, VITALS_REST_MINUTES],
   );
   if (!rows.length) return;

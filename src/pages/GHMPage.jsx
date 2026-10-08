@@ -706,20 +706,11 @@ const callStatusOptions = (value) =>
   value === "rescheduled" ? CALL_STATUSES : COLUMN_CALL_STATUSES;
 
 const bookingStatusOptions = (row) => {
-  const past = !row.appointment_date || row.appointment_date < todayStr();
-  const blocked = row.booking_status !== "booked" && (!row.time_slot || past);
-  if (!blocked) return BOOKING_STATUSES;
-  return BOOKING_STATUSES.map((o) =>
-    o.value === "booked"
-      ? {
-          ...o,
-          disabled: true,
-          title: past
-            ? "Past visit. Book the next appointment with a time slot."
-            : "Allocate a time slot first.",
-        }
-      : o,
-  );
+  const past = !!row.appointment_date && row.appointment_date < todayStr();
+  if (row.booking_status === "booked" || (past ? row.preferred_time_slot : row.time_slot))
+    return BOOKING_STATUSES;
+  const title = past ? "Choose the preferred time first." : "Allocate a time slot first.";
+  return BOOKING_STATUSES.map((o) => (o.value === "booked" ? { ...o, disabled: true, title } : o));
 };
 
 // Gender values the patients table accepts — the column has a CHECK on them.

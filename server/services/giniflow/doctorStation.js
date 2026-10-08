@@ -112,7 +112,7 @@ const resultsLine = (row) => {
 };
 
 const QUEUE_SQL = `
-  SELECT v.id, v.current_status, v.results_status, v.category, v.blocked_reason, v.paused_at,
+  SELECT v.id, v.current_status, v.results_status, v.category, v.stability, v.stability_reasons, v.blocked_reason, v.paused_at,
          v.priority, v.priority_reason, v.assigned_doctor_id, v.assigned_sd_id,
          v.appointment_time::text AS appointment_time,
          p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
@@ -329,6 +329,9 @@ export async function getDoctorQueue(
       visitNumber: row.visit_number,
       appointmentTime: (row.appointment_time || "").slice(0, 5) || null,
       category: row.category,
+      stability: row.stability
+        ? { state: row.stability, reasons: row.stability_reasons || [] }
+        : null,
       priority: row.priority || "normal",
       priorityReason: row.priority_reason,
       blockedReason: row.blocked_reason,
@@ -427,7 +430,7 @@ export async function getDoctorQueue(
 // Everything the consult screen reads. One round trip per patient.
 export async function getConsult(visitId, db = pool) {
   const { rows } = await db.query(
-    `SELECT v.id, v.patient_id, v.current_status, v.results_status, v.category,
+    `SELECT v.id, v.patient_id, v.current_status, v.results_status, v.category, v.stability, v.stability_reasons,
             v.blocked_reason, v.priority, v.priority_reason,
             v.assigned_doctor_id, v.assigned_sd_id, v.visit_date::text AS visit_date,
             p.name, p.file_no, p.age, p.sex, p.notes,
@@ -578,6 +581,7 @@ export async function getConsult(visitId, db = pool) {
     sex: v.sex,
     visitNumber: v.visit_number,
     category: v.category,
+    stability: v.stability ? { state: v.stability, reasons: v.stability_reasons || [] } : null,
     priority: v.priority || "normal",
     priorityReason: v.priority_reason,
     status: v.current_status,

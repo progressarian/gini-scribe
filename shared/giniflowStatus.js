@@ -311,6 +311,8 @@ export const WAIT_SINCE_SQL = (alias, visitAlias = "v") =>
 
 export const chainIndex = (status) => CHAIN_INDEX.get(status) ?? -1;
 
+export const consultStarted = (status) => chainIndex(status) >= chainIndex("with_doctor");
+
 export const nextStatus = (status) => {
   const i = chainIndex(status);
   return i === -1 || i === CHAIN.length - 1 ? null : CHAIN[i + 1];

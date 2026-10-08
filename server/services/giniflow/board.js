@@ -199,7 +199,7 @@ const BOARD_SQL = `
          v.visit_date::text                        AS visit_date,
          v.current_status,
          v.results_status,
-         v.category,
+         v.category, v.stability, v.stability_reasons,
          v.blocked_reason,
          v.resume_status,
          v.paused_at, v.paused_reason, v.paused_ms_total,
@@ -1231,6 +1231,9 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
       status: row.current_status,
       statusLabel: STATUS_LABEL[row.current_status] || row.current_status,
       category: row.category,
+      stability: row.stability
+        ? { state: row.stability, reasons: row.stability_reasons || [] }
+        : null,
       resultsStatus: row.results_status,
       blockedReason: row.blocked_reason,
       // Carried to the card so the client can tell, before a drag starts, which

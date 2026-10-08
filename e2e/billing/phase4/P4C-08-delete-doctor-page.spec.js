@@ -167,11 +167,15 @@ test.describe.serial("P4C-08 delete a doctor from Doctor Management", () => {
     await gotoReady(page, "/doctor-management", () =>
       page.getByRole("heading", { name: "Doctor Management" }),
     );
-    const picker = page.locator(".docmgmt-head select");
-    await expect(picker.locator(`option[value="${ours.page}"]`)).toHaveCount(1);
-    await picker.selectOption(String(ours.page));
+    const listed = page
+      .getByRole("list", { name: "Doctor list" })
+      .getByRole("button")
+      .filter({ hasText: PAGE_DOCTOR });
+    await expect(listed).toHaveCount(1);
+    await listed.click();
+    await expect(page.getByRole("heading", { name: PAGE_DOCTOR })).toBeVisible();
 
-    await page.locator(".docmgmt-head").getByRole("button", { name: "Delete doctor" }).click();
+    await page.locator(".docmgmt-dochead").getByRole("button", { name: "Delete doctor" }).click();
     const dialog = page.getByRole("dialog", { name: `Delete ${PAGE_DOCTOR}?` });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText("future appointment still booked with them")).toContainText("1");
@@ -184,8 +188,9 @@ test.describe.serial("P4C-08 delete a doctor from Doctor Management", () => {
     await confirm.click();
     await expect(dialog).toBeHidden();
 
-    await expect(picker.locator(`option[value="${ours.page}"]`)).toHaveCount(0);
-    const removed = page.getByRole("region", { name: "🗑️ Removed doctors" });
+    await expect(listed).toHaveCount(0);
+    await page.getByRole("button", { name: "Removed doctors" }).click();
+    const removed = page.getByRole("region", { name: "Removed doctors" });
     const row = removed.getByRole("row").filter({ hasText: PAGE_DOCTOR });
     await expect(row).toContainText("Left in September");
     await expect(row).toContainText(USERS.admin.name);
@@ -201,7 +206,8 @@ test.describe.serial("P4C-08 delete a doctor from Doctor Management", () => {
 
     await row.getByRole("button", { name: "Restore" }).click();
     await expect(row).toHaveCount(0);
-    await expect(picker.locator(`option[value="${ours.page}"]`)).toHaveCount(1);
+    await page.getByRole("button", { name: "Consultants" }).click();
+    await expect(listed).toHaveCount(1);
     const back = await one(`SELECT is_active FROM doctors WHERE id = $1`, [ours.page]);
     expect(back.is_active).toBe(true);
   });
@@ -211,9 +217,16 @@ test.describe.serial("P4C-08 delete a doctor from Doctor Management", () => {
     await gotoReady(page, "/doctor-management", () =>
       page.getByRole("heading", { name: "Doctor Management" }),
     );
-    await page.locator(".docmgmt-head select").selectOption(String(USERS.admin.id));
+    await page.getByRole("button", { name: "All staff" }).click();
+    await page
+      .getByRole("list", { name: "Doctor list" })
+      .getByRole("button")
+      .filter({ hasText: USERS.admin.name })
+      .first()
+      .click();
+    await expect(page.getByRole("heading", { name: USERS.admin.name })).toBeVisible();
     await expect(
-      page.locator(".docmgmt-head").getByRole("button", { name: "Delete doctor" }),
+      page.locator(".docmgmt-dochead").getByRole("button", { name: "Delete doctor" }),
     ).toBeDisabled();
   });
 });

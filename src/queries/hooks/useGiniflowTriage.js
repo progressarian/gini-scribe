@@ -81,6 +81,15 @@ export const useAssignVisit = () =>
       ).data,
   );
 
+export const useConsultFee = (visitId, doctorId, enabled) =>
+  useQuery({
+    queryKey: ["giniflow", "triage", "consult-fee", visitId, doctorId],
+    queryFn: async () =>
+      (await api.get(`${base}/${visitId}/consult-fee`, { params: { doctorId } })).data,
+    enabled: Boolean(enabled && visitId && doctorId),
+    staleTime: 30_000,
+  });
+
 export const useRerunTriage = () =>
   useTriageAction(
     async (date) => (await api.post(`${base}/auto`, {}, { params: date ? { date } : {} })).data,

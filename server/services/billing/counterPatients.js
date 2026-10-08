@@ -53,6 +53,8 @@ const COUNTER_SELECT = `
          bs.drafts, bs.paid_drafts, bs.finals, bs.pending_claims, bs.cleared_claims, bs.due,
          bs.draft_due, bs.open_drafts, bs.pay_back, bs.refunds_pending, bs.paid_back,
          cs.seen, cs.consultation_billed,
+         EXISTS (SELECT 1 FROM consultant_changes cc
+                  WHERE cc.visit_id = a.id AND cc.status = 'pending') AS consultant_changed,
          ts.tests_owed, ts.not_priced, ts.settled_orders, lcs.case_tests_owed
     FROM (${ARRIVAL_SELECT}) a
     JOIN giniflow_visits gv ON gv.id = a.id
@@ -166,12 +168,19 @@ function billHints(r) {
     tests: (r.tests_owed || 0) + (r.case_tests_owed || 0),
     notPriced: r.not_priced || 0,
     due: paise(r.due) + paise(r.draft_due),
+    consultantChanged: Boolean(r.consultant_changed),
   };
 }
 
 function groupOf(r, hints, status) {
   if (FINISHED_STATUSES.includes(status)) return COUNTER_GROUP.BILLED;
-  if (hints.consultation || hints.tests > 0 || hints.due > 0 || r.open_drafts > 0) {
+  if (
+    hints.consultation ||
+    hints.consultantChanged ||
+    hints.tests > 0 ||
+    hints.due > 0 ||
+    r.open_drafts > 0
+  ) {
     return COUNTER_GROUP.TO_BILL;
   }
   if (r.finals > 0 || r.paid_drafts > 0 || r.settled_orders > 0) return COUNTER_GROUP.BILLED;

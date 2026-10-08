@@ -14,6 +14,9 @@ import { LAB_ONLY_DOCTOR } from "../../../shared/labOnly.js";
 import { labOnlyHiddenPredicate } from "./labOnlyVisits.js";
 import { hideLabOnlyPatients } from "./floorSettings.js";
 import { IST_TODAY } from "./statusEngine.js";
+import { applyTrendBiomarkers, loadTrendSources } from "../opdBiomarkers.js";
+import { reassignConsultant } from "./reassign.js";
+import { STABILITY_RECENT_MONTHS, stabilityOf } from "../../../shared/biomarkerClassify.js";
 
 // The day BEFORE the day: are the reports in, what do the numbers say, who
 // should see them, and who will be a problem at 9am.
@@ -245,7 +248,7 @@ const DAY_SQL = `
          v.patient_id,
          v.visit_date::text                       AS visit_date,
          v.current_status,
-         v.category,
+         v.category, v.stability, v.stability_reasons,
          v.category_source,
          v.category_set_at,
          v.assigned_sd_id,
@@ -386,6 +389,9 @@ function buildCard(row) {
     appointmentStatus: row.appointment_status,
     arrived,
     category: row.category,
+    stability: row.stability
+      ? { state: row.stability, reasons: row.stability_reasons || [] }
+      : null,
     categorySource: row.category_source,
     categorySetAt: iso(row.category_set_at),
     categorySetBy: row.category_set_by_name,
@@ -572,7 +578,72 @@ export async function autoCategoriseDay(visitDate, { db = pool } = {}) {
     );
   }
 
-  return { date: visitDate, considered: rows.length, updated: changed.length };
+  const stability = await assessStabilityDay(visitDate, { db }).catch((e) => {
+    console.error("[Gini Flow] stable/unstable sweep failed:", e.message);
+    return null;
+  });
+  return { date: visitDate, considered: rows.length, updated: changed.length, stability };
+}
+
+const STABILITY_REST_MS = 2 * 60 * 1000;
+const stabilityAssessedAt = new Map();
+
+function dropStaleReadings(row, original, vitals, since) {
+  const bio = row.biomarkers;
+  const labDates = bio._lab_dates || {};
+  for (const key of Object.keys(bio)) {
+    if (key.startsWith("_")) continue;
+    const taken = labDates[key] ?? (original[key] == null ? vitals?.date : null);
+    if (taken && new Date(taken) < since) delete bio[key];
+  }
+}
+
+export async function assessStabilityDay(visitDate, { db = pool, force = false } = {}) {
+  const last = stabilityAssessedAt.get(visitDate) ?? 0;
+  if (!force && Date.now() - last < STABILITY_REST_MS) return 0;
+  stabilityAssessedAt.set(visitDate, Date.now());
+  const { rows } = await db.query(
+    `SELECT v.id, v.patient_id, v.stability, v.stability_reasons, a.biomarkers
+       FROM giniflow_visits v
+       LEFT JOIN appointments a ON a.id = v.appointment_id
+      WHERE v.visit_date = $1::date AND v.patient_id IS NOT NULL`,
+    [visitDate],
+  );
+  if (!rows.length) return 0;
+  const sources = await loadTrendSources(
+    [...new Set(rows.map((r) => r.patient_id))],
+    visitDate,
+    db,
+  );
+  const since = new Date(`${visitDate}T00:00:00Z`);
+  since.setUTCMonth(since.getUTCMonth() - STABILITY_RECENT_MONTHS);
+  const changed = rows
+    .map((r) => {
+      const original = r.biomarkers || {};
+      const row = { patient_id: r.patient_id, biomarkers: { ...original } };
+      applyTrendBiomarkers(row, sources);
+      dropStaleReadings(row, original, sources.vitalsByPt[r.patient_id], since);
+      const { stability, reasons } = stabilityOf(row);
+      return { id: r.id, before: r, stability, reasons };
+    })
+    .filter(
+      (r) =>
+        r.before.stability !== r.stability ||
+        JSON.stringify(r.before.stability_reasons ?? []) !== JSON.stringify(r.reasons),
+    );
+  if (!changed.length) return 0;
+  await db.query(
+    `UPDATE giniflow_visits v
+        SET stability = t.stability, stability_reasons = t.reasons, stability_at = NOW()
+       FROM UNNEST($1::uuid[], $2::text[], $3::jsonb[]) AS t(id, stability, reasons)
+      WHERE v.id = t.id`,
+    [
+      changed.map((r) => r.id),
+      changed.map((r) => r.stability),
+      changed.map((r) => JSON.stringify(r.reasons)),
+    ],
+  );
+  return changed.length;
 }
 
 // ── Coordinator writes ──────────────────────────────────────────────────────
@@ -691,18 +762,28 @@ export async function assign(visitId, { sdId, doctorId } = {}, actorId = null, d
     params.push(sd);
     sets.push(`assigned_sd_id = $${params.length}`);
   }
-  if (doctor !== undefined) {
+  if (doctor === null) {
     params.push(doctor);
     sets.push(`assigned_doctor_id = $${params.length}`);
   }
-  if (!sets.length) throw Object.assign(new Error("Nothing to assign"), { status: 400 });
+  if (!sets.length && doctor === undefined) {
+    throw Object.assign(new Error("Nothing to assign"), { status: 400 });
+  }
 
-  const { rows } = await db.query(
-    `UPDATE giniflow_visits SET ${sets.join(", ")}, updated_at = NOW()
-      WHERE id = $1
-      RETURNING id, assigned_sd_id, assigned_doctor_id`,
-    params,
-  );
+  const billing = doctor
+    ? (await reassignConsultant(visitId, doctor, { actorId }, db)).billing
+    : null;
+  const { rows } = sets.length
+    ? await db.query(
+        `UPDATE giniflow_visits SET ${sets.join(", ")}, updated_at = NOW()
+          WHERE id = $1
+          RETURNING id, assigned_sd_id, assigned_doctor_id`,
+        params,
+      )
+    : await db.query(
+        `SELECT id, assigned_sd_id, assigned_doctor_id FROM giniflow_visits WHERE id = $1`,
+        [visitId],
+      );
   if (!rows.length) throw Object.assign(new Error("No such visit"), { status: 404 });
 
   const named = await db.query(
@@ -728,6 +809,7 @@ export async function assign(visitId, { sdId, doctorId } = {}, actorId = null, d
     doctorId: rows[0].assigned_doctor_id,
     sdName: named.rows[0]?.sd_name ?? null,
     doctorName: named.rows[0]?.doctor_name ?? null,
+    billing,
   };
 }
 

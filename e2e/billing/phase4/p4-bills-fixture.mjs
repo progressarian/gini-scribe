@@ -443,6 +443,10 @@ export async function sweep(tag) {
     lines,
   ]);
   await query(`DELETE FROM bill_lines WHERE id = ANY($1)`, [lines]);
+  await query(`DELETE FROM consultant_changes WHERE visit_id = ANY($1) OR patient_id = ANY($2)`, [
+    visits,
+    patients,
+  ]).catch(() => {});
   await sweepDeposits(patients, bills);
   await query(`DELETE FROM payments WHERE bill_id = ANY($1)`, [bills]);
   await query(
@@ -477,6 +481,11 @@ export async function sweep(tag) {
   await query(`DELETE FROM giniflow_lab_orders WHERE visit_id = ANY($1)`, [visits]);
   await query(`DELETE FROM giniflow_visit_events WHERE visit_id = ANY($1)`, [visits]);
   await query(`DELETE FROM giniflow_visits WHERE id = ANY($1)`, [visits]);
+  await query(
+    `DELETE FROM appointment_change_log
+      WHERE appointment_id IN (SELECT id FROM appointments WHERE patient_id = ANY($1))`,
+    [patients],
+  ).catch(() => {});
   await query(`DELETE FROM appointments WHERE patient_id = ANY($1)`, [patients]);
   await query(`DELETE FROM walkin_bookings WHERE patient_id = ANY($1)`, [patients]).catch(() => {});
   await query(`DELETE FROM documents WHERE patient_id = ANY($1)`, [patients]);

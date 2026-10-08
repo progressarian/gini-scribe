@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useDoctorQueue, useStartConsult } from "../../queries/hooks/useGiniflowDoctor";
 import "../../styles/giniflow-station.css";
+import StabilityChip from "../../components/giniflow/StabilityChip";
 import StationNotice from "../../components/giniflow/StationNotice";
 import FullscreenButton from "../../components/giniflow/FullscreenButton";
 import useFullscreen from "../../hooks/useFullscreen";
@@ -13,11 +14,11 @@ import useFullscreen from "../../hooks/useFullscreen";
 // the floor's bottleneck queue, so the wait is the first thing it must say.
 
 const CATEGORY_BADGE = {
-  worse_out_of_range: { cls: "b-red", label: "🔴 Worse" },
-  worse_in_range: { cls: "b-amb", label: "🟠 Watch" },
-  getting_better: { cls: "b-amb", label: "🟡 Flag" },
-  in_control: { cls: "b-grn", label: "✅ In control" },
-  no_reports: { cls: "b-blu", label: "🔵 No reports" },
+  worse_out_of_range: { cls: "b-red", label: "🔴 HbA1c: Worse" },
+  worse_in_range: { cls: "b-amb", label: "🟠 HbA1c: Watch" },
+  getting_better: { cls: "b-amb", label: "🟡 HbA1c: Flag" },
+  in_control: { cls: "b-grn", label: "✅ HbA1c: In control" },
+  no_reports: { cls: "b-blu", label: "🔵 HbA1c: No reports" },
 };
 
 const PRIORITY_CHIP = {
@@ -176,6 +177,7 @@ function QueueCard({ card, now, group, onOpen }) {
           {card.name}
           {chip && <span className={`si-pri ${chip.cls}`}>{chip.label}</span>}
           {badge && <span className={`badge ${badge.cls}`}>{badge.label}</span>}
+          <StabilityChip stability={card.stability} />
           <span className="dc-visit">Visit {card.visitNumber ?? "—"}</span>
         </div>
         <div className="dc-meta">

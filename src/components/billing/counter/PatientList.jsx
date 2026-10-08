@@ -37,6 +37,7 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 function hintsOf(hints) {
   if (!hints) return [];
   return [
+    hints.consultantChanged && "Consultant changed — fee to settle",
     hints.consultation && "Consultation done — not billed",
     hints.tests > 0 && `${plural(hints.tests, "test")} ordered`,
     hints.notPriced > 0 && `${hints.notPriced} not priced`,

@@ -601,6 +601,21 @@ export async function clearInHealthray(billId, input, ctx, db = pool) {
   );
 }
 
+export async function applyDepositIn(client, billId, amount, ctx) {
+  if (!amount) return null;
+  const { rows } = await client.query(`SELECT version FROM bills WHERE id = $1`, [billId]);
+  if (!rows.length || !(await moneyOn(client, billId)).balance) return null;
+  return collectOnBill(
+    billId,
+    rows[0].version,
+    (outstanding) => [
+      { mode: DEPOSIT_MODE, amount: Math.min(amount, outstanding), reference: null },
+    ],
+    ctx,
+    client,
+  );
+}
+
 async function collectOnBill(billId, version, plan, ctx, db) {
   const id = cleanUuid(billId, "bill");
   return inTransaction(async (client) => {
@@ -759,6 +774,16 @@ async function refundOf(db, creditNoteId) {
   const row = rows[0];
   if (!row) return null;
   if (row.id) return row;
+  if (row.credit_kind === "consultant_change") {
+    return {
+      id: null,
+      reason: "Consultant changed",
+      requested_mode: DEPOSIT_MODE,
+      approved_mode: DEPOSIT_MODE,
+      mode_reason: null,
+      decision_note: null,
+    };
+  }
   if (row.credit_kind !== "discount") return null;
   return {
     id: null,

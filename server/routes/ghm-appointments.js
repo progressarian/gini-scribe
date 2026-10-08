@@ -1899,26 +1899,31 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
       req.body.alt_phone = alts.value;
     }
 
-    if ("booking_status" in req.body || "time_slot" in req.body) {
+    if (
+      "booking_status" in req.body ||
+      "time_slot" in req.body ||
+      "preferred_time_slot" in req.body
+    ) {
       const cur = await pool.query(
-        `SELECT time_slot, booking_status,
+        `SELECT time_slot, preferred_time_slot, booking_status,
                 COALESCE(appointment_date < ${IST_TODAY}, FALSE) AS past
            FROM appointments WHERE id=$1`,
         [id],
       );
+      const past = "appointment_date" in req.body ? false : !!cur.rows[0]?.past;
+      const slotField = past ? "preferred_time_slot" : "time_slot";
       const slot = String(
-        ("time_slot" in req.body ? req.body.time_slot : cur.rows[0]?.time_slot) || "",
+        (slotField in req.body ? req.body[slotField] : cur.rows[0]?.[slotField]) || "",
       ).trim();
       const wasBooked = cur.rows[0]?.booking_status === "booked";
-      const past = "appointment_date" in req.body ? false : !!cur.rows[0]?.past;
-      if (req.body.booking_status === "booked" && !wasBooked && (!slot || past))
+      if (req.body.booking_status === "booked" && !wasBooked && !slot)
         return res.status(400).json({
           error: past
-            ? "This is a past visit. Book the next appointment with a time slot instead."
+            ? "Choose the patient's preferred time before marking them booked."
             : "Allocate a time slot before marking this patient booked.",
         });
-      if ("time_slot" in req.body && !("booking_status" in req.body)) {
-        if (slot && !past && !wasBooked) req.body.booking_status = "booked";
+      if (slotField in req.body && !("booking_status" in req.body)) {
+        if (slot && !wasBooked) req.body.booking_status = "booked";
         if (!slot && wasBooked) req.body.booking_status = "";
         if ("booking_status" in req.body) sentKeys.add("booking_status");
       }

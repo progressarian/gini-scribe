@@ -67,7 +67,7 @@ router.post("/convert-heic", async (req, res) => {
 router.get("/doctors", async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT id, name, short_name, specialty, qualification, role, is_chief FROM doctors WHERE is_active=true ORDER BY role, name",
+      "SELECT id, name, short_name, specialty, qualification, role, is_chief, vitals_rest FROM doctors WHERE is_active=true ORDER BY role, name",
     );
     res.json(result.rows);
   } catch (e) {
@@ -284,7 +284,7 @@ router.post("/doctors", requireCapability(CAPABILITIES.ADMIN), async (req, res) 
 // alone, so the Chief toggle and the qualification box save independently.
 router.patch("/doctors/:id", requireCapability(CAPABILITIES.ADMIN), async (req, res) => {
   try {
-    const { is_chief, qualification } = req.body || {};
+    const { is_chief, qualification, vitals_rest } = req.body || {};
     const sets = [];
     const params = [req.params.id];
 
@@ -294,6 +294,14 @@ router.patch("/doctors/:id", requireCapability(CAPABILITIES.ADMIN), async (req, 
       }
       params.push(is_chief);
       sets.push(`is_chief=$${params.length}`);
+    }
+
+    if (vitals_rest !== undefined) {
+      if (typeof vitals_rest !== "boolean") {
+        return res.status(400).json({ error: "vitals_rest must be a boolean" });
+      }
+      params.push(vitals_rest);
+      sets.push(`vitals_rest=$${params.length}`);
     }
 
     if (qualification !== undefined) {
@@ -311,7 +319,7 @@ router.patch("/doctors/:id", requireCapability(CAPABILITIES.ADMIN), async (req, 
 
     const r = await pool.query(
       `UPDATE doctors SET ${sets.join(", ")} WHERE id=$1
-        RETURNING id, name, short_name, is_chief, qualification`,
+        RETURNING id, name, short_name, is_chief, qualification, vitals_rest`,
       params,
     );
     if (!r.rows.length) return res.status(404).json({ error: "Doctor not found" });

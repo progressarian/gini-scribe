@@ -39,6 +39,8 @@ import {
   billingDepositRefundRequestSchema,
   billingDepositTransferSchema,
   billingClearHealthraySchema,
+  billingConsultantChangeConfirmSchema,
+  billingConsultantChangeDismissSchema,
   billingPayOutSchema,
   billingPdfQuerySchema,
   billingPreviewSchema,
@@ -66,6 +68,7 @@ import { generateReceiptPdf, generateRefundReceiptPdf } from "../services/billin
 import * as creditNotes from "../services/billing/creditNotes.js";
 import * as bills from "../services/billing/bills.js";
 import * as payments from "../services/billing/payments.js";
+import * as consultantChange from "../services/billing/consultantChange.js";
 import {
   getDeposit,
   payOutRefund,
@@ -295,6 +298,32 @@ router.post(
     await bills.clearReceptionLines(req.params.visitId, opening);
     return bills.openDraft(req.params.visitId, opening);
   }),
+);
+
+router.get(
+  `${BASE}/visits/:visitId/consultant-change`,
+  desk,
+  run("Consultant change waiting", 200, (req) =>
+    consultantChange.consultantChangeForVisit(req.params.visitId, ctx(req)),
+  ),
+);
+
+router.post(
+  `${BASE}/consultant-changes/:changeId/confirm`,
+  desk,
+  validate(billingConsultantChangeConfirmSchema, BILLING_DESK_LABELS),
+  run("Confirm the consultant change", 200, (req) =>
+    consultantChange.confirmConsultantChange(req.params.changeId, req.body, ctx(req)),
+  ),
+);
+
+router.post(
+  `${BASE}/consultant-changes/:changeId/dismiss`,
+  desk,
+  validate(billingConsultantChangeDismissSchema, BILLING_DESK_LABELS),
+  run("Dismiss the consultant change", 200, (req) =>
+    consultantChange.dismissConsultantChange(req.params.changeId, req.body, ctx(req)),
+  ),
 );
 
 router.get(

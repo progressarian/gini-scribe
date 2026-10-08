@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { one, query } from "../helpers/db.mjs";
-import { USERS } from "../fixtures/data.mjs";
+import { CONSULTANTS, USERS } from "../fixtures/data.mjs";
 import { loginAs } from "../helpers/auth.mjs";
 import { gotoReady } from "../helpers/browser.mjs";
 import { assertTestDatabase } from "../setup/guard.mjs";
@@ -19,8 +19,8 @@ let rested;
 
 const failure = (promise) => promise.then(() => null).catch((error) => error);
 
-async function arrived(label, minutesAgo) {
-  const { visit } = await extraVisit(ids, label, { healthray: false });
+async function arrived(label, minutesAgo, doctorId = CONSULTANTS.banshali.id) {
+  const { visit } = await extraVisit(ids, label, { healthray: false, doctorId });
   await query(`UPDATE giniflow_visits SET current_status = 'checked_in' WHERE id = $1`, [visit]);
   await query(
     `INSERT INTO giniflow_visit_events (visit_id, status, actor_role, occurred_at)
@@ -61,6 +61,7 @@ test.describe.serial("G67 vitals waits the rest time after arrival", () => {
         ).n;
       })
       .toBe(0);
+    await query(`UPDATE doctors SET vitals_rest = true WHERE id = $1`, [CONSULTANTS.rahul.id]);
     await tearDown(ids);
   });
 
@@ -114,6 +115,15 @@ test.describe.serial("G67 vitals waits the rest time after arrival", () => {
   });
 
   test("5. vitals cannot be saved until the patient is called to the station", async ({ page }) => {
+    const held = await query(
+      `SELECT v.id FROM giniflow_visits v
+        WHERE v.visit_date = $1::date AND v.current_status = 'with_vitals' AND v.id <> $2
+          AND (SELECT e.actor_id FROM giniflow_visit_events e
+                WHERE e.visit_id = v.id AND e.status = 'with_vitals'
+                ORDER BY e.occurred_at DESC LIMIT 1) = $3`,
+      [ids.day, rested, USERS.admin.id],
+    );
+    for (const row of held.rows) await vitals.releaseVitals(row.id, USERS.admin.id, db);
     const refused = await failure(vitals.saveVitals(rested, { weight: 70 }, db));
     expect(refused?.status).toBe(409);
     expect(refused?.message).toMatch(/Call this patient to the station/);
@@ -135,5 +145,41 @@ test.describe.serial("G67 vitals waits the rest time after arrival", () => {
 
     const saved = await vitals.saveVitals(rested, { weight: 70 }, db);
     expect(saved.movedTo).toBeTruthy();
+  });
+
+  test("6. a doctor switched off in Settings has patients who skip the rest", async ({ page }) => {
+    await loginAs(page, "admin");
+    await gotoReady(page, "/doctor-management", () =>
+      page.getByRole("heading", { name: "Doctor Management" }),
+    );
+    await page
+      .getByRole("list", { name: "Doctor list" })
+      .getByRole("button")
+      .filter({ hasText: CONSULTANTS.rahul.name })
+      .click();
+    await page.getByRole("tab", { name: "Settings" }).click();
+    const toggle = page.getByLabel(`${VITALS_REST_MINUTES}-min rest before vitals`);
+    await expect(toggle).toBeChecked();
+    await toggle.click();
+    await expect(toggle).not.toBeChecked();
+    await expect
+      .poll(
+        async () =>
+          (await one(`SELECT vitals_rest FROM doctors WHERE id = $1`, [CONSULTANTS.rahul.id]))
+            .vitals_rest,
+      )
+      .toBe(false);
+
+    const exempt = await arrived("NoRest", 1, CONSULTANTS.rahul.id);
+    const { row } = await queueRow(exempt);
+    expect(row.restUntil).toBeNull();
+    expect((await queueRow(resting)).row.restUntil).toBeTruthy();
+    expect((await vitals.getVitalsPatient(exempt, db)).restUntil).toBeNull();
+    await vitals.startVitals(exempt, USERS.admin.id, db);
+    expect(
+      (await one(`SELECT current_status FROM giniflow_visits WHERE id = $1`, [exempt]))
+        .current_status,
+    ).toBe("with_vitals");
+    await vitals.releaseVitals(exempt, USERS.admin.id, db);
   });
 });

@@ -1374,6 +1374,24 @@ export const giniflowTriageQuerySchema = z.object({
 // Both writes in one body, because the coordinator makes both in one gesture.
 // `category: null` is meaningful rather than absent: it hands the row back to
 // the auto engine, which is the only way to undo an override.
+export const appointmentConsultantSchema = z.object({
+  doctorId: z.coerce.number().int().positive(),
+});
+
+export const giniflowConsultFeeQuerySchema = z.object({
+  doctorId: z.coerce.number().int().positive(),
+});
+
+export const billingConsultantChangeConfirmSchema = z.object({
+  leftover: z.enum(["deposit", "refund"]).optional(),
+  refund_mode: z.enum(["cash", "card", "upi"]).nullable().optional(),
+  note: z.string().max(300).nullable().optional(),
+});
+
+export const billingConsultantChangeDismissSchema = z.object({
+  note: z.string().trim().min(1, "Say why the bill stays as it is").max(300),
+});
+
 export const giniflowTriagePatchSchema = z
   .object({
     category: z.enum(CATEGORIES).nullable().optional(),

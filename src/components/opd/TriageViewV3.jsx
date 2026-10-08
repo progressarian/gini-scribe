@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import api from "../../services/api";
 import { toast } from "../../stores/uiStore";
-import { targetStatus, BIO_TIER } from "../../utils/biomarkerClassify.js";
-import { triageTier } from "./TriageView.jsx";
+import { targetStatus, BIO_TIER, triageTier } from "../../utils/biomarkerClassify.js";
 import { useIsMobile } from "../../hooks/useIsMobile.js";
 
 // ── Design tokens ──

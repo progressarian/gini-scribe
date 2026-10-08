@@ -3,12 +3,22 @@ import { createRequire } from "module";
 import pool from "../config/db.js";
 import { LIVE_LAB_CASE_SQL } from "../services/giniflow/testsHold.js";
 import { handleError } from "../utils/errorHandler.js";
-import { normalizeWhenToTake } from "../schemas/index.js";
+import {
+  appointmentConsultantSchema,
+  giniflowConsultFeeQuerySchema,
+  normalizeWhenToTake,
+} from "../schemas/index.js";
+import { validate, validateQuery } from "../middleware/validate.js";
+import { appointmentConsultFee, reassignAppointment } from "../services/giniflow/reassign.js";
 import { sortDiagnoses } from "../utils/diagnosisSort.js";
 import { invalidateAppointmentSummaries } from "../services/summaryCache.js";
 import { syncTodaysShow } from "../services/cron/todaysShowSync.js";
 import { markAppointmentAsSeen } from "../services/healthray/db.js";
-import { getCanonical } from "../utils/labCanonical.js";
+import {
+  applyTrendBiomarkers,
+  loadTrendSources,
+  normalizeBiomarkerKeys,
+} from "../services/opdBiomarkers.js";
 import { getCohort, viewFor, MARKERS } from "../services/cohortOutcomes.js";
 import {
   stripFormPrefix,
@@ -331,23 +341,6 @@ const num = (v) => {
   return isNaN(n) ? null : n;
 };
 
-// Intake forms historically write blood pressure as bpSys / bpDia and weight
-// fields with mixed casing. The frontend tier classifier reads canonical keys
-// (sbp / dbp). Normalising at the API layer means every consumer sees the
-// same shape — without this, the daily dashboard and period report apply the
-// classifier against different field names and disagree on the outcome.
-function normalizeBiomarkerKeys(bio) {
-  if (!bio || typeof bio !== "object") return bio;
-  const aliases = { bpSys: "sbp", bpDia: "dbp", BPSys: "sbp", BPDia: "dbp" };
-  for (const [from, to] of Object.entries(aliases)) {
-    if (bio[from] != null && bio[to] == null) {
-      const n = parseFloat(bio[from]);
-      if (!isNaN(n)) bio[to] = n;
-    }
-  }
-  return bio;
-}
-
 // ── POST /api/opd/sync-noshow — trigger Google Sheet no-show sync on demand ──
 router.post("/opd/sync-noshow", async (_req, res) => {
   try {
@@ -630,198 +623,7 @@ router.get("/opd/appointments", async (req, res) => {
       }
     }
 
-    // 4) Latest + previous lab_results per canonical (for trend classification).
-    //    We pull the two most-recent values per (patient, canonical) so the
-    //    frontend tier-classifier has cur+prev for every Tier-1/Tier-2 marker.
-    const CANONICAL_TO_BIO = {
-      HbA1c: "hba1c",
-      FBS: "fg",
-      PPBS: "ppbs",
-      LDL: "ldl",
-      HDL: "hdl",
-      Triglycerides: "tg",
-      UACR: "uacr",
-      Microalbumin: "uacr",
-      Creatinine: "creatinine",
-      TSH: "tsh",
-      Haemoglobin: "hb",
-      Hemoglobin: "hb",
-      eGFR: "egfr",
-      ALT: "alt",
-      AST: "ast",
-    };
-    const labByPt = {};
-    const prevLabByPt = {};
-    if (patientIds.length) {
-      // Mirror /api/visit/:patientId — pull every lab row (canonical_name may
-      // be NULL on legacy entries) and resolve the canonical name in JS via
-      // getCanonical(test_name). Without this the dashboard misses prior
-      // readings for patients whose lab rows pre-date the canonical_name
-      // backfill, even though /visit page renders them fine.
-      const { rows: labR } = await pool.query(
-        `SELECT patient_id, canonical_name, test_name, result, test_date, created_at
-           FROM lab_results
-          WHERE patient_id = ANY($1)
-            AND result IS NOT NULL
-          ORDER BY patient_id,
-                   test_date DESC NULLS LAST,
-                   created_at DESC`,
-        [patientIds],
-      );
-      // Per-(patient, bioKey) we collect every reading and pick the two most
-      // recent. Aliases (Microalbumin/UACR, Hemoglobin/Haemoglobin) collapse
-      // onto the same bioKey via CANONICAL_TO_BIO.
-      const seen = {}; // patient_id → bioKey → array of {val, date}
-      for (const r of labR) {
-        const canonical = r.canonical_name || getCanonical(r.test_name) || r.test_name;
-        const bioKey = CANONICAL_TO_BIO[canonical];
-        if (!bioKey) continue;
-        const val = parseFloat(r.result);
-        if (isNaN(val)) continue;
-        const byPt = seen[r.patient_id] || (seen[r.patient_id] = {});
-        const list = byPt[bioKey] || (byPt[bioKey] = []);
-        list.push({ val, date: r.test_date });
-      }
-      for (const [pid, byKey] of Object.entries(seen)) {
-        for (const [bioKey, list] of Object.entries(byKey)) {
-          // Rows arrived ordered by test_date DESC, so list[0] is latest.
-          if (list.length >= 1) {
-            if (!labByPt[pid]) labByPt[pid] = {};
-            labByPt[pid][bioKey] = { val: list[0].val, date: list[0].date };
-          }
-          if (list.length >= 2) {
-            if (!prevLabByPt[pid]) prevLabByPt[pid] = {};
-            prevLabByPt[pid][bioKey] = { val: list[1].val, date: list[1].date };
-          }
-        }
-      }
-    }
-
-    // 4b) Latest + previous BP / weight / BMI from vitals (not in lab_results).
-    const vitalsByPt = {};
-    const prevVitalsByPt = {};
-    if (patientIds.length) {
-      try {
-        const { rows: vR } = await pool.query(
-          `SELECT patient_id, bp_sys, bp_dia, weight, bmi, recorded_at, rn
-           FROM (
-             SELECT patient_id, bp_sys, bp_dia, weight, bmi, recorded_at,
-                    ROW_NUMBER() OVER (
-                      PARTITION BY patient_id
-                      ORDER BY recorded_at DESC NULLS LAST
-                    ) AS rn
-               FROM vitals
-              WHERE patient_id = ANY($1)
-                AND (bp_sys IS NOT NULL OR weight IS NOT NULL OR bmi IS NOT NULL)
-           ) t
-           WHERE rn <= 2`,
-          [patientIds],
-        );
-        for (const r of vR) {
-          // ROW_NUMBER() is bigint and node-pg hands bigints back as strings,
-          // so a strict `r.rn === 1` never matched and every row landed in the
-          // "previous" bucket — leaving vitalsByPt empty and the weight/BMI
-          // fallback below dead. Coerce before comparing.
-          const bucket = Number(r.rn) === 1 ? vitalsByPt : prevVitalsByPt;
-          bucket[r.patient_id] = {
-            sbp: r.bp_sys != null ? Number(r.bp_sys) : null,
-            dbp: r.bp_dia != null ? Number(r.bp_dia) : null,
-            weight: r.weight != null ? Number(r.weight) : null,
-            bmi: r.bmi != null ? Number(r.bmi) : null,
-            date: r.recorded_at,
-          };
-        }
-      } catch {
-        // vitals table may not exist in all deployments — silently skip.
-      }
-    }
-
-    // 4b-app) Patient-app readings (patient_vitals_log) and clinic fasting-rbs
-    //         readings — same data the /visit page surfaces. Without these the
-    //         dashboard misses values that exist only as patient-logged
-    //         readings (BP, weight, BMI) or as fasting fingersticks (rbs with
-    //         meal_type='Fasting' on either the clinic vitals or the app log).
-    const appReadingsByPt = {}; // patient_id → bioKey → array of {val, date}
-    const pushApp = (pid, k, val, d) => {
-      const n = parseFloat(val);
-      if (!isFinite(n)) return;
-      const byPt = appReadingsByPt[pid] || (appReadingsByPt[pid] = {});
-      const list = byPt[k] || (byPt[k] = []);
-      list.push({ val: n, date: d || null });
-    };
-    if (patientIds.length) {
-      try {
-        const { rows: appR } = await pool.query(
-          `SELECT patient_id, bp_systolic, bp_diastolic, weight_kg, bmi,
-                  rbs, meal_type, waist, body_fat,
-                  COALESCE(created_at, recorded_date::timestamp) AS recorded_at
-             FROM patient_vitals_log
-            WHERE patient_id = ANY($1)`,
-          [patientIds],
-        );
-        for (const r of appR) {
-          const d = r.recorded_at;
-          pushApp(r.patient_id, "sbp", r.bp_systolic, d);
-          pushApp(r.patient_id, "dbp", r.bp_diastolic, d);
-          pushApp(r.patient_id, "weight", r.weight_kg, d);
-          pushApp(r.patient_id, "bmi", r.bmi, d);
-          pushApp(r.patient_id, "waist", r.waist, d);
-          pushApp(r.patient_id, "bodyFat", r.body_fat, d);
-          if (r.rbs != null && (r.meal_type || "").toLowerCase() === "fasting") {
-            pushApp(r.patient_id, "fg", r.rbs, d);
-          }
-        }
-      } catch {
-        // patient_vitals_log table may not exist in all deployments.
-      }
-      try {
-        const { rows: fastR } = await pool.query(
-          `SELECT patient_id, rbs, recorded_at
-             FROM vitals
-            WHERE patient_id = ANY($1)
-              AND rbs IS NOT NULL
-              AND LOWER(COALESCE(meal_type, '')) = 'fasting'`,
-          [patientIds],
-        );
-        for (const r of fastR) pushApp(r.patient_id, "fg", r.rbs, r.recorded_at);
-      } catch {
-        // vitals.meal_type/rbs may be absent on legacy deployments.
-      }
-    }
-
-    // 4c) Historical biomarker fallback — pull every prior appointment's
-    //     biomarkers JSON for these patients and merge newest-first per key.
-    //     Many markers (FBS/LDL/TG) aren't repeated each visit and may not be
-    //     in lab_results at all, so prevLabByPt comes up empty. Walking the
-    //     appointment history fills the gap with the most recent prior value
-    //     regardless of how old it is.
-    const prevHistByPt = {};
-    if (patientIds.length) {
-      try {
-        const { rows: histR } = await pool.query(
-          `SELECT patient_id, biomarkers, appointment_date
-             FROM appointments
-            WHERE patient_id = ANY($1::int[])
-              AND appointment_date < $2
-              AND biomarkers IS NOT NULL
-            ORDER BY patient_id, appointment_date DESC NULLS LAST, created_at DESC`,
-          [patientIds, date],
-        );
-        for (const r of histR) {
-          const bio = normalizeBiomarkerKeys(r.biomarkers || {});
-          const bucket = prevHistByPt[r.patient_id] || (prevHistByPt[r.patient_id] = {});
-          for (const [k, v] of Object.entries(bio)) {
-            if (k.startsWith("_")) continue;
-            const n = parseFloat(v);
-            if (!isFinite(n)) continue;
-            // Rows arrive newest-first, so the first reading per key wins.
-            if (bucket[k] == null) bucket[k] = { val: n, date: r.appointment_date };
-          }
-        }
-      } catch {
-        // appointments.biomarkers may be absent on legacy rows — skip silently.
-      }
-    }
+    const trend = await loadTrendSources(patientIds, date, pool);
 
     // 5) Merge aggregates back into each appointment row.
     for (const row of rows) {
@@ -876,108 +678,7 @@ router.get("/opd/appointments", async (req, res) => {
         row.healthray_diagnoses = sortDiagnoses(row.healthray_diagnoses);
       }
 
-      // Biomarker enrichment from latest labs.
-      const labs = labByPt[row.patient_id];
-      if (labs) {
-        const bio = row.biomarkers || {};
-        const dates = bio._lab_dates || {};
-        for (const [bioKey, { val, date: d }] of Object.entries(labs)) {
-          if (!dates[bioKey] || d >= dates[bioKey]) {
-            bio[bioKey] = val;
-            if (!bio._lab_dates) bio._lab_dates = {};
-            bio._lab_dates[bioKey] = d;
-          }
-        }
-        row.biomarkers = bio;
-      }
-
-      // Vitals enrichment (BP / weight / BMI not in lab_results).
-      const vit = vitalsByPt[row.patient_id];
-      if (vit) {
-        const bio = row.biomarkers || {};
-        if (vit.sbp != null && bio.sbp == null) bio.sbp = vit.sbp;
-        if (vit.dbp != null && bio.dbp == null) bio.dbp = vit.dbp;
-        if (vit.weight != null && bio.weight == null) bio.weight = vit.weight;
-        if (vit.bmi != null && bio.bmi == null) bio.bmi = vit.bmi;
-        row.biomarkers = bio;
-      }
-      // Canonicalise key names (bpSys → sbp, bpDia → dbp) so the frontend
-      // classifier sees the same shape regardless of intake-form vintage.
-      row.biomarkers = normalizeBiomarkerKeys(row.biomarkers || {});
-
-      // Previous values per biomarker — used by frontend tier classifier.
-      // Surface as a single `prev_biomarkers` JSON object so we don't pollute
-      // the row with N nullable columns.
-      const prevLabs = prevLabByPt[row.patient_id] || {};
-      const prevVit = prevVitalsByPt[row.patient_id] || {};
-      const prevHist = prevHistByPt[row.patient_id] || {};
-      const appReads = appReadingsByPt[row.patient_id] || {};
-      // For each biomarker key, gather every candidate reading (with its date)
-      // across lab_results (latest + prev), vitals, appointment history, and
-      // patient-app log. Then take the two with the latest dates: the most
-      // recent becomes the chip's current value (only if not already in
-      // row.biomarkers), and the second-most-recent becomes the prev. This
-      // mirrors how the /visit page chart sources values from every stream.
-      // Build per-biomarker candidate lists. We tag each candidate with its
-      // *source priority* so that authoritative date streams (lab_results
-      // test_date, vitals recorded_at, patient-app log timestamps) outrank
-      // appointment-history fallbacks, where the only available date is the
-      // appointment_date — which can be much newer than the actual reading
-      // and would otherwise wrongly bubble an ancient value to the top.
-      //   1 = real test/recorded date (lab_results, vitals, app readings)
-      //   2 = appointment_date fallback (prevHistByPt)
-      const candidates = {};
-      const addCand = (k, val, d, priority = 1) => {
-        if (val == null || !isFinite(val)) return;
-        const list = candidates[k] || (candidates[k] = []);
-        list.push({ val, date: d || null, priority });
-      };
-      for (const [k, { val, date: d }] of Object.entries(prevLabs)) addCand(k, val, d, 1);
-      for (const [k, entry] of Object.entries(prevHist)) addCand(k, entry.val, entry.date, 2);
-      if (prevVit.sbp != null) addCand("sbp", prevVit.sbp, prevVit.date, 1);
-      if (prevVit.dbp != null) addCand("dbp", prevVit.dbp, prevVit.date, 1);
-      if (prevVit.weight != null) addCand("weight", prevVit.weight, prevVit.date, 1);
-      if (prevVit.bmi != null) addCand("bmi", prevVit.bmi, prevVit.date, 1);
-      // Patient-app readings (rbs fasting → fg, app BP/weight/BMI/waist).
-      for (const [k, list] of Object.entries(appReads)) {
-        for (const e of list) addCand(k, e.val, e.date, 1);
-      }
-      // For each key, prefer the highest-priority source. Within the chosen
-      // priority tier, sort newest-first by date and pick the freshest non-
-      // current reading. Falls through to the next priority only if the
-      // higher-priority tier yields nothing usable.
-      const curBio = row.biomarkers || {};
-      const prev = {};
-      for (const [k, list] of Object.entries(candidates)) {
-        const cur = parseFloat(curBio[k]);
-        // Walk priority tiers in ascending order (1 first).
-        const tiers = [...new Set(list.map((c) => c.priority))].sort((a, b) => a - b);
-        for (const tier of tiers) {
-          const tierList = list
-            .filter((c) => c.priority === tier)
-            .sort((x, y) => {
-              const dx = x.date ? new Date(x.date).getTime() : 0;
-              const dy = y.date ? new Date(y.date).getTime() : 0;
-              return dy - dx;
-            });
-          let picked = null;
-          for (const c of tierList) {
-            if (isFinite(cur) && c.val === cur) continue;
-            picked = c.val;
-            break;
-          }
-          if (picked != null) {
-            prev[k] = picked;
-            break;
-          }
-        }
-      }
-      row.prev_biomarkers = normalizeBiomarkerKeys(prev);
-      // Backwards-compat field: only set when the merged candidate logic
-      // actually found a real prior reading. We don't fall back to aggMap's
-      // OFFSET-1 value because it can echo today's reading when lab_results
-      // stores duplicate rows; that would render the chip as X→X.
-      row.prev_hba1c = prev.hba1c != null ? prev.hba1c : null;
+      applyTrendBiomarkers(row, trend);
 
       delete row._resolved_file_no;
     }
@@ -1222,6 +923,41 @@ router.post("/appointments/:id/resync-condata", async (req, res) => {
     handleError(res, e, "Resync con_data");
   }
 });
+
+router.get(
+  "/appointments/:id/consult-fee",
+  validateQuery(giniflowConsultFeeQuerySchema),
+  async (req, res) => {
+    try {
+      res.json(
+        await appointmentConsultFee(Number(req.params.id), Number(req.query.doctorId), {
+          role: req.doctor?.role ?? null,
+        }),
+      );
+    } catch (e) {
+      if (e.status && e.status < 500) return res.status(e.status).json({ error: e.message });
+      handleError(res, e, "Consultant fee preview");
+    }
+  },
+);
+
+router.post(
+  "/appointments/:id/consultant",
+  validate(appointmentConsultantSchema),
+  async (req, res) => {
+    try {
+      res.json(
+        await reassignAppointment(Number(req.params.id), req.body.doctorId, {
+          actorId: req.doctor?.doctor_id ?? null,
+          role: req.doctor?.role ?? null,
+        }),
+      );
+    } catch (e) {
+      if (e.status && e.status < 500) return res.status(e.status).json({ error: e.message });
+      handleError(res, e, "Reassign consultant");
+    }
+  },
+);
 
 // ── PATCH /api/appointments/:id — status / category / doctor ─────────────────
 // When status → "seen", creates a consultation and links all OPD data

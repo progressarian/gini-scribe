@@ -114,13 +114,22 @@ test.describe("GHM: a booking needs a time slot", () => {
     expect((await visitRow(id)).booking_status).toBeNull();
   });
 
-  test("6. a past visit cannot be marked booked even though it kept its old slot", async () => {
+  test("6. a follow-up row needs the patient's preferred time, not the old visit's slot", async () => {
     const { id } = await appointmentFor(patient, { offset: -60, slot: SLOT, status: "completed" });
-    const res = await api.patch(`/api/ghm-appointments/${id}`, {
+    const refused = await api.patch(`/api/ghm-appointments/${id}`, {
       data: { booking_status: "booked" },
     });
-    expect(res.status()).toBe(400);
-    expect((await res.json()).error).toMatch(/past visit/i);
+    expect(refused.status()).toBe(400);
+    expect((await refused.json()).error).toMatch(/preferred time/i);
+
+    const res = await api.patch(`/api/ghm-appointments/${id}`, {
+      data: { preferred_time_slot: "10 AM to 11 AM" },
+    });
+    expect(res.ok()).toBeTruthy();
+    expect((await visitRow(id)).booking_status).toBe("booked");
+
+    await api.patch(`/api/ghm-appointments/${id}`, { data: { preferred_time_slot: "" } });
+    expect((await visitRow(id)).booking_status).toBeNull();
   });
 
   test("7. cancelling is always allowed", async () => {

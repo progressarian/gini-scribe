@@ -46,17 +46,18 @@ import { useTriageStaff, useAssignVisit } from "../../queries/hooks/useGiniflowT
 import LiveBadge from "../../components/giniflow/LiveBadge";
 import { dayClock } from "../../lib/giniflowTime";
 import useDebounced from "../../hooks/useDebounced";
+import StabilityChip from "../../components/giniflow/StabilityChip";
 import "../../styles/giniflow.css";
 
 // Each category needs its own mark: 🟡 for both "worse in range" and "getting
 // better" made two clinically opposite states look identical (GF-30). The title
 // carries the words, so the dot is never the only signal (GF-16).
 const CATEGORY_DOT = {
-  worse_out_of_range: { icon: "🔴", label: "Worse — out of range" },
-  worse_in_range: { icon: "🟠", label: "Worse — still in range" },
-  getting_better: { icon: "🟡", label: "Getting better" },
-  in_control: { icon: "✅", label: "In control" },
-  no_reports: { icon: "🔵", label: "No reports" },
+  worse_out_of_range: { icon: "🔴", label: "HbA1c: Worse — out of range" },
+  worse_in_range: { icon: "🟠", label: "HbA1c: Worse — still in range" },
+  getting_better: { icon: "🟡", label: "HbA1c: Getting better" },
+  in_control: { icon: "✅", label: "HbA1c: In control" },
+  no_reports: { icon: "🔵", label: "HbA1c: No reports" },
 };
 
 // Queue statuses are folded into the station they feed, so the projected list
@@ -519,6 +520,11 @@ function PatientCard({
           {card.age}
           {(card.sex || "")[0] || ""} · {card.fileNo || "—"} · Visit {card.visitNumber ?? "—"}
         </div>
+        {!card.labOnly && card.stability && (
+          <div className="pc-stab">
+            <StabilityChip stability={card.stability} />
+          </div>
+        )}
         {isLabOnly && !!card.labTests?.length && (
           <div className="pc-tests" title={card.labTests.join(" · ")}>
             {card.labTests.join(" · ")}
@@ -1692,7 +1698,12 @@ export default function FlowManagerPage() {
     assignMutation.mutate(
       { visitId, assignedDoctorId: doctorId },
       {
-        onSuccess: () => showToast(`✓ ${doctorName} assigned — the patient is back on the board`),
+        onSuccess: (data) =>
+          showToast(
+            data?.assignment?.billing?.change_id
+              ? `✓ ${doctorName} assigned — the Billing Counter will settle the fee difference`
+              : `✓ ${doctorName} assigned — the patient is back on the board`,
+          ),
         onError: (e) =>
           showToast(e?.response?.data?.error || "Could not assign that patient — nothing changed"),
       },

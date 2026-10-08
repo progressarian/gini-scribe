@@ -21,6 +21,7 @@ import {
 } from "../../../shared/testCancelReasons.js";
 import { machineCaseListOnly } from "../../../shared/manualFloor.js";
 import { LAB_TEST_STEP_IDS } from "../../../shared/journeyOrder.js";
+import { CHAIN } from "../../../shared/giniflowStatus.js";
 import { createLogger } from "../logger.js";
 import { billReadsBlockedUntil } from "./healthrayRefresh.js";
 import { BILL_MIN_GAP_MS } from "../healthray/client.js";
@@ -76,9 +77,13 @@ const NEWER_THAN_BILL_SQL = (fileNoExpr) => `EXISTS (
           OR EXISTS (SELECT 1 FROM appointments na
                       WHERE na.patient_id = v.patient_id AND na.appointment_date = v.visit_date
                         AND na.created_at > nb.read_at)))`;
+const BEFORE_RX = CHAIN.slice(0, CHAIN.indexOf("rx_pending"));
+const TRIMMED_BEFORE_RX_SQL = `(${TESTS_TRIMMED_SQL}
+  AND v.current_status = ANY(ARRAY[${BEFORE_RX.map((st) => `'${st}'`).join(", ")}]))`;
 const BILL_TIER_SQL = `(CASE
   WHEN NOT ${BILLED_SQL} AND ${UNCONFIRMED_TESTS_SQL} THEN 'A'
   WHEN ${NEWER_THAN_BILL_SQL("(SELECT fp.file_no FROM patients fp WHERE fp.id = v.patient_id)")} THEN 'A'
+  WHEN ${TRIMMED_BEFORE_RX_SQL} THEN 'A'
   WHEN NOT ${BILLED_SQL} THEN 'B'
   WHEN ${REFUNDABLE_OPEN_SQL} OR ${TESTS_TRIMMED_SQL} THEN 'C'
   ELSE 'D' END)`;
@@ -149,6 +154,7 @@ const TARGET_SELECT = `
                      prior.healthray_patient_id, lab.healthray_patient_id) AS hr_patient_id,
             ${REFUNDABLE_OPEN_SQL} AS refundable_open,
             ${TESTS_TRIMMED_SQL} AS tests_trimmed,
+            ${TRIMMED_BEFORE_RX_SQL} AS trimmed_before_rx,
             ${NEWER_THAN_BILL_SQL("p.file_no")} AS newer_than_bill,
             p.name,
             v.machine_scan_at,
@@ -189,11 +195,15 @@ export async function scanTargets(visitDate, db, limit) {
       WHERE t.machine_scan_at IS NULL
          OR NOT EXISTS (SELECT 1 FROM giniflow_patient_bills nb
                          WHERE nb.patient_id = t.patient_id AND nb.bill_date = $2::date)
-         OR t.machine_scan_at < NOW() - ((CASE t.bill_tier
+         OR (t.machine_scan_at < NOW() - interval '2 minutes'
+             AND COALESCE((SELECT nb.read_at FROM giniflow_patient_bills nb
+                            WHERE nb.patient_id = t.patient_id AND nb.bill_date = $2::date
+                              AND nb.status = 'billed'),
+                          t.machine_scan_at) < NOW() - ((CASE t.bill_tier
               WHEN 'A' THEN $10
               WHEN 'B' THEN $3
               WHEN 'C' THEN $9
-              ELSE $6 END) || ' minutes')::interval
+              ELSE $6 END) || ' minutes')::interval)
       ORDER BY EXISTS (SELECT 1 FROM giniflow_patient_bills nb
                         WHERE nb.patient_id = t.patient_id AND nb.bill_date = $2::date),
                t.bill_tier, t.machine_scan_at NULLS FIRST, t.visit_created_at
@@ -237,9 +247,11 @@ export async function syncMachineOrdersForVisit(visit, db = pool, { slotWaitMs }
     {
       ...(visit.newer_than_bill
         ? { maxAgeMin: 0 }
-        : visit.refundable_open || visit.tests_trimmed
-          ? { maxAgeMin: OPEN_TESTS_RESCAN_MIN }
-          : {}),
+        : visit.trimmed_before_rx
+          ? { maxAgeMin: UNCONFIRMED_TESTS_RESCAN_MIN }
+          : visit.refundable_open || visit.tests_trimmed
+            ? { maxAgeMin: OPEN_TESTS_RESCAN_MIN }
+            : {}),
       slotWaitMs,
     },
   );
