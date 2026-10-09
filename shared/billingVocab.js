@@ -1,5 +1,6 @@
 export const INT_MAX = 2147483647;
 export const MONEY_MAX = 9999999999.99;
+export const DEPOSIT_MAX = 500000;
 export const YES_NO = ["yes", "no"];
 export const ITEM_KINDS = ["consultation", "test", "procedure", "medicine", "other"];
 export const CONSULTATION_DEFAULT_GROUP = { code: "OPD", name: "Out-patient Consultation" };

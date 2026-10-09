@@ -2042,7 +2042,7 @@ export default function LabRoom({ room = null }) {
                 </div>
               )}
 
-              {!isLoading && term && !visibleTotal && (
+              {!isLoading && term && !visibleTotal && !doneHere.length && !awaiting.length && (
                 <div className="empty-note">Nobody matches “{search.trim()}”.</div>
               )}
 

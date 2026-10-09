@@ -58,20 +58,21 @@ function sheetName(title, used) {
 }
 
 function addSection(workbook, part, used) {
+  const columns = part.columns.filter((column) => column.kind !== "patient");
   const ws = workbook.addWorksheet(sheetName(part.title, used), {
     views: [{ state: "frozen", ySplit: 1 }],
   });
-  ws.columns = part.columns.map((column) => ({
+  ws.columns = columns.map((column) => ({
     header: column.label,
     key: column.key,
     width: WIDTH[column.kind] ?? 14,
     style: column.kind === "money" ? { numFmt: MONEY_FORMAT } : {},
   }));
   ws.getRow(1).font = { bold: true };
-  const labelColumn = part.columns.findIndex((column) => column.kind === "text") + 1;
+  const labelColumn = columns.findIndex((column) => column.kind === "text") + 1;
   for (const row of part.rows) {
     const added = ws.addRow(
-      Object.fromEntries(part.columns.map((column) => [column.key, cell(column, row[column.key])])),
+      Object.fromEntries(columns.map((column) => [column.key, cell(column, row[column.key])])),
     );
     if (row.depth > 1 && labelColumn > 0) {
       added.getCell(labelColumn).alignment = { indent: (row.depth - 1) * 2 };
@@ -81,7 +82,7 @@ function addSection(workbook, part, used) {
   if (part.total) {
     const totalRow = ws.addRow(
       Object.fromEntries(
-        part.columns.map((column) => [
+        columns.map((column) => [
           column.key,
           ["money", "count", "quantity"].includes(column.kind)
             ? cell(column, part.total[column.key])
@@ -104,7 +105,7 @@ function addSection(workbook, part, used) {
   }
   ws.autoFilter = {
     from: { row: 1, column: 1 },
-    to: { row: Math.max(part.rows.length, 1) + 1, column: part.columns.length },
+    to: { row: Math.max(part.rows.length, 1) + 1, column: columns.length },
   };
   return ws;
 }

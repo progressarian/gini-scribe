@@ -1,6 +1,6 @@
 import pool from "../../config/db.js";
 import { paise } from "../../../shared/labPayment.js";
-import { DEPOSIT_MODE } from "../../../shared/billingVocab.js";
+import { DEPOSIT_MAX, DEPOSIT_MODE } from "../../../shared/billingVocab.js";
 import { writeAudit } from "./audit.js";
 import { nextNumber, seriesFor } from "./billNumber.js";
 import { cashOutShift, DRAWER_MODE, openShiftIdFor, PAYMENT_MODES } from "./cashShifts.js";
@@ -54,6 +54,9 @@ function cleanReceipt(input) {
   }
   const amount = paise(cleanMoney(input?.amount, "The deposit amount"));
   if (amount <= 0) throw httpError(400, "The deposit must be more than zero");
+  if (amount > DEPOSIT_MAX * 100) {
+    throw httpError(400, `One deposit can be at most ₹${DEPOSIT_MAX.toLocaleString("en-IN")}`);
+  }
   const reference = typeof input?.reference === "string" ? input.reference.trim() : "";
   if (mode !== DRAWER_MODE && !reference) {
     throw httpError(400, `A ${MODE_LABEL[mode]} deposit needs its reference number`);
@@ -341,7 +344,7 @@ export async function refuseMergeWithDeposit(client, patientId, label = "This pa
 
 export async function getDeposit(patientIdValue, db = pool) {
   const patientId = cleanPatientId(patientIdValue);
-  const [{ rows: account }, { rows: entries }, { rows: open }] = await Promise.all([
+  const [{ rows: account }, { rows: entries }, { rows: open }, { rows: who }] = await Promise.all([
     db.query(`SELECT balance FROM deposit_accounts WHERE patient_id = $1`, [patientId]),
     db.query(ENTRY_SQL, [patientId, ENTRIES_SHOWN]),
     db.query(
@@ -352,6 +355,9 @@ export async function getDeposit(patientIdValue, db = pool) {
           AND r.status IN ('pending', 'approved')`,
       [patientId],
     ),
+    db.query(`SELECT name, COALESCE(file_no, health_id) AS file_no FROM patients WHERE id = $1`, [
+      patientId,
+    ]),
   ]);
   const balance = account.length ? paise(account[0].balance) : 0;
   const refund = open[0]
@@ -369,6 +375,7 @@ export async function getDeposit(patientIdValue, db = pool) {
   const held = refund?.amount ?? 0;
   return {
     patient_id: patientId,
+    patient: who[0] ? { name: who[0].name, file_no: who[0].file_no } : null,
     balance,
     held,
     available: Math.max(0, balance - held),

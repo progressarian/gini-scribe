@@ -21,7 +21,12 @@ const paiseOf = (typed) => Math.round(Number(typed || 0) * 100);
 const idLine = (patient) =>
   [patient?.file_no, patient?.health_id, patient?.phone].filter(Boolean).join(" · ") || "—";
 
-function AmountField({ value, available, onChange }) {
+export function AmountField({
+  value,
+  available,
+  onChange,
+  reason = `Only ${fromPaise(available)} is in the deposit`,
+}) {
   const [capped, setCapped] = useState(false);
   return (
     <label className="bc-field">
@@ -43,7 +48,7 @@ function AmountField({ value, available, onChange }) {
       </span>
       {capped && (
         <span className="bc-err" role="alert">
-          Only {fromPaise(available)} is in the deposit, so the amount is set to that.
+          {reason}, so the amount is set to that.
         </span>
       )}
     </label>

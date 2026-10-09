@@ -8,11 +8,12 @@ import {
   useDeposit,
   useReceiveDeposit,
 } from "../../../queries/hooks/useBilling";
-import { errorOf, fromPaise, moneyTyped } from "../format";
+import { errorOf, fromPaise } from "../format";
 import { when } from "../importText";
 import { PAYMENT_MODE_LABEL } from "./lineText";
 import { PdfButton } from "./PdfViewer";
-import DepositMoves from "./DepositMoves";
+import DepositMoves, { AmountField } from "./DepositMoves";
+import { DEPOSIT_MAX } from "../../../../shared/billingVocab.js";
 
 const KIND_LABEL = {
   received: "Deposit taken",
@@ -204,19 +205,12 @@ export default function DepositPanel({ patientId, patientName, patientFileNo, op
                 ))}
               </select>
             </label>
-            <label className="bc-field">
-              <span className="bc-field__lbl">Amount *</span>
-              <span className="bc-pay__money">
-                <span aria-hidden="true">₹</span>
-                <input
-                  className="bc-field__in"
-                  inputMode="decimal"
-                  placeholder="0"
-                  value={form.amount}
-                  onChange={(e) => change({ amount: moneyTyped(e.target.value) })}
-                />
-              </span>
-            </label>
+            <AmountField
+              value={form.amount}
+              available={DEPOSIT_MAX * 100}
+              reason={`One deposit can be at most ${fromPaise(DEPOSIT_MAX * 100)}`}
+              onChange={(amount) => change({ amount })}
+            />
             {needsReference && (
               <label className="bc-field">
                 <span className="bc-field__lbl">Reference *</span>

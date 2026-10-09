@@ -76,6 +76,15 @@ export const cronLeaseEnabled = () => process.env.SCRIBE_CRON_LEASE !== "0";
 
 const LEASE_TTL_MS = 2 * 60_000;
 const LEASE_RENEW_MS = 30_000;
+const LEASE_MAX_HOLD_MS = 60 * 60_000;
+const WATCHED_LEASE_MAX_HOLD_MS = 10 * 60_000;
+const WATCHED_FAMILIES = new Set([
+  CRON_LOCK_KEYS.HEALTHRAY_SYNC,
+  CRON_LOCK_KEYS.LAB_SYNC,
+  CRON_LOCK_KEYS.LAB_PARTIAL_RETRY,
+]);
+const maxHoldFor = (key) =>
+  WATCHED_FAMILIES.has(key) ? WATCHED_LEASE_MAX_HOLD_MS : LEASE_MAX_HOLD_MS;
 const LEASE_OWNER = `${hostname()}:${process.pid}`;
 const LEGACY_LOCK_GRACE_MS = 15 * 60_000;
 const leaseStartedAt = Date.now();
@@ -90,7 +99,13 @@ const logSkip = (label, why) => {
 export async function tryAcquireCronLease(
   label,
   key,
-  { db = cronPool, ttlMs = LEASE_TTL_MS, renewMs = LEASE_RENEW_MS, owner = LEASE_OWNER } = {},
+  {
+    db = cronPool,
+    ttlMs = LEASE_TTL_MS,
+    renewMs = LEASE_RENEW_MS,
+    maxHoldMs = maxHoldFor(key),
+    owner = LEASE_OWNER,
+  } = {},
 ) {
   if (!Number.isFinite(key))
     throw new Error(`tryAcquireCronLease(${label}): numeric key is required`);
@@ -118,7 +133,15 @@ export async function tryAcquireCronLease(
     logSkip(label, `previous run still holds its lease (${held.rows[0]?.value?.owner || "?"})`);
     return null;
   }
+  const giveUpAt = now + maxHoldMs;
   const renew = setInterval(() => {
+    if (Date.now() >= giveUpAt) {
+      clearInterval(renew);
+      console.error(
+        `[Cron] ${label} has held its lease for ${Math.round(maxHoldMs / 60_000)} min — assuming the run is stuck and letting the lease lapse so the next run can start`,
+      );
+      return;
+    }
     db.query(
       `UPDATE app_kv SET value = jsonb_set(value, '{until}', to_jsonb($3::bigint)), updated_at = NOW()
         WHERE key = $1 AND value->>'owner' = $2`,

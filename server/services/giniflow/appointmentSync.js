@@ -10,6 +10,7 @@ import {
   HEALTHRAY_STATUS_TO_CHAIN,
   EXCEPTION_STATUSES,
   TERMINAL_STATUSES,
+  CHAIN,
   chainIndex,
   isChainStatus,
   isExceptionStatus,
@@ -22,6 +23,7 @@ import { recordHealthrayObservation, firstUnrecordedStation } from "./observatio
 import { TESTS_HOLD_SQL, testsOpenInScribe } from "./testsHold.js";
 import { canReadBill, syncBillingForVisitId } from "./machineSync.js";
 import { directConsultSql } from "../../../shared/directConsult.js";
+import { reassignConsultant } from "./reassign.js";
 
 const DIRECT_CONSULT_HEALTHRAY_WRITES = ["no_show", "cancelled"];
 
@@ -447,6 +449,37 @@ async function hasCheckedInEvent(client, visitId) {
   return rows.length > 0;
 }
 
+const BEFORE_CONSULT = CHAIN.slice(0, CHAIN.indexOf("with_doctor"));
+
+async function followAppointmentDoctors(client, day, db) {
+  const { rows } = await client.query(
+    `SELECT v.id, doc.id AS doctor_id
+       FROM giniflow_visits v
+       JOIN appointments a ON a.id = v.appointment_id
+       JOIN doctors doc
+         ON lower(btrim(doc.name)) = lower(btrim(a.doctor_name))
+        AND doc.role = 'consultant'
+        AND COALESCE(doc.is_active, TRUE)
+        AND lower(btrim(a.doctor_name)) <> lower($2)
+      WHERE v.visit_date = $1::date
+        AND v.assigned_doctor_id IS NOT NULL
+        AND v.assigned_doctor_id <> doc.id
+        AND v.current_status = ANY($3::text[])
+        AND NOT ${directConsultSql("a.doctor_name")}`,
+    [day, LAB_ONLY_DOCTOR, BEFORE_CONSULT],
+  );
+  let followed = 0;
+  for (const row of rows) {
+    try {
+      await reassignConsultant(row.id, row.doctor_id, { actorId: null }, db);
+      followed++;
+    } catch (e) {
+      console.error(`giniflow appointment sync: follow doctor ${row.id}: ${e.message}`);
+    }
+  }
+  return followed;
+}
+
 export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
   const client = await db.connect();
   const result = {
@@ -633,6 +666,7 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
       [day, LAB_ONLY_DOCTOR],
     );
     result.assigned = assigned.rowCount;
+    result.followedDoctor = await followAppointmentDoctors(client, day, db);
 
     // Vitals are taken at the vitals station and recorded there. Reading
     // HealthRay's would fill a chart nobody on this floor wrote.

@@ -97,7 +97,9 @@ test.describe
     );
     await page.getByRole("button", { name: /Pay back ₹400 by Cash/ }).click();
     await expect(page.getByRole("button", { name: /Pay back ₹400 by Cash/ })).toHaveCount(0);
-    expect((await deposits.getDeposit(ids.draft.patient_id, db)).balance).toBe(110000);
+    await expect
+      .poll(async () => (await deposits.getDeposit(ids.draft.patient_id, db)).balance)
+      .toBe(110000);
   });
 
   test("4. the move forms fit a phone-width screen", async ({ page }) => {

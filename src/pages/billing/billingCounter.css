@@ -301,6 +301,10 @@ body.bc-resizing {
   border: 1px dashed var(--bd2);
   border-radius: 10px;
 }
+.gf .bc-depositonly {
+  display: grid;
+  gap: 12px;
+}
 .gf .bc-empty strong {
   font-size: 14px;
   color: var(--ink);

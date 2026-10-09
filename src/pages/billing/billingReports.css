@@ -57,6 +57,14 @@
 .fset.bill-ui .brep-error {
   color: #b42318;
 }
+.fset.bill-ui .brep-open {
+  color: var(--ui-accent);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.fset.bill-ui .brep-open:hover {
+  text-decoration: underline;
+}
 @media (max-width: 640px) {
   .fset.bill-ui.brep-page {
     padding: 8px;

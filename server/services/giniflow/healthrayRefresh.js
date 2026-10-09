@@ -51,9 +51,12 @@ const readState = async (db) => {
     : r.last_synced_at
       ? new Date(r.last_synced_at).toISOString()
       : null;
-  const dataSinceBlock =
-    lastSyncedAt && r.cooldown_at && new Date(lastSyncedAt) > new Date(r.cooldown_at);
-  const blocked = until > Date.now() && !dataSinceBlock;
+  const syncingDespiteBlock =
+    lastSyncedAt &&
+    r.cooldown_at &&
+    new Date(lastSyncedAt) > new Date(r.cooldown_at) &&
+    Date.now() - new Date(lastSyncedAt).getTime() <= QUIET_AFTER_MS;
+  const blocked = until > Date.now() && !syncingDespiteBlock;
   return {
     lastSyncedAt,
     blockedUntil: blocked ? iso(until) : null,

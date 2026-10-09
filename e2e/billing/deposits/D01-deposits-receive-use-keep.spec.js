@@ -54,6 +54,9 @@ test.describe.serial("D01 deposits: receive, use on a bill, keep a refund as dep
     await expect(receive(bill.patient_id, { mode: "card", amount: 2000 })).rejects.toMatchObject({
       status: 400,
     });
+    await expect(
+      receive(bill.patient_id, { mode: "upi", amount: 500000.01, reference: "UPI-MAX" }),
+    ).rejects.toMatchObject({ status: 400, message: "One deposit can be at most ₹5,00,000" });
     expect(await balanceOf(bill.patient_id)).toBe(0);
   });
 

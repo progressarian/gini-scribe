@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useBlocker } from "react-router-dom";
 import {
   useCounterPatients,
+  useDeposit,
   useDiscardDraft,
   useOpenDraft,
   usePatientSchemeList,
@@ -202,6 +203,28 @@ function useLeaveGuard(bill) {
   return { dialog, followReread, release };
 }
 
+function DepositOnly({ patientId }) {
+  const { data } = useDeposit(patientId);
+  const [open, setOpen] = useState(true);
+  return (
+    <div className="bc-depositonly">
+      <div className="bc-empty">
+        <strong>{data?.patient?.name ?? "This patient"}</strong>
+        {data?.patient?.file_no ? `${data.patient.file_no} · ` : ""}No visit on the floor today, so
+        there is no bill to open. Their deposit is below.
+      </div>
+      <DepositPanel
+        key={`deposit-${patientId}`}
+        patientId={patientId}
+        patientName={data?.patient?.name}
+        patientFileNo={data?.patient?.file_no}
+        open={open}
+        onToggle={() => setOpen((was) => !was)}
+      />
+    </div>
+  );
+}
+
 function Panel({ tab, children }) {
   return (
     <div className="bc-panel" role="tabpanel" id={tab.panelId} aria-labelledby={tab.tabId}>
@@ -343,7 +366,13 @@ export default function BillingDesk({ tab, visitId, patientId, billId, sentPatie
   const newerDraft = bill && bill.status !== "draft" && earlier.some((b) => b.status === "draft");
   const startAgain = bill?.status === "cancelled" && !newerDraft;
   const needsCategory = needsSub && !bill?.category;
-  const missing = patientId && !visitId && rows.length > 0;
+  const missing =
+    Boolean(patientId) &&
+    !visitId &&
+    !billId &&
+    !isLoading &&
+    !debounced.trim() &&
+    !rows.some((row) => String(row.patientId) === patientId);
   const showList = tab === DESK_TABS.bill.key;
 
   return (
@@ -403,9 +432,7 @@ export default function BillingDesk({ tab, visitId, patientId, billId, sentPatie
         <div className="bc-detail">
           {tab === DESK_TABS.bill.key && (
             <Panel tab={DESK_TABS.bill}>
-              {missing && (
-                <div className="bc-empty">That patient has no visit on the floor today.</div>
-              )}
+              {missing && <DepositOnly patientId={Number(patientId)} />}
               {!visitId && !billId && !missing && (
                 <div className="bc-empty">
                   <strong>No patient chosen</strong>

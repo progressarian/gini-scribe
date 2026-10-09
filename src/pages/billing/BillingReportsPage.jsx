@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Download } from "lucide-react";
 import {
   useBillingReport,
@@ -7,6 +7,7 @@ import {
   useBillingReportExport,
 } from "../../queries/hooks/useBillingReports";
 import { errorOf, fromPaise } from "../../components/billing/format";
+import { receptionBillHref } from "../../components/billing/counter/billHref";
 import { saveBlob } from "../../components/billing/importText";
 import { toast } from "../../stores/uiStore";
 import "../../styles/flow.css";
@@ -81,6 +82,14 @@ const CELL = {
   flag: (value) => (value ? <span className="brep-over">Over</span> : ""),
   date: (value) => value ?? "",
   text: (value) => value ?? "",
+  patient: (value) =>
+    value ? (
+      <Link className="brep-open" to={receptionBillHref({ patient: value })}>
+        Open at counter
+      </Link>
+    ) : (
+      ""
+    ),
 };
 
 const NUMERIC = new Set(["money", "count", "quantity", "limit", "days", "percent"]);

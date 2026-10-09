@@ -222,7 +222,7 @@ test.describe.serial("D03 deposits: move to a patient, to IPD, pay back with app
     expect(row).toMatchObject({ patient: { id: mother }, amounts: { credited: 10000 } });
   });
 
-  test("9. the Deposits report reconciles and lists the IPD move", async () => {
+  test("9. the Deposits report reconciles, lists the IPD move and who holds a deposit now", async () => {
     const today = (await one(`SELECT (NOW() AT TIME ZONE 'Asia/Kolkata')::date::text AS d`)).d;
     const result = await reports.runReport("deposits", { from: today, to: today }, db);
     const held = result.sections.find((part) => part.key === "held").rows[0];
@@ -231,6 +231,14 @@ test.describe.serial("D03 deposits: move to a patient, to IPD, pay back with app
     expect(days.moved_out).toBe(days.moved_in);
     const ipd = result.sections.find((part) => part.key === "ipd").rows;
     expect(ipd.find((row) => row.ipd_number === `IP-${tag}`)).toMatchObject({ amount: 30000 });
+    const holders = result.sections.find((part) => part.key === "holders");
+    const holding = (name) =>
+      holders.rows.find((row) => row.patient_name?.includes(`${name} ${tag}`));
+    expect(holding("Ritesh")).toMatchObject({ balance: 20000, held: 0, available: 20000 });
+    expect(holding("Mother")).toMatchObject({ balance: 50000, held: 10000, available: 40000 });
+    expect(holders.rows.every((row) => row.balance > 0)).toBe(true);
+    const balances = holders.rows.map((row) => row.balance);
+    expect(balances).toEqual([...balances].sort((a, b) => b - a));
   });
 
   test("10. a chart merge refuses a patient with deposit history instead of failing half-way", async () => {

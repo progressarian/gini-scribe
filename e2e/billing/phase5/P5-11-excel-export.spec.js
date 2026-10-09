@@ -19,7 +19,11 @@ let api;
 
 const day = () => ({ from: ids.privateDay, to: ids.privateDay });
 
-function expectSheetMatches(sheet, part) {
+function expectSheetMatches(sheet, section) {
+  const part = {
+    ...section,
+    columns: section.columns.filter((column) => column.kind !== "patient"),
+  };
   const [header, ...body] = sheet.rows;
   expect(header, part.key).toEqual(part.columns.map((column) => column.label));
   const data = body.slice(0, part.rows.length);

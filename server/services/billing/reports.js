@@ -93,6 +93,7 @@ const READ = {
   date: (value) => value ?? null,
   instant: (value) => value ?? null,
   flag: (value) => Boolean(value),
+  patient: (value) => (value === null || value === undefined ? null : Number(value)),
 };
 
 function shapeRow(row, columns) {
@@ -1174,9 +1175,50 @@ async function deposits(filters, db) {
       WHERE x.patient_id IN (SELECT patient_id FROM moved)`,
     moved.params,
   );
+  const holders = await db.query(
+    `SELECT a.patient_id, p.name AS patient_name, COALESCE(p.file_no, p.health_id) AS file_no, p.phone,
+            a.balance, COALESCE(r.held, 0) AS held,
+            GREATEST(a.balance - COALESCE(r.held, 0), 0) AS available,
+            a.updated_at AS last_changed
+       FROM deposit_accounts a
+       JOIN patients p ON p.id = a.patient_id
+       LEFT JOIN LATERAL (
+              SELECT SUM(q.amount) AS held FROM billing_requests q
+               WHERE q.kind = 'deposit_refund' AND q.patient_id = a.patient_id
+                 AND q.status IN ('pending', 'approved')) r ON TRUE
+      WHERE a.balance > 0
+      ORDER BY a.balance DESC, lower(p.name)`,
+  );
+  const holderTotal = holders.rows.reduce(
+    (sum, row) => ({
+      balance: sum.balance + Number(row.balance),
+      held: sum.held + Number(row.held),
+      available: sum.available + Number(row.available),
+    }),
+    { balance: 0, held: 0, available: 0 },
+  );
   const days = byDay.rows.filter((row) => Number(row.day_rolled) === 0);
   const total = byDay.rows.find((row) => Number(row.day_rolled) === 1) ?? null;
   return [
+    section(
+      "holders",
+      "Patients holding a deposit now",
+      [
+        col("patient_name", "Patient", "text"),
+        col("file_no", "UHID", "text"),
+        col("phone", "Phone", "text"),
+        col("balance", "Deposit balance"),
+        col("held", "Held for a pay-back"),
+        col("available", "Free to use"),
+        col("last_changed", "Last changed", "instant"),
+        col("patient_id", "Counter", "patient"),
+      ],
+      holders.rows,
+      holders.rows.length ? holderTotal : null,
+      {
+        note: "Today's balances, largest first. The dates and the user filter do not change this list. Open the patient at the billing counter to use, move or pay back their deposit.",
+      },
+    ),
     section(
       "held",
       "Deposits held by the patients in these dates",

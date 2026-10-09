@@ -52,6 +52,11 @@ test.describe.serial("D02 counter: deposit panel, pay from deposit, keep a refun
     await panel(page)
       .getByRole("button", { name: /^Deposit/ })
       .click();
+    await panel(page).getByLabel("Amount *").fill("5757887868");
+    await expect(panel(page).getByLabel("Amount *")).toHaveValue("500000");
+    await expect(panel(page).getByRole("alert")).toContainText(
+      "One deposit can be at most ₹5,00,000, so the amount is set to that.",
+    );
     await panel(page).getByLabel("Amount *").fill("1000");
     await expect(panel(page)).toContainText("Open your shift");
     await expect(panel(page).getByRole("button", { name: "Take deposit" })).toBeDisabled();
