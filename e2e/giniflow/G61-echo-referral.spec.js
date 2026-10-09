@@ -132,12 +132,12 @@ test.describe.serial("G61 an echo referral: echo, report at Rx, vitals, referrin
     }
   });
 
-  test("5. the echo starts without vitals, and the patient stays out of vitals until the report is handed over", async () => {
+  test("5. the echo starts without vitals, and vitals never waits for the echo", async () => {
     test.skip(!echo, "no echo machine in the test catalogue");
     const made = await patientWith("EchoRun");
     await sync.syncAppointmentsToFlow({ date: ids.day, db });
     await sync.syncAppointmentsToFlow({ date: ids.day, db });
-    expect(await inVitalsQueue(made.visit)).toBe(false);
+    expect(await inVitalsQueue(made.visit)).toBe(true);
 
     const order = await echoOrder(made.visit);
     await machine.advanceMachineTest(order, { to: "in_progress", station: "echo" }, db);

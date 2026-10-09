@@ -99,7 +99,6 @@ const QUEUE_SQL = `
      -- reached the consultation statuses. They have no vitals leg: the lab track
      -- is their whole visit.
      AND NOT ${labOnlyPredicate("v", "$4")}
-     AND NOT (v.echo_referral AND v.echo_handed_over_at IS NULL)
      AND NOT (
        EXISTS (SELECT 1 FROM giniflow_visit_steps ps WHERE ps.visit_id = v.id)
        AND NOT EXISTS (

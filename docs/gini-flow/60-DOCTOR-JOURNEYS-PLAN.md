@@ -14,7 +14,7 @@ nothing in routing depends on the booked doctor (only the samples-only `LAB_ONLY
 | K3  | An echo referral has **two** same-day HealthRay appointments: one under Dr Katyal (the echo) and one with the referring doctor (Dr Beant, Dr Simran, Dr Bansal…). |
 | K4  | Staff work these patients on the Scribe stations (vitals, echo, Rx, pharmacy).                                                                                    |
 | K5  | Every same-day pair (a Dr Katyal appointment + another consultant's appointment) is an echo referral — no booking-type check.                                     |
-| K6  | In an echo referral, vitals come **after** the echo report and before the referring doctor.                                                                       |
+| K6  | In an echo referral, vitals are never held for the echo: the patient can do vitals before or after it. The referring doctor still waits for the echo report.      |
 
 ## Flow A — Dr Katyal's own patients
 
@@ -31,15 +31,15 @@ if tests: **Reception (test payment)** → Lab / machine → reports uploaded �
 ## Flow B — echo referral
 
 Appointment under Dr Katyal (echo) + same-day appointment with the referring doctor →
-**Echo** → report uploaded → **report collected at Rx** → **Vitals** → **referring doctor** →
+**Echo** and **Vitals** (either order) → echo report uploaded → **report collected at Rx** → **referring doctor** →
 Rx explain → Pharmacy → exit.
 
-| Gap today                                                                          | Change                                                                                                                                                                                                                                             |
-| ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Two same-day appointments collapse into one visit; the sync keeps the first doctor | Detect the pair: a Dr Katyal appointment plus another consultant's appointment the same day. The visit's doctor is the **referring** doctor; Dr Katyal's echo becomes a test step.                                                                 |
-| Echo demands vitals first                                                          | An "Echo referral" visit type whose vitals step comes after the echo; echo's vitals check is skipped on this route.                                                                                                                                |
-| Rx only does prescription → pharmacy                                               | A "Hand over echo report" action at Rx for a reported echo before the doctor: the patient goes to the vitals queue, then on to the referring doctor (Chief step as that doctor's patients normally have it). After that doctor, Rx works as today. |
-| The echo test is billed under Dr Katyal                                            | Unchanged — billing follows the HealthRay bill; only routing changes.                                                                                                                                                                              |
+| Gap today                                                                          | Change                                                                                                                                                                                                                   |
+| ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Two same-day appointments collapse into one visit; the sync keeps the first doctor | Detect the pair: a Dr Katyal appointment plus another consultant's appointment the same day. The visit's doctor is the **referring** doctor; Dr Katyal's echo becomes a test step.                                       |
+| Echo demands vitals first                                                          | An "Echo referral" visit type whose vitals step comes after the echo; echo's vitals check is skipped on this route.                                                                                                      |
+| Rx only does prescription → pharmacy                                               | A "Hand over echo report" action at Rx for a reported echo before the doctor: the patient goes on to the referring doctor (Chief step as that doctor's patients normally have it). After that doctor, Rx works as today. |
+| The echo test is billed under Dr Katyal                                            | Unchanged — billing follows the HealthRay bill; only routing changes.                                                                                                                                                    |
 
 Other tests ordered on either route follow the same rule as everywhere: reception payment first,
 then the station, then the report.
@@ -67,5 +67,7 @@ then the station, then the report.
   `echo_handed_over_at`, `echo_handed_over_by`). The appointment sync flags the pair and points the
   visit at the referring doctor's appointment and doctor, and ignores Dr Katyal's appointment for
   status. Echo steps go first (`echoFirst`, also after `placeTestsBeforeDoctors`); the echo starts
-  without vitals; the vitals queue holds the patient until the Rx desk's "Hand over report"
-  (`rxStation.handOverEchoReport`, refused until every echo order is reported).
+  without vitals; the vitals queue no longer holds the patient for the echo (changed 2026-10-09: the
+  floor was leaving referrals unseen for an hour while the echo queue was busy). The Rx desk's
+  "Hand over report" (`rxStation.handOverEchoReport`, refused until every echo order is reported)
+  stays; the doctors' "awaiting results" hold keeps the referring doctor from calling them early.
