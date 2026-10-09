@@ -40,7 +40,12 @@ import {
   stepsAllowedByBill,
   syncBillCharges,
 } from "./patientBill.js";
-import { directConsultSql, withoutChief } from "../../../shared/directConsult.js";
+import {
+  directConsultSql,
+  keepsForChoice,
+  onlineConsultChoice,
+  withoutChief,
+} from "../../../shared/directConsult.js";
 
 const DRAWN_STATUS_SQL = LAB_RUNGS.filter((r) => stageIndexOf(r.key) >= stageIndexOf("collected"))
   .flatMap((r) => r.sampleStatuses)
@@ -103,7 +108,7 @@ const VISIT_DIRECT_CONSULT_SQL = `(${directConsultSql(
 
 export const PLAN_STOP = { vitals: ["with_vitals"], chief: ["with_sd"], doctor: ["with_doctor"] };
 
-export async function consultantSkipsChief(db, visitId) {
+async function consultantChiefStep(db, visitId) {
   const { rows } = await db.query(
     `SELECT d.chief_step
        FROM giniflow_visits v
@@ -117,7 +122,19 @@ export async function consultantSkipsChief(db, visitId) {
       WHERE v.id = $1`,
     [visitId],
   );
-  return rows[0]?.chief_step === false;
+  return rows[0]?.chief_step;
+}
+
+export async function consultantSkipsChief(db, visitId) {
+  return (await consultantChiefStep(db, visitId)) === false;
+}
+
+async function isOnlineType(db, visitTypeId) {
+  const { rows } = await db.query(
+    `SELECT COALESCE(for_online, FALSE) AS online FROM flow_visit_types WHERE id = $1`,
+    [visitTypeId],
+  );
+  return !!rows[0]?.online;
 }
 
 export async function skipsChiefStop(db, visitId) {
@@ -684,9 +701,30 @@ export async function checkInWithJourney(
       `SELECT current_status FROM giniflow_visits WHERE id = $1`,
       [visitId],
     );
-    if (
+    const checkedInOnly =
       nowAt[0]?.current_status === "checked_in" &&
-      (await planSkips(client, visitId, PLAN_STOP.vitals)) &&
+      (await planSkips(client, visitId, PLAN_STOP.vitals));
+    if (
+      checkedInOnly &&
+      !(await planSkips(client, visitId, PLAN_STOP.chief)) &&
+      (await planSkips(client, visitId, PLAN_STOP.doctor))
+    ) {
+      await client.query("SAVEPOINT straight_to_chief");
+      try {
+        await advanceStatus(client, {
+          visitId,
+          toStatus: "sd_pending",
+          actorRole: "system",
+          allowSkip: true,
+          meta: { reason: "plan_has_no_vitals_or_consultant_step", after: "checked_in" },
+        });
+        await client.query("RELEASE SAVEPOINT straight_to_chief");
+      } catch {
+        await client.query("ROLLBACK TO SAVEPOINT straight_to_chief");
+      }
+    }
+    if (
+      checkedInOnly &&
       (await planSkips(client, visitId, PLAN_STOP.chief)) &&
       !(await planSkips(client, visitId, PLAN_STOP.doctor))
     ) {
@@ -779,8 +817,10 @@ export async function ensurePlan(visitId, db = pool) {
     await storedBill(visit.patient_id, visit.visit_date, db),
     machines,
   );
-  const routed =
-    visit.direct_consult || (await consultantSkipsChief(db, visitId))
+  const chiefStep = visit.direct_consult ? false : await consultantChiefStep(db, visitId);
+  const routed = (await isOnlineType(db, visitTypeId))
+    ? billed.filter((s) => keepsForChoice(s, onlineConsultChoice(chiefStep)))
+    : chiefStep === false
       ? withoutChief(billed)
       : billed;
   const plan = visit.echo_referral ? echoFirst(routed, machines) : routed;

@@ -247,7 +247,9 @@ router.get(
 
 const onlineTimeline = (timeline, journeySteps) => {
   const stops = new Map(
-    journeySteps.filter((j) => j.chain_status).map((j) => [j.chain_status, j.label]),
+    journeySteps
+      .filter((j) => j.chain_status && !["pending", "in_progress"].includes(j.status))
+      .map((j) => [j.chain_status, j.label]),
   );
   return timeline.flatMap((s) => {
     if (!s.skipped) return [{ ...s, unrecorded: false }];

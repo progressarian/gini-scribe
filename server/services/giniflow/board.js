@@ -243,6 +243,8 @@ const BOARD_SQL = `
          seq.visit_number,
          jr.steps AS journey_steps,
          ${labOnlyPredicate("v", "$2")}            AS lab_only,
+         COALESCE((SELECT vt.for_online FROM flow_visit_types vt
+                    WHERE vt.id = v.visit_type_id), FALSE) AS online,
          tests.names                               AS lab_test_names,
          tests.cases                               AS lab_all_cases,
          tests.reported                            AS lab_all_reported,
@@ -1273,6 +1275,7 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
           : 0,
       unpaidTests: row.unpaid_tests || [],
       labOnly,
+      online: !!row.online,
       // Nothing left for the lab to do. Used to retire a finished patient from
       // the lab track: a sample that was never collected is still worth showing
       // after they leave, a report that is already back is not. Covers both the

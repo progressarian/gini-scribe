@@ -74,7 +74,11 @@ import {
   useJourney,
   useJourneyStep,
 } from "../../queries/hooks/useGiniflowJourney";
-import { CONSULT_CHOICES, keepsForChoice } from "../../../shared/directConsult.js";
+import {
+  CONSULT_CHOICES,
+  keepsForChoice,
+  onlineConsultChoice,
+} from "../../../shared/directConsult.js";
 
 // Arrived and done. They stay on the floor list — the desk is asked about them
 // — but they are not in the building.
@@ -1174,6 +1178,11 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   useEffect(() => {
     if (!choiceTouched.current) setConsultChoice(seesWithoutChief ? "consultant" : "both");
   }, [seesWithoutChief]);
+  const visitType = (visitTypes || []).find((t) => t.id === visitTypeId) || null;
+  const onlineChoice = visitType?.for_online
+    ? onlineConsultChoice(!arrival.consultsDirect && bookedDoctor?.chief_step === true)
+    : null;
+  const planChoice = onlineChoice || consultChoice;
   // Answers to the template's conditions. Only the keys this type's template
   // actually uses ever appear, and every one starts true: the journey a desk
   // sees on open is the journey they saw before this gate existed, and saying
@@ -1215,7 +1224,7 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   // panel causes, would otherwise throw away everything reception had edited and
   // check the patient in on a journey they did not build.
   const loadedFor = useRef(null);
-  const answerKey = `${visitTypeId}|${askable.map((k) => `${k}:${conditions[k] !== false}`).join(",")}|${consultChoice}`;
+  const answerKey = `${visitTypeId}|${askable.map((k) => `${k}:${conditions[k] !== false}`).join(",")}|${planChoice}`;
   useEffect(() => {
     if (!plan || loadedFor.current === answerKey) return;
     loadedFor.current = answerKey;
@@ -1225,9 +1234,11 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
     const preassigned = (step) =>
       step.chainStatus === "with_doctor" && arrival.assignedDoctorId
         ? { staffId: String(arrival.assignedDoctorId), staffName: arrival.assignedDoctorName }
-        : step.chainStatus === "with_sd" && arrival.assignedSdId
-          ? { staffId: String(arrival.assignedSdId), staffName: arrival.assignedSdName }
-          : null;
+        : step.chainStatus === "with_sd" && onlineChoice === "chief" && arrival.assignedDoctorId
+          ? { staffId: String(arrival.assignedDoctorId), staffName: arrival.assignedDoctorName }
+          : step.chainStatus === "with_sd" && arrival.assignedSdId
+            ? { staffId: String(arrival.assignedSdId), staffName: arrival.assignedSdName }
+            : null;
     setSteps((current) => {
       // Toggling an answer rebuilds the template half of the list, so the edits
       // already made to the steps that survive have to be carried across —
@@ -1238,7 +1249,7 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
       );
       const template = plan
         .filter((p) => p.included && stepPassesConditions(p, conditions))
-        .filter((p) => keepsForChoice(p, consultChoice))
+        .filter((p) => keepsForChoice(p, planChoice))
         .map((p) => {
           const base = { ...p, ...(preassigned(p) || {}) };
           const prev = kept.get(p.catalogId);
@@ -1265,7 +1276,6 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
     [plan],
   );
   const choiceKeepsConsult = (choice) => consultSteps.some((p) => keepsForChoice(p, choice));
-  const visitType = (visitTypes || []).find((t) => t.id === visitTypeId) || null;
   const showConsultChoice = !visitType?.for_online && consultSteps.length > 0;
 
   useEffect(() => {

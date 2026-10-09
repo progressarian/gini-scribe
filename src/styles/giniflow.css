@@ -693,20 +693,6 @@
   font-size: 11px;
   color: var(--tl);
 }
-.gf .fb-clear {
-  background: transparent;
-  border: 1px solid var(--tl-b);
-  color: var(--tl);
-  border-radius: 6px;
-  padding: 3px 9px;
-  font-size: 10px;
-  font-weight: 600;
-  cursor: pointer;
-  font-family: var(--fb);
-}
-.gf .fb-clear:hover {
-  background: rgba(13, 148, 136, 0.1);
-}
 
 /* The prototype's identity line under the patient name (26M · P_51200 · Visit 19). */
 .gf .pc-id {
@@ -1390,6 +1376,8 @@
 .gf.gf--page .stats-tools .rbtn {
   height: 40px;
   border-radius: var(--r);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .gf .col-skel {

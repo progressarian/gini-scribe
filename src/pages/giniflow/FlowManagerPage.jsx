@@ -496,6 +496,11 @@ function PatientCard({
               LAB ONLY
             </span>
           )}
+          {card.online && (
+            <span className="pc-lo" title="Online consultation — not seen on the floor">
+              ONLINE
+            </span>
+          )}
           <div className="pc-cat" title={CATEGORY_DOT[card.category]?.label || "Uncategorised"}>
             {CATEGORY_DOT[card.category]?.icon || ""}
           </div>
@@ -1182,13 +1187,25 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
         ]
       : [];
   const onlineJourney = visit?.online && (data?.journeySteps || []).length > 0;
+  const onlineToCome = onlineJourney
+    ? data.journeySteps
+        .filter((s) => s.status === "pending" || s.status === "in_progress")
+        .map((s) => ({
+          status: s.id,
+          label: s.label,
+          budget: s.budget,
+          stop: s.chain_status,
+        }))
+    : [];
+  const nextStop = onlineToCome.findIndex(
+    (s) => s.stop && chainIndex(s.stop) >= chainIndex(visit?.current_status),
+  );
+  const beforeNow = onChain && nextStop > 0 ? onlineToCome.slice(0, nextStop) : [];
   const projected =
     !onChain || visit?.labOnly
       ? []
       : onlineJourney
-        ? data.journeySteps
-            .filter((s) => s.status === "pending" || s.status === "in_progress")
-            .map((s) => ({ status: s.id, label: s.label, budget: s.budget }))
+        ? onlineToCome.slice(beforeNow.length)
         : CHAIN.slice(CHAIN.indexOf("checked_in"))
             .filter(
               (status) =>
@@ -1205,6 +1222,7 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
     ? [{ status: "reports_pending", label: STATUS_LABEL.results_received, budget: null }]
     : [];
   const stillToCome = [...reportsToCome, ...chiefReview, ...projected];
+  const stepsLeft = stillToCome.length + beforeNow.length;
   // Elapsed since check-in, not the sum of the step durations. Summing counted
   // a pre-arrival report wait the floor never owned and silently dropped the
   // hours between the reports being ready and the patient coming back, so the
@@ -1259,6 +1277,18 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
           step,
         ]
       : [step];
+
+  const toComeRow = (step) => (
+    <div className="tstep" key={step.status}>
+      <div className="ts-dot tsd-next">○</div>
+      <div className="ts-body">
+        <div className="ts-name dim">{step.label}</div>
+        <span className="ts-dur tsd-next-dur">
+          {step.budget ? `still to come · ${step.budget}m budget` : "still to come"}
+        </span>
+      </div>
+    </div>
+  );
 
   const stepRow = (step, i) => (
     <div className="tstep" key={`${step.status}-${i}`}>
@@ -1327,6 +1357,11 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
                   LAB ONLY
                 </span>
               )}
+              {visit?.online && (
+                <span className="pc-lo" title="Online consultation — not seen on the floor">
+                  ONLINE
+                </span>
+              )}
             </div>
             <div className="tb-meta">
               {visit
@@ -1350,18 +1385,13 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
           {preArrival.length > 0 && (
             <div className="ts-track-hd">🏥 The consultation journey — from check-in</div>
           )}
-          {steps.flatMap(withCheckIn).map(stepRow)}
-          {stillToCome.map((step) => (
-            <div className="tstep" key={step.status}>
-              <div className="ts-dot tsd-next">○</div>
-              <div className="ts-body">
-                <div className="ts-name dim">{step.label}</div>
-                <span className="ts-dur tsd-next-dur">
-                  {step.budget ? `still to come · ${step.budget}m budget` : "still to come"}
-                </span>
-              </div>
-            </div>
-          ))}
+          {steps
+            .flatMap(withCheckIn)
+            .flatMap((step) => (step.isCurrent ? [...beforeNow, step] : [step]))
+            .map((step, i) =>
+              step.isCurrent || !beforeNow.includes(step) ? stepRow(step, i) : toComeRow(step),
+            )}
+          {stillToCome.map(toComeRow)}
           {labTrack.length > 0 && (
             <>
               <div className="ts-track-hd">🧪 Lab track — runs alongside the journey above</div>
@@ -1442,8 +1472,8 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
                 : ""}
               {finished
                 ? " · journey complete"
-                : stillToCome.length
-                  ? ` · ${stillToCome.length} step${stillToCome.length === 1 ? "" : "s"} left`
+                : stepsLeft
+                  ? ` · ${stepsLeft} step${stepsLeft === 1 ? "" : "s"} left`
                   : ""}
             </div>
           )}
@@ -1922,6 +1952,18 @@ export default function FlowManagerPage() {
             aria-label="Search today's patients"
             onChange={(e) => setSearch(e.target.value)}
           />
+          {(filter || searchActive) && (
+            <button
+              type="button"
+              className="rbtn"
+              onClick={() => {
+                setStatFilter(null);
+                setSearch("");
+              }}
+            >
+              ✕ Clear
+            </button>
+          )}
           <input
             className="rail-date"
             type="date"
@@ -1956,16 +1998,6 @@ export default function FlowManagerPage() {
               </>
             )}
           </span>
-          <button
-            type="button"
-            className="fb-clear"
-            onClick={() => {
-              setStatFilter(null);
-              setSearch("");
-            }}
-          >
-            ✕ Clear
-          </button>
         </div>
       )}
 

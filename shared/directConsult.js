@@ -29,3 +29,5 @@ export const keepsForChoice = (step, choice) => {
 };
 
 export const withoutChief = (steps) => steps.filter((step) => keepsForChoice(step, "consultant"));
+
+export const onlineConsultChoice = (chiefStep) => (chiefStep === true ? "chief" : "consultant");
