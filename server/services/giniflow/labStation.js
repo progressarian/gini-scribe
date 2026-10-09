@@ -427,6 +427,15 @@ export async function getLabQueue(
       if (c.sentOutside) c.stage = { ...c.stage, label: "📮 Sent to outside lab" };
     }
   }
+  const floorHealthray = healthray.flatMap((row) => {
+    const held = (row.caseList || []).filter((c) => !c.sentOutside || c.reported || c.hasReport);
+    if (held.length === 0 && row.caseList?.length) return [];
+    if (held.length === row.caseList?.length) return [row];
+    const lowest = held.reduce((worst, c) => (stageIndex(c) < stageIndex(worst) ? c : worst));
+    return [
+      { ...row, stage: lowest.stage, stageAt: lowest.stageAt, steps: labSteps(stageIndex(lowest)) },
+    ];
+  });
   const orders = rows.map((r) => {
     const paid = opensLabGate(r.payment_status);
     const elsewhere = busyElsewhere(busy, r.visit_id, LAB_STATION);
@@ -489,7 +498,7 @@ export async function getLabQueue(
 
   const by = (b) => orders.filter((o) => o.bucket === b);
 
-  const unified = [...orders.map(unifiedFromOrder), ...healthray.map(unifiedFromCase)];
+  const unified = [...orders.map(unifiedFromOrder), ...floorHealthray.map(unifiedFromCase)];
   const unifiedCounts = LAB_STAGES.reduce(
     (acc, s) => ({ ...acc, [s.key]: unified.filter((u) => u.stage === s.key).length }),
     {},
@@ -500,7 +509,7 @@ export async function getLabQueue(
   // would collapse to one non-zero group the moment a filter was applied.
   const rungs = visibleRungs(room);
   const inRoom = (stageKey) => rungs.some((r) => r.key === stageKey);
-  const roomHealthray = room ? healthray.filter((r) => inRoom(r.stage.key)) : healthray;
+  const roomHealthray = room ? floorHealthray.filter((r) => inRoom(r.stage.key)) : floorHealthray;
 
   const bucketCounts = Object.fromEntries(rungs.map((r) => [r.bucket, by(r.bucket).length]));
   const groupCounts = Object.fromEntries(
@@ -537,6 +546,7 @@ export async function getLabQueue(
     stageCounts: roomHealthray.reduce(
       (acc, r) => {
         r.caseList.forEach((c) => {
+          if (c.sentOutside && !c.reported && !c.hasReport) return;
           if (c.stage.key in acc) acc[c.stage.key] += 1;
         });
         return acc;

@@ -124,6 +124,22 @@ test.describe.serial("G64 outsourced HealthRay cases are sent out and listed", (
     expect(outside.stage.label).toBe("📮 Sent to outside lab");
   });
 
+  test("4b. the patient's section follows the in-house case, not the one sent outside", async () => {
+    const patientRow = async () =>
+      (await lab.getLabQueue(ids.day, null, db, { room: "collection" })).healthray.find((row) =>
+        row.caseList.some((c) => c.caseNo === cases.outside),
+      );
+    expect((await patientRow()).stage.key).toBe("collected");
+    await query(
+      `INSERT INTO giniflow_lab_case_actions (case_no, action, actor_role, actor_id)
+       VALUES ($1, 'sample_sent', 'lab', $2)`,
+      [cases.inHouse, USERS.lab.id],
+    );
+    const row = await patientRow();
+    expect(row.stage.key).toBe("sent");
+    expect(row.caseList.map((c) => c.caseNo).sort()).toEqual([cases.outside, cases.inHouse].sort());
+  });
+
   test("5. the pending list carries outsourced cases from any day, never in-house ones", async () => {
     expect(await pendingKeys()).toEqual([
       `collected:${cases.hrOutsource}`,
