@@ -760,11 +760,28 @@ router.post("/patient/auth/change-password", async (req, res) => {
 
     // Refresh tokens have no equivalent "current one" to spare here (the
     // client doesn't send its refresh token to this endpoint) — revoke all
-    // of them. The caller's access token keeps working until its own short
-    // TTL lapses, same as it always has; after that, one more login.
+    // of them, then hand this caller a fresh pair so the device that just
+    // changed the password keeps its session. Without that it would run on
+    // its short-lived access token and get signed out minutes later.
     await revokePatientRefreshTokens(db, patient.id).catch(() => {});
 
-    res.json({ ok: true });
+    let session = null;
+    try {
+      session = await issueSession(db, patient);
+    } catch {
+      session = null;
+    }
+
+    res.json(
+      session
+        ? {
+            ok: true,
+            token: session.token,
+            access_token: session.token,
+            refresh_token: session.refresh_token,
+          }
+        : { ok: true },
+    );
   } catch (e) {
     handleError(res, e, "Change password");
   }
