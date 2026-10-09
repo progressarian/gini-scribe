@@ -1,7 +1,9 @@
 import pool from "../../config/db.js";
-import { consultStarted } from "../../../shared/giniflowStatus.js";
+import { chainIndex, consultStarted, isChainStatus } from "../../../shared/giniflowStatus.js";
+import { consultSide } from "../../../shared/directConsult.js";
 import { isLabOnlyDoctor } from "../../../shared/labOnly.js";
 import { logFieldChanges } from "../appointmentHistory.js";
+import { advanceStatus } from "./statusEngine.js";
 import { consultantChangedIn, consultFeeDifference } from "../billing/consultantChange.js";
 import { httpError, inTransaction } from "../billing/transaction.js";
 
@@ -21,7 +23,8 @@ const VISIT_SQL = `
 
 async function consultantFor(client, doctorId) {
   const { rows } = await client.query(
-    `SELECT id, name, COALESCE(short_name, name) AS short_name, is_active FROM doctors WHERE id = $1`,
+    `SELECT id, name, COALESCE(short_name, name) AS short_name, is_active, chief_step
+       FROM doctors WHERE id = $1`,
     [doctorId],
   );
   if (!rows.length) throw httpError(400, "That consultant doesn't exist");
@@ -40,6 +43,44 @@ async function actorFor(client, ctx) {
   return { id: ctx.actorId, name: rows[0]?.name ?? null };
 }
 
+const WAITING_FOR_CHIEF = ["vitals_done", "sd_pending"];
+
+async function skipChiefStepsIn(client, visit) {
+  if (
+    isChainStatus(visit.current_status) &&
+    chainIndex(visit.current_status) >= chainIndex("with_sd")
+  )
+    return;
+  const { rows } = await client.query(
+    `SELECT id, step_catalog_id, assigned_role FROM giniflow_visit_steps
+      WHERE visit_id = $1 AND status = 'pending'`,
+    [visit.id],
+  );
+  const chief = rows
+    .filter(
+      (row) => consultSide({ catalogId: row.step_catalog_id, role: row.assigned_role }) === "chief",
+    )
+    .map((row) => row.id);
+  if (chief.length)
+    await client.query(`UPDATE giniflow_visit_steps SET status = 'skipped' WHERE id = ANY($1)`, [
+      chief,
+    ]);
+  if (!WAITING_FOR_CHIEF.includes(visit.current_status)) return;
+  await client.query("SAVEPOINT straight_to_consultant");
+  try {
+    await advanceStatus(client, {
+      visitId: visit.id,
+      toStatus: "ready_for_doctor",
+      actorRole: "system",
+      allowSkip: true,
+      meta: { reason: "consultant_has_no_chief_step", after: visit.current_status },
+    });
+    await client.query("RELEASE SAVEPOINT straight_to_consultant");
+  } catch {
+    await client.query("ROLLBACK TO SAVEPOINT straight_to_consultant");
+  }
+}
+
 export async function reassignConsultantIn(client, visitId, doctorId, ctx) {
   const { rows } = await client.query(VISIT_SQL, [visitId]);
   if (!rows.length) throw httpError(404, "No such visit");
@@ -56,6 +97,7 @@ export async function reassignConsultantIn(client, visitId, doctorId, ctx) {
     `UPDATE giniflow_visits SET assigned_doctor_id = $2, updated_at = NOW() WHERE id = $1`,
     [visit.id, to.id],
   );
+  if (to.chief_step === false) await skipChiefStepsIn(client, visit);
   if (isLabOnlyDoctor(visit.appointment_doctor_name))
     return { visitId: visit.id, fromDoctorId: fromId, doctorId: to.id, billing: null };
   if (visit.appointment_id && visit.appointment_doctor_id !== to.id) {

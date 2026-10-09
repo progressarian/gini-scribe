@@ -307,6 +307,28 @@ export async function consultantChangeForVisit(visitId, ctx, db = pool) {
   return shapeChange(rows[0], await preview(db, rows[0], ctx));
 }
 
+export async function pendingConsultantChanges(ctx, db = pool) {
+  const { rows } = await db.query(
+    `SELECT c.*, p.name AS patient_name, p.file_no AS patient_file_no
+       FROM (${READ_SQL} WHERE c.status = 'pending') c
+       JOIN patients p ON p.id = c.patient_id
+      ORDER BY c.reassigned_at DESC
+      LIMIT 50`,
+  );
+  const changes = [];
+  for (const row of rows) {
+    const shown = await preview(db, row, ctx).catch((error) => {
+      if (!error.status) throw error;
+      return null;
+    });
+    changes.push({
+      ...shapeChange(row, shown),
+      patient: { id: row.patient_id, name: row.patient_name, file_no: row.patient_file_no },
+    });
+  }
+  return { changes };
+}
+
 async function lockChange(client, changeId) {
   const { rows } = await client.query(
     `SELECT ${CHANGE_COLUMNS} FROM consultant_changes c WHERE c.id = $1 FOR UPDATE`,

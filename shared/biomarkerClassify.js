@@ -309,25 +309,23 @@ export function stabilityOf(appt) {
   const present = TIER_KEYS.filter((key) => bio[key] != null);
   if (!present.length) return { stability: "no_reports", outcome: "partial", reasons: [] };
   const outcome = trendOutcome(appt);
-  if (outcome === "single" || outcome === "partial")
-    return { stability: "first", outcome, reasons: [] };
   const per = trendInputs(appt);
   const moved = (status) =>
     Object.entries(per)
       .filter(([, entry]) => entry.status === status)
       .map(([key, entry]) => `${nameOf(key)} ${entry.prev} → ${entry.cur}`);
-  const offTarget = present.filter((key) => targetStatus(key, bio[key]) === "bad");
-  const unstable =
-    outcome === "worse" || outcome === "mixed" || (outcome === "stable" && offTarget.length > 0);
+  const keyOffTarget = present.some((key) => targetStatus(key, bio[key]) === "bad");
   const offTargetNow = [...new Set([...present, ...Object.keys(per)])]
     .filter((key) => per[key]?.status !== "worse")
     .filter((key) => targetStatus(key, bio[key] ?? per[key]?.cur) === "bad")
     .map((key) => `${nameOf(key)} ${bio[key] ?? per[key]?.cur} off target`);
-  if (unstable)
+  if (keyOffTarget || outcome === "worse" || outcome === "mixed")
     return {
       stability: "unstable",
       outcome,
       reasons: [...moved("worse"), ...offTargetNow].slice(0, 4),
     };
+  if (outcome === "single" || outcome === "partial")
+    return { stability: "first", outcome, reasons: [] };
   return { stability: "stable", outcome, reasons: moved("better").slice(0, 4) };
 }

@@ -79,12 +79,25 @@ export function useConsultantChange(visitId) {
   });
 }
 
+const CONSULTANT_CHANGES = ["billing", "consultant-changes"];
+
+export function useConsultantChanges({ enabled = true } = {}) {
+  return useQuery({
+    queryKey: CONSULTANT_CHANGES,
+    queryFn: () => read(`${DESK}/consultant-changes`),
+    enabled,
+    refetchInterval: REFUND_BOARD_POLL_MS,
+    refetchIntervalInBackground: false,
+  });
+}
+
 function useConsultantChangeMutation(mutationFn) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn,
     onSettled: (_data, _error, variables) => {
       queryClient.invalidateQueries({ queryKey: consultantChangeKey(variables?.visitId) });
+      queryClient.invalidateQueries({ queryKey: CONSULTANT_CHANGES });
       queryClient.invalidateQueries({ queryKey: billingKeys.visitBills(variables?.visitId) });
       queryClient.invalidateQueries({ queryKey: ["billing", "deposit"] });
       queryClient.invalidateQueries({ queryKey: ["billing", "requests"] });

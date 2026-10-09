@@ -1,21 +1,11 @@
-export const DIRECT_CONSULT_DOCTORS = ["Dr. Rahul Katyal"];
-
-const nameKey = (name) =>
-  String(name || "")
-    .trim()
-    .toLowerCase()
-    .replace(/^dr\.?\s*/, "")
-    .replace(/[^a-z]/g, "");
-
-const DIRECT_KEYS = new Set(DIRECT_CONSULT_DOCTORS.map(nameKey));
-
-export const consultsDirect = (...names) => names.some((name) => DIRECT_KEYS.has(nameKey(name)));
-
 const sqlKey = (column) =>
   `regexp_replace(regexp_replace(lower(btrim(COALESCE(${column}, ''))), '^dr\\.?\\s*', ''), '[^a-z]', '', 'g')`;
 
 export const directConsultSql = (column) =>
-  `(${sqlKey(column)} IN (${[...DIRECT_KEYS].map((key) => `'${key}'`).join(", ")}))`;
+  `EXISTS (SELECT 1 FROM doctors dc
+            WHERE dc.direct_consult
+              AND ${sqlKey("dc.name")} = ${sqlKey(column)}
+              AND ${sqlKey(column)} <> '')`;
 
 export const CONSULT_CHOICES = [
   { value: "chief", label: "Chief Consultant Only" },

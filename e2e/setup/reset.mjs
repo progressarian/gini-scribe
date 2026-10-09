@@ -57,9 +57,17 @@ async function syncSequences(client) {
 async function insertDoctors(client) {
   for (const doctor of [...Object.values(USERS), ...Object.values(CONSULTANTS)]) {
     await client.query(
-      `INSERT INTO doctors (id, name, short_name, specialty, role, pin, is_active)
-       VALUES ($1, $2, $3, $4, $5, $6, TRUE)`,
-      [doctor.id, doctor.name, doctor.short_name, doctor.specialty ?? null, doctor.role, PIN],
+      `INSERT INTO doctors (id, name, short_name, specialty, role, pin, is_active, chief_step)
+       VALUES ($1, $2, $3, $4, $5, $6, TRUE, $7)`,
+      [
+        doctor.id,
+        doctor.name,
+        doctor.short_name,
+        doctor.specialty ?? null,
+        doctor.role,
+        PIN,
+        doctor.chief_step === true,
+      ],
     );
   }
 }

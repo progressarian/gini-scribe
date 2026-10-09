@@ -27,7 +27,7 @@ export async function fetchBlockRow(patientId, client = pool) {
 // file_no first, then phone (including alt_phone) — the same resolution order
 // ghm-appointments.js:1028 uses, so every guard resolves identity identically.
 // Phone is non-unique by design, so a phone hit is a best-effort match only.
-export async function resolvePatientId({ fileNo, phone }, client = pool) {
+export async function resolvePatientId({ fileNo, phone, blockedFirst = false }, client = pool) {
   if (fileNo) {
     const { rows } = await client.query("SELECT id FROM patients WHERE file_no=$1 LIMIT 1", [
       fileNo,
@@ -36,7 +36,8 @@ export async function resolvePatientId({ fileNo, phone }, client = pool) {
   }
   if (phone) {
     const { rows } = await client.query(
-      "SELECT id FROM patients WHERE phone=$1 OR $1 = ANY(alt_phone) LIMIT 1",
+      `SELECT id FROM patients WHERE phone=$1 OR $1 = ANY(alt_phone)
+        ORDER BY COALESCE(is_blocked, false) ${blockedFirst ? "DESC" : "ASC"}, id LIMIT 1`,
       [phone],
     );
     if (rows[0]) return rows[0].id;

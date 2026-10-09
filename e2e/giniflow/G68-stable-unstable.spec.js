@@ -90,6 +90,15 @@ test.describe.serial("G68 Stable / Unstable from the test comparison", () => {
     const verdict = stabilityOf(hdlOnly);
     expect(verdict.stability).toBe("unstable");
     expect(verdict.reasons).toContain("HDL 25 off target");
+    const betterButBad = { biomarkers: { hba1c: 10 }, prev_biomarkers: { hba1c: 11 } };
+    expect(stabilityOf(betterButBad)).toMatchObject({
+      stability: "unstable",
+      reasons: ["HbA1c 10 off target"],
+    });
+    expect(triageTier(betterButBad).tier).toBe("amber");
+    const firstButBad = { biomarkers: { hba1c: 11 }, prev_biomarkers: {}, prev_hba1c: null };
+    expect(stabilityOf(firstButBad).stability).toBe("unstable");
+    expect(triageTier(firstButBad).tier).toBe("red");
   });
 
   test("2. the sweep stores a verdict for every visit of the day, and a rerun changes nothing", async () => {

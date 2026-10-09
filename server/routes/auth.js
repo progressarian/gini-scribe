@@ -67,7 +67,7 @@ router.post("/convert-heic", async (req, res) => {
 router.get("/doctors", async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT id, name, short_name, specialty, qualification, role, is_chief, vitals_rest, COALESCE((to_jsonb(doctors)->>'can_assign_calls')::boolean, FALSE) AS can_assign_calls FROM doctors WHERE is_active=true ORDER BY role, name",
+      "SELECT id, name, short_name, specialty, qualification, role, is_chief, vitals_rest, chief_step, direct_consult, COALESCE((to_jsonb(doctors)->>'can_assign_calls')::boolean, FALSE) AS can_assign_calls FROM doctors WHERE is_active=true ORDER BY role, name",
     );
     res.json(result.rows);
   } catch (e) {
@@ -284,7 +284,8 @@ router.post("/doctors", requireCapability(CAPABILITIES.ADMIN), async (req, res) 
 // alone, so the Chief toggle and the qualification box save independently.
 router.patch("/doctors/:id", requireCapability(CAPABILITIES.ADMIN), async (req, res) => {
   try {
-    const { is_chief, qualification, vitals_rest, can_assign_calls } = req.body || {};
+    const { is_chief, qualification, vitals_rest, chief_step, direct_consult, can_assign_calls } =
+      req.body || {};
     const sets = [];
     const params = [req.params.id];
 
@@ -302,6 +303,22 @@ router.patch("/doctors/:id", requireCapability(CAPABILITIES.ADMIN), async (req, 
       }
       params.push(vitals_rest);
       sets.push(`vitals_rest=$${params.length}`);
+    }
+
+    if (chief_step !== undefined) {
+      if (typeof chief_step !== "boolean") {
+        return res.status(400).json({ error: "chief_step must be a boolean" });
+      }
+      params.push(chief_step);
+      sets.push(`chief_step=$${params.length}`);
+    }
+
+    if (direct_consult !== undefined) {
+      if (typeof direct_consult !== "boolean") {
+        return res.status(400).json({ error: "direct_consult must be a boolean" });
+      }
+      params.push(direct_consult);
+      sets.push(`direct_consult=$${params.length}`);
     }
 
     if (can_assign_calls !== undefined) {
@@ -327,7 +344,7 @@ router.patch("/doctors/:id", requireCapability(CAPABILITIES.ADMIN), async (req, 
 
     const r = await pool.query(
       `UPDATE doctors SET ${sets.join(", ")} WHERE id=$1
-        RETURNING id, name, short_name, is_chief, qualification, vitals_rest, can_assign_calls`,
+        RETURNING id, name, short_name, is_chief, qualification, vitals_rest, chief_step, direct_consult, can_assign_calls`,
       params,
     );
     if (!r.rows.length) return res.status(404).json({ error: "Doctor not found" });

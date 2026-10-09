@@ -1,4 +1,4 @@
-import { planSkips, PLAN_STOP } from "./journey.js";
+import { skipsChiefStop } from "./journey.js";
 import pool from "../../config/db.js";
 import { advanceStatus, returnToQueue, budgetColour, IST_TODAY } from "./statusEngine.js";
 import { getSlaConfig, budgetLookup } from "./board.js";
@@ -453,7 +453,7 @@ export async function saveAllergy(visitId, { status, note = null, actorId = null
   return rows[0];
 }
 
-export const planSkipsChief = (db, visitId) => planSkips(db, visitId, PLAN_STOP.chief);
+export const planSkipsChief = (db, visitId) => skipsChiefStop(db, visitId);
 
 async function refuseWhileResting(client, visitId) {
   const { rows } = await client.query(

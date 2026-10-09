@@ -301,6 +301,14 @@ router.post(
 );
 
 router.get(
+  `${BASE}/consultant-changes`,
+  desk,
+  run("Consultant changes waiting", 200, (req) =>
+    consultantChange.pendingConsultantChanges(ctx(req)),
+  ),
+);
+
+router.get(
   `${BASE}/visits/:visitId/consultant-change`,
   desk,
   run("Consultant change waiting", 200, (req) =>

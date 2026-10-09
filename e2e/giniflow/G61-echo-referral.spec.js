@@ -17,6 +17,7 @@ const tag = newTag();
 const KATYAL = "Dr. Rahul Katyal";
 let ids;
 let echo;
+let katyalId;
 
 async function patientWith(label, { referral = true } = {}) {
   const made = await extraVisit(ids, label, { healthray: false });
@@ -75,10 +76,17 @@ test.describe.serial("G61 an echo referral: echo, report at Rx, vitals, referrin
   test.beforeAll(async () => {
     ids = await setUp(tag);
     echo = (await getMachines(db)).find((m) => m.station === "echo");
+    katyalId = (
+      await one(
+        `INSERT INTO doctors (name, role, direct_consult) VALUES ($1, 'consultant', TRUE) RETURNING id`,
+        [KATYAL],
+      )
+    ).id;
   });
 
   test.afterAll(async () => {
     await tearDown(ids);
+    await query(`DELETE FROM doctors WHERE id = $1`, [katyalId]).catch(() => {});
   });
 
   test("1. a same-day Dr Katyal + another consultant pair is an echo referral to that consultant", async () => {

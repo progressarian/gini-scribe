@@ -256,7 +256,10 @@ test.describe.serial("G69 reassigning the consultant moves the bill with them", 
     await expect(box).toContainText("Dr Banshali → Dr Rahul");
     await expect(box).toContainText("₹500 more to collect");
     await expect(
-      page.getByRole("button", { name: new RegExp(`P4 Counter ${tag}`) }).first(),
+      page
+        .locator(".bc-list__body")
+        .getByRole("button", { name: new RegExp(`P4 Counter ${tag}`) })
+        .first(),
     ).toContainText("Consultant changed — fee to settle");
     await box.getByRole("button", { name: "Keep the bill as it is" }).click();
     const keep = page.getByRole("button", { name: "Keep the bill", exact: true });
@@ -395,5 +398,30 @@ test.describe.serial("G69 reassigning the consultant moves the bill with them", 
     const done = await change.confirmConsultantChange(moved.billing.change_id, {}, desk, db);
     expect(done.new_fee).toBe(rupees(2500));
     expect(await liveConsultItems(visit)).toContain(ids.rahulNew);
+  });
+
+  test("17. reception is told: a toast, a count on the Bill tab, and a list that opens the patient", async ({
+    page,
+  }) => {
+    const { visit } = await paidConsult("Notice");
+    await loginAs(page, "reception");
+    await gotoReady(page, "/giniflow/station/reception?tab=bill", () =>
+      page.getByRole("tab", { name: /Bill/ }),
+    );
+    await reassign(visit, CONSULTANTS.rahul);
+    await expect(
+      page.getByText(`Consultant changed for P4 Notice ${tag} (Dr Banshali → Dr Rahul)`),
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("tab", { name: /Bill/ })).toContainText(/\d+/);
+    await expect(page.getByLabel(/consultant fee changes? to settle/)).toBeVisible();
+
+    const waiting = page.getByRole("region", { name: "Consultant changes to settle" });
+    const item = waiting.getByRole("button", { name: new RegExp(`P4 Notice ${tag}`) });
+    await expect(item).toContainText("₹500 more to collect");
+    await item.click();
+    await expect(page.getByRole("status", { name: "Consultant changed" })).toContainText(
+      "Dr Banshali → Dr Rahul",
+    );
+    await expect(item).toHaveAttribute("aria-current", "true");
   });
 });

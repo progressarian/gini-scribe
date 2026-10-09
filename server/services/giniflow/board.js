@@ -36,7 +36,6 @@ import { getMachines } from "./machineCatalog.js";
 import { JOURNEY_STEPS_SQL } from "./journey.js";
 import { journeyProgress } from "../../../shared/journeyOrder.js";
 import { machineForTest } from "../../../shared/machineStages.js";
-import { consultsDirect } from "../../../shared/directConsult.js";
 
 export async function getSlaConfig(db = pool) {
   const { rows } = await db.query(
@@ -240,6 +239,7 @@ const BOARD_SQL = `
          sd.short_name                             AS sd_name,
          doc.short_name                            AS doctor_name,
          doc.name                                  AS doctor_full_name,
+         COALESCE(doc.direct_consult, FALSE)       AS direct_consult,
          seq.visit_number,
          jr.steps AS journey_steps,
          ${labOnlyPredicate("v", "$2")}            AS lab_only,
@@ -421,11 +421,7 @@ const subtitleFor = (row) => {
   if (row.current_status === "with_sd" && row.sd_name) return `${row.sd_name} · workup`;
   if (row.current_status === "with_doctor" && row.doctor_name)
     return `${row.doctor_name} · consult`;
-  if (
-    row.current_status === "ready_for_doctor" &&
-    consultsDirect(row.doctor_full_name) &&
-    row.lab_orders_today > 0
-  ) {
+  if (row.current_status === "ready_for_doctor" && row.direct_consult && row.lab_orders_today > 0) {
     return row.reports_outstanding > 0
       ? `Waiting for reports · then back to ${row.doctor_name || "the doctor"}`
       : `Back to ${row.doctor_name || "the doctor"} · reports in`;

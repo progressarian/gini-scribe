@@ -26,6 +26,11 @@ import BillingDesk, { DESK_TABS } from "../../components/billing/counter/Billing
 import { BillBadge } from "../../components/billing/counter/PatientList";
 import { approvedRefundText, useRefundsToPay } from "../../components/billing/counter/RefundsBoard";
 import { receptionBillHref } from "../../components/billing/counter/billHref";
+import {
+  ConsultantChangesWaiting,
+  consultantChangeText,
+  useConsultantChangesToSettle,
+} from "../../components/billing/counter/ConsultantChange";
 import { useCounterPatients, useDeskSettings } from "../../queries/hooks/useBilling";
 import "../../styles/giniflow-station.css";
 import useAuthStore from "../../stores/authStore";
@@ -1163,7 +1168,7 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   const bookedDoctor = useAuthStore((st) =>
     (st.doctorsList || []).find((d) => d.id === arrival.assignedDoctorId),
   );
-  const seesWithoutChief = arrival.consultsDirect || (bookedDoctor && !bookedDoctor.is_chief);
+  const seesWithoutChief = arrival.consultsDirect || bookedDoctor?.chief_step === false;
   const [consultChoice, setConsultChoice] = useState(seesWithoutChief ? "consultant" : "both");
   const choiceTouched = useRef(false);
   useEffect(() => {
@@ -1371,8 +1376,8 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
                   seesWithoutChief &&
                   !choiceTouched.current && (
                     <div>
-                      Booked with {arrival.assignedDoctorName || "a consultant"}, not the chief, so
-                      the Chief Endocrinologist steps are left out.
+                      {arrival.assignedDoctorName || "This consultant"}'s patients skip the Chief
+                      Endocrinologist steps (Settings → Doctor Management).
                     </div>
                   )
                 )}
@@ -2267,7 +2272,15 @@ function useReceptionTab(canBill) {
   };
 }
 
-function ReceptionTabs({ tab, setTab, deskTabs, arrivalsCount, paymentsCount, refundsCount }) {
+function ReceptionTabs({
+  tab,
+  setTab,
+  deskTabs,
+  arrivalsCount,
+  paymentsCount,
+  refundsCount,
+  feeChangesCount,
+}) {
   return (
     <div className="st-tabs rc-tabs" role="tablist" aria-label="Reception">
       <button
@@ -2291,6 +2304,15 @@ function ReceptionTabs({ tab, setTab, deskTabs, arrivalsCount, paymentsCount, re
           onClick={() => setTab(entry.key)}
         >
           {entry.label}
+          {entry.key === DESK_TABS.bill.key && feeChangesCount > 0 && (
+            <span
+              className="st-tab-n st-tab-n--alert"
+              aria-label={`${feeChangesCount} consultant fee change${feeChangesCount === 1 ? "" : "s"} to settle`}
+              title="Consultant changed — fee to settle"
+            >
+              {feeChangesCount}
+            </span>
+          )}
           {entry.key === DESK_TABS.refunds.key && (
             <span className="st-tab-n" aria-label={`${refundsCount} to pay back`}>
               {refundsCount}
@@ -2412,6 +2434,9 @@ export default function ReceptionStationPage() {
   useEffect(() => () => clearTimeout(toastTimer.current), []);
   const refundsToPay = useRefundsToPay(canBill, (rows) =>
     showToast(approvedRefundText(rows), REFUND_TOAST_MS),
+  );
+  const feeChanges = useConsultantChangesToSettle(canBill, (changes) =>
+    showToast(consultantChangeText(changes), REFUND_TOAST_MS),
   );
 
   const failed = (e, fallback) =>
@@ -2588,6 +2613,7 @@ export default function ReceptionStationPage() {
       arrivalsCount={counts.expected}
       paymentsCount={payCounts.pending}
       refundsCount={refundsToPay}
+      feeChangesCount={feeChanges.length}
     />
   );
 
@@ -2630,7 +2656,16 @@ export default function ReceptionStationPage() {
 
       {onDesk ? (
         <div className="rc-desk">
-          <div className="rc-desk__tabs">{tabs}</div>
+          <div className="rc-desk__tabs">
+            {tabs}
+            {tab === DESK_TABS.bill.key && (
+              <ConsultantChangesWaiting
+                changes={feeChanges}
+                visitId={desk.visitId}
+                onOpen={desk.openBill}
+              />
+            )}
+          </div>
           <BillingDesk
             tab={tab}
             visitId={desk.visitId}

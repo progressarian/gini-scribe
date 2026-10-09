@@ -40,7 +40,7 @@ import {
   stepsAllowedByBill,
   syncBillCharges,
 } from "./patientBill.js";
-import { consultsDirect, withoutChief } from "../../../shared/directConsult.js";
+import { directConsultSql, withoutChief } from "../../../shared/directConsult.js";
 
 const DRAWN_STATUS_SQL = LAB_RUNGS.filter((r) => stageIndexOf(r.key) >= stageIndexOf("collected"))
   .flatMap((r) => r.sampleStatuses)
@@ -97,7 +97,38 @@ export async function planSkips(db, visitId, chainStatuses) {
   return !!rows[0]?.planned && !rows[0].has_stop;
 }
 
+const VISIT_DIRECT_CONSULT_SQL = `(${directConsultSql(
+  "(SELECT ba.doctor_name FROM appointments ba WHERE ba.id = v.appointment_id)",
+)} OR EXISTS (SELECT 1 FROM doctors dd WHERE dd.id = v.assigned_doctor_id AND dd.direct_consult))`;
+
 export const PLAN_STOP = { vitals: ["with_vitals"], chief: ["with_sd"], doctor: ["with_doctor"] };
+
+export async function consultantSkipsChief(db, visitId) {
+  const { rows } = await db.query(
+    `SELECT d.chief_step
+       FROM giniflow_visits v
+       LEFT JOIN appointments a ON a.id = v.appointment_id
+       JOIN doctors d ON d.id = COALESCE(
+              v.assigned_doctor_id,
+              a.doctor_id,
+              (SELECT x.id FROM doctors x
+                WHERE lower(btrim(x.name)) = lower(btrim(a.doctor_name))
+                ORDER BY x.is_active IS NOT FALSE DESC, x.id LIMIT 1))
+      WHERE v.id = $1`,
+    [visitId],
+  );
+  return rows[0]?.chief_step === false;
+}
+
+export async function skipsChiefStop(db, visitId) {
+  const { rows } = await db.query(
+    `SELECT EXISTS (SELECT 1 FROM giniflow_visit_steps WHERE visit_id = $1) AS planned`,
+    [visitId],
+  );
+  return rows[0]?.planned
+    ? planSkips(db, visitId, PLAN_STOP.chief)
+    : consultantSkipsChief(db, visitId);
+}
 
 const clampMinutes = (v) => Math.min(600, Math.max(0, Math.round(Number(v) || 0)));
 
@@ -538,6 +569,7 @@ export async function checkInWithJourney(
               (SELECT count(*)::int FROM giniflow_visit_steps s WHERE s.visit_id = v.id) AS steps,
               (SELECT a.doctor_name FROM appointments a WHERE a.id = v.appointment_id) AS booked_doctor,
               (SELECT d.name FROM doctors d WHERE d.id = v.assigned_doctor_id) AS assigned_doctor,
+              ${VISIT_DIRECT_CONSULT_SQL} AS direct_consult,
               v.echo_referral
          FROM giniflow_visits v WHERE v.id = $1 FOR NO KEY UPDATE`,
       [visitId],
@@ -549,9 +581,7 @@ export async function checkInWithJourney(
     const allowed = stepsAllowedByBill(askedSteps, bill, machines).filter(
       (s) => !(labAlreadyDone && isEarlierLabStep(s)),
     );
-    const routed = consultsDirect(existing.rows[0].booked_doctor, existing.rows[0].assigned_doctor)
-      ? withoutChief(allowed)
-      : allowed;
+    const routed = existing.rows[0].direct_consult ? withoutChief(allowed) : allowed;
     const steps = existing.rows[0].echo_referral ? echoFirst(routed, machines) : routed;
     const current = existing.rows[0].current_status;
     // A second press at a busy counter must not give the patient two journeys.
@@ -719,6 +749,7 @@ export async function ensurePlan(visitId, db = pool) {
             (SELECT COUNT(*)::int FROM giniflow_visit_steps s WHERE s.visit_id = v.id) AS steps,
             a.doctor_name AS booked_doctor,
             (SELECT d.name FROM doctors d WHERE d.id = v.assigned_doctor_id) AS assigned_doctor,
+            ${VISIT_DIRECT_CONSULT_SQL} AS direct_consult,
             v.echo_referral
        FROM giniflow_visits v
        LEFT JOIN appointments a ON a.id = v.appointment_id
@@ -748,9 +779,10 @@ export async function ensurePlan(visitId, db = pool) {
     await storedBill(visit.patient_id, visit.visit_date, db),
     machines,
   );
-  const routed = consultsDirect(visit.booked_doctor, visit.assigned_doctor)
-    ? withoutChief(billed)
-    : billed;
+  const routed =
+    visit.direct_consult || (await consultantSkipsChief(db, visitId))
+      ? withoutChief(billed)
+      : billed;
   const plan = visit.echo_referral ? echoFirst(routed, machines) : routed;
   if (!plan.length) return { seeded: false };
 

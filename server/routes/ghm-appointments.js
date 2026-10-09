@@ -1465,7 +1465,8 @@ router.post("/ghm-appointments", async (req, res) => {
     }
     if (!patient_id && phone && !forceNewPatient) {
       const pr = await pool.query(
-        "SELECT id, file_no FROM patients WHERE phone=$1 OR $1 = ANY(alt_phone) LIMIT 1",
+        `SELECT id, file_no FROM patients WHERE phone=$1 OR $1 = ANY(alt_phone)
+          ORDER BY COALESCE(is_blocked, false), id LIMIT 1`,
         [phone],
       );
       if (pr.rows[0]) {
@@ -1485,7 +1486,9 @@ router.post("/ghm-appointments", async (req, res) => {
     // force, the same as any other refusal.
     const blockCheckId =
       patient_id ||
-      (forceNewPatient && phone ? await resolvePatientId({ fileNo: null, phone }) : null);
+      (forceNewPatient && phone
+        ? await resolvePatientId({ fileNo: null, phone, blockedFirst: true })
+        : null);
     const blockedPatient = await checkPatientBlocked({
       patientId: blockCheckId,
       force: req.body.force,

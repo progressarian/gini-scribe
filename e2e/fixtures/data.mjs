@@ -22,6 +22,7 @@ export const CONSULTANTS = {
     short_name: "Dr Banshali",
     role: "consultant",
     specialty: "Endocrinology",
+    chief_step: true,
   },
   rahul: {
     id: 9102,

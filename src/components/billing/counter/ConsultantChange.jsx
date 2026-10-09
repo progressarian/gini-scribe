@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ConfirmModal from "../../ui/ConfirmModal";
 import useAuthStore from "../../../stores/authStore";
 import { CAPABILITIES, hasCapability } from "../../../../shared/permissions.js";
 import {
   useConfirmConsultantChange,
   useConsultantChange,
+  useConsultantChanges,
   useDismissConsultantChange,
 } from "../../../queries/hooks/useBilling";
 import { errorOf, fromPaise } from "../format";
@@ -20,6 +21,64 @@ function outcome(preview) {
   if (preview.difference > 0) return `${fromPaise(preview.difference)} more to collect`;
   if (preview.difference < 0) return `${fromPaise(-preview.difference)} goes back to the patient`;
   return "same fee";
+}
+
+const changeOutcome = (change) => (change.preview ? outcome(change.preview) : "fee to check");
+
+export function consultantChangeText(changes) {
+  if (changes.length === 1) {
+    const [change] = changes;
+    return `Consultant changed for ${change.patient.name} (${change.from.name} → ${change.to.name}) — ${changeOutcome(change)}`;
+  }
+  return `${changes.length} consultant changes need the fee settled — open the Bill tab`;
+}
+
+export function useConsultantChangesToSettle(enabled, onNew) {
+  const { data } = useConsultantChanges({ enabled });
+  const seen = useRef(null);
+  const told = useRef(onNew);
+  told.current = onNew;
+  const changes = data?.changes;
+
+  useEffect(() => {
+    if (!changes) return;
+    const fresh = seen.current ? changes.filter((change) => !seen.current.has(change.id)) : [];
+    seen.current = new Set(changes.map((change) => change.id));
+    if (fresh.length) told.current(fresh);
+  }, [changes]);
+
+  return changes ?? [];
+}
+
+export function ConsultantChangesWaiting({ changes, visitId, onOpen }) {
+  if (!changes.length) return null;
+  return (
+    <section className="bc-ccw" aria-label="Consultant changes to settle">
+      <h3 className="bc-ccw__title">
+        Consultant changed — fee to settle <span className="bc-ccw__n">{changes.length}</span>
+      </h3>
+      <ul className="bc-ccw__list">
+        {changes.map((change) => (
+          <li key={change.id}>
+            <button
+              type="button"
+              className={`bc-ccw__item${change.visit_id === visitId ? " on" : ""}`}
+              aria-current={change.visit_id === visitId ? "true" : undefined}
+              onClick={() => onOpen({ visit: change.visit_id })}
+            >
+              <span>
+                <strong>{change.patient.name}</strong>
+                {change.patient.file_no && ` · ${change.patient.file_no}`}
+              </span>
+              <span className="bc-ccw__what">
+                {change.from.name} → {change.to.name} · {changeOutcome(change)}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
 }
 
 export default function ConsultantChange({ visitId, patient, onSettled }) {

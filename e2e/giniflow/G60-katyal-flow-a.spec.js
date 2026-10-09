@@ -9,7 +9,7 @@ const journey = await import("../../server/services/giniflow/journey.js");
 const mo = await import("../../server/services/giniflow/moStation.js");
 const board = await import("../../server/services/giniflow/board.js");
 const sync = await import("../../server/services/giniflow/appointmentSync.js");
-const { consultsDirect, withoutChief } = await import("../../shared/directConsult.js");
+const { directConsultSql, withoutChief } = await import("../../shared/directConsult.js");
 
 const tag = newTag();
 const KATYAL = "Dr. Rahul Katyal";
@@ -38,6 +38,12 @@ const CHIEF_STEPS = ["mo_assessment", "wait_chief", "chief_consult"];
 test.describe.serial("G60 Dr Katyal's own patients skip the Chief Endocrinologist", () => {
   test.beforeAll(async () => {
     ids = await setUp(tag);
+    katyalId = (
+      await one(
+        `INSERT INTO doctors (name, role, direct_consult) VALUES ($1, 'consultant', TRUE) RETURNING id`,
+        [KATYAL],
+      )
+    ).id;
   });
 
   test.afterAll(async () => {
@@ -45,13 +51,17 @@ test.describe.serial("G60 Dr Katyal's own patients skip the Chief Endocrinologis
     if (katyalId) await query(`DELETE FROM doctors WHERE id = $1`, [katyalId]).catch(() => {});
   });
 
-  test("1. the name rule matches Dr Katyal however HealthRay spells it, and nobody else", () => {
-    expect(consultsDirect("Dr. Rahul Katyal")).toBe(true);
-    expect(consultsDirect("Dr Rahul Katyal")).toBe(true);
-    expect(consultsDirect(" rahul katyal ")).toBe(true);
-    expect(consultsDirect(null, "Dr. Rahul Katyal")).toBe(true);
-    expect(consultsDirect("Dr. Beant Sidhu")).toBe(false);
-    expect(consultsDirect(null, undefined)).toBe(false);
+  test("1. the setting matches Dr Katyal however HealthRay spells it, and nobody else", async () => {
+    const runsOwnFloor = async (name) =>
+      (await one(`SELECT ${directConsultSql("$1::text")} AS yes`, [name])).yes;
+    expect(await runsOwnFloor("Dr. Rahul Katyal")).toBe(true);
+    expect(await runsOwnFloor("Dr Rahul Katyal")).toBe(true);
+    expect(await runsOwnFloor(" rahul katyal ")).toBe(true);
+    expect(await runsOwnFloor("Dr. Beant Sidhu")).toBe(false);
+    expect(await runsOwnFloor(null)).toBe(false);
+    await query(`UPDATE doctors SET direct_consult = FALSE WHERE id = $1`, [katyalId]);
+    expect(await runsOwnFloor("Dr. Rahul Katyal")).toBe(false);
+    await query(`UPDATE doctors SET direct_consult = TRUE WHERE id = $1`, [katyalId]);
   });
 
   test("2. a synced visit with Dr Katyal gets a plan with no Chief steps; others keep them", async () => {
@@ -118,9 +128,6 @@ test.describe.serial("G60 Dr Katyal's own patients skip the Chief Endocrinologis
   });
 
   test("6. the board says the patient goes back to Dr Katyal once the reports are in", async () => {
-    katyalId = (
-      await one(`INSERT INTO doctors (name, role) VALUES ($1, 'consultant') RETURNING id`, [KATYAL])
-    ).id;
     const katyal = await visitWith("KatBoard", KATYAL, "with_doctor");
     await query(`UPDATE giniflow_visits SET assigned_doctor_id = $2 WHERE id = $1`, [
       katyal.visit,

@@ -84,6 +84,7 @@ async function findHospitalPatient(phone) {
           OR regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $2
           OR right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $2)
          AND NOT (id = ANY($3::int[]))
+       ORDER BY COALESCE(is_blocked, false), id
        LIMIT 1`,
     [variants, last10, [...unlinked]],
   );

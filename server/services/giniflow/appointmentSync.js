@@ -486,8 +486,7 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
               doc.id AS booked_doctor_id,
               (${directConsultSql("a.doctor_name")}
                 OR EXISTS (SELECT 1 FROM doctors ad
-                            WHERE ad.id = v.assigned_doctor_id
-                              AND ${directConsultSql("ad.name")})) AS direct_consult
+                            WHERE ad.id = v.assigned_doctor_id AND ad.direct_consult)) AS direct_consult
          FROM appointments a
          LEFT JOIN giniflow_visits v
                 ON v.patient_id = a.patient_id AND v.visit_date = a.appointment_date
@@ -586,7 +585,7 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
         `UPDATE giniflow_visits v
             SET appointment_id = other.id,
                 assigned_doctor_id = CASE
-                  WHEN v.assigned_doctor_id IS NULL OR ${directConsultSql("cur_doc.name")}
+                  WHEN v.assigned_doctor_id IS NULL OR COALESCE(cur_doc.direct_consult, FALSE)
                     THEN COALESCE(other_doc.id, v.assigned_doctor_id)
                   ELSE v.assigned_doctor_id
                 END,
@@ -614,7 +613,7 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
             AND (base.appointment_id IS NULL
                  OR ${directConsultSql("cur.doctor_name")}
                  OR base.assigned_doctor_id IS NULL
-                 OR ${directConsultSql("cur_doc.name")})`,
+                 OR COALESCE(cur_doc.direct_consult, FALSE))`,
         [day, LAB_ONLY_DOCTOR],
       )
     ).rowCount;

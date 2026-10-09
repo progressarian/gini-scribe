@@ -15,7 +15,7 @@ import {
 import { slaKeyForStatus, WAIT_SINCE_SQL } from "../../../shared/giniflowStatus.js";
 import { todaysVitals, previousVitals } from "./visitVitals.js";
 import { insertLabStepsForOrder, insertMachineStepsForOrders } from "./journey.js";
-import { consultsDirect } from "../../../shared/directConsult.js";
+import { directConsultSql } from "../../../shared/directConsult.js";
 import { getMachines } from "./machineCatalog.js";
 import { machineForTest } from "../../../shared/machineStages.js";
 import { ALLERGY_NOT_ASKED } from "../../../shared/giniflowAllergy.js";
@@ -747,7 +747,9 @@ export async function orderTests(
     const { rows: visitRows } = await client.query(
       `SELECT v.current_status,
               (SELECT a.doctor_name FROM appointments a WHERE a.id = v.appointment_id) AS booked_doctor,
-              (SELECT d.name FROM doctors d WHERE d.id = v.assigned_doctor_id) AS assigned_doctor
+              (${directConsultSql("(SELECT a.doctor_name FROM appointments a WHERE a.id = v.appointment_id)")}
+               OR EXISTS (SELECT 1 FROM doctors d
+                           WHERE d.id = v.assigned_doctor_id AND d.direct_consult)) AS direct_consult
          FROM giniflow_visits v WHERE v.id = $1 FOR NO KEY UPDATE`,
       [visitId],
     );
@@ -877,11 +879,7 @@ export async function orderTests(
         [visitId],
       );
       sentToLab = true;
-    } else if (
-      urgency === "today" &&
-      current === "with_doctor" &&
-      consultsDirect(visitRows[0].booked_doctor, visitRows[0].assigned_doctor)
-    ) {
+    } else if (urgency === "today" && current === "with_doctor" && visitRows[0].direct_consult) {
       await client.query(
         `INSERT INTO giniflow_visit_events (visit_id, status, actor_role, actor_id, meta)
          VALUES ($1, 'ready_for_doctor', 'doctor', $2, $3)`,

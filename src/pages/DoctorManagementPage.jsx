@@ -125,6 +125,30 @@ function SettingsTab({ doctor, onSaved }) {
       {doctor.role === "consultant" && (
         <ToggleSetting
           doctor={doctor}
+          field="chief_step"
+          checked={doctor.chief_step === true}
+          label="Chief Endocrinologist step"
+          hint="Patients of this consultant see the Chief Endocrinologist after vitals. When off, they go straight from vitals to this consultant."
+          successText={(on) =>
+            `${name}'s patients ${on ? "now see" : "now skip"} the Chief Endocrinologist`
+          }
+          onSaved={onSaved}
+        />
+      )}
+      {doctor.role === "consultant" && (
+        <ToggleSetting
+          doctor={doctor}
+          field="direct_consult"
+          checked={doctor.direct_consult === true}
+          label="Runs own floor"
+          hint="HealthRay only marks this consultant's patients no-show or cancelled — the floor moves them. Never sends them to the Chief Endocrinologist. A same-day booking with another consultant is an echo referral, and tests ordered during the consult bring the patient back to this consultant."
+          successText={(on) => `${name} ${on ? "now runs" : "no longer runs"} their own floor`}
+          onSaved={onSaved}
+        />
+      )}
+      {doctor.role === "consultant" && (
+        <ToggleSetting
+          doctor={doctor}
           field="vitals_rest"
           checked={doctor.vitals_rest !== false}
           label={`${VITALS_REST_MINUTES}-min rest before vitals`}
