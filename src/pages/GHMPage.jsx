@@ -738,6 +738,10 @@ const bookingStatusOptions = (row) => {
   const past =
     VISIT_HAPPENED.includes(row.status) ||
     (!!row.appointment_date && row.appointment_date < todayStr());
+  if (row.booking_lapsed && !row.is_booked)
+    return BOOKING_STATUSES.map((o) =>
+      o.value === "booked" ? { ...o, label: "Booked — date passed", color: "amber" } : o,
+    );
   if (row.booking_status === "booked" || (past ? row.preferred_time_slot : row.time_slot))
     return BOOKING_STATUSES;
   const title = past ? "Choose the preferred time first." : "Allocate a time slot first.";
@@ -3364,8 +3368,17 @@ export default function GHMPage() {
                                     Booked {prettyDate(row.booked_on)}
                                   </span>
                                 )}
-                                {(row.is_booked || row.booking_status === "booked") &&
-                                  !row.booked_on && <span className="booked-tag">Booked</span>}
+                                {row.is_booked && !row.booked_on && (
+                                  <span className="booked-tag">Booked</span>
+                                )}
+                                {row.booking_lapsed && !row.is_booked && !row.booked_on && (
+                                  <span
+                                    className="lapsed-tag"
+                                    title={`Marked booked for ${prettyDate(row.booked_for_date)}, but that date has passed and there is no newer appointment — call and book again`}
+                                  >
+                                    Booking lapsed · {prettyDate(row.booked_for_date)}
+                                  </span>
+                                )}
                                 {row.booking_status === "cancelled" && (
                                   <span className="cancel-tag">Cancelled</span>
                                 )}

@@ -908,6 +908,13 @@ router.get("/ghm-appointments/category-counts", async (req, res) => {
 // apart. Each entry takes the row alias and the call-status expression to
 // count against, because the list scopes call status to today (callStatusToday)
 // while the raw column holds the last call whenever it was made.
+
+const BOOKED_DATE = (a) => `GREATEST(${a}.appointment_date, ${a}.preferred_date)::text`;
+const BOOKED_FOR = (a, d) =>
+  `(COALESCE(${a}.booking_status, '') = 'booked' AND COALESCE(GREATEST(${a}.appointment_date, ${a}.preferred_date) >= ${d}, FALSE))`;
+const BOOKING_LAPSED = (a) =>
+  `(COALESCE(${a}.booking_status, '') = 'booked' AND NOT COALESCE(GREATEST(${a}.appointment_date, ${a}.preferred_date) >= ${IST_TODAY}, FALSE))`;
+
 const SUMMARY_BUCKETS = {
   came: (a) => `${a}.show_no_show = 'Show'`,
   no_show: (a) => `${a}.show_no_show = 'No Show'`,
@@ -929,10 +936,9 @@ const SUMMARY_BUCKETS = {
   // appointment_date can be NULL, and in SQL `NOT (false OR NULL)` is NULL —
   // which silently put those rows in NEITHER bucket, so the two pills stopped
   // summing to the day's total.
-  booked: (a, cs, d) =>
-    `(COALESCE(${a}.appointment_date = ${d}, FALSE) OR COALESCE(${a}.booking_status, '') = 'booked')`,
+  booked: (a, cs, d) => `(COALESCE(${a}.appointment_date = ${d}, FALSE) OR ${BOOKED_FOR(a, d)})`,
   not_booked: (a, cs, d) =>
-    `(NOT COALESCE(${a}.appointment_date = ${d}, FALSE) AND COALESCE(${a}.booking_status, '') <> 'booked')`,
+    `(NOT COALESCE(${a}.appointment_date = ${d}, FALSE) AND NOT ${BOOKED_FOR(a, d)})`,
   // One summary column per scheme. Built at import time from the seed, which is
   // why it is still the seed and not the table: `summaryCols` emits a fixed
   // column list into SQL and cannot await. The seed and the table hold the same
@@ -1217,7 +1223,7 @@ router.get("/ghm-appointments", async (req, res) => {
              SELECT DISTINCT ON (COALESCE(a.file_no, a.id::text))
                     ${callStatusToday("a")} AS call_status,
                     a.show_no_show, a.visit_type, a.home_collection, a.patient_category,
-                    a.appointment_date, a.booking_status
+                    a.appointment_date, a.booking_status, a.preferred_date
              FROM appointments a
              LEFT JOIN upcoming u ON u.file_no = a.file_no
              ${searchWhere}
@@ -1238,7 +1244,9 @@ router.get("/ghm-appointments", async (req, res) => {
                       -- patient counts as booked when the row it picked is an
                       -- appointment still ahead of them.
                       (COALESCE(a.appointment_date >= $${dIdx}, FALSE)
-                       OR COALESCE(a.booking_status, '') = 'booked') AS is_booked,
+                       OR ${BOOKED_FOR("a", `$${dIdx}`)}) AS is_booked,
+                      ${BOOKING_LAPSED("a")} AS booking_lapsed,
+                      ${BOOKED_DATE("a")} AS booked_for_date,
                       u.next_date AS follow_up_date
                ${joins}
                LEFT JOIN upcoming u ON u.file_no = a.file_no
@@ -1377,7 +1385,9 @@ router.get("/ghm-appointments", async (req, res) => {
                 (a.preferred_date = $1 AND a.appointment_date <> $1) AS via_preferred,
                 -- The row IS an appointment on this date, so the patient is
                 -- booked whether or not anyone ticked the dropdown.
-                (a.appointment_date = $1 OR a.booking_status = 'booked') AS is_booked,
+                (COALESCE(a.appointment_date = $1, FALSE) OR ${BOOKED_FOR("a", "$1")}) AS is_booked,
+                ${BOOKING_LAPSED("a")} AS booking_lapsed,
+                ${BOOKED_DATE("a")} AS booked_for_date,
                 ${upcomingBookingElsewhere("a")} AS booked_on,
                 -- Follow-up date shown for THIS visit:
                 --   1. the visit's OWN effective follow-up date (column, synced

@@ -396,6 +396,48 @@
   flex-shrink: 0;
   align-items: center;
 }
+.gf .sd-header--compact {
+  padding: 8px 16px;
+  align-items: center;
+  gap: 10px;
+}
+.gf .sd-header--compact .sdh-avatar {
+  width: 28px;
+  height: 28px;
+  font-size: 11px;
+}
+.gf .sd-header--compact .sdh-body {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 4px;
+}
+.gf .sd-header--compact .sdh-name {
+  font-size: 16px;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
+}
+.gf .sd-header--compact .sdh-meta {
+  white-space: nowrap;
+}
+.gf .sd-header--compact .mo-rail {
+  margin-top: 0;
+  flex-wrap: nowrap;
+}
+.gf .sd-header--compact .sdh-acts {
+  min-width: 0;
+  flex-shrink: 1;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.gf .sd-header--compact .stab-chip {
+  max-width: 280px;
+}
 .gf .sd-body {
   flex: 1;
   padding: 18px;
@@ -1910,15 +1952,19 @@
 .gf .mo-actions {
   flex-shrink: 0;
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px 10px;
   align-items: center;
-  padding: 12px 18px;
+  padding: 6px 16px;
   border-top: 1px solid var(--bd);
   background: var(--white);
 }
+.gf .mo-actions .st-btn {
+  padding: 4px 12px;
+}
 .gf .mo-close-note {
-  font-size: 10px;
-  color: var(--ink4);
+  font-size: 11px;
+  color: var(--ink3);
 }
 .gf .station-detail.mo-detail {
   overflow: hidden;
@@ -5377,24 +5423,32 @@
   background: var(--tl-l);
   border: 1px solid var(--tl-b);
   border-radius: var(--r);
-  padding: 10px 12px;
-  margin-bottom: 10px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 4px;
 }
 .gf .mo-review-t {
+  flex: 1 1 240px;
   font-size: 11px;
   font-weight: 700;
   color: var(--tl);
 }
+.gf .mo-review .st-btn {
+  padding: 3px 10px;
+}
 .gf .mo-review-done {
+  flex-basis: 100%;
+  order: 3;
   font-size: 11px;
   color: var(--ink2);
 }
 .gf .mo-review-acts {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
 }
 .gf .mo-review-chosen {

@@ -1866,6 +1866,19 @@ a.pcell__ph:hover {
   vertical-align: middle;
 }
 
+.lapsed-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 20px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #b45309;
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  white-space: nowrap;
+}
+
 .booked-tag {
   color: #15803d;
   background: #dcfce7;

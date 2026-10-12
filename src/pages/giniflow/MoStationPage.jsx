@@ -985,7 +985,7 @@ export default function MoStationPage() {
           {!patient && <div className="sd-empty">Select a patient from the queue.</div>}
           {patient && (
             <>
-              <div className="sd-header">
+              <div className="sd-header sd-header--compact">
                 <div className="sdh-avatar">{initials(patient.name)}</div>
                 <div className="sdh-body">
                   <div className="sdh-name">{patient.name}</div>
