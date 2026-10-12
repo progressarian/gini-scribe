@@ -13,6 +13,8 @@ import {
   BILLING_PRICING_LABELS,
   billingCancelSchema,
   billingCategorySetSchema,
+  billingConsultantSetSchema,
+  billingPaymentModeSchema,
   billingCodeAddSchema,
   billingConsultationSuggestionQuerySchema,
   billingDraftDeleteSchema,
@@ -106,6 +108,8 @@ import { paidAtReception } from "../services/billing/receptionOrders.js";
 import { deskSettings } from "../services/billing/billingSettings.js";
 import { searchDeskItems } from "../services/billing/serviceItems.js";
 import { counterPatients } from "../services/billing/counterPatients.js";
+import { consultantOptions } from "../services/billing/billConsultant.js";
+import { correctPaymentMode, paymentsWithRights } from "../services/billing/paymentCorrection.js";
 
 const router = Router();
 const BASE = "/billing";
@@ -396,6 +400,21 @@ router.delete(
   ),
 );
 
+router.get(
+  `${BASE}/bills/:billId/consultants`,
+  desk,
+  run("Bill consultant choices", 200, (req) => consultantOptions(req.params.billId)),
+);
+
+router.patch(
+  `${BASE}/bills/:billId/consultant`,
+  desk,
+  validate(billingConsultantSetSchema, BILLING_DESK_LABELS),
+  run("Set bill consultant", 200, (req) =>
+    bills.setConsultant(req.params.billId, req.body, ctx(req)),
+  ),
+);
+
 router.patch(
   `${BASE}/bills/:billId/category`,
   desk,
@@ -502,7 +521,20 @@ router.post(
 router.get(
   `${BASE}/bills/:billId/payments`,
   desk,
-  run("Bill payments", 200, (req) => payments.listPayments(req.params.billId)),
+  run("Bill payments", 200, async (req) => {
+    const list = await payments.listPayments(req.params.billId);
+    const rights = await paymentsWithRights(req.params.billId, ctx(req));
+    return list.map((payment) => ({ ...payment, ...rights.get(payment.id) }));
+  }),
+);
+
+router.patch(
+  `${BASE}/payments/:paymentId/mode`,
+  desk,
+  validate(billingPaymentModeSchema, BILLING_DESK_LABELS),
+  run("Correct payment mode", 200, (req) =>
+    correctPaymentMode(req.params.paymentId, req.body, ctx(req)),
+  ),
 );
 
 router.get(

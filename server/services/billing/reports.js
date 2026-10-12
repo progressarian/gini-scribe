@@ -1,6 +1,12 @@
 import pool from "../../config/db.js";
 import { paise } from "../../../shared/labPayment.js";
-import { BILLING_ROLES, DEPOSIT_MODE, HEALTHRAY_MODE } from "../../../shared/billingVocab.js";
+import {
+  BILLING_ROLES,
+  DEPOSIT_MODE,
+  HEALTHRAY_MODE,
+  PREPAID_LABEL,
+  PREPAID_MODE,
+} from "../../../shared/billingVocab.js";
 import { ROLES } from "../../../shared/permissions.js";
 import { KINDS as REQUEST_KINDS } from "./billingRequests.js";
 import { PAYMENT_MODES } from "./cashShifts.js";
@@ -20,18 +26,21 @@ import {
 
 export const ROW_CAP = 2000;
 
+import { TESTS_ONLY_CONSULTANT_SQL } from "./billConsultant.js";
 const SIGN = `(CASE WHEN b.bill_type = 'credit_note' THEN -1 ELSE 1 END)`;
 const FINAL = `b.status = 'final'`;
 const SCHEME_JOIN = `LEFT JOIN patient_schemes cs ON cs.code = b.scheme_code`;
 const VISIT_JOIN = `LEFT JOIN giniflow_visits v ON v.id = b.visit_id
   LEFT JOIN appointments a ON a.id = b.appointment_id`;
 const CATEGORY = `COALESCE(cs.parent_code, b.scheme_code)`;
-const LINE_CONSULTANT = `COALESCE(l.doctor_id, a.doctor_id, v.assigned_doctor_id)`;
+const LINE_CONSULTANT = `COALESCE(l.doctor_id, b.consultant_id, a.doctor_id, v.assigned_doctor_id,
+  ${TESTS_ONLY_CONSULTANT_SQL("a")})`;
 const BILL_CONSULTANT = `COALESCE(
+  b.consultant_id,
   (SELECT x.doctor_id FROM bill_lines x
     WHERE x.bill_id = COALESCE(b.original_bill_id, b.id) AND x.doctor_id IS NOT NULL
     ORDER BY x.line_no LIMIT 1),
-  a.doctor_id, v.assigned_doctor_id)`;
+  a.doctor_id, v.assigned_doctor_id, ${TESTS_ONLY_CONSULTANT_SQL("a")})`;
 const TODAY = `(NOW() AT TIME ZONE '${IST}')::date`;
 
 const LINE_COLUMNS = {
@@ -386,6 +395,7 @@ const MODE_LABELS = {
   card: "Card",
   upi: "UPI",
   healthray: "Paid in HealthRay",
+  [PREPAID_MODE]: PREPAID_LABEL,
   cash_deposit: "Cash — deposit taken",
   card_deposit: "Card — deposit taken",
   upi_deposit: "UPI — deposit taken",
@@ -436,7 +446,7 @@ async function collections(filters, db) {
        LEFT JOIN doctors su ON su.id = s.user_id
       ORDER BY r.day, array_position($${scope.params.length + 1}::text[], r.mode),
                lower(u.name), s.opened_at, r.shift_id`,
-    [...scope.params, [...PAYMENT_MODES, HEALTHRAY_MODE, ...DEPOSIT_MODES]],
+    [...scope.params, [...PAYMENT_MODES, HEALTHRAY_MODE, PREPAID_MODE, ...DEPOSIT_MODES]],
   );
   const { sets, total } = splitSets(rows, dims);
   const pick = (key) => sets.get(key) ?? [];

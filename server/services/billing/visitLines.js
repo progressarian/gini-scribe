@@ -122,6 +122,15 @@ async function alreadyOnVisit(client, visitId, serviceItemId) {
   return rows.length > 0;
 }
 
+async function consultantChosen(db, visitId) {
+  const { rows } = await db.query(
+    `SELECT 1 FROM bills
+      WHERE visit_id = $1 AND status = 'draft' AND consultant_id IS NOT NULL LIMIT 1`,
+    [visitId],
+  );
+  return rows.length > 0;
+}
+
 export async function draftAtCheckIn(visitId, ctx, db = pool) {
   try {
     return await inTransaction(async (client) => {
@@ -168,6 +177,21 @@ export async function draftAtCheckIn(visitId, ctx, db = pool) {
   }
 }
 
+export async function arrivalConsultationIn(client, visitId, ctx) {
+  const visit = await visitFor(client, visitId);
+  await holdConsultation(client, visit.id);
+  const item = await consultationItem(client, visit);
+  if (!item || item.removed || (await consultationOnVisit(client, visit.id))) return null;
+  const bill = await openDraftIn(client, visit.id, ctx);
+  await addLineIn(
+    client,
+    bill,
+    { item_id: item.id, source: "visit", doctor_id: item.doctor_id ?? item.chosen_doctor_id },
+    ctx,
+  );
+  return { item_id: item.id, name: item.name };
+}
+
 async function consultationSettled(client, visitId) {
   const { rows } = await client.query(
     `SELECT 1 FROM bills WHERE visit_id = $1 AND bill_type = 'invoice' AND status = 'final'
@@ -194,6 +218,7 @@ export async function consultationForDesk(visitId, ctx, db = pool) {
     return await inTransaction(async (client) => {
       const visit = await visitFor(client, cleanUuid(visitId, "visit"));
       if (!(await addsConsultation(client))) return { ok: true, added: [] };
+      if (await consultantChosen(client, visit.id)) return { ok: true, added: [] };
       await holdConsultation(client, visit.id);
       const item = await consultationItem(client, visit);
       if (item?.removed) return { ok: true, added: [], removed_doctor: item.removed };
@@ -297,13 +322,19 @@ export async function suggestionPrice(db, bill, choice, role) {
 
 export async function consultationSuggestion(billId, ctx, db = pool) {
   const { rows } = await db.query(
-    `SELECT id, visit_id, patient_id, appointment_id, scheme_code, bill_date, status, bill_type
+    `SELECT id, visit_id, patient_id, appointment_id, scheme_code, bill_date, status, bill_type,
+            consultant_id
        FROM bills WHERE id = $1`,
     [cleanUuid(billId, "bill")],
   );
   if (!rows.length) throw httpError(404, "That bill no longer exists");
   const bill = rows[0];
-  if (bill.status !== "draft" || bill.bill_type !== "invoice" || !bill.visit_id) {
+  if (
+    bill.status !== "draft" ||
+    bill.bill_type !== "invoice" ||
+    !bill.visit_id ||
+    bill.consultant_id
+  ) {
     return NO_SUGGESTION;
   }
   const visit = await visitFor(db, bill.visit_id);
@@ -367,12 +398,22 @@ async function adoptUnlinkedLine(client, bill, itemId, labOrderId, ctx) {
   return linkLine(client, bill, found[0], labOrderId, ctx);
 }
 
+async function orderIsForToday(client, labOrderId) {
+  const { rows } = await client.query(`SELECT urgency FROM giniflow_lab_orders WHERE id::text = $1::text`, [
+    labOrderId,
+  ]);
+  return !rows.length || rows[0].urgency === "today";
+}
+
 export async function linesForOrder(visitId, { labOrderId, testNames = [] } = {}, ctx, db = pool) {
   try {
     const asked = Array.isArray(testNames) ? testNames : [];
     const wanted = [...new Set(asked.filter((name) => typeof name === "string" && name.trim()))];
     if (!wanted.length) return { ok: true, bill_id: null, added: [], not_priced: [], skipped: [] };
     return await inTransaction(async (outer) => {
+      if (labOrderId && !(await orderIsForToday(outer, labOrderId))) {
+        return { ok: true, bill_id: null, added: [], not_priced: [], skipped: [], later: true };
+      }
       const items = await itemsForTests(outer, wanted);
       const added = [];
       const notPriced = [];
@@ -439,7 +480,8 @@ async function testsToPrefill(client, visitId) {
        SELECT o.id AS order_id, t.test_name
          FROM giniflow_lab_orders o
          JOIN giniflow_lab_order_tests t ON t.lab_order_id = o.id
-        WHERE o.visit_id = $1 AND t.status <> 'cancelled' AND NOT ${SETTLED_AT_RECEPTION})
+        WHERE o.visit_id = $1 AND o.urgency = 'today' AND t.status <> 'cancelled'
+          AND NOT ${SETTLED_AT_RECEPTION})
      SELECT DISTINCT ON (i.id) d.order_id, d.test_name, i.id AS item_id
        FROM ordered d
        JOIN (${TEST_MATCHES_SQL("ARRAY(SELECT test_name FROM ordered)")}) m

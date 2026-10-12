@@ -414,7 +414,7 @@ function buildPrescriptionHtml(data = {}) {
   // nephropathy, neuropathy, retinopathy, hypertension, MASLD, thyroid, rest.
   const activeDx = sortDiagnoses(activeDxInput) || [];
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = data.rxDate || new Date().toISOString().split("T")[0];
   const latestCon = consultations?.[0]?.con_data || {};
   const followUp = pickNextVisit([latestCon.follow_up, appt_plan?.follow_up]) || {};
   const _notEmpty = (arr) => (Array.isArray(arr) && arr.length > 0 ? arr : null);

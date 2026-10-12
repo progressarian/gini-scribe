@@ -131,6 +131,21 @@ export function useSetBillCategory() {
   );
 }
 
+export function useBillConsultants(billId, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: [...billingKeys.bill(billId), "consultants"],
+    queryFn: () => read(`${DESK}/bills/${billId}/consultants`),
+    enabled: !!billId && enabled,
+  });
+}
+
+export function useSetBillConsultant() {
+  return useVisitMutation(
+    async ({ billId, consultantId }) =>
+      (await api.patch(`${DESK}/bills/${billId}/consultant`, { consultant_id: consultantId })).data,
+  );
+}
+
 export function useChangeLineQuantity() {
   return useVisitMutation(
     async ({ billId, lineId, quantity }) =>
@@ -496,6 +511,20 @@ export function useBillPayments(billId) {
   });
 }
 
+export function useCorrectPaymentMode() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ paymentId, mode, reference, reason }) =>
+      (await api.patch(`${DESK}/payments/${paymentId}/mode`, { mode, reference, reason })).data,
+    onSuccess: (_payment, variables) => {
+      queryClient.invalidateQueries({ queryKey: billingKeys.billPayments(variables?.billId) });
+      queryClient.invalidateQueries({ queryKey: billingKeys.visitBills(variables?.visitId) });
+      queryClient.invalidateQueries({ queryKey: billingKeys.currentShift() });
+      queryClient.invalidateQueries({ queryKey: SHIFTS_MINE });
+    },
+  });
+}
+
 export function useDues(filters) {
   return useQuery({
     queryKey: billingKeys.dues(filters),
@@ -525,10 +554,11 @@ export function useMyShifts(filters) {
   });
 }
 
-export function useCurrentShift() {
+export function useCurrentShift({ enabled = true } = {}) {
   return useQuery({
     queryKey: billingKeys.currentShift(),
     queryFn: () => read(`${DESK}/shifts/current`),
+    enabled,
   });
 }
 

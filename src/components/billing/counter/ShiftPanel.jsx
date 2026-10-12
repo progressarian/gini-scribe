@@ -142,6 +142,11 @@ export default function ShiftPanel() {
               Paid in HealthRay {rupees(shift.healthray.collected)} (not in the drawer)
             </div>
           )}
+          {shift.prepaid?.collected > 0 && (
+            <div className="bc-hint" aria-label="Paid earlier or online">
+              Paid earlier / online {rupees(shift.prepaid.collected)} (not in the drawer)
+            </div>
+          )}
 
           <div className="bc-head__row">
             <label className="bc-field">

@@ -89,6 +89,10 @@ const BILL_TIER_SQL = `(CASE
   ELSE 'D' END)`;
 const EXIT_GRACE_MIN = Number(process.env.SCRIBE_MACHINE_EXIT_GRACE_MIN || 0);
 const NEVER_ON_FLOOR = ["booked", "confirmed"];
+const ARRIVED_IN_HEALTHRAY_SQL = `EXISTS (
+  SELECT 1 FROM appointments ha
+   WHERE ha.patient_id = v.patient_id AND ha.appointment_date = v.visit_date
+     AND ha.status IN ('checkedin', 'in_visit', 'in-progress', 'completed', 'seen'))`;
 const NEVER_ARRIVED = ["no_show", "cancelled"];
 const FINISHED = ["dispensed", "exited"];
 
@@ -187,7 +191,7 @@ export async function scanTargets(visitDate, db, limit) {
        SELECT due.*, ${BILL_TIER_SQL} AS bill_tier
          FROM (${TARGET_SELECT}
                  AND v.visit_date = $2::date
-                 AND v.current_status <> ALL($5::text[])
+                 AND (v.current_status <> ALL($5::text[]) OR ${ARRIVED_IN_HEALTHRAY_SQL})
                  AND (v.current_status <> ALL($7::text[])
                       OR v.updated_at > NOW() - ($8 || ' minutes')::interval)) due
          JOIN giniflow_visits v ON v.id = due.visit_id
@@ -414,6 +418,24 @@ export async function syncBillingForVisitId(visitId, db = pool) {
   return result;
 }
 
+async function readBillOnly(visit, db, slotWaitMs) {
+  const bill = await readPatientBill(
+    {
+      patientId: visit.patient_id,
+      hrPatientId: visit.hr_patient_id,
+      healthrayId: visit.healthray_id,
+      date: visit.visit_date,
+    },
+    db,
+    {
+      maxAgeMin: OPEN_TESTS_RESCAN_MIN,
+      noBillMaxAgeMin: UNCONFIRMED_TESTS_RESCAN_MIN,
+      slotWaitMs,
+    },
+  );
+  return { raised: 0, deferred: !!bill.deferred };
+}
+
 export async function runMachineSync(dateStr, { limit = SCAN_BATCH, db = pool } = {}) {
   if (!machineCaseListOnly()) {
     return { skipped: "SCRIBE_MACHINE_CASE_LIST=0", scanned: 0, raised: 0, failed: 0 };
@@ -430,9 +452,10 @@ export async function runMachineSync(dateStr, { limit = SCAN_BATCH, db = pool } 
   const slotDeadline = Date.now() + Math.max(0, BILL_READS_PER_RUN - 1) * BILL_MIN_GAP_MS;
   for (const visit of targets) {
     try {
-      const result = await syncMachineOrdersForVisit(visit, db, {
-        slotWaitMs: Math.max(0, slotDeadline - Date.now()),
-      });
+      const slotWaitMs = Math.max(0, slotDeadline - Date.now());
+      const result = NEVER_ON_FLOOR.includes(visit.current_status)
+        ? await readBillOnly(visit, db, slotWaitMs)
+        : await syncMachineOrdersForVisit(visit, db, { slotWaitMs });
       if (result.deferred) break;
       raised += result.raised;
     } catch (e) {

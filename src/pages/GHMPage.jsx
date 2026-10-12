@@ -30,6 +30,7 @@ import {
   UserPlus,
   X,
   RotateCcw,
+  CalendarArrowDown,
 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import "./GHMPage.css";
@@ -491,6 +492,32 @@ const CATEGORY_PILLS = PATIENT_CATEGORIES.filter((c) => c.value).map((c) => ({
   category: c.value,
 }));
 
+const pillSection = (bucket) =>
+  bucket.startsWith("cat_")
+    ? "category"
+    : CALL_PILLS.some((p) => p.bucket === bucket)
+      ? "calling"
+      : "appointment";
+
+const pillList = (filter) => (filter ? filter.split(",") : []);
+
+const pillFileLabel = (filter) =>
+  pillList(filter)
+    .map((b) => [...APPT_PILLS, ...CALL_PILLS, ...CATEGORY_PILLS].find((p) => p.bucket === b))
+    .filter(Boolean)
+    .map((p) =>
+      p.label
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, ""),
+    )
+    .join("_");
+
+const togglePill = (filter, bucket) => {
+  const kept = pillList(filter).filter((b) => pillSection(b) !== pillSection(bucket));
+  return [...kept, ...(pillList(filter).includes(bucket) ? [] : [bucket])].join(",");
+};
+
 function Pill({ pill, count, active, onSelect, title }) {
   return (
     <button
@@ -515,8 +542,8 @@ function PillGroup({ label, pills, summary, filter, onFilter, titleFor }) {
             key={p.key}
             pill={p}
             count={summary[p.key] || 0}
-            active={filter === p.bucket}
-            onSelect={onFilter}
+            active={p.bucket ? pillList(filter).includes(p.bucket) : !filter}
+            onSelect={() => onFilter(p.bucket ? togglePill(filter, p.bucket) : "")}
             title={titleFor ? titleFor(p) : undefined}
           />
         ))}
@@ -2032,7 +2059,7 @@ function ReassignNeededView({ date }) {
 
   return (
     <div>
-      <div className="qfilter">
+      <div className="qfilter qfilter--note">
         <span className="qfilter__hint">
           Patients whose assigned doctor is now unavailable (leave / break / day off) on{" "}
           {prettyDate(date)}. Change the day with the date selector at the top. Reassign each to a
@@ -2607,30 +2634,29 @@ export default function GHMPage() {
       ),
     [assignCalls],
   );
-  const exporting = exportMutation.isPending;
+  const buildBookedTodayQuery = useCallback(
+    (pageNum, limit) =>
+      new URLSearchParams({ limit, page: pageNum, date: todayStr(), booked: "today" }),
+    [],
+  );
+  const bookedTodayMutation = useExportPages(buildBookedTodayQuery, EXPORT_PAGE_SIZE);
+  const exporting = exportMutation.isPending || bookedTodayMutation.isPending;
 
   // Exports whatever the current tab is showing, filters included — the file is
   // named after the tab and its date so a By Date and a Follow-up export of the
   // same day do not overwrite each other in the downloads folder.
-  const exportWati = useCallback(async () => {
+  const runExport = useCallback(async (mutation, label, sheetDate, options, emptyMessage) => {
     try {
-      const all = await exportMutation.mutateAsync();
+      const all = await mutation.mutateAsync();
       if (!all.length) {
-        toast("Nothing to export for this view.", "warn");
+        toast(emptyMessage, "warn");
         return;
       }
-      const label = EXPORT_LABELS[view] || "ghm-export";
       // The sheet names the last consultant seen, which lives outside the row —
       // fetched for the exported rows, not just the ones on screen.
       const lastSeen = await fetchLastMo(all.map((r) => r.patient_id)).catch(() => ({}));
       const owners = await fetchObtAssignments(all.map((r) => r.patient_id)).catch(() => ({}));
-      const counts = await exportWatiWorkbook(
-        all,
-        view === "lookup" ? todayStr() : date,
-        label,
-        lastSeen,
-        owners,
-      );
+      const counts = await exportWatiWorkbook(all, sheetDate, label, lastSeen, owners, options);
       if (!counts.total) toast("No patients with a phone number to export.", "warn");
     } catch (e) {
       // Without this the whole export failed into an unhandled rejection and
@@ -2638,7 +2664,31 @@ export default function GHMPage() {
       console.error("[GHM export] failed", e);
       toast(`Export failed: ${e?.response?.data?.error || e?.message || e}`, "error");
     }
-  }, [exportMutation, date, view]);
+  }, []);
+
+  const exportWati = useCallback(
+    () =>
+      runExport(
+        exportMutation,
+        [EXPORT_LABELS[view] || "ghm-export", pillFileLabel(pillFilter)].filter(Boolean).join("_"),
+        view === "lookup" ? todayStr() : date,
+        {},
+        "Nothing to export for this view.",
+      ),
+    [runExport, exportMutation, date, view, pillFilter],
+  );
+
+  const exportBookedToday = useCallback(
+    () =>
+      runExport(
+        bookedTodayMutation,
+        "ghm-booked-today",
+        todayStr(),
+        { bookings: true, singleSheet: "Booked Today" },
+        "No appointments have been booked today yet.",
+      ),
+    [runExport, bookedTodayMutation],
+  );
 
   // Debounce the search box so the Patient Lookup fetch fires after typing stops.
   useEffect(() => {
@@ -2719,7 +2769,6 @@ export default function GHMPage() {
     [patch, loggedInName],
   );
 
-  const isToday = date === todayStr();
   // Per-tab column visibility
   const showShowNoShow = false; // Show/No-Show column hidden on all tabs
   const showRecovery = false; // Recovery column hidden on all tabs
@@ -2859,13 +2908,6 @@ export default function GHMPage() {
         <div className="ghm__hdr">
           <div className="ghm__title">
             <h1>Daily Patient Sheet</h1>
-            <span className="ghm__datelab">{isToday ? "Today" : prettyDate(date)}</span>
-            {showRows && (
-              <span className="ghm__count">
-                {rows.length} of {total}
-                {searchQ ? " matching" : ""}
-              </span>
-            )}
             {busy && (
               <span className="ghm__busy">
                 <span className="ghm__busy-dot" aria-hidden="true" />
@@ -2912,7 +2954,7 @@ export default function GHMPage() {
                 title="Clear search, doctor, collection, mode, calls and date filters"
               >
                 <RotateCcw size={14} aria-hidden="true" />
-                Reset filters
+                <span className="ghm__btn-label">Reset filters</span>
               </button>
             )}
             <button
@@ -2927,7 +2969,7 @@ export default function GHMPage() {
               }
             >
               <Rows3 size={14} aria-hidden="true" />
-              Compact rows
+              <span className="ghm__btn-label">Compact rows</span>
             </button>
             <button
               type="button"
@@ -2945,7 +2987,9 @@ export default function GHMPage() {
               ) : (
                 <Maximize2 size={14} aria-hidden="true" />
               )}
-              {fullscreen ? "Exit full screen" : "Full screen"}
+              <span className="ghm__btn-label">
+                {fullscreen ? "Exit full screen" : "Full screen"}
+              </span>
             </button>
             {canAssignCalls && view !== "reassign" && view !== "lookup" && (
               <button
@@ -2960,7 +3004,7 @@ export default function GHMPage() {
                 }
               >
                 <Users size={14} aria-hidden="true" />
-                Divide calls
+                <span className="ghm__btn-label">Divide calls</span>
               </button>
             )}
             {view !== "reassign" && (
@@ -2974,7 +3018,23 @@ export default function GHMPage() {
                 }
               >
                 <Download size={14} aria-hidden="true" />
-                {exporting ? "Exporting…" : "Export Excel"}
+                <span className="ghm__btn-label">
+                  {exportMutation.isPending ? "Exporting…" : "Export Excel"}
+                </span>
+              </button>
+            )}
+            {view !== "reassign" && (
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={exportBookedToday}
+                disabled={exporting}
+                title="Download every appointment booked today, whatever date it is for"
+              >
+                <CalendarArrowDown size={14} aria-hidden="true" />
+                <span className="ghm__btn-label">
+                  {bookedTodayMutation.isPending ? "Exporting…" : "Booked today"}
+                </span>
               </button>
             )}
             <button

@@ -956,6 +956,22 @@ const summaryBucket = (v) => {
   return CAT_BUCKET_RE.test(name) ? name : null;
 };
 
+const CALL_BUCKETS = ["not_called", "called", "not_picked", "unreachable", "rescheduled"];
+
+const bucketGroup = (name) =>
+  CAT_BUCKET_RE.test(name) ? "category" : CALL_BUCKETS.includes(name) ? "calling" : "appointment";
+
+const summaryBucketList = (v) =>
+  Object.values(
+    Object.fromEntries(
+      String(v ?? "")
+        .split(",")
+        .map(summaryBucket)
+        .filter(Boolean)
+        .map((name) => [bucketGroup(name), name]),
+    ),
+  );
+
 const bucketWhere = (name, a, callStat = null, dateParam = "$1") => {
   if (Object.hasOwn(SUMMARY_BUCKETS, name)) {
     return SUMMARY_BUCKETS[name](a, callStat || `${a}.call_status`, dateParam);
@@ -965,12 +981,24 @@ const bucketWhere = (name, a, callStat = null, dateParam = "$1") => {
   throw Object.assign(new Error(`Unknown bucket: ${name}`), { status: 400 });
 };
 
-const summaryCols = (a, callStat = null, dateParam = "$1") => {
+const bucketsWhere = (names, a, callStat = null, dateParam = "$1") =>
+  names.map((name) => bucketWhere(name, a, callStat, dateParam)).join(" AND ");
+
+const summaryCols = (a, callStat = null, dateParam = "$1", buckets = []) => {
   const cs = callStat || `${a}.call_status`;
+  const otherGroups = (name) => buckets.filter((b) => bucketGroup(b) !== bucketGroup(name));
+  const scoped = (name, cond) => {
+    const others = otherGroups(name);
+    return others.length ? `${cond} AND ${bucketsWhere(others, a, cs, dateParam)}` : cond;
+  };
   return `
   COUNT(*)::int AS total,
+  ${buckets.length ? `COUNT(*) FILTER (WHERE ${bucketsWhere(buckets, a, cs, dateParam)})::int AS filtered,` : ""}
   ${Object.entries(SUMMARY_BUCKETS)
-    .map(([name, cond]) => `COUNT(*) FILTER (WHERE ${cond(a, cs, dateParam)})::int AS ${name}`)
+    .map(
+      ([name, cond]) =>
+        `COUNT(*) FILTER (WHERE ${scoped(name, cond(a, cs, dateParam))})::int AS ${name}`,
+    )
     .join(",\n  ")}`;
 };
 
@@ -1092,10 +1120,11 @@ router.get("/ghm-appointments", async (req, res) => {
           unassigned: ` AND NOT EXISTS ${assignment()}`,
         }[callsParam] || "";
 
-    // Summary-pill filter. It narrows the ROWS only — the summary keeps counting
-    // the whole date so the pills still show the day's real split while one of
-    // them is active, and `total` reports that bucket's own count.
-    const bucket = summaryBucket(req.query.bucket);
+    // Summary-pill filter, one pill per section (Appointments, Calling,
+    // Categories), ANDed. Each section's pills keep their own section's split
+    // and are counted within the other sections' active pills, so Booked +
+    // Need to Call shows how many booked patients still need a call.
+    const buckets = summaryBucketList(req.query.bucket);
 
     const baseCols = `a.id, a.appointment_date, a.time_slot, a.reporting_time_slot,
                 a.doctor_name, a.patient_name, a.file_no, a.phone, a.alt_phone,
@@ -1184,7 +1213,7 @@ router.get("/ghm-appointments", async (req, res) => {
       const [countR, dataR, noApptR] = await Promise.all([
         pool.query(
           `WITH ${upcomingCte}
-           SELECT ${summaryCols("z", null, `$${dIdx}`)} FROM (
+           SELECT ${summaryCols("z", null, `$${dIdx}`, buckets)} FROM (
              SELECT DISTINCT ON (COALESCE(a.file_no, a.id::text))
                     ${callStatusToday("a")} AS call_status,
                     a.show_no_show, a.visit_type, a.home_collection, a.patient_category,
@@ -1216,7 +1245,7 @@ router.get("/ghm-appointments", async (req, res) => {
                ${searchWhere}
                ${pickUpcoming}
              ) t
-             ${bucket ? `WHERE ${bucketWhere(bucket, "t", null, `$${dIdx}`)}` : ""}
+             ${buckets.length ? `WHERE ${bucketsWhere(buckets, "t", null, `$${dIdx}`)}` : ""}
              -- file_no + id tiebreakers give a TOTAL order so OFFSET paging is
              -- stable — many patients share an identical name, and ordering by name
              -- alone lets rows repeat or be skipped across pages.
@@ -1260,7 +1289,7 @@ router.get("/ghm-appointments", async (req, res) => {
         ),
       ]);
       const summary = countR.rows[0] || {};
-      const total = (bucket ? summary[bucket] : summary.total) || 0;
+      const total = (buckets.length ? summary.filtered : summary.total) || 0;
       // Merged into `data` so the list renders them as ordinary rows. The id is
       // the patient id negated: it keeps the rows distinct without ever naming
       // a real appointment, so a row-level edit 404s instead of writing to
@@ -1268,7 +1297,7 @@ router.get("/ghm-appointments", async (req, res) => {
       // these), and never under a summary-pill filter, whose buckets all count
       // appointment state these rows do not have.
       const noAppt =
-        bucket || (!exportAll && +page > 1)
+        buckets.length || (!exportAll && +page > 1)
           ? []
           : noApptR.rows.map((p) => ({ ...NO_APPOINTMENT_ROW, ...p, id: -p.patient_id }));
       return res.json({
@@ -1297,7 +1326,11 @@ router.get("/ghm-appointments", async (req, res) => {
     //            )
     //          )`;
     // } else {
-    where = dayWindowWhere("a");
+    where =
+      req.query.booked === "today"
+        ? `WHERE (a.created_at AT TIME ZONE 'Asia/Kolkata')::date = ${IST_TODAY}
+             AND NOT COALESCE(a.is_walkin, FALSE)`
+        : dayWindowWhere("a");
     // }
     // Blocked patients are hidden from the ops day list entirely — nobody should
     // be calling or booking them, so they should not be in the working set at
@@ -1328,13 +1361,13 @@ router.get("/ghm-appointments", async (req, res) => {
       }
     }
 
-    const rowWhere = bucket
-      ? `${where} AND ${bucketWhere(bucket, "a", callStatusToday("a"))}`
+    const rowWhere = buckets.length
+      ? `${where} AND ${bucketsWhere(buckets, "a", callStatusToday("a"))}`
       : where;
 
     const [countR, dataR] = await Promise.all([
       pool.query(
-        `SELECT ${summaryCols("a", callStatusToday("a"))} FROM appointments a ${where}`,
+        `SELECT ${summaryCols("a", callStatusToday("a"), "$1", buckets)} FROM appointments a ${where}`,
         params,
       ),
       pool.query(
@@ -1377,7 +1410,7 @@ router.get("/ghm-appointments", async (req, res) => {
     ]);
 
     const summary = countR.rows[0] || {};
-    const total = (bucket ? summary[bucket] : summary.total) || 0;
+    const total = (buckets.length ? summary.filtered : summary.total) || 0;
     res.json({
       data: dataR.rows,
       total,

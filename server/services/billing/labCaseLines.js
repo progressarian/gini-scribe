@@ -1,5 +1,5 @@
 import pool from "../../config/db.js";
-import { CASE_NOT_CANCELLED_SQL } from "../giniflow/testsHold.js";
+import { CASE_NOT_CANCELLED_SQL, LIVE_BILL_ITEM_SQL } from "../giniflow/testsHold.js";
 import { addLineIn, addLinesToDraftIn, readBill } from "./bills.js";
 import { addsLabCaseTests } from "./billingSettings.js";
 import { TEST_MATCHES_SQL } from "./testMatch.js";
@@ -28,6 +28,20 @@ export const VISIT_LAB_CASE_TESTS_SQL = (v) => `
                                  AND ov.id <> ${v}.id)))
      AND btrim(n.test_name) <> ''
      AND ${CASE_NOT_CANCELLED_SQL("lc")}`;
+
+export const REFUNDED_IN_HEALTHRAY_SQL = (v) => `
+  WITH hr AS (
+    SELECT btrim(bi->>'desc') AS test_name, ${LIVE_BILL_ITEM_SQL("bi")} AS live
+      FROM ${v}
+      JOIN giniflow_patient_bills pb
+        ON pb.patient_id = ${v}.patient_id AND pb.bill_date = ${v}.visit_date
+      CROSS JOIN LATERAL jsonb_array_elements(COALESCE(pb.items, '[]'::jsonb)) bi
+     WHERE pb.status = 'billed' AND bi->>'category' = 'lab' AND btrim(bi->>'desc') <> ''),
+  hm AS (${TEST_MATCHES_SQL("ARRAY(SELECT test_name FROM hr)")})
+  SELECT hm.catalog_id
+    FROM hr JOIN hm ON hm.test_name = hr.test_name
+   GROUP BY hm.catalog_id
+  HAVING bool_or(NOT hr.live) AND NOT bool_or(hr.live)`;
 
 export const PAID_DRAFT_SQL = (b) =>
   `(${b}.status = 'draft' AND ${b}.paid_amount > 0 AND ${b}.paid_amount >= ${b}.patient_payable)`;
@@ -61,8 +75,10 @@ const LAB_CASE_ROWS_SQL = `
       FROM giniflow_lab_orders o JOIN giniflow_lab_order_tests t ON t.lab_order_id = o.id
      WHERE o.visit_id = $1),
   matched AS MATERIALIZED (
-    ${TEST_MATCHES_SQL("ARRAY(SELECT test_name FROM named UNION SELECT test_name FROM ordered)")})
+    ${TEST_MATCHES_SQL("ARRAY(SELECT test_name FROM named UNION SELECT test_name FROM ordered)")}),
+  refunded AS MATERIALIZED (${REFUNDED_IN_HEALTHRAY_SQL("v")})
   SELECT n.case_no, n.test_name, m.catalog_id, i.id AS item_id, i.name AS item_name,
+         m.catalog_id IN (SELECT catalog_id FROM refunded) AS refunded,
          ${ON_PATIENT_DAY_BILL_SQL("v", "m.catalog_id")} AS on_bill,
          EXISTS (SELECT 1 FROM ordered od LEFT JOIN matched om ON om.test_name = od.test_name
                   WHERE om.catalog_id = m.catalog_id OR od.test_name = n.test_name) AS ordered,
@@ -96,7 +112,9 @@ export async function labCaseTestsForDesk(visitId, ctx, db = pool) {
       const id = cleanUuid(visitId, "visit");
       if (!(await addsLabCaseTests(client))) return { ok: true, added: [] };
       await client.query(`SELECT id FROM giniflow_visits WHERE id = $1 FOR NO KEY UPDATE`, [id]);
-      const due = firstPerItem((await labCaseRows(client, id)).filter((row) => !row.removed));
+      const due = firstPerItem(
+        (await labCaseRows(client, id)).filter((row) => !row.removed && !row.refunded),
+      );
       const result = await addLinesToDraftIn(
         client,
         id,
@@ -132,6 +150,21 @@ async function draftOf(db, billId) {
   return rows[0];
 }
 
+async function refundedLinesOn(db, bill) {
+  const { rows } = await db.query(
+    `WITH v AS (SELECT id, patient_id, visit_date FROM giniflow_visits WHERE id = $2)
+     SELECT l.id AS line_id, l.bill_name
+       FROM bill_lines l
+       JOIN service_items si ON si.id = l.service_item_id
+      CROSS JOIN v
+      WHERE l.bill_id = $1 AND l.is_live AND l.source = 'lab_case'
+        AND si.test_catalog_id IN (${REFUNDED_IN_HEALTHRAY_SQL("v")})
+      ORDER BY l.line_no`,
+    [bill.id, bill.visit_id],
+  );
+  return rows;
+}
+
 const isVisitDraft = (bill) =>
   bill.status === "draft" && bill.bill_type === "invoice" && Boolean(bill.visit_id);
 
@@ -147,11 +180,18 @@ export async function labCaseSuggestion(billId, ctx, db = pool) {
       item_id: row.item_id,
       item_name: row.item_name,
       removed: row.removed,
+      refunded: row.refunded,
       price: await suggestionPrice(db, bill, { item_id: row.item_id }, ctx?.role),
     });
   }
   const notPriced = [...new Set(rows.filter((row) => !row.item_id).map((row) => row.test_name))];
-  return { shown: tests.length + notPriced.length > 0, tests, not_priced: notPriced };
+  const refundedOnBill = await refundedLinesOn(db, bill);
+  return {
+    shown: tests.length + notPriced.length + refundedOnBill.length > 0,
+    tests,
+    not_priced: notPriced,
+    refunded_on_bill: refundedOnBill,
+  };
 }
 
 export async function addLabCaseTests(billId, input, ctx, db = pool) {

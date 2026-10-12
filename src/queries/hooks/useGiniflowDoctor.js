@@ -155,3 +155,30 @@ export function useSaveAdvice(visitId) {
       queryClient.invalidateQueries({ queryKey: adviceKey(visitId), refetchType: "none" }),
   });
 }
+
+const suggestionsKey = (visitId) => ["giniflow", "doctor", "suggestions", visitId];
+
+export function useDoctorSuggestions(visitId) {
+  return useQuery({
+    queryKey: suggestionsKey(visitId),
+    queryFn: async () =>
+      (await api.get(`/api/giniflow/stations/doctor/${visitId}/suggestions`)).data,
+    enabled: !!visitId,
+  });
+}
+
+export function useDecideSuggestion(visitId) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ suggestionId, ...decision }) =>
+      (await api.patch(`/api/giniflow/stations/doctor/suggestions/${suggestionId}`, decision)).data,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.refetchQueries({ queryKey: ["giniflow", "doctor", "consult", visitId] }),
+        queryClient.refetchQueries({ queryKey: adviceKey(visitId) }),
+        queryClient.refetchQueries({ queryKey: suggestionsKey(visitId) }),
+      ]);
+      invalidateAll(queryClient, visitId);
+    },
+  });
+}

@@ -10,7 +10,7 @@ export const DOCTOR_LEG_STATUSES = [
   "with_doctor",
 ];
 
-const LIVE_BILL_ITEM_SQL = (i) =>
+export const LIVE_BILL_ITEM_SQL = (i) =>
   `(NOT COALESCE((${i}->>'cancelled')::boolean, FALSE)
     AND NOT COALESCE((${i}->>'removed')::boolean, FALSE)
     AND NOT (COALESCE((${i}->>'amount')::numeric, 0) > 0

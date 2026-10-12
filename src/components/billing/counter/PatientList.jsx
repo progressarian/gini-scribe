@@ -135,11 +135,11 @@ export default function PatientList({ data, isLoading, visitId, searching, onPic
     <div className="bc-list__body">
       <Group
         id="bc-to-bill"
-        label="To bill"
+        label="Pending bill"
         rows={toBill}
         open={open.toBill}
         onToggle={toggle("toBill")}
-        empty="Nobody to bill."
+        empty="Nobody is waiting for a bill."
         {...shared}
       />
       <Group

@@ -75,46 +75,80 @@ const lastSeenLabel = (seen) => {
   return when ? `${seen.name}${kind} — ${when}` : `${seen.name}${kind}`;
 };
 
-const toSheetRow = (row, fallbackDate, lastSeen = {}, owners = {}) => {
+const BOOKING_COLS_AT = HEADERS.indexOf("Doctor") + 1;
+
+const BOOKING_HEADERS = [
+  ...HEADERS.slice(0, BOOKING_COLS_AT),
+  "Booked By",
+  "Booked At",
+  ...HEADERS.slice(BOOKING_COLS_AT),
+];
+
+const NOT_IN_BOOKINGS = ["CountryCode", "AllowCampaign", "AllowSMS", "Prescription Explained By"];
+
+const withBookingCols = (cells, values, bookings) =>
+  bookings
+    ? [...cells.slice(0, BOOKING_COLS_AT), ...values, ...cells.slice(BOOKING_COLS_AT)].filter(
+        (_, i) => !NOT_IN_BOOKINGS.includes(BOOKING_HEADERS[i]),
+      )
+    : cells;
+
+const fmtSheetTime = (value) =>
+  value
+    ? new Date(value).toLocaleTimeString("en-IN", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+        timeZone: "Asia/Kolkata",
+      })
+    : "";
+
+const toSheetRow = (row, fallbackDate, lastSeen = {}, owners = {}, bookings = false) => {
   const { code, number } = splitCountryCode(row.phone);
   const { start, end } = splitSlot(row.preferred_time_slot);
-  return [
-    row.patient_name || "",
-    code,
-    number,
-    "True",
-    "True",
-    fmtSheetDate(row.preferred_date || fallbackDate),
-    start,
-    end,
-    (Array.isArray(row.alt_phone) ? row.alt_phone : [row.alt_phone])
-      .filter(Boolean)
-      .map((n) => splitCountryCode(n).number)
-      .join(", "),
-    row.file_no || "",
-    row.disp_age ?? row.age ?? "",
-    row.disp_sex || row.sex || "",
-    owners[row.patient_id]?.assigned_to || "",
-    row.doctor_name || row.preferred_doctor || "",
-    fmtSheetDate(row.last_visit_date),
-    fmtSheetDate(row.follow_up_date),
-    fmtSheetDate(row.preferred_date),
-    row.visit_type || "",
-    row.appointment_type || row.mode_of_appointment || "",
-    lastSeenLabel(lastSeen[row.patient_id]),
-    row.prescription_explained_by || "",
-    // The STORED status, not the day-scoped one. On screen the status resets
-    // each morning on purpose — an unreset list would read "already called" and
-    // the team would skip patients on today's round. The sheet is the opposite
-    // job: it is the record of what happened, read alongside Call Date, so a
-    // call logged yesterday must still say so here.
-    callLabel(row.call_status_any || "pending"),
-    row.call_made_by || "",
-    fmtSheetDate(row.call_date),
-    row.home_collection ? "Yes" : "No",
-    row.preferred_time_slot || "",
-    row.notes || "",
-  ];
+  return withBookingCols(
+    [
+      row.patient_name || "",
+      code,
+      number,
+      "True",
+      "True",
+      fmtSheetDate(
+        bookings ? row.appointment_date || row.preferred_date : row.preferred_date || fallbackDate,
+      ),
+      start,
+      end,
+      (Array.isArray(row.alt_phone) ? row.alt_phone : [row.alt_phone])
+        .filter(Boolean)
+        .map((n) => splitCountryCode(n).number)
+        .join(", "),
+      row.file_no || "",
+      row.disp_age ?? row.age ?? "",
+      row.disp_sex || row.sex || "",
+      owners[row.patient_id]?.assigned_to || "",
+      row.doctor_name || row.preferred_doctor || "",
+      fmtSheetDate(row.last_visit_date),
+      fmtSheetDate(row.follow_up_date),
+      fmtSheetDate(row.preferred_date),
+      row.visit_type || "",
+      row.appointment_type || row.mode_of_appointment || "",
+      lastSeenLabel(lastSeen[row.patient_id]),
+      row.prescription_explained_by || "",
+      // The STORED status, not the day-scoped one. On screen the status resets
+      // each morning on purpose — an unreset list would read "already called" and
+      // the team would skip patients on today's round. The sheet is the opposite
+      // job: it is the record of what happened, read alongside Call Date, so a
+      // call logged yesterday must still say so here.
+      callLabel(row.call_status_any || "pending"),
+      row.call_made_by || "",
+      fmtSheetDate(row.call_date),
+      row.home_collection ? "Yes" : "No",
+      row.preferred_time_slot || "",
+      row.notes || "",
+    ],
+    [row.booked_by_name || "", fmtSheetTime(row.booked_at)],
+    bookings,
+  );
 };
 
 const BORDER = {
@@ -166,23 +200,32 @@ export const LIST_SHEETS = [
 ];
 
 // One list, one flat block — no New/FU split, because the sheet IS the split.
-export const buildListSheet = (XLSX, rows, date, title, lastSeen = {}, owners = {}) => {
+export const buildListSheet = (
+  XLSX,
+  rows,
+  date,
+  title,
+  lastSeen = {},
+  owners = {},
+  bookings = false,
+) => {
   const body = (rows || [])
     .filter((r) => r?.phone)
-    .map((r) => toSheetRow(r, date, lastSeen, owners));
+    .map((r) => toSheetRow(r, date, lastSeen, owners, bookings));
+  const headers = withBookingCols(HEADERS, ["Booked By", "Booked At"], bookings);
 
   const titleRow = new Array(BLOCK_WIDTH).fill("");
   titleRow[0] = title;
   titleRow[3] = `${body.length} patient${body.length === 1 ? "" : "s"}`;
   titleRow[5] = fmtSheetDate(date);
 
-  const ws = XLSX.utils.aoa_to_sheet([titleRow, [...HEADERS], ...body]);
-  ws["!cols"] = COL_WIDTHS.map((wch) => ({ wch }));
+  const ws = XLSX.utils.aoa_to_sheet([titleRow, headers, ...body]);
+  ws["!cols"] = withBookingCols(COL_WIDTHS, [18, 12], bookings).map((wch) => ({ wch }));
 
   styleCell(XLSX, ws, 0, 0, BLOCK_STYLE);
   styleCell(XLSX, ws, 0, 3, TITLE_STYLE);
   styleCell(XLSX, ws, 0, 5, DATE_STYLE);
-  HEADERS.forEach((_, i) => styleCell(XLSX, ws, 1, i, HEADER_STYLE));
+  headers.forEach((_, i) => styleCell(XLSX, ws, 1, i, HEADER_STYLE));
 
   return { ws, count: body.length };
 };
@@ -217,6 +260,7 @@ export const exportWatiWorkbook = async (
   fileLabel = "wati-appt-confirmation",
   lastSeen = {},
   owners = {},
+  { bookings = false, singleSheet = null } = {},
 ) => {
   const mod = await import("xlsx-js-style");
   // Interop: the CJS build lands on `default` through Vite, on the namespace
@@ -226,9 +270,18 @@ export const exportWatiWorkbook = async (
 
   // One tab per list, always present so the file has the same shape every day —
   // an empty tab says "nobody in this list", which a missing tab does not.
-  const built = LIST_SHEETS.map((list) => ({
+  const sheets = singleSheet ? [{ name: singleSheet, pick: () => true }] : LIST_SHEETS;
+  const built = sheets.map((list) => ({
     name: list.name,
-    ...buildListSheet(XLSX, (rows || []).filter(list.pick), date, list.name, lastSeen, owners),
+    ...buildListSheet(
+      XLSX,
+      (rows || []).filter(list.pick),
+      date,
+      list.name,
+      lastSeen,
+      owners,
+      bookings,
+    ),
   }));
 
   const counts = { total: 0, lists: {} };

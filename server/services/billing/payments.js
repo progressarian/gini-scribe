@@ -12,6 +12,7 @@ import {
   AS_PAID,
   DEPOSIT_MODE,
   HEALTHRAY_MODE,
+  PREPAID_MODE,
   ORDER_STATE,
 } from "../../../shared/billingVocab.js";
 import { holdFor, recordApplied, restoreToDeposit } from "./deposits.js";
@@ -47,12 +48,13 @@ const MODE_LABEL = {
   upi: "UPI",
   healthray: "HealthRay",
   deposit: "deposit",
+  prepaid: "paid earlier / online",
 };
 
-const PAY_OUT_MODES = [...PAYMENT_MODES, HEALTHRAY_MODE];
+const PAY_OUT_MODES = [...PAYMENT_MODES, HEALTHRAY_MODE, PREPAID_MODE];
 
 const NO_REFERENCE = [DRAWER_MODE, HEALTHRAY_MODE, DEPOSIT_MODE];
-const NO_DRAWER = [HEALTHRAY_MODE, DEPOSIT_MODE];
+const NO_DRAWER = [HEALTHRAY_MODE, DEPOSIT_MODE, PREPAID_MODE];
 
 const shiftFor = (mode, shiftId) => (NO_DRAWER.includes(mode) ? null : shiftId);
 
@@ -70,7 +72,7 @@ const TAKING = {
   amount: "The amount taken",
   positive: "The amount taken must be more than zero",
   mode: "A payment must be taken as one of",
-  modes: [...PAYMENT_MODES, DEPOSIT_MODE],
+  modes: [...PAYMENT_MODES, DEPOSIT_MODE, PREPAID_MODE],
   reference: (mode) => `A ${MODE_LABEL[mode]} payment needs its reference number`,
   none: "Enter the payment being taken",
   many: `At most ${PAYMENTS_AT_ONCE} payments can be taken at once`,
@@ -599,6 +601,11 @@ export async function clearInHealthray(billId, input, ctx, db = pool) {
     ctx,
     db,
   );
+}
+
+export async function collectPlannedIn(client, billId, wanted, ctx) {
+  const { rows } = await client.query(`SELECT version FROM bills WHERE id = $1`, [billId]);
+  return collectOnBill(billId, rows[0]?.version, () => wanted, ctx, client);
 }
 
 export async function applyDepositIn(client, billId, amount, ctx) {

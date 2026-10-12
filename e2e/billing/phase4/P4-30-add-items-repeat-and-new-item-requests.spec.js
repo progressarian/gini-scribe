@@ -163,13 +163,13 @@ test.describe.serial("P4-30 add items, repeat and new-item requests", () => {
     expect(after).toBe(2);
     expect((await requests.getRequest(pending.id, db)).status).toBe("used");
   });
-  test("5. the desk's own item search is active-only and carries no price", async () => {
+  test("5. the desk's own item search is active-only and shows only the patient's rate", async () => {
     const api = await apiAs("reception");
     const response = await api.get(`/api/billing/items/search?q=${tag}`);
     expect(response.status()).toBe(200);
     const items = (await response.json()).items;
     expect(items.some((item) => item.name === `Dressing ${tag}`)).toBe(true);
-    const banned = ["base_price", "price", "rate", "mrp", "bill_name", "bill_code", "discount"];
+    const banned = ["base_price", "price", "mrp", "bill_name", "bill_code", "discount"];
     for (const item of items) {
       for (const field of banned) expect(item).not.toHaveProperty(field);
     }

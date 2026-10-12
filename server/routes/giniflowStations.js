@@ -24,7 +24,9 @@ import {
 } from "../schemas/billing.js";
 import { validate, validateQuery } from "../middleware/validate.js";
 import { CAPABILITIES as CAP } from "../../shared/permissions.js";
-import { giniflowReportReviewSchema } from "../schemas/index.js";
+import { giniflowArrivalBillSchema, giniflowReportReviewSchema } from "../schemas/index.js";
+import { arrivalBillPreview, commitArrivalBill } from "../services/billing/arrivalBill.js";
+import { auditContext } from "../services/billing/audit.js";
 import { requestMedicine } from "../services/pharmacy/stockNeeded.js";
 import { parsePaste } from "../services/giniflow/rxPaste.js";
 import { blockActor, blockedResponse } from "../services/patientBlockGuard.js";
@@ -46,6 +48,8 @@ import {
   giniflowHistorySchema,
   giniflowAdviceSchema,
   giniflowProposalDecisionSchema,
+  giniflowSuggestionDecisionSchema,
+  giniflowSuggestionSaveSchema,
   giniflowDateQuerySchema,
   giniflowStationGroupQuerySchema,
   giniflowStationSearchGroupQuerySchema,
@@ -152,6 +156,12 @@ import {
   referralsForVisit,
 } from "../services/giniflow/referralsStation.js";
 import { extractPlan } from "../services/giniflow/planExtract.js";
+import {
+  decideSuggestion,
+  listSuggestions,
+  saveSuggestion,
+  SUGGESTION_FIELDS,
+} from "../services/giniflow/planSuggestions.js";
 import {
   getMoQueue,
   getMoPatient,
@@ -453,6 +463,7 @@ const requireOwnRow = (table, param) => async (req, res, next) => {
 };
 const requireOwnRxItem = requireOwnRow("giniflow_rx_items", "itemId");
 const requireOwnProposal = requireOwnRow("giniflow_rx_proposals", "id");
+const requireOwnSuggestion = requireOwnRow("giniflow_plan_suggestions", "id");
 
 // A clinical refusal the consultant can act on ("someone is already in the
 // room", "rejecting needs a reason") is a 409 with the reason, never a 500.
@@ -557,6 +568,8 @@ router.patch(
           req.params.key,
           req.body.value,
           req.doctor?.doctor_id ?? null,
+          undefined,
+          { anyChief: overridesOwnership(req) },
         ),
       });
     } catch (e) {
@@ -763,6 +776,28 @@ router.patch(
       res.json(await decideProposal(req.params.id, req.body, req.doctor?.doctor_id ?? null));
     } catch (e) {
       doctorError(res, e, "Gini Flow proposal decision");
+    }
+  },
+);
+
+router.get("/giniflow/stations/doctor/:visitId/suggestions", doctorGate, async (req, res) => {
+  try {
+    res.json({ suggestions: await listSuggestions(req.params.visitId) });
+  } catch (e) {
+    doctorError(res, e, "Gini Flow Chief suggestions");
+  }
+});
+
+router.patch(
+  "/giniflow/stations/doctor/suggestions/:id",
+  doctorGate,
+  requireOwnSuggestion,
+  validate(giniflowSuggestionDecisionSchema),
+  async (req, res) => {
+    try {
+      res.json(await decideSuggestion(req.params.id, req.body, req.doctor?.doctor_id ?? null));
+    } catch (e) {
+      doctorError(res, e, "Gini Flow Chief suggestion decision");
     }
   },
 );
@@ -1084,6 +1119,48 @@ router.get(
 // ── Reception ───────────────────────────────────────────────────────────────
 const receptionGate = requireCapability(CAP.GINIFLOW_STATION_RECEPTION);
 const cancelGate = requireCapability(CAP.GINIFLOW_TEST_CANCEL);
+const arrivalBillGate = [receptionGate, requireCapability(CAP.BILLING_DESK)];
+const deskCtx = (req) => ({ ...auditContext(req), role: req.doctor?.role ?? null });
+
+router.get(
+  "/giniflow/stations/reception/:visitId/arrival-bill",
+  arrivalBillGate,
+  async (req, res) => {
+    try {
+      const skip = String(req.query.skip || "")
+        .split(",")
+        .map((id) => id.trim())
+        .filter((id) => /^[0-9a-f-]{36}$/i.test(id));
+      const ids = (key) =>
+        String(req.query[key] || "")
+          .split(",")
+          .map(Number)
+          .filter((id) => Number.isInteger(id) && id > 0);
+      res.json(
+        await arrivalBillPreview(
+          req.params.visitId,
+          { skip, add: ids("add"), remove: ids("remove") },
+          deskCtx(req),
+        ),
+      );
+    } catch (e) {
+      handleError(res, e, "Arrival bill");
+    }
+  },
+);
+
+router.post(
+  "/giniflow/stations/reception/:visitId/arrival-bill",
+  arrivalBillGate,
+  validate(giniflowArrivalBillSchema),
+  async (req, res) => {
+    try {
+      res.json(await commitArrivalBill(req.params.visitId, req.body, deskCtx(req)));
+    } catch (e) {
+      handleError(res, e, "Arrival bill");
+    }
+  },
+);
 
 const cancelRoute =
   (
@@ -2409,6 +2486,47 @@ router.post(
       );
     } catch (e) {
       handleError(res, e, "Gini Flow MO proposal");
+    }
+  },
+);
+
+router.get("/giniflow/stations/mo/:visitId/advice-choices", moGate, async (req, res) => {
+  try {
+    res.json({ common: (await getVisitAdvice(req.params.visitId)).common });
+  } catch (e) {
+    doctorError(res, e, "Gini Flow MO advice choices");
+  }
+});
+
+router.get("/giniflow/stations/mo/:visitId/suggestions", moGate, async (req, res) => {
+  try {
+    res.json({ suggestions: await listSuggestions(req.params.visitId) });
+  } catch (e) {
+    doctorError(res, e, "Gini Flow MO suggestions");
+  }
+});
+
+router.put(
+  "/giniflow/stations/mo/:visitId/suggestions/:field",
+  moGate,
+  validate(giniflowSuggestionSaveSchema),
+  async (req, res) => {
+    if (!SUGGESTION_FIELDS.includes(req.params.field)) {
+      return res.status(400).json({ error: "Unknown suggestion" });
+    }
+    try {
+      res.json({
+        suggestion: await saveSuggestion(
+          req.params.visitId,
+          req.params.field,
+          req.body.value,
+          req.doctor?.doctor_id ?? null,
+          undefined,
+          { anyChief: overridesOwnership(req) },
+        ),
+      });
+    } catch (e) {
+      doctorError(res, e, "Gini Flow MO suggestion");
     }
   },
 );

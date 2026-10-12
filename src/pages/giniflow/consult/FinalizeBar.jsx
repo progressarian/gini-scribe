@@ -99,9 +99,9 @@ export default function FinalizeBar({ visitId, onDone, onToast, requestRef }) {
                       considered after the patient has gone home. */}
                   {preview.undecidedProposals > 0 && (
                     <li className="fin-block">
-                      ⛔ {preview.undecidedProposals} MO proposal
-                      {preview.undecidedProposals === 1 ? "" : "s"} still to review — approve,
-                      adjust or reject each one before finalizing
+                      ⛔ {preview.undecidedProposals} Chief Endocrinologist proposal
+                      {preview.undecidedProposals === 1 ? "" : "s"} still to review — decide each
+                      one before finalizing
                     </li>
                   )}
                   {unexplained > 0 && (

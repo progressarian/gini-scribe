@@ -848,6 +848,36 @@ export const giniflowCheckinSchema = z.object({
   sendWhatsapp: z.boolean().default(false),
 });
 
+export const giniflowArrivalBillSchema = z.strictObject({
+  skip: z.array(z.string().uuid()).max(50).default([]),
+  alreadyPaid: z
+    .array(
+      z.strictObject({
+        itemId: z.coerce.number().int().positive(),
+        source: z.enum(["healthray", "prepaid"]),
+        reference: z.string().trim().max(60).nullish(),
+      }),
+    )
+    .max(50)
+    .default([]),
+  mode: z.enum(["cash", "card", "upi"]).nullish(),
+  reference: z.string().trim().max(60).nullish(),
+  split: z
+    .array(
+      z.strictObject({
+        mode: z.enum(["cash", "card", "upi"]),
+        amount: z.number().int().positive(),
+        reference: z.string().trim().max(60).nullish(),
+      }),
+    )
+    .max(8)
+    .default([]),
+  extraToDeposit: z.boolean().default(false),
+  add: z.array(z.number().int().positive()).max(30).default([]),
+  remove: z.array(z.number().int().positive()).max(30).default([]),
+  expectedTotal: z.number().int().min(0),
+});
+
 export const giniflowJourneyStepSchema = giniflowStepSchema;
 
 export const giniflowStepStatusSchema = z.object({
@@ -953,6 +983,23 @@ export const giniflowProposalSchema = z.object({
   toDose: z.string().max(100).nullish(),
   reason: z.string().max(500).nullish(),
   changeType: z.enum(["continued", "changed", "new", "stopped", "paused"]).default("changed"),
+});
+
+export const giniflowSuggestionSaveSchema = z.object({
+  value: z.union([
+    z.string().max(4000),
+    z.array(z.record(z.any())).max(30),
+    z.record(z.any()),
+    z.null(),
+  ]),
+});
+
+export const giniflowSuggestionDecisionSchema = z.object({
+  status: z.enum(["accepted", "edited", "dismissed"]),
+  value: z
+    .union([z.string().max(4000), z.array(z.record(z.any())).max(30), z.record(z.any())])
+    .optional(),
+  note: z.string().max(300).nullish(),
 });
 
 // The MO queue also searches, and the search runs in Postgres — see QUEUE_SQL.

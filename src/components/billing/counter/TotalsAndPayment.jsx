@@ -15,6 +15,7 @@ import { errorOf, fromPaise, moneyTyped } from "../format";
 import { HEALTHRAY_LABEL, PAYMENT_MODE_LABEL } from "./lineText";
 import { balanceOf, payLaterAllowed } from "./finaliseChecks";
 import { emptyPaymentRow } from "./counterForm";
+import PaymentsReceived from "./PaymentsReceived";
 
 const paiseOf = (typed) => Math.round(Number(typed || 0) * 100);
 
@@ -226,6 +227,8 @@ export default function TotalsAndPayment({
             <div className="bc-pay__clear">No payment is needed on this bill.</div>
           )}
       </div>
+
+      <PaymentsReceived bill={bill} payments={billPayments} />
 
       {afterSummary}
 

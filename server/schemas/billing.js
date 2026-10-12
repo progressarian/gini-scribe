@@ -46,6 +46,7 @@ import {
   DUE_SORTS,
   DEPOSIT_MODE,
   HEALTHRAY_MODE,
+  PREPAID_MODE,
   PATIENT_PAYS,
   REFUND_MODES,
   REMAINDERS,
@@ -1006,6 +1007,16 @@ export const billingCategorySetSchema = deskObject({
   "send the category, card number, referral number or referral scan to change",
 );
 
+export const billingPaymentModeSchema = deskObject({
+  mode: z.string().trim().min(1).max(10),
+  reference: z.union([z.string().trim().max(60), z.null()]).optional(),
+  reason: z.string().trim().min(1).max(300),
+});
+
+export const billingConsultantSetSchema = deskObject({
+  consultant_id: id,
+});
+
 export const billingFinaliseSchema = deskObject({
   version: whole,
   pay_later: flag.optional(),
@@ -1045,9 +1056,9 @@ const paymentEntry = (modes) =>
       "needs its reference number when it isn't cash",
     );
 
-const takenPayment = paymentEntry([...PAYMENT_MODES, DEPOSIT_MODE]);
+const takenPayment = paymentEntry([...PAYMENT_MODES, DEPOSIT_MODE, PREPAID_MODE]);
 
-const paidOutPayment = paymentEntry([...PAYMENT_MODES, HEALTHRAY_MODE]);
+const paidOutPayment = paymentEntry([...PAYMENT_MODES, HEALTHRAY_MODE, PREPAID_MODE]);
 
 export const billingDepositReceiveSchema = z.strictObject(
   {
@@ -1384,6 +1395,7 @@ export const BILLING_DESK_LABELS = {
   lab_order_id: "Test order",
   repeat_request_id: "Approval",
   category: "Category",
+  consultant_id: "Consultant",
   scheme_ref: "Card number",
   referral_no: "Referral number",
   referral_doc_id: "Referral scan",

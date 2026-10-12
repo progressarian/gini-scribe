@@ -7,6 +7,7 @@ import {
 } from "../../../queries/hooks/useBilling";
 import { errorOf, fromPaise } from "../format";
 import LoadingCard from "./LoadingCard";
+import BillConsultant from "./BillConsultant";
 
 export const readFile = (file) =>
   new Promise((resolve, reject) => {
@@ -265,6 +266,8 @@ export default function PatientHeader({
           Confirm category
         </button>
       </form>
+
+      <BillConsultant bill={bill} onBill={onBill} />
 
       {(needsCard || needsReferral || needsDoc) && (
         <form

@@ -22,6 +22,16 @@ import {
 } from "../../queries/hooks/useGiniflowMo";
 import { VoiceButton } from "../../components/giniflow/VoiceInput";
 import RxSection from "./consult/RxSection";
+import ChiefSuggestions from "../../components/giniflow/ChiefSuggestions";
+import {
+  buildTestIndex,
+  isSearching,
+  MIN_SEARCH_LENGTH,
+  pickPopular,
+  rupees,
+  searchTests,
+  TEST_URGENCY,
+} from "./consult/testSearch";
 import useAuthStore from "../../stores/authStore";
 import { useTick, minutesSince, budgetColour } from "../../lib/giniflowTime";
 import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
@@ -194,11 +204,7 @@ function GroupHead({ icon, title, sub, count, open, onToggle, id }) {
 // refuses a repeat of any test still sitting in one of them.
 const UNCOLLECTED = new Set(UNDRAWN_SAMPLE_STATUSES);
 
-const URGENCY = [
-  { key: "today", label: "Today → lab now" },
-  { key: "tomorrow", label: "Tomorrow → reception" },
-  { key: "next_visit", label: "Next visit" },
-];
+const URGENCY = TEST_URGENCY;
 
 // Plan §2.3: the same five stops on every row, so an MO can see at a glance how
 // far down the floor a patient already is.
@@ -513,8 +519,10 @@ export default function MoStationPage() {
   // Typed in for THIS patient: the line goes on their order, never into the
   // clinic list every other patient is offered.
   const [custom, setCustom] = useState([]);
-  const [newTest, setNewTest] = useState("");
+  const [testFilter, setTestFilter] = useState("");
   const [newPrice, setNewPrice] = useState("");
+  const [showAllTests, setShowAllTests] = useState(false);
+  const testFilterRef = useRef(null);
   const ready = useReadyForDoctor();
   const release = useReleaseWorkup();
   const takeOver = useTakeOver();
@@ -816,7 +824,13 @@ export default function MoStationPage() {
   };
 
   const total = picked.reduce(
-    (sum, name) => sum + (catalogue?.tests.find((t) => t.name === name)?.price ?? 0),
+    (sum, name) =>
+      sum +
+      Number(
+        catalogue?.tests.find((t) => t.name === name)?.price ??
+          custom.find((t) => t.name === name)?.price ??
+          0,
+      ),
     0,
   );
   const cat = CATEGORY[patient?.category];
@@ -835,6 +849,21 @@ export default function MoStationPage() {
       if (UNCOLLECTED.has(o.sample_status)) for (const t of o.tests) names.add(t);
     return names;
   }, [patient?.orders]);
+
+  const testCatalog = useMemo(() => catalogue?.tests || [], [catalogue]);
+  const testIndex = useMemo(() => buildTestIndex(testCatalog), [testCatalog]);
+  const matchedTests = useMemo(() => searchTests(testIndex, testFilter), [testIndex, testFilter]);
+  const popularTests = useMemo(
+    () => pickPopular(testCatalog, catalogue?.panels || []),
+    [testCatalog, catalogue],
+  );
+  const searchingTests = isSearching(testFilter);
+  const visibleTests =
+    searchingTests || showAllTests
+      ? matchedTests
+      : matchedTests.filter(
+          (t) => popularTests.has(t.name) || picked.includes(t.name) || alreadyOrdered.has(t.name),
+        );
 
   const markers = useMemo(
     () => readMarkers(patient?.biomarkers, patient?.previousBiomarkers),
@@ -1308,8 +1337,10 @@ export default function MoStationPage() {
                         <div className="mo-xtr-row">
                           <span className="mo-xtr-lbl">When</span>
                           <span className="mo-xtr-vals">
-                            {URGENCY.find((u) => u.key === extracted.urgency)?.label ||
-                              extracted.urgency}
+                            {(() => {
+                              const u = URGENCY.find((x) => x.key === extracted.urgency);
+                              return u ? `${u.label} — ${u.sub}` : extracted.urgency;
+                            })()}
                           </span>
                         </div>
                       )}
@@ -1445,84 +1476,148 @@ export default function MoStationPage() {
                 </div>
 
                 <div className="dp-sec">
-                  <div className="dp-sec-title">🔬 Tests to order</div>
-                  <div className="mo-urgency">
+                  <div className="dp-sec-title">📝 Suggest advice &amp; care plan</div>
+                  <ChiefSuggestions
+                    visitId={activeId}
+                    readOnly={patient.status !== "with_sd"}
+                    onToast={showToast}
+                  />
+                </div>
+
+                <div className="dp-sec">
+                  <div className="cs-head">
+                    <h2>🔬 Tests to order</h2>
+                    <span className="cs-sub">
+                      panels or individual tests · set when they are needed
+                    </span>
+                    <div className="cs-head-r">
+                      <VoiceButton
+                        small
+                        label="🎤 Voice"
+                        title={'Say: "Order diabetes panel for next visit" or "Add TSH today"'}
+                        onText={(text) => {
+                          setTestFilter(text);
+                          testFilterRef.current?.focus();
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <div className="cn-head">When are these needed?</div>
+                  <div className="cp-chips">
                     {URGENCY.map((u) => (
                       <button
                         key={u.key}
                         type="button"
-                        className={`urg-btn${urgency === u.key ? " on" : ""}`}
+                        className={urgency === u.key ? "on" : ""}
                         onClick={() => setUrgency(u.key)}
                       >
                         {u.label}
                         {u.key === "next_visit" && patient.nextVisitDate
                           ? ` · ${monthLabel(patient.nextVisitDate)}`
-                          : ""}
+                          : ""}{" "}
+                        <em>— {u.sub}</em>
                       </button>
                     ))}
                   </div>
-                  <div className="dp-hint">
-                    Quick panels — tap to select every test in the panel
-                  </div>
-                  <div className="mo-panels">
+                  <div className="cn-head">Quick panels</div>
+                  <div className="tst-panels">
                     {(catalogue?.panels || []).map((p) => (
                       <button
                         key={p.key}
                         type="button"
-                        className={`panel-btn${p.tests.every((t) => picked.includes(t)) ? " on" : ""}`}
+                        className={`tst-panel${p.tests.every((t) => picked.includes(t)) ? " on" : ""}`}
                         onClick={() => togglePanel(p)}
                       >
-                        <span className="pb-icon">{p.icon}</span>
-                        <span className="pb-label">{p.label}</span>
-                        <span className="pb-count">{p.tests.length} tests</span>
+                        <strong>
+                          {p.icon} {p.label}
+                        </strong>
+                        <em>{p.tests.join(" · ")}</em>
+                        <span>{p.tests.length} tests</span>
                       </button>
                     ))}
                   </div>
-                  <div className="dp-hint">Add individual tests</div>
-                  {/* The catalogue is never complete. A test nobody listed is
-                      added to it here rather than written into the plan, where
-                      reception and the lab would never see it. */}
-                  <div className="mo-newtest">
-                    <input
-                      className="cp-inp"
-                      value={newTest}
-                      placeholder="Test not in the list? Type its name"
-                      onChange={(e) => setNewTest(e.target.value)}
-                    />
-                    <input
-                      className="cp-inp mo-newtest__price"
-                      inputMode="decimal"
-                      value={newPrice}
-                      placeholder="₹ price"
-                      onChange={(e) => setNewPrice(e.target.value)}
-                    />
-                    <button
-                      type="button"
-                      className="st-btn st-btn-g"
-                      disabled={newTest.trim().length < 2}
-                      onClick={() => {
-                        const name = newTest.trim();
-                        setCustom((prev) =>
-                          prev.some((c) => c.name.toLowerCase() === name.toLowerCase())
-                            ? prev
-                            : [
-                                ...prev,
-                                { name, price: Number(newPrice) > 0 ? Number(newPrice) : 0 },
-                              ],
-                        );
-                        setPicked((prev) => [...new Set([...prev, name])]);
-                        setNewTest("");
-                        setNewPrice("");
-                      }}
-                    >
-                      + Add for this patient
-                    </button>
+                  <div className="cn-head tst-head">
+                    {searchingTests
+                      ? "Matching tests"
+                      : showAllTests
+                        ? "All tests"
+                        : "Most used tests"}
+                    {!searchingTests && (
+                      <button
+                        type="button"
+                        className="btn-sm"
+                        onClick={() => setShowAllTests((v) => !v)}
+                      >
+                        {showAllTests ? "Show most used only" : `Show all ${testCatalog.length}`}
+                      </button>
+                    )}
                   </div>
+                  <div className="tst-heard">
+                    <input
+                      ref={testFilterRef}
+                      type="search"
+                      className="cp-inp tst-filter"
+                      value={testFilter}
+                      placeholder="Search tests by name or purpose — e.g. TSH, kidney, lipid"
+                      aria-label="Search tests"
+                      onChange={(e) => setTestFilter(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") setTestFilter("");
+                      }}
+                    />
+                    {testFilter && (
+                      <span className="tst-count" aria-live="polite">
+                        {searchingTests
+                          ? `${visibleTests.length} of ${testCatalog.length} tests`
+                          : `Type at least ${MIN_SEARCH_LENGTH} characters to search`}
+                      </span>
+                    )}
+                    {testFilter && (
+                      <button type="button" className="btn-sm" onClick={() => setTestFilter("")}>
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  {(() => {
+                    const typed = testFilter.trim();
+                    const known = [...testCatalog, ...custom].some(
+                      (t) => t.name.toLowerCase() === typed.toLowerCase(),
+                    );
+                    if (typed.length < 2 || known) return null;
+                    return (
+                      <div className="tst-new">
+                        <span>“{typed}” is not in the list — order it for this patient only?</span>
+                        <input
+                          className="cp-inp tst-new__price"
+                          inputMode="decimal"
+                          placeholder="₹ price"
+                          aria-label={`Price for ${typed}`}
+                          value={newPrice}
+                          onChange={(e) => setNewPrice(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          className="btn-sm on"
+                          onClick={() => {
+                            setCustom((prev) => [
+                              ...prev,
+                              { name: typed, price: Number(newPrice) > 0 ? Number(newPrice) : 0 },
+                            ]);
+                            setPicked((prev) => [...new Set([...prev, typed])]);
+                            setTestFilter("");
+                            setNewPrice("");
+                          }}
+                        >
+                          + Add for this patient
+                        </button>
+                      </div>
+                    );
+                  })()}
                   {custom.length > 0 && (
-                    <div className="mo-customlist">
+                    <div className="tst-customlist">
                       {custom.map((t) => (
-                        <span key={t.name} className="mo-custom">
-                          {t.name} · {t.price ? `₹${t.price}` : "price not set"}
+                        <span key={t.name} className="tst-custom">
+                          {t.name} · {t.price ? rupees(t.price) : "price not set"}
                           <button
                             type="button"
                             aria-label={`Remove ${t.name}`}
@@ -1537,8 +1632,8 @@ export default function MoStationPage() {
                       ))}
                     </div>
                   )}
-                  <div className="mo-tests">
-                    {(catalogue?.tests || []).map((t) => {
+                  <div className="tst-list">
+                    {visibleTests.map((t) => {
                       const dup = alreadyOrdered.has(t.name);
                       return (
                         <button
@@ -1546,26 +1641,39 @@ export default function MoStationPage() {
                           type="button"
                           disabled={dup}
                           title={dup ? "Already ordered and not yet collected" : undefined}
-                          className={`test-chip${picked.includes(t.name) ? " on" : ""}${dup ? " ordered" : ""}`}
+                          className={`tst-chip${picked.includes(t.name) ? " on" : ""}${dup ? " done" : ""}`}
                           onClick={() => toggleTest(t.name)}
                         >
-                          <span className="tc-name">{t.name}</span>
-                          {t.gloss && <span className="tc-sub">{t.gloss}</span>}
-                          <span className="tc-price">{dup ? "ordered" : `₹${t.price}`}</span>
+                          <span className="tst-name">
+                            {t.name}
+                            {dup && " ✓"}
+                          </span>
+                          {t.gloss && <span className="tst-gloss">{t.gloss}</span>}
+                          <span className="tst-price">
+                            {dup ? "ordered" : t.price ? rupees(t.price) : "price not set"}
+                          </span>
                         </button>
                       );
                     })}
+                    {searchingTests && visibleTests.length === 0 && (
+                      <div className="cn-empty">No test matches “{testFilter.trim()}”.</div>
+                    )}
                   </div>
                   {picked.length > 0 && (
-                    <div className="mo-order-bar">
+                    <div className="tst-bar">
                       <span>
                         <strong>{picked.length} tests</strong> · ₹{total.toLocaleString("en-IN")} ·{" "}
                         {urgency === "today"
                           ? "goes to reception now"
                           : `saved for ${urgency.replace("_", " ")}`}
                       </span>
-                      <button className="st-btn st-btn-tl" disabled={busy} onClick={confirmTests}>
-                        Confirm →
+                      <button
+                        type="button"
+                        className="btn-sm on"
+                        disabled={busy}
+                        onClick={confirmTests}
+                      >
+                        {orderTests.isPending ? "Ordering…" : "Confirm →"}
                       </button>
                     </div>
                   )}

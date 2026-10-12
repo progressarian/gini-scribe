@@ -21,6 +21,8 @@ export const REFUND_MODES = ["as_paid", "cash", "card", "upi", "deposit"];
 export const AS_PAID = "as_paid";
 export const HEALTHRAY_MODE = "healthray";
 export const DEPOSIT_MODE = "deposit";
+export const PREPAID_MODE = "prepaid";
+export const PREPAID_LABEL = "Paid earlier / online";
 export const ORDER_STATE = {
   CLAIM_AT_RECEPTION: "claim_at_reception",
   PAID_AT_RECEPTION: "paid_at_reception",

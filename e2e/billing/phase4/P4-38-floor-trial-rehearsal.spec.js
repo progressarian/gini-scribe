@@ -98,7 +98,7 @@ async function checkIn(page, patient) {
   await row.getByRole("button", { name: /Arrived/ }).click();
   const panel = page.getByRole("dialog", { name: "Check in" });
   await panel
-    .getByRole("button", { name: /Check in/ })
+    .getByRole("button", { name: /^(✓ )?Check in( only)?( — bill later)?$/ })
     .first()
     .click();
   await expect(panel.getByRole("link", { name: "Open bill →" })).toBeVisible();

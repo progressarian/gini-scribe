@@ -10,6 +10,7 @@ import {
   BILL_DEPARTMENT,
   BILL_DOCUMENT_TITLES,
   HEALTHRAY_MODE,
+  PREPAID_MODE,
 } from "../../../shared/billingVocab.js";
 import { rupeesInWords } from "./amountInWords.js";
 import { getSettings } from "./billingSettings.js";
@@ -17,6 +18,7 @@ import { readBill } from "./bills.js";
 import { readCreditNote } from "./creditNotes.js";
 import { httpError } from "./transaction.js";
 
+import { BILL_CONSULTANT_SQL } from "./billConsultant.js";
 const RUPEES = new Intl.NumberFormat("en-IN", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
@@ -293,11 +295,13 @@ const MODE_LABEL = {
   upi: "UPI",
   healthray: "Paid in HealthRay",
   deposit: "Paid from deposit",
+  prepaid: "Paid earlier / online",
 };
 
 const REFUND_MODE_LABEL = {
   healthray: "Refunded in HealthRay",
   deposit: "Kept as deposit",
+  prepaid: "Refunded outside the counter",
 };
 
 export const modeText = (mode) => MODE_LABEL[mode] ?? String(mode ?? "");
@@ -328,14 +332,9 @@ export const PATIENT_SQL = `SELECT id, name, file_no, health_id, age, sex, phone
 const VISIT_SQL = `
   SELECT (SELECT a.visit_type FROM giniflow_visits v
             JOIN appointments a ON a.id = v.appointment_id WHERE v.id = $2) AS visit_type,
-         (SELECT d.name FROM doctors d
-           WHERE d.id = COALESCE(
-                   (SELECT l.doctor_id FROM bill_lines l
-                     WHERE l.bill_id = $1 AND l.doctor_id IS NOT NULL
-                     ORDER BY l.line_no LIMIT 1),
-                   (SELECT v.assigned_doctor_id FROM giniflow_visits v WHERE v.id = $2),
-                   (SELECT a.doctor_id FROM giniflow_visits v
-                      JOIN appointments a ON a.id = v.appointment_id WHERE v.id = $2))) AS consultant,
+         (SELECT d.name FROM bills cb
+            JOIN doctors d ON d.id = ${BILL_CONSULTANT_SQL("cb")}
+           WHERE cb.id = $1) AS consultant,
          (SELECT o.bill_no FROM bills o WHERE o.id = $3) AS original_bill_no,
          (SELECT COALESCE(d.short_name, d.name) FROM bills b JOIN doctors d ON d.id = b.finalised_by
            WHERE b.id = $1) AS finalised_by_name,
@@ -353,6 +352,8 @@ const VISIT_SQL = `
          ) AS refund_reason,
          (SELECT COALESCE(SUM(p.amount), 0) FROM payments p
            WHERE p.bill_id = $1 AND p.direction = 'in' AND p.mode = '${HEALTHRAY_MODE}') AS healthray_paid,
+         (SELECT COALESCE(SUM(p.amount), 0) FROM payments p
+           WHERE p.bill_id = $1 AND p.direction = 'in' AND p.mode = '${PREPAID_MODE}') AS prepaid_paid,
          (SELECT o.bill_date::text FROM bills o WHERE o.id = $3) AS original_bill_date`;
 
 export async function letterhead() {
@@ -406,6 +407,7 @@ export async function billView(billId, db = pool) {
     finalised_by_name: visit.finalised_by_name ?? null,
     refunded: Math.round(Number(visit.refunded ?? 0) * 100),
     healthray_paid: Math.round(Number(visit.healthray_paid ?? 0) * 100),
+    prepaid_paid: Math.round(Number(visit.prepaid_paid ?? 0) * 100),
     hospital: marks.hospital,
     logo: marks.logo,
   };
@@ -637,6 +639,9 @@ function totalsHtml(view, gst) {
   );
   if ((view.healthray_paid ?? 0) > 0) {
     rows.push([`${modeText(HEALTHRAY_MODE)} (₹)`, amountText(view.healthray_paid)]);
+  }
+  if ((view.prepaid_paid ?? 0) > 0) {
+    rows.push([`${modeText(PREPAID_MODE)} (₹)`, amountText(view.prepaid_paid)]);
   }
   rows.push(["Net Payable Amount(₹)", signedAmountText(balanceOf(bill))]);
   if ((view.refunded ?? 0) > 0) rows.push(["Refunded Amount(₹)", amountText(view.refunded)]);

@@ -12,7 +12,7 @@ import {
 } from "./common.js";
 import { CAPABILITIES, hasAnyCapability } from "../../../shared/permissions.js";
 import { paise } from "../../../shared/labPayment.js";
-import { HEALTHRAY_MODE } from "../../../shared/billingVocab.js";
+import { HEALTHRAY_MODE, PREPAID_MODE } from "../../../shared/billingVocab.js";
 
 export const PAYMENT_MODES = ["cash", "card", "upi"];
 export const DRAWER_MODE = "cash";
@@ -112,7 +112,7 @@ const SHIFT_SQL = `
          ${TOTAL_COLUMNS},
          t.payment_count, t.bill_count, t.refund_count, t.credit_note_count,
          t.deposits_received, t.deposits_refunded, t.deposit_count,
-         hr.healthray_collected, hr.healthray_refunded
+         hr.healthray_collected, hr.healthray_refunded, hr.prepaid_collected
     FROM cash_shifts s
     LEFT JOIN doctors u ON u.id = s.user_id
     LEFT JOIN LATERAL (
@@ -130,10 +130,14 @@ const SHIFT_SQL = `
        WHERE p.shift_id = s.id
     ) t ON TRUE
     LEFT JOIN LATERAL (
-      SELECT COALESCE(SUM(h.amount) FILTER (WHERE h.direction = 'in'), 0) AS healthray_collected,
-             COALESCE(SUM(h.amount) FILTER (WHERE h.direction = 'out'), 0) AS healthray_refunded
+      SELECT COALESCE(SUM(h.amount) FILTER (WHERE h.mode = '${HEALTHRAY_MODE}'
+                                                AND h.direction = 'in'), 0) AS healthray_collected,
+             COALESCE(SUM(h.amount) FILTER (WHERE h.mode = '${HEALTHRAY_MODE}'
+                                                AND h.direction = 'out'), 0) AS healthray_refunded,
+             COALESCE(SUM(h.amount) FILTER (WHERE h.mode = '${PREPAID_MODE}'
+                                                AND h.direction = 'in'), 0) AS prepaid_collected
         FROM payments h
-       WHERE h.mode = '${HEALTHRAY_MODE}' AND h.received_by = s.user_id
+       WHERE h.mode IN ('${HEALTHRAY_MODE}', '${PREPAID_MODE}') AND h.received_by = s.user_id
          AND h.received_at >= s.opened_at AND h.received_at <= COALESCE(s.closed_at, NOW())
     ) hr ON TRUE`;
 
@@ -178,6 +182,7 @@ function shape(row) {
       collected: money(row.healthray_collected),
       refunded: money(row.healthray_refunded),
     },
+    prepaid: { collected: money(row.prepaid_collected) },
     expected_cash: isOpen ? drawerOf(openingCash, collected, refunded) : money(row.expected_cash),
     counted_cash: row.counted_cash === null ? null : money(row.counted_cash),
     difference: row.difference === null ? null : money(row.difference),
@@ -314,6 +319,31 @@ async function expectedCashFor(client, id) {
     );
   }
   return expected;
+}
+
+export async function refreshClosedDrawer(client, shiftId, ctx) {
+  const { rows } = await client.query(
+    `SELECT closed_at, counted_cash FROM cash_shifts WHERE id = $1 FOR UPDATE`,
+    [shiftId],
+  );
+  if (!rows[0]?.closed_at) return null;
+  const before = await readShift(client, shiftId);
+  const expected = await expectedCashFor(client, shiftId);
+  await client.query(
+    `UPDATE cash_shifts SET expected_cash = $2, difference = $3, updated_at = NOW(), updated_by = $4
+      WHERE id = $1`,
+    [shiftId, expected, money(Number(rows[0].counted_cash) - expected), ctx?.actorId ?? null],
+  );
+  const shift = await readShift(client, shiftId);
+  await writeAudit(client, {
+    entity: "cash_shifts",
+    entityId: shiftId,
+    action: "update",
+    before,
+    after: shift,
+    ...auditFields(ctx),
+  });
+  return shift;
 }
 
 export async function closeShift(id, input = {}, ctx, db = pool) {

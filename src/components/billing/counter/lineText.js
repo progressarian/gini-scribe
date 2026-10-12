@@ -1,4 +1,10 @@
-import { DEPOSIT_MODE, HEALTHRAY_MODE, ORDER_STATE } from "../../../../shared/billingVocab.js";
+import {
+  DEPOSIT_MODE,
+  HEALTHRAY_MODE,
+  ORDER_STATE,
+  PREPAID_LABEL,
+  PREPAID_MODE,
+} from "../../../../shared/billingVocab.js";
 
 export const ORDER_STATE_LABEL = {
   [ORDER_STATE.CLAIM_AT_RECEPTION]: "Claim at reception",
@@ -57,6 +63,7 @@ export const PAID_MODE_LABEL = {
   ...PAYMENT_MODE_LABEL,
   [HEALTHRAY_MODE]: HEALTHRAY_LABEL,
   [DEPOSIT_MODE]: "Paid from deposit",
+  [PREPAID_MODE]: PREPAID_LABEL,
 };
 
 export const paymentModeText = (mode) => PAID_MODE_LABEL[mode] ?? mode ?? "";

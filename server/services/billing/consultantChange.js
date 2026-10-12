@@ -3,6 +3,7 @@ import { billingVisitType } from "../../../shared/billingVisitType.js";
 import { paise } from "../../../shared/labPayment.js";
 import { CAPABILITIES, hasCapability } from "../../../shared/permissions.js";
 import { writeAudit } from "./audit.js";
+import { HOSPITAL_ADMIN_ID_SQL } from "./billConsultant.js";
 import { addLineIn, holdConsultation, openDraftIn, removeLine } from "./bills.js";
 import { creditNoteIn } from "./creditNotes.js";
 import { requestRefund } from "./deposits.js";
@@ -158,6 +159,12 @@ async function swapDraftLines(client, visit, lines, to, ctx) {
   for (const line of lines) {
     await removeLine(line.bill_id, line.id, { reason }, ctx, client);
   }
+  await client.query(
+    `UPDATE bills SET consultant_id = $2, updated_at = NOW()
+      WHERE id = ANY($1::uuid[]) AND status = 'draft' AND consultant_id IS NOT NULL
+        AND consultant_id IS DISTINCT FROM ${HOSPITAL_ADMIN_ID_SQL}`,
+    [[...new Set(lines.map((line) => line.bill_id))], to.id],
+  );
   if (!item) return { swapped: lines.length, added: null };
   const bill = await openDraftIn(client, visit.id, ctx);
   await addLineIn(client, bill, { item_id: item.id, source: "visit", doctor_id: to.id }, ctx);

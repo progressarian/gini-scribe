@@ -2,6 +2,15 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useTestPanels, useOrderTests } from "../../../queries/hooks/useGiniflowPrescription";
 import { VoiceButton } from "../../../components/giniflow/VoiceInput";
 import { clearDraftField, writeDraftField } from "../../../lib/consultDraft";
+import {
+  buildTestIndex,
+  isSearching,
+  MIN_SEARCH_LENGTH,
+  pickPopular,
+  rupees,
+  searchTests,
+  TEST_URGENCY,
+} from "./testSearch";
 
 // Tests — gini-doctor-final.html `s-tests`.
 //
@@ -9,58 +18,13 @@ import { clearDraftField, writeDraftField } from "../../../lib/consultDraft";
 // `orderTests` service. Two stations offering different tests would be two
 // answers to the same question.
 
-const URGENCY = [
-  { key: "today", label: "Today", sub: "lab now" },
-  { key: "tomorrow", label: "Tomorrow", sub: "reception" },
-  { key: "next_visit", label: "Next visit", sub: "with the follow-up" },
-];
+const URGENCY = TEST_URGENCY;
 
 const monthLabel = (ymd) => {
   const [y, m] = (ymd || "").split("-").map(Number);
   if (!y) return "";
   return new Date(y, m - 1, 1).toLocaleDateString("en-IN", { month: "short", year: "numeric" });
 };
-
-const searchText = (value) =>
-  (value || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-
-const rupees = (amount) => `₹${Number(amount || 0).toLocaleString("en-IN")}`;
-
-function buildTestIndex(tests) {
-  return tests.map((test) => {
-    const name = searchText(test.name);
-    const words = `${name} ${searchText(test.gloss)}`;
-    return { test, name, words, compact: words.replace(/ /g, "") };
-  });
-}
-
-const MIN_SEARCH_LENGTH = 2;
-
-const byUsageThenName = (a, b) =>
-  (b.uses || 0) - (a.uses || 0) || a.name.localeCompare(b.name, "en", { sensitivity: "base" });
-
-function searchTests(index, query) {
-  const tokens = searchText(query).split(" ").filter(Boolean);
-  const matches =
-    tokens.join("").length < MIN_SEARCH_LENGTH
-      ? index
-      : index.filter((entry) =>
-          tokens.every((token) => entry.words.includes(token) || entry.compact.includes(token)),
-        );
-  return matches.map((entry) => entry.test).sort(byUsageThenName);
-}
-
-const POPULAR_LIMIT = 24;
-
-function pickPopular(tests, panels) {
-  const panelNames = new Set(panels.flatMap((p) => p.tests));
-  const used = tests.filter((t) => t.uses > 0).sort((a, b) => b.uses - a.uses);
-  const curated = tests.filter((t) => !(t.uses > 0) && (panelNames.has(t.name) || t.gloss));
-  return new Set([...used, ...curated].slice(0, POPULAR_LIMIT).map((t) => t.name));
-}
 
 export default function TestsSection({ visitId, consult, readOnly, onToast, onUnsaved, restored }) {
   const { data } = useTestPanels(visitId);
@@ -115,7 +79,7 @@ export default function TestsSection({ visitId, consult, readOnly, onToast, onUn
     [testIndex, deferredFilter],
   );
   const popularNames = useMemo(() => pickPopular(catalog, panels), [catalog, panels]);
-  const searching = searchText(filter).replace(/ /g, "").length >= MIN_SEARCH_LENGTH;
+  const searching = isSearching(filter);
   const visibleTests =
     searching || showAll
       ? matchedTests

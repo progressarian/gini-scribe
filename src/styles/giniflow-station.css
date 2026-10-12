@@ -8464,6 +8464,289 @@
   cursor: not-allowed;
 }
 
+.gf .ab {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+  border: 1px solid var(--bd);
+  border-radius: var(--r-lg);
+  padding: 12px 14px;
+  background: var(--white);
+}
+.gf .ab-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--ink);
+}
+.gf .ab-due {
+  font-family: var(--fm);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--grn);
+  background: var(--grn-l);
+  border: 1px solid var(--grn-b);
+  border-radius: 20px;
+  padding: 2px 10px;
+  white-space: nowrap;
+}
+.gf .ab-due--none {
+  color: var(--ink3);
+  background: var(--bg);
+  border-color: var(--bd);
+}
+.gf .ab-carry {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 0;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--r);
+  background: var(--bg);
+  font-size: 12px;
+  color: var(--ink2);
+}
+.gf .ab-carry legend {
+  float: left;
+  width: 100%;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 2px;
+}
+.gf .ab-carry label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.gf .ab-carry label.is-disabled {
+  color: var(--ink4);
+}
+.gf .ab-lines {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.gf .ab-lines thead th {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  text-align: left;
+  padding: 0 6px 6px;
+  border-bottom: 1px solid var(--bd);
+}
+.gf .ab-lines thead th.ab-amt {
+  text-align: right;
+}
+.gf .ab-lines tbody th,
+.gf .ab-lines tbody td,
+.gf .ab-lines tfoot th,
+.gf .ab-lines tfoot td {
+  padding: 7px 6px;
+  border-bottom: 1px solid var(--bd);
+  text-align: left;
+  font-weight: 400;
+  color: var(--ink);
+  vertical-align: middle;
+}
+.gf .ab-lines tbody th {
+  overflow-wrap: anywhere;
+}
+.gf .ab-lines .ab-amt {
+  width: 1%;
+  text-align: right;
+  font-family: var(--fm);
+  white-space: nowrap;
+}
+.gf .ab-lines td:last-child {
+  width: 1%;
+}
+.gf .ab-pay {
+  border: 1px solid var(--bd2);
+  border-radius: var(--r);
+  padding: 4px 6px;
+  font-family: var(--fb);
+  font-size: 11px;
+  color: var(--ink);
+  background: var(--white);
+}
+.gf .ab-tag {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 10px;
+  color: var(--ink3);
+  background: var(--bg);
+  border-radius: 20px;
+  padding: 0 6px;
+}
+.gf .ab-lines tfoot th,
+.gf .ab-lines tfoot td {
+  color: var(--ink2);
+}
+.gf .ab-lines .ab-total th,
+.gf .ab-lines .ab-total td {
+  font-weight: 700;
+  color: var(--ink);
+  border-bottom: 0;
+}
+.gf .ab-mode {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding-top: 2px;
+}
+.gf .ab-mode-lab {
+  font-weight: 600;
+  color: var(--ink);
+}
+.gf .ab-ref {
+  flex: 1 1 180px;
+  border: 1px solid var(--bd2);
+  border-radius: var(--r);
+  padding: 6px 8px;
+  font-family: var(--fb);
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--white);
+}
+.gf .ab-split {
+  flex: 1 1 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.gf .ab-split-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.gf .ab-ref.ab-split-amt {
+  flex: 0 1 120px;
+  font-family: var(--fm);
+}
+.gf .ab-split-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.gf .ab-split-sum {
+  margin-left: auto;
+  font-family: var(--fm);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--amb);
+}
+.gf .ab-split-sum.is-ok {
+  color: var(--grn);
+}
+.gf .ab-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.gf .ab-add {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.gf .ab-add .ab-ref {
+  flex: none;
+}
+.gf .ab-add-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  background: var(--white);
+}
+.gf .ab-add-item {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--r);
+  background: none;
+  font-family: var(--fb);
+  font-size: 12px;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.gf .ab-add-item:hover:not(:disabled) {
+  background: var(--bg);
+}
+.gf .ab-add-item:disabled {
+  color: var(--ink4);
+  cursor: default;
+}
+.gf .ab-removed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink3);
+}
+.gf .ab-removed-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px 2px 8px;
+  border-radius: 20px;
+  background: var(--bg);
+  text-decoration: line-through;
+}
+.gf .ab-removed-item button {
+  text-decoration: none;
+}
+.gf .ab-ref.ab-paid-ref {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 4px;
+  padding: 4px 6px;
+  font-size: 11px;
+}
+.gf .ab-deposit {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ink2);
+  background: var(--amb-l);
+  border: 1px solid var(--amb-b);
+  border-radius: var(--r);
+  padding: 8px 10px;
+}
+.gf .ab-deposit strong {
+  color: var(--amb);
+}
+.gf .ab-err {
+  font-size: 12px;
+  color: var(--red);
+  background: var(--red-l);
+  border-radius: var(--r);
+  padding: 6px 8px;
+}
+
 .gf .pay-cols {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

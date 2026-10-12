@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useIsMutating, useMutationState } from "@tanstack/react-query";
+import { useIsMutating, useMutationState, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   useConsult,
   useReleaseConsult,
   useSaveCarePlan,
   useDecideProposal,
+  useDecideSuggestion,
 } from "../../queries/hooks/useGiniflowDoctor";
 import OverviewSection from "./consult/OverviewSection";
 import ComplaintsSection from "./consult/ComplaintsSection";
@@ -15,6 +16,7 @@ import CarePlanSection from "./consult/CarePlanSection";
 import { usePrescription, visitWriteKey } from "../../queries/hooks/useGiniflowPrescription";
 import FastPathBar from "./consult/FastPathBar";
 import ProposalsStrip from "./consult/ProposalsStrip";
+import PlanSuggestions from "./consult/PlanSuggestions";
 import RxSection from "./consult/RxSection";
 import TestsSection from "./consult/TestsSection";
 import ProceduresSection from "./consult/ProceduresSection";
@@ -94,6 +96,9 @@ export default function DoctorConsultPage() {
   const releaseConsult = useReleaseConsult();
   const saveCarePlan = useSaveCarePlan(visitId);
   const decideProposal = useDecideProposal(visitId);
+  const decideSuggestion = useDecideSuggestion(visitId);
+  const queryClient = useQueryClient();
+  const [planVersion, setPlanVersion] = useState(0);
   const [trendMarker, setTrendMarker] = useState(null);
   const [toast, setToast] = useState("");
   const [unsaved, setUnsaved] = useState({});
@@ -169,6 +174,22 @@ export default function DoctorConsultPage() {
     decideProposal.mutate(decision, {
       onError: (e) => showToast(e?.response?.data?.error || "Decision not saved"),
     });
+
+  const onDecideSuggestion = async (decision) => {
+    flushAdvice.current?.();
+    flushCarePlan.current?.();
+    for (let waited = 0; waited < 5000 && queryClient.isMutating() > 0; waited += 100) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    try {
+      await decideSuggestion.mutateAsync(decision);
+      setPlanVersion((v) => v + 1);
+      return true;
+    } catch (e) {
+      showToast(e?.response?.data?.error || "Decision not saved");
+      return false;
+    }
+  };
 
   const openPrint = async ({ leaveAfter = false } = {}) => {
     setPrintState({ phase: "preparing", leaveAfter });
@@ -509,6 +530,12 @@ export default function DoctorConsultPage() {
             onDecide={onDecide}
             readOnly={readOnly}
           />
+          <PlanSuggestions
+            visitId={visitId}
+            readOnly={readOnly}
+            deciding={decideSuggestion.isPending}
+            onDecide={onDecideSuggestion}
+          />
           <OverviewSection consult={consult} onTile={setTrendMarker} />
           <ComplaintsSection
             restored={restored}
@@ -541,7 +568,8 @@ export default function DoctorConsultPage() {
           <ProceduresSection visitId={visitId} readOnly={readOnly} onToast={showToast} />
           <MedCardSection visitId={visitId} onToast={showToast} />
           <AdviceSection
-            restored={restored}
+            key={`advice-${planVersion}`}
+            restored={planVersion ? null : restored}
             flushRef={flushAdvice}
             visitId={visitId}
             readOnly={readOnly}
@@ -549,7 +577,8 @@ export default function DoctorConsultPage() {
             onUnsaved={markUnsaved}
           />
           <CarePlanSection
-            restored={restored}
+            key={`plan-${planVersion}`}
+            restored={planVersion ? null : restored}
             consult={consult}
             visitId={visitId}
             onToast={showToast}

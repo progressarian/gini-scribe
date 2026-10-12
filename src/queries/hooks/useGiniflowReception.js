@@ -185,3 +185,43 @@ export function useHealthrayBill(patientId) {
     retry: false,
   });
 }
+
+const idList = (ids) => [...ids].sort().join(",");
+
+export function useArrivalBill(visitId, { skip = [], add = [], remove = [] } = {}, enabled = true) {
+  return useQuery({
+    queryKey: [
+      "giniflow",
+      "reception",
+      "arrival-bill",
+      visitId,
+      idList(skip),
+      idList(add),
+      idList(remove),
+    ],
+    queryFn: async () =>
+      (
+        await api.get(`/api/giniflow/stations/reception/${visitId}/arrival-bill`, {
+          params: {
+            ...(skip.length ? { skip: skip.join(",") } : {}),
+            ...(add.length ? { add: add.join(",") } : {}),
+            ...(remove.length ? { remove: remove.join(",") } : {}),
+          },
+        })
+      ).data,
+    enabled: Boolean(visitId) && enabled,
+    placeholderData: (prev) => prev,
+  });
+}
+
+export function useCommitArrivalBill() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ visitId, ...body }) =>
+      (await api.post(`/api/giniflow/stations/reception/${visitId}/arrival-bill`, body)).data,
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["giniflow"] });
+      queryClient.invalidateQueries({ queryKey: ["billing"] });
+    },
+  });
+}

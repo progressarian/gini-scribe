@@ -1484,14 +1484,28 @@ export async function applyOpdParse(ctx, parsed) {
   const diagnoses = parsed.diagnoses || [];
   const medications = parsed.medications || [];
   const previousMeds = parsed.previous_medications || [];
+  const investigations = parsed.investigations_to_order || [];
+  const followUp = parsed.follow_up?.date || parsed.follow_up?.timing ? parsed.follow_up : null;
+  const followUpWith = parsed.follow_up_with || followUp?.notes || null;
 
   await pool.query(
     `UPDATE appointments
         SET healthray_diagnoses = $1::jsonb,
             healthray_medications = $2::jsonb,
+            healthray_investigations = CASE WHEN jsonb_array_length($4::jsonb) > 0
+                                            THEN $4::jsonb ELSE healthray_investigations END,
+            healthray_follow_up = COALESCE($5::jsonb, healthray_follow_up),
+            follow_up_with = COALESCE($6, follow_up_with),
             updated_at = NOW()
       WHERE id = $3`,
-    [JSON.stringify(diagnoses), JSON.stringify(medications), apptId],
+    [
+      JSON.stringify(diagnoses),
+      JSON.stringify(medications),
+      apptId,
+      JSON.stringify(investigations),
+      followUp ? JSON.stringify(followUp) : null,
+      followUpWith,
+    ],
   );
 
   if (diagnoses.length > 0) {
@@ -1506,6 +1520,7 @@ export async function applyOpdParse(ctx, parsed) {
   }
 
   await pool.query(`UPDATE appointments SET opd_backfilled_at = NOW() WHERE id = $1`, [apptId]);
+  if (medications.length > 0 || diagnoses.length > 0) await maybeAutoSavePrescription(apptId);
 }
 
 let dailyBackfillInFlight = false;

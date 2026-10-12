@@ -52,11 +52,12 @@ Hard rules:
 - FOLLOW-UP RULE: If "followUpRelative" is present in the input JSON, end the body with exactly one sentence using that relative time phrase (e.g. "Your next visit is in about 1 month." / "We will see you next week."). If "followUpNotes" is also present, weave those instructions into the same sentence (e.g. "Please come in about 3 weeks for your HbA1c and lipid tests, fasting."). If "followUpRelative" is null or absent, do NOT mention the next visit at all — keep the closing sentence a general next-step reminder instead.
 - Output ONLY the JSON object. No preamble, no markdown fence, no commentary.`;
 
-function relativeFollowUp(dateStr) {
+function relativeFollowUp(dateStr, fromDate = null) {
   if (!dateStr) return null;
   const fuDate = new Date(String(dateStr).slice(0, 10));
   if (isNaN(fuDate.getTime())) return null;
-  const diffDays = Math.round((fuDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+  const from = fromDate ? new Date(String(fromDate).slice(0, 10)).getTime() : Date.now();
+  const diffDays = Math.round((fuDate.getTime() - from) / (1000 * 60 * 60 * 24));
   if (diffDays === 0) return "today";
   if (diffDays === 1) return "tomorrow";
   if (diffDays > 0) {
@@ -151,7 +152,9 @@ function buildContext(data) {
 
   const conFollowUp = consultations?.[0]?.con_data?.follow_up || {};
   const resolvedFollowUp = pickNextVisit([conFollowUp, appt_plan?.follow_up]);
-  const followUpRelative = resolvedFollowUp?.date ? relativeFollowUp(resolvedFollowUp.date) : null;
+  const followUpRelative = resolvedFollowUp?.date
+    ? relativeFollowUp(resolvedFollowUp.date, data.rxDate)
+    : null;
   const followUpNotes =
     resolvedFollowUp?.notes || appt_plan?.follow_up_with || conFollowUp.notes || null;
   const followUp = conFollowUp;

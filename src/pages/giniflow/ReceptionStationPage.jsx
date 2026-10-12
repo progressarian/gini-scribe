@@ -14,6 +14,8 @@ import {
   useReceptionHealthray,
   useReceptionHealthrayRefresh,
   useHealthrayBill,
+  useArrivalBill,
+  useCommitArrivalBill,
 } from "../../queries/hooks/useGiniflowReception";
 import { useQueryClient } from "@tanstack/react-query";
 import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
@@ -31,7 +33,11 @@ import {
   consultantChangeText,
   useConsultantChangesToSettle,
 } from "../../components/billing/counter/ConsultantChange";
-import { useCounterPatients, useDeskSettings } from "../../queries/hooks/useBilling";
+import {
+  useCounterPatients,
+  useCurrentShift,
+  useDeskSettings,
+} from "../../queries/hooks/useBilling";
 import "../../styles/giniflow-station.css";
 import useAuthStore from "../../stores/authStore";
 import { CAPABILITIES as CAPS, hasCapability } from "../../../shared/permissions.js";
@@ -46,6 +52,12 @@ import ConfirmModal from "../../components/ui/ConfirmModal";
 import OrderedServicesPanel from "../../components/billing/OrderedServicesPanel";
 import StationNotice from "../../components/giniflow/StationNotice";
 import JourneyBuilder from "../../components/giniflow/JourneyBuilder";
+import ArrivalBill, {
+  arrivalButtonText,
+  arrivalPayload,
+  arrivalReady,
+  emptyArrivalChoices,
+} from "../../components/giniflow/ArrivalBill";
 import { useFlowStepCatalog, useFlowVisitTypes } from "../../queries/hooks/useFlow";
 import { stepPassesConditions } from "../../../shared/giniflowConditions.js";
 import {
@@ -1194,6 +1206,21 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   const saving = checkIn.isPending || checkInWalkIn.isPending;
   const canBill = useCanBill();
   const [billFor, setBillFor] = useState(null);
+  const [arrivalChoices, setArrivalChoices] = useState(emptyArrivalChoices);
+  const [arrivalError, setArrivalError] = useState(null);
+  const billVisitId = billFor || arrival.visitId;
+  const arrivalBill = useArrivalBill(
+    billVisitId,
+    {
+      skip: arrivalChoices.skip,
+      add: arrivalChoices.add.map((item) => item.id),
+      remove: arrivalChoices.remove.map((item) => item.id),
+    },
+    canBill,
+  );
+  const commitArrivalBill = useCommitArrivalBill();
+  const { data: shift } = useCurrentShift({ enabled: canBill });
+  const shiftOpen = Boolean(shift?.is_open);
   const { data: bill, isLoading: billLoading } = useHealthrayBill(arrival.patientId);
   const billRef = useRef(null);
   billRef.current = bill || null;
@@ -1288,14 +1315,23 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
     !arrival.assignedDoctorId &&
     list.some((s) => s.chainStatus === "with_doctor") &&
     !list.some((s) => s.chainStatus === "with_doctor" && s.staffId);
-  const blocked = saving || !list.length || consultantMissing;
+  const arrivalPreview = canBill ? arrivalBill.data : null;
+  const billsAtArrival = Boolean(arrivalPreview?.outstanding);
+  const arrivalBusy = commitArrivalBill.isPending || arrivalBill.isFetching;
+  const billPending = canBill && Boolean(billVisitId) && !arrivalBill.data && !arrivalBill.isError;
+  const blocked =
+    saving ||
+    arrivalBusy ||
+    !list.length ||
+    consultantMissing ||
+    (billsAtArrival && !arrivalReady(arrivalPreview, arrivalChoices, shiftOpen));
   const minutes = list.reduce((sum, s) => sum + (Number(s.minutes) || 0), 0);
   const doneBy = new Date(Date.now() + minutes * 60000).toLocaleTimeString("en-IN", {
     hour: "numeric",
     minute: "2-digit",
   });
 
-  const submit = async (sendWhatsapp) => {
+  const submit = async (sendWhatsapp, { bill: withBill = true } = {}) => {
     try {
       let visitId = arrival.visitId;
       if (!visitId) {
@@ -1315,12 +1351,41 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
         visitId = created.visitId;
       }
       const r = await checkIn.mutateAsync({ visitId, visitTypeId, steps: list, sendWhatsapp });
-      const stayOpen = canBill && Boolean(visitId);
+      const billed =
+        withBill && billsAtArrival && arrival.visitId ? await collectAtArrival(visitId) : false;
+      const stayOpen = canBill && Boolean(visitId) && !billed;
       if (stayOpen) setBillFor(visitId);
       onDone({ ...arrival, visitId }, r, sendWhatsapp, stayOpen);
     } catch (e) {
       onFailed(e);
     }
+  };
+
+  const collectAtArrival = async (visitId) => {
+    setArrivalError(null);
+    try {
+      const done = await commitArrivalBill.mutateAsync({
+        visitId,
+        ...arrivalPayload(arrivalPreview, arrivalChoices),
+      });
+      onNote(
+        `${arrival.name}: bill ${done.billNo || "saved"} — ${done.status === "final" ? "paid and final" : "paid, still a draft"}${done.notFinal ? ` (${done.notFinal})` : ""}`,
+      );
+      return true;
+    } catch (e) {
+      const changed = e?.response?.data?.code === "amount_changed";
+      setArrivalError(
+        changed
+          ? "The amount changed while checking in — check the new total, then collect."
+          : `${arrival.name} is checked in, but the payment was not taken: ${e?.response?.data?.error || "try again"}.`,
+      );
+      if (changed) setArrivalChoices((c) => ({ ...c, paid: {} }));
+      return false;
+    }
+  };
+
+  const collectAfterCheckIn = async () => {
+    if (await collectAtArrival(billFor)) onClose();
   };
 
   return (
@@ -1344,7 +1409,10 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
             </div>
             {billFor && (
               <div className="dp-hint" role="status">
-                ✓ {arrival.name} is checked in — open their bill to take the payment.
+                ✓ {arrival.name} is checked in —{" "}
+                {billsAtArrival
+                  ? "collect below, or open their bill."
+                  : "open their bill to take the payment."}
               </div>
             )}
             {billNote(bill, billLoading) && (
@@ -1430,12 +1498,39 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
                 checking in.
               </div>
             )}
+            {canBill && billVisitId && (
+              <ArrivalBill
+                preview={arrivalPreview}
+                isLoading={arrivalBill.isLoading}
+                isError={arrivalBill.isError}
+                choices={arrivalChoices}
+                onChange={setArrivalChoices}
+                error={arrivalError}
+                shiftOpen={shiftOpen}
+                visitId={billVisitId}
+              />
+            )}
           </div>
         </div>
 
         {billFor ? (
           <div className="dp-foot">
-            <Link className="btn-full st-btn st-btn-grn" to={receptionBillHref({ visit: billFor })}>
+            {billsAtArrival && (
+              <button
+                type="button"
+                className="btn-full st-btn st-btn-grn"
+                disabled={arrivalBusy || !arrivalReady(arrivalPreview, arrivalChoices, shiftOpen)}
+                onClick={collectAfterCheckIn}
+              >
+                {commitArrivalBill.isPending
+                  ? "Collecting…"
+                  : arrivalButtonText(arrivalPreview, arrivalChoices, true)}
+              </button>
+            )}
+            <Link
+              className={`${billsAtArrival ? "" : "btn-full "}st-btn ${billsAtArrival ? "st-btn-g" : "st-btn-grn"}`}
+              to={receptionBillHref({ visit: billFor })}
+            >
               Open bill →
             </Link>
             <button type="button" className="st-btn st-btn-g" onClick={onClose}>
@@ -1449,11 +1544,29 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
               disabled={blocked}
               onClick={() => submit(false)}
             >
-              {arrival.phone ? "✓ Check in only" : "✓ Check in"}
+              {saving || commitArrivalBill.isPending
+                ? "Checking in…"
+                : billPending
+                  ? "Working out the bill…"
+                  : billsAtArrival
+                    ? arrivalButtonText(arrivalPreview, arrivalChoices, false)
+                    : arrival.phone
+                      ? "✓ Check in only"
+                      : "✓ Check in"}
             </button>
             {arrival.phone && (
               <button className="st-btn st-btn-g" disabled={blocked} onClick={() => submit(true)}>
-                Check in + send WhatsApp
+                {billsAtArrival ? "Same + send WhatsApp" : "Check in + send WhatsApp"}
+              </button>
+            )}
+            {billsAtArrival && (
+              <button
+                type="button"
+                className="st-btn st-btn-g"
+                disabled={saving || arrivalBusy || !list.length || consultantMissing}
+                onClick={() => submit(false, { bill: false })}
+              >
+                Check in only — bill later
               </button>
             )}
           </div>
@@ -1662,6 +1775,11 @@ const useCanBill = () =>
     useAuthStore((st) => st.currentDoctor?.role),
     CAPS.BILLING_DESK,
   );
+
+function useTestsToBill(enabled) {
+  const { data } = useCounterPatients("", { enabled });
+  return (data?.toBill || []).filter((row) => row.hints?.tests > 0).length;
+}
 
 function useBillStates(enabled) {
   const { data } = useCounterPatients("", { enabled });
@@ -2290,6 +2408,7 @@ function ReceptionTabs({
   paymentsCount,
   refundsCount,
   feeChangesCount,
+  testsToBillCount,
 }) {
   return (
     <div className="st-tabs rc-tabs" role="tablist" aria-label="Reception">
@@ -2310,6 +2429,11 @@ function ReceptionTabs({
           id={entry.tabId}
           aria-controls={tab === entry.key ? entry.panelId : undefined}
           aria-selected={tab === entry.key}
+          aria-describedby={
+            entry.key === DESK_TABS.bill.key && testsToBillCount > 0
+              ? "rc-tests-to-bill"
+              : undefined
+          }
           className={`st-tab${tab === entry.key ? " on" : ""}`}
           onClick={() => setTab(entry.key)}
         >
@@ -2322,6 +2446,20 @@ function ReceptionTabs({
             >
               {feeChangesCount}
             </span>
+          )}
+          {entry.key === DESK_TABS.bill.key && testsToBillCount > 0 && (
+            <>
+              <span
+                className="st-tab-n"
+                aria-hidden="true"
+                title="Tests ordered and not billed yet"
+              >
+                🧪 {testsToBillCount}
+              </span>
+              <span id="rc-tests-to-bill" hidden>
+                {`${testsToBillCount} patient${testsToBillCount === 1 ? "" : "s"} with tests to bill`}
+              </span>
+            </>
           )}
           {entry.key === DESK_TABS.refunds.key && (
             <span className="st-tab-n" aria-label={`${refundsCount} to pay back`}>
@@ -2448,6 +2586,7 @@ export default function ReceptionStationPage() {
   const feeChanges = useConsultantChangesToSettle(canBill, (changes) =>
     showToast(consultantChangeText(changes), REFUND_TOAST_MS),
   );
+  const testsToBill = useTestsToBill(canBill);
 
   const failed = (e, fallback) =>
     showToast(e?.response?.data?.detail || e?.response?.data?.error || fallback);
@@ -2624,6 +2763,7 @@ export default function ReceptionStationPage() {
       paymentsCount={payCounts.pending}
       refundsCount={refundsToPay}
       feeChangesCount={feeChanges.length}
+      testsToBillCount={testsToBill}
     />
   );
 

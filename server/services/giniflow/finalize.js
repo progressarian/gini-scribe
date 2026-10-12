@@ -44,7 +44,9 @@ export async function pendingProposalCount(visitId, db = pool) {
     `SELECT (SELECT count(*) FROM giniflow_rx_proposals
               WHERE visit_id = $1 AND status = 'proposed')
           + (SELECT count(*) FROM giniflow_rx_items
-              WHERE visit_id = $1 AND approval_status = 'pending') AS n`,
+              WHERE visit_id = $1 AND approval_status = 'pending')
+          + (SELECT count(*) FROM giniflow_plan_suggestions
+              WHERE visit_id = $1 AND status = 'proposed') AS n`,
     [visitId],
   );
   return Number(rows[0].n);
@@ -112,7 +114,7 @@ export async function finalizeConsult(
     if (pending) {
       throw Object.assign(
         new Error(
-          `${pending} proposal${pending === 1 ? "" : "s"} still to review — approve, adjust or reject each one first`,
+          `${pending} Chief Endocrinologist proposal${pending === 1 ? "" : "s"} still to review — decide each one first`,
         ),
         { status: 409, pendingProposals: pending },
       );

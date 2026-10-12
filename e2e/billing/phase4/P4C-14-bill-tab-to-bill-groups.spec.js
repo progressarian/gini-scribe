@@ -143,6 +143,7 @@ test.describe.serial("P4C-14 the Bill tab lists who needs a bill first", () => {
       tests: 0,
       notPriced: 0,
       due: 0,
+      consultantChanged: false,
     });
     expect(rowOf(body, "SeenOnline").hints.consultation).toBe(true);
     expect(rowOf(body, "SeenOnline").group).toBe("billed");
@@ -215,12 +216,12 @@ test.describe.serial("P4C-14 the Bill tab lists who needs a bill first", () => {
     await expect(rowButton(page, "Booked")).toBeVisible();
   });
 
-  test("9b. To bill and Billed today / Exited start open and collapse on click", async ({
+  test("9b. Pending bill and Billed today / Exited start open and collapse on click", async ({
     page,
   }) => {
     await loginAs(page, "reception");
     await billTab(page);
-    const toBillToggle = patientList(page).getByRole("button", { name: /^To bill/ });
+    const toBillToggle = patientList(page).getByRole("button", { name: /^Pending bill/ });
     const billedToggle = patientList(page).getByRole("button", {
       name: /^Billed today \/ Exited/,
     });
@@ -311,6 +312,7 @@ test.describe.serial("P4C-14 the Bill tab lists who needs a bill first", () => {
       tests: 0,
       notPriced: 0,
       due: 0,
+      consultantChanged: false,
     });
     expect(names(body.billed)).toContain(nameOf("Seen"));
   });

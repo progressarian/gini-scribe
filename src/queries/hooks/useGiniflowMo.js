@@ -104,3 +104,31 @@ export function useSavePlan() {
       (await api.put(`${base}/${visitId}/plan`, { plan, source })).data,
   });
 }
+
+const suggestionsKey = (visitId) => ["giniflow", "mo", "suggestions", visitId];
+
+export function useMoSuggestions(visitId) {
+  return useQuery({
+    queryKey: suggestionsKey(visitId),
+    queryFn: async () => (await api.get(`${base}/${visitId}/suggestions`)).data,
+    enabled: !!visitId,
+  });
+}
+
+export function useSaveSuggestion(visitId) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ field, value }) =>
+      (await api.put(`${base}/${visitId}/suggestions/${field}`, { value })).data,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: suggestionsKey(visitId) }),
+  });
+}
+
+export function useMoAdviceChoices(visitId) {
+  return useQuery({
+    queryKey: ["giniflow", "mo", "advice-choices", visitId],
+    queryFn: async () => (await api.get(`${base}/${visitId}/advice-choices`)).data,
+    enabled: !!visitId,
+    staleTime: 5 * 60 * 1000,
+  });
+}

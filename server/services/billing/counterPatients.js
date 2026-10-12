@@ -119,7 +119,7 @@ const COUNTER_SELECT = `
                      OR (${SETTLED_AT_RECEPTION} AND ${HELD_AT_RECEPTION("rm")}) AS settled
                 FROM giniflow_lab_orders o
                 CROSS JOIN LATERAL ${RECEPTION_MONEY_SQL("o")} rm
-               WHERE o.visit_id = a.id) o
+               WHERE o.visit_id = a.id AND o.urgency = 'today') o
         JOIN LATERAL (
           SELECT ot.id,
                  EXISTS (SELECT 1 FROM service_items si

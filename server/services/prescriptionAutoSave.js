@@ -173,7 +173,7 @@ export async function savePrescriptionForVisit(pid, payload, opts = {}) {
     `INSERT INTO documents
        (patient_id, consultation_id, doc_type, title, file_name, doc_date,
         source, notes, extracted_data)
-     VALUES ($1,$2,'prescription',$3,$4,CURRENT_DATE,
+     VALUES ($1,$2,'prescription',$3,$4,COALESCE($8::date, CURRENT_DATE),
              $5,$6,$7::jsonb)
      RETURNING *`,
     [
@@ -184,6 +184,7 @@ export async function savePrescriptionForVisit(pid, payload, opts = {}) {
       source,
       clientInitiated ? "Generated on visit completion" : null,
       JSON.stringify(data),
+      data.rxDate || null,
     ],
   );
   const docRow = ins.rows[0];
@@ -426,26 +427,34 @@ export async function buildVisitPayloadFromDb(pid, { appointmentId } = {}) {
   const fuInvestigations = (fuRow?.healthray_investigations || []).map((t) =>
     typeof t === "string" ? { name: t, urgency: "routine" } : t,
   );
+  const visitDay = String(fuRow?.appointment_date || "").slice(0, 10);
+  const afterVisit = (fu) => (fu && String(fu.date || "").slice(0, 10) > visitDay ? fu : null);
   const followUpDate =
-    datedFollowUp(fuRow?.healthray_follow_up) ||
-    (fuBio.followup
-      ? {
-          date: fuBio.followup,
-          notes: fuRow?.healthray_follow_up?.notes || null,
-          timing: fuRow?.healthray_follow_up?.timing || null,
-        }
-      : null) ||
-    (followUpDueDate(fuRow?.appointment_date, fuRow?.healthray_follow_up?.timing)
-      ? {
-          date: followUpDueDate(fuRow.appointment_date, fuRow.healthray_follow_up.timing),
-          notes: fuRow.healthray_follow_up.notes || null,
-          timing: fuRow.healthray_follow_up.timing,
-        }
-      : null);
+    afterVisit(datedFollowUp(fuRow?.healthray_follow_up)) ||
+    afterVisit(
+      fuBio.followup
+        ? {
+            date: fuBio.followup,
+            notes: fuRow?.healthray_follow_up?.notes || null,
+            timing: fuRow?.healthray_follow_up?.timing || null,
+          }
+        : null,
+    ) ||
+    afterVisit(
+      followUpDueDate(fuRow?.appointment_date, fuRow?.healthray_follow_up?.timing)
+        ? {
+            date: followUpDueDate(fuRow.appointment_date, fuRow.healthray_follow_up.timing),
+            notes: fuRow.healthray_follow_up.notes || null,
+            timing: fuRow.healthray_follow_up.timing,
+          }
+        : null,
+    );
 
   return {
     patient,
     doctor,
+    rxDate:
+      appointmentId && appt?.appointment_date ? String(appt.appointment_date).slice(0, 10) : null,
     summary: { totalVisits, firstVisitDate, monthsWithGini, carePhase },
     // Apply the same clinical ordering the manual Print Prescription path
     // uses (visit.js -> sortDiagnoses). Without this, auto-saved PDFs list

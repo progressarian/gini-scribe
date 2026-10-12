@@ -1,4 +1,5 @@
 import pool from "../../config/db.js";
+import { BILL_CONSULTANT_SQL, billConsultantOf, HOSPITAL_ADMIN_ID_SQL } from "./billConsultant.js";
 import { paise } from "../../../shared/labPayment.js";
 import { CAPABILITIES, hasCapability } from "../../../shared/permissions.js";
 import { decryptAadhaarFull, encryptAadhaar } from "../../utils/aadhaarCrypt.js";
@@ -50,7 +51,7 @@ const BILL_COLUMNS = `id, bill_no, series, fy, bill_type, original_bill_id, pati
   adjustment_amount, round_off, paid_amount, claim_status, version,
   finalised_by, finalised_at, cancelled_by, cancelled_at, cancel_reason, created_at, saved_at,
   manual_discount_kind, manual_discount_value, manual_discount_reason,
-  manual_discount_by, manual_discount_at`;
+  manual_discount_by, manual_discount_at, consultant_id`;
 
 const SPEC = { table: "bills", noun: "bill", columns: BILL_COLUMNS };
 
@@ -563,6 +564,7 @@ async function withLines(client, row, extra = {}) {
   return shapeBill(row, await shownLines(client, row.id, { all: showsEveryLine(row) }), {
     discounts: await billDiscounts(client, row.id),
     manual_discount: await billManualOf(client, row),
+    consultant: await billConsultantOf(client, row.id),
     ...extra,
   });
 }
@@ -712,6 +714,7 @@ export async function readBill(billId, db = pool) {
     discounts: await billDiscounts(db, id),
     claim_cleared_on: clearedOn.get(rows[0].id) ?? null,
     credits: await billCredits(db, rows[0]),
+    consultant: await billConsultantOf(db, id),
   });
 }
 
@@ -728,6 +731,7 @@ export async function listVisitBills(visitId, db = pool) {
       shapeBill(row, await shownLines(db, row.id, { all: showsEveryLine(row) }), {
         claim_cleared_on: clearedOn.get(row.id) ?? null,
         credits: await billCredits(db, row),
+        consultant: await billConsultantOf(db, row.id),
       }),
     );
   }
@@ -1145,6 +1149,31 @@ export async function removeLine(billId, lineId, input, ctx, db = pool) {
     await resettleTestOrders(client, saved.bill, ctx);
     return withLines(client, saved.bill, { codes: await billCodes(client, bill.id) });
   }, db);
+}
+
+export async function dropOrderFromDraftsIn(client, orderId, reason, ctx) {
+  const { rows } = await client.query(
+    `SELECT DISTINCT l.bill_id FROM bill_lines l
+       JOIN bills b ON b.id = l.bill_id
+      WHERE l.lab_order_id = $1 AND l.is_live AND b.status = 'draft'
+        AND b.bill_type = 'invoice' AND b.paid_amount = 0
+      ORDER BY l.bill_id`,
+    [orderId],
+  );
+  for (const { bill_id: billId } of rows) {
+    const bill = assertDraft(await lockBill(client, billId));
+    const { rows: lines } = await client.query(
+      `SELECT id FROM bill_lines WHERE bill_id = $1 AND lab_order_id = $2 AND is_live ORDER BY id`,
+      [bill.id, orderId],
+    );
+    for (const line of lines) {
+      const before = await lineOf(client, bill, line.id);
+      await dropLineIn(client, bill, before, { removed: true, reason }, ctx);
+    }
+    const saved = await reprice(client, bill, await billCodes(client, bill.id), ctx);
+    await resettleTestOrders(client, saved.bill, ctx);
+  }
+  return rows.length;
 }
 
 export const PAID_AT_RECEPTION_REASON = "Paid at reception";
@@ -1601,6 +1630,90 @@ export async function setCategory(billId, input, ctx, db = pool) {
   }, db);
 }
 
+const TESTS_ONLY_REASON = "Tests only — Hospital Admin";
+
+async function consultationLinesOn(client, billId) {
+  const { rows } = await client.query(
+    `SELECT l.id, COALESCE(l.doctor_id, i.doctor_id) AS doctor_id
+       FROM bill_lines l JOIN service_items i ON i.id = l.service_item_id
+      WHERE l.bill_id = $1 AND l.is_live AND i.kind = 'consultation'
+      ORDER BY l.line_no`,
+    [billId],
+  );
+  return rows;
+}
+
+async function consultationVisitTypeFor(client, bill) {
+  const booked = await visitConsultationType(bill.visit_id, client);
+  if (booked) return booked;
+  const { rows } = await client.query(
+    `SELECT EXISTS (SELECT 1 FROM appointments a
+                     WHERE a.patient_id = $1 AND a.appointment_date < $2::date
+                       AND a.status IN ('completed', 'seen')) AS returning`,
+    [bill.patient_id, bill.bill_date],
+  );
+  return rows[0].returning ? "Follow Up" : "New";
+}
+
+async function consultationItemFor(client, doctorId, visitType) {
+  const { rows } = await client.query(
+    `SELECT id, name FROM service_items
+      WHERE kind = 'consultation' AND is_active AND visit_type = $1
+        AND (doctor_id = $2 OR doctor_id IS NULL)
+      ORDER BY doctor_id IS NULL, id LIMIT 1`,
+    [visitType, doctorId],
+  );
+  return rows[0] ?? null;
+}
+
+export async function setConsultant(billId, input, ctx, db = pool) {
+  return inTransaction(async (client) => {
+    const before = assertDraft(await lockBill(client, billId));
+    const { rows: chosen } = await client.query(
+      `SELECT id, name, (id = ${HOSPITAL_ADMIN_ID_SQL}) AS tests_only FROM doctors
+        WHERE id = $1 AND role = 'consultant' AND COALESCE(is_active, TRUE)`,
+      [Number(input?.consultant_id) || null],
+    );
+    if (!chosen.length) throw httpError(400, "Choose a consultant for this bill");
+    const to = chosen[0];
+    if (before.visit_id) await holdConsultation(client, before.visit_id);
+    const lines = await consultationLinesOn(client, before.id);
+    const going = to.tests_only ? lines : lines.filter((line) => line.doctor_id !== to.id);
+    const reason = to.tests_only ? TESTS_ONLY_REASON : `Consultant changed to ${to.name}`;
+    for (const line of going) await removeLine(before.id, line.id, { reason }, ctx, client);
+    if (!to.tests_only && going.length === lines.length) {
+      const visitType = await consultationVisitTypeFor(client, before);
+      const item = await consultationItemFor(client, to.id, visitType);
+      if (!item) {
+        throw httpError(
+          409,
+          `${to.name} has no ${visitType} consultation fee yet — add it in Settings → Services first`,
+        );
+      }
+      await addLineIn(
+        client,
+        await lockBill(client, before.id),
+        { item_id: item.id, source: "visit", doctor_id: to.id },
+        ctx,
+      );
+    }
+    const { rows } = await client.query(
+      `UPDATE bills SET consultant_id = $2, updated_at = NOW(), updated_by = $3
+        WHERE id = $1 RETURNING ${BILL_COLUMNS}`,
+      [before.id, to.id, ctx?.actorId ?? null],
+    );
+    await writeAudit(client, {
+      entity: SPEC.table,
+      entityId: before.id,
+      action: "update",
+      before,
+      after: rows[0],
+      ...auditFields(ctx),
+    });
+    return withLines(client, rows[0], { codes: await billCodes(client, before.id) });
+  }, db);
+}
+
 async function assertCategoryChosen(client, bill) {
   const resolution = await resolutionFor(client, {
     patientId: bill.patient_id,
@@ -1703,6 +1816,7 @@ export async function finaliseBill(billId, input, ctx, db = pool) {
       `UPDATE bills
           SET status = 'final', bill_no = $2, series = $3, fy = $4, claim_status = $5,
               pay_later = $6, finalised_by = $7, finalised_at = NOW(),
+              consultant_id = ${BILL_CONSULTANT_SQL("bills")},
               ${snapshot.length ? "issued_gst = $8, issued_gstin = $9, issued_legal_name = $10," : ""}
               version = version + 1, updated_at = NOW(), updated_by = $7
         WHERE id = $1
