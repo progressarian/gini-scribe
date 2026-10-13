@@ -16,6 +16,7 @@ import {
   useHealthrayBill,
   useArrivalBill,
   useCommitArrivalBill,
+  useBackForTests,
 } from "../../queries/hooks/useGiniflowReception";
 import { useQueryClient } from "@tanstack/react-query";
 import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
@@ -51,7 +52,7 @@ import {
 import ConfirmModal from "../../components/ui/ConfirmModal";
 import OrderedServicesPanel from "../../components/billing/OrderedServicesPanel";
 import StationNotice from "../../components/giniflow/StationNotice";
-import JourneyBuilder from "../../components/giniflow/JourneyBuilder";
+import JourneyBuilder, { TestPicker } from "../../components/giniflow/JourneyBuilder";
 import ArrivalBill, {
   arrivalButtonText,
   arrivalPayload,
@@ -1601,6 +1602,59 @@ function ProceduresPanel({ arrival, onClose }) {
   );
 }
 
+function BackForTestsPanel({ arrival, onClose, onNote }) {
+  const [tests, setTests] = useState([]);
+  const send = useBackForTests();
+  const submit = () =>
+    send.mutate(
+      { visitId: arrival.visitId, tests },
+      {
+        onSuccess: () => {
+          onNote(
+            `${arrival.name} is back for tests — ${tests.join(", ")} sent to Payments and the lab`,
+          );
+          onClose();
+        },
+        onError: (e) =>
+          onNote(e?.response?.data?.error || "Could not send the patient back for tests"),
+      },
+    );
+  return (
+    <div className="detail-overlay">
+      <div className="detail-pane ci-pane" role="dialog" aria-label="Back for tests">
+        <div className="dp-head">
+          <div className="dp-name">{arrival.name}</div>
+          <div className="dp-meta">
+            {identity(arrival)} · {arrival.statusLabel} · tests ordered after the visit
+          </div>
+          <div className="dp-acts">
+            <button className="rbtn" onClick={onClose} disabled={send.isPending}>
+              ← Back
+            </button>
+          </div>
+        </div>
+        <div className="dp-sec">
+          <p className="ar-note">
+            The visit reopens for these tests only. Consultation, Rx desk and pharmacy stay done;
+            the patient exits again once the reports are in.
+          </p>
+          <TestPicker picked={tests} onChange={setTests} withMachines />
+          <button
+            type="button"
+            className="st-btn st-btn-grn"
+            disabled={!tests.length || send.isPending}
+            onClick={submit}
+          >
+            {send.isPending
+              ? "Sending…"
+              : `Send back for ${tests.length || ""} test${tests.length === 1 ? "" : "s"}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const proceduresText = (services) =>
   `🩹 ${services.count} procedure${services.count === 1 ? "" : "s"} · ₹${rupeesFromPaise(services.total)}`;
 
@@ -2010,6 +2064,7 @@ export function ArrivalsTab({
   const [arriving, setArriving] = useState(null);
   const [journeyFor, setJourneyFor] = useState(null);
   const [proceduresFor, setProceduresFor] = useState(null);
+  const [backForTestsFor, setBackForTestsFor] = useState(null);
   const canBill = useCanBill();
   const bills = useBillStates(canBill);
   const expected = data?.expected || [];
@@ -2087,6 +2142,13 @@ export function ArrivalsTab({
       {journeyFor && <JourneyPanel arrival={journeyFor} onClose={() => setJourneyFor(null)} />}
       {proceduresFor && (
         <ProceduresPanel arrival={proceduresFor} onClose={() => setProceduresFor(null)} />
+      )}
+      {backForTestsFor && (
+        <BackForTestsPanel
+          arrival={backForTestsFor}
+          onClose={() => setBackForTestsFor(null)}
+          onNote={onNote}
+        />
       )}
 
       {arriving && (
@@ -2195,7 +2257,17 @@ export function ArrivalsTab({
                   visit has no clock to hold, so it gets no control — the server
                   refuses those with a 409 and a button that only ever errors is
                   worse than no button. */}
-              {!FINISHED_STATUSES.includes(a.status) && (
+              {FINISHED_STATUSES.includes(a.status) && (
+                <button
+                  type="button"
+                  className="st-btn st-btn-ghost"
+                  title="A test was ordered after the patient left — reopen the visit for it"
+                  onClick={() => setBackForTestsFor(a)}
+                >
+                  Back for tests
+                </button>
+              )}
+              {!FINISHED_STATUSES.includes(a.status) && a.status !== "back_for_tests" && (
                 <button
                   className={`st-btn ${a.paused ? "st-btn-grn" : "st-btn-ghost"}`}
                   disabled={breakBusy}

@@ -35,7 +35,11 @@ async function journeysIn(db, start, end) {
      marks AS (
        SELECT e.visit_id,
               MAX(e.occurred_at) FILTER (WHERE ${JOURNEY_START_SQL("e.status")}) AS started_at,
-              MAX(e.occurred_at) FILTER (WHERE e.status IN ('exited', 'dispensed')) AS finished_at
+              MAX(e.occurred_at) FILTER (
+                WHERE e.status IN ('exited', 'dispensed')
+                  AND NOT EXISTS (SELECT 1 FROM giniflow_visit_events b
+                                   WHERE b.visit_id = e.visit_id AND b.status = 'back_for_tests'
+                                     AND b.occurred_at < e.occurred_at)) AS finished_at
          FROM giniflow_visit_events e JOIN vs ON vs.id = e.visit_id
         GROUP BY e.visit_id
      )

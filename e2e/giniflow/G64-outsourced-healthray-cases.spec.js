@@ -149,6 +149,27 @@ test.describe.serial("G64 outsourced HealthRay cases are sent out and listed", (
     expect(old).toMatchObject({ kind: "case", daysWaiting: 2, status: "collected" });
   });
 
+  test("5b. a case older than 30 days drops off unless it was sent outside", async () => {
+    const stale = await labCase(visits.old, [`Stale panel ${tag}`], {
+      daysAgo: 40,
+      source: "outsource",
+    });
+    const chased = await labCase(visits.old, [`Chased panel ${tag}`], {
+      daysAgo: 40,
+      source: "outsource",
+    });
+    await query(
+      `INSERT INTO giniflow_lab_case_actions (case_no, action, actor_role, actor_id)
+       VALUES ($1, 'sent_outside', 'lab', $2)`,
+      [chased, USERS.lab.id],
+    );
+    const keys = await pendingKeys();
+    expect(keys).toContain(`sent:${chased}`);
+    expect(keys.some((key) => key.endsWith(`:${stale}`))).toBe(false);
+    await query(`DELETE FROM giniflow_lab_case_actions WHERE case_no = ANY($1)`, [[stale, chased]]);
+    await query(`DELETE FROM lab_cases WHERE case_no = ANY($1)`, [[stale, chased]]);
+  });
+
   test("6. lab staff send and upload through the API; an in-house case is refused", async () => {
     const api = await apiAs("lab");
     const sent = await api.post(

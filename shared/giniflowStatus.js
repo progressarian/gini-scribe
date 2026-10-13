@@ -16,7 +16,14 @@ export const CHAIN = [
   "dispensed",
   "exited",
 ];
-export const EXCEPTION_STATUSES = ["no_show", "cancelled", "blocked_reports", "abandoned"];
+export const BACK_FOR_TESTS = "back_for_tests";
+export const EXCEPTION_STATUSES = [
+  "no_show",
+  "cancelled",
+  "blocked_reports",
+  "abandoned",
+  BACK_FOR_TESTS,
+];
 export const LAB_TRACK = [
   "ordered",
   "payment_pending",
@@ -97,6 +104,7 @@ export const STATUS_LABEL = {
   cancelled: "Cancelled",
   blocked_reports: "Blocked — reports",
   abandoned: "Never closed on the floor",
+  back_for_tests: "Back for tests",
 };
 export const STATUS_TO_SLA_KEY = {
   checked_in: "checkin_to_vitals",
@@ -331,6 +339,7 @@ export const MAX_FORWARD_JUMP = 2;
 export const canTransition = (from, to, resumeFrom = null) => {
   if (!isKnownStatus(to)) return false;
   if (from === null || from === undefined) return isChainStatus(to);
+  if (to === BACK_FOR_TESTS) return isTerminalStatus(from);
   if (isExceptionStatus(to)) return to !== from;
   if (isExceptionStatus(from)) {
     if (!isChainStatus(to)) return false;

@@ -1047,6 +1047,15 @@ export const giniflowOrderTestsSchema = z
     message: "No tests selected",
   });
 
+export const giniflowBackForTestsSchema = z
+  .object({
+    tests: z.array(z.string().min(1).max(120)).max(40).optional(),
+    customTests: z.array(giniflowCustomTestSchema).max(10).optional(),
+  })
+  .refine((v) => (v.tests?.length || 0) + (v.customTests?.length || 0) > 0, {
+    message: "No tests selected",
+  });
+
 // The specialist's reply (brief §4.7). `medicines` is the return leg: what the
 // specialist started, written to `medications` as external.
 export const giniflowReferralResponseSchema = z.object({

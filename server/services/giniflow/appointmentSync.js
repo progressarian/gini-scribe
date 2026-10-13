@@ -8,6 +8,7 @@ import {
 } from "../../../shared/manualFloor.js";
 import {
   HEALTHRAY_STATUS_TO_CHAIN,
+  BACK_FOR_TESTS,
   EXCEPTION_STATUSES,
   TERMINAL_STATUSES,
   CHAIN,
@@ -24,6 +25,7 @@ import { TESTS_HOLD_SQL, testsOpenInScribe } from "./testsHold.js";
 import { canReadBill, syncBillingForVisitId } from "./machineSync.js";
 import { directConsultSql } from "../../../shared/directConsult.js";
 import { reassignConsultant } from "./reassign.js";
+import { sweepLateTestExits } from "./lateTests.js";
 
 const DIRECT_CONSULT_HEALTHRAY_WRITES = ["no_show", "cancelled"];
 
@@ -686,6 +688,7 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
     // able to end it. The reports being in IS the floor's own record here.
     result.labOnlySwept = await sweepLabOnlyExits(client, day);
     result.reopenedAfterLabOnly = await reopenAfterLabOnlyExit(client, day);
+    result.lateTestsClosed = await sweepLateTestExits(client, day);
     // Only ever used to choose `rx_pending` over `exited`, and on a manual floor
     // `exited` is not a target the sync can have — so the query is skipped rather
     // than run every 30 seconds for an answer nothing reads.
@@ -822,6 +825,7 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
         // between the read and now — which can be a cancellation.
         const alreadyThere =
           currentStatus === target ||
+          currentStatus === BACK_FOR_TESTS ||
           revivesException(currentStatus, target) ||
           atPharmacyLeg(currentStatus, target, appt.online_journey) ||
           (isChainStatus(currentStatus) &&

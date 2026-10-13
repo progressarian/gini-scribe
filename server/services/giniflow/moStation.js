@@ -12,7 +12,13 @@ import {
   testCategoriesFor,
   schemeForVisit,
 } from "../pricing.js";
-import { slaKeyForStatus, WAIT_SINCE_SQL } from "../../../shared/giniflowStatus.js";
+import {
+  BACK_FOR_TESTS,
+  isTerminalStatus,
+  slaKeyForStatus,
+  WAIT_SINCE_SQL,
+} from "../../../shared/giniflowStatus.js";
+import { reopenForTests } from "./lateTests.js";
 import { todaysVitals, previousVitals } from "./visitVitals.js";
 import { insertLabStepsForOrder, insertMachineStepsForOrders } from "./journey.js";
 import { directConsultSql } from "../../../shared/directConsult.js";
@@ -715,7 +721,7 @@ export async function getTestPanels(db = pool, visitId = null) {
 // moves afterwards.
 export async function orderTests(
   visitId,
-  { urgency, tests = [], customTests = [], actorId = null },
+  { urgency, tests = [], customTests = [], actorId = null, byReception = false },
   db = pool,
 ) {
   // Two kinds of line on one order: tests from the clinic's catalogue, priced
@@ -742,7 +748,7 @@ export async function orderTests(
   const client = await db.connect();
   try {
     await client.query("BEGIN");
-    await assertOwner(client, visitId, actorId);
+    if (!byReception) await assertOwner(client, visitId, actorId);
 
     const { rows: visitRows } = await client.query(
       `SELECT v.current_status,
@@ -755,6 +761,14 @@ export async function orderTests(
     );
     if (!visitRows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
     const current = visitRows[0].current_status;
+    if (byReception && !isTerminalStatus(current) && current !== BACK_FOR_TESTS) {
+      throw Object.assign(
+        new Error(
+          "This patient is still on the floor — tests are ordered from the MO or doctor station",
+        ),
+        { status: 409 },
+      );
+    }
 
     // The scheme this visit is billed under, snapshotted onto the order below.
     // Resolved once here rather than joined at read time: a card corrected next
@@ -835,8 +849,8 @@ export async function orderTests(
       );
       await client.query(
         `INSERT INTO giniflow_lab_order_events (lab_order_id, track, status, actor_role, actor_id)
-         VALUES ($1, 'payment', 'pending', 'mo_sd', $2)`,
-        [id, actorId],
+         VALUES ($1, 'payment', 'pending', $3, $2)`,
+        [id, actorId, byReception ? "reception" : "mo_sd"],
       );
       await linesForOrder(visitId, { labOrderId: id, testNames: kindTests }, { actorId }, client);
       orders.push({ id, kind, outside, tests: kindTests, total: kindTotal });
@@ -895,9 +909,21 @@ export async function orderTests(
 
     // The journey the patient is shown, and the counter they are about to stand
     // at. Only today's tests: a next-visit panel is not a stop on this visit.
-    if (urgency === "today" && labOrder) await insertLabStepsForOrder(client, visitId);
+    const afterExit =
+      urgency === "today" && (isTerminalStatus(current) || current === BACK_FOR_TESTS);
+    const late = afterExit
+      ? await reopenForTests(client, visitId, {
+          trigger: byReception ? "reception" : "scribe_order",
+          tests,
+          orderIds: orders.map((o) => o.id),
+          actorRole: byReception ? "reception" : "mo_sd",
+          actorId,
+        })
+      : null;
+    if (urgency === "today" && labOrder && !afterExit)
+      await insertLabStepsForOrder(client, visitId);
     const machineOrders = orders.filter((o) => o.kind === "machine");
-    if (urgency === "today" && machineOrders.length) {
+    if (urgency === "today" && machineOrders.length && !afterExit) {
       const machines = await getMachines(client);
       const machineIds = [
         ...new Set(
@@ -926,6 +952,7 @@ export async function orderTests(
       tests,
       total,
       sentToLab,
+      backForTests: Boolean(late?.reopened),
       // Only today's tests reach reception now; the rest wait for their day.
       reachesReceptionToday: urgency === "today",
     };

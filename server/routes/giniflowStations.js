@@ -68,6 +68,7 @@ import {
   giniflowMachineAdvanceSchema,
   giniflowMachineAddSchema,
   giniflowOrderTestsSchema,
+  giniflowBackForTestsSchema,
   giniflowCatalogTestSchema,
   giniflowCatalogTestPatchSchema,
   giniflowFloorSettingSchema,
@@ -1340,6 +1341,27 @@ router.post(
       );
     } catch (e) {
       handleError(res, e, "Gini Flow cancel visit");
+    }
+  },
+);
+
+router.post(
+  "/giniflow/stations/reception/:visitId/back-for-tests",
+  receptionGate,
+  validate(giniflowBackForTestsSchema),
+  async (req, res) => {
+    try {
+      res.json(
+        await orderTests(req.params.visitId, {
+          urgency: "today",
+          tests: req.body.tests,
+          customTests: req.body.customTests,
+          actorId: req.doctor?.doctor_id ?? null,
+          byReception: true,
+        }),
+      );
+    } catch (e) {
+      handleError(res, e, "Gini Flow back for tests");
     }
   },
 );

@@ -8,6 +8,8 @@ export const OUTSIDE_PAGE_SIZE = 50;
 
 const STATUSES = ["collected", "sent", "uploaded"];
 
+const CASE_LOOKBACK_DAYS = 30;
+
 const likeOf = (text) => `%${text.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 
 const istDay = (column) => `(${column} AT TIME ZONE 'Asia/Kolkata')::date`;
@@ -96,7 +98,12 @@ const PENDING_CTE = `
          WHERE lc.pdf_storage_path IS NOT NULL AND d.storage_path = lc.pdf_storage_path
          ORDER BY d.id DESC LIMIT 1
       ) doc ON TRUE
-     WHERE ${LIVE_LAB_CASE_SQL("lc")}
+     WHERE lc.case_no IN (SELECT r.case_no FROM lab_cases r
+                           WHERE r.case_date >= ${IST_TODAY} - ${CASE_LOOKBACK_DAYS}
+                          UNION
+                          SELECT s.case_no FROM giniflow_lab_case_actions s
+                           WHERE s.action = '${SENT_OUTSIDE}')
+       AND ${LIVE_LAB_CASE_SQL("lc")}
        AND ((lc.pdf_storage_path IS NULL
              AND COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'reported_on' IS NULL
              AND NOT EXISTS (SELECT 1 FROM giniflow_lab_case_actions a

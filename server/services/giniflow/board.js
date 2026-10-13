@@ -4,6 +4,7 @@ import { LAB_RUNGS, UNDRAWN_SAMPLE_STATUSES } from "../../../shared/labStages.js
 import { labStepsAreManual } from "../../../shared/manualFloor.js";
 import {
   BOARD_COLUMNS,
+  BACK_FOR_TESTS,
   OFF_BOARD_STATUSES,
   compareQueue,
   columnForStatus,
@@ -634,6 +635,7 @@ export const placementFor = (
   { roomSource = null, vitalsAt = null, labUndrawn = 0, labOpen = 0 } = {},
 ) => {
   if (card.finished) return "chain";
+  if (card.status === BACK_FOR_TESTS) return card.machine && !labUndrawn ? "machine" : "lab";
   if ((!vitalsAt && !card.labOnly) || NOT_YET_FOR_MACHINES.includes(card.status)) return "chain";
   if (MACHINE_BLOCKING_ROOMS.includes(card.status) && roomSource !== "healthray") return "chain";
   if (card.machine?.running) return "machine";
@@ -1306,6 +1308,7 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
       hintIcon: heldForTests ? (row.unpaid_tests?.length ? "💳" : "🧪") : hintIconFor(row),
       heldForTests,
       finished,
+      backForTests: row.current_status === BACK_FOR_TESTS,
       statusSince: waitSince ? new Date(waitSince).toISOString() : null,
       journeyStartedAt: row.journey_started_at
         ? new Date(row.journey_started_at).toISOString()

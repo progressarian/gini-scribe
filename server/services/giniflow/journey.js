@@ -7,8 +7,11 @@ import {
   chainIndex,
   isChainStatus,
   isTerminalStatus,
+  BACK_FOR_TESTS,
   JOURNEY_START_SQL,
+  TERMINAL_STATUSES,
 } from "../../../shared/giniflowStatus.js";
+import { reopenForTests } from "./lateTests.js";
 import { advanceStatus, reopenResultsForNewOrder } from "./statusEngine.js";
 import { labStepsAreManual } from "../../../shared/manualFloor.js";
 import { genVisitToken } from "../flow/journey.js";
@@ -1157,7 +1160,12 @@ export const echoFirst = (steps, machines) => {
   return echo.length ? [...echo, ...steps.filter((step) => !echo.includes(step))] : steps;
 };
 
-export async function addLabStepsForArrivedLabCase(patientId, caseDate, db = pool) {
+export async function addLabStepsForArrivedLabCase(
+  patientId,
+  caseDate,
+  db = pool,
+  { caseNo = null, testNames = [] } = {},
+) {
   if (!patientId || !caseDate) return { added: [] };
   const { rows } = await db.query(
     `SELECT id FROM giniflow_visits
@@ -1170,7 +1178,7 @@ export async function addLabStepsForArrivedLabCase(patientId, caseDate, db = poo
       ["booked", "confirmed", "no_show", "cancelled", "abandoned", "dispensed", "exited"],
     ],
   );
-  if (!rows.length) return { added: [] };
+  if (!rows.length) return reopenForArrivedLabCase(patientId, caseDate, db, caseNo, testNames);
   const client = await db.connect();
   try {
     await client.query("BEGIN");
@@ -1181,6 +1189,38 @@ export async function addLabStepsForArrivedLabCase(patientId, caseDate, db = poo
         : await insertLabStepsForOrder(client, rows[0].id);
     await client.query("COMMIT");
     return result;
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+async function reopenForArrivedLabCase(patientId, caseDate, db, caseNo, testNames) {
+  if (!caseNo) return { added: [] };
+  const { rows } = await db.query(
+    `SELECT v.id FROM giniflow_visits v
+      WHERE v.patient_id = $1 AND v.visit_date = $2::date
+        AND v.current_status = ANY($3::text[])
+        AND v.merged_into_visit_id IS NULL
+        AND EXISTS (SELECT 1 FROM lab_cases lc
+                     WHERE lc.case_no = $4 AND ${LIVE_LAB_CASE_SQL("lc")}
+                       AND COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'reported_on' IS NULL)
+      ORDER BY v.created_at DESC LIMIT 1`,
+    [patientId, caseDate, [...TERMINAL_STATUSES, BACK_FOR_TESTS], caseNo],
+  );
+  if (!rows.length) return { added: [] };
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await reopenForTests(client, rows[0].id, {
+      trigger: "healthray_case",
+      tests: testNames,
+      stepIds: LAB_TEST_STEP_IDS,
+    });
+    await client.query("COMMIT");
+    return { added: result.steps, reopened: result.reopened };
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;

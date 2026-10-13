@@ -107,7 +107,7 @@ import {
 import { paidAtReception } from "../services/billing/receptionOrders.js";
 import { deskSettings } from "../services/billing/billingSettings.js";
 import { searchDeskItems } from "../services/billing/serviceItems.js";
-import { counterPatients } from "../services/billing/counterPatients.js";
+import { billingChanged, counterPatients } from "../services/billing/counterPatients.js";
 import { consultantOptions } from "../services/billing/billConsultant.js";
 import { correctPaymentMode, paymentsWithRights } from "../services/billing/paymentCorrection.js";
 
@@ -119,6 +119,11 @@ const master = requireCapability(CAP.BILLING_MASTER);
 const run = billingRoute;
 
 const ctx = (req) => ({ ...auditContext(req), role: req.doctor?.role ?? null });
+
+router.use(BASE, (req, res, next) => {
+  if (req.method !== "GET") res.on("finish", billingChanged);
+  next();
+});
 
 const pricedLines = (lines) =>
   lines.map((line) => ({

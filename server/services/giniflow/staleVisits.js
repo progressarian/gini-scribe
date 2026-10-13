@@ -1,4 +1,5 @@
 import pool from "../../config/db.js";
+import { BACK_FOR_TESTS } from "../../../shared/giniflowStatus.js";
 
 const STALE_SQL = `
   SELECT v.id, v.visit_date::text AS visit_date, v.current_status,
@@ -16,6 +17,7 @@ const STALE_SQL = `
 // `abandoned` for one who reached a station and was left there — neither
 // invents an exit time, and neither counts as a completed journey.
 export const targetStatus = (row) => {
+  if (row.current_status === BACK_FOR_TESTS) return "exited";
   if (row.hr_status === "no_show") return "no_show";
   if (row.hr_status === "cancelled") return "cancelled";
   // HealthRay saw the consultation through, so the patient did not walk out —

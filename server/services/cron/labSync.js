@@ -93,8 +93,12 @@ async function processCase(listRow, { listOnly = false } = {}) {
   }
 
   try {
-    const { added } = await addLabStepsForArrivedLabCase(patientId, caseDate);
-    if (added.length)
+    const { added, reopened } = await addLabStepsForArrivedLabCase(patientId, caseDate, undefined, {
+      caseNo,
+      testNames,
+    });
+    if (reopened) log("Journey", `case ${caseNo}: patient had exited — sent back for tests`);
+    else if (added.length)
       log("Journey", `case ${caseNo}: Lab Billing added for a patient already checked in`);
   } catch (e) {
     log("Journey", `case ${caseNo}: could not add Lab Billing — ${e.message}`);

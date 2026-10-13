@@ -289,7 +289,8 @@ export async function advanceStatus(
   await client.query(
     `UPDATE giniflow_visits
         SET current_status = $2,
-            resume_status  = CASE WHEN $2 = 'blocked_reports' THEN $3 ELSE NULL END,
+            resume_status  = CASE WHEN $2 = 'blocked_reports' THEN $3
+                                  WHEN $2 = 'back_for_tests' THEN 'exited' ELSE NULL END,
             blocked_reason = CASE WHEN $2 = 'blocked_reports' THEN $4 ELSE NULL END,
             -- A manual queue position means "call this one next AT THIS
             -- STATION". Once the patient has moved on it describes a queue they

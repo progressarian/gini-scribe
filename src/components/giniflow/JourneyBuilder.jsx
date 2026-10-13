@@ -56,9 +56,9 @@ const rupees = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 // Which tests to draw. "Blood Sample" is a stop, not a test — so the desk names
 // the tests here and the check-in raises one lab order for them, priced from the
 // catalogue and left for the payment desk to clear.
-function TestPicker({ picked, onChange }) {
+export function TestPicker({ picked, onChange, withMachines = false }) {
   const { data: catalog = [], isLoading } = useReceptionTestCatalog();
-  const lab = catalog.filter((t) => t.category !== "machine");
+  const lab = withMachines ? catalog : catalog.filter((t) => t.category !== "machine");
   const priceOf = (name) => lab.find((t) => t.name === name)?.price ?? 0;
   const total = picked.reduce((sum, n) => sum + priceOf(n), 0);
 

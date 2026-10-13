@@ -3,6 +3,7 @@ import { draftAtCheckIn, refuseOrderOnBill } from "../billing/visitLines.js";
 import { billTakesTestPayments } from "../../../shared/manualFloor.js";
 import { catalogBasePriceSql, consultationRateJoinSql } from "../pricing.js";
 import {
+  BACK_FOR_TESTS,
   STATUS_LABEL,
   chainIndex,
   isChainStatus,
@@ -1197,7 +1198,9 @@ export function undoArrival(visitId, actorId = null, db = pool) {
     {
       actorId,
       guard: (from) =>
-        isExceptionStatus(from) ? null : `${STATUS_LABEL[from] || from} — there is nothing to undo`,
+        isExceptionStatus(from) && from !== BACK_FOR_TESTS
+          ? null
+          : `${STATUS_LABEL[from] || from} — there is nothing to undo`,
     },
     db,
   );

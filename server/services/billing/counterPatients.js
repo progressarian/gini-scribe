@@ -38,12 +38,14 @@ const DAY_TESTS = `ARRAY(SELECT dt.test_name
                           WHERE dv.visit_date = $1::date
                          UNION
                          SELECT btrim(dn.test_name)
-                           FROM lab_cases dlc
+                           FROM (SELECT dlc.test_names FROM lab_cases dlc
+                                  WHERE dlc.case_date = $1::date
+                                 UNION ALL
+                                 SELECT dlc.test_names FROM lab_cases dlc
+                                   JOIN giniflow_visits dav ON dav.appointment_id = dlc.appointment_id
+                                  WHERE dav.visit_date = $1::date) dlc
                            CROSS JOIN LATERAL unnest(COALESCE(dlc.test_names, '{}'::text[]))
-                             AS dn(test_name)
-                          WHERE dlc.case_date = $1::date
-                             OR dlc.appointment_id IN (SELECT appointment_id FROM giniflow_visits
-                                                        WHERE visit_date = $1::date))`;
+                             AS dn(test_name))`;
 
 const COUNTER_SELECT = `
   WITH day_tests AS MATERIALIZED (${TEST_MATCHES_SQL(DAY_TESTS)})
@@ -204,9 +206,31 @@ async function istToday(db) {
   return rows[0].d;
 }
 
+let billingWrites = 0;
+const running = new Map();
+
+export const billingChanged = () => {
+  billingWrites += 1;
+};
+
+const dayRows = (date, db) =>
+  db.query(COUNTER_SELECT, [date, LAB_ONLY_DOCTOR, false]).then((result) => result.rows);
+
+function sharedDayRows(date, db) {
+  if (db !== pool) return dayRows(date, db);
+  const current = running.get(date);
+  if (current && current.writes === billingWrites) return current.rows;
+  const run = { writes: billingWrites };
+  run.rows = dayRows(date, db).finally(() => {
+    if (running.get(date) === run) running.delete(date);
+  });
+  running.set(date, run);
+  return run.rows;
+}
+
 export async function counterPatients(visitDate, q = "", now = new Date(), db = pool) {
   const date = visitDate || (await istToday(db));
-  const { rows } = await db.query(COUNTER_SELECT, [date, LAB_ONLY_DOCTOR, false]);
+  const rows = await sharedDayRows(date, db);
 
   let visible = rows;
   const query = String(q || "").trim();

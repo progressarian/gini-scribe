@@ -77,6 +77,16 @@ export function useClearPayment() {
   });
 }
 
+export function useBackForTests() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ visitId, tests }) =>
+      (await api.post(`/api/giniflow/stations/reception/${visitId}/back-for-tests`, { tests }))
+        .data,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["giniflow"] }),
+  });
+}
+
 // ── Arrivals ────────────────────────────────────────────────────────────────
 // Search is a server round-trip, not a filter over rendered rows: the day can
 // hold 100+ patients and phone matching has to normalise the number the same way

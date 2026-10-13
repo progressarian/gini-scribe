@@ -501,6 +501,14 @@ function PatientCard({
               ONLINE
             </span>
           )}
+          {card.backForTests && (
+            <span
+              className="pc-lo"
+              title="Exited, then sent back for tests ordered after the visit"
+            >
+              BACK FOR TESTS
+            </span>
+          )}
           <div className="pc-cat" title={CATEGORY_DOT[card.category]?.label || "Uncategorised"}>
             {CATEGORY_DOT[card.category]?.icon || ""}
           </div>
@@ -1360,6 +1368,14 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
               {visit?.online && (
                 <span className="pc-lo" title="Online consultation — not seen on the floor">
                   ONLINE
+                </span>
+              )}
+              {visit?.current_status === "back_for_tests" && (
+                <span
+                  className="pc-lo"
+                  title="Exited, then sent back for tests ordered after the visit"
+                >
+                  BACK FOR TESTS
                 </span>
               )}
             </div>

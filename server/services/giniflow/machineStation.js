@@ -6,6 +6,8 @@ import { LIVE_LAB_CASE_SQL } from "./testsHold.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config/storage.js";
 import { opensLabGate, outstandingOf } from "../../../shared/labPayment.js";
 import {
+  BACK_FOR_TESTS,
+  isTerminalStatus,
   STATUS_LABEL,
   BOARD_COLUMNS,
   columnForStatus,
@@ -50,6 +52,7 @@ import { publish } from "./eventHub.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate, labOnlyHiddenPredicate } from "./labOnlyVisits.js";
 import { hideLabOnlyPatients } from "./floorSettings.js";
 import { hasExtraReports } from "./extraReports.js";
+import { reopenForTests } from "./lateTests.js";
 
 const UNDRAWN_LAB = UNDRAWN_SAMPLE_STATUSES.map((v) => `'${v}'`).join(", ");
 
@@ -594,9 +597,10 @@ export async function addMachineTestOn(
     [visitId],
   );
   if (!visit.length) throw Object.assign(new Error("No such visit"), { status: 404 });
-  if (FINISHED.includes(visit[0].current_status)) {
+  const closed = isTerminalStatus(visit[0].current_status);
+  if (FINISHED.includes(visit[0].current_status) && !closed) {
     throw Object.assign(
-      new Error(`${visit[0].name} has left the floor — the test cannot be added to today`),
+      new Error(`${visit[0].name} did not come in today — the test cannot be added`),
       { status: 409 },
     );
   }
@@ -657,7 +661,25 @@ export async function addMachineTestOn(
     client,
   );
 
-  return { orderId, machine: machine.id, name: visit[0].name, alreadyThere: false, price };
+  const late =
+    closed || visit[0].current_status === BACK_FOR_TESTS
+      ? await reopenForTests(client, visitId, {
+          trigger: "scribe_order",
+          tests: [machine.tests[0]],
+          orderIds: [orderId],
+          actorRole: "lab",
+          actorId,
+        })
+      : null;
+
+  return {
+    orderId,
+    machine: machine.id,
+    name: visit[0].name,
+    alreadyThere: false,
+    price,
+    backForTests: Boolean(late?.reopened),
+  };
 }
 
 export async function addMachineTest(
