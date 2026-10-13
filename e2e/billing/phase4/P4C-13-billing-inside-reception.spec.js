@@ -246,10 +246,7 @@ test.describe.serial("P4C-13 the billing counter inside the reception station", 
     await openReception(page);
     await page.getByRole("button", { name: "✓ Arrived" }).click();
     const panel = page.getByRole("dialog", { name: "Check in" });
-    await panel
-      .getByRole("button", { name: /Check in/ })
-      .first()
-      .click();
+    await panel.getByRole("button", { name: "Check in only — bill later" }).click();
     await expect.poll(() => checkedIn).toBe(1);
     await expect(panel.getByRole("status")).toContainText("is checked in");
     await panel.getByRole("link", { name: "Open bill →" }).click();

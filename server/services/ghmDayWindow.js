@@ -6,6 +6,8 @@
 //
 // Both fragments assume the date is bound as $1.
 
+import { LAB_ONLY_DOCTOR } from "../../shared/labOnly.js";
+
 // A visit's OWN effective follow-up date, from whichever source has it, in
 // priority order: the follow_up_date column → the synced HealthRay appointment
 // value (biomarkers.followup) → the date extracted from the prescription
@@ -85,6 +87,7 @@ export const preferredSuperseded = (a) => `EXISTS (
      AND nb.appointment_date IS DISTINCT FROM ${a}.preferred_date
      AND COALESCE(nb.status, '') <> 'cancelled'
      AND COALESCE(nb.booking_status, '') <> 'cancelled'
+     AND ${NOT_LAB_ONLY("nb")}
      AND ${bookedAt("nb")} > ${preferredSetAt(a)}
 )`;
 
@@ -151,6 +154,9 @@ export const callStatusToday = (a = "a") =>
 // Computed only for the follow-up/preferred listings ($1 is the day being
 // viewed), and anchored to the Indian day so a booking earlier today still
 // counts. Cancellations on either column are not bookings.
+export const NOT_LAB_ONLY = (a) =>
+  `LOWER(TRIM(COALESCE(${a}.doctor_name, ''))) <> '${LAB_ONLY_DOCTOR.toLowerCase()}'`;
+
 export const upcomingBookingElsewhere = (a = "a") => `CASE
   WHEN ${a}.file_no IS NOT NULL AND ${a}.appointment_date IS DISTINCT FROM $1 THEN (
     SELECT MIN(b.appointment_date)
@@ -160,4 +166,6 @@ export const upcomingBookingElsewhere = (a = "a") => `CASE
        AND b.appointment_date >= ${IST_TODAY}
        AND b.status NOT IN ('cancelled', 'no_show')
        AND COALESCE(b.booking_status, '') <> 'cancelled'
+       AND COALESCE(NULLIF(TRIM(b.time_slot), ''), NULLIF(TRIM(b.reporting_time_slot), '')) IS NOT NULL
+       AND ${NOT_LAB_ONLY("b")}
   ) END`;

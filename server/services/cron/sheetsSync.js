@@ -357,6 +357,7 @@ async function linkPendingFollowUp(fileNo, apptDate, bookingId) {
     `UPDATE appointments SET booking_status = 'booked',
             preferred_date = COALESCE(preferred_date, $2), updated_at = NOW()
       WHERE id = $1 AND booking_status IS NULL
+        AND COALESCE(status, '') NOT IN ('completed', 'seen')
       RETURNING id`,
     [bookingId, apptDate],
   );

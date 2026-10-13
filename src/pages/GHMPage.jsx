@@ -61,7 +61,7 @@ import useBodyScrollLock from "../hooks/useBodyScrollLock.js";
 import useViewportFill from "../hooks/useViewportFill.js";
 import {
   PAGE_SIZE,
-  fetchLastMo,
+  fetchLastVisit,
   fetchObtAssignments,
   useActiveCalls,
   useAssignCalls,
@@ -83,7 +83,7 @@ import {
   useExportPages,
   useGhmBiomarkers,
   useGhmDoctors,
-  useGhmLastMo,
+  useGhmLastVisit,
   useGhmSlotCounts,
   useGhmList,
   useLogCallAttempt,
@@ -98,8 +98,6 @@ import { toast } from "../stores/uiStore";
 import { visitStatus } from "../lib/visitStatus.js";
 
 const safeArr = (v) => (Array.isArray(v) ? v : []);
-
-const STALE_MO_DAYS = 90;
 
 // How loaded an arrival window already is on a row's date: booked appointments
 // in that hour plus the patients whose preferred time is that window. Shown as
@@ -274,6 +272,7 @@ const CELL_DATE_STYLE = {
   padding: "5px 26px 5px 26px",
   fontSize: 12,
   borderRadius: 7,
+  textAlign: "center",
 };
 
 const MODE_OPTIONS = [
@@ -483,6 +482,7 @@ const APPT_PILLS = [
   { bucket: "home_collection", key: "home_collection", label: "Home Collection", color: "purple" },
   { bucket: "booked", key: "booked", label: "Booked", color: "green" },
   { bucket: "not_booked", key: "not_booked", label: "Not Booked", color: "red" },
+  { bucket: "cancelled", key: "cancelled", label: "Cancelled", color: "gray" },
 ];
 
 const CALL_PILLS = [
@@ -1101,6 +1101,17 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
     } catch (e) {
       const data = e?.response?.data;
       if (data?.error === "duplicate_booking") return setDup(data.detail || {});
+      if (data?.error === "already_visited") {
+        const where = {
+          checkedin: "checked in",
+          in_visit: "in their visit",
+          "in-progress": "in their visit",
+        }[data.detail?.status];
+        const doctor = data.detail?.doctor_name ? ` with ${data.detail.doctor_name}` : "";
+        return setErr(
+          `This patient is already ${where || "seen"} today${doctor}. Book their next visit for a later date.`,
+        );
+      }
       setErr(data?.error || "Could not save. Please try again.");
     }
   };
@@ -2558,7 +2569,7 @@ export default function GHMPage() {
   const appointmentIds = useMemo(() => rows.map((r) => r.id).filter(Boolean), [rows]);
   const biomarkerQuery = useGhmBiomarkers(patientIds);
   const blockQuery = usePatientBlockStatus(patientIds);
-  const lastMoQuery = useGhmLastMo(patientIds);
+  const lastVisitQuery = useGhmLastVisit(patientIds);
   const assignmentQuery = useObtAssignments(patientIds);
   const assignments = assignmentQuery.data || {};
   const obtTeam = useObtTeam().data || [];
@@ -2575,7 +2586,7 @@ export default function GHMPage() {
   const slotCounts = slotCountQuery.data || {};
   const biomarkers = biomarkerQuery.data || {};
   const blocks = blockQuery.data || {};
-  const lastMo = lastMoQuery.data || {};
+  const lastVisit = lastVisitQuery.data || {};
   const attemptCounts = attemptQuery.data || {};
   const activeCalls = activeCallQuery.data || {};
   const categoryCounts = categoryQuery.data || null;
@@ -2667,7 +2678,7 @@ export default function GHMPage() {
       }
       // The sheet names the last consultant seen, which lives outside the row —
       // fetched for the exported rows, not just the ones on screen.
-      const lastSeen = await fetchLastMo(all.map((r) => r.patient_id)).catch(() => ({}));
+      const lastSeen = await fetchLastVisit(all.map((r) => r.patient_id)).catch(() => ({}));
       const owners = await fetchObtAssignments(all.map((r) => r.patient_id)).catch(() => ({}));
       const counts = await exportWatiWorkbook(all, sheetDate, label, lastSeen, owners, options);
       if (!counts.total) toast("No patients with a phone number to export.", "warn");
@@ -2817,7 +2828,6 @@ export default function GHMPage() {
         "category",
         "mode",
         "doctor",
-        "last_mo",
         "last_visit",
         showShowNoShow && "show_no_show",
         "assigned_to",
@@ -3214,16 +3224,19 @@ export default function GHMPage() {
                     <th style={{ width: 36 }}>#</th>
                     {showApptDate && <th style={{ width: 120 }}>Appointment</th>}
                     {showVisitStatus && <th style={{ width: 120 }}>Visit Status</th>}
-                    <th style={{ minWidth: 170 }}>Patient</th>
-                    <th style={{ width: 155 }}>Biomarkers (auto)</th>
+                    <th className="tl" style={{ minWidth: 170 }}>
+                      Patient
+                    </th>
+                    <th className="tl" style={{ width: 155 }}>
+                      Biomarkers (auto)
+                    </th>
                     <th style={{ minWidth: 130, whiteSpace: "nowrap" }}>Assigned To</th>
                     <th style={{ width: 140 }}>Booking Status</th>
                     <th style={{ width: 100 }}>Visit Type</th>
                     <th style={{ width: 165 }}>Category</th>
                     <th style={{ width: 110 }}>Mode</th>
                     <th style={{ width: 220 }}>Doctor</th>
-                    <th style={{ width: 140 }}>Last Consultant Seen</th>
-                    <th style={{ width: 120 }}>Last Visit Date</th>
+                    <th style={{ minWidth: 230, whiteSpace: "nowrap" }}>Last Visit</th>
                     {showShowNoShow && <th style={{ width: 150 }}>Show / No Show</th>}
                     {showCallStatus && (
                       <th style={{ minWidth: 175, whiteSpace: "nowrap" }}>Call Status</th>
@@ -3246,7 +3259,9 @@ export default function GHMPage() {
                     <th style={{ width: 150 }}>Preferred Date</th>
                     <th style={{ width: 195 }}>Preferred Time</th>
                     <th style={{ width: 130 }}>Home Collection</th>
-                    <th style={{ minWidth: 210 }}>Notes / Reason</th>
+                    <th className="tl" style={{ minWidth: 210 }}>
+                      Notes / Reason
+                    </th>
                     <th style={{ width: 160 }}>Prescription Explained By</th>
                   </tr>
                 </thead>
@@ -3347,7 +3362,9 @@ export default function GHMPage() {
                           {showVisitStatus && (
                             <td>
                               {(() => {
-                                const st = visitStatus(row.status);
+                                const onThisDate =
+                                  String(row.appointment_date || "").slice(0, 10) === date;
+                                const st = visitStatus(onThisDate ? row.status : null);
                                 return (
                                   <span className={`badge badge--${st.tone}`}>{st.label}</span>
                                 );
@@ -3386,6 +3403,14 @@ export default function GHMPage() {
                                     title={`Marked booked for ${prettyDate(row.booked_for_date)}, but that date has passed and there is no newer appointment — call and book again`}
                                   >
                                     Booking lapsed · {prettyDate(row.booked_for_date)}
+                                  </span>
+                                )}
+                                {row.booking_no_slot && !row.is_booked && !row.booked_on && (
+                                  <span
+                                    className="lapsed-tag"
+                                    title={`Marked booked for ${prettyDate(row.booked_for_date)}, but no time is set — choose a preferred time or use Book next`}
+                                  >
+                                    No time slot yet · {prettyDate(row.booked_for_date)}
                                   </span>
                                 )}
                                 {row.booking_status === "cancelled" && (
@@ -3560,53 +3585,42 @@ export default function GHMPage() {
 
                           <td>
                             {(() => {
-                              const lm = lastMo[row.patient_id];
-                              if (!lm?.name)
-                                return <span className="muted">No MO or doctor recorded</span>;
-                              const age = daysAgo(lm.date);
-                              const stale = age != null && age > STALE_MO_DAYS;
-                              const isDoctor = lm.kind === "doctor";
+                              const lv = lastVisit[row.patient_id];
+                              if (!lv?.date && !lv?.testsDate)
+                                return <span className="muted">No visit on record</span>;
+                              const age = daysAgo(lv.date);
                               return (
                                 <div className="lastmo-cell">
-                                  <span className="lastmo-name">
-                                    {lm.name}
-                                    {isDoctor && (
-                                      <span
-                                        className="lastmo-tag"
-                                        title="No MO recorded — showing the doctor seen on the last visit."
-                                      >
-                                        Doctor
+                                  {lv.date ? (
+                                    <>
+                                      <span className="fu-date">
+                                        {prettyDateWithYear(lv.date)}
+                                        {age != null && ` · ${agoLabel(age)}`}
                                       </span>
-                                    )}
-                                  </span>
-                                  {lm.date && (
-                                    <span
-                                      className={`lastmo-date ${stale ? "lastmo-date--stale" : ""}`}
-                                      title={
-                                        stale
-                                          ? `This is the last visit that named ${isDoctor ? "a doctor" : "an MO"} — more recent visits recorded none.`
-                                          : undefined
-                                      }
-                                    >
-                                      {prettyDate(lm.date)}
-                                      {age != null && ` · ${agoLabel(age)}`}
+                                      {lv.doctor || lv.mo ? (
+                                        <>
+                                          {lv.doctor && (
+                                            <span className="lastmo-name">{lv.doctor}</span>
+                                          )}
+                                          {lv.mo && (
+                                            <span className="lastmo-date">MO: {lv.mo}</span>
+                                          )}
+                                        </>
+                                      ) : (
+                                        <span className="lastmo-date">Doctor not recorded</span>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <span className="muted">No consultation on record</span>
+                                  )}
+                                  {lv.testsDate && (
+                                    <span className="lastmo-date">
+                                      Tests only: {prettyDate(lv.testsDate)}
                                     </span>
                                   )}
                                 </div>
                               );
                             })()}
-                          </td>
-
-                          <td>
-                            {row.last_visit_date ? (
-                              <span className="fu-date">
-                                {prettyDateWithYear(row.last_visit_date)}
-                              </span>
-                            ) : (
-                              <span className="muted" title="No earlier attended visit on record">
-                                —
-                              </span>
-                            )}
                           </td>
 
                           {/* Came? */}

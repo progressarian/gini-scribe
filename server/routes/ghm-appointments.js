@@ -15,6 +15,7 @@ import {
   callStatusToday,
   isLatestFollowUpVisit,
   upcomingBookingElsewhere,
+  NOT_LAB_ONLY,
   preferredSuperseded,
   preferredSetAt,
   bookedAt,
@@ -735,75 +736,87 @@ router.post("/ghm-appointments/biomarkers", async (req, res) => {
   }
 });
 
-router.post("/ghm-appointments/last-mo", async (req, res) => {
+router.post("/ghm-appointments/last-visit", async (req, res) => {
   try {
     const ids = (req.body?.patient_ids || []).filter((x) => Number.isInteger(x));
     if (!ids.length) return res.json({});
 
     const r = await pool.query(
-      `WITH seen AS (
-         SELECT c.patient_id, TRIM(c.mo_name) AS name, c.visit_date AS seen_date,
-                'mo' AS kind, 0 AS src_rank
-           FROM consultations c
-          WHERE c.patient_id = ANY($1::int[])
-            AND NULLIF(TRIM(c.mo_name), '') IS NOT NULL
-         UNION ALL
-         SELECT v.patient_db_id, TRIM(fs.assigned_staff_name), v.visit_date, 'mo', 1
-           FROM flow_visit_steps fs
-           JOIN flow_visits v ON v.id = fs.visit_id
-          WHERE v.patient_db_id = ANY($1::int[])
-            AND fs.assigned_role = 'mo'
-            AND fs.status = 'completed'
-            AND NULLIF(TRIM(fs.assigned_staff_name), '') IS NOT NULL
-         UNION ALL
-         SELECT a.patient_id, TRIM(a.assigned_mo), a.appointment_date, 'mo', 2
+      `WITH visits AS (
+         SELECT a.patient_id, a.appointment_date::date AS d
            FROM appointments a
           WHERE a.patient_id = ANY($1::int[])
-            AND NULLIF(TRIM(a.assigned_mo), '') IS NOT NULL
             AND a.status = ANY(${ATTENDED_STATUSES})
             AND a.appointment_date <= ${IST_TODAY}
+            AND ${NOT_LAB_ONLY("a")}
          UNION ALL
-         SELECT c.patient_id, TRIM(c.con_name), c.visit_date, 'doctor', 0
+         SELECT c.patient_id, c.visit_date::date
            FROM consultations c
           WHERE c.patient_id = ANY($1::int[])
-            AND NULLIF(TRIM(c.con_name), '') IS NOT NULL
+            AND c.visit_date::date <= ${IST_TODAY}
+       ),
+       last AS (
+         SELECT patient_id, MAX(d) AS d FROM visits GROUP BY patient_id
+       ),
+       tests AS (
+         SELECT a.patient_id, MAX(a.appointment_date)::date AS d
+           FROM appointments a
+          WHERE a.patient_id = ANY($1::int[])
+            AND a.status = ANY(${ATTENDED_STATUSES})
+            AND a.appointment_date <= ${IST_TODAY}
+            AND NOT ${NOT_LAB_ONLY("a")}
+          GROUP BY a.patient_id
+       ),
+       names AS (
+         SELECT c.patient_id, TRIM(c.con_name) AS name, 'doctor' AS kind, 0 AS src_rank
+           FROM consultations c JOIN last l ON l.patient_id = c.patient_id AND c.visit_date::date = l.d
+          WHERE NULLIF(TRIM(c.con_name), '') IS NOT NULL
          UNION ALL
-         SELECT v.patient_db_id, TRIM(fs.assigned_staff_name), v.visit_date, 'doctor', 1
+         SELECT c.patient_id, TRIM(c.mo_name), 'mo', 0
+           FROM consultations c JOIN last l ON l.patient_id = c.patient_id AND c.visit_date::date = l.d
+          WHERE NULLIF(TRIM(c.mo_name), '') IS NOT NULL
+         UNION ALL
+         SELECT v.patient_db_id, TRIM(fs.assigned_staff_name),
+                CASE WHEN fs.assigned_role = 'mo' THEN 'mo' ELSE 'doctor' END, 1
            FROM flow_visit_steps fs
            JOIN flow_visits v ON v.id = fs.visit_id
-          WHERE v.patient_db_id = ANY($1::int[])
-            AND fs.assigned_role IN ('sd', 'chief', 'consultant', 'doctor')
+           JOIN last l ON l.patient_id = v.patient_db_id AND v.visit_date::date = l.d
+          WHERE fs.assigned_role IN ('mo', 'sd', 'chief', 'consultant', 'doctor')
             AND fs.status = 'completed'
             AND NULLIF(TRIM(fs.assigned_staff_name), '') IS NOT NULL
          UNION ALL
-         SELECT a.patient_id, TRIM(a.doctor_name), a.appointment_date, 'doctor', 2
-           FROM appointments a
-          WHERE a.patient_id = ANY($1::int[])
+         SELECT a.patient_id, TRIM(a.doctor_name), 'doctor', 2
+           FROM appointments a JOIN last l ON l.patient_id = a.patient_id AND a.appointment_date = l.d
+          WHERE a.status = ANY(${ATTENDED_STATUSES})
             AND NULLIF(TRIM(a.doctor_name), '') IS NOT NULL
-            AND a.status = ANY(${ATTENDED_STATUSES})
-            AND a.appointment_date <= ${IST_TODAY}
             AND TRIM(a.doctor_name) NOT IN ('N/A', 'Dr. Hospital Admin')
+         UNION ALL
+         SELECT a.patient_id, TRIM(a.assigned_mo), 'mo', 2
+           FROM appointments a JOIN last l ON l.patient_id = a.patient_id AND a.appointment_date = l.d
+          WHERE a.status = ANY(${ATTENDED_STATUSES})
+            AND NULLIF(TRIM(a.assigned_mo), '') IS NOT NULL
        )
-       SELECT DISTINCT ON (patient_id, kind) patient_id, kind, name, seen_date
-         FROM seen
-        ORDER BY patient_id, kind, seen_date DESC NULLS LAST, src_rank`,
+       SELECT COALESCE(l.patient_id, t.patient_id) AS patient_id, l.d::text AS date,
+              CASE WHEN l.d IS NULL OR t.d > l.d THEN t.d::text END AS tests_date,
+              (SELECT n.name FROM names n WHERE n.patient_id = l.patient_id AND n.kind = 'doctor'
+                ORDER BY n.src_rank LIMIT 1) AS doctor,
+              (SELECT n.name FROM names n WHERE n.patient_id = l.patient_id AND n.kind = 'mo'
+                ORDER BY n.src_rank LIMIT 1) AS mo
+         FROM last l
+         FULL JOIN tests t ON t.patient_id = l.patient_id`,
       [ids],
     );
 
-    const out = {};
-    for (const row of r.rows) {
-      const slot = (out[row.patient_id] = out[row.patient_id] || {});
-      slot[row.kind] = { name: row.name, date: row.seen_date };
-    }
-
-    const merged = {};
-    for (const [pid, slot] of Object.entries(out)) {
-      if (slot.mo) merged[pid] = { ...slot.mo, kind: "mo" };
-      else if (slot.doctor) merged[pid] = { ...slot.doctor, kind: "doctor" };
-    }
-    res.json(merged);
+    res.json(
+      Object.fromEntries(
+        r.rows.map((row) => [
+          row.patient_id,
+          { date: row.date, doctor: row.doctor, mo: row.mo, testsDate: row.tests_date },
+        ]),
+      ),
+    );
   } catch (e) {
-    handleError(res, e, "GHM last MO");
+    handleError(res, e, "GHM last visit");
   }
 });
 
@@ -914,10 +927,31 @@ router.get("/ghm-appointments/category-counts", async (req, res) => {
 // while the raw column holds the last call whenever it was made.
 
 const BOOKED_DATE = (a) => `GREATEST(${a}.appointment_date, ${a}.preferred_date)::text`;
-const BOOKED_FOR = (a, d) =>
-  `(COALESCE(${a}.booking_status, '') = 'booked' AND COALESCE(GREATEST(${a}.appointment_date, ${a}.preferred_date) >= ${d}, FALSE))`;
+const HAS_SLOT = (a) =>
+  `COALESCE(NULLIF(TRIM(${a}.time_slot), ''), NULLIF(TRIM(${a}.reporting_time_slot), '')) IS NOT NULL`;
+const BOOKED_ON_DAY = (a, d) => `COALESCE(${a}.appointment_date = ${d} AND ${HAS_SLOT(a)}, FALSE)`;
+const PREFERRED_SLOT_FOR = (a, d) =>
+  `COALESCE(COALESCE(${a}.preferred_date, ${ownFu(a)}) >= ${d} AND NULLIF(TRIM(${a}.preferred_time_slot), '') IS NOT NULL, FALSE)`;
+const BOOKED_FOR = (a, d) => `(${PREFERRED_SLOT_FOR(a, d)} OR EXISTS (
+  SELECT 1 FROM appointments b
+   WHERE b.patient_id = ${a}.patient_id
+     AND b.appointment_date >= ${d}
+     AND ${HAS_SLOT("b")}
+     AND b.status NOT IN ('cancelled', 'no_show')
+     AND COALESCE(b.booking_status, '') <> 'cancelled'
+     AND ${NOT_LAB_ONLY("b")}))`;
+const NOT_BOOKED = (a, d) => `(NOT ${BOOKED_ON_DAY(a, d)} AND NOT ${BOOKED_FOR(a, d)})`;
+const BOOKING_NO_SLOT = (a) =>
+  `(COALESCE(${a}.booking_status, '') = 'booked' AND COALESCE(GREATEST(${a}.appointment_date, ${a}.preferred_date) >= ${IST_TODAY}, FALSE))`;
 const BOOKING_LAPSED = (a) =>
-  `(COALESCE(${a}.booking_status, '') = 'booked' AND NOT COALESCE(GREATEST(${a}.appointment_date, ${a}.preferred_date) >= ${IST_TODAY}, FALSE))`;
+  `(COALESCE(${a}.booking_status, '') = 'booked'
+    AND NOT COALESCE(GREATEST(${a}.appointment_date, ${a}.preferred_date) >= ${IST_TODAY}, FALSE)
+    AND NOT EXISTS (
+      SELECT 1 FROM appointments kept
+       WHERE (kept.id = ${a}.id OR kept.patient_id = ${a}.patient_id)
+         AND kept.appointment_date >= GREATEST(${a}.appointment_date, ${a}.preferred_date)
+         AND kept.status = ANY(${ATTENDED_STATUSES})
+         AND ${NOT_LAB_ONLY("kept")}))`;
 
 const ATTENDED_STATUSES = `'{"seen","completed","checkedin","in_visit","in-progress"}'::text[]`;
 
@@ -925,8 +959,11 @@ const SUMMARY_BUCKETS = {
   came: (a) => `${a}.show_no_show = 'Show'`,
   no_show: (a) => `${a}.show_no_show = 'No Show'`,
   pending_show: (a) => `(${a}.show_no_show IS NULL OR ${a}.show_no_show = '')`,
-  not_called: (a, cs) =>
-    `((${cs} IS NULL OR ${cs} IN ('', 'pending')) AND NOT COALESCE(${a}.status = ANY(${ATTENDED_STATUSES}), FALSE))`,
+  not_called: (a, cs, d) =>
+    `(CASE WHEN ${d}::date = ${IST_TODAY}
+           THEN (${cs} IS NULL OR ${cs} IN ('', 'pending'))
+                AND NOT COALESCE(${a}.appointment_date = ${d} AND ${a}.status = ANY(${ATTENDED_STATUSES}), FALSE)
+           ELSE ${NOT_BOOKED(a, d)} END)`,
   called: (a, cs) => `${cs} = 'called'`,
   not_picked: (a, cs) => `${cs} = 'not_picked'`,
   unreachable: (a, cs) => `${cs} = ANY(${pgArray(UNREACHABLE_STATUSES)})`,
@@ -943,9 +980,10 @@ const SUMMARY_BUCKETS = {
   // appointment_date can be NULL, and in SQL `NOT (false OR NULL)` is NULL —
   // which silently put those rows in NEITHER bucket, so the two pills stopped
   // summing to the day's total.
-  booked: (a, cs, d) => `(COALESCE(${a}.appointment_date = ${d}, FALSE) OR ${BOOKED_FOR(a, d)})`,
-  not_booked: (a, cs, d) =>
-    `(NOT COALESCE(${a}.appointment_date = ${d}, FALSE) AND NOT ${BOOKED_FOR(a, d)})`,
+  booked: (a, cs, d) => `(${BOOKED_ON_DAY(a, d)} OR ${BOOKED_FOR(a, d)})`,
+  not_booked: (a, cs, d) => NOT_BOOKED(a, d),
+  cancelled: (a) =>
+    `(COALESCE(${a}.booking_status, '') = 'cancelled' OR COALESCE(${a}.status, '') = 'cancelled' OR COALESCE(${a}.call_status, '') = 'cancelled')`,
   // One summary column per scheme. Built at import time from the seed, which is
   // why it is still the seed and not the table: `summaryCols` emits a fixed
   // column list into SQL and cannot await. The seed and the table hold the same
@@ -1025,14 +1063,6 @@ const NOT_BLOCKED = (a = "a") =>
   ` AND NOT EXISTS (SELECT 1 FROM patients bp WHERE bp.id = ${a}.patient_id AND bp.is_blocked)`;
 
 const EXPORT_MAX = 5000;
-
-const LAST_VISIT_SQL = `(
-  SELECT MAX(prev.appointment_date)
-    FROM appointments prev
-   WHERE prev.patient_id = a.patient_id
-     AND prev.appointment_date < a.appointment_date
-     AND prev.status = ANY(${ATTENDED_STATUSES})
-)`;
 
 // Every appointment-shaped column a lookup row carries, blanked. A patient
 // whose history lives only in `consultations` has none of them, and the list
@@ -1155,7 +1185,6 @@ router.get("/ghm-appointments", async (req, res) => {
                 a.preferred_date, a.preferred_doctor, a.preferred_time_slot,
                 COALESCE(a.home_collection, FALSE) AS home_collection,
                 a.patient_category,
-                ${LAST_VISIT_SQL} AS last_visit_date,
                 p.id AS patient_id, p.address, p.email,
                 COALESCE(p.is_blocked, FALSE) AS is_blocked,
                 p.dob AS disp_dob,
@@ -1228,7 +1257,9 @@ router.get("/ghm-appointments", async (req, res) => {
              SELECT DISTINCT ON (COALESCE(a.file_no, a.id::text))
                     ${callStatusToday("a")} AS call_status,
                     a.show_no_show, a.visit_type, a.home_collection, a.patient_category,
-                    a.appointment_date, a.booking_status, a.preferred_date, a.status
+                    a.appointment_date, a.booking_status, a.preferred_date, a.status,
+                    a.patient_id, a.time_slot, a.reporting_time_slot, a.preferred_time_slot,
+                    a.follow_up_date, a.biomarkers, a.healthray_follow_up
              FROM appointments a
              LEFT JOIN upcoming u ON u.file_no = a.file_no
              ${searchWhere}
@@ -1248,9 +1279,9 @@ router.get("/ghm-appointments", async (req, res) => {
                       -- Lookup has no single date to compare against, so a
                       -- patient counts as booked when the row it picked is an
                       -- appointment still ahead of them.
-                      (COALESCE(a.appointment_date >= $${dIdx}, FALSE)
-                       OR ${BOOKED_FOR("a", `$${dIdx}`)}) AS is_booked,
+                      ${BOOKED_FOR("a", `$${dIdx}`)} AS is_booked,
                       ${BOOKING_LAPSED("a")} AS booking_lapsed,
+                      ${BOOKING_NO_SLOT("a")} AS booking_no_slot,
                       ${BOOKED_DATE("a")} AS booked_for_date,
                       u.next_date AS follow_up_date
                ${joins}
@@ -1280,8 +1311,6 @@ router.get("/ghm-appointments", async (req, res) => {
                   p.alt_phone, p.address, p.email, p.dob AS disp_dob,
                   p.age AS disp_age, p.sex AS disp_sex,
                   COALESCE(p.is_blocked, FALSE) AS is_blocked,
-                  (SELECT MAX(c.visit_date)::date FROM consultations c
-                    WHERE c.patient_id = p.id) AS last_visit_date,
                   (SELECT c.con_name FROM consultations c
                     WHERE c.patient_id = p.id
                     ORDER BY c.visit_date DESC LIMIT 1) AS doctor_name
@@ -1390,8 +1419,9 @@ router.get("/ghm-appointments", async (req, res) => {
                 (a.preferred_date = $1 AND a.appointment_date <> $1) AS via_preferred,
                 -- The row IS an appointment on this date, so the patient is
                 -- booked whether or not anyone ticked the dropdown.
-                (COALESCE(a.appointment_date = $1, FALSE) OR ${BOOKED_FOR("a", "$1")}) AS is_booked,
+                (${BOOKED_ON_DAY("a", "$1")} OR ${BOOKED_FOR("a", "$1")}) AS is_booked,
                 ${BOOKING_LAPSED("a")} AS booking_lapsed,
+                ${BOOKING_NO_SLOT("a")} AS booking_no_slot,
                 ${BOOKED_DATE("a")} AS booked_for_date,
                 ${upcomingBookingElsewhere("a")} AS booked_on,
                 -- Follow-up date shown for THIS visit:
@@ -1650,6 +1680,28 @@ router.post("/ghm-appointments", async (req, res) => {
         cap: capState.cap,
         actorId: req.doctor?.doctor_id ?? null,
         actorName: req.doctor?.short_name || req.doctor?.doctor_name || null,
+      });
+    }
+
+    const visited = await pool.query(
+      `SELECT id, doctor_name, time_slot, status
+         FROM appointments
+        WHERE (file_no = $1 OR patient_id = $2)
+          AND appointment_date = $3
+          AND status = ANY(${ATTENDED_STATUSES})
+          AND ${NOT_LAB_ONLY("appointments")}
+        LIMIT 1`,
+      [resolved_file_no || null, patient_id || null, appointment_date],
+    );
+    if (visited.rows[0]) {
+      return res.status(409).json({
+        error: "already_visited",
+        detail: {
+          id: visited.rows[0].id,
+          doctor_name: visited.rows[0].doctor_name,
+          time_slot: visited.rows[0].time_slot,
+          status: visited.rows[0].status,
+        },
       });
     }
 

@@ -68,12 +68,8 @@ export const splitSlot = (slot) => {
 
 export const isNewVisit = isNewVisitType;
 
-const lastSeenLabel = (seen) => {
-  if (!seen?.name) return "";
-  const when = fmtSheetDate(seen.date);
-  const kind = seen.kind === "doctor" ? " (Doctor)" : "";
-  return when ? `${seen.name}${kind} — ${when}` : `${seen.name}${kind}`;
-};
+const lastSeenLabel = (visit) =>
+  [visit?.doctor, visit?.mo && `MO: ${visit.mo}`].filter(Boolean).join(" · ");
 
 const BOOKING_COLS_AT = HEADERS.indexOf("Doctor") + 1;
 
@@ -127,7 +123,7 @@ const toSheetRow = (row, fallbackDate, lastSeen = {}, owners = {}, bookings = fa
       row.disp_sex || row.sex || "",
       owners[row.patient_id]?.assigned_to || "",
       row.doctor_name || row.preferred_doctor || "",
-      fmtSheetDate(row.last_visit_date),
+      fmtSheetDate(lastSeen[row.patient_id]?.date),
       fmtSheetDate(row.follow_up_date),
       fmtSheetDate(row.preferred_date),
       row.visit_type || "",

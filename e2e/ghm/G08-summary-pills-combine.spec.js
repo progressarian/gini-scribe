@@ -95,4 +95,84 @@ test.describe("GHM: a Calling pill combines with Booked", () => {
     expect(ids).not.toContain(patients[4].id);
     expect(ids).toContain(patients[1].id);
   });
+
+  test("6. a follow-up due today whose old visit was seen still needs a call", async () => {
+    const due = await buildPatient();
+    try {
+      await query(
+        `INSERT INTO appointments
+           (patient_id, file_no, patient_name, phone, doctor_name, appointment_date, time_slot,
+            status, visit_type, preferred_date)
+         VALUES ($1, $2, $3, $4, 'Dr E2E Banshali',
+                 (NOW() AT TIME ZONE 'Asia/Kolkata')::date - 28, '10:00', 'seen', 'Follow-Up',
+                 (NOW() AT TIME ZONE 'Asia/Kolkata')::date)`,
+        [due.id, due.file_no, due.name, due.phone],
+      );
+      const res = await admin.get(
+        `/api/ghm-appointments?date=${date}&limit=500&page=1&calls=all&bucket=not_called`,
+      );
+      const ids = (await res.json()).data.map((r) => r.patient_id);
+      expect(ids).toContain(due.id);
+    } finally {
+      await query(`DELETE FROM appointments WHERE patient_id = $1`, [due.id]);
+      await query(`DELETE FROM patients WHERE id = $1`, [due.id]);
+    }
+  });
+
+  test("7. on another date, Need to Call lists everyone not booked, whatever their call status", async () => {
+    const [notBooked, booked] = [await buildPatient(), await buildPatient()];
+    const ahead = (await one(`SELECT ((NOW() AT TIME ZONE 'Asia/Kolkata')::date + 4)::text AS d`))
+      .d;
+    try {
+      await query(
+        `INSERT INTO appointments
+           (patient_id, file_no, patient_name, phone, doctor_name, appointment_date, time_slot,
+            status, visit_type, preferred_date, call_status, call_date)
+         VALUES ($1, $2, $3, $4, 'Dr E2E Banshali',
+                 (NOW() AT TIME ZONE 'Asia/Kolkata')::date - 20, '10:00', 'completed', 'Follow-Up',
+                 $5::date, 'called', (NOW() AT TIME ZONE 'Asia/Kolkata')::date)`,
+        [notBooked.id, notBooked.file_no, notBooked.name, notBooked.phone, ahead],
+      );
+      await query(
+        `INSERT INTO appointments
+           (patient_id, file_no, patient_name, phone, doctor_name, appointment_date, time_slot,
+            status, visit_type)
+         VALUES ($1, $2, $3, $4, 'Dr E2E Banshali', $5::date, '12:30 PM to 1 PM', 'scheduled',
+                 'Follow-Up')`,
+        [booked.id, booked.file_no, booked.name, booked.phone, ahead],
+      );
+      const res = await admin.get(
+        `/api/ghm-appointments?date=${ahead}&limit=500&page=1&calls=all&bucket=not_called`,
+      );
+      const ids = (await res.json()).data.map((r) => r.patient_id);
+      expect(ids).toContain(notBooked.id);
+      expect(ids).not.toContain(booked.id);
+    } finally {
+      const ids = [notBooked.id, booked.id];
+      await query(`DELETE FROM appointments WHERE patient_id = ANY($1::int[])`, [ids]);
+      await query(`DELETE FROM patients WHERE id = ANY($1::int[])`, [ids]);
+    }
+  });
+
+  test("8. the Cancelled pill lists only that day's cancelled patients", async () => {
+    const gone = await buildPatient();
+    try {
+      await query(
+        `INSERT INTO appointments
+           (patient_id, file_no, patient_name, phone, doctor_name, appointment_date, time_slot,
+            status, visit_type, booking_status)
+         VALUES ($1, $2, $3, $4, 'Dr E2E Banshali', (NOW() AT TIME ZONE 'Asia/Kolkata')::date,
+                 '12:30 PM to 1 PM', 'scheduled', 'Follow-Up', 'cancelled')`,
+        [gone.id, gone.file_no, gone.name, gone.phone],
+      );
+      const r = await list("cancelled");
+      const ids = r.data.map((row) => row.patient_id);
+      expect(ids).toContain(gone.id);
+      expect(ids).not.toContain(patients[1].id);
+      expect(r.total).toBe(r.summary.cancelled);
+    } finally {
+      await query(`DELETE FROM appointments WHERE patient_id = $1`, [gone.id]);
+      await query(`DELETE FROM patients WHERE id = $1`, [gone.id]);
+    }
+  });
 });

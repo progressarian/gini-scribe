@@ -100,7 +100,7 @@ test.describe
   test("3. the counter confirms it and says it was saved for future visits", async ({ page }) => {
     const { patient, visit } = await extraVisit(ids, "KeepUi", { healthray: false });
     await loginAs(page, "reception");
-    const head = () => page.getByRole("region", { name: "Patient" });
+    const head = () => page.getByRole("region", { name: "Patient", exact: true });
     await gotoReady(page, `/giniflow/station/reception?tab=bill&visit=${visit}`, head);
     await expect(head().getByRole("checkbox")).toHaveCount(0);
     await head().getByLabel("Category").selectOption(sub);

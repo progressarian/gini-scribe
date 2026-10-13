@@ -131,13 +131,8 @@ export const BOARD_COLUMNS = [
     statuses: ["checked_in", "vitals_pending", "blocked_reports"],
   },
   { key: "vitals", name: "At vitals", icon: "🩺", slaKey: "vitals", statuses: ["with_vitals"] },
-  {
-    key: "sd",
-    name: "With Chief Endocrinologist",
-    icon: "👨‍⚕️",
-    slaKey: "sd",
-    statuses: ["vitals_done", "sd_pending", "with_sd"],
-  },
+  { key: "lab", name: "Lab track", icon: "🧪", slaKey: "lab_total", statuses: null },
+  { key: "machine", name: "Machine Room", icon: "🩺", slaKey: null, statuses: null },
   {
     key: "wait_doctor",
     name: "Waiting — consultant",
@@ -153,6 +148,15 @@ export const BOARD_COLUMNS = [
     statuses: ["with_doctor"],
   },
   {
+    key: "sd",
+    name: "With Chief Endocrinologist",
+    icon: "👨‍⚕️",
+    slaKey: "sd",
+    statuses: ["vitals_done", "sd_pending", "with_sd"],
+  },
+  { key: "xray", name: "X-Ray", icon: "🩻", slaKey: null, statuses: null },
+  { key: "echo", name: "Echo", icon: "❤️", slaKey: null, statuses: null },
+  {
     key: "rx",
     name: "Prescription Explain",
     icon: "🗒️",
@@ -166,10 +170,6 @@ export const BOARD_COLUMNS = [
     slaKey: "pharmacy",
     statuses: ["pharmacy_pending"],
   },
-  { key: "lab", name: "Lab track", icon: "🧪", slaKey: "lab_total", statuses: null },
-  { key: "machine", name: "Machine Room", icon: "🩺", slaKey: null, statuses: null },
-  { key: "xray", name: "X-Ray", icon: "🩻", slaKey: null, statuses: null },
-  { key: "echo", name: "Echo", icon: "❤️", slaKey: null, statuses: null },
   {
     key: "done",
     name: "Done today",

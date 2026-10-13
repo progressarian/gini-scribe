@@ -13,7 +13,9 @@ export const isNewVisitType = (visitType) =>
   !visitType || String(visitType).toLowerCase().startsWith("new");
 
 export const isCancelledRow = (row) =>
-  row?.status === "cancelled" || row?.call_status_any === "cancelled";
+  row?.status === "cancelled" ||
+  row?.booking_status === "cancelled" ||
+  row?.call_status_any === "cancelled";
 
 export const isRescheduledRow = (row) =>
   row?.call_status_any === "rescheduled" ||
