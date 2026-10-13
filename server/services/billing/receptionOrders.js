@@ -122,24 +122,26 @@ export async function heldCatalogs(db, { visitId, billId = null, catalogIds }) {
   return held;
 }
 
-export async function refuseReceptionTest(client, bill, item, labOrderId = null) {
-  if (item.kind !== "test" || !item.test_catalog_id || !bill.visit_id) return;
+export async function receptionHolder(client, bill, item, labOrderId = null) {
+  if (item.kind !== "test" || !item.test_catalog_id || !bill.visit_id) return null;
   await lockVisitOrders(client, bill.visit_id);
-  const holding = await receptionHolds(client, {
+  return receptionHolds(client, {
     visitId: bill.visit_id,
     billId: bill.id,
     catalogId: item.test_catalog_id,
     labOrderId,
   });
-  if (!holding) return;
+}
+
+export function receptionRefusal(holding, item) {
   const way =
     holding.claim && !holding.paid
       ? "has its insurance claim at reception"
       : "was already paid at reception";
-  throw httpError(
+  return httpError(
     409,
-    `${item.name} ${way} — it's listed under Paid at reception and isn't charged on this bill`,
-    { code: PAID_AT_RECEPTION, lab_order_id: holding.lab_order_id },
+    `${item.name} ${way} — it's listed under Paid at reception and isn't charged on this bill. To charge it again, ask an admin to approve billing it again`,
+    { code: PAID_AT_RECEPTION, lab_order_id: holding.lab_order_id, service_item_id: item.id },
   );
 }
 

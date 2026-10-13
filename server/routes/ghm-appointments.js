@@ -915,11 +915,14 @@ const BOOKED_FOR = (a, d) =>
 const BOOKING_LAPSED = (a) =>
   `(COALESCE(${a}.booking_status, '') = 'booked' AND NOT COALESCE(GREATEST(${a}.appointment_date, ${a}.preferred_date) >= ${IST_TODAY}, FALSE))`;
 
+const ATTENDED_STATUSES = `'{"seen","completed","checkedin","in_visit","in-progress"}'::text[]`;
+
 const SUMMARY_BUCKETS = {
   came: (a) => `${a}.show_no_show = 'Show'`,
   no_show: (a) => `${a}.show_no_show = 'No Show'`,
   pending_show: (a) => `(${a}.show_no_show IS NULL OR ${a}.show_no_show = '')`,
-  not_called: (a, cs) => `(${cs} IS NULL OR ${cs} IN ('', 'pending'))`,
+  not_called: (a, cs) =>
+    `((${cs} IS NULL OR ${cs} IN ('', 'pending')) AND NOT COALESCE(${a}.status = ANY(${ATTENDED_STATUSES}), FALSE))`,
   called: (a, cs) => `${cs} = 'called'`,
   not_picked: (a, cs) => `${cs} = 'not_picked'`,
   unreachable: (a, cs) => `${cs} = ANY(${pgArray(UNREACHABLE_STATUSES)})`,
@@ -1018,8 +1021,6 @@ const NOT_BLOCKED = (a = "a") =>
   ` AND NOT EXISTS (SELECT 1 FROM patients bp WHERE bp.id = ${a}.patient_id AND bp.is_blocked)`;
 
 const EXPORT_MAX = 5000;
-
-const ATTENDED_STATUSES = `'{"seen","completed","checkedin","in_visit","in-progress"}'::text[]`;
 
 const LAST_VISIT_SQL = `(
   SELECT MAX(prev.appointment_date)

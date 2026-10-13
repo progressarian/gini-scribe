@@ -40,7 +40,12 @@ import {
 import { markDraftSaved } from "./draftSaves.js";
 import { billCredits } from "./creditNotes.js";
 import { lockVisitOrders, orderToLink, SETTLED_AT_RECEPTION } from "./orderLinks.js";
-import { PAID_AT_RECEPTION, receptionHolds, refuseReceptionTest } from "./receptionOrders.js";
+import {
+  PAID_AT_RECEPTION,
+  receptionHolder,
+  receptionHolds,
+  receptionRefusal,
+} from "./receptionOrders.js";
 import { BILL_DISCOUNT_NAME, cleanManualDiscount, manualOf } from "./manualDiscounts.js";
 
 const BILL_COLUMNS = `id, bill_no, series, fy, bill_type, original_bill_id, patient_id, visit_id,
@@ -750,7 +755,7 @@ async function itemFor(client, itemId) {
   return rows[0];
 }
 
-async function approvalFor(client, bill, item, repeatRequestId, ctx) {
+async function approvalFor(client, bill, item, repeatRequestId, ctx, held) {
   await client.query(`SELECT id FROM bills WHERE visit_id = $1 ORDER BY id FOR UPDATE`, [
     bill.visit_id,
   ]);
@@ -758,11 +763,12 @@ async function approvalFor(client, bill, item, repeatRequestId, ctx) {
     visitId: bill.visit_id,
     serviceItemId: item.id,
   });
-  if (!line) return null;
+  if (!line && !held) return null;
   const approval = repeatRequestId
     ? { id: repeatRequestId }
     : await repeatApprovalFor(client, { visitId: bill.visit_id, serviceItemId: item.id });
   if (!approval) {
+    if (!line) throw receptionRefusal(held, item);
     throw httpError(
       409,
       `Already billed on ${billLabel(line)} — ask an admin to approve billing ${item.name} again`,
@@ -864,7 +870,7 @@ async function insertLineIn(client, bill, input, ctx) {
     );
   }
   await refuseOtherConsultation(client, bill, item);
-  await refuseReceptionTest(client, bill, item, labOrderId);
+  const held = await receptionHolder(client, bill, item, labOrderId);
   if (
     source === "ordered" &&
     (await liveLineFor(client, { visitId: bill.visit_id, serviceItemId: item.id }))
@@ -880,6 +886,7 @@ async function insertLineIn(client, bill, input, ctx) {
     item,
     input?.repeat_request_id ? cleanUuid(input.repeat_request_id, "approval") : null,
     ctx,
+    held,
   );
   const linkedOrderId =
     source === "added" && !labOrderId ? await orderToLink(client, bill, item) : null;
@@ -1189,6 +1196,7 @@ async function receptionLinesOn(client, bill) {
   const catalogOf = new Map(tests.map((row) => [row.id, row.test_catalog_id]));
   const going = [];
   for (const line of lines) {
+    if (line.repeat_request_id) continue;
     const catalogId = line.lab_order_id ? null : catalogOf.get(line.service_item_id);
     const held =
       flagged.has(line.id) ||

@@ -3,17 +3,17 @@ import { apiAs } from "../helpers/auth.mjs";
 import { one, query } from "../helpers/db.mjs";
 import { buildPatient } from "../helpers/builders.mjs";
 
-async function appointmentToday(patient, callStatus = null) {
+async function appointmentToday(patient, callStatus = null, status = "scheduled") {
   return one(
     `INSERT INTO appointments
        (patient_id, file_no, patient_name, phone, doctor_name, appointment_date, time_slot,
         status, visit_type, call_status, call_date)
      VALUES ($1, $2, $3, $4, 'Dr E2E Banshali',
-             (NOW() AT TIME ZONE 'Asia/Kolkata')::date, '12:30 PM to 1 PM', 'scheduled',
+             (NOW() AT TIME ZONE 'Asia/Kolkata')::date, '12:30 PM to 1 PM', $6,
              'Follow-Up', $5, CASE WHEN $5::text IS NULL THEN NULL
                                    ELSE (NOW() AT TIME ZONE 'Asia/Kolkata')::date END)
      RETURNING id`,
-    [patient.id, patient.file_no, patient.name, patient.phone, callStatus],
+    [patient.id, patient.file_no, patient.name, patient.phone, callStatus, status],
   );
 }
 
@@ -24,10 +24,18 @@ test.describe("GHM: a Calling pill combines with Booked", () => {
 
   test.beforeAll(async () => {
     date = (await one(`SELECT ((NOW() AT TIME ZONE 'Asia/Kolkata')::date)::text AS d`)).d;
-    patients = [await buildPatient(), await buildPatient(), await buildPatient()];
+    patients = [
+      await buildPatient(),
+      await buildPatient(),
+      await buildPatient(),
+      await buildPatient(),
+      await buildPatient(),
+    ];
     await appointmentToday(patients[0], "called");
     await appointmentToday(patients[1]);
     await appointmentToday(patients[2]);
+    await appointmentToday(patients[3], null, "checkedin");
+    await appointmentToday(patients[4], null, "seen");
     admin = await apiAs("admin");
   });
 
@@ -78,5 +86,13 @@ test.describe("GHM: a Calling pill combines with Booked", () => {
   test("4. two pills from the same section keep only the last", async () => {
     const r = await list("not_called,called");
     expect(r.ours.map((row) => row.patient_id)).toEqual([patients[0].id]);
+  });
+
+  test("5. Need to Call leaves out patients who are already checked in or seen", async () => {
+    const r = await list("not_called");
+    const ids = r.ours.map((row) => row.patient_id);
+    expect(ids).not.toContain(patients[3].id);
+    expect(ids).not.toContain(patients[4].id);
+    expect(ids).toContain(patients[1].id);
   });
 });

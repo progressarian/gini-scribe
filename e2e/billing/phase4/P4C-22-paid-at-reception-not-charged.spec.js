@@ -20,6 +20,7 @@ const payments = await import("../../../server/services/billing/payments.js");
 const shifts = await import("../../../server/services/billing/cashShifts.js");
 const visitLines = await import("../../../server/services/billing/visitLines.js");
 const labCaseLines = await import("../../../server/services/billing/labCaseLines.js");
+const requests = await import("../../../server/services/billing/billingRequests.js");
 const counter = await import("../../../server/services/billing/counterPatients.js");
 const reception = await import("../../../server/services/giniflow/receptionStation.js");
 
@@ -211,6 +212,7 @@ test.describe.serial("P4C-22 paid at reception shown, not charged", () => {
       "C22Own",
       "C22Final",
       "C22Phone",
+      "C22Again",
     ]) {
       visits[label] = await extraVisit(ids, label);
     }
@@ -326,8 +328,9 @@ test.describe.serial("P4C-22 paid at reception shown, not charged", () => {
     });
     expect(refusedAdd.status).toBe(409);
     expect(refusedAdd.body.error).toBe(
-      `${itemName("hba1c")} was already paid at reception — it's listed under Paid at reception and isn't charged on this bill`,
+      `${itemName("hba1c")} was already paid at reception — it's listed under Paid at reception and isn't charged on this bill. To charge it again, ask an admin to approve billing it again`,
     );
+    expect(refusedAdd.body.service_item_id).toBe(items.hba1c);
     const other = await call("post", `/api/billing/bills/${opened.id}/lines`, {
       item_id: items.tsh,
     });
@@ -445,6 +448,45 @@ test.describe.serial("P4C-22 paid at reception shown, not charged", () => {
     expect(reread.lines[0].order_state).toBe("paid_at_reception");
     expect(reread.version).toBe(final.version);
     expect(await removedAudit(draft.id)).toEqual([]);
+  });
+
+  test("9. a test paid at reception can be billed again once an admin approves it", async () => {
+    const { visit } = visits.C22Again;
+    const orderId = await order(visit, ["vitd"]);
+    await clear(orderId);
+    const draft = await openAtDesk(visit);
+    const refusedAdd = await call("post", `/api/billing/bills/${draft.id}/lines`, {
+      item_id: items.vitd,
+    });
+    expect(refusedAdd.status).toBe(409);
+
+    const request = await requests.createRepeatRequest(
+      { service_item_id: items.vitd, visit_id: visit, bill_id: draft.id, reason: "Repeat sample" },
+      desk,
+      db,
+    );
+    await requests.approveRequest(
+      request.id,
+      { note: "Second test" },
+      { actorId: USERS.admin.id, ip: "10.9.4.2", role: "admin" },
+      db,
+    );
+    const added = await call("post", `/api/billing/bills/${draft.id}/lines`, {
+      item_id: items.vitd,
+      repeat_request_id: request.id,
+    });
+    expect(added.status, JSON.stringify(added.body)).toBe(200);
+
+    const reread = await openAtDesk(visit);
+    expect(reread.lines.map((line) => line.service_item_id)).toEqual([items.vitd]);
+    expect(reread.totals.payable).toBe(TESTS.vitd * 100);
+    const card = await paidAt(visit);
+    expect(card.orders.map((o) => o.lab_order_id)).toEqual([orderId]);
+
+    const again = await call("post", `/api/billing/bills/${draft.id}/lines`, {
+      item_id: items.vitd,
+    });
+    expect(again.status).toBe(409);
   });
 
   test("8. the counter shows the Paid at reception card at phone width, and Finalise works", async ({

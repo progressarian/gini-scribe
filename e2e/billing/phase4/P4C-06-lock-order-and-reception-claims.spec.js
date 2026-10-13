@@ -579,7 +579,7 @@ test.describe.serial("P4C-06 lock order and reception claims", () => {
     );
     expect(attempt.code).toBe("paid_at_reception");
     expect(attempt.message).toBe(
-      `ABI ${tag} was already paid at reception — it's listed under Paid at reception and isn't charged on this bill`,
+      `ABI ${tag} was already paid at reception — it's listed under Paid at reception and isn't charged on this bill. To charge it again, ask an admin to approve billing it again`,
     );
     const kept = await bills.readBill(billed.billId, db);
     expect(kept.lines.find((line) => line.service_item_id === ids.hba1c).order_state).toBeNull();

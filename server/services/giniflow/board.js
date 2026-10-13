@@ -240,6 +240,8 @@ const BOARD_SQL = `
          doc.short_name                            AS doctor_name,
          doc.name                                  AS doctor_full_name,
          COALESCE(doc.direct_consult, FALSE)       AS direct_consult,
+         EXISTS (SELECT 1 FROM giniflow_visit_events se
+                  WHERE se.visit_id = v.id AND se.status = 'with_sd') AS seen_by_sd,
          seq.visit_number,
          jr.steps AS journey_steps,
          ${labOnlyPredicate("v", "$2")}            AS lab_only,
@@ -428,8 +430,12 @@ const subtitleFor = (row) => {
       ? `Waiting for reports · then back to ${row.doctor_name || "the doctor"}`
       : `Back to ${row.doctor_name || "the doctor"} · reports in`;
   }
-  if (row.current_status === "ready_for_doctor")
-    return row.results_status === "ready" ? "Results ✓ · SD plan ready" : "SD plan ready";
+  if (row.current_status === "ready_for_doctor") {
+    const next = row.seen_by_sd
+      ? "SD plan ready"
+      : `Waiting for ${row.doctor_name || "consultant"}`;
+    return row.results_status === "ready" ? `Results ✓ · ${next}` : next;
+  }
   if (row.current_status === "with_vitals") return "BP + weight in progress";
   if (row.current_status === "pharmacy_pending") return "Dispensing";
   if (["dispensed", "exited"].includes(row.current_status)) return "Exited";
@@ -442,14 +448,16 @@ const hintFor = (row) => {
   if (row.blocked_reason) return null;
   if (row.current_status === "checked_in" || row.current_status === "vitals_pending")
     return "Waiting for vitals station";
-  if (row.current_status === "ready_for_doctor" && row.category === "in_control")
+  if (row.current_status === "ready_for_doctor" && row.category === "in_control" && row.seen_by_sd)
     return "Green category — SD could close";
   if (row.current_status === "sd_pending") return "Waiting for Chief Endocrinologist";
   return null;
 };
 
 const hintIconFor = (row) =>
-  row.current_status === "ready_for_doctor" && row.category === "in_control" ? "💡" : "→";
+  row.current_status === "ready_for_doctor" && row.category === "in_control" && row.seen_by_sd
+    ? "💡"
+    : "→";
 
 // What the lab card is waiting on, distinct from the main journey's hints (GF-19).
 // Everything from the moment the tube leaves the patient to the moment the

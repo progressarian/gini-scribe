@@ -122,4 +122,29 @@ test.describe.serial("G76 an online visit sees the Chief Endocrinologist or the 
     expect(card(online).online).toBe(true);
     expect(card(inPerson).online).toBe(false);
   });
+
+  test("7. a consultant's waiting card names the consultant unless the SD has seen the patient", async () => {
+    const waiting = async (label, doctor) => {
+      const { visit } = await extraVisit(ids, label, { doctorId: doctor.id });
+      await query(
+        `UPDATE giniflow_visits SET current_status = 'ready_for_doctor', category = 'in_control'
+          WHERE id = $1`,
+        [visit],
+      );
+      return visit;
+    };
+    const direct = await waiting("WaitBeant", CONSULTANTS.beant);
+    const afterSd = await waiting("WaitAfterSd", CONSULTANTS.beant);
+    await query(
+      `INSERT INTO giniflow_visit_events (visit_id, status, actor_role, occurred_at, meta)
+       VALUES ($1, 'with_sd', 'sd', NOW() - interval '20 minutes', '{}'::jsonb)`,
+      [afterSd],
+    );
+    const day = await board.getDayBoard(ids.day, await board.getSlaConfig(db), new Date(), db);
+    const card = (id) => day.cards.find((c) => c.id === id);
+    expect(card(direct).subtitle).toBe(`Waiting for ${CONSULTANTS.beant.short_name}`);
+    expect(card(direct).hint).not.toBe("Green category — SD could close");
+    expect(card(afterSd).subtitle).toBe("SD plan ready");
+    expect(card(afterSd).hint).toBe("Green category — SD could close");
+  });
 });

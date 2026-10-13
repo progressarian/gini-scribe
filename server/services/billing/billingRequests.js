@@ -15,6 +15,7 @@ import { publishBillingRequest } from "../giniflow/realtimeBus.js";
 import { endVisitAfterRefund } from "./refundVisitExit.js";
 import { restoreDepositLegs } from "./payments.js";
 import { paise } from "../../../shared/labPayment.js";
+import { receptionHolds } from "./receptionOrders.js";
 import {
   NOTE_REQUIRED_REFUND_REASON,
   REFUND_REASONS,
@@ -368,6 +369,16 @@ export async function liveLineFor(client, { visitId, serviceItemId }) {
   return rows[0] ?? null;
 }
 
+export async function alreadyChargedFor(client, { visitId, serviceItemId }) {
+  const line = await liveLineFor(client, { visitId, serviceItemId });
+  if (line) return line;
+  const { rows } = await client.query(`SELECT test_catalog_id FROM service_items WHERE id = $1`, [
+    serviceItemId,
+  ]);
+  const held = await receptionHolds(client, { visitId, catalogId: rows[0]?.test_catalog_id });
+  return held ? { bill_id: null, paid_at_reception: true, lab_order_id: held.lab_order_id } : null;
+}
+
 export async function repeatApprovalFor(client, { visitId, serviceItemId }) {
   const { rows } = await client.query(
     `SELECT r.id, r.reason, r.decided_at
@@ -468,7 +479,7 @@ export async function createRepeatRequest(input, ctx, db = pool) {
     const visit = await readVisit(client, visitId);
     const bill = await readBill(client, billId, visitId);
     const item = await readItem(client, serviceItemId);
-    const line = await liveLineFor(client, { visitId, serviceItemId });
+    const line = await alreadyChargedFor(client, { visitId, serviceItemId });
     if (!line) {
       throw httpError(
         409,
@@ -866,14 +877,14 @@ export async function approveRequest(id, input, ctx, db = pool) {
       );
       createdItemId = item.id;
     } else {
-      const line = await liveLineFor(client, {
+      const line = await alreadyChargedFor(client, {
         visitId: before.visit_id,
         serviceItemId: before.service_item_id,
       });
       if (!line) {
         throw httpError(
           409,
-          "That item is no longer on this visit's bill, so there is nothing to bill again",
+          "That item is no longer on this visit's bill or paid at reception, so there is nothing to bill again",
         );
       }
     }
