@@ -25,6 +25,7 @@ import {
   settleTestOrders,
 } from "./payments.js";
 import { priceBill } from "./priceBill.js";
+import { priceChangeText, priceChanges, takenAboveText } from "./priceDrift.js";
 import { visitConsultationType } from "./serviceItems.js";
 import { refuseRemoved, removedDoctor } from "./removedDoctors.js";
 import { httpError, inTransaction } from "./transaction.js";
@@ -676,10 +677,46 @@ async function keepFirstSnapshot(client, bill) {
   if (!rows[0].saved_snapshot) await markDraftSaved(client, bill.id);
 }
 
+async function catchUpPrices(client, bill, ctx) {
+  const lines = await liveLines(client, bill.id);
+  if (!lines.length) return { bill, changes: null };
+  const codes = await billCodes(client, bill.id);
+  let priced;
+  try {
+    priced = await priceBill(pricingInput(bill, lines, codes, ctx), client);
+  } catch (error) {
+    if (error.status) return { bill, changes: null };
+    throw error;
+  }
+  const changes = await priceChanges(client, bill, lines, priced);
+  if (!changes) return { bill, changes: null };
+  const taken = await takenOn(client, bill.id);
+  if (changes.after.payable < taken) {
+    return {
+      bill,
+      changes: {
+        ...changes,
+        blocked: takenAboveText(taken, changes.after.payable),
+      },
+    };
+  }
+  const saved = await reprice(client, bill, codes, ctx);
+  await writeAudit(client, {
+    entity: SPEC.table,
+    entityId: bill.id,
+    action: "update",
+    before: bill,
+    after: { ...saved.bill, reason: "Prices changed in Settings", price_changes: changes },
+    ...auditFields(ctx),
+  });
+  return { bill: saved.bill, changes };
+}
+
 export async function openDraft(visitId, ctx, db = pool) {
   const id = cleanUuid(visitId, "visit");
   return inTransaction(async (client) => {
-    const bill = await openDraftIn(client, id, ctx);
+    const opened = await openDraftIn(client, id, ctx);
+    const { bill, changes } = await catchUpPrices(client, opened, ctx);
     await keepFirstSnapshot(client, bill);
     const resolution = await resolutionFor(client, {
       patientId: bill.patient_id,
@@ -690,6 +727,7 @@ export async function openDraft(visitId, ctx, db = pool) {
       codes: await billCodes(client, bill.id),
       needs_category: !bill.scheme_code && resolution.needs_sub_category,
       suggestions: bill.scheme_code ? [] : resolution.suggestions,
+      price_changes: changes,
       removed_doctor: (await addsConsultation(client))
         ? await removedDoctorOfVisit(client, id)
         : null,
@@ -1594,6 +1632,26 @@ async function assertBillable(client, code) {
   }
 }
 
+async function rememberOnProfile(client, patientId, schemeCode, ctx) {
+  const { rows } = await client.query(`SELECT scheme_code FROM patients WHERE id = $1 FOR UPDATE`, [
+    patientId,
+  ]);
+  if (!rows.length || rows[0].scheme_code === schemeCode) return false;
+  await client.query(`UPDATE patients SET scheme_code = $2, updated_at = NOW() WHERE id = $1`, [
+    patientId,
+    schemeCode,
+  ]);
+  await writeAudit(client, {
+    entity: "patients",
+    entityId: patientId,
+    action: "update",
+    before: { scheme_code: rows[0].scheme_code },
+    after: { scheme_code: schemeCode, reason: "Saved from the billing counter" },
+    ...auditFields(ctx),
+  });
+  return true;
+}
+
 export async function setCategory(billId, input, ctx, db = pool) {
   return inTransaction(async (client) => {
     const before = assertDraft(await lockBill(client, billId));
@@ -1634,7 +1692,13 @@ export async function setCategory(billId, input, ctx, db = pool) {
       after: named[0],
       ...auditFields(ctx),
     });
-    return withLines(client, named[0], { codes: await billCodes(client, before.id) });
+    const remembered = hasField(input, "category")
+      ? await rememberOnProfile(client, before.patient_id, values.scheme_code, ctx)
+      : false;
+    return withLines(client, named[0], {
+      codes: await billCodes(client, before.id),
+      profile_saved: remembered,
+    });
   }, db);
 }
 
@@ -1781,6 +1845,13 @@ export async function finaliseBill(billId, input, ctx, db = pool) {
     await recheckCodes(client, bill, codes, ctx);
     const saved = await reprice(client, bill, codes, ctx);
     saved.priced.lines.forEach(assertBillLineBalances);
+    const changes = await priceChanges(client, bill, lines, saved.priced);
+    if (changes) {
+      throw httpError(409, priceChangeText(changes), {
+        code: "prices_changed",
+        price_changes: changes,
+      });
+    }
     const unpriced = saved.priced.lines.find((line) => line.price_missing);
     if (unpriced) {
       throw httpError(

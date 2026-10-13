@@ -21,6 +21,7 @@ export default function BillActions({
   onBill,
   onDeleted,
   onRefunded,
+  onPricesChanged,
   schemes,
   payLater,
   needsCategory,
@@ -74,6 +75,10 @@ export default function BillActions({
         fileName: `Bill_${made.bill_no}.pdf`,
       });
     } catch (e) {
+      if (e?.response?.data?.code === "prices_changed") {
+        onPricesChanged();
+        return;
+      }
       const version = e?.response?.data?.version;
       setError(
         errorOf(e, "This bill could not be made final") +

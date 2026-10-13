@@ -19,7 +19,13 @@ function changeHint(bill, pickedId, options) {
 
 export default function BillConsultant({ bill, onBill }) {
   const draft = bill.status === "draft";
-  const { data: options, isLoading, isError } = useBillConsultants(bill.id, { enabled: draft });
+  const {
+    data: options,
+    isLoading,
+    isError,
+    isFetching,
+    refetch,
+  } = useBillConsultants(bill.id, { enabled: draft });
   const setConsultant = useSetBillConsultant();
   const current = bill.consultant?.id ? String(bill.consultant.id) : "";
   const [picked, setPicked] = useState(null);
@@ -110,9 +116,17 @@ export default function BillConsultant({ bill, onBill }) {
         {setConsultant.isPending ? "Changing…" : "Change consultant"}
       </button>
       {hint && <span className="bc-head__hint">{hint}</span>}
-      {isError && (
+      {isError && !options && (
         <span className="bc-err" role="alert">
-          The consultant list could not be loaded. Close and reopen the patient to try again.
+          The consultant list could not be loaded.{" "}
+          <button
+            type="button"
+            className="st-btn st-btn-g"
+            disabled={isFetching}
+            onClick={() => refetch()}
+          >
+            {isFetching ? "Loading…" : "Try again"}
+          </button>
         </span>
       )}
       {error && (

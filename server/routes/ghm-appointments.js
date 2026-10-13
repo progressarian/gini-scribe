@@ -760,6 +760,8 @@ router.post("/ghm-appointments/last-mo", async (req, res) => {
            FROM appointments a
           WHERE a.patient_id = ANY($1::int[])
             AND NULLIF(TRIM(a.assigned_mo), '') IS NOT NULL
+            AND a.status = ANY(${ATTENDED_STATUSES})
+            AND a.appointment_date <= ${IST_TODAY}
          UNION ALL
          SELECT c.patient_id, TRIM(c.con_name), c.visit_date, 'doctor', 0
            FROM consultations c
@@ -778,6 +780,8 @@ router.post("/ghm-appointments/last-mo", async (req, res) => {
            FROM appointments a
           WHERE a.patient_id = ANY($1::int[])
             AND NULLIF(TRIM(a.doctor_name), '') IS NOT NULL
+            AND a.status = ANY(${ATTENDED_STATUSES})
+            AND a.appointment_date <= ${IST_TODAY}
             AND TRIM(a.doctor_name) NOT IN ('N/A', 'Dr. Hospital Admin')
        )
        SELECT DISTINCT ON (patient_id, kind) patient_id, kind, name, seen_date
@@ -1224,7 +1228,7 @@ router.get("/ghm-appointments", async (req, res) => {
              SELECT DISTINCT ON (COALESCE(a.file_no, a.id::text))
                     ${callStatusToday("a")} AS call_status,
                     a.show_no_show, a.visit_type, a.home_collection, a.patient_category,
-                    a.appointment_date, a.booking_status, a.preferred_date
+                    a.appointment_date, a.booking_status, a.preferred_date, a.status
              FROM appointments a
              LEFT JOIN upcoming u ON u.file_no = a.file_no
              ${searchWhere}

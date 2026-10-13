@@ -100,6 +100,7 @@ export default function PatientHeader({
   const [cardNo, setCardNo] = useState("");
   const [referralNo, setReferralNo] = useState("");
   const [error, setError] = useState(null);
+  const [saved, setSaved] = useState(null);
   const [choices, setChoices] = useState([]);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef(null);
@@ -107,6 +108,10 @@ export default function PatientHeader({
   useEffect(() => {
     setChoices([]);
   }, [bill.id, bill.category]);
+
+  useEffect(() => {
+    setSaved(null);
+  }, [bill.id]);
 
   useEffect(() => {
     setCardNo("");
@@ -122,11 +127,30 @@ export default function PatientHeader({
   const needsReferral = needs("requires_referral");
   const needsDoc = needs("requires_referral_doc");
 
+  const labelFor = (code) => {
+    const found = list.find((s) => s.code === code);
+    const top = found ? list.find((s) => s.code === found.parent_code) : null;
+    return found ? (top ? `${top.label} › ${found.label}` : found.label) : code;
+  };
+
   const save = async (body) => {
     setError(null);
+    setSaved(null);
     setChoices([]);
     try {
-      onBill(await setCategory.mutateAsync({ billId: bill.id, visitId: bill.visit_id, ...body }));
+      const next = await setCategory.mutateAsync({
+        billId: bill.id,
+        visitId: bill.visit_id,
+        ...body,
+      });
+      onBill(next);
+      if (next.profile_saved) {
+        setSaved(
+          body.category
+            ? `Saved to the patient's profile — future bills start as ${labelFor(body.category)}.`
+            : "Removed from the patient's profile — future bills start as General.",
+        );
+      }
       if (body.category !== undefined) {
         form.set("chosen", (was) => (was === body.category ? null : was));
       }
@@ -266,6 +290,11 @@ export default function PatientHeader({
           Confirm category
         </button>
       </form>
+      {saved && (
+        <div className="bc-note" role="status">
+          {saved}
+        </div>
+      )}
 
       <BillConsultant bill={bill} onBill={onBill} />
 

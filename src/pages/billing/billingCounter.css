@@ -2652,3 +2652,46 @@ body > [role="dialog"][aria-modal="true"] .bc-cc__warn {
     font-size: 11px;
   }
 }
+
+.gf .bc-repriced {
+  margin-bottom: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  color: var(--amb);
+  background: var(--amb-l);
+  font-size: 12px;
+}
+.gf .bc-repriced__title {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.gf .bc-repriced__sum {
+  margin: 0 0 6px;
+}
+.gf .bc-repriced__list {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+.gf .bc-repriced__list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0 12px;
+}
+.gf .bc-repriced__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.gf .bc-repriced__amt {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.gf .bc-repriced__why {
+  grid-column: 1 / -1;
+  color: var(--ink2);
+}

@@ -157,6 +157,15 @@ const prettyDate = (s) => {
   const d = new Date(s + "T00:00:00");
   return d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
 };
+const prettyDateWithYear = (s) =>
+  s
+    ? new Date(s + "T00:00:00").toLocaleDateString("en-IN", {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      })
+    : "";
 
 // The day-view tabs
 // `cap` gates the tab per role (omitted = visible to anyone who can open /ghm).
@@ -3590,7 +3599,9 @@ export default function GHMPage() {
 
                           <td>
                             {row.last_visit_date ? (
-                              <span className="fu-date">{prettyDate(row.last_visit_date)}</span>
+                              <span className="fu-date">
+                                {prettyDateWithYear(row.last_visit_date)}
+                              </span>
                             ) : (
                               <span className="muted" title="No earlier attended visit on record">
                                 —

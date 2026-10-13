@@ -26,6 +26,7 @@ import ScannedReportLines from "./ScannedReportLines";
 import DiscountCodeBox from "./DiscountCodeBox";
 import TotalsAndPayment from "./TotalsAndPayment";
 import BillActions from "./BillActions";
+import PriceChanges from "./PriceChanges";
 import BillRefunds from "./BillRefunds";
 import DepositPanel from "./DepositPanel";
 import DuesList from "./DuesList";
@@ -243,6 +244,7 @@ export default function BillingDesk({ tab, visitId, patientId, billId, sentPatie
   const [fresh, setFresh] = useState(0);
   const [needsSub, setNeedsSub] = useState(false);
   const [removedDoctor, setRemovedDoctor] = useState(null);
+  const [priceChanges, setPriceChanges] = useState(null);
   const [listOpen, setListOpen] = useState(!visitId && !billId);
   const opened = useRef(null);
   const [listWidth, setListWidth] = useListWidth();
@@ -328,11 +330,13 @@ export default function BillingDesk({ tab, visitId, patientId, billId, sentPatie
     setError(null);
     setNeedsSub(false);
     setRemovedDoctor(null);
+    setPriceChanges(null);
     const handlers = {
       onSuccess: (found) => {
         if (opened.current !== wanted) return;
         setNeedsSub(Boolean(found?.needs_category));
         setRemovedDoctor(found?.removed_doctor ?? null);
+        setPriceChanges(found?.price_changes ?? null);
         setBill(found);
       },
       onError: (e) => {
@@ -462,6 +466,9 @@ export default function BillingDesk({ tab, visitId, patientId, billId, sentPatie
                   </button>
                 </div>
               )}
+              {bill && (
+                <PriceChanges changes={priceChanges} onDismiss={() => setPriceChanges(null)} />
+              )}
               {bill && removedDoctor && (
                 <div className="bc-hint" role="status">
                   {removedDoctor.name} was removed, so this visit has no consultation fee.
@@ -549,6 +556,7 @@ export default function BillingDesk({ tab, visitId, patientId, billId, sentPatie
                           pick(null);
                         }}
                         onRefunded={refreshBill}
+                        onPricesChanged={() => reopenVisit(bill.visit_id)}
                         schemes={schemes || []}
                         payLater={payLater}
                         needsCategory={needsCategory}

@@ -399,9 +399,10 @@ async function adoptUnlinkedLine(client, bill, itemId, labOrderId, ctx) {
 }
 
 async function orderIsForToday(client, labOrderId) {
-  const { rows } = await client.query(`SELECT urgency FROM giniflow_lab_orders WHERE id::text = $1::text`, [
-    labOrderId,
-  ]);
+  const { rows } = await client.query(
+    `SELECT urgency FROM giniflow_lab_orders WHERE id::text = $1::text`,
+    [labOrderId],
+  );
   return !rows.length || rows[0].urgency === "today";
 }
 
