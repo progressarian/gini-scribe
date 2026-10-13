@@ -85,7 +85,7 @@ test.describe.serial("G62 an outsourced test is sent out and never holds the pat
     await collect(outsideOrder);
     const card = await queueOrder("collection", outsideOrder);
     expect(card.outsourced).toBe(true);
-    expect(card.nextAction).toEqual({ to: "sent_outside", label: "📮 Mark sent to outside lab" });
+    expect(card.nextAction).toEqual({ to: "sent_outside", label: "📮 Send to outside lab" });
     expect(await queueOrder("processing", outsideOrder)).toBeNull();
   });
 

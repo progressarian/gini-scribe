@@ -1859,6 +1859,7 @@ router.post(
         await markCaseSentOutside(req.params.caseNo, {
           room: req.labRoom,
           actorId: req.doctor?.doctor_id ?? null,
+          thenBreak: req.body?.thenBreak === true,
         }),
       );
     } catch (e) {

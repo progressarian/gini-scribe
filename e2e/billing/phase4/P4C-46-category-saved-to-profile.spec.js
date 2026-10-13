@@ -89,6 +89,43 @@ test.describe
     expect(await profileOf(patient)).toBeNull();
   });
 
+  test("2a. confirming tags today's and later appointments, never past ones, even when the profile already had it", async () => {
+    const { patient, appointment, visit } = await extraVisit(ids, "Tag", { healthray: false });
+    const insertOn = async (offset) =>
+      (
+        await one(
+          `INSERT INTO appointments (patient_id, patient_name, appointment_date, visit_type)
+           VALUES ($1, 'P4 Tag', $2::date + $3::int, 'Follow Up') RETURNING id`,
+          [patient, ids.day, offset],
+        )
+      ).id;
+    const past = await insertOn(-7);
+    const later = await insertOn(14);
+    const categoryOf = (id) =>
+      one(`SELECT patient_category FROM appointments WHERE id = $1`, [id]).then(
+        (r) => r.patient_category,
+      );
+
+    await query(`UPDATE patients SET scheme_code = $2 WHERE id = $1`, [patient, sub]);
+    const draft = await bills.openDraft(visit, desk, db);
+    const set = await bills.setCategory(draft.id, { category: sub }, desk, db);
+    expect(set.profile_saved).toBe(true);
+    expect(await categoryOf(appointment)).toBe(sub);
+    expect(await categoryOf(later)).toBe(sub);
+    expect(await categoryOf(past)).toBeNull();
+    const audit = await one(
+      `SELECT (after ->> 'appointments_updated')::int AS n FROM billing_audit
+        WHERE entity = 'patients' AND entity_id = $1 ORDER BY id DESC LIMIT 1`,
+      [String(patient)],
+    );
+    expect(audit.n).toBe(2);
+
+    await bills.setCategory(draft.id, { category: null }, desk, db);
+    expect(await categoryOf(appointment)).toBeNull();
+    expect(await categoryOf(later)).toBeNull();
+    await query(`DELETE FROM appointments WHERE id = ANY($1::int[])`, [[past, later]]);
+  });
+
   test("2b. saving only a card number leaves the profile alone", async () => {
     const { patient, visit } = await extraVisit(ids, "Card", { healthray: false });
     const draft = await bills.openDraft(visit, desk, db);

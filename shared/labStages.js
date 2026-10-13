@@ -87,10 +87,10 @@ export const LAB_RUNGS = [
     healthrayAt: "collectedOn",
     sampleStatuses: ["sample_collected"],
     advanceTo: "sample_collected",
-    advanceLabel: "✓ Mark sample collected",
+    advanceLabel: null,
     action: "sample_taken",
     floorAction: true,
-    actionLabel: "✓ Mark sample collected",
+    actionLabel: null,
     actionDone: "Sample collected",
     actionPast: "Sample collected",
     actionHint: "Mark that you have collected the sample from this patient.",
@@ -117,13 +117,14 @@ export const LAB_RUNGS = [
     healthrayAt: null,
     sampleStatuses: ["sent_outside", "sample_sent"],
     advanceTo: "sample_sent",
-    advanceLabel: "📤 Mark sent to lab",
+    advanceLabel: "📤 Send to lab",
     action: "sample_sent",
     floorAction: true,
-    actionLabel: "📤 Mark sent to lab",
+    actionLabel: "📤 Send to lab",
     actionDone: "Sent to lab",
     actionPast: "Sent to lab",
-    actionHint: "Mark that the sample has left for the lab.",
+    actionHint:
+      "Tap once the sample is drawn and on its way to the lab. This records the collection too and frees the patient for other stations.",
     needsPatient: false,
   },
   {
@@ -329,7 +330,7 @@ export const REPORTED_LAB_STATUSES = LAB_RUNGS.filter(
 
 export const SENT_OUTSIDE = "sent_outside";
 
-export const OUTSIDE_STEP = { to: SENT_OUTSIDE, label: "📮 Mark sent to outside lab" };
+export const OUTSIDE_STEP = { to: SENT_OUTSIDE, label: "📮 Send to outside lab" };
 
 export const OUTSIDE_UPLOADABLE = ["sample_collected", SENT_OUTSIDE];
 

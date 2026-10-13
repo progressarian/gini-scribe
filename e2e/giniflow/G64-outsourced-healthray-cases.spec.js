@@ -89,7 +89,7 @@ test.describe.serial("G64 outsourced HealthRay cases are sent out and listed", (
     expect(outside.outsourced).toBe(true);
     expect(outside.nextAction).toEqual({
       action: "sent_outside",
-      label: "📮 Mark sent to outside lab",
+      label: "📮 Send to outside lab",
     });
     const inHouse = await caseOnQueue(cases.inHouse);
     expect(inHouse.outsourced).toBe(false);

@@ -958,7 +958,8 @@ const ATTENDED_STATUSES = `'{"seen","completed","checkedin","in_visit","in-progr
 const SUMMARY_BUCKETS = {
   came: (a) => `${a}.show_no_show = 'Show'`,
   no_show: (a) => `${a}.show_no_show = 'No Show'`,
-  pending_show: (a) => `(${a}.show_no_show IS NULL OR ${a}.show_no_show = '')`,
+  pending_show: (a, cs, d) =>
+    `NOT COALESCE(${a}.appointment_date = ${d} AND LOWER(${a}.status) IN ('seen', 'completed', 'in_visit', 'checkedin', 'prepped', 'no_show'), FALSE)`,
   not_called: (a, cs, d) =>
     `(CASE WHEN ${d}::date = ${IST_TODAY}
            THEN (${cs} IS NULL OR ${cs} IN ('', 'pending'))

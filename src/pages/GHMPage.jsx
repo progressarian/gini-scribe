@@ -451,7 +451,7 @@ const SUMMARY_BUCKET = {
     ({ called: "called", not_picked: "not_picked", rescheduled: "rescheduled" })[v] ||
     (UNREACHABLE_STATUSES.includes(v) ? "unreachable" : null) ||
     (!v || v === "pending" ? "not_called" : null),
-  show_no_show: (v) => (v === "Show" ? "came" : v === "No Show" ? "no_show" : "pending_show"),
+  show_no_show: (v) => (v === "Show" ? "came" : v === "No Show" ? "no_show" : null),
 };
 
 // Compact mode cuts the Patient cell down to the name and the number people

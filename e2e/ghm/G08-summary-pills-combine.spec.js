@@ -175,4 +175,21 @@ test.describe("GHM: a Calling pill combines with Booked", () => {
       await query(`DELETE FROM patients WHERE id = $1`, [gone.id]);
     }
   });
+
+  test("9. Pending lists only patients who have not arrived on that date", async () => {
+    const [arrived, waiting] = [await buildPatient(), await buildPatient()];
+    try {
+      await appointmentToday(arrived, null, "checkedin");
+      await appointmentToday(waiting);
+      const r = await list("pending_show");
+      const ids = r.data.map((row) => row.patient_id);
+      expect(ids).toContain(waiting.id);
+      expect(ids).not.toContain(arrived.id);
+      expect(r.total).toBe(r.summary.pending_show);
+    } finally {
+      const ids = [arrived.id, waiting.id];
+      await query(`DELETE FROM appointments WHERE patient_id = ANY($1::int[])`, [ids]);
+      await query(`DELETE FROM patients WHERE id = ANY($1::int[])`, [ids]);
+    }
+  });
 });

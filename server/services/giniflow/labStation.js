@@ -113,7 +113,7 @@ const OUTSIDE_UPLOAD = { to: "uploaded", label: "📤 Upload report" };
 
 const outsideAction = (sampleStatus, room) => {
   if (room === LAB_ROOMS.PROCESSING) return null;
-  if (sampleStatus === "sample_collected") return OUTSIDE_STEP;
+  if (sampleStatus === "drawing" || sampleStatus === "sample_collected") return OUTSIDE_STEP;
   if (sampleStatus === SENT_OUTSIDE) return OUTSIDE_UPLOAD;
   return roomAction(sampleStatus, room);
 };
@@ -420,7 +420,7 @@ export async function getLabQueue(
       c.nextAction =
         room === LAB_ROOMS.PROCESSING || c.sentOutside || reportIn
           ? null
-          : c.collected
+          : c.collected || c.nextAction?.action === "sample_sent"
             ? { action: SENT_OUTSIDE, label: OUTSIDE_STEP.label }
             : c.nextAction;
       c.canUploadOutside = !reportIn && (c.sentOutside || c.collected);
@@ -1055,7 +1055,7 @@ export function assertSampleDrawn({ kind, sample_status: status }) {
   if (kind !== "lab" || !UNDRAWN_SAMPLE_STATUSES.includes(status)) return;
   throw Object.assign(
     new Error(
-      "Record the sample first — Lab 1 taps Sample taken before it can be sent, run or reported",
+      "Collect the sample first — Lab 1 taps Start collection, then Send to lab, before it can be run or reported",
     ),
     { status: 409 },
   );
@@ -1165,15 +1165,33 @@ export async function cancelDrawing(
   }
 }
 
+const SENDS_FROM_THE_BENCH = ["sample_sent", SENT_OUTSIDE];
+
 export async function advanceSample(
   orderId,
-  { to, actorId = null, reportUrl = null, room = null, thenBreak = false },
+  { to, actorId = null, reportUrl = null, room = null, thenBreak = false, drawnAtBench = false },
   db = pool,
 ) {
   if (!LAB_SAMPLE_FLOW.includes(to)) {
     throw Object.assign(new Error(`Unknown sample status: ${to}`), { status: 400 });
   }
   assertRoomOwns(room, SAMPLE_STATUS_TO_STAGE[to]);
+
+  if (SENDS_FROM_THE_BENCH.includes(to)) {
+    const { rows: current } = await db.query(
+      `SELECT sample_status FROM giniflow_lab_orders WHERE id = $1`,
+      [orderId],
+    );
+    if (current[0]?.sample_status === "drawing") {
+      const taken = await advanceSample(
+        orderId,
+        { to: "sample_collected", actorId, room, thenBreak, drawnAtBench: true },
+        db,
+      );
+      const sent = await advanceSample(orderId, { to, actorId, reportUrl, room }, db);
+      return { ...sent, onBreak: taken.onBreak };
+    }
+  }
 
   const client = await db.connect();
   try {
@@ -1246,7 +1264,7 @@ export async function advanceSample(
           { status: 409 },
         );
       }
-      await assertPatientIsFree(client, visitId, "collect the sample");
+      if (!drawnAtBench) await assertPatientIsFree(client, visitId, "collect the sample");
     }
     if (!UNDRAWN_SAMPLE_STATUSES.includes(to) && to !== "sample_collected") {
       assertSampleDrawn({ kind: "lab", sample_status: from });
@@ -1563,6 +1581,24 @@ export async function uploadOutsideReport(orderId, { replace = false, ...input }
 // screen should not invent vocabulary the rest of the floor does not use.
 export const CASE_ACTIONS = CASE_ACTION_VERBS;
 
+async function caseLadderState(db, caseNo) {
+  const { rows } = await db.query(
+    `SELECT lc.raw_list_json->>'phlebotomy_status' AS phlebotomy,
+            lc.raw_list_json->>'collected_on'      AS "collectedOn",
+            lc.raw_list_json->>'received_on'       AS "receivedOn",
+            lc.raw_list_json->>'result_saved_on'   AS "resultSavedOn",
+            lc.raw_list_json->>'reported_on'       AS "reportedOn",
+            COALESCE(
+              (SELECT json_agg(json_build_object('action', a.action))
+                 FROM giniflow_lab_case_actions a WHERE a.case_no = lc.case_no),
+              '[]'::json
+            ) AS actions
+       FROM lab_cases lc WHERE lc.case_no = $1`,
+    [caseNo],
+  );
+  return rows[0] || {};
+}
+
 export async function markLabCaseAction(
   caseNo,
   {
@@ -1573,6 +1609,7 @@ export async function markLabCaseAction(
     undo = false,
     room = null,
     thenBreak = false,
+    drawnAtBench = false,
   },
   db = pool,
 ) {
@@ -1590,26 +1627,22 @@ export async function markLabCaseAction(
     });
   }
 
+  if (action === "sample_sent" && !undo && !isCollected(await caseLadderState(db, caseNo))) {
+    const taken = await markLabCaseAction(
+      caseNo,
+      { action: "sample_taken", actorId, actorRole, room, thenBreak, drawnAtBench: true },
+      db,
+    );
+    const sent = await markLabCaseAction(caseNo, { action, actorId, actorRole, note, room }, db);
+    return { ...sent, onBreak: taken.onBreak };
+  }
+
   if (!undo) {
     // Where HealthRay and the floor each think this case is. A screen open since
     // before the lab received the tube would otherwise write "collected by"
     // against a sample somebody else drew, and that name is the only record of
     // who drew it.
-    const { rows: state } = await db.query(
-      `SELECT lc.raw_list_json->>'phlebotomy_status' AS phlebotomy,
-              lc.raw_list_json->>'collected_on'      AS "collectedOn",
-              lc.raw_list_json->>'received_on'       AS "receivedOn",
-              lc.raw_list_json->>'result_saved_on'   AS "resultSavedOn",
-              lc.raw_list_json->>'reported_on'       AS "reportedOn",
-              COALESCE(
-                (SELECT json_agg(json_build_object('action', a.action))
-                   FROM giniflow_lab_case_actions a WHERE a.case_no = lc.case_no),
-                '[]'::json
-              ) AS actions
-         FROM lab_cases lc WHERE lc.case_no = $1`,
-      [caseNo],
-    );
-    const c = state[0] || {};
+    const c = await caseLadderState(db, caseNo);
     // The rung this action lands on, asked of the ladder rather than inferred
     // from a position in CASE_ACTIONS — the two agree today only because both
     // are built from the same rungs, and an ordering bug here would let a case
@@ -1667,7 +1700,7 @@ export async function markLabCaseAction(
 
   const resolvedVisitId = await resolveVisitForCase(db, caseNo);
 
-  if ((action === "sample_taken" || action === "drawing_started") && !undo) {
+  if ((action === "sample_taken" || action === "drawing_started") && !undo && !drawnAtBench) {
     const what = action === "drawing_started" ? "start the collection" : "collect the sample";
     await assertPatientIsFree(db, resolvedVisitId, what);
     await assertLabBillingCleared(db, resolvedVisitId);
@@ -1682,7 +1715,7 @@ export async function markLabCaseAction(
         WHERE case_no = $1 AND action = ANY($2::text[])`,
       [caseNo, CASE_ACTIONS.slice(CASE_ACTIONS.indexOf(action))],
     );
-    if (resolvedVisitId && CASE_ACTIONS.indexOf(action) <= CASE_ACTIONS.indexOf("sample_taken")) {
+    if (resolvedVisitId && CASE_ACTIONS.indexOf(action) <= CASE_ACTIONS.indexOf("sample_sent")) {
       await withVisitLock(db, (client) =>
         cancelPauseTx(client, resolvedVisitId, SAMPLE_BREAK_REASON, { actorId, actorRole: "lab" }),
       );
@@ -1907,7 +1940,11 @@ async function outsideCase(db, caseNo) {
   return c;
 }
 
-export async function markCaseSentOutside(caseNo, { actorId = null, room = null } = {}, db = pool) {
+export async function markCaseSentOutside(
+  caseNo,
+  { actorId = null, room = null, thenBreak = false } = {},
+  db = pool,
+) {
   if (room === LAB_ROOMS.PROCESSING) {
     throw Object.assign(new Error("The collection room sends samples to the outside lab"), {
       status: 403,
@@ -1915,10 +1952,21 @@ export async function markCaseSentOutside(caseNo, { actorId = null, room = null 
   }
   const c = await outsideCase(db, caseNo);
   if (hasCaseAction(c, SENT_OUTSIDE)) return { caseNo, action: SENT_OUTSIDE, unchanged: true };
+  let onBreak = false;
   if (!isCollected(c)) {
-    throw Object.assign(new Error("Collect the sample first, then mark it sent"), {
-      status: 409,
-    });
+    if (stageIndex(c) < stageIndexOf("drawing")) {
+      throw Object.assign(
+        new Error("Start the collection first, then send the sample to the outside lab"),
+        { status: 409 },
+      );
+    }
+    onBreak = (
+      await markLabCaseAction(
+        caseNo,
+        { action: "sample_taken", actorId, actorRole: "lab", room, thenBreak, drawnAtBench: true },
+        db,
+      )
+    ).onBreak;
   }
   if (c.reportedOn || c.hasReport || hasCaseAction(c, "report_uploaded")) {
     throw Object.assign(new Error("The report for this case is already in"), { status: 409 });
@@ -1934,7 +1982,7 @@ export async function markCaseSentOutside(caseNo, { actorId = null, room = null 
     publish({ kind: "lab_order", visitId, status: SENT_OUTSIDE });
     await syncLabStepsFromLab(db, visitId);
   }
-  return { caseNo, action: SENT_OUTSIDE, unchanged: false };
+  return { caseNo, action: SENT_OUTSIDE, unchanged: false, onBreak };
 }
 
 export async function uploadOutsideCaseReport(caseNo, { replace = false, ...input }, db = pool) {

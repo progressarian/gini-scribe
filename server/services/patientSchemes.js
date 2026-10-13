@@ -66,6 +66,17 @@ export async function isKnownScheme(code, db = pool) {
   return rows.length > 0;
 }
 
+export async function carrySchemeToUpcoming(patientId, schemeCode, db = pool) {
+  const { rowCount } = await db.query(
+    `UPDATE appointments SET patient_category = $2
+      WHERE patient_id = $1
+        AND appointment_date >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date
+        AND patient_category IS DISTINCT FROM $2`,
+    [patientId, schemeCode || null],
+  );
+  return rowCount;
+}
+
 const CODE_RE = /^[a-z0-9_]{2,32}$/;
 
 const FLAGS = [

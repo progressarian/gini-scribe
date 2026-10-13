@@ -91,6 +91,17 @@ Routes are HTTP-only and delegate to `server/services/*` for domain logic (`heal
 - Break work into small tasks; test each one before moving to the next rather than doing one large change.
 - Do not commit or push to git unless explicitly asked.
 
+### Bulk database changes
+
+Production runs on a small Supabase instance with a limited disk-I/O budget; one large write can starve the live API and mark the project unhealthy. Any script that inserts, updates or deletes many rows (imports, syncs, backfills, rate loads) must:
+
+- Work in small batches (about 100 rows), each in its own short transaction that commits before the next starts. Never wrap the whole job in one long transaction.
+- Be safe to rerun: skip rows already done, so a stopped run continues where it left off instead of starting over or duplicating.
+- Do a dry run first (rolled back) and report the counts before writing.
+- Prefer one set-based statement per batch (e.g. `INSERT … SELECT FROM jsonb_to_recordset($1)`) over one round trip per row, and write the batch's `billing_audit` rows with `writeAuditMany`.
+- Print progress after each batch, and stop on the first error rather than pushing on.
+- Not run while the database is struggling (API just restarted, queries timing out, Supabase showing unhealthy). Check `pg_stat_activity` first, and pause between batches if timeouts appear.
+
 
 ## Gini Production UI / UX Standards
 

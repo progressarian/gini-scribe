@@ -39,6 +39,7 @@ import {
   wholeNumber,
 } from "./common.js";
 import { markDraftSaved } from "./draftSaves.js";
+import { carrySchemeToUpcoming } from "../patientSchemes.js";
 import { billCredits } from "./creditNotes.js";
 import { lockVisitOrders, orderToLink, SETTLED_AT_RECEPTION } from "./orderLinks.js";
 import {
@@ -1636,17 +1637,26 @@ async function rememberOnProfile(client, patientId, schemeCode, ctx) {
   const { rows } = await client.query(`SELECT scheme_code FROM patients WHERE id = $1 FOR UPDATE`, [
     patientId,
   ]);
-  if (!rows.length || rows[0].scheme_code === schemeCode) return false;
-  await client.query(`UPDATE patients SET scheme_code = $2, updated_at = NOW() WHERE id = $1`, [
-    patientId,
-    schemeCode,
-  ]);
+  if (!rows.length) return false;
+  const appointments = await carrySchemeToUpcoming(patientId, schemeCode, client);
+  const changed = rows[0].scheme_code !== schemeCode;
+  if (!changed && !appointments) return false;
+  if (changed) {
+    await client.query(`UPDATE patients SET scheme_code = $2, updated_at = NOW() WHERE id = $1`, [
+      patientId,
+      schemeCode,
+    ]);
+  }
   await writeAudit(client, {
     entity: "patients",
     entityId: patientId,
     action: "update",
     before: { scheme_code: rows[0].scheme_code },
-    after: { scheme_code: schemeCode, reason: "Saved from the billing counter" },
+    after: {
+      scheme_code: schemeCode,
+      reason: "Saved from the billing counter",
+      appointments_updated: appointments,
+    },
     ...auditFields(ctx),
   });
   return true;

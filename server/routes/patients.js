@@ -7,7 +7,7 @@ import { handleError } from "../utils/errorHandler.js";
 import { isPatientBlocked } from "../services/patientBlockGuard.js";
 import { sortDiagnoses } from "../utils/diagnosisSort.js";
 import { encryptAadhaar, decryptAadhaar, decryptAadhaarFull } from "../utils/aadhaarCrypt.js";
-import { isKnownScheme } from "../services/patientSchemes.js";
+import { carrySchemeToUpcoming, isKnownScheme } from "../services/patientSchemes.js";
 import { validate } from "../middleware/validate.js";
 import { patientCreateSchema, patientHealthrayFetchSchema } from "../schemas/index.js";
 import { fetchHealthrayPatientByUhid } from "../services/healthray/patientImport.js";
@@ -681,6 +681,9 @@ router.put("/patients/:id", validate(patientCreateSchema), async (req, res) => {
     if (p.scheme_code && !(await isKnownScheme(p.scheme_code))) {
       return res.status(400).json({ error: `Unknown scheme: ${p.scheme_code}` });
     }
+    const schemeBefore = (
+      await pool.query(`SELECT scheme_code FROM patients WHERE id = $1`, [req.params.id])
+    ).rows[0]?.scheme_code;
     const result = await pool.query(
       `UPDATE patients SET name=COALESCE($2,name), dob=COALESCE($3,dob), age=COALESCE($4,age),
        sex=COALESCE($5,sex), file_no=COALESCE($6,file_no), abha_id=COALESCE($7,abha_id),
@@ -724,6 +727,9 @@ router.put("/patients/:id", validate(patientCreateSchema), async (req, res) => {
     );
     if (!result.rows[0]) return res.status(404).json({ error: "Patient not found" });
     const row = result.rows[0];
+    if ((row.scheme_code ?? null) !== (schemeBefore ?? null)) {
+      await carrySchemeToUpcoming(row.id, row.scheme_code);
+    }
     if (row.aadhaar) row.aadhaar = decryptAadhaar(row.aadhaar);
     if (row.scheme_ref) row.scheme_ref = decryptAadhaarFull(row.scheme_ref);
     res.json(row);

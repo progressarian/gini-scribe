@@ -68,7 +68,7 @@ test.describe.serial("P4-28 patient header", () => {
     await page.getByLabel("Category").selectOption(ids.pensioner);
     await page.getByRole("button", { name: "Confirm category" }).click();
 
-    await expect(page.getByText(`P4 CGHS ${tag} › Pensioner`)).toBeVisible();
+    await expect(page.getByText(`P4 CGHS ${tag} › Pensioner`, { exact: true })).toBeVisible();
     await expect(patientPays(page)).toHaveText("₹0");
     expect((await bills.readBill(ids.bill, db)).category).toBe(ids.pensioner);
   });

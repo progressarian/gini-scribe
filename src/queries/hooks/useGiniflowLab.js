@@ -201,11 +201,11 @@ export function useMarkLabCaseAction() {
 export function useMarkCaseSentOutside() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ caseNo }) =>
+    mutationFn: async ({ caseNo, thenBreak = false }) =>
       (
         await api.post(
           `/api/giniflow/stations/lab/case/${encodeURIComponent(caseNo)}/sent-outside`,
-          {},
+          { thenBreak },
         )
       ).data,
     onSuccess: () => {

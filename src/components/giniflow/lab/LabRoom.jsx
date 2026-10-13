@@ -294,16 +294,21 @@ const byTimeAsc = (a, b) => rowTime(a) - rowTime(b);
 // problem — the report exists, the MO just has not been told.
 const UPLOAD_WAIT_AMBER = 15;
 
+const SENDS_FROM_THE_BENCH = ["sample_sent", SENT_OUTSIDE];
+
+const sendsFromTheBench = (order) =>
+  order.sampleStatus === "drawing" && SENDS_FROM_THE_BENCH.includes(order.nextAction?.to);
+
 function BreakButton({ busy, onClick, full = false }) {
   return (
     <button
       type="button"
       className={`st-btn st-btn-g${full ? " btn-full" : ""}`}
       disabled={busy}
-      title="The sample is taken and the patient is leaving for a while — their wait starts when they are back at vitals"
+      title="The sample is sent and the patient is leaving for a while — their wait starts when they are back at vitals"
       onClick={onClick}
     >
-      ⏸ Sample taken · on break
+      ⏸ Send · patient on break
     </button>
   );
 }
@@ -400,8 +405,11 @@ function LabCard({ order, group, onAdvance, onUpload, onOpen, busy }) {
             >
               {order.nextAction.label}
             </button>
-            {order.nextAction.to === "sample_collected" && (
-              <BreakButton busy={busy} onClick={() => onAdvance(order, "sample_collected", true)} />
+            {sendsFromTheBench(order) && (
+              <BreakButton
+                busy={busy}
+                onClick={() => onAdvance(order, order.nextAction.to, true)}
+              />
             )}
           </>
         ) : (
@@ -579,11 +587,11 @@ function LabDetailPane({
                   >
                     {order.nextAction.label}
                   </button>
-                  {order.nextAction.to === "sample_collected" && (
+                  {sendsFromTheBench(order) && (
                     <BreakButton
                       full
                       busy={busy}
-                      onClick={() => onAdvance(order, "sample_collected", true)}
+                      onClick={() => onAdvance(order, order.nextAction.to, true)}
                     />
                   )}
                   {order.canCancelStart && (
@@ -1213,12 +1221,14 @@ function HealthrayCasePane({
                               {c.nextAction.label}
                             </button>
                           )}
-                          {next?.action === "sample_taken" && !row.labOnly && (
-                            <BreakButton
-                              busy={busy || blocked}
-                              onClick={() => onAction(c.caseNo, next.action, false, true)}
-                            />
-                          )}
+                          {SENDS_FROM_THE_BENCH.includes(next?.action) &&
+                            !c.collected &&
+                            !row.labOnly && (
+                              <BreakButton
+                                busy={busy || blocked}
+                                onClick={() => onAction(c.caseNo, next.action, false, true)}
+                              />
+                            )}
                         </div>
                       </>
                     );
@@ -1485,7 +1495,7 @@ export default function LabRoom({ room = null }) {
             r.unchanged
               ? `${order.name} was already past that step`
               : r.onBreak
-                ? `⏸ ${order.name} — sample taken, on break. Their wait starts when they are back at vitals`
+                ? `⏸ ${order.name} — sample sent, on break. Their wait starts when they are back at vitals`
                 : to === "uploaded"
                   ? `📤 ${order.name}'s report uploaded — MO and doctor now see "Results ready"`
                   : `✓ ${order.name} — ${to.replace(/_/g, " ")}`,
@@ -1641,9 +1651,14 @@ export default function LabRoom({ room = null }) {
   const onCaseAction = (caseNo, action, undo, thenBreak = false) =>
     action === SENT_OUTSIDE
       ? sendCaseOutside.mutate(
-          { caseNo },
+          { caseNo, thenBreak },
           {
-            onSuccess: () => showToast(`📮 Case ${caseNo} marked sent to the outside lab`),
+            onSuccess: (r) =>
+              showToast(
+                r.onBreak
+                  ? `⏸ Case ${caseNo} sent to the outside lab — patient on break until they are back at vitals`
+                  : `📮 Case ${caseNo} marked sent to the outside lab`,
+              ),
             onError: (e) => showToast(e?.response?.data?.error || "Could not mark the sample sent"),
           },
         )
@@ -1655,7 +1670,7 @@ export default function LabRoom({ room = null }) {
                 undo
                   ? "Undone — nothing recorded"
                   : r.onBreak
-                    ? `⏸ Sample taken on case ${caseNo} — patient on break until they are back at vitals`
+                    ? `⏸ Case ${caseNo} sent to the lab — patient on break until they are back at vitals`
                     : `✓ Recorded on case ${caseNo}`,
               ),
             onError: (e) => showToast(e?.response?.data?.error || "Could not record that"),
