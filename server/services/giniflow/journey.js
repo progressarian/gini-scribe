@@ -1409,6 +1409,7 @@ export async function setStepStatus(stepId, status, db = pool) {
           -- now, and holding it until the pharmacy had been done would make it
           -- untickable for the whole visit.
           AND s.source IN ('template', 'auto')
+          AND s.step_catalog_id <> 'lab_billing'
         ORDER BY prev.step_order LIMIT 1`,
       [stepId],
     );
