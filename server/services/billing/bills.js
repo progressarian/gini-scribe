@@ -13,6 +13,7 @@ import {
   useRepeatApproval,
 } from "./billingRequests.js";
 import { normalizeGender, resolveCategoryFor } from "./categoryResolver.js";
+import { cghsSubForReferral, startingCghsSub } from "../../../shared/cghsSubCategory.js";
 import { checkCode } from "./discountRules.js";
 import { issuedGstReady } from "./issuedGst.js";
 import { assertBillLineBalances } from "./lineInvariant.js";
@@ -304,6 +305,18 @@ function chosenCategory(resolution) {
     label: resolution.category.display_label,
     payer: resolution.category.payer_name ?? resolution.parent?.payer_name ?? null,
   };
+}
+
+async function startingCategory(client, resolution) {
+  const sub = startingCghsSub(resolution.category?.code, resolution.age);
+  if (!sub) return chosenCategory(resolution);
+  try {
+    await assertBillable(client, sub);
+  } catch {
+    return chosenCategory(resolution);
+  }
+  const rules = await categoryRules(client, sub);
+  return { code: rules.code, label: rules.display_label, payer: rules.payer_name };
 }
 
 async function categoryRules(client, code) {
@@ -614,7 +627,7 @@ export async function openDraftIn(client, visitId, ctx) {
     appointmentId: visit.appointment_id,
     date: visit.visit_date,
   });
-  const category = chosenCategory(resolution);
+  const category = await startingCategory(client, resolution);
   await client.query("SAVEPOINT billing_draft");
   try {
     const { rows } = await client.query(
@@ -1678,6 +1691,13 @@ export async function setCategory(billId, input, ctx, db = pool) {
     }
     if (hasField(input, "referral_doc_id")) {
       values.referral_doc_id = await checkReferralDoc(client, before, input.referral_doc_id);
+    }
+    if (hasField(input, "referral_no") && !hasField(input, "category")) {
+      const followed = cghsSubForReferral(before.scheme_code, Boolean(values.referral_no_enc));
+      if (followed && followed !== before.scheme_code) {
+        await assertBillable(client, followed);
+        values.scheme_code = followed;
+      }
     }
     if (!Object.keys(values).length) throw httpError(400, "Nothing to change on this bill");
     const keys = Object.keys(values);

@@ -8,6 +8,7 @@ import {
 import { errorOf, fromPaise } from "../format";
 import LoadingCard from "./LoadingCard";
 import BillConsultant from "./BillConsultant";
+import { CGHS } from "../../../../shared/cghsSubCategory.js";
 
 export const readFile = (file) =>
   new Promise((resolve, reject) => {
@@ -124,7 +125,7 @@ export default function PatientHeader({
   const parent = scheme ? list.find((s) => s.code === scheme.parent_code) : null;
   const needs = (flag) => Boolean(scheme?.[flag] || parent?.[flag]);
   const needsCard = needs("requires_ref");
-  const needsReferral = needs("requires_referral");
+  const needsReferral = needs("requires_referral") || bill.category === CGHS.paid;
   const needsDoc = needs("requires_referral_doc");
 
   const labelFor = (code) => {

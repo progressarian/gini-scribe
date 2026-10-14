@@ -1185,12 +1185,14 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   const bookedDoctor = useAuthStore((st) =>
     (st.doctorsList || []).find((d) => d.id === arrival.assignedDoctorId),
   );
-  const seesWithoutChief = arrival.consultsDirect || bookedDoctor?.chief_step === false;
-  const [consultChoice, setConsultChoice] = useState(seesWithoutChief ? "consultant" : "both");
+  const seesWithoutChief = bookedDoctor?.chief_step === false;
+  const seesChiefOnly = !arrival.consultsDirect && bookedDoctor?.chief_step === true;
+  const defaultChoice = seesChiefOnly ? "chief" : "consultant";
+  const [consultChoice, setConsultChoice] = useState(defaultChoice);
   const choiceTouched = useRef(false);
   useEffect(() => {
-    if (!choiceTouched.current) setConsultChoice(seesWithoutChief ? "consultant" : "both");
-  }, [seesWithoutChief]);
+    if (!choiceTouched.current) setConsultChoice(defaultChoice);
+  }, [defaultChoice]);
   const visitType = (visitTypes || []).find((t) => t.id === visitTypeId) || null;
   const onlineChoice = visitType?.for_online
     ? onlineConsultChoice(!arrival.consultsDirect && bookedDoctor?.chief_step === true)

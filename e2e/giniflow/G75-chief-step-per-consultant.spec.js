@@ -95,6 +95,19 @@ test.describe.serial("G75 the Chief Endocrinologist step follows the consultant'
     expect(await chiefSteps(direct)).toEqual([]);
   });
 
+  test("3a. Dr Banshali's seeded journey has the Chief Endocrinologist and no consultant steps", async () => {
+    const visit = await arrived("ChiefOnly", CONSULTANTS.banshali);
+    const seeded = await journey.ensurePlan(visit, db);
+    test.skip(!seeded.seeded, "No visit type with a template in the test database");
+    const consultantSteps = await query(
+      `SELECT step_catalog_id FROM giniflow_visit_steps
+        WHERE visit_id = $1 AND (step_catalog_id = 'wait_sd' OR assigned_role = 'sd')`,
+      [visit],
+    );
+    expect(consultantSteps.rows).toEqual([]);
+    expect((await chiefSteps(visit)).length).toBeGreaterThan(0);
+  });
+
   test("4. switching the setting changes the route for the next patient", async () => {
     await query(`UPDATE doctors SET chief_step = true WHERE id = $1`, [CONSULTANTS.beant.id]);
     try {

@@ -32,9 +32,9 @@ test.describe.serial("G86 lab payment is cleared whatever the journey has reache
     await tearDown(ids);
   });
 
-  test("1. Lab Billing behind a pending Chief Rx step can still be cleared", async () => {
+  test("1. Lab Billing behind a pending Chief step can still be cleared", async () => {
     const { visit } = await extraVisit(ids, "G86Lab", { healthray: false });
-    await step(visit, 1, "rx_ready", "Prescription — Chief Endocrinologist to prepare");
+    await step(visit, 1, "wait_chief", "Wait for Chief");
     const labBilling = await step(visit, 2, "lab_billing", "Lab Billing");
     await setStepStatus(labBilling, "done", db);
     expect(await statusOf(labBilling)).toBe("done");
@@ -42,7 +42,7 @@ test.describe.serial("G86 lab payment is cleared whatever the journey has reache
 
   test("2. other stops still wait for the ones before them", async () => {
     const { visit } = await extraVisit(ids, "G86Bill", { healthray: false });
-    await step(visit, 1, "rx_ready", "Prescription — Chief Endocrinologist to prepare");
+    await step(visit, 1, "wait_chief", "Wait for Chief");
     const billing = await step(visit, 2, "billing", "Billing");
     await expect(setStepStatus(billing, "done", db)).rejects.toThrow("comes first");
     expect(await statusOf(billing)).toBe("pending");

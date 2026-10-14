@@ -142,6 +142,13 @@ export const BOARD_COLUMNS = [
   { key: "lab", name: "Lab track", icon: "🧪", slaKey: "lab_total", statuses: null },
   { key: "machine", name: "Machine Room", icon: "🩺", slaKey: null, statuses: null },
   {
+    key: "sd",
+    name: "With Chief Endocrinologist",
+    icon: "👨‍⚕️",
+    slaKey: "sd",
+    statuses: ["vitals_done", "sd_pending", "with_sd"],
+  },
+  {
     key: "wait_doctor",
     name: "Waiting — consultant",
     icon: "⏳",
@@ -154,13 +161,6 @@ export const BOARD_COLUMNS = [
     icon: "🧑‍⚕️",
     slaKey: "doctor",
     statuses: ["with_doctor"],
-  },
-  {
-    key: "sd",
-    name: "With Chief Endocrinologist",
-    icon: "👨‍⚕️",
-    slaKey: "sd",
-    statuses: ["vitals_done", "sd_pending", "with_sd"],
   },
   { key: "xray", name: "X-Ray", icon: "🩻", slaKey: null, statuses: null },
   { key: "echo", name: "Echo", icon: "❤️", slaKey: null, statuses: null },

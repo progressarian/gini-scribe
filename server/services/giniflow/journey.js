@@ -129,7 +129,7 @@ async function consultantChiefStep(db, visitId) {
 }
 
 export async function consultantSkipsChief(db, visitId) {
-  return (await consultantChiefStep(db, visitId)) === false;
+  return (await consultantChiefStep(db, visitId)) !== true;
 }
 
 async function isOnlineType(db, visitTypeId) {
@@ -821,11 +821,10 @@ export async function ensurePlan(visitId, db = pool) {
     machines,
   );
   const chiefStep = visit.direct_consult ? false : await consultantChiefStep(db, visitId);
-  const routed = (await isOnlineType(db, visitTypeId))
-    ? billed.filter((s) => keepsForChoice(s, onlineConsultChoice(chiefStep)))
-    : chiefStep === false
-      ? withoutChief(billed)
-      : billed;
+  const routed =
+    chiefStep === true || (await isOnlineType(db, visitTypeId))
+      ? billed.filter((s) => keepsForChoice(s, onlineConsultChoice(chiefStep)))
+      : withoutChief(billed);
   const plan = visit.echo_referral ? echoFirst(routed, machines) : routed;
   if (!plan.length) return { seeded: false };
 
