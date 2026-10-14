@@ -66,4 +66,13 @@ test.describe("GHM: Last Visit is the latest visit the patient came to, with who
     expect(visit.doctor).toBe("Dr E2E Came");
     expect(visit.testsDate).toBe(days.tests);
   });
+
+  test("3. with a before date, only visits before it count", async () => {
+    const before = (await one(`SELECT ((NOW() AT TIME ZONE 'Asia/Kolkata')::date - 30)::text AS d`))
+      .d;
+    const res = await admin.post("/api/ghm-appointments/last-visit", {
+      data: { patient_ids: [patient.id], before },
+    });
+    expect((await res.json())[patient.id]).toBeUndefined();
+  });
 });

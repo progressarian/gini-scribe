@@ -1,4 +1,9 @@
-import { LIST_PREDICATES, isNewVisitType } from "../../shared/patientLists.js";
+import {
+  LIST_PREDICATES,
+  isNewVisitType,
+  isEarlierVisitDue,
+  cameOnDate,
+} from "../../shared/patientLists.js";
 import { callLabel } from "../../shared/callStatuses.js";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -110,7 +115,9 @@ const toSheetRow = (row, fallbackDate, lastSeen = {}, owners = {}, bookings = fa
       "True",
       "True",
       fmtSheetDate(
-        bookings ? row.appointment_date || row.preferred_date : row.preferred_date || fallbackDate,
+        bookings || cameOnDate(row, fallbackDate)
+          ? row.appointment_date || row.preferred_date
+          : row.preferred_date || fallbackDate,
       ),
       start,
       end,
@@ -126,7 +133,9 @@ const toSheetRow = (row, fallbackDate, lastSeen = {}, owners = {}, bookings = fa
       fmtSheetDate(lastSeen[row.patient_id]?.date),
       fmtSheetDate(row.follow_up_date),
       fmtSheetDate(row.preferred_date),
-      row.visit_type || "",
+      !bookings && isEarlierVisitDue(row, fallbackDate) && isNewVisitType(row.visit_type)
+        ? "Follow-Up"
+        : row.visit_type || "",
       row.appointment_type || row.mode_of_appointment || "",
       lastSeenLabel(lastSeen[row.patient_id]),
       row.prescription_explained_by || "",
@@ -271,7 +280,7 @@ export const exportWatiWorkbook = async (
     name: list.name,
     ...buildListSheet(
       XLSX,
-      (rows || []).filter(list.pick),
+      (rows || []).filter((r) => list.pick(r, date)),
       date,
       list.name,
       lastSeen,

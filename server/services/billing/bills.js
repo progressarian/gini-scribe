@@ -13,6 +13,7 @@ import {
   useRepeatApproval,
 } from "./billingRequests.js";
 import { normalizeGender, resolveCategoryFor } from "./categoryResolver.js";
+import { testsAfterConsult } from "./afterConsult.js";
 import { cghsSubForReferral, startingCghsSub } from "../../../shared/cghsSubCategory.js";
 import { checkCode } from "./discountRules.js";
 import { issuedGstReady } from "./issuedGst.js";
@@ -196,6 +197,7 @@ function shapeLine(row) {
     claim: paise(row.claim_amount),
     adjustment: paise(row.adjustment_amount),
     order_state: row.order_state ?? null,
+    after_consult: row.after_consult ?? null,
     removed_doctor: row.removed_doctor ?? null,
     price_per_patient: row.price_per_patient ?? false,
     is_outsourced: row.is_outsourced ?? false,
@@ -377,7 +379,12 @@ async function liveLines(client, billId, { all = false } = {}) {
 async function shownLines(client, billId, options) {
   const lines = await liveLines(client, billId, options);
   const states = await orderStatesOn(client, billId);
-  return lines.map((line) => ({ ...line, order_state: states.get(line.id) ?? null }));
+  const later = await testsAfterConsult(client, billId);
+  return lines.map((line) => ({
+    ...line,
+    order_state: states.get(line.id) ?? null,
+    after_consult: later.get(line.id) ?? null,
+  }));
 }
 
 async function billCodes(client, billId) {

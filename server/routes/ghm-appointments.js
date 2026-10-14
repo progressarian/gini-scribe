@@ -740,6 +740,9 @@ router.post("/ghm-appointments/last-visit", async (req, res) => {
   try {
     const ids = (req.body?.patient_ids || []).filter((x) => Number.isInteger(x));
     if (!ids.length) return res.json({});
+    const before = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body?.before || ""))
+      ? req.body.before
+      : null;
 
     const r = await pool.query(
       `WITH visits AS (
@@ -747,13 +750,13 @@ router.post("/ghm-appointments/last-visit", async (req, res) => {
            FROM appointments a
           WHERE a.patient_id = ANY($1::int[])
             AND a.status = ANY(${ATTENDED_STATUSES})
-            AND a.appointment_date <= ${IST_TODAY}
+            AND a.appointment_date < COALESCE($2::date, ${IST_TODAY} + 1)
             AND ${NOT_LAB_ONLY("a")}
          UNION ALL
          SELECT c.patient_id, c.visit_date::date
            FROM consultations c
           WHERE c.patient_id = ANY($1::int[])
-            AND c.visit_date::date <= ${IST_TODAY}
+            AND c.visit_date::date < COALESCE($2::date, ${IST_TODAY} + 1)
        ),
        last AS (
          SELECT patient_id, MAX(d) AS d FROM visits GROUP BY patient_id
@@ -763,7 +766,7 @@ router.post("/ghm-appointments/last-visit", async (req, res) => {
            FROM appointments a
           WHERE a.patient_id = ANY($1::int[])
             AND a.status = ANY(${ATTENDED_STATUSES})
-            AND a.appointment_date <= ${IST_TODAY}
+            AND a.appointment_date < COALESCE($2::date, ${IST_TODAY} + 1)
             AND NOT ${NOT_LAB_ONLY("a")}
           GROUP BY a.patient_id
        ),
@@ -804,7 +807,7 @@ router.post("/ghm-appointments/last-visit", async (req, res) => {
                 ORDER BY n.src_rank LIMIT 1) AS mo
          FROM last l
          FULL JOIN tests t ON t.patient_id = l.patient_id`,
-      [ids],
+      [ids, before],
     );
 
     res.json(
@@ -969,7 +972,8 @@ const SUMMARY_BUCKETS = {
   not_picked: (a, cs) => `${cs} = 'not_picked'`,
   unreachable: (a, cs) => `${cs} = ANY(${pgArray(UNREACHABLE_STATUSES)})`,
   rescheduled: (a, cs) => `${cs} = 'rescheduled'`,
-  follow_up: (a) => `(${a}.visit_type IS NOT NULL AND LOWER(${a}.visit_type) NOT LIKE 'new%')`,
+  follow_up: (a, cs, d) =>
+    `((${a}.visit_type IS NOT NULL AND LOWER(${a}.visit_type) NOT LIKE 'new%') OR COALESCE(${a}.appointment_date < ${d}, FALSE))`,
   home_collection: (a) => `${a}.home_collection`,
   // "Booked" means the patient HAS an appointment on this date — the sheet
   // booking itself counts, not only the ones a caller marked by hand. Keying it
@@ -1372,7 +1376,8 @@ router.get("/ghm-appointments", async (req, res) => {
     where =
       req.query.booked === "today"
         ? `WHERE (a.created_at AT TIME ZONE 'Asia/Kolkata')::date = ${IST_TODAY}
-             AND NOT COALESCE(a.is_walkin, FALSE)`
+             AND NOT (COALESCE(a.is_walkin, FALSE)
+                      AND a.appointment_date <= (a.created_at AT TIME ZONE 'Asia/Kolkata')::date)`
         : dayWindowWhere("a");
     // }
     // Blocked patients are hidden from the ops day list entirely — nobody should

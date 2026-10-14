@@ -96,6 +96,7 @@ import {
 import { qk } from "../queries/keys";
 import { toast } from "../stores/uiStore";
 import { visitStatus } from "../lib/visitStatus.js";
+import { isEarlierVisitDue, isNewVisitType } from "../../shared/patientLists.js";
 
 const safeArr = (v) => (Array.isArray(v) ? v : []);
 
@@ -2678,7 +2679,10 @@ export default function GHMPage() {
       }
       // The sheet names the last consultant seen, which lives outside the row —
       // fetched for the exported rows, not just the ones on screen.
-      const lastSeen = await fetchLastVisit(all.map((r) => r.patient_id)).catch(() => ({}));
+      const lastSeen = await fetchLastVisit(
+        all.map((r) => r.patient_id),
+        String(sheetDate).slice(0, 10),
+      ).catch(() => ({}));
       const owners = await fetchObtAssignments(all.map((r) => r.patient_id)).catch(() => ({}));
       const counts = await exportWatiWorkbook(all, sheetDate, label, lastSeen, owners, options);
       if (!counts.total) toast("No patients with a phone number to export.", "warn");
@@ -3519,13 +3523,23 @@ export default function GHMPage() {
 
                           {/* Visit type */}
                           <td>
-                            {row.visit_type && (
-                              <span
-                                className={`badge badge--${row.visit_type.toLowerCase().startsWith("new") ? "blue" : "amber"}`}
-                              >
-                                {row.visit_type}
-                              </span>
-                            )}
+                            {(() => {
+                              const visitType =
+                                view !== "lookup" &&
+                                isEarlierVisitDue(row, date) &&
+                                isNewVisitType(row.visit_type)
+                                  ? "Follow-Up"
+                                  : row.visit_type;
+                              return (
+                                visitType && (
+                                  <span
+                                    className={`badge badge--${isNewVisitType(visitType) ? "blue" : "amber"}`}
+                                  >
+                                    {visitType}
+                                  </span>
+                                )
+                              );
+                            })()}
                           </td>
 
                           {/* Discount category — editable */}

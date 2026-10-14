@@ -94,12 +94,13 @@ export function useGhmBiomarkers(patientIds) {
 // — one id list per request keeps the query planner off a huge array.
 const LAST_VISIT_CHUNK = 200;
 
-export async function fetchLastVisit(patientIds) {
+export async function fetchLastVisit(patientIds, before = null) {
   const ids = [...new Set((patientIds || []).filter((id) => Number.isInteger(id)))];
   const out = {};
   for (let i = 0; i < ids.length; i += LAST_VISIT_CHUNK) {
     const { data } = await api.post("/api/ghm-appointments/last-visit", {
       patient_ids: ids.slice(i, i + LAST_VISIT_CHUNK),
+      ...(before ? { before } : null),
     });
     Object.assign(out, data || {});
   }

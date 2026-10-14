@@ -181,6 +181,12 @@
   color: var(--blu);
   background: var(--blu-l);
 }
+.gf .bc-badge--new {
+  color: var(--amb);
+  background: var(--amb-l);
+  border: 1px solid var(--amb);
+  font-weight: 700;
+}
 .gf .bc-badge--draft {
   color: var(--amb);
   background: var(--amb-l);
@@ -1170,6 +1176,15 @@ body.bc-resizing {
   .gf .bc-stack .ltable tr > td:last-child:not(.bc-cell-actions) {
     border-bottom: 0;
   }
+  .gf .bc-stack .ltable tr.bc-later {
+    padding: 0;
+    border-color: var(--amb);
+  }
+  .gf .bc-stack .ltable tr.bc-later th {
+    display: block;
+    border-top: 0;
+    border-radius: 10px;
+  }
 }
 @container (max-width: 380px) {
   .gf .bc-main .bc-field {
@@ -1643,6 +1658,31 @@ body > [role="dialog"][aria-modal="true"] .bc-err {
 .gf .bc-icon-btn:focus-visible {
   outline: 2px solid var(--tl);
   outline-offset: 1px;
+}
+.gf .bc-later th {
+  padding: 10px 12px 6px;
+  text-align: left;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: normal;
+  background: var(--amb-l);
+  border-top: 2px solid var(--amb);
+}
+.gf .bc-later__title {
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--amb);
+}
+.gf .bc-later__meta {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--ink2);
+}
+.gf .bc-later-line > * {
+  background: var(--amb-l);
 }
 .gf .bc-items__info {
   margin: 12px 0 0;

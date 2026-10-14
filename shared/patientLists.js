@@ -17,10 +17,24 @@ export const isCancelledRow = (row) =>
   row?.booking_status === "cancelled" ||
   row?.call_status_any === "cancelled";
 
-export const isRescheduledRow = (row) =>
-  row?.call_status_any === "rescheduled" ||
-  !!row?.call_reschedule_date ||
-  (!!row?.preferred_date && day(row.preferred_date) !== day(row.appointment_date));
+export const isEarlierVisitDue = (row, date) =>
+  !!date && !!row?.appointment_date && day(row.appointment_date) < day(date);
+
+export const isNewOnDate = (row, date) =>
+  isNewVisitType(row?.visit_type) && !isEarlierVisitDue(row, date);
+
+const ATTENDED = ["seen", "completed", "checkedin", "in_visit", "in-progress"];
+
+export const cameOnDate = (row, date) =>
+  !!date &&
+  day(row?.appointment_date) === day(date) &&
+  ATTENDED.includes(String(row?.status || "").toLowerCase());
+
+export const isRescheduledRow = (row, date) =>
+  !cameOnDate(row, date) &&
+  (row?.call_status_any === "rescheduled" ||
+    !!row?.call_reschedule_date ||
+    (!!row?.preferred_date && day(row.preferred_date) !== day(row.appointment_date)));
 
 // A blocked patient stays visible on the day list — staff must be able to see
 // why the appointment exists — but drops out of the call lists, because nobody
@@ -28,12 +42,12 @@ export const isRescheduledRow = (row) =>
 export const isBlockedRow = (row) => row?.is_blocked === true;
 
 export const LIST_PREDICATES = {
-  new: (r) =>
-    isNewVisitType(r.visit_type) && !isCancelledRow(r) && !isRescheduledRow(r) && !isBlockedRow(r),
-  followup: (r) =>
-    !isNewVisitType(r.visit_type) && !isCancelledRow(r) && !isRescheduledRow(r) && !isBlockedRow(r),
+  new: (r, date) =>
+    isNewOnDate(r, date) && !isCancelledRow(r) && !isRescheduledRow(r, date) && !isBlockedRow(r),
+  followup: (r, date) =>
+    !isNewOnDate(r, date) && !isCancelledRow(r) && !isRescheduledRow(r, date) && !isBlockedRow(r),
   cancelled: (r) => isCancelledRow(r),
-  rescheduled: (r) => !isCancelledRow(r) && isRescheduledRow(r),
+  rescheduled: (r, date) => !isCancelledRow(r) && isRescheduledRow(r, date),
 };
 
 export const LIST_IDS = Object.keys(LIST_PREDICATES);

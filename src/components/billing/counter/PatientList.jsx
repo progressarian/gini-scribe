@@ -21,6 +21,7 @@ function Badges({ row }) {
   return (
     <span className="bc-row__badges">
       {row.online && <span className="bc-badge bc-badge--online">Online</span>}
+      {row.hints?.newTests > 0 && <span className="bc-badge bc-badge--new">New tests</span>}
       {row.samplesOnly && <span className="bc-badge bc-badge--samples">Samples only</span>}
       <BillBadge bill={row.bill} />
       {row.refundPending && <span className="bc-badge bc-badge--draft">Refund pending</span>}
@@ -37,6 +38,7 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 function hintsOf(hints) {
   if (!hints) return [];
   return [
+    hints.newTests > 0 && `${plural(hints.newTests, "new test")} after consultation`,
     hints.consultantChanged && "Consultant changed — fee to settle",
     hints.consultation && "Consultation done — not billed",
     hints.tests > 0 && `${plural(hints.tests, "test")} ordered`,

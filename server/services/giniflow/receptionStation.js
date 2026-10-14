@@ -43,6 +43,7 @@ import {
   rupeesFromPaise,
 } from "../../../shared/labPayment.js";
 import { directConsultSql } from "../../../shared/directConsult.js";
+import { ORDERED_AFTER_CONSULT_SQL } from "../billing/afterConsult.js";
 
 // Reception: the payment desk between the MO ordering tests and the lab
 // collecting a sample.
@@ -65,6 +66,7 @@ const ORDER_SELECT = `
          paid_ev.occurred_at AS paid_at,
          bill.items AS bill_items,
          ${ORDER_CANCELLABLE_SQL("o")} AS can_cancel,
+         ${ORDERED_AFTER_CONSULT_SQL("o.visit_id", "o.created_at")} AS after_consult,
          CASE WHEN o.kind = 'lab' THEN COALESCE((
            SELECT json_agg(json_build_object('caseNo', lc.case_no, 'tests', lc.test_names)
                            ORDER BY lc.case_no)
@@ -168,6 +170,7 @@ const shape = (r) => ({
   outstanding: rupeesFromPaise(outstandingPaise(moneyOf(r))),
   collectible: rupeesFromPaise(collectiblePaise(moneyOf(r))),
   orderedAt: r.created_at ? new Date(r.created_at).toISOString() : null,
+  afterConsult: !!r.after_consult,
   paidAt: r.paid_at ? new Date(r.paid_at).toISOString() : null,
   canCancel: !!r.can_cancel,
   cancellableCases: r.cancellable_cases || [],

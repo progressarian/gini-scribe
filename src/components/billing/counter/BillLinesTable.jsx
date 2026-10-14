@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import ConfirmModal from "../../ui/ConfirmModal";
 import {
@@ -184,6 +184,38 @@ function categoryOf(line) {
 
 const counted = (count, noun) => `${count} ${noun}${count === 1 ? "" : "s"}`;
 
+const clock = (value) =>
+  new Date(value).toLocaleTimeString("en-IN", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "Asia/Kolkata",
+  });
+
+function AfterConsultHeading({ lines }) {
+  const total = lines.reduce((sum, line) => sum + line.patient_payable, 0);
+  const orderedBy = [
+    ...new Set(lines.map((line) => line.after_consult.ordered_by_name).filter(Boolean)),
+  ];
+  const first = lines.map((line) => line.after_consult.ordered_at).sort()[0];
+  return (
+    <tr className="bc-later">
+      <th colSpan={8} scope="colgroup">
+        <span className="bc-later__title">New tests after the consultation</span>
+        <span className="bc-later__meta">
+          {[
+            counted(lines.length, "test"),
+            fromPaise(total),
+            orderedBy.length && `ordered by ${orderedBy.join(", ")}`,
+            first && `from ${clock(first)}`,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </span>
+      </th>
+    </tr>
+  );
+}
+
 function includesText(lines) {
   const counts = new Map();
   for (const line of lines) {
@@ -243,6 +275,8 @@ export default function BillLinesTable({ bill, onBill, form }) {
   const [error, setError] = useState(null);
   const final = bill.status !== "draft";
   const atReception = final ? bill.lines.filter((line) => line.order_state) : [];
+  const laterTests = bill.lines.filter((line) => line.after_consult);
+  const rows = [...bill.lines.filter((line) => !line.after_consult), ...laterTests];
 
   const savePrice = async () => {
     setError(null);
@@ -344,65 +378,70 @@ export default function BillLinesTable({ bill, onBill, form }) {
                 </tr>
               </thead>
               <tbody>
-                {bill.lines.map((line, index) => {
+                {rows.map((line, index) => {
                   const category = categoryOf(line);
                   return (
-                    <tr key={line.id}>
-                      <th scope="row" className="bc-lineno">
-                        {index + 1}
-                      </th>
-                      <td data-label="Service / Test">
-                        <div className="bc-item__name">{line.bill_name}</div>
-                        <div className="bc-item__sub">
-                          {[
-                            line.bill_code,
-                            line.payment_rule &&
-                              line.payment_rule !== "full" &&
-                              paymentRuleText(line.payment_rule),
-                          ]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </div>
-                        {line.is_outsourced && <span className="badge b-pu">Outsourced</span>}
-                        {line.source === "lab_case" && (
-                          <span className="badge b-blu">from lab report</span>
-                        )}
-                        {final && line.order_state && (
-                          <span className="badge b-amb">{orderStateText(line.order_state)}</span>
-                        )}
-                        {ordered(line) && (
-                          <span className="badge b-blu">
-                            ordered{line.added_by_name ? ` by ${line.added_by_name}` : ""}
-                          </span>
-                        )}
-                        <PriceNote line={line} />
-                        {line.manual_discount && (
-                          <div className="bc-hint bc-line-price">
-                            Discount {discountNote(line.manual_discount)}
+                    <Fragment key={line.id}>
+                      {line === laterTests[0] && <AfterConsultHeading lines={laterTests} />}
+                      <tr className={line.after_consult ? "bc-later-line" : undefined}>
+                        <th scope="row" className="bc-lineno">
+                          {index + 1}
+                        </th>
+                        <td data-label="Service / Test">
+                          <div className="bc-item__name">{line.bill_name}</div>
+                          <div className="bc-item__sub">
+                            {[
+                              line.bill_code,
+                              line.payment_rule &&
+                                line.payment_rule !== "full" &&
+                                paymentRuleText(line.payment_rule),
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
                           </div>
-                        )}
-                      </td>
-                      <td data-label="Category">
-                        <span className={`bc-cat bc-cat--${category.tone}`}>{category.label}</span>
-                      </td>
-                      <QuantityCell
-                        bill={bill}
-                        line={line}
-                        locked={!mayRemove(line)}
-                        onBill={onBill}
-                        onError={setError}
-                      />
-                      <td data-label="Rate" className="bc-num">
-                        {fromPaise(line.rate)}
-                      </td>
-                      <DiscountCell bill={bill} line={line} onBill={onBill} onError={setError} />
-                      <td data-label="Patient pays" className="bc-num bc-num--strong">
-                        {fromPaise(line.patient_payable)}
-                      </td>
-                      <td data-label="" className="bc-cell-actions">
-                        <LineActions actions={actionsFor(line)} />
-                      </td>
-                    </tr>
+                          {line.is_outsourced && <span className="badge b-pu">Outsourced</span>}
+                          {line.source === "lab_case" && (
+                            <span className="badge b-blu">from lab report</span>
+                          )}
+                          {final && line.order_state && (
+                            <span className="badge b-amb">{orderStateText(line.order_state)}</span>
+                          )}
+                          {ordered(line) && (
+                            <span className="badge b-blu">
+                              ordered{line.added_by_name ? ` by ${line.added_by_name}` : ""}
+                            </span>
+                          )}
+                          <PriceNote line={line} />
+                          {line.manual_discount && (
+                            <div className="bc-hint bc-line-price">
+                              Discount {discountNote(line.manual_discount)}
+                            </div>
+                          )}
+                        </td>
+                        <td data-label="Category">
+                          <span className={`bc-cat bc-cat--${category.tone}`}>
+                            {category.label}
+                          </span>
+                        </td>
+                        <QuantityCell
+                          bill={bill}
+                          line={line}
+                          locked={!mayRemove(line)}
+                          onBill={onBill}
+                          onError={setError}
+                        />
+                        <td data-label="Rate" className="bc-num">
+                          {fromPaise(line.rate)}
+                        </td>
+                        <DiscountCell bill={bill} line={line} onBill={onBill} onError={setError} />
+                        <td data-label="Patient pays" className="bc-num bc-num--strong">
+                          {fromPaise(line.patient_payable)}
+                        </td>
+                        <td data-label="" className="bc-cell-actions">
+                          <LineActions actions={actionsFor(line)} />
+                        </td>
+                      </tr>
+                    </Fragment>
                   );
                 })}
               </tbody>

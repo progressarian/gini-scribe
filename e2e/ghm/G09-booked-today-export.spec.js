@@ -22,11 +22,17 @@ test.describe("GHM: export the appointments booked today, for any date", () => {
   let admin;
 
   test.beforeAll(async () => {
-    patients = [await buildPatient(), await buildPatient(), await buildPatient()];
+    patients = [
+      await buildPatient(),
+      await buildPatient(),
+      await buildPatient(),
+      await buildPatient(),
+    ];
     appts = {
       nextWeek: (await appointment(patients[0], { daysAhead: 7 })).id,
       bookedYesterday: (await appointment(patients[1], { daysAhead: 0, bookedDaysAgo: 1 })).id,
       walkIn: (await appointment(patients[2], { daysAhead: 0, walkIn: true })).id,
+      flaggedAhead: (await appointment(patients[3], { daysAhead: 5, walkIn: true })).id,
     };
     admin = await apiAs("admin");
   });
@@ -47,5 +53,6 @@ test.describe("GHM: export the appointments booked today, for any date", () => {
     expect(ids).toContain(appts.nextWeek);
     expect(ids).not.toContain(appts.bookedYesterday);
     expect(ids).not.toContain(appts.walkIn);
+    expect(ids).toContain(appts.flaggedAhead);
   });
 });

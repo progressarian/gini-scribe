@@ -20,6 +20,7 @@ import {
 } from "./labCaseLines.js";
 import { REMOVED_BY_DESK_SQL } from "./visitLines.js";
 import { HELD_AT_RECEPTION, RECEPTION_MONEY_SQL, SETTLED_AT_RECEPTION } from "./orderLinks.js";
+import { LINE_ORDERED_AT_SQL, ORDERED_AFTER_CONSULT_SQL } from "./afterConsult.js";
 
 const ONLINE_BOOKING = "(tele|online|video)";
 
@@ -57,7 +58,8 @@ const COUNTER_SELECT = `
          cs.seen, cs.consultation_billed,
          EXISTS (SELECT 1 FROM consultant_changes cc
                   WHERE cc.visit_id = a.id AND cc.status = 'pending') AS consultant_changed,
-         ts.tests_owed, ts.not_priced, ts.settled_orders, lcs.case_tests_owed
+         ts.tests_owed, ts.not_priced, ts.settled_orders, lcs.case_tests_owed,
+         ts.new_tests_owed, nl.new_lines_owed
     FROM (${ARRIVAL_SELECT}) a
     JOIN giniflow_visits gv ON gv.id = a.id
     LEFT JOIN LATERAL (
@@ -115,8 +117,11 @@ const COUNTER_SELECT = `
       SELECT COUNT(t.id) FILTER (WHERE NOT o.settled AND NOT t.on_final)::int AS tests_owed,
              COUNT(t.id) FILTER (WHERE NOT o.settled AND NOT t.on_final
                                    AND NOT t.priced)::int AS not_priced,
-             COUNT(DISTINCT o.id) FILTER (WHERE o.settled)::int AS settled_orders
+             COUNT(DISTINCT o.id) FILTER (WHERE o.settled)::int AS settled_orders,
+             COUNT(t.id) FILTER (WHERE NOT o.settled AND NOT t.on_final
+                                   AND o.after_consult)::int AS new_tests_owed
         FROM (SELECT o.id,
+                     ${ORDERED_AFTER_CONSULT_SQL("o.visit_id", "o.created_at")} AS after_consult,
                      (o.payment_status IN (${SETTLED_ORDER}) AND o.amount_total > 0)
                      OR (${SETTLED_AT_RECEPTION} AND ${HELD_AT_RECEPTION("rm")}) AS settled
                 FROM giniflow_lab_orders o
@@ -137,6 +142,25 @@ const COUNTER_SELECT = `
            WHERE ot.lab_order_id = o.id
         ) t ON TRUE
     ) ts ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT COUNT(*)::int AS new_lines_owed
+        FROM bill_lines l
+        JOIN bills b ON b.id = l.bill_id
+        JOIN service_items si ON si.id = l.service_item_id
+        CROSS JOIN (SELECT gv.id, gv.patient_id, gv.visit_date, gv.appointment_id, np.file_no
+                      FROM patients np WHERE np.id = gv.patient_id) nv
+       WHERE l.visit_id = a.id AND l.is_live AND si.kind = 'test' AND l.lab_order_id IS NULL
+         AND b.status = 'draft' AND b.bill_type = 'invoice' AND NOT ${PAID_DRAFT_SQL("b")}
+         AND ${ORDERED_AFTER_CONSULT_SQL(
+           "a.id",
+           LINE_ORDERED_AT_SQL({
+             line: "l",
+             visit: "nv",
+             catalog: "si.test_catalog_id",
+             matches: "day_tests",
+           }),
+         )}
+    ) nl ON TRUE
     LEFT JOIN LATERAL (
       SELECT COUNT(DISTINCT cm.catalog_id)::int AS case_tests_owed
         FROM (SELECT gv.id, gv.patient_id, gv.visit_date, gv.appointment_id, cp.file_no
@@ -171,6 +195,7 @@ function billHints(r) {
     notPriced: r.not_priced || 0,
     due: paise(r.due) + paise(r.draft_due),
     consultantChanged: Boolean(r.consultant_changed),
+    newTests: (r.new_tests_owed || 0) + (r.new_lines_owed || 0),
   };
 }
 
@@ -180,6 +205,7 @@ function groupOf(r, hints, status) {
     hints.consultation ||
     hints.consultantChanged ||
     hints.tests > 0 ||
+    hints.newTests > 0 ||
     hints.due > 0 ||
     r.open_drafts > 0
   ) {

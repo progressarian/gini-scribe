@@ -1,8 +1,9 @@
 import pool from "../../config/db.js";
-import { CASE_NOT_CANCELLED_SQL, LIVE_BILL_ITEM_SQL } from "../giniflow/testsHold.js";
+import { LIVE_BILL_ITEM_SQL } from "../giniflow/testsHold.js";
 import { addLineIn, addLinesToDraftIn, readBill } from "./bills.js";
 import { addsLabCaseTests } from "./billingSettings.js";
 import { TEST_MATCHES_SQL } from "./testMatch.js";
+import { VISIT_LAB_CASE_TESTS_SQL } from "./visitLabCases.js";
 import { httpError, inTransaction } from "./transaction.js";
 import { REMOVED_BY_DESK_SQL, suggestionPrice } from "./visitLines.js";
 
@@ -14,20 +15,7 @@ function cleanUuid(value, label) {
   return text.toLowerCase();
 }
 
-export const VISIT_LAB_CASE_TESTS_SQL = (v) => `
-  SELECT lc.case_no, btrim(n.test_name) AS test_name
-    FROM lab_cases lc
-    CROSS JOIN LATERAL unnest(COALESCE(lc.test_names, '{}'::text[])) AS n(test_name)
-   WHERE (lc.appointment_id = ${v}.appointment_id
-          OR (lc.case_date = ${v}.visit_date
-              AND (lc.patient_id = ${v}.patient_id
-                   OR (lc.patient_id IS NULL
-                       AND lc.raw_list_json->'patient'->>'healthray_uid' = ${v}.file_no))
-              AND NOT EXISTS (SELECT 1 FROM giniflow_visits ov
-                               WHERE ov.appointment_id = lc.appointment_id
-                                 AND ov.id <> ${v}.id)))
-     AND btrim(n.test_name) <> ''
-     AND ${CASE_NOT_CANCELLED_SQL("lc")}`;
+export { VISIT_LAB_CASE_TESTS_SQL };
 
 export const REFUNDED_IN_HEALTHRAY_SQL = (v) => `
   WITH hr AS (

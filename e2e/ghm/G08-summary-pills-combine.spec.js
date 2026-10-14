@@ -192,4 +192,24 @@ test.describe("GHM: a Calling pill combines with Booked", () => {
       await query(`DELETE FROM patients WHERE id = ANY($1::int[])`, [ids]);
     }
   });
+
+  test("10. a patient due back after a first visit counts as Follow-up, not new", async () => {
+    const back = await buildPatient();
+    try {
+      await query(
+        `INSERT INTO appointments
+           (patient_id, file_no, patient_name, phone, doctor_name, appointment_date, time_slot,
+            status, visit_type, preferred_date)
+         VALUES ($1, $2, $3, $4, 'Dr E2E Banshali',
+                 (NOW() AT TIME ZONE 'Asia/Kolkata')::date - 40, '10:00', 'completed', 'New Patient',
+                 (NOW() AT TIME ZONE 'Asia/Kolkata')::date)`,
+        [back.id, back.file_no, back.name, back.phone],
+      );
+      const ids = (await list("follow_up")).data.map((r) => r.patient_id);
+      expect(ids).toContain(back.id);
+    } finally {
+      await query(`DELETE FROM appointments WHERE patient_id = $1`, [back.id]);
+      await query(`DELETE FROM patients WHERE id = $1`, [back.id]);
+    }
+  });
 });

@@ -250,6 +250,7 @@ function OrderCard({ order, onClear, pending, actorId, onCancelTest, canCancelTe
           <div className="toc-name">
             {order.name} <span className="badge b-ink">{order.fileNo}</span>
             {order.kind === "machine" && <span className="badge b-ink">Machine Room</span>}
+            {order.afterConsult && <span className="badge b-amb">New after consultation</span>}
             {order.paymentStatus !== "paid" && order.onBill === false && (
               <span className="badge b-amb">Not on HealthRay bill yet</span>
             )}
