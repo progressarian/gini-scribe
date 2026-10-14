@@ -89,21 +89,10 @@ import { duesToday } from "../services/billing/dues.js";
 import { refundBoard } from "../services/billing/refundBoard.js";
 import * as shifts from "../services/billing/cashShifts.js";
 import * as requests from "../services/billing/billingRequests.js";
-import {
-  consultationForDesk,
-  consultationSuggestion,
-  notPricedForVisit,
-  testsForDesk,
-} from "../services/billing/visitLines.js";
-import {
-  addLabCaseTests,
-  labCaseSuggestion,
-  labCaseTestsForDesk,
-} from "../services/billing/labCaseLines.js";
-import {
-  healthrayBillSuggestion,
-  healthrayLinesForDesk,
-} from "../services/billing/healthrayBillLines.js";
+import { consultationSuggestion, notPricedForVisit } from "../services/billing/visitLines.js";
+import { addLabCaseTests, labCaseSuggestion } from "../services/billing/labCaseLines.js";
+import { healthrayBillSuggestion } from "../services/billing/healthrayBillLines.js";
+import { openDeskDraft } from "../services/billing/deskOpen.js";
 import { paidAtReception } from "../services/billing/receptionOrders.js";
 import { deskSettings } from "../services/billing/billingSettings.js";
 import { searchDeskItems } from "../services/billing/serviceItems.js";
@@ -298,15 +287,7 @@ router.post(
   `${BASE}/visits/:visitId/bills`,
   desk,
   validate(billingDraftOpenSchema, BILLING_DESK_LABELS),
-  run("Open draft bill", 200, async (req) => {
-    const opening = { ...ctx(req), unsavedDraft: true };
-    await consultationForDesk(req.params.visitId, opening);
-    await healthrayLinesForDesk(req.params.visitId, opening);
-    await testsForDesk(req.params.visitId, opening);
-    await labCaseTestsForDesk(req.params.visitId, opening);
-    await bills.clearReceptionLines(req.params.visitId, opening);
-    return bills.openDraft(req.params.visitId, opening);
-  }),
+  run("Open draft bill", 200, (req) => openDeskDraft(req.params.visitId, ctx(req))),
 );
 
 router.get(

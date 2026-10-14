@@ -335,6 +335,7 @@ export async function buildVisitPayloadFromDb(pid, { appointmentId } = {}) {
                  OR healthray_follow_up->>'date' ~ '^\\d{4}-\\d{2}-\\d{2}'
                  OR btrim(COALESCE(healthray_follow_up->>'timing', '')) <> '')
             AND NOT ${borrowedFollowUp("appointments")}
+            AND COALESCE(status, '') <> 'cancelled'
             AND appointment_date <= COALESCE(
                   (SELECT appointment_date FROM appointments WHERE id=$2::int),
                   appointment_date)

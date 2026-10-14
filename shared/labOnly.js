@@ -10,3 +10,8 @@ export const LAB_ONLY_DOCTOR = "Dr. Hospital Admin";
 
 export const isLabOnlyDoctor = (name) =>
   (name || "").trim().toLowerCase() === LAB_ONLY_DOCTOR.toLowerCase();
+
+export const isInvestigationVisit = (row) =>
+  String(row?.visit_type || "")
+    .trim()
+    .toLowerCase() === "investigation" || isLabOnlyDoctor(row?.doctor_name);

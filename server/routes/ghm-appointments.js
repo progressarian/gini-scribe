@@ -32,6 +32,14 @@ import { listSchemes, isKnownScheme } from "../services/patientSchemes.js";
 import { slotDoctorKey, slotStartHour } from "../../shared/slotHour.js";
 import { resolveAppointmentId, opensLead } from "../services/ghmLead.js";
 import { editBlockedFor, patientEditBlockedFor } from "../services/obtAssignments.js";
+import {
+  missedCte,
+  historyCte,
+  MISSED_MAX_DAYS,
+  OFTEN_MISSES_AT,
+  REPEATEDLY_MISSES_AT,
+  RISK_LEVELS,
+} from "../services/ghmMissed.js";
 
 const router = Router();
 
@@ -1198,11 +1206,93 @@ router.get("/ghm-appointments", async (req, res) => {
                 a.healthray_follow_up,
                 a.appointment_type AS mode_of_appointment,
                 COALESCE(a.assigned_mo, c.mo_name) AS assigned_mo,
-                COALESCE(a.prescription_explained_by, st.rx_explained_by) AS prescription_explained_by`;
+                COALESCE(NULLIF(a.prescription_explained_by, ''), NULLIF(st.rx_explained_by, ''),
+                  (SELECT d.name
+                     FROM giniflow_visits gv
+                     JOIN giniflow_visit_events e
+                       ON e.visit_id = gv.id AND e.meta->>'explained' = 'true'
+                     JOIN doctors d ON d.id = e.actor_id
+                    WHERE gv.patient_id = p.id AND gv.visit_date = a.appointment_date
+                    ORDER BY e.occurred_at DESC
+                    LIMIT 1)) AS prescription_explained_by`;
     const joins = `FROM appointments a
          LEFT JOIN patients p ON p.file_no = a.file_no
          LEFT JOIN consultations c ON c.id = a.consultation_id
          LEFT JOIN station_tracking st ON st.appointment_id = a.id`;
+
+    if (mode === "missed") {
+      const isoDay = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || "")) ? String(v) : null);
+      const mParams = [isoDay(req.query.from), isoDay(req.query.to)];
+      let mWhere = `WHERE TRUE${NOT_BLOCKED("a")}${homeCond}${modeCond}${callsCond}`;
+      if (doctor) {
+        mParams.push(`%${doctor}%`);
+        mWhere += ` AND (a.doctor_name ILIKE $${mParams.length} OR a.preferred_doctor ILIKE $${mParams.length})`;
+      }
+      for (const t of String(req.query.q || "")
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 6)) {
+        mParams.push(`%${t}%`);
+        mWhere += ` AND (a.patient_name ILIKE $${mParams.length} OR a.file_no ILIKE $${mParams.length} OR a.phone ILIKE $${mParams.length} OR alt_phone_text(a.alt_phone) ILIKE $${mParams.length})`;
+      }
+      const risk = RISK_LEVELS[String(req.query.risk || "")];
+      if (risk) mWhere += ` AND ${risk}`;
+      const mOrder =
+        req.query.sort === "risk"
+          ? "h.miss_total DESC, m.missed_date DESC, a.patient_name ASC, a.id ASC"
+          : "m.missed_date DESC, a.patient_name ASC, a.id ASC";
+      const range = `bounds AS (
+          SELECT LEAST(COALESCE($2::date, ${IST_TODAY} - 1), ${IST_TODAY} - 1) AS t
+        ),
+        missed_range AS (
+          SELECT GREATEST(COALESCE($1::date, t - 6), t - ${MISSED_MAX_DAYS - 1}) AS f, t FROM bounds
+        )`;
+      const missedJoins = joins.replace(
+        "FROM appointments a",
+        `FROM missed m
+         JOIN history h ON h.file_no = m.file_no
+         JOIN appointments a ON a.id = m.id`,
+      );
+      const { rows } = await pool.query(
+        `WITH ${range},
+              ${missedCte("(SELECT f FROM missed_range)", "(SELECT t FROM missed_range)")},
+              ${historyCte()}
+         SELECT ${baseCols},
+                a.call_status AS call_status_any,
+                ${callStatusToday("a")} AS call_status,
+                FALSE AS via_preferred,
+                FALSE AS is_booked,
+                ${BOOKING_LAPSED("a")} AS booking_lapsed,
+                ${BOOKING_NO_SLOT("a")} AS booking_no_slot,
+                ${BOOKED_DATE("a")} AS booked_for_date,
+                ${ownFu("a")} AS follow_up_date,
+                m.missed_date::text AS missed_date,
+                m.missed_kind,
+                h.cancelled_count,
+                h.rescheduled_count,
+                h.missed_count,
+                CASE WHEN h.miss_total >= ${REPEATEDLY_MISSES_AT} THEN 'repeatedly'
+                     WHEN h.miss_total >= ${OFTEN_MISSES_AT} THEN 'often' END AS miss_risk,
+                (SELECT f::text FROM missed_range) AS range_from,
+                (SELECT t::text FROM missed_range) AS range_to,
+                COUNT(*) OVER () AS total_rows
+         ${missedJoins}
+         ${mWhere}
+         ORDER BY ${mOrder}
+         LIMIT $${mParams.length + 1} OFFSET $${mParams.length + 2}`,
+        [...mParams, effLimit, offset],
+      );
+      const total = Number(rows[0]?.total_rows || 0);
+      return res.json({
+        data: rows,
+        total,
+        summary: {},
+        page: +page,
+        limit: effLimit,
+        totalPages: Math.ceil(total / effLimit),
+      });
+    }
 
     if (mode === "lookup") {
       const q = (req.query.q || "").trim();

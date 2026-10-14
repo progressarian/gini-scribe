@@ -518,8 +518,11 @@ export async function getStationTimes(
     const ordered = orderTimes.filter((t) => t > entry.enteredAt && t <= end);
     return ordered.length ? [[entry.enteredAt, new Date(Math.max(...ordered))]] : [];
   });
+  const atVitals = raw
+    .filter((entry) => entry.status === "with_vitals" && !entry.timestampOnly)
+    .map((entry) => [entry.enteredAt, entry.leftAt || now]);
   const awaySteps = segments.flatMap((seg) =>
-    cut([[seg.from, seg.to || now]], consults)
+    cut([[seg.from, seg.to || now]], [...consults, ...atVitals])
       .filter(([a, b]) => b > a)
       .map(([a, b]) => ({
         timestampOnly: false,
@@ -539,7 +542,8 @@ export async function getStationTimes(
   const awayIntervals = awaySteps.map((a) => [a.enteredAt, a.leftAt || now]);
   const withAway = [
     ...raw.flatMap((entry) => {
-      if (entry.timestampOnly || !awayIntervals.length) return [entry];
+      if (entry.timestampOnly || !awayIntervals.length || entry.status === "with_vitals")
+        return [entry];
       const end = entry.leftAt || now;
       return cut([[entry.enteredAt, end]], awayIntervals)
         .filter(([a, b]) => b > a)

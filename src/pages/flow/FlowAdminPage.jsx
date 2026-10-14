@@ -147,12 +147,13 @@ export default function FlowAdminPage() {
             <div className="flow-sec-title">Samples-only patients</div>
           </div>
           <div className="fset__cardsub">
-            Patients booked for lab samples alone, no consultation. Hidden by default from every
-            Gini Flow station screen and the coordinator board.
+            Patients booked for lab samples alone, no consultation. Lab Collection, Lab Processing
+            and the Payments tab always show them. This switch hides them from the coordinator board
+            and the other station screens.
           </div>
           <label
             className="fset__toggle"
-            title="Show samples-only patients on station screens and the board again"
+            title="Show samples-only patients on the board and the other station screens"
           >
             <input
               type="checkbox"
@@ -166,7 +167,7 @@ export default function FlowAdminPage() {
                       toast(
                         hide
                           ? "Samples-only patients hidden again"
-                          : "Samples-only patients are visible again on every station",
+                          : "Samples-only patients are visible on the board and every station",
                         "success",
                       ),
                     onError: (e) => toast(e?.response?.data?.error || "Could not save", "error"),
@@ -174,7 +175,7 @@ export default function FlowAdminPage() {
                 );
               }}
             />
-            Hide samples-only patients from stations and the board
+            Hide samples-only patients from the board and the other stations
           </label>
         </div>
 

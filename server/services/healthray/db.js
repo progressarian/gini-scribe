@@ -22,12 +22,14 @@ async function autoSavePrescriptionAfterSeen(patientId, appointmentId, consultat
          COALESCE(jsonb_array_length(healthray_medications), 0) AS hr_meds,
          COALESCE(jsonb_array_length(healthray_diagnoses), 0)   AS hr_dx,
          COALESCE(jsonb_array_length(opd_medications), 0)       AS opd_meds,
-         COALESCE(jsonb_array_length(opd_diagnoses), 0)         AS opd_dx
+         COALESCE(jsonb_array_length(opd_diagnoses), 0)         AS opd_dx,
+         opd_backfilled_at IS NOT NULL                          AS note_parsed
        FROM appointments WHERE id = $1`,
       [appointmentId],
     );
     const r = rows[0] || {};
-    const hasClinical = (r.hr_meds || 0) + (r.hr_dx || 0) + (r.opd_meds || 0) + (r.opd_dx || 0) > 0;
+    const hasClinical =
+      r.note_parsed || (r.hr_meds || 0) + (r.hr_dx || 0) + (r.opd_meds || 0) + (r.opd_dx || 0) > 0;
     if (!hasClinical) {
       log(
         "autoSavePrescription",

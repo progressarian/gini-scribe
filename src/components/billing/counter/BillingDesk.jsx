@@ -136,9 +136,8 @@ function useLeaveGuard(bill) {
   const discardDraft = useDiscardDraft();
   const isDraft = bill?.status === "draft";
   const edited = isDraft && baseline !== null && bill.version !== baseline;
-  const holding = isDraft && (edited || !bill.saved);
   const held = useRef(false);
-  held.current = holding;
+  held.current = edited;
 
   useEffect(() => {
     setBaseline(bill ? bill.version : null);
@@ -150,13 +149,7 @@ function useLeaveGuard(bill) {
   );
 
   useEffect(() => {
-    if (blocker.state !== "blocked") return;
-    if (edited) {
-      setLeaving({ busy: false, error: null });
-      return;
-    }
-    discardDraft.mutate({ billId: bill.id, visitId: bill.visit_id });
-    blocker.proceed();
+    if (blocker.state === "blocked") setLeaving({ busy: false, error: null });
   }, [blocker.state]);
 
   useEffect(() => {

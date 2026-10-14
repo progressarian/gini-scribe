@@ -84,5 +84,6 @@ test.describe.serial("D05 the patients holding a deposit, and opening one at the
       .click();
     await expect(page).toHaveURL(new RegExp(`visit=${here.visit}`));
     await expect(page.getByText("No visit on the floor today")).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "Bill actions" })).toBeVisible();
   });
 });

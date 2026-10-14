@@ -22,6 +22,7 @@
 //   --territory  assign every doctor in this territory to them (repeatable, comma-separated)
 //   --pin        4-6 digits; omit to create the login inactive until they have one
 //   --mobile     contact number, normalised on write
+//   --email      work email, stored on crm.users
 //   --commit     actually write
 
 import "../loadEnv.js";
@@ -43,6 +44,7 @@ const TERRITORIES = (flag("territory", "") || "")
   .filter(Boolean);
 const PIN = flag("pin");
 const MOBILE = flag("mobile");
+const EMAIL = flag("email")?.trim().toLowerCase() || null;
 const COMMIT = has("commit");
 
 // Mirrors crm.user_role's CHECK constraint. Kept as a literal rather than
@@ -191,15 +193,15 @@ try {
     await client.query(
       `UPDATE crm.users SET role=$2, manager_id=COALESCE($3, manager_id),
               scribe_doctor_id=COALESCE($4, scribe_doctor_id), mobile=COALESCE($5, mobile),
-              is_active=true
+              email=COALESCE($6, email), is_active=true
         WHERE id=$1`,
-      [userId, ROLE, manager?.id ?? null, scribe?.id ?? null, MOBILE],
+      [userId, ROLE, manager?.id ?? null, scribe?.id ?? null, MOBILE, EMAIL],
     );
   } else {
     const { rows } = await client.query(
-      `INSERT INTO crm.users (full_name, role, manager_id, scribe_doctor_id, mobile, is_active)
-       VALUES ($1, $2, $3, $4, $5, true) RETURNING id`,
-      [NAME, ROLE, manager?.id ?? null, scribe?.id ?? null, MOBILE],
+      `INSERT INTO crm.users (full_name, role, manager_id, scribe_doctor_id, mobile, email, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6, true) RETURNING id`,
+      [NAME, ROLE, manager?.id ?? null, scribe?.id ?? null, MOBILE, EMAIL],
     );
     userId = rows[0].id;
   }

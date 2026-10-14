@@ -31,7 +31,7 @@ import {
 import { blockDetail } from "../patientBlockView.js";
 import { mirrorFloorStatus } from "../appointmentStatus.js";
 import { createWalkinBooking } from "../walkinBooking.js";
-import { LAB_ONLY_DOCTOR, labOnlyHiddenPredicate } from "./labOnlyVisits.js";
+import { LAB_ONLY_DOCTOR, labOnlyHiddenPredicate, labOnlyPredicate } from "./labOnlyVisits.js";
 import { hideLabOnlyPatients } from "./floorSettings.js";
 import {
   CLAIM_STATE,
@@ -117,11 +117,7 @@ const ORDER_SELECT = `
      AND o.urgency = 'today'
      -- A patient who never arrived or has gone home is not at the counter.
      AND v.current_status NOT IN ('no_show', 'cancelled')
-     -- Samples-only patients don't show on any station screen while the
-     -- floor has that toggled on (settings/flow) — see awaitingRegistration()
-     -- in labStation.js for where this started. Their billing runs through
-     -- HealthRay directly, not this queue.
-     AND NOT ${labOnlyHiddenPredicate("v", "$2", "$3")}`;
+     AND NOT (o.kind <> 'lab' AND ${labOnlyHiddenPredicate("v", "$2", "$3")})`;
 
 // An order written before amount_total existed carries the price only on its
 // test lines. The card falls back to their sum, so the money maths has to use
@@ -248,14 +244,13 @@ const HEALTHRAY_LAB_SELECT = (stepStatuses) => `
     JOIN lab_cases lc
       ON lc.case_date = v.visit_date AND lc.patient_id = v.patient_id
      AND ${LIVE_LAB_CASE_SQL("lc")}
-     AND NOT ${caseFromEarlierLabOnlyVisit("v")}
+     AND (${labOnlyPredicate("v", "$2")} OR NOT ${caseFromEarlierLabOnlyVisit("v")})
    WHERE v.visit_date = $1::date
      AND v.merged_into_visit_id IS NULL
      AND NOT COALESCE(p.is_blocked, FALSE)
      AND v.current_status NOT IN ('no_show', 'cancelled')
      AND NOT EXISTS (SELECT 1 FROM giniflow_lab_orders o
                       WHERE o.visit_id = v.id AND o.urgency = 'today' AND o.kind = 'lab')
-     AND NOT ${labOnlyHiddenPredicate("v", "$2", "$3")}
    GROUP BY v.id, p.id, lb.id, bs.id
    ORDER BY registered_at NULLS LAST`;
 
@@ -322,7 +317,7 @@ export async function getPaymentQueue(visitDate, db = pool, { q = "" } = {}) {
   });
   const { rows: chargeRows } = await db.query(CHARGE_SELECT, [visitDate]);
   const allCharges = chargeRows.map(shapeCharge);
-  const labParams = [visitDate, LAB_ONLY_DOCTOR, await hideLabOnlyPatients(db)];
+  const labParams = [visitDate, LAB_ONLY_DOCTOR];
   const { rows: hrLabRows } = await db.query(
     HEALTHRAY_LAB_SELECT("'pending', 'in_progress'"),
     labParams,

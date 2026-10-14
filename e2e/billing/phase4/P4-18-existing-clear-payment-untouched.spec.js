@@ -27,7 +27,7 @@ const LINES = "server/services/billing/visitLines.js";
 const VALVE_FILE = "shared/manualFloor.js";
 const VALVE = "SCRIBE_BILL_TAKES_TEST_PAYMENTS";
 const PINNED = {
-  getPaymentQueue: "f2c83067042689ce9c10e6ffc9a802ed",
+  getPaymentQueue: "284dbd7e994e3cf51ed620b0904abacd",
   clearPayment: "218f621d60d191d2d03db1d60efa536f",
   refuseOrderOnBill: "a5954f99178660f014c9af2004f86dce",
 };

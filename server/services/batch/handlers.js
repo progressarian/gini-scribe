@@ -20,7 +20,10 @@ export const BATCH_HANDLERS = {
     await applySideEffectsResult(context, message);
   },
   healthray_parse: async (context, message) => {
-    const parsed = extractPrescriptionFromMessage(message);
+    const parsed = extractPrescriptionFromMessage(
+      message,
+      String(context?.appointmentDate || "").slice(0, 10) || null,
+    );
     if (!parsed) throw new Error("healthray_parse: unparseable / invalid batch result");
     await applyOpdParse(context, parsed);
   },

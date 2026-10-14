@@ -21,7 +21,7 @@ import { slotStartTime } from "../../../shared/slotHour.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { advanceStatus, IST_TODAY } from "./statusEngine.js";
 import { recordHealthrayObservation, firstUnrecordedStation } from "./observation.js";
-import { TESTS_HOLD_SQL, testsOpenInScribe } from "./testsHold.js";
+import { LIVE_LAB_CASE_SQL, TESTS_HOLD_SQL, testsOpenInScribe } from "./testsHold.js";
 import { canReadBill, syncBillingForVisitId } from "./machineSync.js";
 import { directConsultSql } from "../../../shared/directConsult.js";
 import { reassignConsultant } from "./reassign.js";
@@ -382,6 +382,11 @@ export async function sweepLabOnlyExits(client, day, graceMinutes = LAB_ONLY_EXI
           SELECT 1 FROM giniflow_visit_steps s
            WHERE s.visit_id = v.id AND s.chain_status = ANY($5)
         )
+        AND NOT EXISTS (
+          SELECT 1 FROM giniflow_visit_steps s
+           WHERE s.visit_id = v.id AND s.step_catalog_id = 'lab_billing'
+             AND s.status IN ('pending', 'in_progress')
+        )
         AND ${labOnlyPredicate("v", "$4")}`,
     [
       day,
@@ -419,6 +424,49 @@ export async function sweepLabOnlyExits(client, day, graceMinutes = LAB_ONLY_EXI
     }
   }
   return swept;
+}
+
+export async function addLabOnlyBillingSteps(client, day) {
+  try {
+    return await insertLabOnlyBillingSteps(client, day);
+  } catch (e) {
+    console.error("[giniflow] lab-only billing steps:", e.message);
+    return 0;
+  }
+}
+
+async function insertLabOnlyBillingSteps(client, day) {
+  const { rowCount } = await client.query(
+    `INSERT INTO giniflow_visit_steps
+       (visit_id, step_order, step_catalog_id, step_name, planned_duration_min,
+        station, assigned_role, chain_status, source)
+     SELECT v.id,
+            COALESCE((SELECT max(s.step_order) FROM giniflow_visit_steps s WHERE s.visit_id = v.id), 0) + 1,
+            c.id, c.name, c.default_duration_min, c.station, c.assigned_role, c.chain_status, 'auto'
+       FROM giniflow_visits v
+       JOIN patients p ON p.id = v.patient_id
+       CROSS JOIN flow_step_catalog c
+      WHERE c.id = 'lab_billing'
+        AND v.visit_date = $1::date
+        AND v.merged_into_visit_id IS NULL
+        AND v.current_status NOT IN ('no_show', 'cancelled')
+        AND ${labOnlyPredicate("v", "$2")}
+        AND EXISTS (
+          SELECT 1 FROM lab_cases lc
+           WHERE lc.case_date = v.visit_date
+             AND (lc.patient_id = v.patient_id
+                  OR (lc.patient_id IS NULL
+                      AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))
+             AND ${LIVE_LAB_CASE_SQL("lc")})
+        AND NOT EXISTS (
+          SELECT 1 FROM giniflow_visit_steps s
+           WHERE s.visit_id = v.id AND s.step_catalog_id = 'lab_billing')
+        AND NOT EXISTS (
+          SELECT 1 FROM giniflow_lab_orders o
+           WHERE o.visit_id = v.id AND o.urgency = 'today' AND o.kind = 'lab')`,
+    [day, LAB_ONLY_DOCTOR],
+  );
+  return rowCount;
 }
 
 const ENGAGED_ROOMS = ["with_sd", "with_doctor"];
@@ -686,6 +734,7 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
     // only manual close on this floor — can never be pressed for them. Gating
     // this too is what left them in "In building now" all day with no station
     // able to end it. The reports being in IS the floor's own record here.
+    result.labOnlyBilling = await addLabOnlyBillingSteps(client, day);
     result.labOnlySwept = await sweepLabOnlyExits(client, day);
     result.reopenedAfterLabOnly = await reopenAfterLabOnlyExit(client, day);
     result.lateTestsClosed = await sweepLateTestExits(client, day);

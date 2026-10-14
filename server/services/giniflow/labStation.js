@@ -30,7 +30,7 @@ import {
   NOT_A_MARKER_SQL,
   SAMPLE_BREAK_REASON,
 } from "../../../shared/giniflowStatus.js";
-import { LAB_ONLY_DOCTOR, labOnlyPredicate, labOnlyHiddenPredicate } from "./labOnlyVisits.js";
+import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { hideLabOnlyPatients } from "./floorSettings.js";
 import { syncLabStepsFromLab } from "./journey.js";
 import { labStepsAreManual, labShowsHealthrayCases } from "../../../shared/manualFloor.js";
@@ -226,11 +226,7 @@ export const LAB_GROUPS = FILTER_TO_TARGETS;
 // call" chip both count it — an order-less patient would corrupt both. This is
 // its own list, the way the vitals station keeps its held patients beside the
 // queue rather than in it.
-// Admin-toggleable (floorSettings.js, /settings/flow): the floor can turn
-// samples-only patients back on for this list — and every other station —
-// without a deploy. Off by default, matching the decision this shipped with.
 async function awaitingRegistration(visitDate, search, db) {
-  if (await hideLabOnlyPatients(db)) return [];
   const { rows } = await db.query(
     `SELECT v.id AS visit_id, v.current_status,
             p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
@@ -306,7 +302,6 @@ export async function getLabQueue(
   { group = "all", room = null } = {},
 ) {
   const search = q && String(q).trim().length >= 2 ? String(q).trim() : null;
-  const hideLabOnly = await hideLabOnlyPatients(db);
   // A fully manual lab works only what Scribe was asked for. With the case list
   // off, showing the hospital's own cases would put work on the bench's screen
   // that nobody here ordered and the bench cannot bill, collect against or
@@ -377,10 +372,6 @@ export async function getLabQueue(
         AND o.urgency = 'today'
         -- No sample to take from a patient who never arrived or has gone home.
         AND v.current_status NOT IN ('no_show', 'cancelled')
-        -- Samples-only patients don't show on any station screen, this one
-        -- included, while the floor has that toggled on (settings/flow) — see
-        -- awaitingRegistration() above.
-        AND NOT ${labOnlyHiddenPredicate("v", "$3", "$4")}
         AND (
           $2::text IS NULL
           OR p.name ILIKE '%' || $2 || '%'
@@ -392,7 +383,7 @@ export async function getLabQueue(
           )
         )
       ORDER BY o.created_at`,
-    [visitDate, search, LAB_ONLY_DOCTOR, hideLabOnly],
+    [visitDate, search],
   );
   const rows = queued.filter(
     (r) => r.sample_status !== SENT_OUTSIDE && !(room === LAB_ROOMS.PROCESSING && r.is_outsourced),
@@ -746,6 +737,7 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
                WHERE hv.patient_id = COALESCE(lc.patient_id, uid.id)
                  AND hv.visit_date = lc.case_date
                  AND ${caseFromEarlierLabOnlyVisit("hv")}
+                 AND NOT ${labOnlyPredicate("hv", "$3")}
             )
           )
           -- NO DOUBLE ROWS. Once reception or a doctor raises the same patient's
@@ -877,9 +869,6 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
         AND NOT ($4::boolean AND v.id IS NULL)
       GROUP BY c.grp, c.pid, p.id, p.name, p.file_no, p.age, p.sex, v.current_status,
                v.results_status, v.id
-      -- Samples-only patients don't show on any station screen, this one
-      -- included — see awaitingRegistration() above.
-      HAVING NOT bool_or(${labOnlyHiddenPredicate("v", "$3", "$4")})
       ORDER BY (count(*) FILTER (WHERE NOT c.results_synced)) DESC, min(c.fetched_at)`,
     [visitDate, q, LAB_ONLY_DOCTOR, hideLabOnly],
   );
@@ -1096,10 +1085,19 @@ async function resolveVisitForCase(db, caseNo) {
   return sameDay.length === 1 ? sameDay[0].id : null;
 }
 
-async function assertLabBillingCleared(db, visitId) {
+async function isLabOnlyVisit(db, visitId) {
+  if (!visitId) return false;
+  const { rows } = await db.query(
+    `SELECT ${labOnlyPredicate("v", "$2")} AS lab_only FROM giniflow_visits v WHERE v.id = $1`,
+    [visitId, LAB_ONLY_DOCTOR],
+  );
+  return !!rows[0]?.lab_only;
+}
+
+async function assertLabBillingCleared(db, visitId, before = "the sample") {
   if (!visitId) {
     throw Object.assign(
-      new Error("Lab payment is not cleared — reception must clear Lab Billing before the sample"),
+      new Error(`Lab payment is not cleared — reception must clear Lab Billing before ${before}`),
       { status: 409 },
     );
   }
@@ -1117,7 +1115,7 @@ async function assertLabBillingCleared(db, visitId) {
   if (billing_status !== "done") {
     throw Object.assign(
       new Error(
-        `${name}'s lab payment is not cleared — reception must clear Lab Billing before the sample`,
+        `${name}'s lab payment is not cleared — reception must clear Lab Billing before ${before}`,
       ),
       { status: 409 },
     );
@@ -1703,7 +1701,13 @@ export async function markLabCaseAction(
   if ((action === "sample_taken" || action === "drawing_started") && !undo && !drawnAtBench) {
     const what = action === "drawing_started" ? "start the collection" : "collect the sample";
     await assertPatientIsFree(db, resolvedVisitId, what);
-    await assertLabBillingCleared(db, resolvedVisitId);
+    if (!(await isLabOnlyVisit(db, resolvedVisitId))) {
+      await assertLabBillingCleared(db, resolvedVisitId);
+    }
+  }
+
+  if (action === "report_uploaded" && !undo && (await isLabOnlyVisit(db, resolvedVisitId))) {
+    await assertLabBillingCleared(db, resolvedVisitId, "the report");
   }
 
   if (undo) {
@@ -2030,6 +2034,10 @@ export async function uploadLabCaseReport(
   // on one. Refuse rather than store an orphan nobody will ever see.
   if (!c.patient_id) {
     throw Object.assign(new Error("This case is not linked to a patient yet"), { status: 409 });
+  }
+  const visitId = await resolveVisitForCase(db, caseNo);
+  if (await isLabOnlyVisit(db, visitId)) {
+    await assertLabBillingCleared(db, visitId, "the report");
   }
   if (c.pdf_storage_path && !confirmAdditional) {
     throw Object.assign(new Error("A report is already on this case"), {

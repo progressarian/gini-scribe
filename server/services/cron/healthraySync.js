@@ -1520,7 +1520,7 @@ export async function applyOpdParse(ctx, parsed) {
   }
 
   await pool.query(`UPDATE appointments SET opd_backfilled_at = NOW() WHERE id = $1`, [apptId]);
-  if (medications.length > 0 || diagnoses.length > 0) await maybeAutoSavePrescription(apptId);
+  await maybeAutoSavePrescription(apptId);
 }
 
 let dailyBackfillInFlight = false;

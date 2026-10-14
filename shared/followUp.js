@@ -39,7 +39,8 @@ export function followUpDueDate(fromDate, timing) {
   const match = followUpTiming(timing)
     .toLowerCase()
     .match(/^(\d{1,2})\s*(day|week|month|year)/);
-  if (!from || !match) return "";
+  if (!from) return "";
+  if (!match) return weekdayFollowUpDate(from, timing);
   const n = Number(match[1]);
   const d = new Date(`${from}T00:00:00Z`);
   if (match[2] === "day") d.setUTCDate(d.getUTCDate() + n);
@@ -70,4 +71,20 @@ export function pickNextVisit(candidates, today = new Date().toISOString().slice
     return dated.sort((a, b) => b.date.localeCompare(a.date))[0];
   }
   return list.find((c) => c.notes || c.timing || c.instructions || c.duration) || null;
+}
+
+const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+
+const WEEKDAY_FOLLOW_UP =
+  /^\W*(?:follow[\s-]*up\s*|f\/u\s*|review\s*)?(?:on\s+)?(?:the\s+)?(?:next|coming|this)?\s*(sun|mon|tues?|wed(?:nes)?|thu(?:rs?)?|fri|sat(?:ur)?)(?:day)?\b/i;
+
+export function weekdayFollowUpDate(fromDate, text) {
+  const from = clean(fromDate);
+  const match = String(text ?? "").match(WEEKDAY_FOLLOW_UP);
+  if (!from || !match) return "";
+  const target = WEEKDAYS.indexOf(match[1].slice(0, 3).toLowerCase());
+  const d = new Date(`${from}T00:00:00Z`);
+  const ahead = (target - d.getUTCDay() + 7) % 7 || 7;
+  d.setUTCDate(d.getUTCDate() + ahead);
+  return d.toISOString().slice(0, 10);
 }

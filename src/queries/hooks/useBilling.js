@@ -22,10 +22,15 @@ export const receiptPdfHref = (billId, paymentId) =>
   `${API_URL}${DESK}/bills/${billId}/receipt.pdf?token=${encodeURIComponent(authToken())}` +
   (paymentId ? `&payment_id=${encodeURIComponent(paymentId)}` : "");
 
-function useVisitMutation(mutationFn) {
+const OPEN_RETRIES = 2;
+
+const lostConnection = (failures, error) => failures < OPEN_RETRIES && !error?.response;
+
+function useVisitMutation(mutationFn, options = {}) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn,
+    ...options,
     onSuccess: (_bill, variables) => {
       queryClient.invalidateQueries({ queryKey: billingKeys.visitBills(variables?.visitId) });
       queryClient.invalidateQueries({ queryKey: billingKeys.visitNotPriced(variables?.visitId) });
@@ -65,6 +70,7 @@ export function useVisitNotPriced(visitId) {
 export function useOpenDraft() {
   return useVisitMutation(
     async ({ visitId }) => (await api.post(`${DESK}/visits/${visitId}/bills`, {})).data,
+    { retry: lostConnection, retryDelay: 1000 },
   );
 }
 

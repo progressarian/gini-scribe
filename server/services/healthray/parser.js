@@ -5,6 +5,20 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 
 import { createLogger } from "../logger.js";
+import { followUpTiming, weekdayFollowUpDate } from "../../../shared/followUp.js";
+
+const MED_ROUTES = [
+  "Oral",
+  "SC",
+  "IM",
+  "IV",
+  "Topical",
+  "Inhaled",
+  "Sublingual",
+  "Nasal",
+  "Rectal",
+  "Vaginal",
+];
 const { error } = createLogger("HealthRay Sync");
 
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
@@ -825,18 +839,7 @@ export const PrescriptionSchema = z.object({
           "Any time",
         ]),
       ),
-      route: z.enum([
-        "Oral",
-        "SC",
-        "IM",
-        "IV",
-        "Topical",
-        "Inhaled",
-        "Sublingual",
-        "Nasal",
-        "Rectal",
-        "Vaginal",
-      ]),
+      route: z.union([z.enum(MED_ROUTES), z.string()]),
       days_of_week: z.array(z.number().int()),
       is_new: z.boolean(),
       support_for: z.string(),
@@ -886,16 +889,19 @@ const textOrNull = (v) => {
   return s && s.toLowerCase() !== "null" ? s : null;
 };
 
-function normalizeFollowUp(parsed) {
+function normalizeFollowUp(parsed, visitDate = null) {
   if (!parsed) return null;
   const fu = parsed.follow_up || {};
+  const timing = textOrNull(fu.timing);
+  const notes = textOrNull(fu.notes);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(fu.date || "")
+    ? fu.date
+    : (!followUpTiming(timing) &&
+        (weekdayFollowUpDate(visitDate, timing) || weekdayFollowUpDate(visitDate, notes))) ||
+      null;
   return {
     ...parsed,
-    follow_up: {
-      date: /^\d{4}-\d{2}-\d{2}$/.test(fu.date || "") ? fu.date : null,
-      timing: textOrNull(fu.timing),
-      notes: textOrNull(fu.notes),
-    },
+    follow_up: { date, timing, notes },
     follow_up_with: textOrNull(parsed.follow_up_with),
   };
 }
@@ -931,7 +937,7 @@ export async function parsePrescriptionWithAi(rawText, visitDate = null) {
       );
     }
 
-    return normalizeFollowUp(response.parsed_output);
+    return normalizeFollowUp(response.parsed_output, visitDate);
   } catch (e) {
     error("Parser", "messages.parse failed:", e?.message || e);
     return null;
@@ -953,7 +959,7 @@ export function buildHealthrayParseRequest(rawText, visitDate = null) {
   };
 }
 
-export function extractPrescriptionFromMessage(message) {
+export function extractPrescriptionFromMessage(message, visitDate = null) {
   try {
     const text = (message?.content || [])
       .map((c) => c.text || "")
@@ -961,7 +967,7 @@ export function extractPrescriptionFromMessage(message) {
       .trim();
     if (!text) return null;
     const validated = PrescriptionSchema.safeParse(JSON.parse(text));
-    return validated.success ? normalizeFollowUp(validated.data) : null;
+    return validated.success ? normalizeFollowUp(validated.data, visitDate) : null;
   } catch {
     return null;
   }

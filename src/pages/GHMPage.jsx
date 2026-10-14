@@ -31,6 +31,7 @@ import {
   X,
   RotateCcw,
   CalendarArrowDown,
+  CalendarX,
 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import "./GHMPage.css";
@@ -97,6 +98,7 @@ import { qk } from "../queries/keys";
 import { toast } from "../stores/uiStore";
 import { visitStatus } from "../lib/visitStatus.js";
 import { isEarlierVisitDue, isNewVisitType } from "../../shared/patientLists.js";
+import { isInvestigationVisit } from "../../shared/labOnly.js";
 
 const safeArr = (v) => (Array.isArray(v) ? v : []);
 
@@ -183,6 +185,7 @@ const VIEW_TABS = [
   { id: "by_date", label: "Today", Icon: CalendarDays, offset: 0 },
   { id: "tomorrow", label: "Tomorrow", Icon: Sunrise, offset: 1 },
   { id: "fu3", label: "Follow-up in 3 Days", Icon: Phone, offset: 3 },
+  { id: "missed", label: "Missed", Icon: CalendarX, offset: null },
   { id: "lookup", label: "Patient Lookup", Icon: Search, offset: null },
   {
     id: "reassign",
@@ -192,6 +195,44 @@ const VIEW_TABS = [
     cap: CAP.RECEPTION_OPS,
   },
 ];
+
+const MISSED_KIND_LABEL = {
+  appointment: "Appointment",
+  preferred: "Preferred date",
+  follow_up: "Follow-up",
+};
+
+const MISS_RISK = {
+  often: {
+    label: "Often misses",
+    tone: "amber",
+    action: "Call the day before the visit to confirm.",
+  },
+  repeatedly: {
+    label: "Repeatedly misses",
+    tone: "red",
+    action: "Offer an online visit or home collection, and confirm 3 days and 1 day before.",
+  },
+};
+
+const MISS_RISK_OPTIONS = [
+  { value: "", label: "All missed patients" },
+  { value: "often", label: "Often misses (3+)" },
+  { value: "repeatedly", label: "Repeatedly misses (5+)" },
+];
+
+const MISS_SORT_OPTIONS = [
+  { value: "", label: "Most recently missed" },
+  { value: "risk", label: "Most misses first" },
+];
+
+const MISSED_MAX_DAYS = 90;
+
+const STALE_ON_MISSED = ["booked", "rescheduled"];
+
+const missedRange = (days) => ({ from: addDaysStr(-days), to: addDaysStr(-1) });
+
+const UNREACHABLE_MISS_HINT = "Not reachable several times — try the alternate number or WhatsApp.";
 
 // The tab survives a reload even when the URL has been stripped (a bookmark, a
 // sidebar link, a fresh window) — the URL stays the source of truth, this is the
@@ -631,7 +672,7 @@ function GhmFilters({
 
   // Lookup ignores the date entirely — it searches every patient on every date,
   // so offering one there only invited the question of what it filtered.
-  const showDate = view !== "tomorrow" && view !== "lookup";
+  const showDate = view !== "tomorrow" && view !== "lookup" && view !== "missed";
   const showDoctor = view !== "lookup";
 
   return (
@@ -2423,6 +2464,11 @@ export default function GHMPage() {
   const [callsFilter, setCallsFilter] = useState(searchParams.get("calls") || defaultCallsFilter);
   const [divideOpen, setDivideOpen] = useState(false);
   const [pillFilter, setPillFilter] = useState(searchParams.get("pill") || "");
+  const [missedFrom, setMissedFrom] = useState(searchParams.get("from") || missedRange(7).from);
+  const [missedTo, setMissedTo] = useState(searchParams.get("to") || missedRange(7).to);
+  const [missRisk, setMissRisk] = useState(searchParams.get("risk") || "");
+  const [missSort, setMissSort] = useState(searchParams.get("sort") || "");
+  const isMissed = view === "missed";
   const [compact, setCompact] = useState(searchParams.get("rows") === "compact");
   const [fullscreen, setFullscreen] = useState(false);
   // Debounced copy of `search` — drives the date-independent Patient Lookup fetch
@@ -2469,7 +2515,11 @@ export default function GHMPage() {
         put("pill", pillFilter, "");
         put("rows", compact ? "compact" : "", "");
         put("q", searchQ, "");
-        put("date", date, tabDefaultDate(view));
+        put("date", isMissed ? "" : date, tabDefaultDate(view));
+        put("from", isMissed ? missedFrom : "", missedRange(7).from);
+        put("to", isMissed ? missedTo : "", missedRange(7).to);
+        put("risk", isMissed ? missRisk : "", "");
+        put("sort", isMissed ? missSort : "", "");
         return next;
       },
       { replace: true },
@@ -2485,6 +2535,11 @@ export default function GHMPage() {
     searchQ,
     date,
     view,
+    isMissed,
+    missedFrom,
+    missedTo,
+    missRisk,
+    missSort,
     setSearchParams,
   ]);
 
@@ -2507,7 +2562,12 @@ export default function GHMPage() {
     callsFilter !== defaultCallsFilter ||
     pillFilter !== "" ||
     searchQ !== "" ||
-    date !== tabDefaultDate(view);
+    (isMissed
+      ? missedFrom !== missedRange(7).from ||
+        missedTo !== missedRange(7).to ||
+        missRisk !== "" ||
+        missSort !== ""
+      : date !== tabDefaultDate(view));
 
   const resetFilterFields = () => {
     setDoctor("All");
@@ -2516,6 +2576,10 @@ export default function GHMPage() {
     setCallsFilter(defaultCallsFilter);
     setPillFilter("");
     setDate(tabDefaultDate(view));
+    setMissedFrom(missedRange(7).from);
+    setMissedTo(missedRange(7).to);
+    setMissRisk("");
+    setMissSort("");
   };
 
   const resetFilters = () => {
@@ -2527,6 +2591,19 @@ export default function GHMPage() {
   const buildQuery = useCallback(
     (pageNum, limit) => {
       const p = new URLSearchParams({ limit, page: pageNum });
+      if (view === "missed") {
+        p.set("mode", "missed");
+        p.set("from", missedFrom);
+        p.set("to", missedTo);
+        if (missRisk) p.set("risk", missRisk);
+        if (missSort) p.set("sort", missSort);
+        if (doctor !== "All") p.set("doctor", doctor);
+        if (collectionFilter === "home") p.set("home_collection", "1");
+        if (modeFilter !== "all") p.set("appt_mode", modeFilter);
+        if (callsFilter !== "all") p.set("calls", callsFilter);
+        if (searchQ) p.set("q", searchQ);
+        return p;
+      }
       // Lookup is date-independent: it has no date filter, and the backend falls
       // back to today for the "upcoming booking" cutoff.
       if (view !== "lookup") p.set("date", date);
@@ -2547,7 +2624,21 @@ export default function GHMPage() {
       }
       return p;
     },
-    [date, doctor, collectionFilter, modeFilter, callsFilter, pillFilter, view, lookupQ, searchQ],
+    [
+      date,
+      doctor,
+      collectionFilter,
+      modeFilter,
+      callsFilter,
+      pillFilter,
+      view,
+      lookupQ,
+      searchQ,
+      missedFrom,
+      missedTo,
+      missRisk,
+      missSort,
+    ],
   );
 
   const listEnabled = view !== "lookup" || lookupQ.length > 0;
@@ -2578,7 +2669,7 @@ export default function GHMPage() {
   const divideCalls = useDivideCalls();
   const attemptQuery = useCallAttemptCounts(appointmentIds);
   const activeCallQuery = useActiveCalls(appointmentIds);
-  const categoryQuery = useCategoryCounts(view === "lookup" ? null : date);
+  const categoryQuery = useCategoryCounts(view === "lookup" || isMissed ? null : date);
   const { claim: claimCall, release: releaseCall, takeOver: takeOverCall } = useCallClaim();
   // The date a row's preferred time applies to: the preferred date once one is
   // set, otherwise the appointment's own date.
@@ -2823,6 +2914,8 @@ export default function GHMPage() {
       [
         "calling",
         "num",
+        isMissed && "missed",
+        isMissed && "miss_history",
         showApptDate && "appt_date",
         showVisitStatus && "visit_status",
         "patient",
@@ -2848,6 +2941,7 @@ export default function GHMPage() {
         "rx_by",
       ].filter(Boolean),
     [
+      isMissed,
       showApptDate,
       showVisitStatus,
       showShowNoShow,
@@ -2949,7 +3043,9 @@ export default function GHMPage() {
               placeholder={
                 view === "lookup"
                   ? "Search any patient — name, file no, phone"
-                  : "Search this date — name, file no, phone, condition"
+                  : isMissed
+                    ? "Search missed patients — name, file no, phone"
+                    : "Search this date — name, file no, phone, condition"
               }
             />
             <GhmFilters
@@ -3018,7 +3114,7 @@ export default function GHMPage() {
                 {fullscreen ? "Exit full screen" : "Full screen"}
               </span>
             </button>
-            {canAssignCalls && view !== "reassign" && view !== "lookup" && (
+            {canAssignCalls && view !== "reassign" && view !== "lookup" && !isMissed && (
               <button
                 type="button"
                 className="btn btn--ghost"
@@ -3034,7 +3130,7 @@ export default function GHMPage() {
                 <span className="ghm__btn-label">Divide calls</span>
               </button>
             )}
-            {view !== "reassign" && (
+            {view !== "reassign" && !isMissed && (
               <button
                 type="button"
                 className="btn btn--ghost"
@@ -3100,6 +3196,70 @@ export default function GHMPage() {
             </button>
           ))}
         </div>
+
+        {isMissed && (
+          <div className="miss-range" role="group" aria-label="Missed date range">
+            <div className="miss-range__fld">
+              <span>Missed from</span>
+              <DatePicker
+                value={missedFrom}
+                onChange={(v) => setMissedFrom(v || missedRange(7).from)}
+                minDate={addDaysStr(-MISSED_MAX_DAYS)}
+                maxDate={missedTo}
+                clearable={false}
+              />
+            </div>
+            <div className="miss-range__fld">
+              <span>to</span>
+              <DatePicker
+                value={missedTo}
+                onChange={(v) => setMissedTo(v || missedRange(7).to)}
+                minDate={missedFrom}
+                maxDate={addDaysStr(-1)}
+                clearable={false}
+              />
+            </div>
+            <div className="miss-range__quick">
+              {[
+                { days: 1, label: "Yesterday" },
+                { days: 7, label: "Last 7 days" },
+                { days: 30, label: "Last 30 days" },
+              ].map((q) => {
+                const r = missedRange(q.days);
+                const on = missedFrom === r.from && missedTo === r.to;
+                return (
+                  <button
+                    key={q.days}
+                    type="button"
+                    className={`btn btn--ghost ${on ? "btn--on" : ""}`}
+                    aria-pressed={on}
+                    onClick={() => {
+                      setMissedFrom(r.from);
+                      setMissedTo(r.to);
+                    }}
+                  >
+                    {q.label}
+                  </button>
+                );
+              })}
+            </div>
+            <Dropdown
+              value={missRisk}
+              options={MISS_RISK_OPTIONS}
+              onChange={setMissRisk}
+              ariaLabel="Missed history"
+            />
+            <Dropdown
+              value={missSort}
+              options={MISS_SORT_OPTIONS}
+              onChange={setMissSort}
+              ariaLabel="Sort missed patients"
+            />
+            <span className="miss-range__hint">
+              Up to {MISSED_MAX_DAYS} days back. Today's patients appear here once the day is over.
+            </span>
+          </div>
+        )}
       </div>
 
       {/* ── New Appointment modal ── */}
@@ -3115,7 +3275,7 @@ export default function GHMPage() {
           onCreated={(createdDate) => {
             setShowNew(false);
             setNewPrefill(null);
-            if (createdDate !== date) setDate(createdDate);
+            if (!isMissed && createdDate !== date) setDate(createdDate);
           }}
         />
       )}
@@ -3144,7 +3304,7 @@ export default function GHMPage() {
       ) : (
         <>
           {/* ── Summary ── */}
-          {(showRows || pillFilter) && (
+          {!isMissed && (showRows || pillFilter) && (
             <Summary
               summary={summary}
               categories={categoryCounts}
@@ -3177,7 +3337,28 @@ export default function GHMPage() {
               </div>
             </div>
           )}
-          {!coldLoading && !loading && rows.length === 0 && view !== "lookup" && (
+          {!coldLoading && !loading && rows.length === 0 && isMissed && (
+            <div className="ghm__empty">
+              <div className="ghm__empty-icon">
+                <CalendarX size={34} aria-hidden="true" />
+              </div>
+              <div className="ghm__empty-title">
+                {searchQ
+                  ? `No missed patient matches “${searchQ}”`
+                  : `No missed patients between ${prettyDate(missedFrom)} and ${prettyDate(missedTo)}`}
+              </div>
+              <div className="ghm__empty-sub">
+                Everyone due in this range came in, has a new booking, or was closed as Not
+                Interested. Widen the date range or clear the filters to see more.
+              </div>
+              {filtersActive && (
+                <button type="button" className="btn btn--ghost" onClick={resetFilters}>
+                  Clear filters
+                </button>
+              )}
+            </div>
+          )}
+          {!coldLoading && !loading && rows.length === 0 && view !== "lookup" && !isMissed && (
             <div className="ghm__empty">
               <div className="ghm__empty-icon">
                 {searchQ ? (
@@ -3226,6 +3407,12 @@ export default function GHMPage() {
                   <tr>
                     <th style={{ width: 96 }}>Calling</th>
                     <th style={{ width: 36 }}>#</th>
+                    {isMissed && <th style={{ minWidth: 150 }}>Missed</th>}
+                    {isMissed && (
+                      <th className="tl" style={{ minWidth: 260 }}>
+                        Missed history &amp; next step
+                      </th>
+                    )}
                     {showApptDate && <th style={{ width: 120 }}>Appointment</th>}
                     {showVisitStatus && <th style={{ width: 120 }}>Visit Status</th>}
                     <th className="tl" style={{ minWidth: 170 }}>
@@ -3344,6 +3531,42 @@ export default function GHMPage() {
                           <td className="tc">
                             <span className="rnum">{i + 1}</span>
                           </td>
+
+                          {isMissed && (
+                            <td>
+                              <div className="fu-cell">
+                                <span className="fu-date">
+                                  {prettyDateWithYear(row.missed_date)}
+                                </span>
+                                <span className="fu-time">
+                                  {MISSED_KIND_LABEL[row.missed_kind] || "Visit"} ·{" "}
+                                  {agoLabel(daysAgo(row.missed_date))}
+                                </span>
+                              </div>
+                            </td>
+                          )}
+                          {isMissed && (
+                            <td className="miss-hist">
+                              <div className="miss-hist__counts">
+                                Cancelled {row.cancelled_count || 0} · Rescheduled{" "}
+                                {row.rescheduled_count || 0} · Missed {row.missed_count || 0}
+                              </div>
+                              {MISS_RISK[row.miss_risk] && (
+                                <>
+                                  <span className={`badge badge--${MISS_RISK[row.miss_risk].tone}`}>
+                                    {MISS_RISK[row.miss_risk].label}
+                                  </span>
+                                  <div className="miss-hist__action">
+                                    {MISS_RISK[row.miss_risk].action}
+                                  </div>
+                                </>
+                              )}
+                              {UNREACHABLE_STATUSES.includes(row.call_status_any) &&
+                                (attemptCounts[row.id] || 0) >= 2 && (
+                                  <div className="miss-hist__action">{UNREACHABLE_MISS_HINT}</div>
+                                )}
+                            </td>
+                          )}
 
                           {/* Time */}
                           {showApptDate && (
@@ -3505,13 +3728,17 @@ export default function GHMPage() {
                           {/* Booking status — OBT marks a cancellation from the call */}
                           <td>
                             <ColorSelect
-                              value={row.booking_status || ""}
+                              value={
+                                isMissed && STALE_ON_MISSED.includes(row.booking_status)
+                                  ? ""
+                                  : row.booking_status || ""
+                              }
                               options={bookingStatusOptions(row)}
                               onChange={(v) => patch(row.id, "booking_status", v)}
                               disabled={rowLocked}
                               title={lockTitle}
                             />
-                            {row.booking_status === "booked" && row.booked_by_name && (
+                            {!isMissed && row.booking_status === "booked" && row.booked_by_name && (
                               <span
                                 className="booked-by"
                                 title={row.booked_at ? fmtDateTime(row.booked_at) : undefined}
@@ -3526,7 +3753,7 @@ export default function GHMPage() {
                             {(() => {
                               const visitType =
                                 view !== "lookup" &&
-                                isEarlierVisitDue(row, date) &&
+                                isEarlierVisitDue(row, isMissed ? row.missed_date : date) &&
                                 isNewVisitType(row.visit_type)
                                   ? "Follow-Up"
                                   : row.visit_type;
@@ -3737,6 +3964,8 @@ export default function GHMPage() {
                           {showFollowUpDate && (
                             <td>
                               {(() => {
+                                if (isInvestigationVisit(row))
+                                  return <span className="muted">—</span>;
                                 // 1) Next booked appointment after this visit → most reliable date
                                 if (row.follow_up_date) {
                                   return (

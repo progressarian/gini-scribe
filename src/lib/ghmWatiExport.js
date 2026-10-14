@@ -5,14 +5,14 @@ import {
   cameOnDate,
 } from "../../shared/patientLists.js";
 import { callLabel } from "../../shared/callStatuses.js";
+import { visitStatus } from "./visitStatus.js";
+import { isInvestigationVisit } from "../../shared/labOnly.js";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-const BLOCK_WIDTH = 26;
-
 const COL_WIDTHS = [
-  22, 12, 14, 14, 12, 14, 12, 12, 14, 12, 6, 6, 16, 20, 14, 14, 14, 14, 14, 26, 22, 18, 16, 12, 16,
-  22, 30,
+  22, 12, 14, 14, 12, 14, 12, 12, 14, 12, 6, 6, 16, 20, 14, 14, 14, 14, 14, 14, 26, 22, 18, 16, 12,
+  16, 22, 30,
 ];
 
 const HEADERS = [
@@ -34,6 +34,7 @@ const HEADERS = [
   "Follow_Up_Date",
   "Preferred_Date",
   "Visit Type",
+  "Visit Status",
   "Mode",
   "Last Consultant Seen",
   "Prescription Explained By",
@@ -131,11 +132,16 @@ const toSheetRow = (row, fallbackDate, lastSeen = {}, owners = {}, bookings = fa
       owners[row.patient_id]?.assigned_to || "",
       row.doctor_name || row.preferred_doctor || "",
       fmtSheetDate(lastSeen[row.patient_id]?.date),
-      fmtSheetDate(row.follow_up_date),
+      isInvestigationVisit(row) ? "" : fmtSheetDate(row.follow_up_date),
       fmtSheetDate(row.preferred_date),
       !bookings && isEarlierVisitDue(row, fallbackDate) && isNewVisitType(row.visit_type)
         ? "Follow-Up"
         : row.visit_type || "",
+      visitStatus(
+        String(row.appointment_date || "").slice(0, 10) === String(fallbackDate).slice(0, 10)
+          ? row.status
+          : null,
+      ).label,
       row.appointment_type || row.mode_of_appointment || "",
       lastSeenLabel(lastSeen[row.patient_id]),
       row.prescription_explained_by || "",
@@ -198,7 +204,11 @@ const styleCell = (XLSX, ws, r, c, style) => {
 // One tab per WATI list. Which patient belongs where is decided in
 // shared/patientLists.js, the same rules the page's tabs query by.
 export const LIST_SHEETS = [
-  { name: "New Patients", pick: LIST_PREDICATES.new },
+  {
+    name: "New Patients",
+    pick: LIST_PREDICATES.new,
+    omit: ["Preferred Time", "Last_Visit_Date", "Last Consultant Seen", "Start_Time", "End_Time"],
+  },
   { name: "Follow Up", pick: LIST_PREDICATES.followup },
   { name: "Cancelled", pick: LIST_PREDICATES.cancelled },
   { name: "Rescheduled", pick: LIST_PREDICATES.rescheduled },
@@ -213,19 +223,22 @@ export const buildListSheet = (
   lastSeen = {},
   owners = {},
   bookings = false,
+  omit = [],
 ) => {
+  const allHeaders = withBookingCols(HEADERS, ["Booked By", "Booked At"], bookings);
+  const keep = (cells) => cells.filter((_, i) => !omit.includes(allHeaders[i]));
   const body = (rows || [])
     .filter((r) => r?.phone)
-    .map((r) => toSheetRow(r, date, lastSeen, owners, bookings));
-  const headers = withBookingCols(HEADERS, ["Booked By", "Booked At"], bookings);
+    .map((r) => keep(toSheetRow(r, date, lastSeen, owners, bookings)));
+  const headers = keep(allHeaders);
 
-  const titleRow = new Array(BLOCK_WIDTH).fill("");
+  const titleRow = new Array(headers.length).fill("");
   titleRow[0] = title;
   titleRow[3] = `${body.length} patient${body.length === 1 ? "" : "s"}`;
   titleRow[5] = fmtSheetDate(date);
 
   const ws = XLSX.utils.aoa_to_sheet([titleRow, headers, ...body]);
-  ws["!cols"] = withBookingCols(COL_WIDTHS, [18, 12], bookings).map((wch) => ({ wch }));
+  ws["!cols"] = keep(withBookingCols(COL_WIDTHS, [18, 12], bookings)).map((wch) => ({ wch }));
 
   styleCell(XLSX, ws, 0, 0, BLOCK_STYLE);
   styleCell(XLSX, ws, 0, 3, TITLE_STYLE);
@@ -286,6 +299,7 @@ export const exportWatiWorkbook = async (
       lastSeen,
       owners,
       bookings,
+      list.omit,
     ),
   }));
 
