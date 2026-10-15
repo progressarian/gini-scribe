@@ -11,7 +11,7 @@ import {
   STATUS_LABEL,
   BOARD_COLUMNS,
   columnForStatus,
-  NOT_A_MARKER_SQL,
+  ROOM_SOURCE_SQL,
   machineColumnFor,
 } from "../../../shared/giniflowStatus.js";
 import {
@@ -163,9 +163,7 @@ async function assertPatientIsFree(db, visitId, what) {
   if (!visitId) return;
   const { rows } = await db.query(
     `SELECT v.current_status, p.name,
-            (SELECT e.meta->>'source' FROM giniflow_visit_events e
-               WHERE e.visit_id = v.id AND ${NOT_A_MARKER_SQL("e.status")}
-               ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1) AS room_source
+            ${ROOM_SOURCE_SQL("v")} AS room_source
        FROM giniflow_visits v
        JOIN patients p ON p.id = v.patient_id
       WHERE v.id = $1`,
@@ -314,9 +312,7 @@ export async function getMachineQueue(
             o.created_at, o.updated_at, o.uploaded_at, o.report_file_url,
             p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
             v.current_status,
-            (SELECT e.meta->>'source' FROM giniflow_visit_events e
-               WHERE e.visit_id = v.id AND ${NOT_A_MARKER_SQL("e.status")}
-               ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1) AS room_source,
+            ${ROOM_SOURCE_SQL("v")} AS room_source,
             d.short_name AS ordered_by,
             COALESCE(t.tests, '[]'::json) AS tests,
             last_ev.occurred_at AS since,

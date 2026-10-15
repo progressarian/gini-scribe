@@ -27,7 +27,7 @@ import {
   STATUS_LABEL,
   WAIT_STATUSES,
   columnForStatus,
-  NOT_A_MARKER_SQL,
+  ROOM_SOURCE_SQL,
   SAMPLE_BREAK_REASON,
 } from "../../../shared/giniflowStatus.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
@@ -319,9 +319,7 @@ export async function getLabQueue(
             o.created_at, o.updated_at, o.uploaded_at, o.report_file_url, o.is_outsourced,
             p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
             v.current_status,
-            (SELECT e.meta->>'source' FROM giniflow_visit_events e
-               WHERE e.visit_id = v.id AND ${NOT_A_MARKER_SQL("e.status")}
-               ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1) AS room_source,
+            ${ROOM_SOURCE_SQL("v")} AS room_source,
             d.short_name AS ordered_by,
             -- The chart row the report landed on, so the pane can open it in the
             -- viewer the rest of the app uses instead of throwing the file at a
@@ -778,9 +776,7 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
             p.age, p.sex,
             v.current_status, v.results_status, v.id IS NOT NULL AS on_floor,
             v.id AS visit_id,
-            (SELECT e.meta->>'source' FROM giniflow_visit_events e
-               WHERE e.visit_id = v.id AND ${NOT_A_MARKER_SQL("e.status")}
-               ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1) AS room_source,
+            ${ROOM_SOURCE_SQL("v")} AS room_source,
             -- Constant across the group (it depends only on the patient and the
             -- day), so bool_or reads it without widening the GROUP BY.
             bool_or(${labOnlyPredicate("v", "$3")}) AS lab_only,
@@ -1004,9 +1000,7 @@ async function assertPatientIsFree(db, visitId, what) {
   if (!visitId) return;
   const { rows } = await db.query(
     `SELECT v.current_status, p.name,
-            (SELECT e.meta->>'source' FROM giniflow_visit_events e
-               WHERE e.visit_id = v.id AND ${NOT_A_MARKER_SQL("e.status")}
-               ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1) AS room_source,
+            ${ROOM_SOURCE_SQL("v")} AS room_source,
             (SELECT string_agg(t.test_name, ', ' ORDER BY t.test_name)
                FROM giniflow_lab_orders mo
                JOIN giniflow_lab_order_tests t ON t.lab_order_id = mo.id

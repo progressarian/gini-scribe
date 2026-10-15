@@ -18,7 +18,7 @@ import {
   TERMINAL_STATUSES,
 } from "../../../shared/giniflowStatus.js";
 import { doctorsWaitForTests } from "../../../shared/manualFloor.js";
-import { testCancelReasonLabel } from "../../../shared/testCancelReasons.js";
+import { NOT_ON_BILL_REASON, testCancelReasonLabel } from "../../../shared/testCancelReasons.js";
 import { TESTS_HOLD_SQL } from "./testsHold.js";
 
 import { syncFromStatus } from "./journey.js";
@@ -443,7 +443,11 @@ export async function getStationTimes(
   // 20 minutes, and the rest of that wait belonged to nothing. They are put back
   // afterwards as the dated facts they are.
   const statusRows = rows.filter((r) => !isMarkerStatus(r.status));
-  const markerRows = rows.filter((r) => isMarkerStatus(r.status));
+  const markerRows = rows.filter(
+    (r) =>
+      isMarkerStatus(r.status) &&
+      !(r.status === "test_cancelled" && r.meta?.reason === NOT_ON_BILL_REASON),
+  );
 
   const raw = statusRows.map((row, i) => {
     const enteredAt = new Date(row.occurred_at);

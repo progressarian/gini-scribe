@@ -280,6 +280,11 @@ export const isMarkerStatus = (status) => MARKER_STATUSES.includes(status);
 export const NOT_A_MARKER_SQL = (col) =>
   `${col} <> ALL (ARRAY[${MARKER_STATUSES.map((m) => `'${m}'`).join(", ")}])`;
 
+export const ROOM_SOURCE_SQL = (v) =>
+  `(SELECT e.meta->>'source' FROM giniflow_visit_events e
+     WHERE e.visit_id = ${v}.id AND ${NOT_A_MARKER_SQL("e.status")}
+     ORDER BY (e.status = ${v}.current_status) DESC, e.occurred_at DESC, e.id DESC LIMIT 1)`;
+
 // What the wait clock may read as "waiting since". Two kinds of event are not an
 // arrival:
 //

@@ -78,6 +78,8 @@ const WAIT_ONLY = new Set([
   "confirmed",
 ]);
 
+const CONSULTANT_ONLY = new Set(["with_doctor"]);
+
 // How many categories carry an override for one station — the count on the
 // drawer's toggle, so a folded row still says it holds something.
 const countOverrides = (overrides, station) =>
@@ -1209,6 +1211,9 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
     (s) => s.stop && chainIndex(s.stop) >= chainIndex(visit?.current_status),
   );
   const beforeNow = onChain && nextStop > 0 ? onlineToCome.slice(0, nextStop) : [];
+  const journeyStops = (data?.journeySteps || []).map((s) => s.chain_status);
+  const seesConsultant = !journeyStops.length || journeyStops.includes("with_doctor");
+  const notInJourney = (status) => !seesConsultant && CONSULTANT_ONLY.has(status);
   const projected =
     !onChain || visit?.labOnly
       ? []
@@ -1219,7 +1224,8 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
               (status) =>
                 chainIndex(status) > chainIndex(visit.current_status) &&
                 !doneStatuses.has(status) &&
-                !WAIT_ONLY.has(status),
+                !WAIT_ONLY.has(status) &&
+                !notInJourney(status),
             )
             .map((status) => ({
               status,

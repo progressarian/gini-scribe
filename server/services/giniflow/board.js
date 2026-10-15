@@ -12,6 +12,7 @@ import {
   slaKeyForStatus,
   TERMINAL_STATUSES,
   NOT_A_MARKER_SQL,
+  ROOM_SOURCE_SQL,
   JOURNEY_START_SQL,
   WAIT_SINCE_SQL,
   isChainStatus,
@@ -186,9 +187,7 @@ const MACHINE_HOLD_SQL = (v, p, manualParam) => `
             WHERE e.visit_id = ${v}.id AND e.status IN ('with_vitals', 'vitals_done')
               AND e.actor_role <> 'system')
         ) AS vitals_at,
-        (SELECT e.meta->>'source' FROM giniflow_visit_events e
-          WHERE e.visit_id = ${v}.id AND ${NOT_A_MARKER_SQL("e.status")}
-          ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1) AS room_source`;
+        ${ROOM_SOURCE_SQL(v)} AS room_source`;
 
 // One round trip for the whole day. The lateral joins keep it to a single query
 // no matter how many visits the day has — the board polls every 10s and a
