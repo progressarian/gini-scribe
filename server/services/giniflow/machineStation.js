@@ -53,6 +53,8 @@ import { LAB_ONLY_DOCTOR, labOnlyPredicate, labOnlyHiddenPredicate } from "./lab
 import { hideLabOnlyPatients } from "./floorSettings.js";
 import { hasExtraReports } from "./extraReports.js";
 import { reopenForTests } from "./lateTests.js";
+import { assertNotHeld, HELD_ORDER_SQL } from "./cancelHold.js";
+import { orderCancelStage } from "../../../shared/testCancelStages.js";
 
 const UNDRAWN_LAB = UNDRAWN_SAMPLE_STATUSES.map((v) => `'${v}'`).join(", ");
 
@@ -327,6 +329,7 @@ export async function getMachineQueue(
               '[]'::json
             ) AS extra_reports,
             EXISTS (SELECT 1 FROM lab_results lr WHERE lr.lab_order_id = o.id) AS has_values,
+            ${HELD_ORDER_SQL("o")} AS cancel_held,
             -- The two sequencing gates (39-HYBRID-FLOOR-PLAN.md §3). Asked of the
             -- table, not of the screen: a technician with a stale tab must be
             -- refused by the service, not merely shown no button.
@@ -445,6 +448,12 @@ export async function getMachineQueue(
         !r.report_doc_id &&
         !r.report_file_url &&
         !r.has_values,
+      cancelStage: orderCancelStage({
+        kind: "machine",
+        sampleStatus: r.sample_status,
+        hasOutput: !!r.report_doc_id || !!r.report_file_url || !!r.has_values,
+      }),
+      cancelHeld: !!r.cancel_held,
       reportDocId: r.report_doc_id || null,
       reportUrl: r.report_file_url || null,
       extraReports: r.extra_reports || [],
@@ -783,6 +792,7 @@ export async function cancelMachineStart(
       [orderId],
     );
     if (!rows.length) throw Object.assign(new Error("Order not found"), { status: 404 });
+    await assertNotHeld(client, { orderId });
     const row = rows[0];
     visitId = row.visit_id;
     if (row.kind !== "machine") {
@@ -848,6 +858,7 @@ export async function advanceMachineTest(
       [orderId],
     );
     if (!rows.length) throw Object.assign(new Error("Order not found"), { status: 404 });
+    await assertNotHeld(client, { orderId });
     const row = rows[0];
     if (row.kind !== "machine") {
       throw Object.assign(new Error("That order belongs to the lab, not the machine room"), {

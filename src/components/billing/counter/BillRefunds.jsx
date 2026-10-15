@@ -228,7 +228,12 @@ export default function BillRefunds({ bill, onRefunded }) {
         <div key={cn.id} className="bc-refund__note">
           <div>
             <strong>
-              {cn.credit_kind === "discount" ? "Discount credit note" : "Credit note"} {cn.bill_no}
+              {cn.credit_kind === "discount"
+                ? "Discount credit note"
+                : cn.credit_kind === "cancel_charge"
+                  ? "Credit note — cancelled after collection"
+                  : "Credit note"}{" "}
+              {cn.bill_no}
             </strong>{" "}
             · credited {fromPaise(cn.totals.payable)} · refunded {fromPaise(cn.totals.refunded)}
           </div>

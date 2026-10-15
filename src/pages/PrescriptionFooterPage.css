@@ -340,3 +340,28 @@
     flex-wrap: wrap;
   }
 }
+
+.rxp-def-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.rxp-def-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.rxp-def-row .rxf__input {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+.rxp-def-row .rxp-def-unit {
+  flex: 0 1 90px;
+}
+.rxp-def-src {
+  flex: 1 1 160px;
+  margin: 0;
+}

@@ -342,7 +342,11 @@ const VISIT_SQL = `
             LEFT JOIN bills c ON c.id = p.bill_id
            WHERE p.direction = 'out' AND (p.bill_id = $1 OR c.original_bill_id = $1)) AS refunded,
          COALESCE(
-           (SELECT r.reason FROM billing_requests r WHERE r.credit_note_id = $1),
+           (SELECT CASE WHEN r.kind = 'test_cancel'
+                        THEN 'Cancelled after collection — collection charge ₹'
+                             || r.charge_amount::text || ' kept · ' || r.reason
+                        ELSE r.reason END
+              FROM billing_requests r WHERE r.credit_note_id = $1),
            (SELECT 'Discount after the bill was final: '
                    || CASE WHEN n.manual_discount_kind = 'percent'
                            THEN trim(trailing '.' FROM trim(trailing '0' FROM n.manual_discount_value::text)) || '%'

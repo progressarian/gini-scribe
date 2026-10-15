@@ -63,7 +63,9 @@ function ScoreRow({ p, open, onToggle, onOpenPatient }) {
             </span>
           </span>
           <span style={{ display: "block", fontSize: 9, color: "#64748b" }}>
-            {p.targets_total > 0 ? `${p.targets_met}/${p.targets_total} targets met` : "No lab data"}
+            {p.targets_total > 0
+              ? `${p.targets_met}/${p.targets_total} targets met`
+              : "No lab data"}
             {p.con_name && ` • ${p.con_name}`}
           </span>
         </span>
@@ -144,7 +146,12 @@ function ScoreRow({ p, open, onToggle, onOpenPatient }) {
                 .map((d) => (
                   <span
                     key={d.id}
-                    style={{ fontSize: 9, padding: "1px 6px", borderRadius: 4, ...dxTone(d.status) }}
+                    style={{
+                      fontSize: 9,
+                      padding: "1px 6px",
+                      borderRadius: 4,
+                      ...dxTone(d.status),
+                    }}
                   >
                     {d.label}
                   </span>

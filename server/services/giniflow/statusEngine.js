@@ -18,7 +18,12 @@ import {
   TERMINAL_STATUSES,
 } from "../../../shared/giniflowStatus.js";
 import { doctorsWaitForTests } from "../../../shared/manualFloor.js";
-import { NOT_ON_BILL_REASON, testCancelReasonLabel } from "../../../shared/testCancelReasons.js";
+import {
+  NOT_ON_BILL_REASON,
+  testCancelReasonLabel,
+  urgentCancelReasonLabel,
+} from "../../../shared/testCancelReasons.js";
+
 import { TESTS_HOLD_SQL } from "./testsHold.js";
 
 import { syncFromStatus } from "./journey.js";
@@ -28,6 +33,8 @@ import { MACHINE_RUNGS } from "../../../shared/machineStages.js";
 import pool from "../../config/db.js";
 
 export const IST_TODAY = `(NOW() AT TIME ZONE 'Asia/Kolkata')::date`;
+
+const CANCEL_REQUEST_MARKERS = ["cancel_requested", "cancel_rejected", "cancel_withdrawn"];
 
 export const budgetColour = (minutes, budget) => {
   if (!budget) return "neutral";
@@ -382,11 +389,22 @@ const markerLabel = (row) => {
   if (row.status === "test_restored") {
     return row.meta?.tests?.length ? `${base} — ${row.meta.tests.join(", ")}` : base;
   }
-  if (row.status !== "test_cancelled") return base;
   const what = [...(row.meta?.tests || []), ...(row.meta?.cases || []).map((c) => `case ${c}`)];
-  const reason = testCancelReasonLabel(row.meta?.reason);
   const head = what.length ? `${base} — ${what.join(", ")}` : base;
-  return reason ? `${head} · ${reason}` : head;
+  if (CANCEL_REQUEST_MARKERS.includes(row.status)) {
+    const why =
+      row.status === "cancel_requested"
+        ? urgentCancelReasonLabel(row.meta?.reason)
+        : row.meta?.note;
+    return why ? `${head} · ${why}` : head;
+  }
+  if (row.status !== "test_cancelled") return base;
+  const reason = testCancelReasonLabel(row.meta?.reason);
+  const kept =
+    row.meta?.charge !== undefined
+      ? ` · ₹${(row.meta.charge / 100).toLocaleString("en-IN")} kept`
+      : "";
+  return reason ? `${head} · ${reason}${kept}` : head;
 };
 
 export async function getStationTimes(

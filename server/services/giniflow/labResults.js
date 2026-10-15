@@ -10,6 +10,7 @@ import { opensLabGate } from "../../../shared/labPayment.js";
 import { syncBiomarkersFromLatestLabs } from "../healthray/db.js";
 import { catalogRowsFor, catalogTestsByIds, patientFor } from "./labCatalog.js";
 import { computeFormulas, formulaInputs, rangeText, flagFor } from "../../../shared/labFormula.js";
+import { assertNotHeld } from "./cancelHold.js";
 
 // Results the lab types in, rather than scans.
 // docs/gini-flow/32-LAB-TYPED-RESULTS-PLAN.md
@@ -510,6 +511,7 @@ export async function saveResults(
   if (!entries.length) throw bad("Nothing to save — every row needs a test and a value");
 
   const order = await orderContext(orderId, db);
+  await assertNotHeld(db, { orderId });
 
   // The same gate uploadReport enforces, checked BEFORE anything is written: the
   // upload path refuses an uncleared order, and advanceSample would refuse this

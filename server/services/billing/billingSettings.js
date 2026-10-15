@@ -67,6 +67,24 @@ function cleanStacking(value) {
   return value;
 }
 
+function cleanChargeType(value) {
+  if (value !== "percent" && value !== "fixed") {
+    throw httpError(400, "Choose a percentage or a fixed amount as the default charge");
+  }
+  return value;
+}
+
+function cleanChargeNumber(value, label, max) {
+  const n = readNumber(value, `${label} must be a number`);
+  if (n === undefined || n === null || !Number.isFinite(n) || n < 0 || n > max) {
+    throw httpError(400, `${label} must be from 0 to ${max.toLocaleString("en-IN")}`);
+  }
+  if (Math.abs(Math.round(n * 100) - n * 100) > 1e-6) {
+    throw httpError(400, `${label} can have at most 2 decimals`);
+  }
+  return Math.round(n * 100) / 100;
+}
+
 const CLEANERS = {
   discount_stacking: cleanStacking,
   allow_pay_later: (v) => cleanFlag(v, "Allow pay later"),
@@ -78,11 +96,15 @@ const CLEANERS = {
   bill_footer: (v) => cleanText(v, "Bill footer", 1000),
   auto_add_consultation: (v) => cleanFlag(v, "Add the consultation automatically"),
   auto_add_lab_case_tests: (v) => cleanFlag(v, "Add today's lab report tests automatically"),
+  cancel_charge_type: cleanChargeType,
+  cancel_charge_pct: (v) => cleanChargeNumber(v, "The default percentage", 100),
+  cancel_charge_amount: (v) => cleanChargeNumber(v, "The default fixed amount", 100000),
 };
 
 const COLUMNS = `discount_stacking, allow_pay_later, max_codes_per_bill, gst_enabled, gstin,
                  state_code, legal_name, bill_footer, auto_add_consultation,
-                 auto_add_lab_case_tests, updated_at, updated_by`;
+                 auto_add_lab_case_tests, cancel_charge_type, cancel_charge_pct::float8,
+                 cancel_charge_amount::float8, updated_at, updated_by`;
 
 export async function getSettings(db = pool) {
   const { rows } = await db.query(`SELECT ${COLUMNS} FROM billing_settings`);

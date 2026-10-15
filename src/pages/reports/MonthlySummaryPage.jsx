@@ -370,8 +370,9 @@ function VisitList({ month, read, update }) {
                     <td data-label="Patient">
                       <div className="ms-patient">{v.patientName || "—"}</div>
                       <div className="ms-muted">
-                        {[v.fileNo, v.healthId && `HID ${v.healthId}`].filter(Boolean).join(" · ") ||
-                          "No UHID"}
+                        {[v.fileNo, v.healthId && `HID ${v.healthId}`]
+                          .filter(Boolean)
+                          .join(" · ") || "No UHID"}
                       </div>
                     </td>
                     <td data-label="Doctor">{v.doctor}</td>
@@ -421,8 +422,7 @@ export default function MonthlySummaryPage() {
   );
   const pickMonth = (next) => update({ month: next === latest ? "" : next, day: "", page: "" });
   const filtered = FILTER_KEYS.some((key) => read(key) !== (DEFAULTS[key] || ""));
-  const reset = () =>
-    update(Object.fromEntries([...FILTER_KEYS, "page"].map((key) => [key, ""])));
+  const reset = () => update(Object.fromEntries([...FILTER_KEYS, "page"].map((key) => [key, ""])));
 
   const exportFile = () =>
     download.mutate(

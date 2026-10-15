@@ -2,6 +2,8 @@
 // "Printed Prescription" layout. Used by the Puppeteer PDF generator. Keep CSS
 // in sync with that file (lines 9-115) when the design changes.
 
+import { TRENDS_CSS, biomarkerTrendsHtml } from "./prescriptionTrends.js";
+import { PARAM_TABLE_CSS, parameterTableHtml } from "./prescriptionParameterTable.js";
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -393,7 +395,6 @@ function buildPrescriptionHtml(data = {}) {
     patient = {},
     doctor = {},
     summary = {},
-    visitSummaryText: visitSummaryTextOverride,
     activeDx: activeDxInput = [],
     complaints = [],
     history = null,
@@ -461,16 +462,6 @@ function buildPrescriptionHtml(data = {}) {
     [latestCon.follow_up_with, appt_plan?.follow_up_with]
       .map((v) => (typeof v === "string" ? v.trim() : ""))
       .find((v) => /[\p{L}\p{N}]/u.test(v) && v.toLowerCase() !== "null") || "";
-  // Prefer the explicit visit summary the client passes in (current doctor's
-  // summary or visit-level synopsis) over anything found on the consultation
-  // record. Falls back to summary.summary so old callers still work.
-  const visitSummaryText =
-    visitSummaryTextOverride ||
-    latestCon.summary ||
-    latestCon.visit_summary ||
-    summary.summary ||
-    "";
-
   // ── Lab values (latest)
   const hba1c = findLatest(labResults, "hba1c");
   const fbs = findLatest(labResults, "fbs");
@@ -592,7 +583,7 @@ function buildPrescriptionHtml(data = {}) {
         tags.push(renderBio("HbA1c", "%", h[0].value, oldestOf(h), "≤ 7%", true));
       }
       if (f.length > 0) {
-        tags.push(renderBio("FBS", " mg/dL", f[0].value, oldestOf(f), "≤ 130 mg/dL", true));
+        tags.push(renderBio("FPG", " mg/dL", f[0].value, oldestOf(f), "≤ 130 mg/dL", true));
       }
       if (tags.length) return tags;
     }
@@ -878,7 +869,7 @@ function buildPrescriptionHtml(data = {}) {
 <meta charset="UTF-8">
 <title>Prescription</title>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Mono:wght@400;500&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<style>${CSS}</style>
+<style>${CSS}${TRENDS_CSS}${PARAM_TABLE_CSS}</style>
 </head>
 <body>
 <div class="rx-page">
@@ -894,29 +885,13 @@ function buildPrescriptionHtml(data = {}) {
 
   <div class="rx-body">
     ${
-      visitSummaryText || tests.length > 0
-        ? (() => {
-            const paragraphs = visitSummaryText
-              ? String(visitSummaryText)
-                  .replace(/\r\n/g, "\n")
-                  .split(/\n{2,}/)
-                  .map((p) => p.replace(/^\s+|\s+$/g, ""))
-                  .filter(Boolean)
-                  .map((p) => `<p>${escape(p).replace(/\n/g, "<br>")}</p>`)
-                  .join("")
-              : "";
-            const testsHtml =
-              tests.length > 0
-                ? `<div class="rx-summary-tests">
+      tests.length > 0
+        ? `<div class="rx-summary-block rx-summary-block--tests">
+             <div class="rx-summary-tests">
                <div class="rx-summary-tests-title">Investigations ordered</div>
                <div class="rx-summary-tests-list">${tests.map((t) => `<span class="rx-summary-test-chip">${escape(typeof t === "string" ? t : t.name || t.test || String(t))}</span>`).join("")}</div>
-             </div>`
-                : "";
-            return `<div class="rx-summary-block">
-             <div class="sum-title">Visit summary</div>
-             ${paragraphs}${testsHtml}
-           </div>`;
-          })()
+             </div>
+           </div>`
         : ""
     }
 
@@ -933,6 +908,8 @@ function buildPrescriptionHtml(data = {}) {
            <div class="rx-complaints">${escape(history).replace(/\n/g, "<br>")}</div>`
         : ""
     }
+
+    ${parameterTableHtml(data.rxParameters, escape)}
 
     ${activeDx.length > 0 ? `<div class="rx-section-title">Diagnoses</div>${dxHtml}` : ""}
 
@@ -975,6 +952,11 @@ function buildPrescriptionHtml(data = {}) {
         : ""
     }
     ${followUpWithHtml}
+
+    ${biomarkerTrendsHtml(
+      { activeDx, labResults, labHistory, latestVitals, prevVitals, vitalsHistory },
+      { findLatest, findHist, valueColor, escape },
+    )}
   </div>
 
   <div class="rx-close">

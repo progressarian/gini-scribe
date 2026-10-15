@@ -206,6 +206,9 @@ function RefundRow({ row, onOpen }) {
       <td data-label="Credit note">
         {row.kind === "deposit_refund" ? "Deposit refund" : row.credit_note?.bill_no || "—"}
         {row.kind === "discount" && <span className="bc-head__meta"> · discount</span>}
+        {row.kind === "test_cancel" && (
+          <span className="bc-head__meta"> · cancelled after collection</span>
+        )}
       </td>
       <td data-label="Amount">
         <Amount row={row} />

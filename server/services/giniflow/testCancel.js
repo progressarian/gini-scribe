@@ -13,6 +13,7 @@ import {
   TEST_CANCEL_REASON_VALUES,
   SYNC_CANCEL_REASONS,
   NOT_ON_BILL_REASON,
+  URGENT_AFTER_COLLECTION,
   testCancelReasonLabel,
 } from "../../../shared/testCancelReasons.js";
 import { getMachines } from "./machineCatalog.js";
@@ -33,8 +34,12 @@ const bad = (message, status = 400) => Object.assign(new Error(message), { statu
 
 const money = (v) => Math.round(Number(v || 0) * 100) / 100;
 
-export function checkCancelInput({ reason, note, refundAmount, source }) {
-  const allowed = source === "healthray" ? SYNC_REASON_VALUES : TEST_CANCEL_REASON_VALUES;
+export function checkCancelInput({ reason, note, refundAmount, source, allowCollected }) {
+  const allowed = allowCollected
+    ? [URGENT_AFTER_COLLECTION]
+    : source === "healthray"
+      ? SYNC_REASON_VALUES
+      : TEST_CANCEL_REASON_VALUES;
   if (!allowed.includes(reason)) throw bad("Pick a reason for cancelling this test");
   if (reason === NOTE_REQUIRED_CANCEL_REASON && String(note || "").trim().length < 3) {
     throw bad("Say why — a few words are enough");
@@ -280,7 +285,7 @@ async function cancelCasesIn(client, { visit, patientId, date, caseNos, input })
     throw bad("That HealthRay case is not this patient's, or not today's", 404);
   }
   const started = cases.filter((c) => c.live && c.started);
-  if (started.length) {
+  if (started.length && !input.allowCollected) {
     throw bad(
       `Case ${started.map((c) => c.case_no).join(", ")} is already under way at the lab — it cannot be cancelled`,
       409,
@@ -475,7 +480,7 @@ async function refundFinalLines(client, input, kind, onFinal) {
   );
 }
 
-async function finaliseTakenDraft(client, billId, input) {
+export async function finaliseTakenDraft(client, billId, input) {
   const { rows } = await client.query(
     `SELECT version FROM bills WHERE id = $1 AND status = 'draft'`,
     [billId],
@@ -554,7 +559,7 @@ export async function cancelTestIn(client, input) {
     if (input.expectKind && order.kind !== input.expectKind) {
       throw bad(`This is a ${order.kind} test — cancel it from its own station`, 409);
     }
-    if (!CANCELLABLE_ORDER_STATUSES.includes(order.sample_status)) {
+    if (!input.allowCollected && !CANCELLABLE_ORDER_STATUSES.includes(order.sample_status)) {
       throw bad(
         order.kind === "machine"
           ? order.sample_status === "in_progress"
@@ -578,7 +583,9 @@ export async function cancelTestIn(client, input) {
         machines,
       ),
     );
-    const refunds = await refundFinalLines(client, input, order.kind, done.onFinal);
+    const refunds = input.skipRefund
+      ? []
+      : await refundFinalLines(client, input, order.kind, done.onFinal);
     let casesCancelled = [];
     if (order.kind === "lab" && target.caseNos?.length) {
       const { rows: left } = await client.query(
@@ -631,6 +638,7 @@ export async function cancelTestIn(client, input) {
       cases: casesCancelled,
       wholeOrder: done.wholeOrder,
       refunds,
+      billedLines: done.onFinal,
     };
   }
 

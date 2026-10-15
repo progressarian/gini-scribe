@@ -27,6 +27,7 @@ import StationNotice from "../StationNotice";
 import CancelTestControl from "../CancelTestControl";
 import { cancelledText, cancelledToastMs, TOAST_MS } from "../../../lib/testCancelText.js";
 import useAuthStore from "../../../stores/authStore";
+import UrgentCancelControl, { CancelHeldBadge } from "../UrgentCancelControl";
 import { CAPABILITIES as CAP, hasCapability } from "../../../../shared/permissions.js";
 import { refundOnTestCancel } from "../../../../shared/labPayment.js";
 import { OutsourcedTag, TestNames } from "../OutsourcedTests.jsx";
@@ -556,6 +557,20 @@ function LabDetailPane({
                       onCancel={(body, done) => onCancelTest(order, t, body, done)}
                     />
                   )}
+                  {canCancelTest &&
+                    t.id &&
+                    (order.cancelHeld || order.cancelStage === "request") && (
+                      <UrgentCancelControl
+                        stage={order.cancelStage}
+                        held={order.cancelHeld}
+                        target={{
+                          orderId: order.orderId,
+                          ...(order.tests.length > 1 ? { testId: t.id } : {}),
+                        }}
+                        what={t.name}
+                        patient={{ name: order.name, fileNo: order.fileNo }}
+                      />
+                    )}
                 </div>
               ))}
               {order.tests.length === 0 && <div className="dp-hint">No tests on this order.</div>}
@@ -563,7 +578,9 @@ function LabDetailPane({
 
             <div className="dp-sec">
               <div className="dp-sec-title">Update status</div>
-              {order.blockedReason ? (
+              {order.cancelHeld ? (
+                <CancelHeldBadge />
+              ) : order.blockedReason ? (
                 <div className={`dp-hint lab-blocked${order.heldElsewhere ? " is-held" : ""}`}>
                   {order.paid ? (order.heldElsewhere ? "🔒 " : "") : "💰 "}
                   {order.blockedReason}
@@ -946,6 +963,7 @@ function HealthrayCasePane({
   canCancelTest,
   busy,
   room,
+  date,
 }) {
   // Once "done" is on the record the report is settled: view only.
   const caseIsDone = (c) => (c.actions || []).some((a) => a.action === "report_uploaded");
@@ -1079,6 +1097,19 @@ function HealthrayCasePane({
                       onCancel={(body, done) => onCancelCase(row, c, body, done)}
                     />
                   )}
+                  {canCancelTest &&
+                    row.patientId &&
+                    date &&
+                    (c.cancelHeld || c.cancelStage === "request") && (
+                      <UrgentCancelControl
+                        full
+                        stage={c.cancelStage}
+                        held={c.cancelHeld}
+                        target={{ caseNo: c.caseNo, patientId: row.patientId, date }}
+                        what={c.tests.join(", ") || `case ${c.caseNo}`}
+                        patient={{ name: row.name, fileNo: row.fileNo }}
+                      />
+                    )}
                   {c.orderedBy && (
                     <div className="dp-hint">
                       Ordered by <strong>{c.orderedBy}</strong>
@@ -2096,6 +2127,7 @@ export default function LabRoom({ room = null }) {
         canFileReport={canFileReport}
         onCancelCase={onCancelCase}
         canCancelTest={canCancelTest}
+        date={data?.date}
         busy={caseAction.isPending || caseUpload.isPending || cancelLabCase.isPending}
       />
 

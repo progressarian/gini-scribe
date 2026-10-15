@@ -220,11 +220,7 @@ export async function listOpdVisits(filters, db = pool) {
       LIMIT $${params.length - 1} OFFSET $${params.length}`,
     params,
   );
-  const total = rows.length
-    ? n(rows[0].total)
-    : page > 1
-      ? await countOpdVisits(filters, db)
-      : 0;
+  const total = rows.length ? n(rows[0].total) : page > 1 ? await countOpdVisits(filters, db) : 0;
   return {
     data: rows.map(visitRow),
     total,

@@ -15,6 +15,7 @@ import { publishBillingRequest } from "../giniflow/realtimeBus.js";
 import { endVisitAfterRefund } from "./refundVisitExit.js";
 import { restoreDepositLegs } from "./payments.js";
 import { paise } from "../../../shared/labPayment.js";
+import { urgentCancelReasonLabel } from "../../../shared/testCancelReasons.js";
 import { receptionHolds } from "./receptionOrders.js";
 import {
   NOTE_REQUIRED_REFUND_REASON,
@@ -48,6 +49,12 @@ const COLUMNS = [
   "mode_reason",
   "credit_note_id",
   "amount",
+  "cancel_target",
+  "cancel_reason_code",
+  "paid_amount",
+  "charge_type",
+  "charge_value",
+  "charge_amount",
 ];
 
 const SPEC = {
@@ -61,6 +68,7 @@ export const KINDS = {
   repeat_item: "repeat",
   refund: "refund",
   deposit_refund: "deposit refund",
+  test_cancel: "test cancellation",
 };
 const PRICE_FIELDS = ["base_price", "price", "rate", "amount", "mrp", "discount"];
 export const TEXT_MAX = 1000;
@@ -191,6 +199,26 @@ const shape = (row) =>
             balance: paise(row.deposit_balance ?? 0),
           }
         : null,
+    test_cancel:
+      row.kind === "test_cancel"
+        ? {
+            target: row.cancel_target,
+            reason_code: row.cancel_reason_code,
+            reason_label: urgentCancelReasonLabel(row.cancel_reason_code),
+            paid: row.paid_amount === null ? null : paise(row.paid_amount),
+            charge_type: row.charge_type ?? null,
+            charge_value: row.charge_value === null ? null : Number(row.charge_value),
+            charge: row.charge_amount === null ? null : paise(row.charge_amount),
+            credit_note: row.credit_note_id
+              ? {
+                  id: row.credit_note_id,
+                  bill_no: row.credit_note_no ?? null,
+                  payable: paise(row.credit_note_payable),
+                  refunded: paise(row.credit_note_refunded),
+                }
+              : null,
+          }
+        : null,
   };
 
 const LIST_SQL = `
@@ -205,7 +233,8 @@ const LIST_SQL = `
          v.visit_date::text AS visit_date,
          (SELECT da.balance FROM deposit_accounts da WHERE da.patient_id = r.patient_id)
            AS deposit_balance,
-         (r.kind NOT IN ('refund', 'deposit_refund') AND r.status = 'approved' AND l.id IS NULL)
+         (r.kind NOT IN ('refund', 'deposit_refund', 'test_cancel') AND r.status = 'approved'
+          AND l.id IS NULL)
            AS usable
     FROM billing_requests r
     LEFT JOIN patients p ON p.id = r.patient_id
@@ -226,7 +255,7 @@ function cleanLimit(value) {
   return Math.min(limit, LIST_LIMIT);
 }
 
-export const STATUSES = ["pending", "approved", "rejected", "used"];
+export const STATUSES = ["pending", "approved", "rejected", "used", "withdrawn"];
 
 function cleanStatuses(value) {
   if (value === undefined || value === null || value === "") return null;
@@ -257,6 +286,8 @@ export async function listRequests(filters = {}, db = pool) {
       throw httpError(400, `Kind must be one of: ${Object.keys(KINDS).join(", ")}`);
     }
     add("r.kind = ?", filters.kind);
+  } else {
+    where.push("r.kind <> 'test_cancel'");
   }
   params.push(cleanLimit(filters.limit));
   const { rows } = await db.query(
@@ -319,6 +350,13 @@ export async function announceRequest(action, requestId, db = pool) {
 }
 
 export const announceUsed = (requestId, db = pool) => announceRequest("used", requestId, db);
+
+export async function readRequestIn(db, id) {
+  const { rows } = await db.query(`${LIST_SQL} WHERE r.id = $1`, [id]);
+  return rows.length ? shape(rows[0]) : null;
+}
+
+export const lockRequest = (client, id) => lockRow(client, SPEC, cleanUuid(id, "request"));
 
 export async function getRequest(id, db = pool) {
   const { rows } = await db.query(`${LIST_SQL} WHERE r.id = $1`, [cleanUuid(id, "request")]);
@@ -395,7 +433,7 @@ export async function repeatApprovalFor(client, { visitId, serviceItemId }) {
 
 const billLabel = (bill) => (bill?.bill_no ? `bill ${bill.bill_no}` : "this visit's draft bill");
 
-async function insertRequest(client, values, ctx) {
+export async function insertRequest(client, values, ctx) {
   const keys = Object.keys(values);
   const { rows } = await client.query(
     `INSERT INTO billing_requests (${keys.join(", ")}, created_by, updated_by)
@@ -406,7 +444,7 @@ async function insertRequest(client, values, ctx) {
   return rows[0].id;
 }
 
-async function finishCreate(client, id, ctx) {
+export async function finishCreate(client, id, ctx) {
   const { rows } = await client.query(`${LIST_SQL} WHERE r.id = $1`, [id]);
   const request = shape(rows[0]);
   await writeAudit(client, {
@@ -808,9 +846,19 @@ async function approveDepositRefund(client, before, input, note, ctx) {
   );
 }
 
-const DECIDED = { approved: "approved", rejected: "rejected", used: "approved and used" };
+const DECIDED = {
+  approved: "approved",
+  rejected: "rejected",
+  used: "approved and used",
+  withdrawn: "withdrawn",
+};
 
-function checkPending(before) {
+function refuseTestCancel(before) {
+  if (before.kind !== "test_cancel") return;
+  throw httpError(409, "Answer test cancellations from the Test cancellations tab");
+}
+
+export function checkPending(before) {
   if (before.status === "pending") return;
   const when = before.decided_at
     ? ` on ${new Date(before.decided_at).toISOString().slice(0, 10)}`
@@ -832,7 +880,7 @@ async function decide(client, id, { status, note, createdItemId = null }, ctx) {
   return shape(listed.rows[0]);
 }
 
-async function audit(client, { id, action, before, after, ctx }) {
+export async function audit(client, { id, action, before, after, ctx }) {
   await writeAudit(client, {
     entity: SPEC.table,
     entityId: id,
@@ -849,6 +897,7 @@ export async function approveRequest(id, input, ctx, db = pool) {
   const note = cleanNote(input?.note, false);
   const request = await inTransaction(async (client) => {
     const before = await lockRow(client, SPEC, requestId);
+    refuseTestCancel(before);
     checkPending(before);
     let createdItemId = null;
     if (before.kind === "deposit_refund") {
@@ -903,6 +952,7 @@ export async function rejectRequest(id, input, ctx, db = pool) {
   const note = cleanNote(input?.note, true);
   const request = await inTransaction(async (client) => {
     const before = await lockRow(client, SPEC, requestId);
+    refuseTestCancel(before);
     checkPending(before);
     const after = await decide(client, requestId, { status: "rejected", note }, ctx);
     await audit(client, { id: requestId, action: "reject", before, after, ctx });

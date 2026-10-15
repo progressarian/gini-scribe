@@ -1489,3 +1489,37 @@ export const patientAppUnlinkSchema = z.object({
 export * from "./billing.js";
 export * from "./billingReports.js";
 export * from "./pharmacyStock.js";
+
+const cancelTargetSchema = z.strictObject({
+  orderId: z.string().trim().max(64).optional(),
+  testId: z.string().trim().max(64).nullish(),
+  caseNo: z.string().trim().max(40).optional(),
+  patientId: z.union([z.number().int().positive(), z.string().regex(/^\d{1,10}$/)]).optional(),
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+});
+
+const cancelChargeFields = {
+  charge_type: z.enum(["percent", "fixed"]),
+  charge_value: z.union([z.number().min(0).max(100000), z.string().trim().max(12)]),
+  note: z.string().trim().max(500),
+};
+
+export const testCancelRequestSchema = z.strictObject({
+  target: cancelTargetSchema,
+  reason_code: z.string().trim().max(40),
+  note: z.string().trim().max(300).optional(),
+});
+
+export const testCancelApproveSchema = z.strictObject(cancelChargeFields);
+
+export const testCancelRejectSchema = z.strictObject({ note: z.string().trim().max(500) });
+
+export const testCancelNowSchema = z.strictObject({
+  target: cancelTargetSchema,
+  reason_code: z.string().trim().max(40),
+  ...cancelChargeFields,
+  request_note: z.string().trim().max(300).optional(),
+});

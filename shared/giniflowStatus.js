@@ -92,6 +92,9 @@ export const STATUS_LABEL = {
   reports_reviewed: "Reports read by the MO",
   test_cancelled: "Test cancelled",
   test_restored: "Cancelled test restored",
+  cancel_requested: "Cancellation requested",
+  cancel_rejected: "Cancellation rejected",
+  cancel_withdrawn: "Cancellation request withdrawn",
   paused: "Stepped out — clock held",
   resumed: "Back — clock running",
   doctor_done: "Waiting for Prescription Explain",
@@ -225,6 +228,9 @@ export const MARKER_STATUSES = [
   "resumed",
   "test_cancelled",
   "test_restored",
+  "cancel_requested",
+  "cancel_rejected",
+  "cancel_withdrawn",
 ];
 
 // A patient who stepped out — lunch, a phone call, the bank — and came back.

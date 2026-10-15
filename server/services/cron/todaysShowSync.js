@@ -102,7 +102,15 @@ function pickTimeSlot(row) {
     .trim();
 }
 
+export const todaysShowSyncEnabled = () =>
+  ["on", "1", "true", "yes"].includes(
+    String(process.env.SHEETS_TODAYS_SHOW_SYNC || "").toLowerCase(),
+  );
+
 export async function syncTodaysShow() {
+  if (!todaysShowSyncEnabled()) {
+    return { flipped: 0, inserted: 0, skipped: 0, noShow: 0, disabled: true };
+  }
   if (syncInFlight) {
     return { flipped: 0, inserted: 0, skipped: 0, noShow: 0, skippedBecauseRunning: true };
   }
@@ -323,6 +331,10 @@ export async function syncTodaysShow() {
 }
 
 export function startTodaysShowCron() {
+  if (!todaysShowSyncEnabled()) {
+    log("Cron", "Today's Appt sheet sync is OFF (set SHEETS_TODAYS_SHOW_SYNC=on to enable)");
+    return;
+  }
   log("Cron", "Starting (every 5 min)");
   syncTodaysShow().catch((e) => error("Cron", `Initial run failed: ${e.message}`));
   intervalId = setInterval(() => {

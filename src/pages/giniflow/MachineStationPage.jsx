@@ -19,6 +19,9 @@ import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
 import LiveBadge from "../../components/giniflow/LiveBadge";
 import StationNotice from "../../components/giniflow/StationNotice";
 import CancelTestControl from "../../components/giniflow/CancelTestControl";
+import UrgentCancelControl, {
+  CancelHeldBadge,
+} from "../../components/giniflow/UrgentCancelControl";
 import { cancelledText, cancelledToastMs, TOAST_MS } from "../../lib/testCancelText.js";
 import LabResultsForm from "../../components/giniflow/LabResultsForm";
 import PdfViewerModal from "../../components/visit/PdfViewerModal";
@@ -127,7 +130,7 @@ function TestCard({ order, onAdvance, onOpen, busy }) {
           <span className="mc-tlbl">{order.station}</span>
         </span>
       </button>
-      {order.nextAction && (
+      {order.nextAction && !order.cancelHeld && (
         <button
           type="button"
           className="st-btn st-btn-tl mc-act"
@@ -244,7 +247,9 @@ function TestPane({
 
             <div className="dp-sec">
               <div className="dp-sec-title">Update status</div>
-              {order.blockedReason ? (
+              {order.cancelHeld ? (
+                <CancelHeldBadge />
+              ) : order.blockedReason ? (
                 <div className="dp-hint lab-blocked">
                   {order.heldElsewhere ? "🔒" : "⏸"} {order.blockedReason}
                 </div>
@@ -285,6 +290,16 @@ function TestPane({
                   amount={order.amountTotal}
                   refund={order.amountPaid}
                   onCancel={(body, done) => onCancelTest(order, body, done)}
+                />
+              )}
+              {canCancelTest && (order.cancelHeld || order.cancelStage === "request") && (
+                <UrgentCancelControl
+                  full
+                  stage={order.cancelStage}
+                  held={order.cancelHeld}
+                  target={{ orderId: order.orderId }}
+                  what={order.tests.join(", ") || "test"}
+                  patient={{ name: order.name, fileNo: order.fileNo }}
                 />
               )}
             </div>

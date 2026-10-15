@@ -3,6 +3,7 @@ import { keepPreviousData, useQuery, useMutation, useQueryClient } from "@tansta
 import api from "../services/api.js";
 import { toast } from "../stores/uiStore.js";
 import useDebounced from "../hooks/useDebounced";
+import RxParameterDefaults from "../components/RxParameterDefaults.jsx";
 import "./PrescriptionFooterPage.css";
 
 // The fixed strip at the foot of every prescription. HealthRay has the same
@@ -389,6 +390,7 @@ export default function PrescriptionFooterPage() {
                 <span className="rxf__note">Applies to the next prescription printed.</span>
               </div>
             </form>
+            <RxParameterDefaults />
           </div>
           <A4Preview footer={previewFooter} />
         </>

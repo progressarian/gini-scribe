@@ -421,6 +421,35 @@ async function matchIdentitylessByPhone(phone, name, sex) {
   return sameName.length === 1 ? sameName[0].id : null;
 }
 
+const GNI_FILE_NO = "^GNI-[0-9]+$";
+
+export async function carryUhidToBookings(patientId, db = pool) {
+  const { rows } = await db.query(
+    `WITH moved AS (
+       UPDATE appointments a
+          SET file_no = p.file_no, updated_at = NOW()
+         FROM patients p, appointments old
+        WHERE p.id = $1 AND a.patient_id = p.id AND old.id = a.id
+          AND a.file_no ~ $2
+          AND p.file_no IS NOT NULL AND p.file_no !~ $2
+       RETURNING a.id, old.file_no AS old_no, a.file_no AS new_no
+     ), logged AS (
+       INSERT INTO appointment_change_log
+         (appointment_id, field, field_label, old_value, new_value, changed_by)
+       SELECT id, 'file_no', 'UHID', old_no, new_no, 'HealthRay sync' FROM moved
+     )
+     SELECT id, old_no, new_no FROM moved`,
+    [patientId, GNI_FILE_NO],
+  );
+  if (rows.length) {
+    log(
+      "DB",
+      `patient ${patientId}: ${rows.length} booking(s) moved from ${rows[0].old_no} to ${rows[0].new_no}`,
+    );
+  }
+  return rows.length;
+}
+
 export async function findUnlinkedBooking(patientId, apptDate) {
   if (!patientId || !apptDate) return null;
   const { rows } = await pool.query(
@@ -476,6 +505,7 @@ export async function upsertPatient({
          WHERE id = $1`,
         [id, name, phone, fileNo, age, sex, address, dob, email, bloodGroup, abhaId],
       );
+      if (fileNo) await carryUhidToBookings(id);
       return id;
     }
   }
@@ -507,6 +537,7 @@ export async function upsertPatient({
            WHERE id = $1`,
           [row.id, healthId, name, phone, age, sex, address, dob, email, bloodGroup, abhaId],
         );
+        await carryUhidToBookings(row.id);
         return row.id;
       }
       // Reassignment: this UHID now belongs to a different person.
@@ -557,6 +588,7 @@ export async function upsertPatient({
       "DB",
       `adopted identity-less patient ${identitylessId} for file_no=${fileNo || "?"} (${name}) — phone match`,
     );
+    if (fileNo) await carryUhidToBookings(identitylessId);
     return identitylessId;
   }
 

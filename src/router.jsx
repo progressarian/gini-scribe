@@ -83,6 +83,7 @@ const CategoryRatesPage = lazyWithRetry(() => import("./pages/billing/CategoryRa
 const ConsultantFeesPage = lazyWithRetry(() => import("./pages/billing/ConsultantFeesPage"));
 const DiscountsSettingsPage = lazyWithRetry(() => import("./pages/billing/DiscountsSettingsPage"));
 const DeskRequestsPage = lazyWithRetry(() => import("./pages/billing/DeskRequestsPage"));
+const TestCancellationsPage = lazyWithRetry(() => import("./pages/billing/TestCancellationsPage"));
 const BillingSettingsPage = lazyWithRetry(() => import("./pages/billing/BillingSettingsPage"));
 const BillingImportPage = lazyWithRetry(() => import("./pages/billing/BillingImportPage"));
 const BillingCounterPage = lazyWithRetry(() => import("./pages/billing/BillingCounterPage"));
@@ -241,6 +242,7 @@ const router = createBrowserRouter([
                   { path: "consultant-fees", element: lazyEl(ConsultantFeesPage) },
                   { path: "discounts", element: lazyEl(DiscountsSettingsPage) },
                   { path: "desk-requests", element: lazyEl(DeskRequestsPage) },
+                  { path: "test-cancellations", element: lazyEl(TestCancellationsPage) },
                   { path: "bulk-import", element: lazyEl(BillingImportPage) },
                   { path: "billing", element: lazyEl(BillingSettingsPage) },
                 ],

@@ -81,6 +81,11 @@ export function useReissueRx() {
   });
 }
 
+export const medicineCardHref = (visitId) =>
+  `${API_URL}/api/giniflow/stations/rx/${visitId}/medicine-card.pdf?token=${encodeURIComponent(
+    localStorage.getItem("gini_auth_token") || "",
+  )}`;
+
 export const printRxHref = (visitId) =>
   `${API_URL}/api/giniflow/stations/rx/${visitId}/print?token=${encodeURIComponent(
     localStorage.getItem("gini_auth_token") || "",

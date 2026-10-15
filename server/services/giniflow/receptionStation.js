@@ -19,6 +19,7 @@ import {
   CASE_CANCELLABLE_SQL,
   LIVE_LAB_CASE_SQL,
   ORDER_CANCELLABLE_SQL,
+  ORDER_OUTPUT_SQL,
   caseFromEarlierLabOnlyVisit,
 } from "./testsHold.js";
 import {
@@ -44,6 +45,8 @@ import {
 } from "../../../shared/labPayment.js";
 import { directConsultSql } from "../../../shared/directConsult.js";
 import { ORDERED_AFTER_CONSULT_SQL } from "../billing/afterConsult.js";
+import { HELD_ORDER_SQL } from "./cancelHold.js";
+import { orderCancelStage } from "../../../shared/testCancelStages.js";
 
 // Reception: the payment desk between the MO ordering tests and the lab
 // collecting a sample.
@@ -66,6 +69,8 @@ const ORDER_SELECT = `
          paid_ev.occurred_at AS paid_at,
          bill.items AS bill_items,
          ${ORDER_CANCELLABLE_SQL("o")} AS can_cancel,
+         ${ORDER_OUTPUT_SQL("o")} AS has_output,
+         ${HELD_ORDER_SQL("o")} AS cancel_held,
          ${ORDERED_AFTER_CONSULT_SQL("o.visit_id", "o.created_at")} AS after_consult,
          CASE WHEN o.kind = 'lab' THEN COALESCE((
            SELECT json_agg(json_build_object('caseNo', lc.case_no, 'tests', lc.test_names)
@@ -169,6 +174,12 @@ const shape = (r) => ({
   afterConsult: !!r.after_consult,
   paidAt: r.paid_at ? new Date(r.paid_at).toISOString() : null,
   canCancel: !!r.can_cancel,
+  cancelStage: orderCancelStage({
+    kind: r.kind,
+    sampleStatus: r.sample_status,
+    hasOutput: r.has_output,
+  }),
+  cancelHeld: !!r.cancel_held,
   cancellableCases: r.cancellable_cases || [],
 });
 

@@ -6,6 +6,7 @@ import {
   useStartRxExplain,
   useMarkRxExplained,
   useReturnRxToQueue,
+  medicineCardHref,
   printRxHref,
   useReissueRx,
   useEndVisit,
@@ -165,6 +166,20 @@ function Pane({
                   : data?.rxStale
                     ? "↻ Re-issue prescription"
                     : "🖨 Generate prescription"}
+              </button>
+            )}
+            {data && (
+              <button
+                className="st-btn"
+                disabled={!data.card?.counts?.total}
+                title={
+                  data.card?.counts?.total
+                    ? "The patient's medicines by time of day, to take home with the prescription"
+                    : "No medicines on the card"
+                }
+                onClick={() => onView(visitId, data.name, false, "card")}
+              >
+                🖨 Print medicine card
               </button>
             )}
           </div>
@@ -478,7 +493,9 @@ export default function RxStationPage() {
         onExplained={onExplained}
         canEndVisit={canEndVisit}
         onEndVisit={onEndVisit}
-        onView={(visitId, name, fromHealthray) => setViewing({ visitId, name, fromHealthray })}
+        onView={(visitId, name, fromHealthray, kind = "rx") =>
+          setViewing({ visitId, name, fromHealthray, kind })
+        }
         onReissue={onReissue}
         reissuing={reissue.isPending}
         returning={returnToQueue.isPending}
@@ -487,14 +504,23 @@ export default function RxStationPage() {
 
       {viewing && (
         <PdfViewerModal
-          src={{
-            url: printRxHref(viewing.visitId),
-            mimeType: "application/pdf",
-            fileName: `Prescription — ${viewing.name || "patient"}`,
-            title: `${viewing.fromHealthray ? "HealthRay prescription" : "Prescription"} — ${
-              viewing.name || "patient"
-            }`,
-          }}
+          src={
+            viewing.kind === "card"
+              ? {
+                  url: medicineCardHref(viewing.visitId),
+                  mimeType: "application/pdf",
+                  fileName: `Medicine card — ${viewing.name || "patient"}`,
+                  title: `Medicine card — ${viewing.name || "patient"}`,
+                }
+              : {
+                  url: printRxHref(viewing.visitId),
+                  mimeType: "application/pdf",
+                  fileName: `Prescription — ${viewing.name || "patient"}`,
+                  title: `${viewing.fromHealthray ? "HealthRay prescription" : "Prescription"} — ${
+                    viewing.name || "patient"
+                  }`,
+                }
+          }
           onClose={() => setViewing(null)}
         />
       )}

@@ -3,6 +3,7 @@
 // across requests — Puppeteer cold-starts ~1-2s, so reusing it makes the
 // per-request cost only the page render.
 
+import { buildRxParameterTable } from "./rxParameterTable.js";
 import { createRequire } from "module";
 import crypto from "crypto";
 import { buildPrescriptionHtml } from "../templates/prescriptionTemplate.js";
@@ -113,12 +114,32 @@ export async function generatePrescriptionPdf(data) {
   // Resolved here rather than at each call site: the strip is fixed clinic-wide,
   // and prescriptions are rendered from the client, the visit route and the
   // sync auto-save alike — none of which should have to remember to fetch it.
-  const [rx_footer, logo] = await Promise.all([
+  const [rx_footer, logo, rxParameters] = await Promise.all([
     data?.rx_footer ? Promise.resolve(data.rx_footer) : getPrescriptionFooter(),
     data?.rx_logo ? Promise.resolve({ dataUri: data.rx_logo }) : getPrescriptionLogo(),
+    resolveRxParameters(data),
   ]);
-  return renderHtmlToPdf(buildPrescriptionHtml({ ...data, rx_footer, rx_logo: logo.dataUri }));
+  return renderHtmlToPdf(
+    buildPrescriptionHtml({ ...data, rx_footer, rx_logo: logo.dataUri, rxParameters }),
+  );
 }
+
+async function resolveRxParameters(data) {
+  if (data?.rxParameters !== undefined) return data.rxParameters;
+  const patientId = data?.patient?.id;
+  if (!patientId) return null;
+  try {
+    return await buildRxParameterTable(undefined, {
+      patientId,
+      visitDate: data.rxDate || istToday(),
+    });
+  } catch (e) {
+    console.error("Rx parameter table skipped:", e.message);
+    return null;
+  }
+}
+
+const istToday = () => new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
 
 // The referral letter (19 §7.1). Same warm browser, deliberately — a second
 // Chromium for a one-page letter would double the memory the API holds all day

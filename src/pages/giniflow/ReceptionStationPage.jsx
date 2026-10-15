@@ -43,6 +43,7 @@ import "../../styles/giniflow-station.css";
 import useAuthStore from "../../stores/authStore";
 import { CAPABILITIES as CAPS, hasCapability } from "../../../shared/permissions.js";
 import CancelTestControl from "../../components/giniflow/CancelTestControl";
+import UrgentCancelControl from "../../components/giniflow/UrgentCancelControl";
 import {
   cancelledText,
   cancelledToastMs,
@@ -294,6 +295,25 @@ function OrderCard({ order, onClear, pending, actorId, onCancelTest, canCancelTe
                 onCancel={(body, done) => onCancelTest(order, t, body, done)}
               />
             ))}
+        </div>
+      )}
+      {canCancelTest && (order.cancelHeld || order.cancelStage === "request") && (
+        <div className="toc-body">
+          {(order.tests.length > 1 ? order.tests.filter((t) => t.id) : order.tests.slice(0, 1)).map(
+            (t) => (
+              <UrgentCancelControl
+                key={t.id || t.name}
+                stage={order.cancelStage}
+                held={order.cancelHeld}
+                target={{
+                  orderId: order.orderId,
+                  ...(order.tests.length > 1 ? { testId: t.id } : {}),
+                }}
+                what={order.tests.length > 1 ? t.name : order.tests.map((x) => x.name).join(", ")}
+                patient={{ name: order.name, fileNo: order.fileNo }}
+              />
+            ),
+          )}
         </div>
       )}
 

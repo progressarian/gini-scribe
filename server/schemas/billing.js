@@ -313,6 +313,9 @@ export const billingSettingsUpdateSchema = atLeastOne(
       bill_footer: z.union([text(1000), z.null()]),
       auto_add_consultation: flag,
       auto_add_lab_case_tests: flag,
+      cancel_charge_type: z.enum(["percent", "fixed"]),
+      cancel_charge_pct: z.union([z.number().min(0).max(100), z.string().trim().max(10)]),
+      cancel_charge_amount: z.union([z.number().min(0).max(100000), z.string().trim().max(12)]),
     })
     .partial(),
 );

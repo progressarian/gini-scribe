@@ -50,6 +50,8 @@ const TYPED = {
   prefix: codeTyped,
   number_width: digitsTyped,
   next_no: digitsTyped,
+  cancel_charge_pct: moneyTyped,
+  cancel_charge_amount: moneyTyped,
 };
 const typed = (key, value) => (TYPED[key] ? TYPED[key](value) : value);
 const changedOnly = (after, before) =>
@@ -222,6 +224,92 @@ function GeneralCard({ settings }) {
         <Link to="/settings/prescription">Prescription settings</Link>.
       </p>
       <Actions error={error} dirty={dirty} busy={busy} />
+    </form>
+  );
+}
+
+const pickCancelCharge = (s) => ({
+  cancel_charge_type: s.cancel_charge_type ?? "percent",
+  cancel_charge_pct: text(s.cancel_charge_pct),
+  cancel_charge_amount: text(s.cancel_charge_amount),
+});
+
+const twoDecimals = (value) => /^\d+(\.\d{1,2})?$/.test(String(value).trim());
+
+function chargeFieldError(value, max, label) {
+  if (String(value).trim() === "") return `Enter the ${label}`;
+  if (!twoDecimals(value) || Number(value) > max) {
+    return `Enter a ${label} from 0 to ${max.toLocaleString("en-IN")}, up to 2 decimals`;
+  }
+  return "";
+}
+
+function CancelChargeCard({ settings }) {
+  const { form, set, save, error, dirty, busy } = useSettingsForm(settings, pickCancelCharge);
+  const pctError = chargeFieldError(form.cancel_charge_pct, 100, "percentage");
+  const amountError = chargeFieldError(form.cancel_charge_amount, 100000, "amount");
+  const invalid = Boolean(pctError || amountError);
+  return (
+    <form
+      className="flow-card"
+      aria-label="Cancellation after collection"
+      onSubmit={(e) => (invalid ? e.preventDefault() : save(e, "Saved the cancellation charge"))}
+      noValidate
+    >
+      <div className="fset__cardhead">
+        <h2 className="flow-sec-title">Cancellation after collection</h2>
+      </div>
+      <div className="fset__cardsub">
+        When an admin approves cancelling a test whose sample is already collected, this collection
+        charge is pre-filled. They can change it on each approval. No GST is charged on it.
+      </div>
+      <fieldset className="bill-form">
+        <legend className="fset__hint">Default charge type</legend>
+        {[
+          ["percent", "Percentage of what was paid"],
+          ["fixed", "Fixed amount"],
+        ].map(([value, label]) => (
+          <label key={value} className="fset__check bill-settings__check">
+            <input
+              type="radio"
+              name="cancel_charge_type"
+              value={value}
+              checked={form.cancel_charge_type === value}
+              onChange={set("cancel_charge_type")}
+            />
+            {label}
+          </label>
+        ))}
+      </fieldset>
+      <div className="bill-form">
+        <Field label="Default percentage (%)" hint={pctError || "0 to 100"}>
+          {(id) => (
+            <input
+              id={id}
+              className="jb-assign"
+              inputMode="decimal"
+              maxLength={6}
+              value={form.cancel_charge_pct}
+              onChange={set("cancel_charge_pct")}
+              aria-invalid={Boolean(pctError)}
+            />
+          )}
+        </Field>
+        <Field label="Default fixed amount (₹)" hint={amountError || "0 to 1,00,000"}>
+          {(id) => (
+            <input
+              id={id}
+              className="jb-assign"
+              inputMode="decimal"
+              maxLength={9}
+              value={form.cancel_charge_amount}
+              onChange={set("cancel_charge_amount")}
+              aria-invalid={Boolean(amountError)}
+            />
+          )}
+        </Field>
+      </div>
+      <Actions error={error} dirty={dirty && !invalid} busy={busy} />
     </form>
   );
 }
@@ -778,6 +866,7 @@ export default function BillingSettingsPage() {
         <div className="bill-settings">
           <GeneralCard settings={settings} />
           <GstCard settings={settings} />
+          <CancelChargeCard settings={settings} />
           <TaxCodesCard onBlocked={setBlocked} />
           <SeriesCard />
         </div>

@@ -23,6 +23,8 @@ import ProceduresSection from "./consult/ProceduresSection";
 import MedCardSection from "./consult/MedCardSection";
 import FinalizeBar from "./consult/FinalizeBar";
 import TrendModal from "./consult/TrendModal";
+import VisitSummarySection from "./consult/VisitSummarySection";
+import RxParameterSection from "./consult/RxParameterSection";
 import "../../styles/giniflow-station.css";
 import StabilityChip from "../../components/giniflow/StabilityChip";
 import { clearDraftFields, readDraft, writeDraftNav } from "../../lib/consultDraft";
@@ -537,6 +539,7 @@ export default function DoctorConsultPage() {
             onDecide={onDecideSuggestion}
           />
           <OverviewSection consult={consult} onTile={setTrendMarker} />
+          <VisitSummarySection visitId={visitId} onToast={showToast} />
           <ComplaintsSection
             restored={restored}
             flushRef={flushHistory}
@@ -550,6 +553,12 @@ export default function DoctorConsultPage() {
             onTrend={(l) =>
               setTrendMarker({ key: l.test, label: l.test_name || l.test, unit: l.unit })
             }
+          />
+          <RxParameterSection
+            visitId={visitId}
+            readOnly={readOnly}
+            onToast={showToast}
+            onUnsaved={markUnsaved}
           />
           <RxSection
             visitId={visitId}

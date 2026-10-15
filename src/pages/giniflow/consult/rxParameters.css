@@ -1,0 +1,50 @@
+.gf .vsum-text {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink2);
+  background: var(--bg);
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  padding: 10px 12px;
+}
+.gf .vsum-text p {
+  margin: 0;
+}
+.gf .vsum-text p + p {
+  margin-top: 6px;
+}
+.gf .rxp-table th[scope="row"] {
+  text-align: left;
+  white-space: nowrap;
+}
+.gf .rxp-table .rxp-today {
+  background: #f5f9ff;
+}
+.gf .rxp-inp {
+  width: 84px;
+  margin-right: 4px;
+}
+.gf .rxp-unit {
+  width: 70px;
+}
+.gf .rxp-acts {
+  white-space: nowrap;
+  text-align: right;
+}
+.gf .rxp-acts .btn-sm {
+  margin-left: 4px;
+}
+.gf .rxp-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+.gf .rxp-custom {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}

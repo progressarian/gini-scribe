@@ -15,7 +15,7 @@ const SEARCH_MAX = 100;
 const IST_DAY = (column) => `(${column} AT TIME ZONE 'Asia/Kolkata')::date`;
 
 const BOARD_SQL = `
-  SELECT r.id, r.status, r.reason, r.reason_code, r.requested_mode, r.approved_mode,
+  SELECT r.id, r.kind, r.status, r.reason, r.reason_code, r.requested_mode, r.approved_mode,
          r.mode_reason, r.decision_note, r.requested_at, r.decided_at, r.refund_lines,
          r.bill_id, r.credit_note_id, r.requested_by, r.decided_by,
          COALESCE(r.visit_id, b.visit_id) AS visit_id,
@@ -43,7 +43,7 @@ const BOARD_SQL = `
        LIMIT 1
     ) po ON TRUE
     CROSS JOIN LATERAL (SELECT ${MONEY_COLUMNS} FROM bills b WHERE b.id = r.bill_id) m
-   WHERE r.kind = 'refund'
+   WHERE (r.kind = 'refund' OR (r.kind = 'test_cancel' AND r.status = 'approved'))
      AND (r.status = 'pending'
           OR (r.status = 'approved' AND cn.id IS NOT NULL
               AND (cn.paid_amount < cn.patient_payable
@@ -222,7 +222,7 @@ function groupOf(row, amounts, range) {
 function shapeRow(row, group, amounts) {
   return {
     key: row.id ?? row.credit_note_id,
-    kind: isDiscount(row) ? "discount" : "refund",
+    kind: isDiscount(row) ? "discount" : row.kind === "test_cancel" ? "test_cancel" : "refund",
     request_id: row.id,
     status: row.status,
     group,

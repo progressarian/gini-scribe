@@ -3,6 +3,7 @@ import {
   CASE_CANCELLABLE_SQL,
   LIVE_LAB_CASE_SQL,
   ORDER_CANCELLABLE_SQL,
+  ORDER_OUTPUT_SQL,
   caseFromEarlierLabOnlyVisit,
 } from "./testsHold.js";
 import {
@@ -59,6 +60,13 @@ import {
   OUTSIDE_STEP,
   SENT_OUTSIDE,
 } from "../../../shared/labStages.js";
+import {
+  assertNotHeld,
+  CASE_CANCEL_STAGE_SQL,
+  HELD_CASE_SQL,
+  HELD_ORDER_SQL,
+} from "./cancelHold.js";
+import { orderCancelStage } from "../../../shared/testCancelStages.js";
 
 // The COLUMN, not the raw status. `vitals_done` is the last event the sync
 // observed, but the board files it under "With SD / MO" — HealthRay has no
@@ -327,6 +335,8 @@ export async function getLabQueue(
             (SELECT doc.id FROM documents doc WHERE doc.giniflow_lab_order_id = o.id)
               AS report_doc_id,
             ${ORDER_CANCELLABLE_SQL("o")} AS can_cancel,
+            ${ORDER_OUTPUT_SQL("o")} AS has_output,
+            ${HELD_ORDER_SQL("o")} AS cancel_held,
             COALESCE((SELECT json_agg(json_build_object('caseNo', lc.case_no, 'tests', lc.test_names)
                                       ORDER BY lc.case_no)
                         FROM lab_cases lc
@@ -464,6 +474,12 @@ export async function getLabQueue(
       heldElsewhere: startHeld,
       canCancelStart: r.sample_status === "drawing" && (!room || room === LAB_ROOMS.COLLECTION),
       canCancel: !!r.can_cancel,
+      cancelStage: orderCancelStage({
+        kind: "lab",
+        sampleStatus: r.sample_status,
+        hasOutput: r.has_output,
+      }),
+      cancelHeld: !!r.cancel_held,
       cancellableCases: r.cancellable_cases || [],
       claimState: r.claim_state || "none",
       orderedAt: r.created_at ? new Date(r.created_at).toISOString() : null,
@@ -812,6 +828,8 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
                 'caseSource', c.case_source,
                 'tests', COALESCE(c.test_names, ARRAY[]::text[]),
                 'canCancel', ${CASE_CANCELLABLE_SQL("c")},
+                'cancelStage', ${CASE_CANCEL_STAGE_SQL("c")},
+                'cancelHeld', ${HELD_CASE_SQL("c")},
                 'synced', c.results_synced,
                 'reported', c.raw_detail_json->>'reported_on' IS NOT NULL,
                 'hasReport', c.pdf_storage_path IS NOT NULL,
@@ -1194,6 +1212,7 @@ export async function advanceSample(
       [orderId],
     );
     if (!rows.length) throw Object.assign(new Error("Order not found"), { status: 404 });
+    await assertNotHeld(client, { orderId });
     const { sample_status: from, payment_status: payment, visit_id: visitId } = rows[0];
     // The mirror of the check the machine room makes. Both endpoints are reached
     // by a capability, and a capability says which ROOM somebody works — not
@@ -1618,6 +1637,7 @@ export async function markLabCaseAction(
       status: 409,
     });
   }
+  await assertNotHeld(db, { caseNo });
 
   if (action === "sample_sent" && !undo && !isCollected(await caseLadderState(db, caseNo))) {
     const taken = await markLabCaseAction(
@@ -1948,6 +1968,7 @@ export async function markCaseSentOutside(
       status: 403,
     });
   }
+  await assertNotHeld(db, { caseNo });
   const c = await outsideCase(db, caseNo);
   if (hasCaseAction(c, SENT_OUTSIDE)) return { caseNo, action: SENT_OUTSIDE, unchanged: true };
   let onBreak = false;
@@ -2023,6 +2044,7 @@ export async function uploadLabCaseReport(
     [caseNo],
   );
   if (!rows.length) throw Object.assign(new Error("Lab case not found"), { status: 404 });
+  await assertNotHeld(db, { caseNo });
   const c = rows[0];
   // Without a patient the file has no chart to land on, and `documents` is keyed
   // on one. Refuse rather than store an orphan nobody will ever see.

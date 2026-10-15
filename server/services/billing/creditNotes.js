@@ -947,3 +947,70 @@ export async function discountFinalBill(billId, input, ctx, db = pool) {
     };
   }, db);
 }
+
+export async function chargeKeptCreditIn(client, { billId, credits }, ctx) {
+  const loaded = await loadCredit(client, billId, { lock: true });
+  const { bill, lines } = loaded;
+  if (bill.status !== "final") throw httpError(409, `${billLabel(bill)} is not final yet`);
+  const entries = credits
+    .filter((credit) => credit.amount > 0)
+    .map((credit) => {
+      const line = lines.find((entry) => entry.id === credit.lineId);
+      if (!line) {
+        throw httpError(409, `That line isn't on ${billLabel(bill)}`, { line_id: credit.lineId });
+      }
+      const left = line.original.patient_payable - line.credited.patient_payable;
+      if (credit.amount > left) {
+        throw httpError(409, `Only ₹${rupees(left)} is left to refund on ${line.name}`);
+      }
+      return { line, quantity: 0, frees: false, piece: ONLY_PAYABLE(credit.amount) };
+    });
+  if (!entries.length) return null;
+  const amount = entries.reduce((sum, entry) => sum + entry.piece.patient_payable, 0);
+  const plan = {
+    lines: entries,
+    credits_everything: false,
+    totals: {
+      actual: amount,
+      discount: 0,
+      tax: 0,
+      payable: amount,
+      claim: 0,
+      adjustment: 0,
+      round_off: 0,
+    },
+  };
+  const day = indiaToday();
+  const number = await nextNumber(client, seriesFor("credit_note"), day, ctx);
+  const inserted = await insertNote(client, bill, plan, number, day, ctx);
+  const { rows: marked } = await client.query(
+    `UPDATE bills SET credit_kind = 'cancel_charge' WHERE id = $1 RETURNING ${BILL_COLUMNS}`,
+    [inserted.id],
+  );
+  const note = marked[0];
+  const noteLines = [];
+  for (const [index, entry] of plan.lines.entries()) {
+    noteLines.push(await insertNoteLine(client, note, index, entry, ctx));
+  }
+  const { rows: updated } = await client.query(
+    `UPDATE bills SET version = version + 1, updated_at = NOW(), updated_by = $2
+      WHERE id = $1 RETURNING ${BILL_COLUMNS}`,
+    [bill.id, ctx?.actorId ?? null],
+  );
+  await writeAudit(client, {
+    entity: SPEC.table,
+    entityId: note.id,
+    action: "create",
+    after: { ...note, lines: noteLines, role: ctx?.role ?? null },
+    ...auditFields(ctx),
+  });
+  await writeAudit(client, {
+    entity: SPEC.table,
+    entityId: bill.id,
+    action: "update",
+    before: bill,
+    after: { ...updated[0], credit_note_id: note.id, credit_note_no: note.bill_no },
+    ...auditFields(ctx),
+  });
+  return { credit_note_id: note.id, credit_note_no: note.bill_no, amount };
+}

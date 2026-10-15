@@ -2904,6 +2904,18 @@ router.get("/giniflow/stations/rx/:visitId/print", printRxGate, async (req, res)
   }
 });
 
+router.get("/giniflow/stations/rx/:visitId/medicine-card.pdf", printRxGate, async (req, res) => {
+  try {
+    const { pdf, fileName } = await generateMedicineCardPdf(req.params.visitId);
+    res.set("Content-Type", "application/pdf");
+    res.set("Content-Disposition", `inline; filename="${fileName}"`);
+    res.set("Cache-Control", "no-store");
+    res.send(Buffer.from(pdf));
+  } catch (e) {
+    handleError(res, e, "Gini Flow Rx counter medicine card");
+  }
+});
+
 const referralsGate = requireCapability(CAP.GINIFLOW_REFERRALS);
 
 // RF-03. The chips are not the desk. A consultant decides a referral from the

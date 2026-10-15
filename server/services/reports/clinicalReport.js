@@ -326,7 +326,16 @@ async function buildReport(period, doctor, db) {
     .map((p, index) => ({ index, ...scoreOf(bio.get(p.id)) }))
     .sort((a, b) => (a.pct === null ? 999 : a.pct) - (b.pct === null ? 999 : b.pct));
 
-  return { period, doctor, builtAt: new Date().toISOString(), patients, bio, byDoctor, biomarkers, scorecard };
+  return {
+    period,
+    doctor,
+    builtAt: new Date().toISOString(),
+    patients,
+    bio,
+    byDoctor,
+    biomarkers,
+    scorecard,
+  };
 }
 
 const cache = new Map();
@@ -468,7 +477,14 @@ async function buildDiagnoses(db) {
   const map = {};
   for (const r of rows) {
     if (!map[r.id]) {
-      map[r.id] = { id: r.id, label: r.label, total: 0, controlled: 0, uncontrolled: 0, present: 0 };
+      map[r.id] = {
+        id: r.id,
+        label: r.label,
+        total: 0,
+        controlled: 0,
+        uncontrolled: 0,
+        present: 0,
+      };
     }
     const cnt = parseInt(r.patient_count, 10);
     map[r.id].total += cnt;

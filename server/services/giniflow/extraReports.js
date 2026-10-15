@@ -2,6 +2,7 @@ import pool from "../../config/db.js";
 import { t as clipText } from "../../utils/helpers.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config/storage.js";
 import { storeReportObject } from "./labStation.js";
+import { assertNotHeld } from "./cancelHold.js";
 
 const MIME_BY_EXT = {
   pdf: "application/pdf",
@@ -33,6 +34,7 @@ export async function addExtraReport(
     [orderId],
   );
   if (!rows.length) throw notFound("Order not found");
+  await assertNotHeld(db, { orderId });
   const order = rows[0];
   if (order.kind !== "machine") throw conflict("Only machine tests take additional reports");
   if (!order.report_file_url) throw conflict("File the first report before adding another");

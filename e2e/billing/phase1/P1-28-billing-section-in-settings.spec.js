@@ -23,6 +23,7 @@ const ADMIN_TABS = [
   "Consultant fees",
   "Discounts",
   /^Desk requests/,
+  /^Test cancellations/,
   "Bulk import",
   "Billing settings",
 ];

@@ -83,7 +83,12 @@ export async function opdSummaryWorkbook(filters, db = pool) {
     },
   ]);
 
-  sheet(workbook, "By day", [{ header: "Day", key: "day", width: 12 }, ...COUNT_COLUMNS], summary.byDay);
+  sheet(
+    workbook,
+    "By day",
+    [{ header: "Day", key: "day", width: 12 }, ...COUNT_COLUMNS],
+    summary.byDay,
+  );
   sheet(
     workbook,
     "By doctor",
@@ -107,7 +112,9 @@ export async function opdSummaryWorkbook(filters, db = pool) {
   );
   if (visits.length >= VISIT_ROW_CAP) {
     list.addRow([]);
-    list.addRow([`Only the first ${VISIT_ROW_CAP} visits are listed. Narrow the filters to see the rest.`]);
+    list.addRow([
+      `Only the first ${VISIT_ROW_CAP} visits are listed. Narrow the filters to see the rest.`,
+    ]);
   }
 
   return {
