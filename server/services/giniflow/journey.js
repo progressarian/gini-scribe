@@ -94,9 +94,15 @@ const shapeStep = (r) => ({
   source: r.source,
 });
 
+export const AUTO_LAB_BILLING_SQL = (step) =>
+  `(${step}.source = 'auto' AND ${step}.step_catalog_id = 'lab_billing')`;
+
+const PLANNED_STEP_SQL = (step) => `NOT ${AUTO_LAB_BILLING_SQL(step)}`;
+
 export async function planSkips(db, visitId, chainStatuses) {
   const { rows } = await db.query(
-    `SELECT EXISTS (SELECT 1 FROM giniflow_visit_steps WHERE visit_id = $1) AS planned,
+    `SELECT EXISTS (SELECT 1 FROM giniflow_visit_steps ps
+                     WHERE ps.visit_id = $1 AND ${PLANNED_STEP_SQL("ps")}) AS planned,
             EXISTS (SELECT 1 FROM giniflow_visit_steps
                      WHERE visit_id = $1 AND chain_status = ANY($2::text[]) AND status <> 'skipped')
               AS has_stop`,
@@ -142,7 +148,8 @@ async function isOnlineType(db, visitTypeId) {
 
 export async function skipsChiefStop(db, visitId) {
   const { rows } = await db.query(
-    `SELECT EXISTS (SELECT 1 FROM giniflow_visit_steps WHERE visit_id = $1) AS planned`,
+    `SELECT EXISTS (SELECT 1 FROM giniflow_visit_steps ps
+                     WHERE ps.visit_id = $1 AND ${PLANNED_STEP_SQL("ps")}) AS planned`,
     [visitId],
   );
   return rows[0]?.planned
@@ -335,6 +342,11 @@ export async function getJourney(visitId, db = pool) {
 // ── Writing one ────────────────────────────────────────────────────────────
 
 const insertSteps = async (client, visitId, steps) => {
+  const { rows } = await client.query(
+    `SELECT COALESCE(max(step_order), 0)::int AS last FROM giniflow_visit_steps WHERE visit_id = $1`,
+    [visitId],
+  );
+  const after = rows[0].last;
   for (let i = 0; i < steps.length; i++) {
     const s = steps[i];
     await client.query(
@@ -349,7 +361,7 @@ const insertSteps = async (client, visitId, steps) => {
                $10)`,
       [
         visitId,
-        i + 1,
+        after + i + 1,
         s.catalogId || null,
         trimmed(s.name) || "Step",
         clampMinutes(s.minutes),
@@ -586,7 +598,8 @@ export async function checkInWithJourney(
     await client.query("BEGIN");
     const existing = await client.query(
       `SELECT v.current_status, v.patient_id, v.visit_date,
-              (SELECT count(*)::int FROM giniflow_visit_steps s WHERE s.visit_id = v.id) AS steps,
+              (SELECT count(*)::int FROM giniflow_visit_steps s
+                WHERE s.visit_id = v.id AND ${PLANNED_STEP_SQL("s")}) AS steps,
               (SELECT a.doctor_name FROM appointments a WHERE a.id = v.appointment_id) AS booked_doctor,
               (SELECT d.name FROM doctors d WHERE d.id = v.assigned_doctor_id) AS assigned_doctor,
               ${VISIT_DIRECT_CONSULT_SQL} AS direct_consult,
@@ -787,7 +800,8 @@ export async function ensurePlan(visitId, db = pool) {
             END AS booked_as_followup,
             (a.visit_type ~* '(investigat|lab|test)') AS booked_for_tests,
             (a.visit_type ~* '(tele|online|video)') AS booked_online,
-            (SELECT COUNT(*)::int FROM giniflow_visit_steps s WHERE s.visit_id = v.id) AS steps,
+            (SELECT COUNT(*)::int FROM giniflow_visit_steps s
+              WHERE s.visit_id = v.id AND ${PLANNED_STEP_SQL("s")}) AS steps,
             a.doctor_name AS booked_doctor,
             (SELECT d.name FROM doctors d WHERE d.id = v.assigned_doctor_id) AS assigned_doctor,
             ${VISIT_DIRECT_CONSULT_SQL} AS direct_consult,
@@ -836,7 +850,8 @@ export async function ensurePlan(visitId, db = pool) {
     // 1..N and collide on the unique key, turning a plain read into a 500.
     await client.query(`SELECT id FROM giniflow_visits WHERE id = $1 FOR UPDATE`, [visitId]);
     const race = await client.query(
-      `SELECT count(*)::int AS c FROM giniflow_visit_steps WHERE visit_id = $1`,
+      `SELECT count(*)::int AS c FROM giniflow_visit_steps s
+        WHERE s.visit_id = $1 AND ${PLANNED_STEP_SQL("s")}`,
       [visitId],
     );
     if (race.rows[0].c > 0) {

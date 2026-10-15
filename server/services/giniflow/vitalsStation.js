@@ -1,4 +1,4 @@
-import { skipsChiefStop } from "./journey.js";
+import { AUTO_LAB_BILLING_SQL, skipsChiefStop } from "./journey.js";
 import pool from "../../config/db.js";
 import { advanceStatus, returnToQueue, budgetColour, IST_TODAY } from "./statusEngine.js";
 import { getSlaConfig, budgetLookup } from "./board.js";
@@ -100,7 +100,8 @@ const QUEUE_SQL = `
      -- is their whole visit.
      AND NOT ${labOnlyPredicate("v", "$4")}
      AND NOT (
-       EXISTS (SELECT 1 FROM giniflow_visit_steps ps WHERE ps.visit_id = v.id)
+       EXISTS (SELECT 1 FROM giniflow_visit_steps ps
+                WHERE ps.visit_id = v.id AND NOT ${AUTO_LAB_BILLING_SQL("ps")})
        AND NOT EXISTS (
          SELECT 1 FROM giniflow_visit_steps ps
           WHERE ps.visit_id = v.id AND ps.chain_status = 'with_vitals' AND ps.status <> 'skipped'
