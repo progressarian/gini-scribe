@@ -20,6 +20,10 @@ server/gini-ai-*.json
 
 # Generated analytics reports (patient-derived output — never commit)
 reports/
+!src/pages/reports/
+!src/components/reports/
+!server/services/reports/
+!e2e/reports/
 
 # E2E: the test environment file holds no secrets and must be committed; run output is not.
 !e2e/.env.e2e

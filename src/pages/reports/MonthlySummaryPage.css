@@ -1,0 +1,182 @@
+.fset.bill-ui .ms-month {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.fset.bill-ui .ms-month .jb-assign {
+  flex: 1;
+  min-width: 0;
+}
+.fset.bill-ui .ms-monthfield {
+  flex: 0 1 240px;
+  min-width: 220px;
+}
+.fset.bill-ui .ms-type {
+  flex: 0 1 280px;
+  min-width: 200px;
+}
+.fset.bill-ui .ms-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: 10px;
+}
+.fset.bill-ui .ms-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px;
+  border: 1px solid var(--ui-line);
+  border-radius: 8px;
+  background: #fff;
+  min-width: 0;
+}
+.fset.bill-ui .ms-tile--action {
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.fset.bill-ui .ms-tile--action:hover {
+  border-color: var(--ui-accent);
+}
+.fset.bill-ui .ms-tile--action:focus-visible {
+  outline: 2px solid var(--ui-accent);
+  outline-offset: 2px;
+}
+.fset.bill-ui .ms-tile--action[aria-pressed="true"] {
+  border-color: var(--ui-accent);
+  background: var(--ui-accent-soft);
+}
+.fset.bill-ui .ms-tile--main {
+  border-color: var(--ui-accent);
+  background: var(--ui-accent-soft);
+}
+.fset.bill-ui .ms-tile--side {
+  background: var(--ui-soft);
+  border-style: dashed;
+}
+.fset.bill-ui .ms-tile__val {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ui-ink);
+  font-variant-numeric: tabular-nums;
+}
+.fset.bill-ui .ms-tile__lbl {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ui-ink2);
+}
+.fset.bill-ui .ms-tile__note {
+  font-size: 12px;
+  color: var(--ui-muted);
+}
+.fset.bill-ui .ms-foot {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--ui-muted);
+}
+.fset.bill-ui .ms-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.fset.bill-ui .ms-pick,
+.fset.bill-ui .ms-sort {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+}
+.fset.bill-ui .ms-pick {
+  color: var(--ui-accent);
+  font-weight: 600;
+}
+.fset.bill-ui .ms-pick:hover,
+.fset.bill-ui .ms-sort:hover {
+  text-decoration: underline;
+}
+.fset.bill-ui .ms-pick:focus-visible,
+.fset.bill-ui .ms-sort:focus-visible {
+  outline: 2px solid var(--ui-accent);
+  outline-offset: 2px;
+}
+.fset.bill-ui .ms-row--on th,
+.fset.bill-ui .ms-row--on td {
+  background: var(--ui-accent-soft);
+}
+.fset.bill-ui .ms-listbar {
+  margin-bottom: 12px;
+}
+.fset.bill-ui .ms-search {
+  flex: 1 1 320px;
+}
+.fset.bill-ui .ms-patient {
+  font-weight: 600;
+  color: var(--ui-ink);
+}
+.fset.bill-ui .ms-muted {
+  font-size: 12px;
+  color: var(--ui-muted);
+}
+.fset.bill-ui .ms-nowrap {
+  white-space: nowrap;
+}
+.fset.bill-ui .ms-empty {
+  margin: 8px 0;
+  color: var(--ui-muted);
+}
+.fset.bill-ui .ms-state {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  padding: 12px 0;
+}
+.fset.bill-ui .ms-state p {
+  margin: 0;
+}
+.fset.bill-ui .ms-state-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--ui-line);
+  background: var(--ui-soft);
+  color: var(--ui-ink2);
+  white-space: nowrap;
+}
+.fset.bill-ui .ms-state-pill--attended {
+  border-color: #b7e4d8;
+  background: #eefaf6;
+  color: #08664f;
+}
+.fset.bill-ui .ms-state-pill--not_closed {
+  border-color: #f5d9a8;
+  background: #fff8eb;
+  color: #8a5300;
+}
+.fset.bill-ui .ms-state-pill--no_show,
+.fset.bill-ui .ms-state-pill--cancelled {
+  border-color: #f3c4c0;
+  background: #fff3f2;
+  color: #a1251b;
+}
+@media (max-width: 1100px) {
+  .fset.bill-ui .ms-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 640px) {
+  .fset.bill-ui .ms-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .fset.bill-ui .ms-monthfield,
+  .fset.bill-ui .ms-type,
+  .fset.bill-ui .ms-search {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+}
