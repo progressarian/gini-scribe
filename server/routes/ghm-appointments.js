@@ -18,6 +18,7 @@ import {
   NOT_LAB_ONLY,
   preferredSuperseded,
   preferredSetAt,
+  preferredSetBy,
   bookedAt,
   IST_TODAY,
 } from "../services/ghmDayWindow.js";
@@ -1196,6 +1197,7 @@ router.get("/ghm-appointments", async (req, res) => {
                 ${claimCols("a")},
                 a.call_notes, a.call_reschedule_date, a.pt_recovery,
                 a.preferred_date, a.preferred_doctor, a.preferred_time_slot,
+                ${preferredSetBy("a")} AS preferred_set_by,
                 COALESCE(a.home_collection, FALSE) AS home_collection,
                 a.patient_category,
                 p.id AS patient_id, p.address, p.email,
@@ -1269,6 +1271,7 @@ router.get("/ghm-appointments", async (req, res) => {
                 ${ownFu("a")} AS follow_up_date,
                 m.missed_date::text AS missed_date,
                 m.missed_kind,
+                h.visit_count,
                 h.cancelled_count,
                 h.rescheduled_count,
                 h.missed_count,

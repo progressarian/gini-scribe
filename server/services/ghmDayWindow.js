@@ -74,6 +74,10 @@ export const preferredSetAt = (a) => `COALESCE(
   ${a}.updated_at
 )`;
 
+export const preferredSetBy = (a) => `(SELECT l.changed_by FROM appointment_change_log l
+  WHERE l.appointment_id = ${a}.id AND l.field = 'preferred_date' AND l.new_value IS NOT NULL
+  ORDER BY l.changed_at DESC LIMIT 1)`;
+
 export const bookedAt = (b) => `COALESCE(
   (SELECT MAX(bl.changed_at) FROM appointment_change_log bl
     WHERE bl.appointment_id = ${b}.id AND bl.field = 'booking_created'),

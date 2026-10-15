@@ -1976,6 +1976,47 @@ a.pcell__ph:hover {
   padding: 0 7px;
 }
 
+.chg-one,
+.chg-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chg-chip {
+  padding: 2px 2px 2px 4px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.hist-del.hist-del--chip {
+  margin-left: 0;
+  padding: 1px 4px;
+}
+
+.chg-more {
+  margin: -6px 0 14px;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: #2563eb;
+  background: none;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.chg-more:hover {
+  background: #eff6ff;
+}
+
+.chg-more:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
+
 .hist-item--superseded .chg-field {
   color: #b45309;
 }

@@ -87,6 +87,7 @@ const BillingSettingsPage = lazyWithRetry(() => import("./pages/billing/BillingS
 const BillingImportPage = lazyWithRetry(() => import("./pages/billing/BillingImportPage"));
 const BillingCounterPage = lazyWithRetry(() => import("./pages/billing/BillingCounterPage"));
 const BillingReportsPage = lazyWithRetry(() => import("./pages/billing/BillingReportsPage"));
+const MonthlySummaryPage = lazyWithRetry(() => import("./pages/reports/MonthlySummaryPage"));
 const CghsRegisterPage = lazyWithRetry(() => import("./pages/billing/CghsRegisterPage"));
 const DuesRegisterPage = lazyWithRetry(() => import("./pages/billing/DuesRegisterPage"));
 const TestCatalogPage = lazyWithRetry(() => import("./pages/TestCatalogPage"));
@@ -287,6 +288,7 @@ const router = createBrowserRouter([
               { path: "/giniflow/station/referrals", element: lazyEl(GiniFlowReferralsPage) },
               { path: "/giniflow/station/billing", element: lazyEl(BillingCounterPage) },
               { path: "/billing/reports", element: lazyEl(BillingReportsPage) },
+              { path: "/reports/monthly", element: lazyEl(MonthlySummaryPage) },
               { path: "/billing/cghs-register", element: lazyEl(CghsRegisterPage) },
               { path: "/billing/dues", element: lazyEl(DuesRegisterPage) },
               { path: "/crm/home", element: lazyEl(RepHomePage) },

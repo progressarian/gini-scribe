@@ -1,7 +1,7 @@
 import pool from "../../config/db.js";
 import { releaseOrderLines } from "../billing/visitLines.js";
 import { refundCancelledTest } from "../billing/billingRequests.js";
-import { resettleTestOrders } from "../billing/bills.js";
+import { TAKEN_ABOVE_BILL, finaliseBill, resettleTestOrders } from "../billing/bills.js";
 import { releaseTestOrders } from "../billing/payments.js";
 import { derivePaymentStatus, opensLabGate } from "../../../shared/labPayment.js";
 import { machineForTest, machinesOnBillLine } from "../../../shared/machineStages.js";
@@ -475,6 +475,43 @@ async function refundFinalLines(client, input, kind, onFinal) {
   );
 }
 
+async function finaliseTakenDraft(client, billId, input) {
+  const { rows } = await client.query(
+    `SELECT version FROM bills WHERE id = $1 AND status = 'draft'`,
+    [billId],
+  );
+  if (!rows.length) return;
+  try {
+    await finaliseBill(
+      billId,
+      { version: rows[0].version },
+      { role: input.actorRole || "system", actorId: input.actorId ?? null },
+      client,
+    );
+  } catch (error) {
+    throw bad(
+      `This test is already paid on the visit's bill, which is still a draft. Make that bill final at the Billing Counter, then cancel the test here — ${error.message}`,
+      409,
+    );
+  }
+}
+
+async function cancelPaidOnDraft(client, input, cancel) {
+  if (input.source === "healthray") return cancel();
+  await client.query("SAVEPOINT cancel_paid_draft");
+  try {
+    const done = await cancel();
+    await client.query("RELEASE SAVEPOINT cancel_paid_draft");
+    return done;
+  } catch (error) {
+    await client.query("ROLLBACK TO SAVEPOINT cancel_paid_draft");
+    await client.query("RELEASE SAVEPOINT cancel_paid_draft");
+    if (error.code !== TAKEN_ABOVE_BILL) throw error;
+    await finaliseTakenDraft(client, error.bill_id, input);
+    return cancel();
+  }
+}
+
 export async function cancelTest(input, db = pool) {
   checkCancelInput(input);
   const own = typeof db.release !== "function";
@@ -532,12 +569,14 @@ export async function cancelTestIn(client, input) {
     if (order.has_output) {
       throw bad("A report or result is already on this test — it cannot be cancelled", 409);
     }
-    const done = await cancelOrderIn(
-      client,
-      visit,
-      order,
-      { ...input, testId: target.testId },
-      machines,
+    const done = await cancelPaidOnDraft(client, input, async () =>
+      cancelOrderIn(
+        client,
+        visit,
+        await orderWithState(client, target.orderId),
+        { ...input, testId: target.testId },
+        machines,
+      ),
     );
     const refunds = await refundFinalLines(client, input, order.kind, done.onFinal);
     let casesCancelled = [];

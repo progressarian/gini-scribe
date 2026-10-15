@@ -471,6 +471,8 @@ async function saveLines(client, saved, ctx, billManualBy = null) {
   );
 }
 
+export const TAKEN_ABOVE_BILL = "taken_above_bill";
+
 async function takenOn(client, billId) {
   const { rows } = await client.query(
     `SELECT GREATEST(b.paid_amount, COALESCE(SUM(p.amount), 0)) AS taken
@@ -487,6 +489,7 @@ async function saveTotals(client, bill, totals, ctx) {
     throw httpError(
       409,
       `₹${rupees(taken)} has already been taken on ${billLabel(bill)}, which is more than the ₹${rupees(totals.payable)} it now comes to, and refunds are not available yet`,
+      { code: TAKEN_ABOVE_BILL, bill_id: bill.id },
     );
   }
   const { rows } = await client.query(

@@ -57,6 +57,7 @@ test.describe("GHM: Missed tab", () => {
 
   test.afterAll(async () => {
     const ids = patients.map((p) => p.id);
+    await query(`DELETE FROM giniflow_visits WHERE patient_id = ANY($1::int[])`, [ids]);
     await query(
       `DELETE FROM appointment_change_log WHERE appointment_id IN
          (SELECT id FROM appointments WHERE patient_id = ANY($1::int[]))`,
@@ -145,6 +146,47 @@ test.describe("GHM: Missed tab", () => {
     expect(row(await missed(), p)).toBeDefined();
   });
 
+  test("3i. a patient checked in on the floor counts as coming in, even if the day closed as no-show", async () => {
+    const p = await fresh();
+    const apptId = await visit(p, { daysAgo: 3, status: "no_show" });
+    const { id } = await one(
+      `INSERT INTO giniflow_visits (patient_id, appointment_id, visit_date, current_status)
+       VALUES ($1, $2, ${IST} - 3, 'no_show') RETURNING id`,
+      [p.id, apptId],
+    );
+    await query(
+      `INSERT INTO giniflow_visit_events (visit_id, status, actor_role) VALUES ($1, 'checked_in', 'reception')`,
+      [id],
+    );
+    expect(row(await missed(), p)).toBeUndefined();
+  });
+
+  test("3j. the same file number in lower case is listed once", async () => {
+    const p = await fresh();
+    const twin = await buildPatient({
+      name: p.name,
+      phone: p.phone,
+      file_no: p.file_no.toLowerCase(),
+      health_id: `HID-${p.file_no.toLowerCase()}-twin`,
+    });
+    patients.push(twin);
+    await visit(p, { daysAgo: 30, status: "completed", follow_up_date: await day(-2) });
+    await visit(twin, { daysAgo: 4, status: "no_show", patient_name: "Other Name" });
+    const rows = (await missed()).filter(
+      (r) => r.file_no.toUpperCase() === p.file_no.toUpperCase(),
+    );
+    expect(rows).toHaveLength(1);
+  });
+
+  test("3k. a GNI lead who came under a P_ chart on the same phone counts as coming in", async () => {
+    const lead = await fresh();
+    const chart = await buildPatient({ name: `Mr. Other ${lead.name}`, phone: lead.phone });
+    patients.push(chart);
+    await visit(lead, { daysAgo: 3, status: "no_show", file_no: `GNI-${lead.file_no}` });
+    await visit(chart, { daysAgo: 3, status: "completed" });
+    expect((await missed()).find((r) => r.file_no === `GNI-${lead.file_no}`)).toBeUndefined();
+  });
+
   test("4. a cancelled appointment is listed so the team can rebook it", async () => {
     const p = await fresh();
     await visit(p, { daysAgo: 2, status: "cancelled" });
@@ -200,12 +242,29 @@ test.describe("GHM: Missed tab", () => {
     const p = await fresh();
     for (const daysAgo of [2, 12, 22, 32, 42]) await visit(p, { daysAgo, status: "no_show" });
     await visit(p, { daysAgo: 52, status: "cancelled" });
+    await visit(p, { daysAgo: 70, status: "completed" });
+    await visit(p, { daysAgo: 90, status: "completed" });
     const r = row(await missed(), p);
+    expect(r?.visit_count).toBe(2);
     expect(r?.missed_count).toBe(5);
     expect(r?.cancelled_count).toBe(1);
     expect(r?.miss_risk).toBe("repeatedly");
     const often = row(await missed("&risk=often"), p);
     expect(often).toBeDefined();
+  });
+
+  test("8b. the miss a patient is listed for always counts, even right after a visit", async () => {
+    const p = await fresh();
+    await visit(p, {
+      daysAgo: 4,
+      status: "completed",
+      preferred_date: await day(-2),
+      preferred_time_slot: "5 PM to 6 PM",
+    });
+    const r = row(await missed(), p);
+    expect(r?.missed_kind).toBe("preferred");
+    expect(r?.missed_count).toBe(1);
+    expect(r?.visit_count).toBe(1);
   });
 
   test("9. misses within a week of each other count once", async () => {
@@ -234,6 +293,7 @@ test.describe("GHM: Missed tab", () => {
     await page.getByPlaceholder(/Search missed patients/).fill(p.file_no);
     const patientRow = page.locator("tr", { hasText: p.name });
     await expect(patientRow).toContainText("Repeatedly misses");
+    await expect(patientRow).toContainText("Visits done 0");
     await expect(patientRow).toContainText("Missed 5");
     await expect(patientRow).not.toContainText("Booked");
     await expect(

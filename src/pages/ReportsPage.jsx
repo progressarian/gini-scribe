@@ -2,7 +2,10 @@ import { useEffect } from "react";
 import "./ReportsPage.css";
 import usePatientStore from "../stores/patientStore";
 import useReportsStore from "../stores/reportsStore";
+import { useQueryClient } from "@tanstack/react-query";
 import Shimmer from "../components/Shimmer.jsx";
+import BiomarkerDrill from "../components/reports/BiomarkerDrill.jsx";
+import PatientScorecard from "../components/reports/PatientScorecard.jsx";
 
 export default function ReportsPage() {
   const patient = usePatientStore((s) => s.patient);
@@ -22,14 +25,37 @@ export default function ReportsPage() {
   const setReportSection = useReportsStore((s) => s.setReportSection);
   const reportDrillBio = useReportsStore((s) => s.reportDrillBio);
   const setReportDrillBio = useReportsStore((s) => s.setReportDrillBio);
-  const reportDrillPt = useReportsStore((s) => s.reportDrillPt);
-  const setReportDrillPt = useReportsStore((s) => s.setReportDrillPt);
   const loadReports = useReportsStore((s) => s.loadReports);
+  const loadReportDiagnoses = useReportsStore((s) => s.loadReportDiagnoses);
+  const loadReportDoctors = useReportsStore((s) => s.loadReportDoctors);
+  const reportDxLoading = useReportsStore((s) => s.reportDxLoading);
+  const reportDoctorsLoading = useReportsStore((s) => s.reportDoctorsLoading);
+  const queryClient = useQueryClient();
   const runReportQuery = useReportsStore((s) => s.runReportQuery);
 
   useEffect(() => {
     loadReports(reportPeriod, reportDoctor);
   }, [loadReports, reportPeriod, reportDoctor]);
+
+  useEffect(() => {
+    if (reportSection === "diagnoses" && !reportDx && !reportDxLoading) loadReportDiagnoses();
+    if (reportSection === "doctors" && !reportDoctors && !reportDoctorsLoading) loadReportDoctors();
+  }, [
+    reportSection,
+    reportDx,
+    reportDoctors,
+    reportDxLoading,
+    reportDoctorsLoading,
+    loadReportDiagnoses,
+    loadReportDoctors,
+  ]);
+
+  const refreshAll = async () => {
+    await loadReports(reportPeriod, reportDoctor, true);
+    queryClient.invalidateQueries({ queryKey: ["reports", "clinical"] });
+    if (reportDx) loadReportDiagnoses(true);
+    if (reportDoctors) loadReportDoctors(true);
+  };
 
   return (
     <div>
@@ -38,7 +64,7 @@ export default function ReportsPage() {
         <div style={{ fontSize: 15, fontWeight: 800, color: "#1e293b" }}>📊 Clinical Reports</div>
         <div style={{ flex: 1 }} />
         <button
-          onClick={() => loadReports(reportPeriod, reportDoctor)}
+          onClick={refreshAll}
           disabled={reportLoading}
           style={{
             background: "#2563eb",
@@ -74,11 +100,7 @@ export default function ReportsPage() {
         ].map((s) => (
           <button
             key={s.id}
-            onClick={() => {
-              setReportSection(s.id);
-              if (!reportData || !reportDx || !reportDoctors)
-                loadReports(reportPeriod, reportDoctor);
-            }}
+            onClick={() => setReportSection(s.id)}
             style={{
               flex: 1,
               padding: "7px 4px",
@@ -330,314 +352,24 @@ export default function ReportsPage() {
                           </div>
                         </div>
 
-                        {/* Drill-down patient list */}
                         {isExpanded && (
-                          <div
-                            style={{
-                              background: "#f8fafc",
-                              border: "1px solid #e2e8f0",
-                              borderTop: "none",
-                              borderRadius: "0 0 8px 8px",
-                              padding: 6,
-                              maxHeight: 300,
-                              overflow: "auto",
-                            }}
-                          >
-                            {bio.patients
-                              .filter((p) => p.status !== "no_data")
-                              .map((p, i) => (
-                                <div
-                                  key={i}
-                                  onClick={() =>
-                                    loadPatientDB({
-                                      id: p.id,
-                                      name: p.name,
-                                      age: p.age,
-                                      sex: p.sex,
-                                      file_no: p.file_no,
-                                    })
-                                  }
-                                  style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: 6,
-                                    padding: "4px 6px",
-                                    borderBottom: "1px solid #e2e8f0",
-                                    cursor: "pointer",
-                                    fontSize: 10,
-                                    borderRadius: 4,
-                                  }}
-                                  onMouseEnter={(e) =>
-                                    (e.currentTarget.style.background = "#eff6ff")
-                                  }
-                                  onMouseLeave={(e) =>
-                                    (e.currentTarget.style.background = "transparent")
-                                  }
-                                >
-                                  <span style={{ fontSize: 11 }}>
-                                    {p.status === "in_control"
-                                      ? "✅"
-                                      : p.status === "warning"
-                                        ? "⚠️"
-                                        : "❌"}
-                                  </span>
-                                  <div style={{ flex: 1 }}>
-                                    <strong>{p.name}</strong>
-                                    <span style={{ color: "#94a3b8", marginLeft: 4 }}>
-                                      {p.age}Y/{p.sex?.charAt(0)}
-                                    </span>
-                                  </div>
-                                  <span
-                                    style={{
-                                      fontWeight: 700,
-                                      fontSize: 11,
-                                      color:
-                                        p.status === "in_control"
-                                          ? "#059669"
-                                          : p.status === "warning"
-                                            ? "#d97706"
-                                            : "#dc2626",
-                                    }}
-                                  >
-                                    {p.display || "—"}
-                                  </span>
-                                  <span style={{ fontSize: 8, color: "#94a3b8" }}>
-                                    {p.con_name}
-                                  </span>
-                                </div>
-                              ))}
-                            {bio.patients.filter((p) => p.status === "no_data").length > 0 && (
-                              <div
-                                style={{
-                                  fontSize: 9,
-                                  color: "#94a3b8",
-                                  padding: "4px 6px",
-                                  fontStyle: "italic",
-                                }}
-                              >
-                                + {bio.patients.filter((p) => p.status === "no_data").length}{" "}
-                                patients with no {bio.label} data
-                              </div>
-                            )}
-                          </div>
+                          <BiomarkerDrill
+                            bio={bio}
+                            period={reportPeriod}
+                            doctor={reportDoctor}
+                            onOpenPatient={loadPatientDB}
+                          />
                         )}
                       </div>
                     );
                   })}
               </div>
 
-              {/* ═══ PATIENT SCORECARD ═══ */}
-              <div style={{ fontSize: 11, fontWeight: 800, color: "#1e293b", marginBottom: 6 }}>
-                👥 PATIENT TARGET SCORECARD
-              </div>
-              <div style={{ maxHeight: 400, overflow: "auto" }}>
-                {(reportData.patients || []).map((p, i) => {
-                  const pctColor =
-                    p.pct === null
-                      ? "#94a3b8"
-                      : p.pct >= 70
-                        ? "#059669"
-                        : p.pct >= 40
-                          ? "#d97706"
-                          : "#dc2626";
-                  const isExpanded = reportDrillPt === p.id;
-                  return (
-                    <div key={i} style={{ marginBottom: 4 }}>
-                      <div
-                        onClick={() => setReportDrillPt(isExpanded ? null : p.id)}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                          padding: "6px 8px",
-                          background: "white",
-                          border: "1px solid #e2e8f0",
-                          borderRadius: 8,
-                          cursor: "pointer",
-                          fontSize: 11,
-                          borderColor: isExpanded ? "#2563eb" : "#e2e8f0",
-                        }}
-                        onMouseEnter={(e) => {
-                          if (!isExpanded) e.currentTarget.style.background = "#f8fafc";
-                        }}
-                        onMouseLeave={(e) => {
-                          if (!isExpanded) e.currentTarget.style.background = "white";
-                        }}
-                      >
-                        {/* Score circle */}
-                        <div
-                          style={{
-                            width: 36,
-                            height: 36,
-                            borderRadius: "50%",
-                            border: `3px solid ${pctColor}`,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            flexShrink: 0,
-                          }}
-                        >
-                          <span style={{ fontSize: 11, fontWeight: 800, color: pctColor }}>
-                            {p.pct !== null ? `${p.pct}%` : "—"}
-                          </span>
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div>
-                            <strong>{p.name}</strong>{" "}
-                            <span style={{ color: "#94a3b8" }}>
-                              {p.age}Y/{p.sex?.charAt(0)} {p.file_no && `| ${p.file_no}`}
-                            </span>
-                          </div>
-                          <div style={{ fontSize: 9, color: "#64748b" }}>
-                            {p.targets_total > 0
-                              ? `${p.targets_met}/${p.targets_total} targets met`
-                              : "No lab data"}
-                            {p.con_name && ` • ${p.con_name}`}
-                          </div>
-                        </div>
-                        {/* Mini traffic lights */}
-                        <div
-                          style={{
-                            display: "flex",
-                            gap: 2,
-                            flexShrink: 0,
-                            flexWrap: "wrap",
-                            maxWidth: 100,
-                            justifyContent: "flex-end",
-                          }}
-                        >
-                          {Object.entries(p.conditions || {}).map(([key, c]) => (
-                            <span
-                              key={key}
-                              title={`${c.label}: ${c.val} (${c.in_control ? "In target" : "Out of target"} — ${c.target})`}
-                              style={{
-                                width: 8,
-                                height: 8,
-                                borderRadius: "50%",
-                                background: c.in_control ? "#22c55e" : "#ef4444",
-                              }}
-                            />
-                          ))}
-                        </div>
-                        <span style={{ fontSize: 9, color: "#94a3b8" }}>
-                          {isExpanded ? "▲" : "▼"}
-                        </span>
-                      </div>
-
-                      {/* Expanded patient detail */}
-                      {isExpanded && (
-                        <div
-                          style={{
-                            background: "#f8fafc",
-                            border: "1px solid #e2e8f0",
-                            borderTop: "none",
-                            borderRadius: "0 0 8px 8px",
-                            padding: 8,
-                          }}
-                        >
-                          {/* Condition cards */}
-                          <div
-                            style={{
-                              display: "grid",
-                              gridTemplateColumns: "repeat(auto-fill,minmax(130px,1fr))",
-                              gap: 4,
-                              marginBottom: 6,
-                            }}
-                          >
-                            {Object.entries(p.conditions || {}).map(([key, c]) => (
-                              <div
-                                key={key}
-                                style={{
-                                  background: c.in_control ? "#f0fdf4" : "#fef2f2",
-                                  border: `1px solid ${c.in_control ? "#bbf7d0" : "#fecaca"}`,
-                                  borderRadius: 6,
-                                  padding: "4px 8px",
-                                }}
-                              >
-                                <div style={{ fontSize: 9, color: "#64748b" }}>
-                                  {c.emoji} {c.label}
-                                </div>
-                                <div
-                                  style={{
-                                    fontSize: 13,
-                                    fontWeight: 800,
-                                    color: c.in_control ? "#059669" : "#dc2626",
-                                  }}
-                                >
-                                  {typeof c.val === "number"
-                                    ? c.label === "Blood Pressure"
-                                      ? c.val
-                                      : c.val
-                                    : c.val}
-                                </div>
-                                <div style={{ fontSize: 8, color: "#94a3b8" }}>
-                                  Target: {c.target}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                          {/* Diagnoses */}
-                          {p.diagnoses?.length > 0 && (
-                            <div
-                              style={{ display: "flex", flexWrap: "wrap", gap: 3, marginBottom: 4 }}
-                            >
-                              {(p.diagnoses || [])
-                                .filter((d, i, a) => a.findIndex((x) => x.id === d.id) === i)
-                                .map((d, di) => (
-                                  <span
-                                    key={di}
-                                    style={{
-                                      fontSize: 9,
-                                      padding: "1px 6px",
-                                      borderRadius: 4,
-                                      background:
-                                        d.status === "Uncontrolled"
-                                          ? "#fef2f2"
-                                          : d.status === "Controlled"
-                                            ? "#f0fdf4"
-                                            : "#f1f5f9",
-                                      color:
-                                        d.status === "Uncontrolled"
-                                          ? "#dc2626"
-                                          : d.status === "Controlled"
-                                            ? "#059669"
-                                            : "#64748b",
-                                    }}
-                                  >
-                                    {d.label}
-                                  </span>
-                                ))}
-                            </div>
-                          )}
-                          <button
-                            onClick={() =>
-                              loadPatientDB({
-                                id: p.id,
-                                name: p.name,
-                                age: p.age,
-                                sex: p.sex,
-                                file_no: p.file_no,
-                              })
-                            }
-                            style={{
-                              background: "#2563eb",
-                              color: "white",
-                              border: "none",
-                              padding: "3px 12px",
-                              borderRadius: 4,
-                              fontSize: 10,
-                              fontWeight: 700,
-                              cursor: "pointer",
-                            }}
-                          >
-                            Open Patient →
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+              <PatientScorecard
+                period={reportPeriod}
+                doctor={reportDoctor}
+                onOpenPatient={loadPatientDB}
+              />
             </div>
           )}
         </div>
@@ -646,14 +378,14 @@ export default function ReportsPage() {
       {/* ═══ DIAGNOSIS DISTRIBUTION ═══ */}
       {reportSection === "diagnoses" && (
         <div>
-          {reportLoading ? (
+          {reportDxLoading && !reportDx ? (
             <div style={{ padding: 10 }}>
               <Shimmer type="cards" count={5} />
             </div>
           ) : !reportDx ? (
             <div style={{ textAlign: "center", padding: 30 }}>
               <button
-                onClick={() => loadReports(reportPeriod, reportDoctor)}
+                onClick={() => loadReportDiagnoses()}
                 style={{
                   background: "#2563eb",
                   color: "white",
@@ -979,14 +711,14 @@ export default function ReportsPage() {
       {/* ═══ DOCTOR PERFORMANCE ═══ */}
       {reportSection === "doctors" && (
         <div>
-          {reportLoading ? (
+          {reportDoctorsLoading && !reportDoctors ? (
             <div style={{ padding: 10 }}>
               <Shimmer type="table" count={5} />
             </div>
           ) : !reportDoctors ? (
             <div style={{ textAlign: "center", padding: 30 }}>
               <button
-                onClick={() => loadReports(reportPeriod, reportDoctor)}
+                onClick={() => loadReportDoctors()}
                 style={{
                   background: "#2563eb",
                   color: "white",

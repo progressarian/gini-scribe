@@ -19,6 +19,11 @@ const useReportsStore = create((set, get) => ({
   reportPeriod: "today",
   reportDoctor: "",
   reportLoading: false,
+  reportError: false,
+  reportDxLoading: false,
+  reportDxError: false,
+  reportDoctorsLoading: false,
+  reportDoctorsError: false,
   reportQuery: "",
   reportQueryResult: "",
   reportQueryLoading: false,
@@ -129,24 +134,45 @@ const useReportsStore = create((set, get) => ({
     set({ ciLoading: false });
   },
 
-  loadReports: async (period, doctor) => {
-    set({ reportLoading: true });
+  loadReports: async (period, doctor, fresh = false) => {
+    set({ reportLoading: true, reportError: false });
     try {
       const params = new URLSearchParams();
       if (period) params.set("period", period);
       if (doctor) params.set("doctor", doctor);
-      const [todayResp, dxResp, docResp] = await Promise.all([
-        api.get(`/api/reports/today?${params}`),
-        api.get("/api/reports/diagnoses"),
-        api.get("/api/reports/doctors"),
-      ]);
-      set({ reportData: todayResp.data });
-      set({ reportDx: dxResp.data });
-      set({ reportDoctors: docResp.data });
-    } catch (e) {
-      console.warn("Failed to load reports");
+      if (fresh) params.set("refresh", "1");
+      const resp = await api.get(`/api/reports/today?${params}`);
+      set({ reportData: resp.data });
+    } catch {
+      set({ reportError: true });
     }
     set({ reportLoading: false });
+  },
+
+  loadReportDiagnoses: async (fresh = false) => {
+    set({ reportDxLoading: true, reportDxError: false });
+    try {
+      const resp = await api.get("/api/reports/diagnoses", {
+        params: fresh ? { refresh: "1" } : undefined,
+      });
+      set({ reportDx: resp.data });
+    } catch {
+      set({ reportDxError: true });
+    }
+    set({ reportDxLoading: false });
+  },
+
+  loadReportDoctors: async (fresh = false) => {
+    set({ reportDoctorsLoading: true, reportDoctorsError: false });
+    try {
+      const resp = await api.get("/api/reports/doctors", {
+        params: fresh ? { refresh: "1" } : undefined,
+      });
+      set({ reportDoctors: resp.data });
+    } catch {
+      set({ reportDoctorsError: true });
+    }
+    set({ reportDoctorsLoading: false });
   },
 
   runReportQuery: async () => {

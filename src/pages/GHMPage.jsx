@@ -1748,6 +1748,28 @@ function RowActions({ row, onBookNext, onRecords, onEditPatient, lockTitle }) {
   );
 }
 
+const CHANGE_GROUP_GAP_MS = 2 * 60 * 1000;
+const CHANGES_SHOWN = 10;
+
+const sameAction = (head, c) =>
+  head.kind === "change" &&
+  c.kind === "change" &&
+  head.changed_by === c.changed_by &&
+  head.appointment_id === c.appointment_id &&
+  Math.abs(new Date(head.changed_at) - new Date(c.changed_at)) <= CHANGE_GROUP_GAP_MS;
+
+const groupChanges = (changes) => {
+  const groups = [];
+  for (const c of changes) {
+    const last = groups[groups.length - 1];
+    if (last && sameAction(last[0], c)) last.push(c);
+    else groups.push([c]);
+  }
+  return groups.map((items) => items.reverse());
+};
+
+const changeKey = (c) => `${c.kind}-${c.id ?? c.appointment_id}-${c.changed_at}`;
+
 function CallHistoryPanel({ row, ccAgents, colSpan, details, actions, lockTitle }) {
   const [outcome, setOutcome] = useState("not_picked");
   const [calledBy, setCalledBy] = useState("");
@@ -1755,6 +1777,7 @@ function CallHistoryPanel({ row, ccAgents, colSpan, details, actions, lockTitle 
   const [reschedule, setReschedule] = useState("");
   const [confirmDel, setConfirmDel] = useState(null); // attempt object pending delete
   const [confirmChg, setConfirmChg] = useState(null); // change object pending delete
+  const [showOlderChanges, setShowOlderChanges] = useState(false);
 
   useBodyScrollLock(!!confirmDel || !!confirmChg);
 
@@ -1763,6 +1786,8 @@ function CallHistoryPanel({ row, ccAgents, colSpan, details, actions, lockTitle 
   const sessionsQuery = useCallSessions(row.id);
   const history = attemptsQuery.isPending ? null : attemptsQuery.data || [];
   const changes = changesQuery.data || [];
+  const changeGroups = useMemo(() => groupChanges(changesQuery.data || []), [changesQuery.data]);
+  const shownGroups = showOlderChanges ? changeGroups : changeGroups.slice(0, CHANGES_SHOWN);
   const sessions = sessionsQuery.data || [];
 
   const logMutation = useLogCallAttempt();
@@ -1917,47 +1942,83 @@ function CallHistoryPanel({ row, ccAgents, colSpan, details, actions, lockTitle 
                 Change History — all of this patient's visits
               </div>
               <div className="hist-list">
-                {changes.map((c) => (
-                  <div
-                    key={`${c.kind}-${c.id ?? c.appointment_id}-${c.changed_at}`}
-                    className={`hist-item${c.kind === "superseded" ? " hist-item--superseded" : ""}`}
-                  >
-                    <span className="hist-when">{fmtDateTime(c.changed_at)}</span>
-                    <span className="chg-field">{c.field_label}</span>
-                    {c.kind === "audit" ? (
-                      <span className="chg-new">{c.new_value || c.old_value || "—"}</span>
-                    ) : (
-                      <>
-                        {c.kind !== "booking" && (
-                          <>
-                            <span className="chg-old">{c.old_value || "—"}</span>
-                            <span className="chg-arrow">
-                              <ArrowRight size={12} aria-hidden="true" />
-                            </span>
-                          </>
-                        )}
-                        <span className="chg-new">{c.new_value || "—"}</span>
-                      </>
-                    )}
-                    {c.changed_by && <span className="chg-by">by {c.changed_by}</span>}
-                    {c.visit_date && c.appointment_id !== row.id && (
-                      <span className="chg-visit" title="Recorded on another visit of this patient">
-                        {prettyDate(String(c.visit_date).slice(0, 10))} visit
-                      </span>
-                    )}
-                    {c.kind === "change" && (
-                      <button
-                        className="hist-del"
-                        title="Delete this change log"
-                        aria-label="Delete this change log"
-                        onClick={() => setConfirmChg(c)}
-                      >
-                        <X size={13} aria-hidden="true" />
-                      </button>
-                    )}
-                  </div>
-                ))}
+                {shownGroups.map((items) => {
+                  const c = items[0];
+                  const grouped = items.length > 1;
+                  return (
+                    <div
+                      key={changeKey(c)}
+                      className={`hist-item${c.kind === "superseded" ? " hist-item--superseded" : ""}`}
+                    >
+                      <span className="hist-when">{fmtDateTime(c.changed_at)}</span>
+                      {grouped && c.changed_by && <span className="chg-by">{c.changed_by}</span>}
+                      {items.map((ch) => (
+                        <span key={changeKey(ch)} className={grouped ? "chg-chip" : "chg-one"}>
+                          <span className="chg-field">{ch.field_label}</span>
+                          {ch.kind === "audit" ? (
+                            <span className="chg-new">{ch.new_value || ch.old_value || "—"}</span>
+                          ) : (
+                            <>
+                              {ch.kind !== "booking" && ch.old_value && (
+                                <>
+                                  <span className="chg-old">{ch.old_value}</span>
+                                  <span className="chg-arrow">
+                                    <ArrowRight size={12} aria-hidden="true" />
+                                  </span>
+                                </>
+                              )}
+                              <span className="chg-new">{ch.new_value || "—"}</span>
+                            </>
+                          )}
+                          {grouped && (
+                            <button
+                              className="hist-del hist-del--chip"
+                              title={`Delete this ${ch.field_label} change`}
+                              aria-label={`Delete this ${ch.field_label} change`}
+                              onClick={() => setConfirmChg(ch)}
+                            >
+                              <X size={12} aria-hidden="true" />
+                            </button>
+                          )}
+                        </span>
+                      ))}
+                      {!grouped && c.changed_by && (
+                        <span className="chg-by">by {c.changed_by}</span>
+                      )}
+                      {c.visit_date && c.appointment_id !== row.id && (
+                        <span
+                          className="chg-visit"
+                          title="Recorded on another visit of this patient"
+                        >
+                          {prettyDate(String(c.visit_date).slice(0, 10))} visit
+                        </span>
+                      )}
+                      {!grouped && c.kind === "change" && (
+                        <button
+                          className="hist-del"
+                          title="Delete this change log"
+                          aria-label="Delete this change log"
+                          onClick={() => setConfirmChg(c)}
+                        >
+                          <X size={13} aria-hidden="true" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
+              {changeGroups.length > CHANGES_SHOWN && (
+                <button
+                  type="button"
+                  className="chg-more"
+                  aria-expanded={showOlderChanges}
+                  onClick={() => setShowOlderChanges((v) => !v)}
+                >
+                  {showOlderChanges
+                    ? "Show fewer"
+                    : `Show older (${changeGroups.length - CHANGES_SHOWN})`}
+                </button>
+              )}
             </div>
           )}
 
@@ -3548,7 +3609,8 @@ export default function GHMPage() {
                           {isMissed && (
                             <td className="miss-hist">
                               <div className="miss-hist__counts">
-                                Cancelled {row.cancelled_count || 0} · Rescheduled{" "}
+                                Visits done {row.visit_count || 0} · Cancelled{" "}
+                                {row.cancelled_count || 0} · Rescheduled{" "}
                                 {row.rescheduled_count || 0} · Missed {row.missed_count || 0}
                               </div>
                               {MISS_RISK[row.miss_risk] && (

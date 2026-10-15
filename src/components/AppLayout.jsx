@@ -207,6 +207,12 @@ const NAV_ITEMS = [
     show: () => true,
   },
   {
+    path: "/reports/monthly",
+    label: "📅 Monthly summary",
+    cap: C["/reports/monthly"],
+    show: () => true,
+  },
+  {
     path: "/billing/cghs-register",
     label: "🧾 CGHS register",
     cap: C["/billing/cghs-register"],

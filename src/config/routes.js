@@ -156,6 +156,7 @@ export const PAGE_CAPABILITIES = {
   "/giniflow/station/referrals": CAP.GINIFLOW_REFERRALS,
   "/giniflow/station/billing": CAP.BILLING_DESK,
   "/billing/reports": CAP.BILLING_REPORTS,
+  "/reports/monthly": CAP.OPD_SUMMARY,
   "/billing/cghs-register": CAP.BILLING_CLAIMS,
   "/billing/dues": CAP.BILLING_DUES,
   "/crm/home": CAP.CRM_ACCESS,

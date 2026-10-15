@@ -208,6 +208,7 @@ export const LIST_SHEETS = [
     name: "New Patients",
     pick: LIST_PREDICATES.new,
     omit: ["Preferred Time", "Last_Visit_Date", "Last Consultant Seen", "Start_Time", "End_Time"],
+    preferredBookedBy: true,
   },
   { name: "Follow Up", pick: LIST_PREDICATES.followup },
   { name: "Cancelled", pick: LIST_PREDICATES.cancelled },
@@ -224,13 +225,25 @@ export const buildListSheet = (
   owners = {},
   bookings = false,
   omit = [],
+  preferredBookedBy = false,
 ) => {
   const allHeaders = withBookingCols(HEADERS, ["Booked By", "Booked At"], bookings);
-  const keep = (cells) => cells.filter((_, i) => !omit.includes(allHeaders[i]));
+  const keepCols = allHeaders.filter((h) => !omit.includes(h));
+  const bookedByAt = preferredBookedBy ? keepCols.indexOf("Preferred_Date") + 1 : -1;
+  const keep = (cells, extra) => {
+    const kept = cells.filter((_, i) => !omit.includes(allHeaders[i]));
+    if (bookedByAt > 0) kept.splice(bookedByAt, 0, extra);
+    return kept;
+  };
   const body = (rows || [])
     .filter((r) => r?.phone)
-    .map((r) => keep(toSheetRow(r, date, lastSeen, owners, bookings)));
-  const headers = keep(allHeaders);
+    .map((r) =>
+      keep(
+        toSheetRow(r, date, lastSeen, owners, bookings),
+        r.preferred_date ? r.preferred_set_by || r.booked_by_name || "" : "",
+      ),
+    );
+  const headers = keep(allHeaders, "Booked By");
 
   const titleRow = new Array(headers.length).fill("");
   titleRow[0] = title;
@@ -238,7 +251,7 @@ export const buildListSheet = (
   titleRow[5] = fmtSheetDate(date);
 
   const ws = XLSX.utils.aoa_to_sheet([titleRow, headers, ...body]);
-  ws["!cols"] = keep(withBookingCols(COL_WIDTHS, [18, 12], bookings)).map((wch) => ({ wch }));
+  ws["!cols"] = keep(withBookingCols(COL_WIDTHS, [18, 12], bookings), 14).map((wch) => ({ wch }));
 
   styleCell(XLSX, ws, 0, 0, BLOCK_STYLE);
   styleCell(XLSX, ws, 0, 3, TITLE_STYLE);
@@ -300,6 +313,7 @@ export const exportWatiWorkbook = async (
       owners,
       bookings,
       list.omit,
+      list.preferredBookedBy,
     ),
   }));
 

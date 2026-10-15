@@ -112,6 +112,7 @@ const ROUTE_CAPABILITIES = [
   ["/api/billing/dues-register", CAP.BILLING_DUES],
   ["/api/home-stats", null],
   ["/api/reports", CAP.ANALYTICS],
+  ["/api/reports/opd", CAP.OPD_SUMMARY],
   ["/api/analytics", CAP.ANALYTICS],
   ["/api/dashboard", CAP.ANALYTICS],
   ["/api/stats", CAP.ANALYTICS],

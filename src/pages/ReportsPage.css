@@ -99,3 +99,18 @@
   font-weight: 700;
   cursor: pointer;
 }
+
+.rep-row {
+  background: transparent;
+}
+.rep-row:hover,
+.rep-row:focus-visible {
+  background: #eff6ff;
+}
+.rep-score {
+  background: white;
+}
+.rep-score:hover,
+.rep-score:focus-visible {
+  background: #f8fafc;
+}
