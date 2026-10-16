@@ -1,6 +1,6 @@
 export const PARAM_TABLE_CSS = `
-.rx-ptable{width:100%;border-collapse:collapse;margin:2px 0 10px;font-size:10.5px;break-inside:avoid}
-.rx-ptable th,.rx-ptable td{border:1px solid var(--bd);padding:3px 6px;text-align:center;white-space:nowrap}
+.rx-ptable{width:100%;border-collapse:collapse;margin:0 0 4px;font-size:10.5px;line-height:1.3;break-inside:avoid}
+.rx-ptable th,.rx-ptable td{border:1px solid var(--bd);padding:2px 6px;text-align:center;white-space:nowrap}
 .rx-ptable thead th{background:var(--bg);font-weight:700;color:var(--ink2);font-size:9.5px}
 .rx-ptable thead th.today{color:var(--ink);background:#e8f0fb}
 .rx-ptable tbody th{text-align:left;font-weight:600;color:var(--ink);background:#fbfcfd}
@@ -9,6 +9,7 @@ export const PARAM_TABLE_CSS = `
 .rx-ptable td.today{font-weight:700;color:var(--ink);background:#f5f9ff}
 .rx-ptable td.empty{color:#b6c0cc}
 .rx-summary-block--tests .rx-summary-tests{margin-top:0;padding-top:0;border-top:0}
+.rx-body>.rx-ptable-title:first-child{margin-top:0}
 `;
 
 const shortDate = (ymd) => {
@@ -29,10 +30,15 @@ export function parameterTableHtml(table, escape) {
   );
   if (!columns.length || !rows.length) return "";
   const head = columns
-    .map(
-      (c) =>
-        `<th class="${c.today ? "today" : ""}">${escape(c.today ? `Today (${shortDate(c.date)})` : shortDate(c.date))}</th>`,
-    )
+    .map((c, i) => {
+      const last = i === columns.length - 1;
+      const label = c.today
+        ? `Today (${shortDate(c.date)})`
+        : last
+          ? `Last visit (${shortDate(c.date)})`
+          : shortDate(c.date);
+      return `<th class="${c.today || last ? "today" : ""}">${escape(label)}</th>`;
+    })
     .join("");
   const body = rows
     .map((r) => {
@@ -40,13 +46,13 @@ export function parameterTableHtml(table, escape) {
         .map((c, i) => {
           const v = r.values?.[i];
           const empty = v == null || v === "";
-          return `<td class="${[c.today ? "today" : "", empty ? "empty" : ""].filter(Boolean).join(" ")}">${empty ? "—" : escape(String(v))}</td>`;
+          return `<td class="${[c.today || i === columns.length - 1 ? "today" : "", empty ? "empty" : ""].filter(Boolean).join(" ")}">${empty ? "—" : escape(String(v))}</td>`;
         })
         .join("");
       const unit = r.unit ? `<span class="unit">(${escape(r.unit)})</span>` : "";
       return `<tr><th>${escape(r.label)}${unit}</th>${cells}</tr>`;
     })
     .join("");
-  return `<div class="rx-section-title">Vitals &amp; biomarkers — last visits</div>
+  return `<div class="rx-section-title rx-ptable-title">Vitals &amp; biomarkers — last visits</div>
 <table class="rx-ptable"><thead><tr><th>Parameter</th>${head}</tr></thead><tbody>${body}</tbody></table>`;
 }

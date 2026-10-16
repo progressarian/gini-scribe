@@ -30,13 +30,27 @@ const fmtSparkDate = (d) => {
   return t.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
 };
 
+const SAME_REPORT_DAYS = 3;
+const dayNumber = (d) => Math.floor(new Date(d).getTime() / 86400000);
+
+const sameReadingOnce = (entries) =>
+  entries.reduce((kept, e) => {
+    const prev = kept[kept.length - 1];
+    const repeat =
+      prev &&
+      prev.value === e.value &&
+      Math.abs(dayNumber(e.date) - dayNumber(prev.date)) <= SAME_REPORT_DAYS;
+    return repeat ? kept : [...kept, e];
+  }, []);
+
 const buildSparkline = (history, goal, lowerBetter = true) => {
   if (!history || history.length === 0) return { bars: [], goalPct: null };
-  const chronological = [...history].reverse();
-  const entries = chronological
-    .slice(-4)
-    .map((h) => ({ value: Number(h.result ?? h.value), date: h.date || h.test_date }))
-    .filter((e) => !Number.isNaN(e.value));
+  const entries = sameReadingOnce(
+    [...history]
+      .reverse()
+      .map((h) => ({ value: Number(h.result ?? h.value), date: h.date || h.test_date }))
+      .filter((e) => !Number.isNaN(e.value)),
+  ).slice(-4);
   if (entries.length === 0) return { bars: [], goalPct: null };
   const vals = entries.map((e) => e.value);
   const min = Math.min(...vals, goal != null ? goal : Infinity);

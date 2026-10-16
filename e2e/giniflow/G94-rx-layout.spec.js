@@ -69,6 +69,143 @@ test.describe("G94 prescription layout", () => {
     at(html, ">Lipids<");
   });
 
+  test("1b. investigations ordered leaves out the tests for the next visit", () => {
+    const chips = (html) => [...html.matchAll(/rx-summary-test-chip">([^<]*)</g)].map((m) => m[1]);
+    expect(chips(base())).toEqual(["Lipids"]);
+
+    const healthray = base({
+      consultations: [],
+      appt_plan: {
+        investigations_to_order: ["FBG", "PP", "Rheumatoid Factor", "ANCA", "SMBG"].map((name) => ({
+          name,
+          urgency: "routine",
+        })),
+        follow_up: "2026-12-01",
+        follow_up_with: "With FBG, PP, Rheumatoid Factor, ANCA, SMBG",
+      },
+    });
+    expect(healthray).not.toContain("Investigations ordered");
+    at(healthray, "Reports to bring");
+    at(healthray, "Rheumatoid Factor");
+
+    const mixed = base({
+      consultations: [],
+      appt_plan: {
+        investigations_to_order: [
+          { name: "TSH", urgency: "routine" },
+          { name: "HbA1c", urgency: "next_visit" },
+          { name: "FBG", urgency: "routine" },
+        ],
+        follow_up: "2026-12-01",
+        follow_up_with: "Come fasting with FBG",
+      },
+    });
+    expect(chips(mixed)).toEqual(["TSH"]);
+  });
+
+  test("1d. tests and the follow-up note print once, as a checklist beside the next appointment", () => {
+    const items = (html) => [...html.matchAll(/rx-nv-box[^>]*><\/span>([^<]*)</g)].map((m) => m[1]);
+    const plan = (follow_up_with, follow_up = { date: "2099-01-15", timing: "6 weeks" }) =>
+      base({
+        consultations: [],
+        appt_plan: {
+          investigations_to_order: ["FBG", "PP", "ANCA"].map((name) => ({
+            name,
+            urgency: "routine",
+          })),
+          follow_up,
+          follow_up_with,
+        },
+      });
+
+    const same = plan("With FBG, PP, ANCA");
+    expect(items(same)).toEqual(["FBG", "PP", "ANCA"]);
+    expect(same).not.toContain("Instructions:");
+    expect(same).not.toContain("Follow up with");
+    expect(same).toContain("Follow-up appointment");
+    expect(same).toContain("15 January 2099");
+    expect(same).toContain("Thursday · in 6 weeks");
+    expect(same).toContain("Please bring all the reports above to your next visit.");
+
+    const extra = plan("Come fasting with FBG");
+    expect(items(extra)).toEqual(["FBG", "PP", "ANCA"]);
+    expect(extra).toContain("<b>Instructions:</b> Come fasting with FBG");
+
+    const undated = plan("", null);
+    expect(undated).toMatch(/rx-nv-date">To be scheduled</);
+  });
+
+  test("1e. trends plot a repeated report once and never mistake Anti-TG for triglycerides", () => {
+    const html = base({
+      activeDx: [
+        { diagnosis_id: "dm2", label: "Type 2 Diabetes Mellitus", status: "Present" },
+        { diagnosis_id: "dyslipidemia", label: "Dyslipidemia", status: "Present" },
+      ],
+      labResults: [
+        { test_name: "HbA1c", canonical_name: "HbA1c", result: 9.5, test_date: "2026-07-16" },
+        {
+          test_name: "TG",
+          canonical_name: "Triglycerides",
+          result: 105.4,
+          test_date: "2026-07-16",
+        },
+      ],
+      labHistory: {
+        HbA1c: [
+          { result: 9.5, date: "2026-07-16" },
+          { result: 9.5, date: "2026-07-15" },
+          { result: 10.7, date: "2026-05-11" },
+          { result: 13.4, date: "2026-03-12" },
+        ],
+        "Anti-TG": [{ result: 17.27, date: "2026-07-16" }],
+        Triglycerides: [
+          { result: 105.4, date: "2026-07-16" },
+          { result: 105.4, date: "2026-07-15" },
+          { result: 172, date: "2026-05-11" },
+        ],
+      },
+    });
+    const card = (label) => {
+      const start = html.indexOf(label);
+      expect(start, label).toBeGreaterThan(-1);
+      return html.slice(start, html.indexOf("sp-dates", start) + 400);
+    };
+    const values = (chunk) => [...chunk.matchAll(/sp-val">([^<]*)</g)].map((m) => m[1]);
+    const dates = (chunk) => [...chunk.matchAll(/sp-date[^"]*">([^<]*)</g)].map((m) => m[1]);
+    expect(values(card("HbA1c (%)"))).toEqual(["13.4", "10.7", "9.5"]);
+    expect(dates(card("HbA1c (%)")).at(-1)).toBe("15 Jul");
+    expect(values(card("TG (mg/dL)"))).toEqual(["172", "105.4"]);
+    expect(html).not.toContain(">17.3<");
+  });
+
+  test("1c. diagnoses print one row each, deduped, in consistent case, primary first", () => {
+    const html = base({
+      activeDx: [
+        {
+          diagnosis_id: "dm2",
+          label: "TYPE 2 DM",
+          status: "Present",
+          since_year: "2017",
+          notes: "SINCE 2017",
+        },
+        { diagnosis_id: "dual_adiposity", label: "Dual Adiposity", status: "New" },
+        { diagnosis_id: "dual_adiposity_hr", label: "DUAL ADIPOSITY", status: "Present" },
+        { diagnosis_id: "perianal", label: "LEFT SIDE PERIANAL ABSCESS", status: "Present" },
+        { diagnosis_id: "gmi", label: "SGLT2 INDUCED GMI", status: "Present", notes: "TOLERABLE" },
+      ],
+    });
+    const names = [...html.matchAll(/class="rx-dx-name">([^<]*)</g)].map((m) => m[1]);
+    expect(names).toEqual([
+      "Type 2 DM",
+      "Dual Adiposity",
+      "Left Side Perianal Abscess",
+      "SGLT2 Induced GMI",
+    ]);
+    expect(html).not.toContain("rx-dx--primary");
+    expect(html).toContain('<span class="rx-dx-meta">Since 2017</span>');
+    expect(html).toContain('<span class="rx-dx-meta">Tolerable</span>');
+  });
+
   test("2. the parameter table comes before diagnoses, trends come last", () => {
     const html = base();
     const table = at(html, "Vitals &amp; biomarkers — last visits");

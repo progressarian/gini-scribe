@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { query } from "../helpers/db.mjs";
+import { query, registerEnumArrayParsers } from "../helpers/db.mjs";
 import { apiAs, loginAs } from "../helpers/auth.mjs";
 import { assertTestDatabase } from "../setup/guard.mjs";
 import { extraVisit, newTag, setUp, tearDown } from "../billing/phase4/p4-bills-fixture.mjs";
@@ -44,6 +44,7 @@ const html = async (patient, extra = {}) =>
 
 test.describe.serial("G93 the Rx counter prints the medicine card", () => {
   test.beforeAll(async () => {
+    await registerEnumArrayParsers();
     ids = await setUp(tag);
     made.full = await extraVisit(ids, "CardFull", { healthray: false });
     made.empty = await extraVisit(ids, "CardEmpty", { healthray: false });
@@ -103,7 +104,7 @@ test.describe.serial("G93 the Rx counter prints the medicine card", () => {
     expect(body).toContain("F-93");
     expect(body).toContain("Medicine card");
     expect(body).toContain("Metformin + Glimepiride · for Diabetes");
-    expect(body).toContain("ⓘ Take after food");
+    expect(body).toContain("</svg><span>Take after food</span>");
     expect(body).toContain("Not from Gini · Dr Cardio");
     expect(body).toContain("Next visit: <b>Sun, 15 Nov, 2026</b>");
     expect(body).toMatch(/class="mc-count">2</);
@@ -162,7 +163,8 @@ test.describe.serial("G93 the Rx counter prints the medicine card", () => {
     await expect(button).toBeEnabled();
     await button.click();
     await expect(page.getByText(`Medicine card — P4 CardFull ${tag}`).first()).toBeVisible();
-    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "✕" }).click();
+    await page.getByRole("button", { name: "← Back" }).click();
     await page.getByText(`P4 CardEmpty ${tag}`).first().click();
     await expect(page.getByRole("button", { name: "🖨 Print medicine card" })).toBeDisabled();
   });

@@ -127,6 +127,53 @@ test.describe.serial("G95 the prescription parameter table", () => {
     expect(rowOf(table, "fundus").values.at(-3)).toBe("No DR");
   });
 
+  test("2b. vitals stamped at midnight after their visit still land on that visit", async () => {
+    const visit = addDays(ids.day, -120);
+    const { rows } = await query(
+      `INSERT INTO consultations (patient_id, visit_date, status) VALUES ($1, $2::date, 'completed') RETURNING id`,
+      [made.patient, visit],
+    );
+    await query(
+      `INSERT INTO vitals (patient_id, consultation_id, recorded_at, weight)
+       VALUES ($1, $2, ($3::date + 1)::timestamp AT TIME ZONE 'Asia/Kolkata', 94)`,
+      [made.patient, rows[0].id, visit],
+    );
+    try {
+      const table = await buildRxParameterTable(db, {
+        patientId: made.patient,
+        visitDate: ids.day,
+      });
+      expect(rowOf(table, "weight").values).toEqual(["95", "94", "92", null, null, "88"]);
+    } finally {
+      await query(`DELETE FROM vitals WHERE consultation_id = $1`, [rows[0].id]);
+      await query(`DELETE FROM consultations WHERE id = $1`, [rows[0].id]);
+    }
+  });
+
+  test("2c. an empty consultation record is not counted as a visit", async () => {
+    const { rows } = await query(
+      `INSERT INTO consultations (patient_id, visit_date, status, mo_data)
+       VALUES ($1, $2::date, 'completed', '{"follow_up": null, "raw_comment": "", "diet_lifestyle": []}'::jsonb)
+       RETURNING id`,
+      [made.patient, addDays(ids.day, -45)],
+    );
+    try {
+      const table = await buildRxParameterTable(db, {
+        patientId: made.patient,
+        visitDate: ids.day,
+      });
+      expect(table.columns.map((c) => c.date)).not.toContain(addDays(ids.day, -45));
+      await query(`UPDATE consultations SET con_name = 'Dr. G92' WHERE id = $1`, [rows[0].id]);
+      const counted = await buildRxParameterTable(db, {
+        patientId: made.patient,
+        visitDate: ids.day,
+      });
+      expect(counted.columns.map((c) => c.date)).toContain(addDays(ids.day, -45));
+    } finally {
+      await query(`DELETE FROM consultations WHERE id = $1`, [rows[0].id]);
+    }
+  });
+
   test("3. the station edits today, adds, removes and reorders for this prescription only", async () => {
     const api = await apiAs("admin");
     try {
@@ -238,6 +285,46 @@ test.describe.serial("G95 the prescription parameter table", () => {
       await reception.dispose();
     } finally {
       await api.dispose();
+    }
+  });
+
+  test("6. the print shows Today only once today's visit is completed", async () => {
+    const before = await query(
+      `SELECT id, status FROM appointments WHERE patient_id = $1 AND appointment_date = $2::date`,
+      [made.patient, ids.day],
+    );
+    await query(`UPDATE appointments SET status = 'scheduled' WHERE id = ANY($1::int[])`, [
+      before.rows.map((r) => r.id),
+    ]);
+    try {
+      const open = await buildRxParameterTable(db, {
+        patientId: made.patient,
+        visitDate: ids.day,
+        todayOnlyWhenCompleted: true,
+      });
+      expect(open.columns.map((c) => c.date)).toEqual(PAST.map((o) => addDays(ids.day, o)));
+      expect(open.columns.some((c) => c.today)).toBe(false);
+      expect(rowOf(open, "weight").values.at(-1)).toBeNull();
+      expect(buildPrescriptionHtml({ patient: { name: "X" }, rxParameters: open })).not.toContain(
+        "Today (",
+      );
+
+      await query(
+        `INSERT INTO appointments (patient_id, patient_name, file_no, appointment_date, status, visit_type, doctor_name)
+         SELECT id, name, file_no, $2::date, 'completed', 'Follow-Up', 'Dr. G92' FROM patients WHERE id = $1`,
+        [made.patient, ids.day],
+      );
+      const done = await buildRxParameterTable(db, {
+        patientId: made.patient,
+        visitDate: ids.day,
+        todayOnlyWhenCompleted: true,
+      });
+      expect(done.columns.at(-1)).toEqual({ date: ids.day, today: true });
+      expect(done.columns).toHaveLength(6);
+    } finally {
+      for (const r of before.rows) {
+        await query(`UPDATE appointments SET status = $2 WHERE id = $1`, [r.id, r.status]);
+      }
     }
   });
 });

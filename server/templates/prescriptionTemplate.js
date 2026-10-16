@@ -148,6 +148,67 @@ const escape = (s) => {
     .replace(/'/g, "&#39;");
 };
 
+const reEscape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const DX_ACRONYMS = new Set([
+  "ascvd",
+  "copd",
+  "gerd",
+  "masld",
+  "nafld",
+  "nash",
+  "pcod",
+  "pcos",
+  "t1dm",
+  "t2dm",
+  "mody",
+  "lada",
+]);
+const DX_SMALL_WORDS = new Set(["of", "and", "with", "in", "on", "the", "to", "or", "for", "due"]);
+
+const dxCase = (label) => {
+  const text = String(label || "")
+    .replace(/\s+/g, " ")
+    .replace(/\s*\(\s*/g, " (")
+    .replace(/\s*\)/g, ")")
+    .trim();
+  if (/[a-z]/.test(text) || !/[A-Z]{2}/.test(text)) return text;
+  return text.replace(/[A-Za-z][A-Za-z0-9]*/g, (word, offset) => {
+    const lower = word.toLowerCase();
+    if (offset > 0 && DX_SMALL_WORDS.has(lower)) return lower;
+    if (/\d/.test(word) || word.length <= 3 || DX_ACRONYMS.has(lower)) return word;
+    return lower.charAt(0).toUpperCase() + lower.slice(1);
+  });
+};
+
+const dxKey = (d) =>
+  String(d.label || d.diagnosis_id || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+const uniqueDiagnoses = (list) => {
+  const seen = new Set();
+  return list.filter((d) => {
+    const key = dxKey(d);
+    if (!key || seen.has(key)) return !key;
+    seen.add(key);
+    return true;
+  });
+};
+
+const uniqueParts = (parts) => {
+  const seen = new Set();
+  return parts.filter((p) => {
+    const key = String(p)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "");
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
 const STATUS_BADGE = {
   controlled: { bg: "#edfcf0", color: "#15803d", label: "Controlled" },
   improving: { bg: "#fef6e6", color: "#d97a0a", label: "Improving" },
@@ -179,18 +240,20 @@ const ALIASES = {
   triglycerides: ["triglycerides", "tg"],
   creatinine: ["creatinine", "serum creatinine"],
   uacr: ["uacr", "albumin/creatinine", "urine albumin"],
+  alt: ["alt", "sgpt", "sgpt (alt)"],
 };
 const findHist = (labHistory, key) => {
   if (!labHistory) return [];
   const aliases = ALIASES[key] || [key];
-  for (const k of Object.keys(labHistory)) {
-    const lk = k.toLowerCase();
-    if (aliases.some((a) => lk.includes(a))) {
-      const hist = labHistory[k];
-      return Array.isArray(hist) ? hist : [];
-    }
-  }
-  return [];
+  const keys = Object.keys(labHistory);
+  const match =
+    keys.find((k) => aliases.includes(k.toLowerCase().trim())) ||
+    keys.find((k) => {
+      const lk = k.toLowerCase();
+      return aliases.some((a) => a.length >= 4 && lk.includes(a) && !/(^|[^a-z])anti/.test(lk));
+    });
+  const hist = match ? labHistory[match] : null;
+  return Array.isArray(hist) ? hist : [];
 };
 const findLatest = (labResults, key) => {
   if (!labResults) return null;
@@ -289,25 +352,28 @@ const CSS = `
 body{font-family:var(--fb);color:var(--ink);background:var(--white);font-size:13px}
 
 .rx-page{background:var(--white);border:1px solid var(--bd);border-radius:var(--r);margin-bottom:16px;overflow:hidden;-webkit-box-decoration-break:clone;box-decoration-break:clone}
-.rx-header{background:var(--nv);padding:16px 22px}
+.rx-sheet{width:100%;border-collapse:collapse;border-spacing:0}
+.rx-sheet>thead{display:table-header-group}
+.rx-sheet>thead>tr>td,.rx-sheet>tbody>tr>td{padding:0;vertical-align:top}
+.rx-header{background:var(--nv);padding:11px 16px 9px}
 .rx-header-top{display:flex;align-items:center;justify-content:space-between;gap:16px}
 .rx-hosp{flex:1 1 0;min-width:0}
 .rx-hosp-name{font-family:var(--fd);font-size:22px;color:#fff;font-style:italic}
 /* The address sits on its own full-width line under the row rather than under
    the hospital name: in a three-column header it only gets a third of the page
    and orphans the phone number onto a second line. */
-.rx-hosp-tag{font-size:10px;color:rgba(255,255,255,.5);margin-top:10px;padding-top:9px;border-top:1px solid rgba(255,255,255,.12)}
+.rx-hosp-tag{font-size:10px;color:rgba(255,255,255,.5);margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.12)}
 .rx-logo{flex:0 0 auto;display:flex;align-items:center;justify-content:center}
-.rx-logo img{height:46px;width:auto;display:block}
+.rx-logo img{height:38px;width:auto;display:block}
 .rx-doc{flex:1 1 0;text-align:right}
 .rx-doc-name{font-size:13px;font-weight:700;color:#fff}
 .rx-doc-cred{font-size:10px;color:rgba(255,255,255,.5);line-height:1.6;margin-top:2px}
-.rx-patient-bar{background:var(--bg);padding:10px 22px;display:flex;gap:20px;align-items:center;border-bottom:1px solid var(--bd);flex-wrap:wrap}
+.rx-patient-bar{background:var(--bg);padding:10px 16px;display:flex;gap:20px;align-items:center;border-bottom:1px solid var(--bd);flex-wrap:wrap}
 .rx-pt-name{font-size:14px;font-weight:700;color:var(--nv)}
 .rx-pt-meta{font-size:11px;color:var(--ink3)}
 .rx-pt-pills{display:flex;gap:5px;margin-left:auto;flex-wrap:wrap}
 .rx-pill{font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px}
-.rx-body{padding:18px 22px}
+.rx-body{padding:14px 16px 6px;-webkit-box-decoration-break:clone;box-decoration-break:clone}
 
 .rx-summary-block{background:var(--tll);border:1px solid var(--tlb);border-radius:7px;padding:10px 14px;margin-bottom:16px;font-size:12px;line-height:1.55;color:var(--ink)}
 .rx-summary-block .sum-title{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--tl);margin:0 0 4px}
@@ -323,12 +389,15 @@ body{font-family:var(--fb);color:var(--ink);background:var(--white);font-size:13
 .rx-section-title{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--ink3);margin-bottom:8px;margin-top:16px;padding-bottom:4px;border-bottom:1px solid var(--bd);break-inside:avoid;break-after:avoid}
 .rx-med-cat{display:flex;align-items:center;gap:6px;font-size:10px;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.08em;background:#f5f7fa;padding:4px 8px;border-left:3px solid var(--tl);margin:10px 0 2px}
 .rx-med-cat-count{font-size:9px;font-weight:600;color:var(--ink3);text-transform:none;letter-spacing:0}
-.rx-dx{display:flex;gap:10px;align-items:flex-start;margin-bottom:7px;break-inside:avoid}
-.rx-dx-num{font-family:var(--fm);font-size:11px;color:var(--ink3);flex-shrink:0;min-width:18px;padding-top:1px}
-.rx-dx-body{flex:1}
-.rx-dx-name{font-size:13px;font-weight:600;color:var(--ink)}
-.rx-dx-detail{font-size:11px;color:var(--ink3);margin-top:1px}
-.rx-dx-badge{font-size:9px;font-weight:700;padding:1px 7px;border-radius:4px;margin-left:7px}
+.rx-dx{display:flex;gap:10px;align-items:flex-start;padding:6px 8px 6px 0;border-bottom:1px solid var(--bd);break-inside:avoid}
+.rx-dx:last-child{border-bottom:none}
+.rx-dx-num{font-family:var(--fm);font-size:11px;color:var(--ink3);flex-shrink:0;min-width:22px;padding-top:1px}
+.rx-dx-body{flex:1;min-width:0}
+.rx-dx-name{font-size:12.5px;font-weight:600;color:var(--ink);line-height:1.35}
+.rx-dx-meta{font-weight:400;font-size:11px;color:var(--ink3);margin-left:6px}
+.rx-dx-detail{font-size:11px;color:var(--ink3);margin-top:2px;line-height:1.45}
+.rx-dx-sep{color:var(--bd2);margin:0 6px}
+.rx-dx-badge{flex-shrink:0;font-size:9px;font-weight:700;padding:2px 8px;border-radius:4px;margin-top:1px;text-transform:uppercase;letter-spacing:.04em}
 .rx-dx-bio{font-size:11px;color:var(--ink2);font-weight:500}
 .rx-dx-bio b{color:var(--ink);font-weight:700}
 .rx-dx-bio .arrow-up{color:#dc2626;font-weight:700}
@@ -336,14 +405,15 @@ body{font-family:var(--fb);color:var(--ink);background:var(--white);font-size:13
 .rx-dx-bio .arrow-flat{color:#6b7280;font-weight:700}
 .rx-dx-bio .meta{color:var(--ink3)}
 
-.rx-goals{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:4px}
-.rx-goal{background:var(--bg);border-radius:6px;padding:8px 10px;border-left:3px solid var(--tl)}
+.rx-goals-block{break-inside:avoid}
+.rx-goals{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:4px;break-inside:avoid}
+.rx-goal{background:var(--bg);border-radius:6px;padding:8px 10px;border-left:3px solid var(--tl);break-inside:avoid}
 .rx-goal-label{font-size:10px;font-weight:700;color:var(--tl);margin-bottom:3px}
 .rx-goal-val{font-family:var(--fm);font-size:12px;font-weight:500}
 .rx-goal-current{font-size:10px;color:var(--ink3);margin-top:2px}
 
 
-.rx-med{display:flex;gap:12px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--bg);break-inside:avoid}
+.rx-med{display:flex;gap:12px;align-items:flex-start;padding:4px 0;line-height:1.25;border-bottom:1px solid var(--bg);break-inside:avoid}
 .rx-med:last-child{border:none}
 .rx-med-num{font-family:var(--fm);font-size:11px;color:var(--ink3);flex-shrink:0;min-width:20px;padding-top:2px}
 .rx-med-body{flex:1;min-width:0;word-break:break-word;overflow-wrap:break-word}
@@ -368,16 +438,30 @@ body{font-family:var(--fb);color:var(--ink);background:var(--white);font-size:13
 .rx-ref{background:var(--skl);border-radius:6px;padding:9px 11px;border-left:3px solid var(--sk);break-inside:avoid}
 .rx-ref-title{font-size:10px;font-weight:700;color:var(--sk);margin-bottom:4px}
 .rx-ref-body{font-size:12px;color:var(--ink);line-height:1.5}
+.rx-nv-block{break-inside:avoid}
+.rx-ref-grid+.rx-nv{margin-top:8px}
+.rx-nv{display:flex;border:1px solid var(--bd);border-radius:6px;overflow:hidden;break-inside:avoid}
+.rx-nv-appt{flex:0 0 32%;background:var(--white);color:var(--nv);padding:10px 12px;border-right:1px solid var(--bd);display:flex;flex-direction:column;justify-content:center}
+.rx-nv-appt .rx-nv-label{color:var(--tl)}
+.rx-nv-date{font-size:17px;font-weight:700;line-height:1.2;margin-top:2px}
+.rx-nv-when{font-size:10.5px;color:var(--ink3);margin-top:3px}
+.rx-nv-reports{flex:1;min-width:0;padding:9px 12px;background:var(--aml)}
+.rx-nv-label{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:var(--am)}
+.rx-nv-list{list-style:none;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:3px 12px;margin-top:5px}
+.rx-nv-list li{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink);overflow-wrap:anywhere}
+.rx-nv-box{flex:0 0 auto;width:10px;height:10px;border:1.5px solid var(--am);border-radius:2px;background:#fff}
+.rx-nv-note{font-size:11.5px;color:var(--ink);margin-top:6px;white-space:pre-line;line-height:1.45}
+.rx-nv-remind{font-size:10.5px;font-weight:600;color:#7c2d12;margin-top:6px;padding-top:5px;border-top:1px dashed rgba(217,122,10,.35)}
 .rx-test{background:var(--aml);border-radius:6px;padding:9px 11px;border-left:3px solid var(--am);break-inside:avoid}
 .rx-test-title{font-size:10px;font-weight:700;color:var(--am);margin-bottom:4px}
 .rx-test-item{font-size:12px;color:var(--ink);padding:2px 0;display:flex;gap:6px}
 
 .rx-close{break-inside:avoid}
-.rx-footer{background:var(--bg);border-top:1px solid var(--bd);padding:10px 22px;display:flex;justify-content:space-between;align-items:center}
+.rx-footer{background:var(--bg);border-top:1px solid var(--bd);padding:10px 16px;display:flex;justify-content:space-between;align-items:center}
 .rx-sig{font-size:11px;color:var(--ink3)}
 .rx-next{font-size:11px;font-weight:700;color:var(--nv)}
 
-.rx-promo{background:var(--nv);padding:11px 22px;display:flex;justify-content:space-between;align-items:center;gap:18px}
+.rx-promo{background:var(--nv);padding:11px 16px;display:flex;justify-content:space-between;align-items:center;gap:18px}
 .rx-promo-svc{font-size:10px;color:rgba(255,255,255,.72);line-height:1.75}
 .rx-promo-svc div{padding-left:11px;position:relative}
 .rx-promo-svc div::before{content:"";position:absolute;left:0;top:6px;width:4px;height:4px;border-radius:50%;background:var(--am)}
@@ -387,7 +471,7 @@ body{font-family:var(--fb);color:var(--ink);background:var(--white);font-size:13
 .rx-promo-ttl{font-size:11px;font-weight:700;color:#fff}
 .rx-promo-sub{font-size:9px;color:rgba(255,255,255,.55);margin-top:1px}
 
-@page{size:A4;margin:14mm 18mm}
+@page{size:A4;margin:14mm 10mm}
 `;
 
 function buildPrescriptionHtml(data = {}) {
@@ -413,7 +497,7 @@ function buildPrescriptionHtml(data = {}) {
   // Every caller (client print, /visit route, sync auto-save) gets the same
   // clinical sequence: diabetes, obesity, CAD, CVA, PVD, hypercholesterolemia,
   // nephropathy, neuropathy, retinopathy, hypertension, MASLD, thyroid, rest.
-  const activeDx = sortDiagnoses(activeDxInput) || [];
+  const activeDx = uniqueDiagnoses(sortDiagnoses(activeDxInput) || []);
 
   const today = data.rxDate || new Date().toISOString().split("T")[0];
   const latestCon = consultations?.[0]?.con_data || {};
@@ -462,6 +546,21 @@ function buildPrescriptionHtml(data = {}) {
     [latestCon.follow_up_with, appt_plan?.follow_up_with]
       .map((v) => (typeof v === "string" ? v.trim() : ""))
       .find((v) => /[\p{L}\p{N}]/u.test(v) && v.toLowerCase() !== "null") || "";
+  const nextVisitNames = new Set(
+    mergeTests(latestCon.follow_up?.tests_to_bring, appt_plan?.follow_up?.tests_to_bring).map((t) =>
+      testName(t).trim().toLowerCase(),
+    ),
+  );
+  const nextVisitNote = [followUpWith, followUp.notes]
+    .filter((v) => typeof v === "string")
+    .join(" ")
+    .toLowerCase();
+  const namedInNextVisitNote = (name) =>
+    !!name && new RegExp(`(^|[^a-z0-9])${reEscape(name)}([^a-z0-9]|$)`).test(nextVisitNote);
+  const orderedTests = tests.filter((t) => {
+    const name = testName(t).trim().toLowerCase();
+    return t?.urgency !== "next_visit" && !nextVisitNames.has(name) && !namedInNextVisitNote(name);
+  });
   // ── Lab values (latest)
   const hba1c = findLatest(labResults, "hba1c");
   const fbs = findLatest(labResults, "fbs");
@@ -657,25 +756,25 @@ function buildPrescriptionHtml(data = {}) {
       if (d.since_year) metaParts.push(`Since ${escape(d.since_year)}`);
       if (d.age_of_onset) metaParts.push(`Age of onset: ${escape(d.age_of_onset)} yrs`);
       const cleanedNotes = cleanNote(d.notes);
-      if (cleanedNotes) metaParts.push(escape(cleanedNotes));
+      if (cleanedNotes) metaParts.push(escape(dxCase(cleanedNotes)));
       const cleanedDetail = cleanNote(d.detail);
-      if (cleanedDetail) metaParts.push(escape(cleanedDetail));
-      const metaHtml = metaParts.length
-        ? `<span style="font-weight:400;color:var(--ink3);margin-left:6px">(${metaParts.join(" · ")})</span>`
-        : "";
+      if (cleanedDetail) metaParts.push(escape(dxCase(cleanedDetail)));
+      const meta = uniqueParts(metaParts);
+      const metaHtml = meta.length ? `<span class="rx-dx-meta">${meta.join(" · ")}</span>` : "";
       const bios = bioTagFor(d) || [];
-      const bioLine = bios.join(' <span style="color:var(--bd2);margin:0 4px">·</span> ');
+      const bioLine = bios.join('<span class="rx-dx-sep">·</span>');
       return `
         <div class="rx-dx">
           <div class="rx-dx-num">${i + 1}.</div>
           <div class="rx-dx-body">
-            <div class="rx-dx-name">${escape(d.label || d.diagnosis_id || "")}${metaHtml}${
-              d.status
-                ? `<span class="rx-dx-badge" style="background:${badge.bg};color:${badge.color}">${escape(badge.label)}</span>`
-                : ""
-            }</div>
+            <div class="rx-dx-name">${escape(dxCase(d.label || d.diagnosis_id || ""))}${metaHtml}</div>
             ${bioLine ? `<div class="rx-dx-detail">${bioLine}</div>` : ""}
           </div>
+          ${
+            d.status
+              ? `<span class="rx-dx-badge" style="background:${badge.bg};color:${badge.color}">${escape(badge.label)}</span>`
+              : ""
+          }
         </div>`;
     })
     .join("");
@@ -817,34 +916,6 @@ function buildPrescriptionHtml(data = {}) {
           .join("")}</div>`
       : "";
 
-  // ── Lab tests grid
-  const labTestsHtml =
-    labTests.length > 0
-      ? `<div class="rx-test" style="margin-top:${referrals.length > 0 ? 8 : 0}px">
-          <div class="rx-test-title">🔬 Bring these reports to next visit${
-            followUp.duration ? ` (${escape(followUp.duration)})` : ""
-          }</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-top:4px">
-            ${labTests
-              .map((t) => {
-                const name = typeof t === "string" ? t : t.name || t.test || "";
-                return `<div class="rx-test-item"><span>·</span><span>${escape(name)}</span></div>`;
-              })
-              .join("")}
-          </div>
-        </div>`
-      : "";
-
-  // ── FOLLOW UP WITH — dedicated printed section, preserves line breaks
-  const followUpWithHtml = followUpWith
-    ? `<div class="rx-test" style="margin-top:8px;background:#fff7ed;border:1px solid #fed7aa">
-          <div class="rx-test-title" style="color:#7c2d12">📋 Follow up with</div>
-          <div style="margin-top:4px;font-size:12px;color:#7c2d12;white-space:pre-line;line-height:1.5">${escape(
-            followUpWith,
-          )}</div>
-        </div>`
-    : "";
-
   // ── Pills
   const phasePill = summary.carePhase
     ? `<span class="rx-pill" style="background:var(--aml);color:var(--am)">${escape(summary.carePhase)}</span>`
@@ -860,8 +931,69 @@ function buildPrescriptionHtml(data = {}) {
     : followUpDueDate(visitDay, followUp.timing || followUp.duration);
   const nextVisitDate = plannedDate && plannedDate > visitDay ? plannedDate : "";
   const nextVisitText = nextVisitDate
-    ? `📅 Next visit: ${fmtDateLong(nextVisitDate)}${labTests.length > 0 ? " · Come with all reports above" : ""}`
+    ? `📅 Next visit: ${fmtDateLong(nextVisitDate)}`
     : "📅 Next visit: To be scheduled";
+
+  const testNames = labTests.map((t) => testName(t).trim()).filter(Boolean);
+  const followUpLeftover = testNames
+    .reduce(
+      (text, name) =>
+        text.replace(
+          new RegExp(`(^|[^a-z0-9])${reEscape(name.toLowerCase())}(?=[^a-z0-9]|$)`, "g"),
+          "$1",
+        ),
+      followUpWith.toLowerCase(),
+    )
+    .replace(/\b(with|and|reports?|tests?|of|all|the|bring|come)\b/g, "")
+    .replace(/[^a-z0-9]+/g, "");
+  const followUpNote = followUpLeftover ? followUpWith : "";
+  const nextVisitWeekday = nextVisitDate
+    ? new Date(`${nextVisitDate}T00:00:00Z`).toLocaleDateString("en-GB", {
+        weekday: "long",
+        timeZone: "UTC",
+      })
+    : "";
+  const nextVisitGap = String(followUp.timing || followUp.duration || "").trim();
+  const nextVisitWhen = [
+    nextVisitWeekday,
+    /^\d/.test(nextVisitGap) ? `in ${nextVisitGap}` : nextVisitGap,
+  ]
+    .filter(Boolean)
+    .map((v) => escape(String(v)))
+    .join(" · ");
+  const showNextVisit = nextVisitDate || testNames.length > 0 || followUpNote;
+  const nextVisitHtml = showNextVisit
+    ? `<div class="rx-nv">
+        <div class="rx-nv-appt">
+          <div class="rx-nv-label">Follow-up appointment</div>
+          <div class="rx-nv-date">${nextVisitDate ? escape(fmtDateLong(nextVisitDate)) : "To be scheduled"}</div>
+          ${nextVisitWhen ? `<div class="rx-nv-when">${nextVisitWhen}</div>` : ""}
+        </div>
+        <div class="rx-nv-reports">
+          ${
+            testNames.length > 0
+              ? `<div class="rx-nv-label">Reports to bring</div>
+                 <ul class="rx-nv-list">${testNames
+                   .map(
+                     (n) =>
+                       `<li><span class="rx-nv-box" aria-hidden="true"></span>${escape(n)}</li>`,
+                   )
+                   .join("")}</ul>`
+              : ""
+          }
+          ${
+            followUpNote
+              ? `<div class="rx-nv-note"><b>Instructions:</b> ${escape(followUpNote)}</div>`
+              : ""
+          }
+          ${
+            testNames.length > 0
+              ? `<div class="rx-nv-remind">Please bring all the reports above to your next visit.</div>`
+              : ""
+          }
+        </div>
+      </div>`
+    : "";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -873,7 +1005,11 @@ function buildPrescriptionHtml(data = {}) {
 </head>
 <body>
 <div class="rx-page">
+<table class="rx-sheet">
+<thead><tr><td>
   ${letterheadHtml(escape(doctor.name || "Doctor"), docCredHtml, data.rx_logo || DEFAULT_LOGO_DATA_URI, data.rx_footer?.hospital)}
+</td></tr></thead>
+<tbody><tr><td>
 
   <div class="rx-patient-bar">
     <div>
@@ -885,11 +1021,11 @@ function buildPrescriptionHtml(data = {}) {
 
   <div class="rx-body">
     ${
-      tests.length > 0
+      orderedTests.length > 0
         ? `<div class="rx-summary-block rx-summary-block--tests">
              <div class="rx-summary-tests">
                <div class="rx-summary-tests-title">Investigations ordered</div>
-               <div class="rx-summary-tests-list">${tests.map((t) => `<span class="rx-summary-test-chip">${escape(typeof t === "string" ? t : t.name || t.test || String(t))}</span>`).join("")}</div>
+               <div class="rx-summary-tests-list">${orderedTests.map((t) => `<span class="rx-summary-test-chip">${escape(typeof t === "string" ? t : t.name || t.test || String(t))}</span>`).join("")}</div>
              </div>
            </div>`
         : ""
@@ -911,12 +1047,14 @@ function buildPrescriptionHtml(data = {}) {
 
     ${parameterTableHtml(data.rxParameters, escape)}
 
-    ${activeDx.length > 0 ? `<div class="rx-section-title">Diagnoses</div>${dxHtml}` : ""}
+    ${activeDx.length > 0 ? `<div class="rx-section-title">Diagnoses</div><div class="rx-dx-list">${dxHtml}</div>` : ""}
 
     ${
       goals.length > 0
-        ? `<div class="rx-section-title">Goals for next visit</div>
-           <div class="rx-goals">${goalsHtml}</div>`
+        ? `<div class="rx-goals-block">
+             <div class="rx-section-title">Goals for next visit</div>
+             <div class="rx-goals">${goalsHtml}</div>
+           </div>`
         : ""
     }
 
@@ -945,13 +1083,14 @@ function buildPrescriptionHtml(data = {}) {
     }
 
     ${
-      referrals.length > 0 || labTests.length > 0
-        ? `<div class="rx-section-title">Referrals &amp; tests for next visit</div>
-           ${referralsHtml}
-           ${labTestsHtml}`
+      referrals.length > 0 || showNextVisit
+        ? `<div class="rx-nv-block">
+             <div class="rx-section-title">Referrals &amp; tests for next visit</div>
+             ${referralsHtml}
+             ${nextVisitHtml}
+           </div>`
         : ""
     }
-    ${followUpWithHtml}
 
     ${biomarkerTrendsHtml(
       { activeDx, labResults, labHistory, latestVitals, prevVitals, vitalsHistory },
@@ -972,6 +1111,8 @@ function buildPrescriptionHtml(data = {}) {
 
   ${promoHtml(data.rx_footer, data.rx_logo || DEFAULT_LOGO_DATA_URI)}
   </div>
+</td></tr></tbody>
+</table>
 </div>
 </body>
 </html>`;
@@ -985,6 +1126,7 @@ export {
   escape as escapeHtml,
   CSS as LETTERHEAD_CSS,
   letterheadHtml,
+  promoHtml,
   HOSPITAL_NAME,
   HOSPITAL_ADDRESS,
   HOSPITAL_PHONE,

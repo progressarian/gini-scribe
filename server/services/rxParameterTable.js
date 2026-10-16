@@ -5,6 +5,7 @@ export const RX_PARAMETER_DEFAULTS_KEY = "rx_parameter_defaults";
 export const HISTORY_VISITS = 5;
 const FIRST_WINDOW_DAYS = 90;
 const ATTENDED = ["completed", "seen", "checkedin", "in_visit", "in-progress"];
+const COMPLETED = ["completed", "seen"];
 
 export const DEFAULT_RX_PARAMETERS = [
   { key: "height", label: "Height", unit: "cm", source: { vital: "height" } },
@@ -55,6 +56,8 @@ const dayOf = (v) => {
   return new Date(new Date(v).getTime() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
 };
 
+const istDay = () => new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+
 const addDays = (ymd, days) => {
   const t = new Date(`${ymd}T00:00:00Z`);
   t.setUTCDate(t.getUTCDate() + days);
@@ -102,7 +105,7 @@ export async function saveRxParameterOverrides(db, { patientId, visitDate, rows,
   );
 }
 
-async function pastVisitDates(db, patientId, visitDate) {
+async function pastVisitDates(db, patientId, visitDate, limit) {
   const { rows } = await db.query(
     `SELECT d FROM (
        SELECT appointment_date AS d FROM appointments
@@ -110,15 +113,41 @@ async function pastVisitDates(db, patientId, visitDate) {
           AND lower(COALESCE(status, '')) = ANY($3)
           AND lower(btrim(COALESCE(doctor_name, ''))) <> lower($4)
        UNION
-       SELECT visit_date::date FROM consultations
-        WHERE patient_id = $1 AND visit_date::date < $2::date
+       SELECT c.visit_date::date FROM consultations c
+        WHERE c.patient_id = $1 AND c.visit_date::date < $2::date
+          AND (
+            btrim(COALESCE(c.con_name, '')) <> ''
+            OR btrim(COALESCE(c.mo_name, '')) <> ''
+            OR EXISTS (SELECT 1 FROM vitals vt WHERE vt.consultation_id = c.id)
+            OR EXISTS (
+              SELECT 1 FROM jsonb_each(COALESCE(c.con_data, '{}'::jsonb) || COALESCE(c.mo_data, '{}'::jsonb)) e
+               WHERE e.value NOT IN ('null'::jsonb, '""'::jsonb, '[]'::jsonb, '{}'::jsonb)
+            )
+          )
      ) v
      WHERE d IS NOT NULL
      ORDER BY d DESC
      LIMIT $5`,
-    [patientId, visitDate, ATTENDED, LAB_ONLY_DOCTOR, HISTORY_VISITS],
+    [patientId, visitDate, ATTENDED, LAB_ONLY_DOCTOR, limit],
   );
   return rows.map((r) => dayOf(r.d)).reverse();
+}
+
+async function visitCompleted(db, patientId, visitDate) {
+  const { rows } = await db.query(
+    `SELECT EXISTS (
+       SELECT 1 FROM appointments
+        WHERE patient_id = $1 AND appointment_date = $2::date
+          AND lower(COALESCE(status, '')) = ANY($3)
+          AND lower(btrim(COALESCE(doctor_name, ''))) <> lower($4)
+     ) OR EXISTS (
+       SELECT 1 FROM consultations
+        WHERE patient_id = $1 AND visit_date::date = $2::date
+          AND lower(COALESCE(status, '')) = 'completed'
+     ) AS done`,
+    [patientId, visitDate, COMPLETED, LAB_ONLY_DOCTOR],
+  );
+  return !!rows[0]?.done;
 }
 
 const labNamesOf = (params) => [
@@ -133,11 +162,17 @@ async function readings(db, patientId, from, to, params) {
   const names = labNamesOf(params);
   const [vitals, labs] = await Promise.all([
     db.query(
-      `SELECT recorded_at, height, weight, bmi, waist, body_fat, bp_sys, bp_dia
-         FROM vitals
-        WHERE patient_id = $1
-          AND (recorded_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN $2::date AND $3::date
-        ORDER BY recorded_at`,
+      `SELECT day, height, weight, bmi, waist, body_fat, bp_sys, bp_dia
+         FROM (
+           SELECT COALESCE(c.visit_date::date, (v.recorded_at AT TIME ZONE 'Asia/Kolkata')::date)::text AS day,
+                  v.recorded_at, v.height, v.weight, v.bmi, v.waist, v.body_fat, v.bp_sys, v.bp_dia
+             FROM vitals v
+             LEFT JOIN consultations c ON c.id = v.consultation_id AND c.patient_id = v.patient_id
+            WHERE v.patient_id = $1
+              AND (v.recorded_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN $2::date AND $3::date + 1
+         ) x
+        WHERE day BETWEEN $2::text AND $3::text
+        ORDER BY day, recorded_at`,
       [patientId, from, to],
     ),
     names.length
@@ -163,7 +198,7 @@ function valueIn(param, data, start, end) {
   if (src.vital) {
     let picked = null;
     for (const v of data.vitals) {
-      if (!inWindow(dayOf(v.recorded_at))) continue;
+      if (!inWindow(v.day)) continue;
       const value =
         src.vital === "bp"
           ? v.bp_sys != null && v.bp_dia != null
@@ -226,27 +261,36 @@ export function mergeRxParameterRows(defaults, overrideRows = []) {
     .map(({ _i, ...p }) => p);
 }
 
-export async function buildRxParameterTable(db = pool, { patientId, visitDate }) {
+export async function buildRxParameterTable(
+  db = pool,
+  { patientId, visitDate, todayOnlyWhenCompleted = false },
+) {
   if (!patientId || !visitDate) return null;
   const day = dayOf(visitDate);
-  const [defaults, override, past] = await Promise.all([
+  const [defaults, override, past, completed] = await Promise.all([
     getRxParameterDefaults(db),
     getRxParameterOverrides(db, patientId, day),
-    pastVisitDates(db, patientId, day),
+    pastVisitDates(db, patientId, day, HISTORY_VISITS + 1),
+    todayOnlyWhenCompleted ? visitCompleted(db, patientId, day) : true,
   ]);
   const params = mergeRxParameterRows(defaults, override?.rows);
-  const dates = [...past, day];
+  const dates = completed ? [...past.slice(-HISTORY_VISITS), day] : past;
+  if (!dates.length)
+    return { columns: [], rows: [], removed: [], updatedBy: null, updatedAt: null };
   const from = addDays(dates[0], -FIRST_WINDOW_DAYS);
-  const data = await readings(db, patientId, from, day, params);
-  const columns = dates.map((date, i) => ({ date, today: i === dates.length - 1 }));
+  const data = await readings(db, patientId, from, dates.at(-1), params);
+  const columns = dates.map((date, i) => ({
+    date,
+    today: completed && i === dates.length - 1 && (!todayOnlyWhenCompleted || date === istDay()),
+  }));
   const rows = params
     .filter((p) => !p.removed)
     .map((p) => {
       const values = dates.map((date, i) =>
         p.source ? valueIn(p, data, i === 0 ? from : dates[i - 1], date) : null,
       );
-      const measuredToday = values[values.length - 1];
-      if (p.todayValue !== undefined) values[values.length - 1] = fmt(p.todayValue);
+      const measuredToday = completed ? values[values.length - 1] : null;
+      if (completed && p.todayValue !== undefined) values[values.length - 1] = fmt(p.todayValue);
       return {
         key: p.key,
         label: cleanText(p.label, 60),

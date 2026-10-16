@@ -132,6 +132,7 @@ async function resolveRxParameters(data) {
     return await buildRxParameterTable(undefined, {
       patientId,
       visitDate: data.rxDate || istToday(),
+      todayOnlyWhenCompleted: true,
     });
   } catch (e) {
     console.error("Rx parameter table skipped:", e.message);

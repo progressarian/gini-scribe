@@ -3,7 +3,7 @@ import { buildCard } from "./medicineCard.js";
 import { renderHtmlToPdf } from "../prescriptionHtmlPdf.js";
 import { getPrescriptionLogo } from "../prescriptionLogo.js";
 import { getPrescriptionFooter } from "../prescriptionFooter.js";
-import { LETTERHEAD_CSS, letterheadHtml } from "../../templates/prescriptionTemplate.js";
+import { LETTERHEAD_CSS, letterheadHtml, promoHtml } from "../../templates/prescriptionTemplate.js";
 import { ownFu } from "../ghmDayWindow.js";
 import { SLOT_ICONS } from "./medicineCardIcons.js";
 import {
@@ -40,7 +40,17 @@ const PRINT_SLOTS = {
   [UNSLOTTED.key]: { label: "Timing not set", icon: "alarm" },
 };
 
-export function slotsFor(medicine) {
+const WEEKLY = /^\s*(once\s+(weekly|a\s+week)|weekly)\b/i;
+const FORTNIGHTLY = /^\s*(once\s+)?(fortnightly|in\s+14\s+days|every\s+14\s+days)\b/i;
+
+const repeatSlot = (frequency) => {
+  const text = String(frequency || "");
+  if (FORTNIGHTLY.test(text)) return "fortnightly";
+  if (WEEKLY.test(text)) return "weekly";
+  return null;
+};
+
+function timeSlotsFor(medicine) {
   const values = Array.isArray(medicine.whenToTake)
     ? medicine.whenToTake
     : medicine.whenToTake
@@ -63,6 +73,20 @@ export function slotsFor(medicine) {
   if (SLOT_ORDER.has(medicine.timingCategory)) return [medicine.timingCategory];
   return [UNSLOTTED.key];
 }
+
+export function slotsFor(medicine) {
+  const repeat = repeatSlot(medicine.frequency);
+  return repeat ? [repeat] : timeSlotsFor(medicine);
+}
+
+const takeAt = (medicine) => {
+  if (!repeatSlot(medicine.frequency)) return null;
+  const labels = timeSlotsFor(medicine)
+    .filter((k) => !["any_time", "weekly", "fortnightly", UNSLOTTED.key].includes(k))
+    .map((k) => PRINT_SLOTS[k]?.label)
+    .filter(Boolean);
+  return labels.length ? labels.join(", ") : null;
+};
 
 export function groupForPrint(card) {
   const seen = new Set();
@@ -95,34 +119,42 @@ const icon = (name) =>
   `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SLOT_ICONS[name] || SLOT_ICONS.clock}</svg>`;
 
 const CSS = `
-  .mc{font-family:'Helvetica Neue',Arial,sans-serif;color:#1e1b4b;font-size:12px}
-  .mc-title{display:flex;justify-content:space-between;align-items:baseline;margin:14px 0 2px}
-  .mc-title h1{font-size:20px;margin:0;color:#1e1b4b}
-  .mc-date{font-size:11px;color:#6b7280}
-  .mc-who{font-size:13px;color:#374151;margin-bottom:14px}
+  .mc{font-family:'Outfit',sans-serif;color:#1e1b4b;font-size:12px;padding-top:10px}
+  .mc-bar{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:8px 2px 6px;border-bottom:1px solid #e5e7eb;font-family:'Outfit',sans-serif}
+  .mc-bar h1{font-size:16px;margin:0;color:#1e1b4b;font-weight:700}
+  .mc-who{font-size:12.5px;color:#374151;flex:1}
   .mc-who b{color:#1e1b4b}
-  .mc-slot{margin:0 0 12px;break-inside:auto}
-  .mc-head{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:14px;background:#f5f3ff;border:1px solid #ddd6fe;break-after:avoid;page-break-after:avoid}
-  .mc-ico{width:32px;height:32px;border-radius:10px;background:#ede9fe;color:#6d28d9;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-  .mc-label{flex:1;font-size:14px;font-weight:800;color:#1e1b4b}
-  .mc-count{min-width:22px;height:22px;border-radius:11px;background:#7c5cff;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 7px}
-  .mc-med{margin:6px 0 0 20px;padding:9px 12px;border:1px solid #e5e7eb;border-radius:14px;background:#fff;break-inside:avoid;page-break-inside:avoid}
-  .mc-name{font-size:13.5px;font-weight:700;color:#1e1b4b;overflow-wrap:anywhere}
-  .mc-dose{font-size:12px;color:#374151;margin-top:2px}
+  .mc-date{font-size:10.5px;color:#6b7280;white-space:nowrap}
+  .mc-slot{margin:0 0 8px;break-inside:auto}
+  .mc-head{display:flex;align-items:center;gap:8px;padding:5px 10px;border-radius:10px;background:#f5f3ff;border:1px solid #ddd6fe;break-inside:avoid;break-after:avoid;page-break-after:avoid}
+  .mc-ico{width:24px;height:24px;border-radius:7px;background:#ede9fe;color:#6d28d9;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .mc-ico svg{width:15px;height:15px}
+  .mc-label{flex:1;font-size:13px;font-weight:700;color:#1e1b4b}
+  .mc-count{min-width:20px;height:20px;border-radius:10px;background:#7c5cff;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 7px}
+  .mc-med{margin:4px 0 0 20px;padding:5px 12px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;line-height:1.3;break-inside:avoid;page-break-inside:avoid}
+  .mc-name{font-size:13px;font-weight:700;color:#1e1b4b;overflow-wrap:anywhere}
+  .mc-dose{font-size:11.5px;color:#374151;margin-top:1px}
   .mc-sub{font-size:11px;color:#6b7280;margin-top:2px;overflow-wrap:anywhere}
-  .mc-inst{font-size:11.5px;color:#374151;margin-top:4px}
+  .mc-inst{display:flex;align-items:center;gap:5px;font-size:11px;color:#374151;margin-top:2px}
+  .mc-inst svg{flex-shrink:0;color:#6d28d9}
   .mc-tag{display:inline-block;font-size:9.5px;font-weight:700;padding:1px 7px;border-radius:12px;margin-left:6px;vertical-align:middle}
   .mc-new{background:#dcfce7;color:#166534}
   .mc-chg{background:#fef3c7;color:#92400e}
   .mc-ext{background:#dbeafe;color:#1e40af}
   .mc-empty{padding:24px;text-align:center;color:#6b7280;border:1px dashed #d1d5db;border-radius:14px}
-  .mc-next{margin-top:16px;padding:10px 14px;border-radius:14px;background:#faf9ff;border:1px solid #ddd6fe;font-size:13px;break-inside:avoid}
+  .mc-next{margin-top:10px;padding:8px 14px;border-radius:10px;background:#faf9ff;border:1px solid #ddd6fe;font-size:13px;break-inside:avoid}
   .mc-next b{color:#6d28d9}
+  .rx-sheet .rx-header{border-radius:var(--r) var(--r) 0 0}
+  .mc-close{margin-top:14px;border-radius:10px;overflow:hidden;break-inside:avoid;page-break-inside:avoid}
   .mc-legend{margin-top:10px;font-size:10.5px;color:#6b7280;line-height:1.5}
 `;
 
+const INFO_ICON = `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>`;
+
+const FONTS_LINK = `<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">`;
+
 const medHtml = (m) => {
-  const dose = [m.dose, m.form, m.route, m.frequency].filter(Boolean).join(" · ") || "—";
+  const dose = [m.dose, m.form, m.route, m.frequency, takeAt(m)].filter(Boolean).join(" · ") || "—";
   const tag = m.external
     ? `<span class="mc-tag mc-ext">Not from Gini${m.prescriber ? ` · ${esc(m.prescriber)}` : ""}</span>`
     : m.changeType === "new"
@@ -136,7 +168,7 @@ const medHtml = (m) => {
     <div class="mc-name">${esc(m.name || "—")}${tag}</div>
     <div class="mc-dose">${esc(dose)}</div>
     ${sub ? `<div class="mc-sub">${esc(sub)}</div>` : ""}
-    ${m.instruction ? `<div class="mc-inst">ⓘ ${esc(m.instruction)}</div>` : ""}
+    ${m.instruction ? `<div class="mc-inst">${INFO_ICON}<span>${esc(m.instruction)}</span></div>` : ""}
   </div>`;
 };
 
@@ -157,6 +189,7 @@ export function buildMedicineCardHtml({
   nextVisit = null,
   logo = null,
   hospital = null,
+  footer = null,
 }) {
   const groups = groupForPrint(card);
   const slots = groups
@@ -178,13 +211,17 @@ export function buildMedicineCardHtml({
   ]
     .filter((v) => v && v !== "<b></b>")
     .join(" · ");
+  const closing = promoHtml(footer, logo || undefined);
   const head = letterheadHtml(esc(doctorName || "Gini Advanced Care Hospital"), "", logo, hospital);
 
-  return `<!doctype html><html><head><meta charset="utf-8"><style>${LETTERHEAD_CSS}${CSS}</style></head><body>
+  return `<!doctype html><html><head><meta charset="utf-8">${FONTS_LINK}<style>${LETTERHEAD_CSS}${CSS}</style></head><body>
+    <table class="rx-sheet">
+    <thead><tr><td>
     ${head}
+    <div class="mc-bar"><h1>Medicine card</h1><span class="mc-who">${who}</span><span class="mc-date">Printed ${esc(printedAt)}</span></div>
+    </td></tr></thead>
+    <tbody><tr><td>
     <main class="mc">
-      <div class="mc-title"><h1>Medicine card</h1><span class="mc-date">Printed ${esc(printedAt)}</span></div>
-      <div class="mc-who">${who}</div>
       ${slots || `<div class="mc-empty">No active medicines on record.</div>`}
       ${
         nextVisit
@@ -197,6 +234,9 @@ export function buildMedicineCardHtml({
           : ""
       }
     </main>
+    ${closing ? `<div class="mc-close">${closing}</div>` : ""}
+    </td></tr></tbody>
+    </table>
   </body></html>`;
 }
 
@@ -230,6 +270,7 @@ export async function generateMedicineCardPdf(visitId, db = pool) {
     nextVisit: patient.next_visit,
     logo: logo?.dataUri,
     hospital: footer?.hospital,
+    footer,
   });
   return {
     pdf: await renderHtmlToPdf(html),

@@ -11,6 +11,17 @@ export function getPool(url = TEST_DATABASE_URL) {
   return pool;
 }
 
+export async function registerEnumArrayParsers() {
+  const { rows } = await getPool().query(
+    `SELECT DISTINCT t.typarray::int AS oid
+       FROM pg_type t
+       JOIN pg_enum e ON e.enumtypid = t.oid
+      WHERE t.typarray <> 0`,
+  );
+  const textArray = pg.types.getTypeParser(1009);
+  for (const { oid } of rows) pg.types.setTypeParser(oid, textArray);
+}
+
 export async function query(text, params = []) {
   return getPool().query(text, params);
 }
