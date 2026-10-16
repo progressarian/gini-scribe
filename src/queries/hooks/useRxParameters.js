@@ -1,43 +1,50 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "../../services/api";
 
-const station = (visitId) => `/api/giniflow/stations/doctor/${visitId}`;
+const stationPath = (visitId, station) => `/api/giniflow/stations/${station}/${visitId}`;
 
 export const rxParameterKeys = {
-  table: (visitId) => ["giniflow", "rx-parameters", visitId],
-  summary: (visitId) => ["giniflow", "visit-summary", visitId],
+  table: (visitId, station = "doctor") => ["giniflow", "rx-parameters", station, visitId],
+  summary: (visitId, station = "doctor") => ["giniflow", "visit-summary", station, visitId],
   defaults: ["admin", "rx-parameters"],
 };
 
-export function useRxParameters(visitId) {
+export function useRxParameters(visitId, station = "doctor") {
   return useQuery({
-    queryKey: rxParameterKeys.table(visitId),
-    queryFn: async () => (await api.get(`${station(visitId)}/rx-parameters`)).data,
+    queryKey: rxParameterKeys.table(visitId, station),
+    queryFn: async () => (await api.get(`${stationPath(visitId, station)}/rx-parameters`)).data,
     enabled: !!visitId,
   });
 }
 
-export function useSaveRxParameters(visitId) {
+export function useSaveRxParameters(visitId, station = "doctor") {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (rows) => (await api.put(`${station(visitId)}/rx-parameters`, { rows })).data,
-    onSuccess: (data) => qc.setQueryData(rxParameterKeys.table(visitId), data),
+    mutationFn: async (rows) =>
+      (await api.put(`${stationPath(visitId, station)}/rx-parameters`, { rows })).data,
+    onSuccess: (data) => {
+      qc.setQueryData(rxParameterKeys.table(visitId, station), data);
+      qc.invalidateQueries({ queryKey: ["giniflow", "rx-parameters"] });
+    },
   });
 }
 
-export function useVisitSummary(visitId) {
+export function useVisitSummary(visitId, station = "doctor") {
   return useQuery({
-    queryKey: rxParameterKeys.summary(visitId),
-    queryFn: async () => (await api.get(`${station(visitId)}/visit-summary`)).data,
+    queryKey: rxParameterKeys.summary(visitId, station),
+    queryFn: async () => (await api.get(`${stationPath(visitId, station)}/visit-summary`)).data,
     enabled: !!visitId,
   });
 }
 
-export function useGenerateVisitSummary(visitId) {
+export function useGenerateVisitSummary(visitId, station = "doctor") {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async () => (await api.post(`${station(visitId)}/visit-summary`)).data,
-    onSuccess: (data) => qc.setQueryData(rxParameterKeys.summary(visitId), data),
+    mutationFn: async () => (await api.post(`${stationPath(visitId, station)}/visit-summary`)).data,
+    onSuccess: (data) => {
+      qc.setQueryData(rxParameterKeys.summary(visitId, station), data);
+      qc.invalidateQueries({ queryKey: ["giniflow", "visit-summary"] });
+    },
   });
 }
 

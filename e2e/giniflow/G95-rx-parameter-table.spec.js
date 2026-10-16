@@ -102,6 +102,29 @@ test.describe.serial("G95 the prescription parameter table", () => {
     await tearDown(ids);
   });
 
+  test("0. the default rows follow the clinic's order", () => {
+    expect(DEFAULT_RX_PARAMETERS.map((p) => p.label)).toEqual([
+      "Height",
+      "Weight",
+      "BMI",
+      "Waist",
+      "Body Fat",
+      "BP",
+      "FPG",
+      "Fasting Plasma Insulin",
+      "Fasting C-Peptide",
+      "HOMA-IR",
+      "HOMA-B",
+      "HbA1c",
+      "Creatinine",
+      "eGFR",
+      "uACR",
+      "LDL-C",
+      "Triglycerides",
+      "Non-HDL",
+    ]);
+  });
+
   test("1. columns are the last 5 doctor visits plus today; lab-only visits don't count", async () => {
     const table = await buildRxParameterTable(db, { patientId: made.patient, visitDate: ids.day });
     expect(table.columns.map((c) => c.date)).toEqual([
@@ -123,8 +146,6 @@ test.describe.serial("G95 the prescription parameter table", () => {
     expect(rowOf(table, "height").values).toEqual(["170", null, null, null, null, null]);
     expect(rowOf(table, "bp").values).toEqual([null, null, "140/90", null, null, "128/82"]);
     expect(rowOf(table, "fpg").values.at(-2)).toBe("118");
-    expect(rowOf(table, "abi").values.at(-2)).toBe("R 1.12 / L 1.14");
-    expect(rowOf(table, "fundus").values.at(-3)).toBe("No DR");
   });
 
   test("2b. vitals stamped at midnight after their visit still land on that visit", async () => {
@@ -183,7 +204,7 @@ test.describe.serial("G95 the prescription parameter table", () => {
           rows: [
             { key: "weight", value: "87.5" },
             { key: "height", removed: true },
-            { key: "vpt", show: true },
+            { key: "homa_b", show: true },
             {
               key: "grip",
               custom: true,
@@ -203,7 +224,7 @@ test.describe.serial("G95 the prescription parameter table", () => {
       expect(rowOf(body, "weight")).toMatchObject({ measuredToday: "88", edited: true });
       expect(rowOf(body, "height")).toBeUndefined();
       expect(body.removed.map((r) => r.key)).toContain("height");
-      expect(rowOf(body, "vpt").show).toBe(true);
+      expect(rowOf(body, "homa_b").show).toBe(true);
       expect(body.locked).toBe(false);
       expect(body.catalog.length).toBe(DEFAULT_RX_PARAMETERS.length);
 
@@ -220,7 +241,7 @@ test.describe.serial("G95 the prescription parameter table", () => {
       });
       expect(html).toContain("Grip strength");
       expect(html).toContain(">87.5<");
-      expect(html).toContain(">VPT<");
+      expect(html).toContain(">HOMA-B<");
       expect(html).not.toContain(">Height<");
     } finally {
       await api.dispose();

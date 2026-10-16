@@ -292,7 +292,7 @@ test.describe.serial("P3-17 test this rule endpoint", () => {
       [{ age: 151 }, "Age must be at most 150"],
       [{ age: -1 }, "Age must be 0 or more"],
       [{ age: 7.5 }, "Age must be a whole number"],
-      [{ gender: "F" }, "Gender must be one of: Male, Female, Other"],
+      [{ gender: "F" }, "Gender must be one of: male, female, other"],
       [{ age: "70" }, "Age must be a whole number"],
       [{ age: true }, "Age must be a whole number"],
       [{ role: "doctor" }, "Role must be one of: reception, reception_admin, admin"],

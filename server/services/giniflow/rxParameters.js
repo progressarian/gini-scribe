@@ -16,18 +16,30 @@ const LOCKED_STATUSES = [
   "exited",
 ];
 
-async function visitContext(db, visitId) {
+const CHIEF_STATUS = "with_sd";
+const NOT_WITH_CHIEF =
+  "The patient is no longer with the Chief Endocrinologist — the consultant edits this now";
+
+async function visitContext(db, visitId, station = "doctor") {
   const { rows } = await db.query(
     `SELECT id, patient_id, visit_date::text AS visit_date, current_status, appointment_id
        FROM giniflow_visits WHERE id = $1`,
     [visitId],
   );
   if (!rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
-  return { ...rows[0], locked: LOCKED_STATUSES.includes(rows[0].current_status) };
+  const finalized = LOCKED_STATUSES.includes(rows[0].current_status);
+  const notWithChief = station === "mo" && rows[0].current_status !== CHIEF_STATUS;
+  return { ...rows[0], finalized, notWithChief, locked: finalized || notWithChief };
 }
 
-export async function getStationRxParameters(visitId, db = pool) {
-  const visit = await visitContext(db, visitId);
+const refuseIfNotWithChief = (visit) => {
+  if (visit.notWithChief && !visit.finalized) {
+    throw Object.assign(new Error(NOT_WITH_CHIEF), { status: 409 });
+  }
+};
+
+export async function getStationRxParameters(visitId, db = pool, { station = "doctor" } = {}) {
+  const visit = await visitContext(db, visitId, station);
   const [table, defaults] = await Promise.all([
     buildRxParameterTable(db, { patientId: visit.patient_id, visitDate: visit.visit_date }),
     getRxParameterDefaults(db),
@@ -35,13 +47,21 @@ export async function getStationRxParameters(visitId, db = pool) {
   return {
     ...table,
     locked: visit.locked,
+    lockedReason: visit.finalized ? "finalized" : visit.notWithChief ? "not_with_chief" : null,
     catalog: defaults.map(({ key, label, unit }) => ({ key, label, unit })),
   };
 }
 
-export async function saveStationRxParameters(visitId, rows, actor, db = pool) {
-  const visit = await visitContext(db, visitId);
-  if (visit.locked) {
+export async function saveStationRxParameters(
+  visitId,
+  rows,
+  actor,
+  db = pool,
+  { station = "doctor" } = {},
+) {
+  const visit = await visitContext(db, visitId, station);
+  refuseIfNotWithChief(visit);
+  if (visit.finalized) {
     throw Object.assign(
       new Error("This prescription is finalized — use Re-issue to change the parameter table"),
       { status: 409 },
@@ -63,7 +83,7 @@ export async function saveStationRxParameters(visitId, rows, actor, db = pool) {
     rows,
     actor,
   });
-  return getStationRxParameters(visitId, db);
+  return getStationRxParameters(visitId, db, { station });
 }
 
 const summaryText = (raw) => {
@@ -72,17 +92,18 @@ const summaryText = (raw) => {
   return String(raw);
 };
 
-export async function getStationVisitSummary(visitId, db = pool) {
-  const visit = await visitContext(db, visitId);
+export async function getStationVisitSummary(visitId, db = pool, { station = "doctor" } = {}) {
+  const visit = await visitContext(db, visitId, station);
   if (!visit.appointment_id) return { text: null, canGenerate: false };
   const { rows } = await db.query(`SELECT post_visit_summary FROM appointments WHERE id = $1`, [
     visit.appointment_id,
   ]);
-  return { text: summaryText(rows[0]?.post_visit_summary), canGenerate: true };
+  return { text: summaryText(rows[0]?.post_visit_summary), canGenerate: !visit.notWithChief };
 }
 
-export async function generateStationVisitSummary(visitId, db = pool) {
-  const visit = await visitContext(db, visitId);
+export async function generateStationVisitSummary(visitId, db = pool, { station = "doctor" } = {}) {
+  const visit = await visitContext(db, visitId, station);
+  refuseIfNotWithChief(visit);
   if (!visit.appointment_id) {
     throw Object.assign(new Error("This visit has no appointment to summarise"), { status: 409 });
   }
@@ -94,5 +115,5 @@ export async function generateStationVisitSummary(visitId, db = pool) {
     JSON.stringify(body),
     visit.appointment_id,
   ]);
-  return { text: body, canGenerate: true };
+  return { text: body, canGenerate: !visit.notWithChief };
 }

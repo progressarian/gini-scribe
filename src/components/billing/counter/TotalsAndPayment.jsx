@@ -217,6 +217,19 @@ export default function TotalsAndPayment({
             {total("Paid", bill.totals.paid, "paid")}
             {bill.credits?.credited > 0 && total("Credited", bill.credits.credited, "credited")}
             {bill.credits?.refunded > 0 && total("Refunded", bill.credits.refunded, "refunded")}
+            {bill.credits?.credited > 0 &&
+              total(
+                "Net charged after credit notes",
+                bill.totals.payable - bill.credits.credited,
+                "net-charged",
+                "strong",
+              )}
+            {bill.credits?.credited > 0 &&
+              total(
+                "Net paid after refunds",
+                bill.totals.paid - (bill.credits.refunded ?? 0),
+                "net-paid",
+              )}
             {total("Amount Due", balance, "balance", balance > 0 ? "due" : "clear")}
           </tbody>
         </table>

@@ -50,7 +50,7 @@ import {
   callLabel,
 } from "../../shared/callStatuses.js";
 import { slotDoctorKey, slotStartHour } from "../../shared/slotHour.js";
-import { followUpDueDate, followUpTiming } from "../lib/followUp.js";
+import { CLOSED_WEEKDAYS, followUpDueDate, followUpTiming } from "../lib/followUp.js";
 import PatientRecordModal from "../components/ghm/PatientRecordModal.jsx";
 import Dropdown from "../components/ui/Dropdown.jsx";
 import FilterPopover from "../components/ui/FilterPopover.jsx";
@@ -2904,6 +2904,25 @@ export default function GHMPage() {
     [patchMutation],
   );
 
+  const [preferredChange, setPreferredChange] = useState(null);
+  const changePreferredDate = useCallback(
+    (row, value) => {
+      const current = String(row.preferred_date || "").slice(0, 10);
+      const setBySomeoneElse =
+        current &&
+        value !== current &&
+        row.preferred_set_by_id &&
+        row.preferred_set_by_id !== currentDoctor?.id;
+      if (setBySomeoneElse) setPreferredChange({ row, current, value });
+      else patch(row.id, "preferred_date", value);
+    },
+    [patch, currentDoctor?.id],
+  );
+  const confirmPreferredChange = () => {
+    patch(preferredChange.row.id, "preferred_date", preferredChange.value);
+    setPreferredChange(null);
+  };
+
   const bookNext = useCallback((row) => {
     setNewPrefill({
       patient_name: row.patient_name,
@@ -3070,6 +3089,46 @@ export default function GHMPage() {
       ref={pageRef}
       style={fitted && !fullscreen ? { height: pageHeight } : undefined}
     >
+      <ConfirmModal
+        open={!!preferredChange}
+        title="Change the preferred date someone else set?"
+        variant="primary"
+        cancelLabel={preferredChange ? `Keep ${prettyDate(preferredChange.current)}` : "Cancel"}
+        confirmLabel={
+          preferredChange?.value
+            ? `Change to ${prettyDate(preferredChange.value)}`
+            : "Remove preferred date"
+        }
+        onCancel={() => setPreferredChange(null)}
+        onConfirm={confirmPreferredChange}
+        message={
+          preferredChange && (
+            <>
+              <strong>
+                {preferredChange.row.patient_name}
+                {preferredChange.row.file_no ? ` · ${preferredChange.row.file_no}` : ""}
+              </strong>
+              <br />
+              {preferredChange.row.preferred_set_by || "Someone"} set the preferred date to{" "}
+              <strong>{prettyDate(preferredChange.current)}</strong>
+              {preferredChange.row.preferred_set_at
+                ? ` on ${fmtDateTime(preferredChange.row.preferred_set_at)}`
+                : ""}
+              .
+              <br />
+              {preferredChange.value ? (
+                <>
+                  You are changing it to <strong>{prettyDate(preferredChange.value)}</strong>.
+                </>
+              ) : (
+                "You are removing it."
+              )}{" "}
+              Check with the patient or the caller before you change it.
+            </>
+          )
+        }
+      />
+
       <DivideCallsDialog
         open={divideOpen}
         onClose={() => setDivideOpen(false)}
@@ -4104,9 +4163,10 @@ export default function GHMPage() {
                           <td>
                             <DatePicker
                               value={row.preferred_date || ""}
-                              onChange={(v) => patch(row.id, "preferred_date", v)}
+                              onChange={(v) => changePreferredDate(row, v)}
                               disabled={rowLocked}
                               minDate={todayStr()}
+                              closedWeekdays={CLOSED_WEEKDAYS}
                               placeholder="—"
                               style={CELL_DATE_STYLE}
                             />

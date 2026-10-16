@@ -1,9 +1,19 @@
+import { useEffect } from "react";
 import { useGenerateVisitSummary, useVisitSummary } from "../../../queries/hooks/useRxParameters";
 import "./rxParameters.css";
 
-export default function VisitSummarySection({ visitId, onToast }) {
-  const { data, isLoading, isError, refetch } = useVisitSummary(visitId);
-  const generate = useGenerateVisitSummary(visitId);
+export default function VisitSummarySection({
+  visitId,
+  onToast,
+  station = "doctor",
+  readOnly = false,
+}) {
+  const { data, isLoading, isError, refetch } = useVisitSummary(visitId, station);
+  const generate = useGenerateVisitSummary(visitId, station);
+
+  useEffect(() => {
+    if (station === "mo") refetch();
+  }, [readOnly, station, refetch]);
   const paragraphs = String(data?.text || "")
     .split(/\n{2,}/)
     .map((p) => p.trim())
@@ -20,7 +30,7 @@ export default function VisitSummarySection({ visitId, onToast }) {
         <h2 id="visit-summary-title">📝 Visit summary</h2>
         <span className="cs-sub">for explaining to the patient · not printed</span>
         <div className="cs-head-r">
-          {data?.canGenerate && (
+          {data?.canGenerate && !readOnly && (
             <button type="button" className="btn-sm" disabled={generate.isPending} onClick={write}>
               {generate.isPending ? "Writing…" : paragraphs.length ? "Rewrite" : "Write summary"}
             </button>

@@ -211,6 +211,7 @@ export const LIST_SHEETS = [
     preferredBookedBy: true,
   },
   { name: "Follow Up", pick: LIST_PREDICATES.followup },
+  { name: "Online", pick: LIST_PREDICATES.online },
   { name: "Cancelled", pick: LIST_PREDICATES.cancelled },
   { name: "Rescheduled", pick: LIST_PREDICATES.rescheduled },
 ];

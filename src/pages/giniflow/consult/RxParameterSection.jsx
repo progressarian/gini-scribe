@@ -41,16 +41,28 @@ const toOverrides = (rows, removed) => [
   ...removed.map((key) => ({ key, removed: true })),
 ];
 
-export default function RxParameterSection({ visitId, readOnly, onToast, onUnsaved }) {
-  const { data, isLoading, isError, refetch } = useRxParameters(visitId);
-  const save = useSaveRxParameters(visitId);
+export default function RxParameterSection({
+  visitId,
+  readOnly,
+  onToast,
+  onUnsaved,
+  station = "doctor",
+}) {
+  const { data, isLoading, isError, refetch } = useRxParameters(visitId, station);
+  const save = useSaveRxParameters(visitId, station);
   const [rows, setRows] = useState([]);
   const [removed, setRemoved] = useState([]);
   const [dirty, setDirty] = useState(false);
   const [adding, setAdding] = useState("");
   const [custom, setCustom] = useState({ label: "", unit: "", value: "" });
+  const [showAll, setShowAll] = useState(false);
+  const [editing, setEditing] = useState(false);
   const pickId = useId();
   const locked = readOnly || data?.locked;
+
+  useEffect(() => {
+    if (station === "mo") refetch();
+  }, [readOnly, station, refetch]);
 
   useEffect(() => {
     if (!data || dirty) return;
@@ -149,16 +161,32 @@ export default function RxParameterSection({ visitId, readOnly, onToast, onUnsav
   };
 
   const columns = data?.columns || [];
+  const hasValue = (r) => [...r.history, r.today].some((v) => v != null && v !== "");
+  const filledCount = rows.filter((r) => hasValue(r) || r.show || r.custom).length;
+  const emptyCount = rows.length - filledCount;
+  const listAll = showAll || (editing && !locked);
+  const shown = listAll ? rows : rows.filter((r) => hasValue(r) || r.show || r.custom);
+  const canEdit = editing && !locked;
 
   return (
     <section className="csec" id="s-rx-parameters" aria-labelledby="rx-params-title">
       <div className="cs-head">
         <h2 id="rx-params-title">📊 Vitals &amp; biomarkers table</h2>
         <span className="cs-sub">
-          prints before Diagnosis · last {Math.max(columns.length - 1, 0)} visits + today
+          prints after Diagnoses · last {Math.max(columns.length - 1, 0)} visits + today
           {data?.updatedBy && !dirty ? ` · edited by ${data.updatedBy}` : ""}
         </span>
         <div className="cs-head-r">
+          {!locked && (
+            <button
+              type="button"
+              className={canEdit ? "btn-sm on" : "btn-sm"}
+              aria-pressed={canEdit}
+              onClick={() => setEditing((v) => !v)}
+            >
+              {canEdit ? "Done editing" : "Edit rows"}
+            </button>
+          )}
           {dirty && (
             <button type="button" className="btn-sm" onClick={discard} disabled={save.isPending}>
               Discard
@@ -177,7 +205,9 @@ export default function RxParameterSection({ visitId, readOnly, onToast, onUnsav
 
       {data?.locked && (
         <p className="cn-empty">
-          This prescription is finalized. Use Re-issue to change the table.
+          {data.lockedReason === "not_with_chief"
+            ? "The patient has moved on from the Chief Endocrinologist — the consultant edits this table now."
+            : "This prescription is finalized. Use Re-issue to change the table."}
         </p>
       )}
 
@@ -202,14 +232,17 @@ export default function RxParameterSection({ visitId, readOnly, onToast, onUnsav
                       {c.today ? `Today (${shortDate(c.date)})` : shortDate(c.date)}
                     </th>
                   ))}
-                  <th scope="col">
-                    <span className="sr-only">Actions</span>
-                  </th>
+                  {canEdit && (
+                    <th scope="col">
+                      <span className="sr-only">Actions</span>
+                    </th>
+                  )}
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r, i) => {
-                  const empty = [...r.history, r.today].every((v) => v == null || v === "");
+                {shown.map((r) => {
+                  const i = rows.indexOf(r);
+                  const empty = !hasValue(r);
                   return (
                     <tr key={r.key} data-key={r.key}>
                       <th scope="row">
@@ -243,46 +276,48 @@ export default function RxParameterSection({ visitId, readOnly, onToast, onUnsav
                           </button>
                         )}
                       </td>
-                      <td className="rxp-acts">
-                        {empty && (
-                          <label className="lt-ref">
-                            <input
-                              type="checkbox"
-                              checked={!!r.show}
-                              disabled={locked}
-                              onChange={() => toggleShow(r.key)}
-                            />{" "}
-                            print empty
-                          </label>
-                        )}
-                        <button
-                          type="button"
-                          className="btn-sm"
-                          aria-label={`Move ${r.label} up`}
-                          disabled={locked || i === 0}
-                          onClick={() => move(i, -1)}
-                        >
-                          ↑
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-sm"
-                          aria-label={`Move ${r.label} down`}
-                          disabled={locked || i === rows.length - 1}
-                          onClick={() => move(i, 1)}
-                        >
-                          ↓
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-sm"
-                          aria-label={`Remove ${r.label}`}
-                          disabled={locked}
-                          onClick={() => remove(r.key)}
-                        >
-                          ✕
-                        </button>
-                      </td>
+                      {canEdit && (
+                        <td className="rxp-acts">
+                          {empty && (
+                            <label className="lt-ref">
+                              <input
+                                type="checkbox"
+                                checked={!!r.show}
+                                disabled={locked}
+                                onChange={() => toggleShow(r.key)}
+                              />{" "}
+                              print empty
+                            </label>
+                          )}
+                          <button
+                            type="button"
+                            className="btn-sm"
+                            aria-label={`Move ${r.label} up`}
+                            disabled={locked || i === 0}
+                            onClick={() => move(i, -1)}
+                          >
+                            ↑
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-sm"
+                            aria-label={`Move ${r.label} down`}
+                            disabled={locked || i === rows.length - 1}
+                            onClick={() => move(i, 1)}
+                          >
+                            ↓
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-sm"
+                            aria-label={`Remove ${r.label}`}
+                            disabled={locked}
+                            onClick={() => remove(r.key)}
+                          >
+                            ✕
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
@@ -290,7 +325,20 @@ export default function RxParameterSection({ visitId, readOnly, onToast, onUnsav
             </table>
           </div>
 
-          {!locked && (
+          {!canEdit && emptyCount > 0 && (
+            <button
+              type="button"
+              className="rxp-more"
+              aria-expanded={showAll}
+              onClick={() => setShowAll((v) => !v)}
+            >
+              {showAll
+                ? `▴ Show only filled rows (${filledCount})`
+                : `▸ Show all ${rows.length} parameters (${emptyCount} empty)`}
+            </button>
+          )}
+
+          {canEdit && (
             <div className="rxp-add">
               <label htmlFor={pickId} className="lt-ref">
                 Add from list

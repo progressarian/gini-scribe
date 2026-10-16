@@ -257,10 +257,14 @@ test.describe.serial("G69 reassigning the consultant moves the bill with them", 
     await expect(box).toContainText("₹500 more to collect");
     await expect(
       page
-        .locator(".bc-list__body")
-        .getByRole("button", { name: new RegExp(`P4 Counter ${tag}`) })
-        .first(),
+        .locator("#bc-to-bill, #bc-billed")
+        .getByRole("button", { name: new RegExp(`P4 Counter ${tag}`) }),
     ).toContainText("Consultant changed — fee to settle");
+    await expect(
+      page
+        .getByRole("region", { name: "Consultant changes to settle" })
+        .getByRole("button", { name: new RegExp(`P4 Counter ${tag}`) }),
+    ).toContainText("Dr Banshali → Dr Rahul");
     await box.getByRole("button", { name: "Keep the bill as it is" }).click();
     const keep = page.getByRole("button", { name: "Keep the bill", exact: true });
     await expect(keep).toBeDisabled();
@@ -415,7 +419,11 @@ test.describe.serial("G69 reassigning the consultant moves the bill with them", 
     await expect(page.getByRole("tab", { name: /Bill/ })).toContainText(/\d+/);
     await expect(page.getByLabel(/consultant fee changes? to settle/)).toBeVisible();
 
+    const alert = page.getByRole("region", { name: "Consultant change alert" });
+    await expect(alert).toContainText(/Consultant changed — \d+ fees? to settle/);
+    await alert.getByRole("button", { name: "Show them" }).click();
     const waiting = page.getByRole("region", { name: "Consultant changes to settle" });
+    await expect(waiting.getByRole("button", { name: /Fee to settle/ })).toBeFocused();
     const item = waiting.getByRole("button", { name: new RegExp(`P4 Notice ${tag}`) });
     await expect(item).toContainText("₹500 more to collect");
     await item.click();
@@ -423,5 +431,30 @@ test.describe.serial("G69 reassigning the consultant moves the bill with them", 
       "Dr Banshali → Dr Rahul",
     );
     await expect(item).toHaveAttribute("aria-current", "true");
+  });
+
+  test("18. many waiting changes stay in the patient list; the alert stays one line", async ({
+    page,
+  }) => {
+    for (let i = 0; i < 10; i += 1) {
+      const { visit } = await paidConsult(`Many${i}`);
+      await reassign(visit, CONSULTANTS.rahul);
+    }
+    await loginAs(page, "reception");
+    await gotoReady(page, "/giniflow/station/reception?tab=bill", () =>
+      page.getByRole("region", { name: "Consultant change alert" }),
+    );
+    const alert = page.getByRole("region", { name: "Consultant change alert" });
+    expect((await alert.boundingBox()).height).toBeLessThan(60);
+    const waiting = page.getByRole("region", { name: "Consultant changes to settle" });
+    await expect(
+      waiting.getByRole("button", { name: new RegExp(`P4 Many\\d ${tag}`) }),
+    ).toHaveCount(10);
+    await page.getByLabel("Search today's patients").fill(`Many3 ${tag}`);
+    await expect(
+      waiting.getByRole("button", { name: new RegExp(`P4 Many\\d ${tag}`) }),
+    ).toHaveCount(1);
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect((await alert.boundingBox()).height).toBeLessThan(90);
   });
 });

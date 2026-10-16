@@ -22,6 +22,8 @@ import {
 } from "../../queries/hooks/useGiniflowMo";
 import { VoiceButton } from "../../components/giniflow/VoiceInput";
 import RxSection from "./consult/RxSection";
+import VisitSummarySection from "./consult/VisitSummarySection";
+import RxParameterSection from "./consult/RxParameterSection";
 import ChiefSuggestions from "../../components/giniflow/ChiefSuggestions";
 import {
   buildTestIndex,
@@ -1390,6 +1392,24 @@ export default function MoStationPage() {
                     doctor as proposals to approve, adjust or reject (addendum
                     v1.1 §3). The same section the consultant uses — one inline
                     editor, not a second one that could drift from it. */}
+                <div className="dp-sec mo-rx">
+                  <VisitSummarySection
+                    visitId={activeId}
+                    station="mo"
+                    readOnly={patient.status !== "with_sd"}
+                    onToast={showToast}
+                  />
+                </div>
+
+                <div className="dp-sec mo-rx">
+                  <RxParameterSection
+                    visitId={activeId}
+                    station="mo"
+                    readOnly={patient.status !== "with_sd"}
+                    onToast={showToast}
+                  />
+                </div>
+
                 <div className="dp-sec mo-rx">
                   <RxSection
                     visitId={activeId}

@@ -5,17 +5,30 @@ const clean = (v) => {
   return ISO_DATE.test(s) ? s : "";
 };
 
+export const CLOSED_WEEKDAYS = [0];
+
+export const isClosedDay = (iso) =>
+  !!clean(iso) && CLOSED_WEEKDAYS.includes(new Date(`${clean(iso)}T00:00:00Z`).getUTCDay());
+
+export function skipSunday(iso) {
+  const day = clean(iso);
+  if (!isClosedDay(day)) return day;
+  const d = new Date(`${day}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
 export function datedFollowUp(fu) {
   return fu && clean(fu.date) ? fu : null;
 }
 
 export function effectiveFollowUpDate(row) {
   if (!row) return "";
-  return (
+  return skipSunday(
     clean(row.follow_up_date) ||
-    clean(row.biomarkers?.followup) ||
-    clean(row.healthray_follow_up?.date) ||
-    ""
+      clean(row.biomarkers?.followup) ||
+      clean(row.healthray_follow_up?.date) ||
+      "",
   );
 }
 
@@ -46,7 +59,7 @@ export function followUpDueDate(fromDate, timing) {
   if (match[2] === "day") d.setUTCDate(d.getUTCDate() + n);
   else if (match[2] === "week") d.setUTCDate(d.getUTCDate() + 7 * n);
   else addMonths(d, match[2] === "month" ? n : 12 * n);
-  return d.toISOString().slice(0, 10);
+  return skipSunday(d.toISOString().slice(0, 10));
 }
 
 export function effectiveFollowUp(row) {
@@ -61,7 +74,7 @@ export function effectiveFollowUp(row) {
 export function pickNextVisit(candidates, today = new Date().toISOString().slice(0, 10)) {
   const list = (candidates || []).filter(Boolean);
   const dated = list
-    .map((c) => ({ ...c, date: effectiveFollowUpDate(c) || clean(c.date) }))
+    .map((c) => ({ ...c, date: effectiveFollowUpDate(c) || skipSunday(c.date) }))
     .filter((c) => c.date);
   if (dated.length) {
     const upcoming = dated
@@ -86,5 +99,5 @@ export function weekdayFollowUpDate(fromDate, text) {
   const d = new Date(`${from}T00:00:00Z`);
   const ahead = (target - d.getUTCDay() + 7) % 7 || 7;
   d.setUTCDate(d.getUTCDate() + ahead);
-  return d.toISOString().slice(0, 10);
+  return skipSunday(d.toISOString().slice(0, 10));
 }

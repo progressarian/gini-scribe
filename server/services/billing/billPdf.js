@@ -341,6 +341,8 @@ const VISIT_SQL = `
          (SELECT COALESCE(SUM(p.amount), 0) FROM payments p
             LEFT JOIN bills c ON c.id = p.bill_id
            WHERE p.direction = 'out' AND (p.bill_id = $1 OR c.original_bill_id = $1)) AS refunded,
+         (SELECT COALESCE(SUM(n.patient_payable), 0) FROM bills n
+           WHERE n.original_bill_id = $1 AND n.bill_type = 'credit_note' AND n.status = 'final') AS credited,
          COALESCE(
            (SELECT CASE WHEN r.kind = 'test_cancel'
                         THEN 'Cancelled after collection — collection charge ₹'
@@ -410,6 +412,7 @@ export async function billView(billId, db = pool) {
     refund_reason: visit.refund_reason ?? null,
     finalised_by_name: visit.finalised_by_name ?? null,
     refunded: Math.round(Number(visit.refunded ?? 0) * 100),
+    credited: Math.round(Number(visit.credited ?? 0) * 100),
     healthray_paid: Math.round(Number(visit.healthray_paid ?? 0) * 100),
     prepaid_paid: Math.round(Number(visit.prepaid_paid ?? 0) * 100),
     hospital: marks.hospital,
@@ -649,6 +652,13 @@ function totalsHtml(view, gst) {
   }
   rows.push(["Net Payable Amount(₹)", signedAmountText(balanceOf(bill))]);
   if ((view.refunded ?? 0) > 0) rows.push(["Refunded Amount(₹)", amountText(view.refunded)]);
+  if ((view.credited ?? 0) > 0) {
+    rows.push(
+      ["Credit Notes (₹)", amountText(view.credited)],
+      ["Net Charged After Credit Notes (₹)", amountText(bill.totals.payable - view.credited)],
+      ["Net Paid After Refunds (₹)", amountText(bill.totals.paid - (view.refunded ?? 0))],
+    );
+  }
   return totalsTableHtml(rows);
 }
 

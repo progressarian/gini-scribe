@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { COUNTER_BILL_STATE as STATE } from "../../../../shared/billingVocab.js";
 import { fromPaise } from "../format";
 import { initialsOf } from "./PatientHeader";
+import { changeOutcome } from "./ConsultantChange";
 
 const BILL_BADGE = {
   [STATE.NONE]: { tone: "none", label: () => "No bill" },
@@ -73,6 +74,28 @@ function VisitRow({ row, active, onPick }) {
   );
 }
 
+function ChangeRow({ change, active, onPick }) {
+  return (
+    <button
+      type="button"
+      className={`bc-row${active ? " bc-row--on" : ""}`}
+      aria-current={active ? "true" : undefined}
+      onClick={() => onPick(change.visit_id)}
+    >
+      <span className="bc-avatar" aria-hidden="true">
+        {initialsOf(change.patient.name)}
+      </span>
+      <span className="bc-row__top">
+        <span className="bc-row__name">{change.patient.name}</span>
+      </span>
+      <span className="bc-row__hints">
+        {change.from.name} → {change.to.name} · {changeOutcome(change)}
+      </span>
+      <span className="bc-row__meta">{change.patient.file_no || "—"}</span>
+    </button>
+  );
+}
+
 function Rows({ rows, visitId, onPick }) {
   return rows.map((row) => (
     <VisitRow key={row.visitId} row={row} active={row.visitId === visitId} onPick={onPick} />
@@ -85,10 +108,23 @@ export const counterRows = (data) => [
   ...(data?.waiting || []),
 ];
 
-function Group({ id, label, rows, open, onToggle, empty, isLoading, visitId, onPick }) {
+function Group({
+  id,
+  label,
+  rows,
+  open,
+  onToggle,
+  empty,
+  isLoading,
+  visitId,
+  onPick,
+  toggleRef,
+  children,
+}) {
   return (
     <>
       <button
+        ref={toggleRef}
         type="button"
         className="bc-group bc-group--toggle"
         aria-expanded={open}
@@ -104,20 +140,36 @@ function Group({ id, label, rows, open, onToggle, empty, isLoading, visitId, onP
       <div id={id} hidden={!open}>
         {isLoading && <div className="bc-list__empty">Loading…</div>}
         {!isLoading && !rows.length && <div className="bc-list__empty">{empty}</div>}
-        <Rows rows={rows} visitId={visitId} onPick={onPick} />
+        {children ?? <Rows rows={rows} visitId={visitId} onPick={onPick} />}
       </div>
     </>
   );
 }
 
-export default function PatientList({ data, isLoading, visitId, searching, onPick }) {
+export default function PatientList({
+  data,
+  isLoading,
+  visitId,
+  searching,
+  onPick,
+  feeChanges = [],
+  feeFocus = 0,
+}) {
   const toBill = data?.toBill || [];
   const billed = data?.billed || [];
   const waiting = data?.waiting || [];
   const matchToBill = searching && toBill.length > 0;
   const matchBilled = searching && billed.length > 0;
   const matchWaiting = searching && waiting.length > 0;
-  const [open, setOpen] = useState({ toBill: true, billed: true, waiting: false });
+  const [open, setOpen] = useState({ fees: true, toBill: true, billed: true, waiting: false });
+  const feesToggle = useRef(null);
+
+  useEffect(() => {
+    if (!feeFocus) return;
+    setOpen((was) => ({ ...was, fees: true }));
+    feesToggle.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+    feesToggle.current?.focus({ preventScroll: true });
+  }, [feeFocus]);
   const toggle = (key) => () => setOpen((was) => ({ ...was, [key]: !was[key] }));
 
   useEffect(() => {
@@ -135,6 +187,29 @@ export default function PatientList({ data, isLoading, visitId, searching, onPic
   const shared = { isLoading, visitId, onPick };
   return (
     <div className="bc-list__body">
+      {feeChanges.length > 0 && (
+        <section aria-label="Consultant changes to settle">
+          <Group
+            id="bc-fee-changes"
+            label="Fee to settle"
+            rows={feeChanges}
+            open={open.fees}
+            onToggle={toggle("fees")}
+            toggleRef={feesToggle}
+            {...shared}
+            isLoading={false}
+          >
+            {feeChanges.map((change) => (
+              <ChangeRow
+                key={change.id}
+                change={change}
+                active={change.visit_id === visitId}
+                onPick={onPick}
+              />
+            ))}
+          </Group>
+        </section>
+      )}
       <Group
         id="bc-to-bill"
         label="Pending bill"

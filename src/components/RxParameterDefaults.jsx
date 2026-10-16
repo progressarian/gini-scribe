@@ -82,7 +82,7 @@ export default function RxParameterDefaults() {
           Vitals &amp; biomarkers table
         </legend>
         <p className="rxf__hint">
-          The rows printed in the table before Diagnosis, with the last 5 visits and today. At the
+          The rows printed in the table after Diagnoses, with the last 5 visits and today. At the
           station, staff can still add or remove rows for one prescription.
         </p>
         {isLoading ? (

@@ -206,13 +206,14 @@ test.describe("G94 prescription layout", () => {
     expect(html).toContain('<span class="rx-dx-meta">Tolerable</span>');
   });
 
-  test("2. the parameter table comes before diagnoses, trends come last", () => {
+  test("2. the parameter table comes after diagnoses, trends come last", () => {
     const html = base();
-    const table = at(html, "Vitals &amp; biomarkers — last visits");
-    const dx = at(html, ">Diagnoses<");
+    const table = at(html, "Vitals &amp; biomarkers</div>");
+    const dx = at(html, ">Diagnosis<");
     const referrals = at(html, "Referrals &amp; tests for next visit");
     const trends = at(html, "Biomarker trends — last 4 visits");
-    expect(table).toBeLessThan(dx);
+    expect(dx).toBeLessThan(table);
+    expect(html).not.toContain("biomarkers — last visits");
     expect(referrals).toBeLessThan(trends);
     expect(trends).toBeLessThan(at(html, 'class="rx-close"'));
   });

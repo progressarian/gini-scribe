@@ -227,7 +227,16 @@ function Panel({ tab, children }) {
   );
 }
 
-export default function BillingDesk({ tab, visitId, patientId, billId, sentPatient, onOpen }) {
+export default function BillingDesk({
+  tab,
+  visitId,
+  patientId,
+  billId,
+  sentPatient,
+  onOpen,
+  feeChanges = [],
+  feeFocus = 0,
+}) {
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
   const [bill, setBill] = useState(null);
@@ -264,6 +273,21 @@ export default function BillingDesk({ tab, visitId, patientId, billId, sentPatie
   const { data: schemes } = usePatientSchemeList();
 
   const rows = useMemo(() => counterRows(data), [data]);
+  const shownFeeChanges = useMemo(() => {
+    const q = debounced.trim().toLowerCase();
+    if (q.length < 2) return feeChanges;
+    return feeChanges.filter((change) =>
+      [change.patient.name, change.patient.file_no].some((v) =>
+        String(v || "")
+          .toLowerCase()
+          .includes(q),
+      ),
+    );
+  }, [feeChanges, debounced]);
+
+  useEffect(() => {
+    if (feeFocus) setListOpen(true);
+  }, [feeFocus]);
   const selected = rows.find((row) => row.visitId === visitId) || null;
 
   const pick = (id) => {
@@ -417,6 +441,8 @@ export default function BillingDesk({ tab, visitId, patientId, billId, sentPatie
                 visitId={visitId}
                 searching={debounced.trim().length >= 2}
                 onPick={pick}
+                feeChanges={shownFeeChanges}
+                feeFocus={feeFocus}
               />
             </div>
           </aside>

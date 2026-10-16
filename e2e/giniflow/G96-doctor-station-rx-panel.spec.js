@@ -70,6 +70,13 @@ test.describe.serial("G96 the doctor station shows the visit summary and edits t
     const panel = tablePanel(page);
     await expect(panel.getByRole("textbox", { name: "Today's Weight" })).toHaveValue("88");
     await panel.getByRole("textbox", { name: "Today's Weight" }).fill("87.5");
+    await expect(panel.getByRole("textbox", { name: "Today's HOMA-B" })).toHaveCount(0);
+    await expect(panel.getByRole("button", { name: "Remove Height" })).toHaveCount(0);
+    await panel.getByRole("button", { name: /Show all \d+ parameters/ }).click();
+    await expect(panel.getByRole("textbox", { name: "Today's HOMA-B" })).toBeVisible();
+    await panel.getByRole("button", { name: /Show only filled rows/ }).click();
+    await expect(panel.getByRole("textbox", { name: "Today's HOMA-B" })).toHaveCount(0);
+    await panel.getByRole("button", { name: "Edit rows" }).click();
     await panel.getByRole("button", { name: "Remove Height" }).click();
     await panel.getByRole("textbox", { name: "New parameter name" }).fill("Grip strength");
     await panel.getByRole("textbox", { name: "New parameter unit" }).fill("kg");

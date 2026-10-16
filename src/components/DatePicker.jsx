@@ -51,6 +51,7 @@ export default function DatePicker({
   onChange,
   minDate,
   maxDate,
+  closedWeekdays = [],
   placeholder = "Select date",
   disabled = false,
   clearable = true,
@@ -101,11 +102,12 @@ export default function DatePicker({
   const selectedIso = value || "";
   const todayIso = toIso(new Date());
 
+  const isClosed = (d) => closedWeekdays.includes(d.getDay());
   const isDisabled = (d) => {
     if (!d) return true;
     if (min && d < min) return true;
     if (max && d > max) return true;
-    return false;
+    return isClosed(d);
   };
 
   const goPrevMonth = () => setView(new Date(view.getFullYear(), view.getMonth() - 1, 1));
@@ -314,6 +316,7 @@ export default function DatePicker({
                     type="button"
                     key={i}
                     disabled={dis}
+                    title={isClosed(d) ? "Clinic is closed on this day" : undefined}
                     onClick={() => {
                       onChange(iso);
                       setOpen(false);
@@ -363,7 +366,8 @@ export default function DatePicker({
               {(() => {
                 const now = new Date();
                 const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-                const todayDisabled = (!!min && today < min) || (!!max && today > max);
+                const todayDisabled =
+                  (!!min && today < min) || (!!max && today > max) || isClosed(today);
                 return (
                   <button
                     type="button"

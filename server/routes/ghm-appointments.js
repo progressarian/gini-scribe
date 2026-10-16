@@ -29,6 +29,7 @@ import {
   logBookingCreated,
 } from "../services/appointmentHistory.js";
 import { CATEGORY_VALUES } from "../../shared/patientCategories.js";
+import { isClosedDay } from "../../shared/followUp.js";
 import { listSchemes, isKnownScheme } from "../services/patientSchemes.js";
 import { slotDoctorKey, slotStartHour } from "../../shared/slotHour.js";
 import { resolveAppointmentId, opensLead } from "../services/ghmLead.js";
@@ -1198,6 +1199,8 @@ router.get("/ghm-appointments", async (req, res) => {
                 a.call_notes, a.call_reschedule_date, a.pt_recovery,
                 a.preferred_date, a.preferred_doctor, a.preferred_time_slot,
                 ${preferredSetBy("a")} AS preferred_set_by,
+                ${preferredSetBy("a", "changed_by_id")} AS preferred_set_by_id,
+                ${preferredSetBy("a", "changed_at")} AS preferred_set_at,
                 COALESCE(a.home_collection, FALSE) AS home_collection,
                 a.patient_category,
                 p.id AS patient_id, p.address, p.email,
@@ -2059,6 +2062,12 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
       !(await isKnownScheme(req.body.patient_category || null))
     ) {
       return res.status(400).json({ error: `Unknown category: ${req.body.patient_category}` });
+    }
+
+    if (isClosedDay(req.body.preferred_date)) {
+      return res
+        .status(400)
+        .json({ error: "The clinic is closed on Sunday. Pick another preferred date." });
     }
 
     // Patient details the desk corrects after the booking. They live on the

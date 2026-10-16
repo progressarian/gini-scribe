@@ -15,30 +15,27 @@ export const DEFAULT_RX_PARAMETERS = [
   { key: "body_fat", label: "Body Fat", unit: "%", source: { vital: "body_fat" } },
   { key: "bp", label: "BP", unit: "mmHg", source: { vital: "bp" } },
   { key: "fpg", label: "FPG", unit: "mg/dL", source: { labs: ["FBS"] } },
-  { key: "hba1c", label: "HbA1c", unit: "%", source: { labs: ["HbA1c"] } },
   {
     key: "insulin",
-    label: "Fasting Insulin",
+    label: "Fasting Plasma Insulin",
     unit: "µIU/mL",
     source: { labs: ["Fasting Insulin"] },
   },
-  { key: "c_peptide", label: "C-Peptide", unit: "ng/mL", source: { labs: ["C-Peptide"] } },
+  {
+    key: "c_peptide",
+    label: "Fasting C-Peptide",
+    unit: "ng/mL",
+    source: { labs: ["C-Peptide"] },
+  },
   { key: "homa_ir", label: "HOMA-IR", unit: "", source: { labs: ["HOMA-IR"] } },
   { key: "homa_b", label: "HOMA-B", unit: "", source: { labs: ["HOMA-Beta"] } },
+  { key: "hba1c", label: "HbA1c", unit: "%", source: { labs: ["HbA1c"] } },
   { key: "creatinine", label: "Creatinine", unit: "mg/dL", source: { labs: ["Creatinine"] } },
   { key: "egfr", label: "eGFR", unit: "mL/min", source: { labs: ["eGFR"] } },
   { key: "uacr", label: "uACR", unit: "mg/g", source: { labs: ["UACR"] } },
   { key: "ldl", label: "LDL-C", unit: "mg/dL", source: { labs: ["LDL"] } },
   { key: "tg", label: "Triglycerides", unit: "mg/dL", source: { labs: ["Triglycerides"] } },
   { key: "non_hdl", label: "Non-HDL", unit: "mg/dL", source: { labs: ["Non-HDL"] } },
-  { key: "fundus", label: "Fundus", unit: "", source: { labs: ["Fundus"] } },
-  { key: "vpt", label: "VPT", unit: "", source: { labs: ["VPT"] } },
-  {
-    key: "abi",
-    label: "ABI",
-    unit: "",
-    source: { labs: ["ABI"], sides: ["ABI Right", "ABI Left"] },
-  },
 ];
 
 const VITAL_FIELDS = ["height", "weight", "bmi", "waist", "body_fat", "bp"];

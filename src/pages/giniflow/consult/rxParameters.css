@@ -48,3 +48,22 @@
   gap: 6px;
   margin-left: auto;
 }
+.gf .rxp-more {
+  display: block;
+  margin-top: 8px;
+  padding: 6px 0;
+  background: none;
+  border: 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--tl, #009e8c);
+  cursor: pointer;
+}
+.gf .rxp-more:hover {
+  text-decoration: underline;
+}
+.gf .rxp-more:focus-visible {
+  outline: 2px solid var(--tl, #009e8c);
+  outline-offset: 2px;
+}

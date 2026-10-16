@@ -1,15 +1,15 @@
 export const PARAM_TABLE_CSS = `
-.rx-ptable{width:100%;border-collapse:collapse;margin:0 0 4px;font-size:10.5px;line-height:1.3;break-inside:avoid}
+.rx-ptable{width:100%;border-collapse:collapse;margin:0;font-size:var(--fs-meta);line-height:1.3;break-inside:avoid}
 .rx-ptable th,.rx-ptable td{border:1px solid var(--bd);padding:2px 6px;text-align:center;white-space:nowrap}
-.rx-ptable thead th{background:var(--bg);font-weight:700;color:var(--ink2);font-size:9.5px}
+.rx-ptable thead th{background:var(--bg);font-weight:700;color:var(--ink2);font-size:var(--fs-label)}
 .rx-ptable thead th.today{color:var(--ink);background:#e8f0fb}
 .rx-ptable tbody th{text-align:left;font-weight:600;color:var(--ink);background:#fbfcfd}
-.rx-ptable .unit{color:var(--ink3);font-weight:500;font-size:9px;margin-left:3px}
-.rx-ptable td{font-family:var(--fm);color:var(--ink2)}
+.rx-ptable .unit{color:var(--ink3);font-weight:500;font-size:var(--fs-label);margin-left:3px}
+.rx-ptable td{color:var(--ink2)}
 .rx-ptable td.today{font-weight:700;color:var(--ink);background:#f5f9ff}
 .rx-ptable td.empty{color:#b6c0cc}
 .rx-summary-block--tests .rx-summary-tests{margin-top:0;padding-top:0;border-top:0}
-.rx-body>.rx-ptable-title:first-child{margin-top:0}
+.rx-body>.rx-section-title:first-child{margin-top:0}
 `;
 
 const shortDate = (ymd) => {
@@ -53,6 +53,6 @@ export function parameterTableHtml(table, escape) {
       return `<tr><th>${escape(r.label)}${unit}</th>${cells}</tr>`;
     })
     .join("");
-  return `<div class="rx-section-title rx-ptable-title">Vitals &amp; biomarkers — last visits</div>
+  return `<div class="rx-section-title rx-ptable-title">Vitals &amp; biomarkers</div>
 <table class="rx-ptable"><thead><tr><th>Parameter</th>${head}</tr></thead><tbody>${body}</tbody></table>`;
 }

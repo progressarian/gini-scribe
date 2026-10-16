@@ -1,12 +1,12 @@
 export const TRENDS_CSS = `
-.rx-bio-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:4px}
+.rx-bio-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .rx-bio-section{}
 .rx-bio{background:var(--bg);border-radius:8px;padding:10px 12px;border:1px solid var(--bd);break-inside:avoid}
 .rx-bio-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px}
-.rx-bio-name{font-size:10px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.04em}
-.rx-bio-goal{font-size:9px;color:var(--ink3);font-weight:600}
+.rx-bio-name{font-size:var(--fs-label);font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.04em}
+.rx-bio-goal{font-size:var(--fs-label);color:var(--ink3);font-weight:600}
 .rx-bio-val{font-family:var(--fm);font-size:18px;font-weight:600;line-height:1.1}
-.rx-bio-trend{font-size:10px;margin-top:2px;font-weight:600}
+.rx-bio-trend{font-size:var(--fs-label);margin-top:2px;font-weight:600}
 .rx-bio-trend .arrow{font-weight:700;margin-right:2px}
 .rx-bio-chart{margin-top:8px;padding-top:14px;border-top:1px dashed var(--bd2)}
 .rx-bio-sparkline{display:flex;gap:6px;align-items:flex-end;height:38px;position:relative}

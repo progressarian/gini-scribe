@@ -40,7 +40,7 @@ export function seedRows(tag, now) {
       row(p.pensioner, docA, `${MONTH}-07`, "Follow-Up", "lead"),
       row(p.general, docB, `${MONTH}-08`, "Follow-Up", "completed", "10:15"),
       row(p.senior, "Dr. Hospital Admin", `${MONTH}-08`, "Follow-Up", "completed", "07:30"),
-      row(p.general, docA, `${PREVIOUS}-20`, "Follow-Up", "completed"),
+      row(p.cghsPaid, docA, `${PREVIOUS}-20`, "Follow-Up", "completed"),
       row(p.senior, docA, `${PREVIOUS}-21`, "Follow-Up", "completed"),
       row(p.senior, docA, now, "Follow-Up", "scheduled"),
     ],

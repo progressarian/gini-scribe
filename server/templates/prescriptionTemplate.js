@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 
 import { MED_CATEGORIES, detectMedCategory } from "../config/medicationCategories.js";
 import { sortDiagnoses } from "../utils/diagnosisSort.js";
-import { followUpDueDate, pickNextVisit } from "../../shared/followUp.js";
+import { followUpDueDate, pickNextVisit, skipSunday } from "../../shared/followUp.js";
 import { DEFAULT_HOSPITAL, normalizeHospital } from "../services/prescriptionFooter.js";
 
 const HOSPITAL_NAME = DEFAULT_HOSPITAL.name;
@@ -346,10 +346,11 @@ const CSS = `
   --gn:#15803d;--gnl:#edfcf0;--gnb:rgba(21,128,61,.18);
   --sk:#2563eb;--skl:#eff6ff;
   --sh:0 1px 3px rgba(0,0,0,.08);
-  --r:10px;--fb:'Outfit',sans-serif;--fd:'Instrument Serif',serif;--fm:'DM Mono',monospace;
+  --r:10px;--fb:'Outfit',sans-serif;--fd:'Instrument Serif',serif;--fm:'Outfit',sans-serif;
+  --fs-label:10px;--fs-meta:10.5px;--fs-body:11.5px;--fs-name:12.5px;--fs-head:14px;
 }
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:var(--fb);color:var(--ink);background:var(--white);font-size:13px}
+body{font-family:var(--fb);color:var(--ink);background:var(--white);font-size:var(--fs-body);line-height:1.4;font-variant-numeric:tabular-nums}
 
 .rx-page{background:var(--white);border:1px solid var(--bd);border-radius:var(--r);margin-bottom:16px;overflow:hidden;-webkit-box-decoration-break:clone;box-decoration-break:clone}
 .rx-sheet{width:100%;border-collapse:collapse;border-spacing:0}
@@ -362,43 +363,43 @@ body{font-family:var(--fb);color:var(--ink);background:var(--white);font-size:13
 /* The address sits on its own full-width line under the row rather than under
    the hospital name: in a three-column header it only gets a third of the page
    and orphans the phone number onto a second line. */
-.rx-hosp-tag{font-size:10px;color:rgba(255,255,255,.5);margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.12)}
+.rx-hosp-tag{font-size:var(--fs-meta);color:rgba(255,255,255,.5);margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.12)}
 .rx-logo{flex:0 0 auto;display:flex;align-items:center;justify-content:center}
 .rx-logo img{height:38px;width:auto;display:block}
 .rx-doc{flex:1 1 0;text-align:right}
 .rx-doc-name{font-size:13px;font-weight:700;color:#fff}
-.rx-doc-cred{font-size:10px;color:rgba(255,255,255,.5);line-height:1.6;margin-top:2px}
+.rx-doc-cred{font-size:var(--fs-meta);color:rgba(255,255,255,.5);line-height:1.6;margin-top:2px}
 .rx-patient-bar{background:var(--bg);padding:10px 16px;display:flex;gap:20px;align-items:center;border-bottom:1px solid var(--bd);flex-wrap:wrap}
-.rx-pt-name{font-size:14px;font-weight:700;color:var(--nv)}
-.rx-pt-meta{font-size:11px;color:var(--ink3)}
+.rx-pt-name{font-size:var(--fs-head);font-weight:700;color:var(--nv)}
+.rx-pt-meta{font-size:var(--fs-meta);color:var(--ink3)}
 .rx-pt-pills{display:flex;gap:5px;margin-left:auto;flex-wrap:wrap}
-.rx-pill{font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px}
+.rx-pill{font-size:var(--fs-label);font-weight:700;padding:2px 8px;border-radius:10px}
 .rx-body{padding:14px 16px 6px;-webkit-box-decoration-break:clone;box-decoration-break:clone}
 
-.rx-summary-block{background:var(--tll);border:1px solid var(--tlb);border-radius:7px;padding:10px 14px;margin-bottom:16px;font-size:12px;line-height:1.55;color:var(--ink)}
-.rx-summary-block .sum-title{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--tl);margin:0 0 4px}
+.rx-summary-block{background:var(--tll);border:1px solid var(--tlb);border-radius:7px;padding:10px 14px;margin-bottom:16px;font-size:var(--fs-body);line-height:1.55;color:var(--ink)}
+.rx-summary-block .sum-title{font-size:var(--fs-label);font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--tl);margin:0 0 4px}
 .rx-summary-block p{margin:0}
 .rx-summary-block p+p{margin-top:6px}
 .rx-summary-tests{margin-top:8px;padding-top:8px;border-top:1px solid var(--tlb)}
-.rx-summary-tests-title{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--tl);margin-bottom:5px}
+.rx-summary-tests-title{font-size:var(--fs-label);font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--tl);margin-bottom:5px}
 .rx-summary-tests-list{display:flex;flex-wrap:wrap;gap:4px}
-.rx-summary-test-chip{font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:var(--bg);border:1px solid var(--tlb);color:var(--ink2)}
+.rx-summary-test-chip{font-size:var(--fs-label);font-weight:600;padding:2px 8px;border-radius:10px;background:var(--bg);border:1px solid var(--tlb);color:var(--ink2)}
 
-.rx-complaints{font-size:11.5px;line-height:1.5;color:var(--ink)}
-.rx-advice{margin:0;padding-left:18px;font-size:11.5px;line-height:1.55;color:var(--ink)}
-.rx-section-title{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--ink3);margin-bottom:8px;margin-top:16px;padding-bottom:4px;border-bottom:1px solid var(--bd);break-inside:avoid;break-after:avoid}
-.rx-med-cat{display:flex;align-items:center;gap:6px;font-size:10px;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.08em;background:#f5f7fa;padding:4px 8px;border-left:3px solid var(--tl);margin:10px 0 2px}
-.rx-med-cat-count{font-size:9px;font-weight:600;color:var(--ink3);text-transform:none;letter-spacing:0}
-.rx-dx{display:flex;gap:10px;align-items:flex-start;padding:6px 8px 6px 0;border-bottom:1px solid var(--bd);break-inside:avoid}
+.rx-complaints{font-size:var(--fs-body);line-height:1.5;color:var(--ink)}
+.rx-advice{margin:0;padding-left:18px;font-size:var(--fs-body);line-height:1.55;color:var(--ink)}
+.rx-section-title{font-size:var(--fs-label);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink3);margin-bottom:8px;margin-top:18px;padding-bottom:5px;border-bottom:1px solid var(--bd);break-inside:avoid;break-after:avoid}
+.rx-med-cat{display:flex;align-items:center;gap:6px;font-size:var(--fs-label);font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.08em;background:#f5f7fa;padding:4px 8px;border-left:3px solid var(--tl);margin:10px 0 2px}
+.rx-med-cat-count{font-size:var(--fs-label);font-weight:600;color:var(--ink3);text-transform:none;letter-spacing:0}
+.rx-dx{display:flex;gap:10px;align-items:flex-start;padding:5px 8px 5px 0;border-bottom:1px solid var(--bd);break-inside:avoid}
 .rx-dx:last-child{border-bottom:none}
-.rx-dx-num{font-family:var(--fm);font-size:11px;color:var(--ink3);flex-shrink:0;min-width:22px;padding-top:1px}
+.rx-dx-num{font-family:var(--fm);font-size:var(--fs-meta);color:var(--ink3);flex-shrink:0;min-width:22px;padding-top:1px}
 .rx-dx-body{flex:1;min-width:0}
-.rx-dx-name{font-size:12.5px;font-weight:600;color:var(--ink);line-height:1.35}
-.rx-dx-meta{font-weight:400;font-size:11px;color:var(--ink3);margin-left:6px}
-.rx-dx-detail{font-size:11px;color:var(--ink3);margin-top:2px;line-height:1.45}
+.rx-dx-name{font-size:var(--fs-name);font-weight:600;color:var(--ink);line-height:1.35}
+.rx-dx-meta{font-weight:400;font-size:var(--fs-meta);color:var(--ink3);margin-left:6px}
+.rx-dx-detail{font-size:var(--fs-meta);color:var(--ink3);margin-top:2px;line-height:1.45}
 .rx-dx-sep{color:var(--bd2);margin:0 6px}
-.rx-dx-badge{flex-shrink:0;font-size:9px;font-weight:700;padding:2px 8px;border-radius:4px;margin-top:1px;text-transform:uppercase;letter-spacing:.04em}
-.rx-dx-bio{font-size:11px;color:var(--ink2);font-weight:500}
+.rx-dx-badge{flex-shrink:0;font-size:var(--fs-label);font-weight:700;padding:2px 8px;border-radius:4px;margin-top:1px;text-transform:uppercase;letter-spacing:.04em}
+.rx-dx-bio{font-size:var(--fs-meta);color:var(--ink2);font-weight:500}
 .rx-dx-bio b{color:var(--ink);font-weight:700}
 .rx-dx-bio .arrow-up{color:#dc2626;font-weight:700}
 .rx-dx-bio .arrow-down{color:#16a34a;font-weight:700}
@@ -406,70 +407,70 @@ body{font-family:var(--fb);color:var(--ink);background:var(--white);font-size:13
 .rx-dx-bio .meta{color:var(--ink3)}
 
 .rx-goals-block{break-inside:avoid}
-.rx-goals{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:4px;break-inside:avoid}
+.rx-goals{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;break-inside:avoid}
 .rx-goal{background:var(--bg);border-radius:6px;padding:8px 10px;border-left:3px solid var(--tl);break-inside:avoid}
-.rx-goal-label{font-size:10px;font-weight:700;color:var(--tl);margin-bottom:3px}
-.rx-goal-val{font-family:var(--fm);font-size:12px;font-weight:500}
-.rx-goal-current{font-size:10px;color:var(--ink3);margin-top:2px}
+.rx-goal-label{font-size:var(--fs-label);font-weight:700;color:var(--tl);margin-bottom:3px}
+.rx-goal-val{font-family:var(--fm);font-size:var(--fs-name);font-weight:600}
+.rx-goal-current{font-size:var(--fs-meta);color:var(--ink3);margin-top:2px}
 
 
-.rx-med{display:flex;gap:12px;align-items:flex-start;padding:4px 0;line-height:1.25;border-bottom:1px solid var(--bg);break-inside:avoid}
+.rx-med{display:flex;gap:10px;align-items:flex-start;padding:5px 0;line-height:1.3;border-bottom:1px solid var(--bg);break-inside:avoid}
 .rx-med:last-child{border:none}
-.rx-med-num{font-family:var(--fm);font-size:11px;color:var(--ink3);flex-shrink:0;min-width:20px;padding-top:2px}
+.rx-med-num{font-family:var(--fm);font-size:var(--fs-meta);color:var(--ink3);flex-shrink:0;min-width:22px;padding-top:1px}
 .rx-med-body{flex:1;min-width:0;word-break:break-word;overflow-wrap:break-word}
-.rx-med-name{font-size:13px;font-weight:700;color:var(--ink)}
-.rx-med-brand{font-size:11px;color:var(--ink3)}
-.rx-med-instr{font-size:11px;color:var(--ink2);margin-top:2px;word-break:break-word;overflow-wrap:break-word}
+.rx-med-name{font-size:var(--fs-name);font-weight:700;color:var(--ink)}
+.rx-med-brand{font-size:var(--fs-meta);color:var(--ink3)}
+.rx-med-instr{font-size:var(--fs-meta);color:var(--ink2);margin-top:2px;word-break:break-word;overflow-wrap:break-word}
 .rx-med-right{text-align:right;flex-shrink:0;max-width:40%;min-width:0;word-break:break-word;overflow-wrap:break-word}
-.rx-med-dose{font-family:var(--fm);font-size:12px;font-weight:500;word-break:break-word;overflow-wrap:break-word}
-.rx-med-timing{font-size:11px;color:var(--ink3)}
-.rx-ext-badge{font-size:9px;background:var(--skl);color:var(--sk);font-weight:700;padding:1px 6px;border-radius:4px;margin-left:6px}
+.rx-med-dose{font-family:var(--fm);font-size:var(--fs-body);font-weight:600;word-break:break-word;overflow-wrap:break-word}
+.rx-med-timing{font-size:var(--fs-meta);color:var(--ink3)}
+.rx-ext-badge{font-size:var(--fs-label);background:var(--skl);color:var(--sk);font-weight:700;padding:1px 6px;border-radius:4px;margin-left:6px}
 .rx-med-sub{padding-left:38px;background:#fafbfc;border-bottom:none;border-left:3px solid var(--tl);margin-left:14px}
-.rx-med-sub .rx-med-name{font-size:12px;font-weight:600}
+.rx-med-sub .rx-med-name{font-size:var(--fs-body);font-weight:600}
 .rx-med-sub .rx-med-arrow{color:var(--ink3);margin-right:6px;font-size:13px}
-.rx-sub-badge{font-size:9px;background:#eef2ff;color:#4338ca;font-weight:700;padding:1px 6px;border-radius:4px;margin-left:6px}
-.rx-cat-badge{font-size:9px;background:#f1f5f9;color:#475569;font-weight:700;padding:1px 6px;border-radius:4px;margin-left:10px;border:1px solid #e2e8f0}
+.rx-sub-badge{font-size:var(--fs-label);background:#eef2ff;color:#4338ca;font-weight:700;padding:1px 6px;border-radius:4px;margin-left:6px}
+.rx-cat-badge{font-size:var(--fs-label);background:#f1f5f9;color:#475569;font-weight:700;padding:1px 6px;border-radius:4px;margin-left:10px;border:1px solid #e2e8f0}
 .rx-med-group-header{display:flex;align-items:center;gap:8px;padding:6px 10px;background:#f8fafc;border-bottom:1px solid var(--bd)}
-.rx-med-group-label{font-size:10px;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.05em}
-.rx-med-group-count{font-size:10px;color:var(--ink3)}
-.rx-sub-cond{font-size:10px;color:var(--ink3);margin-top:1px;font-style:italic}
+.rx-med-group-label{font-size:var(--fs-label);font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.05em}
+.rx-med-group-count{font-size:var(--fs-meta);color:var(--ink3)}
+.rx-sub-cond{font-size:var(--fs-meta);color:var(--ink3);margin-top:1px;font-style:italic}
 
 .rx-ref-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .rx-ref{background:var(--skl);border-radius:6px;padding:9px 11px;border-left:3px solid var(--sk);break-inside:avoid}
-.rx-ref-title{font-size:10px;font-weight:700;color:var(--sk);margin-bottom:4px}
-.rx-ref-body{font-size:12px;color:var(--ink);line-height:1.5}
+.rx-ref-title{font-size:var(--fs-label);font-weight:700;color:var(--sk);margin-bottom:4px}
+.rx-ref-body{font-size:var(--fs-body);color:var(--ink);line-height:1.5}
 .rx-nv-block{break-inside:avoid}
 .rx-ref-grid+.rx-nv{margin-top:8px}
 .rx-nv{display:flex;border:1px solid var(--bd);border-radius:6px;overflow:hidden;break-inside:avoid}
 .rx-nv-appt{flex:0 0 32%;background:var(--white);color:var(--nv);padding:10px 12px;border-right:1px solid var(--bd);display:flex;flex-direction:column;justify-content:center}
 .rx-nv-appt .rx-nv-label{color:var(--tl)}
-.rx-nv-date{font-size:17px;font-weight:700;line-height:1.2;margin-top:2px}
-.rx-nv-when{font-size:10.5px;color:var(--ink3);margin-top:3px}
+.rx-nv-date{font-size:15px;font-weight:700;line-height:1.2;margin-top:2px}
+.rx-nv-when{font-size:var(--fs-meta);color:var(--ink3);margin-top:3px}
 .rx-nv-reports{flex:1;min-width:0;padding:9px 12px;background:var(--aml)}
-.rx-nv-label{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:var(--am)}
+.rx-nv-label{font-size:var(--fs-label);font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:var(--am)}
 .rx-nv-list{list-style:none;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:3px 12px;margin-top:5px}
-.rx-nv-list li{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink);overflow-wrap:anywhere}
+.rx-nv-list li{display:flex;align-items:center;gap:6px;font-size:var(--fs-body);color:var(--ink);overflow-wrap:anywhere}
 .rx-nv-box{flex:0 0 auto;width:10px;height:10px;border:1.5px solid var(--am);border-radius:2px;background:#fff}
-.rx-nv-note{font-size:11.5px;color:var(--ink);margin-top:6px;white-space:pre-line;line-height:1.45}
-.rx-nv-remind{font-size:10.5px;font-weight:600;color:#7c2d12;margin-top:6px;padding-top:5px;border-top:1px dashed rgba(217,122,10,.35)}
+.rx-nv-note{font-size:var(--fs-body);color:var(--ink);margin-top:6px;white-space:pre-line;line-height:1.45}
+.rx-nv-remind{font-size:var(--fs-meta);font-weight:600;color:#7c2d12;margin-top:6px;padding-top:5px;border-top:1px dashed rgba(217,122,10,.35)}
 .rx-test{background:var(--aml);border-radius:6px;padding:9px 11px;border-left:3px solid var(--am);break-inside:avoid}
-.rx-test-title{font-size:10px;font-weight:700;color:var(--am);margin-bottom:4px}
-.rx-test-item{font-size:12px;color:var(--ink);padding:2px 0;display:flex;gap:6px}
+.rx-test-title{font-size:var(--fs-label);font-weight:700;color:var(--am);margin-bottom:4px}
+.rx-test-item{font-size:var(--fs-body);color:var(--ink);padding:2px 0;display:flex;gap:6px}
 
 .rx-close{break-inside:avoid}
 .rx-footer{background:var(--bg);border-top:1px solid var(--bd);padding:10px 16px;display:flex;justify-content:space-between;align-items:center}
-.rx-sig{font-size:11px;color:var(--ink3)}
-.rx-next{font-size:11px;font-weight:700;color:var(--nv)}
+.rx-sig{font-size:var(--fs-meta);color:var(--ink3)}
+.rx-next{font-size:var(--fs-meta);font-weight:700;color:var(--nv)}
 
 .rx-promo{background:var(--nv);padding:11px 16px;display:flex;justify-content:space-between;align-items:center;gap:18px}
-.rx-promo-svc{font-size:10px;color:rgba(255,255,255,.72);line-height:1.75}
+.rx-promo-svc{font-size:var(--fs-meta);color:rgba(255,255,255,.72);line-height:1.75}
 .rx-promo-svc div{padding-left:11px;position:relative}
 .rx-promo-svc div::before{content:"";position:absolute;left:0;top:6px;width:4px;height:4px;border-radius:50%;background:var(--am)}
 .rx-promo-app{display:flex;align-items:center;gap:10px;flex:0 0 auto}
 .rx-promo-app img{height:30px;width:auto;display:block}
 .rx-promo-txt{text-align:right}
-.rx-promo-ttl{font-size:11px;font-weight:700;color:#fff}
-.rx-promo-sub{font-size:9px;color:rgba(255,255,255,.55);margin-top:1px}
+.rx-promo-ttl{font-size:var(--fs-meta);font-weight:700;color:#fff}
+.rx-promo-sub{font-size:var(--fs-label);color:rgba(255,255,255,.55);margin-top:1px}
 
 @page{size:A4;margin:14mm 10mm}
 `;
@@ -590,11 +591,7 @@ function buildPrescriptionHtml(data = {}) {
     .filter(Boolean)
     .join(" ");
 
-  const patientMeta = [
-    patient.file_no || patient.id,
-    fmtDateLong(today),
-    summary.totalVisits ? `Visit ${summary.totalVisits}` : null,
-  ]
+  const patientMeta = [patient.file_no || patient.id, fmtDateLong(today)]
     .filter(Boolean)
     .join(" · ");
 
@@ -927,7 +924,7 @@ function buildPrescriptionHtml(data = {}) {
   // ── Footer next-visit text
   const visitDay = String(consultations?.[0]?.visit_date || today).slice(0, 10);
   const plannedDate = /^\d{4}-\d{2}-\d{2}/.test(followUp.date || "")
-    ? followUp.date.slice(0, 10)
+    ? skipSunday(followUp.date)
     : followUpDueDate(visitDay, followUp.timing || followUp.duration);
   const nextVisitDate = plannedDate && plannedDate > visitDay ? plannedDate : "";
   const nextVisitText = nextVisitDate
@@ -1000,7 +997,7 @@ function buildPrescriptionHtml(data = {}) {
 <head>
 <meta charset="UTF-8">
 <title>Prescription</title>
-<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Mono:wght@400;500&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>${CSS}${TRENDS_CSS}${PARAM_TABLE_CSS}</style>
 </head>
 <body>
@@ -1045,9 +1042,10 @@ function buildPrescriptionHtml(data = {}) {
         : ""
     }
 
-    ${parameterTableHtml(data.rxParameters, escape)}
 
-    ${activeDx.length > 0 ? `<div class="rx-section-title">Diagnoses</div><div class="rx-dx-list">${dxHtml}</div>` : ""}
+    ${activeDx.length > 0 ? `<div class="rx-section-title">Diagnosis</div><div class="rx-dx-list">${dxHtml}</div>` : ""}
+
+    ${parameterTableHtml(data.rxParameters, escape)}
 
     ${
       goals.length > 0

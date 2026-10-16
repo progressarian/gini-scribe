@@ -51,14 +51,29 @@ export const isNewRescheduledIntoDay = (row, date) => {
 // should be phoning them. See docs/PATIENT_BLOCKLIST_PLAN.md §4.3
 export const isBlockedRow = (row) => row?.is_blocked === true;
 
+export const isOnlineRow = (row) =>
+  String(row?.appointment_type || "")
+    .trim()
+    .toLowerCase() === "online";
+
 export const LIST_PREDICATES = {
   new: (r, date) =>
     isNewOnDate(r, date) &&
     !isCancelledRow(r) &&
     (!isRescheduledRow(r, date) || isNewRescheduledIntoDay(r, date)) &&
-    !isBlockedRow(r),
+    !isBlockedRow(r) &&
+    !isOnlineRow(r),
   followup: (r, date) =>
-    !isNewOnDate(r, date) && !isCancelledRow(r) && !isRescheduledRow(r, date) && !isBlockedRow(r),
+    !isNewOnDate(r, date) &&
+    !isCancelledRow(r) &&
+    !isRescheduledRow(r, date) &&
+    !isBlockedRow(r) &&
+    !isOnlineRow(r),
+  online: (r, date) =>
+    isOnlineRow(r) &&
+    !isCancelledRow(r) &&
+    (!isRescheduledRow(r, date) || isNewRescheduledIntoDay(r, date)) &&
+    !isBlockedRow(r),
   cancelled: (r) => isCancelledRow(r),
   rescheduled: (r, date) =>
     !isCancelledRow(r) && isRescheduledRow(r, date) && !isNewRescheduledIntoDay(r, date),

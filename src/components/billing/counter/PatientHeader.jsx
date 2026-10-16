@@ -188,6 +188,7 @@ export default function PatientHeader({
     }
   };
 
+  const isDraft = bill.status === "draft";
   const offered = choices.length ? choices : needsCategory ? suggestions || [] : [];
 
   return (
@@ -231,7 +232,7 @@ export default function PatientHeader({
         </button>
       </div>
 
-      {offered.length > 0 && (
+      {isDraft && offered.length > 0 && (
         <div className="bc-head__suggest">
           <span className="bc-head__hint">
             {choices.length
@@ -252,45 +253,49 @@ export default function PatientHeader({
         </div>
       )}
 
-      <form
-        className="bc-head__row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          save({ category: chosen });
-        }}
-      >
-        <label className="bc-field">
-          <span className="bc-field__lbl">Category</span>
-          <select
-            className="bc-field__in"
-            value={chosen}
-            onChange={(e) => form.set("chosen", e.target.value === current ? null : e.target.value)}
-          >
-            <option value="">General (no category)</option>
-            {list
-              .filter((s) => !s.parent_code)
-              .map((top) => {
-                const subs = subsOf(top.code);
-                return subs.length ? (
-                  <optgroup key={top.code} label={top.label}>
-                    {subs.map((sub) => (
-                      <option key={sub.code} value={sub.code}>
-                        {sub.label}
-                      </option>
-                    ))}
-                  </optgroup>
-                ) : (
-                  <option key={top.code} value={top.code}>
-                    {top.label}
-                  </option>
-                );
-              })}
-          </select>
-        </label>
-        <button type="submit" className="st-btn st-btn-grn" disabled={setCategory.isPending}>
-          Confirm category
-        </button>
-      </form>
+      {isDraft && (
+        <form
+          className="bc-head__row"
+          onSubmit={(e) => {
+            e.preventDefault();
+            save({ category: chosen });
+          }}
+        >
+          <label className="bc-field">
+            <span className="bc-field__lbl">Category</span>
+            <select
+              className="bc-field__in"
+              value={chosen}
+              onChange={(e) =>
+                form.set("chosen", e.target.value === current ? null : e.target.value)
+              }
+            >
+              <option value="">General (no category)</option>
+              {list
+                .filter((s) => !s.parent_code)
+                .map((top) => {
+                  const subs = subsOf(top.code);
+                  return subs.length ? (
+                    <optgroup key={top.code} label={top.label}>
+                      {subs.map((sub) => (
+                        <option key={sub.code} value={sub.code}>
+                          {sub.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : (
+                    <option key={top.code} value={top.code}>
+                      {top.label}
+                    </option>
+                  );
+                })}
+            </select>
+          </label>
+          <button type="submit" className="st-btn st-btn-grn" disabled={setCategory.isPending}>
+            Confirm category
+          </button>
+        </form>
+      )}
       {saved && (
         <div className="bc-note" role="status">
           {saved}

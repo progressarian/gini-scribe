@@ -63,6 +63,7 @@ try {
   const byList = {
     "New Patients": "new",
     "Follow Up": "followup",
+    Online: "online",
     Cancelled: "cancelled",
     Rescheduled: "rescheduled",
   };

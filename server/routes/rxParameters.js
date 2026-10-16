@@ -17,36 +17,47 @@ import { getRxParameterDefaults, saveRxParameterDefaults } from "../services/rxP
 import { billingRoute as run } from "./billingHttp.js";
 
 const router = Router();
-const doctorGate = requireCapability(CAP.GINIFLOW_STATION_DOCTOR);
-const STATION = "/giniflow/stations/doctor/:visitId";
+const STATIONS = [
+  { station: "doctor", gate: requireCapability(CAP.GINIFLOW_STATION_DOCTOR) },
+  { station: "mo", gate: requireCapability(CAP.GINIFLOW_STATION_MO) },
+];
 const actorOf = (req) => (req.doctor?.short_name || req.doctor?.doctor_name || "").trim() || null;
 
-router.get(
-  `${STATION}/rx-parameters`,
-  doctorGate,
-  run("Rx parameter table", 200, (req) => getStationRxParameters(req.params.visitId)),
-);
+for (const { station, gate } of STATIONS) {
+  const base = `/giniflow/stations/${station}/:visitId`;
+  const opts = { station };
 
-router.put(
-  `${STATION}/rx-parameters`,
-  doctorGate,
-  validate(rxParameterRowsSchema, RX_PARAMETER_LABELS),
-  run("Rx parameter table save", 200, (req) =>
-    saveStationRxParameters(req.params.visitId, req.body.rows, actorOf(req)),
-  ),
-);
+  router.get(
+    `${base}/rx-parameters`,
+    gate,
+    run("Rx parameter table", 200, (req) =>
+      getStationRxParameters(req.params.visitId, undefined, opts),
+    ),
+  );
 
-router.get(
-  `${STATION}/visit-summary`,
-  doctorGate,
-  run("Visit summary", 200, (req) => getStationVisitSummary(req.params.visitId)),
-);
+  router.put(
+    `${base}/rx-parameters`,
+    gate,
+    validate(rxParameterRowsSchema, RX_PARAMETER_LABELS),
+    run("Rx parameter table save", 200, (req) =>
+      saveStationRxParameters(req.params.visitId, req.body.rows, actorOf(req), undefined, opts),
+    ),
+  );
 
-router.post(
-  `${STATION}/visit-summary`,
-  doctorGate,
-  run("Visit summary generate", 200, (req) => generateStationVisitSummary(req.params.visitId)),
-);
+  router.get(
+    `${base}/visit-summary`,
+    gate,
+    run("Visit summary", 200, (req) => getStationVisitSummary(req.params.visitId, undefined, opts)),
+  );
+
+  router.post(
+    `${base}/visit-summary`,
+    gate,
+    run("Visit summary generate", 200, (req) =>
+      generateStationVisitSummary(req.params.visitId, undefined, opts),
+    ),
+  );
+}
 
 router.get(
   "/admin/rx-parameters",

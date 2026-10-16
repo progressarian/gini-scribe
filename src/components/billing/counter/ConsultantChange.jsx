@@ -23,7 +23,8 @@ function outcome(preview) {
   return "same fee";
 }
 
-const changeOutcome = (change) => (change.preview ? outcome(change.preview) : "fee to check");
+export const changeOutcome = (change) =>
+  change.preview ? outcome(change.preview) : "fee to check";
 
 export function consultantChangeText(changes) {
   if (changes.length === 1) {
@@ -50,33 +51,17 @@ export function useConsultantChangesToSettle(enabled, onNew) {
   return changes ?? [];
 }
 
-export function ConsultantChangesWaiting({ changes, visitId, onOpen }) {
-  if (!changes.length) return null;
+export function ConsultantChangesAlert({ count, onShow }) {
+  if (!count) return null;
   return (
-    <section className="bc-ccw" aria-label="Consultant changes to settle">
-      <h3 className="bc-ccw__title">
-        Consultant changed — fee to settle <span className="bc-ccw__n">{changes.length}</span>
-      </h3>
-      <ul className="bc-ccw__list">
-        {changes.map((change) => (
-          <li key={change.id}>
-            <button
-              type="button"
-              className={`bc-ccw__item${change.visit_id === visitId ? " on" : ""}`}
-              aria-current={change.visit_id === visitId ? "true" : undefined}
-              onClick={() => onOpen({ visit: change.visit_id })}
-            >
-              <span>
-                <strong>{change.patient.name}</strong>
-                {change.patient.file_no && ` · ${change.patient.file_no}`}
-              </span>
-              <span className="bc-ccw__what">
-                {change.from.name} → {change.to.name} · {changeOutcome(change)}
-              </span>
-            </button>
-          </li>
-        ))}
-      </ul>
+    <section className="bc-ccw" aria-label="Consultant change alert">
+      <span className="bc-ccw__title">
+        <span aria-hidden="true">⚠</span> Consultant changed —{" "}
+        <span className="bc-ccw__n">{count}</span> {count === 1 ? "fee" : "fees"} to settle
+      </span>
+      <button type="button" className="bc-ccw__show" onClick={onShow}>
+        Show them
+      </button>
     </section>
   );
 }

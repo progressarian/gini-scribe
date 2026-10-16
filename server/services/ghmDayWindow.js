@@ -16,7 +16,7 @@ import { LAB_ONLY_DOCTOR } from "../../shared/labOnly.js";
 // AI-extracted and dirty (can hold "4 weeks", "today", "09/10/2025", "null", …),
 // so each is ONLY cast when it matches its expected shape — an unguarded ::date
 // or ::interval would throw and break the whole query.
-export const ownFu = (a) => `COALESCE(
+export const ownFu = (a) => `skip_sunday(COALESCE(
   ${a}.follow_up_date,
   NULLIF(${a}.biomarkers->>'followup', '')::date,
   CASE WHEN ${a}.healthray_follow_up->>'date' ~ '^\\d{4}-\\d{2}-\\d{2}$'
@@ -25,7 +25,7 @@ export const ownFu = (a) => `COALESCE(
         AND btrim(lower(${a}.healthray_follow_up->>'timing')) ~ '^[0-9]{1,2} *(day|week|month|year)s?$'
        THEN (${a}.appointment_date
              + btrim(lower(${a}.healthray_follow_up->>'timing'))::interval)::date END
-)`;
+))`;
 
 // A visit is the patient's CURRENT one for follow-up purposes only if it is
 // their latest visit that carries a follow-up at all. Every older visit's
@@ -74,7 +74,10 @@ export const preferredSetAt = (a) => `COALESCE(
   ${a}.updated_at
 )`;
 
-export const preferredSetBy = (a) => `(SELECT l.changed_by FROM appointment_change_log l
+export const preferredSetBy = (
+  a,
+  column = "changed_by",
+) => `(SELECT l.${column} FROM appointment_change_log l
   WHERE l.appointment_id = ${a}.id AND l.field = 'preferred_date' AND l.new_value IS NOT NULL
   ORDER BY l.changed_at DESC LIMIT 1)`;
 

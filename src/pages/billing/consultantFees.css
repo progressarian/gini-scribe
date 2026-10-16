@@ -73,6 +73,11 @@
 .fset.bill-ui .cf-scroll > .cf-grid {
   min-width: 0;
   width: max-content;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  border-collapse: separate;
+  border-spacing: 0;
 }
 .fset.bill-ui .cf-grid thead th {
   position: sticky;

@@ -30,7 +30,7 @@ import { BillBadge } from "../../components/billing/counter/PatientList";
 import { approvedRefundText, useRefundsToPay } from "../../components/billing/counter/RefundsBoard";
 import { receptionBillHref } from "../../components/billing/counter/billHref";
 import {
-  ConsultantChangesWaiting,
+  ConsultantChangesAlert,
   consultantChangeText,
   useConsultantChangesToSettle,
 } from "../../components/billing/counter/ConsultantChange";
@@ -2682,6 +2682,7 @@ export default function ReceptionStationPage() {
     showToast(consultantChangeText(changes), REFUND_TOAST_MS),
   );
   const testsToBill = useTestsToBill(canBill);
+  const [feeFocus, setFeeFocus] = useState(0);
 
   const failed = (e, fallback) =>
     showToast(e?.response?.data?.detail || e?.response?.data?.error || fallback);
@@ -2904,10 +2905,9 @@ export default function ReceptionStationPage() {
           <div className="rc-desk__tabs">
             {tabs}
             {tab === DESK_TABS.bill.key && (
-              <ConsultantChangesWaiting
-                changes={feeChanges}
-                visitId={desk.visitId}
-                onOpen={desk.openBill}
+              <ConsultantChangesAlert
+                count={feeChanges.length}
+                onShow={() => setFeeFocus((n) => n + 1)}
               />
             )}
           </div>
@@ -2918,6 +2918,8 @@ export default function ReceptionStationPage() {
             billId={desk.billId}
             sentPatient={sentPatient}
             onOpen={desk.openBill}
+            feeChanges={feeChanges}
+            feeFocus={feeFocus}
           />
         </div>
       ) : (
