@@ -2,6 +2,7 @@ import pool from "../../config/db.js";
 import { HEALTHRAY_MODE, PREPAID_MODE } from "../../../shared/billingVocab.js";
 import { paise } from "../../../shared/labPayment.js";
 import { CARRY_STATE, carryOverChoices, carryOverIn } from "../giniflow/carryOver.js";
+import { checkInIn } from "../giniflow/journey.js";
 import { addLine, finaliseBill, openDraftIn, removeLine } from "./bills.js";
 import { DRAWER_MODE, PAYMENT_MODES } from "./cashShifts.js";
 import { receiveDeposit } from "./deposits.js";
@@ -91,11 +92,39 @@ async function viewIn(client, built) {
   };
 }
 
-export async function arrivalBillPreview(visitId, { skip, add, remove } = {}, ctx = {}, db = pool) {
+async function journeyPlannedIn(client, visitId, plan, ctx) {
+  const { rows } = await client.query(`SELECT current_status FROM giniflow_visits WHERE id = $1`, [
+    visitId,
+  ]);
+  if (!plan || !NOT_ARRIVED.includes(rows[0]?.current_status)) return null;
+  await client.query("SAVEPOINT arrival_journey");
+  try {
+    await checkInIn(client, visitId, {
+      visitTypeId: plan.visitTypeId ?? null,
+      steps: asList(plan.steps),
+      actorId: ctx.actorId ?? null,
+      actorRole: ctx.role || "reception",
+    });
+    return null;
+  } catch (error) {
+    await client.query("ROLLBACK TO SAVEPOINT arrival_journey");
+    return error.status && error.status < 500
+      ? error.message
+      : "The journey's tests could not be priced.";
+  }
+}
+
+export async function arrivalBillPreview(
+  visitId,
+  { skip, add, remove, plan } = {},
+  ctx = {},
+  db = pool,
+) {
   const client = await db.connect();
   try {
     await client.query("BEGIN");
     await client.query(`SELECT id FROM giniflow_visits WHERE id = $1 FOR UPDATE`, [visitId]);
+    const journeyNote = await journeyPlannedIn(client, visitId, plan, ctx);
     const view = await viewIn(
       client,
       await buildIn(client, visitId, asList(skip), ctx, {
@@ -103,7 +132,7 @@ export async function arrivalBillPreview(visitId, { skip, add, remove } = {}, ct
         remove: itemIds(remove),
       }),
     );
-    return { ...view, billId: null };
+    return { ...view, billId: null, ...(journeyNote ? { journeyNote } : {}) };
   } finally {
     await client.query("ROLLBACK").catch(() => {});
     client.release();

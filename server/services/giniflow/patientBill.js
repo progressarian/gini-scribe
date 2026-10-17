@@ -10,6 +10,7 @@ import {
 } from "../../../shared/journeyOrder.js";
 import { paise, rupeesFromPaise } from "../../../shared/labPayment.js";
 import { NOT_ON_BILL_REASON } from "../../../shared/testCancelReasons.js";
+import { isNurseRapidTest } from "../../../shared/nurseTests.js";
 import { autoCancelMode, cancelTestIn } from "./testCancel.js";
 import { writeAudit } from "../billing/audit.js";
 
@@ -145,7 +146,7 @@ const itemsOf = (bill, { includeDead = false } = {}) =>
 export const billedLabLines = (bill, opts = {}) => {
   const byName = new Map();
   for (const i of itemsOf(bill, opts)) {
-    if (i.category !== "lab" || !i.desc || byName.has(i.desc)) continue;
+    if (i.category !== "lab" || !i.desc || byName.has(i.desc) || isNurseRapidTest(i.desc)) continue;
     if (opts.skip?.({ kind: "lab", testName: i.desc, line: billLineRef(i) })) continue;
     byName.set(i.desc, i);
   }
@@ -156,6 +157,15 @@ export const billedLabLines = (bill, opts = {}) => {
     line: billLineRef(i),
   }));
 };
+
+export const billedNurseTestLines = (bill, opts = {}) => [
+  ...new Set(
+    itemsOf(bill, opts)
+      .filter((i) => i.category === "lab" && i.desc && isNurseRapidTest(i.desc))
+      .filter((i) => !opts.skip?.({ kind: "lab", testName: i.desc, line: billLineRef(i) }))
+      .map((i) => i.desc),
+  ),
+];
 
 export const splitBillAmount = (amount, count) => {
   const total = paise(amount);

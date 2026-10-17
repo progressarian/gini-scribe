@@ -510,3 +510,34 @@ export function useExportPages(buildQuery, exportPageSize) {
     },
   });
 }
+
+export function useGhmStatusChanges(params) {
+  return useQuery({
+    queryKey: qk.ghm.statusChanges(params),
+    placeholderData: keepPreviousData,
+    queryFn: async () => {
+      const { data } = await api.get("/api/ghm-appointments", {
+        params: { mode: "changes", ...params },
+      });
+      return data;
+    },
+  });
+}
+
+export function useExportStatusChanges() {
+  return useMutation({
+    mutationFn: async (params) => {
+      const { data } = await api.get("/api/ghm-appointments", {
+        params: { mode: "changes", ...params, export: 1 },
+      });
+      if ((data?.total || 0) > arr(data?.data).length) {
+        toast(
+          `This range has ${data.total} changes and the export is capped at ${arr(data?.data).length}. ` +
+            `Pick a shorter range to get the rest.`,
+          "warn",
+        );
+      }
+      return data;
+    },
+  });
+}

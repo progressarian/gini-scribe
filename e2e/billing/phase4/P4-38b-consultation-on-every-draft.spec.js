@@ -5,9 +5,9 @@ import { assertTestDatabase } from "../../setup/guard.mjs";
 import { ensureSeries, newDayTag, seedDay, tearDownDay } from "./p438-floor-day.mjs";
 
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
-const journey = await import("../../../server/services/giniflow/journey.js");
-const visitLines = await import("../../../server/services/billing/visitLines.js");
 const bills = await import("../../../server/services/billing/bills.js");
+const visitLines = await import("../../../server/services/billing/visitLines.js");
+const journey = await import("../../../server/services/giniflow/journey.js");
 
 const db = getPool();
 const tag = newDayTag();

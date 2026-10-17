@@ -1,5 +1,5 @@
 import pool from "../../config/db.js";
-import { linesForOrder } from "../billing/visitLines.js";
+import { linesForNurseTests, linesForOrder } from "../billing/visitLines.js";
 import { testPriceForVisit } from "../pricing.js";
 import {
   insertLabStepsForOrder,
@@ -30,6 +30,7 @@ import { IST_TODAY, reopenResultsForNewOrder } from "./statusEngine.js";
 import {
   billedLabLines,
   billedMachineLines,
+  billedNurseTestLines,
   priceOrdersFromBill,
   readPatientBill,
   repricePaidOrdersFromBill,
@@ -422,6 +423,18 @@ export async function syncMachineOrdersForVisit(visit, db = pool, { slotWaitMs }
       }
       if (await syncBillCharges(client, visit.visit_id, bill, machines, skip)) {
         log("charge", `${visit.name}: HealthRay charge(s) waiting at reception`);
+      }
+      const nurse = await linesForNurseTests(
+        visit.visit_id,
+        billedNurseTestLines(bill, { skip }),
+        null,
+        client,
+      );
+      if (nurse.added?.length) {
+        log(
+          "nurse",
+          `${visit.name}: ${nurse.added.join(", ")} added to the bill (done by the nurse)`,
+        );
       }
       const dead = await cancelDeadBillTests(client, visit.visit_id, bill, machines);
       if (dead.cancelled) {

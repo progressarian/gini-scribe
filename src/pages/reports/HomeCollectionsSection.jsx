@@ -111,7 +111,7 @@ export default function HomeCollectionsSection({ from, to }) {
           disabled={!data || download.isPending}
         >
           <Download size={14} aria-hidden="true" />
-          {download.isPending ? "Preparing…" : "Download Excel"}
+          {download.isPending ? "Preparing…" : "Export to Excel"}
         </button>
       </div>
       <div className="fset__cardsub">

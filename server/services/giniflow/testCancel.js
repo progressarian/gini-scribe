@@ -27,6 +27,7 @@ import {
 } from "./testsHold.js";
 import { placeTestsBeforeDoctors, syncLabStepsFromLab } from "./journey.js";
 import { billLineRef, isLiveBillItem } from "./patientBill.js";
+import { isNurseRapidTest } from "../../../shared/nurseTests.js";
 
 const SYNC_REASON_VALUES = SYNC_CANCEL_REASONS.map((r) => r.value);
 
@@ -928,7 +929,8 @@ export async function cancelDeadBillTests(client, visitId, bill, machines) {
     }
   }
 
-  if (dead.some((i) => i.category === "lab") && !live.some((i) => i.category === "lab")) {
+  const isLabSample = (i) => i.category === "lab" && !isNurseRapidTest(i.desc);
+  if (dead.some(isLabSample) && !live.some(isLabSample)) {
     const { rows } = await client.query(
       `SELECT lc.case_no, v.patient_id, v.visit_date::text AS visit_date
          FROM giniflow_visits v
@@ -942,7 +944,7 @@ export async function cancelDeadBillTests(client, visitId, bill, machines) {
       [visitId],
     );
     if (rows.length) {
-      const line = dead.find((i) => i.category === "lab");
+      const line = dead.find(isLabSample);
       await run(
         {
           caseNos: rows.map((r) => r.case_no),

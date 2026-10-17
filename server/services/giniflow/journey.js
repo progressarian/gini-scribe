@@ -588,178 +588,13 @@ const requireConsultant = async (client, visitId) => {
 // the floor and the patient read, and the token the patient's link needs. The
 // WhatsApp is the caller's job, AFTER the commit — a message that fails must
 // never cost the check-in.
-export async function checkInWithJourney(
-  visitId,
-  { visitTypeId = null, steps: askedSteps = [], actorId = null, actorRole = "reception" },
-  db = pool,
-) {
+export async function checkInWithJourney(visitId, choices, db = pool) {
   const client = await db.connect();
   try {
     await client.query("BEGIN");
-    const existing = await client.query(
-      `SELECT v.current_status, v.patient_id, v.visit_date,
-              (SELECT count(*)::int FROM giniflow_visit_steps s
-                WHERE s.visit_id = v.id AND ${PLANNED_STEP_SQL("s")}) AS steps,
-              (SELECT a.doctor_name FROM appointments a WHERE a.id = v.appointment_id) AS booked_doctor,
-              (SELECT d.name FROM doctors d WHERE d.id = v.assigned_doctor_id) AS assigned_doctor,
-              ${VISIT_DIRECT_CONSULT_SQL} AS direct_consult,
-              v.echo_referral
-         FROM giniflow_visits v WHERE v.id = $1 FOR NO KEY UPDATE`,
-      [visitId],
-    );
-    if (!existing.rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
-    const labAlreadyDone = await sampleTakenBeforeVisit(client, visitId);
-    const bill = await storedBill(existing.rows[0].patient_id, existing.rows[0].visit_date, client);
-    const machines = await getMachines(client);
-    const allowed = stepsAllowedByBill(askedSteps, bill, machines).filter(
-      (s) => !(labAlreadyDone && isEarlierLabStep(s)),
-    );
-    const routed = existing.rows[0].direct_consult ? withoutChief(allowed) : allowed;
-    const steps = existing.rows[0].echo_referral ? echoFirst(routed, machines) : routed;
-    const current = existing.rows[0].current_status;
-    // A second press at a busy counter must not give the patient two journeys.
-    const alreadyPlanned = existing.rows[0].steps > 0;
-    const alreadyHere = isChainStatus(current) && chainIndex(current) >= chainIndex("checked_in");
-
-    // Someone already down the floor is not arriving again — the same refusal
-    // the Arrived button has always given. A patient standing AT the desk whose
-    // status is already checked_in is the double-tap: no second event, but the
-    // journey they were being given is still attached.
-    if (isChainStatus(current) && chainIndex(current) > chainIndex("checked_in")) {
-      throw Object.assign(
-        new Error(`${STATUS_LABEL[current] || current} — this patient is already past reception`),
-        { status: 409 },
-      );
-    }
-
-    if (!alreadyHere) {
-      await advanceStatus(client, {
-        visitId,
-        toStatus: "checked_in",
-        actorRole,
-        actorId,
-        meta: { visitTypeId, steps: steps.length },
-      });
-    }
-
-    let raised = {
-      labOrderId: null,
-      labTests: [],
-      outsideOrderId: null,
-      outsideTests: [],
-      machine: [],
-    };
-    if (!alreadyPlanned) {
-      await insertSteps(client, visitId, steps);
-      // A plan attached to a patient who is already here has to agree with where
-      // they are, the same way a seeded one does.
-      if (alreadyHere) await syncFromStatus(client, visitId, current);
-      // In the same transaction as the arrival: a patient checked in for tests
-      // whose orders failed to write would stand in a queue nobody can see.
-      // Guarded by `alreadyPlanned` for the same reason the steps are — a second
-      // press at a busy counter must not bill the patient twice.
-      raised = await raiseOrdersFromSteps(client, visitId, steps, actorId);
-      await priceOrdersFromBill(client, visitId, bill, machines);
-      await syncBillCharges(client, visitId, bill, machines, await billSuppressor(client, visitId));
-      await insertLabStepsIfHealthrayCase(client, visitId);
-      await placeTestsBeforeDoctors(client, visitId);
-    }
-
-    // Assigning a doctor on the journey has to mean what it looks like it
-    // means: the consultant's own queue reads giniflow_visits, not the steps.
-    // Read back from the rows just written, so the catalog's mapping decides
-    // which column a name belongs in rather than anything the client sent.
-    const assigned = await client.query(
-      `SELECT chain_status, assigned_staff_id::int AS staff_id
-         FROM giniflow_visit_steps
-        WHERE visit_id = $1
-          AND chain_status IN ('with_sd', 'with_doctor')
-          AND assigned_staff_id ~ '^[0-9]+$'
-          AND (chain_status <> 'with_doctor'
-               OR EXISTS (SELECT 1 FROM doctors d
-                           WHERE d.id = assigned_staff_id::int AND d.role = 'consultant'
-                             AND COALESCE(d.is_active, TRUE)))
-        ORDER BY step_order`,
-      [visitId],
-    );
-    const forColumn = (status) =>
-      assigned.rows.find((r) => r.chain_status === status)?.staff_id ?? null;
-    const doctorId = forColumn("with_doctor") ?? (await consultantPicked(client, askedSteps));
-
-    const token = await uniqueToken(client);
-    const planned = steps.reduce((sum, s) => sum + clampMinutes(s.minutes), 0);
-    await client.query(
-      `UPDATE giniflow_visits
-          SET visit_type_id = COALESCE($2, visit_type_id),
-              planned_total_min = CASE WHEN $4 THEN planned_total_min ELSE $3 END,
-              visit_token = COALESCE(visit_token, $5),
-              checked_in_by = COALESCE(checked_in_by, $6),
-              -- COALESCE, never an overwrite: the module's existing rule is that
-              -- whoever is in the room beats whoever was booked, and by the time
-              -- a station has claimed a patient the desk's guess is stale.
-              assigned_sd_id = COALESCE(assigned_sd_id, $7),
-              assigned_doctor_id = COALESCE(assigned_doctor_id, $8),
-              updated_at = NOW()
-        WHERE id = $1`,
-      [
-        visitId,
-        visitTypeId,
-        planned,
-        alreadyPlanned,
-        token,
-        actorId,
-        forColumn("with_sd"),
-        doctorId,
-      ],
-    );
-    await requireConsultant(client, visitId);
-    const { rows: nowAt } = await client.query(
-      `SELECT current_status FROM giniflow_visits WHERE id = $1`,
-      [visitId],
-    );
-    const checkedInOnly =
-      nowAt[0]?.current_status === "checked_in" &&
-      (await planSkips(client, visitId, PLAN_STOP.vitals));
-    if (
-      checkedInOnly &&
-      !(await planSkips(client, visitId, PLAN_STOP.chief)) &&
-      (await planSkips(client, visitId, PLAN_STOP.doctor))
-    ) {
-      await client.query("SAVEPOINT straight_to_chief");
-      try {
-        await advanceStatus(client, {
-          visitId,
-          toStatus: "sd_pending",
-          actorRole: "system",
-          allowSkip: true,
-          meta: { reason: "plan_has_no_vitals_or_consultant_step", after: "checked_in" },
-        });
-        await client.query("RELEASE SAVEPOINT straight_to_chief");
-      } catch {
-        await client.query("ROLLBACK TO SAVEPOINT straight_to_chief");
-      }
-    }
-    if (
-      checkedInOnly &&
-      (await planSkips(client, visitId, PLAN_STOP.chief)) &&
-      !(await planSkips(client, visitId, PLAN_STOP.doctor))
-    ) {
-      await client.query("SAVEPOINT straight_to_consultant");
-      try {
-        await advanceStatus(client, {
-          visitId,
-          toStatus: "ready_for_doctor",
-          actorRole: "system",
-          allowSkip: true,
-          meta: { reason: "plan_has_no_vitals_or_chief_step", after: "checked_in" },
-        });
-        await client.query("RELEASE SAVEPOINT straight_to_consultant");
-      } catch {
-        await client.query("ROLLBACK TO SAVEPOINT straight_to_consultant");
-      }
-    }
+    const { alreadyHere, alreadyPlanned, raised } = await checkInIn(client, visitId, choices);
     await client.query("COMMIT");
-    if (!alreadyHere) await draftAtCheckIn(visitId, { actorId }, db);
+    if (!alreadyHere) await draftAtCheckIn(visitId, { actorId: choices.actorId ?? null }, db);
     const journey = await getJourney(visitId, db);
     const { rows } = await db.query(
       `SELECT visit_token, planned_total_min FROM giniflow_visits WHERE id = $1`,
@@ -778,6 +613,167 @@ export async function checkInWithJourney(
   } finally {
     client.release();
   }
+}
+
+export async function checkInIn(
+  client,
+  visitId,
+  { visitTypeId = null, steps: askedSteps = [], actorId = null, actorRole = "reception" },
+) {
+  const existing = await client.query(
+    `SELECT v.current_status, v.patient_id, v.visit_date,
+              (SELECT count(*)::int FROM giniflow_visit_steps s
+                WHERE s.visit_id = v.id AND ${PLANNED_STEP_SQL("s")}) AS steps,
+              (SELECT a.doctor_name FROM appointments a WHERE a.id = v.appointment_id) AS booked_doctor,
+              (SELECT d.name FROM doctors d WHERE d.id = v.assigned_doctor_id) AS assigned_doctor,
+              ${VISIT_DIRECT_CONSULT_SQL} AS direct_consult,
+              v.echo_referral
+         FROM giniflow_visits v WHERE v.id = $1 FOR NO KEY UPDATE`,
+    [visitId],
+  );
+  if (!existing.rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
+  const labAlreadyDone = await sampleTakenBeforeVisit(client, visitId);
+  const bill = await storedBill(existing.rows[0].patient_id, existing.rows[0].visit_date, client);
+  const machines = await getMachines(client);
+  const allowed = stepsAllowedByBill(askedSteps, bill, machines).filter(
+    (s) => !(labAlreadyDone && isEarlierLabStep(s)),
+  );
+  const routed = existing.rows[0].direct_consult ? withoutChief(allowed) : allowed;
+  const steps = existing.rows[0].echo_referral ? echoFirst(routed, machines) : routed;
+  const current = existing.rows[0].current_status;
+  // A second press at a busy counter must not give the patient two journeys.
+  const alreadyPlanned = existing.rows[0].steps > 0;
+  const alreadyHere = isChainStatus(current) && chainIndex(current) >= chainIndex("checked_in");
+
+  // Someone already down the floor is not arriving again — the same refusal
+  // the Arrived button has always given. A patient standing AT the desk whose
+  // status is already checked_in is the double-tap: no second event, but the
+  // journey they were being given is still attached.
+  if (isChainStatus(current) && chainIndex(current) > chainIndex("checked_in")) {
+    throw Object.assign(
+      new Error(`${STATUS_LABEL[current] || current} — this patient is already past reception`),
+      { status: 409 },
+    );
+  }
+
+  if (!alreadyHere) {
+    await advanceStatus(client, {
+      visitId,
+      toStatus: "checked_in",
+      actorRole,
+      actorId,
+      meta: { visitTypeId, steps: steps.length },
+    });
+  }
+
+  let raised = {
+    labOrderId: null,
+    labTests: [],
+    outsideOrderId: null,
+    outsideTests: [],
+    machine: [],
+  };
+  if (!alreadyPlanned) {
+    await insertSteps(client, visitId, steps);
+    // A plan attached to a patient who is already here has to agree with where
+    // they are, the same way a seeded one does.
+    if (alreadyHere) await syncFromStatus(client, visitId, current);
+    // In the same transaction as the arrival: a patient checked in for tests
+    // whose orders failed to write would stand in a queue nobody can see.
+    // Guarded by `alreadyPlanned` for the same reason the steps are — a second
+    // press at a busy counter must not bill the patient twice.
+    raised = await raiseOrdersFromSteps(client, visitId, steps, actorId);
+    await priceOrdersFromBill(client, visitId, bill, machines);
+    await syncBillCharges(client, visitId, bill, machines, await billSuppressor(client, visitId));
+    await insertLabStepsIfHealthrayCase(client, visitId);
+    await placeTestsBeforeDoctors(client, visitId);
+  }
+
+  // Assigning a doctor on the journey has to mean what it looks like it
+  // means: the consultant's own queue reads giniflow_visits, not the steps.
+  // Read back from the rows just written, so the catalog's mapping decides
+  // which column a name belongs in rather than anything the client sent.
+  const assigned = await client.query(
+    `SELECT chain_status, assigned_staff_id::int AS staff_id
+         FROM giniflow_visit_steps
+        WHERE visit_id = $1
+          AND chain_status IN ('with_sd', 'with_doctor')
+          AND assigned_staff_id ~ '^[0-9]+$'
+          AND (chain_status <> 'with_doctor'
+               OR EXISTS (SELECT 1 FROM doctors d
+                           WHERE d.id = assigned_staff_id::int AND d.role = 'consultant'
+                             AND COALESCE(d.is_active, TRUE)))
+        ORDER BY step_order`,
+    [visitId],
+  );
+  const forColumn = (status) =>
+    assigned.rows.find((r) => r.chain_status === status)?.staff_id ?? null;
+  const doctorId = forColumn("with_doctor") ?? (await consultantPicked(client, askedSteps));
+
+  const token = await uniqueToken(client);
+  const planned = steps.reduce((sum, s) => sum + clampMinutes(s.minutes), 0);
+  await client.query(
+    `UPDATE giniflow_visits
+          SET visit_type_id = COALESCE($2, visit_type_id),
+              planned_total_min = CASE WHEN $4 THEN planned_total_min ELSE $3 END,
+              visit_token = COALESCE(visit_token, $5),
+              checked_in_by = COALESCE(checked_in_by, $6),
+              -- COALESCE, never an overwrite: the module's existing rule is that
+              -- whoever is in the room beats whoever was booked, and by the time
+              -- a station has claimed a patient the desk's guess is stale.
+              assigned_sd_id = COALESCE(assigned_sd_id, $7),
+              assigned_doctor_id = COALESCE(assigned_doctor_id, $8),
+              updated_at = NOW()
+        WHERE id = $1`,
+    [visitId, visitTypeId, planned, alreadyPlanned, token, actorId, forColumn("with_sd"), doctorId],
+  );
+  await requireConsultant(client, visitId);
+  const { rows: nowAt } = await client.query(
+    `SELECT current_status FROM giniflow_visits WHERE id = $1`,
+    [visitId],
+  );
+  const checkedInOnly =
+    nowAt[0]?.current_status === "checked_in" &&
+    (await planSkips(client, visitId, PLAN_STOP.vitals));
+  if (
+    checkedInOnly &&
+    !(await planSkips(client, visitId, PLAN_STOP.chief)) &&
+    (await planSkips(client, visitId, PLAN_STOP.doctor))
+  ) {
+    await client.query("SAVEPOINT straight_to_chief");
+    try {
+      await advanceStatus(client, {
+        visitId,
+        toStatus: "sd_pending",
+        actorRole: "system",
+        allowSkip: true,
+        meta: { reason: "plan_has_no_vitals_or_consultant_step", after: "checked_in" },
+      });
+      await client.query("RELEASE SAVEPOINT straight_to_chief");
+    } catch {
+      await client.query("ROLLBACK TO SAVEPOINT straight_to_chief");
+    }
+  }
+  if (
+    checkedInOnly &&
+    (await planSkips(client, visitId, PLAN_STOP.chief)) &&
+    !(await planSkips(client, visitId, PLAN_STOP.doctor))
+  ) {
+    await client.query("SAVEPOINT straight_to_consultant");
+    try {
+      await advanceStatus(client, {
+        visitId,
+        toStatus: "ready_for_doctor",
+        actorRole: "system",
+        allowSkip: true,
+        meta: { reason: "plan_has_no_vitals_or_chief_step", after: "checked_in" },
+      });
+      await client.query("RELEASE SAVEPOINT straight_to_consultant");
+    } catch {
+      await client.query("ROLLBACK TO SAVEPOINT straight_to_consultant");
+    }
+  }
+  return { alreadyHere, alreadyPlanned, raised };
 }
 
 // Most patients on this floor are checked in by the HealthRay sync, which knows

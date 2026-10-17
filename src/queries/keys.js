@@ -66,6 +66,7 @@ export const qk = {
     doctors: () => ["ghm", "doctors"],
     ccAgents: () => ["ghm", "cc-agents"],
     list: (params) => ["ghm", "list", params],
+    statusChanges: (params) => ["ghm", "status-changes", params],
     biomarkers: (patientIds) => ["ghm", "biomarkers", patientIds],
     lastVisit: (patientIds) => ["ghm", "last-visit", patientIds],
     obtTeam: () => ["ghm", "obt-team"],

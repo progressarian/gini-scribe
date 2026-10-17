@@ -32,6 +32,7 @@ import {
   RotateCcw,
   CalendarArrowDown,
   CalendarX,
+  History,
 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import "./GHMPage.css";
@@ -53,6 +54,7 @@ import {
 import { slotDoctorKey, slotStartHour } from "../../shared/slotHour.js";
 import { CLOSED_WEEKDAYS, followUpDueDate, followUpTiming } from "../lib/followUp.js";
 import PatientRecordModal from "../components/ghm/PatientRecordModal.jsx";
+import StatusChangesView from "../components/ghm/StatusChangesView.jsx";
 import Dropdown from "../components/ui/Dropdown.jsx";
 import FilterPopover from "../components/ui/FilterPopover.jsx";
 import SearchBox from "../components/ui/SearchBox.jsx";
@@ -187,6 +189,7 @@ const VIEW_TABS = [
   { id: "tomorrow", label: "Tomorrow", Icon: Sunrise, offset: 1 },
   { id: "fu3", label: "Follow-up in 3 Days", Icon: Phone, offset: 3 },
   { id: "missed", label: "Missed", Icon: CalendarX, offset: null },
+  { id: "changes", label: "Status Changes", Icon: History, offset: null },
   { id: "lookup", label: "Patient Lookup", Icon: Search, offset: null },
   {
     id: "reassign",
@@ -814,7 +817,7 @@ const bookingStatusOptions = (row) => {
     );
   if (row.booking_status === "booked" || (past ? row.preferred_time_slot : row.time_slot))
     return BOOKING_STATUSES;
-  const title = past ? "Choose the preferred time first." : "Allocate a time slot first.";
+  const title = past ? "Choose a time slot first." : "Allocate a time slot first.";
   return BOOKING_STATUSES.map((o) => (o.value === "booked" ? { ...o, disabled: true, title } : o));
 };
 
@@ -2549,6 +2552,7 @@ export default function GHMPage() {
   const [missRisk, setMissRisk] = useState(searchParams.get("risk") || "");
   const [missSort, setMissSort] = useState(searchParams.get("sort") || "");
   const isMissed = view === "missed";
+  const isChanges = view === "changes";
   const [compact, setCompact] = useState(searchParams.get("rows") === "compact");
   const [fullscreen, setFullscreen] = useState(false);
   // Debounced copy of `search` — drives the date-independent Patient Lookup fetch
@@ -2600,6 +2604,9 @@ export default function GHMPage() {
         put("to", isMissed ? missedTo : "", missedRange(7).to);
         put("risk", isMissed ? missRisk : "", "");
         put("sort", isMissed ? missSort : "", "");
+        if (view !== "changes") {
+          for (const k of ["cfrom", "cto", "ckind", "cdoctor", "cby", "cq"]) next.delete(k);
+        }
         return next;
       },
       { replace: true },
@@ -2725,7 +2732,7 @@ export default function GHMPage() {
     ],
   );
 
-  const listEnabled = view !== "lookup" || lookupQ.length > 0;
+  const listEnabled = !isChanges && (view !== "lookup" || lookupQ.length > 0);
   const listKey = qk.ghm.list(buildQuery(1, PAGE_SIZE).toString());
   const listQuery = useGhmList({
     buildQuery,
@@ -3180,63 +3187,67 @@ export default function GHMPage() {
             )}
           </div>
           <div className="ghm__controls">
-            <SearchBox
-              value={search}
-              onChange={setSearch}
-              placeholder={
-                view === "lookup"
-                  ? "Search any patient — name, file no, phone"
-                  : isMissed
-                    ? "Search missed patients — name, file no, phone"
-                    : "Search this date — name, file no, phone, condition"
-              }
-            />
-            <GhmFilters
-              view={view}
-              date={date}
-              doctor={doctor}
-              doctors={doctors}
-              collectionFilter={collectionFilter}
-              modeFilter={modeFilter}
-              callsFilter={callsFilter}
-              defaultCallsFilter={defaultCallsFilter}
-              team={obtTeam}
-              activeCount={activeFilters}
-              onApply={(next) => {
-                setDate(next.date || todayStr());
-                setDoctor(next.doctor);
-                setCollectionFilter(next.collectionFilter);
-                setModeFilter(next.modeFilter);
-                setCallsFilter(next.callsFilter);
-              }}
-              defaultDate={tabDefaultDate(view)}
-              onReset={resetFilterFields}
-            />
-            {filtersActive && (
-              <button
-                type="button"
-                className="btn btn--ghost"
-                onClick={resetFilters}
-                title="Clear search, doctor, collection, mode, calls and date filters"
-              >
-                <RotateCcw size={14} aria-hidden="true" />
-                <span className="ghm__btn-label">Reset filters</span>
-              </button>
+            {!isChanges && (
+              <>
+                <SearchBox
+                  value={search}
+                  onChange={setSearch}
+                  placeholder={
+                    view === "lookup"
+                      ? "Search any patient — name, file no, phone"
+                      : isMissed
+                        ? "Search missed patients — name, file no, phone"
+                        : "Search this date — name, file no, phone, condition"
+                  }
+                />
+                <GhmFilters
+                  view={view}
+                  date={date}
+                  doctor={doctor}
+                  doctors={doctors}
+                  collectionFilter={collectionFilter}
+                  modeFilter={modeFilter}
+                  callsFilter={callsFilter}
+                  defaultCallsFilter={defaultCallsFilter}
+                  team={obtTeam}
+                  activeCount={activeFilters}
+                  onApply={(next) => {
+                    setDate(next.date || todayStr());
+                    setDoctor(next.doctor);
+                    setCollectionFilter(next.collectionFilter);
+                    setModeFilter(next.modeFilter);
+                    setCallsFilter(next.callsFilter);
+                  }}
+                  defaultDate={tabDefaultDate(view)}
+                  onReset={resetFilterFields}
+                />
+                {filtersActive && (
+                  <button
+                    type="button"
+                    className="btn btn--ghost"
+                    onClick={resetFilters}
+                    title="Clear search, doctor, collection, mode, calls and date filters"
+                  >
+                    <RotateCcw size={14} aria-hidden="true" />
+                    <span className="ghm__btn-label">Reset filters</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className={`btn btn--ghost ${compact ? "btn--on" : ""}`}
+                  aria-pressed={compact}
+                  onClick={() => setCompact((v) => !v)}
+                  title={
+                    compact
+                      ? "Back to the roomier row height"
+                      : "Smaller text and tighter rows — every column stays, so more patients fit a screen"
+                  }
+                >
+                  <Rows3 size={14} aria-hidden="true" />
+                  <span className="ghm__btn-label">Compact rows</span>
+                </button>
+              </>
             )}
-            <button
-              type="button"
-              className={`btn btn--ghost ${compact ? "btn--on" : ""}`}
-              aria-pressed={compact}
-              onClick={() => setCompact((v) => !v)}
-              title={
-                compact
-                  ? "Back to the roomier row height"
-                  : "Smaller text and tighter rows — every column stays, so more patients fit a screen"
-              }
-            >
-              <Rows3 size={14} aria-hidden="true" />
-              <span className="ghm__btn-label">Compact rows</span>
-            </button>
             <button
               type="button"
               className={`btn btn--ghost ${fullscreen ? "btn--on" : ""}`}
@@ -3257,23 +3268,27 @@ export default function GHMPage() {
                 {fullscreen ? "Exit full screen" : "Full screen"}
               </span>
             </button>
-            {canAssignCalls && view !== "reassign" && view !== "lookup" && !isMissed && (
-              <button
-                type="button"
-                className="btn btn--ghost"
-                onClick={() => setDivideOpen(true)}
-                disabled={!listEnabled || total === 0 || !obtTeam.length}
-                title={
-                  obtTeam.length
-                    ? "Share today's calls on this list between the OBT team"
-                    : "No OBT team members found"
-                }
-              >
-                <Users size={14} aria-hidden="true" />
-                <span className="ghm__btn-label">Divide calls</span>
-              </button>
-            )}
-            {view !== "reassign" && !isMissed && (
+            {canAssignCalls &&
+              view !== "reassign" &&
+              view !== "lookup" &&
+              !isMissed &&
+              !isChanges && (
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  onClick={() => setDivideOpen(true)}
+                  disabled={!listEnabled || total === 0 || !obtTeam.length}
+                  title={
+                    obtTeam.length
+                      ? "Share today's calls on this list between the OBT team"
+                      : "No OBT team members found"
+                  }
+                >
+                  <Users size={14} aria-hidden="true" />
+                  <span className="ghm__btn-label">Divide calls</span>
+                </button>
+              )}
+            {view !== "reassign" && !isMissed && !isChanges && (
               <button
                 type="button"
                 className="btn btn--ghost"
@@ -3444,6 +3459,13 @@ export default function GHMPage() {
           reached another way (deep link, persisted view state). */}
       {view === "reassign" && canReassign ? (
         <ReassignNeededView date={date} />
+      ) : isChanges ? (
+        <StatusChangesView
+          doctors={doctors}
+          renderHistory={(row, colSpan) => (
+            <CallHistoryPanel row={row} ccAgents={ccAgents} colSpan={colSpan} />
+          )}
+        />
       ) : (
         <>
           {/* ── Summary ── */}
@@ -3591,7 +3613,7 @@ export default function GHMPage() {
                     )}
                     <th style={{ width: 180 }}>Preferred Doctor</th>
                     <th style={{ width: 150 }}>Preferred Date</th>
-                    <th style={{ width: 195 }}>Preferred Time</th>
+                    <th style={{ width: 195 }}>Time Slot</th>
                     <th style={{ width: 130 }}>Home Collection</th>
                     <th className="tl" style={{ minWidth: 210 }}>
                       Notes / Reason
@@ -3779,7 +3801,7 @@ export default function GHMPage() {
                                 {row.booking_no_slot && !row.is_booked && !row.booked_on && (
                                   <span
                                     className="lapsed-tag"
-                                    title={`Marked booked for ${prettyDate(row.booked_for_date)}, but no time is set — choose a preferred time or use Book next`}
+                                    title={`Marked booked for ${prettyDate(row.booked_for_date)}, but no time is set — choose a time slot or use Book next`}
                                   >
                                     No time slot yet · {prettyDate(row.booked_for_date)}
                                   </span>

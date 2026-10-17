@@ -430,6 +430,7 @@ export default function ArrivalBill({
         )}
       </div>
       <CarriedTests carry={preview.carry} choices={choices} onChange={onChange} />
+      {preview.journeyNote && <div className="dp-hint">{preview.journeyNote}</div>}
       {lines.length === 0 ? (
         <div className="dp-hint">Nothing to bill yet — the consultant may still order tests.</div>
       ) : (

@@ -2426,3 +2426,29 @@ a.pcell__ph:hover {
   background: #eefaf6;
   color: #08664f;
 }
+
+.chg-view .summary {
+  margin-top: 10px;
+}
+.chg-tbl__note {
+  display: block;
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: #64748b;
+}
+.chg-tbl__note--since {
+  color: #b45309;
+}
+.chg-tbl th.chg-tbl__pt,
+.chg-tbl td.chg-tbl__pt {
+  position: sticky;
+  left: 0;
+  background: #fff;
+}
+.chg-tbl td.chg-tbl__pt {
+  z-index: 1;
+}
+.chg-tbl th.chg-tbl__pt {
+  z-index: 4;
+  background: #f1f5f9;
+}

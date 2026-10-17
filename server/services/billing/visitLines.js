@@ -455,6 +455,47 @@ export async function linesForOrder(visitId, { labOrderId, testNames = [] } = {}
   }
 }
 
+const onVisitBillOrRemovedSql = () => `
+  EXISTS (SELECT 1 FROM bill_lines l JOIN bills b ON b.id = l.bill_id
+           WHERE l.visit_id = $1 AND l.service_item_id = $2 AND l.is_live
+             AND b.status <> 'cancelled')
+  OR ${REMOVED_BY_DESK_SQL("$1::uuid", "$2::int")}`;
+
+export async function linesForNurseTests(visitId, testNames = [], ctx, db = pool) {
+  try {
+    const wanted = [
+      ...new Set(testNames.filter((name) => typeof name === "string" && name.trim())),
+    ];
+    if (!wanted.length) return { ok: true, added: [], not_priced: [] };
+    return await inTransaction(async (outer) => {
+      const items = await itemsForTests(outer, wanted);
+      const added = [];
+      const notPriced = wanted.filter((name) => !items.has(name));
+      for (const name of wanted) {
+        const item = items.get(name);
+        if (!item) continue;
+        const { rows } = await outer.query(`SELECT ${onVisitBillOrRemovedSql()} AS there`, [
+          visitId,
+          item.id,
+        ]);
+        if (rows[0].there) continue;
+        await inTransaction(async (client) => {
+          const bill = await openDraftIn(client, visitId, ctx);
+          await addLineIn(client, bill, { item_id: item.id, source: "added" }, ctx);
+        }, outer);
+        added.push(name);
+      }
+      if (notPriced.length) {
+        console.warn(`[billing] not priced on visit ${visitId}: ${notPriced.join(", ")}`);
+      }
+      return { ok: true, added, not_priced: notPriced };
+    }, db);
+  } catch (error) {
+    if (error.code === "40P01") throw error;
+    return report(`no bill lines for the nurse tests on visit ${visitId}`, error);
+  }
+}
+
 const WITH_DELETED_DRAFT = (audit) => `EXISTS (
   SELECT 1 FROM billing_audit da
    WHERE da.entity = 'bills' AND da.action = 'delete'

@@ -31,6 +31,7 @@ import {
   logBookingCreated,
 } from "../services/appointmentHistory.js";
 import { CATEGORY_VALUES } from "../../shared/patientCategories.js";
+import { changesRange, listStatusChanges } from "../services/ghmChanges.js";
 import { isClosedDay } from "../../shared/followUp.js";
 import { listSchemes, isKnownScheme } from "../services/patientSchemes.js";
 import { slotDoctorKey, slotStartHour } from "../../shared/slotHour.js";
@@ -1153,6 +1154,22 @@ router.get("/ghm-appointments", async (req, res) => {
     const effLimit = exportAll ? EXPORT_MAX : Math.min(100, Math.max(1, +limit || 50));
     const offset = exportAll ? 0 : (Math.max(1, +page) - 1) * effLimit;
 
+    if (mode === "changes") {
+      const { from, to } = changesRange(req.query.from, req.query.to);
+      return res.json(
+        await listStatusChanges(pool, {
+          from,
+          to,
+          kind: String(req.query.kind || ""),
+          q: req.query.q,
+          doctor,
+          by: String(req.query.by || "").trim() || null,
+          limit: effLimit,
+          offset,
+        }),
+      );
+    }
+
     const params = [d];
 
     const homeOnly = ["1", "true", "yes"].includes(
@@ -2150,7 +2167,7 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
       if (req.body.booking_status === "booked" && !wasBooked && !slot)
         return res.status(400).json({
           error: past
-            ? "Choose the patient's preferred time before marking them booked."
+            ? "Choose the patient's time slot before marking them booked."
             : "Allocate a time slot before marking this patient booked.",
         });
       if (slotField in req.body && !("booking_status" in req.body)) {
@@ -2240,7 +2257,7 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
       pt_recovery: "Patient Recovery",
       preferred_date: "Preferred Date",
       preferred_doctor: "Preferred Doctor",
-      preferred_time_slot: "Preferred Time",
+      preferred_time_slot: "Time Slot",
       home_collection: "Home Collection",
       assigned_mo: "Assigned MO",
       prescription_explained_by: "Prescription Explained By",

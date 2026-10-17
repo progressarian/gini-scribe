@@ -120,7 +120,7 @@ test.describe("GHM: a booking needs a time slot", () => {
       data: { booking_status: "booked" },
     });
     expect(refused.status()).toBe(400);
-    expect((await refused.json()).error).toMatch(/preferred time/i);
+    expect((await refused.json()).error).toMatch(/time slot/i);
 
     const res = await api.patch(`/api/ghm-appointments/${id}`, {
       data: { preferred_time_slot: "10 AM to 11 AM" },
@@ -138,7 +138,7 @@ test.describe("GHM: a booking needs a time slot", () => {
       data: { booking_status: "booked" },
     });
     expect(refused.status()).toBe(400);
-    expect((await refused.json()).error).toMatch(/preferred time/i);
+    expect((await refused.json()).error).toMatch(/time slot/i);
   });
 
   test("7. cancelling is always allowed", async () => {

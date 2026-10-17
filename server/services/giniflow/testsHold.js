@@ -1,6 +1,7 @@
 import { CANCELLABLE_ORDER_STATUSES } from "../../../shared/testCancelReasons.js";
 import pool from "../../config/db.js";
 import { LAB_ONLY_DOCTOR } from "../../../shared/labOnly.js";
+import { NURSE_RAPID_TESTS } from "../../../shared/nurseTests.js";
 
 export const DOCTOR_LEG_STATUSES = [
   "vitals_done",
@@ -9,6 +10,10 @@ export const DOCTOR_LEG_STATUSES = [
   "ready_for_doctor",
   "with_doctor",
 ];
+
+export const NOT_NURSE_RAPID_TEST_SQL = (i) =>
+  `lower(regexp_replace(btrim(COALESCE(${i}->>'desc', '')), '\\s+', ' ', 'g'))
+     <> ALL (ARRAY[${NURSE_RAPID_TESTS.map((t) => `'${t}'`).join(", ")}]::text[])`;
 
 export const LIVE_BILL_ITEM_SQL = (i) =>
   `(NOT COALESCE((${i}->>'cancelled')::boolean, FALSE)
@@ -30,7 +35,8 @@ const CASE_NOT_ON_BILL_SQL = (lc) =>
                    AND bx.status = 'billed'
                    AND bx.read_at > (COALESCE(${lc}.raw_detail_json, ${lc}.raw_list_json)->>'registered_at')::timestamptz
                    AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(bx.items, '[]'::jsonb)) bi
-                                    WHERE bi->>'category' = 'lab' AND ${LIVE_BILL_ITEM_SQL("bi")})))`;
+                                    WHERE bi->>'category' = 'lab' AND ${LIVE_BILL_ITEM_SQL("bi")}
+                                      AND ${NOT_NURSE_RAPID_TEST_SQL("bi")})))`;
 
 export const CASE_NOT_CANCELLED_SQL = (lc = "lc") =>
   `(NOT EXISTS (SELECT 1 FROM giniflow_lab_case_actions cx

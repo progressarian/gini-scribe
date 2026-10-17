@@ -887,6 +887,14 @@ export const giniflowCheckinSchema = z.object({
   sendWhatsapp: z.boolean().default(false),
 });
 
+export const giniflowArrivalBillPreviewSchema = z.strictObject({
+  visitTypeId: z.string().trim().max(60).nullish(),
+  steps: z.array(giniflowStepSchema).max(40).default([]),
+  skip: z.array(z.string().uuid()).max(50).default([]),
+  add: z.array(z.number().int().positive()).max(30).default([]),
+  remove: z.array(z.number().int().positive()).max(30).default([]),
+});
+
 export const giniflowArrivalBillSchema = z.strictObject({
   skip: z.array(z.string().uuid()).max(50).default([]),
   alreadyPaid: z

@@ -7,6 +7,7 @@ import {
 import { callLabel } from "../../shared/callStatuses.js";
 import { visitStatus } from "./visitStatus.js";
 import { isInvestigationVisit } from "../../shared/labOnly.js";
+import { STATUS_CHANGE_KINDS, changeKindLabel } from "../../shared/statusChanges.js";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -286,6 +287,15 @@ const downloadWorkbook = (XLSX, wb, filename) => {
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 };
 
+const loadXlsx = async () => {
+  const mod = await import("xlsx-js-style");
+  // Interop: the CJS build lands on `default` through Vite, on the namespace
+  // itself elsewhere. Reading only one of them is how the button dies silently.
+  const XLSX = mod?.default?.utils ? mod.default : mod;
+  if (!XLSX?.utils) throw new Error("Excel library failed to load — check the network tab");
+  return XLSX;
+};
+
 export const exportWatiWorkbook = async (
   rows,
   date,
@@ -294,11 +304,7 @@ export const exportWatiWorkbook = async (
   owners = {},
   { bookings = false, singleSheet = null } = {},
 ) => {
-  const mod = await import("xlsx-js-style");
-  // Interop: the CJS build lands on `default` through Vite, on the namespace
-  // itself elsewhere. Reading only one of them is how the button dies silently.
-  const XLSX = mod?.default?.utils ? mod.default : mod;
-  if (!XLSX?.utils) throw new Error("Excel library failed to load — check the network tab");
+  const XLSX = await loadXlsx();
 
   // One tab per list, always present so the file has the same shape every day —
   // an empty tab says "nobody in this list", which a missing tab does not.
@@ -328,5 +334,81 @@ export const exportWatiWorkbook = async (
   const wb = XLSX.utils.book_new();
   for (const sheet of built) XLSX.utils.book_append_sheet(wb, sheet.ws, sheet.name);
   downloadWorkbook(XLSX, wb, `${fileLabel}_${String(date).slice(0, 10)}.xlsx`);
+  return counts;
+};
+
+const CHANGE_HEADERS = [
+  "Name",
+  "CountryCode",
+  "Phone",
+  "AllowCampaign",
+  "AllowSMS",
+  "Appt_Date",
+  "Start_Time",
+  "End_Time",
+  "UHID",
+  "Doctor",
+  "Change",
+  "Was_Date",
+  "Changed_By",
+  "Changed_At",
+];
+const CHANGE_WIDTHS = [22, 12, 14, 14, 12, 14, 12, 12, 12, 20, 14, 14, 14, 20];
+
+const changedAtLabel = (value) =>
+  value
+    ? `${fmtSheetDate(new Date(value).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }))} ${fmtSheetTime(value)}`
+    : "";
+
+const statusChangeRow = (r) => {
+  const { code, number } = splitCountryCode(r.phone);
+  const { start, end } = splitSlot(r.plan_time);
+  return [
+    r.patient_name || "",
+    code,
+    number,
+    "True",
+    "True",
+    fmtSheetDate(r.plan_date),
+    start,
+    end,
+    r.file_no || "",
+    r.plan_doctor || r.doctor_name || "",
+    changeKindLabel(r.kind),
+    fmtSheetDate(r.was_date),
+    r.changed_by || "",
+    changedAtLabel(r.changed_at),
+  ];
+};
+
+export const statusChangesFileName = ({ from, to }) =>
+  from === to ? `ghm-status-changes_${from}.xlsx` : `ghm-status-changes_${from}_to_${to}.xlsx`;
+
+export const exportStatusChangesWorkbook = async (rows, range, kinds = STATUS_CHANGE_KINDS) => {
+  const XLSX = await loadXlsx();
+  const rangeLabel =
+    range.from === range.to
+      ? fmtSheetDate(range.from)
+      : `${fmtSheetDate(range.from)} – ${fmtSheetDate(range.to)}`;
+  const wb = XLSX.utils.book_new();
+  const counts = { total: 0, lists: {} };
+  for (const kind of kinds) {
+    const body = (rows || []).filter((r) => r.kind === kind.value && r.phone).map(statusChangeRow);
+    const titleRow = new Array(CHANGE_HEADERS.length).fill("");
+    titleRow[0] = kind.label;
+    titleRow[3] = `${body.length} patient${body.length === 1 ? "" : "s"}`;
+    titleRow[5] = rangeLabel;
+    const ws = XLSX.utils.aoa_to_sheet([titleRow, CHANGE_HEADERS, ...body]);
+    ws["!cols"] = CHANGE_WIDTHS.map((wch) => ({ wch }));
+    styleCell(XLSX, ws, 0, 0, BLOCK_STYLE);
+    styleCell(XLSX, ws, 0, 3, TITLE_STYLE);
+    styleCell(XLSX, ws, 0, 5, DATE_STYLE);
+    CHANGE_HEADERS.forEach((_, i) => styleCell(XLSX, ws, 1, i, HEADER_STYLE));
+    XLSX.utils.book_append_sheet(wb, ws, kind.label);
+    counts.lists[kind.label] = body.length;
+    counts.total += body.length;
+  }
+  if (!counts.total) return counts;
+  downloadWorkbook(XLSX, wb, statusChangesFileName(range));
   return counts;
 };

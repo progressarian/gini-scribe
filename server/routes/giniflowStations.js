@@ -24,7 +24,11 @@ import {
 } from "../schemas/billing.js";
 import { validate, validateQuery } from "../middleware/validate.js";
 import { CAPABILITIES as CAP } from "../../shared/permissions.js";
-import { giniflowArrivalBillSchema, giniflowReportReviewSchema } from "../schemas/index.js";
+import {
+  giniflowArrivalBillPreviewSchema,
+  giniflowArrivalBillSchema,
+  giniflowReportReviewSchema,
+} from "../schemas/index.js";
 import { arrivalBillPreview, commitArrivalBill } from "../services/billing/arrivalBill.js";
 import { auditContext } from "../services/billing/audit.js";
 import { requestMedicine } from "../services/pharmacy/stockNeeded.js";
@@ -1148,6 +1152,26 @@ router.get(
         await arrivalBillPreview(
           req.params.visitId,
           { skip, add: ids("add"), remove: ids("remove") },
+          deskCtx(req),
+        ),
+      );
+    } catch (e) {
+      handleError(res, e, "Arrival bill");
+    }
+  },
+);
+
+router.post(
+  "/giniflow/stations/reception/:visitId/arrival-bill/preview",
+  arrivalBillGate,
+  validate(giniflowArrivalBillPreviewSchema),
+  async (req, res) => {
+    try {
+      const { skip, add, remove, visitTypeId, steps } = req.body;
+      res.json(
+        await arrivalBillPreview(
+          req.params.visitId,
+          { skip, add, remove, plan: { visitTypeId, steps } },
           deskCtx(req),
         ),
       );

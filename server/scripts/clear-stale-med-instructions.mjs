@@ -3,7 +3,10 @@ import fs from "node:fs";
 import pool from "../config/db.js";
 
 const [planPath, mode = "dry", limitArg] = process.argv.slice(2);
-const plan = JSON.parse(fs.readFileSync(planPath, "utf8")).slice(0, limitArg ? Number(limitArg) : undefined);
+const plan = JSON.parse(fs.readFileSync(planPath, "utf8")).slice(
+  0,
+  limitArg ? Number(limitArg) : undefined,
+);
 const BATCH = 100;
 let cleared = 0;
 for (let i = 0; i < plan.length; i += BATCH) {

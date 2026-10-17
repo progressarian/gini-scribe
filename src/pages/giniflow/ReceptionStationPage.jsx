@@ -41,6 +41,7 @@ import {
 } from "../../queries/hooks/useBilling";
 import "../../styles/giniflow-station.css";
 import useAuthStore from "../../stores/authStore";
+import useDebounced from "../../hooks/useDebounced";
 import { CAPABILITIES as CAPS, hasCapability } from "../../../shared/permissions.js";
 import CancelTestControl from "../../components/giniflow/CancelTestControl";
 import UrgentCancelControl from "../../components/giniflow/UrgentCancelControl";
@@ -1272,14 +1273,22 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   const [arrivalChoices, setArrivalChoices] = useState(emptyArrivalChoices);
   const [arrivalError, setArrivalError] = useState(null);
   const billVisitId = billFor || arrival.visitId;
+  const journeyPlan = useDebounced(
+    useMemo(
+      () => (billFor ? null : { visitTypeId, steps: steps || [] }),
+      [billFor, visitTypeId, steps],
+    ),
+    300,
+  );
   const arrivalBill = useArrivalBill(
     billVisitId,
     {
       skip: arrivalChoices.skip,
       add: arrivalChoices.add.map((item) => item.id),
       remove: arrivalChoices.remove.map((item) => item.id),
+      plan: journeyPlan,
     },
-    canBill,
+    canBill && (Boolean(billFor) || steps !== null),
   );
   const commitArrivalBill = useCommitArrivalBill();
   const { data: shift } = useCurrentShift({ enabled: canBill });

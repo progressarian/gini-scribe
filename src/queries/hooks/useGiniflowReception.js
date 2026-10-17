@@ -198,7 +198,11 @@ export function useHealthrayBill(patientId) {
 
 const idList = (ids) => [...ids].sort().join(",");
 
-export function useArrivalBill(visitId, { skip = [], add = [], remove = [] } = {}, enabled = true) {
+export function useArrivalBill(
+  visitId,
+  { skip = [], add = [], remove = [], plan = null } = {},
+  enabled = true,
+) {
   return useQuery({
     queryKey: [
       "giniflow",
@@ -208,17 +212,27 @@ export function useArrivalBill(visitId, { skip = [], add = [], remove = [] } = {
       idList(skip),
       idList(add),
       idList(remove),
+      plan,
     ],
     queryFn: async () =>
-      (
-        await api.get(`/api/giniflow/stations/reception/${visitId}/arrival-bill`, {
-          params: {
-            ...(skip.length ? { skip: skip.join(",") } : {}),
-            ...(add.length ? { add: add.join(",") } : {}),
-            ...(remove.length ? { remove: remove.join(",") } : {}),
-          },
-        })
-      ).data,
+      plan
+        ? (
+            await api.post(`/api/giniflow/stations/reception/${visitId}/arrival-bill/preview`, {
+              ...plan,
+              skip,
+              add,
+              remove,
+            })
+          ).data
+        : (
+            await api.get(`/api/giniflow/stations/reception/${visitId}/arrival-bill`, {
+              params: {
+                ...(skip.length ? { skip: skip.join(",") } : {}),
+                ...(add.length ? { add: add.join(",") } : {}),
+                ...(remove.length ? { remove: remove.join(",") } : {}),
+              },
+            })
+          ).data,
     enabled: Boolean(visitId) && enabled,
     placeholderData: (prev) => prev,
   });

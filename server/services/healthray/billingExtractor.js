@@ -3,6 +3,7 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 
 import { createLogger } from "../logger.js";
+import { isNurseRapidTest } from "../../../shared/nurseTests.js";
 const { log, error } = createLogger("Billing Extract");
 
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
@@ -185,7 +186,9 @@ export function transactionsToBilling(rows, { appointmentId, date, wholeDay = fa
   const live = items.filter(
     (i) => !i.cancelled && !(Number(i.amount) > 0 && Number(i.refunded || 0) >= Number(i.amount)),
   );
-  const labs = live.filter((i) => i.category === "lab").map((i) => i.desc);
+  const labs = live
+    .filter((i) => i.category === "lab" && !isNurseRapidTest(i.desc))
+    .map((i) => i.desc);
   const steps = [];
   if (labs.length) {
     steps.push({ step_catalog_id: "blood_sample", step_name: "Blood Sample", tests: labs });
