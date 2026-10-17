@@ -171,6 +171,8 @@ const ROUTE_CAPABILITIES = [
   // you?" without being CRM users, so this rides on the same capability as the
   // registration form it sits in.
   ["/api/crm/registration", CAP.PATIENT_READ],
+  ["/api/crm/import", CAP.CRM_IMPORT],
+  ["/api/crm/assignments", CAP.CRM_IMPORT],
   ["/api/crm", CAP.CRM_ACCESS],
   ["/api/patients", CAP.PATIENT_READ],
   ["/api/patients/directory-export", CAP.ADMIN],

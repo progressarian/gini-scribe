@@ -6,9 +6,27 @@ import {
   suggestMapping,
   createBatch,
   previewBatch,
-  commitBatch,
 } from "../crm/importDoctors.js";
 import { crmContext } from "../crm/db.js";
+import {
+  ImportAssignError,
+  assertCanAssign,
+  batchSummary,
+  commitChunk,
+  listAssignees,
+  pagedPreview,
+  pickAssignee,
+  resolveBatch,
+  retryRows,
+} from "../crm/importAssign.js";
+import { failedWorkbook, templateWorkbook } from "../crm/importWorkbooks.js";
+import { ASSIGNING_ROLES } from "../crm/assignees.js";
+import {
+  AssignmentError,
+  assignDoctors,
+  assignmentsWorkbook,
+  listAssignments,
+} from "../crm/assignments.js";
 import {
   createReferral,
   advanceReferral,
@@ -38,6 +56,10 @@ router.get("/crm/registration/referring-doctors", async (req, res) => {
 // Everything below is a CRM operation, so it runs as a CRM user through
 // withCrmContext. crmContext() refuses a caller with no crm.users row.
 const crm = crmContext();
+const importer = (req, res, next) =>
+  ASSIGNING_ROLES.includes(req.crmUser?.role)
+    ? next()
+    : res.status(403).json({ error: "Only an admin or the head of growth can import doctors" });
 
 // ---- Rep home and visit logging (brief §5, §13) -------------------------
 router.get("/crm/home", crm, async (req, res) => {
@@ -137,40 +159,89 @@ router.patch("/crm/doctors/:id", crm, express.json(), async (req, res) => {
   }
 });
 
-router.get("/crm/import/fields", crm, (_req, res) => res.json(IMPORT_FIELDS));
+router.get("/crm/assignments", crm, importer, async (req, res) => {
+  try {
+    const { owner, territory, q, page } = req.query;
+    res.json(await listAssignments(req.crmUser, { owner, territory, q, page }));
+  } catch (e) {
+    importError(res, e, "Assignments");
+  }
+});
+
+router.post("/crm/assignments", crm, importer, express.json(), async (req, res) => {
+  try {
+    const { doctor_ids, executive_id } = req.body || {};
+    res.json(
+      await assignDoctors(req.crmUser, { doctorIds: doctor_ids, executiveId: executive_id }),
+    );
+  } catch (e) {
+    importError(res, e, "Assign doctors");
+  }
+});
+
+router.get("/crm/assignments/export.xlsx", crm, importer, async (req, res) => {
+  try {
+    const { owner, territory, q } = req.query;
+    const { buffer } = await assignmentsWorkbook(req.crmUser, { owner, territory, q });
+    const day = new Date().toISOString().slice(0, 10);
+    res.setHeader("Content-Type", XLSX_TYPE);
+    res.setHeader("Content-Disposition", `attachment; filename="crm-assignments-${day}.xlsx"`);
+    res.send(Buffer.from(buffer));
+  } catch (e) {
+    importError(res, e, "Assignments export");
+  }
+});
+
+router.get("/crm/import/fields", crm, importer, (_req, res) => res.json(IMPORT_FIELDS));
 
 // Step 1 — read the file and guess the mapping. Nothing is stored yet.
-router.post("/crm/import/parse", crm, express.raw({ type: "*/*", limit: "8mb" }), (req, res) => {
-  try {
-    const { headers, rows } = parseSheet(req.body, req.query.name || "upload");
-    res.json({
-      headers,
-      suggested_mapping: suggestMapping(headers),
-      total_rows: rows.length,
-      sample: rows.slice(0, 5),
-      // The mapping step only needs a sample; the preview step needs the lot.
-      rows: req.query.full ? rows : undefined,
-    });
-  } catch (e) {
-    handleError(res, e, "Import parse");
-  }
-});
+router.post(
+  "/crm/import/parse",
+  crm,
+  importer,
+  express.raw({ type: "*/*", limit: "8mb" }),
+  (req, res) => {
+    try {
+      const { headers, rows } = parseSheet(req.body, req.query.name || "upload");
+      res.json({
+        headers,
+        suggested_mapping: suggestMapping(headers),
+        total_rows: rows.length,
+        sample: rows.slice(0, 5),
+        // The mapping step only needs a sample; the preview step needs the lot.
+        rows: req.query.full ? rows : undefined,
+      });
+    } catch (e) {
+      handleError(res, e, "Import parse");
+    }
+  },
+);
 
 // Step 2 — store the rows with the operator's mapping.
-router.post("/crm/import/batches", crm, express.json({ limit: "16mb" }), async (req, res) => {
-  try {
-    const { file_name, headers, rows, mapping } = req.body;
-    if (!Array.isArray(rows) || rows.length === 0) {
-      return res.status(400).json({ error: "No rows to import" });
+router.post(
+  "/crm/import/batches",
+  crm,
+  importer,
+  express.json({ limit: "16mb" }),
+  async (req, res) => {
+    try {
+      const { file_name, headers, rows, mapping } = req.body;
+      if (!Array.isArray(rows) || rows.length === 0) {
+        return res.status(400).json({ error: "No rows to import" });
+      }
+      const mapped = Object.values(mapping || {});
+      if (mapped.includes("assigned_to") || mapped.includes("doctor_id")) {
+        assertCanAssign(req.crmUser);
+      }
+      res.json(await createBatch(req.crmUser, { fileName: file_name, headers, rows, mapping }));
+    } catch (e) {
+      handleError(res, e, "Import batch");
     }
-    res.json(await createBatch(req.crmUser, { fileName: file_name, headers, rows, mapping }));
-  } catch (e) {
-    handleError(res, e, "Import batch");
-  }
-});
+  },
+);
 
 // Step 3 — resolve, dedup and flag. Still writes nothing to crm.doctors.
-router.get("/crm/import/batches/:id/preview", crm, async (req, res) => {
+router.get("/crm/import/batches/:id/preview", crm, importer, async (req, res) => {
   try {
     res.json(await previewBatch(req.crmUser, req.params.id));
   } catch (e) {
@@ -178,12 +249,102 @@ router.get("/crm/import/batches/:id/preview", crm, async (req, res) => {
   }
 });
 
-// Step 4 — the only call that changes the doctor universe.
-router.post("/crm/import/batches/:id/commit", crm, express.json(), async (req, res) => {
+const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+function importError(res, e, context) {
+  if (e instanceof ImportAssignError || e instanceof AssignmentError) {
+    return res.status(e.status).json({ error: e.message });
+  }
+  console.error(`${context} error:`, e?.message, e?.detail || "", e?.stack || "");
+  const message =
+    e?.code === "23505"
+      ? "A doctor in this file already exists in the CRM. Build the preview again and retry."
+      : `${context} failed. Try again; if it keeps failing, contact an administrator.`;
+  res.status(e?.code === "23505" ? 409 : 500).json({ error: message });
+}
+
+router.get("/crm/import/assignees", crm, importer, async (req, res) => {
   try {
-    res.json(await commitBatch(req.crmUser, req.params.id, req.body?.skip_rows || []));
+    assertCanAssign(req.crmUser);
+    res.json(await listAssignees(req.crmUser));
   } catch (e) {
-    handleError(res, e, "Import commit");
+    importError(res, e, "Staff list");
+  }
+});
+
+router.get("/crm/import/template.xlsx", crm, importer, async (req, res) => {
+  try {
+    assertCanAssign(req.crmUser);
+    const { buffer } = await templateWorkbook(req.crmUser);
+    const day = new Date().toISOString().slice(0, 10);
+    res.setHeader("Content-Type", XLSX_TYPE);
+    res.setHeader("Content-Disposition", `attachment; filename="crm-doctors-template-${day}.xlsx"`);
+    res.send(Buffer.from(buffer));
+  } catch (e) {
+    importError(res, e, "Doctors template");
+  }
+});
+
+router.post("/crm/import/batches/:id/resolve", crm, importer, async (req, res) => {
+  try {
+    res.json(await resolveBatch(req.crmUser, req.params.id));
+  } catch (e) {
+    importError(res, e, "Import preview");
+  }
+});
+
+router.get("/crm/import/batches/:id/summary", crm, importer, async (req, res) => {
+  try {
+    res.json(await batchSummary(req.crmUser, req.params.id));
+  } catch (e) {
+    importError(res, e, "Import summary");
+  }
+});
+
+router.get("/crm/import/batches/:id/rows", crm, importer, async (req, res) => {
+  try {
+    const { status, q, page } = req.query;
+    res.json(await pagedPreview(req.crmUser, req.params.id, { status, q, page }));
+  } catch (e) {
+    importError(res, e, "Import rows");
+  }
+});
+
+router.post("/crm/import/batches/:id/commit", crm, importer, express.json(), async (req, res) => {
+  try {
+    const skipRows = Array.isArray(req.body?.skip_rows) ? req.body.skip_rows : [];
+    res.json(await commitChunk(req.crmUser, req.params.id, { skipRows }));
+  } catch (e) {
+    importError(res, e, "Import");
+  }
+});
+
+router.post("/crm/import/batches/:id/pick", crm, importer, express.json(), async (req, res) => {
+  try {
+    assertCanAssign(req.crmUser);
+    res.json(await pickAssignee(req.crmUser, req.params.id, req.body || {}));
+  } catch (e) {
+    importError(res, e, "Choose staff");
+  }
+});
+
+router.post("/crm/import/batches/:id/retry", crm, importer, express.json(), async (req, res) => {
+  try {
+    assertCanAssign(req.crmUser);
+    res.json(await retryRows(req.crmUser, req.params.id, req.body?.rows));
+  } catch (e) {
+    importError(res, e, "Retry");
+  }
+});
+
+router.get("/crm/import/batches/:id/failed.xlsx", crm, importer, async (req, res) => {
+  try {
+    const { buffer, fileName } = await failedWorkbook(req.crmUser, req.params.id);
+    res.setHeader("Content-Type", XLSX_TYPE);
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName.replace(/"/g, "")}"`);
+    res.send(Buffer.from(buffer));
+  } catch (e) {
+    importError(res, e, "Failed rows export");
   }
 });
 

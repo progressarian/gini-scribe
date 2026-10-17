@@ -1,6 +1,7 @@
 import * as XLSX from "xlsx";
 import { withCrmContext } from "./db.js";
 import { DOCTOR_PRIORITY_VALUES } from "../../shared/crmVocab.js";
+import { ASSIGNABLE_ROLES, ASSIGNING_ROLES, resolveAssignee } from "./assignees.js";
 
 // The doctor import wizard (brief §10). Deliberately not a script for one CSV:
 // Virender's transcribed list is the first file through it, and every later
@@ -18,6 +19,12 @@ import { DOCTOR_PRIORITY_VALUES } from "../../shared/crmVocab.js";
 // What a column can mean. `aliases` are matched case- and space-insensitively
 // against the header so the common shapes need no mapping at all.
 export const IMPORT_FIELDS = [
+  { key: "doctor_id", label: "Doctor ID", aliases: ["doctorid", "id"] },
+  {
+    key: "assigned_to",
+    label: "Assigned to",
+    aliases: ["assignedto", "assignee", "owner", "rep", "executive", "assigned"],
+  },
   {
     key: "full_name",
     label: "Doctor name",
@@ -221,10 +228,17 @@ export async function createBatch(crmUser, { fileName, headers, rows, mapping })
 
     const { rows: created } = await sql(
       `INSERT INTO crm.import_batches
-         (hospital_id, uploaded_by, file_name, column_mapping, status, total_rows)
-       VALUES ($1, $2, $3, $4, 'previewing', $5)
+         (hospital_id, uploaded_by, file_name, column_mapping, status, total_rows, headers)
+       VALUES ($1, $2, $3, $4, 'previewing', $5, $6)
        RETURNING id`,
-      [hospitalId, crmUser.id, fileName, JSON.stringify(mapping), rows.length],
+      [
+        hospitalId,
+        crmUser.id,
+        fileName,
+        JSON.stringify(mapping),
+        rows.length,
+        JSON.stringify(headers || Object.keys(rows[0] || {})),
+      ],
     );
     const batchId = created[0].id;
 
@@ -300,11 +314,31 @@ export async function previewBatch(crmUser, batchId) {
 
     const byMobile = new Map();
     const byNameTerritory = new Map();
+    const byId = new Map();
+    const nameMatches = new Map();
     const nameKey = (name, territory) => `${norm(name)}::${norm(territory)}`;
     for (const d of existing) {
       if (d.mobile_e164) byMobile.set(d.mobile_e164, d);
-      byNameTerritory.set(nameKey(d.full_name, d.territory || d.area), d);
+      const key = nameKey(d.full_name, d.territory || d.area);
+      byNameTerritory.set(key, d);
+      nameMatches.set(key, [...(nameMatches.get(key) || []), d]);
+      byId.set(d.id, d);
     }
+
+    const canAssign = ASSIGNING_ROLES.includes(crmUser.role);
+    const { rows: users } = canAssign
+      ? await sql(
+          `SELECT id, full_name, role FROM crm.users WHERE is_active AND deleted_at IS NULL`,
+        )
+      : { rows: [] };
+    const staff = users.filter((u) => ASSIGNABLE_ROLES.includes(u.role));
+    const others = users.filter((u) => !ASSIGNABLE_ROLES.includes(u.role));
+    const usersById = new Map(users.map((u) => [u.id, u]));
+    const { rows: openAssignments } = await sql(
+      `SELECT doctor_id, executive_id FROM crm.doctor_assignments WHERE effective_to IS NULL`,
+    );
+    const ownerOf = new Map(openAssignments.map((a) => [a.doctor_id, a.executive_id]));
+    const seenDoctor = new Map();
 
     // A number that appears against two different doctors in one list is not a
     // personal mobile — it is the clinic's line. Treating it as identity would
@@ -350,7 +384,33 @@ export async function previewBatch(crmUser, batchId) {
         );
       }
 
-      if (errors.length) {
+      let assignment = null;
+      if (!errors.length && (v.doctor_id || v.assigned_to)) {
+        assignment = classifyAssignment({
+          v,
+          row: r,
+          shared,
+          canAssign,
+          byId,
+          byMobile,
+          nameMatches,
+          key: nameKey(v.full_name, v.territory || v.area),
+          seenDoctor,
+          seenMobile,
+          staff,
+          others,
+          ownerOf,
+        });
+        status = assignment.status;
+        matched = assignment.doctor;
+        flags.push(...assignment.flags);
+      }
+
+      if (assignment) {
+        if (r.mobile_e164 && !seenMobile.has(r.mobile_e164)) {
+          seenMobile.set(r.mobile_e164, r.row_number);
+        }
+      } else if (errors.length) {
         status = "error";
       } else if (shared) {
         // Distinct doctors who happen to share a clinic line.
@@ -375,10 +435,10 @@ export async function previewBatch(crmUser, batchId) {
         seenName.set(key, r.row_number);
       }
 
-      if (r.mobile_e164 && !seenMobile.has(r.mobile_e164)) {
+      if (!assignment && r.mobile_e164 && !seenMobile.has(r.mobile_e164)) {
         seenMobile.set(r.mobile_e164, r.row_number);
       }
-      if (!r.mobile_e164 && status !== "error")
+      if (!r.mobile_e164 && (status === "create" || status === "possible_duplicate"))
         flags.push("No mobile — imports as a skeleton record");
       if (v.needs_verification) {
         flags.push(`Transcription uncertain: ${v.verification_note}`);
@@ -401,6 +461,23 @@ export async function previewBatch(crmUser, batchId) {
         flags,
         errors,
         matched_doctor: matched ? { id: matched.id, full_name: matched.full_name } : null,
+        doctor_match: assignment?.doctor_match ?? null,
+        assignee_typed: v.assigned_to ?? null,
+        assignee: assignment?.assignee
+          ? { id: assignment.assignee.id, full_name: assignment.assignee.full_name }
+          : null,
+        assignee_note: assignment?.note ?? null,
+        fail_reason: assignment?.reason ?? null,
+        suggestion: assignment?.suggestion
+          ? { id: assignment.suggestion.id, full_name: assignment.suggestion.full_name }
+          : null,
+        current_owner:
+          matched && usersById.get(ownerOf.get(matched.id))
+            ? {
+                id: ownerOf.get(matched.id),
+                full_name: usersById.get(ownerOf.get(matched.id)).full_name,
+              }
+            : null,
       });
     }
 
@@ -408,6 +485,76 @@ export async function previewBatch(crmUser, batchId) {
     return { batch: batches[0], rows: out, counts };
   });
 }
+
+function classifyAssignment(ctx) {
+  const { v, row, shared, canAssign, byId, byMobile, nameMatches, key, seenDoctor, seenMobile } =
+    ctx;
+  const fail = (reason, doctor = null, doctor_match = null, extra = {}) => ({
+    status: "failed",
+    reason,
+    doctor,
+    doctor_match,
+    flags: [],
+    ...extra,
+  });
+
+  if (!canAssign) return fail("Only an admin or the head of growth can assign doctors");
+
+  let doctor = null;
+  let doctor_match = null;
+  const flags = [];
+  if (v.doctor_id) {
+    doctor = byId.get(v.doctor_id) ?? null;
+    if (!doctor) return fail("Doctor ID not found — it may have been removed");
+    doctor_match = "id";
+  } else if (!shared && row.mobile_e164 && byMobile.has(row.mobile_e164)) {
+    doctor = byMobile.get(row.mobile_e164);
+    doctor_match = "mobile";
+  } else {
+    const named = nameMatches.get(key) || [];
+    if (named.length > 1) {
+      return fail(
+        `${named.length} doctors named ${v.full_name} in ${v.territory || v.area || "this area"} — add the mobile or Doctor ID`,
+      );
+    }
+    if (named.length === 1) {
+      doctor = named[0];
+      doctor_match = "name";
+      flags.push("Matched an existing doctor by name — check");
+    } else {
+      doctor_match = "new";
+    }
+  }
+
+  if (doctor) {
+    if (seenDoctor.has(doctor.id)) {
+      return fail(`Same doctor as row ${seenDoctor.get(doctor.id)}`, null, null);
+    }
+    seenDoctor.set(doctor.id, row.row_number);
+  } else if (row.mobile_e164 && !shared && seenMobile.has(row.mobile_e164)) {
+    return fail(`Same doctor as row ${seenMobile.get(row.mobile_e164)}`);
+  }
+
+  if (!v.assigned_to) {
+    return doctor
+      ? { status: "unchanged", doctor, doctor_match, flags }
+      : { status: "create", doctor: null, doctor_match, flags };
+  }
+
+  const who = resolveAssignee(v.assigned_to, ctx.staff, ctx.others);
+  if (who.status !== "matched") {
+    return fail(who.reason, doctor, doctor_match, { flags, suggestion: who.suggestion });
+  }
+  if (who.note) flags.push(`${who.note}: ${v.assigned_to} → ${who.assignee.full_name}`);
+  const status = !doctor
+    ? "create"
+    : ctx.ownerOf.get(doctor.id) === who.assignee.id
+      ? "unchanged"
+      : "assign";
+  return { status, doctor, doctor_match, flags, assignee: who.assignee, note: who.note };
+}
+
+const CREATABLE = new Set(["create", "possible_duplicate"]);
 
 /**
  * Write the approved rows. `skipRows` is the set of row numbers the operator
@@ -450,7 +597,7 @@ export async function commitBatch(crmUser, batchId, skipRows = [], options = {})
         heldOut++;
         continue; // left `pending`, deliberately
       }
-      if (row.status === "duplicate" || skip.has(row.row_number)) {
+      if (!CREATABLE.has(row.status) || skip.has(row.row_number)) {
         skipped++;
         await sql(
           `UPDATE crm.import_rows SET status='skipped_duplicate', matched_doctor_id=$3

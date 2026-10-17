@@ -1521,7 +1521,7 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
              last_prescribed_date = GREATEST(COALESCE(last_prescribed_date, $9::date), $9::date),
              notes = $8,
              days_of_week = COALESCE($11::int[], days_of_week),
-             instructions = COALESCE($12::text, instructions),
+             instructions = $12::text,
              form = COALESCE($13::text, form),
              stopped_date = NULL,
              stop_reason = NULL,
@@ -1564,7 +1564,12 @@ export async function syncMedications(patientId, healthrayId, apptDate, meds) {
            notes = EXCLUDED.notes,
            pharmacy_match = EXCLUDED.pharmacy_match,
            days_of_week = COALESCE(EXCLUDED.days_of_week, medications.days_of_week),
-           instructions = COALESCE(EXCLUDED.instructions, medications.instructions),
+           instructions = CASE
+             WHEN EXCLUDED.last_prescribed_date IS NULL
+               OR EXCLUDED.last_prescribed_date >= COALESCE(medications.last_prescribed_date, EXCLUDED.last_prescribed_date)
+               THEN EXCLUDED.instructions
+             ELSE medications.instructions
+           END,
            form = COALESCE(EXCLUDED.form, medications.form),
            common_side_effects = CASE
              WHEN jsonb_array_length(COALESCE(EXCLUDED.common_side_effects, '[]'::jsonb)) > 0

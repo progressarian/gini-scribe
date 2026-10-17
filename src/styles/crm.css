@@ -18,6 +18,21 @@
   gap: 16px;
   margin-bottom: 20px;
 }
+.dimp__titlebar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.dimp__back {
+  display: inline-grid;
+  place-items: center;
+  color: #1e293b;
+  text-decoration: none;
+}
+.dimp__back:focus-visible {
+  outline: 2px solid #1e40af;
+  outline-offset: 2px;
+}
 .dimp__title {
   margin: 0;
   font-size: 22px;
@@ -271,6 +286,211 @@
   outline-offset: 2px;
 }
 
+.dimp__h2 {
+  margin: 24px 0 12px;
+  font-size: 16px;
+  font-weight: 700;
+}
+.dimp__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.dimp__ok {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: #166534;
+}
+.dimp__link {
+  margin-left: 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #1e40af;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.dimp__link:focus-visible,
+.dimp__chip:focus-visible,
+.dimp__search input:focus-visible {
+  outline: 2px solid #1e40af;
+  outline-offset: 2px;
+}
+
+.dimp__template {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  font-size: 14px;
+}
+
+.dimp__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.dimp__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.dimp__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #fff;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.dimp__chip--on {
+  border-color: #1e40af;
+  background: #eff6ff;
+  color: #1e40af;
+}
+.dimp__chip--err .dimp__chip-n {
+  background: #fee2e2;
+  color: #991b1b;
+}
+.dimp__chip-n {
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.dimp__search input {
+  width: min(340px, 100%);
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.dimp__search {
+  flex: 1 1 260px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.dimp__empty {
+  padding: 24px 12px;
+  text-align: center;
+  color: #64748b;
+}
+.dimp__skeleton span {
+  display: block;
+  height: 14px;
+  border-radius: 4px;
+  background: #f1f5f9;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .dimp__skeleton span {
+    animation: dimp-pulse 1.2s ease-in-out infinite;
+  }
+}
+@keyframes dimp-pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.dimp__pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: #475569;
+}
+.dimp__actions .dimp__pager {
+  margin: 0 0 0 auto;
+}
+
+.dimp__failed {
+  margin-top: 8px;
+  padding: 16px;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  background: #fffbfb;
+}
+.dimp__failed-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.dimp__failed-head .dimp__h2 {
+  margin: 0 0 8px;
+}
+
+.dimp__pick {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dimp__pick select {
+  min-width: 180px;
+}
+.dimp__pick select.dimp__pick--empty {
+  border-color: #fca5a5;
+  background: #fef2f2;
+}
+
+.dimp__warnlist p {
+  margin: 0 0 8px;
+}
+
+.dimp__per {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  color: #475569;
+}
+
+@media (max-width: 640px) {
+  .dimp {
+    padding: 16px 16px 48px;
+  }
+  .dimp__actions {
+    flex-wrap: wrap;
+  }
+  .dimp__search {
+    justify-content: stretch;
+  }
+  .dimp__search input {
+    width: 100%;
+  }
+}
+
 /* ---- Rep screens — src/pages/crm/RepHomePage.jsx, AddVisitPage.jsx ----
    Built for a phone held one-handed in a corridor, so: a single column, 44px
    minimum touch targets throughout, and the primary action of every row on the
@@ -282,6 +502,16 @@
   padding: 12px 14px 96px;
   color: #0f172a;
   -webkit-tap-highlight-color: transparent;
+}
+
+.rep--wide {
+  max-width: none;
+  padding: 16px 24px 96px;
+}
+@media (max-width: 640px) {
+  .rep--wide {
+    padding: 12px 14px 96px;
+  }
 }
 
 .rep__head {
@@ -931,6 +1161,98 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* Assignments tab — src/components/crm/AssignmentsPanel.jsx */
+.asg {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.asg__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.asg__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.asg__field {
+  flex: 1 1 220px;
+}
+.asg__field--narrow {
+  flex: 0 1 180px;
+}
+.asg__bulk {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.asg__limit {
+  margin: 0;
+  padding: 4px 8px;
+}
+.asg__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.asg__all {
+  min-height: 36px;
+  font-size: 13px;
+}
+.asg__check {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+.asg__owner {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 0 0 170px;
+}
+.asg__owner .rep__input {
+  font-size: 14px;
+}
+.asg__owner--none {
+  border-color: #f59e0b;
+  background: #fffbeb;
+}
+.asg__skeleton {
+  height: 64px;
+  background: #f8fafc;
+}
+.asg__pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.asg__link {
+  margin-left: 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #1e40af;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+@media (max-width: 520px) {
+  .asg .rep__row {
+    flex-wrap: wrap;
+  }
+  .asg__owner {
+    flex: 1 1 100%;
+  }
 }
 
 /* Referral status control — src/components/crm/ReferralStatusControl.jsx */

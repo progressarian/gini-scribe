@@ -224,6 +224,8 @@ const NAV_ITEMS = [
     cap: C["/billing/dues"],
     show: () => true,
   },
+  { path: "/crm/home", label: "🤝 CRM", cap: C["/crm/home"], show: () => true },
+  { path: "/crm/import", label: "📥 Import doctors", cap: C["/crm/import"], show: () => true },
   { path: "/settings", label: "⚙️ Settings", cap: C["/settings"], show: () => true },
 ];
 

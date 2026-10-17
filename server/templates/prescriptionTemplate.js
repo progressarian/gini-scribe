@@ -36,11 +36,11 @@ const LOGO_MIME = {
 
 // The shipped artwork, and the fallback whenever no logo has been uploaded from
 // Settings (services/prescriptionLogo.js) — so the letterhead is never blank.
-export const DEFAULT_LOGO_DATA_URI = (() => {
+const assetDataUri = (prefix) => {
   const dir = join(dirname(fileURLToPath(import.meta.url)), "assets");
   try {
     const file = readdirSync(dir)
-      .filter((f) => f.toLowerCase().startsWith("logo") && LOGO_MIME[extname(f).toLowerCase()])
+      .filter((f) => f.toLowerCase().startsWith(prefix) && LOGO_MIME[extname(f).toLowerCase()])
       .sort()[0];
     if (!file) return "";
     const mime = LOGO_MIME[extname(file).toLowerCase()];
@@ -48,7 +48,10 @@ export const DEFAULT_LOGO_DATA_URI = (() => {
   } catch {
     return "";
   }
-})();
+};
+
+export const DEFAULT_LOGO_DATA_URI = assetDataUri("logo");
+export const NABH_LOGO_DATA_URI = assetDataUri("nabh");
 
 // The closing strip — the services note the clinic used to rubber-stamp on the
 // printed Rx, set as part of the document instead. Navy to bookend the header,
@@ -87,13 +90,18 @@ function promoHtml(footer, logo = DEFAULT_LOGO_DATA_URI) {
 // coming from two different hospitals.
 function letterheadHtml(docNameHtml, docCredHtml, logoDataUri = DEFAULT_LOGO_DATA_URI, hospital) {
   const hosp = normalizeHospital(hospital);
-  const logo = logoDataUri ? `<div class="rx-logo"><img src="${logoDataUri}" alt=""></div>` : "";
+  const brand = logoDataUri
+    ? `<img class="rx-hosp-logo" src="${logoDataUri}" alt="${escape(hosp.name)}">`
+    : `<div class="rx-hosp-name">${escape(hosp.name)}</div>`;
+  const nabh = NABH_LOGO_DATA_URI
+    ? `<div class="rx-logo"><img src="${NABH_LOGO_DATA_URI}" alt="NABH accredited"></div>`
+    : "";
   return `<div class="rx-header">
     <div class="rx-header-top">
       <div class="rx-hosp">
-        <div class="rx-hosp-name">${escape(hosp.name)}</div>
+        ${brand}
       </div>
-      ${logo}
+      ${nabh}
       <div class="rx-doc">
         <div class="rx-doc-name">${docNameHtml}</div>
         <div class="rx-doc-cred">${docCredHtml}</div>
@@ -405,7 +413,8 @@ body{font-family:var(--fb);color:var(--ink);background:var(--white);font-size:va
    and orphans the phone number onto a second line. */
 .rx-hosp-tag{font-size:var(--fs-meta);color:rgba(255,255,255,.5);margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.12)}
 .rx-logo{flex:0 0 auto;display:flex;align-items:center;justify-content:center}
-.rx-logo img{height:38px;width:auto;display:block}
+.rx-hosp-logo{height:38px;width:auto;display:block}
+.rx-logo img{height:44px;width:auto;display:block}
 .rx-doc{flex:1 1 0;text-align:right}
 .rx-doc-name{font-size:13px;font-weight:700;color:#fff}
 .rx-doc-cred{font-size:var(--fs-meta);color:rgba(255,255,255,.5);line-height:1.6;margin-top:2px}

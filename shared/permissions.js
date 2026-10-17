@@ -92,6 +92,7 @@ export const CAPABILITIES = {
   // staff answer "who referred you?" without being CRM users at all, so
   // /api/crm/registration sits on PATIENT_READ alongside /api/patients.
   CRM_ACCESS: "CRM_ACCESS",
+  CRM_IMPORT: "CRM_IMPORT",
   ANALYTICS: "ANALYTICS", // reports, clinical intelligence, dashboards
   MED_COLLECTION: "MED_COLLECTION", // pharmacy: mark medicine collection at the counter
   ADMIN: "ADMIN", // manage doctors/roles
@@ -520,7 +521,7 @@ export const ROLE_CAPABILITIES = {
   // and referrals they can actually see is decided inside the CRM by their
   // crm.users role and enforced by RLS — a route capability cannot express
   // "only the doctors assigned to me", so it does not try.
-  [ROLES.HEAD_OF_GROWTH]: [C.CRM_ACCESS],
+  [ROLES.HEAD_OF_GROWTH]: [C.CRM_ACCESS, C.CRM_IMPORT],
   [ROLES.GROWTH_MANAGER]: [C.CRM_ACCESS],
   [ROLES.GROWTH_EXECUTIVE]: [C.CRM_ACCESS],
 

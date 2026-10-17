@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import api from "../../services/api.js";
 import { startAutoDrain, pendingCount } from "../../crm/offlineQueue.js";
 import ReferralStatusControl from "../../components/crm/ReferralStatusControl.jsx";
+import AssignmentsPanel from "../../components/crm/AssignmentsPanel.jsx";
 import { urgencyLabel, referralStatusLabel } from "../../../shared/crmVocab.js";
 import {
   visitDueStateMeta,
@@ -25,6 +26,9 @@ const TABS = [
   { key: "doctors", label: "My doctors" },
   { key: "tasks", label: "Tasks" },
 ];
+
+const ASSIGNMENTS_TAB = { key: "assignments", label: "Assignments" };
+const SEES_EVERY_DOCTOR = ["ceo_admin", "head_of_growth"];
 
 export default function RepHomePage() {
   const navigate = useNavigate();
@@ -110,13 +114,13 @@ export default function RepHomePage() {
 
   if (err)
     return (
-      <div className="rep">
+      <div className="rep rep--wide">
         <div className="rep__err">{err}</div>
       </div>
     );
   if (!data)
     return (
-      <div className="rep">
+      <div className="rep rep--wide">
         <div className="rep__loading">Loading…</div>
       </div>
     );
@@ -124,7 +128,7 @@ export default function RepHomePage() {
   const p = data.performance;
 
   return (
-    <div className="rep">
+    <div className="rep rep--wide">
       <header className="rep__head">
         <div>
           <span className="rep__eyebrow">Growth</span>
@@ -162,21 +166,23 @@ export default function RepHomePage() {
       </div>
 
       <nav className="rep__tabs">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            className={`rep__tab ${tab === t.key ? "rep__tab--on" : ""}`}
-            onClick={() => setTab(t.key)}
-          >
-            {t.label}
-            {t.key === "due" && (data.due_summary?.total ?? 0) > 0 && (
-              <span className="rep__badge">{data.due_summary.total}</span>
-            )}
-            {t.key === "referrals" && (referrals?.summary?.open ?? 0) > 0 && (
-              <span className="rep__badge">{referrals.summary.open}</span>
-            )}
-          </button>
-        ))}
+        {[...TABS, ...(SEES_EVERY_DOCTOR.includes(data.user.role) ? [ASSIGNMENTS_TAB] : [])].map(
+          (t) => (
+            <button
+              key={t.key}
+              className={`rep__tab ${tab === t.key ? "rep__tab--on" : ""}`}
+              onClick={() => setTab(t.key)}
+            >
+              {t.label}
+              {t.key === "due" && (data.due_summary?.total ?? 0) > 0 && (
+                <span className="rep__badge">{data.due_summary.total}</span>
+              )}
+              {t.key === "referrals" && (referrals?.summary?.open ?? 0) > 0 && (
+                <span className="rep__badge">{referrals.summary.open}</span>
+              )}
+            </button>
+          ),
+        )}
       </nav>
 
       {tab === "due" && (
@@ -298,6 +304,8 @@ export default function RepHomePage() {
           </ul>
         </>
       )}
+
+      {tab === "assignments" && SEES_EVERY_DOCTOR.includes(data.user.role) && <AssignmentsPanel />}
 
       {tab === "tasks" && (
         <ul className="rep__list">

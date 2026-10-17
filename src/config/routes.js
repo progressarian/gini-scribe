@@ -164,7 +164,7 @@ export const PAGE_CAPABILITIES = {
   "/crm/doctor/:doctorId": CAP.CRM_ACCESS,
   "/crm/visit/:doctorId": CAP.CRM_ACCESS,
   "/crm/referral/:doctorId": CAP.CRM_ACCESS,
-  "/crm/import": CAP.CRM_ACCESS,
+  "/crm/import": CAP.CRM_IMPORT,
   "/flow/admin": CAP.ADMIN,
 };
 
@@ -187,7 +187,7 @@ export const ROLE_NAV_ALLOWLIST = {
   // nav would already be short — but it would still offer them the import
   // wizard beside their home. A rep needs one door.
   [ROLES.GROWTH_EXECUTIVE]: ["/crm/home"],
-  [ROLES.GROWTH_MANAGER]: ["/crm/home", "/crm/import"],
+  [ROLES.GROWTH_MANAGER]: ["/crm/home"],
   [ROLES.HEAD_OF_GROWTH]: ["/crm/home", "/crm/import"],
 };
 
