@@ -5,47 +5,47 @@ export const EXTERNAL_CLINICAL_RANK = 99;
 export const CLINICAL_ORDER = [
   {
     key: "nephropathy",
-    rank: 7,
+    rank: 4,
     label: "Nephropathy",
     pattern:
       /nephropath|albuminuria|micro ?albumin|\bckd\b|\bdkd\b|\besrd\b|chronic kidney|kidney disease|renal (disease|failure|impairment)/i,
   },
   {
     key: "neuropathy",
-    rank: 8,
+    rank: 3,
     label: "Neuropathy",
     pattern: /neuropath|\bdpn\b|polyneurit|paraesthes|paresthes|autonomic dysfunction/i,
   },
   {
     key: "retinopathy",
-    rank: 9,
+    rank: 5,
     label: "Retinopathy",
     pattern: /retinopath|maculopath|macular (oedema|edema|degeneration)|\bnpdr\b|\bpdr\b/i,
   },
   {
     key: "cva",
-    rank: 4,
+    rank: 7,
     label: "CVA",
     pattern:
       /\bcva\b|\btia\b|stroke|cerebrovascular|cerebral (infarct|haemorrhage|hemorrhage|ischemia)|transient ischemic|hemiplegia|hemiparesis/i,
   },
   {
     key: "pvd",
-    rank: 5,
+    rank: 8,
     label: "PVD",
     pattern:
       /\bpvd\b|\bpad\b|peripheral (arterial|vascular)|claudication|\babi\b|diabetic foot|foot ulcer|gangrene/i,
   },
   {
     key: "cad",
-    rank: 3,
+    rank: 6,
     label: "CAD",
     pattern:
       /\bcad\b|\bihd\b|\bacs\b|\bcabg\b|\bpci\b|coronary|angina|myocardial|ischemic heart|ischaemic heart|heart failure|\bhfref\b|\bhfpef\b|cardiomyopath|stent|angioplasty/i,
   },
   {
     key: "hypercholesterolemia",
-    rank: 6,
+    rank: 10,
     label: "Hypercholesterolemia",
     pattern:
       /hypercholesterol|hyperlipid|dyslipid|cholesterol|\bhcn\b|\bldl\b|triglycerid|lipid|statin/i,
@@ -64,7 +64,7 @@ export const CLINICAL_ORDER = [
   },
   {
     key: "hypertension",
-    rank: 10,
+    rank: 9,
     label: "Hypertension",
     pattern: /hypertens|\bhtn\b|(high|raised|elevated) blood pressure/i,
   },

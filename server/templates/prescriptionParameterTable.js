@@ -1,5 +1,7 @@
 export const PARAM_TABLE_CSS = `
-.rx-ptable{width:100%;border-collapse:collapse;margin:0;font-size:var(--fs-meta);line-height:1.3;break-inside:avoid}
+.rx-ptable{width:100%;border-collapse:collapse;margin:0;font-size:var(--fs-meta);line-height:1.3}
+.rx-ptable thead{display:table-header-group}
+.rx-ptable tr{break-inside:avoid}
 .rx-ptable th,.rx-ptable td{border:1px solid var(--bd);padding:2px 6px;text-align:center;white-space:nowrap}
 .rx-ptable thead th{background:var(--bg);font-weight:700;color:var(--ink2);font-size:var(--fs-label)}
 .rx-ptable thead th.today{color:var(--ink);background:#e8f0fb}

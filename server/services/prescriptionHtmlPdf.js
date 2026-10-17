@@ -10,6 +10,7 @@ import { buildPrescriptionHtml } from "../templates/prescriptionTemplate.js";
 import { buildReferralLetterHtml } from "../templates/referralLetterTemplate.js";
 import { getPrescriptionFooter } from "./prescriptionFooter.js";
 import { getPrescriptionLogo } from "./prescriptionLogo.js";
+import { healthrayNoteSections } from "./healthray/noteSections.js";
 
 const require = createRequire(import.meta.url);
 
@@ -114,14 +115,33 @@ export async function generatePrescriptionPdf(data) {
   // Resolved here rather than at each call site: the strip is fixed clinic-wide,
   // and prescriptions are rendered from the client, the visit route and the
   // sync auto-save alike — none of which should have to remember to fetch it.
-  const [rx_footer, logo, rxParameters] = await Promise.all([
+  const [rx_footer, logo, rxParameters, note] = await Promise.all([
     data?.rx_footer ? Promise.resolve(data.rx_footer) : getPrescriptionFooter(),
     data?.rx_logo ? Promise.resolve({ dataUri: data.rx_logo }) : getPrescriptionLogo(),
     resolveRxParameters(data),
+    resolveNoteSections(data),
   ]);
   return renderHtmlToPdf(
-    buildPrescriptionHtml({ ...data, rx_footer, rx_logo: logo.dataUri, rxParameters }),
+    buildPrescriptionHtml({
+      ...data,
+      history: data?.history || note.history,
+      referrals: data?.referrals ?? note.referrals,
+      rx_footer,
+      rx_logo: logo.dataUri,
+      rxParameters,
+    }),
   );
+}
+
+async function resolveNoteSections(data) {
+  const patientId = data?.patient?.id;
+  if (!patientId || (data.history && data.referrals)) return { history: null, referrals: [] };
+  try {
+    return await healthrayNoteSections(patientId, data.rxDate || istToday());
+  } catch (e) {
+    console.error("Rx note sections skipped:", e.message);
+    return { history: null, referrals: [] };
+  }
 }
 
 async function resolveRxParameters(data) {

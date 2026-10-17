@@ -209,6 +209,46 @@ const uniqueParts = (parts) => {
   });
 };
 
+const uniqueGoals = (list) => {
+  const seen = new Set();
+  return list.filter((g) => {
+    const key = `${g.marker || ""}|${g.target_value || ""}`
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+const DX_YEAR = /\b(19|20)\d{2}\b/;
+const SEX_WORD = { m: "male", f: "female" };
+
+const recordedHistory = (patient, diagnoses) => {
+  const dated = diagnoses
+    .map((d) => {
+      const notes = cleanNote(d.notes);
+      const year = val(d.since_year) || notes.match(DX_YEAR)?.[0];
+      if (!year) return null;
+      const since = val(d.since_year) || /\bsince\b/i.test(notes);
+      const recovered = /recovered|resolved/i.test(`${d.status || ""} ${notes}`);
+      const name = dxCase(d.label || d.diagnosis_id || "");
+      return `${name} ${since ? `since ${year}` : `(${year})`}${recovered ? " — recovered" : ""}`;
+    })
+    .filter(Boolean);
+  if (!dated.length) return null;
+  const sex =
+    SEX_WORD[
+      String(patient.sex || "")
+        .trim()
+        .charAt(0)
+        .toLowerCase()
+    ];
+  const who = [patient.age ? `${patient.age} yr` : "", sex || ""].filter(Boolean).join(" ");
+  return [who, ...dated].filter(Boolean).join(" · ");
+};
+
 const STATUS_BADGE = {
   controlled: { bg: "#edfcf0", color: "#15803d", label: "Controlled" },
   improving: { bg: "#fef6e6", color: "#d97a0a", label: "Improving" },
@@ -386,6 +426,7 @@ body{font-family:var(--fb);color:var(--ink);background:var(--white);font-size:va
 .rx-summary-test-chip{font-size:var(--fs-label);font-weight:600;padding:2px 8px;border-radius:10px;background:var(--bg);border:1px solid var(--tlb);color:var(--ink2)}
 
 .rx-complaints{font-size:var(--fs-body);line-height:1.5;color:var(--ink)}
+.rx-history b{font-weight:600;color:var(--ink2)}
 .rx-advice{margin:0;padding-left:18px;font-size:var(--fs-body);line-height:1.55;color:var(--ink)}
 .rx-section-title{font-size:var(--fs-label);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink3);margin-bottom:8px;margin-top:18px;padding-bottom:5px;border-bottom:1px solid var(--bd);break-inside:avoid;break-after:avoid}
 .rx-med-cat{display:flex;align-items:center;gap:6px;font-size:var(--fs-label);font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.08em;background:#f5f7fa;padding:4px 8px;border-left:3px solid var(--tl);margin:10px 0 2px}
@@ -482,7 +523,7 @@ function buildPrescriptionHtml(data = {}) {
     summary = {},
     activeDx: activeDxInput = [],
     complaints = [],
-    history = null,
+    history: writtenHistory = null,
     advice = null,
     activeMeds = [],
     latestVitals = {},
@@ -491,14 +532,16 @@ function buildPrescriptionHtml(data = {}) {
     labResults = [],
     labHistory = {},
     consultations = [],
-    goals = [],
+    goals: goalsInput = [],
     appt_plan = null,
   } = data;
 
   // Every caller (client print, /visit route, sync auto-save) gets the same
-  // clinical sequence: diabetes, obesity, CAD, CVA, PVD, hypercholesterolemia,
-  // nephropathy, neuropathy, retinopathy, hypertension, MASLD, thyroid, rest.
+  // clinical sequence: diabetes, obesity, neuropathy, nephropathy, retinopathy,
+  // CAD, CVA, PVD, hypertension, hypercholesterolemia, MASLD, thyroid, rest.
   const activeDx = uniqueDiagnoses(sortDiagnoses(activeDxInput) || []);
+  const goals = uniqueGoals(goalsInput || []);
+  const history = writtenHistory || recordedHistory(patient, activeDx);
 
   const today = data.rxDate || new Date().toISOString().split("T")[0];
   const latestCon = consultations?.[0]?.con_data || {};
@@ -574,7 +617,9 @@ function buildPrescriptionHtml(data = {}) {
   const alt = findLatest(labResults, "alt");
 
   const { ownMeds, externalMeds } = splitMeds(activeMeds);
-  const { referrals, labTests } = splitTests(tests);
+  const split = splitTests(tests);
+  const labTests = split.labTests;
+  const referrals = [...split.referrals, ...(Array.isArray(data.referrals) ? data.referrals : [])];
 
   // ── Patient name and meta line
   // Age and sex ride with the name in chart shorthand — "Pawan Kumar (61M)"
@@ -663,6 +708,12 @@ function buildPrescriptionHtml(data = {}) {
     return `<span class="rx-dx-bio"><b>${escape(label)} ${escape(fmtNum(cur))}${escape(unit)}</b>${meta}</span>`;
   };
 
+  const latestParam = (key) =>
+    (data.rxParameters?.rows || [])
+      .find((r) => r.key === key)
+      ?.values?.filter((v) => v != null && v !== "")
+      .at(-1) ?? null;
+
   const bioTagFor = (dx) => {
     const id = String(dx.diagnosis_id || "")
       .toLowerCase()
@@ -711,14 +762,16 @@ function buildPrescriptionHtml(data = {}) {
       }
     }
     if (text.includes("obesity") || text.includes("adiposity") || text.includes("bmi")) {
-      const bmi = latestVitals?.bmi;
+      const bmi = latestVitals?.bmi || latestParam("bmi");
       const wt = latestVitals?.weight;
       if (bmi) {
         tags.push(
           `<span class="rx-dx-bio"><b>BMI ${escape(fmtNum(bmi))}</b> <span class="meta">(target &lt; 25)</span></span>`,
         );
       }
-      if (wt) tags.push(`<span class="rx-dx-bio"><b>${escape(fmtNum(wt))} kg</b></span>`);
+      const wc = latestVitals?.waist || latestParam("waist");
+      if (wc) tags.push(`<span class="rx-dx-bio"><b>WC ${escape(fmtNum(wc))} cm</b></span>`);
+      else if (wt) tags.push(`<span class="rx-dx-bio"><b>${escape(fmtNum(wt))} kg</b></span>`);
       if (tags.length) return tags;
     }
     if (text.includes("nafld") || text.includes("masld") || text.includes("fatty liver")) {
@@ -1037,8 +1090,16 @@ function buildPrescriptionHtml(data = {}) {
 
     ${
       history
-        ? `<div class="rx-section-title">History</div>
-           <div class="rx-complaints">${escape(history).replace(/\n/g, "<br>")}</div>`
+        ? `<div class="rx-section-title">Clinical history</div>
+           <div class="rx-complaints rx-history">${String(history)
+             .split(/\n+/)
+             .map((line) => line.trim())
+             .filter(Boolean)
+             .map((line) => {
+               const sub = line.match(/^([^:]{2,30}):\s+(.+)$/);
+               return `<div>${sub ? `<b>${escape(sub[1])}:</b> ${escape(sub[2])}` : escape(line)}</div>`;
+             })
+             .join("")}</div>`
         : ""
     }
 

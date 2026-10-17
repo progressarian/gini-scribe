@@ -98,6 +98,56 @@ export const preferredSuperseded = (a) => `EXISTS (
      AND ${bookedAt("nb")} > ${preferredSetAt(a)}
 )`;
 
+const livePlanRow = (o) => `COALESCE(${o}.status, '') <> 'cancelled'
+  AND COALESCE(${o}.booking_status, '') <> 'cancelled'
+  AND ${NOT_LAB_ONLY(o)}`;
+
+const laterPlanRow = (a, o) => `${o}.file_no = ${a}.file_no
+  AND ${o}.id <> ${a}.id
+  AND ${o}.appointment_date > ${a}.appointment_date
+  AND ${livePlanRow(o)}`;
+
+const bookingSlot = (o) =>
+  `COALESCE(NULLIF(TRIM(${o}.time_slot), ''), NULLIF(TRIM(${o}.reporting_time_slot), ''))`;
+
+const bookingPlan = (o) => `${o}.appointment_date, ${bookingSlot(o)}, ${o}.doctor_name,
+           ${o}.booked_by_name,
+           (SELECT bl.changed_by_id FROM appointment_change_log bl
+             WHERE bl.appointment_id = ${o}.id AND bl.field = 'booking_created'
+             ORDER BY bl.changed_at DESC LIMIT 1),
+           ${bookedAt(o)},
+           (${o}.appointment_date < ${IST_TODAY} OR COALESCE(${o}.status, '') = 'no_show')`;
+
+export const latestPlanJoin = (a = "a") => `LEFT JOIN LATERAL (
+  SELECT TRUE AS found, plan.* FROM (
+    SELECT ${a}.preferred_date AS date, ${a}.preferred_time_slot AS time_slot,
+           ${a}.preferred_doctor AS doctor, ${preferredSetBy(a)} AS set_by,
+           ${preferredSetBy(a, "changed_by_id")} AS set_by_id, ${preferredSetAt(a)} AS set_at,
+           FALSE AS stale
+     WHERE ${a}.preferred_date IS NOT NULL
+    UNION ALL
+    SELECT ${bookingPlan(a)}
+     WHERE ${livePlanRow(a)}
+       AND COALESCE(${a}.status, '') NOT IN ('seen', 'completed', 'in_visit', 'in-progress', 'checkedin', 'checked_in')
+       AND ${bookingSlot(a)} IS NOT NULL
+    UNION ALL
+    SELECT ${bookingPlan("o")}
+      FROM appointments o
+     WHERE ${laterPlanRow(a, "o")} AND ${bookingSlot("o")} IS NOT NULL
+    UNION ALL
+    SELECT o.preferred_date, o.preferred_time_slot, o.preferred_doctor, ${preferredSetBy("o")},
+           ${preferredSetBy("o", "changed_by_id")}, ${preferredSetAt("o")},
+           o.preferred_date < ${IST_TODAY}
+      FROM appointments o
+     WHERE ${laterPlanRow(a, "o")} AND o.preferred_date IS NOT NULL
+  ) plan
+  ORDER BY plan.set_at DESC NULLS LAST
+  LIMIT 1
+) lp ON TRUE`;
+
+export const latestPlan = (field, a = "a") =>
+  `(CASE WHEN lp.found THEN (CASE WHEN lp.stale THEN NULL ELSE lp.${field} END) ELSE ${a}.preferred_${field} END)`;
+
 export const livePreferredOn = (a, d) =>
   `(CASE WHEN ${a}.preferred_date = ${d} THEN NOT ${preferredSuperseded(a)} ELSE FALSE END)`;
 

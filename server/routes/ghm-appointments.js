@@ -17,8 +17,10 @@ import {
   upcomingBookingElsewhere,
   NOT_LAB_ONLY,
   preferredSuperseded,
+  livePreferredOn,
+  latestPlanJoin,
+  latestPlan,
   preferredSetAt,
-  preferredSetBy,
   bookedAt,
   IST_TODAY,
 } from "../services/ghmDayWindow.js";
@@ -1197,10 +1199,12 @@ router.get("/ghm-appointments", async (req, res) => {
                 a.call_made_by, a.call_date,
                 ${claimCols("a")},
                 a.call_notes, a.call_reschedule_date, a.pt_recovery,
-                a.preferred_date, a.preferred_doctor, a.preferred_time_slot,
-                ${preferredSetBy("a")} AS preferred_set_by,
-                ${preferredSetBy("a", "changed_by_id")} AS preferred_set_by_id,
-                ${preferredSetBy("a", "changed_at")} AS preferred_set_at,
+                ${latestPlan("date")} AS preferred_date,
+                ${latestPlan("doctor")} AS preferred_doctor,
+                ${latestPlan("time_slot")} AS preferred_time_slot,
+                (CASE WHEN lp.stale THEN NULL ELSE lp.set_by END) AS preferred_set_by,
+                (CASE WHEN lp.stale THEN NULL ELSE lp.set_by_id END) AS preferred_set_by_id,
+                (CASE WHEN lp.stale THEN NULL ELSE lp.set_at END) AS preferred_set_at,
                 COALESCE(a.home_collection, FALSE) AS home_collection,
                 a.patient_category,
                 p.id AS patient_id, p.address, p.email,
@@ -1223,7 +1227,8 @@ router.get("/ghm-appointments", async (req, res) => {
     const joins = `FROM appointments a
          LEFT JOIN patients p ON p.file_no = a.file_no
          LEFT JOIN consultations c ON c.id = a.consultation_id
-         LEFT JOIN station_tracking st ON st.appointment_id = a.id`;
+         LEFT JOIN station_tracking st ON st.appointment_id = a.id
+         ${latestPlanJoin("a")}`;
 
     if (mode === "missed") {
       const isoDay = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || "")) ? String(v) : null);
@@ -1518,7 +1523,7 @@ router.get("/ghm-appointments", async (req, res) => {
         `SELECT ${baseCols},
                 a.call_status AS call_status_any,
                 ${callStatusToday("a")} AS call_status,
-                (a.preferred_date = $1 AND a.appointment_date <> $1) AS via_preferred,
+                (${livePreferredOn("a", "$1")} AND a.appointment_date <> $1) AS via_preferred,
                 -- The row IS an appointment on this date, so the patient is
                 -- booked whether or not anyone ticked the dropdown.
                 (${BOOKED_ON_DAY("a", "$1")} OR ${BOOKED_FOR("a", "$1")}) AS is_booked,
