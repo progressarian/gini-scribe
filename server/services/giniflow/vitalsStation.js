@@ -485,7 +485,7 @@ async function refuseWhileResting(client, visitId) {
 }
 
 async function moveOnFromVitals(client, visitId, actorId, meta) {
-  await advanceStatus(client, {
+  const moved = await advanceStatus(client, {
     visitId,
     toStatus: "vitals_done",
     actorRole: "vitals",
@@ -493,22 +493,7 @@ async function moveOnFromVitals(client, visitId, actorId, meta) {
     allowSkip: true,
     meta,
   });
-  if (!(await planSkipsChief(client, visitId))) return "vitals_done";
-  await client.query("SAVEPOINT straight_to_consultant");
-  try {
-    await advanceStatus(client, {
-      visitId,
-      toStatus: "ready_for_doctor",
-      actorRole: "system",
-      allowSkip: true,
-      meta: { reason: "plan_has_no_chief_step", after: "vitals_done" },
-    });
-    await client.query("RELEASE SAVEPOINT straight_to_consultant");
-    return "ready_for_doctor";
-  } catch {
-    await client.query("ROLLBACK TO SAVEPOINT straight_to_consultant");
-    return "vitals_done";
-  }
+  return moved.status;
 }
 
 export async function skipVitals(visitId, { reason, actorId = null }, db = pool) {

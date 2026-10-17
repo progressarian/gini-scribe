@@ -8,6 +8,10 @@ export async function expectPdfInViewer(page, path, title) {
   if (title) await expect(viewer.locator(".pdf-modal-name")).toHaveText(title);
   const download = viewer.getByTitle("Download");
   await expect(download).toHaveAttribute("href", new RegExp(path.replace(/[.?]/g, "\\$&")));
+  await expect(viewer.locator("canvas.pdf-js-page, .pdf-js-error").first()).toBeVisible({
+    timeout: 30000,
+  });
+  await expect(viewer.locator(".pdf-js-error")).toHaveCount(0);
   await expect(viewer.locator("canvas.pdf-js-page").first()).toBeVisible();
   await expect(viewer.locator(".pdf-js-overlay")).toHaveCount(0);
   return download.getAttribute("href");

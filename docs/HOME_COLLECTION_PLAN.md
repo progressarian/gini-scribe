@@ -1,6 +1,6 @@
 # Home collection — where the sample was taken, and by whom
 
-Status: plan v3, awaiting review. No code written yet.
+Status: **built 17 Oct 2026** (steps 1–5; see "As built" at the end). Not committed.
 
 ## Problem
 
@@ -10,15 +10,15 @@ The lab team (WhatsApp, 15 Oct) asked where the collector should mark "sample co
 
 ## Decisions (review, 16 Oct)
 
-| Question | Decision |
-|---|---|
-| Home flow | One step, on return: the collector marks it when back with the sample. No "patient at the bench" step. |
-| Who collected | Harwinder and Pratham get **their own lab logins**. "Who" = the logged-in user. No name picker. |
-| Which patients are asked | **Only home-collection patients.** Every other sample behaves exactly as today. |
-| Where it shows | Lab 1 header, Lab 2 and Flow Coordinator badge, Reports / monthly summary, GHM Ops page. |
-| Payment | The collector takes payment **physically at the home**. On return they tell reception, and reception records it on the Payments tab as today. If it was not taken at the home, reception contacts the patient and collects it. So a home sample **may be collected and sent before payment is cleared**; the **report is not released until it is paid** (same rule as samples-only patients). |
-| No booking tick | **Only ticked bookings.** Lab 1 never offers home collection for an unticked patient; reception/OBT must tick Home Collection on the booking first. |
-| No Scribe visit that day | **Book first, then mark.** The patient must be booked (samples-only / Hospital Admin) and tests ordered so they appear on Lab 1. |
+| Question                 | Decision                                                                                                                                                                                                                                                                                                                                                                                       |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Home flow                | One step, on return: the collector marks it when back with the sample. No "patient at the bench" step.                                                                                                                                                                                                                                                                                         |
+| Who collected            | Harwinder and Pratham get **their own lab logins**. "Who" = the logged-in user. No name picker.                                                                                                                                                                                                                                                                                                |
+| Which patients are asked | **Only home-collection patients.** Every other sample behaves exactly as today.                                                                                                                                                                                                                                                                                                                |
+| Where it shows           | Lab 1 header, Lab 2 and Flow Coordinator badge, Reports / monthly summary, GHM Ops page.                                                                                                                                                                                                                                                                                                       |
+| Payment                  | The collector takes payment **physically at the home**. On return they tell reception, and reception records it on the Payments tab as today. If it was not taken at the home, reception contacts the patient and collects it. So a home sample **may be collected and sent before payment is cleared**; the **report is not released until it is paid** (same rule as samples-only patients). |
+| No booking tick          | **Only ticked bookings.** Lab 1 never offers home collection for an unticked patient; reception/OBT must tick Home Collection on the booking first.                                                                                                                                                                                                                                            |
+| No Scribe visit that day | **Book first, then mark.** The patient must be booked (samples-only / Hospital Admin) and tests ordered so they appear on Lab 1.                                                                                                                                                                                                                                                               |
 
 ## What the code does today (checked)
 
@@ -45,9 +45,9 @@ shows that name, so it is visible, not silent).
 
 ## 1. Data
 
-| Path | Change |
-|---|---|
-| Floor orders | No migration. The `sample_taken` event's `meta` gets `{ "site": "home", "collectedAt": "<ts>" }`. |
+| Path            | Change                                                                                                                                                                                                  |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Floor orders    | No migration. The `sample_taken` event's `meta` gets `{ "site": "home", "collectedAt": "<ts>" }`.                                                                                                       |
 | HealthRay cases | Migration `2026-12-xx_home_collection_site.sql`: add `collected_at_site TEXT CHECK (collected_at_site IN ('ghm','home'))` and `collected_at TIMESTAMPTZ` to `giniflow_lab_case_actions`. Both nullable. |
 
 - Filled only on the `sample_taken` row of a home-collection patient. NULL everywhere else, so
@@ -57,7 +57,7 @@ shows that name, so it is visible, not silent).
   still records when it was marked, so both are kept for audit.
 - Report indexes: `giniflow_lab_case_actions (created_at) WHERE action = 'sample_taken'`, and an
   expression index on `giniflow_lab_order_events ((meta->>'site'), occurred_at) WHERE
-  status = 'collected'`. Created `IF NOT EXISTS`, small tables, safe on prod.
+status = 'collected'`. Created `IF NOT EXISTS`, small tables, safe on prod.
 
 ## 2. Server
 
@@ -151,11 +151,11 @@ collected". OBT can call the patients still pending.
 
 Follows the existing Gini Flow station styles and tokens (`giniflow-station.css`); no new UI library.
 
-| Width | Behaviour |
-|---|---|
-| Desktop ≥ 1024px | Dialog centred, ~420px wide. Header tiles in one row. Report as a table. |
-| Tablet 640–1023px | Header tiles wrap to two rows. Report table scrolls sideways; patient and site columns stay pinned. |
-| Phone < 640px | Dialog becomes a bottom sheet at full width; buttons stacked, at least 44px tall. The collector can mark from a phone on return. Cards keep name, UHID, badge and the action button with no sideways scroll. The report becomes a card list (patient, site badge, collector, time). The GHM chip wraps under the name. |
+| Width             | Behaviour                                                                                                                                                                                                                                                                                                              |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Desktop ≥ 1024px  | Dialog centred, ~420px wide. Header tiles in one row. Report as a table.                                                                                                                                                                                                                                               |
+| Tablet 640–1023px | Header tiles wrap to two rows. Report table scrolls sideways; patient and site columns stay pinned.                                                                                                                                                                                                                    |
+| Phone < 640px     | Dialog becomes a bottom sheet at full width; buttons stacked, at least 44px tall. The collector can mark from a phone on return. Cards keep name, UHID, badge and the action button with no sideways scroll. The report becomes a card list (patient, site badge, collector, time). The GHM chip wraps under the name. |
 
 - The dialog is a real `role="dialog"` with a label; focus moves into it and returns to the button.
   Esc and Cancel close it. All controls are `<button>`/`<input>` with visible labels.
@@ -184,22 +184,15 @@ All in Playwright against the e2e Docker DB (`npm run test:e2e:setup` after the 
   9. Undo `sample_taken` clears site and collectedAt.
   10. Reception, OBT and guest roles → 403 on the action and report endpoints.
   11. Counts: `homeCollected` and `homePending` are correct before and after marking.
-- Report API
-  12. Date range, site, collector and search filters; pagination totals; page-size cap; sort.
-  13. Summary numbers match the rows.
+- Report API 12. Date range, site, collector and search filters; pagination totals; page-size cap; sort. 13. Summary numbers match the rows.
 - Reception
   14a. A home-collected unpaid order shows the 🏠 tag and appears under the "Home collection — payment
-       pending" filter; after the payment is recorded it leaves the filter.
-- GHM
-  14. The booking chip goes Not collected → Collected · name · time; the filter returns the right rows.
-- UI (desktop 1280px)
-  15. The home card shows the tag; Start collection opens the dialog with the patient identity; "Collected
-      at home" moves the card and shows the badge; the header counts update without reload.
-  16. Lab 2 shows the same badge in realtime.
-  17. Keyboard: Tab order, Esc closes and returns focus.
-- UI (phone 390px and tablet 768px viewports)
-  18. Bottom-sheet dialog, stacked 44px buttons, no horizontal page scroll on Lab 1, the report and
-      the GHM page.
+  pending" filter; after the payment is recorded it leaves the filter.
+- GHM 14. The booking chip goes Not collected → Collected · name · time; the filter returns the right rows.
+- UI (desktop 1280px) 15. The home card shows the tag; Start collection opens the dialog with the patient identity; "Collected
+  at home" moves the card and shows the badge; the header counts update without reload. 16. Lab 2 shows the same badge in realtime. 17. Keyboard: Tab order, Esc closes and returns focus.
+- UI (phone 390px and tablet 768px viewports) 18. Bottom-sheet dialog, stacked 44px buttons, no horizontal page scroll on Lab 1, the report and
+  the GHM page.
 
 **Regression — must still pass unchanged:** G73, G79, G85, G86 (payment before Rx), G87, G88, G89,
 G91, G92 (lab and samples-only), the reception Payments specs, G05 and G09 (GHM), and the monthly-summary specs.
@@ -218,3 +211,32 @@ G91, G92 (lab and samples-only), the reception Payments specs, G05 and G09 (GHM)
 ## Open points
 
 None. All three were answered on 16 Oct (see Decisions).
+
+## As built (17 Oct 2026)
+
+Where the build differs from the text above, this section wins.
+
+- **Second home source.** `lab_test_requests` has no collection date, so an approved home request
+  counts for visits on the day it was raised and the 7 days after (`HOME_REQUEST_DAYS` in
+  `server/services/giniflow/homeCollection.js`).
+- **Event names.** A Scribe order's collection is the `sample_collected` event (not
+  `sample_taken`); its `meta` carries `{ site, collectedAt }`. A home patient collected through the
+  bench is stamped `{ site: "ghm" }` automatically, on orders and on HealthRay cases, so reports
+  never miss one.
+- **Home step.** `site: "home"` is accepted only with `to: "sample_collected"` (orders) or
+  `action: "sample_taken"` (cases); the route sends it to `collectAtHome()` in `labStation.js`, one
+  transaction for the sample and, with `alsoOthers`, the patient's other uncollected samples.
+- **Payment.** `opensLabGateFor()` in `shared/labPayment.js`: a home-collected order may move to
+  every step except `uploaded` while unpaid. A home-collected HealthRay case may not be marked
+  `report_uploaded` until reception has cleared Lab Billing.
+- **Counts.** The queue returns `homeCounts: { homeCollected, homePending }` as its own object.
+  Adding them to `counts` would have broken the "All" chip, which sums every value in it.
+- **Report.** `GET /giniflow/stations/lab/home-collections` and `…/export.xlsx` (lab collection
+  room or `OPD_SUMMARY`). The table and tiles are a "Home collections" section on the Monthly
+  summary page, covering the month on screen.
+- **GHM.** `home_sample=pending|collected` extends the existing home filter, offered in the
+  Filters panel as "Home sample — not collected yet / collected". The chip sits under the
+  patient's name.
+- **Tests.** `e2e/giniflow/G98-home-collection.spec.js`, 21 tests.
+- **Still to do by hand.** Section 0 (Harwinder's and Pratham's lab logins). Run the migration
+  `2026-12-03_home_collection_site.sql` on production before deploying.

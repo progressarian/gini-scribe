@@ -26,7 +26,7 @@ const bucketLabel = (type, bucket, label) =>
 
 const labelOf = (options, value) => options.find((o) => o.value === value)?.label ?? value;
 
-function sheet(workbook, name, columns, rows) {
+export function sheet(workbook, name, columns, rows) {
   const ws = workbook.addWorksheet(name, { views: [{ state: "frozen", ySplit: 1 }] });
   ws.columns = columns.map((c) => ({ width: c.width ?? 14, ...c }));
   ws.getRow(1).font = { bold: true };

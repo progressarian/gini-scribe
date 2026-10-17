@@ -52,6 +52,7 @@ import { dayClock } from "../../lib/giniflowTime";
 import useDebounced from "../../hooks/useDebounced";
 import StabilityChip from "../../components/giniflow/StabilityChip";
 import "../../styles/giniflow.css";
+import { homeSampleText } from "../../../shared/homeCollection.js";
 
 // Each category needs its own mark: 🟡 for both "worse in range" and "getting
 // better" made two clinically opposite states look identical (GF-30). The title
@@ -79,6 +80,7 @@ const WAIT_ONLY = new Set([
 ]);
 
 const CONSULTANT_ONLY = new Set(["with_doctor"]);
+const CHIEF_ONLY = new Set(["sd_pending", "with_sd"]);
 
 // How many categories carry an override for one station — the count on the
 // drawer's toggle, so a folded row still says it holds something.
@@ -496,6 +498,11 @@ function PatientCard({
           {card.labOnly && (
             <span className="pc-lo" title="Registered for samples only — no consultation booked">
               LAB ONLY
+            </span>
+          )}
+          {card.homeCollection && (
+            <span className="pc-lo" title="Booked for home collection">
+              {homeSampleText(card.homeSample)}
             </span>
           )}
           {card.online && (
@@ -1115,6 +1122,8 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
   useDismissable(!!visitId, onClose);
   if (!visitId) return null;
   const visit = data?.visit;
+  const journeyStops = (data?.journeySteps || []).map((s) => s.chain_status);
+  const seesChief = !journeyStops.length || journeyStops.includes("with_sd");
   const allSteps = data?.steps || [];
   // Samples given in the morning and a consultation checked in hours later are
   // two trips, not one journey. The timeline sorts every step by timestamp, so
@@ -1211,9 +1220,9 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
     (s) => s.stop && chainIndex(s.stop) >= chainIndex(visit?.current_status),
   );
   const beforeNow = onChain && nextStop > 0 ? onlineToCome.slice(0, nextStop) : [];
-  const journeyStops = (data?.journeySteps || []).map((s) => s.chain_status);
   const seesConsultant = !journeyStops.length || journeyStops.includes("with_doctor");
-  const notInJourney = (status) => !seesConsultant && CONSULTANT_ONLY.has(status);
+  const notInJourney = (status) =>
+    (!seesConsultant && CONSULTANT_ONLY.has(status)) || (!seesChief && CHIEF_ONLY.has(status));
   const projected =
     !onChain || visit?.labOnly
       ? []

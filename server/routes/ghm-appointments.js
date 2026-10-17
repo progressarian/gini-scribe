@@ -44,6 +44,7 @@ import {
   REPEATEDLY_MISSES_AT,
   RISK_LEVELS,
 } from "../services/ghmMissed.js";
+import { BOOKING_HOME_SAMPLE_SQL } from "../services/giniflow/homeCollection.js";
 
 const router = Router();
 
@@ -1157,7 +1158,15 @@ router.get("/ghm-appointments", async (req, res) => {
     const homeOnly = ["1", "true", "yes"].includes(
       String(req.query.home_collection || "").toLowerCase(),
     );
-    const homeCond = homeOnly ? " AND a.home_collection IS TRUE" : "";
+    const homeSample = String(req.query.home_sample || "").toLowerCase();
+    const homeCond =
+      homeSample === "pending"
+        ? ` AND a.home_collection IS TRUE AND ${BOOKING_HOME_SAMPLE_SQL("a")} IS NULL`
+        : homeSample === "collected"
+          ? ` AND a.home_collection IS TRUE AND ${BOOKING_HOME_SAMPLE_SQL("a")} IS NOT NULL`
+          : homeOnly
+            ? " AND a.home_collection IS TRUE"
+            : "";
     const apptMode = String(req.query.appt_mode || "").toLowerCase();
     const modeCond =
       apptMode === "online"
@@ -1206,6 +1215,11 @@ router.get("/ghm-appointments", async (req, res) => {
                 (CASE WHEN lp.stale THEN NULL ELSE lp.set_by_id END) AS preferred_set_by_id,
                 (CASE WHEN lp.stale THEN NULL ELSE lp.set_at END) AS preferred_set_at,
                 COALESCE(a.home_collection, FALSE) AS home_collection,
+                CASE WHEN a.home_collection IS TRUE THEN ${BOOKING_HOME_SAMPLE_SQL("a")} END
+                  AS home_sample,
+                CASE WHEN a.home_collection IS TRUE
+                     THEN COALESCE(${BOOKING_HOME_SAMPLE_SQL("a")}->>'site', 'not_collected') END
+                  AS home_sample_status,
                 a.patient_category,
                 p.id AS patient_id, p.address, p.email,
                 COALESCE(p.is_blocked, FALSE) AS is_blocked,

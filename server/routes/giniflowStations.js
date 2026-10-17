@@ -54,6 +54,7 @@ import {
   giniflowStationGroupQuerySchema,
   giniflowStationSearchGroupQuerySchema,
   giniflowStationQuerySchema,
+  homeCollectionsQuerySchema,
   giniflowOutsidePendingQuerySchema,
   giniflowMoQueueQuerySchema,
   giniflowPaymentSchemaChecked,
@@ -129,6 +130,7 @@ import {
 import {
   getLabQueue,
   advanceSample,
+  collectAtHome,
   markLabCaseAction,
   uploadLabCaseReport,
   deleteLabCaseReport,
@@ -139,6 +141,11 @@ import {
   fetchStoredReport,
   cancelDrawing,
 } from "../services/giniflow/labStation.js";
+import {
+  homeCollectionsWorkbook,
+  listHomeCollections,
+} from "../services/giniflow/homeCollectionReport.js";
+import { sendXlsx } from "./billingHttp.js";
 import { releaseVisit } from "../services/giniflow/stationRelease.js";
 import { addExtraReport, removeExtraReport } from "../services/giniflow/extraReports.js";
 import {
@@ -1776,6 +1783,35 @@ router.get(
   },
 );
 
+const homeReportGate = requireCapability([CAP.GINIFLOW_STATION_LAB_COLLECT, CAP.OPD_SUMMARY]);
+
+router.get(
+  "/giniflow/stations/lab/home-collections",
+  homeReportGate,
+  validateQuery(homeCollectionsQuerySchema),
+  async (req, res) => {
+    try {
+      res.json(await listHomeCollections(req.query));
+    } catch (e) {
+      handleError(res, e, "Gini Flow home collections");
+    }
+  },
+);
+
+router.get(
+  "/giniflow/stations/lab/home-collections/export.xlsx",
+  homeReportGate,
+  validateQuery(homeCollectionsQuerySchema),
+  async (req, res) => {
+    try {
+      const { buffer, fileName } = await homeCollectionsWorkbook(req.query);
+      sendXlsx(res, buffer, fileName);
+    } catch (e) {
+      handleError(res, e, "Gini Flow home collections export");
+    }
+  },
+);
+
 router.get(
   "/giniflow/stations/lab/queue",
   labGate,
@@ -1882,8 +1918,27 @@ router.post(
   labBodyRoom,
   async (req, res) => {
     try {
+      if (req.body.site === "home") {
+        if (req.body.action !== "sample_taken" || req.body.undo === true) {
+          return res
+            .status(400)
+            .json({ error: "Only the sample collection step can be marked as done at home" });
+        }
+        return res.json(
+          await collectAtHome(
+            { caseNo: req.params.caseNo },
+            {
+              collectedAt: req.body.collectedAt ?? null,
+              alsoOthers: req.body.alsoOthers === true,
+              actorId: req.doctor?.doctor_id ?? null,
+              room: req.labRoom,
+            },
+          ),
+        );
+      }
       res.json(
         await markLabCaseAction(req.params.caseNo, {
+          site: req.body.site ?? null,
           action: req.body.action,
           note: req.body.note ?? null,
           undo: req.body.undo === true,
@@ -1986,8 +2041,27 @@ router.post(
   labBodyRoom,
   async (req, res) => {
     try {
+      if (req.body.site === "home") {
+        if (req.body.to !== "sample_collected") {
+          return res
+            .status(400)
+            .json({ error: "Only the sample collection step can be marked as done at home" });
+        }
+        return res.json(
+          await collectAtHome(
+            { orderId: req.params.orderId },
+            {
+              collectedAt: req.body.collectedAt ?? null,
+              alsoOthers: req.body.alsoOthers === true,
+              actorId: req.doctor?.doctor_id ?? null,
+              room: req.labRoom,
+            },
+          ),
+        );
+      }
       res.json(
         await advanceSample(req.params.orderId, {
+          site: req.body.site ?? null,
           to: req.body.to,
           room: req.labRoom,
           reportUrl: req.body.reportUrl ?? null,

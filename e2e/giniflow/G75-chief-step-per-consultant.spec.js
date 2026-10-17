@@ -9,6 +9,8 @@ if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 const vitals = await import("../../server/services/giniflow/vitalsStation.js");
 const triage = await import("../../server/services/giniflow/triage.js");
 const journey = await import("../../server/services/giniflow/journey.js");
+const doctor = await import("../../server/services/giniflow/doctorStation.js");
+const engine = await import("../../server/services/giniflow/statusEngine.js");
 
 const tag = newTag();
 let ids;
@@ -127,5 +129,42 @@ test.describe.serial("G75 the Chief Endocrinologist step follows the consultant'
     await triage.assign(visit, { doctorId: CONSULTANTS.beant.id }, USERS.admin.id, db);
     expect(await statusOf(visit)).toBe("ready_for_doctor");
     expect((await chiefSteps(visit)).every((status) => status !== "pending")).toBe(true);
+  });
+
+  test("6. with reports still out, Dr Beant's patient waits in his queue and is called once they land", async () => {
+    const visit = await arrived("ReportsOut", CONSULTANTS.beant);
+    const order = (
+      await one(
+        `INSERT INTO giniflow_lab_orders (visit_id, urgency, payment_status, amount_total,
+                                          sample_status, kind)
+         VALUES ($1, 'today', 'paid', 650, 'paid', 'lab') RETURNING id`,
+        [visit],
+      )
+    ).id;
+    await vitalsTaken(visit);
+    expect(await statusOf(visit)).toBe("ready_for_doctor");
+    await expect(doctor.startConsult(visit, CONSULTANTS.beant.id, db)).rejects.toThrow(
+      /still waiting on a report/,
+    );
+    expect(await statusOf(visit)).toBe("ready_for_doctor");
+    await query(`UPDATE giniflow_lab_orders SET sample_status = 'reported' WHERE id = $1`, [order]);
+    await doctor.startConsult(visit, CONSULTANTS.beant.id, db);
+    expect(await statusOf(visit)).toBe("with_doctor");
+  });
+
+  test("7. vitals seen in HealthRay never leave Dr Beant's patient in the Chief's column", async () => {
+    const direct = await arrived("SyncNo", CONSULTANTS.beant);
+    const chief = await arrived("SyncYes", CONSULTANTS.banshali);
+    for (const visitId of [direct, chief]) {
+      await engine.advanceStatus(db, {
+        visitId,
+        toStatus: "vitals_done",
+        actorRole: "system",
+        allowSkip: true,
+        meta: { source: "healthray", observed: "vitals" },
+      });
+    }
+    expect(await statusOf(direct)).toBe("ready_for_doctor");
+    expect(await statusOf(chief)).toBe("vitals_done");
   });
 });

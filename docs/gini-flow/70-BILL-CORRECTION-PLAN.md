@@ -1,6 +1,6 @@
 # 70 — Correcting a final bill (credit and re-issue)
 
-Status: **plan only, 16 Oct 2026**. Nothing built. Needs a decision on §9 before code.
+Status: **decided 17 Oct 2026** (§9). Not built yet.
 
 ## 1. The problem
 
@@ -157,13 +157,12 @@ differently on someone's word:
 - Admin list: Settings → Billing → Corrections (pending / approved / rejected), same shape as
   the Refunds board.
 
-## 9. Decisions needed
+## 9. Decisions (17 Oct 2026, the recommendations taken)
 
-1. Should the desk raise corrections for admin to approve (recommended), or admin only?
-2. Leftover default: keep as deposit (recommended — no cash moves) or refund?
-3. May an admin approve their own correction when no other admin is on duty?
-4. Should the correction also cover a bill whose CGHS claim is **pending** (it would pull the
-   claim and re-raise it on the replacement)? Recommended: not in the first version.
+1. The desk raises a correction; an admin approves it.
+2. Leftover defaults to the deposit; the approver may send it to the Refunds board instead.
+3. No self-approval: the approver can never be the requester.
+4. A bill with any CGHS claim (pending or cleared) is not eligible in this version.
 
 ## 10. Tests (Playwright, test DB)
 

@@ -97,11 +97,21 @@ async function checkIn(page, patient) {
   const row = page.locator(".ar-row").filter({ hasText: patient.name });
   await row.getByRole("button", { name: /Arrived/ }).click();
   const panel = page.getByRole("dialog", { name: "Check in" });
-  await panel
+  const checkInButton = panel
     .getByRole("button", { name: /^(✓ )?Check in( only)?( — bill later)?$/ })
-    .first()
-    .click();
-  await expect(panel.getByRole("link", { name: "Open bill →" })).toBeVisible();
+    .first();
+  await expect(panel.getByText("Working out the bill…")).toHaveCount(0);
+  await expect(checkInButton).toBeEnabled();
+  let sent = false;
+  const onRequest = (request) => {
+    if (request.method() === "POST" && /\/stations\/reception\//.test(request.url())) sent = true;
+  };
+  page.on("request", onRequest);
+  await expect(async () => {
+    if (!sent) await checkInButton.click();
+    await expect(panel.getByRole("link", { name: "Open bill →" })).toBeVisible({ timeout: 3000 });
+  }).toPass({ timeout: 15000 });
+  page.off("request", onRequest);
   await panel.getByRole("button", { name: "Close", exact: true }).click();
   await expect(panel).toHaveCount(0);
   await expect

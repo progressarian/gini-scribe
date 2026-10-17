@@ -38,6 +38,7 @@ import { getMachines } from "./machineCatalog.js";
 import { JOURNEY_STEPS_SQL } from "./journey.js";
 import { journeyProgress } from "../../../shared/journeyOrder.js";
 import { machineForTest } from "../../../shared/machineStages.js";
+import { HOME_COLLECTION_SQL, VISIT_HOME_SAMPLE_SQL, homeSampleOf } from "./homeCollection.js";
 
 export async function getSlaConfig(db = pool) {
   const { rows } = await db.query(
@@ -245,6 +246,8 @@ const BOARD_SQL = `
          seq.visit_number,
          jr.steps AS journey_steps,
          ${labOnlyPredicate("v", "$2")}            AS lab_only,
+         ${HOME_COLLECTION_SQL("v")}               AS home_collection,
+         CASE WHEN ${HOME_COLLECTION_SQL("v")} THEN ${VISIT_HOME_SAMPLE_SQL("v")} END AS home_sample,
          COALESCE((SELECT vt.for_online FROM flow_visit_types vt
                     WHERE vt.id = v.visit_type_id), FALSE) AS online,
          tests.names                               AS lab_test_names,
@@ -430,6 +433,8 @@ const subtitleFor = (row) => {
       ? `Waiting for reports · then back to ${row.doctor_name || "the doctor"}`
       : `Back to ${row.doctor_name || "the doctor"} · reports in`;
   }
+  if (row.current_status === "ready_for_doctor" && !row.seen_by_sd && row.reports_outstanding > 0)
+    return `Waiting for reports · then ${row.doctor_name || "the consultant"}`;
   if (row.current_status === "ready_for_doctor") {
     const next = row.seen_by_sd
       ? "SD plan ready"
@@ -1238,6 +1243,8 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
       status: row.current_status,
       statusLabel: STATUS_LABEL[row.current_status] || row.current_status,
       category: row.category,
+      homeCollection: !!row.home_collection,
+      homeSample: homeSampleOf(row),
       stability: row.stability
         ? { state: row.stability, reasons: row.stability_reasons || [] }
         : null,

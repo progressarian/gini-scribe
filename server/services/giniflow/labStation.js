@@ -22,7 +22,21 @@ import { promoteLabReport, promoteQuietly } from "./promote.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config/storage.js";
 import { advanceStatus, cancelPauseTx, pauseVisitTx, resumeVisitTx } from "./statusEngine.js";
 import { advanceMachineTest } from "./machineStation.js";
-import { opensLabGate, outstandingOf } from "../../../shared/labPayment.js";
+import {
+  HOME_PAYMENT_PENDING,
+  HOME_RELEASE_STEP,
+  opensLabGate,
+  opensLabGateFor,
+  outstandingOf,
+} from "../../../shared/labPayment.js";
+import {
+  HOME_COLLECTION_SQL,
+  ORDER_COLLECTED_SQL,
+  ORDER_HOME_COLLECTED_SQL,
+  cleanCollectedAt,
+  homeVisit,
+  refuseSiteForNonHome,
+} from "./homeCollection.js";
 import {
   BOARD_COLUMNS,
   STATUS_LABEL,
@@ -131,8 +145,8 @@ const orderAction = (order, room) =>
     ? outsideAction(order.sample_status, room)
     : roomAction(order.sample_status, room);
 
-const stepsFor = (sampleStatus, paid) => {
-  const reached = paid ? railForStage[stageIndexOf(SAMPLE_STATUS_TO_STAGE[sampleStatus])] : 0;
+const stepsFor = (sampleStatus, paid, moving = paid) => {
+  const reached = moving ? railForStage[stageIndexOf(SAMPLE_STATUS_TO_STAGE[sampleStatus])] : 0;
   return [
     { name: "Payment ✓", state: paid ? "done" : "now" },
     ...LAB_RAIL.slice(1).map((name, i) => {
@@ -189,6 +203,11 @@ const unifiedFromOrder = (o) => ({
   reportUrl: o.reportUrl,
   orderId: o.orderId,
   visitId: o.visitId,
+  homeCollection: o.homeCollection,
+  homeCollectable: o.homeCollectable,
+  collectedAtSite: o.collectedAtSite,
+  collectedBy: o.collectedBy,
+  collectedAt: o.collectedAt,
 });
 
 const unifiedFromCase = (r) => ({
@@ -212,6 +231,11 @@ const unifiedFromCase = (r) => ({
   reportUrl: null,
   station: r.station || null,
   outstanding: r.outstanding,
+  homeCollection: r.homeCollection,
+  homeCollectable: r.homeCollectable,
+  collectedAtSite: r.collectedAtSite,
+  collectedBy: r.collectedBy,
+  collectedAt: r.collectedAt,
 });
 
 // The page's filter groups → the Gini bucket and the HealthRay stage that make
@@ -303,6 +327,25 @@ const doneHereFor = (unified, room) => {
     .sort((a, b) => (b.since || "").localeCompare(a.since || ""));
 };
 
+const homeCountsOf = (orders, healthray) => {
+  const homeSites = [
+    ...orders.map((o) => o.collectedAtSite),
+    ...healthray.flatMap((h) =>
+      (h.caseList || []).map(
+        (c) => (c.actions || []).find((a) => a.action === "sample_taken")?.site ?? null,
+      ),
+    ),
+  ];
+  const pending = new Set([
+    ...orders.filter((o) => o.homeCollectable).map((o) => `p:${o.patientId ?? o.orderId}`),
+    ...healthray.filter((h) => h.homeCollectable).map((h) => `p:${h.patientId ?? h.rowKey}`),
+  ]);
+  return {
+    homeCollected: homeSites.filter((site) => site === "home").length,
+    homePending: pending.size,
+  };
+};
+
 export async function getLabQueue(
   visitDate,
   q = null,
@@ -337,6 +380,8 @@ export async function getLabQueue(
             ${ORDER_CANCELLABLE_SQL("o")} AS can_cancel,
             ${ORDER_OUTPUT_SQL("o")} AS has_output,
             ${HELD_ORDER_SQL("o")} AS cancel_held,
+            ${HOME_COLLECTION_SQL("v")} AS home_collection,
+            ${ORDER_COLLECTED_SQL("o")} AS collected_info,
             COALESCE((SELECT json_agg(json_build_object('caseNo', lc.case_no, 'tests', lc.test_names)
                                       ORDER BY lc.case_no)
                         FROM lab_cases lc
@@ -438,7 +483,16 @@ export async function getLabQueue(
   const orders = rows.map((r) => {
     const paid = opensLabGate(r.payment_status);
     const elsewhere = busyElsewhere(busy, r.visit_id, LAB_STATION);
-    const next = paid ? orderAction(r, room) : null;
+    const collected = r.collected_info || null;
+    const homeCollected = collected?.site === "home";
+    const moving = opensLabGateFor(r.payment_status, { homeCollected });
+    const offered = moving ? orderAction(r, room) : null;
+    const next = paid || offered?.to !== HOME_RELEASE_STEP ? offered : null;
+    const homeCollectable =
+      !!r.home_collection &&
+      HOME_FROM_STATUSES.includes(r.sample_status) &&
+      (!room || room === LAB_ROOMS.COLLECTION) &&
+      !r.cancel_held;
     const startHeld = next?.to === "drawing" && !!elsewhere;
     return {
       orderId: r.id,
@@ -458,16 +512,20 @@ export async function getLabQueue(
       sampleStatus: r.sample_status,
       paid,
       bucket: SAMPLE_STATUS_TO_BUCKET[r.sample_status] || "pending",
-      steps: stepsFor(r.sample_status, paid),
+      steps: stepsFor(r.sample_status, paid, moving),
       // Only offered once payment is cleared — and refused by the service too.
       // Room-scoped as well: the collection room sees a sample it has sent, and
       // its next step belongs to the analyzer bench. Offering a button that
       // answers 403 is worse than offering none.
       nextAction: startHeld ? null : next,
       blockedReason: !paid
-        ? r.payment_status === "insurance_claim"
-          ? `Insurance claim submitted — waiting for approval (₹${outstandingOf(r)} outstanding)`
-          : `Waiting for reception to clear payment — ₹${outstandingOf(r)} outstanding`
+        ? homeCollected
+          ? `Payment pending — ₹${outstandingOf(r)}; the report is held until reception records it`
+          : r.home_collection
+            ? `Payment pending — collect ₹${outstandingOf(r)} at the home and tell reception`
+            : r.payment_status === "insurance_claim"
+              ? `Insurance claim submitted — waiting for approval (₹${outstandingOf(r)} outstanding)`
+              : `Waiting for reception to clear payment — ₹${outstandingOf(r)} outstanding`
         : startHeld
           ? busyReason(elsewhere)
           : null,
@@ -498,6 +556,11 @@ export async function getLabQueue(
           r.current_status,
       collectable: !inStationRoom(r) && !NEVER_CAME.includes(r.current_status) && !elsewhere,
       busyAt: elsewhere ? busyReason(elsewhere) : null,
+      homeCollection: !!r.home_collection,
+      homeCollectable,
+      collectedAtSite: collected?.site ?? null,
+      collectedBy: collected?.by ?? null,
+      collectedAt: collected?.at ?? null,
     };
   });
 
@@ -544,6 +607,7 @@ export async function getLabQueue(
     unified: room ? unified.filter((u) => inRoom(u.stage)) : unified,
     unifiedCounts,
     stages: rungs.map((r) => ({ key: r.key, label: r.stageLabel })),
+    homeCounts: homeCountsOf(orders, healthray),
     // The five counters at the top of the screen. They read 0 all day because
     // they only ever counted `giniflow_lab_orders`; the hospital's own cases
     // move through the same five stages and are simply added in, so the strip
@@ -796,6 +860,7 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
             -- Constant across the group (it depends only on the patient and the
             -- day), so bool_or reads it without widening the GROUP BY.
             bool_or(${labOnlyPredicate("v", "$3")}) AS lab_only,
+            bool_or(${HOME_COLLECTION_SQL("v")}) AS home_collection,
             count(*)::int AS cases,
             count(*) FILTER (WHERE NOT c.results_synced)::int AS pending,
             count(*) FILTER (WHERE c.results_synced
@@ -871,7 +936,9 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
          SELECT json_agg(json_build_object(
                   'action', a.action,
                   'at', a.created_at,
-                  'by', COALESCE(d.short_name, d.name, a.actor_role)
+                  'by', COALESCE(d.short_name, d.name, a.actor_role),
+                  'site', a.collected_at_site,
+                  'collectedAt', a.collected_at
                 ) ORDER BY a.created_at) AS list
            FROM giniflow_lab_case_actions a
            LEFT JOIN doctors d ON d.id = a.actor_id
@@ -936,8 +1003,20 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
       (worst, c) => (stageIndex(c) < stageIndex(worst) ? c : worst),
       cases[0],
     );
+    const taken = cases
+      .map((c) => (c.actions || []).find((a) => a.action === "sample_taken" && a.site))
+      .find(Boolean);
     return {
       rowKey: r.grp,
+      homeCollection: !!r.home_collection,
+      homeCollectable:
+        !!r.home_collection &&
+        !!r.visit_id &&
+        (!room || room === LAB_ROOMS.COLLECTION) &&
+        cases.some((c) => !c.cancelHeld && stageIndex(c) < stageIndexOf("drawing")),
+      collectedAtSite: taken?.site ?? null,
+      collectedBy: taken?.by ?? null,
+      collectedAt: taken ? taken.collectedAt || taken.at : null,
       patientId: r.patient_id,
       name: r.name || "Unnamed patient",
       fileNo: r.file_no,
@@ -1179,11 +1258,24 @@ const SENDS_FROM_THE_BENCH = ["sample_sent", SENT_OUTSIDE];
 
 export async function advanceSample(
   orderId,
-  { to, actorId = null, reportUrl = null, room = null, thenBreak = false, drawnAtBench = false },
+  {
+    to,
+    actorId = null,
+    reportUrl = null,
+    room = null,
+    thenBreak = false,
+    drawnAtBench = false,
+    site = null,
+  },
   db = pool,
 ) {
   if (!LAB_SAMPLE_FLOW.includes(to)) {
     throw Object.assign(new Error(`Unknown sample status: ${to}`), { status: 400 });
+  }
+  if (site === "home") {
+    throw Object.assign(new Error("Mark a home collection with the home collection step"), {
+      status: 400,
+    });
   }
   assertRoomOwns(room, SAMPLE_STATUS_TO_STAGE[to]);
 
@@ -1207,13 +1299,21 @@ export async function advanceSample(
   try {
     await client.query("BEGIN");
     const { rows } = await client.query(
-      `SELECT o.sample_status, o.payment_status, o.visit_id, o.kind, o.is_outsourced
+      `SELECT o.sample_status, o.payment_status, o.visit_id, o.kind, o.is_outsourced,
+              ${ORDER_HOME_COLLECTED_SQL("o")} AS home_collected
          FROM giniflow_lab_orders o WHERE o.id = $1 FOR UPDATE`,
       [orderId],
     );
     if (!rows.length) throw Object.assign(new Error("Order not found"), { status: 404 });
     await assertNotHeld(client, { orderId });
-    const { sample_status: from, payment_status: payment, visit_id: visitId } = rows[0];
+    const {
+      sample_status: from,
+      payment_status: payment,
+      visit_id: visitId,
+      home_collected: homeCollected,
+    } = rows[0];
+    const visit = await homeVisit(client, visitId);
+    refuseSiteForNonHome(site, visit);
     // The mirror of the check the machine room makes. Both endpoints are reached
     // by a capability, and a capability says which ROOM somebody works — not
     // which orders exist. Without this, a lab role could walk a machine test up
@@ -1239,12 +1339,14 @@ export async function advanceSample(
     // The payment gate. Enforced here, not in the UI: a hidden button is not a
     // rule, and this one decides whether a patient is charged for a test.
     // Brief §2.2 — "paid (or claim approved)": a submitted claim is not enough.
-    if (!opensLabGate(payment)) {
+    if (!opensLabGateFor(payment, { homeCollected, to })) {
       throw Object.assign(
         new Error(
-          payment === "insurance_claim"
-            ? "Insurance claim is not approved yet — the sample cannot be collected"
-            : "Payment is not cleared — reception must take payment before the sample",
+          homeCollected
+            ? HOME_PAYMENT_PENDING
+            : payment === "insurance_claim"
+              ? "Insurance claim is not approved yet — the sample cannot be collected"
+              : "Payment is not cleared — reception must take payment before the sample",
         ),
         { status: 409 },
       );
@@ -1291,9 +1393,9 @@ export async function advanceSample(
       [orderId, to, reportUrl],
     );
     await client.query(
-      `INSERT INTO giniflow_lab_order_events (lab_order_id, track, status, actor_role, actor_id)
-       VALUES ($1, 'sample', $2, 'lab', $3)`,
-      [orderId, to, actorId],
+      `INSERT INTO giniflow_lab_order_events (lab_order_id, track, status, actor_role, actor_id, meta)
+       VALUES ($1, 'sample', $2, 'lab', $3, $4)`,
+      [orderId, to, actorId, to === "sample_collected" && visit?.home ? { site: "ghm" } : {}],
     );
     // Every test moves with its order. Per-test divergence (one result back
     // before another) is a later refinement; this at least makes the pane's
@@ -1610,6 +1712,177 @@ async function caseLadderState(db, caseNo) {
   return rows[0] || {};
 }
 
+async function caseCollectedAtHome(db, caseNo) {
+  const { rows } = await db.query(
+    `SELECT 1 FROM giniflow_lab_case_actions
+      WHERE case_no = $1 AND action = 'sample_taken' AND collected_at_site = 'home'`,
+    [caseNo],
+  );
+  return rows.length > 0;
+}
+
+async function assertHomePaymentCleared(db, visitId) {
+  const { rows } = await db.query(
+    `SELECT s.status FROM giniflow_visit_steps s
+      WHERE s.visit_id = $1 AND s.step_catalog_id = 'lab_billing'`,
+    [visitId],
+  );
+  if (rows[0]?.status !== "done") {
+    throw Object.assign(new Error(HOME_PAYMENT_PENDING), { status: 409 });
+  }
+}
+
+const HOME_FROM_STATUSES = UNDRAWN_SAMPLE_STATUSES.filter((s) => s !== "drawing");
+
+const refusal = (strict, message, status = 409) => {
+  if (strict) throw Object.assign(new Error(message), { status });
+  return false;
+};
+
+async function heldFor(client, target, strict) {
+  try {
+    await assertNotHeld(client, target);
+    return false;
+  } catch (e) {
+    if (strict || e.code !== "cancel_pending") throw e;
+    return true;
+  }
+}
+
+async function markOrderAtHome(client, orderId, { meta, actorId, strict }) {
+  const { rows } = await client.query(
+    `SELECT sample_status, kind FROM giniflow_lab_orders WHERE id = $1 FOR UPDATE`,
+    [orderId],
+  );
+  if (!rows.length) return refusal(strict, "Order not found", 404);
+  const { sample_status: from, kind } = rows[0];
+  if (kind !== "lab") return refusal(strict, "That order belongs to the machine room, not the lab");
+  if (from === "cancelled") return refusal(strict, "This test was cancelled");
+  if (from === "drawing") {
+    return refusal(strict, "Collection has already started at the bench — finish it there");
+  }
+  if (!HOME_FROM_STATUSES.includes(from)) {
+    return refusal(strict, "This sample has already been collected");
+  }
+  if (await heldFor(client, { orderId }, strict)) return false;
+  await client.query(
+    `UPDATE giniflow_lab_orders SET sample_status = 'sample_collected', updated_at = NOW()
+      WHERE id = $1`,
+    [orderId],
+  );
+  await client.query(
+    `INSERT INTO giniflow_lab_order_events (lab_order_id, track, status, actor_role, actor_id, meta)
+     VALUES ($1, 'sample', 'sample_collected', 'lab', $2, $3)`,
+    [orderId, actorId, meta],
+  );
+  await client.query(
+    `UPDATE giniflow_lab_order_tests SET status = 'sample_collected' WHERE lab_order_id = $1`,
+    [orderId],
+  );
+  return true;
+}
+
+async function markCaseAtHome(client, caseNo, { collectedAt, actorId, strict }) {
+  const { rows } = await client.query(
+    `SELECT ${LIVE_LAB_CASE_SQL("lc")} AS live FROM lab_cases lc WHERE lc.case_no = $1`,
+    [caseNo],
+  );
+  if (!rows.length) return refusal(strict, `No such lab case: ${caseNo}`, 404);
+  if (!rows[0].live)
+    return refusal(strict, `Case ${caseNo} was cancelled — nothing more to record`);
+  if (await heldFor(client, { caseNo }, strict)) return false;
+  const ladder = await caseLadderState(client, caseNo);
+  if (isCollected(ladder)) return refusal(strict, "This sample has already been collected");
+  if (stageIndex(ladder) >= stageIndexOf("drawing")) {
+    return refusal(strict, "Collection has already started at the bench — finish it there");
+  }
+  await client.query(
+    `INSERT INTO giniflow_lab_case_actions
+       (case_no, action, actor_role, actor_id, collected_at_site, collected_at)
+     VALUES ($1, 'sample_taken', 'lab', $2, 'home', $3)
+     ON CONFLICT (case_no, action) DO NOTHING`,
+    [caseNo, actorId, collectedAt],
+  );
+  return true;
+}
+
+async function otherHomeTargets(client, visit, { orderId = null, caseNo = null }) {
+  const { rows: orders } = await client.query(
+    `SELECT id FROM giniflow_lab_orders
+      WHERE visit_id = $1 AND kind = 'lab' AND urgency = 'today'
+        AND id IS DISTINCT FROM $2::uuid AND sample_status = ANY($3::text[])
+      ORDER BY created_at`,
+    [visit.id, orderId, HOME_FROM_STATUSES],
+  );
+  const { rows: today } = await client.query(
+    `SELECT 1 FROM giniflow_lab_orders
+      WHERE visit_id = $1 AND kind = 'lab' AND urgency = 'today' LIMIT 1`,
+    [visit.id],
+  );
+  if (today.length) return { orders: orders.map((r) => r.id), cases: [] };
+  const { rows: cases } = await client.query(
+    `SELECT lc.case_no FROM lab_cases lc
+      WHERE lc.case_date = $2::date
+        AND (lc.patient_id = $1
+             OR (lc.patient_id IS NULL
+                 AND lc.raw_list_json->'patient'->>'healthray_uid' = $3))
+        AND lc.case_no IS DISTINCT FROM $4
+        AND ${LIVE_LAB_CASE_SQL("lc")}
+      ORDER BY lc.case_no`,
+    [visit.patient_id, visit.visit_date, visit.file_no, caseNo],
+  );
+  return { orders: [], cases: cases.map((r) => r.case_no) };
+}
+
+export async function collectAtHome(
+  { orderId = null, caseNo = null },
+  { collectedAt = null, alsoOthers = false, actorId = null, room = null },
+  db = pool,
+) {
+  assertRoomOwns(room, "collected");
+  let visitId = null;
+  if (orderId) {
+    const { rows } = await db.query(`SELECT visit_id FROM giniflow_lab_orders WHERE id = $1`, [
+      orderId,
+    ]);
+    if (!rows.length) throw Object.assign(new Error("Order not found"), { status: 404 });
+    visitId = rows[0].visit_id;
+  } else {
+    visitId = await resolveVisitForCase(db, caseNo);
+  }
+  if (!visitId) {
+    throw Object.assign(
+      new Error("Book the patient for today first, then mark the home collection"),
+      { status: 409 },
+    );
+  }
+  const visit = await homeVisit(db, visitId);
+  refuseSiteForNonHome("home", visit);
+  const at = cleanCollectedAt(collectedAt, visit.visit_date);
+  const meta = { site: "home", collectedAt: at.toISOString() };
+
+  const marked = await withVisitLock(db, async (client) => {
+    const done = { orders: [], cases: [] };
+    const options = { meta, collectedAt: at, actorId, strict: true };
+    if (orderId && (await markOrderAtHome(client, orderId, options))) done.orders.push(orderId);
+    if (caseNo && (await markCaseAtHome(client, caseNo, options))) done.cases.push(caseNo);
+    if (alsoOthers) {
+      const others = await otherHomeTargets(client, visit, { orderId, caseNo });
+      const loose = { ...options, strict: false };
+      for (const id of others.orders) {
+        if (await markOrderAtHome(client, id, loose)) done.orders.push(id);
+      }
+      for (const no of others.cases) {
+        if (await markCaseAtHome(client, no, loose)) done.cases.push(no);
+      }
+    }
+    await syncLabStepsFromLab(client, visitId);
+    return done;
+  });
+  publish({ kind: "lab_order", visitId, status: "sample_collected" });
+  return { visitId, site: "home", collectedAt: meta.collectedAt, ...marked };
+}
+
 export async function markLabCaseAction(
   caseNo,
   {
@@ -1621,10 +1894,16 @@ export async function markLabCaseAction(
     room = null,
     thenBreak = false,
     drawnAtBench = false,
+    site = null,
   },
   db = pool,
 ) {
   if (!CASE_ACTIONS.includes(action)) throw new Error(`Unknown lab case action: ${action}`);
+  if (site === "home") {
+    throw Object.assign(new Error("Mark a home collection with the home collection step"), {
+      status: 400,
+    });
+  }
   assertRoomOwns(room, STAGE_FOR_ACTION[action]);
 
   const { rows: known } = await db.query(
@@ -1711,6 +1990,12 @@ export async function markLabCaseAction(
   }
 
   const resolvedVisitId = await resolveVisitForCase(db, caseNo);
+  const visit = await homeVisit(db, resolvedVisitId);
+  refuseSiteForNonHome(site, visit);
+
+  if (action === "report_uploaded" && !undo && (await caseCollectedAtHome(db, caseNo))) {
+    await assertHomePaymentCleared(db, resolvedVisitId);
+  }
 
   if ((action === "sample_taken" || action === "drawing_started") && !undo && !drawnAtBench) {
     const what = action === "drawing_started" ? "start the collection" : "collect the sample";
@@ -1742,17 +2027,22 @@ export async function markLabCaseAction(
     return { caseNo, action, undone: true };
   }
 
+  const benchSite = action === "sample_taken" && visit?.home ? "ghm" : null;
   // One row per case per action: tapping twice is the same statement, not two.
   const recordAction = (conn) =>
     conn.query(
-      `INSERT INTO giniflow_lab_case_actions (case_no, action, actor_role, actor_id, note)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO giniflow_lab_case_actions
+         (case_no, action, actor_role, actor_id, note, collected_at_site, collected_at)
+       VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $6::text IS NULL THEN NULL ELSE NOW() END)
        ON CONFLICT (case_no, action) DO UPDATE
          SET actor_role = EXCLUDED.actor_role,
              actor_id   = EXCLUDED.actor_id,
-             note       = COALESCE(EXCLUDED.note, giniflow_lab_case_actions.note)
+             note       = COALESCE(EXCLUDED.note, giniflow_lab_case_actions.note),
+             collected_at_site = COALESCE(EXCLUDED.collected_at_site,
+                                          giniflow_lab_case_actions.collected_at_site),
+             collected_at = COALESCE(EXCLUDED.collected_at, giniflow_lab_case_actions.collected_at)
        RETURNING action, created_at`,
-      [caseNo, action, actorRole, actorId, note],
+      [caseNo, action, actorRole, actorId, note, benchSite],
     );
   const breakAfter = thenBreak && action === "sample_taken" && !!resolvedVisitId;
   const { rows } =

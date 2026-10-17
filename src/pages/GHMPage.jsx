@@ -35,6 +35,7 @@ import {
 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import "./GHMPage.css";
+import { istClock } from "../../shared/homeCollection.js";
 import useAuthStore from "../stores/authStore";
 import { SLOT_REASON, slotOptions, ARRIVAL_TIME_RANGES } from "../lib/slotAvailability.js";
 import { exportWatiWorkbook } from "../lib/ghmWatiExport.js";
@@ -338,7 +339,25 @@ const MODE_FILTER_OPTIONS = [
 const COLLECTION_OPTIONS = [
   { value: "all", label: "All patients" },
   { value: "home", label: "Home collection only" },
+  { value: "home_pending", label: "Home sample — not collected yet" },
+  { value: "home_collected", label: "Home sample — collected" },
 ];
+
+const HOME_SAMPLE_PARAM = { home_pending: "pending", home_collected: "collected" };
+
+function HomeSampleChip({ row }) {
+  if (!row.home_collection || !row.home_sample_status) return null;
+  const collected = row.home_sample_status !== "not_collected";
+  return (
+    <span className={`home-sample-chip${collected ? " is-collected" : ""}`}>
+      {row.home_sample_status === "ghm"
+        ? "🏥 Came to GHM"
+        : collected
+          ? `🏠 Collected · ${[row.home_sample?.by, istClock(row.home_sample?.at)].filter(Boolean).join(" ")}`
+          : "🏠 Not collected yet"}
+    </span>
+  );
+}
 
 // ─── Inline text/date cell that saves on blur / Enter ─────────────────────
 function InlineEdit({
@@ -2660,6 +2679,8 @@ export default function GHMPage() {
         if (missSort) p.set("sort", missSort);
         if (doctor !== "All") p.set("doctor", doctor);
         if (collectionFilter === "home") p.set("home_collection", "1");
+        if (HOME_SAMPLE_PARAM[collectionFilter])
+          p.set("home_sample", HOME_SAMPLE_PARAM[collectionFilter]);
         if (modeFilter !== "all") p.set("appt_mode", modeFilter);
         if (callsFilter !== "all") p.set("calls", callsFilter);
         if (searchQ) p.set("q", searchQ);
@@ -2670,6 +2691,8 @@ export default function GHMPage() {
       if (view !== "lookup") p.set("date", date);
       if (doctor !== "All") p.set("doctor", doctor);
       if (collectionFilter === "home") p.set("home_collection", "1");
+      if (HOME_SAMPLE_PARAM[collectionFilter])
+        p.set("home_sample", HOME_SAMPLE_PARAM[collectionFilter]);
       if (modeFilter !== "all") p.set("appt_mode", modeFilter);
       if (callsFilter !== "all" && view !== "lookup") p.set("calls", callsFilter);
       if (pillFilter) p.set("bucket", pillFilter);
@@ -3766,6 +3789,7 @@ export default function GHMPage() {
                                 )}
                                 <BlockedBadge block={blocks[row.patient_id]} size="sm" />
                               </span>
+                              <HomeSampleChip row={row} />
                               {row.phone ? (
                                 <a
                                   className="pcell__ph"

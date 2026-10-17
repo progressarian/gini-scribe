@@ -127,12 +127,15 @@ export function useSaveLabResults() {
 export function useAdvanceSample() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ orderId, to, reportUrl, thenBreak }) =>
+    mutationFn: async ({ orderId, to, reportUrl, thenBreak, site, collectedAt, alsoOthers }) =>
       (
         await api.post(`/api/giniflow/stations/lab/${orderId}/advance`, {
           to,
           reportUrl,
           thenBreak,
+          site,
+          collectedAt,
+          alsoOthers,
         })
       ).data,
     onSuccess: () => {
@@ -180,12 +183,15 @@ export function useCancelLabCase() {
 export function useMarkLabCaseAction() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ caseNo, action, undo, thenBreak }) =>
+    mutationFn: async ({ caseNo, action, undo, thenBreak, site, collectedAt, alsoOthers }) =>
       (
         await api.post(`/api/giniflow/stations/lab/case/${caseNo}/action`, {
           action,
           undo,
           thenBreak,
+          site,
+          collectedAt,
+          alsoOthers,
         })
       ).data,
     onSuccess: () => {

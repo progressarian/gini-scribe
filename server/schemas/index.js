@@ -711,6 +711,45 @@ export const giniflowStationQuerySchema = z.object({
     .optional(),
 });
 
+const HOME_REPORT_DAY = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dates must be YYYY-MM-DD");
+const istToday = () => new Date(Date.now() + 330 * 60 * 1000).toISOString().slice(0, 10);
+const wholeNumber = (label, max) =>
+  z.coerce
+    .number({ message: `${label} must be a whole number` })
+    .int(`${label} must be a whole number`)
+    .min(1, `${label} must be at least 1`)
+    .max(max, `${label} can be at most ${max}`);
+
+export const homeCollectionsQuerySchema = z
+  .object({
+    from: HOME_REPORT_DAY.optional(),
+    to: HOME_REPORT_DAY.optional(),
+    site: z.enum(["home", "ghm", "pending"]).optional(),
+    collectorId: wholeNumber("Collector", 2147483647).optional(),
+    q: z.string().trim().max(100).optional(),
+    page: wholeNumber("Page", 100000).optional(),
+    pageSize: wholeNumber("Page size", 100).optional(),
+    sort: z
+      .enum([
+        "date_desc",
+        "date_asc",
+        "patient_asc",
+        "patient_desc",
+        "collected_desc",
+        "collected_asc",
+      ])
+      .optional(),
+  })
+  .transform((v) => ({
+    ...v,
+    from: v.from || v.to || istToday(),
+    to: v.to || v.from || istToday(),
+  }))
+  .refine((v) => v.from <= v.to, { message: "The start date must be on or before the end date" })
+  .refine((v) => (new Date(v.to) - new Date(v.from)) / 86400000 <= 366, {
+    message: "Choose a range of at most one year",
+  });
+
 export const giniflowSearchQuerySchema = z.object({
   q: z.string().trim().min(2, "search needs at least 2 characters").max(60),
   date: z
@@ -917,6 +956,12 @@ export const giniflowWalkInSchema = z.object({
   force: z.boolean().optional(),
 });
 
+const homeCollectionFields = {
+  site: z.enum(["home", "ghm"]).nullish(),
+  collectedAt: z.string().max(40).nullish(),
+  alsoOthers: z.boolean().optional(),
+};
+
 export const giniflowSampleSchema = z.object({
   to: z.enum([
     "paid",
@@ -932,6 +977,7 @@ export const giniflowSampleSchema = z.object({
   room: z.enum(["collection", "processing"]).nullish(),
   reportUrl: z.string().url().max(2000).nullish(),
   thenBreak: z.boolean().optional(),
+  ...homeCollectionFields,
 });
 
 // Confirm-and-attribute on a HealthRay-owned case. The DB CHECK still permits
@@ -947,6 +993,7 @@ export const giniflowLabCaseActionSchema = z.object({
   note: z.string().max(500).nullish(),
   undo: z.boolean().optional(),
   thenBreak: z.boolean().optional(),
+  ...homeCollectionFields,
 });
 
 export const giniflowReportSchema = z.object({

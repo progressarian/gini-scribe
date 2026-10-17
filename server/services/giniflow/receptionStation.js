@@ -47,6 +47,12 @@ import { directConsultSql } from "../../../shared/directConsult.js";
 import { ORDERED_AFTER_CONSULT_SQL } from "../billing/afterConsult.js";
 import { HELD_ORDER_SQL } from "./cancelHold.js";
 import { orderCancelStage } from "../../../shared/testCancelStages.js";
+import {
+  HOME_COLLECTION_SQL,
+  ORDER_COLLECTED_SQL,
+  VISIT_HOME_SAMPLE_SQL,
+  homeSampleOf,
+} from "./homeCollection.js";
 
 // Reception: the payment desk between the MO ordering tests and the lab
 // collecting a sample.
@@ -72,6 +78,8 @@ const ORDER_SELECT = `
          ${ORDER_OUTPUT_SQL("o")} AS has_output,
          ${HELD_ORDER_SQL("o")} AS cancel_held,
          ${ORDERED_AFTER_CONSULT_SQL("o.visit_id", "o.created_at")} AS after_consult,
+         ${HOME_COLLECTION_SQL("v")} AS home_collection,
+         ${ORDER_COLLECTED_SQL("o")} AS collected_info,
          CASE WHEN o.kind = 'lab' THEN COALESCE((
            SELECT json_agg(json_build_object('caseNo', lc.case_no, 'tests', lc.test_names)
                            ORDER BY lc.case_no)
@@ -181,6 +189,10 @@ const shape = (r) => ({
   }),
   cancelHeld: !!r.cancel_held,
   cancellableCases: r.cancellable_cases || [],
+  homeCollection: !!r.home_collection,
+  homeSample: r.collected_info?.site
+    ? { site: r.collected_info.site, by: r.collected_info.by, at: r.collected_info.at }
+    : null,
 });
 
 const isAwaitingSample = (o) =>
@@ -244,7 +256,9 @@ const HEALTHRAY_LAB_SELECT = (stepStatuses) => `
          json_agg(json_build_object('caseNo', lc.case_no, 'tests', lc.test_names)
                   ORDER BY lc.case_no) AS cases,
          min((COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'registered_at')::timestamptz)
-           AS registered_at
+           AS registered_at,
+         ${HOME_COLLECTION_SQL("v")} AS home_collection,
+         ${VISIT_HOME_SAMPLE_SQL("v")} AS home_sample
     FROM giniflow_visits v
     JOIN patients p ON p.id = v.patient_id
     JOIN giniflow_visit_steps lb
@@ -296,6 +310,8 @@ const shapeHealthrayLab = (r) => ({
   cases: r.cases || [],
   registeredAt: r.registered_at ? new Date(r.registered_at).toISOString() : null,
   clearedAt: r.cleared_at ? new Date(r.cleared_at).toISOString() : null,
+  homeCollection: !!r.home_collection,
+  homeSample: homeSampleOf(r),
 });
 
 export async function getPaymentQueue(visitDate, db = pool, { q = "" } = {}) {
@@ -383,6 +399,10 @@ export async function getPaymentQueue(visitDate, db = pool, { q = "" } = {}) {
       ...paymentCounts(allOrders, pendingCharges(allCharges), allHealthrayLab),
       charges: pendingCharges(allCharges).length,
       healthrayLab: allHealthrayLab.length,
+      homePaymentPending: [
+        ...allOrders.filter((o) => !opensLabGate(o.paymentStatus)),
+        ...allHealthrayLab,
+      ].filter((row) => row.homeSample?.site === "home").length,
     },
     query,
     pricesArePlaceholders: placeholder[0].placeholder,

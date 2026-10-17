@@ -37,6 +37,14 @@ export const PAYMENT_LABEL = {
 export const opensLabGate = (paymentStatus) =>
   [PAYMENT_STATUS.PAID, PAYMENT_STATUS.CLAIM_APPROVED].includes(paymentStatus);
 
+export const HOME_RELEASE_STEP = "uploaded";
+
+export const HOME_PAYMENT_PENDING =
+  "Payment pending — reception must record the home-collection payment before the report is released";
+
+export const opensLabGateFor = (paymentStatus, { homeCollected = false, to = null } = {}) =>
+  opensLabGate(paymentStatus) || (homeCollected && to !== HOME_RELEASE_STEP);
+
 // Rupees in, whole paise out. Money never rides on a float: 1250.1 - 900.1 is
 // not 350 in binary, and a stray hundredth of a paisa would leave an order
 // permanently one unit short of settled and the lab permanently blocked.

@@ -26,7 +26,7 @@ import {
 
 import { TESTS_HOLD_SQL } from "./testsHold.js";
 
-import { syncFromStatus } from "./journey.js";
+import { skipsChiefStop, syncFromStatus } from "./journey.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { FLOOR_DONE_LAB_STATUSES } from "../../../shared/labStages.js";
 import { MACHINE_RUNGS } from "../../../shared/machineStages.js";
@@ -72,14 +72,18 @@ const CONSULT_STATUSES = [
 // consultant's queue because one such write moved him to `with_vitals` and
 // nothing refused it. This is where it is refused. Asked only for the statuses
 // that could be wrong, so the ordinary advance pays nothing for it.
-async function assertNotLabOnly(client, visitId, toStatus) {
-  if (!CONSULT_STATUSES.includes(toStatus)) return;
+const isLabOnlyVisit = async (client, visitId) => {
   const { rows } = await client.query(
     `SELECT ${labOnlyPredicate("v", "$2")} AS lab_only
        FROM giniflow_visits v WHERE v.id = $1`,
     [visitId, LAB_ONLY_DOCTOR],
   );
-  if (rows[0]?.lab_only) {
+  return !!rows[0]?.lab_only;
+};
+
+async function assertNotLabOnly(client, visitId, toStatus) {
+  if (!CONSULT_STATUSES.includes(toStatus)) return;
+  if (await isLabOnlyVisit(client, visitId)) {
     throw new Error(
       `Samples-only visit cannot enter the consultation flow: ${toStatus}. ` +
         `Assign a consultant to this patient first.`,
@@ -102,6 +106,8 @@ async function assertNotLabOnly(client, visitId, toStatus) {
 // Enforced here rather than on a screen because four different callers move a
 // patient toward a doctor — the board's drag, the MO's "ready for doctor", the
 // consultant claiming a patient, and the sync. One gate covers all of them.
+export const NO_CHIEF_STEP_REASON = "plan_has_no_chief_step";
+
 const DOCTOR_STATUSES = ["sd_pending", "with_sd", "ready_for_doctor", "with_doctor"];
 
 // What "reported" means, from both ladders — the lab's and the machine room's.
@@ -114,8 +120,11 @@ const REPORTED_SAMPLE_STATUSES = [
   ]),
 ];
 
-async function assertReportsAreIn(client, visitId, toStatus) {
+const QUEUED_WITHOUT_CHIEF_SQL = `COALESCE(meta->>'reason', '') <> '${NO_CHIEF_STEP_REASON}'`;
+
+async function assertReportsAreIn(client, visitId, toStatus, meta) {
   if (!DOCTOR_STATUSES.includes(toStatus)) return;
+  if (toStatus === "ready_for_doctor" && meta?.reason === NO_CHIEF_STEP_REASON) return;
   // Only the FIRST arrival at the doctor leg is gated.
   //
   // Once a patient has been with the Chief, they are in the Chief's hands for
@@ -126,7 +135,7 @@ async function assertReportsAreIn(client, visitId, toStatus) {
   // patient goes to the lab, comes back, chief reviews.
   const { rows: been } = await client.query(
     `SELECT 1 FROM giniflow_visit_events
-      WHERE visit_id = $1 AND status = ANY($2::text[]) LIMIT 1`,
+      WHERE visit_id = $1 AND status = ANY($2::text[]) AND ${QUEUED_WITHOUT_CHIEF_SQL} LIMIT 1`,
     [visitId, DOCTOR_STATUSES],
   );
   if (been.length) return;
@@ -235,7 +244,7 @@ export async function advanceStatus(
     !isChainStatus(toStatus) ||
     chainIndex(toStatus) > chainIndex(fromStatus)
   ) {
-    await assertReportsAreIn(client, visitId, toStatus);
+    await assertReportsAreIn(client, visitId, toStatus, meta);
   }
   await assertSyncLeavesTestsAlone(client, visitId, toStatus, meta);
   await assertNoExitWithTestsOpen(client, visitId, toStatus, actorRole);
@@ -328,6 +337,21 @@ export async function advanceStatus(
   // meta travels with it: an exit the pharmacy counter wrote is not evidence the
   // stops behind it happened, and only the meta says which exit this is.
   await syncFromStatus(client, visitId, toStatus, meta);
+
+  if (
+    toStatus === "vitals_done" &&
+    (await skipsChiefStop(client, visitId)) &&
+    !(await isLabOnlyVisit(client, visitId))
+  ) {
+    const next = await advanceStatus(client, {
+      visitId,
+      toStatus: "ready_for_doctor",
+      actorRole: "system",
+      allowSkip: true,
+      meta: { reason: NO_CHIEF_STEP_REASON, after: "vitals_done" },
+    });
+    return { ...next, from: fromStatus };
+  }
 
   return { from: fromStatus, ...event.rows[0] };
 }
@@ -447,7 +471,7 @@ export async function getStationTimes(
           (st) => chainIndex(st) > chainIndex(from) && chainIndex(st) < chainIndex(to),
         )
       : [];
-  const chiefNotPlanned = (next) => next?.meta?.reason === "plan_has_no_chief_step";
+  const chiefNotPlanned = (next) => next?.meta?.reason === NO_CHIEF_STEP_REASON;
   const skippedBetween = (row, next) =>
     stationsSkipped(row.status, next.status).filter(
       (st) =>

@@ -26,6 +26,7 @@ import "../billing/billing.css";
 import "../billing/billingUi.css";
 import "../billing/billingReports.css";
 import "./MonthlySummaryPage.css";
+import HomeCollectionsSection from "./HomeCollectionsSection";
 
 const IST_MONTH = new Intl.DateTimeFormat("en-CA", {
   timeZone: "Asia/Kolkata",
@@ -55,6 +56,14 @@ const DOCTOR_BUCKETS = [
 ];
 
 const MONTH_CHOICES = 24;
+
+const IST_DAY = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" });
+const monthRange = (month) => {
+  const [y, m] = month.split("-").map(Number);
+  const last = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+  const today = IST_DAY.format(new Date());
+  return { from: `${month}-01`, to: last < today ? last : today };
+};
 const VISITS_ID = "ms-visits";
 const SEARCH_DELAY_MS = 300;
 const DEFAULTS = { type: "opd", status: "came", sort: "date_desc", page: "1", limit: "25" };
@@ -615,6 +624,8 @@ export default function MonthlySummaryPage() {
           </div>
         </>
       )}
+
+      <HomeCollectionsSection {...monthRange(month)} />
 
       <VisitList month={month} read={read} update={update} />
     </div>

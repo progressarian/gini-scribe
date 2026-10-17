@@ -21,6 +21,8 @@ import "../../../pages/giniflow/MachineStationPage.css";
 import CancelledTestsPanel from "../CancelledTestsPanel";
 import { useCancelledTests } from "../../../queries/hooks/useGiniflowCancelled";
 import OutsidePendingPanel from "./OutsidePendingPanel";
+import HomeCollectDialog, { HomeCollectionTag } from "./HomeCollectDialog";
+import useDismiss from "./useDismiss";
 import LabResultsForm from "../LabResultsForm";
 import PdfViewerModal from "../../visit/PdfViewerModal";
 import StationNotice from "../StationNotice";
@@ -314,7 +316,22 @@ function BreakButton({ busy, onClick, full = false }) {
   );
 }
 
-function LabCard({ order, group, onAdvance, onUpload, onOpen, busy }) {
+const offersHomeCollection = (order) => order.homeCollectable && !order.heldElsewhere;
+
+function HomeCollectButton({ busy, onClick, full = false }) {
+  return (
+    <button
+      type="button"
+      className={`st-btn st-btn-tl${full ? " btn-full" : ""}`}
+      disabled={busy}
+      onClick={onClick}
+    >
+      ▶ Start collection
+    </button>
+  );
+}
+
+function LabCard({ order, group, onAdvance, onUpload, onOpen, onHomeCollect, busy }) {
   const mins = minutesSince(group.key === "uploaded" ? order.uploadedAt : order.since);
   const fileRef = useRef(null);
   const waitingTooLong = group.key === "ready" && mins !== null && mins >= UPLOAD_WAIT_AMBER;
@@ -338,7 +355,8 @@ function LabCard({ order, group, onAdvance, onUpload, onOpen, busy }) {
             <span className="badge b-grn">Uploaded {clock(order.uploadedAt)}</span>
           ) : (
             <span className="badge b-ink">{order.fileNo}</span>
-          )}
+          )}{" "}
+          <HomeCollectionTag row={order} />
         </div>
         <div className="pc-meta">
           {order.age}
@@ -373,7 +391,9 @@ function LabCard({ order, group, onAdvance, onUpload, onOpen, busy }) {
         )}
       </div>
       <div className="pc-r">
-        {order.nextAction?.to === "uploaded" ? (
+        {offersHomeCollection(order) && onHomeCollect ? (
+          <HomeCollectButton busy={busy} onClick={() => onHomeCollect(order)} />
+        ) : order.nextAction?.to === "uploaded" ? (
           <>
             {/* The last step needs a file, not just a tap: an order marked
                 uploaded with no report tells the MO a result exists when it
@@ -446,25 +466,6 @@ const TEST_STATUS_LABEL = {
 // only covers a server that has not shipped it yet.
 const caseRowKey = (r) => r.rowKey ?? r.patientId ?? `hr:${r.fileNo || "?"}`;
 
-// Escape closes, focus returns, click outside closes — the same contract the
-// board's modal and drawer follow.
-function useDismiss(open, onClose, ref) {
-  const opener = useRef(null);
-  useEffect(() => {
-    if (!open) return undefined;
-    opener.current = document.activeElement;
-    const onKey = (e) => e.key === "Escape" && onClose();
-    const onDown = (e) => ref.current && !ref.current.contains(e.target) && onClose();
-    document.addEventListener("keydown", onKey);
-    document.addEventListener("pointerdown", onDown);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.removeEventListener("pointerdown", onDown);
-      if (opener.current instanceof HTMLElement) opener.current.focus();
-    };
-  }, [open, onClose, ref]);
-}
-
 function LabDetailPane({
   order,
   group,
@@ -478,6 +479,7 @@ function LabDetailPane({
   onResultsFailed,
   onCancelTest,
   canCancelTest,
+  onHomeCollect,
   busy,
 }) {
   // Same rule as the hospital-case pane: results belong to the analyzer bench.
@@ -522,7 +524,8 @@ function LabDetailPane({
               <TestNames names={orderTestNames(order)} outsourced={orderOutsourced(order)} />
             ) : (
               "none listed"
-            )}
+            )}{" "}
+            <HomeCollectionTag row={order} />
           </div>
           <div className="dp-acts">
             <button className="rbtn" onClick={onClose}>
@@ -580,6 +583,17 @@ function LabDetailPane({
               <div className="dp-sec-title">Update status</div>
               {order.cancelHeld ? (
                 <CancelHeldBadge />
+              ) : offersHomeCollection(order) && onHomeCollect ? (
+                <>
+                  {order.blockedReason && (
+                    <div className="dp-hint lab-blocked">💰 {order.blockedReason}</div>
+                  )}
+                  <div className="dp-hint">
+                    Home collection patient. Mark the sample when you are back with it, or start the
+                    collection here if they came to GHM.
+                  </div>
+                  <HomeCollectButton full busy={busy} onClick={() => onHomeCollect(order)} />
+                </>
               ) : order.blockedReason ? (
                 <div className={`dp-hint lab-blocked${order.heldElsewhere ? " is-held" : ""}`}>
                   {order.paid ? (order.heldElsewhere ? "🔒 " : "") : "💰 "}
@@ -884,7 +898,8 @@ function HealthrayCard({ row, onOpen, readOnly = false }) {
       <div className="pc-body">
         <div className="pc-name">
           {row.name}
-          {row.fileNo && <span className="badge b-ink">{row.fileNo}</span>}
+          {row.fileNo && <span className="badge b-ink">{row.fileNo}</span>}{" "}
+          <HomeCollectionTag row={row} />
         </div>
         <div className="pc-meta">
           {[
@@ -961,6 +976,7 @@ function HealthrayCasePane({
   canFileReport,
   onCancelCase,
   canCancelTest,
+  onHomeCollect,
   busy,
   room,
   date,
@@ -994,7 +1010,8 @@ function HealthrayCasePane({
               `${row.cases} ${row.cases === 1 ? "case" : "cases"} today`,
             ]
               .filter(Boolean)
-              .join(" · ")}
+              .join(" · ")}{" "}
+            <HomeCollectionTag row={row} />
           </div>
           <div className="dp-acts">
             <button className="rbtn" onClick={onClose}>
@@ -1242,16 +1259,25 @@ function HealthrayCasePane({
                               ✓ {a.doneLabel}
                             </button>
                           ))}
-                          {next && (
-                            <button
-                              type="button"
-                              className="st-btn st-btn-tl"
-                              disabled={busy || blocked}
-                              onClick={() => onAction(c.caseNo, next.action, false)}
-                            >
-                              {c.nextAction.label}
-                            </button>
-                          )}
+                          {next &&
+                            (row.homeCollectable &&
+                            onHomeCollect &&
+                            next.action === "drawing_started" &&
+                            !c.cancelHeld ? (
+                              <HomeCollectButton
+                                busy={busy}
+                                onClick={() => onHomeCollect(row, c)}
+                              />
+                            ) : (
+                              <button
+                                type="button"
+                                className="st-btn st-btn-tl"
+                                disabled={busy || blocked}
+                                onClick={() => onAction(c.caseNo, next.action, false)}
+                              >
+                                {c.nextAction.label}
+                              </button>
+                            ))}
                           {SENDS_FROM_THE_BENCH.includes(next?.action) &&
                             !c.collected &&
                             !row.labOnly && (
@@ -1340,8 +1366,14 @@ function HealthrayCasePane({
                   )}
                   {(c.actions || []).map((x) => (
                     <div className="dp-hint" key={x.action}>
-                      {ACTION_LABEL[x.action]} by <strong>{x.by}</strong> at {clock(x.at)} —
-                      recorded here only, not sent to HealthRay.
+                      {x.site === "home"
+                        ? "🏠 Sample collected at home"
+                        : x.site === "ghm"
+                          ? "🏥 Sample collected at GHM"
+                          : ACTION_LABEL[x.action]}{" "}
+                      by <strong>{x.by}</strong> at {clock(x.collectedAt || x.at)}
+                      {x.site === "home" ? ` (marked ${clock(x.at)})` : ""} — recorded here only,
+                      not sent to HealthRay.
                     </div>
                   ))}
                 </div>
@@ -1434,6 +1466,9 @@ export default function LabRoom({ room = null }) {
   const upload = useUploadReport();
   const [openOrderId, setOpenOrderId] = useState(null);
   const [openCaseId, setOpenCaseId] = useState(null);
+  const [homeTarget, setHomeTarget] = useState(null);
+  const [homeError, setHomeError] = useState(null);
+  const [homeOnly, setHomeOnly] = useState(false);
   const [viewingDoc, setViewingDoc] = useState(null);
   const deleteCaseReport = useDeleteLabCaseReport();
 
@@ -1679,6 +1714,93 @@ export default function LabRoom({ room = null }) {
       },
     );
 
+  const homeOrders = allOrders.map(({ o }) => o).filter(offersHomeCollection);
+  const homeRows = healthray.filter((r) => r.homeCollectable);
+  const homeCounts = data?.homeCounts;
+  const showHome = !!homeCounts && inRoom !== "processing";
+
+  const openHomeForOrder = (order) => {
+    setOpenOrderId(null);
+    setHomeError(null);
+    setHomeTarget({
+      kind: "order",
+      order,
+      name: order.name,
+      fileNo: order.fileNo,
+      age: order.age,
+      sex: order.sex,
+      tests: orderTestNames(order),
+      unpaid: !order.paid,
+      amount: Math.max(0, order.amountTotal - order.amountPaid),
+      others: homeOrders.filter(
+        (o) => o.orderId !== order.orderId && o.patientId && o.patientId === order.patientId,
+      ).length,
+    });
+  };
+
+  const openHomeForCase = (row, c) => {
+    setOpenCaseId(null);
+    setHomeError(null);
+    setHomeTarget({
+      kind: "case",
+      row,
+      caseNo: c.caseNo,
+      name: row.name,
+      fileNo: row.fileNo,
+      age: row.age,
+      sex: row.sex,
+      tests: c.tests,
+      unpaid: false,
+      amount: 0,
+      others: (row.caseList || []).filter(
+        (x) => x.caseNo !== c.caseNo && x.stage?.key === "pending" && !x.cancelHeld,
+      ).length,
+    });
+  };
+
+  const closeHome = useCallback(() => {
+    setHomeTarget(null);
+    setHomeError(null);
+  }, []);
+
+  const homeSaved = (target) => (r) => {
+    const count = (r.orders?.length || 0) + (r.cases?.length || 0);
+    closeHome();
+    showToast(
+      `🏠 ${target.name} — ${count > 1 ? `${count} samples` : "sample"} collected at home${
+        target.unpaid ? ". Payment pending — tell reception" : ""
+      }`,
+    );
+  };
+
+  const homeFailed = (e) =>
+    setHomeError(e?.response?.data?.error || "Could not save — nothing was recorded. Try again.");
+
+  const markHome = ({ collectedAt, alsoOthers }) => {
+    const target = homeTarget;
+    if (!target) return;
+    const home = { site: "home", collectedAt, alsoOthers };
+    if (target.kind === "order") {
+      advance.mutate(
+        { orderId: target.order.orderId, to: "sample_collected", ...home },
+        { onSuccess: homeSaved(target), onError: homeFailed },
+      );
+    } else {
+      caseAction.mutate(
+        { caseNo: target.caseNo, action: "sample_taken", ...home },
+        { onSuccess: homeSaved(target), onError: homeFailed },
+      );
+    }
+  };
+
+  const cameToGhm = () => {
+    const target = homeTarget;
+    if (!target) return;
+    closeHome();
+    if (target.kind === "order") onAdvance(target.order, "drawing");
+    else onCaseAction(target.caseNo, "drawing_started", false);
+  };
+
   const onCaseAction = (caseNo, action, undo, thenBreak = false) =>
     action === SENT_OUTSIDE
       ? sendCaseOutside.mutate(
@@ -1804,6 +1926,38 @@ export default function LabRoom({ room = null }) {
                     </div>
                   </div>
                 ))}
+                {showHome && (
+                  <>
+                    <div className="stat">
+                      <div className="sv" style={{ color: "var(--tl)" }}>
+                        {homeCounts.homeCollected}
+                      </div>
+                      <div>
+                        <div className="sl">🏠 Home collected</div>
+                        <div className="ss">today</div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="stat"
+                      aria-pressed={homeOnly}
+                      onClick={() => {
+                        setHomeOnly(!homeOnly);
+                        setFilter("all");
+                      }}
+                    >
+                      <div className="sv" style={{ color: "var(--tl)" }}>
+                        {homeCounts.homePending}
+                      </div>
+                      <div>
+                        <div className="sl">🏠 Home pending</div>
+                        <div className="ss">
+                          {homeOnly ? "showing — tap for all" : "tap to show"}
+                        </div>
+                      </div>
+                    </button>
+                  </>
+                )}
               </div>
 
               <p className="stats-note">
@@ -1822,7 +1976,49 @@ export default function LabRoom({ room = null }) {
 
               {isLoading && <div className="empty-note">Loading…</div>}
 
-              {!isLoading && (
+              {!isLoading && homeOnly && showHome && (
+                <section aria-label="Home collections not collected yet">
+                  <div className="grp-lbl">
+                    🏠 Home collection — sample not collected yet
+                    <span className="grp-split">{homeOrders.length + homeRows.length}</span>
+                  </div>
+                  {!homeOrders.length && !homeRows.length && (
+                    <div className="empty-note">
+                      Every home-collection sample for today is marked.{" "}
+                      <button
+                        type="button"
+                        className="sq-clearfilter"
+                        onClick={() => setHomeOnly(false)}
+                      >
+                        Show all
+                      </button>
+                    </div>
+                  )}
+                  <div className="pt-list">
+                    {homeOrders.map((order) => (
+                      <LabCard
+                        key={`home-${order.orderId}`}
+                        order={order}
+                        group={FIRST_GROUP}
+                        onAdvance={onAdvance}
+                        onUpload={onUpload}
+                        onOpen={(o) => setOpenOrderId(o.orderId)}
+                        onHomeCollect={openHomeForOrder}
+                        busy={advance.isPending || upload.isPending}
+                      />
+                    ))}
+                    {homeRows.map((row) => (
+                      <HealthrayCard
+                        key={`home-${caseRowKey(row)}`}
+                        row={row}
+                        onOpen={() => setOpenCaseId(caseRowKey(row))}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {!isLoading && !(homeOnly && showHome) && (
                 <div
                   className="sq-filters sq-filters--page"
                   role="group"
@@ -1855,74 +2051,78 @@ export default function LabRoom({ room = null }) {
                 </div>
               )}
 
-              {!isLoading && MID_GROUPS.some((g) => filter === "all" || filter === g.key) && (
-                <div className="lab-running">
-                  {MID_GROUPS.filter((g) => filter === "all" || filter === g.key).map((group) => {
-                    const orders = data?.[group.key] || [];
-                    const cases = healthray.filter(
-                      (r) => r.stage.key === GROUP_TO_STAGE[group.key],
-                    );
-                    const total = orders.length + cases.length;
-                    const open = openStages[group.key] ?? total > 0;
-                    return (
-                      <div key={group.key}>
-                        <h2 className="sq-gh">
-                          <button
-                            type="button"
-                            className="sq-toggle"
-                            aria-expanded={open}
-                            aria-controls={`lab-stage-${group.key}`}
-                            onClick={() => setOpenStages((v) => ({ ...v, [group.key]: !open }))}
-                          >
-                            <span className={`sq-chev${open ? " open" : ""}`} aria-hidden="true">
-                              ▸
-                            </span>
-                            {group.label}
-                            <span className="sq-count">
-                              {orders.length} Gini · {cases.length} hospital
-                            </span>
-                          </button>
-                        </h2>
-                        <div id={`lab-stage-${group.key}`} hidden={!open}>
-                          {!total ? (
-                            <div className="empty-note">—</div>
-                          ) : (
-                            <div className="pt-list">
-                              {[
-                                ...cases.map((row) => ({ source: "healthray", row })),
-                                ...orders.map((row) => ({ source: "giniflow", row })),
-                              ]
-                                .sort(byTimeAsc)
-                                .map((r) =>
-                                  r.source === "healthray" ? (
-                                    <HealthrayCard
-                                      key={`hr-${caseRowKey(r.row)}`}
-                                      row={r.row}
-                                      onOpen={() => setOpenCaseId(caseRowKey(r.row))}
-                                      readOnly={cannotBeWorked(r.row)}
-                                    />
-                                  ) : (
-                                    <LabCard
-                                      key={r.row.orderId}
-                                      order={r.row}
-                                      group={group}
-                                      onAdvance={onAdvance}
-                                      onUpload={onUpload}
-                                      onOpen={(o) => setOpenOrderId(o.orderId)}
-                                      busy={advance.isPending || upload.isPending}
-                                    />
-                                  ),
-                                )}
-                            </div>
-                          )}
+              {!isLoading &&
+                !(homeOnly && showHome) &&
+                MID_GROUPS.some((g) => filter === "all" || filter === g.key) && (
+                  <div className="lab-running">
+                    {MID_GROUPS.filter((g) => filter === "all" || filter === g.key).map((group) => {
+                      const orders = data?.[group.key] || [];
+                      const cases = healthray.filter(
+                        (r) => r.stage.key === GROUP_TO_STAGE[group.key],
+                      );
+                      const total = orders.length + cases.length;
+                      const open = openStages[group.key] ?? total > 0;
+                      return (
+                        <div key={group.key}>
+                          <h2 className="sq-gh">
+                            <button
+                              type="button"
+                              className="sq-toggle"
+                              aria-expanded={open}
+                              aria-controls={`lab-stage-${group.key}`}
+                              onClick={() => setOpenStages((v) => ({ ...v, [group.key]: !open }))}
+                            >
+                              <span className={`sq-chev${open ? " open" : ""}`} aria-hidden="true">
+                                ▸
+                              </span>
+                              {group.label}
+                              <span className="sq-count">
+                                {orders.length} Gini · {cases.length} hospital
+                              </span>
+                            </button>
+                          </h2>
+                          <div id={`lab-stage-${group.key}`} hidden={!open}>
+                            {!total ? (
+                              <div className="empty-note">—</div>
+                            ) : (
+                              <div className="pt-list">
+                                {[
+                                  ...cases.map((row) => ({ source: "healthray", row })),
+                                  ...orders.map((row) => ({ source: "giniflow", row })),
+                                ]
+                                  .sort(byTimeAsc)
+                                  .map((r) =>
+                                    r.source === "healthray" ? (
+                                      <HealthrayCard
+                                        key={`hr-${caseRowKey(r.row)}`}
+                                        row={r.row}
+                                        onOpen={() => setOpenCaseId(caseRowKey(r.row))}
+                                        readOnly={cannotBeWorked(r.row)}
+                                      />
+                                    ) : (
+                                      <LabCard
+                                        key={r.row.orderId}
+                                        order={r.row}
+                                        group={group}
+                                        onAdvance={onAdvance}
+                                        onUpload={onUpload}
+                                        onOpen={(o) => setOpenOrderId(o.orderId)}
+                                        onHomeCollect={openHomeForOrder}
+                                        busy={advance.isPending || upload.isPending}
+                                      />
+                                    ),
+                                  )}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+                      );
+                    })}
+                  </div>
+                )}
 
               {!isLoading &&
+                !(homeOnly && showHome) &&
                 (filter === "all" || isEntryFilter(filter) || filter === LAST_GROUP.filterKey) && (
                   <div className={`ar-split${filter === "all" ? "" : " ar-split--one"}`}>
                     {(filter === "all" || isEntryFilter(filter)) && (
@@ -1942,6 +2142,7 @@ export default function LabRoom({ room = null }) {
                                 onAdvance={onAdvance}
                                 onUpload={onUpload}
                                 onOpen={(o) => setOpenOrderId(o.orderId)}
+                                onHomeCollect={openHomeForOrder}
                                 busy={advance.isPending || upload.isPending}
                               />
                             ) : (
@@ -2034,6 +2235,7 @@ export default function LabRoom({ room = null }) {
                                       onAdvance={onAdvance}
                                       onUpload={onUpload}
                                       onOpen={(o) => setOpenOrderId(o.orderId)}
+                                      onHomeCollect={openHomeForOrder}
                                       busy={advance.isPending || upload.isPending}
                                     />
                                   ) : (
@@ -2127,6 +2329,7 @@ export default function LabRoom({ room = null }) {
         canFileReport={canFileReport}
         onCancelCase={onCancelCase}
         canCancelTest={canCancelTest}
+        onHomeCollect={openHomeForCase}
         date={data?.date}
         busy={caseAction.isPending || caseUpload.isPending || cancelLabCase.isPending}
       />
@@ -2147,7 +2350,19 @@ export default function LabRoom({ room = null }) {
         onResultsFailed={onResultsFailed}
         onCancelTest={onCancelTest}
         canCancelTest={canCancelTest}
+        onHomeCollect={openHomeForOrder}
       />
+
+      {homeTarget && (
+        <HomeCollectDialog
+          target={homeTarget}
+          busy={advance.isPending || caseAction.isPending}
+          error={homeError}
+          onHome={markHome}
+          onGhm={cameToGhm}
+          onClose={closeHome}
+        />
+      )}
 
       {confirmUpload && (
         <div className="modal-back" onClick={() => setConfirmUpload(null)}>

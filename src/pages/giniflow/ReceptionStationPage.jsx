@@ -69,7 +69,13 @@ import {
   pauseReasonLabel,
 } from "../../../shared/giniflowStatus.js";
 import { useGiniflowTimeline } from "../../queries/hooks/useGiniflowBoard";
-import { paise, refundOnTestCancel, rupeesFromPaise } from "../../../shared/labPayment.js";
+import {
+  opensLabGate,
+  paise,
+  refundOnTestCancel,
+  rupeesFromPaise,
+} from "../../../shared/labPayment.js";
+import { istClock } from "../../../shared/homeCollection.js";
 import { amountLeft, cleanAmount } from "../../utils/amountInput.js";
 import {
   dropUnbilledTestSteps,
@@ -179,6 +185,21 @@ const CLAIM_LINE = {
   rejected: "rejected by the insurer",
 };
 
+const collectedAtHome = (row) => row.homeSample?.site === "home";
+
+function HomePayTag({ row, due = null }) {
+  if (collectedAtHome(row)) {
+    return (
+      <span className="badge b-home">
+        🏠 Collected at home ·{" "}
+        {[row.homeSample.by, istClock(row.homeSample.at)].filter(Boolean).join(" ")}
+        {due ? ` · ${rupees(due)} pending` : ""}
+      </span>
+    );
+  }
+  return row.homeCollection ? <span className="badge b-home">🏠 Home collection</span> : null;
+}
+
 function OrderCard({ order, onClear, pending, actorId, onCancelTest, canCancelTest }) {
   const claimed = order.claimState === "submitted";
   const [form, setForm] = useState(null);
@@ -249,7 +270,8 @@ function OrderCard({ order, onClear, pending, actorId, onCancelTest, canCancelTe
         </div>
         <div className="toc-who">
           <div className="toc-name">
-            {order.name} <span className="badge b-ink">{order.fileNo}</span>
+            {order.name} <span className="badge b-ink">{order.fileNo}</span>{" "}
+            <HomePayTag row={order} due={opensLabGate(order.paymentStatus) ? null : due} />
             {order.kind === "machine" && <span className="badge b-ink">Machine Room</span>}
             {order.afterConsult && <span className="badge b-amb">New after consultation</span>}
             {order.paymentStatus !== "paid" && order.onBill === false && (
@@ -813,7 +835,8 @@ function HealthrayLabCard({ lab, onClear, pending, onCancelCase, canCancelTest }
         </div>
         <div className="toc-who">
           <div className="toc-name">
-            {lab.name} <span className="badge b-ink">{lab.fileNo}</span>
+            {lab.name} <span className="badge b-ink">{lab.fileNo}</span>{" "}
+            <HomePayTag row={lab} due={lab.labBill?.total || null} />
           </div>
           <div className="toc-meta">
             {lab.age}
@@ -991,9 +1014,12 @@ export function PaymentsTab({
   onCancelHealthrayCase = () => {},
   healthrayLabPending = false,
 }) {
-  const queue = data?.pending || [];
-  const healthrayLab = data?.healthrayLab || [];
-  const chargeQueue = data?.charges?.pending || [];
+  const [homeOnly, setHomeOnly] = useState(false);
+  const homeWaiting = data?.counts?.homePaymentPending || 0;
+  const onlyHome = homeOnly && homeWaiting > 0;
+  const queue = (data?.pending || []).filter((o) => !onlyHome || collectedAtHome(o));
+  const healthrayLab = (data?.healthrayLab || []).filter((l) => !onlyHome || collectedAtHome(l));
+  const chargeQueue = onlyHome ? [] : data?.charges?.pending || [];
   const cleared = byVisit([
     ...(data?.awaitingSample || []),
     ...(data?.cleared || []),
@@ -1035,6 +1061,19 @@ export function PaymentsTab({
             </button>
           )}
         </div>
+        {homeWaiting > 0 && (
+          <div className="sq-filters" role="group" aria-label="Filter payments">
+            <button
+              type="button"
+              className={onlyHome ? "on" : ""}
+              aria-pressed={onlyHome}
+              onClick={() => setHomeOnly(!homeOnly)}
+            >
+              🏠 Home collection — payment pending
+              <span className="sq-fcount">{homeWaiting}</span>
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="pay-cols">
