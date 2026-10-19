@@ -675,6 +675,7 @@ export const giniflowCaseCancelSchema = giniflowTestCancelSchema.extend({
   caseNos: z.array(z.string().trim().min(1).max(40)).min(1).max(20),
   patientId: z.coerce.number().int().positive(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD"),
+  testName: z.string().trim().min(1).max(200).optional(),
 });
 
 export const giniflowTestRestoreSchema = z.strictObject({});
@@ -1554,6 +1555,7 @@ const cancelTargetSchema = z.strictObject({
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .optional(),
+  testName: z.string().trim().min(1).max(200).optional(),
 });
 
 const cancelChargeFields = {

@@ -22,9 +22,13 @@ const PATIENT = `P436 Patient ${tag}`;
 const FILE_NO = `F436-${tag}`;
 const seed = {};
 
-const waitingTable = (page) => page.getByRole("table", { name: "Requests waiting" });
-const decidedTable = (page) => page.getByRole("table", { name: "Decided requests" });
-const waitingRow = (page, text) => waitingTable(page).getByRole("row").filter({ hasText: text });
+const waitingTable = (page) => page.getByRole("table", { name: "Billing requests" });
+const decidedTable = (page) => page.getByRole("table", { name: "Billing requests" });
+const waitingRow = (page, text) =>
+  waitingTable(page)
+    .getByRole("row")
+    .filter({ hasText: text })
+    .filter({ has: page.getByRole("button", { name: /^Reject request for/ }) });
 const decidedRow = (page, text) => decidedTable(page).getByRole("row").filter({ hasText: text });
 const dialog = (page) => page.getByRole("dialog");
 const field = (page, label) => dialog(page).getByLabel(label, { exact: true });
@@ -38,8 +42,8 @@ const requestRow = (id) =>
 
 async function openPage(page, role = "reception_admin") {
   await loginAs(page, role);
-  await gotoReady(page, "/settings/desk-requests", () =>
-    page.getByRole("heading", { name: "Waiting for an answer" }),
+  await gotoReady(page, "/desk-requests", () =>
+    page.getByRole("heading", { name: "Billing requests" }),
   );
 }
 
@@ -158,7 +162,10 @@ test.describe.serial("P4-36 desk requests page", () => {
     await expect(repeat).toContainText("Bill again");
     await expect(repeat).toContainText("already on this visit's draft bill");
 
-    const waiting = (await waitingTable(page).getByRole("row").count()) - 1;
+    const { waiting } = await one(
+      `SELECT COUNT(*)::int AS waiting FROM billing_requests
+        WHERE status = 'pending' AND kind <> 'test_cancel'`,
+    );
     expect(waiting).toBeGreaterThanOrEqual(2);
     await expect(page.getByRole("link", { name: /Desk requests/ })).toContainText(String(waiting));
     await expect(dialog(page)).toHaveCount(0);
@@ -370,9 +377,10 @@ test.describe.serial("P4-36 desk requests page", () => {
     const asked = [];
     page.on("request", (r) => asked.push(r.url()));
     await loginAs(page, "reception");
-    await gotoReady(page, "/settings/desk-requests", () => page.locator(".tabs"));
-    await expect(page).not.toHaveURL(/\/settings/);
-    await expect(page.getByRole("heading", { name: "Waiting for an answer" })).toHaveCount(0);
+    await gotoReady(page, "/desk-requests", () => page.locator(".tabs"));
+    await expect(page).not.toHaveURL(/desk-requests/);
+    await expect(page.getByRole("link", { name: /Desk requests/ })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Billing requests" })).toHaveCount(0);
     expect(asked.filter((u) => u.includes("/api/billing/master/requests"))).toEqual([]);
   });
 
@@ -380,9 +388,10 @@ test.describe.serial("P4-36 desk requests page", () => {
     page,
   }) => {
     await loginAs(page, "coordinator");
-    await gotoReady(page, "/settings/desk-requests", () => page.locator(".tabs"));
-    await expect(page).not.toHaveURL(/\/settings/);
-    await expect(page.getByRole("heading", { name: "Waiting for an answer" })).toHaveCount(0);
+    await gotoReady(page, "/desk-requests", () => page.locator(".tabs"));
+    await expect(page).not.toHaveURL(/desk-requests/);
+    await expect(page.getByRole("link", { name: /Desk requests/ })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Billing requests" })).toHaveCount(0);
 
     const api = await apiAs("coordinator");
     const refused = await api.get("/api/billing/master/requests");

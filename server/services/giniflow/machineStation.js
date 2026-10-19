@@ -49,8 +49,7 @@ import {
   revertStart,
 } from "./stationLock.js";
 import { publish } from "./eventHub.js";
-import { LAB_ONLY_DOCTOR, labOnlyPredicate, labOnlyHiddenPredicate } from "./labOnlyVisits.js";
-import { hideLabOnlyPatients } from "./floorSettings.js";
+import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { hasExtraReports } from "./extraReports.js";
 import { reopenForTests } from "./lateTests.js";
 import { assertNotHeld, HELD_ORDER_SQL } from "./cancelHold.js";
@@ -300,7 +299,6 @@ export async function getMachineQueue(
   { machine = null, group = "all", station = null } = {},
 ) {
   const search = q && String(q).trim().length >= 2 ? String(q).trim() : null;
-  const hideLabOnly = await hideLabOnlyPatients(db);
   const catalogue = await getMachines(db);
   // Additive to the `machine` filter below, not a replacement: a station's
   // screen always calls with its own `station` and never sees another
@@ -356,10 +354,6 @@ export async function getMachineQueue(
         AND NOT COALESCE(p.is_blocked, FALSE)
         AND o.urgency = 'today'
         AND v.current_status NOT IN ('no_show', 'cancelled')
-        -- Samples-only patients don't show on any station screen while the
-        -- floor has that toggled on (settings/flow) — see
-        -- awaitingRegistration() in labStation.js for where this started.
-        AND NOT ${labOnlyHiddenPredicate("v", "$3", "$5")}
         AND (
           $2::text IS NULL
           OR p.name ILIKE '%' || $2 || '%'
@@ -371,7 +365,7 @@ export async function getMachineQueue(
           )
         )
       ORDER BY o.created_at`,
-    [visitDate, search, LAB_ONLY_DOCTOR, labStepsAreManual(), hideLabOnly],
+    [visitDate, search, LAB_ONLY_DOCTOR, labStepsAreManual()],
   );
 
   const busy = await busyStations(
@@ -741,7 +735,6 @@ export async function assertOrderInStation(orderId, station, db = pool) {
 
 export async function machineCandidates(visitDate, q = null, db = pool) {
   const search = q && String(q).trim().length >= 2 ? String(q).trim() : null;
-  const hideLabOnly = await hideLabOnlyPatients(db);
   const { rows } = await db.query(
     `SELECT v.id AS visit_id, p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
             v.current_status
@@ -750,7 +743,6 @@ export async function machineCandidates(visitDate, q = null, db = pool) {
       WHERE v.visit_date = $1::date
         AND NOT COALESCE(p.is_blocked, FALSE)
         AND v.current_status <> ALL($3::text[])
-        AND NOT ${labOnlyHiddenPredicate("v", "$4", "$5")}
         AND (
           $2::text IS NULL
           OR p.name ILIKE '%' || $2 || '%'
@@ -758,7 +750,7 @@ export async function machineCandidates(visitDate, q = null, db = pool) {
         )
       ORDER BY p.name
       LIMIT 40`,
-    [visitDate, search, FINISHED, LAB_ONLY_DOCTOR, hideLabOnly],
+    [visitDate, search, FINISHED],
   );
   return rows.map((r) => ({
     visitId: r.visit_id,

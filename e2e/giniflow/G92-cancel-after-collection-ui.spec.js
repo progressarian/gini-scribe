@@ -150,7 +150,7 @@ test.describe.serial("G92 urgent cancellation after collection — screens", () 
       db,
     );
     await loginAs(page, "admin");
-    await gotoReady(page, "/settings/test-cancellations", () =>
+    await gotoReady(page, "/desk-requests?tab=tests", () =>
       page.getByRole("heading", { name: "Test cancellations after collection" }),
     );
     const searched = page.waitForRequest(
@@ -172,7 +172,9 @@ test.describe.serial("G92 urgent cancellation after collection — screens", () 
     await dialog.getByLabel("Note for the record (required)").fill("Duplicate order");
     await dialog.getByRole("button", { name: "Approve and cancel test…" }).click();
     await dialog.getByRole("button", { name: "Confirm" }).click();
-    await expect(row).toHaveCount(0);
+    await expect(
+      row.getByRole("button", { name: `Answer cancellation of ${t.test} for ${t.name}` }),
+    ).toHaveCount(0);
     await page.getByLabel("Status").selectOption("approved");
     await expect(table.getByRole("row").filter({ hasText: t.name })).toContainText("Kept ₹25");
   });

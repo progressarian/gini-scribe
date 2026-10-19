@@ -20,6 +20,7 @@ import {
 } from "../../queries/hooks/useGiniflowReception";
 import { useQueryClient } from "@tanstack/react-query";
 import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
+import { useApprovalsWaiting } from "../../queries/hooks/useApprovals";
 import {
   useGiniflowPauseVisit,
   useGiniflowResumeVisit,
@@ -100,7 +101,7 @@ import {
   keepsForChoice,
   onlineConsultChoice,
 } from "../../../shared/directConsult.js";
-import { labOnlyKeepsStep } from "../../../shared/labOnly.js";
+import { labOnlyJourney, labOnlyKeepsStep } from "../../../shared/labOnly.js";
 
 // Arrived and done. They stay on the floor list — the desk is asked about them
 // — but they are not in the building.
@@ -1308,11 +1309,15 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   requires.current = Object.fromEntries(
     catalog.filter((c) => c.machine_requires_before).map((c) => [c.id, c.machine_requires_before]),
   );
+  const catalogRef = useRef(catalog);
+  catalogRef.current = catalog;
+  const forPatient = (list) =>
+    arrival.samplesOnly ? labOnlyJourney(list, catalogRef.current) : list;
 
   useEffect(() => {
     if (!bill) return;
     stepsBill.current = bill;
-    setSteps((current) => current && withBilledSteps(current, bill, requires.current));
+    setSteps((current) => current && forPatient(withBilledSteps(current, bill, requires.current)));
   }, [bill]);
 
   const askable = useMemo(
@@ -1332,7 +1337,7 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   // panel causes, would otherwise throw away everything reception had edited and
   // check the patient in on a journey they did not build.
   const loadedFor = useRef(null);
-  const answerKey = `${visitTypeId}|${askable.map((k) => `${k}:${conditions[k] !== false}`).join(",")}|${planChoice}`;
+  const answerKey = `${visitTypeId}|${askable.map((k) => `${k}:${conditions[k] !== false}`).join(",")}|${planChoice}|${arrival.samplesOnly && catalog.length > 0}`;
   useEffect(() => {
     if (!plan || loadedFor.current === answerKey) return;
     loadedFor.current = answerKey;
@@ -1367,16 +1372,18 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
             ? { ...base, minutes: prev.minutes, staffId: prev.staffId, staffName: prev.staffName }
             : base;
         });
-      return withBilledSteps(
-        [
-          ...template,
-          // Steps the desk added by hand survive a change of type: retyping an
-          // X-Ray because they corrected the visit type is how a screen gets
-          // abandoned.
-          ...(current || []).filter((s) => s.source === "added" || s.source === "custom"),
-        ],
-        billRef.current,
-        requires.current,
+      return forPatient(
+        withBilledSteps(
+          [
+            ...template,
+            // Steps the desk added by hand survive a change of type: retyping an
+            // X-Ray because they corrected the visit type is how a screen gets
+            // abandoned.
+            ...(current || []).filter((s) => s.source === "added" || s.source === "custom"),
+          ],
+          billRef.current,
+          requires.current,
+        ),
       );
     });
   }, [plan, answerKey, arrival, conditions]);
@@ -2506,14 +2513,14 @@ const TAB = {
 
 const DESK_TAB_KEYS = Object.keys(DESK_TABS);
 
-function useReceptionTab(canBill) {
+function useReceptionTab(canBill, canApprove) {
   const [params, setParams] = useSearchParams();
   const { data: deskSettings } = useDeskSettings({ enabled: canBill });
   const requested = params.get("tab") || TAB.arrivals;
   const isDesk = DESK_TAB_KEYS.includes(requested);
   const duesOff = deskSettings && !deskSettings.allow_pay_later;
   const tab =
-    isDesk && !canBill
+    (isDesk && !canBill) || (requested === DESK_TABS.requests.key && !canApprove)
       ? TAB.arrivals
       : requested === DESK_TABS.dues.key && duesOff
         ? DESK_TABS.bill.key
@@ -2526,6 +2533,7 @@ function useReceptionTab(canBill) {
         ...(duesOff || (!deskSettings && tab !== DESK_TABS.dues.key) ? [] : [DESK_TABS.dues]),
         DESK_TABS.shift,
         DESK_TABS.refunds,
+        ...(canApprove ? [DESK_TABS.requests] : []),
       ]
     : [];
 
@@ -2562,6 +2570,7 @@ function ReceptionTabs({
   arrivalsCount,
   paymentsCount,
   refundsCount,
+  requestsCount,
   feeChangesCount,
   testsToBillCount,
 }) {
@@ -2621,6 +2630,14 @@ function ReceptionTabs({
               {refundsCount}
             </span>
           )}
+          {entry.key === DESK_TABS.requests.key && (
+            <span
+              className={`st-tab-n${requestsCount > 0 ? " st-tab-n--alert" : ""}`}
+              aria-label={`${requestsCount} request${requestsCount === 1 ? "" : "s"} waiting for you`}
+            >
+              {requestsCount}
+            </span>
+          )}
         </button>
       ))}
       <button
@@ -2638,7 +2655,8 @@ function ReceptionTabs({
 
 export default function ReceptionStationPage() {
   const canBill = useCanBill();
-  const desk = useReceptionTab(canBill);
+  const approvals = useApprovalsWaiting();
+  const desk = useReceptionTab(canBill, approvals.any);
   const { tab, setTab } = desk;
   const onDesk = DESK_TAB_KEYS.includes(tab);
   const sentPatient = useLocation().state?.duePatient ?? null;
@@ -2918,6 +2936,7 @@ export default function ReceptionStationPage() {
       arrivalsCount={counts.expected}
       paymentsCount={payCounts.pending}
       refundsCount={refundsToPay}
+      requestsCount={approvals.total}
       feeChangesCount={feeChanges.length}
       testsToBillCount={testsToBill}
     />

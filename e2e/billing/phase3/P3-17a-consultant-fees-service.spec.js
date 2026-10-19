@@ -101,6 +101,7 @@ test.describe.serial("P3-17a consultant fees service", () => {
       for (const [visit, suffix] of [
         ["New", "NEW"],
         ["Follow Up", "FU"],
+        ["Follow Up (3 days)", "FU3"],
       ]) {
         ids[`${key}${suffix}`] = await one(
           `INSERT INTO service_items (code, name, subgroup_id, base_price, kind, doctor_id, visit_type)
@@ -165,7 +166,7 @@ test.describe.serial("P3-17a consultant fees service", () => {
   test("1. the grid: rows per doctor and visit type, General + every category column, inherited values marked", async () => {
     const body = await grid({ doctorId: String(ids.rahul) });
     expect(body.date).toBe(today);
-    expect(body.visit_types).toEqual(["New", "Follow Up"]);
+    expect(body.visit_types).toEqual(["New", "Follow Up", "Follow Up (3 days)"]);
     const codes = body.columns.map((col) => col.code);
     expect(codes[0]).toBe("general");
     const at = (code) => codes.indexOf(c(code));
@@ -179,6 +180,7 @@ test.describe.serial("P3-17a consultant fees service", () => {
     expect(body.rows.map((r) => [r.doctor_id, r.visit_type, r.item.id])).toEqual([
       [ids.rahul, "New", ids.rahulNEW],
       [ids.rahul, "Follow Up", ids.rahulFU],
+      [ids.rahul, "Follow Up (3 days)", ids.rahulFU3],
     ]);
     expect(body.not_priced).toEqual([]);
 
@@ -572,13 +574,19 @@ test.describe.serial("P3-17a consultant fees service", () => {
         status: "no_item",
         item_id: null,
       }),
+      expect.objectContaining({
+        doctor_id: ids.nofee,
+        visit_type: "Follow Up (3 days)",
+        status: "no_item",
+        item_id: null,
+      }),
     ]);
     const everyone = await grid({ schemeCode: c("pensioner") });
     expect(everyone.columns.map((col) => col.code)).toEqual(["general", c("pensioner")]);
-    expect(everyone.not_priced.filter((r) => r.doctor_id === ids.nofee)).toHaveLength(2);
+    expect(everyone.not_priced.filter((r) => r.doctor_id === ids.nofee)).toHaveLength(3);
     expect(
       everyone.rows.filter((r) => [ids.rahul, ids.beant, ids.banshali].includes(r.doctor_id)),
-    ).toHaveLength(6);
+    ).toHaveLength(9);
   });
 
   test("10. reception can't read or change consultant fees", async () => {

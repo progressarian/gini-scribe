@@ -1,5 +1,7 @@
 import pool from "../../config/db.js";
 import { billingVisitType } from "../../../shared/billingVisitType.js";
+import { RECENT_FOLLOW_UP } from "../../../shared/billingVocab.js";
+import { seenRecentlyBy } from "./serviceItems.js";
 import { collectiblePaise, paise } from "../../../shared/labPayment.js";
 import { writeAudit } from "./audit.js";
 import {
@@ -104,6 +106,25 @@ export async function consultationItem(client, visit) {
   if (!doctorId) return null;
   const removed = await removedDoctor(doctorId, client);
   if (removed) return { removed };
+  if (
+    await seenRecentlyBy(
+      { patientId: visit.patient_id, visitDate: visit.visit_date },
+      doctorId,
+      client,
+    )
+  ) {
+    const { rows: recent } = await client.query(
+      `SELECT id, name, doctor_id FROM service_items
+        WHERE kind = 'consultation' AND is_active AND visit_type = $1
+          AND (doctor_id = $2 OR doctor_id IS NULL)
+        ORDER BY doctor_id IS NULL, id
+        LIMIT 1`,
+      [RECENT_FOLLOW_UP, doctorId],
+    );
+    if (recent[0]) {
+      return { ...recent[0], visit_type: RECENT_FOLLOW_UP, chosen_doctor_id: doctorId };
+    }
+  }
   const { rows } = await client.query(
     `SELECT id, name, doctor_id FROM service_items
       WHERE kind = 'consultation' AND is_active AND visit_type = $1 AND doctor_id = $2
@@ -136,11 +157,15 @@ export async function draftAtCheckIn(visitId, ctx, db = pool) {
     return await inTransaction(async (client) => {
       const visit = await visitFor(client, visitId);
       await holdConsultation(client, visit.id);
+      const adds = await addsConsultation(client);
+      const candidate = adds ? await consultationItem(client, visit) : null;
       const automatic =
-        (await addsConsultation(client)) && (await healthrayBilledConsultation(client, visit));
+        adds &&
+        (candidate?.visit_type === RECENT_FOLLOW_UP ||
+          (await healthrayBilledConsultation(client, visit)));
       const settled = automatic && (await consultationSettled(client, visit.id));
       const bill = await openDraftIn(client, visitId, ctx);
-      const item = automatic ? await consultationItem(client, visit) : null;
+      const item = automatic ? candidate : null;
       if (item?.removed) {
         return {
           ok: true,
@@ -227,7 +252,11 @@ export async function consultationForDesk(visitId, ctx, db = pool) {
         if (swapped)
           return { ok: true, bill_id: swapped.bill.id, added: [item.name], replaced: true };
       }
-      if (visit.appointment_id && !(await healthrayBilledConsultation(client, visit))) {
+      if (
+        visit.appointment_id &&
+        item?.visit_type !== RECENT_FOLLOW_UP &&
+        !(await healthrayBilledConsultation(client, visit))
+      ) {
         return { ok: true, added: [], waiting_for_healthray: true };
       }
       if (
@@ -643,6 +672,42 @@ async function detachFinalLines(client, billed, ctx) {
     bill_no: row.bill_no,
     bill_name: row.bill_name,
   }));
+}
+
+export async function releaseCaseTestLines(client, visitId, testName, ctx = null) {
+  const { rows } = await client.query(
+    `WITH m AS (${TEST_MATCHES_SQL("ARRAY[$2::text]")})
+     SELECT l.id, l.bill_id, l.bill_name, l.is_live, l.source, b.status, b.bill_no
+       FROM bill_lines l
+       JOIN bills b ON b.id = l.bill_id AND b.bill_type = 'invoice' AND b.status IN ('draft', 'final')
+       JOIN service_items i ON i.id = l.service_item_id AND i.kind = 'test'
+      WHERE l.visit_id = $1 AND l.is_live AND l.lab_order_id IS NULL
+        AND i.test_catalog_id IN (SELECT m.catalog_id FROM m WHERE m.catalog_id IS NOT NULL)
+      ORDER BY l.line_no
+      FOR UPDATE OF l`,
+    [visitId, testName],
+  );
+  const finals = rows.filter((row) => row.status === "final");
+  const onFinal = finals.length ? await detachFinalLines(client, finals, ctx) : [];
+  const drafts = rows.filter((row) => row.status === "draft");
+  if (!drafts.length) return { removed: [], onFinal };
+  const ids = drafts.map((row) => row.id);
+  await client.query(`DELETE FROM bill_line_discounts WHERE bill_line_id = ANY($1::uuid[])`, [ids]);
+  await client.query(`DELETE FROM bill_lines WHERE id = ANY($1::uuid[])`, [ids]);
+  for (const row of drafts) {
+    await writeAudit(client, {
+      entity: "bill_lines",
+      entityId: row.id,
+      action: "delete",
+      before: row,
+      after: { removed: true, reason: "The test was cancelled on the floor" },
+      ...auditFields(ctx),
+    });
+  }
+  for (const billId of [...new Set(drafts.map((row) => row.bill_id))]) {
+    await repriceBillIn(client, billId, ctx);
+  }
+  return { removed: drafts.map((row) => row.bill_name), onFinal };
 }
 
 export async function releaseOrderLines(

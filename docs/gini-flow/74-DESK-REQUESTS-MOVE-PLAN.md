@@ -1,6 +1,6 @@
 # 74 — Desk requests move out of Settings
 
-Status: plan (19 Oct 2026). Waiting for review before building.
+Status: built (19 Oct 2026). Approved the same day ("yes build it").
 
 ## Problem
 
@@ -15,7 +15,7 @@ Requests waiting for an admin are hard to find and manage:
 
 Desk requests move out of Settings to **two places**. Both show the same screen with the same live counts:
 
-1. **Its own item in the top menu:** "📥 Desk requests (3)", next to 🏥 Reception.
+1. **Its own item in the top menu:** "📥 Desk requests (3)", right before 🕐 Gini Flow.
 2. **A tab on the reception screen:** "Requests (3)", after Refunds, for admins working at the counter.
 
 The screen has two tabs:
@@ -81,9 +81,9 @@ The menu item and the reception tab show the sum of the kinds the person can see
 
 ## The shared screen
 
-New `src/components/billing/DeskRequestsInbox.jsx`, `<DeskRequestsInbox tab onTab live />`. It has:
+New `src/components/billing/DeskRequestsInbox.jsx`, `<DeskRequestsInbox param live />`. `param` is the address word that holds the sub-tab: `tab` on `/desk-requests`, `kind` inside reception (where `tab` is already the reception tab). It has:
 
-- a tab row "Billing requests (3)" and "Test cancellations (1)", using the existing `st-tabs` / `st-tab` / `st-tab-n` styles from the station screens with `role="tablist"` / `role="tab"` / `aria-selected` / `aria-controls`;
+- a tab row "Billing requests (3)" and "Test cancellations (1)", using the existing Settings tab styles (`set__tabs` / `set__tab` / `set__tab-badge`, as Billing reports does), because the station `st-tabs` styles only apply inside the reception screen. It has `role="tablist"` / `role="tab"` / `aria-selected` / `aria-controls`, and the arrow keys move between tabs. A count of 0 shows in grey;
 - the matching panel: `DeskRequestsPage` or `TestCancellationsPage`, as they are.
 
 Small changes to the two pages:
@@ -98,14 +98,14 @@ Small changes to the two pages:
 
 ## Top menu
 
-`src/components/AppLayout.jsx` `NAV_ITEMS` gets `{ path: "/desk-requests", label: "📥 Desk requests", cap: C["/desk-requests"] }`, placed right after 🏥 Reception.
+`src/components/AppLayout.jsx` `NAV_ITEMS` gets `{ path: "/desk-requests", label: "📥 Desk requests", cap: C["/desk-requests"] }`, placed right before 🕐 Gini Flow (moved there on 19 Oct at the user's request; first built after 🏥 Reception).
 
 - **A number, not a dot.** The menu today has only a yellow dot (`.tab-badge`) for "something new". This item shows the count, because the admin needs to know how many:
-  - new `.tab-count`: a red pill with a white number (min-width 16 px, height 16 px, 10.5 px bold, "99+" above 99);
+  - the existing `.tab-count` pill (amber, used by 🏥 Reception) with a new `.tab-count--alert` red variant and "99+" above 99;
   - the item's accessible name includes "3 waiting";
   - it shows on the current page too, unlike the dot, so the admin sees the queue empty out.
 - `src/config/routes.js`: `"/desk-requests": [CAP.BILLING_MASTER, CAP.GINIFLOW_TEST_CANCEL_DECIDE]`. The `/settings/desk-requests` and `/settings/test-cancellations` entries stay so their forwards keep the same guard.
-- `src/pages/SettingsLayout.jsx`: the Desk requests and Test cancellations tabs and their badges are removed.
+- `src/pages/SettingsLayout.jsx`: the Desk requests and Test cancellations tabs are removed. Their badges (`DeskRequestsBadge.jsx`, `TestCancellationsBadge.jsx`) had no other user and are deleted.
 
 ## Reception tab
 
@@ -139,7 +139,7 @@ The page never scrolls sideways at any of these widths.
 
 ## Tests (e2e, test DB only)
 
-New `e2e/billing/phase4b/P4B-22-desk-requests-moved.spec.js`. Fixture: one pending refund request, one pending "bill again" request and one pending test cancellation, created through the existing services.
+New `e2e/billing/phase4b/P4B-22-desk-requests-moved.spec.js`. Fixture: one pending refund request, one pending new-item request and one pending test cancellation, created through the existing services.
 
 1. **API counts:**
    - admin gets both counts, equal to the two lists;
@@ -164,14 +164,15 @@ New `e2e/billing/phase4b/P4B-22-desk-requests-moved.spec.js`. Fixture: one pendi
    - reception doesn't see the tab, and `?tab=requests` falls back to Arrivals;
    - the reception page still holds exactly one live connection.
 7. **Answering updates counts:** approve a request from the reception tab, and the tab count, the sub-tab count and the menu number all drop by one without reloading.
-8. **Live:** a new request raised by another user shows on the open reception Requests tab without reloading, through the reception's own connection.
+8. **Live:** a new request raised by another user shows on the open reception Requests tab without reloading. Realtime is off in the test environment, so this proves the poll path; live signals arrive through the reception's own connection (`BILLING_REQUEST_KEYS` in `useGiniflowLive.js`).
 9. **Screen sizes 1366, 768 and 390 px:** on `/desk-requests` and the reception tab, the page never scrolls sideways, the tabs are visible, and the decision dialog fits the screen.
-10. **Nothing waiting:** no number on the menu item, "0" in grey on the reception tab, and each list's existing empty state.
+10. **Nothing waiting:** no number on the menu item and a grey "0" on the tabs (the test answers the counts as zero, since the shared test DB may hold other pending requests).
 
 Existing specs that open `/settings/desk-requests` or `/settings/test-cancellations` move to the new address:
 
 - P4-36, P4-38, P4B-11, P4B-17, P4B-19, P4C-03, G92;
-- P4-36 tests 373/383, which check the Settings tab strip, are rewritten for the menu item.
+- P4-36 tests 9 and 10 open `/desk-requests` and check the menu item is absent;
+- P1-28 and P1-38 no longer expect the two Settings tabs; P4C-13 test 1 expects Requests for reception_admin.
 
 Rerun all of those plus P4C-13, P4B-04, P4B-20, G91, and `npm run check:giniflow`.
 
@@ -187,7 +188,7 @@ Rerun all of those plus P4C-13, P4B-04, P4B-20, G91, and `npm run check:giniflow
 - Changed:
   - `server/index.js`, `server/middleware/auth.js`;
   - `src/router.jsx` (new route and the two forwards), `src/config/routes.js`;
-  - `src/components/AppLayout.jsx` (menu item with count), `src/styles/App.css` (`.tab-count`);
+  - `src/components/AppLayout.jsx` (menu item with count), `src/styles/App.css` (`.tab-count--alert`);
   - `src/pages/SettingsLayout.jsx` (two tabs removed);
   - `src/pages/billing/DeskRequestsPage.jsx`, `src/pages/billing/TestCancellationsPage.jsx` (`live` prop);
   - `src/queries/hooks/useGiniflowLive.js` (two keys on `billing_request`);

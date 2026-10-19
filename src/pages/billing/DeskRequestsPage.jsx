@@ -1,15 +1,17 @@
 import { useState } from "react";
+import useDebounced from "../../hooks/useDebounced";
 import { Check, X } from "lucide-react";
-import {
-  INBOX_POLL_MS,
-  useDeskRequests,
-  usePendingDeskRequests,
-} from "../../queries/hooks/useBillingRequests";
+import { useRequestSearch } from "../../queries/hooks/useBillingRequests";
 import useDeskRequestsLive from "../../queries/hooks/useDeskRequestsLive";
 import { toast } from "../../stores/uiStore";
 import DeskRequestDecisionDialog from "../../components/billing/DeskRequestDecisionDialog";
 import DeskRequestItemDialog from "../../components/billing/DeskRequestItemDialog";
 import Pagination from "../../components/ui/Pagination";
+import RequestFilters, {
+  STATUS_ALL,
+  useRequestFilters,
+} from "../../components/billing/RequestFilters";
+import DayGroups, { OlderWaiting } from "../../components/billing/DayGroups";
 import { fromPaise } from "../../components/billing/format";
 import { refundLegsText, refundModeText } from "../../components/billing/counter/lineText";
 import "../../styles/flow.css";
@@ -17,6 +19,8 @@ import "../flow/FlowSettings.css";
 import "./billing.css";
 import "./billingUi.css";
 import "./deskRequests.css";
+import "../../components/giniflow/cancelRequests.css";
+import "../../components/billing/deskRequestsInbox.css";
 
 const when = (value) =>
   value ? new Date(value).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "";
@@ -192,9 +196,79 @@ function Answer({ request }) {
   );
 }
 
-function PendingRow({ request, onAct }) {
+export const DESK_STATUSES = [
+  [STATUS_ALL, "All"],
+  ["pending", "Waiting"],
+  ["approved", "Approved"],
+  ["rejected", "Rejected"],
+  ["used", "Used"],
+  ["withdrawn", "Withdrawn"],
+];
+
+const DESK_KINDS = [
+  ["", "All kinds"],
+  ["refund", "Refund"],
+  ["deposit_refund", "Deposit refund"],
+  ["new_item", "New item"],
+  ["repeat_item", "Bill again"],
+];
+
+const PAGE_SIZE = 20;
+
+function Status({ request }) {
+  if (request.status === "pending") {
+    return <span className="bill-status dreq__tag">Waiting</span>;
+  }
+  if (request.status === "withdrawn") {
+    return <span className="bill-status dreq__answer--no">Withdrawn</span>;
+  }
+  return (
+    <>
+      <Answer request={request} />
+      {request.decided_by?.name ? (
+        <div className="dreq__muted">
+          {request.decided_by.name} · {when(request.decided_at)}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function Actions({ request, onAct }) {
+  if (request.status !== "pending") return null;
   const subject = subjectOf(request);
   const newItem = request.kind === "new_item";
+  return (
+    <>
+      <button
+        type="button"
+        className="flow-btn flow-btn-primary flow-btn-mini"
+        aria-label={
+          newItem
+            ? `Create item for ${subject}`
+            : request.kind === "refund" || request.kind === "deposit_refund"
+              ? `Approve ${subject}`
+              : `Approve billing ${subject} again`
+        }
+        onClick={() => onAct(request, newItem ? "create" : "approve")}
+      >
+        <Check size={14} aria-hidden="true" />
+        {newItem ? "Create item" : "Approve"}
+      </button>
+      <button
+        type="button"
+        className="flow-btn flow-btn-ghost flow-btn-mini dreq__reject"
+        aria-label={`Reject request for ${subject}`}
+        onClick={() => onAct(request, "reject")}
+      >
+        <X size={14} aria-hidden="true" />
+        Reject
+      </button>
+    </>
+  );
+}
+
+function RequestRow({ request, onAct }) {
   return (
     <tr>
       <td data-label="Asked by">
@@ -210,69 +284,28 @@ function PendingRow({ request, onAct }) {
       <td data-label="Why" className="dreq__reason">
         {request.reason}
       </td>
+      <td data-label="Status">
+        <Status request={request} />
+      </td>
       <td data-label="" className="bill-items__actions">
-        <button
-          type="button"
-          className="flow-btn flow-btn-primary flow-btn-mini"
-          aria-label={
-            newItem
-              ? `Create item for ${subject}`
-              : request.kind === "refund" || request.kind === "deposit_refund"
-                ? `Approve ${subject}`
-                : `Approve billing ${subject} again`
-          }
-          onClick={() => onAct(request, newItem ? "create" : "approve")}
-        >
-          <Check size={14} aria-hidden="true" />
-          {newItem ? "Create item" : "Approve"}
-        </button>
-        <button
-          type="button"
-          className="flow-btn flow-btn-ghost flow-btn-mini dreq__reject"
-          aria-label={`Reject request for ${subject}`}
-          onClick={() => onAct(request, "reject")}
-        >
-          <X size={14} aria-hidden="true" />
-          Reject
-        </button>
+        <Actions request={request} onAct={onAct} />
       </td>
     </tr>
   );
 }
 
-export default function DeskRequestsPage() {
-  useDeskRequestsLive();
-  const pending = usePendingDeskRequests({ refetchInterval: INBOX_POLL_MS });
-  const history = useDeskRequests({ refetchInterval: INBOX_POLL_MS });
-  const [acting, setActing] = useState(null);
-  const [q, setQ] = useState("");
+export default function DeskRequestsPage({ live = true, filters: shared }) {
+  useDeskRequestsLive(live);
+  const own = useRequestFilters();
+  const filters = shared ?? own;
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
-
-  const waiting = pending.data ?? [];
-  const needle = q.trim().toLowerCase();
-  const decided = (history.data ?? [])
-    .filter((request) => request.status !== "pending")
-    .sort((a, b) => String(b.decided_at ?? "").localeCompare(String(a.decided_at ?? "")));
-  const found = decided.filter(
-    (request) =>
-      !needle ||
-      [
-        subjectOf(request),
-        request.patient?.name,
-        request.patient?.file_no,
-        request.requested_by?.name,
-        request.decided_by?.name,
-        request.reason,
-      ].some((v) =>
-        String(v ?? "")
-          .toLowerCase()
-          .includes(needle),
-      ),
-  );
-  const lastPage = Math.max(1, Math.ceil(found.length / pageSize));
-  const current = Math.min(page, lastPage);
-  const shown = found.slice((current - 1) * pageSize, current * pageSize);
+  const [acting, setActing] = useState(null);
+  const q = useDebounced(filters.value.q, 300);
+  const status = DESK_STATUSES.some(([key]) => key === filters.value.status)
+    ? filters.value.status
+    : STATUS_ALL;
+  const list = useRequestSearch({ ...filters.value, status, q, page, limit: PAGE_SIZE });
+  const rows = list.data?.rows ?? [];
   const close = (message) => {
     setActing(null);
     if (message) toast(message, "success");
@@ -282,122 +315,102 @@ export default function DeskRequestsPage() {
     <div className="flow-root fset bill-ui dreq-page">
       <div className="flow-card bill-stack">
         <div className="fset__cardhead">
-          <h2 className="flow-sec-title">Waiting for an answer</h2>
-          <span className={`fset__count bill-count--${waiting.length ? "todo" : "done"}`}>
-            {waiting.length}
-          </span>
+          <h2 className="flow-sec-title">Billing requests</h2>
+          {list.data ? <span className="fset__count">{list.data.total}</span> : null}
         </div>
         <div className="fset__cardsub">
           The billing desk asks here when an item is missing from the master, when a patient needs
           an item billed a second time on one visit, or when money should go back on a final bill. A
           new-item request carries no price — you set the price when you create the item.
         </div>
-        {pending.isLoading ? (
-          <div className="fset__cardsub">Loading…</div>
-        ) : pending.isError ? (
-          <div className="fset__cardsub">Could not load the requests.</div>
-        ) : waiting.length ? (
-          <div className="fset__scroll fset__scroll--wide">
-            <table className="flow-table" aria-label="Requests waiting">
-              <thead>
-                <tr>
-                  <th>Asked by</th>
-                  <th>Patient</th>
-                  <th>What for</th>
-                  <th>Why</th>
-                  <th className="bill-items__actions-head">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {waiting.map((request) => (
-                  <PendingRow
-                    key={request.id}
-                    request={request}
-                    onAct={(r, mode) => setActing({ request: r, mode })}
-                  />
-                ))}
-              </tbody>
-            </table>
+        <RequestFilters
+          filters={filters}
+          statuses={DESK_STATUSES}
+          kinds={DESK_KINDS}
+          searchPlaceholder="Search by patient name, UHID, bill no or item"
+          onChange={() => setPage(1)}
+        />
+        <OlderWaiting
+          count={list.data?.olderWaiting ?? 0}
+          onShow={() => {
+            filters.set({ status: "pending", from: "", to: "" });
+            setPage(1);
+          }}
+        />
+        {list.isLoading ? (
+          <div className="fset__cardsub" role="status">
+            Loading requests…
           </div>
-        ) : (
-          <div className="bill-allclear">Nothing is waiting for an answer.</div>
-        )}
-      </div>
-
-      <div className="flow-card bill-stack">
-        <div className="fset__cardhead">
-          <h2 className="flow-sec-title">Already answered</h2>
-          <span className="fset__count">{decided.length}</span>
-          {decided.length ? (
-            <input
-              type="search"
-              className="jb-assign bill-np-search"
-              aria-label="Search answered requests"
-              placeholder="e.g. patient, item or staff name"
-              value={q}
-              onChange={(e) => {
-                setQ(e.target.value);
-                setPage(1);
-              }}
-            />
-          ) : null}
-        </div>
-        {history.isLoading ? (
-          <div className="fset__cardsub">Loading…</div>
-        ) : history.isError ? (
-          <div className="fset__cardsub">Could not load the history.</div>
-        ) : !decided.length ? (
-          <div className="fset__cardsub">Nothing has been answered yet.</div>
-        ) : !found.length ? (
-          <div className="fset__cardsub">Nothing answered matches that search.</div>
-        ) : (
+        ) : list.isError ? (
+          <div className="cxl-empty" role="alert">
+            <strong>Unable to load requests.</strong>
+            <span>Please try again. If the problem continues, contact an administrator.</span>
+            <button
+              type="button"
+              className="flow-btn flow-btn-ghost"
+              onClick={() => list.refetch()}
+            >
+              Try again
+            </button>
+          </div>
+        ) : rows.length ? (
           <>
             <div className="fset__scroll fset__scroll--wide">
-              <table className="flow-table" aria-label="Decided requests">
+              <table className="flow-table" aria-label="Billing requests">
                 <thead>
                   <tr>
                     <th>Asked by</th>
                     <th>Patient</th>
                     <th>What for</th>
-                    <th>Answer</th>
-                    <th>Answered by</th>
+                    <th>Why</th>
+                    <th>Status</th>
+                    <th className="bill-items__actions-head">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {shown.map((request) => (
-                    <tr key={request.id}>
-                      <td data-label="Asked by">
-                        <strong>{request.requested_by?.name ?? "The desk"}</strong>
-                        <div className="dreq__muted">{when(request.requested_at)}</div>
-                      </td>
-                      <td data-label="Patient">
-                        <Patient request={request} />
-                      </td>
-                      <td data-label="What for">
-                        <Wanted request={request} />
-                        <div className="dreq__muted dreq__reason">{request.reason}</div>
-                      </td>
-                      <td data-label="Answer">
-                        <Answer request={request} />
-                      </td>
-                      <td data-label="Answered by">
-                        {request.decided_by?.name ?? ""}
-                        <div className="dreq__muted">{when(request.decided_at)}</div>
-                      </td>
-                    </tr>
-                  ))}
+                  <DayGroups
+                    rows={rows}
+                    days={list.data.days}
+                    columns={6}
+                    renderRow={(request) => (
+                      <RequestRow
+                        request={request}
+                        onAct={(r, mode) => setActing({ request: r, mode })}
+                      />
+                    )}
+                  />
                 </tbody>
               </table>
             </div>
             <Pagination
-              page={current}
-              pageSize={pageSize}
-              total={found.length}
+              page={list.data.page}
+              pageSize={PAGE_SIZE}
+              total={list.data.total}
               onChange={setPage}
-              onPageSizeChange={setPageSize}
+              disabled={list.isFetching}
               unit="requests"
             />
           </>
+        ) : (
+          <div className="cxl-empty">
+            <strong>
+              {filters.isDefault ? "No requests today." : "No requests match these filters."}
+            </strong>
+            {filters.isDefault ? (
+              <span>Requests from the billing desk appear here.</span>
+            ) : (
+              <button
+                type="button"
+                className="flow-btn flow-btn-ghost"
+                onClick={() => {
+                  filters.reset();
+                  setPage(1);
+                }}
+              >
+                Clear filters
+              </button>
+            )}
+          </div>
         )}
       </div>
 

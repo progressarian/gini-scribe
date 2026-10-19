@@ -1,6 +1,7 @@
 import { cloneElement, useId, useState } from "react";
 import { useCreateBillingItem } from "../../queries/hooks/useBillingMaster";
 import { toast } from "../../stores/uiStore";
+import { RECENT_FOLLOW_UP } from "../../../shared/billingVocab";
 import { codeTyped, moneyTyped, requestErrorOf } from "./format";
 import useDialog from "./useDialog";
 import BillDialogLayer from "./BillDialogLayer";
@@ -15,7 +16,8 @@ function Field({ label, className = "", children }) {
   );
 }
 
-const visitCode = (visitType) => (visitType === "New" ? "NEW" : "FU");
+const VISIT_CODES = { New: "NEW", "Follow Up": "FU", [RECENT_FOLLOW_UP]: "FU3" };
+const visitCode = (visitType) => VISIT_CODES[visitType] ?? "FU";
 
 const suggestedCode = (doctor) =>
   `CONS-${doctor.doctor_id ?? "DEFAULT"}-${visitCode(doctor.visit_type)}`;
@@ -25,7 +27,10 @@ const whoOf = (doctor) => doctor.doctor_name ?? "Hospital default";
 export default function ConsultantFeeCreateItem({ doctor, onClose, onCreated }) {
   const create = useCreateBillingItem();
   const [form, setForm] = useState(() => ({
-    name: `Consultation — ${whoOf(doctor)} (${doctor.visit_type})`,
+    name:
+      doctor.visit_type === RECENT_FOLLOW_UP
+        ? `Follow-up within 3 days — ${whoOf(doctor)}`
+        : `Consultation — ${whoOf(doctor)} (${doctor.visit_type})`,
     code: suggestedCode(doctor),
     base_price: "",
   }));

@@ -321,9 +321,9 @@ export default function ConsultantFeesPage() {
           <h2 className="flow-sec-title">Consultant fees</h2>
         </div>
         <div className="fset__cardsub">
-          Each doctor's New and Follow Up fee for every category, and what the patient pays. Click a
-          cell to change it. Greyed values are inherited — from the parent category, a wider rule or
-          the base price — until the cell gets its own.
+          Each doctor's New, Follow Up and Follow-up within 3 days fee for every category, and what
+          the patient pays. Click a cell to change it. Greyed values are inherited — from the parent
+          category, a wider rule or the base price — until the cell gets its own.
         </div>
         <div className="bill-form cf-filters">
           <Picker

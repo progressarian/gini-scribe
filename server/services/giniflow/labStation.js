@@ -895,6 +895,14 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
                 'canCancel', ${CASE_CANCELLABLE_SQL("c")},
                 'cancelStage', ${CASE_CANCEL_STAGE_SQL("c")},
                 'cancelHeld', ${HELD_CASE_SQL("c")},
+                'cancelledTests', COALESCE((
+                  SELECT json_agg(json_build_object('name', x.test_name, 'reason', x.reason,
+                                                    'note', x.note, 'at', x.cancelled_at,
+                                                    'by', d.name)
+                                  ORDER BY x.cancelled_at)
+                    FROM giniflow_lab_case_test_cancels x
+                    LEFT JOIN doctors d ON d.id = x.actor_id
+                   WHERE x.case_no = c.case_no), '[]'::json),
                 'synced', c.results_synced,
                 'reported', c.raw_detail_json->>'reported_on' IS NOT NULL,
                 'hasReport', c.pdf_storage_path IS NOT NULL,

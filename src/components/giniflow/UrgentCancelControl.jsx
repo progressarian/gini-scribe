@@ -26,7 +26,15 @@ export function CancelHeldBadge() {
   );
 }
 
-export default function UrgentCancelControl({ stage, held, target, what, patient, full = false }) {
+export default function UrgentCancelControl({
+  stage,
+  held,
+  target,
+  what,
+  patient,
+  full = false,
+  label = "Request urgent cancellation",
+}) {
   const canDecide = hasCapability(
     useAuthStore((st) => st.currentDoctor?.role),
     CAP.GINIFLOW_TEST_CANCEL_DECIDE,
@@ -98,7 +106,7 @@ export default function UrgentCancelControl({ stage, held, target, what, patient
         className={`st-btn st-btn-g${full ? " btn-full" : ""}`}
         onClick={() => setOpen(true)}
       >
-        Request urgent cancellation
+        {label}
       </button>
     );
   }

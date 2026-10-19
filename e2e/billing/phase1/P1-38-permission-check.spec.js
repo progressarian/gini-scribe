@@ -220,7 +220,6 @@ test.describe("P1-38 billing permissions — screens", () => {
       "Category rates",
       "Consultant fees",
       "Discounts",
-      /^Desk requests/,
       "Bulk import",
     ]);
     await expect(page).toHaveURL(/\/settings\/schemes$/);

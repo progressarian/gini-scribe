@@ -22,8 +22,6 @@ const ADMIN_TABS = [
   "Category rates",
   "Consultant fees",
   "Discounts",
-  /^Desk requests/,
-  /^Test cancellations/,
   "Bulk import",
   "Billing settings",
 ];
@@ -33,7 +31,6 @@ const RECEPTION_ADMIN_TABS = [
   "Category rates",
   "Consultant fees",
   "Discounts",
-  /^Desk requests/,
   "Bulk import",
 ];
 const BILLING_PAGES = [

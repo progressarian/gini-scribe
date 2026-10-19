@@ -32,6 +32,7 @@ import useAuthStore from "../../../stores/authStore";
 import UrgentCancelControl, { CancelHeldBadge } from "../UrgentCancelControl";
 import { CAPABILITIES as CAP, hasCapability } from "../../../../shared/permissions.js";
 import { refundOnTestCancel } from "../../../../shared/labPayment.js";
+import { testCancelReasonLabel } from "../../../../shared/testCancelReasons.js";
 import { OutsourcedTag, TestNames } from "../OutsourcedTests.jsx";
 import {
   LAB_RUNGS,
@@ -478,6 +479,7 @@ function LabDetailPane({
   onResultsSaved,
   onResultsFailed,
   onCancelTest,
+  onCancelAll,
   canCancelTest,
   onHomeCollect,
   busy,
@@ -577,6 +579,33 @@ function LabDetailPane({
                 </div>
               ))}
               {order.tests.length === 0 && <div className="dp-hint">No tests on this order.</div>}
+              {canCancelTest && order.tests.length > 1 && (
+                <div className="lab-cancel-all">
+                  {order.canCancel && (
+                    <CancelTestControl
+                      full
+                      what={`all ${order.tests.length} tests`}
+                      detail={`Cancels ${order.tests.map((t) => t.name).join(", ")}`}
+                      busy={busy}
+                      cases={order.cancellableCases}
+                      amount={order.amountTotal}
+                      refund={refundOnTestCancel(order, order.amountTotal)}
+                      onCancel={(body, done) => onCancelAll(order, body, done)}
+                    />
+                  )}
+                  {(order.cancelHeld || order.cancelStage === "request") && (
+                    <UrgentCancelControl
+                      full
+                      label={`Request to cancel all ${order.tests.length} tests`}
+                      stage={order.cancelStage}
+                      held={order.cancelHeld}
+                      target={{ orderId: order.orderId }}
+                      what={`all tests (${order.tests.map((t) => t.name).join(", ")})`}
+                      patient={{ name: order.name, fileNo: order.fileNo }}
+                    />
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="dp-sec">
@@ -975,6 +1004,7 @@ function HealthrayCasePane({
   onResultsFailed,
   canFileReport,
   onCancelCase,
+  onCancelCaseTest,
   canCancelTest,
   onHomeCollect,
   busy,
@@ -1102,6 +1132,51 @@ function HealthrayCasePane({
                       </div>
                       <div className="tr-status">
                         <span className="badge b-ink">{c.stage.label}</span>
+                      </div>
+                      {canCancelTest && c.tests.length > 1 && row.patientId && c.canCancel && (
+                        <CancelTestControl
+                          what={t}
+                          busy={busy}
+                          onCancel={(body, done) => onCancelCaseTest(row, c, t, body, done)}
+                        />
+                      )}
+                      {canCancelTest &&
+                        c.tests.length > 1 &&
+                        row.patientId &&
+                        date &&
+                        (c.cancelHeld || c.cancelStage === "request") && (
+                          <UrgentCancelControl
+                            stage={c.cancelStage}
+                            held={c.cancelHeld}
+                            target={{
+                              caseNo: c.caseNo,
+                              patientId: row.patientId,
+                              date,
+                              testName: t,
+                            }}
+                            what={t}
+                            patient={{ name: row.name, fileNo: row.fileNo }}
+                          />
+                        )}
+                    </div>
+                  ))}
+                  {(c.cancelledTests || []).map((x) => (
+                    <div className="test-row lab-case-cancelled" key={`cancelled-${x.name}`}>
+                      <div className="tr-name">
+                        <s>{x.name}</s>
+                      </div>
+                      <div className="tr-status">
+                        <span className="badge b-red">Cancelled</span>
+                        <span className="dp-hint">
+                          {[
+                            testCancelReasonLabel(x.reason),
+                            x.note,
+                            x.by,
+                            x.at ? clock(x.at) : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </span>
                       </div>
                     </div>
                   ))}
@@ -1590,6 +1665,22 @@ export default function LabRoom({ room = null }) {
       },
     );
 
+  const onCancelAll = (order, body, done) =>
+    cancelLabTest.mutate(
+      { orderId: order.orderId, ...body },
+      {
+        onSuccess: (r) => {
+          done();
+          closePane();
+          showToast(
+            cancelledText(`✕ All ${order.tests.length} tests cancelled for ${order.name}`, r),
+            cancelledToastMs(r),
+          );
+        },
+        onError: cancelFailed,
+      },
+    );
+
   const onCancelCase = (row, c, body, done) =>
     cancelLabCase.mutate(
       { ...body, caseNos: [c.caseNo], patientId: row.patientId, date: data?.date },
@@ -1598,6 +1689,23 @@ export default function LabRoom({ room = null }) {
           done();
           if ((row.caseList || []).length <= 1) closeCasePane();
           showToast(`✕ Case ${c.caseNo} cancelled for ${row.name}`);
+        },
+        onError: cancelFailed,
+      },
+    );
+
+  const onCancelCaseTest = (row, c, testName, body, done) =>
+    cancelLabCase.mutate(
+      { ...body, caseNos: [c.caseNo], patientId: row.patientId, date: data?.date, testName },
+      {
+        onSuccess: (r) => {
+          done();
+          showToast(
+            r.wholeCase
+              ? `✕ Case ${c.caseNo} cancelled for ${row.name} — ${testName} was its last test`
+              : `✕ ${testName} cancelled from case ${c.caseNo} for ${row.name} — also remove it from the case in HealthRay`,
+            TOAST_MS * 2,
+          );
         },
         onError: cancelFailed,
       },
@@ -2328,6 +2436,7 @@ export default function LabRoom({ room = null }) {
         onUploadCase={onUploadCase}
         canFileReport={canFileReport}
         onCancelCase={onCancelCase}
+        onCancelCaseTest={onCancelCaseTest}
         canCancelTest={canCancelTest}
         onHomeCollect={openHomeForCase}
         date={data?.date}
@@ -2349,6 +2458,7 @@ export default function LabRoom({ room = null }) {
         onResultsSaved={onResultsSaved}
         onResultsFailed={onResultsFailed}
         onCancelTest={onCancelTest}
+        onCancelAll={onCancelAll}
         canCancelTest={canCancelTest}
         onHomeCollect={openHomeForOrder}
       />

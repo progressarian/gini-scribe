@@ -33,6 +33,7 @@ import DuesList from "./DuesList";
 import EarlierDues from "./EarlierDues";
 import ShiftPanel from "./ShiftPanel";
 import RefundsBoard from "./RefundsBoard";
+import DeskRequestsInbox from "../DeskRequestsInbox";
 import LeaveDraftDialog from "./LeaveDraftDialog";
 import { dropStaleForms, useSavedForm } from "./useSavedForm";
 import { BILL_FORM, BILL_FORM_PREFIX, SHIFT_FORM_PREFIX, billFormKey } from "./counterForm";
@@ -49,6 +50,12 @@ export const DESK_TABS = {
     label: "Refunds",
     tabId: "bc-tab-refunds",
     panelId: "bc-panel-refunds",
+  },
+  requests: {
+    key: "requests",
+    label: "Requests",
+    tabId: "bc-tab-requests",
+    panelId: "bc-panel-requests",
   },
 };
 
@@ -612,6 +619,12 @@ export default function BillingDesk({
           {tab === DESK_TABS.refunds.key && (
             <Panel tab={DESK_TABS.refunds}>
               <RefundsBoard onOpen={takePaymentOn} />
+            </Panel>
+          )}
+
+          {tab === DESK_TABS.requests.key && (
+            <Panel tab={DESK_TABS.requests}>
+              <DeskRequestsInbox param="kind" live={false} />
             </Panel>
           )}
         </div>

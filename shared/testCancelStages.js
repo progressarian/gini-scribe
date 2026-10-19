@@ -38,7 +38,8 @@ export function caseCancelStage({ live, reported, collected, drawing }) {
 }
 
 export const orderCancelKey = (orderId, testId = null) => `order:${orderId}:${testId || "all"}`;
-export const caseCancelKey = (caseNo) => `case:${caseNo}`;
+export const caseCancelKey = (caseNo, testName = null) =>
+  testName ? `case:${caseNo}:${testName}` : `case:${caseNo}`;
 
 export const CHARGE_TYPES = ["percent", "fixed"];
 

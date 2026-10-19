@@ -8,6 +8,7 @@ import usePatientStore from "../stores/patientStore";
 import useVisitStore from "../stores/visitStore";
 import useUiStore, { toast } from "../stores/uiStore";
 import useMessagingStore from "../stores/messagingStore";
+import { useApprovalsWaiting } from "../queries/hooks/useApprovals";
 import PageErrorBoundary from "./PageErrorBoundary";
 import {
   PAGE_CAPABILITIES,
@@ -189,6 +190,14 @@ const NAV_ITEMS = [
     show: (s) => isPharmacyDesk(s.role),
   },
   {
+    path: "/desk-requests",
+    label: "📥 Desk requests",
+    cap: C["/desk-requests"],
+    show: () => true,
+    count: (s) => s.approvalsWaiting,
+    countLabel: (n) => `${n} waiting for you`,
+  },
+  {
     path: "/giniflow/manager",
     label: "🕐 Gini Flow",
     cap: C["/giniflow/manager"],
@@ -285,6 +294,7 @@ export default function AppLayout() {
     enabled: hasAnyCapability(currentDoctor?.role, C["/reception-inbox"]),
   });
   const receptionCount = receptionCountQuery.data || 0;
+  const approvalsWaiting = useApprovalsWaiting().total;
 
   // Track route changes during active visit so refresh lands on the right page
   const prevPath = useRef(location.pathname);
@@ -311,6 +321,7 @@ export default function AppLayout() {
     unreadCount,
     labRequestCount,
     receptionCount,
+    approvalsWaiting,
   };
 
   const onLogout = () => {
@@ -503,7 +514,12 @@ export default function AppLayout() {
                 >
                   {t.label}
                   {t.count && t.count(navState) > 0 && (
-                    <span className="tab-count">{t.count(navState)}</span>
+                    <span
+                      className={`tab-count${t.countLabel ? " tab-count--alert" : ""}`}
+                      aria-label={t.countLabel?.(t.count(navState))}
+                    >
+                      {t.count(navState) > 99 ? "99+" : t.count(navState)}
+                    </span>
                   )}
                   {t.badge && t.badge(navState) && !location.pathname.startsWith(t.path) && (
                     <span className="tab-badge" />

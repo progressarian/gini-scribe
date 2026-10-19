@@ -19,6 +19,7 @@ import {
 } from "../../../shared/giniflowStatus.js";
 import { slotStartTime } from "../../../shared/slotHour.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
+import { LAB_ONLY_STEP_NAMES } from "../../../shared/labOnly.js";
 import { advanceStatus, IST_TODAY } from "./statusEngine.js";
 import { recordHealthrayObservation, firstUnrecordedStation } from "./observation.js";
 import { LIVE_LAB_CASE_SQL, TESTS_HOLD_SQL, testsOpenInScribe } from "./testsHold.js";
@@ -287,7 +288,9 @@ async function sweepPharmacyLeg(client, day, graceMinutes) {
 // The evidence is the same one the lab station reads: every case of the day
 // reported. The grace period is short because nothing follows a report — it
 // only covers the patient still at the counter collecting a printout.
-export const LAB_ONLY_EXIT_GRACE_MINUTES = 15;
+export const LAB_ONLY_EXIT_GRACE_MINUTES = 0;
+
+const LAB_ONLY_DONE_STATUSES = ["results_ready", "uploaded", "reported", "sent_outside", "done"];
 
 export async function reopenAfterLabOnlyExit(client, day) {
   const { rows } = await client.query(
@@ -347,37 +350,50 @@ export async function reopenAfterLabOnlyExit(client, day) {
 
 export async function sweepLabOnlyExits(client, day, graceMinutes = LAB_ONLY_EXIT_GRACE_MINUTES) {
   const { rows } = await client.query(
-    `SELECT v.id, GREATEST(lab.last_report, step.last_at) AS exit_at
+    `SELECT v.id, GREATEST(lab.last_done, ord.last_at, step.last_at) AS exit_at
        FROM giniflow_visits v
        JOIN patients p ON p.id = v.patient_id
        JOIN LATERAL (
          SELECT count(*)::int AS cases,
-                count(*) FILTER (WHERE c.reported_at IS NULL)::int AS pending,
-                max(c.reported_at) AS last_report
+                count(*) FILTER (WHERE c.done_at IS NULL)::int AS pending,
+                max(c.done_at) AS last_done
            FROM (
              SELECT COALESCE(
                       (COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'reported_on')::timestamptz,
                       (SELECT max(a.created_at) FROM giniflow_lab_case_actions a
                         WHERE a.case_no = lc.case_no
-                          AND a.action IN ('report_uploaded', 'sent_outside'))
-                    ) AS reported_at
+                          AND a.action IN ('results_ready', 'report_uploaded', 'sent_outside'))
+                    ) AS done_at
                FROM lab_cases lc
               WHERE lc.case_date = v.visit_date
                 AND (lc.patient_id = v.patient_id
                      OR (lc.patient_id IS NULL
                          AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))
+                AND ${LIVE_LAB_CASE_SQL("lc")}
            ) c
        ) lab ON TRUE
+       CROSS JOIN LATERAL (
+         SELECT count(*)::int AS orders,
+                count(*) FILTER (WHERE o.sample_status <> ALL($6::text[]))::int AS pending,
+                count(*) FILTER (WHERE o.payment_status NOT IN ('paid', 'claim_approved'))::int
+                  AS unpaid,
+                max(o.updated_at) AS last_at
+           FROM giniflow_lab_orders o
+          WHERE o.visit_id = v.id AND o.urgency = 'today' AND o.sample_status <> 'cancelled'
+       ) ord
        CROSS JOIN LATERAL (
          SELECT max(e.occurred_at) AS last_at FROM giniflow_visit_events e
           WHERE e.visit_id = v.id AND ${NOT_A_MARKER_SQL("e.status")}
        ) step
       WHERE v.visit_date = $1::date
         AND v.current_status <> ALL($3)
-        AND lab.cases > 0
+        AND (lab.cases > 0 OR ord.orders > 0)
         AND lab.pending = 0
-        AND GREATEST(lab.last_report, step.last_at) < NOW() - ($2 || ' minutes')::interval
-        AND (SELECT h.tests_pending FROM (${TESTS_HOLD_SQL("v", "p")}) h) = 0
+        AND ord.pending = 0
+        AND ord.unpaid = 0
+        AND GREATEST(lab.last_done, ord.last_at, step.last_at)
+              < NOW() - ($2 || ' minutes')::interval
+        AND ${labOnlyPredicate("v", "$4")}
         AND NOT EXISTS (
           SELECT 1 FROM giniflow_visit_steps s
            WHERE s.visit_id = v.id AND s.chain_status = ANY($5)
@@ -386,14 +402,14 @@ export async function sweepLabOnlyExits(client, day, graceMinutes = LAB_ONLY_EXI
           SELECT 1 FROM giniflow_visit_steps s
            WHERE s.visit_id = v.id AND s.step_catalog_id = 'lab_billing'
              AND s.status IN ('pending', 'in_progress')
-        )
-        AND ${labOnlyPredicate("v", "$4")}`,
+        )`,
     [
       day,
       graceMinutes,
       [...EXCEPTION_STATUSES, ...TERMINAL_STATUSES],
       LAB_ONLY_DOCTOR,
       ["sd_pending", "with_sd", "ready_for_doctor", "with_doctor"],
+      LAB_ONLY_DONE_STATUSES,
     ],
   );
 
@@ -442,7 +458,7 @@ async function insertLabOnlyBillingSteps(client, day) {
         station, assigned_role, chain_status, source)
      SELECT v.id,
             COALESCE((SELECT max(s.step_order) FROM giniflow_visit_steps s WHERE s.visit_id = v.id), 0) + 1,
-            c.id, c.name, c.default_duration_min, c.station, c.assigned_role, c.chain_status, 'auto'
+            c.id, $3, c.default_duration_min, c.station, c.assigned_role, c.chain_status, 'auto'
        FROM giniflow_visits v
        JOIN patients p ON p.id = v.patient_id
        CROSS JOIN flow_step_catalog c
@@ -464,7 +480,7 @@ async function insertLabOnlyBillingSteps(client, day) {
         AND NOT EXISTS (
           SELECT 1 FROM giniflow_lab_orders o
            WHERE o.visit_id = v.id AND o.urgency = 'today' AND o.kind = 'lab')`,
-    [day, LAB_ONLY_DOCTOR],
+    [day, LAB_ONLY_DOCTOR, LAB_ONLY_STEP_NAMES.lab_billing],
   );
   return rowCount;
 }

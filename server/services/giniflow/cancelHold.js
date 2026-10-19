@@ -8,7 +8,8 @@ export async function assertNotHeld(db, { orderId = null, caseNo = null }) {
     `SELECT 1 FROM billing_requests
       WHERE kind = 'test_cancel' AND status = 'pending'
         AND (($1::text IS NOT NULL AND cancel_key LIKE 'order:' || $1 || ':%')
-             OR ($2::text IS NOT NULL AND cancel_key = 'case:' || $2))
+             OR ($2::text IS NOT NULL
+                 AND (cancel_key = 'case:' || $2 OR cancel_key LIKE 'case:' || $2 || ':%')))
       LIMIT 1`,
     [orderId, caseNo],
   );
@@ -24,7 +25,8 @@ export const HELD_ORDER_SQL = (o) => `EXISTS (
 export const HELD_CASE_SQL = (lc) => `EXISTS (
   SELECT 1 FROM billing_requests hr
    WHERE hr.kind = 'test_cancel' AND hr.status = 'pending'
-     AND hr.cancel_key = 'case:' || ${lc}.case_no)`;
+     AND (hr.cancel_key = 'case:' || ${lc}.case_no
+          OR hr.cancel_key LIKE 'case:' || ${lc}.case_no || ':%'))`;
 
 export const CASE_CANCEL_STAGE_SQL = (lc) => `(CASE
   WHEN NOT ${LIVE_LAB_CASE_SQL(lc)}

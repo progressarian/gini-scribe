@@ -18,6 +18,7 @@ import { AS_PAID } from "../../../shared/billingVocab.js";
 import { httpError, inTransaction } from "../billing/transaction.js";
 import {
   announceRequest,
+  olderWaitingCount,
   audit,
   checkPending,
   finishCreate,
@@ -85,7 +86,9 @@ export function cleanTarget(target) {
   ) {
     throw bad(404, "This test is no longer on the list");
   }
-  return { caseNo, patientId, date };
+  const testName = typeof target?.testName === "string" ? target.testName.trim() : "";
+  if (testName.length > 200) throw bad(404, "This test is no longer on the list");
+  return { caseNo, patientId, date, testName: testName || null };
 }
 
 function cleanRaise(input) {
@@ -157,7 +160,7 @@ async function orderFacts(db, { orderId, testId }, { lock }) {
   };
 }
 
-async function caseFacts(db, { caseNo, patientId, date }, { lock }) {
+async function caseFacts(db, { caseNo, patientId, date, testName = null }, { lock }) {
   const { rows } = await db.query(
     `SELECT lc.case_no, lc.test_names,
             ${LIVE_LAB_CASE_SQL("lc")} AS live,
@@ -189,20 +192,26 @@ async function caseFacts(db, { caseNo, patientId, date }, { lock }) {
   const found = rows[0];
   if (!found) throw bad(404, "That HealthRay case is not this patient's, or not that day's");
   if (!found.visit_id) throw bad(409, "This patient has no visit on the floor that day");
-  const names = found.test_names || [];
+  const all = found.test_names || [];
+  const single = testName && all.length > 1;
+  if (testName && !all.includes(testName)) {
+    throw bad(404, `${testName} is no longer on case ${caseNo} — it may already be cancelled`);
+  }
+  const names = single ? [testName] : all;
   return {
     kind: "healthray_case",
     visitId: found.visit_id,
     patientId,
     date,
     testNames: names,
-    key: caseCancelKey(caseNo),
+    key: caseCancelKey(caseNo, single ? testName : null),
     stage: caseCancelStage(found),
     target: {
       kind: "healthray_case",
       case_no: caseNo,
       patient_id: patientId,
       date,
+      ...(single ? { case_test: testName } : {}),
       test_name: names.join(", ") || `Case ${caseNo}`,
     },
   };
@@ -215,7 +224,7 @@ const targetFromRequest = (request) => {
   const t = request.cancel_target;
   return t.order_id
     ? { orderId: t.order_id, testId: t.test_id }
-    : { caseNo: t.case_no, patientId: t.patient_id, date: t.date };
+    : { caseNo: t.case_no, patientId: t.patient_id, date: t.date, testName: t.case_test ?? null };
 };
 
 const STAGE_REFUSAL = {
@@ -299,9 +308,32 @@ export async function cancelStage(target, db = pool) {
   };
 }
 
+const familyOf = (key) => key.split(":").slice(0, 2).join(":");
+
+async function refuseOverlap(client, key) {
+  const { rows } = await client.query(
+    `SELECT cancel_key, cancel_target->>'test_name' AS test_name FROM billing_requests
+      WHERE kind = 'test_cancel' AND status = 'pending' AND cancel_key <> $2
+        AND (cancel_key = $1 OR cancel_key LIKE $1 || ':%')
+      LIMIT 1`,
+    [familyOf(key), key],
+  );
+  const other = rows[0];
+  if (!other) return;
+  const wholeSample = other.cancel_key.endsWith(":all") || other.cancel_key === familyOf(key);
+  throw bad(
+    409,
+    wholeSample
+      ? "A request to cancel all tests on this sample is already waiting — withdraw it first or wait for the admin"
+      : `A request for ${other.test_name} is already waiting — withdraw it first or wait for the admin`,
+    { code: "cancel_pending" },
+  );
+}
+
 async function raiseIn(client, wanted, ctx) {
   const facts = await factsOf(client, wanted.target, { lock: true });
   if (facts.stage !== CANCEL_STAGE.request) throw bad(409, STAGE_REFUSAL[facts.stage]);
+  await refuseOverlap(client, facts.key);
   const label = urgentCancelReasonLabel(wanted.reasonCode);
   await client.query("SAVEPOINT test_cancel_request");
   let id;
@@ -425,7 +457,12 @@ async function cancelTheTest(client, before, facts, ctx) {
   const done = await cancelTestIn(client, {
     target: target.orderId
       ? { orderId: target.orderId, testId: target.testId }
-      : { caseNos: [target.caseNo], patientId: target.patientId, date: target.date },
+      : {
+          caseNos: [target.caseNo],
+          patientId: target.patientId,
+          date: target.date,
+          ...(target.testName ? { testName: target.testName } : {}),
+        },
     reason: URGENT_AFTER_COLLECTION,
     note: before.reason,
     source: "station",
@@ -434,6 +471,7 @@ async function cancelTheTest(client, before, facts, ctx) {
     actorRole: ctx.role,
     allowCollected: true,
     skipRefund: true,
+    requestId: before.id,
   });
   if (target.orderId)
     return linesById(
@@ -595,6 +633,7 @@ export async function listCancelRequests(filters = {}, db = pool) {
             p.id AS patient_id, p.name AS patient_name, p.file_no, p.age, p.sex,
             rq.name AS requested_by_name, dq.name AS decided_by_name,
             b.bill_no, cn.bill_no AS credit_note_no, cn.patient_payable AS credit_note_payable,
+            (r.requested_at AT TIME ZONE 'Asia/Kolkata')::date::text AS asked_day,
             COUNT(*) OVER () AS total
        FROM billing_requests r
        LEFT JOIN patients p ON p.id = r.patient_id
@@ -603,7 +642,8 @@ export async function listCancelRequests(filters = {}, db = pool) {
        LEFT JOIN bills b ON b.id = r.bill_id
        LEFT JOIN bills cn ON cn.id = r.credit_note_id
       WHERE ${where.join(" AND ")}
-      ORDER BY CASE WHEN r.status = 'pending' THEN 0 ELSE 1 END,
+      ORDER BY asked_day DESC,
+               CASE WHEN r.status = 'pending' THEN 0 ELSE 1 END,
                CASE WHEN r.status = 'pending' THEN r.requested_at END ASC,
                r.requested_at DESC, r.id
       LIMIT $${params.length - 1} OFFSET $${params.length}`,
@@ -611,6 +651,18 @@ export async function listCancelRequests(filters = {}, db = pool) {
   );
   const { rows: waiting } = await db.query(
     `SELECT COUNT(*)::int AS n FROM billing_requests WHERE kind = 'test_cancel' AND status = 'pending'`,
+  );
+  const filterParams = params.slice(0, -2);
+  const { rows: days } = await db.query(
+    `SELECT (r.requested_at AT TIME ZONE 'Asia/Kolkata')::date::text AS day,
+            COUNT(*)::int AS total,
+            COUNT(*) FILTER (WHERE r.status = 'pending')::int AS waiting
+       FROM billing_requests r
+       LEFT JOIN patients p ON p.id = r.patient_id
+      WHERE ${where.join(" AND ")}
+        AND (r.requested_at AT TIME ZONE 'Asia/Kolkata')::date::text = ANY($${filterParams.length + 1}::text[])
+      GROUP BY 1 ORDER BY 1 DESC`,
+    [...filterParams, [...new Set(rows.map((row) => row.asked_day))]],
   );
   return {
     rows: rows.map((row) => ({
@@ -629,6 +681,7 @@ export async function listCancelRequests(filters = {}, db = pool) {
       },
       requested_by: row.requested_by ? { id: row.requested_by, name: row.requested_by_name } : null,
       requested_at: row.requested_at,
+      day: row.asked_day,
       decided_by: row.decided_by ? { id: row.decided_by, name: row.decided_by_name } : null,
       decided_at: row.decided_at,
       decision_note: row.decision_note,
@@ -641,10 +694,15 @@ export async function listCancelRequests(filters = {}, db = pool) {
         ? { bill_no: row.credit_note_no, amount: paise(row.credit_note_payable) }
         : null,
     })),
+    days,
     total: Number(rows[0]?.total ?? 0),
     page,
     limit,
     waiting: waiting[0].n,
+    olderWaiting: await olderWaitingCount(db, "r.kind = 'test_cancel'", {
+      from: filters.from || null,
+      to: filters.to || null,
+    }),
   };
 }
 

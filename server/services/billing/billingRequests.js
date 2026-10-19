@@ -10,7 +10,15 @@ import {
 } from "./creditNotes.js";
 import { createItem } from "./serviceItems.js";
 import { httpError, inTransaction } from "./transaction.js";
-import { auditFields, cleanName, hasField, INT_MAX, lockRow, readNumber } from "./common.js";
+import {
+  auditFields,
+  cleanDate,
+  cleanName,
+  hasField,
+  INT_MAX,
+  lockRow,
+  readNumber,
+} from "./common.js";
 import { publishBillingRequest } from "../giniflow/realtimeBus.js";
 import { endVisitAfterRefund } from "./refundVisitExit.js";
 import { restoreDepositLegs } from "./payments.js";
@@ -312,6 +320,110 @@ export async function refundPreviewOf(request, db) {
     if (!Number.isInteger(error?.status) || error.status >= 500) throw error;
     return { preview: null, preview_error: error.message };
   }
+}
+
+export const SEARCH_KINDS = ["refund", "deposit_refund", "new_item", "repeat_item"];
+const SEARCH_LIMIT = 20;
+const SEARCH_LIMIT_MAX = 100;
+const SEARCH_TEXT_MAX = 100;
+const ASKED_DAY_SQL = "(r.requested_at AT TIME ZONE 'Asia/Kolkata')::date";
+
+function cleanSearchPage(value, fallback, max) {
+  if (value === undefined || value === null || value === "") return fallback;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n <= 0) throw httpError(400, "Page and limit must be whole numbers");
+  return Math.min(n, max);
+}
+
+export function askedDayFilters(filters, add) {
+  const from = cleanDate(filters.from, "From");
+  const to = cleanDate(filters.to, "To");
+  if (from && to && from > to) throw httpError(400, "From must be on or before To");
+  if (from) add(`${ASKED_DAY_SQL} >= ?::date`, from);
+  if (to) add(`${ASKED_DAY_SQL} <= ?::date`, to);
+  return { from, to };
+}
+
+export async function olderWaitingCount(db, kindSql, { from, to }) {
+  if (!from && !to) return 0;
+  const { rows } = await db.query(
+    `SELECT COUNT(*)::int AS n FROM billing_requests r
+      WHERE r.status = 'pending' AND ${kindSql}
+        AND NOT (${ASKED_DAY_SQL} BETWEEN COALESCE($1::date, '-infinity'::date)
+                                     AND COALESCE($2::date, 'infinity'::date))`,
+    [from, to],
+  );
+  return rows[0].n;
+}
+
+export async function searchRequests(filters = {}, db = pool) {
+  const where = ["r.kind <> 'test_cancel'"];
+  const params = [];
+  const add = (sql, value) => {
+    params.push(value);
+    where.push(sql.replaceAll("?", `$${params.length}`));
+  };
+  if (filters.status) {
+    if (!STATUSES.includes(filters.status)) {
+      throw httpError(400, `Status must be from: ${STATUSES.join(", ")}`);
+    }
+    add("r.status = ?", filters.status);
+  }
+  if (filters.kind) {
+    if (!SEARCH_KINDS.includes(filters.kind)) {
+      throw httpError(400, `Kind must be one of: ${SEARCH_KINDS.join(", ")}`);
+    }
+    add("r.kind = ?", filters.kind);
+  }
+  const range = askedDayFilters(filters, add);
+  const q = typeof filters.q === "string" ? filters.q.trim() : "";
+  if (q.length > SEARCH_TEXT_MAX) {
+    throw httpError(400, `Keep the search under ${SEARCH_TEXT_MAX} letters`);
+  }
+  if (q.length >= 2) {
+    add(
+      `(p.name ILIKE ? OR p.file_no ILIKE ? OR b.bill_no ILIKE ? OR i.name ILIKE ?
+        OR r.proposed_name ILIKE ?)`,
+      `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`,
+    );
+  }
+  const limit = cleanSearchPage(filters.limit, SEARCH_LIMIT, SEARCH_LIMIT_MAX);
+  const page = cleanSearchPage(filters.page, 1, 100000);
+  const filtered = `${LIST_SQL} WHERE ${where.join(" AND ")}`;
+  const { rows: counted } = await db.query(
+    `SELECT COUNT(*)::int AS n FROM (${filtered}) found`,
+    params,
+  );
+  const dated = filtered.replace("SELECT ", `SELECT ${ASKED_DAY_SQL}::text AS asked_day, `);
+  const { rows } = await db.query(
+    `SELECT found.* FROM (${dated}) found
+     ORDER BY found.asked_day DESC,
+              CASE WHEN found.status = 'pending' THEN 0 ELSE 1 END,
+              CASE WHEN found.status = 'pending' THEN found.requested_at END ASC,
+              found.requested_at DESC, found.id
+     LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+    [...params, limit, (page - 1) * limit],
+  );
+  const shaped = await withRefundPreviews(
+    rows.map((row) => ({ ...shape(row), day: row.asked_day })),
+    db,
+  );
+  const { rows: days } = await db.query(
+    `SELECT found.asked_day AS day, COUNT(*)::int AS total,
+            COUNT(*) FILTER (WHERE found.status = 'pending')::int AS waiting
+       FROM (${dated}) found
+      WHERE found.asked_day = ANY($${params.length + 1}::text[])
+      GROUP BY 1 ORDER BY 1 DESC`,
+    [...params, [...new Set(rows.map((row) => row.asked_day))]],
+  );
+  return {
+    rows: shaped,
+    days,
+    total: counted[0].n,
+    page,
+    limit,
+    olderWaiting: await olderWaitingCount(db, "r.kind <> 'test_cancel'", range),
+  };
 }
 
 async function withRefundPreviews(requests, db) {

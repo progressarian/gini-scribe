@@ -91,7 +91,7 @@ test.describe("P1-29 services page — pickers endpoint", () => {
     expect(response.status()).toBe(200);
     const body = await response.json();
     expect(body.kinds).toEqual(["consultation", "test", "procedure", "medicine", "other"]);
-    expect(body.visitTypes).toEqual(["New", "Follow Up"]);
+    expect(body.visitTypes).toEqual(["New", "Follow Up", "Follow Up (3 days)"]);
     expect(body.tests.find((t) => t.id === seed.test.id)).toMatchObject({ item_id: null });
     expect(body.consultants.map((d) => d.id)).toContain(seed.doctor.id);
     expect(body.consultants.map((d) => d.id)).not.toContain(labOnly.id);

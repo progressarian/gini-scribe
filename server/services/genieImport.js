@@ -1,22 +1,3 @@
-// ============================================================================
-// genieImport — read a patient + their history out of the Genie DB
-// (purzqfmfycfowyxfaumc) and copy it into this scribe Postgres.
-//
-// Replaces the bidirectional gini_sync_* RPC pipeline. Used in two flows:
-//
-//   1. POST /api/patients/convert-from-genie — reception in scribe is
-//      onboarding a walk-in whose phone already exists in the patient app.
-//      We pull every row keyed off the genie patient and insert into scribe,
-//      then mark the genie row migrated_to_gini=true so the patient app stops
-//      writing to it.
-//
-//   2. GET /api/patients/genie-lookup?phone= — IntakePage lookup. Read-only.
-//
-// IMPORTANT: this module only READS from the Genie DB (and flips ONE flag at
-// the very end). It does not push scribe data to Genie. The whole point of
-// the dual-DB routing is to stop syncing.
-// ============================================================================
-
 import { createRequire } from "module";
 import pool from "../config/db.js";
 import { encryptAadhaar } from "../utils/aadhaarCrypt.js";
@@ -43,11 +24,6 @@ function normalisePhone(phone) {
   return Array.from(new Set([phone, digits, `+${digits}`, last10, withCountry].filter(Boolean)));
 }
 
-/**
- * Look up app-DB patient rows by phone. Returns an array — a phone may legitimately
- * be shared by multiple family members who self-onboarded on the app.
- * By default, rows already migrated to hospital are filtered out.
- */
 export async function lookupGeniePatientsByPhone(phone, { includeMigrated = false } = {}) {
   const db = getGenieDb();
   if (!db) return [];
@@ -80,15 +56,6 @@ async function getGeniePatientById(genieId) {
   return data;
 }
 
-// ---- per-table inverse mappers (genie row → scribe insert payload) ----
-//
-// Every mapper sets `genie_id` (or source_id for tables that use that name)
-// to the app row's UUID. Combined with the unique indexes from migration
-// 2026-05-20_patient_log_genie_id_unique.sql, ON CONFLICT prevents re-imports
-// from duplicating rows.
-
-// Genie `vitals` → scribe `patient_vitals_log` (NOT scribe `vitals` — that's
-// for OPD in-clinic measurements; patient self-measurements live in the log).
 function mapVitalToScribeLog(v, scribePatientId) {
   return {
     patient_id: scribePatientId,
@@ -154,11 +121,6 @@ function mapConditionToDiagnosis(c, scribePatientId) {
   };
 }
 
-// Genie `meal_logs` lands in scribe's `meal_logs` (rich shape; idempotency
-// via `(patient_id, source_id)`) AND in scribe's `patient_meal_log` (the
-// thinner log table). Two destinations, one source. The app DB uses
-// `log_date` + `log_time` columns; combine them into a single timestamp for
-// scribe's `meal_logs.logged_at`.
 function geniMealTimestamp(ml) {
   if (ml.logged_at) return ml.logged_at;
   if (ml.log_date) {
@@ -298,11 +260,6 @@ async function bulkInsert(table, rows, columns, conflictTarget = null) {
   return result.rowCount || 0;
 }
 
-/**
- * Convert a specific Genie patient row into scribe by its app-DB id (UUID).
- * Preferred over `convertGeniePatientByPhone` when multiple app patients
- * share the same phone — the doctor must pick which one to import.
- */
 export async function convertGeniePatientById(genieId) {
   const db = getGenieDb();
   if (!db) return { ok: false, reason: "genie_db_not_configured" };
@@ -331,10 +288,6 @@ export async function convertGeniePatientByPhone(phone) {
 }
 
 async function doConvert(db, geniePatient, opts = {}) {
-  // Target scribe patient: caller-supplied (e.g. file-no linking, where the
-  // hospital record was already verified by phone match) wins over the
-  // exact-phone lookup — that lookup can miss differently-formatted phones
-  // and would then create a duplicate GNI- patient.
   let scribePatientId = opts.scribePatientId ?? null;
   if (!scribePatientId) {
     const existing = (
@@ -375,10 +328,6 @@ async function doConvert(db, geniePatient, opts = {}) {
       .then((r) => r.data ?? [])
       .catch(() => []);
 
-  // `patient_reported_side_effects` doesn't exist in the app DB schema today —
-  // the app writes side effects directly to the scribe hospital DB. Same for
-  // `patient_documents`. We still fetch (defensively returns [] on missing
-  // table) so the import is forward-compatible if those tables show up later.
   const [
     vitals,
     labs,
@@ -632,11 +581,6 @@ async function doConvert(db, geniePatient, opts = {}) {
     );
   }
 
-  // Carry the app login over: after migration "hospital wins" at login, so a
-  // hospital row without a password would force the user back through
-  // OTP + set-password even though they just set one in the app. Copy the
-  // genie hash when the hospital row has none (never overwrite an existing
-  // hospital password).
   if (geniePatient.password_hash) {
     await pool.query(
       `UPDATE patients SET password_hash = COALESCE(password_hash, $1) WHERE id = $2`,
@@ -663,19 +607,6 @@ async function doConvert(db, geniePatient, opts = {}) {
   };
 }
 
-/**
- * Fire-and-forget: copy all genie app data into the hospital DB when a
- * collision is first detected (same phone in both DBs). Safe to call without
- * await — errors are logged, never thrown. Idempotent: bulkInsert uses
- * ON CONFLICT DO NOTHING so re-runs are safe.
- */
-/**
- * Import a genie patient's app history into a SPECIFIC scribe patient (or, if
- * scribePatientId is null, doConvert's own find-or-create). Used by the
- * patient-app endpoints: ensure-scribe-patient and link-file-no (where the
- * target hospital record was verified by phone match first). Idempotent —
- * bulkInsert uses ON CONFLICT DO NOTHING.
- */
 export async function importGenieHistoryToScribePatient(geniePatient, scribePatientId = null) {
   const db = getGenieDb();
   if (!db) return { ok: false, reason: "genie_db_not_configured" };

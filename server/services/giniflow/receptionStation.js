@@ -32,8 +32,7 @@ import {
 import { blockDetail } from "../patientBlockView.js";
 import { mirrorFloorStatus } from "../appointmentStatus.js";
 import { createWalkinBooking } from "../walkinBooking.js";
-import { LAB_ONLY_DOCTOR, labOnlyHiddenPredicate, labOnlyPredicate } from "./labOnlyVisits.js";
-import { hideLabOnlyPatients } from "./floorSettings.js";
+import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import {
   CLAIM_STATE,
   collectiblePaise,
@@ -129,8 +128,7 @@ const ORDER_SELECT = `
      -- taking.
      AND o.urgency = 'today'
      -- A patient who never arrived or has gone home is not at the counter.
-     AND v.current_status NOT IN ('no_show', 'cancelled')
-     AND NOT (o.kind <> 'lab' AND ${labOnlyHiddenPredicate("v", "$2", "$3")})`;
+     AND v.current_status NOT IN ('no_show', 'cancelled')`;
 
 // An order written before amount_total existed carries the price only on its
 // test lines. The card falls back to their sum, so the money maths has to use
@@ -315,11 +313,7 @@ const shapeHealthrayLab = (r) => ({
 });
 
 export async function getPaymentQueue(visitDate, db = pool, { q = "" } = {}) {
-  const { rows } = await db.query(`${ORDER_SELECT} ORDER BY o.created_at`, [
-    visitDate,
-    LAB_ONLY_DOCTOR,
-    await hideLabOnlyPatients(db),
-  ]);
+  const { rows } = await db.query(`${ORDER_SELECT} ORDER BY o.created_at`, [visitDate]);
   const machines = await getMachines(db);
   const allOrders = rows.map((r) => {
     const bill = { items: r.bill_items || [] };
@@ -906,6 +900,13 @@ export const ARRIVAL_SELECT = `
          AND pa.appointment_date < v.visit_date
          AND pa.status = 'completed'
     ) seq ON TRUE
+    CROSS JOIN LATERAL (
+      SELECT CASE
+               WHEN ap.visit_type ~* '(follow|f/?u|review)' THEN TRUE
+               WHEN ap.visit_type ~* '^\s*new\b' THEN FALSE
+               ELSE seq.prior > 0
+             END AS followup
+    ) booked
     LEFT JOIN LATERAL (
       -- HealthRay's own word for the booking first, the patient's history when
       -- it says nothing useful ("OPD" is the generic both systems write). Same
@@ -915,12 +916,8 @@ export const ARRIVAL_SELECT = `
        WHERE CASE
                WHEN ap.visit_type ~* '(tele|online|video)' THEN t.for_online
                ELSE NOT t.for_online
-                    AND t.for_followup = (
-                          CASE
-                            WHEN ap.visit_type ~* '(follow|f/?u|review)' THEN TRUE
-                            WHEN ap.visit_type ~* '^\s*new\b' THEN FALSE
-                            ELSE seq.prior > 0
-                          END)
+                    AND (ap.visit_type ~* '(investigat|lab|test)'
+                         OR t.for_followup = booked.followup)
                     AND t.for_walkin = FALSE
                     -- A booking HealthRay calls an investigation is a patient coming to
                     -- GIVE samples and go, booked against Dr. Hospital Admin. They should
@@ -930,7 +927,8 @@ export const ARRIVAL_SELECT = `
          -- A type an admin has switched off is not offered again; visits already
          -- on it keep running, since the id still resolves everywhere else.
          AND t.is_active = TRUE
-       ORDER BY t.max_time_min, t.id LIMIT 1
+       ORDER BY t.for_followup IS NOT DISTINCT FROM booked.followup DESC, t.max_time_min, t.id
+       LIMIT 1
     ) sugg ON TRUE
     LEFT JOIN LATERAL (${JOURNEY_STEPS_SQL("v")}) jr ON TRUE
     LEFT JOIN LATERAL (

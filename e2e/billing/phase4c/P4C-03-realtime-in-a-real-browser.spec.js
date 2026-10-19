@@ -124,12 +124,16 @@ function watchFetches(page, pattern) {
 }
 
 const waitingRow = (page, text) =>
-  page.getByRole("table", { name: "Requests waiting" }).getByRole("row").filter({ hasText: text });
+  page
+    .getByRole("table", { name: "Billing requests" })
+    .getByRole("row")
+    .filter({ hasText: text })
+    .filter({ has: page.getByRole("button", { name: /^Reject request for/ }) });
 const mine = (page) => page.getByRole("region", { name: "My requests" });
 
 async function openInbox(page, base) {
-  await gotoReady(page, `${base}/settings/desk-requests`, () =>
-    page.getByRole("heading", { name: "Waiting for an answer" }),
+  await gotoReady(page, `${base}/desk-requests`, () =>
+    page.getByRole("heading", { name: "Billing requests" }),
   );
 }
 

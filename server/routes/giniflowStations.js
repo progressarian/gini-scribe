@@ -1866,6 +1866,7 @@ router.post(
     caseNos: req.body.caseNos,
     patientId: req.body.patientId,
     date: req.body.date,
+    testName: req.body.testName,
   })),
 );
 

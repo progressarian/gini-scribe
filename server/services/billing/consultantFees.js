@@ -2,7 +2,7 @@ import pool from "../../config/db.js";
 import {
   CONSULTANT_FEES_PAGE_SIZE,
   CONSULTANT_FEES_PAGE_SIZE_MAX,
-  CONSULTATION_VISIT_TYPES,
+  CONSULTATION_ITEM_VISIT_TYPES,
   PATIENT_PAYS,
   RESERVED_CATEGORY_CODES,
 } from "../../../shared/billingVocab.js";
@@ -360,7 +360,14 @@ async function unpricedDoctors(db, doctorId, paging) {
           ORDER BY i.id DESC LIMIT 1
        ) old ON TRUE
       ORDER BY m.name, m.id, m.ord`,
-    [LAB_ONLY_DOCTOR, doctorId, CONSULTATION_VISIT_TYPES, paging.q, paging.limit, paging.offset],
+    [
+      LAB_ONLY_DOCTOR,
+      doctorId,
+      CONSULTATION_ITEM_VISIT_TYPES,
+      paging.q,
+      paging.limit,
+      paging.offset,
+    ],
   );
   return {
     rows: rows
@@ -398,7 +405,7 @@ const whoOf = (doctor, visitType) => ({
 });
 
 function defaultRows(defaults, cells) {
-  return CONSULTATION_VISIT_TYPES.filter((v) => defaults.has(v)).map((visitType) => {
+  return CONSULTATION_ITEM_VISIT_TYPES.filter((v) => defaults.has(v)).map((visitType) => {
     const item = defaults.get(visitType);
     return {
       doctor_id: null,
@@ -453,7 +460,7 @@ export async function consultantFeeGrid(options = {}, db = pool) {
     date,
   );
   const doctorRows = doctors.flatMap((doctor) =>
-    CONSULTATION_VISIT_TYPES.flatMap((visitType) => {
+    CONSULTATION_ITEM_VISIT_TYPES.flatMap((visitType) => {
       const item = items.find((i) => i.doctor_id === doctor.id && i.visit_type === visitType);
       if (!item) return [];
       return [
@@ -469,7 +476,7 @@ export async function consultantFeeGrid(options = {}, db = pool) {
   const base = {
     date,
     today: indiaToday(),
-    visit_types: CONSULTATION_VISIT_TYPES,
+    visit_types: CONSULTATION_ITEM_VISIT_TYPES,
     patient_pays: PATIENT_PAYS,
     columns,
   };
@@ -503,7 +510,9 @@ export async function consultantFeeNotPriced(options = {}, db = pool) {
     ),
   ]);
   const covered = new Set(defaults.rows.map((r) => r.visit_type));
-  const missingDefaults = doctorId ? [] : CONSULTATION_VISIT_TYPES.filter((v) => !covered.has(v));
+  const missingDefaults = doctorId
+    ? []
+    : CONSULTATION_ITEM_VISIT_TYPES.filter((v) => !covered.has(v));
   const search = typeof options.q === "string" ? options.q.trim().toLowerCase() : "";
   return {
     rows: found.rows,

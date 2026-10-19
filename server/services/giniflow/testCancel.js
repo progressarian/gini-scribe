@@ -1,5 +1,5 @@
 import pool from "../../config/db.js";
-import { releaseOrderLines } from "../billing/visitLines.js";
+import { releaseCaseTestLines, releaseOrderLines } from "../billing/visitLines.js";
 import { refundCancelledTest } from "../billing/billingRequests.js";
 import { TAKEN_ABOVE_BILL, finaliseBill, resettleTestOrders } from "../billing/bills.js";
 import { releaseTestOrders } from "../billing/payments.js";
@@ -17,6 +17,7 @@ import {
   testCancelReasonLabel,
 } from "../../../shared/testCancelReasons.js";
 import { getMachines } from "./machineCatalog.js";
+import { assertNotHeld } from "./cancelHold.js";
 import {
   CASE_CANCELLABLE_SQL,
   CASE_STARTED_SQL,
@@ -319,12 +320,89 @@ async function cancelCasesIn(client, { visit, patientId, date, caseNos, input })
   return todo.map((c) => c.case_no);
 }
 
+async function cancelCaseTestIn(client, { visit, patientId, date, caseNo, testName, input }) {
+  const [found] = await patientCases(client, { patientId, date, caseNos: [caseNo] });
+  if (!found) throw bad("That HealthRay case is not this patient's, or not today's", 404);
+  if (!found.live) throw bad(`Case ${caseNo} is already cancelled`, 409);
+  const names = found.test_names || [];
+  if (!names.includes(testName)) {
+    throw bad(`${testName} is no longer on case ${caseNo} — it may already be cancelled`, 404);
+  }
+  if (names.length === 1) {
+    return {
+      whole: true,
+      cases: await cancelCasesIn(client, { visit, patientId, date, caseNos: [caseNo], input }),
+      onFinal: [],
+    };
+  }
+  if (found.started && !input.allowCollected) {
+    throw bad(
+      `Case ${caseNo} is already under way at the lab — use Request cancellation for ${testName}`,
+      409,
+    );
+  }
+  if (!input.allowCollected && input.source !== "healthray") {
+    await assertNotHeld(client, { caseNo });
+  }
+  await client.query(
+    `UPDATE lab_cases SET test_names = array_remove(test_names, $2) WHERE case_no = $1`,
+    [caseNo, testName],
+  );
+  await client.query(
+    `INSERT INTO giniflow_lab_case_test_cancels
+       (case_no, test_name, reason, note, request_id, actor_id, actor_role)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (case_no, test_name) DO NOTHING`,
+    [
+      caseNo,
+      testName,
+      input.reason,
+      input.note ? String(input.note).trim().slice(0, 160) : null,
+      input.requestId ?? null,
+      input.actorId ?? null,
+      input.actorRole || null,
+    ],
+  );
+  const lines = visit
+    ? await releaseCaseTestLines(client, visit.id, testName, { actorId: input.actorId ?? null })
+    : { onFinal: [] };
+  await recordCancellation(client, {
+    visitId: visit?.id,
+    patientId,
+    visitDate: date,
+    kind: "healthray_case",
+    caseNo,
+    testName,
+    reason: input.reason,
+    note: input.note,
+    refundAmount: input.refundAmount ?? null,
+    source: input.source,
+    actorId: input.actorId,
+    actorRole: input.actorRole,
+    snapshot: { caseNo, tests: names, cancelledTest: testName },
+  });
+  return { whole: false, cases: [], onFinal: lines.onFinal };
+}
+
 const paidShare = (order, tests, test) => {
   const total = tests.reduce((s, t) => s + Number(t.price || 0), 0);
   const paid = Number(order.amount_paid) || 0;
   if (!total) return tests.length === 1 ? money(paid) : 0;
   return money((paid * Number(test.price || 0)) / total);
 };
+
+function splitRefund(amount, tests) {
+  const total = money(amount);
+  const prices = tests.map((t) => Number(t.price || 0));
+  const sum = prices.reduce((s, p) => s + p, 0);
+  let left = total;
+  return tests.map((_, i) => {
+    if (i === tests.length - 1) return money(left);
+    const part = money(sum ? (total * prices[i]) / sum : total / tests.length);
+    left -= part;
+    return part;
+  });
+}
 
 async function cancelOrderIn(client, visit, order, input, machines) {
   const tests = order.tests || [];
@@ -418,7 +496,9 @@ async function cancelOrderIn(client, visit, order, input, machines) {
     for (const draft of drafts) await resettleTestOrders(client, draft, moneyCtx);
   }
 
-  for (const t of going) {
+  const typedRefund = input.refundAmount != null && input.refundAmount !== "";
+  const typedShares = typedRefund ? splitRefund(input.refundAmount, going) : [];
+  for (const [index, t] of going.entries()) {
     const share = partial ? refundLeft : paidShare(order, tests, t);
     await recordCancellation(client, {
       visitId: visit.id,
@@ -432,12 +512,11 @@ async function cancelOrderIn(client, visit, order, input, machines) {
       paymentStatus: order.payment_status,
       amountPaid: order.amount_paid,
       amountClaimed: order.amount_claimed,
-      refundAmount:
-        input.refundAmount != null && input.refundAmount !== ""
-          ? money(input.refundAmount)
-          : input.reason === "refunded" || input.source === "healthray"
-            ? share
-            : null,
+      refundAmount: typedRefund
+        ? typedShares[index]
+        : input.reason === "refunded" || input.source === "healthray"
+          ? share
+          : null,
       billLine:
         input.billLine ||
         billLineForTest(bill, machines, { kind: order.kind, testName: t.name, machineId }),
@@ -560,6 +639,9 @@ export async function cancelTestIn(client, input) {
     if (input.expectKind && order.kind !== input.expectKind) {
       throw bad(`This is a ${order.kind} test — cancel it from its own station`, 409);
     }
+    if (!input.allowCollected && input.source !== "healthray") {
+      await assertNotHeld(client, { orderId: order.id });
+    }
     if (!input.allowCollected && !CANCELLABLE_ORDER_STATUSES.includes(order.sample_status)) {
       throw bad(
         order.kind === "machine"
@@ -653,6 +735,48 @@ export async function cancelTestIn(client, input) {
       [patientId, date],
     );
     const visit = vrows.length ? await lockVisit(client, vrows[0].id) : null;
+    if (target.testName) {
+      if (target.caseNos.length !== 1) throw bad("Cancel one test from one case at a time");
+      const done = await cancelCaseTestIn(client, {
+        visit,
+        patientId,
+        date,
+        caseNo: target.caseNos[0],
+        testName: target.testName,
+        input,
+      });
+      const refunds = input.skipRefund
+        ? []
+        : await refundFinalLines(client, input, "lab", done.onFinal);
+      await writeMarker(
+        client,
+        visit?.id,
+        {
+          kind: "healthray_case",
+          cases: done.cases,
+          tests: done.whole ? [] : [target.testName],
+          caseNo: target.caseNos[0],
+          reason: input.reason,
+          note: input.note || null,
+          source: input.source,
+        },
+        input.actorRole,
+        input.actorId,
+      );
+      if (visit) {
+        await tidyLabSteps(client, visit.id);
+        await afterJourneyChange(client, visit.id);
+      }
+      return {
+        visitId: visit?.id ?? null,
+        kind: "healthray_case",
+        cases: done.cases,
+        tests: done.whole ? [] : [target.testName],
+        wholeCase: done.whole,
+        refunds,
+        billedLines: done.onFinal,
+      };
+    }
     const cases = await cancelCasesIn(client, {
       visit,
       patientId,

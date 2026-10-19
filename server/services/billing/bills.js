@@ -15,6 +15,7 @@ import {
 import { normalizeGender, resolveCategoryFor } from "./categoryResolver.js";
 import { testsAfterConsult } from "./afterConsult.js";
 import { cghsSubForReferral, startingCghsSub } from "../../../shared/cghsSubCategory.js";
+import { FOLLOW_UP_WITHIN_DAYS, RECENT_FOLLOW_UP } from "../../../shared/billingVocab.js";
 import { checkCode } from "./discountRules.js";
 import { issuedGstReady } from "./issuedGst.js";
 import { assertBillLineBalances } from "./lineInvariant.js";
@@ -28,7 +29,7 @@ import {
 } from "./payments.js";
 import { priceBill } from "./priceBill.js";
 import { priceChangeText, priceChanges, takenAboveText } from "./priceDrift.js";
-import { visitConsultationType } from "./serviceItems.js";
+import { seenRecentlyBy, visitConsultationType } from "./serviceItems.js";
 import { refuseRemoved, removedDoctor } from "./removedDoctors.js";
 import { httpError, inTransaction } from "./transaction.js";
 import {
@@ -865,8 +866,32 @@ async function approvalFor(client, bill, item, repeatRequestId, ctx, held) {
 
 const VISIT_LABELS = { New: "New Patient", "Follow Up": "Follow Up" };
 
-async function refuseOtherConsultation(client, bill, item) {
+async function refuseOtherConsultation(client, bill, item, doctorId) {
   if (item.kind !== "consultation" || !item.visit_type) return;
+  if (item.visit_type === RECENT_FOLLOW_UP) {
+    const { rows } = await client.query(
+      `SELECT patient_id, visit_date::text AS visit_date, assigned_doctor_id
+         FROM giniflow_visits WHERE id = $1`,
+      [bill.visit_id],
+    );
+    const visit = rows[0];
+    const consultant =
+      item.doctor_id ?? doctorId ?? bill.consultant_id ?? visit?.assigned_doctor_id ?? null;
+    if (
+      visit &&
+      (await seenRecentlyBy(
+        { patientId: visit.patient_id, visitDate: visit.visit_date },
+        consultant,
+        client,
+      ))
+    ) {
+      return;
+    }
+    throw httpError(
+      409,
+      `${item.name} is only for a patient this consultant saw in the last ${FOLLOW_UP_WITHIN_DAYS} days`,
+    );
+  }
   const wanted = await visitConsultationType(bill.visit_id, client);
   if (!wanted || wanted === item.visit_type) return;
   throw httpError(409, `This is a ${VISIT_LABELS[wanted]} visit — add the ${wanted} consultation`);
@@ -948,7 +973,7 @@ async function insertLineIn(client, bill, input, ctx) {
       `${item.name} has a fixed price; it can't be given a price for this patient`,
     );
   }
-  await refuseOtherConsultation(client, bill, item);
+  await refuseOtherConsultation(client, bill, item, doctorId);
   const held = await receptionHolder(client, bill, item, labOrderId);
   if (
     source === "ordered" &&

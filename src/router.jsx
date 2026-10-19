@@ -82,8 +82,7 @@ const ServicesSettingsPage = lazyWithRetry(() => import("./pages/billing/Service
 const CategoryRatesPage = lazyWithRetry(() => import("./pages/billing/CategoryRatesPage"));
 const ConsultantFeesPage = lazyWithRetry(() => import("./pages/billing/ConsultantFeesPage"));
 const DiscountsSettingsPage = lazyWithRetry(() => import("./pages/billing/DiscountsSettingsPage"));
-const DeskRequestsPage = lazyWithRetry(() => import("./pages/billing/DeskRequestsPage"));
-const TestCancellationsPage = lazyWithRetry(() => import("./pages/billing/TestCancellationsPage"));
+const DeskRequestsHome = lazyWithRetry(() => import("./pages/billing/DeskRequestsHome"));
 const BillingSettingsPage = lazyWithRetry(() => import("./pages/billing/BillingSettingsPage"));
 const BillingImportPage = lazyWithRetry(() => import("./pages/billing/BillingImportPage"));
 const BillingCounterPage = lazyWithRetry(() => import("./pages/billing/BillingCounterPage"));
@@ -229,6 +228,7 @@ const router = createBrowserRouter([
                 element: <Navigate to="/staff-management" replace />,
               },
               { path: "/admin/blocklist", element: lazyEl(PatientBlocklistPage) },
+              { path: "/desk-requests", element: lazyEl(DeskRequestsHome) },
               {
                 path: "/settings",
                 element: lazyEl(SettingsLayout),
@@ -241,8 +241,11 @@ const router = createBrowserRouter([
                   { path: "category-rates", element: lazyEl(CategoryRatesPage) },
                   { path: "consultant-fees", element: lazyEl(ConsultantFeesPage) },
                   { path: "discounts", element: lazyEl(DiscountsSettingsPage) },
-                  { path: "desk-requests", element: lazyEl(DeskRequestsPage) },
-                  { path: "test-cancellations", element: lazyEl(TestCancellationsPage) },
+                  { path: "desk-requests", element: <Navigate to="/desk-requests" replace /> },
+                  {
+                    path: "test-cancellations",
+                    element: <Navigate to="/desk-requests?tab=tests" replace />,
+                  },
                   { path: "bulk-import", element: lazyEl(BillingImportPage) },
                   { path: "billing", element: lazyEl(BillingSettingsPage) },
                 ],

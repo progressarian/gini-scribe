@@ -5,6 +5,7 @@ import { API_URL } from "../../services/api";
 import { setLiveConnected } from "./giniflowPolling";
 import { createLiveConnection } from "./giniflowLiveConnection";
 import { billingKeys } from "./useBillingMaster";
+import { APPROVALS_WAITING_KEY } from "./useApprovals";
 
 // One connection per screen, not one per query.
 //
@@ -18,6 +19,12 @@ import { billingKeys } from "./useBillingMaster";
 // reconnect policy lives in `giniflowLiveConnection.js`, which retries with
 // backoff until the connection comes back. A station tablet is open all day and
 // must survive a deploy without anybody reloading the page.
+
+export const BILLING_REQUEST_KEYS = [
+  billingKeys.requests(),
+  ["giniflow", "cancel-requests"],
+  APPROVALS_WAITING_KEY,
+];
 
 const INVALIDATES = {
   visit: [
@@ -67,7 +74,7 @@ const INVALIDATES = {
     ["giniflow", "doctor"],
     ["giniflow", "board"],
   ],
-  billing_request: [billingKeys.requests()],
+  billing_request: BILLING_REQUEST_KEYS,
 };
 
 const ALL = [

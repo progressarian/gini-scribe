@@ -14,6 +14,8 @@ import { FLAT } from "../giniflow/labCatalog.js";
 import {
   CONSULTATION_DEFAULT_GROUP,
   CONSULTATION_DEFAULT_SUBGROUP,
+  CONSULTATION_ITEM_VISIT_TYPES,
+  FOLLOW_UP_WITHIN_DAYS,
 } from "../../../shared/billingVocab.js";
 import { httpError, inTransaction } from "./transaction.js";
 import {
@@ -99,8 +101,8 @@ function cleanMaxQuantity(value) {
 
 function cleanVisitType(value) {
   if (value === undefined || value === null || value === "") return null;
-  if (!CONSULTATION_VISIT_TYPES.includes(value)) {
-    throw httpError(400, `Visit type must be one of: ${CONSULTATION_VISIT_TYPES.join(", ")}`);
+  if (!CONSULTATION_ITEM_VISIT_TYPES.includes(value)) {
+    throw httpError(400, `Visit type must be one of: ${CONSULTATION_ITEM_VISIT_TYPES.join(", ")}`);
   }
   return value;
 }
@@ -165,7 +167,7 @@ function checkShape(item) {
     if (!item.visit_type) {
       throw httpError(
         400,
-        `A consultation item needs a visit type (${CONSULTATION_VISIT_TYPES.join(" or ")})`,
+        `A consultation item needs a visit type (${CONSULTATION_ITEM_VISIT_TYPES.join(" or ")})`,
       );
     }
   } else if (item.doctor_id !== null || item.visit_type !== null) {
@@ -358,6 +360,23 @@ function cleanReason(value) {
 
 export const DESK_SEARCH_LIMIT = 30;
 const DESK_SEARCH_TERMS = 8;
+
+export async function seenRecentlyBy({ patientId, visitDate }, doctorId, db = pool) {
+  if (!patientId || !visitDate || !doctorId) return false;
+  const { rows } = await db.query(
+    `SELECT EXISTS (
+       SELECT 1 FROM appointments a
+        WHERE a.patient_id = $1
+          AND a.status = 'completed'
+          AND a.appointment_date BETWEEN $2::date - $4::int AND $2::date - 1
+          AND (a.doctor_id = $3
+               OR lower(btrim(a.doctor_name)) =
+                  (SELECT lower(btrim(d.name)) FROM doctors d WHERE d.id = $3))
+     ) AS recent`,
+    [patientId, visitDate, doctorId, FOLLOW_UP_WITHIN_DAYS],
+  );
+  return rows[0].recent;
+}
 
 export async function visitConsultationType(visitId, db = pool) {
   if (!visitId) return null;
@@ -748,7 +767,7 @@ export async function itemChoices(db = pool) {
   );
   return {
     kinds: ITEM_KINDS,
-    visitTypes: CONSULTATION_VISIT_TYPES,
+    visitTypes: CONSULTATION_ITEM_VISIT_TYPES,
     tests,
     consultants: consultants.filter((d) => !isLabOnlyDoctor(d.name)),
   };

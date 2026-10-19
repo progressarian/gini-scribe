@@ -55,6 +55,7 @@ import {
   billingRepeatRequestSchema,
   billingRequestApproveSchema,
   billingRequestListQuerySchema,
+  billingRequestSearchQuerySchema,
   billingRequestRejectSchema,
   billingRuleTestSchema,
   billingShiftCloseSchema,
@@ -790,6 +791,23 @@ router.get(
   validateQuery(billingRequestListQuerySchema, BILLING_DESK_LABELS),
   run("Request inbox", 200, (req) =>
     requests.listRequests({ ...requestFilters(req), newestFirst: true }),
+  ),
+);
+
+router.get(
+  `${BASE}/master/requests/search`,
+  master,
+  validateQuery(billingRequestSearchQuerySchema, BILLING_DESK_LABELS),
+  run("Request search", 200, (req) =>
+    requests.searchRequests({
+      status: req.query.status,
+      kind: req.query.kind,
+      from: req.query.from,
+      to: req.query.to,
+      q: req.query.q,
+      page: req.query.page,
+      limit: req.query.limit,
+    }),
   ),
 );
 

@@ -3,8 +3,6 @@ import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
 import useAuthStore from "../stores/authStore";
 import { PAGE_CAPABILITIES } from "../config/routes";
 import { hasAnyCapability } from "../../shared/permissions";
-import DeskRequestsBadge from "../components/billing/DeskRequestsBadge";
-import TestCancellationsBadge from "../components/giniflow/TestCancellationsBadge";
 import "./SettingsLayout.css";
 
 // One place for the clinic's settings instead of a page per setting. The tabs
@@ -47,16 +45,6 @@ export const SETTINGS_TABS = [
     label: "Discounts",
   },
   {
-    to: "/settings/desk-requests",
-    label: "Desk requests",
-    Badge: DeskRequestsBadge,
-  },
-  {
-    to: "/settings/test-cancellations",
-    label: "Test cancellations",
-    Badge: TestCancellationsBadge,
-  },
-  {
     to: "/settings/bulk-import",
     label: "Bulk import",
   },
@@ -95,7 +83,6 @@ export default function SettingsLayout() {
             className={({ isActive }) => `set__tab${isActive ? " set__tab--on" : ""}`}
           >
             {t.label}
-            {t.Badge ? <t.Badge /> : null}
           </NavLink>
         ))}
       </nav>

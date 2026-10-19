@@ -17,19 +17,20 @@ import {
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 
 const tag = newTag();
-const INBOX = "/settings/desk-requests";
+const INBOX = "/desk-requests";
 let ids;
 
-const waitingTable = (page) => page.getByRole("table", { name: "Requests waiting" });
+const waitingTable = (page) => page.getByRole("table", { name: "Billing requests" });
 const waitingRow = (page, billNo) =>
   waitingTable(page)
     .getByRole("row")
-    .filter({ hasText: `Bill ${billNo}` });
+    .filter({ hasText: `Bill ${billNo}` })
+    .filter({ has: page.getByRole("button", { name: /^Reject request for/ }) });
 const dialog = (page) => page.getByRole("dialog");
 
 async function openInbox(page, role = "reception_admin") {
   await loginAs(page, role);
-  await gotoReady(page, INBOX, () => page.getByRole("heading", { name: "Waiting for an answer" }));
+  await gotoReady(page, INBOX, () => page.getByRole("heading", { name: "Billing requests" }));
 }
 
 const requestRow = (id) =>
@@ -87,7 +88,10 @@ test.describe.serial("P4B-11 desk requests inbox: refunds", () => {
     await expect(waitingRow(page, ids.reject.bill.bill_no)).toContainText(
       "Billed by mistake / duplicate",
     );
-    const waiting = (await waitingTable(page).getByRole("row").count()) - 1;
+    const { waiting } = await one(
+      `SELECT COUNT(*)::int AS waiting FROM billing_requests
+        WHERE status = 'pending' AND kind <> 'test_cancel'`,
+    );
     await expect(page.getByRole("link", { name: /Desk requests/ })).toContainText(String(waiting));
   });
 
@@ -115,7 +119,7 @@ test.describe.serial("P4B-11 desk requests inbox: refunds", () => {
       mode_reason: "Cash drawer empty",
     });
     const note = await one(`SELECT bill_no FROM bills WHERE id = $1`, [stored.credit_note_id]);
-    const decided = page.getByRole("table", { name: "Decided requests" });
+    const decided = page.getByRole("table", { name: "Billing requests" });
     await expect(decided).toContainText(`Credit note ${note.bill_no} · credited ₹500`);
     await expect(decided).toContainText("UPI — Cash drawer empty");
   });
@@ -167,6 +171,6 @@ test.describe.serial("P4B-11 desk requests inbox: refunds", () => {
   test("5. reception can't open the inbox", async ({ page }) => {
     await loginAs(page, "reception");
     await page.goto(INBOX);
-    await expect(page.getByRole("heading", { name: "Waiting for an answer" })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Billing requests" })).toHaveCount(0);
   });
 });

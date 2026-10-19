@@ -12,7 +12,7 @@ if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 const tag = newTag();
 const RECEPTION = "/giniflow/station/reception";
 const SETTINGS = "/settings/billing";
-const INBOX = "/settings/desk-requests";
+const INBOX = "/desk-requests";
 let ids;
 let fixtureSeries;
 let prefix;
@@ -22,9 +22,10 @@ const refunds = (page) => page.getByRole("region", { name: "Refunds" });
 const dialog = (page) => page.getByRole("dialog");
 const waitingRow = (page, billNo) =>
   page
-    .getByRole("table", { name: "Requests waiting" })
+    .getByRole("table", { name: "Billing requests" })
     .getByRole("row")
-    .filter({ hasText: `Bill ${billNo}` });
+    .filter({ hasText: `Bill ${billNo}` })
+    .filter({ has: page.getByRole("button", { name: /^Reject request for/ }) });
 const creditSeries = () =>
   one(`SELECT prefix, number_width, next_no FROM bill_series WHERE series = 'CN' AND fy = $1`, [
     ids.fy,
@@ -38,7 +39,7 @@ async function openBill(page, bill) {
 
 async function openInbox(page) {
   await loginAs(page, "admin");
-  await gotoReady(page, INBOX, () => page.getByRole("heading", { name: "Waiting for an answer" }));
+  await gotoReady(page, INBOX, () => page.getByRole("heading", { name: "Billing requests" }));
 }
 
 test.describe.serial("P4B-19 the credit note series is set up in Billing settings", () => {

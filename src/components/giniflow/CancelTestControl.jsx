@@ -16,6 +16,8 @@ export default function CancelTestControl({
   full = false,
   amount = null,
   refund = 0,
+  label = null,
+  detail = null,
 }) {
   const [form, setForm] = useState(null);
   const noteRef = useRef(null);
@@ -35,7 +37,7 @@ export default function CancelTestControl({
           setForm({ reason: "", note: "", refund: "", cases: cases.map((c) => c.caseNo) })
         }
       >
-        ✕ Cancel {what}
+        ✕ {label ?? `Cancel ${what}`}
       </button>
     );
   }
@@ -88,6 +90,7 @@ export default function CancelTestControl({
           </option>
         ))}
       </select>
+      {detail && <span className="dp-hint">{detail}</span>}
       {showAmount && (
         <span className="dp-hint">
           {refund > 0

@@ -1,5 +1,11 @@
 import pool from "../../config/db.js";
-import { RESERVED_CATEGORY_CODES, VISIT_TYPES } from "../../../shared/billingVocab.js";
+import {
+  RECENT_FOLLOW_UP,
+  RESERVED_CATEGORY_CODES,
+  VISIT_TYPES,
+} from "../../../shared/billingVocab.js";
+
+const ruleVisitType = (type) => (type === RECENT_FOLLOW_UP ? "Follow Up" : type);
 import { paise } from "../../../shared/labPayment.js";
 import { indiaToday } from "./categoryResolver.js";
 import { getSettings } from "./billingSettings.js";
@@ -222,7 +228,9 @@ function cleanCodes(value) {
     .filter((code) => code && !seen.has(code.toLowerCase()) && seen.add(code.toLowerCase()));
 }
 
-function cleanVisitType(value, own) {
+function cleanVisitType(asked, ownType) {
+  const value = ruleVisitType(asked);
+  const own = ruleVisitType(ownType);
   if (value !== undefined && value !== null && !VISIT_TYPES.includes(value)) {
     throw httpError(400, `Visit type must be one of: ${VISIT_TYPES.join(", ")}`);
   }

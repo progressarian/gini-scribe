@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "../../services/api";
 import { billingKeys } from "./useBillingMaster";
 
@@ -41,4 +41,24 @@ export function useRejectDeskRequest() {
   return useDecision(
     async ({ id, note }) => (await api.post(`${INBOX}/${id}/reject`, { note })).data,
   );
+}
+
+export function useRequestSearch({ status, kind, from, to, q, page, limit = 20 }) {
+  const search = q.trim().length >= 2 ? q.trim() : "";
+  const params = {
+    ...(status && status !== "all" ? { status } : {}),
+    ...(kind ? { kind } : {}),
+    ...(from ? { from } : {}),
+    ...(to ? { to } : {}),
+    ...(search ? { q: search } : {}),
+    page: String(page),
+    limit: String(limit),
+  };
+  return useQuery({
+    queryKey: billingKeys.requestInbox({ search: params }),
+    queryFn: async () => (await api.get(`${INBOX}/search`, { params })).data,
+    refetchInterval: INBOX_POLL_MS,
+    refetchIntervalInBackground: false,
+    placeholderData: keepPreviousData,
+  });
 }

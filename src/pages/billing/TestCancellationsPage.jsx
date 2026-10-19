@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, X } from "lucide-react";
 import {
   useCancelRequestDetail,
@@ -8,6 +8,11 @@ import useDeskRequestsLive from "../../queries/hooks/useDeskRequestsLive";
 import useDebounced from "../../hooks/useDebounced";
 import { toast } from "../../stores/uiStore";
 import Pagination from "../../components/ui/Pagination";
+import RequestFilters, {
+  STATUS_ALL,
+  useRequestFilters,
+} from "../../components/billing/RequestFilters";
+import DayGroups, { OlderWaiting } from "../../components/billing/DayGroups";
 import CancelDecisionDialog from "../../components/giniflow/CancelDecisionDialog";
 import { fromPaise } from "../../components/billing/format";
 import "../../styles/flow.css";
@@ -16,13 +21,14 @@ import "./billing.css";
 import "./billingUi.css";
 import "./deskRequests.css";
 import "../../components/giniflow/cancelRequests.css";
+import "../../components/billing/deskRequestsInbox.css";
 
 const STATUS_OPTIONS = [
+  [STATUS_ALL, "All"],
   ["pending", "Waiting"],
   ["approved", "Approved"],
   ["rejected", "Rejected"],
   ["withdrawn", "Withdrawn"],
-  ["all", "All"],
 ];
 const STATUS_TEXT = {
   pending: "Waiting for admin",
@@ -43,8 +49,6 @@ const PAGE_SIZE = 20;
 
 const when = (value) =>
   value ? new Date(value).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "";
-
-const today = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 
 const stageOf = (target) =>
   target?.kind === "healthray_case"
@@ -105,43 +109,32 @@ function Answer({ acting, onClose }) {
   );
 }
 
-export default function TestCancellationsPage() {
-  useDeskRequestsLive();
-  const [status, setStatus] = useState("pending");
-  const [q, setQ] = useState("");
-  const [from, setFrom] = useState(today());
-  const [to, setTo] = useState(today());
+export default function TestCancellationsPage({ live = true, filters: shared }) {
+  useDeskRequestsLive(live);
+  const own = useRequestFilters();
+  const filters = shared ?? own;
   const [page, setPage] = useState(1);
   const [acting, setActing] = useState(null);
-  const search = useDebounced(q, 300);
-  const waitingOnly = status === "pending";
+  const search = useDebounced(filters.value.q, 300);
+  const status = STATUS_OPTIONS.some(([key]) => key === filters.value.status)
+    ? filters.value.status
+    : STATUS_ALL;
   const list = useCancelRequests({
     status,
     q: search,
-    from: waitingOnly ? "" : from,
-    to: waitingOnly ? "" : to,
+    from: filters.value.from,
+    to: filters.value.to,
     page,
     limit: PAGE_SIZE,
   });
-  const statusId = useId();
-  const searchId = useId();
-  const fromId = useId();
-  const toId = useId();
   const rows = list.data?.rows ?? [];
-  const filtered = Boolean(search.trim().length >= 2 || (!waitingOnly && (from || to)));
 
   const close = (message, ok) => {
     setActing(null);
     if (message) toast(message, ok ? "success" : "error");
   };
   const clear = () => {
-    setQ("");
-    setFrom(today());
-    setTo(today());
-    setPage(1);
-  };
-  const reset = (fn) => (e) => {
-    fn(e.target.value);
+    filters.reset();
     setPage(1);
   };
 
@@ -160,61 +153,19 @@ export default function TestCancellationsPage() {
           keeps a collection charge and sends the rest to the Refunds tab.
         </div>
 
-        <div className="cxl-filters" role="search">
-          <div className="fset__field">
-            <label htmlFor={statusId}>Status</label>
-            <select id={statusId} className="jb-assign" value={status} onChange={reset(setStatus)}>
-              {STATUS_OPTIONS.map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </div>
-          {!waitingOnly ? (
-            <>
-              <div className="fset__field">
-                <label htmlFor={fromId}>From</label>
-                <input
-                  id={fromId}
-                  type="date"
-                  className="jb-assign"
-                  value={from}
-                  max={to || undefined}
-                  onChange={reset(setFrom)}
-                />
-              </div>
-              <div className="fset__field">
-                <label htmlFor={toId}>To</label>
-                <input
-                  id={toId}
-                  type="date"
-                  className="jb-assign"
-                  value={to}
-                  min={from || undefined}
-                  onChange={reset(setTo)}
-                />
-              </div>
-            </>
-          ) : null}
-          <div className="fset__field cxl-filters__search">
-            <label htmlFor={searchId}>Search</label>
-            <input
-              id={searchId}
-              type="search"
-              className="jb-assign"
-              placeholder="Search by patient name, UHID or test"
-              value={q}
-              maxLength={100}
-              onChange={reset(setQ)}
-            />
-          </div>
-          {filtered ? (
-            <button type="button" className="flow-btn flow-btn-ghost" onClick={clear}>
-              Clear filters
-            </button>
-          ) : null}
-        </div>
+        <RequestFilters
+          filters={filters}
+          statuses={STATUS_OPTIONS}
+          searchPlaceholder="Search by patient name, UHID or test"
+          onChange={() => setPage(1)}
+        />
+        <OlderWaiting
+          count={list.data?.olderWaiting ?? 0}
+          onShow={() => {
+            filters.set({ status: "pending", from: "", to: "" });
+            setPage(1);
+          }}
+        />
 
         {list.isLoading ? (
           <div className="fset__cardsub" role="status">
@@ -248,59 +199,64 @@ export default function TestCancellationsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((row) => (
-                    <tr key={row.id}>
-                      <td data-label="Asked">
-                        <strong>{row.requested_by?.name ?? "—"}</strong>
-                        <div className="dreq__muted">{when(row.requested_at)}</div>
-                      </td>
-                      <td data-label="Patient">
-                        <strong>{row.patient.name}</strong>
-                        <div className="dreq__muted">
-                          {row.patient.file_no}
-                          {row.patient.age ? ` · ${row.patient.age}` : ""}
-                          {row.patient.sex ? `${String(row.patient.sex)[0]}` : ""}
-                        </div>
-                      </td>
-                      <td data-label="Test">
-                        <strong>{row.target?.test_name}</strong>
-                        <div className="dreq__muted">{stageOf(row.target)}</div>
-                      </td>
-                      <td data-label="Paid" className="cxl-num">
-                        {row.paid === null ? "—" : fromPaise(row.paid)}
-                      </td>
-                      <td data-label="Reason" className="dreq__reason">
-                        {row.reason}
-                      </td>
-                      <td data-label="Status">
-                        <Decision row={row} />
-                      </td>
-                      <td data-label="" className="bill-items__actions">
-                        {row.status === "pending" ? (
-                          <>
-                            <button
-                              type="button"
-                              className="flow-btn flow-btn-primary flow-btn-mini"
-                              aria-label={`Answer cancellation of ${row.target?.test_name} for ${row.patient.name}`}
-                              onClick={() => setActing({ row, mode: "approve" })}
-                            >
-                              <Check size={14} aria-hidden="true" />
-                              Answer
-                            </button>
-                            <button
-                              type="button"
-                              className="flow-btn flow-btn-ghost flow-btn-mini dreq__reject"
-                              aria-label={`Reject cancellation of ${row.target?.test_name} for ${row.patient.name}`}
-                              onClick={() => setActing({ row, mode: "reject" })}
-                            >
-                              <X size={14} aria-hidden="true" />
-                              Reject
-                            </button>
-                          </>
-                        ) : null}
-                      </td>
-                    </tr>
-                  ))}
+                  <DayGroups
+                    rows={rows}
+                    days={list.data.days}
+                    columns={7}
+                    renderRow={(row) => (
+                      <tr>
+                        <td data-label="Asked">
+                          <strong>{row.requested_by?.name ?? "—"}</strong>
+                          <div className="dreq__muted">{when(row.requested_at)}</div>
+                        </td>
+                        <td data-label="Patient">
+                          <strong>{row.patient.name}</strong>
+                          <div className="dreq__muted">
+                            {row.patient.file_no}
+                            {row.patient.age ? ` · ${row.patient.age}` : ""}
+                            {row.patient.sex ? `${String(row.patient.sex)[0]}` : ""}
+                          </div>
+                        </td>
+                        <td data-label="Test">
+                          <strong>{row.target?.test_name}</strong>
+                          <div className="dreq__muted">{stageOf(row.target)}</div>
+                        </td>
+                        <td data-label="Paid" className="cxl-num">
+                          {row.paid === null ? "—" : fromPaise(row.paid)}
+                        </td>
+                        <td data-label="Reason" className="dreq__reason">
+                          {row.reason}
+                        </td>
+                        <td data-label="Status">
+                          <Decision row={row} />
+                        </td>
+                        <td data-label="" className="bill-items__actions">
+                          {row.status === "pending" ? (
+                            <>
+                              <button
+                                type="button"
+                                className="flow-btn flow-btn-primary flow-btn-mini"
+                                aria-label={`Answer cancellation of ${row.target?.test_name} for ${row.patient.name}`}
+                                onClick={() => setActing({ row, mode: "approve" })}
+                              >
+                                <Check size={14} aria-hidden="true" />
+                                Answer
+                              </button>
+                              <button
+                                type="button"
+                                className="flow-btn flow-btn-ghost flow-btn-mini dreq__reject"
+                                aria-label={`Reject cancellation of ${row.target?.test_name} for ${row.patient.name}`}
+                                onClick={() => setActing({ row, mode: "reject" })}
+                              >
+                                <X size={14} aria-hidden="true" />
+                                Reject
+                              </button>
+                            </>
+                          ) : null}
+                        </td>
+                      </tr>
+                    )}
+                  />
                 </tbody>
               </table>
             </div>
@@ -316,9 +272,11 @@ export default function TestCancellationsPage() {
         ) : (
           <div className="cxl-empty">
             <strong>
-              {filtered ? "No requests match these filters" : "No cancellation requests waiting"}
+              {filters.isDefault
+                ? "No cancellation requests today."
+                : "No requests match these filters."}
             </strong>
-            {filtered ? (
+            {!filters.isDefault ? (
               <button type="button" className="flow-btn flow-btn-ghost" onClick={clear}>
                 Clear filters
               </button>

@@ -1596,6 +1596,22 @@
 .gf .dp-sec > .sq-toggle[aria-expanded="true"] {
   margin-bottom: 8px;
 }
+.gf .lab-case-cancelled .tr-name {
+  color: var(--ink3, #6b7d90);
+}
+.gf .lab-case-cancelled .tr-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.gf .lab-cancel-all {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--bd2, #d4dbe3);
+}
 .gf .dp-sec-title {
   font-size: 10px;
   font-weight: 700;

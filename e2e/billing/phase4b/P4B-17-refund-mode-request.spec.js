@@ -22,7 +22,7 @@ const payments = await import("../../../server/services/billing/payments.js");
 
 const tag = newTag();
 const RECEPTION = "/giniflow/station/reception";
-const INBOX = "/settings/desk-requests";
+const INBOX = "/desk-requests";
 let ids;
 
 const actions = (page) => page.getByRole("region", { name: "Bill actions" });
@@ -30,9 +30,10 @@ const dialog = (page) => page.getByRole("dialog");
 const preview = (page) => dialog(page).getByLabel("What the patient gets back");
 const waitingRow = (page, billNo) =>
   page
-    .getByRole("table", { name: "Requests waiting" })
+    .getByRole("table", { name: "Billing requests" })
     .getByRole("row")
-    .filter({ hasText: `Bill ${billNo}` });
+    .filter({ hasText: `Bill ${billNo}` })
+    .filter({ has: page.getByRole("button", { name: /^Reject request for/ }) });
 
 const requestOf = (billId) =>
   one(
@@ -95,9 +96,7 @@ test.describe.serial("P4B-17 reception asks for a refund mode", () => {
     page,
   }) => {
     await loginAs(page, "reception_admin");
-    await gotoReady(page, INBOX, () =>
-      page.getByRole("heading", { name: "Waiting for an answer" }),
-    );
+    await gotoReady(page, INBOX, () => page.getByRole("heading", { name: "Billing requests" }));
     const row = waitingRow(page, ids.card.bill_no);
     await expect(row).toContainText("Asked for: Card");
     await expect(row).toContainText("₹800 goes back — ₹800 by card");
@@ -118,9 +117,7 @@ test.describe.serial("P4B-17 reception asks for a refund mode", () => {
   test("3. the admin can still change the asked mode, with a reason", async ({ page }) => {
     await askRefund(ids.upi.id, "whole", { reason_code: "long_wait", requested_mode: "upi" });
     await loginAs(page, "admin");
-    await gotoReady(page, INBOX, () =>
-      page.getByRole("heading", { name: "Waiting for an answer" }),
-    );
+    await gotoReady(page, INBOX, () => page.getByRole("heading", { name: "Billing requests" }));
     const row = waitingRow(page, ids.upi.bill_no);
     await expect(row).toContainText("Asked for: UPI");
     await row.getByRole("button", { name: `Approve refund on bill ${ids.upi.bill_no}` }).click();

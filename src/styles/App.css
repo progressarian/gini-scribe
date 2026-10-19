@@ -1008,6 +1008,10 @@
   vertical-align: middle;
 }
 
+.tab-count--alert {
+  background: #d94f4f;
+}
+
 /* ============ DUPLICATE BLOCKER ============ */
 .dup-blocker {
   background: white;

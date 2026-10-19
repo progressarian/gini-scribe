@@ -1,14 +1,3 @@
-// Server-side document extraction helper. Used by the /retry-extract
-// endpoint to re-run Claude vision extraction from scratch with real
-// reliability guarantees:
-//   • AbortController with 180s timeout per call (large PDFs need it)
-//   • 3 attempts with 2s / 5s / 10s backoff
-//   • Retries on network errors, 5xx, 429, parse failures
-//   • Fails fast on 4xx (auth / bad request)
-// The prompts mirror src/config/prompts.js — we keep them here too so
-// the server doesn't reach across the monorepo into client code, same
-// pattern already used by server/routes/visit.js:844.
-
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 const RETRYABLE_HTTP = new Set([408, 425, 429, 500, 502, 503, 504]);
 const BACKOFF_MS = [2000, 5000, 10_000];
@@ -95,11 +84,6 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-// Claude can return valid JSON where nearly every field is empty — most
-// often when a long PDF runs past the output-token budget or a page didn't
-// render. We treat those skinny results as failures so the retry loop
-// tries again rather than persisting "few details only" as if it were
-// a successful extraction.
 function isExtractionUsable(data, docType) {
   if (!data || typeof data !== "object") return false;
   if (docType === "prescription") {
@@ -113,9 +97,6 @@ function isExtractionUsable(data, docType) {
   return testCount > 0;
 }
 
-// Best-effort JSON repair for slightly-malformed Claude output. Same
-// strategy as the client parseVisionResponse: strip code fences, drop
-// trailing commas, then balance braces.
 export function parseClaudeJson(text) {
   if (!text) return { data: null, error: "Empty response" };
   let clean = text
@@ -217,10 +198,6 @@ async function callClaudeOnce({ base64, mediaType, prompt, maxTokens, signal }) 
   return parsed.data;
 }
 
-// Run callClaudeOnce with timeout + up to 3 attempts + backoff.
-// Returns { data, attempts } on success; throws with an explanatory
-// message (and `.attempts`) on final failure. Callers are expected to
-// catch and persist the failure to the doc's extracted_data.
 export async function extractWithRetry({ base64, mediaType, docType, attempts = 3 }) {
   const prompt = pickPrompt(docType);
   const maxTokens = docType === "prescription" ? 3000 : 16_000;

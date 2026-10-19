@@ -100,6 +100,7 @@ const DOCTOR_ONLY_PREFIXES = [
   "/api/refills",
   "/api/flow",
   "/api/billing",
+  "/api/approvals",
 ];
 
 const ROUTE_CAPABILITIES = [
@@ -110,6 +111,7 @@ const ROUTE_CAPABILITIES = [
   ["/api/billing/claims", CAP.BILLING_CLAIMS],
   ["/api/billing/reports", CAP.BILLING_REPORTS],
   ["/api/billing/dues-register", CAP.BILLING_DUES],
+  ["/api/approvals", [CAP.BILLING_MASTER, CAP.GINIFLOW_TEST_CANCEL_DECIDE]],
   ["/api/home-stats", null],
   ["/api/reports", CAP.ANALYTICS],
   ["/api/reports/opd", CAP.OPD_SUMMARY],

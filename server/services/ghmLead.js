@@ -1,12 +1,5 @@
 import pool from "../config/db.js";
 
-// A caller reaching a patient who has never had an appointment needs somewhere
-// to put the outcome — every call column lives on `appointments`. Patient
-// Lookup gives those patients a negative id (-patient_id) so a stray edit can
-// never hit a real booking; this turns one into a LEAD row: an appointment with
-// no date, which no day list can ever show and no count of real visits picks up.
-// It is created only when a caller actually records something, and only ever
-// once per patient (uniq_appt_lead_per_patient).
 export const LEAD_STATUS = "lead";
 
 export const isLeadId = (rawId) => Number(rawId) < 0;
@@ -35,9 +28,6 @@ export async function createLead(patientId, db = pool) {
   return ins.rows[0]?.id ?? (await findLeadId(patientId, db));
 }
 
-// Every id arriving from the sheet passes through here. A real appointment id
-// is returned untouched; a lookup row's negative id becomes its lead row —
-// created on the spot when `create` is set, which is what the call fields do.
 export async function resolveAppointmentId(rawId, { create = false, db = pool } = {}) {
   const id = Number(rawId);
   if (!Number.isInteger(id) || id === 0) return null;
@@ -45,10 +35,6 @@ export async function resolveAppointmentId(rawId, { create = false, db = pool } 
   const patientId = -id;
   return (await findLeadId(patientId, db)) ?? (create ? await createLead(patientId, db) : null);
 }
-
-// The fields worth opening a lead for: what the call itself produced, and what
-// the patient asked for on it. Editing anything else on a patient with no
-// appointment has nothing to attach to and stays a 404.
 const LEAD_FIELDS = new Set([
   "call_status",
   "call_made_by",

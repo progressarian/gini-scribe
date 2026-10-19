@@ -17,7 +17,7 @@ let day;
 
 const COUNTER = "/giniflow/station/billing";
 const RECEPTION = "/giniflow/station/reception";
-const REQUESTS = "/settings/desk-requests";
+const REQUESTS = "/desk-requests";
 
 const region = (page, name) => page.getByRole("region", { name, exact: true });
 const header = (page) => region(page, "Patient");
@@ -160,9 +160,7 @@ async function chooseCategory(page, label) {
 }
 
 async function answerRequest(admin, subject, fill) {
-  await gotoReady(admin, REQUESTS, () =>
-    admin.getByRole("heading", { name: "Waiting for an answer" }),
-  );
+  await gotoReady(admin, REQUESTS, () => admin.getByRole("heading", { name: "Billing requests" }));
   await admin.getByRole("button", { name: subject }).click();
   await fill(admin.getByRole("dialog"));
   await expect(admin.getByRole("dialog")).toHaveCount(0);

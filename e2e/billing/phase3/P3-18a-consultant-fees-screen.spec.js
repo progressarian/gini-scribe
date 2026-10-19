@@ -332,7 +332,7 @@ test.describe.serial("P3-18a consultant fees screen", () => {
     await page.getByLabel("Doctor", { exact: true }).selectOption(String(seed.nofee));
     await showView(page, "Not priced");
     const list = page.getByRole("table", { name: "Not priced" });
-    await expect(list.getByRole("row")).toHaveCount(3);
+    await expect(list.getByRole("row")).toHaveCount(4);
     await list.getByRole("button", { name: `Create item for ${NOFEE} (New)` }).click();
     const box = dialog(page);
     await box.getByRole("button", { name: "Create item", exact: true }).click();
@@ -342,7 +342,7 @@ test.describe.serial("P3-18a consultant fees screen", () => {
     await expect(box.getByLabel("Subgroup", { exact: true })).toHaveCount(0);
     await box.getByRole("button", { name: "Create item", exact: true }).click();
     await expect(box).toBeHidden();
-    await expect(list.getByRole("row")).toHaveCount(2);
+    await expect(list.getByRole("row")).toHaveCount(3);
     await expect(list).toContainText("Follow Up");
     await showView(page, "Fees");
     const table = page.getByRole("table", { name: "Consultant fees" });
@@ -503,7 +503,7 @@ test.describe.serial("P3-18a consultant fees screen", () => {
     await page.getByLabel("Doctor", { exact: true }).selectOption(String(seed.both));
     await showView(page, "Not priced");
     const list = page.getByRole("table", { name: "Not priced" });
-    await expect(list.getByRole("row")).toHaveCount(3);
+    await expect(list.getByRole("row")).toHaveCount(4);
     const create = async () => {
       const box = dialog(page);
       await box.getByLabel("Price (₹)", { exact: true }).fill("400");
@@ -513,9 +513,16 @@ test.describe.serial("P3-18a consultant fees screen", () => {
 
     await list.getByRole("button", { name: `Create item for ${BOTH} (New)` }).click();
     await create();
-    await expect(list.getByRole("row")).toHaveCount(2);
+    await expect(list.getByRole("row")).toHaveCount(3);
     await expect(
       list.getByRole("button", { name: `Create item for ${BOTH} (Follow Up)` }),
+    ).toBeFocused();
+
+    await page.keyboard.press("Enter");
+    await create();
+    await expect(list.getByRole("row")).toHaveCount(2);
+    await expect(
+      list.getByRole("button", { name: `Create item for ${BOTH} (Follow Up (3 days))` }),
     ).toBeFocused();
 
     await page.keyboard.press("Enter");

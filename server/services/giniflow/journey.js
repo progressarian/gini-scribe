@@ -13,7 +13,7 @@ import {
 } from "../../../shared/giniflowStatus.js";
 import { reopenForTests } from "./lateTests.js";
 import { advanceStatus, reopenResultsForNewOrder } from "./statusEngine.js";
-import { CONSULT_STATUSES } from "../../../shared/labOnly.js";
+import { labOnlyJourney } from "../../../shared/labOnly.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { labStepsAreManual } from "../../../shared/manualFloor.js";
 import { genVisitToken } from "../flow/journey.js";
@@ -165,6 +165,11 @@ const clampMinutes = (v) => Math.min(600, Math.max(0, Math.round(Number(v) || 0)
 // collection and reporting times are the lab's own. Matched the way every other
 // reader of lab_cases matches — id first, healthray_uid only when the case was
 // never linked.
+const RESULTS_STATUS_SQL = LAB_RUNGS.filter((r) => stageIndexOf(r.key) >= stageIndexOf("results"))
+  .flatMap((r) => r.sampleStatuses)
+  .map((v) => `'${v}'`)
+  .join(", ");
+
 const REPORTED_STATUS_SQL = LAB_RUNGS.filter((r) => r.key === "reported")
   .flatMap((r) => r.sampleStatuses)
   .map((v) => `'${v}'`)
@@ -202,7 +207,20 @@ const HR_LAB_EVIDENCE_SQL = `
       AND (lc.patient_id = v.patient_id
            OR (lc.patient_id IS NULL
                AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))
-      AND ${LIVE_LAB_CASE_SQL("lc")}) AS hr_reported`;
+      AND ${LIVE_LAB_CASE_SQL("lc")}) AS hr_reported,
+  (SELECT bool_and(${
+    labStepsAreManual()
+      ? `EXISTS (SELECT 1 FROM giniflow_lab_case_actions ca
+                  WHERE ca.case_no = lc.case_no
+                    AND ca.action IN ('results_ready', 'report_uploaded'))`
+      : `(COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'reported_on') IS NOT NULL`
+  })
+     FROM lab_cases lc
+    WHERE lc.case_date = v.visit_date
+      AND (lc.patient_id = v.patient_id
+           OR (lc.patient_id IS NULL
+               AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))
+      AND ${LIVE_LAB_CASE_SQL("lc")}) AS hr_results`;
 
 export const SAMPLE_TAKEN_BEFORE_VISIT_SQL = (v = "v", p = "p") => `EXISTS (
   SELECT 1 FROM lab_cases lc
@@ -319,10 +337,10 @@ export async function suggestVisitType(
         AND CASE
               WHEN $4 THEN for_online
               ELSE NOT for_online
-                   AND for_followup = $1 AND for_walkin = $2
+                   AND ($3 OR for_followup = $1) AND for_walkin = $2
                    AND COALESCE(for_tests, FALSE) = $3
             END
-      ORDER BY max_time_min, id LIMIT 1`,
+      ORDER BY for_followup IS NOT DISTINCT FROM $1 DESC, max_time_min, id LIMIT 1`,
     [!!isFollowUp, !!isWalkIn, !!isTests, !!isOnline],
   );
   return rows[0]?.id || null;
@@ -586,23 +604,20 @@ const consultantPicked = async (client, steps) => {
   return rows[0]?.id ?? null;
 };
 
-const withoutConsultLeg = async (db, visitId, steps) => {
+const labOnlyPlan = async (db, visitId, steps) => {
   const { rows } = await db.query(
     `SELECT ${labOnlyPredicate("v", "$2")} AS lab_only,
-            ARRAY(SELECT c.id FROM flow_step_catalog c
-                   WHERE c.chain_status = ANY($3::text[])) AS consult_steps,
             EXISTS (SELECT 1 FROM giniflow_visit_steps s
                      WHERE s.visit_id = v.id AND s.step_catalog_id = 'lab_billing') AS has_lab_billing
        FROM giniflow_visits v WHERE v.id = $1`,
-    [visitId, LAB_ONLY_DOCTOR, CONSULT_STATUSES],
+    [visitId, LAB_ONLY_DOCTOR],
   );
   if (!rows[0]?.lab_only) return steps;
-  const dropped = [
-    ...rows[0].consult_steps,
-    "billing",
-    ...(rows[0].has_lab_billing ? ["lab_billing"] : []),
-  ];
-  return steps.filter((s) => !dropped.includes(s.catalogId));
+  const { rows: catalog } = await db.query(
+    `SELECT id, name, default_duration_min, station, assigned_role, chain_status
+       FROM flow_step_catalog WHERE COALESCE(is_active, TRUE)`,
+  );
+  return labOnlyJourney(steps, catalog, { hasBilling: rows[0].has_lab_billing });
 };
 
 const requireConsultant = async (client, visitId) => {
@@ -680,7 +695,7 @@ export async function checkInIn(
   const ordered = existing.rows[0].echo_referral ? echoFirst(routed, machines) : routed;
   const steps = (await consultantPicked(client, askedSteps))
     ? ordered
-    : await withoutConsultLeg(client, visitId, ordered);
+    : await labOnlyPlan(client, visitId, ordered);
   const current = existing.rows[0].current_status;
   // A second press at a busy counter must not give the patient two journeys.
   const alreadyPlanned = existing.rows[0].steps > 0;
@@ -814,6 +829,7 @@ export async function checkInIn(
       await client.query("ROLLBACK TO SAVEPOINT straight_to_consultant");
     }
   }
+  await syncLabStepsFromLab(client, visitId);
   return { alreadyHere, alreadyPlanned, raised };
 }
 
@@ -876,7 +892,7 @@ export async function ensurePlan(visitId, db = pool) {
     chiefStep === true || (await isOnlineType(db, visitTypeId))
       ? billed.filter((s) => keepsForChoice(s, onlineConsultChoice(chiefStep)))
       : withoutChief(billed);
-  const plan = await withoutConsultLeg(
+  const plan = await labOnlyPlan(
     db,
     visitId,
     visit.echo_referral ? echoFirst(routed, machines) : routed,
@@ -1348,6 +1364,12 @@ export async function syncLabStepsFromLab(db, visitId) {
          WHERE o.visit_id = v.id AND o.urgency = 'today' AND o.kind = 'lab'
            AND o.sample_status IN (${REPORTED_STATUS_SQL}))
          AS reported,
+       (SELECT count(*)::int FROM giniflow_lab_orders o
+         WHERE o.visit_id = v.id AND o.urgency = 'today' AND o.kind = 'lab'
+           AND o.sample_status IN (${RESULTS_STATUS_SQL}))
+         AS results,
+       EXISTS (SELECT 1 FROM giniflow_visit_events ce
+                WHERE ce.visit_id = v.id AND ce.status = 'checked_in') AS checked_in,
        ${HR_LAB_EVIDENCE_SQL}
        FROM giniflow_visits v JOIN patients p ON p.id = v.patient_id
       WHERE v.id = $1`,
@@ -1359,6 +1381,7 @@ export async function syncLabStepsFromLab(db, visitId) {
   const drawn = e.orders > 0 ? e.drawn === e.orders : !!e.hr_collected;
   const billed = e.test_orders > 0 && e.unsettled === 0;
   const reported = e.orders > 0 ? e.reported === e.orders : !!e.hr_reported;
+  const results = e.orders > 0 ? e.results === e.orders : !!e.hr_results;
 
   const tick = async (catalogId) =>
     db.query(
@@ -1381,8 +1404,11 @@ export async function syncLabStepsFromLab(db, visitId) {
   else if (e.test_orders > 0) await reopen("lab_billing");
   if (drawn) await tick("blood_sample");
   else if (e.orders > 0) await reopen("blood_sample");
-  if (reported) await tick("lab_processing_2");
+  if (results) await tick("lab_processing_2");
   else if (e.orders > 0) await reopen("lab_processing_2");
+  if (reported) await tick("report_upload");
+  else if (e.orders > 0) await reopen("report_upload");
+  if (e.checked_in || drawn) await tick("check_in");
   await syncMachineSteps(db, visitId);
   return { billed, drawn };
 }

@@ -1,10 +1,6 @@
 import { z } from "zod";
-import {
-  CATEGORY_RULE_MODES,
-  CONSULTATION_VISIT_TYPES,
-  GENDERS,
-  ITEM_KINDS,
-} from "../services/billing/importColumns.js";
+import { CONSULTATION_ITEM_VISIT_TYPES } from "../../shared/billingVocab.js";
+import { CATEGORY_RULE_MODES, GENDERS, ITEM_KINDS } from "../services/billing/importColumns.js";
 import { STACKING_MODES } from "../services/billing/billingSettings.js";
 import { cleanDate, INT_MAX, MONEY_MAX } from "../services/billing/common.js";
 import { IMPORT_HISTORY_PAGE_MAX } from "../services/billing/importHistory.js";
@@ -194,7 +190,7 @@ const itemFields = {
   is_outsourced: flag,
   kind: z.enum(ITEM_KINDS),
   doctor_id: z.union([id, z.null()]),
-  visit_type: z.union([z.enum(CONSULTATION_VISIT_TYPES), z.null()]),
+  visit_type: z.union([z.enum(CONSULTATION_ITEM_VISIT_TYPES), z.null()]),
   test_catalog_id: z.union([
     z.string().trim().regex(UUID_TEXT, "must be a catalogue test id"),
     z.null(),
@@ -1270,6 +1266,22 @@ export const billingRequestListQuerySchema = z.strictObject({
     .enum(REQUEST_KINDS, { message: `must be one of: ${REQUEST_KINDS.join(", ")}` })
     .optional(),
   visit_id: uuid.optional(),
+  limit: count.optional(),
+});
+
+const SEARCH_REQUEST_KINDS = REQUEST_KINDS.filter((k) => k !== "test_cancel");
+
+export const billingRequestSearchQuerySchema = z.strictObject({
+  status: z
+    .enum(REQUEST_STATUSES, { message: `must be from: ${REQUEST_STATUSES.join(", ")}` })
+    .optional(),
+  kind: z
+    .enum(SEARCH_REQUEST_KINDS, { message: `must be one of: ${SEARCH_REQUEST_KINDS.join(", ")}` })
+    .optional(),
+  from: fromDate.optional(),
+  to: fromDate.optional(),
+  q: z.string().trim().max(100, "must be under 100 letters").optional(),
+  page: count.optional(),
   limit: count.optional(),
 });
 
