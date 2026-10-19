@@ -202,8 +202,13 @@ export async function draftAtCheckIn(visitId, ctx, db = pool) {
   }
 }
 
-export async function arrivalConsultationIn(client, visitId, ctx) {
-  const visit = await visitFor(client, visitId);
+export async function arrivalConsultationIn(client, visitId, ctx, journey = null) {
+  const found = await visitFor(client, visitId);
+  const visit = {
+    ...found,
+    ...(journey?.doctorId ? { journey_doctor_id: journey.doctorId } : {}),
+    ...(journey?.visitType ? { journey_visit_type: journey.visitType } : {}),
+  };
   await holdConsultation(client, visit.id);
   const item = await consultationItem(client, visit);
   if (!item || item.removed || (await consultationOnVisit(client, visit.id))) return null;

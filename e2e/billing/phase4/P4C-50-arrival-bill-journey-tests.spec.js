@@ -8,6 +8,7 @@ if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 await import("../../../server/services/giniflow/board.js");
 const arrival = await import("../../../server/services/billing/arrivalBill.js");
 const journey = await import("../../../server/services/giniflow/journey.js");
+const bills = await import("../../../server/services/billing/bills.js");
 
 const db = getPool();
 const tag = newTag();
@@ -137,5 +138,23 @@ test.describe.serial("P4C-50 Bill at arrival shows the journey's tests before ch
 
     const coordinator = await apiAs("coordinator");
     expect((await coordinator.post(url, { data })).status()).toBe(403);
+  });
+
+  test("6. a returning visit with a draft and a journey without tests: quick preview, same total at check-in", async () => {
+    const made = await extraVisit(ids, "JourneyNoTests", { visitType: "Follow Up" });
+    await bills.openDraft(made.visit, desk, db);
+    const steps = [vitals, { catalogId: "sd_consult", name: "SD Consultation", minutes: 20 }];
+    const preview = await arrival.arrivalBillPreview(made.visit, { plan: { steps } }, desk, db);
+    expect(preview.lines.map((l) => l.itemId)).toContain(ids.consultFu);
+    expect(await written(made.visit)).toMatchObject({ current_status: "booked", steps: 0 });
+
+    await journey.checkInWithJourney(made.visit, { steps, actorId: desk.actorId }, db);
+    const done = await arrival.commitArrivalBill(
+      made.visit,
+      { expectedTotal: preview.outstanding, mode: "upi", reference: `J6-${tag}` },
+      desk,
+      db,
+    );
+    expect(done.status).toBe("final");
   });
 });

@@ -2,7 +2,12 @@ import pool from "../../config/db.js";
 import { withoutChief } from "../../../shared/directConsult.js";
 import { machineFor } from "../../../shared/machineStages.js";
 import { carryOverChoices } from "../giniflow/carryOver.js";
-import { billedLabTestsOf, labTestsOf, VISIT_DIRECT_CONSULT_SQL } from "../giniflow/journey.js";
+import {
+  AUTO_LAB_BILLING_SQL,
+  billedLabTestsOf,
+  labTestsOf,
+  VISIT_DIRECT_CONSULT_SQL,
+} from "../giniflow/journey.js";
 import { getMachines } from "../giniflow/machineCatalog.js";
 import { stepsAllowedByBill, storedBill } from "../giniflow/patientBill.js";
 import { schemeForVisit, testPriceForVisit, testPricesFor } from "../pricing.js";
@@ -172,6 +177,31 @@ async function plannedLines(db, visitId, visit, { plan, add, remove }) {
   }
   const deskChanged = kept.length !== lines.length || kept.some((line) => line.added);
   return { lines: kept, journeyNote, byDesk: Boolean(consultation) || deskChanged };
+}
+
+export async function journeyAddsTests(db, steps) {
+  if (labTestsOf(steps).length || billedLabTestsOf(steps).size) return true;
+  const machines = await getMachines(db);
+  return steps.some((step) => step.catalogId && machineFor(machines, step.catalogId));
+}
+
+export async function journeyConsultation(db, visitId, plan) {
+  const { rows } = await db.query(
+    `SELECT v.appointment_id, v.visit_type_id, ${VISIT_DIRECT_CONSULT_SQL} AS direct_consult,
+            EXISTS (SELECT 1 FROM giniflow_visit_steps s
+                     WHERE s.visit_id = v.id AND NOT ${AUTO_LAB_BILLING_SQL("s")}) AS planned
+       FROM giniflow_visits v WHERE v.id = $1`,
+    [visitId],
+  );
+  const visit = rows[0];
+  if (!visit) return null;
+  const steps = visit.direct_consult ? withoutChief(asList(plan.steps)) : asList(plan.steps);
+  return {
+    doctorId: visit.planned ? null : await journeyDoctor(db, steps),
+    visitType: visit.appointment_id
+      ? null
+      : await journeyVisitType(db, plan.visitTypeId ?? visit.visit_type_id),
+  };
 }
 
 const asPricing = (lines) =>

@@ -9,7 +9,7 @@ import { receiveDeposit } from "./deposits.js";
 import { collectPlannedIn, moneyOn } from "./payments.js";
 import { httpError, inTransaction } from "./transaction.js";
 import { arrivalConsultationIn, testsForDesk } from "./visitLines.js";
-import { arrivalQuote } from "./arrivalQuote.js";
+import { arrivalQuote, journeyAddsTests, journeyConsultation } from "./arrivalQuote.js";
 
 export const ALREADY_PAID_SOURCES = [HEALTHRAY_MODE, PREPAID_MODE];
 const NOT_ARRIVED = ["booked", "no_show", "cancelled"];
@@ -51,13 +51,20 @@ async function applyDeskChanges(client, visitId, { add, remove }, ctx) {
   }
 }
 
-async function buildIn(client, visitId, skip, ctx, changes = { add: [], remove: [] }) {
+async function buildIn(
+  client,
+  visitId,
+  skip,
+  ctx,
+  changes = { add: [], remove: [] },
+  journey = null,
+) {
   const choices = await carryOverChoices(visitId, client);
   const carried = choices
     .filter((order) => order.state !== CARRY_STATE.DUE && !skip.includes(order.orderId))
     .map((order) => order.orderId);
   await carryOverIn(client, visitId, carried, ctx);
-  await arrivalConsultationIn(client, visitId, ctx);
+  await arrivalConsultationIn(client, visitId, ctx, journey);
   await testsForDesk(visitId, ctx, client);
   await applyDeskChanges(client, visitId, changes, ctx);
   return { choices, carried, bill: await draftOfVisit(client, visitId) };
@@ -94,10 +101,6 @@ async function viewIn(client, built) {
 }
 
 async function journeyPlannedIn(client, visitId, plan, ctx) {
-  const { rows } = await client.query(`SELECT current_status FROM giniflow_visits WHERE id = $1`, [
-    visitId,
-  ]);
-  if (!plan || !NOT_ARRIVED.includes(rows[0]?.current_status)) return null;
   await client.query("SAVEPOINT arrival_journey");
   try {
     await checkInIn(client, visitId, {
@@ -140,14 +143,25 @@ export async function rehearseArrivalBill(
   const client = await db.connect();
   try {
     await client.query("BEGIN");
-    await client.query(`SELECT id FROM giniflow_visits WHERE id = $1 FOR UPDATE`, [visitId]);
-    const journeyNote = await journeyPlannedIn(client, visitId, plan, ctx);
+    const { rows } = await client.query(
+      `SELECT current_status FROM giniflow_visits WHERE id = $1 FOR UPDATE`,
+      [visitId],
+    );
+    const planned = plan && NOT_ARRIVED.includes(rows[0]?.current_status) ? plan : null;
+    const rehearse = planned && (await journeyAddsTests(client, asList(planned.steps)));
+    const journeyNote = rehearse ? await journeyPlannedIn(client, visitId, planned, ctx) : null;
+    const journey =
+      planned && !rehearse ? await journeyConsultation(client, visitId, planned) : null;
     const view = await viewIn(
       client,
-      await buildIn(client, visitId, asList(skip), ctx, {
-        add: itemIds(add),
-        remove: itemIds(remove),
-      }),
+      await buildIn(
+        client,
+        visitId,
+        asList(skip),
+        ctx,
+        { add: itemIds(add), remove: itemIds(remove) },
+        journey,
+      ),
     );
     return { ...view, billId: null, ...(journeyNote ? { journeyNote } : {}) };
   } finally {

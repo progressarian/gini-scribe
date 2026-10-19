@@ -161,8 +161,11 @@ test.describe.serial("G103 lab station: cancel all tests on a blood order", () =
     await form.getByLabel("Why must it be cancelled? (required)").selectOption("patient_left");
     await form.getByRole("button", { name: "Send to admin" }).click();
     await expect(
-      page.getByText("Sent to admin — the test is on hold until they decide"),
+      page
+        .getByText("Sent to admin — the test is on hold until they decide")
+        .or(page.getByRole("button", { name: "Withdraw request" })),
     ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Withdraw request" })).toBeVisible();
     const asked = await one(
       `SELECT cancel_key FROM billing_requests WHERE kind = 'test_cancel' AND status = 'pending'
           AND cancel_key LIKE 'order:' || $1 || ':%'`,

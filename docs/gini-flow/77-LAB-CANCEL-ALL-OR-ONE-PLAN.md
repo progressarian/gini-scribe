@@ -1,6 +1,6 @@
 # 77 — Lab collection station: cancel all tests or one test
 
-Status: built (19 Oct 2026). Approved the same day ("yes build it"). Migration `2026-12-01_lab_case_test_cancels.sql` must run on production before deploy.
+Status: built (19 Oct 2026). Approved the same day ("yes build it"). No migration: the planned table was dropped (see "As built" under Part B).
 
 ## Ask
 
@@ -64,11 +64,11 @@ CREATE TABLE giniflow_lab_case_test_cancels (
 
 Plus one `giniflow_test_cancellations` row per cancel (kind `healthray_case`, `test_name` = that test), so the audit trail and plan 76 see it.
 
-**The migration must be run on production before this is deployed.** I don't run it; you do.
+**As built, no new table.** The lab queue read the planned table, and the local server (on the production database, where the table did not exist) showed an empty lab collection station. Single-test cancels are recorded only in `giniflow_test_cancellations` (kind `healthray_case`, `snapshot.cancelledTest`, `snapshot.requestId`), which every environment already has.
 
 ### One rule, used everywhere
 
-**As built:** cancelling a test removes its name from `lab_cases.test_names` (`array_remove`) and keeps it in `giniflow_lab_case_test_cancels`. The HealthRay sync never rewrites `test_names` once a case is stored (`ON CONFLICT (case_no) DO NOTHING` in `server/services/lab/db.js`), so every reader leaves the test out without being changed. This replaced the planned shared helper (`LIVE_CASE_TESTS_SQL`), which would have meant editing every one of these readers:
+**As built:** cancelling a test removes its name from `lab_cases.test_names` (`array_remove`) and records it in `giniflow_test_cancellations`. The HealthRay sync never rewrites `test_names` once a case is stored (`ON CONFLICT (case_no) DO NOTHING` in `server/services/lab/db.js`), so every reader leaves the test out without being changed. This replaced the planned shared helper (`LIVE_CASE_TESTS_SQL`), which would have meant editing every one of these readers:
 
 - Lab station queue, case pane and counts (`labStation.js`);
 - billing: `VISIT_LAB_CASE_TESTS_SQL` (which covers the bill auto-fill, counter "tests to bill" and after-consult), `counterPatients.js`, `serviceItemAliases.js`;
