@@ -348,21 +348,6 @@ async function cancelCaseTestIn(client, { visit, patientId, date, caseNo, testNa
     `UPDATE lab_cases SET test_names = array_remove(test_names, $2) WHERE case_no = $1`,
     [caseNo, testName],
   );
-  await client.query(
-    `INSERT INTO giniflow_lab_case_test_cancels
-       (case_no, test_name, reason, note, request_id, actor_id, actor_role)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
-     ON CONFLICT (case_no, test_name) DO NOTHING`,
-    [
-      caseNo,
-      testName,
-      input.reason,
-      input.note ? String(input.note).trim().slice(0, 160) : null,
-      input.requestId ?? null,
-      input.actorId ?? null,
-      input.actorRole || null,
-    ],
-  );
   const lines = visit
     ? await releaseCaseTestLines(client, visit.id, testName, { actorId: input.actorId ?? null })
     : { onFinal: [] };
@@ -379,7 +364,7 @@ async function cancelCaseTestIn(client, { visit, patientId, date, caseNo, testNa
     source: input.source,
     actorId: input.actorId,
     actorRole: input.actorRole,
-    snapshot: { caseNo, tests: names, cancelledTest: testName },
+    snapshot: { caseNo, tests: names, cancelledTest: testName, requestId: input.requestId ?? null },
   });
   return { whole: false, cases: [], onFinal: lines.onFinal };
 }

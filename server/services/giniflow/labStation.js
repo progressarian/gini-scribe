@@ -900,9 +900,10 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
                                                     'note', x.note, 'at', x.cancelled_at,
                                                     'by', d.name)
                                   ORDER BY x.cancelled_at)
-                    FROM giniflow_lab_case_test_cancels x
+                    FROM giniflow_test_cancellations x
                     LEFT JOIN doctors d ON d.id = x.actor_id
-                   WHERE x.case_no = c.case_no), '[]'::json),
+                   WHERE x.visit_date = c.case_date AND x.kind = 'healthray_case'
+                     AND x.case_no = c.case_no AND x.snapshot ? 'cancelledTest'), '[]'::json),
                 'synced', c.results_synced,
                 'reported', c.raw_detail_json->>'reported_on' IS NOT NULL,
                 'hasReport', c.pdf_storage_path IS NOT NULL,

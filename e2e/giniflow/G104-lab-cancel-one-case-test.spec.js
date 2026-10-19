@@ -104,9 +104,6 @@ test.describe.serial("G104 lab station: cancel one test of a HealthRay case", ()
 
   test.afterAll(async () => {
     await query(`UPDATE billing_settings SET auto_add_lab_case_tests = $1`, [autoAddBefore]);
-    await query(`DELETE FROM giniflow_lab_case_test_cancels WHERE case_no LIKE $1`, [
-      `G104-%-${tag}%`,
-    ]);
     await query(
       `DELETE FROM billing_requests WHERE kind = 'test_cancel'
           AND visit_id IN (SELECT v.id FROM giniflow_visits v JOIN patients p ON p.id = v.patient_id
@@ -144,8 +141,8 @@ test.describe.serial("G104 lab station: cancel one test of a HealthRay case", ()
 
     expect(await testsOn(made.caseNo)).toEqual([ids.lipidName, ids.looseName]);
     const saved = await one(
-      `SELECT reason, note, actor_id FROM giniflow_lab_case_test_cancels
-        WHERE case_no = $1 AND test_name = $2`,
+      `SELECT reason, note, actor_id FROM giniflow_test_cancellations
+        WHERE case_no = $1 AND test_name = $2 AND snapshot ? 'cancelledTest'`,
       [made.caseNo, ids.hba1cName],
     );
     expect(saved).toEqual({ reason: "patient_declined", note: "Fasting not done", actor_id: 9005 });
@@ -255,7 +252,8 @@ test.describe.serial("G104 lab station: cancel one test of a HealthRay case", ()
     expect(done).toMatchObject({ paid: 25000, charge: 2500, refund: 22500 });
     expect(await testsOn(made.caseNo)).toEqual([ids.lipidName]);
     const saved = await one(
-      `SELECT request_id FROM giniflow_lab_case_test_cancels WHERE case_no = $1 AND test_name = $2`,
+      `SELECT snapshot->>'requestId' AS request_id FROM giniflow_test_cancellations
+        WHERE case_no = $1 AND test_name = $2 AND snapshot ? 'cancelledTest'`,
       [made.caseNo, ids.hba1cName],
     );
     expect(saved.request_id).toBe(asked.id);
