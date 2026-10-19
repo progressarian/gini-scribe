@@ -144,6 +144,7 @@ test.describe.serial("P4C-14 the Bill tab lists who needs a bill first", () => {
       notPriced: 0,
       due: 0,
       consultantChanged: false,
+      newTests: 0,
     });
     expect(rowOf(body, "SeenOnline").hints.consultation).toBe(true);
     expect(rowOf(body, "SeenOnline").group).toBe("billed");
@@ -313,6 +314,7 @@ test.describe.serial("P4C-14 the Bill tab lists who needs a bill first", () => {
       notPriced: 0,
       due: 0,
       consultantChanged: false,
+      newTests: 0,
     });
     expect(names(body.billed)).toContain(nameOf("Seen"));
   });

@@ -158,4 +158,39 @@ test.describe("GHM: Booked needs a time slot, a real one or the preferred time",
       await query(`DELETE FROM patients WHERE id = $1`, [other.id]);
     }
   });
+
+  test("7. an appointment with no time whose preferred date and time are a day earlier reads Booked for that day", async () => {
+    const other = await buildPatient();
+    const earlier = (await one(`SELECT ($1::date - 1)::text AS d`, [preferred])).d;
+    try {
+      const row = await one(
+        `INSERT INTO appointments
+           (patient_id, file_no, patient_name, phone, doctor_name, appointment_date, time_slot,
+            status, visit_type, booking_status, preferred_date, preferred_time_slot)
+         VALUES ($1, $2, $3, $4, 'Dr E2E Banshali', $5::date, '', 'scheduled', 'New', 'booked',
+                 $6::date, '12 PM to 1 PM')
+         RETURNING id`,
+        [other.id, other.file_no, other.name, other.phone, preferred, earlier],
+      );
+      const later = (
+        await (
+          await admin.get(`/api/ghm-appointments?date=${preferred}&limit=500&page=1&calls=all`)
+        ).json()
+      ).data.find((r) => r.id === row.id);
+      expect(later).toMatchObject({
+        booking_no_slot: false,
+        booked_on: earlier,
+        booked_for_date: earlier,
+      });
+      const onTheDay = (
+        await (
+          await admin.get(`/api/ghm-appointments?date=${earlier}&limit=500&page=1&calls=all`)
+        ).json()
+      ).data.find((r) => r.id === row.id);
+      expect(onTheDay?.is_booked).toBe(true);
+    } finally {
+      await query(`DELETE FROM appointments WHERE patient_id = $1`, [other.id]);
+      await query(`DELETE FROM patients WHERE id = $1`, [other.id]);
+    }
+  });
 });

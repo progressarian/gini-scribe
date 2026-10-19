@@ -617,7 +617,10 @@ export async function healthrayBillSteps(patientId, { date = null, db = pool } =
       ),
     ),
   ];
-  const ids = [...(labTests.length ? LAB_STEPS : []), ...machineIds];
+  const ids = [
+    ...(labTests.length ? LAB_STEPS : machineIds.length ? ["lab_billing"] : []),
+    ...machineIds,
+  ];
   if (!ids.length) return { ...empty, status: "no_tests" };
 
   const { rows: catalog } = await db.query(

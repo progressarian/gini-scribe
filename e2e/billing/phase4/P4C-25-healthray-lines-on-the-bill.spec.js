@@ -141,6 +141,8 @@ test.describe.serial("P4C-25 every HealthRay bill line reaches the bill", () => 
       `HR-FREE-LEAFLET-${TAG}`,
     ]);
     expect(made.n).toBe(0);
+    const card = await healthrayBillSuggestion((await draftOf(free.visit)).id, desk, db);
+    expect(card.not_matched).toEqual([]);
   });
 
   test("6. an unknown name already paid at reception is not charged again", async () => {

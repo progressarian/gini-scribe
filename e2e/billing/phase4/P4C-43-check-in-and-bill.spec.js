@@ -335,7 +335,7 @@ test.describe.serial("P4C-43 check in and bill in one step", () => {
               status: "booked",
               statusLabel: "Booked",
               assignedDoctorId: null,
-              suggestedVisitTypeId: 991431,
+              suggestedVisitTypeId: "991431",
             },
           ],
           onFloor: [],
@@ -347,13 +347,13 @@ test.describe.serial("P4C-43 check in and bill in one step", () => {
       }),
     );
     await page.route("**/api/flow/visit-types**", (route) =>
-      route.fulfill({ json: [{ id: 991431, name: `P4C43 Visit ${tag}`, for_online: false }] }),
+      route.fulfill({ json: [{ id: "991431", name: `P4C43 Visit ${tag}`, for_online: false }] }),
     );
     await page.route("**/api/giniflow/journey/plan/991431", (route) =>
       route.fulfill({
         json: [
           {
-            catalogId: 991432,
+            catalogId: "991432",
             name: "Vitals",
             role: "vitals",
             minutes: 5,
@@ -548,7 +548,7 @@ test.describe.serial("P4C-43 check in and bill in one step", () => {
               status: "booked",
               statusLabel: "Booked",
               assignedDoctorId: null,
-              suggestedVisitTypeId: 991441,
+              suggestedVisitTypeId: "991441",
             },
           ],
           onFloor: [],
@@ -560,13 +560,13 @@ test.describe.serial("P4C-43 check in and bill in one step", () => {
       }),
     );
     await page.route("**/api/flow/visit-types**", (route) =>
-      route.fulfill({ json: [{ id: 991441, name: `P4C43 Visit ${tag}`, for_online: false }] }),
+      route.fulfill({ json: [{ id: "991441", name: `P4C43 Visit ${tag}`, for_online: false }] }),
     );
     await page.route("**/api/giniflow/journey/plan/991441", (route) =>
       route.fulfill({
         json: [
           {
-            catalogId: 991442,
+            catalogId: "991442",
             name: "Vitals",
             role: "vitals",
             minutes: 5,
@@ -669,7 +669,7 @@ test.describe.serial("P4C-43 check in and bill in one step", () => {
               status: "booked",
               statusLabel: "Booked",
               assignedDoctorId: null,
-              suggestedVisitTypeId: 991451,
+              suggestedVisitTypeId: "991451",
             },
           ],
           onFloor: [],
@@ -681,13 +681,13 @@ test.describe.serial("P4C-43 check in and bill in one step", () => {
       }),
     );
     await page.route("**/api/flow/visit-types**", (route) =>
-      route.fulfill({ json: [{ id: 991451, name: `P4C43 Visit ${tag}`, for_online: false }] }),
+      route.fulfill({ json: [{ id: "991451", name: `P4C43 Visit ${tag}`, for_online: false }] }),
     );
     await page.route("**/api/giniflow/journey/plan/991451", (route) =>
       route.fulfill({
         json: [
           {
-            catalogId: 991452,
+            catalogId: "991452",
             name: "Vitals",
             role: "vitals",
             minutes: 5,
@@ -852,7 +852,7 @@ test.describe.serial("P4C-43 check in and bill in one step", () => {
               status: "booked",
               statusLabel: "Booked",
               assignedDoctorId: null,
-              suggestedVisitTypeId: 991461,
+              suggestedVisitTypeId: "991461",
             },
           ],
           onFloor: [],
@@ -864,13 +864,13 @@ test.describe.serial("P4C-43 check in and bill in one step", () => {
       }),
     );
     await page.route("**/api/flow/visit-types**", (route) =>
-      route.fulfill({ json: [{ id: 991461, name: `P4C43 Visit ${tag}`, for_online: false }] }),
+      route.fulfill({ json: [{ id: "991461", name: `P4C43 Visit ${tag}`, for_online: false }] }),
     );
     await page.route("**/api/giniflow/journey/plan/991461", (route) =>
       route.fulfill({
         json: [
           {
-            catalogId: 991462,
+            catalogId: "991462",
             name: "Vitals",
             role: "vitals",
             minutes: 5,

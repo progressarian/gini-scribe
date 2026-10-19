@@ -681,6 +681,23 @@ export async function openDraftIn(client, visitId, ctx) {
   }
 }
 
+export async function priceUnsavedDraft(client, visitId, lines, ctx) {
+  const visit = await visitFacts(client, visitId);
+  const resolution = await resolutionFor(client, {
+    patientId: visit.patient_id,
+    appointmentId: visit.appointment_id,
+    date: visit.visit_date,
+  });
+  const category = await startingCategory(client, resolution);
+  const bill = {
+    patient_id: visit.patient_id,
+    appointment_id: visit.appointment_id,
+    scheme_code: category.code,
+    bill_date: visit.visit_date,
+  };
+  return priceBill(pricingInput(bill, lines, [], ctx), client);
+}
+
 export async function repriceBillIn(client, billId, ctx) {
   const { rows } = await client.query(
     `SELECT ${BILL_COLUMNS} FROM bills WHERE id = $1 FOR UPDATE`,

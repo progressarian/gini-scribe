@@ -103,53 +103,60 @@ export default function PaymentsReceived({ bill, payments }) {
   const [open, setOpen] = useState(null);
   const received = (payments || []).filter((payment) => payment.direction === "in");
   if (!received.length) return null;
+  const correctable = received.some((payment) => payment.can_correct);
 
   return (
     <section className="bc-card" aria-label="Payments received">
       <h3 className="bc-card__heading">Payments received</h3>
-      <table className="ltable" aria-label="Payments received">
-        <thead>
-          <tr>
-            <th scope="col">Receipt</th>
-            <th scope="col">Mode</th>
-            <th scope="col" className="bc-num">
-              Amount
-            </th>
-            <th scope="col">Time · by</th>
-            <th scope="col">
-              <span className="sr-only">Actions</span>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {received.map((payment) => (
-            <tr key={payment.id}>
-              <td>{payment.receipt_no || "—"}</td>
-              <td>
-                {paymentModeText(payment.mode)}
-                {payment.reference ? ` · ${payment.reference}` : ""}
-              </td>
-              <td className="bc-num">{fromPaise(payment.amount)}</td>
-              <td>
-                {timeOf(payment.received_at)}
-                {payment.received_by_name ? ` · ${payment.received_by_name}` : ""}
-              </td>
-              <td>
-                {payment.can_correct && open !== payment.id && (
-                  <button
-                    type="button"
-                    className="st-btn st-btn-g"
-                    onClick={() => setOpen(payment.id)}
-                    aria-label={`Correct ${fromPaise(payment.amount)} ${paymentModeText(payment.mode)} payment`}
-                  >
-                    Correct mode
-                  </button>
-                )}
-              </td>
+      <div className="ltablewrap">
+        <table className="ltable bc-paytable" aria-label="Payments received">
+          <thead>
+            <tr>
+              <th scope="col">Receipt</th>
+              <th scope="col">Mode</th>
+              <th scope="col" className="bc-num">
+                Amount
+              </th>
+              <th scope="col">Time · by</th>
+              {correctable && (
+                <th scope="col">
+                  <span className="sr-only">Actions</span>
+                </th>
+              )}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {received.map((payment) => (
+              <tr key={payment.id}>
+                <td>{payment.receipt_no || "—"}</td>
+                <td>
+                  {paymentModeText(payment.mode)}
+                  {payment.reference ? ` · ${payment.reference}` : ""}
+                </td>
+                <td className="bc-num">{fromPaise(payment.amount)}</td>
+                <td>
+                  {timeOf(payment.received_at)}
+                  {payment.received_by_name ? ` · ${payment.received_by_name}` : ""}
+                </td>
+                {correctable && (
+                  <td>
+                    {payment.can_correct && open !== payment.id && (
+                      <button
+                        type="button"
+                        className="st-btn st-btn-g"
+                        onClick={() => setOpen(payment.id)}
+                        aria-label={`Correct ${fromPaise(payment.amount)} ${paymentModeText(payment.mode)} payment`}
+                      >
+                        Correct mode
+                      </button>
+                    )}
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       {received
         .filter((payment) => payment.id === open)
         .map((payment) => (

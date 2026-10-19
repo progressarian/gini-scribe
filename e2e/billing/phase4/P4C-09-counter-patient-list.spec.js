@@ -33,6 +33,7 @@ const ARRIVAL_KEYS = [
   "pausedReason",
   "phone",
   "priority",
+  "samplesOnly",
   "schemeCode",
   "schemeOpdFee",
   "sex",
@@ -244,10 +245,7 @@ test.describe.serial("P4C-09 billing counter patient list", () => {
     expect(rowOf(body, "FloorLate").online).toBe(false);
   });
 
-  test("7. a samples-only patient shows once arrived even while the floor hides them", async () => {
-    const hidden = await one(
-      `SELECT value FROM giniflow_floor_settings WHERE key = 'hide_lab_only_patients'`,
-    );
+  test("7. a samples-only patient shows on the counter and on Arrivals", async () => {
     const { body } = await list();
     expect(rowOf(body, "Samples")?.samplesOnly).toBe(true);
     expect(rowOf(body, "FloorLate").samplesOnly).toBe(false);
@@ -255,7 +253,7 @@ test.describe.serial("P4C-09 billing counter patient list", () => {
     const arrivals = await (await api.get(ARRIVALS, { params: { q: tag } })).json();
     await api.dispose();
     const onReception = names([...arrivals.expected, ...arrivals.onFloor]);
-    expect(onReception.includes(nameOf("Samples"))).toBe(hidden?.value === false);
+    expect(onReception.includes(nameOf("Samples"))).toBe(true);
   });
 
   test("8. each row carries its bill state", async () => {
@@ -306,16 +304,13 @@ test.describe.serial("P4C-09 billing counter patient list", () => {
     expect(Object.keys(arrivals).sort()).toEqual(
       ["counts", "date", "expected", "notComing", "onFloor", "query", "serverTime"].sort(),
     );
-    const hidden =
-      (await one(`SELECT value FROM giniflow_floor_settings WHERE key = 'hide_lab_only_patients'`))
-        ?.value !== false;
     expect(names(arrivals.expected)).toEqual(["Booked", "Confirmed", "Patient"].map(nameOf));
     expect(names(arrivals.onFloor)).toEqual(
       [
         "FloorEarly",
         "FloorLate",
         "Online",
-        ...(hidden ? [] : ["Samples"]),
+        "Samples",
         "Claim",
         "Cleared",
         "DueDraft",

@@ -24,6 +24,7 @@ import {
   markCollections,
   today,
 } from "../services/medication/collection.js";
+import { assertPatientExplained, handoverBlockFor } from "../services/giniflow/pharmacyStation.js";
 
 const router = Router();
 const canMark = requireCapability(CAPABILITIES.MED_COLLECTION);
@@ -124,7 +125,12 @@ router.get("/patients/:id/collection", async (req, res) => {
         ORDER BY m.med_group NULLS LAST, m.sort_order, m.name`,
       [req.params.id, date],
     );
-    res.json({ patient_id: Number(req.params.id), date, medicines: rows });
+    res.json({
+      patient_id: Number(req.params.id),
+      date,
+      blocked_reason: await handoverBlockFor(pool, req.params.id, date),
+      medicines: rows,
+    });
   } catch (e) {
     handleError(res, e, "Patient collection");
   }
@@ -147,6 +153,7 @@ router.post(
       ]);
       if (!med.rows.length) return res.status(404).json({ error: "Medication not found" });
       const patientId = med.rows[0].patient_id;
+      await assertPatientExplained(client, patientId, date);
       const apptId = req.body.appointment_id || (await appointmentFor(client, patientId, date));
 
       const row = await markCollection(client, {
@@ -184,6 +191,7 @@ router.post(
     try {
       const patientId = parseInt(req.params.id, 10);
       const date = req.body.date || today();
+      await assertPatientExplained(client, patientId, date);
       const apptId = await appointmentFor(client, patientId, date);
       const markedBy = req.doctor?.doctor_name || null;
 

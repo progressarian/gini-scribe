@@ -1103,6 +1103,21 @@ body.bc-resizing {
 .gf .bc-main .ltablewrap {
   overflow-x: auto;
 }
+.gf .bc-main .bc-paytable {
+  min-width: 0;
+}
+.gf .bc-main .bc-paytable th,
+.gf .bc-main .bc-paytable td {
+  padding: 5px 6px;
+  white-space: normal;
+}
+.gf .bc-main .bc-paytable td {
+  overflow-wrap: anywhere;
+}
+.gf .bc-main .bc-paytable .bc-num {
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
 
 @container (max-width: 620px) {
   .gf .bc-stack .ltable thead {

@@ -136,11 +136,12 @@ export async function healthrayBillSuggestion(billId, ctx, db = pool) {
   const found = await candidatesFor(db, bill);
   if (!found) return NOTHING;
   const suggested = await suggestedLines(db, bill, found.due, ctx);
+  const notMatched = found.notMatched.filter((line) => line.amount > 0);
   return {
-    shown: suggested.length + found.notMatched.length > 0,
+    shown: suggested.length + notMatched.length > 0,
     read_at: found.readAt,
     lines: suggested,
-    not_matched: found.notMatched,
+    not_matched: notMatched,
   };
 }
 

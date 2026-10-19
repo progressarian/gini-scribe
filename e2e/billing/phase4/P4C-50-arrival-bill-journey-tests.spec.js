@@ -135,7 +135,7 @@ test.describe.serial("P4C-50 Bill at arrival shows the journey's tests before ch
     expect((await res.json()).lines.map((l) => l.itemId)).toContain(ids.hba1c);
     expect((await written(made.visit)).orders).toBe(0);
 
-    const nurse = await apiAs("nurse");
-    expect((await nurse.post(url, { data })).status()).toBe(403);
+    const coordinator = await apiAs("coordinator");
+    expect((await coordinator.post(url, { data })).status()).toBe(403);
   });
 });

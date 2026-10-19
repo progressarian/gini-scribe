@@ -122,6 +122,8 @@ export function journeyProgress(steps, currentStatus, resumeStatus = null) {
 
 export const LAB_TEST_STEP_IDS = LAB_STEP_IDS;
 
+const BILLED_WITH = { lab_processing_2: "blood_sample" };
+
 export function dropUnbilledTestSteps(
   steps,
   billedIds,
@@ -131,8 +133,9 @@ export function dropUnbilledTestSteps(
     keep = (s) => s.source !== "template" || s.billedIn === "healthray",
   } = {},
 ) {
+  const billedAs = (s) => BILLED_WITH[idOf(s)] || idOf(s);
   const next = steps.filter(
-    (s) => keep(s) || !isTestStep(idOf(s), machineOf(s)) || billedIds.has(idOf(s)),
+    (s) => keep(s) || !isTestStep(billedAs(s), machineOf(s)) || billedIds.has(billedAs(s)),
   );
   return next.length === steps.length ? steps : next;
 }

@@ -8,6 +8,24 @@
 // not become the sixth copy.
 export const LAB_ONLY_DOCTOR = "Dr. Hospital Admin";
 
+export const CONSULT_STATUSES = [
+  "vitals_pending",
+  "with_vitals",
+  "vitals_done",
+  "sd_pending",
+  "with_sd",
+  "ready_for_doctor",
+  "with_doctor",
+  "doctor_done",
+  "rx_pending",
+  "with_rx",
+  "pharmacy_pending",
+  "dispensed",
+];
+
+export const labOnlyKeepsStep = (step) =>
+  step.catalogId !== "billing" && !CONSULT_STATUSES.includes(step.chainStatus);
+
 export const isLabOnlyDoctor = (name) =>
   (name || "").trim().toLowerCase() === LAB_ONLY_DOCTOR.toLowerCase();
 

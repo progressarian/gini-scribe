@@ -6,6 +6,7 @@ import { desk, extraVisit, healthrayBill, newTag, setUp, tearDown } from "./p4-b
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 const bills = await import("../../../server/services/billing/bills.js");
 const labCaseLines = await import("../../../server/services/billing/labCaseLines.js");
+const { counterPatients } = await import("../../../server/services/billing/counterPatients.js");
 
 const db = getPool();
 const tag = newTag();
@@ -27,7 +28,8 @@ const itemsOn = (visit) =>
     (r) => r.rows.map((row) => row.service_item_id).sort(),
   );
 
-test.describe.serial("P4C-44 a test refunded in HealthRay is not billed from the lab report", () => {
+test.describe
+  .serial("P4C-44 a test refunded in HealthRay is not billed from the lab report", () => {
   test.beforeAll(async () => {
     ids = await setUp(tag);
     labCaseBefore = (await one(`SELECT auto_add_lab_case_tests FROM billing_settings`))
@@ -77,5 +79,28 @@ test.describe.serial("P4C-44 a test refunded in HealthRay is not billed from the
     const offered = await labCaseLines.labCaseSuggestion(draft.id, desk, db);
     expect(offered.shown).toBe(true);
     expect(offered.refunded_on_bill.map((line) => line.bill_name)).toHaveLength(1);
+  });
+
+  test("3. lab-report tests refunded in HealthRay don't leave the patient under Pending bill", async () => {
+    const made = await extraVisit(ids, "RefundList", { healthray: false });
+    patients.push(made.patient);
+    await labCase(made.patient, [ids.hba1cName, ids.abiName]);
+    const hintsOf = async () =>
+      Object.values(await counterPatients(ids.day, "", new Date(), db))
+        .filter(Array.isArray)
+        .flat()
+        .find((row) => row.visitId === made.visit)?.hints;
+
+    await healthrayBill(ids, made.patient, [
+      { desc: ids.hba1cName, amount: 350, category: "lab" },
+      { desc: ids.abiName, amount: 400, category: "lab", refunded: 400 },
+    ]);
+    expect((await hintsOf()).tests).toBe(1);
+
+    await healthrayBill(ids, made.patient, [
+      { desc: ids.hba1cName, amount: 350, category: "lab", refunded: 350 },
+      { desc: ids.abiName, amount: 400, category: "lab", refunded: 400 },
+    ]);
+    expect((await hintsOf()).tests).toBe(0);
   });
 });

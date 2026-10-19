@@ -35,6 +35,7 @@ export default function MedicineCollectionPage() {
   const [loadingList, setLoadingList] = useState(false);
   const [selected, setSelected] = useState(null); // patient_id
   const [meds, setMeds] = useState([]);
+  const [blockedReason, setBlockedReason] = useState(null);
   const [marks, setMarks] = useState({}); // medication_id -> {status, reason, qty_note}
   const [loadingMeds, setLoadingMeds] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -57,6 +58,7 @@ export default function MedicineCollectionPage() {
       .then((r) => {
         const list = r.data?.medicines || [];
         setMeds(list);
+        setBlockedReason(r.data?.blocked_reason || null);
         const m = {};
         for (const x of list)
           if (x.status)
@@ -67,7 +69,10 @@ export default function MedicineCollectionPage() {
             };
         setMarks(m);
       })
-      .catch(() => setMeds([]))
+      .catch(() => {
+        setMeds([]);
+        setBlockedReason(null);
+      })
       .finally(() => setLoadingMeds(false));
   };
 
@@ -198,10 +203,19 @@ export default function MedicineCollectionPage() {
                   <div className="medcoll-panel-head">
                     <strong>{selPatient?.patient_name}</strong>
                     {selPatient?.doctor_name && <small> · {selPatient.doctor_name}</small>}
-                    <button className="medcoll-allbtn" onClick={markAllGiven}>
+                    <button
+                      className="medcoll-allbtn"
+                      disabled={!!blockedReason}
+                      onClick={markAllGiven}
+                    >
                       ✓ Mark all given
                     </button>
                   </div>
+                  {blockedReason && (
+                    <p className="medcoll-blocked" role="status">
+                      ⏸ {blockedReason}
+                    </p>
+                  )}
                   <FlowPanel
                     patientDbId={selected}
                     fileNo={selPatient?.file_no}
@@ -243,6 +257,7 @@ export default function MedicineCollectionPage() {
                                         type="radio"
                                         name={`st-${m.medication_id}`}
                                         checked={mk.status === s.v}
+                                        disabled={!!blockedReason}
                                         onChange={() => setMark(m.medication_id, "status", s.v)}
                                       />
                                       {s.label}
@@ -290,7 +305,11 @@ export default function MedicineCollectionPage() {
                     </table>
                   )}
                   {meds.length > 0 && (
-                    <button className="medcoll-save" disabled={saving} onClick={save}>
+                    <button
+                      className="medcoll-save"
+                      disabled={saving || !!blockedReason}
+                      onClick={save}
+                    >
                       {saving ? "Saving…" : "Save collection"}
                     </button>
                   )}

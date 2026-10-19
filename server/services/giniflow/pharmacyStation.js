@@ -59,12 +59,22 @@ const assertExplained = (status) => {
   if (reason) throw Object.assign(new Error(reason), { status: 409, awaitingRx: true });
 };
 
-const assertPatientExplained = async (db, patientId, visitDate) => {
+const HANDOVER_READY = ["pharmacy_pending", ...FINISHED];
+
+const handoverBlock = (status) =>
+  pharmacyWaitsForRx() && status && !HANDOVER_READY.includes(status) ? RX_WAIT_REASON : null;
+
+export const handoverBlockFor = async (db, patientId, visitDate) => {
   const { rows } = await db.query(
     `SELECT current_status FROM giniflow_visits WHERE patient_id = $1 AND visit_date = $2::date`,
     [patientId, visitDate],
   );
-  if (rows[0]) assertExplained(rows[0].current_status);
+  return handoverBlock(rows[0]?.current_status);
+};
+
+export const assertPatientExplained = async (db, patientId, visitDate) => {
+  const reason = await handoverBlockFor(db, patientId, visitDate);
+  if (reason) throw Object.assign(new Error(reason), { status: 409, awaitingRx: true });
 };
 
 const minutesSince = (from, now) =>
@@ -317,13 +327,14 @@ async function getPendingHandover(visitDate, db = pool, search = null) {
         -- floor has that toggled on (settings/flow) — see
         -- awaitingRegistration() in labStation.js for where this started.
         AND NOT ${labOnlyHiddenPredicate("v", "$2", "$3")}
+        AND v.current_status <> ALL($5::text[])
         AND NOT EXISTS (
           SELECT 1 FROM medicine_collections c
            WHERE c.medication_id = m.id AND c.collected_date = $1::date
         )
       GROUP BY p.id, p.name, p.file_no, p.age, p.sex, v.current_status
       ORDER BY min(m.created_at)`,
-    [visitDate, LAB_ONLY_DOCTOR, await hideLabOnlyPatients(db), search],
+    [visitDate, LAB_ONLY_DOCTOR, await hideLabOnlyPatients(db), search, QUEUE_STATUSES],
   );
 
   return rows.map((r) => ({
@@ -343,7 +354,7 @@ async function getPendingHandover(visitDate, db = pool, search = null) {
         STATUS_LABEL[r.current_status] ||
         r.current_status,
     gone: FINISHED.includes(r.current_status),
-    blockedReason: rxBlock(r.current_status),
+    blockedReason: handoverBlock(r.current_status),
     prescribedAt: iso(r.prescribed_at),
   }));
 }
@@ -893,7 +904,7 @@ export async function getHandoverPatient(patientId, visitDate, db = pool) {
         status ||
         "Not on the floor",
     gone: FINISHED.includes(status),
-    blockedReason: rxBlock(status),
+    blockedReason: handoverBlock(status),
     items,
     pending: items.filter((i) => !i.status).length,
     given: items.filter((i) => i.status === "given").length,

@@ -230,11 +230,17 @@ export async function syncBillCharges(client, visitId, bill, machines, skip = ()
   return rowCount;
 }
 
-export const billedStepIds = (bill, machines, opts) =>
-  new Set([
-    ...(billedLabLines(bill, opts).length ? LAB_TEST_STEP_IDS : []),
-    ...billedMachineLines(bill, machines, opts).flatMap((l) => l.machines),
+export const billedStepIds = (bill, machines, opts) => {
+  const machineIds = billedMachineLines(bill, machines, opts).flatMap((l) => l.machines);
+  return new Set([
+    ...(billedLabLines(bill, opts).length
+      ? LAB_TEST_STEP_IDS
+      : machineIds.length
+        ? ["lab_billing"]
+        : []),
+    ...machineIds,
   ]);
+};
 
 export const stepsAllowedByBill = (steps, bill, machines) =>
   bill?.status === "billed"
@@ -523,7 +529,7 @@ export async function reconcileTestSteps(client, visitId, bill, machines) {
       WHERE s.visit_id = $1 AND s.status = 'pending' AND s.source IN ('template', 'added')`,
     [visitId],
   );
-  const labNeeded = LAB_TEST_STEP_IDS.some((id) => billed.has(id) || kept.has(id));
+  const labNeeded = billed.has("blood_sample") || kept.has("blood_sample");
   const isLabStage = (s) =>
     s.station === "Lab" && !s.machine && !LAB_TEST_STEP_IDS.includes(s.step_catalog_id);
   const stale = steps.filter((s) =>

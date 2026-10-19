@@ -86,6 +86,7 @@ function HandoverPane({ patientId, onClose, onToast }) {
   const dispenseAll = useHandoverDispenseAll();
   const [reasonFor, setReasonFor] = useState(null);
   const [reason, setReason] = useState("");
+  const [changing, setChanging] = useState(null);
 
   useEffect(() => {
     const onKey = (e) => e.key === "Escape" && onClose();
@@ -102,11 +103,18 @@ function HandoverPane({ patientId, onClose, onToast }) {
         onSuccess: (r) => {
           setReasonFor(null);
           setReason("");
+          setChanging(null);
           onToast(status === "given" ? `✓ ${r.name} dispensed` : `${r.name} — not given`);
         },
         onError: (e) => onToast(e?.response?.data?.error || "Could not record that"),
       },
     );
+
+  const cancelChange = () => {
+    setReasonFor(null);
+    setReason("");
+    setChanging(null);
+  };
 
   const markAll = () =>
     dispenseAll.mutate(
@@ -196,7 +204,28 @@ function HandoverPane({ patientId, onClose, onToast }) {
                               >
                                 Save
                               </button>
+                              <button
+                                type="button"
+                                className="st-btn st-btn-ghost"
+                                onClick={cancelChange}
+                              >
+                                Cancel
+                              </button>
                             </form>
+                          ) : i.status && changing !== i.medicationId ? (
+                            <>
+                              <span className={`badge ${i.status === "given" ? "b-grn" : "b-amb"}`}>
+                                {i.status === "given" ? "✓ Dispensed" : "✕ Not given"}
+                              </span>
+                              <button
+                                type="button"
+                                className="st-btn st-btn-ghost"
+                                disabled={busy}
+                                onClick={() => setChanging(i.medicationId)}
+                              >
+                                Change
+                              </button>
+                            </>
                           ) : (
                             <>
                               <button
@@ -205,7 +234,7 @@ function HandoverPane({ patientId, onClose, onToast }) {
                                 disabled={busy || i.status === "given"}
                                 onClick={() => mark(i.medicationId, "given")}
                               >
-                                {i.status === "given" ? "Dispensed" : "Dispense"}
+                                Dispense
                               </button>
                               <button
                                 type="button"
@@ -218,6 +247,15 @@ function HandoverPane({ patientId, onClose, onToast }) {
                               >
                                 Not given
                               </button>
+                              {changing === i.medicationId && (
+                                <button
+                                  type="button"
+                                  className="st-btn st-btn-ghost"
+                                  onClick={cancelChange}
+                                >
+                                  Cancel
+                                </button>
+                              )}
                             </>
                           )}
                         </div>

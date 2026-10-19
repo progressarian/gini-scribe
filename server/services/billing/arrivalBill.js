@@ -9,6 +9,7 @@ import { receiveDeposit } from "./deposits.js";
 import { collectPlannedIn, moneyOn } from "./payments.js";
 import { httpError, inTransaction } from "./transaction.js";
 import { arrivalConsultationIn, testsForDesk } from "./visitLines.js";
+import { arrivalQuote } from "./arrivalQuote.js";
 
 export const ALREADY_PAID_SOURCES = [HEALTHRAY_MODE, PREPAID_MODE];
 const NOT_ARRIVED = ["booked", "no_show", "cancelled"];
@@ -115,6 +116,22 @@ async function journeyPlannedIn(client, visitId, plan, ctx) {
 }
 
 export async function arrivalBillPreview(
+  visitId,
+  { skip, add, remove, plan } = {},
+  ctx = {},
+  db = pool,
+) {
+  if (!asList(skip).length) {
+    const quote = await arrivalQuote(visitId, { add, remove, plan }, ctx, db).catch((error) => {
+      console.warn(`[billing] arrival quote fell back for visit ${visitId}: ${error.message}`);
+      return null;
+    });
+    if (quote) return quote;
+  }
+  return rehearseArrivalBill(visitId, { skip, add, remove, plan }, ctx, db);
+}
+
+export async function rehearseArrivalBill(
   visitId,
   { skip, add, remove, plan } = {},
   ctx = {},

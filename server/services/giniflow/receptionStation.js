@@ -873,6 +873,7 @@ export const ARRIVAL_SELECT = `
          COALESCE(adoc.short_name, adoc.name) AS assigned_doctor_name,
          (${directConsultSql("ap.doctor_name")} OR COALESCE(adoc.direct_consult, FALSE))
            AS direct_consult,
+         ${labOnlyPredicate("v", `'${LAB_ONLY_DOCTOR}'`)} AS lab_only,
          jr.steps AS journey_steps,
          ordered.count AS ordered_count, ordered.total AS ordered_total
     FROM giniflow_visits v
@@ -950,12 +951,6 @@ export const ARRIVAL_SELECT = `
    WHERE v.visit_date = $1::date
      AND NOT COALESCE(p.is_blocked, FALSE)
      AND v.merged_into_visit_id IS NULL
-     -- Samples-only patients don't show on any station screen while the
-     -- floor has that toggled on (settings/flow) — see awaitingRegistration()
-     -- in labStation.js for where this started. Their check-in status is set
-     -- automatically by the HealthRay sync regardless of what this screen
-     -- shows, so hiding them here doesn't stop that.
-     AND NOT ${labOnlyHiddenPredicate("v", "$2", "$3")}
    ORDER BY v.appointment_time NULLS LAST, p.name`;
 
 const minutesBetween = (from, now) =>
@@ -1008,6 +1003,7 @@ export const shapeArrival = (r, now) => ({
   assignedDoctorId: r.assigned_doctor_id || null,
   assignedDoctorName: r.assigned_doctor_name || null,
   consultsDirect: r.direct_consult,
+  samplesOnly: !!r.lab_only,
   journey: journeyProgress(r.journey_steps, r.current_status, r.resume_status),
   orderedServices: r.ordered_count
     ? { count: r.ordered_count, total: Math.round(Number(r.ordered_total) * 100) }
@@ -1051,11 +1047,7 @@ const alreadyOnFloorAs = (row, rows) => {
 };
 
 export async function getArrivals(visitDate, q = "", now = new Date(), db = pool) {
-  const { rows } = await db.query(ARRIVAL_SELECT, [
-    visitDate,
-    LAB_ONLY_DOCTOR,
-    await hideLabOnlyPatients(db),
-  ]);
+  const { rows } = await db.query(ARRIVAL_SELECT, [visitDate]);
 
   // Server-side, and the board's own search rather than a second implementation:
   // it already normalises phone numbers the way the rest of the repo does, and a

@@ -943,7 +943,16 @@ router.get("/ghm-appointments/category-counts", async (req, res) => {
 // count against, because the list scopes call status to today (callStatusToday)
 // while the raw column holds the last call whenever it was made.
 
-const BOOKED_DATE = (a) => `GREATEST(${a}.appointment_date, ${a}.preferred_date)::text`;
+const HAS_PREFERRED_SLOT = (a) =>
+  `(${a}.preferred_date IS NOT NULL AND NULLIF(TRIM(${a}.preferred_time_slot), '') IS NOT NULL)`;
+const BOOKED_DAY = (a) =>
+  `CASE WHEN ${HAS_PREFERRED_SLOT(a)} THEN ${a}.preferred_date
+        ELSE GREATEST(${a}.appointment_date, ${a}.preferred_date) END`;
+const BOOKED_DATE = (a) => `(${BOOKED_DAY(a)})::text`;
+const PREFERRED_BOOKING_ELSEWHERE = (a, d) =>
+  `CASE WHEN ${HAS_PREFERRED_SLOT(a)} AND ${a}.preferred_date <> ${d}
+             AND ${a}.preferred_date >= ${IST_TODAY}
+        THEN ${a}.preferred_date END`;
 const HAS_SLOT = (a) =>
   `COALESCE(NULLIF(TRIM(${a}.time_slot), ''), NULLIF(TRIM(${a}.reporting_time_slot), '')) IS NOT NULL`;
 const BOOKED_ON_DAY = (a, d) => `COALESCE(${a}.appointment_date = ${d} AND ${HAS_SLOT(a)}, FALSE)`;
@@ -959,14 +968,15 @@ const BOOKED_FOR = (a, d) => `(${PREFERRED_SLOT_FOR(a, d)} OR EXISTS (
      AND ${NOT_LAB_ONLY("b")}))`;
 const NOT_BOOKED = (a, d) => `(NOT ${BOOKED_ON_DAY(a, d)} AND NOT ${BOOKED_FOR(a, d)})`;
 const BOOKING_NO_SLOT = (a) =>
-  `(COALESCE(${a}.booking_status, '') = 'booked' AND COALESCE(GREATEST(${a}.appointment_date, ${a}.preferred_date) >= ${IST_TODAY}, FALSE))`;
+  `(COALESCE(${a}.booking_status, '') = 'booked' AND NOT ${HAS_PREFERRED_SLOT(a)}
+    AND COALESCE(${BOOKED_DAY(a)} >= ${IST_TODAY}, FALSE))`;
 const BOOKING_LAPSED = (a) =>
   `(COALESCE(${a}.booking_status, '') = 'booked'
-    AND NOT COALESCE(GREATEST(${a}.appointment_date, ${a}.preferred_date) >= ${IST_TODAY}, FALSE)
+    AND NOT COALESCE(${BOOKED_DAY(a)} >= ${IST_TODAY}, FALSE)
     AND NOT EXISTS (
       SELECT 1 FROM appointments kept
        WHERE (kept.id = ${a}.id OR kept.patient_id = ${a}.patient_id)
-         AND kept.appointment_date >= GREATEST(${a}.appointment_date, ${a}.preferred_date)
+         AND kept.appointment_date >= ${BOOKED_DAY(a)}
          AND kept.status = ANY(${ATTENDED_STATUSES})
          AND ${NOT_LAB_ONLY("kept")}))`;
 
@@ -1561,7 +1571,7 @@ router.get("/ghm-appointments", async (req, res) => {
                 ${BOOKING_LAPSED("a")} AS booking_lapsed,
                 ${BOOKING_NO_SLOT("a")} AS booking_no_slot,
                 ${BOOKED_DATE("a")} AS booked_for_date,
-                ${upcomingBookingElsewhere("a")} AS booked_on,
+                COALESCE(${upcomingBookingElsewhere("a")}, ${PREFERRED_BOOKING_ELSEWHERE("a", "$1")}) AS booked_on,
                 -- Follow-up date shown for THIS visit:
                 --   1. the visit's OWN effective follow-up date (column, synced
                 --      HealthRay appointment value, or prescription-extracted date —

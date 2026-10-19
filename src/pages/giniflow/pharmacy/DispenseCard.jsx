@@ -43,6 +43,7 @@ function StockChip({ stock }) {
 function MedicineRow({ medicine, onDispense, busy, closed }) {
   const [askingReason, setAskingReason] = useState(false);
   const [reason, setReason] = useState("");
+  const [changing, setChanging] = useState(false);
   const mark = medicine.collection;
   const alternative = medicine.stock?.out ? medicine.stock.alternatives?.[0] : null;
 
@@ -53,6 +54,7 @@ function MedicineRow({ medicine, onDispense, busy, closed }) {
     onDispense(medicine, status, why);
     setAskingReason(false);
     setReason("");
+    setChanging(false);
   };
 
   return (
@@ -145,17 +147,34 @@ function MedicineRow({ medicine, onDispense, busy, closed }) {
             <button
               type="button"
               className="st-btn st-btn-g"
-              onClick={() => setAskingReason(false)}
+              onClick={() => {
+                setAskingReason(false);
+                setChanging(false);
+              }}
             >
               Cancel
             </button>
           </div>
+        ) : (done || refused) && !changing ? (
+          <>
+            <div className={`mm-final${done ? " is-done" : " is-refused"}`}>
+              {done ? "✓ Dispensed" : "Not given"}
+            </div>
+            <button
+              type="button"
+              className="ph-refuse"
+              disabled={busy}
+              onClick={() => setChanging(true)}
+            >
+              Change
+            </button>
+          </>
         ) : (
           <>
             <button
               type="button"
               className={`dispense-btn${done ? " db-done" : ""}`}
-              disabled={busy}
+              disabled={busy || done}
               onClick={() => send("given")}
             >
               {done
@@ -174,6 +193,11 @@ function MedicineRow({ medicine, onDispense, busy, closed }) {
             >
               {refused ? "Change reason" : "Not given"}
             </button>
+            {changing && (
+              <button type="button" className="st-btn st-btn-g" onClick={() => setChanging(false)}>
+                Cancel
+              </button>
+            )}
           </>
         )}
       </div>

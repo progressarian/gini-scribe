@@ -204,7 +204,7 @@ test.describe.serial("P4C-13 the billing counter inside the reception station", 
       status: "booked",
       statusLabel: "Booked",
       checkedInAt: null,
-      suggestedVisitTypeId: 991301,
+      suggestedVisitTypeId: "991301",
     };
     await page.route("**/api/giniflow/stations/reception/arrivals**", (route) =>
       route.fulfill({
@@ -220,13 +220,13 @@ test.describe.serial("P4C-13 the billing counter inside the reception station", 
       }),
     );
     await page.route("**/api/flow/visit-types**", (route) =>
-      route.fulfill({ json: [{ id: 991301, name: `P4C13 Visit ${tag}`, for_online: false }] }),
+      route.fulfill({ json: [{ id: "991301", name: `P4C13 Visit ${tag}`, for_online: false }] }),
     );
     await page.route("**/api/giniflow/journey/plan/991301", (route) =>
       route.fulfill({
         json: [
           {
-            catalogId: 991302,
+            catalogId: "991302",
             name: "Vitals",
             role: "vitals",
             minutes: 5,

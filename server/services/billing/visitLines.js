@@ -96,7 +96,7 @@ async function visitFor(client, visitId) {
 const consultationVisitType = (visit) =>
   visit.appointment_id ? billingVisitType(visit.visit_type) : visit.journey_visit_type;
 
-async function consultationItem(client, visit) {
+export async function consultationItem(client, visit) {
   const visitType = consultationVisitType(visit);
   if (!visitType || (!visit.appointment_id && !visit.journey_doctor_id)) return null;
   const doctorId =

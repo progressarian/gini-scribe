@@ -100,6 +100,7 @@ import {
   keepsForChoice,
   onlineConsultChoice,
 } from "../../../shared/directConsult.js";
+import { labOnlyKeepsStep } from "../../../shared/labOnly.js";
 
 // Arrived and done. They stay on the floor list — the desk is asked about them
 // — but they are not in the building.
@@ -1280,6 +1281,8 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
     ),
     300,
   );
+  const { data: bill, isLoading: billLoading } = useHealthrayBill(arrival.patientId);
+  const stepsBill = useRef(null);
   const arrivalBill = useArrivalBill(
     billVisitId,
     {
@@ -1288,12 +1291,16 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
       remove: arrivalChoices.remove.map((item) => item.id),
       plan: journeyPlan,
     },
-    canBill && (Boolean(billFor) || steps !== null),
+    canBill &&
+      (Boolean(billFor) ||
+        (steps !== null &&
+          journeyPlan?.steps === steps &&
+          !billLoading &&
+          stepsBill.current === (bill || null))),
   );
   const commitArrivalBill = useCommitArrivalBill();
   const { data: shift } = useCurrentShift({ enabled: canBill });
   const shiftOpen = Boolean(shift?.is_open);
-  const { data: bill, isLoading: billLoading } = useHealthrayBill(arrival.patientId);
   const billRef = useRef(null);
   billRef.current = bill || null;
   const { data: catalog = [] } = useFlowStepCatalog();
@@ -1303,7 +1310,9 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   );
 
   useEffect(() => {
-    if (bill) setSteps((current) => current && withBilledSteps(current, bill, requires.current));
+    if (!bill) return;
+    stepsBill.current = bill;
+    setSteps((current) => current && withBilledSteps(current, bill, requires.current));
   }, [bill]);
 
   const askable = useMemo(
@@ -1338,6 +1347,7 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
           : step.chainStatus === "with_sd" && arrival.assignedSdId
             ? { staffId: String(arrival.assignedSdId), staffName: arrival.assignedSdName }
             : null;
+    stepsBill.current = billRef.current;
     setSteps((current) => {
       // Toggling an answer rebuilds the template half of the list, so the edits
       // already made to the steps that survive have to be carried across —
@@ -1349,6 +1359,7 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
       const template = plan
         .filter((p) => p.included && stepPassesConditions(p, conditions))
         .filter((p) => keepsForChoice(p, planChoice))
+        .filter((p) => !arrival.samplesOnly || labOnlyKeepsStep(p))
         .map((p) => {
           const base = { ...p, ...(preassigned(p) || {}) };
           const prev = kept.get(p.catalogId);
@@ -1375,7 +1386,8 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
     [plan],
   );
   const choiceKeepsConsult = (choice) => consultSteps.some((p) => keepsForChoice(p, choice));
-  const showConsultChoice = !visitType?.for_online && consultSteps.length > 0;
+  const showConsultChoice =
+    !visitType?.for_online && !arrival.samplesOnly && consultSteps.length > 0;
 
   useEffect(() => {
     if (consultChoice !== "both" && consultSteps.length && !choiceKeepsConsult(consultChoice))

@@ -16,9 +16,11 @@ import { TEST_MATCHES_SQL } from "./testMatch.js";
 import {
   ON_PATIENT_DAY_BILL_SQL,
   PAID_DRAFT_SQL,
+  REFUNDED_IN_HEALTHRAY_SQL,
   VISIT_LAB_CASE_TESTS_SQL,
 } from "./labCaseLines.js";
 import { REMOVED_BY_DESK_SQL } from "./visitLines.js";
+import { LIVE_BILL_ITEM_SQL } from "../giniflow/testsHold.js";
 import { HELD_AT_RECEPTION, RECEPTION_MONEY_SQL, SETTLED_AT_RECEPTION } from "./orderLinks.js";
 import { LINE_ORDERED_AT_SQL, ORDERED_AFTER_CONSULT_SQL } from "./afterConsult.js";
 
@@ -165,6 +167,16 @@ const COUNTER_SELECT = `
       SELECT COUNT(DISTINCT cm.catalog_id)::int AS case_tests_owed
         FROM (SELECT gv.id, gv.patient_id, gv.visit_date, gv.appointment_id, cp.file_no
                 FROM patients cp WHERE cp.id = gv.patient_id) cv
+        CROSS JOIN LATERAL (
+          SELECT COALESCE(array_agg(refunded.catalog_id), '{}') AS ids
+            FROM (WITH rv AS (SELECT cv.patient_id, cv.visit_date)
+                  SELECT * FROM (${REFUNDED_IN_HEALTHRAY_SQL("rv")}) q) refunded
+           WHERE EXISTS (SELECT 1 FROM giniflow_patient_bills rpb
+                          CROSS JOIN LATERAL jsonb_array_elements(COALESCE(rpb.items, '[]'::jsonb)) rbi
+                         WHERE rpb.patient_id = cv.patient_id AND rpb.bill_date = cv.visit_date
+                           AND rpb.status = 'billed' AND rbi->>'category' = 'lab'
+                           AND NOT ${LIVE_BILL_ITEM_SQL("rbi")})
+        ) rf
         CROSS JOIN LATERAL (${VISIT_LAB_CASE_TESTS_SQL("cv")}) ct
         JOIN day_tests cm ON cm.test_name = ct.test_name
         JOIN LATERAL (SELECT ci.id FROM service_items ci
@@ -176,6 +188,7 @@ const COUNTER_SELECT = `
                            JOIN day_tests com ON com.test_name = cot.test_name
                           WHERE co.visit_id = cv.id AND com.catalog_id = cm.catalog_id)
          AND NOT ${REMOVED_BY_DESK_SQL("cv.id", "ci.id")}
+         AND NOT (cm.catalog_id = ANY(rf.ids))
     ) lcs ON TRUE`;
 
 function billState(r) {
@@ -240,7 +253,7 @@ export const billingChanged = () => {
 };
 
 const dayRows = (date, db) =>
-  db.query(COUNTER_SELECT, [date, LAB_ONLY_DOCTOR, false]).then((result) => result.rows);
+  db.query(COUNTER_SELECT, [date, LAB_ONLY_DOCTOR]).then((result) => result.rows);
 
 function sharedDayRows(date, db) {
   if (db !== pool) return dayRows(date, db);

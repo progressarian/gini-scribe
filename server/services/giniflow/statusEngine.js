@@ -28,6 +28,7 @@ import { TESTS_HOLD_SQL } from "./testsHold.js";
 
 import { skipsChiefStop, syncFromStatus } from "./journey.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
+import { CONSULT_STATUSES } from "../../../shared/labOnly.js";
 import { FLOOR_DONE_LAB_STATUSES } from "../../../shared/labStages.js";
 import { MACHINE_RUNGS } from "../../../shared/machineStages.js";
 import pool from "../../config/db.js";
@@ -45,26 +46,6 @@ export const budgetColour = (minutes, budget) => {
 };
 
 const minutesBetween = (from, to) => Math.max(0, Math.round((to - from) / 60000));
-
-// The consultation leg, which a samples-only patient has no business entering.
-// `checked_in` and `exited` are absent on purpose: they arrive at reception and
-// they leave, and appointmentSync's lab-only sweep closes them with `exited`.
-// The exception statuses are absent for the same reason — a patient who came
-// only for bloods can still be a no-show.
-const CONSULT_STATUSES = [
-  "vitals_pending",
-  "with_vitals",
-  "vitals_done",
-  "sd_pending",
-  "with_sd",
-  "ready_for_doctor",
-  "with_doctor",
-  "doctor_done",
-  "rx_pending",
-  "with_rx",
-  "pharmacy_pending",
-  "dispensed",
-];
 
 // Keeping these patients off the station queues stops them being OFFERED to the
 // floor; it does not stop a status write reaching here by another route — a
