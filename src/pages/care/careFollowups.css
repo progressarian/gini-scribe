@@ -1,0 +1,352 @@
+.cfu {
+  padding: 16px 24px 24px;
+  min-height: 100%;
+  min-width: 0;
+}
+.cfu__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 12px;
+}
+.cfu__title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--fnv);
+}
+.cfu__sub {
+  margin: 4px 0 0;
+  max-width: 720px;
+  font-size: 13px;
+  color: var(--fink3);
+}
+.cfu__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 0 0 16px;
+}
+.cfu__filters .fset__field {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  font-size: 12px;
+  min-width: 140px;
+}
+.cfu__search {
+  flex: 1 1 260px;
+}
+.cfu__clear {
+  align-self: flex-end;
+}
+.cfu__skeleton {
+  display: grid;
+  gap: 8px;
+}
+.cfu__skeleton-row {
+  height: 44px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--fbg), var(--fwhite), var(--fbg));
+}
+.cfu-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: var(--fnv);
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--fbd2);
+}
+.cfu-link:focus-visible {
+  outline: 2px solid var(--ftl);
+  outline-offset: 2px;
+}
+.cfu-what {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.cfu-overdue {
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fre);
+}
+.cfu-avail {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+.cfu-avail--in_house {
+  color: var(--fgn);
+  background: var(--fgnl);
+}
+.cfu-avail--outsourced {
+  color: var(--fsk);
+  background: var(--fskl);
+}
+.cfu-avail--not_available {
+  color: var(--fre);
+  background: var(--frel);
+}
+.cfu-avail--unknown {
+  color: var(--fam);
+  background: var(--faml);
+}
+.cfu-status--open {
+  color: var(--fam);
+  background: var(--faml);
+}
+.cfu-status--booked {
+  color: var(--fsk);
+  background: var(--fskl);
+}
+.cfu-status--done {
+  color: var(--fgn);
+  background: var(--fgnl);
+}
+.cfu-status--not_available,
+.cfu-status--declined,
+.cfu-status--closed {
+  color: var(--fink2);
+  background: var(--fbg);
+}
+.cfu-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: center;
+  gap: 6px;
+}
+.cfu .flow-btn-primary.flow-btn-mini {
+  background: var(--ftl);
+  color: #fff;
+  border-color: var(--ftl);
+}
+.cfu .flow-btn-primary.flow-btn-mini:hover:not(:disabled) {
+  filter: brightness(0.95);
+}
+.cfu-sheet td.tl {
+  text-align: left;
+}
+.cfu-actions .flow-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.cfu-note {
+  margin-top: 4px;
+  max-width: 380px;
+  font-size: 12px;
+  color: var(--fink2);
+  overflow-wrap: anywhere;
+}
+.cfu-calls {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--fink3);
+  white-space: nowrap;
+}
+.cfu-what + .cfu-avail {
+  margin-top: 4px;
+}
+.cfu-drawer-back {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(14, 34, 64, 0.25);
+}
+.cfu-drawer {
+  width: min(520px, 100%);
+  height: 100%;
+  overflow-y: auto;
+  padding: 16px 20px 24px;
+  background: var(--fbg);
+  box-shadow: -6px 0 18px rgba(14, 34, 64, 0.12);
+}
+.cfu-drawer__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.cfu-drawer__eyebrow {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fink3);
+}
+.cfu-drawer__name {
+  margin: 2px 0 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--fnv);
+  overflow-wrap: anywhere;
+}
+.cfu-drawer__sub {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fink3);
+}
+.cfu-card {
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  background: var(--fwhite);
+  border: 1px solid var(--fbd);
+  border-radius: 8px;
+}
+.cfu-card__ids,
+.cfu-card__phones {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.cfu-facts {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 6px 12px;
+  margin: 10px 0 0;
+  font-size: 13px;
+}
+.cfu-facts dt {
+  color: var(--fink3);
+}
+.cfu-facts dd {
+  margin: 0;
+  color: var(--fink);
+  overflow-wrap: anywhere;
+}
+.cfu-other {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+.cfu-other li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.cfu-tl {
+  position: relative;
+  margin: 0;
+  padding: 0 0 0 18px;
+  list-style: none;
+  border-left: 2px solid var(--fbd);
+}
+.cfu-tl__item {
+  position: relative;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  background: var(--fwhite);
+  border: 1px solid var(--fbd);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.cfu-tl__dot {
+  position: absolute;
+  top: 14px;
+  left: -25px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--fink3);
+  box-shadow: 0 0 0 3px var(--fbg);
+}
+.cfu-tl__item--call .cfu-tl__dot {
+  background: var(--fsk);
+}
+.cfu-tl__item--status .cfu-tl__dot,
+.cfu-tl__item--booked .cfu-tl__dot {
+  background: var(--ftl);
+}
+.cfu-tl__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--fnv);
+}
+.cfu-tl__when {
+  font-size: 12px;
+  color: var(--fink3);
+  white-space: nowrap;
+}
+.cfu-tl__body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.cfu-tl__chip {
+  display: inline-block;
+  width: auto;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: default;
+}
+.cfu-tl__by {
+  font-size: 12px;
+  color: var(--fink3);
+}
+.cfu-tl__note {
+  margin: 6px 0 0;
+  color: var(--fink2);
+  overflow-wrap: anywhere;
+}
+@media (max-width: 640px) {
+  .cfu {
+    padding: 12px 16px 16px;
+  }
+  .cfu__filters .fset__field {
+    flex: 1 1 100%;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .cfu-drawer {
+    animation: cfu-slide 160ms ease-out;
+  }
+}
+@keyframes cfu-slide {
+  from {
+    transform: translateX(24px);
+    opacity: 0.6;
+  }
+}
+.cfu-day {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cfu-day .flow-btn-mini {
+  min-height: 36px;
+}
+.cfu__fetching {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--fink3);
+}

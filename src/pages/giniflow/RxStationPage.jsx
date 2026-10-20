@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   useRxQueue,
   useHandOverEchoReport,
@@ -16,7 +16,14 @@ import useAuthStore from "../../stores/authStore";
 import { CAPABILITIES as CAP, hasCapability } from "../../../shared/permissions.js";
 import LiveBadge from "../../components/giniflow/LiveBadge";
 import StationNotice from "../../components/giniflow/StationNotice";
-import PdfViewerModal from "../../components/visit/PdfViewerModal";
+import PdfViewerModal, { printPdf } from "../../components/visit/PdfViewerModal";
+import RxFollowupDialog from "../../components/giniflow/RxFollowupDialog";
+import {
+  RX_FOLLOWUP_LABEL,
+  RX_FOLLOWUP_RESOLVES,
+  RX_NOT_TAKEN_REASON_LABEL,
+} from "../../../shared/rxFollowups.js";
+import { isValidMobile, toLocal10 } from "../../../shared/phone.js";
 import "../../styles/giniflow-station.css";
 
 const AVATAR_COLOURS = ["#374151", "#1e3a5f", "#14532d", "#7c2d12", "#7f1d1d", "#b45309"];
@@ -30,6 +37,53 @@ const initials = (name = "") =>
     .join("");
 
 const avatarColour = (id) => AVATAR_COLOURS[Math.abs(id ?? 0) % AVATAR_COLOURS.length];
+
+const RESOLVE_ACTIONS = [...RX_FOLLOWUP_RESOLVES, "note"];
+
+const DOCUMENT_TIMEOUT_MS = 60000;
+
+const shiftDay = (day, by) => {
+  const d = new Date(`${day}T00:00:00`);
+  d.setDate(d.getDate() + by);
+  return d.toLocaleDateString("en-CA");
+};
+
+const visitLabel = (visitDate, today) => {
+  if (!visitDate) return "";
+  if (visitDate === today) return "Today";
+  if (today && visitDate === shiftDay(today, -1)) return "Yesterday";
+  return new Date(`${visitDate}T00:00:00`).toLocaleDateString("en-IN", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
+};
+
+const clock = (iso) =>
+  new Date(iso).toLocaleString("en-IN", {
+    day: "numeric",
+    month: "short",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+const whatsappHref = (phone, name) => {
+  const local = toLocal10(phone);
+  if (!isValidMobile(local)) return null;
+  const text = encodeURIComponent(
+    `Namaste ${name || ""}, this is Gini Advanced Care Hospital. Sharing your prescription from your visit.`,
+  );
+  return `https://wa.me/91${local}?text=${text}`;
+};
+
+function ExplainedBadge({ explained, online }) {
+  if (!explained && online) return <span className="badge b-ink">📱 Online visit</span>;
+  return explained ? (
+    <span className="badge b-grn">✓ Explained</span>
+  ) : (
+    <span className="badge b-amb">⚠ Not explained</span>
+  );
+}
 
 const toneClass = (colour) =>
   colour === "red" ? "si-tmr-r" : colour === "amber" ? "si-tmr-a" : "si-tmr-g";
@@ -93,28 +147,54 @@ function MedicineGroup({ group }) {
 
 function Pane({
   visitId,
+  readOnly,
   canEndVisit,
   onEndVisit,
   onClose,
   onReturn,
   onExplained,
   onView,
+  onPrint,
+  printing,
   onReissue,
+  onFollowup,
+  listed,
+  today,
   reissuing,
   returning,
   busy,
 }) {
   const { data, isLoading } = useRxPatient(visitId);
+  const followupPatient = data && {
+    visitId,
+    name: data.name,
+    fileNo: data.fileNo,
+    phone: data.phone,
+    doctorName: data.doctorName,
+    visitLabel: visitLabel(data.visitDate, today),
+  };
+  const wa = data && whatsappHref(data.phone, data.name);
   if (!visitId) return null;
 
   return (
     <div className="detail-overlay">
       <div className="detail-pane" role="dialog" aria-label="Explain the prescription">
         <div className="dp-head">
-          <div className="dp-name">{data?.name || "…"}</div>
+          <div className="dp-title-row">
+            <button type="button" className="rbtn" onClick={onClose}>
+              ← Back
+            </button>
+            <div className="dp-name">{data?.name || "…"}</div>
+          </div>
           <div className="dp-meta">
             {data ? `${data.age}${(data.sex || "")[0] || ""} · ${data.fileNo || "—"}` : ""}
             {data?.doctorName ? ` · ${data.doctorName}` : ""}
+            {readOnly && data && (
+              <>
+                {" "}
+                <ExplainedBadge explained={data.explained} online={data.online} />
+              </>
+            )}
           </div>
           {data?.rxFromHealthray && (
             <div className="dp-hint">
@@ -122,11 +202,8 @@ function Pane({
               cannot be re-issued from this station.
             </div>
           )}
-          <div className="dp-acts">
-            <button className="rbtn" onClick={onClose}>
-              ← Back
-            </button>
-            {data?.status === "with_rx" && (
+          <div className="dp-acts dp-acts--row">
+            {!readOnly && data?.status === "with_rx" && (
               <button
                 className="rbtn"
                 disabled={returning}
@@ -137,14 +214,25 @@ function Pane({
               </button>
             )}
             {data?.canPrint ? (
-              <button
-                className="st-btn st-btn-grn"
-                onClick={() => onView(visitId, data.name, data.rxFromHealthray)}
-              >
-                {data.rxFromHealthray
-                  ? "🖨 View / print HealthRay Rx"
-                  : "🖨 View / print prescription"}
-              </button>
+              <>
+                <button
+                  className="st-btn"
+                  onClick={() => onView(visitId, data.name, data.rxFromHealthray)}
+                >
+                  {data.rxFromHealthray ? "View HealthRay Rx" : "View prescription"}
+                </button>
+                <button
+                  className="st-btn st-btn-grn"
+                  disabled={!!printing}
+                  onClick={() => onPrint(visitId, data.name, "rx")}
+                >
+                  {printing === `${visitId}:rx`
+                    ? "🖨 Preparing…"
+                    : data.rxFromHealthray
+                      ? "🖨 Print HealthRay Rx"
+                      : "🖨 Print prescription"}
+                </button>
+              </>
             ) : (
               /* No printable copy is two situations and only one of them had a
                  way out. A stale copy offered "re-issue"; a missing one read
@@ -169,18 +257,28 @@ function Pane({
               </button>
             )}
             {data && (
-              <button
-                className="st-btn"
-                disabled={!data.card?.counts?.total}
-                title={
-                  data.card?.counts?.total
-                    ? "The patient's medicines by time of day, to take home with the prescription"
-                    : "No medicines on the card"
-                }
-                onClick={() => onView(visitId, data.name, false, "card")}
-              >
-                🖨 Print medicine card
-              </button>
+              <>
+                <button
+                  className="st-btn"
+                  disabled={!data.card?.counts?.total}
+                  title={
+                    data.card?.counts?.total
+                      ? "The patient's medicines by time of day, to take home with the prescription"
+                      : "No medicines on the card"
+                  }
+                  onClick={() => onView(visitId, data.name, false, "card")}
+                >
+                  View medicine card
+                </button>
+                <button
+                  className="st-btn"
+                  disabled={!data.card?.counts?.total || !!printing}
+                  title={data.card?.counts?.total ? undefined : "No medicines on the card"}
+                  onClick={() => onPrint(visitId, data.name, "card")}
+                >
+                  {printing === `${visitId}:card` ? "🖨 Preparing…" : "🖨 Print medicine card"}
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -221,6 +319,25 @@ function Pane({
               </div>
             )}
 
+            {data?.followups?.length > 0 && (
+              <div className="dp-sec">
+                <div className="dp-sec-title">Prescription follow-up</div>
+                {data.followups.map((f) => (
+                  <div className="test-row" key={f.id}>
+                    <div className="tr-name">
+                      {RX_FOLLOWUP_LABEL[f.action] || f.action}
+                      <div className="pc-meta">{f.remark}</div>
+                    </div>
+                    <div className="tr-status">
+                      <span className="pc-meta">
+                        {f.by || "—"} · {clock(f.at)}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div className="dp-sec">
               <div className="dp-sec-title">What this station can and cannot do</div>
               <div className="dp-hint">
@@ -232,29 +349,68 @@ function Pane({
           </div>
         </div>
 
-        <div className="dp-foot">
-          <button
-            className="st-btn st-btn-grn"
-            disabled={busy || data?.status === "pharmacy_pending"}
-            onClick={() => onExplained(visitId)}
-          >
-            ✓ Explained — send to pharmacy
-          </button>
-          {/* Most patients never reach a dispense: they take the prescription
+        {readOnly && data && (
+          <div className="dp-foot">
+            {wa && (
+              <a className="st-btn" href={wa} target="_blank" rel="noopener noreferrer">
+                📱 Open WhatsApp
+              </a>
+            )}
+            {listed ? (
+              <button
+                type="button"
+                className="st-btn st-btn-grn"
+                onClick={() => onFollowup(followupPatient, RESOLVE_ACTIONS)}
+              >
+                ✓ Mark done / remark
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="st-btn"
+                  onClick={() => onFollowup(followupPatient, ["not_taken"])}
+                  title="The patient left without the prescription — keep them in Prescription not given"
+                >
+                  ⚠ Not taken
+                </button>
+                <button
+                  type="button"
+                  className="st-btn"
+                  onClick={() => onFollowup(followupPatient, ["note"])}
+                >
+                  Add remark
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        {!readOnly && (
+          <div className="dp-foot">
+            <button
+              className="st-btn st-btn-grn"
+              disabled={busy || data?.status === "pharmacy_pending"}
+              onClick={() => onExplained(visitId)}
+            >
+              ✓ Explained — send to pharmacy
+            </button>
+            {/* Most patients never reach a dispense: they take the prescription
               from the counter and go, buying medicines elsewhere or having none
               to collect. HealthRay's checkout used to close those; the counter
               says it now (38-MANUAL-FLOOR-PLAN.md). */}
-          {canEndVisit && (
-            <button
-              className="st-btn"
-              disabled={busy}
-              onClick={() => onEndVisit(visitId, data?.name)}
-              title="The patient has taken the prescription and gone"
-            >
-              🚪 Explained — patient leaving
-            </button>
-          )}
-        </div>
+            {canEndVisit && (
+              <button
+                className="st-btn"
+                disabled={busy}
+                onClick={() => onEndVisit(visitId, data?.name)}
+                title="The patient has taken the prescription and gone"
+              >
+                🚪 Explained — patient leaving
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -262,8 +418,20 @@ function Pane({
 
 export default function RxStationPage() {
   const [openId, setOpenId] = useState(null);
+  const [openReadOnly, setOpenReadOnly] = useState(false);
+  const [printing, setPrinting] = useState(null);
+  const printFrame = useRef(null);
+  const printUrl = useRef(null);
+  useEffect(
+    () => () => {
+      printFrame.current?.remove();
+      if (printUrl.current) URL.revokeObjectURL(printUrl.current);
+    },
+    [],
+  );
   const [toast, setToast] = useState("");
   const [viewing, setViewing] = useState(null);
+  const [followup, setFollowup] = useState(null);
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
   useEffect(() => {
@@ -292,6 +460,16 @@ export default function RxStationPage() {
   const waiting = data?.waiting || [];
   const done = data?.explained || [];
   const handovers = data?.echoHandovers || [];
+  const notTaken = data?.notTaken || [];
+  const today = data?.date;
+  const followupFor = (r) => ({
+    visitId: r.visitId,
+    name: r.name,
+    fileNo: r.fileNo,
+    phone: r.phone,
+    doctorName: r.doctorName,
+    visitLabel: visitLabel(r.visitDate, today),
+  });
 
   const onHandOver = (row) =>
     handOver.mutate(
@@ -307,7 +485,70 @@ export default function RxStationPage() {
       },
     );
 
+  const fetchDocument = async (visitId, kind, verb) => {
+    const what = kind === "card" ? "medicine card" : "prescription";
+    try {
+      const res = await fetch(kind === "card" ? medicineCardHref(visitId) : printRxHref(visitId), {
+        signal: AbortSignal.timeout(DOCUMENT_TIMEOUT_MS),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setToast(body.error || `Could not ${verb} the ${what}`);
+        return null;
+      }
+      return await res.blob();
+    } catch (e) {
+      setToast(
+        e?.name === "TimeoutError"
+          ? `The ${what} is taking too long — try again`
+          : `Could not reach the server to ${verb} the ${what} — try again`,
+      );
+      return null;
+    }
+  };
+
+  const onPrint = async (visitId, name, kind) => {
+    if (printing) return;
+    const label = `${kind === "card" ? "Medicine card" : "Prescription"} — ${name || "patient"}`;
+    setPrinting(`${visitId}:${kind}`);
+    try {
+      const blob = await fetchDocument(visitId, kind, "print");
+      if (!blob) return;
+      if (printUrl.current) URL.revokeObjectURL(printUrl.current);
+      printUrl.current = URL.createObjectURL(blob);
+      printFrame.current = printPdf(printUrl.current, label, printFrame.current);
+    } finally {
+      setPrinting(null);
+    }
+  };
+
+  const onDownload = async (visitId, name) => {
+    if (printing) return;
+    setPrinting(`${visitId}:download`);
+    try {
+      const blob = await fetchDocument(visitId, "rx", "download");
+      if (!blob) return;
+      const extension = blob.type.startsWith("image/") ? blob.type.split("/")[1] : "pdf";
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = href;
+      link.download = `Prescription — ${name || "patient"}.${extension}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(href), 1000);
+    } finally {
+      setPrinting(null);
+    }
+  };
+
+  const openExplained = (visitId) => {
+    setOpenReadOnly(true);
+    setOpenId(visitId);
+  };
+
   const pick = (visitId) => {
+    setOpenReadOnly(false);
     setOpenId(visitId);
     if (!atDesk.some((r) => r.visitId === visitId)) start.mutate({ visitId });
   };
@@ -328,7 +569,7 @@ export default function RxStationPage() {
   // The counter ends the visit; a station that cannot see the patient leave
   // cannot honestly say they have.
   const canEndVisit = hasCapability(
-    useAuthStore((st) => st.currentDoctor?.role),
+    useAuthStore((st) => st.currentDoctor),
     CAP.GINIFLOW_END_VISIT,
   );
   const endVisit = useEndVisit("rx");
@@ -396,7 +637,7 @@ export default function RxStationPage() {
 
           {isLoading && <div className="empty-note">Loading…</div>}
 
-          {!isLoading && !atDesk.length && !waiting.length && !done.length && (
+          {!isLoading && !atDesk.length && !waiting.length && !done.length && !notTaken.length && (
             <div className="empty-note">
               {debounced.trim()
                 ? `Nobody matches “${debounced.trim()}”.`
@@ -404,7 +645,7 @@ export default function RxStationPage() {
             </div>
           )}
 
-          <div className="ar-split">
+          <div className="ar-split ar-split--three">
             <div className="ar-col">
               {handovers.length > 0 && (
                 <>
@@ -417,21 +658,25 @@ export default function RxStationPage() {
                     their doctor.
                   </div>
                   {handovers.map((r) => (
-                    <div className="sq-done" key={r.visitId}>
-                      <div className="si-name">{r.name}</div>
-                      <div className="si-meta">
-                        {r.fileNo || "—"} · {r.echoTests.join(", ") || "Echo"} · then{" "}
-                        {r.doctorName || "their doctor"}
+                    <div className="rxq-row" key={r.visitId}>
+                      <div className="rxq-row__body">
+                        <div className="si-name">{r.name}</div>
+                        <div className="si-meta">
+                          {r.fileNo || "—"} · {r.echoTests.join(", ") || "Echo"} · then{" "}
+                          {r.doctorName || "their doctor"}
+                        </div>
                       </div>
-                      <button
-                        type="button"
-                        className={`st-btn ${r.reportReady ? "st-btn-grn" : "st-btn-g"}`}
-                        disabled={!r.reportReady || handOver.isPending}
-                        aria-label={`Hand over the echo report to ${r.name}`}
-                        onClick={() => onHandOver(r)}
-                      >
-                        {r.reportReady ? "Hand over report" : "Waiting for echo report"}
-                      </button>
+                      <div className="rxq-row__acts">
+                        <button
+                          type="button"
+                          className={`st-btn ${r.reportReady ? "st-btn-grn" : "st-btn-g"}`}
+                          disabled={!r.reportReady || handOver.isPending}
+                          aria-label={`Hand over the echo report to ${r.name}`}
+                          onClick={() => onHandOver(r)}
+                        >
+                          {r.reportReady ? "Hand over report" : "Waiting for echo report"}
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </>
@@ -457,28 +702,140 @@ export default function RxStationPage() {
 
             <div className="ar-col">
               <div className="grp-lbl grp-lbl-sp">
-                ✅ Explained today<span className="grp-split">{done.length}</span>
+                📱 Prescription not given<span className="grp-split">{notTaken.length}</span>
               </div>
-              <div className="grp-hint">Already sent on to the pharmacy.</div>
+              <div className="grp-hint">
+                Left without their prescription. Send it on WhatsApp, then mark done — they stay
+                here until someone does.
+              </div>
+              {!notTaken.length && <div className="empty-note">Nothing to send.</div>}
+              {notTaken.map((r) => {
+                const wa = whatsappHref(r.phone, r.name);
+                return (
+                  <div className="rxq-row rxq-row--stack" key={r.visitId}>
+                    <div className="pc-av" style={{ background: avatarColour(r.patientId) }}>
+                      {initials(r.name)}
+                    </div>
+                    <div className="rxq-row__body">
+                      <div className="si-name">{r.name}</div>
+                      <div className="si-meta">
+                        {r.fileNo || "—"} · {visitLabel(r.visitDate, today)}
+                        {r.doctorName ? ` · ${r.doctorName}` : ""}
+                        {r.phone ? ` · ${r.phone}` : " · no phone"}
+                      </div>
+                      <div className="rxq-row__tags">
+                        <span className="badge b-amb">⚠ {RX_NOT_TAKEN_REASON_LABEL[r.reason]}</span>
+                      </div>
+                      {r.lastFollowup && (
+                        <div className="rx-fu-last">
+                          {RX_FOLLOWUP_LABEL[r.lastFollowup.action]}: {r.lastFollowup.remark} —{" "}
+                          {r.lastFollowup.by || "—"}, {clock(r.lastFollowup.at)}
+                        </div>
+                      )}
+                    </div>
+                    <div className="rxq-row__acts">
+                      <button
+                        type="button"
+                        className="st-btn"
+                        aria-label={`Open ${r.name}'s prescription and medicine card`}
+                        onClick={() => openExplained(r.visitId)}
+                      >
+                        Open
+                      </button>
+                      {r.canPrint && (
+                        <>
+                          <button
+                            type="button"
+                            className="st-btn"
+                            aria-label={`Print ${r.name}'s prescription`}
+                            disabled={!!printing}
+                            onClick={() => onPrint(r.visitId, r.name, "rx")}
+                          >
+                            {printing === `${r.visitId}:rx` ? "🖨 Preparing…" : "🖨 Print"}
+                          </button>
+                          <button
+                            type="button"
+                            className="st-btn"
+                            aria-label={`Download ${r.name}'s prescription`}
+                            disabled={!!printing}
+                            onClick={() => onDownload(r.visitId, r.name)}
+                          >
+                            {printing === `${r.visitId}:download` ? "⬇ Preparing…" : "⬇ Download"}
+                          </button>
+                        </>
+                      )}
+                      {wa && (
+                        <a
+                          className="st-btn"
+                          href={wa}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-label={`Open WhatsApp chat with ${r.name}`}
+                        >
+                          📱 WhatsApp
+                        </a>
+                      )}
+                      <button
+                        type="button"
+                        className="st-btn st-btn-grn"
+                        aria-label={`Mark ${r.name}'s prescription done or add a remark`}
+                        onClick={() =>
+                          setFollowup({ patient: followupFor(r), actions: RESOLVE_ACTIONS })
+                        }
+                      >
+                        ✓ Mark done
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="ar-col">
+              <div className="grp-lbl grp-lbl-sp">
+                ✅ Done today<span className="grp-split">{done.length}</span>
+              </div>
+              <div className="grp-hint">
+                Passed the desk or left. ⚠ Not explained ones move to Prescription not given once
+                they leave.
+              </div>
               {!done.length && <div className="empty-note">Nobody yet.</div>}
               {done.map((r) => (
-                <div className="sq-done" key={r.visitId}>
+                <div className="rxq-row" key={r.visitId}>
                   <div className="pc-av" style={{ background: avatarColour(r.patientId) }}>
                     {initials(r.name)}
                   </div>
-                  <div className="si-name">{r.name}</div>
-                  <div className="si-meta">
-                    {r.fileNo || "—"} · {r.statusLabel}
-                    {r.rxFromHealthray && <span className="badge b-ink"> HealthRay Rx</span>}
+                  <div className="rxq-row__body">
+                    <div className="si-name">{r.name}</div>
+                    <div className="si-meta">
+                      {r.fileNo || "—"} · {r.statusLabel}
+                    </div>
+                    <div className="rxq-row__tags">
+                      <ExplainedBadge explained={r.explained} online={r.online} />
+                      {r.rxFromHealthray && <span className="badge b-ink">HealthRay Rx</span>}
+                    </div>
                   </div>
-                  {r.canPrint && (
+                  <div className="rxq-row__acts">
                     <button
+                      type="button"
                       className="st-btn"
-                      onClick={() => setViewing({ ...r, fromHealthray: r.rxFromHealthray })}
+                      aria-label={`Open ${r.name}'s prescription and medicine card`}
+                      onClick={() => openExplained(r.visitId)}
                     >
-                      🖨 View
+                      Open
                     </button>
-                  )}
+                    {r.canPrint && (
+                      <button
+                        type="button"
+                        className="st-btn"
+                        aria-label={`Print ${r.name}'s prescription`}
+                        disabled={!!printing}
+                        onClick={() => onPrint(r.visitId, r.name, "rx")}
+                      >
+                        {printing === `${r.visitId}:rx` ? "🖨 Preparing…" : "🖨 Print"}
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -488,6 +845,7 @@ export default function RxStationPage() {
 
       <Pane
         visitId={openId}
+        readOnly={openReadOnly}
         onClose={() => setOpenId(null)}
         onReturn={onReturn}
         onExplained={onExplained}
@@ -496,6 +854,11 @@ export default function RxStationPage() {
         onView={(visitId, name, fromHealthray, kind = "rx") =>
           setViewing({ visitId, name, fromHealthray, kind })
         }
+        onPrint={onPrint}
+        printing={printing}
+        onFollowup={(patient, actions) => setFollowup({ patient, actions })}
+        today={today}
+        listed={notTaken.some((r) => r.visitId === openId)}
         onReissue={onReissue}
         reissuing={reissue.isPending}
         returning={returnToQueue.isPending}
@@ -521,7 +884,21 @@ export default function RxStationPage() {
                   }`,
                 }
           }
+          printable
           onClose={() => setViewing(null)}
+        />
+      )}
+
+      {followup && (
+        <RxFollowupDialog
+          patient={followup.patient}
+          actions={followup.actions}
+          onClose={() => setFollowup(null)}
+          onDone={(message) => {
+            setFollowup(null);
+            setToast(`✓ ${message}`);
+            setTimeout(() => setToast(""), 3500);
+          }}
         />
       )}
 

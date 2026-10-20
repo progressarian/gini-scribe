@@ -4,10 +4,11 @@ import { getSlaConfig, budgetLookup } from "./board.js";
 import { buildCard } from "./medicineCard.js";
 import { buildCounsellingNote } from "./counsellingNote.js";
 import { stoppedToday } from "./pharmacyStation.js";
-import { STATUS_LABEL, slaKeyForStatus } from "../../../shared/giniflowStatus.js";
+import { STATUS_LABEL, WAIT_SINCE_SQL, slaKeyForStatus } from "../../../shared/giniflowStatus.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { getMachines } from "./machineCatalog.js";
 import { machineForTest } from "../../../shared/machineStages.js";
+import { EXPLAINED_SQL, ONLINE_VISIT_SQL, getRxFollowups } from "./rxFollowups.js";
 
 const QUEUE_STATUSES = ["doctor_done", "rx_pending", "with_rx"];
 const DONE_STATUSES = ["pharmacy_pending", "dispensed", "exited"];
@@ -22,13 +23,16 @@ const QUEUE_SQL = `
          (rx.id IS NOT NULL AND (rx.source <> 'visit' OR rxchg.last_change IS NULL OR rxchg.last_change <= rx.created_at))
            AS has_printable_rx,
          (rx.id IS NOT NULL AND rx.source = 'visit' AND rxchg.last_change > rx.created_at) AS rx_stale,
-         meds.n AS medicine_count
+         meds.n AS medicine_count,
+         ${EXPLAINED_SQL("v")} AS explained,
+         ${ONLINE_VISIT_SQL("v")} AS online
     FROM giniflow_visits v
     JOIN patients p ON p.id = v.patient_id
     LEFT JOIN doctors doc ON doc.id = v.assigned_doctor_id
     LEFT JOIN LATERAL (
       SELECT occurred_at FROM giniflow_visit_events e
-       WHERE e.visit_id = v.id ORDER BY occurred_at DESC, id DESC LIMIT 1
+       WHERE e.visit_id = v.id AND ${WAIT_SINCE_SQL("e", "v")}
+       ORDER BY occurred_at DESC, id DESC LIMIT 1
     ) last_ev ON TRUE
     LEFT JOIN LATERAL (
       SELECT id FROM consultations c
@@ -91,6 +95,8 @@ const toRow = (r, budgetFor, now) => {
     canPrint: !!r.has_printable_rx,
     rxStale: !!r.rx_stale,
     rxFromHealthray: r.rx_source === "healthray",
+    explained: !!r.explained,
+    online: !!r.online,
     since: r.since ? new Date(r.since).toISOString() : null,
     minutes,
     budget,
@@ -121,13 +127,15 @@ export async function getRxQueue(visitDate, q = null, now = new Date(), db = poo
 export async function getRxPatient(visitId, db = pool) {
   const { rows } = await db.query(
     `SELECT v.id AS visit_id, v.patient_id, v.current_status, v.visit_date::text AS visit_date,
-            p.name, p.file_no, p.age, p.sex,
+            p.name, p.file_no, p.age, p.sex, p.phone,
             doc.short_name AS doctor_name,
             cons.id AS consultation_id,
             rx.id AS document_id,
             rx.source AS rx_source,
             (rx.id IS NOT NULL AND rx.source = 'visit' AND rxchg.last_change > rx.created_at) AS rx_stale,
-            ${labOnlyPredicate("v", "$2")} AS lab_only
+            ${labOnlyPredicate("v", "$2")} AS lab_only,
+            ${EXPLAINED_SQL("v")} AS explained,
+            ${ONLINE_VISIT_SQL("v")} AS online
        FROM giniflow_visits v
        JOIN patients p ON p.id = v.patient_id
        LEFT JOIN doctors doc ON doc.id = v.assigned_doctor_id
@@ -166,7 +174,10 @@ export async function getRxPatient(visitId, db = pool) {
 
   const card = await buildCard(v.patient_id, db);
   const active = card.groups.flatMap((g) => g.medicines);
-  const stopped = await stoppedToday(v.patient_id, v.visit_date, db);
+  const [stopped, followups] = await Promise.all([
+    stoppedToday(v.patient_id, v.visit_date, db),
+    getRxFollowups(v.visit_id, db),
+  ]);
 
   return {
     visitId: v.visit_id,
@@ -182,6 +193,11 @@ export async function getRxPatient(visitId, db = pool) {
     canPrint: !!v.document_id && !v.rx_stale,
     rxStale: !!v.rx_stale,
     rxFromHealthray: v.rx_source === "healthray",
+    visitDate: v.visit_date,
+    phone: v.phone,
+    explained: !!v.explained,
+    online: !!v.online,
+    followups,
     card,
     stopped,
     counselling: buildCounsellingNote([...active, ...stopped]),

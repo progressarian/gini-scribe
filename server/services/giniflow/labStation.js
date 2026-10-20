@@ -1017,6 +1017,7 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
       .find(Boolean);
     return {
       rowKey: r.grp,
+      visitId: r.visit_id || null,
       homeCollection: !!r.home_collection,
       homeCollectable:
         !!r.home_collection &&

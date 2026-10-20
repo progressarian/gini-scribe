@@ -20,6 +20,7 @@ import {
   columnForStatus,
   isChainStatus,
   slaKeyForStatus,
+  WAIT_SINCE_SQL,
 } from "../../../shared/giniflowStatus.js";
 import { LAB_ONLY_DOCTOR, labOnlyHiddenPredicate } from "./labOnlyVisits.js";
 import { hideLabOnlyPatients } from "./floorSettings.js";
@@ -126,7 +127,8 @@ const QUEUE_SQL = `
     ) done_ev ON TRUE
     LEFT JOIN LATERAL (
       SELECT occurred_at FROM giniflow_visit_events e
-       WHERE e.visit_id = v.id ORDER BY occurred_at DESC, id DESC LIMIT 1
+       WHERE e.visit_id = v.id AND ${WAIT_SINCE_SQL("e", "v")}
+       ORDER BY occurred_at DESC, id DESC LIMIT 1
     ) last_ev ON TRUE
     -- The medicine names the pharmacist starts pulling stock from, and how many
     -- of them the inventory knows to be low or out. A medicine with no inventory

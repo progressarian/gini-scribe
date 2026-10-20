@@ -4,7 +4,7 @@ export const SITES = ["home", "ghm"];
 export const HOME_REQUEST_DAYS = 7;
 const CLOCK_SKEW_MS = 2 * 60 * 1000;
 
-export const HOME_COLLECTION_SQL = (v) => `(
+export const HOME_COLLECTION_SQL = (v) => `COALESCE(${v}.lab_site = 'home', (
   EXISTS (
     SELECT 1 FROM appointments hca
      WHERE hca.patient_id = ${v}.patient_id
@@ -20,7 +20,7 @@ export const HOME_COLLECTION_SQL = (v) => `(
        AND (hcr.created_at AT TIME ZONE 'Asia/Kolkata')::date
            BETWEEN ${v}.visit_date - ${HOME_REQUEST_DAYS} AND ${v}.visit_date
   )
-)`;
+))`;
 
 export const ORDER_COLLECTED_SQL = (o) => `(
   SELECT json_build_object(
@@ -85,7 +85,19 @@ export function refuseSiteForNonHome(site, visit) {
   if (site && !visit?.home) throw badRequest("This patient did not opt for home collection");
 }
 
-export const VISIT_HOME_SAMPLE_SQL = (v) => `(
+const RECEPTION_HOME_SAMPLE_SQL = (v) => `
+      UNION ALL
+      SELECT 'home', hrr.collected_by, hrr.entered_by, hrr.collected_at
+        FROM (
+          SELECT r.sample, r.collected_by, r.entered_by, r.collected_at
+            FROM giniflow_home_samples r
+           WHERE r.visit_id = ${v}.id
+           ORDER BY r.entered_at DESC, r.id DESC
+           LIMIT 1
+        ) hrr
+       WHERE hrr.sample = 'collected'`;
+
+export const VISIT_HOME_SAMPLE_SQL = (v, { reception = false } = {}) => `(
   SELECT json_build_object('site', hs.site, 'by', hs.by, 'byId', hs.by_id, 'at', hs.at)
     FROM (
       SELECT he.meta->>'site' AS site, COALESCE(hd.short_name, hd.name) AS by,
@@ -104,6 +116,7 @@ export const VISIT_HOME_SAMPLE_SQL = (v) => `(
         LEFT JOIN doctors hd ON hd.id = ha.actor_id
        WHERE ha.action = 'sample_taken' AND ha.collected_at_site IS NOT NULL
          AND hl.case_date = ${v}.visit_date AND hl.patient_id = ${v}.patient_id
+      ${reception ? RECEPTION_HOME_SAMPLE_SQL(v) : ""}
     ) hs
    ORDER BY hs.at DESC
    LIMIT 1
@@ -114,8 +127,8 @@ export const homeSampleOf = (row) =>
     ? { site: row.home_sample.site, by: row.home_sample.by, at: row.home_sample.at }
     : null;
 
-export const BOOKING_HOME_SAMPLE_SQL = (a) => `(
-  SELECT ${VISIT_HOME_SAMPLE_SQL("hbv")}
+export const BOOKING_HOME_SAMPLE_SQL = (a, opts) => `(
+  SELECT ${VISIT_HOME_SAMPLE_SQL("hbv", opts)}
     FROM giniflow_visits hbv
    WHERE hbv.patient_id = ${a}.patient_id AND hbv.visit_date = ${a}.appointment_date
    ORDER BY hbv.created_at

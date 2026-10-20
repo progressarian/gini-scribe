@@ -203,6 +203,46 @@
   color: var(--grn);
   background: var(--grn-l);
 }
+.gf .bc-badge--unfinal {
+  color: var(--amb);
+  background: var(--white, #fff);
+  border: 1px solid var(--amb);
+}
+.gf .bc-unfinal {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 8px 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--amb);
+  border-radius: var(--r, 8px);
+  background: var(--amb-l);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+.gf .bc-unfinal-banner {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid var(--amb);
+  border-radius: var(--r, 8px);
+  background: var(--amb-l);
+  font-size: 13px;
+}
+.gf .bc-unfinal-banner__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.gf .bc-unfinal-banner p {
+  margin: 0;
+}
 .gf .bc-group--toggle {
   width: 100%;
   gap: 6px;

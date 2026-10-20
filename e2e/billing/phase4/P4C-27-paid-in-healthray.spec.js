@@ -197,7 +197,7 @@ test.describe.serial("P4C-27 Paid in HealthRay clears the bill in one click", ()
     ).toBe(false);
     const { group, row } = await groupOf("C26Main");
     expect(group).toBe("billed");
-    expect(row.bill.state).toBe("paid");
+    expect(row.bill.state).toBe("paid_draft");
     expect(row.hints).toMatchObject({ tests: 0, due: 0 });
     const audit = await one(
       `SELECT COUNT(*)::int AS n FROM billing_audit

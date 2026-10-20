@@ -150,22 +150,73 @@ test.describe.serial("G93 the Rx counter prints the medicine card", () => {
     }
   });
 
-  test("5. the Rx counter has a Print medicine card button that opens the card", async ({
-    page,
-  }) => {
+  test("5. the Rx counter can view or print the medicine card", async ({ page }) => {
     await query(`UPDATE giniflow_visits SET current_status = 'rx_pending' WHERE id = ANY($1)`, [
       [made.full.visit, made.empty.visit],
     ]);
     await loginAs(page, "admin");
     await page.goto("/giniflow/station/rx");
     await page.getByText(`P4 CardFull ${tag}`).first().click();
-    const button = page.getByRole("button", { name: "🖨 Print medicine card" });
-    await expect(button).toBeEnabled();
-    await button.click();
+    await expect(page.getByRole("button", { name: "🖨 Print medicine card" })).toBeEnabled();
+    const view = page.getByRole("button", { name: "View medicine card" });
+    await expect(view).toBeEnabled();
+    await view.click();
     await expect(page.getByText(`Medicine card — P4 CardFull ${tag}`).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Print", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "✕" }).click();
     await page.getByRole("button", { name: "← Back" }).click();
     await page.getByText(`P4 CardEmpty ${tag}`).first().click();
+    await expect(page.getByRole("button", { name: "View medicine card" })).toBeDisabled();
     await expect(page.getByRole("button", { name: "🖨 Print medicine card" })).toBeDisabled();
+  });
+
+  test("6. an explained patient opens view-only, with the card to view or print", async ({
+    page,
+  }) => {
+    await query(`UPDATE giniflow_visits SET current_status = 'exited' WHERE id = $1`, [
+      made.full.visit,
+    ]);
+    await loginAs(page, "admin");
+    await page.goto("/giniflow/station/rx");
+    await page
+      .getByRole("button", { name: `Open P4 CardFull ${tag}'s prescription and medicine card` })
+      .click();
+    await expect(page.getByRole("dialog", { name: "Explain the prescription" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "View medicine card" })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "🖨 Print medicine card" })).toBeInViewport({
+      ratio: 1,
+    });
+    await expect(page.getByRole("button", { name: "🖨 Print medicine card" })).toBeEnabled();
+    await expect(page.getByRole("button", { name: /Explained — send to pharmacy/ })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Not this patient/ })).toHaveCount(0);
+    const { rows } = await query(`SELECT current_status FROM giniflow_visits WHERE id = $1`, [
+      made.full.visit,
+    ]);
+    expect(rows[0].current_status).toBe("exited");
+  });
+
+  test("7. print fetches the card first: success prints it, a server error is shown", async ({
+    page,
+  }) => {
+    await loginAs(page, "admin");
+    await page.goto("/giniflow/station/rx");
+    await page
+      .getByRole("button", { name: `Open P4 CardFull ${tag}'s prescription and medicine card` })
+      .click();
+    await page.getByRole("button", { name: "🖨 Print medicine card" }).click();
+    const frame = page.locator("iframe.pdf-print-frame");
+    await expect(frame).toHaveCount(1, { timeout: 45000 });
+    await expect(frame).toHaveAttribute("src", /^blob:/);
+    await expect(page.getByRole("button", { name: "🖨 Print medicine card" })).toBeEnabled();
+
+    await page.route("**/medicine-card.pdf*", (route) =>
+      route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "Card not ready for this visit" }),
+      }),
+    );
+    await page.getByRole("button", { name: "🖨 Print medicine card" }).click();
+    await expect(page.getByText("Card not ready for this visit")).toBeVisible();
   });
 });

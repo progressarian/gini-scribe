@@ -10,6 +10,7 @@ import {
   handOverEchoReport,
   returnRxToQueue,
 } from "../services/giniflow/rxStation.js";
+import { addRxFollowup, getRxNotTaken } from "../services/giniflow/rxFollowups.js";
 import { fetchRxFile, regenerateRx } from "../services/giniflow/printRx.js";
 import {
   addOrderedService,
@@ -28,7 +29,11 @@ import {
   giniflowArrivalBillPreviewSchema,
   giniflowArrivalBillSchema,
   giniflowReportReviewSchema,
+  homeSampleRecordSchema,
+  labSiteSchema,
 } from "../schemas/index.js";
+import { labSiteOf, setLabSite } from "../services/giniflow/labSite.js";
+import { homeSampleHistory, saveHomeSample } from "../services/giniflow/homeSampleRecords.js";
 import { arrivalBillPreview, commitArrivalBill } from "../services/billing/arrivalBill.js";
 import { auditContext } from "../services/billing/audit.js";
 import { requestMedicine } from "../services/pharmacy/stockNeeded.js";
@@ -41,6 +46,7 @@ import {
   giniflowAllergySchema,
   giniflowRxPauseSchema,
   giniflowRxStopSchema,
+  giniflowRxFollowupSchema,
   giniflowMedSearchQuerySchema,
   pharmacyMedicineRequestSchema,
   giniflowExternalMedSchema,
@@ -1111,9 +1117,10 @@ router.get(
   async (req, res) => {
     try {
       const date = await resolveDate(req.query.date);
-      const role = req.doctor?.role;
       const allowed = Object.fromEntries(
-        Object.entries(GINIFLOW_LAUNCHER_CAPABILITY).filter(([, cap]) => hasCapability(role, cap)),
+        Object.entries(GINIFLOW_LAUNCHER_CAPABILITY).filter(([, cap]) =>
+          hasCapability(req.doctor, cap),
+        ),
       );
       const summary = await getStationSummary(date, undefined, { stations: Object.keys(allowed) });
       res.json({
@@ -1393,6 +1400,64 @@ router.post(
       );
     } catch (e) {
       handleError(res, e, "Gini Flow back for tests");
+    }
+  },
+);
+
+router.post(
+  "/giniflow/stations/reception/:visitId/home-sample",
+  receptionGate,
+  validate(homeSampleRecordSchema),
+  async (req, res) => {
+    try {
+      res.json(
+        await saveHomeSample(req.params.visitId, req.body, {
+          actorId: req.doctor?.doctor_id ?? null,
+          role: req.doctor?.role ?? null,
+        }),
+      );
+    } catch (e) {
+      handleError(res, e, "Gini Flow home sample");
+    }
+  },
+);
+
+router.get(
+  "/giniflow/stations/reception/:visitId/home-sample/history",
+  receptionGate,
+  async (req, res) => {
+    try {
+      res.json({ history: await homeSampleHistory(req.params.visitId) });
+    } catch (e) {
+      handleError(res, e, "Gini Flow home sample history");
+    }
+  },
+);
+
+const labSiteGate = requireCapability([CAP.BILLING_DESK, CAP.GINIFLOW_STATION_LAB_COLLECT]);
+
+router.get("/giniflow/stations/lab-site/:visitId", labSiteGate, async (req, res) => {
+  try {
+    res.json(await labSiteOf(req.params.visitId));
+  } catch (e) {
+    handleError(res, e, "Gini Flow lab sample category");
+  }
+});
+
+router.post(
+  "/giniflow/stations/lab-site/:visitId",
+  labSiteGate,
+  validate(labSiteSchema),
+  async (req, res) => {
+    try {
+      res.json(
+        await setLabSite(req.params.visitId, req.body.site, {
+          actorId: req.doctor?.doctor_id ?? null,
+          actorName: (req.doctor?.short_name || req.doctor?.doctor_name || "").trim() || null,
+        }),
+      );
+    } catch (e) {
+      handleError(res, e, "Gini Flow set lab sample category");
     }
   },
 );
@@ -2933,6 +2998,7 @@ router.get(
       res.json({
         date,
         ...(await getRxQueue(date, req.query.q ?? null)),
+        notTaken: await getRxNotTaken(date, req.query.q ?? null),
         serverTime: new Date().toISOString(),
       });
     } catch (e) {
@@ -2948,6 +3014,19 @@ router.get("/giniflow/stations/rx/:visitId", rxGate, async (req, res) => {
     handleError(res, e, "Gini Flow Rx patient");
   }
 });
+
+router.post(
+  "/giniflow/stations/rx/:visitId/followup",
+  rxGate,
+  validate(giniflowRxFollowupSchema),
+  async (req, res) => {
+    try {
+      res.json(await addRxFollowup(req.params.visitId, req.body, req.doctor?.doctor_id ?? null));
+    } catch (e) {
+      handleError(res, e, "Gini Flow Rx follow-up");
+    }
+  },
+);
 
 router.post("/giniflow/stations/rx/:visitId/start", rxGate, async (req, res) => {
   try {

@@ -46,6 +46,14 @@ import useDebounced from "../../hooks/useDebounced";
 import { CAPABILITIES as CAPS, hasCapability } from "../../../shared/permissions.js";
 import CancelTestControl from "../../components/giniflow/CancelTestControl";
 import UrgentCancelControl from "../../components/giniflow/UrgentCancelControl";
+import HomeSampleDialog, {
+  HomeSampleFields,
+  HomeSampleLine,
+  emptyHomeAnswer,
+  homePayload,
+  homeProblemsNow,
+} from "../../components/giniflow/HomeSampleDialog";
+import { useSaveHomeSample } from "../../queries/hooks/useHomeSample";
 import {
   cancelledText,
   cancelledToastMs,
@@ -1274,6 +1282,13 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   const [billFor, setBillFor] = useState(null);
   const [arrivalChoices, setArrivalChoices] = useState(emptyArrivalChoices);
   const [arrivalError, setArrivalError] = useState(null);
+  const asksHome = Boolean(arrival.visitId && canRecordHome(arrival) && !arrival.homeRecord);
+  const saveHome = useSaveHomeSample();
+  const [homeAnswer, setHomeAnswer] = useState(emptyHomeAnswer);
+  const [homeSaved, setHomeSaved] = useState(false);
+  const [homeTouched, setHomeTouched] = useState(false);
+  const homeProblems = asksHome && !homeSaved ? homeProblemsNow(homeAnswer) : {};
+  const homeMissing = Object.keys(homeProblems).length > 0;
   const billVisitId = billFor || arrival.visitId;
   const journeyPlan = useDebounced(
     useMemo(
@@ -1412,6 +1427,8 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   const billPending = canBill && Boolean(billVisitId) && !arrivalBill.data && !arrivalBill.isError;
   const blocked =
     saving ||
+    saveHome.isPending ||
+    homeMissing ||
     arrivalBusy ||
     !list.length ||
     consultantMissing ||
@@ -1424,6 +1441,10 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
 
   const submit = async (sendWhatsapp, { bill: withBill = true } = {}) => {
     try {
+      if (asksHome && !homeSaved) {
+        await saveHome.mutateAsync({ visitId: arrival.visitId, ...homePayload(homeAnswer) });
+        setHomeSaved(true);
+      }
       let visitId = arrival.visitId;
       if (!visitId) {
         const created = await checkInWalkIn.mutateAsync({
@@ -1495,6 +1516,28 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
 
         <div className="dp-scroll">
           <div className="dp-inner ci-panel">
+            {asksHome && (
+              <section
+                className="ci-home"
+                aria-label="Home collection — ask the patient"
+                onBlur={() => setHomeTouched(true)}
+              >
+                <div className="ci-home__title">🏠 Home collection — ask the patient</div>
+                {homeSaved ? (
+                  <p className="ci-home-need" role="status">
+                    Home sample saved.
+                  </p>
+                ) : (
+                  <HomeSampleFields
+                    value={homeAnswer}
+                    onChange={setHomeAnswer}
+                    problems={homeProblems}
+                    showErrors={homeTouched}
+                    withNote={false}
+                  />
+                )}
+              </section>
+            )}
             <div className="wi-head">
               <strong>What is this visit?</strong>
             </div>
@@ -1630,6 +1673,11 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
           </div>
         ) : (
           <div className="dp-foot">
+            {homeMissing && (
+              <p className="ci-home-need btn-full" role="status">
+                Answer the home sample question first
+              </p>
+            )}
             <button
               className="btn-full st-btn st-btn-grn"
               disabled={blocked}
@@ -1654,7 +1702,7 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
               <button
                 type="button"
                 className="st-btn st-btn-g"
-                disabled={saving || arrivalBusy || !list.length || consultantMissing}
+                disabled={saving || homeMissing || arrivalBusy || !list.length || consultantMissing}
                 onClick={() => submit(false, { bill: false })}
               >
                 Check in only — bill later
@@ -1892,7 +1940,23 @@ function LateChip({ minutesLate }) {
   return <span className={`ar-late${tone}`}>{minutesLate}m past slot</span>;
 }
 
-function ArrivalRow({ arrival, children, note, warning, wide }) {
+const canRecordHome = (a) => a.homeCollection && a.homeRecordsOn;
+
+function HomeSampleButton({ arrival, onHome }) {
+  if (!canRecordHome(arrival) || !onHome) return null;
+  return (
+    <button
+      type="button"
+      className="st-btn st-btn-g ar-home-btn"
+      title="Record what the home collection staff reported"
+      onClick={() => onHome(arrival)}
+    >
+      🏠 Home sample
+    </button>
+  );
+}
+
+function ArrivalRow({ arrival, children, note, warning, wide, showLabOnly }) {
   return (
     <div className="ar-row">
       <div className="ar-slot">{arrival.slot || "—"}</div>
@@ -1900,8 +1964,10 @@ function ArrivalRow({ arrival, children, note, warning, wide }) {
         <div className="ar-name">
           {arrival.name}
           {arrival.priority !== "normal" && <span className="badge b-red">{arrival.priority}</span>}
+          {showLabOnly && arrival.samplesOnly && <span className="badge b-tl">🧪 Lab only</span>}
         </div>
         <div className="ar-meta">{identity(arrival)}</div>
+        {arrival.homeCollection && <HomeSampleLine record={arrival.homeRecord} />}
         {note && <div className="ar-note">{note}</div>}
         {warning && (
           <div className="ar-dup" role="alert">
@@ -1956,12 +2022,12 @@ function BillButton({ visitId, bills }) {
   );
 }
 
-function ExpectedRow({ arrival, onAct, onCheckIn, busy, bills }) {
+function ExpectedRow({ arrival, onAct, onCheckIn, onHome, busy, bills }) {
   const [reason, setReason] = useState(null);
 
   if (reason !== null) {
     return (
-      <ArrivalRow arrival={arrival} wide>
+      <ArrivalRow arrival={arrival} wide showLabOnly>
         <form
           className="ar-reason"
           onSubmit={(e) => {
@@ -1993,6 +2059,7 @@ function ExpectedRow({ arrival, onAct, onCheckIn, busy, bills }) {
   return (
     <ArrivalRow
       arrival={arrival}
+      showLabOnly
       warning={
         twin &&
         `⚠ Same name and phone as ${twin.name} (${twin.fileNo}), already on the floor — ${twin.statusLabel}. Check it is not the same person before marking arrived.`
@@ -2017,6 +2084,7 @@ function ExpectedRow({ arrival, onAct, onCheckIn, busy, bills }) {
         Cancel
       </button>
       <BillButton visitId={arrival.visitId} bills={bills} />
+      <HomeSampleButton arrival={arrival} onHome={onHome} />
     </ArrivalRow>
   );
 }
@@ -2155,6 +2223,7 @@ export function ArrivalsTab({
   const [journeyFor, setJourneyFor] = useState(null);
   const [proceduresFor, setProceduresFor] = useState(null);
   const [backForTestsFor, setBackForTestsFor] = useState(null);
+  const [homeFor, setHomeFor] = useState(null);
   const canBill = useCanBill();
   const bills = useBillStates(canBill);
   const expected = data?.expected || [];
@@ -2241,6 +2310,17 @@ export function ArrivalsTab({
         />
       )}
 
+      {homeFor && (
+        <HomeSampleDialog
+          arrival={homeFor}
+          onClose={() => setHomeFor(null)}
+          onSaved={(message) => {
+            setHomeFor(null);
+            onNote(message);
+          }}
+        />
+      )}
+
       {arriving && (
         <CheckInPanel
           arrival={arriving}
@@ -2273,6 +2353,7 @@ export function ArrivalsTab({
               arrival={a}
               onAct={onAct}
               onCheckIn={setArriving}
+              onHome={setHomeFor}
               busy={busy}
               bills={bills}
             />
@@ -2386,6 +2467,9 @@ export function ArrivalsTab({
                 </button>
               )}
               <BillButton visitId={a.visitId} bills={bills} />
+              {!FINISHED_STATUSES.includes(a.status) && (
+                <HomeSampleButton arrival={a} onHome={setHomeFor} />
+              )}
               <span className="ar-since">
                 {a.paused
                   ? `${pauseReasonLabel(a.pausedReason) || "On break"} · on break since ${clock(a.pausedAt)}`

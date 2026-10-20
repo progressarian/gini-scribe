@@ -167,10 +167,11 @@ export const PAGE_CAPABILITIES = {
   "/crm/referral/:doctorId": CAP.CRM_ACCESS,
   "/crm/import": CAP.CRM_IMPORT,
   "/flow/admin": CAP.ADMIN,
+  "/care-followups": CAP.CARE_FOLLOWUPS,
 };
 
 export const ROLE_NAV_ALLOWLIST = {
-  [ROLES.OBT]: ["/obt-dashboard", "/ghm", "/find"],
+  [ROLES.OBT]: ["/obt-dashboard", "/ghm", "/find", "/giniflow/stations"],
   // The prescription explainer holds GINIFLOW_VIEW only because `/api/giniflow*` is
   // prefix-gated on it, so a plain capability nav would also offer them the
   // manager board. The allowlist keeps the nav to the launcher, which shows

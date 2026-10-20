@@ -76,6 +76,7 @@ const GLOBALS = new Set([
   "HTMLElement",
   "Element",
   "AbortController",
+  "AbortSignal",
   "URL",
   "structuredClone",
   "requestAnimationFrame",

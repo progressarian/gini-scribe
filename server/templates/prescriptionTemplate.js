@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { MED_CATEGORIES, detectMedCategory } from "../config/medicationCategories.js";
 import { sortDiagnoses } from "../utils/diagnosisSort.js";
 import { followUpDueDate, pickNextVisit, skipSunday } from "../../shared/followUp.js";
+import { toLocal10 } from "../../shared/phone.js";
 import { DEFAULT_HOSPITAL, normalizeHospital } from "../services/prescriptionFooter.js";
 
 const HOSPITAL_NAME = DEFAULT_HOSPITAL.name;
@@ -143,6 +144,22 @@ const val = (v) => {
   if (v == null) return null;
   const s = String(v).trim();
   return s === "" || s === "null" ? null : s;
+};
+
+const timingWords = (text) =>
+  String(text || "")
+    .toLowerCase()
+    .replace(/\./g, "")
+    .replace(/\b(minutes|minute|mins)\b/g, "min")
+    .replace(/\b(hours|hour|hrs)\b/g, "hr")
+    .split(/[^a-z0-9/]+/)
+    .filter(Boolean);
+
+const timingShown = (timing, instructions) => {
+  const words = timingWords(timing);
+  if (!words.length) return "";
+  const said = new Set(timingWords(instructions));
+  return words.every((w) => said.has(w)) ? "" : timing;
 };
 
 const escape = (s) => {
@@ -418,11 +435,10 @@ body{font-family:var(--fb);color:var(--ink);background:var(--white);font-size:va
 .rx-doc{flex:1 1 0;text-align:right}
 .rx-doc-name{font-size:13px;font-weight:700;color:#fff}
 .rx-doc-cred{font-size:var(--fs-meta);color:rgba(255,255,255,.5);line-height:1.6;margin-top:2px}
-.rx-patient-bar{background:var(--bg);padding:10px 16px;display:flex;gap:20px;align-items:center;border-bottom:1px solid var(--bd);flex-wrap:wrap}
+.rx-patient-bar{background:var(--bg);padding:10px 16px;display:flex;justify-content:space-between;align-items:center;gap:16px;border-bottom:1px solid var(--bd)}
+.rx-pt-phone{flex:0 0 auto;text-align:right;font-size:var(--fs-body);font-weight:600;color:var(--nv);white-space:nowrap}
 .rx-pt-name{font-size:var(--fs-head);font-weight:700;color:var(--nv)}
 .rx-pt-meta{font-size:var(--fs-meta);color:var(--ink3)}
-.rx-pt-pills{display:flex;gap:5px;margin-left:auto;flex-wrap:wrap}
-.rx-pill{font-size:var(--fs-label);font-weight:700;padding:2px 8px;border-radius:10px}
 .rx-body{padding:14px 16px 6px;-webkit-box-decoration-break:clone;box-decoration-break:clone}
 
 .rx-summary-block{background:var(--tll);border:1px solid var(--tlb);border-radius:7px;padding:10px 14px;margin-bottom:16px;font-size:var(--fs-body);line-height:1.55;color:var(--ink)}
@@ -640,21 +656,25 @@ function buildPrescriptionHtml(data = {}) {
     .trim()
     .charAt(0)
     .toUpperCase();
-  const patientQualifier = `${patient.age ?? ""}${sexInitial}`;
+  const patientQualifier = [
+    patient.age != null && patient.age !== "" ? `${patient.age} Y` : "",
+    sexInitial,
+  ]
+    .filter(Boolean)
+    .join(" / ");
   const patientTitle = [patient.name || "", patientQualifier ? `(${patientQualifier})` : ""]
     .filter(Boolean)
     .join(" ");
 
-  const patientMeta = [patient.file_no || patient.id, fmtDateLong(today)]
+  const phoneDigits = toLocal10(patient.phone);
+  const patientPhone =
+    phoneDigits.length === 10
+      ? `+91 ${phoneDigits.slice(0, 5)} ${phoneDigits.slice(5)}`
+      : phoneDigits;
+  const patientUhid = patient.file_no || patient.id;
+  const patientMeta = [patientUhid ? `UHID: ${patientUhid}` : "", fmtDateLong(today)]
     .filter(Boolean)
     .join(" · ");
-
-  const monthsLabel =
-    summary.monthsWithGini != null
-      ? summary.monthsWithGini >= 12
-        ? `${Math.floor(summary.monthsWithGini / 12)}+ years on programme`
-        : `${summary.monthsWithGini} months on programme`
-      : null;
 
   // ── Doctor cred lines (qualification only; reg_no goes in footer)
   const credLines = [];
@@ -876,7 +896,7 @@ function buildPrescriptionHtml(data = {}) {
           </div>
           <div class="rx-med-right">
             <div class="rx-med-dose">${escape(val(child.dose) || val(child.dosage) || val(child.frequency) || "—")}</div>
-            <div class="rx-med-timing">${escape(val(child.timing) || "")}</div>
+            <div class="rx-med-timing">${escape(timingShown(val(child.timing), val(child.instructions)))}</div>
           </div>
         </div>`;
   };
@@ -910,7 +930,7 @@ function buildPrescriptionHtml(data = {}) {
           </div>
           <div class="rx-med-right">
             <div class="rx-med-dose">${escape(val(m.dose) || val(m.dosage) || val(m.frequency) || "—")}</div>
-            <div class="rx-med-timing">${escape(val(m.timing) || "")}</div>
+            <div class="rx-med-timing">${escape(timingShown(val(m.timing), val(m.instructions)))}</div>
           </div>
         </div>${childrenHtml}`;
   };
@@ -974,14 +994,6 @@ function buildPrescriptionHtml(data = {}) {
           })
           .join("")}</div>`
       : "";
-
-  // ── Pills
-  const phasePill = summary.carePhase
-    ? `<span class="rx-pill" style="background:var(--aml);color:var(--am)">${escape(summary.carePhase)}</span>`
-    : "";
-  const monthsPill = monthsLabel
-    ? `<span class="rx-pill" style="background:var(--tll);color:var(--tl)">${escape(monthsLabel)}</span>`
-    : "";
 
   // ── Footer next-visit text
   const visitDay = String(consultations?.[0]?.visit_date || today).slice(0, 10);
@@ -1075,7 +1087,7 @@ function buildPrescriptionHtml(data = {}) {
       <div class="rx-pt-name">${escape(patientTitle)}</div>
       <div class="rx-pt-meta">${escape(patientMeta)}</div>
     </div>
-    <div class="rx-pt-pills">${phasePill}${monthsPill}</div>
+    ${patientPhone ? `<div class="rx-pt-phone">Ph: ${escape(patientPhone)}</div>` : ""}
   </div>
 
   <div class="rx-body">
@@ -1170,9 +1182,11 @@ function buildPrescriptionHtml(data = {}) {
   <div class="rx-footer">
     <div class="rx-sig">
       <div style="font-weight:700">${escape(doctor.name || "Doctor")}</div>
-      <div style="font-size:10px;color:var(--ink3)">${
-        doctor.reg_no ? `Reg. No. ${escape(doctor.reg_no)} · ` : ""
-      }Date: ${fmtDateLong(today)}</div>
+      ${
+        doctor.reg_no
+          ? `<div style="font-size:10px;color:var(--ink3)">Reg. No. ${escape(doctor.reg_no)}</div>`
+          : ""
+      }
     </div>
     <div class="rx-next">${nextVisitText}</div>
   </div>

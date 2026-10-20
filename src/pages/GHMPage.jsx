@@ -995,7 +995,7 @@ function DemographicFields({ dob, age, sex, onChange }) {
 }
 
 // ─── New Appointment modal ─────────────────────────────────────────────────
-function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated }) {
+export function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated }) {
   const isPrefilled = !!prefill?.patient_name;
   const [form, setForm] = useState({
     patient_name: prefill?.patient_name || "",
@@ -1005,17 +1005,17 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
     dob: toDateInput(prefill?.dob),
     age: prefill?.age != null ? String(prefill.age) : "",
     sex: canonSex(prefill?.sex),
-    doctor_name: prefill?.doctor_name || doctors[0] || "",
+    doctor_name: prefill?.doctor_name ?? doctors[0] ?? "",
     appointment_date: prefill?.preferred_date || defaultDate,
     time_slot: "",
     // A repeat booking for a known patient is almost always a follow-up
-    visit_type: isPrefilled ? "Follow Up" : "New",
+    visit_type: prefill?.visit_type || (isPrefilled ? "Follow Up" : "New"),
     appointment_type: "Physical",
     address: prefill?.address || "",
     condition: prefill?.condition || "",
     booked_by_name: "",
-    notes: "",
-    home_collection: false,
+    notes: prefill?.notes || "",
+    home_collection: Boolean(prefill?.home_collection),
   });
   const [err, setErr] = useState("");
   const [dup, setDup] = useState(null);
@@ -1154,6 +1154,7 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
         ...(allowDuplicate ? { allow_duplicate: true } : null),
       });
       setBooked({
+        id: created?.id ?? null,
         patient_name: form.patient_name.trim(),
         file_no: created?.file_no || form.file_no.trim(),
         phone: form.phone,
@@ -1180,7 +1181,7 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
     }
   };
 
-  const done = () => onCreated(booked?.appointment_date || form.appointment_date);
+  const done = () => onCreated(booked?.appointment_date || form.appointment_date, booked);
 
   if (booked) {
     return (
@@ -1373,7 +1374,10 @@ function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated
               <span>Doctor *</span>
               <select value={form.doctor_name} onChange={(e) => set("doctor_name", e.target.value)}>
                 <option value="">— Select doctor</option>
-                {doctors.map((d) => (
+                {(form.doctor_name && !doctors.includes(form.doctor_name)
+                  ? [form.doctor_name, ...doctors]
+                  : doctors
+                ).map((d) => (
                   <option key={d} value={d}>
                     {d}
                   </option>

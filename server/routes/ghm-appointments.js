@@ -46,6 +46,8 @@ import {
   RISK_LEVELS,
 } from "../services/ghmMissed.js";
 import { BOOKING_HOME_SAMPLE_SQL } from "../services/giniflow/homeCollection.js";
+import { homeSamplesReady } from "../services/giniflow/homeSampleRecords.js";
+import { followBookingTag } from "../services/giniflow/labSite.js";
 
 const router = Router();
 
@@ -1186,11 +1188,12 @@ router.get("/ghm-appointments", async (req, res) => {
       String(req.query.home_collection || "").toLowerCase(),
     );
     const homeSample = String(req.query.home_sample || "").toLowerCase();
+    const homeOpts = { reception: await homeSamplesReady() };
     const homeCond =
       homeSample === "pending"
-        ? ` AND a.home_collection IS TRUE AND ${BOOKING_HOME_SAMPLE_SQL("a")} IS NULL`
+        ? ` AND a.home_collection IS TRUE AND ${BOOKING_HOME_SAMPLE_SQL("a", homeOpts)} IS NULL`
         : homeSample === "collected"
-          ? ` AND a.home_collection IS TRUE AND ${BOOKING_HOME_SAMPLE_SQL("a")} IS NOT NULL`
+          ? ` AND a.home_collection IS TRUE AND ${BOOKING_HOME_SAMPLE_SQL("a", homeOpts)} IS NOT NULL`
           : homeOnly
             ? " AND a.home_collection IS TRUE"
             : "";
@@ -1242,10 +1245,10 @@ router.get("/ghm-appointments", async (req, res) => {
                 (CASE WHEN lp.stale THEN NULL ELSE lp.set_by_id END) AS preferred_set_by_id,
                 (CASE WHEN lp.stale THEN NULL ELSE lp.set_at END) AS preferred_set_at,
                 COALESCE(a.home_collection, FALSE) AS home_collection,
-                CASE WHEN a.home_collection IS TRUE THEN ${BOOKING_HOME_SAMPLE_SQL("a")} END
+                CASE WHEN a.home_collection IS TRUE THEN ${BOOKING_HOME_SAMPLE_SQL("a", homeOpts)} END
                   AS home_sample,
                 CASE WHEN a.home_collection IS TRUE
-                     THEN COALESCE(${BOOKING_HOME_SAMPLE_SQL("a")}->>'site', 'not_collected') END
+                     THEN COALESCE(${BOOKING_HOME_SAMPLE_SQL("a", homeOpts)}->>'site', 'not_collected') END
                   AS home_sample_status,
                 a.patient_category,
                 p.id AS patient_id, p.address, p.email,
@@ -2336,6 +2339,8 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
         patientVals,
       );
     }
+
+    if ("home_collection" in req.body) await followBookingTag(r.rows[0]);
 
     // Log doctor changes. Values are normalised to text first — home_collection
     // is a boolean, and `false || ""` would otherwise read as "no value" and

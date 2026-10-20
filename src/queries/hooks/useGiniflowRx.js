@@ -72,6 +72,15 @@ export function useMarkRxExplained() {
   });
 }
 
+export function useAddRxFollowup() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ visitId, action, remark }) =>
+      (await api.post(`/api/giniflow/stations/rx/${visitId}/followup`, { action, remark })).data,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["giniflow", "rx"] }),
+  });
+}
+
 export function useReissueRx() {
   const queryClient = useQueryClient();
   return useMutation({

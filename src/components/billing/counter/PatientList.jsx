@@ -9,13 +9,23 @@ const BILL_BADGE = {
   [STATE.DRAFT]: { tone: "draft", label: () => "Draft" },
   [STATE.DUE]: { tone: "due", label: (bill) => `${fromPaise(bill.due)} due` },
   [STATE.PAID]: { tone: "paid", label: () => "Paid" },
+  [STATE.PAID_DRAFT]: {
+    tone: "unfinal",
+    label: () => "Paid · not final",
+    title:
+      "Fully paid, but the bill isn't final yet — open it and press Finalise & print to give it a bill number.",
+  },
   [STATE.CLAIM_PENDING]: { tone: "claim", label: () => "CGHS pending" },
   [STATE.CLAIM_CLEARED]: { tone: "paid", label: () => "Cleared" },
 };
 
 export function BillBadge({ bill }) {
   const badge = BILL_BADGE[bill?.state] || BILL_BADGE[STATE.NONE];
-  return <span className={`bc-badge bc-badge--${badge.tone}`}>{badge.label(bill)}</span>;
+  return (
+    <span className={`bc-badge bc-badge--${badge.tone}`} title={badge.title}>
+      {badge.label(bill)}
+    </span>
+  );
 }
 
 function Badges({ row }) {
@@ -102,6 +112,15 @@ function Rows({ rows, visitId, onPick }) {
   ));
 }
 
+const LEFT_STATUSES = ["dispensed", "exited"];
+
+export const paidNotFinal = (rows) =>
+  rows
+    .filter((row) => row.bill?.state === STATE.PAID_DRAFT)
+    .sort(
+      (a, b) => Number(LEFT_STATUSES.includes(b.status)) - Number(LEFT_STATUSES.includes(a.status)),
+    );
+
 export const counterRows = (data) => [
   ...(data?.toBill || []),
   ...(data?.billed || []),
@@ -162,6 +181,8 @@ export default function PatientList({
   const matchBilled = searching && billed.length > 0;
   const matchWaiting = searching && waiting.length > 0;
   const [open, setOpen] = useState({ fees: true, toBill: true, billed: true, waiting: false });
+  const [onlyUnfinal, setOnlyUnfinal] = useState(false);
+  const unfinal = paidNotFinal(counterRows(data));
   const feesToggle = useRef(null);
 
   useEffect(() => {
@@ -185,60 +206,82 @@ export default function PatientList({
   }, [matchBilled]);
 
   const shared = { isLoading, visitId, onPick };
+  const showUnfinal = onlyUnfinal && unfinal.length > 0;
   return (
     <div className="bc-list__body">
-      {feeChanges.length > 0 && (
-        <section aria-label="Consultant changes to settle">
+      {unfinal.length > 0 && (
+        <div className="bc-unfinal" role="status">
+          <span>⚠ {unfinal.length} paid, not final</span>
+          <button
+            type="button"
+            className="st-btn st-btn-g"
+            aria-pressed={showUnfinal}
+            onClick={() => setOnlyUnfinal(!showUnfinal)}
+          >
+            {showUnfinal ? "Show all" : "Show them"}
+          </button>
+        </div>
+      )}
+      {showUnfinal ? (
+        <section aria-label="Paid, not final">
+          <Rows rows={unfinal} visitId={visitId} onPick={onPick} />
+        </section>
+      ) : (
+        <>
+          {feeChanges.length > 0 && (
+            <section aria-label="Consultant changes to settle">
+              <Group
+                id="bc-fee-changes"
+                label="Fee to settle"
+                rows={feeChanges}
+                open={open.fees}
+                onToggle={toggle("fees")}
+                toggleRef={feesToggle}
+                {...shared}
+                isLoading={false}
+              >
+                {feeChanges.map((change) => (
+                  <ChangeRow
+                    key={change.id}
+                    change={change}
+                    active={change.visit_id === visitId}
+                    onPick={onPick}
+                  />
+                ))}
+              </Group>
+            </section>
+          )}
           <Group
-            id="bc-fee-changes"
-            label="Fee to settle"
-            rows={feeChanges}
-            open={open.fees}
-            onToggle={toggle("fees")}
-            toggleRef={feesToggle}
+            id="bc-to-bill"
+            label="Pending bill"
+            rows={toBill}
+            open={open.toBill}
+            onToggle={toggle("toBill")}
+            empty="Nobody is waiting for a bill."
+            {...shared}
+          />
+          <Group
+            id="bc-billed"
+            label="Billed today / Exited"
+            rows={billed}
+            open={open.billed}
+            onToggle={toggle("billed")}
+            empty="Nobody billed or exited yet."
             {...shared}
             isLoading={false}
-          >
-            {feeChanges.map((change) => (
-              <ChangeRow
-                key={change.id}
-                change={change}
-                active={change.visit_id === visitId}
-                onPick={onPick}
-              />
-            ))}
-          </Group>
-        </section>
+          />
+          <Group
+            id="bc-waiting"
+            label="Nothing to bill yet"
+            rows={waiting}
+            open={open.waiting}
+            onToggle={toggle("waiting")}
+            empty="Nobody waiting."
+            {...shared}
+            isLoading={false}
+          />
+        </>
       )}
-      <Group
-        id="bc-to-bill"
-        label="Pending bill"
-        rows={toBill}
-        open={open.toBill}
-        onToggle={toggle("toBill")}
-        empty="Nobody is waiting for a bill."
-        {...shared}
-      />
-      <Group
-        id="bc-billed"
-        label="Billed today / Exited"
-        rows={billed}
-        open={open.billed}
-        onToggle={toggle("billed")}
-        empty="Nobody billed or exited yet."
-        {...shared}
-        isLoading={false}
-      />
-      <Group
-        id="bc-waiting"
-        label="Nothing to bill yet"
-        rows={waiting}
-        open={open.waiting}
-        onToggle={toggle("waiting")}
-        empty="Nobody waiting."
-        {...shared}
-        isLoading={false}
-      />
     </div>
   );
 }

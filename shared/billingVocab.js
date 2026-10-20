@@ -35,6 +35,7 @@ export const COUNTER_BILL_STATE = {
   DRAFT: "draft",
   DUE: "due",
   PAID: "paid",
+  PAID_DRAFT: "paid_draft",
   CLAIM_PENDING: "claim_pending",
   CLAIM_CLEARED: "claim_cleared",
 };

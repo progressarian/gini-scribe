@@ -45,6 +45,7 @@ import {
 import { directConsultSql } from "../../../shared/directConsult.js";
 import { ORDERED_AFTER_CONSULT_SQL } from "../billing/afterConsult.js";
 import { HELD_ORDER_SQL } from "./cancelHold.js";
+import { homeForDay } from "./homeSampleRecords.js";
 import { orderCancelStage } from "../../../shared/testCancelStages.js";
 import {
   HOME_COLLECTION_SQL,
@@ -1045,7 +1046,10 @@ const alreadyOnFloorAs = (row, rows) => {
 };
 
 export async function getArrivals(visitDate, q = "", now = new Date(), db = pool) {
-  const { rows } = await db.query(ARRIVAL_SELECT, [visitDate]);
+  const [{ rows }, home] = await Promise.all([
+    db.query(ARRIVAL_SELECT, [visitDate]),
+    homeForDay(visitDate, db),
+  ]);
 
   // Server-side, and the board's own search rather than a second implementation:
   // it already normalises phone numbers the way the rest of the repo does, and a
@@ -1059,6 +1063,9 @@ export async function getArrivals(visitDate, q = "", now = new Date(), db = pool
 
   const arrivals = visible.map((r) => ({
     ...shapeArrival(r, now),
+    homeCollection: home.byVisit.has(r.id),
+    homeRecordsOn: home.ready,
+    homeRecord: home.byVisit.get(r.id) ?? null,
     alreadyOnFloorAs: EXPECTED_STATUSES.includes(r.current_status)
       ? alreadyOnFloorAs(r, rows)
       : null,

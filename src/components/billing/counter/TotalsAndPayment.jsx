@@ -16,6 +16,7 @@ import { HEALTHRAY_LABEL, PAYMENT_MODE_LABEL } from "./lineText";
 import { balanceOf, payLaterAllowed } from "./finaliseChecks";
 import { emptyPaymentRow } from "./counterForm";
 import PaymentsReceived from "./PaymentsReceived";
+import { announcePaid } from "./paidSignal";
 
 const paiseOf = (typed) => Math.round(Number(typed || 0) * 100);
 
@@ -133,6 +134,7 @@ export default function TotalsAndPayment({
       form.drop("rows", "payLater");
       setCapped(null);
       setNote("Payment taken.");
+      announcePaid(bill.id);
     } catch (e) {
       if (e?.paymentTaken) {
         form.drop("rows", "payLater");
@@ -168,6 +170,7 @@ export default function TotalsAndPayment({
       setCapped(null);
       setConfirming(false);
       setNote(`Marked ${fromPaise(balance)} as paid in HealthRay.`);
+      announcePaid(bill.id);
     } catch (e) {
       if (e?.paymentTaken) {
         form.drop("rows", "payLater");

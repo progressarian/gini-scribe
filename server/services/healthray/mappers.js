@@ -3,7 +3,7 @@
 export function calcAge(birthDateStr) {
   if (!birthDateStr) return null;
   const [dd, mm, yyyy] = birthDateStr.split("-").map(Number);
-  if (!dd || !mm || !yyyy) return null;
+  if (!dd || !mm || !(yyyy >= 1900)) return null;
   const born = new Date(yyyy, mm - 1, dd);
   const now = new Date();
   let age = now.getFullYear() - born.getFullYear();

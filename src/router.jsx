@@ -74,6 +74,7 @@ const OPD = lazyWithRetry(() => import("./OPD"));
 const VisitPage = lazyWithRetry(() => import("./pages/VisitPage"));
 const GHMPage = lazyWithRetry(() => import("./pages/GHMPage"));
 const OBTDashboardPage = lazyWithRetry(() => import("./pages/OBTDashboardPage"));
+const CareFollowupsPage = lazyWithRetry(() => import("./pages/care/CareFollowupsPage"));
 const DoctorManagementPage = lazyWithRetry(() => import("./pages/DoctorManagementPage"));
 const PatientBlocklistPage = lazyWithRetry(() => import("./pages/PatientBlocklistPage"));
 const PrescriptionFooterPage = lazyWithRetry(() => import("./pages/PrescriptionFooterPage"));
@@ -222,6 +223,7 @@ const router = createBrowserRouter([
               { path: "/visit", element: lazyEl(VisitPage) },
               { path: "/ghm", element: lazyEl(GHMPage) },
               { path: "/obt-dashboard", element: lazyEl(OBTDashboardPage) },
+              { path: "/care-followups", element: lazyEl(CareFollowupsPage) },
               { path: "/staff-management", element: lazyEl(DoctorManagementPage) },
               {
                 path: "/doctor-management",

@@ -165,6 +165,35 @@ function PdfFrame({ src }) {
   );
 }
 
+function openInNewTab(target, name) {
+  const win = window.open("", "_blank");
+  if (win) {
+    win.document.write(
+      `<!DOCTYPE html><html><head><title>${name}</title></head><body style="margin:0;padding:0;overflow:hidden"><iframe src="${target}" style="width:100vw;height:100vh;border:none"></iframe></body></html>`,
+    );
+    win.document.close();
+  }
+}
+
+export function printPdf(target, name, previousFrame = null) {
+  previousFrame?.remove();
+  const frame = document.createElement("iframe");
+  frame.className = "pdf-print-frame";
+  frame.title = `Print ${name}`;
+  frame.setAttribute("aria-hidden", "true");
+  frame.onload = () => {
+    try {
+      frame.contentWindow.focus();
+      frame.contentWindow.print();
+    } catch {
+      openInNewTab(target, name);
+    }
+  };
+  frame.src = target;
+  document.body.appendChild(frame);
+  return frame;
+}
+
 const PdfViewerModal = memo(function PdfViewerModal({ doc, src, onClose, printable = false }) {
   const [url, setUrl] = useState(null);
   const [loading, setLoading] = useState(!src);
@@ -185,33 +214,8 @@ const PdfViewerModal = memo(function PdfViewerModal({ doc, src, onClose, printab
 
   useEffect(() => () => printFrameRef.current?.remove(), []);
 
-  const openInNewTab = (target, name) => {
-    const win = window.open("", "_blank");
-    if (win) {
-      win.document.write(
-        `<!DOCTYPE html><html><head><title>${name}</title></head><body style="margin:0;padding:0;overflow:hidden"><iframe src="${target}" style="width:100vw;height:100vh;border:none"></iframe></body></html>`,
-      );
-      win.document.close();
-    }
-  };
-
   const printDocument = (target, name) => {
-    printFrameRef.current?.remove();
-    const frame = document.createElement("iframe");
-    frame.className = "pdf-print-frame";
-    frame.title = `Print ${name}`;
-    frame.setAttribute("aria-hidden", "true");
-    frame.onload = () => {
-      try {
-        frame.contentWindow.focus();
-        frame.contentWindow.print();
-      } catch {
-        openInNewTab(target, name);
-      }
-    };
-    frame.src = target;
-    document.body.appendChild(frame);
-    printFrameRef.current = frame;
+    printFrameRef.current = printPdf(target, name, printFrameRef.current);
   };
 
   const isPannable = zoom != null && zoom > fitScale + 0.001;

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ConfirmModal from "../../ui/ConfirmModal";
 import {
   billPdfHref,
@@ -12,7 +12,8 @@ import {
 } from "../../../queries/hooks/useBilling";
 import { errorOf } from "../format";
 import { claimBadgeText } from "./lineText";
-import { finaliseBlockers } from "./finaliseChecks";
+import { balanceOf, finaliseBlockers } from "./finaliseChecks";
+import { useOnPaid } from "./paidSignal";
 import RefundDialog from "./RefundDialog";
 import PdfViewer, { PdfButton } from "./PdfViewer";
 
@@ -26,6 +27,7 @@ export default function BillActions({
   payLater,
   needsCategory,
   form,
+  stillOnFloor = false,
 }) {
   const { data: settings } = useDeskSettings();
   const finalise = useFinaliseBill();
@@ -45,6 +47,23 @@ export default function BillActions({
   const setReason = (next) => form.set("cancelReason", next);
 
   const blockers = finaliseBlockers(bill, { schemes, settings, payLater, needsCategory });
+  const paidInFull =
+    bill.status === "draft" &&
+    bill.bill_type === "invoice" &&
+    bill.totals.paid > 0 &&
+    balanceOf(bill) === 0;
+  const finaliseNow = useRef(null);
+  const [offerFinalise, setOfferFinalise] = useState(false);
+  useOnPaid(
+    bill.id,
+    useCallback(() => setOfferFinalise(true), []),
+  );
+
+  useEffect(() => {
+    if (!offerFinalise || !paidInFull) return;
+    finaliseNow.current?.focus();
+    setOfferFinalise(false);
+  }, [offerFinalise, paidInFull]);
   const badge = claimBadgeText(bill.claim_status, bill.claim_cleared_on);
 
   const save = async () => {
@@ -128,6 +147,28 @@ export default function BillActions({
 
   return (
     <section className="bc-card bc-actions" aria-label="Bill actions">
+      {paidInFull && (
+        <div className="bc-unfinal-banner" role="group" aria-label="Paid, not final">
+          <div className="bc-unfinal-banner__row">
+            <p>
+              <strong>Paid in full — not final yet.</strong> Finalising gives it a bill number.
+            </p>
+            <button
+              ref={finaliseNow}
+              type="button"
+              className="st-btn st-btn-grn"
+              disabled={!!blockers.length || finalise.isPending}
+              onClick={makeFinal}
+            >
+              {finalise.isPending ? "Finalising…" : "Finalise this bill"}
+            </button>
+          </div>
+          {stillOnFloor && (
+            <p>Still on the floor — finalise when they leave if more may be added.</p>
+          )}
+          {!!blockers.length && <p>Can&apos;t finalise yet: {blockers.join(" ")}</p>}
+        </div>
+      )}
       <div className="bc-head__row">
         {badge && <span className="badge b-amb">{badge}</span>}
 

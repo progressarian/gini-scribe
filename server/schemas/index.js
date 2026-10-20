@@ -6,6 +6,15 @@ import { CASE_ACTION_VERBS } from "../../shared/labStages.js";
 import { CATEGORIES as TEST_CATEGORIES } from "../services/giniflow/testCatalog.js";
 import { MACHINE_SAMPLE_FLOW } from "../../shared/machineStages.js";
 import { TEST_CANCEL_REASON_VALUES } from "../../shared/testCancelReasons.js";
+import { HOME_NOTE_MAX } from "../../shared/homeCollectors.js";
+import { RX_FOLLOWUP_ACTIONS } from "../../shared/rxFollowups.js";
+import {
+  CLOSE_OUTCOMES,
+  FOLLOWUP_KIND_GROUPS,
+  FOLLOWUP_STATUSES,
+  REASON_MAX,
+  REASON_MIN,
+} from "../../shared/careFollowups.js";
 
 // Canonical patient-facing "when to take" vocabulary. Must stay in sync
 // with src/config/medicationTimings.js and the Postgres when_to_take_pill
@@ -959,6 +968,73 @@ export const giniflowCancelSchema = z.object({
   reason: z.string().trim().min(2, "a cancellation needs a reason").max(200),
 });
 
+export const homeSampleRecordSchema = z.object({
+  sample: z.enum(["collected", "not_collected"]),
+  collectedTime: z.string().trim().max(5).nullish(),
+  collectedBy: z.string().trim().max(60).nullish(),
+  payment: z.enum(["paid", "pending"]).nullish(),
+  amount: z.coerce.number().nullish(),
+  mode: z.enum(["cash", "upi", "card"]).nullish(),
+  note: z.string().max(HOME_NOTE_MAX).nullish(),
+});
+
+export const labSiteSchema = z.object({
+  site: z.enum(["home", "ghm"], { message: "Choose 🏥 At GHM or 🏠 Home collection" }),
+});
+
+const followupReason = z
+  .string()
+  .trim()
+  .min(REASON_MIN, "Write the reason — at least 3 characters")
+  .max(REASON_MAX);
+
+export const careFollowupListSchema = z.object({
+  status: z.enum([...FOLLOWUP_STATUSES.map((s) => s.value), "all"]).optional(),
+  kind: z.enum(Object.keys(FOLLOWUP_KIND_GROUPS)).optional(),
+  availability: z.enum(["in_house", "outsourced", "not_available", "unknown"]).optional(),
+  specialty: z.string().trim().max(60).optional(),
+  due: z.enum(["overdue", "week"]).optional(),
+  q: z.string().trim().max(80).optional(),
+  from: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  to: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  page: z.coerce.number().int().min(1).max(1000).optional(),
+});
+
+export const careFollowupCallSchema = z.object({
+  call_status: z.string().trim().min(1, "Choose how the call went").max(40),
+  note: z.string().trim().max(500).nullish(),
+});
+
+export const careFollowupCloseSchema = z.object({
+  status: z.enum(
+    CLOSE_OUTCOMES.map((o) => o.value),
+    { message: "Choose an outcome" },
+  ),
+  reason: followupReason,
+});
+
+export const careFollowupBookedSchema = z.object({
+  appointment_id: z.coerce.number().int().positive(),
+});
+
+export const careFollowupReopenSchema = z.object({ reason: followupReason });
+
+export const careFollowupDaySchema = z.object({
+  day: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a date")
+    .refine(
+      (day) => day <= new Date(Date.now() + 330 * 60 * 1000).toISOString().slice(0, 10),
+      "Choose today or an earlier date",
+    ),
+});
+
 export const giniflowWalkInSchema = z.object({
   patientId: z.coerce.number().int().positive(),
   appointmentId: z.coerce.number().int().positive().nullish(),
@@ -1339,6 +1415,11 @@ export const giniflowRxPauseSchema = z.object({
 // see; it carries its reason for the same reason a block does (GF-18).
 export const giniflowRxStopSchema = z.object({
   reason: z.string().trim().min(1, "Stopping a medicine needs a reason").max(300),
+});
+
+export const giniflowRxFollowupSchema = z.object({
+  action: z.enum(RX_FOLLOWUP_ACTIONS),
+  remark: z.string().trim().min(1, "Add a remark").max(500),
 });
 
 export const giniflowMedSearchQuerySchema = z.object({

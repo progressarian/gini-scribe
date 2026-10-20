@@ -56,8 +56,11 @@ export default function LoginPage() {
   // Init auth + fetch doctors list on mount
   useEffect(() => {
     if (!authReady) initAuth();
+  }, [authReady, initAuth]);
+
+  useEffect(() => {
     fetchDoctorsList();
-  }, [authReady, initAuth, fetchDoctorsList]);
+  }, [fetchDoctorsList]);
 
   // Land each role on a page it can actually open under the capability matrix.
   // ("/" and "/find" need no capability, so home is always a safe fallback —
@@ -73,6 +76,7 @@ export default function LoginPage() {
     rx: "/giniflow/station/rx",
   };
   const getDefaultRoute = (role) => ROLE_LANDING[role] || "/";
+  const listLoading = doctorsLoading && !doctorsList.length;
 
   // If already logged in, redirect to intended page or home
   useEffect(() => {
@@ -102,12 +106,10 @@ export default function LoginPage() {
             value={loginDoctorId}
             onChange={(e) => setLoginDoctorId(e.target.value)}
             className="login-select"
-            disabled={doctorsLoading}
+            disabled={listLoading}
           >
-            <option value="">
-              {doctorsLoading ? "Loading doctors..." : "Choose your name..."}
-            </option>
-            {!doctorsLoading &&
+            <option value="">{listLoading ? "Loading doctors..." : "Choose your name..."}</option>
+            {!listLoading &&
               ROLE_GROUPS.map((g) => {
                 const roles = rolesOf(g);
                 const docs = doctorsList.filter((d) => roles.includes(d.role));
@@ -123,7 +125,7 @@ export default function LoginPage() {
                   </optgroup>
                 );
               })}
-            {!doctorsLoading &&
+            {!listLoading &&
               (() => {
                 // Anything this list does not know about, rather than a second
                 // hardcoded allowlist. The growth roles existed, were active,

@@ -30,6 +30,7 @@ import PriceChanges from "./PriceChanges";
 import BillRefunds from "./BillRefunds";
 import DepositPanel from "./DepositPanel";
 import DuesList from "./DuesList";
+import LabSiteControl from "../../giniflow/LabSiteControl";
 import EarlierDues from "./EarlierDues";
 import ShiftPanel from "./ShiftPanel";
 import RefundsBoard from "./RefundsBoard";
@@ -537,6 +538,7 @@ export default function BillingDesk({
                       )}
                       <PreviousBills bills={earlier} onOpen={openEarlier} />
                       <BillLinesTable bill={bill} onBill={setBill} form={form} />
+                      {bill.visit_id && <LabSiteControl visitId={bill.visit_id} card />}
                       <AddItems bill={bill} onBill={setBill} form={form} />
                       <ConsultationSuggestion
                         key={bill.id}
@@ -587,6 +589,9 @@ export default function BillingDesk({
                         payLater={payLater}
                         needsCategory={needsCategory}
                         form={form}
+                        stillOnFloor={
+                          !!selected && !["dispensed", "exited"].includes(selected.status)
+                        }
                       />
                       <BillRefunds bill={bill} onRefunded={refreshBill} />
                       <DepositPanel

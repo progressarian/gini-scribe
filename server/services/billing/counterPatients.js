@@ -196,6 +196,7 @@ function billState(r) {
   if (due > 0) return { state: STATE.DUE, due };
   if (r.drafts > 0) return { state: STATE.DRAFT, due: 0 };
   if (r.pending_claims > 0) return { state: STATE.CLAIM_PENDING, due: 0 };
+  if (r.paid_drafts > 0) return { state: STATE.PAID_DRAFT, due: 0 };
   if (r.cleared_claims > 0) return { state: STATE.CLAIM_CLEARED, due: 0 };
   if (r.finals > 0 || r.paid_drafts > 0) return { state: STATE.PAID, due: 0 };
   return { state: STATE.NONE, due: 0 };
@@ -228,7 +229,7 @@ function groupOf(r, hints, status) {
   return COUNTER_GROUP.WAITING;
 }
 
-const OPEN_BILL_STATES = [STATE.DUE, STATE.DRAFT, STATE.CLAIM_PENDING];
+const OPEN_BILL_STATES = [STATE.DUE, STATE.DRAFT, STATE.CLAIM_PENDING, STATE.PAID_DRAFT];
 
 const notArrived = (row) => EXPECTED_STATUSES.includes(row.status);
 const notComing = (row) => NOT_COMING_STATUSES.includes(row.status);

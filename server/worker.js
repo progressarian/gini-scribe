@@ -20,6 +20,10 @@ import {
   startHealthrayPatientsCron,
   stopHealthrayPatientsCron,
 } from "./services/cron/healthrayPatientsSync.js";
+import {
+  startCareFollowupsCron,
+  stopCareFollowupsCron,
+} from "./services/cron/careFollowupsCollect.js";
 import pool from "./config/db.js";
 
 console.log("🛠️  Gini Scribe Worker starting...");
@@ -32,6 +36,7 @@ startAnalyticsSnapshotCron();
 startStaleVisitSweepCron();
 startReadOnlyGuardCron();
 startHealthrayPatientsCron();
+startCareFollowupsCron();
 startAppointmentInsertListener().catch((e) =>
   console.error("[Worker] appointment-insert listener failed to start:", e.message),
 );
@@ -52,6 +57,7 @@ async function shutdown(signal) {
     stopStaleVisitSweepCron();
     stopReadOnlyGuardCron();
     stopHealthrayPatientsCron();
+    stopCareFollowupsCron();
     await stopAppointmentInsertListener();
   } catch (e) {
     console.error("[Worker] error stopping cron:", e.message);

@@ -79,7 +79,7 @@ export function buildPatientData(appt) {
   let dob = null;
   if (fm.birth_date) {
     const [dd, mm, yyyy] = fm.birth_date.split("-").map(Number);
-    if (dd && mm && yyyy)
+    if (dd && mm && yyyy >= 1900)
       dob = `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
   }
 

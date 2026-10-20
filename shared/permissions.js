@@ -198,6 +198,7 @@ export const CAPABILITIES = {
   // Care plan's chips, so they must be able to write one.
   GINIFLOW_REFERRALS: "GINIFLOW_REFERRALS",
   OBT_OPS: "OBT_OPS", // OBT outbound call team: tomorrow's appointment call list (/api/obt-status)
+  CARE_FOLLOWUPS: "CARE_FOLLOWUPS",
   OBT_ASSIGN: "OBT_ASSIGN",
   BILLING_DESK: "BILLING_DESK",
   BILLING_MASTER: "BILLING_MASTER",
@@ -444,6 +445,7 @@ export const ROLE_CAPABILITIES = {
   // admin/reception job. FLOW_COORDINATOR is separate and still lets them
   // override anything from the floor screens.
   [ROLES.COORDINATOR]: [
+    C.CARE_FOLLOWUPS,
     C.PATIENT_READ,
     C.PATIENT_CHART,
     C.AI_TOOLS,
@@ -561,6 +563,10 @@ export function hasOwnPatientList(role) {
 // (If the master switch is ever flipped back on, everyone is granted everything.)
 export const DOCTOR_CAPABILITY_OVERRIDES = {
   3: { grant: [C.GINIFLOW_STATION_ECHO], revoke: [C.GINIFLOW_STATION_MO] },
+  97: {
+    grant: [C.GINIFLOW_VIEW, C.GINIFLOW_STATION_RX, C.GINIFLOW_END_VISIT, C.GINIFLOW_PRINT_RX],
+    revoke: [],
+  },
 };
 
 const roleOf = (who) => (who && typeof who === "object" ? who.role : who);

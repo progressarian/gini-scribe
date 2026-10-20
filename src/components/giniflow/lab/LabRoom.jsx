@@ -22,6 +22,7 @@ import CancelledTestsPanel from "../CancelledTestsPanel";
 import { useCancelledTests } from "../../../queries/hooks/useGiniflowCancelled";
 import OutsidePendingPanel from "./OutsidePendingPanel";
 import HomeCollectDialog, { HomeCollectionTag } from "./HomeCollectDialog";
+import LabSiteControl from "../LabSiteControl";
 import useDismiss from "./useDismiss";
 import LabResultsForm from "../LabResultsForm";
 import PdfViewerModal from "../../visit/PdfViewerModal";
@@ -539,6 +540,7 @@ function LabDetailPane({
 
         <div className="dp-scroll">
           <div className="dp-inner">
+            {order.visitId && <LabSiteControl visitId={order.visitId} />}
             <div className="dp-sec">
               <div className="dp-sec-title">Tests ordered</div>
               {order.tests.map((t) => (
@@ -1069,6 +1071,7 @@ function HealthrayCasePane({
         />
         <div className="dp-scroll">
           <div className="dp-inner">
+            {row.visitId && <LabSiteControl visitId={row.visitId} />}
             <div className="dp-sec">
               <div className="dp-sec-title">Where this patient is</div>
               <div className="dp-hint">

@@ -147,6 +147,12 @@ const NAV_ITEMS = [
     cap: C["/obt-dashboard"],
     show: () => true,
   },
+  {
+    path: "/care-followups",
+    label: "🧭 Follow-ups",
+    cap: C["/care-followups"],
+    show: () => true,
+  },
   { path: "/ghm", label: "🏥 GHM Ops", cap: C["/ghm"], show: () => true },
   {
     path: "/staff-management",
