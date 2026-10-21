@@ -152,7 +152,7 @@ function SettingsTab({ doctor, onSaved }) {
           field="vitals_rest"
           checked={doctor.vitals_rest !== false}
           label={`${VITALS_REST_MINUTES}-min rest before vitals`}
-          hint={`Patients rest ${VITALS_REST_MINUTES} minutes after the Vitals station calls them, before BP is taken.`}
+          hint={`Patients rest ${VITALS_REST_MINUTES} minutes after arrival before the Vitals station can call them.`}
           successText={(on) =>
             `${name}'s patients ${on ? `now rest ${VITALS_REST_MINUTES} minutes` : "no longer rest"} before vitals`
           }

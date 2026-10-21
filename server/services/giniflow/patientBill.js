@@ -9,13 +9,17 @@ import {
   isTestStep,
 } from "../../../shared/journeyOrder.js";
 import { paise, rupeesFromPaise } from "../../../shared/labPayment.js";
-import { NOT_ON_BILL_REASON } from "../../../shared/testCancelReasons.js";
+import { NOT_ON_BILL_REASON, REFUND_REASON_FOR_CANCEL } from "../../../shared/testCancelReasons.js";
 import { isNurseRapidTest } from "../../../shared/nurseTests.js";
 import { autoCancelMode, cancelTestIn } from "./testCancel.js";
 import { writeAudit } from "../billing/audit.js";
+import { refundCancelledTest } from "../billing/billingRequests.js";
 
 export const BILL_MAX_AGE_MIN = Number(process.env.SCRIBE_BILL_MAX_AGE_MIN || 60);
 export const NO_BILL_MAX_AGE_MIN = Number(process.env.SCRIBE_NO_BILL_MAX_AGE_MIN || 20);
+export const PAID_NOT_ON_BILL_GRACE_MIN = Number(
+  process.env.SCRIBE_PAID_NOT_ON_BILL_GRACE_MIN ?? 30,
+);
 
 const UNKNOWN = { status: "unknown", items: [], invoiceNo: null, readAt: null };
 
@@ -474,7 +478,7 @@ export async function repricePaidOrdersFromBill(client, visitId, bill, machines)
 }
 
 export async function reconcileTestSteps(client, visitId, bill, machines) {
-  const result = { removedSteps: 0, removedOrders: 0, wouldCancel: [], failed: [] };
+  const result = { removedSteps: 0, removedOrders: 0, wouldCancel: [], failed: [], refunds: [] };
   if (bill?.status !== "billed") return result;
   const mode = autoCancelMode();
   if (mode === "0" || mode === "off") return result;
@@ -493,6 +497,12 @@ export async function reconcileTestSteps(client, visitId, bill, machines) {
             EXISTS (SELECT 1 FROM giniflow_lab_order_events e
                      WHERE e.lab_order_id = o.id AND e.track = 'payment' AND e.status = 'paid'
                        AND COALESCE((e.meta->>'notOnBill')::boolean, FALSE)) AS cleared_before_bill,
+            (SELECT max(e.occurred_at) FROM giniflow_lab_order_events e
+              WHERE e.lab_order_id = o.id AND e.track = 'payment' AND e.status = 'paid'
+                AND e.meta ? 'bill_id') AS scribe_paid_at,
+            EXISTS (SELECT 1 FROM bill_lines l JOIN bills b ON b.id = l.bill_id
+                     WHERE l.lab_order_id = o.id AND l.is_live
+                       AND b.bill_type = 'invoice' AND b.status = 'final') AS on_final_bill,
             COALESCE(o.claim_state, 'none') AS claim_state,
             COALESCE((SELECT array_agg(t.test_name) FROM giniflow_lab_order_tests t
                        WHERE t.lab_order_id = o.id), '{}') AS tests
@@ -517,8 +527,24 @@ export async function reconcileTestSteps(client, visitId, bill, machines) {
     o.payment_status === "paid" &&
     o.sample_status === "paid" &&
     o.claim_state === "none";
+  const readAt = bill.readAt ? new Date(bill.readAt).getTime() : null;
+  const paidOnScribeBill = (o) =>
+    o.kind === "machine" &&
+    idsOf(o).length > 0 &&
+    !o.cleared_before_bill &&
+    !!o.scribe_paid_at &&
+    o.on_final_bill &&
+    o.payment_status === "paid" &&
+    o.sample_status === "paid" &&
+    o.claim_state === "none" &&
+    readAt !== null &&
+    readAt - new Date(o.scribe_paid_at).getTime() >= PAID_NOT_ON_BILL_GRACE_MIN * 60000;
   const removable = orders.filter(
-    (o) => o.from_checkin && !o.started && unbilled(o) && (unpaid(o) || paidBeforeBill(o)),
+    (o) =>
+      o.from_checkin &&
+      !o.started &&
+      unbilled(o) &&
+      (unpaid(o) || paidBeforeBill(o) || paidOnScribeBill(o)),
   );
   const kept = new Set(orders.filter((o) => !removable.includes(o)).flatMap(idsOf));
 
@@ -548,7 +574,9 @@ export async function reconcileTestSteps(client, visitId, bill, machines) {
     return result;
   }
 
-  for (const o of removable) {
+  const onScribeBill = removable.filter(paidOnScribeBill);
+  const stillOpen = [];
+  for (const o of removable.filter((o) => !onScribeBill.includes(o))) {
     await client.query("SAVEPOINT not_on_bill");
     try {
       await cancelTestIn(client, {
@@ -567,16 +595,63 @@ export async function reconcileTestSteps(client, visitId, bill, machines) {
       result.removedOrders += 1;
     } catch (e) {
       await client.query("ROLLBACK TO SAVEPOINT not_on_bill");
+      stillOpen.push(o);
       result.failed.push({ test: o.tests.join(", "), error: e.message });
     }
   }
 
-  if (stale.length) {
+  if (onScribeBill.length) {
+    const invoices = [...new Set(bill.items.map((i) => i.invoice).filter(Boolean))].join(", ");
+    const onBill = invoices ? `HealthRay bill ${invoices}` : "the HealthRay bill";
+    await client.query("SAVEPOINT not_on_bill_scribe");
+    try {
+      const lines = [];
+      for (const o of onScribeBill) {
+        const done = await cancelTestIn(client, {
+          target: { orderId: o.id },
+          reason: NOT_ON_BILL_REASON,
+          source: "healthray",
+          actorRole: "system",
+          refundFinal: true,
+          skipRefund: true,
+          note: `Paid on the Scribe bill, but ${onBill} has no ${o.tests.join(", ")}`,
+        });
+        lines.push(...(done.billedLines || []));
+      }
+      result.refunds = lines.length
+        ? await refundCancelledTest(
+            {
+              lines,
+              reasonCode: REFUND_REASON_FOR_CANCEL[NOT_ON_BILL_REASON],
+              note: `Not on ${onBill} — check what reception collected before choosing the mode`,
+            },
+            { system: true, actorId: null, role: "system" },
+            client,
+          )
+        : [];
+      await client.query("RELEASE SAVEPOINT not_on_bill_scribe");
+      result.removedOrders += onScribeBill.length;
+    } catch (e) {
+      await client.query("ROLLBACK TO SAVEPOINT not_on_bill_scribe");
+      stillOpen.push(...onScribeBill);
+      for (const o of onScribeBill)
+        result.failed.push({ test: o.tests.join(", "), error: e.message });
+    }
+  }
+
+  const keptAfter = new Set(stillOpen.flatMap(idsOf));
+  const toSkip = stale.filter(
+    (st) =>
+      !keptAfter.has(st.step_catalog_id) &&
+      !(isLabStage(st) && stillOpen.some((o) => o.kind === "lab")),
+  );
+
+  if (toSkip.length) {
     const { rows: skipped } = await client.query(
       `UPDATE giniflow_visit_steps SET status = 'skipped'
         WHERE id = ANY($1::uuid[]) AND status = 'pending'
         RETURNING step_catalog_id`,
-      [stale.map((st) => st.id)],
+      [toSkip.map((st) => st.id)],
     );
     if (skipped.length) {
       await client.query(

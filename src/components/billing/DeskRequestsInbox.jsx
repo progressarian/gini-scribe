@@ -13,13 +13,13 @@ export const INBOX_TABS = {
   tests: { key: "tests", label: "Test cancellations" },
 };
 
-export default function DeskRequestsInbox({ param = "tab", live = true }) {
+export default function DeskRequestsInbox({ param = "tab", live = true, defaultStatus }) {
   useDeskRequestsLive(live);
   const [params, setParams] = useSearchParams();
   const waiting = useApprovalsWaiting();
   const baseId = useId();
   const tabsRef = useRef(null);
-  const filters = useRequestFilters();
+  const filters = useRequestFilters({ status: defaultStatus });
   const tabs = [
     waiting.desk && { ...INBOX_TABS.desk, count: waiting.deskCount },
     waiting.tests && { ...INBOX_TABS.tests, count: waiting.testsCount },

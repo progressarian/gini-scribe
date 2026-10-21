@@ -138,7 +138,7 @@ export async function fillDoctorGap(crmUser, doctorId, patch) {
  * A rep opens this on a corridor connection. Six separate requests would mean
  * six chances to hang; one means the screen either arrives or it does not.
  */
-export async function repHome(crmUser, { limit = 25 } = {}) {
+export async function repHome(crmUser, { limit = 25, lists = true } = {}) {
   return withCrmContext(crmUser, async (sql) => {
     const [todays, due, dueTotal, doctors, tasks, performance] = await Promise.all([
       sql(
@@ -153,8 +153,9 @@ export async function repHome(crmUser, { limit = 25 } = {}) {
       // v_doctor_visit_due carries the cadence maths, not the doctor's details,
       // so the specialty and area the rep needs to recognise a name come from
       // the table itself.
-      sql(
-        `SELECT vd.doctor_id, vd.full_name, vd.priority, vd.due_state,
+      lists
+        ? sql(
+            `SELECT vd.doctor_id, vd.full_name, vd.priority, vd.due_state,
                 vd.last_visit_at, vd.next_due_on,
                 d.specialty, d.area, d.mobile, d.profile_complete
            FROM crm.v_doctor_visit_due vd
@@ -164,8 +165,9 @@ export async function repHome(crmUser, { limit = 25 } = {}) {
                    CASE vd.priority WHEN 'A' THEN 0 WHEN 'B' THEN 1 WHEN 'C' THEN 2 ELSE 3 END,
                    vd.last_visit_at NULLS FIRST
           LIMIT $1`,
-        [clamp(Number(limit) || 25, 1, 100)],
-      ),
+            [clamp(Number(limit) || 25, 1, 100)],
+          )
+        : { rows: [] },
       // The list is paged; the COUNT is not. Without this the home screen
       // showed the page size as the workload — "To visit 25" when 46 doctors
       // were waiting — which is the one number on that screen a rep plans
@@ -177,8 +179,9 @@ export async function repHome(crmUser, { limit = 25 } = {}) {
            FROM crm.v_doctor_visit_due
           WHERE due_state IN ('overdue', 'due', 'never_visited')`,
       ),
-      sql(
-        `SELECT d.id AS doctor_id, d.full_name, d.specialty, d.area, d.city, d.priority,
+      lists
+        ? sql(
+            `SELECT d.id AS doctor_id, d.full_name, d.specialty, d.area, d.city, d.priority,
                 d.relationship_stage, d.mobile, d.profile_complete, d.missing_fields,
                 d.needs_verification, t.name AS territory_name,
                 vd.due_state, vd.last_visit_at
@@ -189,17 +192,24 @@ export async function repHome(crmUser, { limit = 25 } = {}) {
           ORDER BY t.name NULLS LAST,
                    CASE d.priority WHEN 'A' THEN 0 WHEN 'B' THEN 1 WHEN 'C' THEN 2 ELSE 3 END,
                    d.full_name`,
-      ),
-      sql(
-        `SELECT id, title, due_date, priority, status, doctor_id
+          )
+        : sql(
+            `SELECT count(*)::int AS assigned,
+                    count(*) FILTER (WHERE profile_complete IS NOT TRUE)::int AS incomplete
+               FROM crm.doctors WHERE deleted_at IS NULL AND is_active`,
+          ),
+      lists
+        ? sql(
+            `SELECT id, title, due_date, priority, status, doctor_id
            FROM crm.tasks
           WHERE deleted_at IS NULL AND owner_id = $1 AND status IN ('open', 'in_progress')
           ORDER BY due_date NULLS LAST, CASE priority
                      WHEN 'critical' THEN 0 WHEN 'high' THEN 1
                      WHEN 'normal' THEN 2 ELSE 3 END
           LIMIT 25`,
-        [crmUser.id],
-      ),
+            [crmUser.id],
+          )
+        : { rows: [] },
       sql(
         `SELECT
            count(*) FILTER (WHERE occurred_at >= date_trunc('day', now()))::int   AS visits_today,
@@ -212,7 +222,13 @@ export async function repHome(crmUser, { limit = 25 } = {}) {
       ),
     ]);
 
-    const myDoctors = doctors.rows;
+    const myDoctors = lists ? doctors.rows : [];
+    const doctorCounts = lists
+      ? {
+          assigned: myDoctors.length,
+          incomplete: myDoctors.filter((d) => !d.profile_complete).length,
+        }
+      : doctors.rows[0];
     return {
       user: { id: crmUser.id, name: crmUser.full_name, role: crmUser.role },
       todays_visits: todays.rows,
@@ -227,8 +243,8 @@ export async function repHome(crmUser, { limit = 25 } = {}) {
         ...performance.rows[0],
         // The reason the import shipped skeleton records: turning fieldwork
         // into the thing that completes the universe.
-        doctors_assigned: myDoctors.length,
-        doctors_incomplete: myDoctors.filter((d) => !d.profile_complete).length,
+        doctors_assigned: doctorCounts.assigned,
+        doctors_incomplete: doctorCounts.incomplete,
       },
     };
   });

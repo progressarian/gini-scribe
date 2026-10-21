@@ -459,6 +459,12 @@ export async function syncMachineOrdersForVisit(visit, db = pool, { slotWaitMs }
       for (const f of removed.failed) {
         error("unbilled", `${visit.name}: could not cancel ${f.test}: ${f.error}`);
       }
+      for (const r of removed.refunds) {
+        log(
+          "unbilled",
+          `${visit.name}: refund request ${r.status} on ${r.bill_no || "the Scribe bill"}`,
+        );
+      }
     }
     await client.query("COMMIT");
   } catch (e) {

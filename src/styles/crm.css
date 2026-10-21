@@ -1324,3 +1324,42 @@
     background: #eff6ff;
   }
 }
+
+.home__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.home__count {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 20px;
+}
+.home__select--on {
+  border-color: #1e40af;
+  background: #eff6ff;
+}
+.home__list .rep__empty,
+.home__list .rep__more {
+  grid-column: 1 / -1;
+}
+@media (min-width: 1100px) {
+  .rep--wide .home__list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(460px, 1fr));
+    align-items: stretch;
+  }
+}
+.asg__filters select.rep__input {
+  background-color: #fff;
+}
+@media (max-width: 640px) {
+  .asg__filters .asg__field {
+    flex-basis: 100%;
+  }
+  .asg__filters .asg__field--narrow {
+    flex: 1 1 calc(50% - 4px);
+    min-width: 0;
+  }
+}

@@ -4,6 +4,7 @@ import api from "../../services/api.js";
 import useDebounced from "../../hooks/useDebounced.js";
 import { downloadFile } from "../../lib/downloadBlob.js";
 import ConfirmModal from "../ui/ConfirmModal.jsx";
+import ListPager from "./ListPager.jsx";
 import { errorText } from "./import/importText.js";
 
 const dateText = (v) =>
@@ -129,6 +130,7 @@ export default function AssignmentsPanel() {
           <input
             className="rep__input"
             type="search"
+            maxLength={100}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search by doctor name, mobile, area or specialty"
@@ -320,29 +322,7 @@ export default function AssignmentsPanel() {
         )}
       </ul>
 
-      {data && data.pages > 1 && (
-        <nav className="asg__pager" aria-label="Pages">
-          <button
-            type="button"
-            className="rep__btn rep__btn--sm"
-            onClick={() => setPage((p) => p - 1)}
-            disabled={page <= 1 || loading}
-          >
-            Previous
-          </button>
-          <span className="rep__hint">
-            Page {data.page} of {data.pages}
-          </span>
-          <button
-            type="button"
-            className="rep__btn rep__btn--sm"
-            onClick={() => setPage((p) => p + 1)}
-            disabled={page >= data.pages || loading}
-          >
-            Next
-          </button>
-        </nav>
-      )}
+      <ListPager page={data?.page} pages={data?.pages} loading={loading} onPage={setPage} />
 
       <ConfirmModal
         open={!!confirm}

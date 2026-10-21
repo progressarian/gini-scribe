@@ -303,6 +303,8 @@ test.describe.serial("P4B-22 desk requests move out of Settings", () => {
     await expect(requestsTab(page)).toContainText(String(after));
     await expect(subTab(page, /^Billing requests/)).toContainText(String(before.desk - 1));
     await expect(menuItem(page)).toContainText(String(after));
+    await expect(waitingTable(page).getByRole("row").filter({ hasText: WANTED })).toHaveCount(0);
+    await page.getByLabel("Status", { exact: true }).selectOption("all");
     const answered = waitingTable(page).getByRole("row").filter({ hasText: WANTED });
     await expect(answered).toContainText("Rejected");
     await expect(answered.getByRole("button", { name: /^Reject request for/ })).toHaveCount(0);

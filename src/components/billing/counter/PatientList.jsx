@@ -187,7 +187,9 @@ export default function PatientList({
 
   useEffect(() => {
     if (!feeFocus) return;
+    setOnlyUnfinal(false);
     setOpen((was) => ({ ...was, fees: true }));
+    if (feeChanges.length === 1) onPick(feeChanges[0].visit_id);
     feesToggle.current?.scrollIntoView({ block: "start", behavior: "smooth" });
     feesToggle.current?.focus({ preventScroll: true });
   }, [feeFocus]);

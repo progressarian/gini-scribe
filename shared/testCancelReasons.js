@@ -29,6 +29,7 @@ export const REFUND_REASON_FOR_CANCEL = {
   patient_declined: "patient_declined",
   billed_by_mistake: "billed_by_mistake",
   duplicate: "billed_by_mistake",
+  not_on_bill: "billed_by_mistake",
   refunded: "other",
   other: "other",
 };

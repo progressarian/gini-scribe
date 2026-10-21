@@ -1681,19 +1681,22 @@ export async function runMissingMedsRecovery() {
 
   try {
     // For each patient with a future appointment, find the LATEST appointment
-    // whose healthray_medications JSONB is non-empty, and check whether any
-    // active medications row is tagged to that healthray_id. If not, the
-    // patient needs a chronological resync of all their healthray prescriptions.
+    // that has a note or medications. If its medications are not parsed yet,
+    // leave the patient alone; otherwise check whether any active medications
+    // row is tagged to that healthray_id. If not, the patient needs a
+    // chronological resync of all their healthray prescriptions.
     const { rows: affected } = await pool.query(`
       WITH future_pts AS (
         SELECT DISTINCT patient_id FROM appointments WHERE appointment_date >= CURRENT_DATE
       ),
       latest_rx AS (
         SELECT DISTINCT ON (a.patient_id)
-               a.patient_id, a.healthray_id
+               a.patient_id, a.healthray_id,
+               jsonb_array_length(COALESCE(a.healthray_medications,'[]'::jsonb)) AS meds
         FROM appointments a
         WHERE a.healthray_id IS NOT NULL
-          AND jsonb_array_length(COALESCE(a.healthray_medications,'[]'::jsonb)) > 0
+          AND (jsonb_array_length(COALESCE(a.healthray_medications,'[]'::jsonb)) > 0
+               OR LENGTH(COALESCE(a.healthray_clinical_notes, '')) > 20)
           AND a.patient_id IN (SELECT patient_id FROM future_pts)
         ORDER BY a.patient_id, a.appointment_date DESC NULLS LAST, a.id DESC
       ),
@@ -1706,7 +1709,8 @@ export async function runMissingMedsRecovery() {
       )
       SELECT DISTINCT l.patient_id
       FROM latest_rx l
-      WHERE NOT EXISTS (
+      WHERE l.meds > 0
+        AND NOT EXISTS (
         SELECT 1 FROM tagged t
         WHERE t.patient_id = l.patient_id AND t.hr_id = l.healthray_id::text
       );
@@ -1773,6 +1777,20 @@ export function syncWalkingAppointments() {
 }
 
 export const syncTodayWalkingAppointments = syncWalkingAppointments;
+
+export async function forceResyncAppointment(date, healthrayId) {
+  await ensureSyncColumns();
+  const rayDoctors = await fetchDoctors();
+  const doctorMap = await syncDoctors(rayDoctors);
+  for (const doc of rayDoctors.filter((d) => !d.is_deactivated)) {
+    const appointments = (await fetchAppointments(doc.id, date)) || [];
+    const appt = appointments.find((a) => String(a.id) === String(healthrayId));
+    if (appt) {
+      return syncAppointment(appt, doctorMap.get(doc.id) || doc.doctor_name, { force: true });
+    }
+  }
+  return null;
+}
 
 // Hard resync — bypasses fast-path skip so every appointment is re-fetched +
 // re-enriched + status-updated from HealthRay. Triggered by the OPD UI.

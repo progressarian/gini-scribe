@@ -394,10 +394,18 @@ export default function DeskRequestsPage({ live = true, filters: shared }) {
         ) : (
           <div className="cxl-empty">
             <strong>
-              {filters.isDefault ? "No requests today." : "No requests match these filters."}
+              {!filters.isDefault
+                ? "No requests match these filters."
+                : status === "pending"
+                  ? "No requests waiting today."
+                  : "No requests today."}
             </strong>
             {filters.isDefault ? (
-              <span>Requests from the billing desk appear here.</span>
+              <span>
+                {status === "pending"
+                  ? "Approved and rejected requests are under Status → All."
+                  : "Requests from the billing desk appear here."}
+              </span>
             ) : (
               <button
                 type="button"

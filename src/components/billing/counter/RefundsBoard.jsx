@@ -168,7 +168,7 @@ function When({ row }) {
     <>
       <div>
         {discount ? "Discount given" : "Asked"} {clock(row.requested_at)} by{" "}
-        {row.requested_by?.name ?? "—"}
+        {row.requested_by?.name ?? "System"}
       </div>
       {row.decided_at && !discount && (
         <div className="bc-head__meta">

@@ -1,15 +1,12 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import api from "../../services/api.js";
 import { startAutoDrain, pendingCount } from "../../crm/offlineQueue.js";
-import ReferralStatusControl from "../../components/crm/ReferralStatusControl.jsx";
 import AssignmentsPanel from "../../components/crm/AssignmentsPanel.jsx";
-import { urgencyLabel, referralStatusLabel } from "../../../shared/crmVocab.js";
-import {
-  visitDueStateMeta,
-  doctorPriorityMeta,
-  DOCTOR_PRIORITIES,
-} from "../../../shared/crmVocab.js";
+import DueList from "../../components/crm/home/DueList.jsx";
+import DoctorsList from "../../components/crm/home/DoctorsList.jsx";
+import ReferralsList from "../../components/crm/home/ReferralsList.jsx";
+import TasksList from "../../components/crm/home/TasksList.jsx";
 
 // The rep's home screen (brief §13). Opened one-handed, in a corridor.
 //
@@ -35,12 +32,10 @@ export default function RepHomePage() {
   const [params, setParams] = useSearchParams();
   const [data, setData] = useState(null);
   const [tab, setTab] = useState("due");
-  const [query, setQuery] = useState("");
-  const [territory, setTerritory] = useState("all");
   const [pending, setPending] = useState(pendingCount());
-  const [classifying, setClassifying] = useState(false);
   const [referrals, setReferrals] = useState(null);
-  const [bulkMsg, setBulkMsg] = useState(null);
+  const [listFilters, setListFilters] = useState({});
+  const [refreshKey, setRefreshKey] = useState(0);
   const [err, setErr] = useState(null);
 
   const justLogged = params.get("logged");
@@ -48,12 +43,14 @@ export default function RepHomePage() {
 
   const load = () =>
     Promise.all([
-      api.get("/api/crm/home").then(({ data }) => setData(data)),
+      api.get("/api/crm/home", { params: { lists: 0 } }).then(({ data }) => setData(data)),
       api
-        .get("/api/crm/referrals")
+        .get("/api/crm/referrals", { params: { page: 1 } })
         .then(({ data }) => setReferrals(data))
         .catch(() => setReferrals({ referrals: [], summary: {} })),
     ]).catch((e) => setErr(e?.response?.data?.error || "Could not load your doctors"));
+
+  const reload = () => load().then(() => setRefreshKey((n) => n + 1));
 
   useEffect(() => {
     load();
@@ -64,7 +61,7 @@ export default function RepHomePage() {
       (v) => api.post("/api/crm/visits", v).then((r) => r.data),
       (remaining) => {
         setPending(remaining);
-        if (remaining === 0) load();
+        if (remaining === 0) reload();
       },
     );
     return stop;
@@ -76,41 +73,8 @@ export default function RepHomePage() {
     return () => clearTimeout(t);
   }, [justLogged, justReferred, setParams]);
 
-  const territories = useMemo(() => {
-    const names = new Set((data?.my_doctors || []).map((d) => d.territory_name).filter(Boolean));
-    return ["all", ...[...names].sort()];
-  }, [data]);
-
-  const doctors = useMemo(() => {
-    let list = data?.my_doctors || [];
-    if (territory !== "all") list = list.filter((d) => d.territory_name === territory);
-    const q = query.trim().toLowerCase();
-    if (q) {
-      list = list.filter((d) =>
-        [d.full_name, d.specialty, d.area, d.city].some((v) => (v || "").toLowerCase().includes(q)),
-      );
-    }
-    return list;
-  }, [data, territory, query]);
-
-  // Classifying 273 doctors one at a time is how a universe stays Unclassified
-  // forever, so the bulk action sits on the filter the rep is already using.
-  const classifyTerritory = async (priority) => {
-    if (territory === "all") return;
-    setClassifying(true);
-    setBulkMsg(null);
-    try {
-      const { data: r } = await api.post("/api/crm/doctors/priority", { territory, priority });
-      setBulkMsg(
-        `${r.updated} doctor${r.updated === 1 ? "" : "s"} in ${territory} set to ${priority}`,
-      );
-      await load();
-    } catch (e) {
-      setBulkMsg(e?.response?.data?.error || "Could not update");
-    } finally {
-      setClassifying(false);
-    }
-  };
+  const filtersFor = (key) => listFilters[key] || {};
+  const setFiltersFor = (key) => (next) => setListFilters((prev) => ({ ...prev, [key]: next }));
 
   if (err)
     return (
@@ -165,12 +129,14 @@ export default function RepHomePage() {
         />
       </div>
 
-      <nav className="rep__tabs">
+      <nav className="rep__tabs" aria-label="CRM lists">
         {[...TABS, ...(SEES_EVERY_DOCTOR.includes(data.user.role) ? [ASSIGNMENTS_TAB] : [])].map(
           (t) => (
             <button
               key={t.key}
+              type="button"
               className={`rep__tab ${tab === t.key ? "rep__tab--on" : ""}`}
+              aria-pressed={tab === t.key}
               onClick={() => setTab(t.key)}
             >
               {t.label}
@@ -186,47 +152,24 @@ export default function RepHomePage() {
       </nav>
 
       {tab === "due" && (
-        <ul className="rep__list">
-          {data.due_visits.length === 0 && <Empty>Nobody is due. Good.</Empty>}
-          {data.due_visits.map((d) => (
-            <DoctorRow key={d.doctor_id} d={d} navigate={navigate} showDue />
-          ))}
-          {data.due_summary && data.due_summary.showing < data.due_summary.total && (
-            <li className="rep__more">
-              Showing the {data.due_summary.showing} most urgent of {data.due_summary.total} waiting
-            </li>
-          )}
-        </ul>
+        <DueList
+          filters={filtersFor("due")}
+          onChange={setFiltersFor("due")}
+          refreshKey={refreshKey}
+        />
       )}
 
       {tab === "referrals" && (
-        <ul className="rep__list">
-          {(referrals?.referrals?.length ?? 0) === 0 && (
-            <Empty>No open referrals. Log one from a doctor's page.</Empty>
-          )}
-          {referrals?.referrals?.map((r) => (
-            <li key={r.id} className="rep__row rep__row--stack">
-              <div className="rep__row-main">
-                <strong>{r.patient_name_raw || r.patient_phone_raw || "Unnamed patient"}</strong>
-                <span className="rep__row-sub">
-                  {r.referral_code} · from {r.doctor_name || "—"}
-                  {r.service_line_name ? ` · ${r.service_line_name}` : ""}
-                </span>
-                <span className="rep__row-flags">
-                  {r.urgency !== "routine" && (
-                    <span className="rep__due rep__due--red">{urgencyLabel(r.urgency)}</span>
-                  )}
-                  <span className="rep__flag">{referralStatusLabel(r.status)}</span>
-                </span>
-              </div>
-              <ReferralStatusControl referral={r} onChanged={load} />
-            </li>
-          ))}
-        </ul>
+        <ReferralsList
+          filters={filtersFor("referrals")}
+          onChange={setFiltersFor("referrals")}
+          refreshKey={refreshKey}
+          onChanged={reload}
+        />
       )}
 
       {tab === "today" && (
-        <ul className="rep__list">
+        <ul className="rep__list home__list">
           {data.todays_visits.length === 0 && <Empty>No visits logged yet today.</Empty>}
           {data.todays_visits.map((v) => (
             // The whole card is the target, not a link inside it. A logged
@@ -258,131 +201,34 @@ export default function RepHomePage() {
       )}
 
       {tab === "doctors" && (
-        <>
-          <div className="rep__filters">
-            <input
-              className="rep__input"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search name, specialty, area"
-            />
-            <div className="rep__chips rep__chips--scroll">
-              {territories.map((t) => (
-                <button
-                  key={t}
-                  className={`rep__chip ${territory === t ? "rep__chip--on" : ""}`}
-                  onClick={() => setTerritory(t)}
-                >
-                  {t === "all" ? "All" : t}
-                </button>
-              ))}
-            </div>
-            {territory !== "all" && (
-              <div className="rep__bulk">
-                <span className="rep__hint">
-                  Set all {doctors.length} in {territory} to
-                </span>
-                {DOCTOR_PRIORITIES.filter((p) => p.value !== "unclassified").map((p) => (
-                  <button
-                    key={p.value}
-                    className="rep__btn rep__btn--sm"
-                    disabled={classifying}
-                    onClick={() => classifyTerritory(p.value)}
-                  >
-                    {p.short}
-                  </button>
-                ))}
-                {bulkMsg && <span className="rep__saved">{bulkMsg}</span>}
-              </div>
-            )}
-          </div>
-          <ul className="rep__list">
-            {doctors.length === 0 && <Empty>No doctors match.</Empty>}
-            {doctors.map((d) => (
-              <DoctorRow key={d.doctor_id} d={d} navigate={navigate} />
-            ))}
-          </ul>
-        </>
+        <DoctorsList
+          filters={filtersFor("doctors")}
+          onChange={setFiltersFor("doctors")}
+          refreshKey={refreshKey}
+          onChanged={reload}
+        />
       )}
 
       {tab === "assignments" && SEES_EVERY_DOCTOR.includes(data.user.role) && <AssignmentsPanel />}
 
       {tab === "tasks" && (
-        <ul className="rep__list">
-          {data.tasks.length === 0 && <Empty>No open tasks.</Empty>}
-          {data.tasks.map((t) => (
-            <li key={t.id} className="rep__row">
-              <div className="rep__row-main">
-                <strong>{t.title}</strong>
-                <span className="rep__row-sub">
-                  {t.due_date ? `Due ${t.due_date}` : "No date"} · {t.priority}
-                </span>
-              </div>
-            </li>
-          ))}
-        </ul>
+        <TasksList
+          filters={filtersFor("tasks")}
+          onChange={setFiltersFor("tasks")}
+          refreshKey={refreshKey}
+        />
       )}
 
       <div className="rep__perf">
         <span>
-          {p.visits_month} visits this month · {p.unique_doctors_month} unique doctors ·{" "}
-          {p.doctors_assigned} assigned
+          {p.visits_month} visit{p.visits_month === 1 ? "" : "s"} this month ·{" "}
+          {p.unique_doctors_month} unique doctors · {p.doctors_assigned} assigned
         </span>
         <Link to="/crm/import" className="rep__link">
           Import list
         </Link>
       </div>
     </div>
-  );
-}
-
-function DoctorRow({ d, navigate, showDue }) {
-  const due = d.due_state ? visitDueStateMeta(d.due_state) : null;
-  const pri = doctorPriorityMeta(d.priority);
-  return (
-    <li className="rep__row">
-      <div className="rep__row-main">
-        <strong>
-          <button className="rep__name" onClick={() => navigate(`/crm/doctor/${d.doctor_id}`)}>
-            {d.full_name}
-          </button>
-          {pri && d.priority !== "unclassified" && (
-            <span className={`rep__pri rep__pri--${pri.tone}`}>{pri.short}</span>
-          )}
-        </strong>
-        <span className="rep__row-sub">
-          {[d.specialty, d.area, d.territory_name].filter(Boolean).join(" · ") || "No details yet"}
-        </span>
-        <span className="rep__row-flags">
-          {showDue && due && <span className={`rep__due rep__due--${due.tone}`}>{due.label}</span>}
-          {d.profile_complete === false && <span className="rep__flag">No mobile</span>}
-          {d.needs_verification && <span className="rep__flag">Check details</span>}
-        </span>
-      </div>
-      <div className="rep__row-actions">
-        {d.mobile && (
-          <a className="rep__call" href={`tel:${d.mobile}`} aria-label={`Call ${d.full_name}`}>
-            Call
-          </a>
-        )}
-        <button
-          className="rep__btn rep__btn--sm"
-          onClick={() =>
-            navigate(`/crm/referral/${d.doctor_id}?name=${encodeURIComponent(d.full_name)}`)
-          }
-        >
-          Referral
-        </button>
-        <button
-          className="rep__btn rep__btn--primary rep__btn--sm"
-          onClick={() =>
-            navigate(`/crm/visit/${d.doctor_id}?name=${encodeURIComponent(d.full_name)}`)
-          }
-        >
-          Log visit
-        </button>
-      </div>
-    </li>
   );
 }
 

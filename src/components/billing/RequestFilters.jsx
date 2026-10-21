@@ -5,11 +5,11 @@ export const todayInIndia = () =>
 
 export const STATUS_ALL = "all";
 
-export function useRequestFilters() {
+export function useRequestFilters({ status = STATUS_ALL } = {}) {
   const defaults = useMemo(() => {
     const today = todayInIndia();
-    return { status: STATUS_ALL, kind: "", from: today, to: today, q: "" };
-  }, []);
+    return { status, kind: "", from: today, to: today, q: "" };
+  }, [status]);
   const [value, setValue] = useState(defaults);
   const set = useCallback((patch) => setValue((current) => ({ ...current, ...patch })), []);
   const reset = useCallback(() => setValue(defaults), [defaults]);

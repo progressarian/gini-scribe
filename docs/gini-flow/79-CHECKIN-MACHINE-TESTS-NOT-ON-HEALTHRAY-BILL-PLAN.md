@@ -1,6 +1,6 @@
 # 79 — Check-in machine tests paid on the Scribe bill but never billed in HealthRay
 
-Status: **plan, waiting for review (20 Oct 2026)**. Nothing built.
+Status: built (21 Oct 2026), with the corrections in "As built". Refund requests are raised by the system (answer of 21 Oct).
 
 ## 1. The case
 
@@ -94,3 +94,21 @@ I write nothing to production for this; it is the desk's and the admin's maker�
   floor decision under Settings → Flow, not code.
 - Holding check-in machine lines off the Scribe draft until HealthRay bills them. That is
   bigger and changes the arrival bill (72, 73).
+
+## As built (21 Oct 2026)
+
+Two things §3 assumed were wrong, found on the second case (Mohit Mahajan, P_182270, GH26-000380, 21 Oct):
+
+1. `cancelTestIn` with `source: 'healthray'` refuses a line on a final Scribe bill ("…is on bill GH26-000380, so it can't be cancelled here"). Only floor cancels detach final lines.
+2. A refund request needs a signed-in requester (`actorOf` in `billingRequests.js`); the sync has none.
+3. A floor cancel of several tests on one bill raises a request for the first line only; the rest are left "cancelled, not refunded" because one request is already pending on the bill.
+
+What was built instead:
+
+- **Rule** (`reconcileTestSteps`, `server/services/giniflow/patientBill.js`): a check-in machine order is cancelled when it is not started, has a known machine, `claim_state = 'none'`, is paid with a payment event carrying `meta.bill_id`, has a live line on a **final** Scribe invoice, the machine is not on the HealthRay bill (dead lines included), and the HealthRay bill was read at least `SCRIBE_PAID_NOT_ON_BILL_GRACE_MIN` (default 30) minutes after that payment. `SCRIBE_BILL_AUTO_CANCEL=dry` reports it in `wouldCancel` only; `0`/`off` stops it.
+- **Cancel:** `cancelTestIn` with reason `not_on_bill`, source `healthray`, and the new `refundFinal: true` (keeps the final line, like a floor cancel) plus `skipRefund: true`.
+- **One refund request** for all of a visit's cancelled lines: `refundCancelledTest` with `ctx.system = true`, so `requested_by` is empty. Refund reason "Billed by mistake / duplicate" (`REFUND_REASON_FOR_CANCEL.not_on_bill`), note "Not on HealthRay bill … — check what reception collected before choosing the mode". The Refunds board shows the requester as **System**. An admin still approves; no money moves on its own.
+- If the cancel or the request fails, the whole group is rolled back and the tests' steps are left in place.
+- The bill sync logs `unbilled: refund request raised on GH26-…`.
+- **Tests:** `e2e/giniflow/G110-scribe-billed-machine-not-on-healthray-bill.spec.js` (6): cancelled with one system request after the grace; left alone inside the grace, once started, when HealthRay billed it, when ordered after check-in; dry mode.
+- **One-off fix script** for a visit the sync has not reached: `server/scripts/cancel-scribe-billed-machine-tests.mjs <date> <file_no> --actor=<staff id> [--apply]` (floor route, signed as that staff member).

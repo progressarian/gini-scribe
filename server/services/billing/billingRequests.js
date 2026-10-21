@@ -704,7 +704,7 @@ export function cleanRefundReason(input) {
 
 export async function createRefundRequest(input, ctx, db = pool) {
   refusePrice(input);
-  const actorId = actorOf(ctx, "ask for a refund");
+  const actorId = ctx?.system ? null : actorOf(ctx, "ask for a refund");
   const billId = cleanUuid(input?.bill_id, "bill");
   const { code: reasonCode, reason } = cleanRefundReason(input);
   const requestedMode = cleanRefundMode(input?.requested_mode);

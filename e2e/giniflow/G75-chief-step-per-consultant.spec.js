@@ -36,11 +36,6 @@ const statusOf = async (visit) =>
 
 async function vitalsTaken(visit) {
   await vitals.startVitals(visit, USERS.admin.id, db);
-  await query(
-    `UPDATE giniflow_visit_events SET occurred_at = NOW() - interval '30 minutes'
-      WHERE visit_id = $1 AND status = 'with_vitals'`,
-    [visit],
-  );
   await vitals.saveVitals(visit, { weight: 70, bp_sys: 120, bp_dia: 80 }, db);
 }
 

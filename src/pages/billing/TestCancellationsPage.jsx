@@ -272,16 +272,22 @@ export default function TestCancellationsPage({ live = true, filters: shared }) 
         ) : (
           <div className="cxl-empty">
             <strong>
-              {filters.isDefault
-                ? "No cancellation requests today."
-                : "No requests match these filters."}
+              {!filters.isDefault
+                ? "No requests match these filters."
+                : status === "pending"
+                  ? "No cancellation requests waiting today."
+                  : "No cancellation requests today."}
             </strong>
             {!filters.isDefault ? (
               <button type="button" className="flow-btn flow-btn-ghost" onClick={clear}>
                 Clear filters
               </button>
             ) : (
-              <span>Requests from the lab, machine room and reception appear here.</span>
+              <span>
+                {status === "pending"
+                  ? "Approved and rejected requests are under Status → All."
+                  : "Requests from the lab, machine room and reception appear here."}
+              </span>
             )}
           </div>
         )}

@@ -629,7 +629,7 @@ export default function BillingDesk({
 
           {tab === DESK_TABS.requests.key && (
             <Panel tab={DESK_TABS.requests}>
-              <DeskRequestsInbox param="kind" live={false} />
+              <DeskRequestsInbox param="kind" live={false} defaultStatus="pending" />
             </Panel>
           )}
         </div>

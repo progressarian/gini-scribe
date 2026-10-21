@@ -5,9 +5,11 @@ import { DEPOSIT_TABLES, refuseMergeWithDeposit } from "../services/billing/depo
 
 const [dupFileNo, realFileNo, date] = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 const apply = process.argv.includes("--apply");
+const allowPhoneMismatch = process.argv.includes("--allow-phone-mismatch");
+const keepPaid = process.argv.includes("--keep-paid");
 if (!dupFileNo || !realFileNo || !date) {
   console.error(
-    "Usage: node scripts/merge-walkin-chart-into-healthray.mjs <duplicate_file_no> <real_file_no> <YYYY-MM-DD> [--apply]",
+    "Usage: node scripts/merge-walkin-chart-into-healthray.mjs <duplicate_file_no> <real_file_no> <YYYY-MM-DD> [--allow-phone-mismatch] [--keep-paid] [--apply]",
   );
   process.exit(1);
 }
@@ -42,7 +44,12 @@ try {
   if (!dup || !real) throw new Error("one of the charts was not found");
   if (dup.health_id) throw new Error(`${dupFileNo} is a real HealthRay chart; not merging`);
   if (!real.health_id) throw new Error(`${realFileNo} is not a HealthRay chart`);
-  if (last10(dup.phone) !== last10(real.phone)) throw new Error("phone numbers differ");
+  if (last10(dup.phone) !== last10(real.phone)) {
+    if (!allowPhoneMismatch) throw new Error("phone numbers differ");
+    console.log(
+      `  phones differ (…${last10(dup.phone).slice(-4)} vs …${last10(real.phone).slice(-4)}); allowed`,
+    );
+  }
   console.log(
     `${dup.name} ${dup.file_no} (#${dup.id}) → ${real.name} ${real.file_no} (#${real.id})`,
   );
@@ -83,8 +90,11 @@ try {
     [keep.id],
   );
   for (const o of orders) {
-    if (o.payment_status !== "pending")
-      throw new Error(`${o.tests} is ${o.payment_status}; cancel it by hand`);
+    if (o.payment_status !== "pending") {
+      if (!keepPaid) throw new Error(`${o.tests} is ${o.payment_status}; cancel it by hand`);
+      console.log(`  kept ${o.tests} (${o.payment_status}) on the moved visit`);
+      continue;
+    }
     await cancelTestIn(client, {
       target: { orderId: o.id },
       reason: "duplicate",
@@ -127,6 +137,40 @@ try {
     if (r.rowCount) moved[`${tbl}.${col}`] = r.rowCount;
   }
   console.log("  rows moved:", JSON.stringify(moved));
+  const { rows: placeholders } = await client.query(
+    `SELECT id FROM appointments WHERE patient_id = $1 AND healthray_id IS NULL`,
+    [real.id],
+  );
+  if (placeholders.length && hrAppt) {
+    const ids = placeholders.map((a) => a.id);
+    await client.query(
+      `UPDATE appointments r SET
+          booked_by_name = COALESCE(r.booked_by_name, s.booked_by_name),
+          booking_date = COALESCE(r.booking_date, s.booking_date),
+          reporting_time_slot = COALESCE(r.reporting_time_slot, s.reporting_time_slot),
+          booking_status = COALESCE(r.booking_status, s.booking_status),
+          condition = COALESCE(r.condition, s.condition),
+          updated_at = NOW()
+         FROM appointments s
+        WHERE r.id = $1 AND s.id = $2`,
+      [hrAppt.id, ids[0]],
+    );
+    const { rows: apptCols } = await client.query(
+      `SELECT cl.relname AS tbl, a.attname AS col
+         FROM pg_constraint k
+         JOIN pg_class cl ON cl.oid = k.conrelid
+         JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = ANY (k.conkey)
+        WHERE k.contype = 'f' AND k.confrelid = 'appointments'::regclass`,
+    );
+    for (const { tbl, col } of apptCols) {
+      const r = await client.query(
+        `UPDATE "${tbl}" SET "${col}" = $2 WHERE "${col}" = ANY($1::int[])`,
+        [ids, hrAppt.id],
+      );
+      if (r.rowCount)
+        console.log(`  ${tbl}.${col}: ${r.rowCount} row(s) moved to appointment ${hrAppt.id}`);
+    }
+  }
   await client.query(`DELETE FROM appointments WHERE patient_id = $1 AND healthray_id IS NULL`, [
     real.id,
   ]);

@@ -4,6 +4,8 @@ import { ASSIGNABLE_ROLES } from "./assignees.js";
 
 const PAGE_SIZE = 50;
 const MAX_PER_CHANGE = 100;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const textOf = (v) => (typeof v === "string" ? v.trim().slice(0, 100) : "");
 
 export class AssignmentError extends Error {
   constructor(message, status = 400) {
@@ -44,16 +46,17 @@ function filterSql({ owner = "all", territory = "", q = "" }) {
   const where = ["d.deleted_at IS NULL", "d.is_active"];
   if (owner === "unassigned") where.push("a.executive_id IS NULL");
   else if (owner && owner !== "all") {
+    if (!UUID.test(owner)) throw new AssignmentError("Choose an owner from the list");
     params.push(owner);
     where.push(`a.executive_id = $${params.length}::uuid`);
   }
-  if (territory) {
-    params.push(territory);
+  if (textOf(territory)) {
+    params.push(textOf(territory));
     where.push(`t.name = $${params.length}`);
   }
-  const term = String(q || "").trim();
+  const term = textOf(q);
   if (term) {
-    params.push(`%${term}%`);
+    params.push(`%${term.replace(/[\\%_]/g, "\\$&")}%`);
     const p = `$${params.length}`;
     where.push(
       `(d.full_name ILIKE ${p} OR d.mobile ILIKE ${p} OR d.area ILIKE ${p} OR d.specialty ILIKE ${p})`,
@@ -74,13 +77,14 @@ const COLUMNS = `d.id AS doctor_id, d.full_name, d.specialty, d.mobile, d.area,
        a.effective_from AS assigned_at, b.full_name AS assigned_by`;
 
 export async function listAssignments(crmUser, filters = {}) {
-  const page = Math.max(1, Number(filters.page) || 1);
+  const requested = Math.min(10_000, Math.max(1, Math.floor(Number(filters.page)) || 1));
   const { params, where } = filterSql(filters);
   return withCrmContext(crmUser, async (sql) => {
     const { rows: total } = await sql(`SELECT count(*)::int AS n ${FROM} WHERE ${where}`, params);
+    const page = Math.min(requested, Math.max(1, Math.ceil(total[0].n / PAGE_SIZE)));
     const { rows } = await sql(
       `SELECT ${COLUMNS} ${FROM} WHERE ${where}
-        ORDER BY (a.executive_id IS NOT NULL), t.name NULLS LAST, d.full_name
+        ORDER BY (a.executive_id IS NOT NULL), t.name NULLS LAST, d.full_name, d.id
         LIMIT ${PAGE_SIZE} OFFSET ${(page - 1) * PAGE_SIZE}`,
       params,
     );
@@ -122,8 +126,15 @@ export async function listAssignments(crmUser, filters = {}) {
 }
 
 export async function assignDoctors(crmUser, { doctorIds, executiveId }) {
-  const ids = [...new Set((doctorIds || []).filter(Boolean))];
+  if (!Array.isArray(doctorIds)) throw new AssignmentError("Select at least one doctor");
+  const ids = [...new Set(doctorIds.filter(Boolean))];
   if (!ids.length) throw new AssignmentError("Select at least one doctor");
+  if (!ids.every((id) => typeof id === "string" && UUID.test(id))) {
+    throw new AssignmentError("Some of those doctors no longer exist — refresh the list");
+  }
+  if (executiveId && !(typeof executiveId === "string" && UUID.test(executiveId))) {
+    throw new AssignmentError("That staff member cannot be assigned doctors");
+  }
   if (ids.length > MAX_PER_CHANGE) {
     throw new AssignmentError(`Change at most ${MAX_PER_CHANGE} doctors at a time`);
   }

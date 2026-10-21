@@ -1443,8 +1443,31 @@ export async function syncStoppedMedications(
 }
 const normalizeMedName = canonicalMedKey;
 
+async function newerHealthrayVisitExists(patientId, healthrayId, apptDate) {
+  if (!apptDate) return false;
+  const { rows } = await pool.query(
+    `SELECT 1 FROM appointments
+      WHERE patient_id = $1
+        AND healthray_id IS NOT NULL
+        AND healthray_id::text <> $2::text
+        AND appointment_date > $3::date
+        AND (jsonb_array_length(COALESCE(healthray_medications, '[]'::jsonb)) > 0
+             OR LENGTH(COALESCE(healthray_clinical_notes, '')) > 20)
+      LIMIT 1`,
+    [patientId, String(healthrayId), apptDate],
+  );
+  return rows.length > 0;
+}
+
 export async function syncMedications(patientId, healthrayId, apptDate, meds) {
   if (!patientId || meds.length === 0) return;
+  if (await newerHealthrayVisitExists(patientId, healthrayId, apptDate)) {
+    log(
+      "syncMedications",
+      `${patientId}/${healthrayId}: skip — a newer visit owns the active list`,
+    );
+    return;
+  }
 
   const syncStart = new Date();
   const canonicalKeys = meds
@@ -1769,24 +1792,12 @@ export async function stopStaleHealthrayMeds(patientId, healthrayId, apptDate, c
     }
   }
 
-  if (apptDate) {
-    const { rows: newer } = await pool.query(
-      `SELECT 1 FROM appointments
-        WHERE patient_id = $1
-          AND healthray_id IS NOT NULL
-          AND healthray_id::text <> $2::text
-          AND appointment_date > $3::date
-          AND jsonb_array_length(COALESCE(healthray_medications, '[]'::jsonb)) > 0
-        LIMIT 1`,
-      [patientId, String(healthrayId), apptDate],
+  if (await newerHealthrayVisitExists(patientId, healthrayId, apptDate)) {
+    log(
+      "stopStaleHealthrayMeds",
+      `${patientId}/${healthrayId}: skip — a newer prescription exists; cleanup will run for that one`,
     );
-    if (newer.length) {
-      log(
-        "stopStaleHealthrayMeds",
-        `${patientId}/${healthrayId}: skip — a newer prescription exists; cleanup will run for that one`,
-      );
-      return;
-    }
+    return;
   }
   const { rows: tagged } = await pool.query(
     `SELECT 1 FROM medications

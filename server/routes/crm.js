@@ -27,15 +27,10 @@ import {
   assignmentsWorkbook,
   listAssignments,
 } from "../crm/assignments.js";
-import {
-  createReferral,
-  advanceReferral,
-  openReferrals,
-  referralDetail,
-  serviceLines,
-} from "../crm/referrals.js";
+import { createReferral, advanceReferral, referralDetail, serviceLines } from "../crm/referrals.js";
 import { logVisit, fillDoctorGap, repHome, suggestedNextVisit, doctor360 } from "../crm/visits.js";
 import { handleError } from "../utils/errorHandler.js";
+import { listDueDoctors, listMyDoctors, listReferrals, listTasks } from "../crm/homeLists.js";
 
 const router = express.Router();
 
@@ -64,11 +59,25 @@ const importer = (req, res, next) =>
 // ---- Rep home and visit logging (brief §5, §13) -------------------------
 router.get("/crm/home", crm, async (req, res) => {
   try {
-    res.json(await repHome(req.crmUser));
+    res.json(await repHome(req.crmUser, { lists: req.query.lists !== "0" }));
   } catch (e) {
     handleError(res, e, "Rep home");
   }
 });
+
+const homeList = (path, list, label) =>
+  router.get(path, crm, async (req, res) => {
+    try {
+      res.json(await list(req.crmUser, req.query));
+    } catch (e) {
+      console.error(`${label} error:`, e?.message);
+      res.status(500).json({ error: `Unable to load ${label.toLowerCase()}. Please try again.` });
+    }
+  });
+
+homeList("/crm/home/due", listDueDoctors, "Doctors to visit");
+homeList("/crm/home/doctors", listMyDoctors, "My doctors");
+homeList("/crm/home/tasks", listTasks, "Tasks");
 
 // ---- Referral capture and the patient journey (brief §6, §7) ------------
 router.get("/crm/service-lines", crm, async (req, res) => {
@@ -81,9 +90,10 @@ router.get("/crm/service-lines", crm, async (req, res) => {
 
 router.get("/crm/referrals", crm, async (req, res) => {
   try {
-    res.json(await openReferrals(req.crmUser, { limit: req.query.limit }));
+    res.json(await listReferrals(req.crmUser, req.query));
   } catch (e) {
-    handleError(res, e, "Open referrals");
+    console.error("Open referrals error:", e?.message);
+    res.status(500).json({ error: "Unable to load referrals. Please try again." });
   }
 });
 

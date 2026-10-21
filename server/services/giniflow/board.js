@@ -21,7 +21,9 @@ import {
   isMachineColumn,
   machineColumnFor,
   SIDE_TRACK_COLUMNS,
+  vitalsStageSince,
 } from "../../../shared/giniflowStatus.js";
+import { REST_SKIPPED_SQL, VITALS_FROM_SQL, wholeVitalsBudget } from "./vitalsRest.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { hideLabOnlyPatients } from "./floorSettings.js";
 import { BEHIND_STATION_LABEL, healthrayChainStatus } from "./observation.js";
@@ -255,6 +257,8 @@ const BOARD_SQL = `
          tests.reported                            AS lab_all_reported,
          first_ev.occurred_at                      AS journey_started_at,
          last_ev.occurred_at                       AS status_since,
+         ${VITALS_FROM_SQL("v")}                   AS vitals_from,
+         ${REST_SKIPPED_SQL("v")}                  AS rest_skipped,
          hold.tests_pending,
          hold.tests_ready_at,
          machine.orders                            AS machine_orders,
@@ -1216,12 +1220,18 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
     const paused = !!row.paused_at;
     const clock = finished && row.status_since ? new Date(row.status_since) : now;
     const liveClock = paused ? new Date(row.paused_at) : now;
-    const { heldForTests, since: waitSince } = chiefWaitClock(row);
+    const { heldForTests, since: heldSince } = chiefWaitClock(row);
+    const waitSince = row.lab_only
+      ? heldSince
+      : vitalsStageSince(row.current_status, heldSince, row.vitals_from, row.rest_skipped);
+    const wholeVitals = !row.lab_only && row.current_status === "with_vitals" && !!row.vitals_from;
     const statusMinutes = finished ? null : minutesSince(waitSince, liveClock);
     const totalMinutes = minutesSince(row.journey_started_at, paused ? liveClock : clock);
     const budget = heldForTests
       ? null
-      : budgetFor(slaKeyForStatus(row.current_status), row.category);
+      : wholeVitals
+        ? wholeVitalsBudget(budgetFor, row.category)
+        : budgetFor(slaKeyForStatus(row.current_status), row.category);
     // Settled entirely in SQL by labOnlyPredicate, so this board and the lab
     // station cannot drift apart on who counts as samples-only.
     const labOnly = !!row.lab_only;

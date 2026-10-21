@@ -409,7 +409,7 @@ async function cancelOrderIn(client, visit, order, input, machines) {
 
   let refundLeft = null;
   let onFinal = [];
-  const keepFinal = { keepFinal: input.source !== "healthray" };
+  const keepFinal = { keepFinal: input.source !== "healthray" || input.refundFinal === true };
   const moneyCtx = { role: input.actorRole || "system", actorId: input.actorId ?? null };
   const drafts = await draftsHolding(client, order.id);
   if (partial) {
