@@ -46,6 +46,7 @@ const INVALIDATES = {
     // read `current_status`.
     //
     ["giniflow", "triage"],
+    ["care-followups", "on-floor"],
   ],
   // The coordinator's own writes, from giniflow_triage_events. Its own kind
   // rather than folding into `visit`, because a categorise moves nothing on the

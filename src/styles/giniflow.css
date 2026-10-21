@@ -1303,7 +1303,7 @@
 }
 .gf.gf--page .stats {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr)) auto;
+  grid-template-columns: repeat(7, minmax(0, 1fr)) auto;
   align-items: stretch;
 }
 .gf.gf--page .stats .stat {
@@ -1316,7 +1316,7 @@
 }
 @media (max-width: 1440px) {
   .gf.gf--page .stats {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+    grid-template-columns: repeat(7, minmax(0, 1fr));
   }
   .gf.gf--page .stats-tools {
     grid-column: 1 / -1;
@@ -1329,7 +1329,7 @@
 }
 @media (max-width: 1180px) {
   .gf.gf--page .stats {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 @media (max-width: 900px) {

@@ -27,6 +27,7 @@ import {
 import { TESTS_HOLD_SQL } from "./testsHold.js";
 
 import { skipsChiefStop, syncFromStatus } from "./journey.js";
+import { assertCoordinatorDone, syncHoldIn } from "./coordinatorHold.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { CONSULT_STATUSES } from "../../../shared/labOnly.js";
 import { FLOOR_DONE_LAB_STATUSES } from "../../../shared/labStages.js";
@@ -34,6 +35,8 @@ import { MACHINE_RUNGS } from "../../../shared/machineStages.js";
 import pool from "../../config/db.js";
 
 export const IST_TODAY = `(NOW() AT TIME ZONE 'Asia/Kolkata')::date`;
+
+const HOLD_ARRIVAL_STATUSES = ["doctor_done", "rx_pending"];
 
 const CANCEL_REQUEST_MARKERS = ["cancel_requested", "cancel_rejected", "cancel_withdrawn"];
 
@@ -226,6 +229,7 @@ export async function advanceStatus(
     chainIndex(toStatus) > chainIndex(fromStatus)
   ) {
     await assertReportsAreIn(client, visitId, toStatus, meta);
+    await assertCoordinatorDone(client, visitId, toStatus);
   }
   await assertSyncLeavesTestsAlone(client, visitId, toStatus, meta);
   await assertNoExitWithTestsOpen(client, visitId, toStatus, actorRole);
@@ -318,6 +322,7 @@ export async function advanceStatus(
   // meta travels with it: an exit the pharmacy counter wrote is not evidence the
   // stops behind it happened, and only the meta says which exit this is.
   await syncFromStatus(client, visitId, toStatus, meta);
+  if (HOLD_ARRIVAL_STATUSES.includes(toStatus)) await syncHoldIn(client, visitId);
 
   if (
     toStatus === "vitals_done" &&

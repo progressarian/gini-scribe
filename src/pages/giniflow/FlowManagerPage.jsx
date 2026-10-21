@@ -653,6 +653,12 @@ function PatientCard({
             <span className="w-ico">{card.lab.hintIcon}</span> {card.lab.hint}
           </div>
         )}
+        {!isLab && card.coordinator?.waiting && (
+          <div className={`wait4${card.coordinator.blocking ? " blocked" : ""}`}>
+            <span className="w-ico">🤝</span> With Care Coordinator
+            {card.coordinator.minutes > 0 ? ` · ${card.coordinator.minutes}m` : ""}
+          </div>
+        )}
         {!isLab && !card.blockedReason && card.hint && (
           <div className="wait4">
             <span className="w-ico">{card.hintIcon}</span> {card.hint}
@@ -782,7 +788,8 @@ function PatientCard({
 // happened — neither has a queue to arrange.
 const BOOKING_STATUSES = new Set(["booked", "confirmed", "no_show", "cancelled"]);
 
-const ORDERABLE = (key) => key !== "done" && !SIDE_TRACK_COLUMNS.includes(key);
+const ORDERABLE = (key) =>
+  key !== "done" && key !== "coordinator" && !SIDE_TRACK_COLUMNS.includes(key);
 
 function BoardSkeleton() {
   return (
@@ -1536,6 +1543,10 @@ const STAT_FILTERS = {
     label: "Over time budget",
     match: (card) => !card.finished && !card.labOnly && card.statusColour === "red",
   },
+  withCoordinator: {
+    label: "With Care Coordinator",
+    match: (card) => !!card.coordinator?.waiting,
+  },
   blocked: {
     label: "Blocked",
     // The status is authoritative; the reason is its text (GF-18).
@@ -1840,6 +1851,13 @@ export default function FlowManagerPage() {
   const stale = !live && ageSeconds > 45;
 
   const filter = statFilter ? STAT_FILTERS[statFilter] : null;
+  const withCoordinator = columns
+    .flatMap((col) => col.cards)
+    .filter((card) => card.coordinator?.waiting);
+  const longestWithCoordinator = Math.max(
+    0,
+    ...withCoordinator.map((card) => card.coordinator.minutes || 0),
+  );
   const searchActive = debouncedSearch.trim().length >= 2;
   const searchIds = searchActive
     ? new Set((searchData?.results || []).map((r) => r.visitId))
@@ -1944,6 +1962,14 @@ export default function FlowManagerPage() {
           label="Blocked"
           sub="missing reports / payment"
           filterKey="blocked"
+          activeFilter={statFilter}
+          onFilter={setStatFilter}
+        />
+        <StatTile
+          value={withCoordinator.length}
+          label="With Care Coordinator"
+          sub={withCoordinator.length ? `longest ${longestWithCoordinator}m` : "nobody waiting"}
+          filterKey="withCoordinator"
           activeFilter={statFilter}
           onFilter={setStatFilter}
         />

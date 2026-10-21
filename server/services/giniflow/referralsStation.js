@@ -6,6 +6,7 @@ import { generateReferralLetterPdf } from "../prescriptionHtmlPdf.js";
 import { sendReferralLetter } from "../msg91.js";
 import { addExternal } from "./prescription.js";
 import { syncFromDeskReferral } from "../careFollowups/referralLink.js";
+import { syncHoldSafely } from "./coordinatorHold.js";
 import { FOLLOWUP_STATUS_LABEL } from "../../../shared/careFollowups.js";
 import {
   isValidSpecialty,
@@ -321,6 +322,7 @@ export async function createReferral(visitId, fields = {}, db = pool) {
     }
 
     await syncFromDeskReferral(client, rows[0].id, { actorId });
+    await syncHoldSafely(client, visitId);
     await client.query("COMMIT");
     return shape(await loadReferral(rows[0].id, db));
   } catch (e) {
@@ -340,7 +342,7 @@ export async function removeReferral(referralId, db = pool, { actorId = null } =
   try {
     await client.query("BEGIN");
     const { rows } = await client.query(
-      `SELECT id, status, letter_file_url FROM giniflow_referrals WHERE id = $1 FOR UPDATE`,
+      `SELECT id, visit_id, status, letter_file_url FROM giniflow_referrals WHERE id = $1 FOR UPDATE`,
       [referralId],
     );
     if (!rows.length) throw bad("Referral not found", 404);
@@ -353,6 +355,7 @@ export async function removeReferral(referralId, db = pool, { actorId = null } =
       actorId,
     });
     await client.query(`DELETE FROM giniflow_referrals WHERE id = $1`, [referralId]);
+    await syncHoldSafely(client, rows[0].visit_id);
     await client.query("COMMIT");
     return { removed: true, id: referralId };
   } catch (e) {

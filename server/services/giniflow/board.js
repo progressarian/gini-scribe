@@ -37,7 +37,8 @@ import {
   chiefWaitClock,
 } from "./testsHold.js";
 import { getMachines } from "./machineCatalog.js";
-import { JOURNEY_STEPS_SQL } from "./journey.js";
+import { JOURNEY_STEPS_SQL } from "./stepSql.js";
+import { holdsForVisits } from "./coordinatorHold.js";
 import { journeyProgress } from "../../../shared/journeyOrder.js";
 import { machineForTest } from "../../../shared/machineStages.js";
 import { HOME_COLLECTION_SQL, VISIT_HOME_SAMPLE_SQL, homeSampleOf } from "./homeCollection.js";
@@ -1413,6 +1414,14 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
     };
   }
 
+  const rxColumn = BOARD_COLUMNS.find((col) => col.key === "rx").statuses;
+  const holds = await holdsForVisits(
+    db,
+    cards.filter((c) => rxColumn.includes(c.status)).map((c) => c.id),
+    now,
+  );
+  for (const card of cards) card.coordinator = holds.get(card.id) ?? null;
+
   const onFloor = cards.filter((c) => !OFF_BOARD_STATUSES.includes(c.status));
 
   // Admin-toggleable (floorSettings.js, /settings/flow): whether samples-only
@@ -1442,7 +1451,8 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
               (c) =>
                 (!c.labOnly || chainAllowsLabOnly(col)) &&
                 c.placement === "chain" &&
-                col.statuses.includes(c.status),
+                col.statuses.includes(c.status) &&
+                !(col.key === "rx" && c.coordinator?.waiting),
             );
     const onMachines = isMachineColumn(col.key);
     const machineTimed = onMachines ? items.filter((c) => c.machine.budget) : [];
@@ -1483,6 +1493,29 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
           : [...items].sort(compareQueue),
     };
   });
+
+  const withCoordinator = onFloor
+    .filter((c) => !c.labOnly && c.placement === "chain" && c.coordinator?.waiting)
+    .sort((a, b) => b.coordinator.minutes - a.coordinator.minutes);
+  const waits = withCoordinator.map((c) => c.coordinator.minutes);
+  if (withCoordinator.length) {
+    columns.splice(
+      columns.findIndex((col) => col.key === "rx"),
+      0,
+      {
+        key: "coordinator",
+        name: "With Care Coordinator",
+        icon: "🤝",
+        slaKey: null,
+        statuses: null,
+        budgetMinutes: null,
+        count: withCoordinator.length,
+        avgMinutes: waits.length ? Math.round(waits.reduce((a, b) => a + b, 0) / waits.length) : 0,
+        hot: false,
+        cards: withCoordinator,
+      },
+    );
+  }
 
   return { cards, onFloor, columns };
 }

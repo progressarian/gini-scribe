@@ -31,6 +31,7 @@ import {
 import { useGhmDoctors } from "../../queries/hooks/useGhm";
 import { NewAppointmentModal } from "../GHMPage";
 import { OutcomeDialog, ReopenDialog } from "./FollowupDialogs";
+import OnFloorHolds from "./OnFloorHolds";
 import "../../styles/flow.css";
 import "../billing/billing.css";
 import "../billing/billingUi.css";
@@ -520,6 +521,8 @@ export default function CareFollowupsPage() {
           {refresh.isPending ? "Refreshing…" : "Refresh now"}
         </button>
       </header>
+
+      <OnFloorHolds />
 
       <div className="flow-card bill-stack">
         <div className="cfu__filters">

@@ -1,4 +1,5 @@
-import { AUTO_LAB_BILLING_SQL, skipsChiefStop } from "./journey.js";
+import { skipsChiefStop } from "./journey.js";
+import { AUTO_LAB_BILLING_SQL } from "./stepSql.js";
 import pool from "../../config/db.js";
 import { advanceStatus, returnToQueue, budgetColour, IST_TODAY } from "./statusEngine.js";
 import { getSlaConfig, budgetLookup } from "./board.js";

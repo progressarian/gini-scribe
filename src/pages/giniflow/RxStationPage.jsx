@@ -88,6 +88,15 @@ function ExplainedBadge({ explained, online }) {
 const toneClass = (colour) =>
   colour === "red" ? "si-tmr-r" : colour === "amber" ? "si-tmr-a" : "si-tmr-g";
 
+function CoordinatorBadge({ hold }) {
+  if (!hold?.waiting) return null;
+  return (
+    <span className="badge b-amb">
+      🤝 With Care Coordinator{hold.minutes != null ? ` · ${hold.minutes}m` : ""}
+    </span>
+  );
+}
+
 function QueueRow({ row, active, onPick }) {
   return (
     <button
@@ -107,6 +116,11 @@ function QueueRow({ row, active, onPick }) {
         <span className={`si-tmr ${toneClass(row.colour)}`}>⏱ {row.minutes ?? 0}m</span>
         <span className="si-since">{row.statusLabel}</span>
       </div>
+      {row.coordinator?.waiting && (
+        <div className="rxq-row__tags">
+          <CoordinatorBadge hold={row.coordinator} />
+        </div>
+      )}
       {!row.canPrint && (
         <div className="grp-hint">
           {row.rxStale
@@ -196,6 +210,14 @@ function Pane({
               </>
             )}
           </div>
+          {data?.coordinator?.waiting && (
+            <div className="dp-hint" role="status">
+              <CoordinatorBadge hold={data.coordinator} />{" "}
+              {data.coordinator.blocking
+                ? "Referred — the Care Coordinator sees them first. Explain the prescription once the coordinator sends them on."
+                : "Referred — send the patient to the Care Coordinator as well."}
+            </div>
+          )}
           {data?.rxFromHealthray && (
             <div className="dp-hint">
               Written in HealthRay, not here — the copy below is the doctor's own document. It
@@ -548,9 +570,21 @@ export default function RxStationPage() {
   };
 
   const pick = (visitId) => {
-    setOpenReadOnly(false);
+    const held = waiting.find((r) => r.visitId === visitId)?.coordinator?.blocking;
+    setOpenReadOnly(!!held);
     setOpenId(visitId);
-    if (!atDesk.some((r) => r.visitId === visitId)) start.mutate({ visitId });
+    if (held) return;
+    if (!atDesk.some((r) => r.visitId === visitId)) {
+      start.mutate(
+        { visitId },
+        {
+          onError: (e) => {
+            setOpenReadOnly(true);
+            setToast(e?.response?.data?.error || "Could not call this patient to the desk");
+          },
+        },
+      );
+    }
   };
 
   const onReturn = (visitId) =>

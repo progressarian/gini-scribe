@@ -110,6 +110,7 @@ import {
   onlineConsultChoice,
 } from "../../../shared/directConsult.js";
 import { labOnlyJourney, labOnlyKeepsStep } from "../../../shared/labOnly.js";
+import { homeStillNeeded } from "../../../shared/homeCollectors.js";
 
 // Arrived and done. They stay on the floor list — the desk is asked about them
 // — but they are not in the building.
@@ -1520,7 +1521,11 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
               <section
                 className="ci-home"
                 aria-label="Home collection — ask the patient"
-                onBlur={() => setHomeTouched(true)}
+                onBlur={(e) => {
+                  if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget)) {
+                    setHomeTouched(true);
+                  }
+                }}
               >
                 <div className="ci-home__title">🏠 Home collection — ask the patient</div>
                 {homeSaved ? (
@@ -1675,7 +1680,7 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
           <div className="dp-foot">
             {homeMissing && (
               <p className="ci-home-need btn-full" role="status">
-                Answer the home sample question first
+                Home sample — still needed: {homeStillNeeded(homeProblems).join(", ")}
               </p>
             )}
             <button
@@ -2323,6 +2328,7 @@ export function ArrivalsTab({
 
       {arriving && (
         <CheckInPanel
+          key={arriving.visitId || arriving.appointmentId || arriving.patientId}
           arrival={arriving}
           onClose={() => setArriving(null)}
           onFailed={onFailed}

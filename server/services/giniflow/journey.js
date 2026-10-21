@@ -1,4 +1,5 @@
 import pool from "../../config/db.js";
+import { AUTO_LAB_BILLING_SQL, JOURNEY_STEPS_SQL } from "./stepSql.js";
 import { draftAtCheckIn, linesForOrder } from "../billing/visitLines.js";
 import { outsourcedTestNames } from "../billing/testMatch.js";
 import {
@@ -96,8 +97,7 @@ const shapeStep = (r) => ({
   source: r.source,
 });
 
-export const AUTO_LAB_BILLING_SQL = (step) =>
-  `(${step}.source = 'auto' AND ${step}.step_catalog_id = 'lab_billing')`;
+export { AUTO_LAB_BILLING_SQL, JOURNEY_STEPS_SQL };
 
 const PLANNED_STEP_SQL = (step) => `NOT ${AUTO_LAB_BILLING_SQL(step)}`;
 
@@ -1077,18 +1077,6 @@ export async function syncFromStatus(client, visitId, toStatus, meta = null) {
 //
 // Runs inside the caller's transaction: an order that rolls back must not leave
 // stops behind for tests nobody ordered.
-export const JOURNEY_STEPS_SQL = (v) => `
-  SELECT json_agg(json_build_object(
-           'name', s.step_name,
-           'status', s.status,
-           'chain', s.chain_status,
-           'order', s.step_order,
-           'background', COALESCE(c.is_background, FALSE),
-           'test', s.step_catalog_id IN ('lab_billing', 'blood_sample') OR COALESCE(c.machine, FALSE)
-         ) ORDER BY s.step_order) AS steps
-    FROM giniflow_visit_steps s
-    LEFT JOIN flow_step_catalog c ON c.id = s.step_catalog_id
-   WHERE s.visit_id = ${v}.id`;
 
 export async function placeTestsBeforeDoctors(client, visitId) {
   const { rows: plan } = await client.query(
@@ -1137,7 +1125,8 @@ const firstPendingAfterVitals = (plan) =>
 
 async function insertAutoSteps(client, visitId, wanted, placeIn) {
   const { rows: plan } = await client.query(
-    `SELECT s.step_catalog_id, s.step_order, s.status, COALESCE(c.machine, FALSE) AS machine
+    `SELECT s.step_catalog_id, s.step_order, s.status, s.chain_status,
+            COALESCE(c.machine, FALSE) AS machine
        FROM giniflow_visit_steps s
        LEFT JOIN flow_step_catalog c ON c.id = s.step_catalog_id
       WHERE s.visit_id = $1 ORDER BY s.step_order`,
@@ -1221,6 +1210,31 @@ export async function insertMachineStepsForOrders(client, visitId, machineIds) {
     const lastTest = plan.findLast((s) => isTestStep(s.step_catalog_id, s.machine));
     return lastTest ? lastTest.step_order + 1 : firstPendingAfterVitals(plan)?.step_order;
   });
+}
+
+const AFTER_COORDINATOR = ["rx_pending", "with_rx", "pharmacy_pending", "dispensed"];
+
+export async function insertCoordinatorStep(client, visitId) {
+  return insertAutoSteps(
+    client,
+    visitId,
+    ["care_coordinator"],
+    (plan) =>
+      plan.find((s) => s.status !== "done" && AFTER_COORDINATOR.includes(s.chain_status))
+        ?.step_order,
+  );
+}
+
+export async function closeCoordinatorStep(client, visitId, status) {
+  await client.query(
+    `UPDATE giniflow_visit_steps
+        SET status = $2,
+            started_at = COALESCE(started_at, NOW()),
+            completed_at = CASE WHEN $2 = 'done' THEN NOW() ELSE completed_at END
+      WHERE visit_id = $1 AND step_catalog_id = 'care_coordinator'
+        AND status IN ('pending', 'in_progress')`,
+    [visitId, status],
+  );
 }
 
 const isEchoStep = (step, machines) =>

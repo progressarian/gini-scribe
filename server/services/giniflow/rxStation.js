@@ -9,6 +9,7 @@ import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { getMachines } from "./machineCatalog.js";
 import { machineForTest } from "../../../shared/machineStages.js";
 import { EXPLAINED_SQL, ONLINE_VISIT_SQL, getRxFollowups } from "./rxFollowups.js";
+import { holdsForVisits } from "./coordinatorHold.js";
 
 const QUEUE_STATUSES = ["doctor_done", "rx_pending", "with_rx"];
 const DONE_STATUSES = ["pharmacy_pending", "dispensed", "exited"];
@@ -113,7 +114,15 @@ export async function getRxQueue(visitDate, q = null, now = new Date(), db = poo
     db.query(QUEUE_SQL, [visitDate, DONE_STATUSES, LAB_ONLY_DOCTOR, search]),
   ]);
 
-  const rows = open.map((r) => toRow(r, budgetFor, now));
+  const holds = await holdsForVisits(
+    db,
+    open.map((r) => r.visit_id),
+    now,
+  );
+  const rows = open.map((r) => ({
+    ...toRow(r, budgetFor, now),
+    coordinator: holds.get(r.visit_id) ?? null,
+  }));
   return {
     echoHandovers: await getEchoHandovers(visitDate, search, db),
     atDesk: rows.filter((r) => r.status === "with_rx"),
@@ -174,9 +183,10 @@ export async function getRxPatient(visitId, db = pool) {
 
   const card = await buildCard(v.patient_id, db);
   const active = card.groups.flatMap((g) => g.medicines);
-  const [stopped, followups] = await Promise.all([
+  const [stopped, followups, holds] = await Promise.all([
     stoppedToday(v.patient_id, v.visit_date, db),
     getRxFollowups(v.visit_id, db),
+    holdsForVisits(db, [v.visit_id]),
   ]);
 
   return {
@@ -198,6 +208,7 @@ export async function getRxPatient(visitId, db = pool) {
     explained: !!v.explained,
     online: !!v.online,
     followups,
+    coordinator: holds.get(v.visit_id) ?? null,
     card,
     stopped,
     counselling: buildCounsellingNote([...active, ...stopped]),

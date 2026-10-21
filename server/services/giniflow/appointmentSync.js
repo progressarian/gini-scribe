@@ -27,6 +27,7 @@ import { canReadBill, syncBillingForVisitId } from "./machineSync.js";
 import { directConsultSql } from "../../../shared/directConsult.js";
 import { reassignConsultant } from "./reassign.js";
 import { sweepLateTestExits } from "./lateTests.js";
+import { syncDayHolds } from "./coordinatorHold.js";
 
 const DIRECT_CONSULT_HEALTHRAY_WRITES = ["no_show", "cancelled"];
 
@@ -754,6 +755,7 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
     result.labOnlySwept = await sweepLabOnlyExits(client, day);
     result.reopenedAfterLabOnly = await reopenAfterLabOnlyExit(client, day);
     result.lateTestsClosed = await sweepLateTestExits(client, day);
+    result.coordinatorHolds = await syncDayHolds(client, day);
     // Only ever used to choose `rx_pending` over `exited`, and on a manual floor
     // `exited` is not a target the sync can have — so the query is skipped rather
     // than run every 30 seconds for an answer nothing reads.

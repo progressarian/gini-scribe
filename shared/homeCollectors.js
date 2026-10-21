@@ -9,6 +9,7 @@ export const HOME_PAY_MODES = [
 export const HOME_AMOUNT_MAX = 100000;
 export const HOME_NOTE_MAX = 160;
 const CLOCK_SKEW_MIN = 2;
+export const FUTURE_TIME = "The collection time can't be in the future";
 
 const minutesOf = (clock) => {
   const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(clock || ""));
@@ -25,7 +26,7 @@ export function homeSampleProblems(answer, nowClock) {
   const at = minutesOf(answer.collectedTime);
   if (at === null) problems.collectedTime = "Enter the time the sample was collected";
   else if (nowClock && at > minutesOf(nowClock) + CLOCK_SKEW_MIN)
-    problems.collectedTime = "The collection time can't be in the future";
+    problems.collectedTime = FUTURE_TIME;
   if (!HOME_COLLECTORS.includes(answer.collectedBy))
     problems.collectedBy = `Choose who collected it: ${HOME_COLLECTORS.join(" or ")}`;
   if (!["paid", "pending"].includes(answer.payment)) {
@@ -41,6 +42,24 @@ export function homeSampleProblems(answer, nowClock) {
   }
   return problems;
 }
+
+const STILL_NEEDED = {
+  sample: "collected at home or not",
+  collectedTime: "collection time",
+  collectedBy: "collected by",
+  payment: "paid at home or pending",
+  amount: "amount paid",
+  mode: "how they paid",
+};
+
+export const homeStillNeeded = (problems) =>
+  Object.keys(STILL_NEEDED)
+    .filter((key) => problems[key])
+    .map((key) =>
+      key === "collectedTime" && problems[key] === FUTURE_TIME
+        ? "collection time (it can't be in the future)"
+        : STILL_NEEDED[key],
+    );
 
 const modeLabel = (mode) => HOME_PAY_MODES.find((m) => m.value === mode)?.label || mode;
 

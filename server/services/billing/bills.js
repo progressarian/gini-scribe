@@ -378,9 +378,11 @@ async function liveLines(client, billId, { all = false } = {}) {
 }
 
 async function shownLines(client, billId, options) {
-  const lines = await liveLines(client, billId, options);
-  const states = await orderStatesOn(client, billId);
-  const later = await testsAfterConsult(client, billId);
+  const [lines, states, later] = await Promise.all([
+    liveLines(client, billId, options),
+    orderStatesOn(client, billId),
+    testsAfterConsult(client, billId),
+  ]);
   return lines.map((line) => ({
     ...line,
     order_state: states.get(line.id) ?? null,
@@ -592,10 +594,16 @@ async function billManualOf(client, row) {
 }
 
 async function withLines(client, row, extra = {}) {
-  return shapeBill(row, await shownLines(client, row.id, { all: showsEveryLine(row) }), {
-    discounts: await billDiscounts(client, row.id),
-    manual_discount: await billManualOf(client, row),
-    consultant: await billConsultantOf(client, row.id),
+  const [lines, discounts, manualDiscount, consultant] = await Promise.all([
+    shownLines(client, row.id, { all: showsEveryLine(row) }),
+    billDiscounts(client, row.id),
+    billManualOf(client, row),
+    billConsultantOf(client, row.id),
+  ]);
+  return shapeBill(row, lines, {
+    discounts,
+    manual_discount: manualDiscount,
+    consultant,
     ...extra,
   });
 }
@@ -758,7 +766,9 @@ export async function openDraft(visitId, ctx, db = pool) {
   const id = cleanUuid(visitId, "visit");
   return inTransaction(async (client) => {
     const opened = await openDraftIn(client, id, ctx);
-    const { bill, changes } = await catchUpPrices(client, opened, ctx);
+    const { bill, changes } = ctx?.skipPriceCatchUp
+      ? { bill: opened, changes: null }
+      : await catchUpPrices(client, opened, ctx);
     await keepFirstSnapshot(client, bill);
     const resolution = await resolutionFor(client, {
       patientId: bill.patient_id,
@@ -793,13 +803,20 @@ export async function readBill(billId, db = pool) {
   const id = cleanUuid(billId, "bill");
   const { rows } = await db.query(`SELECT ${BILL_COLUMNS} FROM bills WHERE id = $1`, [id]);
   if (!rows.length) throw httpError(404, "That bill no longer exists");
-  const clearedOn = await claimClearedOn(db, rows);
-  return shapeBill(rows[0], await shownLines(db, id, { all: showsEveryLine(rows[0]) }), {
-    codes: await billCodes(db, id),
-    discounts: await billDiscounts(db, id),
+  const [clearedOn, lines, codes, discounts, credits, consultant] = await Promise.all([
+    claimClearedOn(db, rows),
+    shownLines(db, id, { all: showsEveryLine(rows[0]) }),
+    billCodes(db, id),
+    billDiscounts(db, id),
+    billCredits(db, rows[0]),
+    billConsultantOf(db, id),
+  ]);
+  return shapeBill(rows[0], lines, {
+    codes,
+    discounts,
     claim_cleared_on: clearedOn.get(rows[0].id) ?? null,
-    credits: await billCredits(db, rows[0]),
-    consultant: await billConsultantOf(db, id),
+    credits,
+    consultant,
   });
 }
 
@@ -812,11 +829,16 @@ export async function listVisitBills(visitId, db = pool) {
   const clearedOn = await claimClearedOn(db, rows);
   const bills = [];
   for (const row of rows) {
+    const [lines, credits, consultant] = await Promise.all([
+      shownLines(db, row.id, { all: showsEveryLine(row) }),
+      billCredits(db, row),
+      billConsultantOf(db, row.id),
+    ]);
     bills.push(
-      shapeBill(row, await shownLines(db, row.id, { all: showsEveryLine(row) }), {
+      shapeBill(row, lines, {
         claim_cleared_on: clearedOn.get(row.id) ?? null,
-        credits: await billCredits(db, row),
-        consultant: await billConsultantOf(db, row.id),
+        credits,
+        consultant,
       }),
     );
   }

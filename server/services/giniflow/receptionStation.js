@@ -10,7 +10,8 @@ import {
   isExceptionStatus,
 } from "../../../shared/giniflowStatus.js";
 import { advanceStatus, IST_TODAY } from "./statusEngine.js";
-import { JOURNEY_STEPS_SQL, syncLabStepsFromLab, suggestVisitType } from "./journey.js";
+import { syncLabStepsFromLab, suggestVisitType } from "./journey.js";
+import { JOURNEY_STEPS_SQL } from "./stepSql.js";
 import { journeyProgress } from "../../../shared/journeyOrder.js";
 import { PHONE_DIGITS, toLocal10 } from "../../../shared/phone.js";
 import { searchDayVisits } from "./board.js";

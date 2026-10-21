@@ -1,4 +1,4 @@
-import { AUTO_LAB_BILLING_SQL } from "./journey.js";
+import { AUTO_LAB_BILLING_SQL } from "./stepSql.js";
 import { JOURNEY_START_SQL } from "../../../shared/giniflowStatus.js";
 
 export const REST_SKIPPED_SQL = (v) => `EXISTS (

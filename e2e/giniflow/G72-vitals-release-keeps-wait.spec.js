@@ -8,6 +8,7 @@ import { db } from "../billing/phase4b/p4b-refunds.mjs";
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 await import("../../server/services/giniflow/board.js");
 const vitals = await import("../../server/services/giniflow/vitalsStation.js");
+const { VITALS_REST_MINUTES } = await import("../../shared/giniflowStatus.js");
 
 const tag = newTag();
 let ids;
@@ -34,16 +35,16 @@ test.describe.serial("G72 sending a patient back from vitals keeps their wait", 
     await tearDown(ids);
   });
 
-  test("1. called by mistake and sent back, the wait still counts from arrival", async () => {
+  test("1. called by mistake and sent back, the wait still counts from the end of the rest", async () => {
     const before = await waitingRow();
-    expect(before.waitMinutes).toBeGreaterThanOrEqual(40);
+    expect(before.waitMinutes).toBeGreaterThanOrEqual(40 - VITALS_REST_MINUTES);
 
     await vitals.startVitals(visit, USERS.admin.id, db);
     await vitals.releaseVitals(visit, USERS.admin.id, db);
 
     const after = await waitingRow();
     expect(after).toBeTruthy();
-    expect(after.waitMinutes).toBeGreaterThanOrEqual(40);
+    expect(after.waitMinutes).toBeGreaterThanOrEqual(40 - VITALS_REST_MINUTES);
     expect(after.statusSince).toBe(before.statusSince);
   });
 });

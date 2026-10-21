@@ -95,6 +95,8 @@ export const STATUS_LABEL = {
   cancel_requested: "Cancellation requested",
   cancel_rejected: "Cancellation rejected",
   cancel_withdrawn: "Cancellation request withdrawn",
+  coordinator_hold: "Sent to the Care Coordinator",
+  coordinator_done: "Care Coordinator done",
   paused: "Stepped out — clock held",
   resumed: "Back — clock running",
   doctor_done: "Waiting for Prescription Explain",
@@ -231,6 +233,8 @@ export const MARKER_STATUSES = [
   "cancel_requested",
   "cancel_rejected",
   "cancel_withdrawn",
+  "coordinator_hold",
+  "coordinator_done",
 ];
 
 // A patient who stepped out — lunch, a phone call, the bank — and came back.

@@ -52,3 +52,28 @@ export function useRefreshFollowups() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: CARE_FOLLOWUPS_KEY }),
   });
 }
+
+export const ON_FLOOR_KEY = [...CARE_FOLLOWUPS_KEY, "on-floor"];
+
+export function useOnFloorHolds() {
+  return useQuery({
+    queryKey: ON_FLOOR_KEY,
+    queryFn: async () => (await api.get(`${BASE}/on-floor`)).data,
+    refetchInterval: 30_000,
+  });
+}
+
+function useHoldAction(path) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ visitId, ...body }) =>
+      (await api.post(`${BASE}/on-floor/${visitId}/${path}`, body)).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: CARE_FOLLOWUPS_KEY });
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "rx"] });
+    },
+  });
+}
+
+export const useCompleteHold = () => useHoldAction("done");
+export const useSkipHold = () => useHoldAction("skip");

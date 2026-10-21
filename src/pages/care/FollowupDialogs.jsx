@@ -8,7 +8,19 @@ import {
 import { requestErrorOf } from "../../components/billing/format";
 import useDialog from "../../components/billing/useDialog";
 import BillDialogLayer from "../../components/billing/BillDialogLayer";
-import { useCloseFollowup, useReopenFollowup } from "../../queries/hooks/useCareFollowups";
+import {
+  HOLD_DECISIONS,
+  HOLD_DECISION_LABEL,
+  HOLD_NOTE_MAX,
+  HOLD_NOTE_MIN,
+  NOTE_REQUIRED_DECISIONS,
+} from "../../../shared/coordinatorHold.js";
+import {
+  useCloseFollowup,
+  useCompleteHold,
+  useReopenFollowup,
+  useSkipHold,
+} from "../../queries/hooks/useCareFollowups";
 import "../../styles/flow.css";
 import "../billing/billing.css";
 import "../billing/billingUi.css";
@@ -195,6 +207,136 @@ export function ReopenDialog({ item, onClose, onDone }) {
       error={error}
     >
       <ReasonField value={reason} onChange={setReason} touched={touched} />
+    </Shell>
+  );
+}
+
+const holdItem = (row) => ({
+  patient: { name: row.name, fileNo: row.fileNo, phone: row.phone },
+  target: row.referrals.map((r) => r.target).join(" · ") || "Referral",
+});
+
+function HoldNoteField({ value, onChange, required, invalid }) {
+  const id = useId();
+  const errId = useId();
+  return (
+    <div className="fset__field">
+      <label htmlFor={id}>{required ? "Note (required)" : "Note (optional)"}</label>
+      <textarea
+        id={id}
+        className="jb-assign"
+        rows={3}
+        maxLength={HOLD_NOTE_MAX}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        aria-invalid={invalid}
+        aria-describedby={invalid ? errId : undefined}
+      />
+      {invalid ? (
+        <p id={errId} className="bill-dialog__error">
+          Write what was decided — at least {HOLD_NOTE_MIN} characters
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+export function HoldDoneDialog({ row, onClose, onDone }) {
+  const save = useCompleteHold();
+  const [decision, setDecision] = useState("");
+  const [note, setNote] = useState("");
+  const [touched, setTouched] = useState(false);
+  const [error, setError] = useState("");
+  const needsNote = NOTE_REQUIRED_DECISIONS.includes(decision);
+  const noteShort = needsNote && note.trim().length < HOLD_NOTE_MIN;
+  const submit = async () => {
+    setTouched(true);
+    setError("");
+    if (!decision || noteShort || save.isPending) return;
+    try {
+      await save.mutateAsync({ visitId: row.visitId, decision, note: note.trim() || null });
+      onDone(`${row.name}: ${HOLD_DECISION_LABEL[decision]} — sent to the Rx desk`);
+    } catch (e) {
+      setError(requestErrorOf(e, "Could not send the patient on"));
+    }
+  };
+  return (
+    <Shell
+      title={`Send to Prescription Explain — ${row.name}`}
+      item={holdItem(row)}
+      onClose={onClose}
+      onSubmit={submit}
+      busy={save.isPending}
+      submitLabel="Done — send to Rx desk"
+      error={error}
+    >
+      <fieldset className="cxl-charge">
+        <legend>What was decided? (required)</legend>
+        <div className="cxl-charge__types" role="radiogroup">
+          {HOLD_DECISIONS.map((d) => (
+            <label key={d.value} className="cxl-radio">
+              <input
+                type="radio"
+                name="hold-decision"
+                checked={decision === d.value}
+                onChange={() => setDecision(d.value)}
+              />
+              {d.label}
+            </label>
+          ))}
+        </div>
+        {touched && !decision ? (
+          <p className="bill-dialog__error">Choose what was decided</p>
+        ) : null}
+      </fieldset>
+      <HoldNoteField
+        value={note}
+        onChange={setNote}
+        required={needsNote}
+        invalid={Boolean(touched && noteShort)}
+      />
+      <p className="cxl-confirm">
+        The patient goes on to Prescription Explain. Their follow-up stays on this list
+        {decision === "call_later" ? " so the calls carry on" : ""}.
+      </p>
+    </Shell>
+  );
+}
+
+export function HoldSkipDialog({ row, onClose, onDone }) {
+  const save = useSkipHold();
+  const [reason, setReason] = useState("");
+  const [touched, setTouched] = useState(false);
+  const [error, setError] = useState("");
+  const short = reason.trim().length < HOLD_NOTE_MIN;
+  const submit = async () => {
+    setTouched(true);
+    setError("");
+    if (short || save.isPending) return;
+    try {
+      await save.mutateAsync({ visitId: row.visitId, reason: reason.trim() });
+      onDone(`${row.name}: sent on without the Care Coordinator`);
+    } catch (e) {
+      setError(requestErrorOf(e, "Could not send the patient on"));
+    }
+  };
+  return (
+    <Shell
+      title={`Send on without the Care Coordinator — ${row.name}`}
+      item={holdItem(row)}
+      onClose={onClose}
+      onSubmit={submit}
+      busy={save.isPending}
+      submitLabel="Send on"
+      error={error}
+    >
+      <HoldNoteField
+        value={reason}
+        onChange={setReason}
+        required
+        invalid={Boolean(touched && short)}
+      />
+      <p className="cxl-confirm">Recorded with your name. The referral stays on Follow-ups.</p>
     </Shell>
   );
 }

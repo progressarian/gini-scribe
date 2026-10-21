@@ -155,16 +155,25 @@ test.describe.serial("G105 reception records the home sample", () => {
     const panel = page.getByRole("dialog", { name: "Check in" });
     const box = panel.getByRole("region", { name: "Home collection — ask the patient" });
     await expect(box).toBeVisible();
-    await expect(panel.getByText("Answer the home sample question first")).toBeVisible();
+    const need = panel.getByRole("status").filter({ hasText: "Home sample — still needed" });
+    await expect(need).toHaveText("Home sample — still needed: collected at home or not");
     const arrive = panel.getByRole("button", { name: "Check in only — bill later" });
     await expect(arrive).toBeDisabled();
 
     await box.getByRole("radio", { name: "Collected at home" }).check();
+    await box.getByLabel("Collected by (required)").focus();
+    await expect(box.getByText("Enter the time the sample was collected")).toHaveCount(0);
+    await expect(box.getByText(/Choose who collected it/)).toHaveCount(0);
+    await expect(box.getByText("Choose whether the payment was made at home")).toHaveCount(0);
+    await expect(need).toHaveText(
+      "Home sample — still needed: collection time, collected by, paid at home or pending",
+    );
     await box.getByLabel("Time (required)").fill(pastClock());
     await box.getByLabel("Collected by (required)").selectOption("Pratham");
+    await expect(need).toHaveText("Home sample — still needed: paid at home or pending");
     await expect(arrive).toBeDisabled();
     await box.getByRole("radio", { name: "Pending" }).check();
-    await expect(panel.getByText("Answer the home sample question first")).toHaveCount(0);
+    await expect(need).toHaveCount(0);
     await expect(arrive).toBeEnabled({ timeout: 15000 });
     await arrive.click();
 

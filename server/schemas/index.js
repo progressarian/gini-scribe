@@ -8,6 +8,7 @@ import { MACHINE_SAMPLE_FLOW } from "../../shared/machineStages.js";
 import { TEST_CANCEL_REASON_VALUES } from "../../shared/testCancelReasons.js";
 import { HOME_NOTE_MAX } from "../../shared/homeCollectors.js";
 import { RX_FOLLOWUP_ACTIONS } from "../../shared/rxFollowups.js";
+import { HOLD_DECISIONS, HOLD_NOTE_MAX, HOLD_NOTE_MIN } from "../../shared/coordinatorHold.js";
 import {
   CLOSE_OUTCOMES,
   FOLLOWUP_KIND_GROUPS,
@@ -1024,6 +1025,27 @@ export const careFollowupBookedSchema = z.object({
 });
 
 export const careFollowupReopenSchema = z.object({ reason: followupReason });
+
+export const careHoldDoneSchema = z.object({
+  decision: z.enum(
+    HOLD_DECISIONS.map((d) => d.value),
+    { message: "Choose what was decided for the referral" },
+  ),
+  note: z
+    .string()
+    .trim()
+    .max(HOLD_NOTE_MAX, `Keep the note under ${HOLD_NOTE_MAX} characters`)
+    .optional()
+    .nullable(),
+});
+
+export const careHoldSkipSchema = z.object({
+  reason: z
+    .string()
+    .trim()
+    .min(HOLD_NOTE_MIN, "Say why the patient goes on without the Care Coordinator")
+    .max(HOLD_NOTE_MAX, `Keep the reason under ${HOLD_NOTE_MAX} characters`),
+});
 
 export const careFollowupDaySchema = z.object({
   day: z

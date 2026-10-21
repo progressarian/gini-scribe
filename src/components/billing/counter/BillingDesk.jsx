@@ -276,6 +276,8 @@ export default function BillingDesk({
   const { data, isLoading } = useCounterPatients(debounced.trim());
   const openDraft = useOpenDraft();
   const reread = useRereadBill();
+  const peek = useRereadBill();
+  const peeked = useRef(null);
   const { data: visitBills } = useVisitBills(visitId);
   const { data: notPriced } = useVisitNotPriced(visitId);
   const { data: schemes } = usePatientSchemeList();
@@ -371,6 +373,23 @@ export default function BillingDesk({
     if (billId) reread.mutate({ billId }, handlers);
     else openDraft.mutate({ visitId }, handlers);
   }, [visitId, billId, fresh]);
+
+  useEffect(() => {
+    if (bill || billId || !visitId || !openDraft.isPending) return;
+    const wanted = opened.current;
+    if (!wanted || peeked.current === wanted) return;
+    const draft = (visitBills || []).find((b) => b.status === "draft" && b.bill_type === "invoice");
+    if (!draft) return;
+    peeked.current = wanted;
+    peek.mutate(
+      { billId: draft.id },
+      {
+        onSuccess: (found) => {
+          if (opened.current === wanted) setBill((current) => current ?? found);
+        },
+      },
+    );
+  }, [visitBills, bill, billId, visitId, openDraft.isPending]);
 
   useEffect(() => {
     if (!bill || bill.status !== "draft" || reread.isPending) return;

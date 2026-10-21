@@ -44,6 +44,7 @@ import { backfillCommonSideEffectsForMed } from "../services/medication/commonSi
 import { enrichMedWithDays } from "../services/medication/daysOfWeek.js";
 import { blockWriteGuard } from "../middleware/blockWriteGuard.js";
 import { datedFollowUp } from "../../shared/followUp.js";
+import { syncReferralHold } from "../services/giniflow/coordinatorHold.js";
 
 const require = createRequire(import.meta.url);
 // Outbound Genie sync removed 2026-05-01 — dual-DB routing replaces it.
@@ -1992,6 +1993,7 @@ router.post("/visit/:patientId/referral", async (req, res) => {
       `INSERT INTO referrals (patient_id, doctor_name, speciality, reason, appointment_id) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
       [pid, t(doctor_name, 200), t(speciality, 100), t(reason, 1000), appointment_id || null],
     );
+    await syncReferralHold(pid, appointment_id || null);
     res.json(r.rows[0]);
   } catch (e) {
     handleError(res, e, "Add referral");
