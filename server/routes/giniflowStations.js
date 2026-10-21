@@ -3193,7 +3193,9 @@ router.post(
 // Deselecting a chip. Refused with a 409 once a letter exists behind the row.
 router.delete("/giniflow/referrals/:id", referralChipGate, async (req, res) => {
   try {
-    res.json(await removeReferral(req.params.id));
+    res.json(
+      await removeReferral(req.params.id, undefined, { actorId: req.doctor?.doctor_id ?? null }),
+    );
   } catch (e) {
     referralsError(res, e, "Gini Flow remove referral");
   }
@@ -3215,6 +3217,7 @@ router.post(
           medicines: req.body.medicines || [],
           complete: req.body.complete !== false,
           actorName: req.doctor?.short_name || req.doctor?.doctor_name || null,
+          actorId: req.doctor?.doctor_id ?? null,
         }),
       );
     } catch (e) {
@@ -3284,7 +3287,13 @@ router.post(
   validate(giniflowReferralAppointmentSchema),
   async (req, res) => {
     try {
-      res.json(await bookAppointment(req.params.id, { date: req.body.date, note: req.body.note }));
+      res.json(
+        await bookAppointment(req.params.id, {
+          date: req.body.date,
+          note: req.body.note,
+          actorId: req.doctor?.doctor_id ?? null,
+        }),
+      );
     } catch (e) {
       referralsError(res, e, "Gini Flow book referral appointment");
     }
@@ -3297,7 +3306,11 @@ router.post(
   validate(giniflowReferralCompleteSchema),
   async (req, res) => {
     try {
-      res.json(await completeReferral(req.params.id));
+      res.json(
+        await completeReferral(req.params.id, undefined, {
+          actorId: req.doctor?.doctor_id ?? null,
+        }),
+      );
     } catch (e) {
       referralsError(res, e, "Gini Flow complete referral");
     }

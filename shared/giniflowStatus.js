@@ -270,9 +270,9 @@ export const JOURNEY_START_SQL = (col) =>
 
 export const VITALS_REST_MINUTES = 10;
 
-export const vitalsRestUntil = (status, arrivedAt) => {
-  if (!hasNotStarted(status) || !arrivedAt) return null;
-  return new Date(new Date(arrivedAt).getTime() + VITALS_REST_MINUTES * 60000).toISOString();
+export const vitalsRestUntil = (status, calledAt) => {
+  if (status !== "with_vitals" || !calledAt) return null;
+  return new Date(new Date(calledAt).getTime() + VITALS_REST_MINUTES * 60000).toISOString();
 };
 
 export const isResting = (restUntil, now = Date.now()) =>

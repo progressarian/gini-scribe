@@ -111,6 +111,10 @@
   color: var(--fsk);
   background: var(--fskl);
 }
+.cfu-status--booked_outside {
+  color: var(--ftl);
+  background: var(--ftll);
+}
 .cfu-status--done {
   color: var(--fgn);
   background: var(--fgnl);
@@ -143,6 +147,12 @@
   align-items: center;
   gap: 4px;
   white-space: nowrap;
+}
+.cfu-desk {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ftl);
 }
 .cfu-note {
   margin-top: 4px;

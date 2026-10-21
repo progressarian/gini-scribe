@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   useReferrals,
   useCreateReferral,
@@ -53,7 +54,8 @@ function GroupHead({ title, sub, count, open, onToggle, id }) {
 }
 
 export default function ReferralsStationPage() {
-  const [search, setSearch] = useState("");
+  const [params] = useSearchParams();
+  const [search, setSearch] = useState(() => params.get("q") || "");
   const [formOpen, setFormOpen] = useState(false);
   // Today open, the last 30 days closed. The station is worked forward: past
   // referrals are what you go looking for, and they are twenty rows deep.

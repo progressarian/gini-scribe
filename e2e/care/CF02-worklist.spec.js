@@ -89,7 +89,9 @@ test.describe.serial("CF02 care follow-ups: the worklist", () => {
     await expect(page).toHaveURL(/\/care-followups$/, { timeout: 20000 });
     await expect(page.getByRole("heading", { name: "Follow-ups" })).toBeVisible({ timeout: 30000 });
     await expect(page.getByRole("link", { name: /Follow-ups/ })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Reception|OPD/ })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: /Reception|OPD|GHM/ })).toHaveCount(0);
+    await page.goto("/ghm?tab=by_date");
+    await expect(page).not.toHaveURL(/\/ghm/, { timeout: 20000 });
     await page.goto("/giniflow/station/referrals");
     await expect(page.getByText("Today's referrals")).toBeVisible({ timeout: 30000 });
     const care = await apiAs("care_coordinator");

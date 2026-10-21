@@ -1,6 +1,7 @@
 export const FOLLOWUP_STATUSES = [
   { value: "open", label: "Open" },
   { value: "booked", label: "Booked" },
+  { value: "booked_outside", label: "Booked outside" },
   { value: "done", label: "Done" },
   { value: "not_available", label: "Not available here" },
   { value: "declined", label: "Patient declined" },
@@ -11,7 +12,7 @@ export const FOLLOWUP_STATUS_LABEL = Object.fromEntries(
   FOLLOWUP_STATUSES.map((s) => [s.value, s.label]),
 );
 
-export const ACTIVE_STATUSES = ["open", "booked"];
+export const ACTIVE_STATUSES = ["open", "booked", "booked_outside"];
 
 export const FOLLOWUP_KIND_LABEL = {
   consultant: "Consultant",

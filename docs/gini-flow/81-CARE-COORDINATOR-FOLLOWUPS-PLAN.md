@@ -322,3 +322,11 @@ The user asked for the page to work like the GHM calling sheet, a clearer Action
   - **An earlier day is fetched when picked.** The list collects from the go-live date (`care_followups_since`) onwards. Picking a day before it calls `POST /api/care-followups/day` (`collectDay`): the three referral sources are read for that one day only (`BETWEEN day AND day`), inserted as usual (`ON CONFLICT DO NOTHING`), then auto-progress runs. The go-live date itself is not moved. A future day is refused (400). The page fetches each day once per visit and shows "Fetching referrals for …" meanwhile.
   - Auto-progress now looks for later visits from each batch's earliest referral date rather than from the go-live date, so an older referral can still turn Booked/Done.
   - Test: CF02 9.
+
+## Linked with the Referrals desk (plan 83)
+
+Desk referrals now reach Follow-ups at once and move with the desk (Booked outside, done on reply / Mark seen, closed on remove); a GHM booking here sets the desk to Appointment pending. See `83-REFERRALS-DESK-FOLLOWUPS-LINK-PLAN.md`.
+
+## GHM Ops page hidden from the care coordinator (21 Oct 2026)
+
+`/ghm` is in `ROLE_NAV_HIDDEN` for `care_coordinator`: no menu item, and a direct URL redirects home. `OBT_OPS` stays, because Follow-ups' **Book appointment** opens the GHM booking form and uses the GHM appointment APIs.

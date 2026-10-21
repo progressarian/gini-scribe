@@ -1,6 +1,11 @@
 import pool from "../../config/db.js";
 import { toLocal10 } from "../../../shared/phone.js";
-import { FOLLOWUP_KIND_GROUPS, REFERRAL_KINDS } from "../../../shared/careFollowups.js";
+import {
+  ACTIVE_STATUSES,
+  FOLLOWUP_KIND_GROUPS,
+  REFERRAL_KINDS,
+} from "../../../shared/careFollowups.js";
+import { referralStatusMeta, urgencyMeta } from "../../../shared/giniflowReferrals.js";
 import { loadCatalog } from "./match.js";
 import { followupsSince } from "./collect.js";
 
@@ -44,6 +49,21 @@ const shapeItem = (r) => ({
     : null,
   attempts: r.attempts,
   lastCall: r.last_call_status ? { status: r.last_call_status, at: r.last_call_at } : null,
+  desk: r.desk_id
+    ? {
+        referralId: r.desk_id,
+        status: r.desk_status,
+        statusLabel: referralStatusMeta(r.desk_status).label,
+        urgency: r.desk_urgency,
+        urgencyLabel: urgencyMeta(r.desk_urgency).short,
+        hospital: r.desk_hospital,
+        hasLetter: Boolean(r.desk_letter_at || r.desk_letter_url),
+        letterSentAt: r.desk_sent_at,
+        sentTo: r.desk_sent_to,
+        appointmentDate: r.desk_appt_day,
+        appointmentNote: r.desk_appt_note,
+      }
+    : null,
   updatedAt: r.updated_at,
 });
 
@@ -52,11 +72,19 @@ const ITEM_SQL = `
          COALESCE(md.short_name, md.name) AS matched_doctor_name, md.name AS matched_doctor_full,
          ba.appointment_date::text AS booked_day, ba.time_slot AS booked_slot,
          ba.doctor_name AS booked_doctor, ba.status AS booked_status,
-         (${TODAY} - cf.due_on) AS overdue_days
+         (${TODAY} - cf.due_on) AS overdue_days,
+         gr.id AS desk_id, gr.status AS desk_status, gr.urgency AS desk_urgency,
+         gr.hospital AS desk_hospital, gr.letter_generated_at AS desk_letter_at,
+         gr.letter_file_url AS desk_letter_url, gr.letter_sent_at AS desk_sent_at,
+         gr.sent_to AS desk_sent_to, gr.appointment_date::text AS desk_appt_day,
+         gr.appointment_note AS desk_appt_note
     FROM care_followups cf
     JOIN patients p ON p.id = cf.patient_id
     LEFT JOIN doctors md ON md.id = cf.matched_doctor_id
-    LEFT JOIN appointments ba ON ba.id = cf.booked_appointment_id`;
+    LEFT JOIN appointments ba ON ba.id = cf.booked_appointment_id
+    LEFT JOIN giniflow_referrals gr
+      ON cf.source = 'gf_referral'
+     AND gr.id = CASE WHEN cf.source = 'gf_referral' THEN substring(cf.source_key FROM 4)::uuid END`;
 
 function whereOf(f) {
   const params = [];
@@ -145,10 +173,10 @@ export async function readFollowup(id, db = pool) {
       [id],
     ),
     db.query(
-      `${ITEM_SQL} WHERE cf.patient_id = $1 AND cf.id <> $2 AND cf.status IN ('open', 'booked')
+      `${ITEM_SQL} WHERE cf.patient_id = $1 AND cf.id <> $2 AND cf.status = ANY($4)
           AND cf.kind = ANY($3)
         ORDER BY cf.due_on NULLS LAST, cf.ordered_on`,
-      [item.patient.id, id, REFERRAL_KINDS],
+      [item.patient.id, id, REFERRAL_KINDS, ACTIVE_STATUSES],
     ),
     db.query(
       `SELECT p.address, p.emergency_contact, p.emergency_phone,
@@ -189,7 +217,8 @@ export async function readFollowup(id, db = pool) {
       to: e.to_status,
       note: e.note,
       at: e.at,
-      actor: e.actor || (e.kind === "auto" ? "Automatic" : null),
+      actor:
+        e.actor || (e.kind === "auto" ? "Automatic" : e.kind === "desk" ? "Referrals desk" : null),
     })),
     otherOpen: others.map(shapeItem),
   };

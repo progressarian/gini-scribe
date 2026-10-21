@@ -174,7 +174,6 @@ export const ROLE_NAV_ALLOWLIST = {
   [ROLES.OBT]: ["/obt-dashboard", "/ghm", "/find", "/giniflow/stations"],
   [ROLES.CARE_COORDINATOR]: [
     "/care-followups",
-    "/ghm",
     "/find",
     "/giniflow/stations",
     "/giniflow/triage",
@@ -236,6 +235,7 @@ export const ROLE_NAV_HIDDEN = {
   [ROLES.MO]: STATION_ROLE_HIDDEN_NAV,
   [ROLES.PHARMACY]: PHARMACY_HIDDEN_NAV,
   [ROLES.PHARMACY_ADMIN]: PHARMACY_HIDDEN_NAV,
+  [ROLES.CARE_COORDINATOR]: ["/ghm"],
 };
 
 export const ROLE_HOME = {

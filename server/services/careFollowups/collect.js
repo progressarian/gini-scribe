@@ -1,8 +1,9 @@
 import crypto from "node:crypto";
 import pool from "../../config/db.js";
 import { referralsFromNote } from "../healthray/noteSections.js";
-import { REFERRAL_KINDS } from "../../../shared/careFollowups.js";
+import { ACTIVE_STATUSES, REFERRAL_KINDS } from "../../../shared/careFollowups.js";
 import { loadCatalog, matchReferral, personOf } from "./match.js";
+import { markDeskBookedAtGhm } from "./deskReferral.js";
 
 const BATCH = 100;
 const IST_DATE = (col) => `(${col} AT TIME ZONE 'Asia/Kolkata')::date`;
@@ -32,16 +33,19 @@ const doctorInReferral = (text) => {
 const notCollected = (key) =>
   `NOT EXISTS (SELECT 1 FROM care_followups cf WHERE cf.source_key = ${key})`;
 
+export const DESK_REFERRAL_SELECT = `
+  SELECT r.id::text AS ref, r.patient_id, r.specialty, r.to_doctor, r.hospital, r.reason,
+         r.investigations, r.appointment_date::text AS due_on,
+         r.created_by AS by_id, COALESCE(d.short_name, d.name) AS by_name,
+         v.visit_date::text AS ordered_on
+    FROM giniflow_referrals r
+    JOIN giniflow_visits v ON v.id = r.visit_id
+    LEFT JOIN doctors d ON d.id = r.created_by`;
+
 const SOURCES = [
   {
     source: "gf_referral",
-    sql: `SELECT r.id::text AS ref, r.patient_id, r.specialty, r.to_doctor, r.hospital, r.reason,
-                 r.investigations, r.appointment_date::text AS due_on,
-                 r.created_by AS by_id, COALESCE(d.short_name, d.name) AS by_name,
-                 v.visit_date::text AS ordered_on
-            FROM giniflow_referrals r
-            JOIN giniflow_visits v ON v.id = r.visit_id
-            LEFT JOIN doctors d ON d.id = r.created_by
+    sql: `${DESK_REFERRAL_SELECT}
            WHERE v.visit_date BETWEEN $1::date AND $2::date AND ${notCollected("'gf:' || r.id")}
            ORDER BY r.created_at LIMIT ${BATCH}`,
     shape: (r, catalog) => ({
@@ -109,7 +113,25 @@ const SOURCES = [
   },
 ];
 
-async function insertItems(db, source, items) {
+export const deskReferralShape = (row, catalog) => SOURCES[0].shape(row, catalog);
+
+export const itemRow = (r, shaped) => ({
+  patient_id: r.patient_id,
+  source_key: shaped.key,
+  kind: shaped.kind,
+  target: shaped.target.slice(0, 300),
+  detail: shaped.detail ? shaped.detail.slice(0, 1000) : null,
+  matched_doctor_id: shaped.matchedDoctorId ?? null,
+  matched_specialty: shaped.matchedSpecialty ?? null,
+  matched_tests: shaped.matchedTests ?? null,
+  availability: shaped.availability,
+  ordered_by_id: r.by_id ?? null,
+  ordered_by_name: r.by_name ?? null,
+  ordered_on: r.ordered_on,
+  due_on: shaped.dueOn ?? null,
+});
+
+export async function insertItems(db, source, items) {
   if (!items.length) return 0;
   const { rowCount } = await db.query(
     `INSERT INTO care_followups
@@ -145,25 +167,7 @@ async function collectSource(db, spec, since, catalog, dryRun, until = OPEN_END)
         if (!shaped) return [{ skip: `${spec.source}:${r.ref}` }];
         return [shaped].flat().map((one) => ({ row: r, shaped: one }));
       })
-      .map((x) => {
-        if (x.skip) return x;
-        const { row: r, shaped } = x;
-        return {
-          patient_id: r.patient_id,
-          source_key: shaped.key,
-          kind: shaped.kind,
-          target: shaped.target.slice(0, 300),
-          detail: shaped.detail ? shaped.detail.slice(0, 1000) : null,
-          matched_doctor_id: shaped.matchedDoctorId ?? null,
-          matched_specialty: shaped.matchedSpecialty ?? null,
-          matched_tests: shaped.matchedTests ?? null,
-          availability: shaped.availability,
-          ordered_by_id: r.by_id ?? null,
-          ordered_by_name: r.by_name ?? null,
-          ordered_on: r.ordered_on,
-          due_on: shaped.dueOn ?? null,
-        };
-      })
+      .map((x) => (x.skip ? x : itemRow(x.row, x.shaped)))
       .filter((x) => x.patient_id && !x.skip);
     seen += rows.length;
     if (dryRun && !spec.keyset) {
@@ -252,6 +256,7 @@ function decide(item, facts, catalog) {
     to: "booked",
     reason: `Already booked with ${visit.doctor_name} on ${visit.day}`,
     appointmentId: visit.id,
+    visit,
   };
 }
 
@@ -270,8 +275,9 @@ async function closeGoneSources(db) {
                 THEN 'closed:Referral cancelled at source'
             END AS verdict
        FROM care_followups cf
-      WHERE cf.status IN ('open', 'booked')
+      WHERE cf.status = ANY($1)
       LIMIT 500`,
+    [ACTIVE_STATUSES],
   );
   let moved = 0;
   for (const row of gone.rows) {
@@ -287,7 +293,7 @@ export async function autoProgress(db = pool, catalog = null) {
   const cat = catalog || (await loadCatalog(db));
   let moved = await closeGoneSources(db);
   const { rows } = await db.query(
-    `SELECT id, patient_id, kind, status, ordered_on::text AS ordered_on,
+    `SELECT id, patient_id, kind, status, ordered_on::text AS ordered_on, source, source_key,
             matched_doctor_id, matched_specialty, booked_appointment_id
        FROM care_followups
       WHERE status IN ('open', 'booked') AND kind = ANY($1)
@@ -302,7 +308,12 @@ export async function autoProgress(db = pool, catalog = null) {
     for (const item of batch) {
       const next = decide(item, facts, cat);
       if (next && next.to !== item.status) {
-        moved += await moveItem(db, item.id, { from: item.status, ...next });
+        const { visit, ...move } = next;
+        const changed = await moveItem(db, item.id, { from: item.status, ...move });
+        moved += changed;
+        if (changed && visit && item.source === "gf_referral") {
+          await markDeskBookedAtGhm(db, item.source_key, visit);
+        }
       }
     }
   }

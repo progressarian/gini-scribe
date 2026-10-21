@@ -8,7 +8,6 @@ import {
   slaKeyForStatus,
   compareQueue,
   columnForStatus,
-  JOURNEY_START_SQL,
   VITALS_REST_MINUTES,
   NOT_STARTED_STATUSES,
   vitalsRestUntil,
@@ -53,13 +52,19 @@ const REST_SKIPPED_SQL = (v) => `EXISTS (
                    ORDER BY d.is_active IS NOT FALSE DESC, d.id LIMIT 1))
           FROM appointments ra WHERE ra.id = ${v}.appointment_id)))`;
 
+const RESTING_SQL = (v) => `(
+  NOT ${REST_SKIPPED_SQL(v)}
+  AND (SELECT MAX(re.occurred_at) FROM giniflow_visit_events re
+        WHERE re.visit_id = ${v}.id AND re.status = 'with_vitals')
+      + make_interval(mins => ${VITALS_REST_MINUTES}) > NOW())`;
+
 const QUEUE_SQL = `
   SELECT v.id, v.current_status, v.category, v.stability, v.stability_reasons, v.appointment_time::text AS appointment_time,
          v.priority, v.priority_reason, v.blocked_reason,
          v.queue_position, v.queue_column, v.paused_at, v.paused_reason,
          p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
          first_ev.occurred_at AS checked_in_at,
-         CASE WHEN ${REST_SKIPPED_SQL("v")} THEN NULL ELSE arrived.occurred_at END AS arrived_at,
+         CASE WHEN ${REST_SKIPPED_SQL("v")} THEN NULL ELSE called.occurred_at END AS called_at,
          last_ev.occurred_at  AS status_since,
          seq.visit_number,
          bio.biomarkers
@@ -72,9 +77,9 @@ const QUEUE_SQL = `
     ) first_ev ON TRUE
     LEFT JOIN LATERAL (
       SELECT occurred_at FROM giniflow_visit_events e
-       WHERE e.visit_id = v.id AND ${JOURNEY_START_SQL("e.status")}
+       WHERE e.visit_id = v.id AND e.status = 'with_vitals'
        ORDER BY occurred_at DESC LIMIT 1
-    ) arrived ON TRUE
+    ) called ON TRUE
     -- What the current wait is measured from. The board times every card from
     -- its last event, and the station must agree with it: a card the board has
     -- turned red cannot look calm at the station that could act on it.
@@ -196,7 +201,7 @@ export async function getVitalsQueue(
   const waitFields = (r) => {
     const minutes = minutesSince(r.status_since, now);
     const budget = budgetFor(slaKeyForStatus(r.current_status), r.category);
-    const restUntil = vitalsRestUntil(r.current_status, r.arrived_at);
+    const restUntil = vitalsRestUntil(r.current_status, r.called_at);
     return {
       statusSince: r.status_since ? new Date(r.status_since).toISOString() : null,
       restUntil: isResting(restUntil, now.getTime()) ? restUntil : null,
@@ -349,7 +354,7 @@ export async function getVitalsPatient(visitId, db = pool) {
             p.name, p.file_no, p.age, p.sex, p.notes,
             p.allergy_status, p.allergy_note,
             first_ev.occurred_at AS checked_in_at,
-            CASE WHEN ${REST_SKIPPED_SQL("v")} THEN NULL ELSE arrived.occurred_at END AS arrived_at,
+            CASE WHEN ${REST_SKIPPED_SQL("v")} THEN NULL ELSE called.occurred_at END AS called_at,
             seq.visit_number
        FROM giniflow_visits v
        JOIN patients p ON p.id = v.patient_id
@@ -360,9 +365,9 @@ export async function getVitalsPatient(visitId, db = pool) {
        ) first_ev ON TRUE
        LEFT JOIN LATERAL (
          SELECT occurred_at FROM giniflow_visit_events e
-          WHERE e.visit_id = v.id AND ${JOURNEY_START_SQL("e.status")}
+          WHERE e.visit_id = v.id AND e.status = 'with_vitals'
           ORDER BY occurred_at DESC LIMIT 1
-       ) arrived ON TRUE
+       ) called ON TRUE
        LEFT JOIN LATERAL (
          SELECT COUNT(*)::int + 1 AS visit_number FROM appointments pa
           WHERE pa.patient_id = v.patient_id AND pa.appointment_date < v.visit_date
@@ -407,8 +412,8 @@ export async function getVitalsPatient(visitId, db = pool) {
       : null,
     status: visit.current_status,
     checkedInAt: visit.checked_in_at ? new Date(visit.checked_in_at).toISOString() : null,
-    restUntil: isResting(vitalsRestUntil(visit.current_status, visit.arrived_at))
-      ? vitalsRestUntil(visit.current_status, visit.arrived_at)
+    restUntil: isResting(vitalsRestUntil(visit.current_status, visit.called_at))
+      ? vitalsRestUntil(visit.current_status, visit.called_at)
       : null,
     allergyStatus: visit.allergy_status || ALLERGY_NOT_ASKED,
     allergyNote: visit.allergy_note || null,
@@ -459,26 +464,26 @@ export const planSkipsChief = (db, visitId) => skipsChiefStop(db, visitId);
 async function refuseWhileResting(client, visitId) {
   const { rows } = await client.query(
     `SELECT p.name,
-            (e.occurred_at + make_interval(mins => $3))::timestamptz AS rest_until,
-            CEIL(EXTRACT(EPOCH FROM (e.occurred_at + make_interval(mins => $3) - NOW())) / 60)::int
+            (e.occurred_at + make_interval(mins => $2))::timestamptz AS rest_until,
+            CEIL(EXTRACT(EPOCH FROM (e.occurred_at + make_interval(mins => $2) - NOW())) / 60)::int
               AS minutes_left
        FROM giniflow_visits v
        JOIN patients p ON p.id = v.patient_id
        JOIN LATERAL (
          SELECT occurred_at FROM giniflow_visit_events ev
-          WHERE ev.visit_id = v.id AND ${JOURNEY_START_SQL("ev.status")}
+          WHERE ev.visit_id = v.id AND ev.status = 'with_vitals'
           ORDER BY occurred_at DESC LIMIT 1
        ) e ON TRUE
-      WHERE v.id = $1 AND v.current_status = ANY($2)
-        AND e.occurred_at + make_interval(mins => $3) > NOW()
+      WHERE v.id = $1 AND v.current_status = 'with_vitals'
+        AND e.occurred_at + make_interval(mins => $2) > NOW()
         AND NOT ${REST_SKIPPED_SQL("v")}`,
-    [visitId, NOT_STARTED_STATUSES, VITALS_REST_MINUTES],
+    [visitId, VITALS_REST_MINUTES],
   );
   if (!rows.length) return;
   const { name, rest_until: restUntil, minutes_left: minutesLeft } = rows[0];
   throw Object.assign(
     new Error(
-      `${name} is resting for ${VITALS_REST_MINUTES} minutes after arrival so the BP reads true — ready in ${minutesLeft} min`,
+      `${name} is resting for ${VITALS_REST_MINUTES} minutes at the station so the BP reads true — ready in ${minutesLeft} min`,
     ),
     { status: 409, restUntil: new Date(restUntil).toISOString() },
   );
@@ -677,6 +682,7 @@ export async function startVitals(visitId, actorId = null, db = pool) {
            JOIN patients p ON p.id = v.patient_id
           WHERE v.visit_date = $1::date AND v.current_status = 'with_vitals'
             AND v.id <> $3 AND ${VITALS_HOLDER_SQL} = $2
+            AND NOT ${RESTING_SQL("v")}
           LIMIT 1`,
         [rows[0].visit_date, actorId, visitId],
       );
@@ -715,7 +721,6 @@ export async function startVitals(visitId, actorId = null, db = pool) {
     }
 
     if (["checked_in", "vitals_pending"].includes(rows[0].current_status)) {
-      await refuseWhileResting(client, visitId);
       await advanceStatus(client, {
         visitId,
         toStatus: "with_vitals",

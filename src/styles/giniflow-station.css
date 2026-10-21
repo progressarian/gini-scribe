@@ -6948,6 +6948,21 @@
   margin-bottom: 8px;
 }
 
+.gf .ref-card .rc-followup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  font-size: 11px;
+  color: var(--tl);
+  background: var(--tl-l);
+  border: 1px solid var(--tl-b);
+  border-radius: var(--r);
+  padding: 6px 9px;
+  margin-bottom: 8px;
+}
+
 /* Booking is an inline box, not a modal: it records what somebody else's clinic
    said, which is a sentence, not a workflow. */
 .gf .ref-card .rc-book {

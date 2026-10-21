@@ -1,6 +1,33 @@
 import { useState } from "react";
 import { letterHref } from "../../../queries/hooks/useGiniflowReferrals";
 import { MED_SLOTS } from "../../../../shared/giniflowMedTiming";
+import { ATTEMPT_OUTCOMES } from "../../../../shared/callStatuses.js";
+import { CAPABILITIES, hasCapability } from "../../../../shared/permissions.js";
+import useAuthStore from "../../../stores/authStore";
+
+const CALL_LABEL = Object.fromEntries(ATTEMPT_OUTCOMES.map((o) => [o.value, o.label]));
+
+function FollowupLine({ followup }) {
+  const doctor = useAuthStore((s) => s.currentDoctor);
+  const calls = followup.attempts
+    ? `📞 ${followup.attempts} call${followup.attempts === 1 ? "" : "s"}${
+        followup.lastCall ? ` · last: ${CALL_LABEL[followup.lastCall] || followup.lastCall}` : ""
+      }`
+    : "Not called yet";
+  return (
+    <div className="rc-followup">
+      <span>
+        🧭 Care coordinator: <strong>{followup.statusLabel}</strong> · {calls}
+        {followup.reason ? ` · ${followup.reason}` : ""}
+      </span>
+      {hasCapability(doctor, CAPABILITIES.CARE_FOLLOWUPS) ? (
+        <a className="rc-more" href={`/care-followups?item=${encodeURIComponent(followup.id)}`}>
+          Open follow-up history
+        </a>
+      ) : null}
+    </div>
+  );
+}
 
 // One `.ref-card` — gini-stations.html #s-referrals:636.
 //
@@ -161,6 +188,8 @@ export default function ReferralCard({ referral: r, past = false, busy, onAction
           📅 {fmtDate(r.appointmentDate)} — {r.appointmentNote}
         </div>
       )}
+
+      {r.followup ? <FollowupLine followup={r.followup} /> : null}
 
       {replying && (
         <form className="rc-reply-form" onSubmit={sendReply}>

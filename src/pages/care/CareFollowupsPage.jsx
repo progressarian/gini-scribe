@@ -1,5 +1,9 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { History, Phone } from "lucide-react";
+import { CAPABILITIES, hasCapability } from "../../../shared/permissions.js";
+import useAuthStore from "../../stores/authStore";
+import { letterHref } from "../../queries/hooks/useGiniflowReferrals";
 import { ATTEMPT_OUTCOMES, CALL_STATUSES, callColor } from "../../../shared/callStatuses.js";
 import {
   ACTIVE_STATUSES,
@@ -94,6 +98,62 @@ function bookingPrefill(item, doctors) {
   };
 }
 
+const deskSearchHref = (item) =>
+  `/giniflow/station/referrals?q=${encodeURIComponent(item.patient.fileNo || item.patient.name)}`;
+
+function DeskChip({ desk }) {
+  return (
+    <div className="cfu-desk">
+      ↗ Referrals desk · {desk.statusLabel}
+      {desk.letterSentAt ? " · letter sent" : desk.hasLetter ? " · letter ready" : ""}
+    </div>
+  );
+}
+
+function DeskCard({ item }) {
+  const doctor = useAuthStore((s) => s.currentDoctor);
+  const { desk } = item;
+  const canOpen = hasCapability(doctor, CAPABILITIES.GINIFLOW_REFERRALS);
+  return (
+    <section className="cfu-card" aria-label="Referrals desk">
+      <h3 className="cfu-drawer__sub">Referrals desk</h3>
+      <dl className="cfu-facts">
+        <Fact label="Desk status">{desk.statusLabel}</Fact>
+        <Fact label="Urgency">{desk.urgencyLabel}</Fact>
+        {desk.hospital ? <Fact label="Hospital">{desk.hospital}</Fact> : null}
+        <Fact label="Letter">
+          {desk.letterSentAt
+            ? `Sent to ${desk.sentTo || "patient"} · ${whenText(desk.letterSentAt)}`
+            : desk.hasLetter
+              ? "Generated, not sent"
+              : "Not generated yet"}
+        </Fact>
+        {desk.appointmentDate ? (
+          <Fact label="Appointment">
+            {dayText(desk.appointmentDate)}
+            {desk.appointmentNote ? ` · ${desk.appointmentNote}` : ""}
+          </Fact>
+        ) : null}
+      </dl>
+      {canOpen ? (
+        <div className="cfu-actions">
+          <a
+            className="flow-btn flow-btn-ghost flow-btn-mini"
+            href={letterHref(desk.referralId)}
+            target="_blank"
+            rel="noreferrer"
+          >
+            📄 Open letter
+          </a>
+          <a className="flow-btn flow-btn-ghost flow-btn-mini" href={deskSearchHref(item)}>
+            ↗ Open on Referrals desk
+          </a>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function StatusCell({ item }) {
   return (
     <>
@@ -153,9 +213,11 @@ function HistoryEntry({ entry }) {
     ? "Call"
     : entry.kind === "auto"
       ? "Updated automatically"
-      : entry.kind === "booked"
-        ? "Booked"
-        : "Status changed";
+      : entry.kind === "desk"
+        ? "Referrals desk"
+        : entry.kind === "booked"
+          ? "Booked"
+          : "Status changed";
   return (
     <li className={`cfu-tl__item cfu-tl__item--${entry.kind}`}>
       <span className="cfu-tl__dot" aria-hidden="true" />
@@ -295,6 +357,8 @@ function Drawer({ id, onClose }) {
               </dl>
             </section>
 
+            {data.desk ? <DeskCard item={data} /> : null}
+
             {data.otherOpen.length > 0 && (
               <section className="cfu-card" aria-label="Other open follow-ups">
                 <h3 className="cfu-drawer__sub">Also open for this patient</h3>
@@ -336,7 +400,16 @@ export default function CareFollowupsPage() {
   const q = useDebounced(search.trim(), 300);
   const [dialog, setDialog] = useState(null);
   const [bookingFor, setBookingFor] = useState(null);
-  const [drawer, setDrawer] = useState(null);
+  const [params, setParams] = useSearchParams();
+  const [drawer, setDrawerState] = useState(() => params.get("item") || null);
+  const setDrawer = (id) => {
+    setDrawerState(id);
+    if (!id && params.has("item")) {
+      const next = new URLSearchParams(params);
+      next.delete("item");
+      setParams(next, { replace: true });
+    }
+  };
   const { day, ...listFilters } = filters;
   const list = useCareFollowups({
     ...listFilters,
@@ -701,6 +774,7 @@ export default function CareFollowupsPage() {
                           {AVAILABILITY_LABEL[item.availability]}
                         </span>
                         {item.detail ? <div className="cfu-note">“{item.detail}”</div> : null}
+                        {item.desk ? <DeskChip desk={item.desk} /> : null}
                       </td>
                       <td className="tl">
                         {item.orderedBy || "—"}

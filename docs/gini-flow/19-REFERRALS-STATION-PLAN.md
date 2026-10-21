@@ -563,3 +563,7 @@ second medicine history is the failure this module is structured to avoid.
 
 Until that plan lands, **do not render the two past-card buttons.** A button that toasts and does
 nothing is worse than an absent one on a screen a coordinator is trusting.
+
+## Linked with Care Follow-ups (plan 83, 21 Oct 2026)
+
+Each card shows the care coordinator's status and calls; desk actions update the matching Follow-ups item in the same transaction. See `83-REFERRALS-DESK-FOLLOWUPS-LINK-PLAN.md`.

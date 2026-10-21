@@ -184,10 +184,7 @@ function QueueRow({ q, active, now, onPick }) {
   return (
     <button
       type="button"
-      className={`sq-item${active ? " active" : ""}${chip ? ` ${chip.cls}` : ""}${
-        resting ? " is-readonly" : ""
-      }`}
-      disabled={resting}
+      className={`sq-item${active ? " active" : ""}${chip ? ` ${chip.cls}` : ""}`}
       aria-label={
         resting
           ? `${q.name}, resting before BP, ready in ${countdown(q.restUntil, now)}`
@@ -349,7 +346,8 @@ export default function VitalsStationPage() {
   // with no click and no flash of the empty state.
   const activeVisitId =
     selected ??
-    [...atStation, ...waitingList.filter((q) => !isResting(q.restUntil, now))][0]?.visitId ??
+    [...atStation.filter((q) => !isResting(q.restUntil, now)), ...waitingList, ...atStation][0]
+      ?.visitId ??
     null;
   // A patient reopened from the done list has already left the station, and
   // saveVitals will store the correction without moving them. The bar must say
@@ -735,9 +733,17 @@ export default function VitalsStationPage() {
                 </div>
                 <div className="sd-rest-clock">Rest {countdown(patient.restUntil, now)} left</div>
                 <div>
-                  BP is taken after {VITALS_REST_MINUTES} minutes of rest from arrival — ready at{" "}
+                  BP is taken after {VITALS_REST_MINUTES} minutes of rest at the station — ready at{" "}
                   {clock(patient.restUntil)}.
                 </div>
+                <button
+                  type="button"
+                  className="tr-back"
+                  onClick={sendBackToQueue}
+                  disabled={releaseVitals.isPending}
+                >
+                  {releaseVitals.isPending ? "Sending…" : "← Back to queue"}
+                </button>
               </div>
             </div>
           )}

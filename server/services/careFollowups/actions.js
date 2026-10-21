@@ -1,6 +1,7 @@
 import pool from "../../config/db.js";
 import { ATTEMPT_OUTCOMES } from "../../../shared/callStatuses.js";
 import { ACTIVE_STATUSES, CLOSE_OUTCOMES } from "../../../shared/careFollowups.js";
+import { markDeskBookedAtGhm } from "./deskReferral.js";
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 
@@ -99,6 +100,7 @@ export function markBooked(id, { appointment_id }, ctx = {}, db = pool) {
     );
     const note = `${appt.doctor_name || "Booked"} · ${appt.day}${appt.time_slot ? ` ${appt.time_slot}` : ""}`;
     await event(client, id, ctx, { kind: "booked", from: item.status, to: "booked", note });
+    if (item.source === "gf_referral") await markDeskBookedAtGhm(client, item.source_key, appt);
     return { id, status: "booked", appointmentId: appt.id };
   });
 }

@@ -5,6 +5,8 @@ import { todaysVitals, previousVitals } from "./visitVitals.js";
 import { generateReferralLetterPdf } from "../prescriptionHtmlPdf.js";
 import { sendReferralLetter } from "../msg91.js";
 import { addExternal } from "./prescription.js";
+import { syncFromDeskReferral } from "../careFollowups/referralLink.js";
+import { FOLLOWUP_STATUS_LABEL } from "../../../shared/careFollowups.js";
 import {
   isValidSpecialty,
   specialtyLabel,
@@ -43,6 +45,9 @@ const SELECT_SQL = `
          r.appointment_date::text AS appointment_date, r.appointment_note,
          r.status, r.created_at, r.ref_no,
          r.response_note, r.response_at, r.response_by,
+         cf.id AS followup_id, cf.status AS followup_status, cf.attempts AS followup_attempts,
+         cf.last_call_status AS followup_last_call, cf.last_call_at AS followup_last_call_at,
+         cf.outcome_reason AS followup_reason,
          v.visit_date::text AS visit_date,
          p.name, p.file_no, p.age, p.sex, p.phone, p.dob::text AS dob,
          COALESCE(ref.short_name, ref.name) AS referred_by,
@@ -53,6 +58,7 @@ const SELECT_SQL = `
     LEFT JOIN doctors ref  ON ref.id = r.created_by
     LEFT JOIN doctors doc  ON doc.id = v.assigned_doctor_id
     LEFT JOIN doctors sd   ON sd.id  = v.assigned_sd_id
+    LEFT JOIN care_followups cf ON cf.source_key = 'gf:' || r.id
 `;
 
 const shape = (row) => {
@@ -103,6 +109,17 @@ const shape = (row) => {
       : specialtyLabel(row.specialty),
     referredBy: row.referred_by || row.visit_doctor || null,
     createdAt: iso(row.created_at),
+    followup: row.followup_id
+      ? {
+          id: row.followup_id,
+          status: row.followup_status,
+          statusLabel: FOLLOWUP_STATUS_LABEL[row.followup_status] || row.followup_status,
+          attempts: row.followup_attempts || 0,
+          lastCall: row.followup_last_call || null,
+          lastCallAt: iso(row.followup_last_call_at),
+          reason: row.followup_reason || null,
+        }
+      : null,
     // The station never draws "View specialist report" / "Add to medicines":
     // the return leg is deferred (19 §12.3), and a button that toasts and does
     // nothing is worse than an absent one on a screen a coordinator trusts.
@@ -303,6 +320,7 @@ export async function createReferral(visitId, fields = {}, db = pool) {
       );
     }
 
+    await syncFromDeskReferral(client, rows[0].id, { actorId });
     await client.query("COMMIT");
     return shape(await loadReferral(rows[0].id, db));
   } catch (e) {
@@ -317,7 +335,7 @@ export async function createReferral(visitId, fields = {}, db = pool) {
 // changed their mind about; a row past that has a letter behind it, and that
 // letter may already be on its way to a specialist — so it is refused with a
 // sentence the consultant can act on rather than deleted quietly.
-export async function removeReferral(referralId, db = pool) {
+export async function removeReferral(referralId, db = pool, { actorId = null } = {}) {
   const client = await db.connect();
   try {
     await client.query("BEGIN");
@@ -329,6 +347,11 @@ export async function removeReferral(referralId, db = pool) {
     if (rows[0].status !== "created" || rows[0].letter_file_url) {
       throw bad("A letter has been generated for this referral — it cannot be removed");
     }
+    await syncFromDeskReferral(client, referralId, {
+      event: "removed",
+      note: "Referral removed on the Referrals desk",
+      actorId,
+    });
     await client.query(`DELETE FROM giniflow_referrals WHERE id = $1`, [referralId]);
     await client.query("COMMIT");
     return { removed: true, id: referralId };
@@ -683,7 +706,11 @@ export async function sendLetter(referralId, { to = "patient", force = false } =
 
 // The external clinic gave a slot. Gini books nothing — this records what
 // somebody else's diary says, which is why the note is free text.
-export async function bookAppointment(referralId, { date, note = null } = {}, db = pool) {
+export async function bookAppointment(
+  referralId,
+  { date, note = null, actorId = null } = {},
+  db = pool,
+) {
   if (!date) throw bad("An appointment needs a date", 400);
   const client = await db.connect();
   try {
@@ -703,6 +730,11 @@ export async function bookAppointment(referralId, { date, note = null } = {}, db
         WHERE id = $1`,
       [referralId, date, note],
     );
+    await syncFromDeskReferral(client, referralId, {
+      event: "booked_outside",
+      note: [`Outside appointment ${date}`, note].filter(Boolean).join(" — "),
+      actorId,
+    });
     await client.query("COMMIT");
     return shape(await loadReferral(referralId, db));
   } catch (e) {
@@ -732,7 +764,7 @@ export async function bookAppointment(referralId, { date, note = null } = {}, db
 // the loop was closed while the prescriber still could not see the new drugs.
 export async function recordResponse(
   referralId,
-  { note = null, medicines = [], complete = true, actorName = null },
+  { note = null, medicines = [], complete = true, actorName = null, actorId = null },
   db = pool,
 ) {
   const text = String(note || "").trim();
@@ -783,6 +815,13 @@ export async function recordResponse(
         WHERE id = $1`,
       [referralId, text, actorName, complete],
     );
+    if (complete) {
+      await syncFromDeskReferral(client, referralId, {
+        event: "completed",
+        note: "Specialist reply recorded on the Referrals desk",
+        actorId,
+      });
+    }
 
     await client.query("COMMIT");
     return { ...shape(await loadReferral(referralId, db)), medicinesAdded: added };
@@ -794,7 +833,7 @@ export async function recordResponse(
   }
 }
 
-export async function completeReferral(referralId, db = pool) {
+export async function completeReferral(referralId, db = pool, { actorId = null } = {}) {
   const client = await db.connect();
   try {
     await client.query("BEGIN");
@@ -809,6 +848,11 @@ export async function completeReferral(referralId, db = pool) {
         `UPDATE giniflow_referrals SET status = 'completed', updated_at = NOW() WHERE id = $1`,
         [referralId],
       );
+      await syncFromDeskReferral(client, referralId, {
+        event: "completed",
+        note: "Marked seen on the Referrals desk",
+        actorId,
+      });
     }
     await client.query("COMMIT");
     const fresh = shape(await loadReferral(referralId, db));
