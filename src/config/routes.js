@@ -172,6 +172,16 @@ export const PAGE_CAPABILITIES = {
 
 export const ROLE_NAV_ALLOWLIST = {
   [ROLES.OBT]: ["/obt-dashboard", "/ghm", "/find", "/giniflow/stations"],
+  [ROLES.CARE_COORDINATOR]: [
+    "/care-followups",
+    "/ghm",
+    "/find",
+    "/giniflow/stations",
+    "/giniflow/triage",
+    "/giniflow/manager",
+    "/giniflow/station/doctor",
+    "/giniflow/station/referrals",
+  ],
   // The prescription explainer holds GINIFLOW_VIEW only because `/api/giniflow*` is
   // prefix-gated on it, so a plain capability nav would also offer them the
   // manager board. The allowlist keeps the nav to the launcher, which shows
@@ -232,6 +242,7 @@ export const ROLE_HOME = {
   [ROLES.CONSULTANT]: "/giniflow/station/doctor",
   [ROLES.MO]: "/giniflow/station/mo",
   [ROLES.OBT]: "/obt-dashboard",
+  [ROLES.CARE_COORDINATOR]: "/care-followups",
   [ROLES.RX]: "/giniflow/station/rx",
   [ROLES.PHARMACY]: "/giniflow/station/pharmacy",
   [ROLES.PHARMACY_ADMIN]: "/pharmacy/stock",

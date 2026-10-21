@@ -13,6 +13,12 @@ export const USERS = {
   lab: { id: 9005, name: "E2E Lab", short_name: "Lab", role: "lab" },
   obt_one: { id: 9006, name: "E2E OBT One", short_name: "OBT One", role: "obt" },
   obt_two: { id: 9007, name: "E2E OBT Two", short_name: "OBT Two", role: "obt" },
+  care_coordinator: {
+    id: 9008,
+    name: "E2E Care Coordinator",
+    short_name: "CareCoord",
+    role: "care_coordinator",
+  },
 };
 
 export const CONSULTANTS = {

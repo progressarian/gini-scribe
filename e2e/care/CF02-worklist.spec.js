@@ -44,7 +44,7 @@ async function referred(label, specialty, { to = null, phone = null } = {}) {
 const table = (page) => page.getByRole("table", { name: "Follow-ups" });
 const rowOf = (page, name) => table(page).getByRole("row").filter({ hasText: name });
 
-async function openPage(page, role = "coordinator") {
+async function openPage(page, role = "care_coordinator") {
   await loginAs(page, role);
   await gotoReady(
     page,
@@ -81,23 +81,33 @@ test.describe.serial("CF02 care follow-ups: the worklist", () => {
     await tearDown(ids);
   });
 
-  test("1. the coordinator reaches Follow-ups from the menu; other roles are kept out", async ({
+  test("1. only the care coordinator reaches Follow-ups and the Referrals desk; the floor coordinator and other roles are kept out", async ({
     page,
   }) => {
-    await loginAs(page, "coordinator");
+    await loginAs(page, "care_coordinator");
     await page.goto("/");
-    await page.getByRole("link", { name: /Follow-ups/ }).click();
     await expect(page).toHaveURL(/\/care-followups$/, { timeout: 20000 });
     await expect(page.getByRole("heading", { name: "Follow-ups" })).toBeVisible({ timeout: 30000 });
-    for (const role of ["reception", "obt_one", "lab"]) {
+    await expect(page.getByRole("link", { name: /Follow-ups/ })).toBeVisible();
+    await expect(page.getByRole("link", { name: /Reception|OPD/ })).toHaveCount(0);
+    await page.goto("/giniflow/station/referrals");
+    await expect(page.getByText("Today's referrals")).toBeVisible({ timeout: 30000 });
+    const care = await apiAs("care_coordinator");
+    expect((await care.get("/api/care-followups")).status()).toBe(200);
+    expect((await care.get("/api/giniflow/referrals")).status()).toBe(200);
+    expect((await care.get("/api/giniflow/stations/rx/queue")).status()).toBe(403);
+    expect((await care.get("/api/giniflow/stations/vitals/queue")).status()).toBe(403);
+    await care.dispose();
+
+    await loginAs(page, "coordinator");
+    await page.goto("/");
+    await expect(page.getByRole("link", { name: /Follow-ups/ })).toHaveCount(0);
+    for (const role of ["coordinator", "reception", "obt_one", "lab"]) {
       const api = await apiAs(role);
-      const res = await api.get("/api/care-followups");
-      expect(res.status(), role).toBe(403);
+      expect((await api.get("/api/care-followups")).status(), role).toBe(403);
+      expect((await api.get("/api/giniflow/referrals")).status(), role).toBe(403);
       await api.dispose();
     }
-    const coord = await apiAs("coordinator");
-    expect((await coord.get("/api/care-followups")).status()).toBe(200);
-    await coord.dispose();
   });
 
   test("2. search by name or phone and the status counts match the database", async ({ page }) => {
@@ -107,7 +117,7 @@ test.describe.serial("CF02 care follow-ups: the worklist", () => {
     await expect(rowOf(page, a.name)).toContainText("Ophthalmology");
     await page.getByLabel("Search").fill("98111222");
     await expect(rowOf(page, a.name)).toBeVisible({ timeout: 15000 });
-    const api = await apiAs("coordinator");
+    const api = await apiAs("care_coordinator");
     const body = await (await api.get("/api/care-followups", { params: { q: a.name } })).json();
     await api.dispose();
     expect(body.total).toBe(1);
@@ -160,7 +170,7 @@ test.describe.serial("CF02 care follow-ups: the worklist", () => {
       .click()
       .catch(() => {});
 
-    const api = await apiAs("coordinator");
+    const api = await apiAs("care_coordinator");
     const day = addDays(ids.day, 3);
     const res = await api.post("/api/ghm-appointments", {
       data: {
@@ -219,7 +229,7 @@ test.describe.serial("CF02 care follow-ups: the worklist", () => {
 
   test("6. Not available needs a reason, on screen and from the API", async ({ page }) => {
     const a = await referred("CfwNa", "Oncology");
-    const api = await apiAs("coordinator");
+    const api = await apiAs("care_coordinator");
     const bad = await api.post(`/api/care-followups/${a.item}/outcome`, {
       data: { status: "not_available", reason: "" },
     });
@@ -259,7 +269,7 @@ test.describe.serial("CF02 care follow-ups: the worklist", () => {
       [a.visit, a.patient, USERS.admin.id],
     );
     await collect.collectFollowups({ db });
-    const api = await apiAs("coordinator");
+    const api = await apiAs("care_coordinator");
     await api.post(`/api/care-followups/${a.item}/outcome`, {
       data: { status: "declined", reason: "Will go to own urologist" },
     });
@@ -353,11 +363,38 @@ test.describe.serial("CF02 care follow-ups: the worklist", () => {
     await expect(rowOf(page, fresh.name)).toBeVisible({ timeout: 15000 });
     await expect(rowOf(page, oldName)).toBeVisible();
 
-    const api = await apiAs("coordinator");
+    const api = await apiAs("care_coordinator");
     const future = await api.post("/api/care-followups/day", {
       data: { day: addDays(ids.day, 1) },
     });
     expect(future.status()).toBe(400);
     await api.dispose();
+  });
+
+  test("10. the care coordinator opens Triage, Flow Coordinator, Consultant and Referrals with nothing refused", async ({
+    page,
+  }) => {
+    const refused = [];
+    page.on("response", (r) => {
+      if (r.url().includes("/api/") && r.status() === 403) refused.push(r.url());
+    });
+    await loginAs(page, "care_coordinator");
+    await gotoReady(page, "/giniflow/stations", () => page.getByText("Referrals").first());
+    for (const name of ["Triage", "Flow Coordinator", "Consultant", "Referrals"])
+      await expect(page.getByText(name, { exact: true }).first()).toBeVisible();
+    for (const name of ["Reception", "Vitals", "Prescription Explain", "Pharmacy"])
+      await expect(page.getByText(name, { exact: true })).toHaveCount(0);
+    for (const path of [
+      "/giniflow/triage",
+      "/giniflow/manager",
+      "/giniflow/station/doctor",
+      "/giniflow/station/referrals",
+    ]) {
+      await page.goto(path);
+      await page.waitForLoadState("networkidle");
+      await expect(page).toHaveURL(new RegExp(path.replace(/\//g, "\\/")));
+      await expect(page.getByText(/not allowed|no access|don't have access/i)).toHaveCount(0);
+    }
+    expect(refused).toEqual([]);
   });
 });

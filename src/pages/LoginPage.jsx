@@ -9,6 +9,7 @@ const ROLE_GROUPS = [
   { role: "mo", label: "Medical Officers", showSpecialty: false },
   { role: "nurse", label: "Nursing", showSpecialty: false },
   { role: "coordinator", label: "Coordinators", showSpecialty: false },
+  { role: "care_coordinator", label: "Care Coordinators", showSpecialty: false },
   { role: "lab", label: "Laboratory", showSpecialty: false },
   { role: "lab_admin", label: "Lab Admin", showSpecialty: false },
   { role: "machine_tech", label: "Machine Test Station", showSpecialty: false },

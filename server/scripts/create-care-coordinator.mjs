@@ -5,7 +5,7 @@ import pool from "../config/db.js";
 
 const NAME = process.argv.slice(2).join(" ").trim();
 if (!NAME || !/^[A-Za-z0-9.\s'-]{2,60}$/.test(NAME)) {
-  console.error('usage: node scripts/create-coordinator.mjs "Full Name"');
+  console.error('usage: node scripts/create-care-coordinator.mjs "Full Name"');
   process.exit(1);
 }
 
@@ -22,7 +22,7 @@ if (existing.rows.length) {
 const pin = String(crypto.randomInt(1000, 10000));
 const pinHash = await bcrypt.hash(pin, 10);
 const { rows } = await pool.query(
-  `INSERT INTO doctors (name, short_name, role, pin) VALUES ($1, $1, 'coordinator', $2)
+  `INSERT INTO doctors (name, short_name, role, pin) VALUES ($1, $1, 'care_coordinator', $2)
    RETURNING id, name, role, is_active`,
   [NAME, pinHash],
 );

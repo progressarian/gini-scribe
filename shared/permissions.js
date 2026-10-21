@@ -44,6 +44,7 @@ export const ROLES = {
   RECEPTION: "reception",
   RECEPTION_ADMIN: "reception_admin",
   COORDINATOR: "coordinator",
+  CARE_COORDINATOR: "care_coordinator",
   PHARMACY: "pharmacy",
   PHARMACY_ADMIN: "pharmacy_admin",
   // Prescription explainer. Its own role rather than a nurse account: the desk
@@ -445,7 +446,6 @@ export const ROLE_CAPABILITIES = {
   // admin/reception job. FLOW_COORDINATOR is separate and still lets them
   // override anything from the floor screens.
   [ROLES.COORDINATOR]: [
-    C.CARE_FOLLOWUPS,
     C.PATIENT_READ,
     C.PATIENT_CHART,
     C.AI_TOOLS,
@@ -472,7 +472,6 @@ export const ROLE_CAPABILITIES = {
     C.GINIFLOW_STATION_LAB_COLLECT,
     C.GINIFLOW_STATION_MO,
     C.GINIFLOW_TRIAGE,
-    C.GINIFLOW_REFERRALS,
     C.GINIFLOW_STATION_RX,
     C.GINIFLOW_PRINT_RX,
     C.GINIFLOW_TEST_CANCEL,
@@ -519,6 +518,16 @@ export const ROLE_CAPABILITIES = {
   // everything the screen shows, so the chart never has to open here.
   [ROLES.RX]: [C.GINIFLOW_VIEW, C.GINIFLOW_STATION_RX, C.GINIFLOW_END_VISIT, C.GINIFLOW_PRINT_RX],
   [ROLES.OBT]: [C.PATIENT_READ, C.OBT_OPS],
+  [ROLES.CARE_COORDINATOR]: [
+    C.PATIENT_READ,
+    C.CARE_FOLLOWUPS,
+    C.OBT_OPS,
+    C.GINIFLOW_VIEW,
+    C.GINIFLOW_REFERRALS,
+    C.GINIFLOW_TRIAGE,
+    C.GINIFLOW_BOARD,
+    C.GINIFLOW_STATION_DOCTOR,
+  ],
   // The three growth roles hold exactly one capability. Which doctors, visits
   // and referrals they can actually see is decided inside the CRM by their
   // crm.users role and enforced by RLS — a route capability cannot express
@@ -563,10 +572,6 @@ export function hasOwnPatientList(role) {
 // (If the master switch is ever flipped back on, everyone is granted everything.)
 export const DOCTOR_CAPABILITY_OVERRIDES = {
   3: { grant: [C.GINIFLOW_STATION_ECHO], revoke: [C.GINIFLOW_STATION_MO] },
-  97: {
-    grant: [C.GINIFLOW_VIEW, C.GINIFLOW_STATION_RX, C.GINIFLOW_END_VISIT, C.GINIFLOW_PRINT_RX],
-    revoke: [],
-  },
 };
 
 const roleOf = (who) => (who && typeof who === "object" ? who.role : who);

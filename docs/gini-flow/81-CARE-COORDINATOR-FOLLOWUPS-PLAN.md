@@ -271,7 +271,7 @@ Rerun the GHM specs (G01, G03, G23), plan 19's referrals smoke, P4C-13, and G105
   - every move writes an `auto` event.
 - **Matching** (`match.js`, `shared/specialties.js`): doctor names match after removing "Dr"; specialty aliases decide; tests match the catalogue by name, and `is_outsourced` marks outsourced.
 - **API:** `/api/care-followups` (list, item, call, outcome, booked, reopen, refresh), guarded by the new `CARE_FOLLOWUPS` capability.
-  - Who has it: the floor `coordinator` role and admin. The separate `care_coordinator` role was **dropped on 20 Oct 2026** at the user's request ("merge it with coordinator"); the coordinator reaches the page from the 🧭 Follow-ups menu item.
+  - Who has it: the floor `coordinator` role and admin. The separate `care_coordinator` role was dropped on 20 Oct 2026 ("merge it with coordinator") and **restored on 21 Oct 2026** ("make it separate from coordinator roles"). `care_coordinator` holds `PATIENT_READ`, `CARE_FOLLOWUPS`, `OBT_OPS`, `GINIFLOW_VIEW` and `GINIFLOW_REFERRALS`, lands on Follow-ups, and its menu is limited to Follow-ups, GHM, Find and the Referrals desk (`/giniflow/station/referrals`, via the stations launcher). The floor `coordinator` no longer holds `CARE_FOLLOWUPS` or `GINIFLOW_REFERRALS` (21 Oct 2026, "remove follow-ups from coordinator and referral also"); admin keeps both. Also on 21 Oct 2026 the care coordinator gained Triage (`GINIFLOW_TRIAGE`), the Flow Coordinator board (`GINIFLOW_BOARD`, `/giniflow/manager`) and the Consultant station (`GINIFLOW_STATION_DOCTOR`); the stations launcher shows them only those four cards with Referrals.
 - **Booking** reuses the GHM ops `NewAppointmentModal`, now exported from `GHMPage.jsx`. It gained:
   - prefilled `visit_type`, `notes` and `home_collection`;
   - the new booking returned to the caller;
@@ -281,7 +281,7 @@ Rerun the GHM specs (G01, G03, G23), plan 19's referrals smoke, P4C-13, and G105
 - **Not built:**
   - the optional **Refer outside** link (Q6);
   - `assigned_to` (one coordinator for now).
-- **Account:** `server/scripts/create-coordinator.mjs "Full Name"` makes a `coordinator` login, run by you in your own terminal. "Coordinator 2" (id 98) was created with it and moved to role `coordinator` when the roles merged.
+- **Account:** `server/scripts/create-care-coordinator.mjs "Full Name"` makes a `care_coordinator` login, run by you in your own terminal. "Coordinator 2" (id 98) was moved to `coordinator` on the merge, back to `care_coordinator` on 21 Oct 2026, and renamed "Care Coordinator" the same day.
 - **Tests:** CF01 (7 checks) and CF02 (8 checks) pass, as do `setup/helpers`, `setup/fixtures`, P0-04 and GHM G01, G03, G14 and G23.
 
 ## HealthRay note referrals (added 20 Oct 2026)

@@ -13,7 +13,7 @@ const match = await import("../../server/services/careFollowups/match.js");
 
 const db = getPool();
 const tag = newTag();
-const coord = { actorId: USERS.coordinator.id };
+const coord = { actorId: USERS.care_coordinator.id };
 let ids;
 const patients = [];
 
