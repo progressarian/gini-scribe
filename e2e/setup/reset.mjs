@@ -1,5 +1,8 @@
 import { CATALOG_TESTS, CONSULTANTS, PATIENTS, PIN, USERS } from "../fixtures/data.mjs";
 import { withTransaction } from "../helpers/db.mjs";
+import { seedTemplateFromProfile } from "../../server/services/slots/seedFromProfile.js";
+import { profileFromRow } from "../../server/services/slots/profileRules.js";
+import { insertTemplateVersion } from "../../server/services/slots/templateWrites.js";
 
 async function truncateAll(client) {
   const { rows } = await client.query(
@@ -93,6 +96,22 @@ async function insertCatalogTests(client) {
   }
 }
 
+async function insertSlotTemplates(client) {
+  const { rows: catalog } = await client.query(
+    `SELECT label, start_time::text, end_time::text FROM slot_catalog WHERE is_active ORDER BY sort_order`,
+  );
+  if (!catalog.length) return;
+  const template = seedTemplateFromProfile(profileFromRow(null), catalog);
+  for (const doctor of [...Object.values(USERS), ...Object.values(CONSULTANTS)]) {
+    if (!["consultant", "mo"].includes(String(doctor.role).toLowerCase())) continue;
+    await insertTemplateVersion(client, doctor.id, template, {
+      effectiveFrom: "2026-01-01",
+      note: "e2e fixture: same 24 h seed as production",
+      actorId: null,
+    });
+  }
+}
+
 const RETRYABLE = new Set(["40P01", "55P03", "40001"]);
 
 export async function resetDatabase({ attempts = 8 } = {}) {
@@ -115,5 +134,6 @@ async function resetOnce() {
     await insertPatients(client);
     await insertCatalogTests(client);
     await syncSequences(client);
+    await insertSlotTemplates(client);
   });
 }

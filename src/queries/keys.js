@@ -6,6 +6,7 @@
 // lead to typos that silently skip cache invalidation.
 
 export const qk = {
+  slotCatalog: ["slot-catalog"],
   opd: {
     all: ["opd"],
     appointments: (date) => ["opd", "appointments", date],

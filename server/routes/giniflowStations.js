@@ -14,12 +14,14 @@ import { addRxFollowup, getRxNotTaken } from "../services/giniflow/rxFollowups.j
 import { fetchRxFile, regenerateRx } from "../services/giniflow/printRx.js";
 import {
   addOrderedService,
+  addOtherProcedure,
   orderedServiceChoices,
   orderedServicesFor,
   removeOrderedService,
 } from "../services/billing/orderedServices.js";
 import {
   orderedServiceAddSchema,
+  orderedServiceOtherSchema,
   orderedServiceChoicesQuerySchema,
   orderedServiceRemoveSchema,
 } from "../schemas/billing.js";
@@ -51,6 +53,8 @@ import {
   pharmacyMedicineRequestSchema,
   giniflowExternalMedSchema,
   giniflowFinalizeSchema,
+  giniflowConsultEditSaveSchema,
+  giniflowDoctorRemoveTestSchema,
   giniflowDoctorQueueQuerySchema,
   giniflowCarePlanSchema,
   GINIFLOW_RX_LABELS,
@@ -251,6 +255,14 @@ import {
   fastPathFinalize,
 } from "../services/giniflow/finalize.js";
 import {
+  openEdit,
+  cancelEdit,
+  saveEdit,
+  editingVisitOf,
+  editingRowOf,
+  editState,
+} from "../services/giniflow/consultEdit.js";
+import {
   getPharmacyQueue,
   getPharmacyPatient,
   getHandoverPatient,
@@ -276,7 +288,7 @@ import {
 } from "../services/giniflow/journey.js";
 import { sendFlowCheckin } from "../services/msg91.js";
 import { syncBillingForVisitId, healthrayBillSteps } from "../services/giniflow/machineSync.js";
-import { cancelTest } from "../services/giniflow/testCancel.js";
+import { cancelTest, removeTestByDoctor } from "../services/giniflow/testCancel.js";
 import { listCancelled, restoreTest } from "../services/giniflow/testRestore.js";
 import { announceRequest } from "../services/billing/billingRequests.js";
 import { getMachines } from "../services/giniflow/machineCatalog.js";
@@ -643,9 +655,17 @@ router.get("/giniflow/stations/doctor/:visitId", doctorGate, async (req, res) =>
     // Decided here rather than in the browser so the page and the gate that
     // refuses its writes can never disagree about who owns this patient.
     const owned = await visitOwnership(req.params.visitId, req.doctor?.doctor_id ?? null);
-    const readOnly = owned.readOnly && !overridesOwnership(req);
+    const admin = overridesOwnership(req);
+    const me = req.doctor?.doctor_id ?? null;
+    const isMine = (id) => id != null && me != null && Number(id) === Number(me);
+    const editor =
+      admin || [consult.assignedDoctorId, consult.assignedSdId, consult.finalizedBy].some(isMine);
+    const editingMine = !!consult.editing && (admin || isMine(consult.editing.by));
+    const readOnly = owned.readOnly && !admin && !editingMine;
     res.json({
       ...consult,
+      canEdit: consult.finalized && consult.isToday && editor && !consult.editing,
+      editingMine,
       readOnly,
       readOnlyOwner: readOnly ? owned.ownerName : null,
       serverTime: new Date().toISOString(),
@@ -1101,9 +1121,75 @@ router.post(
   validate(giniflowFinalizeSchema),
   async (req, res) => {
     try {
-      res.json(await finalizeConsult(req.params.visitId, req.doctor?.doctor_id ?? null));
+      res.json(
+        await finalizeConsult(req.params.visitId, req.doctor?.doctor_id ?? null, undefined, {
+          requireNextVisit: true,
+        }),
+      );
     } catch (e) {
       doctorError(res, e, "Gini Flow finalize");
+    }
+  },
+);
+
+router.post(
+  "/giniflow/stations/doctor/:visitId/tests/:orderId/remove",
+  doctorGate,
+  requireOwnVisit,
+  validate(giniflowDoctorRemoveTestSchema),
+  async (req, res) => {
+    try {
+      res.json(
+        await removeTestByDoctor({
+          visitId: req.params.visitId,
+          orderId: req.params.orderId,
+          testId: req.body.testId,
+          actorId: req.doctor?.doctor_id ?? null,
+          actorRole: req.doctor?.role || null,
+        }),
+      );
+    } catch (e) {
+      doctorError(res, e, "Gini Flow doctor remove test");
+    }
+  },
+);
+
+const editActor = (req) => ({
+  actorId: req.doctor?.doctor_id ?? null,
+  isAdmin: overridesOwnership(req),
+});
+
+router.post("/giniflow/stations/doctor/:visitId/edit", doctorGate, async (req, res) => {
+  try {
+    res.json(await openEdit(req.params.visitId, editActor(req)));
+  } catch (e) {
+    doctorError(res, e, "Gini Flow edit consultation");
+  }
+});
+
+router.post("/giniflow/stations/doctor/:visitId/edit/cancel", doctorGate, async (req, res) => {
+  try {
+    res.json(await cancelEdit(req.params.visitId, editActor(req)));
+  } catch (e) {
+    doctorError(res, e, "Gini Flow cancel consultation edit");
+  }
+});
+
+router.post(
+  "/giniflow/stations/doctor/:visitId/edit/save",
+  doctorGate,
+  validate(giniflowConsultEditSaveSchema),
+  async (req, res) => {
+    try {
+      res.json(
+        await saveEdit(req.params.visitId, {
+          ...editActor(req),
+          reason: req.body.reason,
+          requireNextVisit: true,
+        }),
+      );
+    } catch (e) {
+      doctorError(res, e, "Gini Flow save consultation edit");
     }
   },
 );
@@ -2567,14 +2653,132 @@ router.post(
   validate(giniflowRxItemSchema, GINIFLOW_RX_LABELS),
   async (req, res) => {
     try {
+      const me = req.doctor?.doctor_id ?? null;
+      const editing = me != null && (await editingVisitOf(req.params.visitId)) === me;
       res.json(
         await addItem(req.params.visitId, {
           ...req.body,
-          proposedBy: req.doctor?.doctor_id ?? null,
+          proposedBy: editing ? null : me,
         }),
       );
     } catch (e) {
       handleError(res, e, "Gini Flow MO propose medicine");
+    }
+  },
+);
+
+const requireMoEditingRow = async (req, res, next) => {
+  try {
+    const editingBy = await editingRowOf(req.params.itemId);
+    if (editingBy === undefined) return res.status(404).json({ error: "Draft row not found" });
+    const me = req.doctor?.doctor_id ?? null;
+    if (overridesOwnership(req) || (editingBy != null && editingBy === me)) return next();
+    return res.status(403).json({
+      error: "Press Edit prescription first — rows can be changed here only while you edit",
+    });
+  } catch (e) {
+    handleError(res, e, "Gini Flow MO edit row");
+  }
+};
+
+router.patch(
+  "/giniflow/stations/mo/prescription/items/:itemId",
+  moGate,
+  requireMoEditingRow,
+  validate(giniflowRxItemPatchSchema, GINIFLOW_RX_LABELS),
+  async (req, res) => {
+    try {
+      res.json(
+        await updateItem(req.params.itemId, {
+          ...req.body,
+          actorId: req.doctor?.doctor_id ?? null,
+        }),
+      );
+    } catch (e) {
+      doctorError(res, e, "Gini Flow MO edit medicine");
+    }
+  },
+);
+
+router.delete(
+  "/giniflow/stations/mo/prescription/items/:itemId",
+  moGate,
+  requireMoEditingRow,
+  async (req, res) => {
+    try {
+      res.json(await removeItem(req.params.itemId));
+    } catch (e) {
+      doctorError(res, e, "Gini Flow MO remove medicine");
+    }
+  },
+);
+
+router.post(
+  "/giniflow/stations/mo/prescription/items/:itemId/pause",
+  moGate,
+  requireMoEditingRow,
+  validate(giniflowRxPauseSchema),
+  async (req, res) => {
+    try {
+      res.json(await pauseItem(req.params.itemId, req.body.weeks));
+    } catch (e) {
+      doctorError(res, e, "Gini Flow MO pause medicine");
+    }
+  },
+);
+
+router.post(
+  "/giniflow/stations/mo/prescription/items/:itemId/resume",
+  moGate,
+  requireMoEditingRow,
+  async (req, res) => {
+    try {
+      res.json(await resumeItem(req.params.itemId));
+    } catch (e) {
+      doctorError(res, e, "Gini Flow MO resume medicine");
+    }
+  },
+);
+
+router.post(
+  "/giniflow/stations/mo/prescription/items/:itemId/stop",
+  moGate,
+  requireMoEditingRow,
+  validate(giniflowRxStopSchema),
+  async (req, res) => {
+    try {
+      res.json(await stopItem(req.params.itemId, req.body.reason));
+    } catch (e) {
+      doctorError(res, e, "Gini Flow MO stop medicine");
+    }
+  },
+);
+
+router.post("/giniflow/stations/mo/:visitId/edit", moGate, async (req, res) => {
+  try {
+    res.json(await openEdit(req.params.visitId, editActor(req)));
+  } catch (e) {
+    doctorError(res, e, "Gini Flow MO edit consultation");
+  }
+});
+
+router.post("/giniflow/stations/mo/:visitId/edit/cancel", moGate, async (req, res) => {
+  try {
+    res.json(await cancelEdit(req.params.visitId, editActor(req)));
+  } catch (e) {
+    doctorError(res, e, "Gini Flow MO cancel consultation edit");
+  }
+});
+
+router.post(
+  "/giniflow/stations/mo/:visitId/edit/save",
+  moGate,
+  validate(giniflowConsultEditSaveSchema),
+  async (req, res) => {
+    try {
+      res.json(await saveEdit(req.params.visitId, { ...editActor(req), reason: req.body.reason }));
+    } catch (e) {
+      doctorError(res, e, "Gini Flow MO save consultation edit");
     }
   },
 );
@@ -2606,7 +2810,7 @@ router.get("/giniflow/stations/mo/:visitId", moGate, async (req, res) => {
   try {
     const patient = await getMoPatient(req.params.visitId);
     if (!patient) return res.status(404).json({ error: "Visit not found" });
-    res.json(patient);
+    res.json({ ...patient, edit: await editState(req.params.visitId, editActor(req)) });
   } catch (e) {
     handleError(res, e, "Gini Flow MO patient");
   }
@@ -3355,11 +3559,31 @@ for (const [station, readGates, writeGates] of ORDERED_SERVICE_ROUTES) {
   );
   router.post(base, ...writeGates, validate(orderedServiceAddSchema), async (req, res) => {
     try {
-      res.json(await addOrderedService(req.params.visitId, req.body, orderedCtx(req)));
+      res.json(
+        await addOrderedService(req.params.visitId, req.body, orderedCtx(req), undefined, {
+          priceLater: station === "doctor",
+        }),
+      );
     } catch (e) {
       handleError(res, e, label);
     }
   });
+  router.post(
+    `${base}/other`,
+    ...writeGates,
+    validate(orderedServiceOtherSchema),
+    async (req, res) => {
+      try {
+        res.json(
+          await addOtherProcedure(req.params.visitId, req.body, orderedCtx(req), undefined, {
+            priceLater: station === "doctor",
+          }),
+        );
+      } catch (e) {
+        handleError(res, e, label);
+      }
+    },
+  );
   router.post(
     `${base}/:lineId/remove`,
     ...writeGates,

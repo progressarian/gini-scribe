@@ -185,7 +185,7 @@ export async function getDraft(visitId, db = pool) {
 // A medicine the patient is already on twice a day arrives with BOTH its
 // timings, read back from `when_to_take` — the draft opening with one of them
 // is how a BD row silently became OD at the next visit.
-const SEEDED_SLOTS = `COALESCE(
+export const SEEDED_SLOTS = `COALESCE(
   (SELECT ARRAY_AGG(k) FROM (
      SELECT CASE lower(btrim(w::text))
               WHEN 'fasting' THEN 'fasting'

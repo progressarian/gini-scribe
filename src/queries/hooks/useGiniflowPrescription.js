@@ -126,11 +126,12 @@ export const useAddItem = (visitId, station = "doctor") =>
     async (item) => (await api.post(`${base(visitId, station)}/prescription/items`, item)).data,
   );
 
-export const useUpdateItem = (visitId) =>
+export const useUpdateItem = (visitId, station = "doctor") =>
   useDraftMutation(
     visitId,
     async ({ itemId, ...patch }) =>
-      (await api.patch(`/api/giniflow/stations/doctor/prescription/items/${itemId}`, patch)).data,
+      (await api.patch(`/api/giniflow/stations/${station}/prescription/items/${itemId}`, patch))
+        .data,
   );
 
 // Approve or Reject a proposed row. Adjust is not here: editing the row through
@@ -152,37 +153,38 @@ export const useDecideItem = (visitId) =>
       ).data,
   );
 
-export const useRemoveItem = (visitId) =>
+export const useRemoveItem = (visitId, station = "doctor") =>
   useDraftMutation(
     visitId,
     async (itemId) =>
-      (await api.delete(`/api/giniflow/stations/doctor/prescription/items/${itemId}`)).data,
+      (await api.delete(`/api/giniflow/stations/${station}/prescription/items/${itemId}`)).data,
   );
 
-export const useResumeItem = (visitId) =>
+export const useResumeItem = (visitId, station = "doctor") =>
   useDraftMutation(
     visitId,
     async (itemId) =>
-      (await api.post(`/api/giniflow/stations/doctor/prescription/items/${itemId}/resume`)).data,
+      (await api.post(`/api/giniflow/stations/${station}/prescription/items/${itemId}/resume`))
+        .data,
   );
 
-export const usePauseItem = (visitId) =>
+export const usePauseItem = (visitId, station = "doctor") =>
   useDraftMutation(
     visitId,
     async ({ itemId, weeks }) =>
       (
-        await api.post(`/api/giniflow/stations/doctor/prescription/items/${itemId}/pause`, {
+        await api.post(`/api/giniflow/stations/${station}/prescription/items/${itemId}/pause`, {
           weeks,
         })
       ).data,
   );
 
-export const useStopItem = (visitId) =>
+export const useStopItem = (visitId, station = "doctor") =>
   useDraftMutation(
     visitId,
     async ({ itemId, reason }) =>
       (
-        await api.post(`/api/giniflow/stations/doctor/prescription/items/${itemId}/stop`, {
+        await api.post(`/api/giniflow/stations/${station}/prescription/items/${itemId}/stop`, {
           reason,
         })
       ).data,
@@ -246,5 +248,39 @@ export function useRequestMedicine() {
     mutationFn: async (body) =>
       (await api.post("/api/giniflow/stations/doctor/medicine-requests", body)).data,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pharmacy-stock", "needed"] }),
+  });
+}
+
+function useConsultEditMutation(visitId, path, station) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (body) =>
+      (await api.post(`${base(visitId, station)}/${path}`, body ?? {})).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "rx-parameters"] });
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "mo"] });
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "doctor"] });
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "board"] });
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "rx"] });
+    },
+  });
+}
+
+export const useOpenConsultEdit = (visitId, station = "doctor") =>
+  useConsultEditMutation(visitId, "edit", station);
+export const useCancelConsultEdit = (visitId, station = "doctor") =>
+  useConsultEditMutation(visitId, "edit/cancel", station);
+export const useSaveConsultEdit = (visitId, station = "doctor") =>
+  useConsultEditMutation(visitId, "edit/save", station);
+
+export function useRemoveOrderedTest(visitId) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ orderId, testId }) =>
+      (await api.post(`${base(visitId)}/tests/${orderId}/remove`, { testId })).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "doctor", "consult", visitId] });
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "board"] });
+    },
   });
 }

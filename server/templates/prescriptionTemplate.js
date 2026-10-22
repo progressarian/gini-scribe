@@ -304,19 +304,36 @@ const ALIASES = {
   ldl: ["ldl", "ldl cholesterol", "ldl-c"],
   triglycerides: ["triglycerides", "tg"],
   creatinine: ["creatinine", "serum creatinine"],
-  uacr: ["uacr", "albumin/creatinine", "urine albumin"],
+  uacr: ["uacr", "albumin/creatinine", "urine albumin", "urine albumin creatinine ratio"],
   alt: ["alt", "sgpt", "sgpt (alt)"],
+};
+const OTHER_TEST_MARKERS = [/ratio/, /urine/, /(^|[^a-z])anti/];
+const isExactLab = (name, aliases) =>
+  aliases.includes(
+    String(name || "")
+      .toLowerCase()
+      .trim(),
+  );
+const hasWord = (text, word) => {
+  for (let i = text.indexOf(word); i !== -1; i = text.indexOf(word, i + 1)) {
+    const before = text[i - 1] || " ";
+    const after = text[i + word.length] || " ";
+    if (!/[a-z0-9]/.test(before) && !/[a-z0-9]/.test(after)) return true;
+  }
+  return false;
+};
+const isLooseLab = (name, aliases) => {
+  const n = String(name || "").toLowerCase();
+  return aliases.some(
+    (a) => hasWord(n, a) && !OTHER_TEST_MARKERS.some((m) => m.test(n) && !m.test(a)),
+  );
 };
 const findHist = (labHistory, key) => {
   if (!labHistory) return [];
   const aliases = ALIASES[key] || [key];
   const keys = Object.keys(labHistory);
   const match =
-    keys.find((k) => aliases.includes(k.toLowerCase().trim())) ||
-    keys.find((k) => {
-      const lk = k.toLowerCase();
-      return aliases.some((a) => a.length >= 4 && lk.includes(a) && !/(^|[^a-z])anti/.test(lk));
-    });
+    keys.find((k) => isExactLab(k, aliases)) || keys.find((k) => isLooseLab(k, aliases));
   const hist = match ? labHistory[match] : null;
   return Array.isArray(hist) ? hist : [];
 };
@@ -324,11 +341,12 @@ const findLatest = (labResults, key) => {
   if (!labResults) return null;
   const aliases = ALIASES[key] || [key];
   const arr = Array.isArray(labResults) ? labResults : Object.values(labResults).flat();
-  for (const r of arr) {
-    const nm = String(r.test_name || r.canonical_name || r.name || "").toLowerCase();
-    if (aliases.some((a) => nm.includes(a))) return r;
-  }
-  return null;
+  const namesOf = (r) => [r.canonical_name, r.test_name, r.name];
+  return (
+    arr.find((r) => namesOf(r).some((n) => isExactLab(n, aliases))) ||
+    arr.find((r) => namesOf(r).some((n) => isLooseLab(n, aliases))) ||
+    null
+  );
 };
 
 const fmtDateLong = (d) => {

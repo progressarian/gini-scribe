@@ -599,6 +599,33 @@ export async function cancelTest(input, db = pool) {
   }
 }
 
+export async function removeTestByDoctor(
+  { visitId, orderId, testId, actorId = null, actorRole = null },
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT visit_id, payment_status FROM giniflow_lab_orders WHERE id = $1`,
+    [orderId],
+  );
+  if (!rows.length || rows[0].visit_id !== visitId) {
+    throw bad("This test is no longer on the list", 404);
+  }
+  if (rows[0].payment_status !== "pending") {
+    throw bad("This test is already paid — reception cancels it so the refund is raised", 409);
+  }
+  return cancelTest(
+    {
+      target: { orderId, testId },
+      reason: "doctor_cancelled",
+      source: "station",
+      stationLabel: "doctor",
+      actorId,
+      actorRole,
+    },
+    db,
+  );
+}
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function cancelTestIn(client, input) {

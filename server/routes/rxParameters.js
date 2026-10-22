@@ -22,6 +22,7 @@ const STATIONS = [
   { station: "mo", gate: requireCapability(CAP.GINIFLOW_STATION_MO) },
 ];
 const actorOf = (req) => (req.doctor?.short_name || req.doctor?.doctor_name || "").trim() || null;
+const editorOf = (req) => req.doctor?.doctor_id ?? null;
 
 for (const { station, gate } of STATIONS) {
   const base = `/giniflow/stations/${station}/:visitId`;
@@ -31,7 +32,7 @@ for (const { station, gate } of STATIONS) {
     `${base}/rx-parameters`,
     gate,
     run("Rx parameter table", 200, (req) =>
-      getStationRxParameters(req.params.visitId, undefined, opts),
+      getStationRxParameters(req.params.visitId, undefined, { ...opts, editorId: editorOf(req) }),
     ),
   );
 
@@ -40,7 +41,10 @@ for (const { station, gate } of STATIONS) {
     gate,
     validate(rxParameterRowsSchema, RX_PARAMETER_LABELS),
     run("Rx parameter table save", 200, (req) =>
-      saveStationRxParameters(req.params.visitId, req.body.rows, actorOf(req), undefined, opts),
+      saveStationRxParameters(req.params.visitId, req.body.rows, actorOf(req), undefined, {
+        ...opts,
+        editorId: editorOf(req),
+      }),
     ),
   );
 

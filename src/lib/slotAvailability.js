@@ -1,47 +1,19 @@
 // Shared booking-slot availability helpers for the manual booking screens
 // (GHM/OPD have their own inline copies; Find + Dashboard use this).
 import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import api from "../services/api.js";
+import { qk } from "../queries/keys.js";
+import { capacityNote } from "../../shared/slotCapacity.js";
 
-// The 24h catalog labels — fallback when a doctor's availability isn't loaded.
-// Must stay in sync with the slot_catalog table (server/migrations/
-// 2026-08-21_slot_catalog_30min.sql) and TIME_SLOTS in
-// server/routes/appointment-slots.js. The clinic day (09:00–17:00) runs in
-// 30-minute slots; evening/overnight stays hourly for night-shift doctors.
-export const SLOT_CATALOG = [
-  "9:30 AM to 10 AM",
-  "10 AM to 10:30 AM",
-  "10:30 AM to 11 AM",
-  "11 AM to 11:30 AM",
-  "11:30 AM to 12 PM",
-  "12 PM to 12:30 PM",
-  "12:30 PM to 1 PM",
-  "1 PM to 1:30 PM",
-  "1:30 PM to 2 PM",
-  "2 PM to 2:30 PM",
-  "2:30 PM to 3 PM",
-  "3 PM to 3:30 PM",
-  "3:30 PM to 4 PM",
-  "4 PM to 4:30 PM",
-  "4:30 PM to 5 PM",
-  "5 PM to 6 PM",
-  "6 PM to 7 PM",
-  "7 PM to 8 PM",
-  "8 PM to 9 PM",
-  "9 PM to 10 PM",
-  "10 PM to 11 PM",
-  "11 PM to 12 AM",
-  "12 AM to 1 AM",
-  "1 AM to 2 AM",
-  "2 AM to 3 AM",
-  "3 AM to 4 AM",
-  "4 AM to 5 AM",
-  "5 AM to 6 AM",
-  "6 AM to 7 AM",
-  "7 AM to 8 AM",
-  "8 AM to 9 AM",
-  "9 AM to 9:30 AM",
-];
+export function useSlotCatalog() {
+  const { data } = useQuery({
+    queryKey: qk.slotCatalog,
+    queryFn: async () => (await api.get("/api/slot-catalog")).data.map((s) => s.label),
+    staleTime: 60 * 60 * 1000,
+  });
+  return data || [];
+}
 
 export const ARRIVAL_TIME_RANGES = [
   "8 AM to 9 AM",
@@ -71,6 +43,12 @@ export const SLOT_REASON = {
   full: "Full",
 };
 
+export const slotOptionLabel = (s) => {
+  if (!s.available) return `${s.slot_label} — ${SLOT_REASON[s.blocked_by] || "Unavailable"}`;
+  const note = capacityNote(s);
+  return note ? `${s.slot_label} — ${note}` : s.slot_label;
+};
+
 // Hide non-clinical staff from a doctor picker; keep doctors (incl. odd roles).
 export const isClinicalDoctor = (d) =>
   d?.name &&
@@ -86,11 +64,10 @@ export const isClinicalDoctor = (d) =>
     "guest",
   ].includes(String(d.role || "").toLowerCase());
 
-// Options for the slot dropdown: all catalog slots annotated, with the
-// out-of-hours ("not_working") ones removed. Available ones are selectable;
-// the rest carry a reason for greying out.
-export const slotOptions = (slots) =>
-  (slots || SLOT_CATALOG.map((s) => ({ slot_label: s, available: true }))).filter(
+// Options for the slot dropdown: the doctor's day annotated, or the catalog
+// when no doctor/date is known, with out-of-hours ("not_working") ones removed.
+export const slotOptions = (slots, catalog = []) =>
+  (slots || catalog.map((s) => ({ slot_label: s, available: true }))).filter(
     (s) => s.blocked_by !== "not_working",
   );
 

@@ -193,7 +193,7 @@ const ROUTE_CAPABILITIES = [
   ["/api/doctors", CAP.RECEPTION_OPS],
   // Slot availability — drives the time-slot picker on both /find and /ghm.
   ["/api/availability", [CAP.RECEPTION_OPS, CAP.OBT_OPS]],
-  ["/api/slot-catalog", CAP.RECEPTION_OPS],
+  ["/api/slot-catalog", [CAP.RECEPTION_OPS, CAP.OBT_OPS]],
   // App-install funnel, tracked per registering coordinator (registered_by_cc).
   ["/api/app-installs", CAP.RECEPTION_OPS],
   [

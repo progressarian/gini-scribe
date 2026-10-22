@@ -1,24 +1,34 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import api from "../services/api";
 import useAuthStore from "../stores/authStore";
 import { toast } from "../stores/uiStore";
 import DeleteDoctorModal from "../components/doctors/DeleteDoctorModal";
+import ScheduleEditor from "../components/doctors/ScheduleEditor";
+import StaffOverview from "../components/doctors/StaffOverview";
+import AddStaffModal from "../components/doctors/AddStaffModal";
+import ReassignModal, { enrichAffected } from "../components/doctors/ReassignModal";
+import ConfirmModal from "../components/ui/ConfirmModal";
 import { VITALS_REST_MINUTES } from "../../shared/giniflowStatus";
+import { SCHEDULED_ROLES, staffRoleLabel } from "../../shared/staffRoles";
 import "./DoctorManagementPage.css";
 
-const todayISO = () => new Date().toISOString().split("T")[0];
+const todayISO = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 
 const TABS = [
-  { id: "schedule", label: "Schedule" },
-  { id: "timeoff", label: "Time off" },
+  { id: "overview", label: "Overview" },
+  { id: "schedule", label: "Schedule", scheduled: true },
+  { id: "timeoff", label: "Time off", scheduled: true },
   { id: "settings", label: "Settings" },
 ];
 
-const ROLE_LABELS = {
-  consultant: "Consultant",
-  mo: "Medical officer",
-  admin: "Admin",
-};
+const isScheduled = (d) => SCHEDULED_ROLES.includes(d?.role);
+
+const hasSettings = (doctor) =>
+  doctor.role === "consultant" ||
+  doctor.is_chief ||
+  doctor.role === "obt" ||
+  doctor.can_assign_calls === true ||
+  isScheduled(doctor);
 
 function LetterheadSection({ doctor, onSaved }) {
   const [value, setValue] = useState("");
@@ -107,76 +117,120 @@ function ToggleSetting({ doctor, field, checked, disabled, label, hint, successT
   );
 }
 
+function SettingsGroup({ title, hint, children }) {
+  return (
+    <section className="docmgmt-setgroup">
+      <h3 className="docmgmt-subhead first">{title}</h3>
+      {hint && <p className="docmgmt-hint">{hint}</p>}
+      <div className="docmgmt-settings">{children}</div>
+    </section>
+  );
+}
+
 function SettingsTab({ doctor, onSaved }) {
   const name = doctor.short_name || doctor.name;
+  const consultant = doctor.role === "consultant";
+  const routing = consultant || doctor.is_chief;
+  const calls = doctor.role === "obt" || doctor.can_assign_calls === true;
   return (
-    <div className="docmgmt-settings">
-      {(doctor.role === "consultant" || doctor.is_chief) && (
-        <ToggleSetting
-          doctor={doctor}
-          field="is_chief"
-          checked={!!doctor.is_chief}
-          label="Chief consultant"
-          hint="Used by patient-flow check-in to route patients to a Chief."
-          successText={(on) => `${name} ${on ? "marked as" : "removed as"} Chief`}
-          onSaved={onSaved}
-        />
+    <div className="docmgmt-setgroups">
+      {routing && (
+        <SettingsGroup
+          title="Patient flow routing"
+          hint="Where this consultant's patients go on the floor after check-in and vitals."
+        >
+          {(doctor.role === "consultant" || doctor.is_chief) && (
+            <ToggleSetting
+              doctor={doctor}
+              field="is_chief"
+              checked={!!doctor.is_chief}
+              label="Chief consultant"
+              hint="Used by patient-flow check-in to route patients to a Chief."
+              successText={(on) => `${name} ${on ? "marked as" : "removed as"} Chief`}
+              onSaved={onSaved}
+            />
+          )}
+          {doctor.role === "consultant" && (
+            <ToggleSetting
+              doctor={doctor}
+              field="chief_step"
+              checked={doctor.chief_step === true}
+              label="Chief Endocrinologist step"
+              hint="Patients of this consultant see the Chief Endocrinologist after vitals. When off, they go straight from vitals to this consultant."
+              successText={(on) =>
+                `${name}'s patients ${on ? "now see" : "now skip"} the Chief Endocrinologist`
+              }
+              onSaved={onSaved}
+            />
+          )}
+          {doctor.role === "consultant" && (
+            <ToggleSetting
+              doctor={doctor}
+              field="direct_consult"
+              checked={doctor.direct_consult === true}
+              label="Runs own floor"
+              hint="HealthRay only marks this consultant's patients no-show or cancelled — the floor moves them. Never sends them to the Chief Endocrinologist. A same-day booking with another consultant is an echo referral, and tests ordered during the consult bring the patient back to this consultant."
+              successText={(on) => `${name} ${on ? "now runs" : "no longer runs"} their own floor`}
+              onSaved={onSaved}
+            />
+          )}
+        </SettingsGroup>
       )}
-      {doctor.role === "consultant" && (
-        <ToggleSetting
-          doctor={doctor}
-          field="chief_step"
-          checked={doctor.chief_step === true}
-          label="Chief Endocrinologist step"
-          hint="Patients of this consultant see the Chief Endocrinologist after vitals. When off, they go straight from vitals to this consultant."
-          successText={(on) =>
-            `${name}'s patients ${on ? "now see" : "now skip"} the Chief Endocrinologist`
-          }
-          onSaved={onSaved}
-        />
+      {consultant && (
+        <SettingsGroup title="Clinic timing">
+          {doctor.role === "consultant" && (
+            <ToggleSetting
+              doctor={doctor}
+              field="vitals_rest"
+              checked={doctor.vitals_rest !== false}
+              label={`${VITALS_REST_MINUTES}-min rest before vitals`}
+              hint={`Patients rest ${VITALS_REST_MINUTES} minutes after arrival before the Vitals station can call them.`}
+              successText={(on) =>
+                `${name}'s patients ${on ? `now rest ${VITALS_REST_MINUTES} minutes` : "no longer rest"} before vitals`
+              }
+              onSaved={onSaved}
+            />
+          )}
+        </SettingsGroup>
       )}
-      {doctor.role === "consultant" && (
-        <ToggleSetting
-          doctor={doctor}
-          field="direct_consult"
-          checked={doctor.direct_consult === true}
-          label="Runs own floor"
-          hint="HealthRay only marks this consultant's patients no-show or cancelled — the floor moves them. Never sends them to the Chief Endocrinologist. A same-day booking with another consultant is an echo referral, and tests ordered during the consult bring the patient back to this consultant."
-          successText={(on) => `${name} ${on ? "now runs" : "no longer runs"} their own floor`}
-          onSaved={onSaved}
-        />
+      {isScheduled(doctor) && (
+        <SettingsGroup title="Prescriptions">
+          <LetterheadSection doctor={doctor} onSaved={onSaved} />
+        </SettingsGroup>
       )}
-      {doctor.role === "consultant" && (
-        <ToggleSetting
-          doctor={doctor}
-          field="vitals_rest"
-          checked={doctor.vitals_rest !== false}
-          label={`${VITALS_REST_MINUTES}-min rest before vitals`}
-          hint={`Patients rest ${VITALS_REST_MINUTES} minutes after arrival before the Vitals station can call them.`}
-          successText={(on) =>
-            `${name}'s patients ${on ? `now rest ${VITALS_REST_MINUTES} minutes` : "no longer rest"} before vitals`
-          }
-          onSaved={onSaved}
-        />
+      {calls && (
+        <SettingsGroup title="Access">
+          {(doctor.role === "obt" || doctor.can_assign_calls === true) && (
+            <ToggleSetting
+              doctor={doctor}
+              field="can_assign_calls"
+              checked={doctor.can_assign_calls === true}
+              label="Can assign GHM calls"
+              hint={
+                doctor.role === "obt"
+                  ? "Lets this person assign and unassign patients to the OBT team on the GHM Ops sheet."
+                  : "Only the OBT team uses this. Switch it off — it stops this person assigning GHM calls."
+              }
+              successText={(on) =>
+                `${name} ${on ? "can now assign" : "can no longer assign"} GHM calls`
+              }
+              onSaved={onSaved}
+            />
+          )}
+        </SettingsGroup>
       )}
-      <ToggleSetting
-        doctor={doctor}
-        field="can_assign_calls"
-        checked={doctor.can_assign_calls === true || doctor.role === "admin"}
-        disabled={doctor.role === "admin"}
-        label="Can assign GHM calls"
-        hint={
-          doctor.role === "admin"
-            ? "Admins can always assign and unassign patients on the GHM Ops sheet."
-            : "Lets this person assign and unassign patients to the OBT team on the GHM Ops sheet."
-        }
-        successText={(on) => `${name} ${on ? "can now assign" : "can no longer assign"} GHM calls`}
-        onSaved={onSaved}
-      />
-      <LetterheadSection doctor={doctor} onSaved={onSaved} />
     </div>
   );
 }
+
+const FILTERS = [
+  ["all", "All staff", () => true],
+  ["consultants", "Consultants", (d) => d.role === "consultant"],
+  ["mo", "Medical officers", (d) => d.role === "mo"],
+  ["other", "Other roles", (d) => !isScheduled(d)],
+];
+
+const OFF_LABEL = { leave: "On leave", holiday: "On holiday", emergency: "Emergency leave" };
 
 function DoctorList({
   doctors,
@@ -186,17 +240,19 @@ function DoctorList({
   onSelect,
   showRemoved,
   onShowRemoved,
+  offToday,
 }) {
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
-  const itemMeta = (d) =>
-    [filter === "all" ? ROLE_LABELS[d.role] || d.role : null, d.specialty]
-      .filter(Boolean)
-      .join(" · ");
+  const keep = FILTERS.find(([id]) => id === filter)?.[2] || (() => true);
   const visible = doctors
-    .filter((d) => filter === "all" || d.role === "consultant")
+    .filter(keep)
     .filter(
-      (d) => !q || d.name?.toLowerCase().includes(q) || d.specialty?.toLowerCase().includes(q),
+      (d) =>
+        !q ||
+        [d.name, d.short_name, d.specialty, staffRoleLabel(d.role)].some((v) =>
+          v?.toLowerCase().includes(q),
+        ),
     );
 
   return (
@@ -206,15 +262,12 @@ function DoctorList({
         <input
           type="search"
           value={query}
-          placeholder="Search staff"
+          placeholder="Search by name, role or specialty"
           onChange={(e) => setQuery(e.target.value)}
         />
       </label>
       <div className="docmgmt-filter" role="group" aria-label="Show">
-        {[
-          ["consultants", "Consultants"],
-          ["all", "All staff"],
-        ].map(([id, label]) => (
+        {FILTERS.map(([id, label]) => (
           <button
             key={id}
             type="button"
@@ -225,28 +278,39 @@ function DoctorList({
           </button>
         ))}
       </div>
+      <p className="docmgmt-listhead">
+        Staff directory <span>{visible.length}</span>
+      </p>
       <ul className="docmgmt-doclist" aria-label="Staff list">
         {visible.length === 0 && (
           <li className="docmgmt-empty">
-            {q ? "No one matches this search." : "No staff to show."}
+            {q ? "No one matches this search." : "No staff in this group."}
           </li>
         )}
-        {visible.map((d) => (
-          <li key={d.id}>
-            <button
-              type="button"
-              className="docmgmt-docitem"
-              aria-current={!showRemoved && d.id === selectedId ? "true" : undefined}
-              onClick={() => onSelect(d.id)}
-            >
-              <span className="docmgmt-docitem-name">
-                {d.name}
-                {d.is_chief && <span className="docmgmt-badge">Chief</span>}
-              </span>
-              {itemMeta(d) && <span className="docmgmt-docitem-meta">{itemMeta(d)}</span>}
-            </button>
-          </li>
-        ))}
+        {visible.map((d) => {
+          const off = offToday.get(d.id);
+          return (
+            <li key={d.id}>
+              <button
+                type="button"
+                className="docmgmt-docitem"
+                aria-current={!showRemoved && d.id === selectedId ? "true" : undefined}
+                onClick={() => onSelect(d.id)}
+              >
+                <span className="docmgmt-docitem-name">
+                  {d.name}
+                  {d.is_chief && <span className="docmgmt-badge">Chief</span>}
+                </span>
+                <span className="docmgmt-docitem-meta">
+                  {[staffRoleLabel(d.role), d.specialty].filter(Boolean).join(" · ")}
+                </span>
+                {off && (
+                  <span className="docmgmt-offbadge">{OFF_LABEL[off.type] || "Off"} today</span>
+                )}
+              </button>
+            </li>
+          );
+        })}
       </ul>
       <button
         type="button"
@@ -260,6 +324,57 @@ function DoctorList({
   );
 }
 
+function MoreActions({ doctor, isSelf, onDelete }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e) => {
+      if (e.type === "keydown" ? e.key === "Escape" : !ref.current?.contains(e.target))
+        setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, [open]);
+
+  return (
+    <div className="docmgmt-more" ref={ref}>
+      <button
+        type="button"
+        className="docmgmt-secondary docmgmt-small"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`More actions for ${doctor.name}`}
+        onClick={() => setOpen((o) => !o)}
+      >
+        ⋯
+      </button>
+      {open && (
+        <div className="docmgmt-menu" role="menu">
+          <button
+            type="button"
+            role="menuitem"
+            className="danger"
+            disabled={isSelf}
+            title={isSelf ? "You can't delete your own account" : undefined}
+            onClick={() => {
+              setOpen(false);
+              onDelete();
+            }}
+          >
+            Delete staff member
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function DoctorManagementPage() {
   const doctorsList = useAuthStore((s) => s.doctorsList);
   const fetchDoctorsList = useAuthStore((s) => s.fetchDoctorsList);
@@ -267,16 +382,27 @@ export default function DoctorManagementPage() {
   const [doctorId, setDoctorId] = useState(null);
   const [filter, setFilter] = useState("consultants");
   const [showRemoved, setShowRemoved] = useState(false);
-  const [tab, setTab] = useState("schedule");
+  const [showBulk, setShowBulk] = useState(false);
+  const [tab, setTab] = useState("overview");
   const [addTimeOff, setAddTimeOff] = useState(0);
+  const [editSchedule, setEditSchedule] = useState(0);
   const [refresh, setRefresh] = useState(0);
   const onChange = () => setRefresh((n) => n + 1);
   const [deleting, setDeleting] = useState(false);
+  const [addingStaff, setAddingStaff] = useState(false);
   const [removedRefresh, setRemovedRefresh] = useState(0);
+  const [offToday, setOffToday] = useState(new Map());
 
   useEffect(() => {
     if (!doctorsList?.length) fetchDoctorsList();
   }, [doctorsList?.length, fetchDoctorsList]);
+
+  useEffect(() => {
+    api
+      .get("/api/doctors/time-off-today")
+      .then((r) => setOffToday(new Map((r.data || []).map((u) => [u.doctor_id, u]))))
+      .catch(() => setOffToday(new Map()));
+  }, [refresh]);
 
   useEffect(() => {
     if (doctorId || !doctorsList?.length) return;
@@ -289,47 +415,102 @@ export default function DoctorManagementPage() {
     [doctorsList, doctorId],
   );
 
+  const staff = doctorsList || [];
+  const scheduledCount = staff.filter(isScheduled).length;
+  const offCount = staff.filter((d) => offToday.has(d.id)).length;
+  const settingsShown = doctor ? hasSettings(doctor) : false;
+  const visibleTabs = TABS.filter(
+    (t) => (!t.scheduled || isScheduled(doctor)) && (t.id !== "settings" || settingsShown),
+  );
+  const activeTab = visibleTabs.some((t) => t.id === tab) ? tab : visibleTabs[0].id;
+  const off = doctor ? offToday.get(doctor.id) : null;
+
   const select = (id) => {
     setShowRemoved(false);
+    setShowBulk(false);
     setDoctorId(id);
+    setTab("overview");
   };
 
   const openAddTimeOff = () => {
-    setShowRemoved(false);
     setTab("timeoff");
     setAddTimeOff((n) => n + 1);
+  };
+
+  const openEditSchedule = () => {
+    setTab("schedule");
+    setEditSchedule((n) => n + 1);
   };
 
   return (
     <div className="docmgmt">
       <div className="docmgmt-head">
-        <h1>Staff Management</h1>
-        <button
-          type="button"
-          className="docmgmt-primary"
-          disabled={!doctor}
-          onClick={openAddTimeOff}
-        >
-          + Add time off
-        </button>
+        <div>
+          <h1>Staff Management</h1>
+          <p className="docmgmt-hint">Staff, weekly schedules, time off and settings.</p>
+        </div>
+        <div className="docmgmt-headactions">
+          <button
+            type="button"
+            className="docmgmt-secondary"
+            aria-pressed={showBulk}
+            onClick={() => {
+              setShowRemoved(false);
+              setShowBulk(true);
+            }}
+          >
+            Bulk schedule
+          </button>
+          <button type="button" className="docmgmt-primary" onClick={() => setAddingStaff(true)}>
+            + Add staff
+          </button>
+        </div>
       </div>
+
+      <dl className="docmgmt-kpis">
+        <div>
+          <dt>Total staff</dt>
+          <dd>{staff.length}</dd>
+        </div>
+        <div>
+          <dt>Consultants and MOs</dt>
+          <dd>{scheduledCount}</dd>
+        </div>
+        <div>
+          <dt>Off today</dt>
+          <dd>{offCount}</dd>
+        </div>
+      </dl>
 
       <div className="docmgmt-layout">
         <DoctorList
-          doctors={doctorsList || []}
+          doctors={staff}
           filter={filter}
           setFilter={(f) => {
             setFilter(f);
             setShowRemoved(false);
           }}
-          selectedId={doctorId}
+          selectedId={showBulk ? null : doctorId}
           onSelect={select}
           showRemoved={showRemoved}
-          onShowRemoved={() => setShowRemoved(true)}
+          onShowRemoved={() => {
+            setShowBulk(false);
+            setShowRemoved(true);
+          }}
+          offToday={offToday}
         />
 
         <main className="docmgmt-main">
-          {showRemoved ? (
+          {showBulk ? (
+            <section className="docmgmt-panel" aria-label="Bulk schedule">
+              <ScheduleEditor
+                bulk
+                onChange={onChange}
+                refresh={refresh}
+                onClose={() => setShowBulk(false)}
+              />
+            </section>
+          ) : showRemoved ? (
             <section className="docmgmt-panel" aria-labelledby="docmgmt-removed-title">
               <h2 className="docmgmt-panel-title" id="docmgmt-removed-title">
                 Removed staff
@@ -342,45 +523,37 @@ export default function DoctorManagementPage() {
             <section className="docmgmt-panel" aria-labelledby="docmgmt-doctor-name">
               <div className="docmgmt-dochead">
                 <div>
-                  <h2 id="docmgmt-doctor-name">
-                    {doctor.name}
-                    {doctor.is_chief && <span className="docmgmt-badge">Chief</span>}
-                  </h2>
+                  <h2 id="docmgmt-doctor-name">{doctor.name}</h2>
                   <p className="docmgmt-docmeta">
-                    {[
-                      ROLE_LABELS[doctor.role] || doctor.role,
-                      doctor.specialty,
-                      doctor.qualification,
-                    ]
+                    {[staffRoleLabel(doctor.role), doctor.specialty, doctor.qualification]
                       .filter(Boolean)
                       .join(" · ")}
                   </p>
+                  <div className="docmgmt-chips">
+                    {doctor.is_chief && <span className="docmgmt-badge">Chief</span>}
+                    <span className="docmgmt-chip">Active</span>
+                    {off && (
+                      <span className="docmgmt-offbadge">{OFF_LABEL[off.type] || "Off"} today</span>
+                    )}
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  className="docmgmt-del"
-                  disabled={doctor.id === currentDoctor?.id}
-                  title={
-                    doctor.id === currentDoctor?.id
-                      ? "You can't delete your own account"
-                      : undefined
-                  }
-                  onClick={() => setDeleting(true)}
-                >
-                  Delete
-                </button>
+                <MoreActions
+                  doctor={doctor}
+                  isSelf={doctor.id === currentDoctor?.id}
+                  onDelete={() => setDeleting(true)}
+                />
               </div>
 
               <div className="docmgmt-tabs" role="tablist" aria-label="Staff sections">
-                {TABS.map((t) => (
+                {visibleTabs.map((t) => (
                   <button
                     key={t.id}
                     type="button"
                     role="tab"
                     id={`docmgmt-tab-${t.id}`}
-                    aria-selected={tab === t.id}
+                    aria-selected={activeTab === t.id}
                     aria-controls="docmgmt-tabpanel"
-                    className={tab === t.id ? "active" : ""}
+                    className={activeTab === t.id ? "active" : ""}
                     onClick={() => setTab(t.id)}
                   >
                     {t.label}
@@ -391,21 +564,29 @@ export default function DoctorManagementPage() {
               <div
                 id="docmgmt-tabpanel"
                 role="tabpanel"
-                aria-labelledby={`docmgmt-tab-${tab}`}
+                aria-labelledby={`docmgmt-tab-${activeTab}`}
                 className="docmgmt-tabpanel"
               >
-                {tab === "schedule" && (
-                  <>
-                    <ProfileTab
-                      doctorId={doctorId}
-                      doctor={doctor}
-                      refresh={refresh}
-                      onChange={onChange}
-                    />
-                    <DayViewTab doctorId={doctorId} refresh={refresh} />
-                  </>
+                {activeTab === "overview" && (
+                  <StaffOverview
+                    doctor={doctor}
+                    refresh={refresh}
+                    hasSettings={settingsShown}
+                    onEditSchedule={openEditSchedule}
+                    onAddTimeOff={openAddTimeOff}
+                    onSettings={() => setTab("settings")}
+                  />
                 )}
-                {tab === "timeoff" && (
+                {activeTab === "schedule" && (
+                  <ScheduleEditor
+                    doctorId={doctorId}
+                    doctor={doctor}
+                    onChange={onChange}
+                    refresh={refresh}
+                    editSignal={editSchedule}
+                  />
+                )}
+                {activeTab === "timeoff" && (
                   <TimeOffTab
                     doctorId={doctorId}
                     doctor={doctor}
@@ -414,7 +595,9 @@ export default function DoctorManagementPage() {
                     openSignal={addTimeOff}
                   />
                 )}
-                {tab === "settings" && <SettingsTab doctor={doctor} onSaved={fetchDoctorsList} />}
+                {activeTab === "settings" && (
+                  <SettingsTab doctor={doctor} onSaved={fetchDoctorsList} />
+                )}
               </div>
             </section>
           )}
@@ -433,19 +616,36 @@ export default function DoctorManagementPage() {
           }}
         />
       )}
+
+      {addingStaff && (
+        <AddStaffModal
+          onClose={() => setAddingStaff(false)}
+          onCreated={async (created) => {
+            setAddingStaff(false);
+            await fetchDoctorsList();
+            setFilter("all");
+            select(created.id);
+          }}
+        />
+      )}
     </div>
   );
 }
 
 function RemovedDoctors({ refresh, onRestored }) {
   const [list, setList] = useState(null);
+  const [failed, setFailed] = useState(false);
   const [restoring, setRestoring] = useState(null);
 
   const load = useCallback(() => {
+    setFailed(false);
     api
       .get("/api/doctors/removed")
       .then((r) => setList(r.data || []))
-      .catch(() => setList([]));
+      .catch(() => {
+        setList([]);
+        setFailed(true);
+      });
   }, [refresh]);
   useEffect(load, [load]);
 
@@ -475,7 +675,7 @@ function RemovedDoctors({ refresh, onRestored }) {
       <table className="docmgmt-list">
         <thead>
           <tr>
-            <th>Doctor</th>
+            <th>Staff member</th>
             <th>Removed on</th>
             <th>By</th>
             <th>Reason</th>
@@ -490,10 +690,11 @@ function RemovedDoctors({ refresh, onRestored }) {
               </td>
             </tr>
           )}
-          {list?.length === 0 && (
+          {failed && <LoadFailedRow what="removed staff" onRetry={load} />}
+          {!failed && list?.length === 0 && (
             <tr>
               <td colSpan="5" className="docmgmt-empty">
-                No removed doctors.
+                No removed staff.
               </td>
             </tr>
           )}
@@ -521,147 +722,6 @@ function RemovedDoctors({ refresh, onRestored }) {
   );
 }
 
-// ───────────────────────── Working Profile ─────────────────────
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const hhmm = (t) => (t ? String(t).slice(0, 5) : ""); // "HH:MM:SS" → "HH:MM"
-const toMin = (t) => {
-  if (!t) return null;
-  const [h, m] = t.split(":").map(Number);
-  return h * 60 + m;
-};
-// Overnight-aware: is time t inside [ws, we] (window wraps midnight if we<=ws)?
-const withinWork = (ws, we, t) => {
-  const s = toMin(ws),
-    e0 = toMin(we),
-    x0 = toMin(t);
-  if (s == null || e0 == null || x0 == null) return true;
-  let e = e0,
-    x = x0;
-  if (e <= s) e += 1440;
-  if (x < s) x += 1440;
-  return x >= s && x <= e;
-};
-
-function ProfileTab({ doctorId, doctor, refresh, onChange }) {
-  const [offDays, setOffDays] = useState([0]);
-  const [workStart, setWorkStart] = useState("");
-  const [workEnd, setWorkEnd] = useState("");
-  const [lunchStart, setLunchStart] = useState("");
-  const [lunchEnd, setLunchEnd] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-
-  // Load the doctor's saved profile (or defaults) — prefills the form.
-  useEffect(() => {
-    setLoading(true);
-    api
-      .get(`/api/doctors/${doctorId}/profile`)
-      .then((r) => {
-        const p = r.data || {};
-        setOffDays(p.off_weekdays ?? [0]);
-        setWorkStart(hhmm(p.work_start));
-        setWorkEnd(hhmm(p.work_end));
-        setLunchStart(hhmm(p.lunch_start));
-        setLunchEnd(hhmm(p.lunch_end));
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [doctorId, refresh]);
-
-  const isWorking = (d) => !offDays.includes(d);
-  const toggleDay = (d) =>
-    setOffDays((o) => (o.includes(d) ? o.filter((x) => x !== d) : [...o, d]));
-
-  const overnight = workStart && workEnd && toMin(workEnd) <= toMin(workStart);
-
-  const save = async () => {
-    if ((workStart && !workEnd) || (!workStart && workEnd))
-      return toast("Enter both working start and end times", "warn");
-    if (workStart && workEnd && workStart === workEnd)
-      return toast("Working start and end can't be the same", "warn");
-    if ((lunchStart && !lunchEnd) || (!lunchStart && lunchEnd))
-      return toast("Enter both lunch start and end times", "warn");
-    if (
-      workStart &&
-      workEnd &&
-      lunchStart &&
-      lunchEnd &&
-      (!withinWork(workStart, workEnd, lunchStart) || !withinWork(workStart, workEnd, lunchEnd))
-    )
-      return toast("Lunch break must be within working hours", "warn");
-    setSaving(true);
-    try {
-      await api.put(`/api/doctors/${doctorId}/profile`, {
-        off_weekdays: offDays,
-        work_start: workStart || null,
-        work_end: workEnd || null,
-        lunch_start: lunchStart || null,
-        lunch_end: lunchEnd || null,
-      });
-      toast("Profile saved", "success");
-      onChange?.();
-    } catch (e) {
-      toast(e.response?.data?.error || e.response?.data?.details?.[0] || "Save failed", "error");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (loading) return <p className="docmgmt-empty">Loading…</p>;
-
-  return (
-    <div>
-      <h3 className="docmgmt-subhead first">Working days</h3>
-      <div className="docmgmt-slotmulti">
-        {WEEKDAYS.map((label, d) => (
-          <label key={d} className={isWorking(d) ? "on" : ""}>
-            <input type="checkbox" checked={isWorking(d)} onChange={() => toggleDay(d)} />
-            {label}
-          </label>
-        ))}
-      </div>
-
-      <h3 className="docmgmt-subhead">Working hours</h3>
-      <div className="docmgmt-form wrap">
-        <label>
-          From{" "}
-          <input type="time" value={workStart} onChange={(e) => setWorkStart(e.target.value)} />
-        </label>
-        <label>
-          To <input type="time" value={workEnd} onChange={(e) => setWorkEnd(e.target.value)} />
-        </label>
-        <span className="docmgmt-hint">
-          {overnight
-            ? "Overnight shift — ends next day."
-            : "Leave blank = available all day. Overnight (e.g. 17:00–01:00) is supported."}
-        </span>
-      </div>
-
-      <h3 className="docmgmt-subhead">Lunch break (every working day)</h3>
-      <div className="docmgmt-form wrap">
-        <label>
-          From{" "}
-          <input type="time" value={lunchStart} onChange={(e) => setLunchStart(e.target.value)} />
-        </label>
-        <label>
-          To <input type="time" value={lunchEnd} onChange={(e) => setLunchEnd(e.target.value)} />
-        </label>
-        <span className="docmgmt-hint">
-          {workStart && workEnd
-            ? `Must be within working hours (${workStart}–${workEnd}).`
-            : "Optional."}
-        </span>
-      </div>
-
-      <div className="docmgmt-form-actions start">
-        <button type="button" className="docmgmt-primary" disabled={saving} onClick={save}>
-          {saving ? "Saving…" : "Save schedule"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
 const TIME_OFF_TYPES = {
   leave: "Leave",
   holiday: "Holiday",
@@ -678,8 +738,22 @@ const prettyDate = (d) =>
       })
     : "—";
 
+const TIME_OFF_VIEWS = [
+  ["upcoming", "Upcoming"],
+  ["past", "Past"],
+  ["cancelled", "Cancelled"],
+];
+
+const timeOf = (u) =>
+  u.start_time && u.end_time
+    ? `${String(u.start_time).slice(0, 5)}–${String(u.end_time).slice(0, 5)}`
+    : u.slot_labels?.length
+      ? u.slot_labels.join(", ")
+      : "Whole day";
+
 function TimeOffTab({ doctorId, doctor, refresh, onChange, openSignal }) {
   const [list, setList] = useState(null);
+  const [view, setView] = useState("upcoming");
   const [formOpen, setFormOpen] = useState(false);
   const [type, setType] = useState("leave");
   const [start, setStart] = useState(todayISO());
@@ -691,6 +765,8 @@ function TimeOffTab({ doctorId, doctor, refresh, onChange, openSignal }) {
   const [fullDayLeave, setFullDayLeave] = useState(null);
   const [saving, setSaving] = useState(false);
   const [reassign, setReassign] = useState(null);
+  const [cancelling, setCancelling] = useState(null);
+  const [cancelBusy, setCancelBusy] = useState(false);
   const isEmergency = type === "emergency";
   const isBreak = type === "break";
 
@@ -698,11 +774,16 @@ function TimeOffTab({ doctorId, doctor, refresh, onChange, openSignal }) {
     if (openSignal) setFormOpen(true);
   }, [openSignal]);
 
+  const [listFailed, setListFailed] = useState(false);
   const load = useCallback(() => {
+    setListFailed(false);
     api
-      .get(`/api/doctors/${doctorId}/unavailability`)
+      .get(`/api/doctors/${doctorId}/unavailability?scope=all`)
       .then((r) => setList(r.data || []))
-      .catch(() => setList([]));
+      .catch(() => {
+        setList([]);
+        setListFailed(true);
+      });
   }, [doctorId, refresh]);
   useEffect(load, [load]);
 
@@ -770,18 +851,23 @@ function TimeOffTab({ doctorId, doctor, refresh, onChange, openSignal }) {
         const { data } = await api.post(`/api/doctors/${doctorId}/emergency-leave`, {
           start_date: start,
           end_date: end,
-          from_now: fromNow,
+          from_now: fromNow && start === todayISO() && end === start,
           slot_labels: null,
           reason,
         });
         finish();
-        if (data.affected?.length) {
+        if (data.requires_reassignment) {
           setReassign({
             affected: data.affected,
             doctor,
             unavailability_id: data.unavailability_id,
             trigger: "emergency_leave",
           });
+        } else if (data.affected?.length) {
+          toast(
+            `Emergency leave set. ${data.affected.length} patient(s) are already in their visit with ${doctor?.name} and stay with them.`,
+            "success",
+          );
         } else {
           toast("Emergency leave set — no patients were booked in that window.", "success");
         }
@@ -809,19 +895,54 @@ function TimeOffTab({ doctorId, doctor, refresh, onChange, openSignal }) {
   };
 
   const cancel = async (u) => {
+    setCancelBusy(true);
     try {
       await api.patch(`/api/doctors/${doctorId}/unavailability/${u.id}`, { status: "cancelled" });
       toast(`${TIME_OFF_TYPES[u.type] || "Time off"} cancelled`, "success");
+      setCancelling(null);
       onChange?.();
     } catch (e) {
       toast(e.response?.data?.error || "Could not cancel it", "error");
+    } finally {
+      setCancelBusy(false);
     }
   };
+
+  const today = todayISO();
+  const grouped = { upcoming: [], past: [], cancelled: [] };
+  for (const u of list || []) {
+    if (u.status !== "active") grouped.cancelled.push(u);
+    else if (String(u.end_date).slice(0, 10) >= today) grouped.upcoming.push(u);
+    else grouped.past.push(u);
+  }
+  grouped.past.reverse();
+  grouped.cancelled.reverse();
+  const rows = grouped[view];
+
+  const describe = (u) =>
+    `${TIME_OFF_TYPES[u.type] || "Time off"} · ${prettyDate(u.start_date)}${
+      u.end_date && String(u.end_date).slice(0, 10) !== String(u.start_date).slice(0, 10)
+        ? ` – ${prettyDate(u.end_date)}`
+        : ""
+    } · ${timeOf(u)}`;
 
   const submitLabel = isEmergency ? "Mark emergency" : `Add ${TIME_OFF_TYPES[type].toLowerCase()}`;
 
   return (
     <div>
+      <div className="docmgmt-sectionhead">
+        <div>
+          <h3 className="docmgmt-subhead first">Time off</h3>
+          <p className="docmgmt-hint">
+            Leave, holidays, emergencies and one-off breaks. Booking can't use these times.
+          </p>
+        </div>
+        {!formOpen && (
+          <button type="button" className="docmgmt-primary" onClick={() => setFormOpen(true)}>
+            + Add time off
+          </button>
+        )}
+      </div>
       {formOpen ? (
         <form
           className={`docmgmt-timeoff-form${isEmergency ? " docmgmt-emergency" : ""}`}
@@ -865,7 +986,7 @@ function TimeOffTab({ doctorId, doctor, refresh, onChange, openSignal }) {
                 />
               </label>
             )}
-            {isEmergency && (
+            {isEmergency && start === todayISO() && end === start && (
               <label className="docmgmt-check">
                 <input
                   type="checkbox"
@@ -929,16 +1050,15 @@ function TimeOffTab({ doctorId, doctor, refresh, onChange, openSignal }) {
             </button>
           </div>
         </form>
-      ) : (
-        <div className="docmgmt-tabbar">
-          <p className="docmgmt-hint">
-            Leave, holidays, emergencies and one-off breaks. Booking can't use these times.
-          </p>
-          <button type="button" className="docmgmt-secondary" onClick={() => setFormOpen(true)}>
-            + Add time off
+      ) : null}
+
+      <div className="docmgmt-filter docmgmt-viewfilter" role="group" aria-label="Show time off">
+        {TIME_OFF_VIEWS.map(([id, label]) => (
+          <button key={id} type="button" aria-pressed={view === id} onClick={() => setView(id)}>
+            {label} <span className="docmgmt-count">{grouped[id].length}</span>
           </button>
-        </div>
-      )}
+        ))}
+      </div>
 
       <table className="docmgmt-list">
         <thead>
@@ -960,14 +1080,19 @@ function TimeOffTab({ doctorId, doctor, refresh, onChange, openSignal }) {
               </td>
             </tr>
           )}
-          {list?.length === 0 && (
+          {listFailed && <LoadFailedRow what="time off" onRetry={load} />}
+          {!listFailed && list && rows.length === 0 && (
             <tr>
               <td colSpan="5" className="docmgmt-empty">
-                No time off scheduled. Use “Add time off” to mark leave, a holiday or a break.
+                {view === "upcoming"
+                  ? "No upcoming time off. Use “Add time off” to mark leave, a holiday or a break."
+                  : view === "past"
+                    ? "No past time off."
+                    : "Nothing has been cancelled."}
               </td>
             </tr>
           )}
-          {(list || []).map((u) => (
+          {rows.map((u) => (
             <tr key={u.id}>
               <td>
                 <span className={`docmgmt-type docmgmt-type--${u.type}`}>
@@ -980,17 +1105,43 @@ function TimeOffTab({ doctorId, doctor, refresh, onChange, openSignal }) {
                   ? ` – ${prettyDate(u.end_date)}`
                   : ""}
               </td>
-              <td>{u.slot_labels?.length ? u.slot_labels.join(", ") : "Whole day"}</td>
+              <td>{timeOf(u)}</td>
               <td>{u.reason || "—"}</td>
               <td className="docmgmt-cell-action">
-                <button type="button" className="docmgmt-del" onClick={() => cancel(u)}>
-                  Cancel
-                </button>
+                {view === "upcoming" && (
+                  <button type="button" className="docmgmt-del" onClick={() => setCancelling(u)}>
+                    Cancel
+                  </button>
+                )}
               </td>
             </tr>
           ))}
         </tbody>
       </table>
+
+      <ConfirmModal
+        open={!!cancelling}
+        title={`Cancel ${(TIME_OFF_TYPES[cancelling?.type] || "time off").toLowerCase()} for ${doctor?.name}?`}
+        message={
+          cancelling && (
+            <>
+              <p>{describe(cancelling)}</p>
+              {cancelling.reason && <p>Reason: {cancelling.reason}</p>}
+              <p>
+                {doctor?.name} becomes bookable again in this time.
+                {cancelling.type === "emergency" || cancelling.type === "leave"
+                  ? " Patients already moved to another doctor stay with that doctor — this does not move them back."
+                  : ""}
+              </p>
+            </>
+          )
+        }
+        confirmLabel={`Cancel ${(TIME_OFF_TYPES[cancelling?.type] || "time off").toLowerCase()}`}
+        cancelLabel="Keep it"
+        busy={cancelBusy}
+        onConfirm={() => cancel(cancelling)}
+        onCancel={() => !cancelBusy && setCancelling(null)}
+      />
 
       {reassign && (
         <ReassignModal
@@ -1007,246 +1158,6 @@ function TimeOffTab({ doctorId, doctor, refresh, onChange, openSignal }) {
   );
 }
 
-const shiftDay = (iso, days) => {
-  const d = new Date(`${iso}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-};
-
-function DayViewTab({ doctorId, refresh }) {
-  const [date, setDate] = useState(todayISO());
-  const [slots, setSlots] = useState([]);
-  const [profile, setProfile] = useState(null);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    setLoading(true);
-    Promise.all([
-      api.get(`/api/doctors/${doctorId}/availability?date=${date}`),
-      api.get(`/api/doctors/${doctorId}/profile`),
-    ])
-      .then(([a, p]) => {
-        setSlots(a.data?.slots || []);
-        setProfile(p.data || null);
-      })
-      .catch(() => {
-        setSlots([]);
-        setProfile(null);
-      })
-      .finally(() => setLoading(false));
-  }, [doctorId, date, refresh]);
-
-  // Only show slots inside working hours — hide "not a working slot".
-  const dayOff = slots.length > 0 && slots.every((s) => s.blocked_by === "day_off");
-  const visible = slots.filter((s) => s.blocked_by !== "not_working");
-  const freeCount = visible.filter((s) => s.available).length;
-  const t = (x) => (x ? String(x).slice(0, 5) : null);
-  const hours =
-    profile && t(profile.work_start) && t(profile.work_end)
-      ? `${t(profile.work_start)}–${t(profile.work_end)}`
-      : "All day";
-  const lunch =
-    profile && t(profile.lunch_start) && t(profile.lunch_end)
-      ? `${t(profile.lunch_start)}–${t(profile.lunch_end)}`
-      : null;
-
-  return (
-    <div>
-      <div className="docmgmt-dayhead">
-        <h3 className="docmgmt-subhead">Day preview</h3>
-        <div className="docmgmt-daynav">
-          <button
-            type="button"
-            aria-label="Previous day"
-            onClick={() => setDate(shiftDay(date, -1))}
-          >
-            ‹
-          </button>
-          <label>
-            <span className="docmgmt-visually-hidden">Preview date</span>
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => e.target.value && setDate(e.target.value)}
-            />
-          </label>
-          <button type="button" aria-label="Next day" onClick={() => setDate(shiftDay(date, 1))}>
-            ›
-          </button>
-        </div>
-      </div>
-      <p className="docmgmt-hint">What booking sees for this doctor on the chosen day.</p>
-
-      {!loading && profile && (
-        <div className="docmgmt-dayinfo">
-          <span>
-            Hours <strong>{hours}</strong>
-          </span>
-          {lunch && (
-            <span>
-              Lunch <strong>{lunch}</strong>
-            </span>
-          )}
-          <span>
-            <strong>{freeCount}</strong>/{visible.length} slots open
-          </span>
-        </div>
-      )}
-
-      {loading ? (
-        <p className="docmgmt-empty">Loading…</p>
-      ) : slots.length === 0 ? (
-        <p className="docmgmt-empty">Could not load the day.</p>
-      ) : dayOff ? (
-        <p className="docmgmt-empty">Day off — not a working day.</p>
-      ) : (
-        <div className="docmgmt-slots">
-          {visible.map((s) => (
-            <div key={s.slot_label} className={`slotpill ${s.available ? "free" : "blocked"}`}>
-              <span>{s.slot_label}</span>
-              <small>
-                {s.available
-                  ? s.capacity == null
-                    ? `Available${s.booked ? ` · ${s.booked} booked` : ""}`
-                    : `Available · ${s.booked}/${s.capacity} booked`
-                  : labelReason(s.blocked_by)}
-              </small>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ───────────────────────── Reassignment Modal ──────────────────
-function ReassignModal({ affected, doctor, unavailability_id, trigger, onClose, onDone }) {
-  const [picks, setPicks] = useState({});
-  const [busy, setBusy] = useState(false);
-  const [rows, setRows] = useState(affected);
-
-  const movable = rows.filter((r) => !r.in_progress);
-  const allPicked = movable.every((r) => picks[r.appointment_id]);
-
-  const autofill = () => {
-    const next = {};
-    for (const r of movable) {
-      const top = r.suggested_doctors?.[0];
-      if (top)
-        next[r.appointment_id] = { to_doctor_id: top.doctor_id, to_doctor_name: top.doctor_name };
-    }
-    setPicks(next);
-  };
-
-  const apply = async () => {
-    const moves = Object.entries(picks).map(([appointment_id, v]) => ({
-      appointment_id: Number(appointment_id),
-      to_doctor_id: v.to_doctor_id,
-      to_doctor_name: v.to_doctor_name,
-    }));
-    if (!moves.length) return toast("Pick at least one doctor", "warn");
-    setBusy(true);
-    try {
-      const { data } = await api.post("/api/appointments/reassign", {
-        trigger,
-        unavailability_id,
-        reason: `${doctor?.name} ${trigger}`,
-        moves,
-      });
-      if (data.failed?.length) {
-        const failedIds = new Set(data.failed.map((f) => f.appointment_id));
-        setRows((rs) => rs.filter((r) => failedIds.has(r.appointment_id)));
-        setPicks({});
-        toast(
-          `${data.moved.length} moved, ${data.failed.length} failed (slot full?). Retry those.`,
-          "warn",
-        );
-      } else {
-        onDone();
-      }
-    } catch (e) {
-      toast(e.response?.data?.error || "Reassign failed", "error");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="docmgmt-modal-bg" onClick={onClose}>
-      <div className="docmgmt-modal" onClick={(e) => e.stopPropagation()}>
-        <h2>Reassign patients — {doctor?.name} unavailable</h2>
-        <p className="docmgmt-hint">
-          {movable.length} patient(s) need a new doctor. In-progress visits are locked.
-        </p>
-        <table className="docmgmt-list">
-          <thead>
-            <tr>
-              <th>Patient</th>
-              <th>Date</th>
-              <th>Slot</th>
-              <th>Reassign to</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.appointment_id} className={r.in_progress ? "locked" : ""}>
-                <td>
-                  {r.patient_name}
-                  {r.file_no ? <small> ({r.file_no})</small> : null}
-                </td>
-                <td>{r.appointment_date?.slice(0, 10)}</td>
-                <td>{r.time_slot}</td>
-                <td>
-                  {r.in_progress ? (
-                    <em>🔒 in progress</em>
-                  ) : r.suggested_doctors?.length ? (
-                    <select
-                      value={picks[r.appointment_id]?.to_doctor_id || ""}
-                      onChange={(e) => {
-                        const id = Number(e.target.value);
-                        const d = r.suggested_doctors.find((x) => x.doctor_id === id);
-                        setPicks((p) => ({
-                          ...p,
-                          [r.appointment_id]: d
-                            ? { to_doctor_id: d.doctor_id, to_doctor_name: d.doctor_name }
-                            : undefined,
-                        }));
-                      }}
-                    >
-                      <option value="">— choose —</option>
-                      {r.suggested_doctors.map((d) => (
-                        <option key={d.doctor_id} value={d.doctor_id}>
-                          {d.doctor_name} ({d.free_capacity} free){d.same_specialty ? " ⭐" : ""}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <em className="docmgmt-nofree">⚠ no doctor free this slot</em>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div className="docmgmt-modal-actions">
-          <button onClick={autofill}>Auto-fill suggestions</button>
-          <div className="spacer" />
-          <button onClick={onClose}>Cancel</button>
-          <button className="docmgmt-primary" disabled={busy || !allPicked} onClick={apply}>
-            {busy ? "Reassigning…" : "Reassign all"}
-          </button>
-        </div>
-        {!allPicked && (
-          <p className="docmgmt-warnline">
-            Every movable patient must have a doctor before you can finish.
-          </p>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ───────────────────────── helpers ─────────────────────────────
 function SlotMultiSelect({ slots, value, onChange }) {
   const toggle = (label) =>
     onChange(value.includes(label) ? value.filter((l) => l !== label) : [...value, label]);
@@ -1266,39 +1177,15 @@ function SlotMultiSelect({ slots, value, onChange }) {
   );
 }
 
-// For planned-leave affected lists that arrive without suggestions, fetch them.
-async function enrichAffected(affected, doctorId, doctor) {
-  const out = [];
-  for (const a of affected) {
-    let suggested = [];
-    if (!a.in_progress) {
-      try {
-        const { data } = await api.get(
-          `/api/availability/doctors-for-slot?date=${a.appointment_date?.slice(0, 10)}&slot=${encodeURIComponent(
-            a.time_slot,
-          )}&exclude=${doctorId}${doctor?.specialty ? `&specialty=${encodeURIComponent(doctor.specialty)}` : ""}`,
-        );
-        suggested = data || [];
-      } catch {
-        suggested = [];
-      }
-    }
-    out.push({ ...a, suggested_doctors: suggested });
-  }
-  return out;
-}
-
-function labelReason(reason) {
-  const map = {
-    day_off: "Day off",
-    not_working: "Not a working slot",
-    clinic_holiday: "Clinic holiday",
-    leave: "On leave",
-    break: "Break",
-    emergency: "Emergency leave",
-    holiday: "Doctor holiday",
-    manual_block: "Blocked",
-    full: "Full",
-  };
-  return map[reason] || reason || "Unavailable";
+function LoadFailedRow({ what, onRetry }) {
+  return (
+    <tr>
+      <td colSpan="5" className="docmgmt-empty" role="alert">
+        Could not load {what}. This list may be incomplete — try again before adding anything.{" "}
+        <button type="button" className="docmgmt-secondary docmgmt-small" onClick={onRetry}>
+          Try again
+        </button>
+      </td>
+    </tr>
+  );
 }

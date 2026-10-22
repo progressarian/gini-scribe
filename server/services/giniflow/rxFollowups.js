@@ -6,6 +6,12 @@ export const EXPLAINED_SQL = (visit) => `EXISTS (
   SELECT 1 FROM giniflow_visit_events ex
    WHERE ex.visit_id = ${visit}.id AND ex.meta->>'explained' = 'true')`;
 
+export const AMENDED_AT_SQL = (visit) => `(to_jsonb(${visit})->>'amended_at')::timestamptz`;
+
+export const AMENDED_AFTER_EXPLAINED_SQL = (visit) => `COALESCE(${AMENDED_AT_SQL(visit)} > (
+  SELECT max(ex.occurred_at) FROM giniflow_visit_events ex
+   WHERE ex.visit_id = ${visit}.id AND ex.meta->>'explained' = 'true'), FALSE)`;
+
 export const ONLINE_VISIT_SQL = (visit) => `(
   COALESCE((SELECT vt.for_online FROM flow_visit_types vt WHERE vt.id = ${visit}.visit_type_id), FALSE)
   OR COALESCE((SELECT a.visit_type ~* '(tele|online|video)' FROM appointments a

@@ -20,15 +20,20 @@ const CHIEF_STATUS = "with_sd";
 const NOT_WITH_CHIEF =
   "The patient is no longer with the Chief Endocrinologist — the consultant edits this now";
 
-async function visitContext(db, visitId, station = "doctor") {
+async function visitContext(db, visitId, station = "doctor", editorId = null) {
   const { rows } = await db.query(
-    `SELECT id, patient_id, visit_date::text AS visit_date, current_status, appointment_id
-       FROM giniflow_visits WHERE id = $1`,
+    `SELECT v.id, v.patient_id, v.visit_date::text AS visit_date, v.current_status, v.appointment_id,
+            (to_jsonb(v)->>'editing_by')::int AS editing_by
+       FROM giniflow_visits v WHERE v.id = $1`,
     [visitId],
   );
   if (!rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
-  const finalized = LOCKED_STATUSES.includes(rows[0].current_status);
-  const notWithChief = station === "mo" && rows[0].current_status !== CHIEF_STATUS;
+  const editing =
+    editorId != null &&
+    rows[0].editing_by != null &&
+    Number(rows[0].editing_by) === Number(editorId);
+  const finalized = LOCKED_STATUSES.includes(rows[0].current_status) && !editing;
+  const notWithChief = station === "mo" && rows[0].current_status !== CHIEF_STATUS && !editing;
   return { ...rows[0], finalized, notWithChief, locked: finalized || notWithChief };
 }
 
@@ -38,8 +43,12 @@ const refuseIfNotWithChief = (visit) => {
   }
 };
 
-export async function getStationRxParameters(visitId, db = pool, { station = "doctor" } = {}) {
-  const visit = await visitContext(db, visitId, station);
+export async function getStationRxParameters(
+  visitId,
+  db = pool,
+  { station = "doctor", editorId = null } = {},
+) {
+  const visit = await visitContext(db, visitId, station, editorId);
   const [table, defaults] = await Promise.all([
     buildRxParameterTable(db, { patientId: visit.patient_id, visitDate: visit.visit_date }),
     getRxParameterDefaults(db),
@@ -57,9 +66,9 @@ export async function saveStationRxParameters(
   rows,
   actor,
   db = pool,
-  { station = "doctor" } = {},
+  { station = "doctor", editorId = null } = {},
 ) {
-  const visit = await visitContext(db, visitId, station);
+  const visit = await visitContext(db, visitId, station, editorId);
   refuseIfNotWithChief(visit);
   if (visit.finalized) {
     throw Object.assign(
@@ -83,7 +92,7 @@ export async function saveStationRxParameters(
     rows,
     actor,
   });
-  return getStationRxParameters(visitId, db, { station });
+  return getStationRxParameters(visitId, db, { station, editorId });
 }
 
 const summaryText = (raw) => {

@@ -978,6 +978,11 @@ export const orderedServiceAddSchema = z.strictObject({
   agreed_rate: numberValue.optional(),
 });
 
+export const orderedServiceOtherSchema = z.strictObject({
+  name: z.string().trim().min(2, "Type the procedure's name").max(100),
+  agreed_rate: numberValue.optional(),
+});
+
 export const orderedServiceRemoveSchema = z.strictObject({
   reason: z.string().trim().min(1).max(BILL_TEXT_MAX),
 });

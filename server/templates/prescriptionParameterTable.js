@@ -36,7 +36,7 @@ export function parameterTableHtml(table, escape) {
       const last = i === columns.length - 1;
       const label = c.today
         ? `Today (${shortDate(c.date)})`
-        : last
+        : last && c.visit
           ? `Last visit (${shortDate(c.date)})`
           : shortDate(c.date);
       return `<th class="${c.today || last ? "today" : ""}">${escape(label)}</th>`;

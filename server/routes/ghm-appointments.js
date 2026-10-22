@@ -1,7 +1,11 @@
 import { Router } from "express";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
-import { resolveDoctorIdByName, checkBookingAvailability } from "../services/bookingGuard.js";
+import {
+  resolveDoctorIdByName,
+  checkBookingAvailability,
+  checkBookingChange,
+} from "../services/bookingGuard.js";
 import { checkSchemeCap, schemeDayCount, logCapOverride } from "../services/schemeCap.js";
 import {
   checkPatientBlocked,
@@ -2189,6 +2193,17 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
         if ("booking_status" in req.body) sentKeys.add("booking_status");
       }
     }
+
+    const moved = await checkBookingChange(id, req.body, {
+      force: req.body.force,
+      role: req.doctor?.role,
+    });
+    if (moved?.blocked)
+      return res.status(409).json({
+        error: "doctor_unavailable",
+        reason: moved.reason,
+        detail: moved.detail || null,
+      });
 
     // The reporting time and the WhatsApp message are generated at booking from
     // the date, slot, doctor, name and visit type. Editing any of those makes

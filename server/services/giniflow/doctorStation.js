@@ -1,5 +1,5 @@
 import pool from "../../config/db.js";
-import { advanceStatus, budgetColour, returnToQueue } from "./statusEngine.js";
+import { advanceStatus, budgetColour, returnToQueue, IST_TODAY } from "./statusEngine.js";
 import { getSlaConfig, budgetMap, budgetLookup } from "./board.js";
 import { slaKeyForStatus, STATUS_LABEL, WAIT_SINCE_SQL } from "../../../shared/giniflowStatus.js";
 import { todaysVitals, previousVitals } from "./visitVitals.js";
@@ -7,6 +7,7 @@ import { buildBrief } from "./consultBrief.js";
 import { seedDraftOn } from "./prescription.js";
 import { OPEN_LAB_CASES_SQL } from "./labStation.js";
 import { nonTestPredicate } from "../../utils/nonTests.js";
+import { skipSunday } from "../../../shared/followUp.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 
 // The consultant's station — the queue that forms in front of Dr. Bhansali, and
@@ -433,6 +434,15 @@ export async function getConsult(visitId, db = pool) {
     `SELECT v.id, v.patient_id, v.current_status, v.results_status, v.category, v.stability, v.stability_reasons,
             v.blocked_reason, v.priority, v.priority_reason,
             v.assigned_doctor_id, v.assigned_sd_id, v.visit_date::text AS visit_date,
+            v.visit_date = ${IST_TODAY} AS is_today,
+            (to_jsonb(v)->>'editing_by')::int AS editing_by,
+            to_jsonb(v)->>'editing_since' AS editing_since,
+            to_jsonb(v)->>'amended_at' AS amended_at,
+            (SELECT COALESCE(ed.short_name, ed.name) FROM doctors ed
+              WHERE ed.id = (to_jsonb(v)->>'editing_by')::int) AS editing_name,
+            (SELECT e.actor_id FROM giniflow_visit_events e
+              WHERE e.visit_id = v.id AND e.meta->>'source' = 'consult_finalize'
+              ORDER BY e.occurred_at DESC LIMIT 1) AS finalized_by,
             p.name, p.file_no, p.age, p.sex, p.notes,
             COALESCE(doc.short_name, doc.name) AS doctor_name,
             sd.short_name  AS sd_name,
@@ -510,7 +520,10 @@ export async function getConsult(visitId, db = pool) {
     db.query(
       `SELECT o.id, o.urgency, o.payment_status, o.sample_status, o.created_at,
               COALESCE(json_agg(t.test_name ORDER BY t.test_name)
-                       FILTER (WHERE t.test_name IS NOT NULL), '[]'::json) AS tests
+                       FILTER (WHERE t.test_name IS NOT NULL), '[]'::json) AS tests,
+              COALESCE(json_agg(json_build_object('id', t.id, 'name', t.test_name)
+                                ORDER BY t.test_name)
+                       FILTER (WHERE t.test_name IS NOT NULL), '[]'::json) AS items
          FROM giniflow_lab_orders o
          LEFT JOIN giniflow_lab_order_tests t ON t.lab_order_id = o.id
         WHERE o.visit_id = $1
@@ -595,6 +608,13 @@ export async function getConsult(visitId, db = pool) {
     statusSince: v.status_since ? new Date(v.status_since).toISOString() : null,
     // A finalized visit is read-only; the only writable path is an addendum.
     finalized: DONE_STATUSES.includes(v.current_status),
+    isToday: !!v.is_today,
+    finalizedBy: v.finalized_by ?? null,
+    assignedSdId: v.assigned_sd_id ?? null,
+    editing: v.editing_by
+      ? { by: v.editing_by, name: v.editing_name, since: v.editing_since }
+      : null,
+    amendedAt: v.amended_at || null,
     inRoom: v.current_status === "with_doctor",
     header: {
       lastVisitDate: lastVisit[0]?.date || null,
@@ -652,7 +672,8 @@ export async function getTrend(patientId, marker, db = pool) {
 // picking them up, which is how the queue's "Mine" column already treats them.
 export async function visitOwnership(visitId, doctorId, db = pool) {
   const { rows } = await db.query(
-    `SELECT v.assigned_doctor_id, COALESCE(d.short_name, d.name) AS doctor_name
+    `SELECT v.assigned_doctor_id, COALESCE(d.short_name, d.name) AS doctor_name,
+            (to_jsonb(v)->>'editing_by')::int AS editing_by
        FROM giniflow_visits v
        LEFT JOIN doctors d ON d.id = v.assigned_doctor_id
       WHERE v.id = $1`,
@@ -662,7 +683,7 @@ export async function visitOwnership(visitId, doctorId, db = pool) {
   const assigned = rows[0].assigned_doctor_id;
   return {
     found: true,
-    readOnly: !!assigned && !!doctorId && assigned !== doctorId,
+    readOnly: !!assigned && !!doctorId && assigned !== doctorId && rows[0].editing_by !== doctorId,
     ownerName: rows[0].doctor_name,
   };
 }
@@ -673,7 +694,8 @@ export async function visitOwnership(visitId, doctorId, db = pool) {
 // lock on the front door with the side gate open.
 export async function rowOwnership(table, rowId, doctorId, db = pool) {
   const { rows } = await db.query(
-    `SELECT v.id AS visit_id, v.assigned_doctor_id, COALESCE(d.short_name, d.name) AS doctor_name
+    `SELECT v.id AS visit_id, v.assigned_doctor_id, COALESCE(d.short_name, d.name) AS doctor_name,
+            (to_jsonb(v)->>'editing_by')::int AS editing_by
        FROM ${table} r
        JOIN giniflow_visits v ON v.id = r.visit_id
        LEFT JOIN doctors d ON d.id = v.assigned_doctor_id
@@ -684,7 +706,7 @@ export async function rowOwnership(table, rowId, doctorId, db = pool) {
   const assigned = rows[0].assigned_doctor_id;
   return {
     found: true,
-    readOnly: !!assigned && !!doctorId && assigned !== doctorId,
+    readOnly: !!assigned && !!doctorId && assigned !== doctorId && rows[0].editing_by !== doctorId,
     ownerName: rows[0].doctor_name,
   };
 }
@@ -837,7 +859,7 @@ export async function saveCarePlan(visitId, plan, actorId = null, db = pool) {
       plan.treatment ?? null,
       plan.lifestyle ?? null,
       plan.internalNote ?? null,
-      plan.nextVisitDate || null,
+      skipSunday(plan.nextVisitDate) || null,
       plan.nextVisitInterval ?? null,
       JSON.stringify(plan.goals ?? []),
       plan.source || "typed",

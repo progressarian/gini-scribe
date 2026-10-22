@@ -3,6 +3,8 @@ import { paise } from "../../../shared/labPayment.js";
 import { addLineIn, holdConsultation, openDraftIn, removeLine } from "./bills.js";
 import { markDraftSaved } from "./draftSaves.js";
 import { httpError, inTransaction } from "./transaction.js";
+import { createNewItemRequest } from "./billingRequests.js";
+import { OTHER_PROCEDURE_CODE, otherProcedureLineName } from "../../../shared/otherProcedure.js";
 
 const CLOSED_VISIT = ["no_show", "cancelled"];
 
@@ -97,7 +99,13 @@ export async function orderedServicesFor(visitId, db = pool) {
   };
 }
 
-export async function addOrderedService(visitId, input, ctx, db = pool) {
+export async function addOrderedService(
+  visitId,
+  input,
+  ctx,
+  db = pool,
+  { priceLater = false } = {},
+) {
   const id = cleanUuid(visitId, "visit");
   await inTransaction(async (client) => {
     await holdConsultation(client, id);
@@ -122,8 +130,14 @@ export async function addOrderedService(visitId, input, ctx, db = pool) {
     await addLineIn(
       client,
       bill,
-      { item_id: input.item_id, source: "ordered", agreed_rate: input.agreed_rate },
+      {
+        item_id: input.item_id,
+        source: "ordered",
+        agreed_rate: input.agreed_rate,
+        ...(input.bill_name ? { bill_name: input.bill_name } : {}),
+      },
       ctx,
+      { priceLater },
     );
     if (!bill.saved_at) await markDraftSaved(client, bill.id, ctx);
   }, db);
@@ -140,4 +154,61 @@ export async function removeOrderedService(visitId, lineId, input, ctx, db = poo
   if (!rows.length) throw httpError(404, "That service is no longer on this patient's bill");
   await removeLine(rows[0].bill_id, lineId, { reason: input?.reason }, ctx, db);
   return orderedServicesFor(id, db);
+}
+
+export async function addOtherProcedure(
+  visitId,
+  input,
+  ctx,
+  db = pool,
+  { priceLater = false } = {},
+) {
+  const id = cleanUuid(visitId, "visit");
+  const name = String(input?.name ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (name.length < 2) throw httpError(400, "Type the procedure's name");
+  const { rows: item } = await db.query(
+    `SELECT id FROM service_items
+      WHERE upper(code) = $1 AND is_active AND price_per_patient
+      LIMIT 1`,
+    [OTHER_PROCEDURE_CODE],
+  );
+  let added = false;
+  if (item.length) {
+    await addOrderedService(
+      id,
+      {
+        item_id: item[0].id,
+        agreed_rate: input.agreed_rate,
+        bill_name: otherProcedureLineName(name),
+      },
+      ctx,
+      db,
+      { priceLater },
+    );
+    added = true;
+  }
+  let requested = false;
+  try {
+    await createNewItemRequest(
+      {
+        proposed_name: name,
+        proposed_group: "Procedures",
+        reason: added
+          ? `Ordered for a patient as "Other procedure" — add it to the master for next time`
+          : `Ordered for a patient but not in the master, and no "Other procedure" item exists`,
+        visit_id: id,
+      },
+      ctx,
+      db,
+    );
+    requested = true;
+  } catch (e) {
+    console.warn("[ordered services] new item request failed:", e?.message);
+  }
+  if (!added && !requested) {
+    throw httpError(409, "This procedure could not be added or requested — ask an admin");
+  }
+  return { ...(await orderedServicesFor(id, db)), added, requested };
 }

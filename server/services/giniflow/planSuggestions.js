@@ -1,4 +1,5 @@
 import pool from "../../config/db.js";
+import { skipSunday } from "../../../shared/followUp.js";
 
 export const SUGGESTION_FIELDS = ["advice", "treatment", "lifestyle", "goals", "next_visit"];
 const TEXT_FIELDS = ["advice", "treatment", "lifestyle"];
@@ -37,7 +38,7 @@ function cleanValue(field, value) {
   const date = typeof value?.date === "string" ? value.date.trim() : "";
   const interval = typeof value?.interval === "string" ? value.interval.trim() : "";
   if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) throw fail(400, "Choose a valid next-visit date");
-  return date || interval ? { date: date || null, interval: interval || null } : null;
+  return date || interval ? { date: skipSunday(date) || null, interval: interval || null } : null;
 }
 
 const shape = (row) => ({
@@ -189,7 +190,7 @@ async function applyToCarePlan(client, visitId, field, value, actorId) {
       `UPDATE giniflow_care_plans
           SET next_visit_date = $2, next_visit_interval = $3, updated_at = NOW()
         WHERE visit_id = $1`,
-      [visitId, value.date, value.interval],
+      [visitId, skipSunday(value.date) || null, value.interval],
     );
   }
 }

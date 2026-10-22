@@ -85,6 +85,20 @@ function ExplainedBadge({ explained, online }) {
   );
 }
 
+function RxUpdatedBadge({ amendedAt, afterExplained }) {
+  if (!amendedAt) return null;
+  const at = new Date(amendedAt).toLocaleTimeString("en-IN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Kolkata",
+  });
+  return afterExplained ? (
+    <span className="badge b-amb">⚠ Prescription updated {at} — explain the changes</span>
+  ) : (
+    <span className="badge b-ink">✎ Prescription updated {at}</span>
+  );
+}
+
 const toneClass = (colour) =>
   colour === "red" ? "si-tmr-r" : colour === "amber" ? "si-tmr-a" : "si-tmr-g";
 
@@ -116,9 +130,10 @@ function QueueRow({ row, active, onPick }) {
         <span className={`si-tmr ${toneClass(row.colour)}`}>⏱ {row.minutes ?? 0}m</span>
         <span className="si-since">{row.statusLabel}</span>
       </div>
-      {row.coordinator?.waiting && (
+      {(row.coordinator?.waiting || row.amendedAt) && (
         <div className="rxq-row__tags">
-          <CoordinatorBadge hold={row.coordinator} />
+          {row.coordinator?.waiting && <CoordinatorBadge hold={row.coordinator} />}
+          <RxUpdatedBadge amendedAt={row.amendedAt} afterExplained={row.amendedAfterExplained} />
         </div>
       )}
       {!row.canPrint && (
@@ -207,6 +222,15 @@ function Pane({
               <>
                 {" "}
                 <ExplainedBadge explained={data.explained} online={data.online} />
+              </>
+            )}
+            {data?.amendedAt && (
+              <>
+                {" "}
+                <RxUpdatedBadge
+                  amendedAt={data.amendedAt}
+                  afterExplained={data.amendedAfterExplained}
+                />
               </>
             )}
           </div>
@@ -846,6 +870,10 @@ export default function RxStationPage() {
                     </div>
                     <div className="rxq-row__tags">
                       <ExplainedBadge explained={r.explained} online={r.online} />
+                      <RxUpdatedBadge
+                        amendedAt={r.amendedAt}
+                        afterExplained={r.amendedAfterExplained}
+                      />
                       {r.rxFromHealthray && <span className="badge b-ink">HealthRay Rx</span>}
                     </div>
                   </div>

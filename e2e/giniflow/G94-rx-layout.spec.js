@@ -242,4 +242,46 @@ test.describe("G94 prescription layout", () => {
       base({ rxParameters: { columns: [{ date: "2026-10-15", today: true }], rows: [] } }),
     ).not.toContain('<table class="rx-ptable">');
   });
+
+  test("6. trend cards ignore ratios, urine and VLDL tests that share a name", () => {
+    const labs = [
+      ["LDL / HDL Cholesterol Ratio", 1.45],
+      ["VLDL Cholesterol", 24],
+      ["LDL Cholesterol", 56.1],
+      ["BUN / Creatinine Ratio", 13.93],
+      ["Urine Creatinine", 88],
+      ["Creatinine", 0.89],
+      ["ALT/AST Ratio", 0.88],
+      ["Alanine Transferase (ALT/SGPT)", 20.3],
+      ["Urea / Creatinine Ratio", 29.82],
+      ["TSH (Ultrasensitive)", 2.31],
+      ["Urine Albumin Creatinine Ratio", 12],
+    ].map(([name, result]) => ({ test_name: name, result, test_date: "2026-09-02" }));
+    const html = base({
+      activeDx: [
+        { label: "CKD" },
+        { label: "Dyslipidemia" },
+        { label: "Hypothyroidism" },
+        { label: "NAFLD" },
+      ],
+      labResults: labs,
+      labHistory: Object.fromEntries(
+        labs.map((l) => [l.test_name, [{ result: l.result, date: l.test_date }]]),
+      ),
+    });
+    const cards = Object.fromEntries(
+      [
+        ...html
+          .slice(at(html, "rx-bio-section"))
+          .matchAll(/rx-bio-name">([^<]+)<[\s\S]*?rx-bio-val[^>]*>([^<]+)</g),
+      ].map((m) => [m[1], m[2]]),
+    );
+    expect(cards).toMatchObject({
+      "LDL (mg/dL)": "56.1",
+      Creatinine: "0.89",
+      "ALT (U/L)": "20.3",
+      "TSH (µIU/mL)": "2.31",
+      "UACR (mg/g)": "12",
+    });
+  });
 });

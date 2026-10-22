@@ -8,7 +8,7 @@
 // Design: docs/doctor-management/08-booking-integration.md
 // ============================================================================
 import pool from "../config/db.js";
-import { isSlotAvailable } from "./availability.js";
+import { DONE_OR_INPROGRESS, isSlotAvailable } from "./availability.js";
 import { hasCapability, CAPABILITIES } from "../../shared/permissions.js";
 
 export const SCHEDULE_ENFORCEMENT = (process.env.SCHEDULE_ENFORCEMENT || "off").toLowerCase();
@@ -33,4 +33,34 @@ export async function checkBookingAvailability({ doctorId, date, slot, force, ro
   if (SCHEDULE_ENFORCEMENT === "warn") return { warn: true, reason: a.reason, detail: a.detail };
   if (force && hasCapability(role, CAPABILITIES.ADMIN)) return null;
   return { blocked: true, reason: a.reason, detail: a.detail };
+}
+
+const BOOKING_KEYS = ["appointment_date", "time_slot", "doctor_name"];
+
+export async function checkBookingChange(
+  appointmentId,
+  changes,
+  { force, role, client = pool } = {},
+) {
+  if (SCHEDULE_ENFORCEMENT === "off" || !BOOKING_KEYS.some((k) => k in changes)) return null;
+  const { rows } = await client.query(
+    `SELECT appointment_date::text, time_slot, doctor_name, status FROM appointments WHERE id=$1`,
+    [appointmentId],
+  );
+  if (!rows.length) return null;
+  const before = rows[0];
+  const after = { ...before };
+  for (const k of [...BOOKING_KEYS, "status"])
+    if (k in changes) after[k] = changes[k] === "" ? null : changes[k];
+  if (BOOKING_KEYS.every((k) => (after[k] ?? null) === (before[k] ?? null))) return null;
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  if (!after.appointment_date || String(after.appointment_date).slice(0, 10) < today) return null;
+  if (DONE_OR_INPROGRESS.includes(String(after.status || "").toLowerCase())) return null;
+  return checkBookingAvailability({
+    doctorId: await resolveDoctorIdByName(after.doctor_name, client),
+    date: String(after.appointment_date).slice(0, 10),
+    slot: after.time_slot,
+    force,
+    role,
+  });
 }

@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 // xlsx is lazy-loaded inside the Excel-upload handler below to keep it out
 // of the main bundle (~900 KB pre-gzip). Nothing else in this file touches it.
 import { extractLab, extractImaging, extractRx } from "./services/extraction.js";
-import { SLOT_CATALOG, SLOT_REASON, isClinicalDoctor } from "./lib/slotAvailability.js";
+import { isClinicalDoctor, useSlotCatalog, slotOptionLabel } from "./lib/slotAvailability.js";
 import { MOBILE_HINT, PHONE_DIGITS, isValidMobile, toEntryDigits } from "../shared/phone.js";
 import usePatientStore from "./stores/patientStore.js";
 import PdfViewerModal from "./components/visit/PdfViewerModal.jsx";
@@ -69,8 +69,6 @@ const SH = "0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.05)";
 const FB = "'Inter',system-ui,sans-serif";
 const FD = "'Instrument Serif',serif";
 const FM = "'DM Mono',monospace";
-
-// SLOT_CATALOG + SLOT_REASON now come from ./lib/slotAvailability.
 
 const getToken = () => localStorage.getItem("gini_auth_token") || "";
 const getDoctor = () => {
@@ -5499,6 +5497,7 @@ function NewApptView({ doctors, onSaved, onCancel, showToast }) {
   // Doctor's day availability → drives the slot dropdown + a day-off heads-up.
   const [dayWarn, setDayWarn] = useState("");
   const [availSlots, setAvailSlots] = useState(null); // null ⇒ use plain catalog slots
+  const slotCatalog = useSlotCatalog();
 
   useEffect(() => {
     const { doctor_name, appointment_date } = form;
@@ -6165,12 +6164,11 @@ function NewApptView({ doctors, onSaved, onCancel, showToast }) {
                 <option value="">
                   {form.doctor_name ? "— Select slot" : "— Pick a doctor first"}
                 </option>
-                {(availSlots || SLOT_CATALOG.map((s) => ({ slot_label: s, available: true })))
+                {(availSlots || slotCatalog.map((s) => ({ slot_label: s, available: true })))
                   .filter((s) => s.blocked_by !== "not_working")
                   .map((s) => (
                     <option key={s.slot_label} value={s.slot_label} disabled={!s.available}>
-                      {s.slot_label}
-                      {s.available ? "" : ` — ${SLOT_REASON[s.blocked_by] || "Unavailable"}`}
+                      {slotOptionLabel(s)}
                     </option>
                   ))}
               </select>

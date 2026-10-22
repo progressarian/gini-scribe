@@ -831,12 +831,20 @@ function PastePanel({ visitId, onAdd, onCancel, adding, result, onRead, reading,
   );
 }
 
-export default function RxSection({ visitId, readOnly, onToast, onUnsaved, station = "doctor" }) {
-  const proposing = station === "mo";
+export default function RxSection({
+  visitId,
+  readOnly,
+  onToast,
+  onUnsaved,
+  station = "doctor",
+  amending = false,
+}) {
+  const proposing = station === "mo" && !amending;
+  const rowStation = station === "mo" && amending ? "mo" : "doctor";
   const { data, isLoading } = usePrescription(visitId, station);
   const add = useAddItem(visitId, station);
-  const update = useUpdateItem(visitId);
-  const remove = useRemoveItem(visitId);
+  const update = useUpdateItem(visitId, rowStation);
+  const remove = useRemoveItem(visitId, rowStation);
   const decide = useDecideItem(visitId);
   const addExternal = useAddExternal(visitId);
   const removeExternal = useRemoveExternal(visitId);
@@ -846,9 +854,9 @@ export default function RxSection({ visitId, readOnly, onToast, onUnsaved, stati
   const [pasteError, setPasteError] = useState(null);
   const [pasteAdding, setPasteAdding] = useState(false);
   const parsePaste = useParsePaste(visitId);
-  const pause = usePauseItem(visitId);
-  const resume = useResumeItem(visitId);
-  const stop = useStopItem(visitId);
+  const pause = usePauseItem(visitId, rowStation);
+  const resume = useResumeItem(visitId, rowStation);
+  const stop = useStopItem(visitId, rowStation);
   const [editing, setEditing] = useState(null);
   const [adding, setAdding] = useState(false);
   const [alternativesFor, setAlternativesFor] = useState(null);

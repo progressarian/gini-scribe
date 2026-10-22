@@ -4,43 +4,10 @@ import { handleError } from "../utils/errorHandler.js";
 
 const router = Router();
 
-// Standard time slots — mirrors the slot_catalog table and SLOT_CATALOG in
-// src/lib/slotAvailability.js. Clinic day (09:00–17:00) is 30-minute slots;
-// evening/overnight stays hourly for night-shift doctors.
-export const TIME_SLOTS = [
-  "9:30 AM to 10 AM",
-  "10 AM to 10:30 AM",
-  "10:30 AM to 11 AM",
-  "11 AM to 11:30 AM",
-  "11:30 AM to 12 PM",
-  "12 PM to 12:30 PM",
-  "12:30 PM to 1 PM",
-  "1 PM to 1:30 PM",
-  "1:30 PM to 2 PM",
-  "2 PM to 2:30 PM",
-  "2:30 PM to 3 PM",
-  "3 PM to 3:30 PM",
-  "3:30 PM to 4 PM",
-  "4 PM to 4:30 PM",
-  "4:30 PM to 5 PM",
-  "5 PM to 6 PM",
-  "6 PM to 7 PM",
-  "7 PM to 8 PM",
-  "8 PM to 9 PM",
-  "9 PM to 10 PM",
-  "10 PM to 11 PM",
-  "11 PM to 12 AM",
-  "12 AM to 1 AM",
-  "1 AM to 2 AM",
-  "2 AM to 3 AM",
-  "3 AM to 4 AM",
-  "4 AM to 5 AM",
-  "5 AM to 6 AM",
-  "6 AM to 7 AM",
-  "7 AM to 8 AM",
-  "8 AM to 9 AM",
-  "9 AM to 9:30 AM",
-];
+const catalogLabels = async () =>
+  (await pool.query("SELECT label FROM slot_catalog WHERE is_active ORDER BY sort_order")).rows.map(
+    (r) => r.label,
+  );
 
 // GET /api/appointment-slots?date=2026-06-02&doctor=Dr.+Anil+Bhansali
 router.get("/appointment-slots", async (req, res) => {
@@ -121,7 +88,11 @@ router.get("/appointment-slots/availability", async (req, res) => {
 
     const configs = slotsR.rows.length
       ? slotsR.rows
-      : TIME_SLOTS.map((ts) => ({ time_slot: ts, total_capacity: 5, is_blocked: false }));
+      : (await catalogLabels()).map((ts) => ({
+          time_slot: ts,
+          total_capacity: 5,
+          is_blocked: false,
+        }));
 
     const slots = configs.map((s) => ({
       time_slot: s.time_slot,
@@ -199,8 +170,12 @@ router.patch("/appointment-slots/:id", async (req, res) => {
 });
 
 // GET /api/appointment-slots/time-slots — list of standard time slot values
-router.get("/appointment-slots/time-slots", (_req, res) => {
-  res.json(TIME_SLOTS);
+router.get("/appointment-slots/time-slots", async (_req, res) => {
+  try {
+    res.json(await catalogLabels());
+  } catch (e) {
+    handleError(res, e, "Time slots");
+  }
 });
 
 export default router;

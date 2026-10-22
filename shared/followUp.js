@@ -47,19 +47,25 @@ const addMonths = (d, n) => {
   d.setUTCDate(Math.min(day, last));
 };
 
-export function followUpDueDate(fromDate, timing) {
+export function intervalEndDate(fromDate, timing) {
   const from = clean(fromDate);
   const match = followUpTiming(timing)
     .toLowerCase()
     .match(/^(\d{1,2})\s*(day|week|month|year)/);
-  if (!from) return "";
-  if (!match) return weekdayFollowUpDate(from, timing);
+  if (!from || !match) return "";
   const n = Number(match[1]);
   const d = new Date(`${from}T00:00:00Z`);
   if (match[2] === "day") d.setUTCDate(d.getUTCDate() + n);
   else if (match[2] === "week") d.setUTCDate(d.getUTCDate() + 7 * n);
   else addMonths(d, match[2] === "month" ? n : 12 * n);
-  return skipSunday(d.toISOString().slice(0, 10));
+  return d.toISOString().slice(0, 10);
+}
+
+export function followUpDueDate(fromDate, timing) {
+  const from = clean(fromDate);
+  if (!from) return "";
+  const end = intervalEndDate(from, timing);
+  return end ? skipSunday(end) : weekdayFollowUpDate(from, timing);
 }
 
 export function effectiveFollowUp(row) {
@@ -100,4 +106,21 @@ export function weekdayFollowUpDate(fromDate, text) {
   const ahead = (target - d.getUTCDay() + 7) % 7 || 7;
   d.setUTCDate(d.getUTCDate() + ahead);
   return skipSunday(d.toISOString().slice(0, 10));
+}
+
+export const FOLLOW_UP_UNITS = ["days", "weeks", "months"];
+
+export function followUpIntervalLabel(count, unit) {
+  const n = Number(count);
+  if (!n || !FOLLOW_UP_UNITS.includes(unit)) return "";
+  return `${n} ${n === 1 ? unit.slice(0, -1) : unit}`;
+}
+
+export function parseFollowUpInterval(text) {
+  const match = String(text ?? "").match(/(\d{1,2})\s*(day|week|month|year)s?/i);
+  if (!match) return { count: "", unit: "" };
+  const n = Number(match[1]);
+  const kind = match[2].toLowerCase();
+  if (kind === "year") return { count: String(12 * n), unit: "months" };
+  return { count: String(n), unit: `${kind}s` };
 }

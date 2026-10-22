@@ -52,3 +52,11 @@ export function useRemoveOrderedService(station, visitId) {
       (await api.post(`${base(station, visitId)}/${lineId}/remove`, { reason })).data,
   );
 }
+
+export function useAddOtherProcedure(station, visitId) {
+  return useServicesMutation(
+    station,
+    visitId,
+    async (body) => (await api.post(`${base(station, visitId)}/other`, body)).data,
+  );
+}

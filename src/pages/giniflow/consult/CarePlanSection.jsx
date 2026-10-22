@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { VoiceButton } from "../../../components/giniflow/VoiceInput";
 import ReferralChips from "./ReferralChips";
 import { clearDraftField, writeDraftField } from "../../../lib/consultDraft";
+import NextVisitPicker from "../../../components/giniflow/NextVisitPicker";
 
 // Care plan — gini-doctor-final.html care-plan block.
 //
@@ -14,8 +15,6 @@ import { clearDraftField, writeDraftField } from "../../../lib/consultDraft";
 // Everything autosaves. A consultation interrupted by a phone call must lose
 // nothing — the same rule Scribe's active_visits established.
 
-const INTERVALS = ["2 weeks", "1 month", "~3 months", "6 months", "1 year"];
-
 const emptyGoal = () => ({ test: "", target: "", unit: "" });
 
 export default function CarePlanSection({
@@ -27,6 +26,7 @@ export default function CarePlanSection({
   onToast,
   flushRef,
   restored,
+  onNextVisit,
 }) {
   // getConsult always sends an object, never null — but a blank consult screen
   // mid-clinic is a bad way to find out that changed.
@@ -105,6 +105,16 @@ export default function CarePlanSection({
     setPlan((p) => ({ ...p, [field]: e.target.value }));
   };
 
+  useEffect(() => {
+    onNextVisit?.(plan.nextVisitDate || null);
+  }, [plan.nextVisitDate, onNextVisit]);
+
+  const setNextVisit = ({ interval, date }) => {
+    dirty.current = true;
+    unsent.current = true;
+    setPlan((p) => ({ ...p, nextVisitInterval: interval, nextVisitDate: date }));
+  };
+
   const setGoal = (i, field) => (e) => {
     dirty.current = true;
     unsent.current = true;
@@ -171,41 +181,14 @@ export default function CarePlanSection({
 
       <ReferralChips visitId={visitId} readOnly={readOnly} onToast={onToast} />
 
-      <div className="cp-row">
-        <div>
-          <label className="cp-lab" htmlFor="cp-date">
-            Next visit
-          </label>
-          <input
-            id="cp-date"
-            type="date"
-            className="cp-inp"
-            disabled={readOnly}
-            value={plan.nextVisitDate || ""}
-            onChange={set("nextVisitDate")}
-          />
-        </div>
-        <div>
-          <span className="cp-lab">Interval</span>
-          <div className="cp-chips">
-            {INTERVALS.map((iv) => (
-              <button
-                type="button"
-                key={iv}
-                disabled={readOnly}
-                className={plan.nextVisitInterval === iv ? "on" : ""}
-                onClick={() => {
-                  dirty.current = true;
-                  unsent.current = true;
-                  setPlan((p) => ({ ...p, nextVisitInterval: iv }));
-                }}
-              >
-                {iv}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
+      <NextVisitPicker
+        fromDate={consult.visitDate}
+        interval={plan.nextVisitInterval}
+        date={plan.nextVisitDate}
+        disabled={readOnly}
+        onChange={setNextVisit}
+        required={!readOnly}
+      />
 
       <span className="cp-lab">
         Goals for next visit

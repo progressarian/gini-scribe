@@ -175,10 +175,8 @@ test.describe.serial("P4C-08 delete a doctor from Staff Management", () => {
     await listed.click();
     await expect(page.getByRole("heading", { name: PAGE_DOCTOR })).toBeVisible();
 
-    await page
-      .locator(".docmgmt-dochead")
-      .getByRole("button", { name: "Delete", exact: true })
-      .click();
+    await page.getByRole("button", { name: `More actions for ${PAGE_DOCTOR}` }).click();
+    await page.getByRole("menuitem", { name: "Delete staff member" }).click();
     const dialog = page.getByRole("dialog", { name: `Delete ${PAGE_DOCTOR}?` });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText("future appointment still booked with them")).toContainText("1");
@@ -228,9 +226,8 @@ test.describe.serial("P4C-08 delete a doctor from Staff Management", () => {
       .first()
       .click();
     await expect(page.getByRole("heading", { name: USERS.admin.name })).toBeVisible();
-    await expect(
-      page.locator(".docmgmt-dochead").getByRole("button", { name: "Delete", exact: true }),
-    ).toBeDisabled();
+    await page.getByRole("button", { name: `More actions for ${USERS.admin.name}` }).click();
+    await expect(page.getByRole("menuitem", { name: "Delete staff member" })).toBeDisabled();
   });
 });
 

@@ -104,3 +104,12 @@
   color: #b91c1c;
   font-size: 13px;
 }
+
+.osv-other {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 12px;
+}

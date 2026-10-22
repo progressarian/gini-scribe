@@ -7,12 +7,24 @@ import { useFinalize, useFinalizePreview } from "../../../queries/hooks/useGinif
 // cannot be corrected by a further event. It therefore states what it is about
 // to do, in the prototype's own words, before it will do it.
 
-export default function FinalizeBar({ visitId, onDone, onToast, requestRef }) {
+export default function FinalizeBar({
+  visitId,
+  onDone,
+  onToast,
+  requestRef,
+  nextVisitDate,
+  onOpen,
+}) {
   const [printAfter, setPrintAfter] = useState(false);
-  const [open, setOpen] = useState(false);
+  const [open, setOpenState] = useState(false);
+  const setOpen = (value) => {
+    if (value) onOpen?.();
+    setOpenState(value);
+  };
   const { data: preview, isLoading } = useFinalizePreview(visitId, open);
   const finalize = useFinalize(visitId);
   if (requestRef) requestRef.current = () => setOpen(true);
+  const noNextVisit = !nextVisitDate;
 
   // A proposal the doctor has not decided blocks the fan-out (addendum v1.1 §3).
   // Not a warning: finalizing used to record every undecided proposal as
@@ -22,7 +34,7 @@ export default function FinalizeBar({ visitId, onDone, onToast, requestRef }) {
   // (§5.2): the server refuses either way, and a button that says why before
   // the click beats a toast after it.
   const unexplained = preview?.interactions?.blocking?.length ?? 0;
-  const blocked = (preview?.undecidedProposals ?? 0) > 0 || unexplained > 0;
+  const blocked = (preview?.undecidedProposals ?? 0) > 0 || unexplained > 0 || noNextVisit;
 
   const run = (print = false) => {
     setPrintAfter(print);
@@ -37,14 +49,23 @@ export default function FinalizeBar({ visitId, onDone, onToast, requestRef }) {
 
   return (
     <>
-      <div className="fin-bar">
+      <div className="fin-bar fin-bottom">
         <div>
           <strong>Finish this consultation</strong>
           <span>
             Sends the prescription to the pharmacy and the medicine card to the patient&apos;s app.
           </span>
+          {noNextVisit && (
+            <span className="fin-edit-need">📅 Set the next visit before finalizing.</span>
+          )}
         </div>
-        <button type="button" className="btn-fin" onClick={() => setOpen(true)}>
+        <button
+          type="button"
+          className="btn-fin"
+          disabled={noNextVisit}
+          title={noNextVisit ? "Set the next visit in the Care plan first" : undefined}
+          onClick={() => setOpen(true)}
+        >
           Finalize →
         </button>
       </div>
@@ -65,6 +86,11 @@ export default function FinalizeBar({ visitId, onDone, onToast, requestRef }) {
               </button>
             </div>
             <div className="tb-body">
+              {noNextVisit && (
+                <div className="fin-block fin-need-next" role="alert">
+                  📅 Set the next visit in the Care plan before finalizing.
+                </div>
+              )}
               {isLoading && <div className="cn-empty">Checking what will be sent…</div>}
               {preview && (
                 <ul className="fin-list">
@@ -149,9 +175,11 @@ export default function FinalizeBar({ visitId, onDone, onToast, requestRef }) {
                     ? "Finalizing…"
                     : unexplained > 0
                       ? `${unexplained} interaction${unexplained === 1 ? "" : "s"} to resolve`
-                      : blocked
-                        ? `${preview.undecidedProposals} to review`
-                        : "Yes — finalize"}
+                      : noNextVisit
+                        ? "Set the next visit first"
+                        : blocked
+                          ? `${preview.undecidedProposals} to review`
+                          : "Yes — finalize"}
                 </button>
               </div>
             </div>

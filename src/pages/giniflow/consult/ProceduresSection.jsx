@@ -5,12 +5,13 @@ export default function ProceduresSection({ visitId, readOnly, onToast }) {
     <section className="csec" id="s-procedures">
       <div className="cs-head">
         <h2>🩹 Procedures</h2>
-        <span className="cs-sub">priced for this patient · goes straight on the bill</span>
+        <span className="cs-sub">goes straight on the bill · reception sets the price</span>
       </div>
       <OrderedServicesPanel
         station="doctor"
         visitId={visitId}
         readOnly={readOnly}
+        hidePrices
         onToast={onToast}
       />
     </section>

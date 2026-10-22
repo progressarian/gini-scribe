@@ -14,8 +14,9 @@ import Shimmer from "../components/Shimmer.jsx";
 import api from "../services/api.js";
 import {
   useDayAvailability,
+  useSlotCatalog,
   slotOptions,
-  SLOT_REASON,
+  slotOptionLabel,
   isClinicalDoctor,
 } from "../lib/slotAvailability.js";
 import "./FindPage.css";
@@ -99,6 +100,7 @@ export default function FindPage() {
 
   // Doctor's slot availability for the quick-book form.
   const apptSlots = useDayAvailability(bookForm.doc, bookForm.dt);
+  const slotCatalog = useSlotCatalog();
   // Clear a chosen slot that just became unavailable.
   useEffect(() => {
     if (!apptSlots || !bookForm.tm) return;
@@ -389,10 +391,9 @@ export default function FindPage() {
               }}
             >
               <option value="">{bookForm.doc ? "Time slot" : "Pick doctor first"}</option>
-              {slotOptions(apptSlots).map((s) => (
+              {slotOptions(apptSlots, slotCatalog).map((s) => (
                 <option key={s.slot_label} value={s.slot_label} disabled={!s.available}>
-                  {s.slot_label}
-                  {s.available ? "" : ` — ${SLOT_REASON[s.blocked_by] || "Unavailable"}`}
+                  {slotOptionLabel(s)}
                 </option>
               ))}
             </select>

@@ -16,24 +16,48 @@ import { validate } from "../middleware/validate.js";
 import { requireCapability } from "../middleware/auth.js";
 import { CAPABILITIES } from "../../shared/permissions.js";
 import {
-  profileUpdateSchema,
   breakCreateSchema,
   unavailabilityCreateSchema,
   unavailabilityUpdateSchema,
   emergencyLeaveSchema,
   reassignBulkSchema,
   reassignSingleSchema,
+  slotTemplateSchema,
+  slotTemplateApplySchema,
 } from "../schemas/index.js";
 import {
   isSlotAvailable,
-  getDoctorDayAvailability,
+  getDoctorDayView,
   findAvailableDoctors,
   getAffectedAssignments,
   resolveDoctor,
 } from "../services/availability.js";
+import {
+  insertTemplateVersion,
+  istToday,
+  templateErrors,
+  withdrawFutureVersion,
+} from "../services/slots/templateWrites.js";
+import { templateVersions } from "../services/slots/templateStore.js";
+import { bookingsOutsideTemplate } from "../services/slots/bookingImpact.js";
+import {
+  APPLY_BATCH,
+  applyBatch,
+  previewApply,
+  scheduledDoctors,
+} from "../services/slots/applyTemplate.js";
+import { SCHEDULED_ROLES } from "../../shared/staffRoles.js";
 
 const router = Router();
 const admin = requireCapability(CAPABILITIES.ADMIN);
+
+const publicDay = (day) => ({
+  slots: day.slots,
+  warnings: day.warnings || [],
+  unreadable: day.unreadable || 0,
+  orphan_overrides: day.orphanOverrides || [],
+  from_template: !!day.fromTemplate,
+});
 
 // A doctor can't have two overlapping time-off entries (leave/holiday/emergency
 // can't coexist on the same dates). Returns the clashing row, or null.
@@ -84,41 +108,185 @@ router.get("/doctors/:id/profile", async (req, res) => {
   }
 });
 
-router.put("/doctors/:id/profile", admin, validate(profileUpdateSchema), async (req, res) => {
+// ───────────────────────── Slot templates ───────────────────────
+router.get("/doctors/:id/slot-templates", async (req, res) => {
   try {
-    const { off_weekdays, work_start, work_end, lunch_start, lunch_end } = req.body;
-    const r = await pool.query(
-      `INSERT INTO doctor_profile (doctor_id, off_weekdays, work_start, work_end, lunch_start, lunch_end, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,NOW())
-       ON CONFLICT (doctor_id) DO UPDATE
-         SET off_weekdays=EXCLUDED.off_weekdays,
-             work_start=EXCLUDED.work_start,
-             work_end=EXCLUDED.work_end,
-             lunch_start=EXCLUDED.lunch_start,
-             lunch_end=EXCLUDED.lunch_end,
-             updated_at=NOW()
-       RETURNING off_weekdays, work_start, work_end, lunch_start, lunch_end`,
-      [
-        req.params.id,
-        off_weekdays ?? [0],
-        work_start || null,
-        work_end || null,
-        lunch_start || null,
-        lunch_end || null,
-      ],
-    );
-    res.json(r.rows[0]);
+    const versions = await templateVersions(parseInt(req.params.id, 10));
+    const today = istToday();
+    const current = versions.find((v) => v.status === "active" && v.effectiveFrom <= today);
+    res.json({ today, current_id: current?.id ?? null, versions });
   } catch (e) {
-    handleError(res, e, "Profile update");
+    handleError(res, e, "Slot templates list");
   }
 });
 
+const scheduledDoctor = async (req, res) => {
+  const doctor = await resolveDoctor(parseInt(req.params.id, 10));
+  if (!doctor) {
+    res.status(404).json({ error: "Doctor not found" });
+    return null;
+  }
+  if (!SCHEDULED_ROLES.includes(doctor.role)) {
+    res
+      .status(400)
+      .json({ error: "Schedules are kept for consultants and medical officers only." });
+    return null;
+  }
+  return doctor;
+};
+
+const refuseTemplate = (req, res) => {
+  if (req.body.effective_from < istToday()) {
+    res.status(400).json({
+      error: "A schedule can't start in the past. Pick today or a later date.",
+      errors: [{ field: "effective_from", message: "Pick today or a later date." }],
+    });
+    return true;
+  }
+  const invalid = templateErrors(req.body.template);
+  if (invalid) {
+    res.status(400).json({ error: invalid.message, errors: invalid.errors });
+    return true;
+  }
+  return false;
+};
+
+router.post(
+  "/doctors/:id/slot-templates/check",
+  admin,
+  validate(slotTemplateSchema),
+  async (req, res) => {
+    try {
+      const doctor = await scheduledDoctor(req, res);
+      if (!doctor || refuseTemplate(req, res)) return;
+      res.json(
+        await bookingsOutsideTemplate(doctor.id, req.body.template, req.body.effective_from),
+      );
+    } catch (e) {
+      handleError(res, e, "Slot template check");
+    }
+  },
+);
+
+router.post(
+  "/doctors/:id/slot-templates",
+  admin,
+  validate(slotTemplateSchema),
+  async (req, res) => {
+    const doctor = await scheduledDoctor(req, res).catch((e) =>
+      handleError(res, e, "Slot template save"),
+    );
+    if (!doctor || refuseTemplate(req, res)) return;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const id = await insertTemplateVersion(client, doctor.id, req.body.template, {
+        effectiveFrom: req.body.effective_from,
+        note: req.body.note?.trim() || null,
+        actorId: req.doctor?.doctor_id ?? null,
+      });
+      const impact = await bookingsOutsideTemplate(
+        doctor.id,
+        req.body.template,
+        req.body.effective_from,
+        { client },
+      );
+      await client.query("COMMIT");
+      res.status(201).json({ id, ...impact });
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => {});
+      handleError(res, e, "Slot template save");
+    } finally {
+      client.release();
+    }
+  },
+);
+
+router.post("/doctors/:id/slot-templates/:templateId/withdraw", admin, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await withdrawFutureVersion(
+      client,
+      parseInt(req.params.id, 10),
+      parseInt(req.params.templateId, 10),
+      req.doctor?.doctor_id ?? null,
+    );
+    await client.query("COMMIT");
+    res.json({ withdrawn: true });
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    handleError(res, e, "Slot template withdraw");
+  } finally {
+    client.release();
+  }
+});
+
+router.post(
+  "/doctor-slot-templates/apply",
+  admin,
+  validate(slotTemplateApplySchema),
+  async (req, res) => {
+    try {
+      if (refuseTemplate(req, res)) return;
+      const { doctor_ids, all, dry_run, template, effective_from, note } = req.body;
+      const until = req.body.effective_until || null;
+      if (until && until < effective_from)
+        return res.status(400).json({
+          error: "The end date must be on or after the start date.",
+          errors: [
+            { field: "effective_until", message: "Pick a date on or after the start date." },
+          ],
+        });
+      if (!all && !doctor_ids?.length)
+        return res.status(400).json({ error: "Choose at least one doctor." });
+      const doctors = await scheduledDoctors(all ? null : doctor_ids);
+      if (!doctors.length)
+        return res.status(400).json({ error: "None of the chosen staff are consultants or MOs." });
+      if (dry_run)
+        return res.json({
+          doctors: await previewApply(doctors, template, effective_from, until),
+        });
+      if (all || doctors.length > APPLY_BATCH)
+        return res.status(400).json({
+          error: `Save at most ${APPLY_BATCH} doctors at a time.`,
+        });
+      res.json(
+        await applyBatch(doctors, template, effective_from, {
+          note: note?.trim() || null,
+          actorId: req.doctor?.doctor_id ?? null,
+          until,
+        }),
+      );
+    } catch (e) {
+      handleError(res, e, "Slot template apply");
+    }
+  },
+);
+
 // ───────────────────── Leave / unavailability ───────────────────
+router.get("/doctors/time-off-today", async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT DISTINCT ON (doctor_id) doctor_id, type, reason
+         FROM doctor_unavailability
+        WHERE status = 'active' AND type IN ('leave','holiday','emergency')
+          AND slot_labels IS NULL AND start_time IS NULL
+          AND start_date <= $1::date AND end_date >= $1::date
+        ORDER BY doctor_id, (type = 'emergency') DESC`,
+      [istToday()],
+    );
+    res.json(rows);
+  } catch (e) {
+    handleError(res, e, "Time off today");
+  }
+});
+
 router.get("/doctors/:id/unavailability", async (req, res) => {
   try {
-    const { from, to } = req.query;
+    const { from, to, scope } = req.query;
     const params = [req.params.id];
-    let where = "WHERE doctor_id=$1 AND status='active'";
+    let where = scope === "all" ? "WHERE doctor_id=$1" : "WHERE doctor_id=$1 AND status='active'";
     if (from && to) {
       params.push(from, to);
       where += ` AND end_date >= $2 AND start_date <= $3`;
@@ -197,7 +365,7 @@ router.patch(
         `UPDATE doctor_unavailability
             SET start_date=COALESCE($1,start_date),
                 end_date=COALESCE($2,end_date),
-                slot_labels=$3,
+                slot_labels=CASE WHEN $8 THEN $3 ELSE slot_labels END,
                 reason=COALESCE($4,reason),
                 status=COALESCE($5,status)
           WHERE id=$6 AND doctor_id=$7 RETURNING *`,
@@ -209,6 +377,7 @@ router.patch(
           status || null,
           req.params.uid,
           req.params.id,
+          slot_labels !== undefined,
         ],
       );
       if (!r.rows.length) return res.status(404).json({ error: "Not found" });
@@ -297,13 +466,25 @@ router.post(
           message: `Doctor already has "${clash.type}" time off overlapping these dates. Cancel it first.`,
         });
 
-      // from_now: restrict to slots whose start_time hasn't passed yet today.
       let effectiveSlots = slot_labels || null;
       if (from_now && !effectiveSlots) {
-        const fut = await pool.query(
-          "SELECT label FROM slot_catalog WHERE is_active AND start_time >= LOCALTIME ORDER BY sort_order",
-        );
-        effectiveSlots = fut.rows.map((r) => r.label);
+        const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+        if (start_date !== today || end_date !== today)
+          return res.status(400).json({
+            error: "from_now_today_only",
+            message:
+              "“Only the rest of today” works for today's leave only. Untick it to block the whole date range.",
+          });
+        const now = new Date().toLocaleTimeString("en-GB", {
+          timeZone: "Asia/Kolkata",
+          hour: "2-digit",
+          minute: "2-digit",
+          hourCycle: "h23",
+        });
+        const day = await getDoctorDayView(doctorId, today);
+        effectiveSlots = day.slots
+          .filter((s) => s.blocked_by !== "break" && s.start_time.slice(0, 5) >= now)
+          .map((s) => s.slot_label);
       }
 
       const ins = await pool.query(
@@ -358,8 +539,8 @@ router.get("/doctors/:id/availability", async (req, res) => {
   try {
     const { date } = req.query;
     if (!date) return res.status(400).json({ error: "date required" });
-    const slots = await getDoctorDayAvailability(parseInt(req.params.id, 10), date);
-    res.json({ date, slots });
+    const day = await getDoctorDayView(parseInt(req.params.id, 10), date);
+    res.json({ date, ...publicDay(day) });
   } catch (e) {
     handleError(res, e, "Doctor availability");
   }
@@ -374,8 +555,8 @@ router.get("/availability/day", async (req, res) => {
     const idR = await pool.query("SELECT resolve_doctor_id($1) AS id", [doctor]);
     const doctorId = idR.rows[0]?.id || null;
     if (!doctorId) return res.json({ resolved: false, date, slots: [] });
-    const slots = await getDoctorDayAvailability(doctorId, date);
-    res.json({ resolved: true, date, slots });
+    const day = await getDoctorDayView(doctorId, date);
+    res.json({ resolved: true, date, ...publicDay(day) });
   } catch (e) {
     handleError(res, e, "Availability by name");
   }
@@ -412,11 +593,11 @@ async function applyMove(client, move, ctx) {
     return { appointment_id, error: avail.reason === "full" ? "target_full" : avail.reason };
 
   const fromDoctorId = appt.doctor_id || null;
-  await client.query("UPDATE appointments SET doctor_name=$1, doctor_id=$2 WHERE id=$3", [
-    to_doctor_name,
-    to_doctor_id,
-    appointment_id,
-  ]);
+  const toSlot = !appt.healthray_id && avail.slot_label ? avail.slot_label : appt.time_slot;
+  await client.query(
+    "UPDATE appointments SET doctor_name=$1, doctor_id=$2, time_slot=$3 WHERE id=$4",
+    [to_doctor_name, to_doctor_id, toSlot, appointment_id],
+  );
   // Mirror to the live OPD queue card if the patient is already checked in.
   await client.query(
     "UPDATE active_visits SET doctor_name=$1, doctor_id=$2 WHERE appointment_id=$3",
@@ -444,7 +625,7 @@ async function applyMove(client, move, ctx) {
       ctx.reassigned_by || null,
     ],
   );
-  return { appointment_id, to_doctor_id, to_doctor_name, moved: true };
+  return { appointment_id, to_doctor_id, to_doctor_name, time_slot: toSlot, moved: true };
 }
 
 // Bulk reassign (emergency / planned).

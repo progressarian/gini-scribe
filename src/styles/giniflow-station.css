@@ -9372,3 +9372,130 @@
     width: 100%;
   }
 }
+.gf .cp-next {
+  display: flex;
+  gap: 6px;
+}
+.gf .cp-next .cp-inp {
+  width: auto;
+  min-width: 72px;
+}
+.gf .cp-next-date {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+  padding: 7px 0;
+}
+.gf .cp-next-date em {
+  font-weight: 400;
+  font-style: normal;
+  color: var(--ink4);
+}
+.gf .fin-done-edit {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.gf .fin-bar.fin-editing {
+  max-width: 560px;
+  background: var(--amb);
+}
+.gf .fin-edit-acts {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.gf .btn-fin:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.gf .cp-next-box {
+  margin: 12px 0;
+  padding: 10px 12px;
+  background: var(--blu-l);
+  border: 1px solid var(--blu-b);
+  border-left: 4px solid var(--blu);
+  border-radius: var(--r-lg);
+}
+.gf .cp-next-box.is-missing {
+  background: var(--amb-l);
+  border-color: var(--amb-b);
+  border-left-color: var(--amb);
+}
+.gf .cp-next-box .cp-req {
+  font-style: normal;
+  color: var(--red);
+}
+.gf .cp-next-need {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--amb);
+}
+.gf .fin-bar.fin-editing,
+.gf .fin-bar.fin-bottom {
+  position: static;
+  width: auto;
+  max-width: none;
+  margin: 16px 0 0;
+}
+.gf .fin-need-next {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+.gf .cp-next-far {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--red);
+}
+.gf .tst-ordered + .tst-ordered {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--bd);
+}
+.gf .tst-ordered .tst-customlist {
+  margin: 5px 0 0;
+}
+.gf .tst-ordered .tst-custom {
+  color: var(--grn);
+  background: var(--grn-l);
+  border-color: var(--grn-b);
+}
+.gf .tst-ordered .tst-custom.tst-confirm {
+  color: var(--red);
+  background: var(--red-l);
+  border-color: var(--red-b);
+}
+.gf .tst-ordered-note {
+  font-style: normal;
+  color: var(--ink4);
+}
+.gf .tst-picked {
+  margin: 8px 0;
+}
+.gf .tst-picked .tst-custom {
+  color: var(--blu);
+  background: var(--blu-l);
+  border-color: var(--blu-b);
+}
+.gf .cp-next-val {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.gf .fin-bar .fin-edit-need {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-weight: 700;
+  color: #fff;
+}

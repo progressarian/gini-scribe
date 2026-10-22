@@ -1,5 +1,9 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { useTestPanels, useOrderTests } from "../../../queries/hooks/useGiniflowPrescription";
+import {
+  useTestPanels,
+  useOrderTests,
+  useRemoveOrderedTest,
+} from "../../../queries/hooks/useGiniflowPrescription";
 import { VoiceButton } from "../../../components/giniflow/VoiceInput";
 import { clearDraftField, writeDraftField } from "../../../lib/consultDraft";
 import {
@@ -7,7 +11,6 @@ import {
   isSearching,
   MIN_SEARCH_LENGTH,
   pickPopular,
-  rupees,
   searchTests,
   TEST_URGENCY,
 } from "./testSearch";
@@ -20,6 +23,8 @@ import {
 
 const URGENCY = TEST_URGENCY;
 
+const REMOVABLE_SAMPLE = ["ordered", "payment_pending"];
+
 const monthLabel = (ymd) => {
   const [y, m] = (ymd || "").split("-").map(Number);
   if (!y) return "";
@@ -29,6 +34,8 @@ const monthLabel = (ymd) => {
 export default function TestsSection({ visitId, consult, readOnly, onToast, onUnsaved, restored }) {
   const { data } = useTestPanels(visitId);
   const orderTests = useOrderTests(visitId);
+  const removeTest = useRemoveOrderedTest(visitId);
+  const [confirmRemove, setConfirmRemove] = useState(null);
   // Tests typed in for THIS patient. They ride on the order and are never added
   // to the clinic list — the next patient's picker is unchanged by them.
   const [custom, setCustom] = useState([]);
@@ -36,7 +43,6 @@ export default function TestsSection({ visitId, consult, readOnly, onToast, onUn
   const [urgency, setUrgency] = useState("next_visit");
   const [filter, setFilter] = useState("");
   const filterRef = useRef(null);
-  const [customPrice, setCustomPrice] = useState("");
   const [showAll, setShowAll] = useState(false);
   const appliedRestore = useRef(false);
 
@@ -86,11 +92,6 @@ export default function TestsSection({ visitId, consult, readOnly, onToast, onUn
       : matchedTests.filter(
           (t) => popularNames.has(t.name) || selected.has(t.name) || alreadyOrdered.has(t.name),
         );
-  const priceByName = useMemo(
-    () => new Map([...catalog, ...custom].map((t) => [t.name, Number(t.price) || 0])),
-    [catalog, custom],
-  );
-  const selectedTotal = [...selected].reduce((sum, name) => sum + (priceByName.get(name) || 0), 0);
 
   const toggle = (name) =>
     setSelected((prev) => {
@@ -148,14 +149,82 @@ export default function TestsSection({ visitId, consult, readOnly, onToast, onUn
         )}
       </div>
 
-      {(consult.orders || []).length > 0 && (
+      {(consult.orders || []).some((o) => o.tests.length) && (
         <div className="tst-existing">
-          {consult.orders.map((o) => (
-            <div key={o.id}>
-              <strong>{o.tests.length} already ordered</strong> · {o.urgency.replace("_", " ")} ·{" "}
-              {o.payment_status} · {o.tests.join(", ")}
-            </div>
-          ))}
+          {consult.orders
+            .filter((o) => o.tests.length)
+            .map((o) => {
+              const removable =
+                !readOnly &&
+                o.payment_status === "pending" &&
+                REMOVABLE_SAMPLE.includes(o.sample_status);
+              return (
+                <div key={o.id} className="tst-ordered">
+                  <div>
+                    <strong>{o.tests.length} already ordered</strong> ·{" "}
+                    {o.urgency.replace("_", " ")} · {o.payment_status}
+                    {!readOnly && !removable && (
+                      <em className="tst-ordered-note">
+                        {" "}
+                        · {o.payment_status === "pending" ? "sample taken" : "paid"} — reception
+                        cancels these
+                      </em>
+                    )}
+                  </div>
+                  <div className="tst-customlist">
+                    {(o.items || o.tests.map((name) => ({ id: name, name }))).map((t) =>
+                      confirmRemove === t.id ? (
+                        <span key={t.id} className="tst-custom tst-confirm">
+                          Remove {t.name}?
+                          <button
+                            type="button"
+                            className="btn-sm on"
+                            disabled={removeTest.isPending}
+                            onClick={() =>
+                              removeTest.mutate(
+                                { orderId: o.id, testId: t.id },
+                                {
+                                  onSuccess: () => {
+                                    setConfirmRemove(null);
+                                    onToast(`✓ ${t.name} removed from the order`);
+                                  },
+                                  onError: (e) =>
+                                    onToast(
+                                      e?.response?.data?.error || `${t.name} was not removed`,
+                                    ),
+                                },
+                              )
+                            }
+                          >
+                            {removeTest.isPending ? "Removing…" : "Yes, remove"}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-sm"
+                            onClick={() => setConfirmRemove(null)}
+                          >
+                            Keep
+                          </button>
+                        </span>
+                      ) : (
+                        <span key={t.id} className="tst-custom">
+                          {t.name}
+                          {removable && o.items && (
+                            <button
+                              type="button"
+                              aria-label={`Remove ${t.name} from the order`}
+                              onClick={() => setConfirmRemove(t.id)}
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </span>
+                      ),
+                    )}
+                  </div>
+                </div>
+              );
+            })}
         </div>
       )}
 
@@ -243,24 +312,13 @@ export default function TestsSection({ visitId, consult, readOnly, onToast, onUn
             return (
               <div className="tst-new">
                 <span>“{typed}” is not in the list — order it for this patient only?</span>
-                <input
-                  className="cp-inp tst-new__price"
-                  inputMode="decimal"
-                  placeholder="₹ price"
-                  value={customPrice}
-                  onChange={(e) => setCustomPrice(e.target.value)}
-                />
                 <button
                   type="button"
                   className="btn-sm on"
                   onClick={() => {
-                    setCustom((prev) => [
-                      ...prev,
-                      { name: typed, price: Number(customPrice) > 0 ? Number(customPrice) : 0 },
-                    ]);
+                    setCustom((prev) => [...prev, { name: typed, price: 0 }]);
                     setSelected((prev) => new Set(prev).add(typed));
                     setFilter("");
-                    setCustomPrice("");
                   }}
                 >
                   + Add for this patient
@@ -272,7 +330,7 @@ export default function TestsSection({ visitId, consult, readOnly, onToast, onUn
             <div className="tst-customlist">
               {custom.map((t) => (
                 <span key={t.name} className="tst-custom">
-                  {t.name} · {t.price ? `₹${t.price}` : "price not set"}
+                  {t.name}
                   <button
                     type="button"
                     aria-label={`Remove ${t.name}`}
@@ -308,15 +366,6 @@ export default function TestsSection({ visitId, consult, readOnly, onToast, onUn
                 {/* The reason a consultant picks this test, printed rather
                       than hidden in a tooltip no tablet can show. */}
                 {t.gloss && <span className="tst-gloss">{t.gloss}</span>}
-                <span
-                  className="tst-price"
-                  title={
-                    t.schemePriced ? `Scheme rate · usual price ${rupees(t.basePrice)}` : undefined
-                  }
-                >
-                  {t.price ? rupees(t.price) : "price not set"}
-                  {t.schemePriced && " · scheme"}
-                </span>
               </button>
             ))}
             {searching && visibleTests.length === 0 && (
@@ -325,9 +374,31 @@ export default function TestsSection({ visitId, consult, readOnly, onToast, onUn
           </div>
 
           {selected.size > 0 && (
+            <div className="tst-picked" aria-label="Selected tests, not ordered yet">
+              <span className="cn-head">Selected — not ordered yet</span>
+              <div className="tst-customlist">
+                {[...selected].map((name) => (
+                  <span key={name} className="tst-custom">
+                    {name}
+                    <button
+                      type="button"
+                      aria-label={`Unselect ${name}`}
+                      onClick={() => toggle(name)}
+                    >
+                      ✕
+                    </button>
+                  </span>
+                ))}
+                <button type="button" className="btn-sm" onClick={() => setSelected(new Set())}>
+                  Clear all
+                </button>
+              </div>
+            </div>
+          )}
+          {selected.size > 0 && (
             <div className="tst-bar">
               <span>
-                📋 <strong>{selected.size} tests selected</strong> · {rupees(selectedTotal)} for{" "}
+                📋 <strong>{selected.size} tests selected</strong> for{" "}
                 {URGENCY.find((u) => u.key === urgency).label.toLowerCase()}
                 {urgency === "next_visit" && consult.nextVisitDate
                   ? ` (${monthLabel(consult.nextVisitDate)})`

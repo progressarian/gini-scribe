@@ -36,7 +36,7 @@ export const LAB_ONLY_STEP_NAMES = {
 
 const LAB_LEG = ["blood_sample", "lab_processing_2", "report_upload"];
 
-export function labOnlyJourney(steps, catalog = [], { hasBilling = false } = {}) {
+export function labOnlyJourney(steps, catalog = [], { hasBilling = false, withLeg = false } = {}) {
   const entry = (id) => catalog.find((c) => c.id === id);
   const chainOf = (s) => s.chainStatus ?? entry(s.catalogId)?.chain_status ?? null;
   const kept = steps.filter((s) => labOnlyKeepsStep({ ...s, chainStatus: chainOf(s) }));
@@ -59,7 +59,12 @@ export function labOnlyJourney(steps, catalog = [], { hasBilling = false } = {})
     hasBilling ? null : own("lab_billing") || fromCatalog("lab_billing"),
     own("check_in") || fromCatalog("check_in"),
   ];
-  const leg = own("blood_sample") ? LAB_LEG.map((id) => own(id) || fromCatalog(id)) : [];
+  const leg =
+    own("blood_sample") || withLeg
+      ? LAB_LEG.map((id) => own(id) || fromCatalog(id))
+          .filter(Boolean)
+          .map((s) => (withLeg && s.source === "template" ? { ...s, source: "lab_only" } : s))
+      : [];
   const rest = kept.filter((s) => !LAB_ONLY_STEP_NAMES[s.catalogId]);
   return [...head, ...leg]
     .filter(Boolean)

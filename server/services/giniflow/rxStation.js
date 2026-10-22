@@ -8,7 +8,13 @@ import { STATUS_LABEL, WAIT_SINCE_SQL, slaKeyForStatus } from "../../../shared/g
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { getMachines } from "./machineCatalog.js";
 import { machineForTest } from "../../../shared/machineStages.js";
-import { EXPLAINED_SQL, ONLINE_VISIT_SQL, getRxFollowups } from "./rxFollowups.js";
+import {
+  EXPLAINED_SQL,
+  ONLINE_VISIT_SQL,
+  getRxFollowups,
+  AMENDED_AT_SQL,
+  AMENDED_AFTER_EXPLAINED_SQL,
+} from "./rxFollowups.js";
 import { holdsForVisits } from "./coordinatorHold.js";
 
 const QUEUE_STATUSES = ["doctor_done", "rx_pending", "with_rx"];
@@ -26,6 +32,8 @@ const QUEUE_SQL = `
          (rx.id IS NOT NULL AND rx.source = 'visit' AND rxchg.last_change > rx.created_at) AS rx_stale,
          meds.n AS medicine_count,
          ${EXPLAINED_SQL("v")} AS explained,
+         ${AMENDED_AT_SQL("v")} AS amended_at,
+         ${AMENDED_AFTER_EXPLAINED_SQL("v")} AS amended_after_explained,
          ${ONLINE_VISIT_SQL("v")} AS online
     FROM giniflow_visits v
     JOIN patients p ON p.id = v.patient_id
@@ -97,6 +105,8 @@ const toRow = (r, budgetFor, now) => {
     rxStale: !!r.rx_stale,
     rxFromHealthray: r.rx_source === "healthray",
     explained: !!r.explained,
+    amendedAt: r.amended_at ? new Date(r.amended_at).toISOString() : null,
+    amendedAfterExplained: !!r.amended_after_explained,
     online: !!r.online,
     since: r.since ? new Date(r.since).toISOString() : null,
     minutes,
@@ -144,6 +154,8 @@ export async function getRxPatient(visitId, db = pool) {
             (rx.id IS NOT NULL AND rx.source = 'visit' AND rxchg.last_change > rx.created_at) AS rx_stale,
             ${labOnlyPredicate("v", "$2")} AS lab_only,
             ${EXPLAINED_SQL("v")} AS explained,
+            ${AMENDED_AT_SQL("v")} AS amended_at,
+            ${AMENDED_AFTER_EXPLAINED_SQL("v")} AS amended_after_explained,
             ${ONLINE_VISIT_SQL("v")} AS online
        FROM giniflow_visits v
        JOIN patients p ON p.id = v.patient_id
@@ -206,6 +218,8 @@ export async function getRxPatient(visitId, db = pool) {
     visitDate: v.visit_date,
     phone: v.phone,
     explained: !!v.explained,
+    amendedAt: v.amended_at ? new Date(v.amended_at).toISOString() : null,
+    amendedAfterExplained: !!v.amended_after_explained,
     online: !!v.online,
     followups,
     coordinator: holds.get(v.visit_id) ?? null,

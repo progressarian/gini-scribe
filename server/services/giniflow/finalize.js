@@ -52,11 +52,147 @@ export async function pendingProposalCount(visitId, db = pool) {
   return Number(rows[0].n);
 }
 
+export async function writeMedicines(client, { patientId, consultationId, visitDate, items }) {
+  // ── 2. Medicines ─────────────────────────────────────────────────────────
+  const stopped = items.filter((i) => i.change_type === "stopped");
+  const active = items.filter((i) => DISPENSABLE.includes(i.change_type));
+  const paused = items.filter((i) => i.change_type === "paused");
+
+  // Stopped first, so a medicine stopped and re-prescribed under a new dose in
+  // the same visit cannot collide on the active unique index.
+  if (stopped.length) {
+    // CS-02. `medications_patient_inactive_name_uniq` is unique on the same key
+    // among INACTIVE rows, and the flip below moves a row into that set. A
+    // medicine stopped at an earlier visit, re-prescribed, and stopped again
+    // therefore lands a second inactive row and aborts the whole consultation
+    // with a unique violation the consultant cannot act on.
+    //
+    // The older inactive row is superseded history — the row being stopped now
+    // carries the current dose, timing and consultation. Dropping it keeps the
+    // most recent row per (patient, medicine) in each active state, which is
+    // exactly the policy `scripts/dedup-medications.js` applies when it repairs
+    // this table.
+    await client.query(
+      `DELETE FROM medications old
+        WHERE old.patient_id = $1
+          AND old.is_active = false
+          AND UPPER(COALESCE(old.pharmacy_match, old.name)) = ANY($2::text[])
+          AND EXISTS (
+            SELECT 1 FROM medications cur
+             WHERE cur.patient_id = old.patient_id
+               AND cur.is_active = true
+               AND UPPER(COALESCE(cur.pharmacy_match, cur.name))
+                   = UPPER(COALESCE(old.pharmacy_match, old.name)))`,
+      [patientId, stopped.map((i) => (i.pharmacy_match || i.medicine_name).toUpperCase())],
+    );
+
+    await client.query(
+      `UPDATE medications m
+          SET is_active = false,
+              stopped_date = COALESCE(m.stopped_date, CURRENT_DATE),
+              stop_reason = COALESCE(t.stop_reason, m.stop_reason),
+              change_type = 'stopped',
+              consultation_id = $2,
+              updated_at = NOW()
+         FROM UNNEST($3::text[], $4::text[]) AS t(key, stop_reason)
+        WHERE m.patient_id = $1
+          AND m.is_active = true
+          AND UPPER(COALESCE(m.pharmacy_match, m.name)) = UPPER(t.key)`,
+      [
+        patientId,
+        consultationId,
+        stopped.map((i) => i.pharmacy_match || i.medicine_name),
+        stopped.map((i) => i.stop_reason || "Stopped at consultation"),
+      ],
+    );
+  }
+
+  // A paused medicine is still the patient's medicine — it keeps its row and
+  // its history, and only stops appearing on the card until it resumes.
+  if (paused.length) {
+    await client.query(
+      `UPDATE medications m
+          SET change_type = 'paused',
+              consultation_id = $2,
+              updated_at = NOW()
+         FROM UNNEST($3::text[]) AS t(key)
+        WHERE m.patient_id = $1 AND m.is_active = true
+          AND UPPER(COALESCE(m.pharmacy_match, m.name)) = UPPER(t.key)`,
+      [patientId, consultationId, paused.map((i) => i.pharmacy_match || i.medicine_name)],
+    );
+  }
+
+  if (active.length) {
+    await client.query(
+      `INSERT INTO medications
+         (patient_id, consultation_id, name, pharmacy_match, composition, dose, previous_dose,
+          frequency, timing, timing_category, when_to_take, time_of_day, route, form,
+          clinical_note, instructions, drug_class, change_type, is_new, is_active,
+          started_date, last_prescribed_date)
+       SELECT $1, $2, t.name, t.pharm, t.composition, t.dose, t.previous_dose,
+              t.frequency, t.timing, t.timing_category,
+              NULLIF(string_to_array(t.when_to_take, '|'), '{}')::when_to_take_pill[],
+              t.time_of_day::time, t.route, t.form,
+              t.reason, t.patient_instruction, t.drug_class, t.change_type,
+              t.change_type = 'new', true,
+              CASE WHEN t.change_type = 'new' THEN $3::date ELSE NULL END, $3::date
+         FROM UNNEST($4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[],
+                     $10::text[], $11::text[], $12::text[], $13::text[], $14::text[],
+                     $15::text[], $16::text[], $17::text[], $18::text[], $19::text[])
+              AS t(name, pharm, composition, dose, previous_dose, frequency, timing,
+                   timing_category, time_of_day, route, form, reason, patient_instruction,
+                   drug_class, change_type, when_to_take)
+       ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
+       DO UPDATE SET consultation_id = EXCLUDED.consultation_id,
+         composition = COALESCE(EXCLUDED.composition, medications.composition),
+         dose = COALESCE(EXCLUDED.dose, medications.dose),
+         previous_dose = COALESCE(EXCLUDED.previous_dose, medications.previous_dose),
+         frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
+         timing = COALESCE(EXCLUDED.timing, medications.timing),
+         timing_category = COALESCE(EXCLUDED.timing_category, medications.timing_category),
+         when_to_take = COALESCE(EXCLUDED.when_to_take, medications.when_to_take),
+         time_of_day = COALESCE(EXCLUDED.time_of_day, medications.time_of_day),
+         route = COALESCE(EXCLUDED.route, medications.route),
+         form = COALESCE(EXCLUDED.form, medications.form),
+         clinical_note = COALESCE(EXCLUDED.clinical_note, medications.clinical_note),
+         instructions = COALESCE(EXCLUDED.instructions, medications.instructions),
+         drug_class = COALESCE(EXCLUDED.drug_class, medications.drug_class),
+         change_type = EXCLUDED.change_type,
+         last_prescribed_date = EXCLUDED.last_prescribed_date,
+         stopped_date = NULL,
+         stop_reason = NULL,
+         updated_at = NOW()`,
+      [
+        patientId,
+        consultationId,
+        visitDate,
+        active.map((i) => i.medicine_name),
+        active.map((i) => i.pharmacy_match),
+        active.map((i) => i.composition),
+        active.map((i) => i.dose),
+        active.map((i) => i.previous_dose),
+        active.map((i) => i.frequency),
+        active.map((i) => i.timing),
+        active.map((i) => i.timing_category),
+        active.map((i) => i.time_of_day),
+        active.map((i) => i.route),
+        active.map((i) => i.form),
+        active.map((i) => i.reason),
+        active.map((i) => i.patient_instruction),
+        active.map((i) => i.drug_class),
+        active.map((i) => i.change_type),
+        active.map((i) => whenToTakeFor(i.timing_categories).join("|") || null),
+      ],
+    );
+  }
+  return { active, stopped, paused };
+}
+
 export async function finalizeConsult(
   visitId,
   actorId = null,
   db = pool,
-  { closedBySd = false } = {},
+  { closedBySd = false, requireNextVisit = false } = {},
 ) {
   const client = await db.connect();
   let patientId = null;
@@ -138,6 +274,19 @@ export async function finalizeConsult(
       );
     }
 
+    if (requireNextVisit) {
+      const { rows: plan } = await client.query(
+        `SELECT next_visit_date FROM giniflow_care_plans WHERE visit_id = $1`,
+        [visitId],
+      );
+      if (!plan[0]?.next_visit_date) {
+        throw Object.assign(new Error("Set the next visit in the Care plan before finalizing"), {
+          status: 409,
+          nextVisitMissing: true,
+        });
+      }
+    }
+
     const { rows: items } = await client.query(
       `SELECT * FROM giniflow_rx_items WHERE visit_id = $1 ORDER BY sort_order, created_at`,
       [visitId],
@@ -157,138 +306,12 @@ export async function finalizeConsult(
     );
     const consultationId = consultRows[0].id;
 
-    // ── 2. Medicines ─────────────────────────────────────────────────────────
-    const stopped = items.filter((i) => i.change_type === "stopped");
-    const active = items.filter((i) => DISPENSABLE.includes(i.change_type));
-    const paused = items.filter((i) => i.change_type === "paused");
-
-    // Stopped first, so a medicine stopped and re-prescribed under a new dose in
-    // the same visit cannot collide on the active unique index.
-    if (stopped.length) {
-      // CS-02. `medications_patient_inactive_name_uniq` is unique on the same key
-      // among INACTIVE rows, and the flip below moves a row into that set. A
-      // medicine stopped at an earlier visit, re-prescribed, and stopped again
-      // therefore lands a second inactive row and aborts the whole consultation
-      // with a unique violation the consultant cannot act on.
-      //
-      // The older inactive row is superseded history — the row being stopped now
-      // carries the current dose, timing and consultation. Dropping it keeps the
-      // most recent row per (patient, medicine) in each active state, which is
-      // exactly the policy `scripts/dedup-medications.js` applies when it repairs
-      // this table.
-      await client.query(
-        `DELETE FROM medications old
-          WHERE old.patient_id = $1
-            AND old.is_active = false
-            AND UPPER(COALESCE(old.pharmacy_match, old.name)) = ANY($2::text[])
-            AND EXISTS (
-              SELECT 1 FROM medications cur
-               WHERE cur.patient_id = old.patient_id
-                 AND cur.is_active = true
-                 AND UPPER(COALESCE(cur.pharmacy_match, cur.name))
-                     = UPPER(COALESCE(old.pharmacy_match, old.name)))`,
-        [visit.patient_id, stopped.map((i) => (i.pharmacy_match || i.medicine_name).toUpperCase())],
-      );
-
-      await client.query(
-        `UPDATE medications m
-            SET is_active = false,
-                stopped_date = COALESCE(m.stopped_date, CURRENT_DATE),
-                stop_reason = COALESCE(t.stop_reason, m.stop_reason),
-                change_type = 'stopped',
-                consultation_id = $2,
-                updated_at = NOW()
-           FROM UNNEST($3::text[], $4::text[]) AS t(key, stop_reason)
-          WHERE m.patient_id = $1
-            AND m.is_active = true
-            AND UPPER(COALESCE(m.pharmacy_match, m.name)) = UPPER(t.key)`,
-        [
-          visit.patient_id,
-          consultationId,
-          stopped.map((i) => i.pharmacy_match || i.medicine_name),
-          stopped.map((i) => i.stop_reason || "Stopped at consultation"),
-        ],
-      );
-    }
-
-    // A paused medicine is still the patient's medicine — it keeps its row and
-    // its history, and only stops appearing on the card until it resumes.
-    if (paused.length) {
-      await client.query(
-        `UPDATE medications m
-            SET change_type = 'paused',
-                consultation_id = $2,
-                updated_at = NOW()
-           FROM UNNEST($3::text[]) AS t(key)
-          WHERE m.patient_id = $1 AND m.is_active = true
-            AND UPPER(COALESCE(m.pharmacy_match, m.name)) = UPPER(t.key)`,
-        [visit.patient_id, consultationId, paused.map((i) => i.pharmacy_match || i.medicine_name)],
-      );
-    }
-
-    if (active.length) {
-      await client.query(
-        `INSERT INTO medications
-           (patient_id, consultation_id, name, pharmacy_match, composition, dose, previous_dose,
-            frequency, timing, timing_category, when_to_take, time_of_day, route, form,
-            clinical_note, instructions, drug_class, change_type, is_new, is_active,
-            started_date, last_prescribed_date)
-         SELECT $1, $2, t.name, t.pharm, t.composition, t.dose, t.previous_dose,
-                t.frequency, t.timing, t.timing_category,
-                NULLIF(string_to_array(t.when_to_take, '|'), '{}')::when_to_take_pill[],
-                t.time_of_day::time, t.route, t.form,
-                t.reason, t.patient_instruction, t.drug_class, t.change_type,
-                t.change_type = 'new', true,
-                CASE WHEN t.change_type = 'new' THEN $3::date ELSE NULL END, $3::date
-           FROM UNNEST($4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[],
-                       $10::text[], $11::text[], $12::text[], $13::text[], $14::text[],
-                       $15::text[], $16::text[], $17::text[], $18::text[], $19::text[])
-                AS t(name, pharm, composition, dose, previous_dose, frequency, timing,
-                     timing_category, time_of_day, route, form, reason, patient_instruction,
-                     drug_class, change_type, when_to_take)
-         ON CONFLICT (patient_id, UPPER(COALESCE(pharmacy_match, name))) WHERE is_active = true
-         DO UPDATE SET consultation_id = EXCLUDED.consultation_id,
-           composition = COALESCE(EXCLUDED.composition, medications.composition),
-           dose = COALESCE(EXCLUDED.dose, medications.dose),
-           previous_dose = COALESCE(EXCLUDED.previous_dose, medications.previous_dose),
-           frequency = COALESCE(EXCLUDED.frequency, medications.frequency),
-           timing = COALESCE(EXCLUDED.timing, medications.timing),
-           timing_category = COALESCE(EXCLUDED.timing_category, medications.timing_category),
-           when_to_take = COALESCE(EXCLUDED.when_to_take, medications.when_to_take),
-           time_of_day = COALESCE(EXCLUDED.time_of_day, medications.time_of_day),
-           route = COALESCE(EXCLUDED.route, medications.route),
-           form = COALESCE(EXCLUDED.form, medications.form),
-           clinical_note = COALESCE(EXCLUDED.clinical_note, medications.clinical_note),
-           instructions = COALESCE(EXCLUDED.instructions, medications.instructions),
-           drug_class = COALESCE(EXCLUDED.drug_class, medications.drug_class),
-           change_type = EXCLUDED.change_type,
-           last_prescribed_date = EXCLUDED.last_prescribed_date,
-           stopped_date = NULL,
-           stop_reason = NULL,
-           updated_at = NOW()`,
-        [
-          visit.patient_id,
-          consultationId,
-          visit.visit_date,
-          active.map((i) => i.medicine_name),
-          active.map((i) => i.pharmacy_match),
-          active.map((i) => i.composition),
-          active.map((i) => i.dose),
-          active.map((i) => i.previous_dose),
-          active.map((i) => i.frequency),
-          active.map((i) => i.timing),
-          active.map((i) => i.timing_category),
-          active.map((i) => i.time_of_day),
-          active.map((i) => i.route),
-          active.map((i) => i.form),
-          active.map((i) => i.reason),
-          active.map((i) => i.patient_instruction),
-          active.map((i) => i.drug_class),
-          active.map((i) => i.change_type),
-          active.map((i) => whenToTakeFor(i.timing_categories).join("|") || null),
-        ],
-      );
-    }
+    const { active, stopped, paused } = await writeMedicines(client, {
+      patientId: visit.patient_id,
+      consultationId,
+      visitDate: visit.visit_date,
+      items,
+    });
 
     // ── 4. Status ────────────────────────────────────────────────────────────
     const actorRole = closedBySd ? "mo_sd" : "doctor";
@@ -519,7 +542,13 @@ export async function finalizePreview(visitId, db = pool) {
     [visitId],
   );
 
+  const { rows: plan } = await db.query(
+    `SELECT next_visit_date::text AS next_visit_date FROM giniflow_care_plans WHERE visit_id = $1`,
+    [visitId],
+  );
+
   return {
+    nextVisitDate: plan[0]?.next_visit_date || null,
     medicines: items.filter((i) => DISPENSABLE.includes(i.change_type)).length,
     stopped: items.filter((i) => i.change_type === "stopped").length,
     tests: orders.reduce((n, o) => n + o.tests, 0),

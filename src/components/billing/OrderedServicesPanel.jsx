@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   useAddOrderedService,
+  useAddOtherProcedure,
   useOrderedServiceChoices,
   useOrderedServices,
   useRemoveOrderedService,
@@ -12,17 +13,21 @@ import "./orderedServices.css";
 
 const SEARCH_MIN = 2;
 
-function ServiceRow({ service, mayRemove, onRemove, busy }) {
+function ServiceRow({ service, mayRemove, onRemove, busy, hidePrices }) {
   const [reason, setReason] = useState(null);
   return (
     <li className="osv-row">
       <div className="osv-row__main">
         <span className="osv-row__name">{service.name}</span>
-        <span className="osv-row__price">{fromPaise(service.patient_payable)}</span>
+        {!hidePrices && (
+          <span className="osv-row__price">{fromPaise(service.patient_payable)}</span>
+        )}
       </div>
       <div className="osv-row__meta">
         {service.added_by_name ? `Added by ${service.added_by_name}` : "Added"}
-        {service.price_set_by_name && service.price_set_by_name !== service.added_by_name
+        {!hidePrices &&
+        service.price_set_by_name &&
+        service.price_set_by_name !== service.added_by_name
           ? ` · price by ${service.price_set_by_name}`
           : ""}
         {service.bill_status === "final" ? ` · billed ${service.bill_no ?? ""}` : ""}
@@ -58,7 +63,13 @@ function ServiceRow({ service, mayRemove, onRemove, busy }) {
   );
 }
 
-export default function OrderedServicesPanel({ station, visitId, readOnly = false, onToast }) {
+export default function OrderedServicesPanel({
+  station,
+  visitId,
+  readOnly = false,
+  hidePrices = false,
+  onToast,
+}) {
   const me = useAuthStore((st) => st.currentDoctor);
   const admin = hasCapability(me?.role, CAPABILITIES.ADMIN);
   const [search, setSearch] = useState("");
@@ -74,6 +85,7 @@ export default function OrderedServicesPanel({ station, visitId, readOnly = fals
     searching ? debounced : "",
   );
   const add = useAddOrderedService(station, visitId);
+  const addOther = useAddOtherProcedure(station, visitId);
   const remove = useRemoveOrderedService(station, visitId);
 
   useEffect(() => {
@@ -82,9 +94,34 @@ export default function OrderedServicesPanel({ station, visitId, readOnly = fals
   }, [search]);
 
   const services = data?.services ?? [];
-  const priceNeeded = chosen?.price_needed ?? true;
+  const priceNeeded = !hidePrices && (chosen?.price_needed ?? true);
+
+  const typed = debounced.trim();
+  const offerOther =
+    searching && !isFetching && !choices.some((c) => c.name.toLowerCase() === typed.toLowerCase());
+
+  const confirmOther = async () => {
+    setError(null);
+    try {
+      const result = await addOther.mutateAsync({
+        name: chosen.name,
+        ...(price.trim() ? { agreed_rate: price.trim() } : {}),
+      });
+      onToast?.(
+        result.added
+          ? `${chosen.name} added as "Other procedure"${result.requested ? " — admin asked to add it to the list" : ""}`
+          : `${chosen.name} is not on the bill — no "Other procedure" item exists yet; admin has been asked to add it`,
+      );
+      setChosen(null);
+      setPrice("");
+      setSearch("");
+    } catch (e) {
+      setError(errorOf(e, "That procedure could not be added"));
+    }
+  };
 
   const confirm = async () => {
+    if (chosen?.other) return confirmOther();
     setError(null);
     try {
       await add.mutateAsync({
@@ -120,6 +157,7 @@ export default function OrderedServicesPanel({ station, visitId, readOnly = fals
               key={service.line_id}
               service={service}
               busy={remove.isPending}
+              hidePrices={hidePrices}
               mayRemove={!readOnly && (service.added_by === me?.id || admin)}
               onRemove={drop}
             />
@@ -141,6 +179,22 @@ export default function OrderedServicesPanel({ station, visitId, readOnly = fals
           />
           {searching && !isFetching && !choices.length && (
             <div className="osv-empty">No procedure matches “{debounced}”.</div>
+          )}
+          {offerOther && (
+            <div className="osv-other">
+              <span>“{typed}” is not in the list.</span>
+              <button
+                type="button"
+                className="osv-btn osv-btn--ghost"
+                onClick={() => {
+                  setError(null);
+                  setChosen({ other: true, name: typed, price_needed: true });
+                  setPrice("");
+                }}
+              >
+                + Add as other procedure
+              </button>
+            </div>
           )}
           {searching && !!choices.length && (
             <ul className="osv-choices" aria-label="Procedures">
@@ -169,7 +223,14 @@ export default function OrderedServicesPanel({ station, visitId, readOnly = fals
 
       {!readOnly && chosen && (
         <div className="osv-confirm">
-          <div className="osv-row__name">{chosen.name}</div>
+          <div className="osv-row__name">
+            {chosen.other ? `Other procedure — ${chosen.name}` : chosen.name}
+          </div>
+          {chosen.other && (
+            <div className="osv-row__meta">
+              Not in the list — billed as &quot;Other procedure&quot;, and admin is asked to add it.
+            </div>
+          )}
           {priceNeeded ? (
             <label className="osv-field">
               <span>Price for this patient ₹</span>
@@ -181,6 +242,8 @@ export default function OrderedServicesPanel({ station, visitId, readOnly = fals
                 onChange={(e) => setPrice(moneyTyped(e.target.value))}
               />
             </label>
+          ) : hidePrices ? (
+            <div className="osv-row__meta">Reception sets the price on the bill.</div>
           ) : (
             <div className="osv-row__meta">Billed at this patient's category rate.</div>
           )}
@@ -188,7 +251,7 @@ export default function OrderedServicesPanel({ station, visitId, readOnly = fals
             <button
               type="button"
               className="osv-btn osv-btn--primary"
-              disabled={add.isPending || (priceNeeded && !price.trim())}
+              disabled={add.isPending || addOther.isPending || (priceNeeded && !price.trim())}
               onClick={confirm}
             >
               Add for this patient

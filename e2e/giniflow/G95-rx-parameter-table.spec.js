@@ -125,27 +125,29 @@ test.describe.serial("G95 the prescription parameter table", () => {
     ]);
   });
 
-  test("1. columns are the last 5 doctor visits plus today; lab-only visits don't count", async () => {
+  test("1. columns are the last 5 dates with a reading plus today; visit dates are marked", async () => {
     const table = await buildRxParameterTable(db, { patientId: made.patient, visitDate: ids.day });
     expect(table.columns.map((c) => c.date)).toEqual([
-      addDays(ids.day, -150),
-      addDays(ids.day, -120),
+      addDays(ids.day, -123),
       addDays(ids.day, -90),
       addDays(ids.day, -60),
       addDays(ids.day, -30),
+      addDays(ids.day, -2),
       ids.day,
     ]);
+    expect(table.columns.map((c) => c.visit)).toEqual([false, true, true, true, false, true]);
     expect(table.columns.at(-1).today).toBe(true);
     expect(table.rows.map((r) => r.key)).toEqual(DEFAULT_RX_PARAMETERS.map((p) => p.key));
   });
 
-  test("2. each reading lands on its visit; a lab 3 days before a visit counts for it", async () => {
+  test("2. each reading sits on the date it was taken; Today holds only today's readings", async () => {
     const table = await buildRxParameterTable(db, { patientId: made.patient, visitDate: ids.day });
-    expect(rowOf(table, "weight").values).toEqual(["95", null, "92", null, null, "88"]);
-    expect(rowOf(table, "hba1c").values).toEqual([null, "8.4", null, "7.1", null, "6.4"]);
-    expect(rowOf(table, "height").values).toEqual(["170", null, null, null, null, null]);
-    expect(rowOf(table, "bp").values).toEqual([null, null, "140/90", null, null, "128/82"]);
-    expect(rowOf(table, "fpg").values.at(-2)).toBe("118");
+    expect(rowOf(table, "weight").values).toEqual([null, "92", null, null, null, "88"]);
+    expect(rowOf(table, "hba1c").values).toEqual(["8.4", null, "7.1", null, "6.4", null]);
+    expect(rowOf(table, "height").values).toEqual([null, null, null, null, null, null]);
+    expect(rowOf(table, "bp").values).toEqual([null, "140/90", null, null, null, "128/82"]);
+    expect(rowOf(table, "fpg").values.at(-3)).toBe("118");
+    expect(rowOf(table, "hba1c").measuredToday).toBeNull();
   });
 
   test("2b. vitals stamped at midnight after their visit still land on that visit", async () => {
@@ -164,7 +166,8 @@ test.describe.serial("G95 the prescription parameter table", () => {
         patientId: made.patient,
         visitDate: ids.day,
       });
-      expect(rowOf(table, "weight").values).toEqual(["95", "94", "92", null, null, "88"]);
+      expect(table.columns[0]).toMatchObject({ date: visit, visit: true });
+      expect(rowOf(table, "weight").values).toEqual(["94", "92", null, null, null, "88"]);
     } finally {
       await query(`DELETE FROM vitals WHERE consultation_id = $1`, [rows[0].id]);
       await query(`DELETE FROM consultations WHERE id = $1`, [rows[0].id]);
@@ -172,25 +175,28 @@ test.describe.serial("G95 the prescription parameter table", () => {
   });
 
   test("2c. an empty consultation record is not counted as a visit", async () => {
+    const day = addDays(ids.day, -45);
     const { rows } = await query(
       `INSERT INTO consultations (patient_id, visit_date, status, mo_data)
        VALUES ($1, $2::date, 'completed', '{"follow_up": null, "raw_comment": "", "diet_lifestyle": []}'::jsonb)
        RETURNING id`,
-      [made.patient, addDays(ids.day, -45)],
+      [made.patient, day],
     );
+    const vital = await query(
+      `INSERT INTO vitals (patient_id, recorded_at, weight)
+       VALUES ($1, ($2::date + time '10:00') AT TIME ZONE 'Asia/Kolkata', 90) RETURNING id`,
+      [made.patient, day],
+    );
+    const column = async () =>
+      (
+        await buildRxParameterTable(db, { patientId: made.patient, visitDate: ids.day })
+      ).columns.find((c) => c.date === day);
     try {
-      const table = await buildRxParameterTable(db, {
-        patientId: made.patient,
-        visitDate: ids.day,
-      });
-      expect(table.columns.map((c) => c.date)).not.toContain(addDays(ids.day, -45));
+      expect(await column()).toEqual({ date: day, visit: false, today: false });
       await query(`UPDATE consultations SET con_name = 'Dr. G92' WHERE id = $1`, [rows[0].id]);
-      const counted = await buildRxParameterTable(db, {
-        patientId: made.patient,
-        visitDate: ids.day,
-      });
-      expect(counted.columns.map((c) => c.date)).toContain(addDays(ids.day, -45));
+      expect(await column()).toEqual({ date: day, visit: true, today: false });
     } finally {
+      await query(`DELETE FROM vitals WHERE id = $1`, [vital.rows[0].id]);
       await query(`DELETE FROM consultations WHERE id = $1`, [rows[0].id]);
     }
   });
@@ -323,12 +329,14 @@ test.describe.serial("G95 the prescription parameter table", () => {
         visitDate: ids.day,
         todayOnlyWhenCompleted: true,
       });
-      expect(open.columns.map((c) => c.date)).toEqual(PAST.map((o) => addDays(ids.day, o)));
+      expect(open.columns.map((c) => c.date)).toEqual(
+        [-150, -123, -90, -60, -2].map((o) => addDays(ids.day, o)),
+      );
       expect(open.columns.some((c) => c.today)).toBe(false);
       expect(rowOf(open, "weight").values.at(-1)).toBeNull();
-      expect(buildPrescriptionHtml({ patient: { name: "X" }, rxParameters: open })).not.toContain(
-        "Today (",
-      );
+      const openHtml = buildPrescriptionHtml({ patient: { name: "X" }, rxParameters: open });
+      expect(openHtml).not.toContain("Today (");
+      expect(openHtml).not.toContain("Last visit (");
 
       await query(
         `INSERT INTO appointments (patient_id, patient_name, file_no, appointment_date, status, visit_type, doctor_name)
@@ -340,7 +348,7 @@ test.describe.serial("G95 the prescription parameter table", () => {
         visitDate: ids.day,
         todayOnlyWhenCompleted: true,
       });
-      expect(done.columns.at(-1)).toEqual({ date: ids.day, today: true });
+      expect(done.columns.at(-1)).toEqual({ date: ids.day, visit: true, today: true });
       expect(done.columns).toHaveLength(6);
     } finally {
       for (const r of before.rows) {

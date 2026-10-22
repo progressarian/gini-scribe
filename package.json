@@ -17,6 +17,7 @@
     "check:giniflow-styles": "node scripts/check-giniflow-styles.mjs",
     "check:giniflow": "node scripts/check-giniflow-undefined.mjs && node scripts/check-giniflow-styles.mjs",
     "format:check": "prettier --check \"src/**/*.{js,jsx,css}\" \"server/**/*.js\" \"*.{js,json}\" \"e2e/**/*.{js,mjs}\"",
+    "test:unit": "node --test tests/unit/",
     "test:e2e": "playwright test --config e2e/playwright.config.js",
     "test:e2e:billing": "playwright test --config e2e/playwright.config.js e2e/billing",
     "test:e2e:setup": "docker compose up -d postgres && node e2e/setup/rebuild.mjs"

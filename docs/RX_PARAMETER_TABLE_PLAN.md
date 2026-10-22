@@ -46,9 +46,9 @@ The list is stored in `app_kv` (key `rx_parameter_defaults`), the same mechanism
 
 ### 2.2 Columns and values
 
-- **Columns:** the patient's last **5 follow-up visit dates** before today (completed or seen appointments, newest on the right), plus **Today**.
-- **Value for a visit date:** the reading of that parameter dated after the previous column's date and up to that visit's date. Labs are often drawn a few days before the visit. If there are several readings, the latest one is used.
-- **Today:** readings since the last visit, up to today. Any value entered at the station (§3) overrides it.
+- **Columns:** the last **5 dates on which any parameter was recorded** before today (newest on the right), plus **Today**. Columns that fall on a doctor visit are marked as visits; the print labels the last column "Last visit" only when it is one.
+- **Value for a date:** the reading taken on that date. If there are several, the latest one is used. A reading is never moved onto a later visit's column. (Changed on 2026-10-22: the first version put every reading since the previous visit under the next visit, so a 02 Sep HbA1c printed under "Today (22 Oct 26)".)
+- **Today:** only readings taken today. Any value entered at the station (§3) overrides it.
 - **Hiding:** a row with no value in any column is hidden on the print by default. Staff can force it to show.
 - **One loader, used by both print paths:** a new `server/services/rxParameterTable.js`. It is used by:
   - the Gini Flow / server path: `buildVisitPayloadFromDb` in `prescriptionAutoSave.js`, which currently loads only 2 vitals rows;
@@ -89,7 +89,7 @@ The consultant's screen is **`DoctorConsultPage`** (`/giniflow/station/doctor/:v
 
 **`e2e/giniflow/G95-rx-parameter-table.spec.js`** (service + API):
 
-1. Seeded vitals, labs and machine readings across 6 visits: the last 5 visits appear as columns, each value is assigned to the correct visit window, and a lab drawn 3 days before a visit lands on that visit.
+1. Seeded vitals, labs and machine readings across 6 visits: the last 5 visits appear as columns, each value sits on the date it was taken, and Today holds only today's readings.
 2. GET merges the defaults. PUT can edit Today, add a custom row, remove and re-order. A second GET returns the saved state.
 3. The PDF data from both paths contains the same table: Gini Flow finalise and `/visit` print.
 4. Validation errors and a wrong role are refused (400 / 403). After finalise, editing returns 409, pointing to Re-issue.

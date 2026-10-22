@@ -17,6 +17,7 @@ import {
 } from "../services/bookingGuard.js";
 import { checkPatientBlocked, blockedResponse, blockActor } from "../services/patientBlockGuard.js";
 import { isSlotAvailable, findAvailableDoctors } from "../services/availability.js";
+import { labelSpan } from "../services/slots/dayView.js";
 
 // Blocked patients are hidden from working lists — nobody should be calling,
 // booking or preparing for them. They stay findable in /find and on the admin
@@ -110,6 +111,7 @@ router.get("/appointments/conflicts", async (req, res) => {
       if (av.available) continue;
       // Only doctor-unavailability conflicts (skip free-form slots and capacity).
       if (av.reason === "unknown_slot" || av.reason === "full") continue;
+      if (["not_working", "break"].includes(av.reason) && !labelSpan(a.time_slot)) continue;
       const suggested = await findAvailableDoctors(a.appointment_date, a.time_slot, {
         excludeDoctorId: doctorId,
       });

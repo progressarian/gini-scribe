@@ -43,7 +43,8 @@ test.describe.serial("G71 Staff Management: list, tabs and one time-off form", (
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/1-schedule.png`, fullPage: true });
   });
 
-  test("2. the day preview steps a day at a time", async ({ page }) => {
+  test("2. the booking availability steps a day at a time", async ({ page }) => {
+    await page.getByRole("tab", { name: "Schedule" }).click();
     const date = page.getByLabel("Preview date");
     const before = await date.inputValue();
     await page.getByRole("button", { name: "Next day" }).click();
@@ -55,7 +56,10 @@ test.describe.serial("G71 Staff Management: list, tabs and one time-off form", (
   test("3. Add time off opens one form; a holiday lands in the list and can be cancelled", async ({
     page,
   }) => {
-    await page.locator(".docmgmt-head").getByRole("button", { name: "+ Add time off" }).click();
+    await page
+      .getByRole("group", { name: "Quick actions" })
+      .getByRole("button", { name: "Add time off" })
+      .click();
     await expect(page.getByRole("tab", { name: "Time off" })).toHaveAttribute(
       "aria-selected",
       "true",
@@ -74,6 +78,13 @@ test.describe.serial("G71 Staff Management: list, tabs and one time-off form", (
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/2-timeoff.png`, fullPage: true });
 
     await row.getByRole("button", { name: "Cancel" }).click();
+    const confirm = page.getByRole("dialog");
+    await expect(confirm).toContainText("Whole day");
+    await confirm.getByRole("button", { name: "Keep it" }).click();
+    await expect(row).toBeVisible();
+
+    await row.getByRole("button", { name: "Cancel" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Cancel holiday" }).click();
     await expect(page.getByRole("row").filter({ hasText: "G71 holiday" })).toHaveCount(0);
   });
 

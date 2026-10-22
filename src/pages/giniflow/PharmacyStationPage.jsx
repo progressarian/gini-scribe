@@ -525,6 +525,14 @@ function PharmacyPane({ visitId, onClose, onToast }) {
                   totals.gini === 1 ? "" : "s"
                 }${totals.external ? ` · ${totals.external} external` : ""}`
               : "Opening the card…"}
+            {data?.amendedAt && (
+              <>
+                {" "}
+                <span className="badge b-amb">
+                  ⚠ Prescription updated {clock(data.amendedAt)} — check the medicines again
+                </span>
+              </>
+            )}
           </div>
           <div className="dp-acts">
             <button className="rbtn" onClick={onClose}>

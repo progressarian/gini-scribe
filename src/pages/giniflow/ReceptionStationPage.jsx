@@ -175,6 +175,23 @@ const visitCategory = (a) => {
   return booked ? { label: booked, cls: "b-ink" } : null;
 };
 
+const ARRIVAL_FILTERS = [
+  { key: "all", label: "All", match: () => true },
+  {
+    key: "lab_only",
+    label: "🧪 Lab only",
+    match: (a) => a.samplesOnly || visitCategory(a)?.label === "Tests only",
+  },
+  { key: "home", label: "🏠 Home collection", match: (a) => a.homeCollection },
+  {
+    key: "follow_up",
+    label: "Follow-up",
+    match: (a) => /follow|f\/?u|review/i.test(a.bookingType || ""),
+  },
+  { key: "new", label: "New", match: (a) => /^\s*new\b/i.test(a.bookingType || "") },
+  { key: "walk_in", label: "🚶 Walk-in", match: (a) => a.walkIn },
+];
+
 function VisitCategory({ arrival }) {
   const category = visitCategory(arrival);
   if (!category) return null;
@@ -1253,6 +1270,8 @@ const CONSULT_CHAIN = ["with_sd", "with_doctor"];
 function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   const { data: visitTypes = [] } = useFlowVisitTypes();
   const [visitTypeId, setVisitTypeId] = useState(arrival.suggestedVisitTypeId || null);
+  const [labOnlyChosen, setLabOnlyChosen] = useState(false);
+  const samplesOnly = arrival.samplesOnly || labOnlyChosen;
   const [steps, setSteps] = useState(null);
   const bookedDoctor = useAuthStore((st) =>
     (st.doctorsList || []).find((d) => d.id === arrival.assignedDoctorId),
@@ -1328,7 +1347,9 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   const catalogRef = useRef(catalog);
   catalogRef.current = catalog;
   const forPatient = (list) =>
-    arrival.samplesOnly ? labOnlyJourney(list, catalogRef.current) : list;
+    samplesOnly
+      ? labOnlyJourney(list, catalogRef.current, { withLeg: labOnlyChosen && !arrival.samplesOnly })
+      : list;
 
   useEffect(() => {
     if (!bill) return;
@@ -1353,7 +1374,7 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   // panel causes, would otherwise throw away everything reception had edited and
   // check the patient in on a journey they did not build.
   const loadedFor = useRef(null);
-  const answerKey = `${visitTypeId}|${askable.map((k) => `${k}:${conditions[k] !== false}`).join(",")}|${planChoice}|${arrival.samplesOnly && catalog.length > 0}`;
+  const answerKey = `${visitTypeId}|${askable.map((k) => `${k}:${conditions[k] !== false}`).join(",")}|${planChoice}|${samplesOnly && catalog.length > 0}`;
   useEffect(() => {
     if (!plan || loadedFor.current === answerKey) return;
     loadedFor.current = answerKey;
@@ -1380,7 +1401,7 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
       const template = plan
         .filter((p) => p.included && stepPassesConditions(p, conditions))
         .filter((p) => keepsForChoice(p, planChoice))
-        .filter((p) => !arrival.samplesOnly || labOnlyKeepsStep(p))
+        .filter((p) => !samplesOnly || labOnlyKeepsStep(p))
         .map((p) => {
           const base = { ...p, ...(preassigned(p) || {}) };
           const prev = kept.get(p.catalogId);
@@ -1409,8 +1430,7 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
     [plan],
   );
   const choiceKeepsConsult = (choice) => consultSteps.some((p) => keepsForChoice(p, choice));
-  const showConsultChoice =
-    !visitType?.for_online && !arrival.samplesOnly && consultSteps.length > 0;
+  const showConsultChoice = !visitType?.for_online && !samplesOnly && consultSteps.length > 0;
 
   useEffect(() => {
     if (consultChoice !== "both" && consultSteps.length && !choiceKeepsConsult(consultChoice))
@@ -1606,7 +1626,20 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
               onChange={setSteps}
               visitTypes={visitTypes}
               visitTypeId={visitTypeId}
-              onTypeChange={setVisitTypeId}
+              onTypeChange={(id) => {
+                setLabOnlyChosen(false);
+                setVisitTypeId(id);
+              }}
+              labOnly={samplesOnly}
+              onLabOnly={
+                arrival.samplesOnly
+                  ? undefined
+                  : () => {
+                      setLabOnlyChosen(true);
+                      const testsType = (visitTypes || []).find((t) => t.for_tests);
+                      if (testsType) setVisitTypeId(testsType.id);
+                    }
+              }
               askable={askable}
               conditions={conditions}
               onConditionChange={(key, value) => setConditions((c) => ({ ...c, [key]: value }))}
@@ -2229,10 +2262,17 @@ export function ArrivalsTab({
   const [proceduresFor, setProceduresFor] = useState(null);
   const [backForTestsFor, setBackForTestsFor] = useState(null);
   const [homeFor, setHomeFor] = useState(null);
+  const [filterKey, setFilterKey] = useState("all");
   const canBill = useCanBill();
   const bills = useBillStates(canBill);
-  const expected = data?.expected || [];
-  const onFloor = data?.onFloor || [];
+  const everyone = [
+    ...(data?.expected || []),
+    ...(data?.onFloor || []),
+    ...(data?.notComing || []),
+  ];
+  const filter = ARRIVAL_FILTERS.find((f) => f.key === filterKey) || ARRIVAL_FILTERS[0];
+  const expected = (data?.expected || []).filter(filter.match);
+  const onFloor = (data?.onFloor || []).filter(filter.match);
   // The list holds everyone who is not expected and not a no-show, so it counts
   // the patients who have already gone home alongside the ones standing in the
   // building. One number for both read as 89 people on a floor holding 32.
@@ -2240,7 +2280,7 @@ export function ArrivalsTab({
   const onBreak = notFinished.filter((a) => a.paused).length;
   const stillHere = notFinished.length - onBreak;
   const alreadyLeft = onFloor.length - notFinished.length;
-  const notComing = data?.notComing || [];
+  const notComing = (data?.notComing || []).filter(filter.match);
   const searching = (data?.query || "").length >= 2;
   const { data: healthray } = useReceptionHealthray();
   const notInScribe = healthray?.notInScribe?.items || [];
@@ -2272,6 +2312,20 @@ export function ArrivalsTab({
         <button className="st-btn st-btn-blu" onClick={() => setWalkIn((w) => !w)}>
           + Walk-in
         </button>
+        <div className="sq-filters" role="group" aria-label="Filter arrivals">
+          {ARRIVAL_FILTERS.map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              className={filterKey === f.key ? "on" : ""}
+              aria-pressed={filterKey === f.key}
+              onClick={() => setFilterKey(f.key)}
+            >
+              {f.label}
+              <span className="sq-fcount">{everyone.filter(f.match).length}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
       {walkIn && (
@@ -2350,7 +2404,11 @@ export function ArrivalsTab({
           {isLoading && <div className="empty-note">Loading…</div>}
           {!isLoading && expected.length === 0 && (
             <div className="empty-note">
-              {searching ? "Nobody expected matches that search." : "Everyone booked has arrived."}
+              {searching
+                ? "Nobody expected matches that search."
+                : filterKey !== "all"
+                  ? `No ${filter.label} patients still expected.`
+                  : "Everyone booked has arrived."}
             </div>
           )}
           {expected.map((a) => (
@@ -2372,7 +2430,13 @@ export function ArrivalsTab({
             {onBreak > 0 ? ` · ${onBreak} on break` : ""}
             {alreadyLeft > 0 ? ` · ${alreadyLeft} left` : ""})
           </div>
-          {onFloor.length === 0 && <div className="empty-note">Nobody in the building yet.</div>}
+          {onFloor.length === 0 && (
+            <div className="empty-note">
+              {filterKey !== "all"
+                ? `No ${filter.label} patients on the floor.`
+                : "Nobody in the building yet."}
+            </div>
+          )}
           {onFloor.map((a) => (
             <ArrivalRow
               key={a.visitId}

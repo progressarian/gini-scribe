@@ -369,7 +369,8 @@ async function loadVisit(visitId, db = pool) {
             v.appointment_id, v.card_sent_at,
             p.name, p.file_no, p.age, p.sex, p.phone,
             COALESCE(doc.short_name, sd.short_name) AS doctor_name,
-            fin.occurred_at AS finalized_at
+            fin.occurred_at AS finalized_at,
+            to_jsonb(v)->>'amended_at' AS amended_at
        FROM giniflow_visits v
        JOIN patients p ON p.id = v.patient_id
        LEFT JOIN doctors doc ON doc.id = v.assigned_doctor_id
@@ -489,6 +490,7 @@ export async function getPharmacyPatient(visitId, db = pool) {
     blockedReason: rxBlock(visit.current_status),
     visitDate: visit.visit_date,
     finalizedAt: iso(visit.finalized_at),
+    amendedAt: iso(visit.amended_at),
     cardSentAt: iso(visit.card_sent_at),
     finished: DONE_STATUSES.includes(visit.current_status),
     counselling: buildCounsellingNote([...all, ...stopped]),

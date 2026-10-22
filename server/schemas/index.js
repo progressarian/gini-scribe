@@ -485,51 +485,6 @@ export const collectionBulkSchema = z.object({
 // ---- Doctor Management & Availability ----
 // See docs/doctor-management/03-api-endpoints.md §9.
 
-// Doctor working profile (available-by-default model). All fields optional.
-//   off_weekdays  : weekdays NOT worked (0=Sun..6=Sat); default {Sunday}
-//   work_start/end: clock-time working hours ("HH:MM"); null = all day
-//   lunch_start/end: recurring daily lunch break ("HH:MM"); null = none
-const optTime = z
-  .string()
-  .regex(/^\d{2}:\d{2}(:\d{2})?$/, "time must be HH:MM")
-  .optional()
-  .nullable();
-// Overnight-aware: working hours may wrap past midnight (e.g. 17:00–01:00).
-const _toMin = (t) => {
-  if (!t) return null;
-  const [h, m] = String(t).split(":").map(Number);
-  return h * 60 + m;
-};
-const _within = (ws, we, t) => {
-  if (ws == null || we == null || t == null) return true;
-  let s = ws,
-    e = we,
-    x = t;
-  if (e <= s) e += 1440; // overnight window
-  if (x < s) x += 1440;
-  return x >= s && x <= e; // inclusive (lunch bounds)
-};
-export const profileUpdateSchema = z
-  .object({
-    off_weekdays: z.array(z.number().int().min(0).max(6)).optional().default([]),
-    work_start: optTime,
-    work_end: optTime,
-    lunch_start: optTime,
-    lunch_end: optTime,
-  })
-  // Lunch must sit inside the working hours (when both are set) — wrap-aware.
-  .refine(
-    (v) => {
-      const ws = _toMin(v.work_start);
-      const we = _toMin(v.work_end);
-      const ls = _toMin(v.lunch_start);
-      const le = _toMin(v.lunch_end);
-      if (ls == null || le == null || ws == null || we == null) return true;
-      return _within(ws, we, ls) && _within(ws, we, le);
-    },
-    { message: "Lunch break must be within working hours", path: ["lunch_start"] },
-  );
-
 // Reject windows that start before today (no leave/emergency in the past).
 const notPastStart = (v) => v.start_date >= new Date().toISOString().slice(0, 10);
 const notPastStartOpts = { message: "Cannot select a past date", path: ["start_date"] };
@@ -547,6 +502,51 @@ export const unavailabilityCreateSchema = z
     path: ["end_date"],
   })
   .refine(notPastStart, notPastStartOpts);
+
+const hhmmTime = z.string().regex(/^\d{2}:\d{2}$/, "time must be HH:MM");
+export const slotTemplateSchema = z.object({
+  effective_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "pick the date this schedule starts"),
+  note: z.string().max(200).optional().nullable(),
+  template: z.object({
+    partialLast: z.enum(["drop", "short"]).optional().default("drop"),
+    hours: z
+      .array(
+        z.object({
+          weekday: z.number().int().min(0).max(6),
+          start: hhmmTime,
+          end: hhmmTime,
+          slotMinutes: z.number().int(),
+          capNew: z.number().int().min(0).max(99).nullable().optional(),
+          capFollowup: z.number().int().min(0).max(99).nullable().optional(),
+          capWalkin: z.number().int().min(0).max(99).nullable().optional(),
+        }),
+      )
+      .max(28),
+    breaks: z
+      .array(
+        z.object({
+          weekday: z.number().int().min(0).max(6).nullable(),
+          name: z.string(),
+          start: hhmmTime,
+          end: hhmmTime,
+        }),
+      )
+      .max(70)
+      .optional()
+      .default([]),
+  }),
+});
+
+export const slotTemplateApplySchema = slotTemplateSchema.extend({
+  effective_until: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "pick the last day of this schedule")
+    .optional()
+    .nullable(),
+  doctor_ids: z.array(z.number().int()).min(1).max(500).optional(),
+  all: z.boolean().optional(),
+  dry_run: z.boolean().optional().default(true),
+});
 
 // A break is a slot-scoped unavailability — slots are required.
 export const breakCreateSchema = z
@@ -1499,6 +1499,14 @@ export const giniflowDispenseAllSchema = z
 // Finalize is irreversible under append-only rules, so it is never a bare POST.
 export const giniflowFinalizeSchema = z.object({
   confirm: z.literal(true, { errorMap: () => ({ message: "Finalize must be confirmed" }) }),
+});
+
+export const giniflowDoctorRemoveTestSchema = z.object({
+  testId: z.string().uuid("Pick the test to remove"),
+});
+
+export const giniflowConsultEditSaveSchema = z.object({
+  reason: z.string().trim().max(300, "Keep the reason under 300 characters").optional(),
 });
 
 // ── Gini Flow · referrals (docs/gini-flow/19-REFERRALS-STATION-PLAN.md §4.2) ─

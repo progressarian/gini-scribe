@@ -12,8 +12,9 @@ import useVisitStore from "../stores/visitStore";
 import useLabStore from "../stores/labStore";
 import {
   useDayAvailability,
+  useSlotCatalog,
   slotOptions,
-  SLOT_REASON,
+  slotOptionLabel,
   isClinicalDoctor,
 } from "../lib/slotAvailability.js";
 import useMessagingStore from "../stores/messagingStore";
@@ -113,6 +114,7 @@ export default function DashboardPage() {
 
   // Doctor's slot availability for the Book Appointment form.
   const apptSlots = useDayAvailability(bookForm.doc, bookForm.dt);
+  const slotCatalog = useSlotCatalog();
   useEffect(() => {
     if (!apptSlots || !bookForm.tm) return;
     const sel = apptSlots.find((s) => s.slot_label === bookForm.tm);
@@ -861,10 +863,9 @@ export default function DashboardPage() {
                 }}
               >
                 <option value="">{bookForm.doc ? "Time slot" : "Pick doctor first"}</option>
-                {slotOptions(apptSlots).map((s) => (
+                {slotOptions(apptSlots, slotCatalog).map((s) => (
                   <option key={s.slot_label} value={s.slot_label} disabled={!s.available}>
-                    {s.slot_label}
-                    {s.available ? "" : ` — ${SLOT_REASON[s.blocked_by] || "Unavailable"}`}
+                    {slotOptionLabel(s)}
                   </option>
                 ))}
               </select>

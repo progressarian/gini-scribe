@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import OrderedServicesPanel from "../../components/billing/OrderedServicesPanel";
 import { Line, LineChart, ResponsiveContainer, Tooltip, YAxis } from "recharts";
-import { CHAIN } from "../../../shared/giniflowStatus";
+import { CHAIN, STATUS_LABEL } from "../../../shared/giniflowStatus";
 import { UNDRAWN_SAMPLE_STATUSES } from "../../../shared/labStages.js";
 import { moActions } from "../../lib/moActions.js";
 import {
@@ -25,6 +25,7 @@ import RxSection from "./consult/RxSection";
 import VisitSummarySection from "./consult/VisitSummarySection";
 import RxParameterSection from "./consult/RxParameterSection";
 import ChiefSuggestions from "../../components/giniflow/ChiefSuggestions";
+import ConsultEditBar, { AmendedNote, EditPrescriptionButton } from "./consult/ConsultEditBar";
 import {
   buildTestIndex,
   isSearching,
@@ -687,6 +688,12 @@ export default function MoStationPage() {
     });
   };
 
+  const viewClosed = (visitId) => {
+    flushPlan();
+    setPinned(false);
+    setSelected(visitId);
+  };
+
   const togglePanel = (panel) =>
     setPicked((prev) => {
       const all = panel.tests.every((t) => prev.includes(t));
@@ -964,7 +971,7 @@ export default function MoStationPage() {
                       key={card.visitId}
                       card={card}
                       active={card.visitId === activeId}
-                      onOpen={openPatient}
+                      onOpen={g.key === "done" ? viewClosed : openPatient}
                       onTakeOver={askTakeOver}
                       readOnly={g.readOnly}
                       now={now}
@@ -1009,6 +1016,9 @@ export default function MoStationPage() {
                   />
                 </div>
                 <div className="sdh-acts">
+                  {patient.edit?.canEdit && (
+                    <EditPrescriptionButton visitId={activeId} station="mo" onToast={showToast} />
+                  )}
                   <StabilityChip stability={patient.stability} detail />
                   {cat && (
                     <span className="badge b-amb">
@@ -1036,6 +1046,31 @@ export default function MoStationPage() {
               </div>
 
               <div className="sd-body">
+                {patient.edit?.editingMine ? (
+                  <ConsultEditBar
+                    visitId={activeId}
+                    station="mo"
+                    onToast={showToast}
+                    consult={{
+                      name: patient.name,
+                      fileNo: patient.fileNo,
+                      statusLabel: STATUS_LABEL[patient.status] || patient.status,
+                    }}
+                  />
+                ) : (
+                  patient.edit?.finalized && (
+                    <div className="fin-done">
+                      <strong>✓ Finalized</strong>
+                      {patient.edit.editing && (
+                        <span className="fin-gap">
+                          {patient.edit.editing.name || "Another doctor"} is editing this
+                          prescription now.
+                        </span>
+                      )}
+                      <AmendedNote amendedAt={patient.edit.amendedAt} />
+                    </div>
+                  )
+                )}
                 {/* No allergy field exists in the database yet, so this says what
                     is true rather than "None recorded", which would read as a
                     check somebody performed. Plan §7. */}
@@ -1396,7 +1431,7 @@ export default function MoStationPage() {
                   <VisitSummarySection
                     visitId={activeId}
                     station="mo"
-                    readOnly={patient.status !== "with_sd"}
+                    readOnly={patient.status !== "with_sd" && !patient.edit?.editingMine}
                     onToast={showToast}
                   />
                 </div>
@@ -1405,7 +1440,7 @@ export default function MoStationPage() {
                   <RxParameterSection
                     visitId={activeId}
                     station="mo"
-                    readOnly={patient.status !== "with_sd"}
+                    readOnly={patient.status !== "with_sd" && !patient.edit?.editingMine}
                     onToast={showToast}
                   />
                 </div>
@@ -1414,7 +1449,8 @@ export default function MoStationPage() {
                   <RxSection
                     visitId={activeId}
                     station="mo"
-                    readOnly={patient.status !== "with_sd"}
+                    amending={!!patient.edit?.editingMine}
+                    readOnly={patient.status !== "with_sd" && !patient.edit?.editingMine}
                     onToast={showToast}
                   />
                 </div>

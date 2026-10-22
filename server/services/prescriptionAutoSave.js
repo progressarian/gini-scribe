@@ -28,6 +28,7 @@ import { datedFollowUp, followUpDueDate } from "../../shared/followUp.js";
 import { borrowedFollowUp } from "./ghmDayWindow.js";
 import { appointmentComplaints, appointmentHistory } from "./giniflow/visitComplaints.js";
 import { appointmentAdvice } from "./giniflow/visitAdvice.js";
+import { appointmentNextVisit } from "./giniflow/visitNextVisit.js";
 
 const require = createRequire(import.meta.url);
 // Outbound Genie sync removed 2026-05-01 — dual-DB routing replaces it.
@@ -348,10 +349,11 @@ export async function buildVisitPayloadFromDb(pid, { appointmentId } = {}) {
   const patient = patientR.rows[0];
   if (!patient) return null;
   const appt = apptR.rows[0] || null;
-  const [complaints, history, advice] = await Promise.all([
+  const [complaints, history, advice, floorNextVisit] = await Promise.all([
     appointmentComplaints(pid, appt?.id),
     appointmentHistory(appt?.id),
     appointmentAdvice(appt?.id),
+    appointmentNextVisit(appt?.id),
   ]);
 
   // Doctor block — appointments.doctor_name is the canonical reference for
@@ -425,12 +427,15 @@ export async function buildVisitPayloadFromDb(pid, { appointmentId } = {}) {
       ? fuCandidate
       : null;
   const fuBio = fuRow?.biomarkers || {};
-  const fuInvestigations = (fuRow?.healthray_investigations || []).map((t) =>
-    typeof t === "string" ? { name: t, urgency: "routine" } : t,
-  );
+  const fuInvestigations = floorNextVisit?.tests.length
+    ? floorNextVisit.tests
+    : (fuRow?.healthray_investigations || []).map((t) =>
+        typeof t === "string" ? { name: t, urgency: "routine" } : t,
+      );
   const visitDay = String(fuRow?.appointment_date || "").slice(0, 10);
   const afterVisit = (fu) => (fu && String(fu.date || "").slice(0, 10) > visitDay ? fu : null);
   const followUpDate =
+    floorNextVisit?.followUp ||
     afterVisit(datedFollowUp(fuRow?.healthray_follow_up)) ||
     afterVisit(
       fuBio.followup

@@ -4,10 +4,10 @@ import {
   useMoSuggestions,
   useSaveSuggestion,
 } from "../../queries/hooks/useGiniflowMo";
+import NextVisitPicker from "./NextVisitPicker";
 
 const SAVE_DELAY_MS = 800;
 const COMMON_SHOWN = 12;
-const INTERVALS = ["2 weeks", "4 weeks", "6 weeks", "3 months", "6 months"];
 const emptyGoal = () => ({ test: "", target: "", unit: "" });
 
 const OUTCOME = {
@@ -222,35 +222,13 @@ export default function ChiefSuggestions({ visitId, readOnly, onToast }) {
       )}
       <Outcome suggestion={byField.goals} />
 
-      <div className="cp-lab">
-        Next visit <span className="cs-sub">{state("next_visit")}</span>
-      </div>
-      <div className="cp-chips">
-        {INTERVALS.map((interval) => (
-          <button
-            type="button"
-            key={interval}
-            disabled={locked("next_visit")}
-            className={values.next_visit.interval === interval ? "on" : ""}
-            onClick={() =>
-              edit("next_visit", {
-                date: "",
-                interval: values.next_visit.interval === interval ? "" : interval,
-              })
-            }
-          >
-            {interval}
-          </button>
-        ))}
-        <input
-          type="date"
-          className="cp-inp"
-          aria-label="Next visit date"
-          value={values.next_visit.date || ""}
-          readOnly={locked("next_visit")}
-          onChange={(e) => edit("next_visit", { date: e.target.value, interval: "" })}
-        />
-      </div>
+      {state("next_visit") && <div className="cs-sub">Next visit · {state("next_visit")}</div>}
+      <NextVisitPicker
+        interval={values.next_visit.interval || ""}
+        date={values.next_visit.date || ""}
+        disabled={locked("next_visit")}
+        onChange={(next) => edit("next_visit", next)}
+      />
       <Outcome suggestion={byField.next_visit} />
     </div>
   );

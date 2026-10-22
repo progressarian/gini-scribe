@@ -38,7 +38,13 @@ import { useSearchParams } from "react-router-dom";
 import "./GHMPage.css";
 import { istClock } from "../../shared/homeCollection.js";
 import useAuthStore from "../stores/authStore";
-import { SLOT_REASON, slotOptions, ARRIVAL_TIME_RANGES } from "../lib/slotAvailability.js";
+import {
+  SLOT_REASON,
+  slotOptions,
+  slotOptionLabel,
+  useSlotCatalog,
+  ARRIVAL_TIME_RANGES,
+} from "../lib/slotAvailability.js";
 import { exportWatiWorkbook } from "../lib/ghmWatiExport.js";
 import { CAPABILITIES as CAP, hasAnyCapability, hasCapability } from "../../shared/permissions";
 import ConfirmModal from "../components/ui/ConfirmModal.jsx";
@@ -1101,6 +1107,7 @@ export function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, on
 
   const { data: availData } = useDayAvailability(form.doctor_name, form.appointment_date);
   const availSlots = availData ?? null;
+  const slotCatalog = useSlotCatalog();
 
   const createMutation = useCreateAppointment();
   const saving = createMutation.isPending;
@@ -1362,10 +1369,9 @@ export function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, on
               <span>Time Slot *</span>
               <select value={form.time_slot} onChange={(e) => set("time_slot", e.target.value)}>
                 <option value="">— Select slot</option>
-                {slotOptions(availSlots).map((s) => (
+                {slotOptions(availSlots, slotCatalog).map((s) => (
                   <option key={s.slot_label} value={s.slot_label} disabled={!s.available}>
-                    {s.slot_label}
-                    {s.available ? "" : ` — ${SLOT_REASON[s.blocked_by] || "Unavailable"}`}
+                    {slotOptionLabel(s)}
                   </option>
                 ))}
               </select>
@@ -1496,6 +1502,7 @@ function EditPatientModal({ row, doctors, onClose }) {
 
   const { data: availData } = useDayAvailability(form.doctor_name, form.appointment_date);
   const availSlots = availData ?? null;
+  const slotCatalog = useSlotCatalog();
 
   const updateMutation = useUpdateAppointmentPatient();
   const saving = updateMutation.isPending;
@@ -1508,11 +1515,9 @@ function EditPatientModal({ row, doctors, onClose }) {
   // carry a sheet ("05. 1-2PM") or HealthRay ("13:00") label that the catalog
   // never had, so tagging those "(retired)" would claim the patient's slot was
   // discontinued when it is only written in another format.
-  const offered = slotOptions(availSlots).map((s) => ({
+  const offered = slotOptions(availSlots, slotCatalog).map((s) => ({
     value: s.slot_label,
-    label: s.available
-      ? s.slot_label
-      : `${s.slot_label} — ${SLOT_REASON[s.blocked_by] || "Unavailable"}`,
+    label: slotOptionLabel(s),
     available: s.available,
   }));
   const slotList = offered.some((s) => s.value === form.time_slot)

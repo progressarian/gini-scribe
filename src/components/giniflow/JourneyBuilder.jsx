@@ -109,6 +109,8 @@ export default function JourneyBuilder({
   visitTypes,
   visitTypeId,
   onTypeChange,
+  labOnly = false,
+  onLabOnly,
   // Only the conditions this type's template actually uses are asked about, so
   // a journey with no conditional steps shows no questions at all.
   askable = [],
@@ -181,13 +183,24 @@ export default function JourneyBuilder({
           <button
             key={t.id}
             type="button"
-            className={`jb-type${t.id === visitTypeId ? " on" : ""}`}
+            className={`jb-type${!labOnly && t.id === visitTypeId ? " on" : ""}`}
             onClick={() => onTypeChange(t.id)}
           >
             {t.label}
             <span className="jb-type-min">{t.max_time_min}m</span>
           </button>
         ))}
+        {(onLabOnly || labOnly) && (
+          <button
+            type="button"
+            className={`jb-type${labOnly ? " on" : ""}`}
+            aria-pressed={labOnly}
+            onClick={onLabOnly}
+          >
+            Lab only
+            <span className="jb-type-min">{minutesOf(steps)}m</span>
+          </button>
+        )}
       </div>
 
       {askable.length > 0 && onConditionChange && (

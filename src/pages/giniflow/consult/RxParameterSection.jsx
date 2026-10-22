@@ -173,7 +173,8 @@ export default function RxParameterSection({
       <div className="cs-head">
         <h2 id="rx-params-title">📊 Vitals &amp; biomarkers table</h2>
         <span className="cs-sub">
-          prints after Diagnoses · last {Math.max(columns.length - 1, 0)} visits + today
+          prints after Diagnoses · last {Math.max(columns.length - 1, 0)} dates with readings +
+          today
           {data?.updatedBy && !dirty ? ` · edited by ${data.updatedBy}` : ""}
         </span>
         <div className="cs-head-r">

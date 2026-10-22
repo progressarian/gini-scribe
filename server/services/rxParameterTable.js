@@ -271,34 +271,39 @@ export async function buildRxParameterTable(
     todayOnlyWhenCompleted ? visitCompleted(db, patientId, day) : true,
   ]);
   const params = mergeRxParameterRows(defaults, override?.rows);
-  const dates = completed ? [...past.slice(-HISTORY_VISITS), day] : past;
+  const active = params.filter((p) => !p.removed);
+  const from = addDays(past[0] || day, -FIRST_WINDOW_DAYS);
+  const data = await readings(db, patientId, from, day, active);
+  const onDay = (p, date) => (p.source ? valueIn(p, data, addDays(date, -1), date) : null);
+  const readingDays = [
+    ...new Set([...data.vitals.map((v) => v.day), ...data.labs.map((l) => dayOf(l.test_date))]),
+  ]
+    .filter((d) => d && d < day && active.some((p) => onDay(p, d) != null))
+    .sort();
+  const dates = [...readingDays.slice(-HISTORY_VISITS), ...(completed ? [day] : [])];
   if (!dates.length)
     return { columns: [], rows: [], removed: [], updatedBy: null, updatedAt: null };
-  const from = addDays(dates[0], -FIRST_WINDOW_DAYS);
-  const data = await readings(db, patientId, from, dates.at(-1), params);
+  const visits = new Set(past);
   const columns = dates.map((date, i) => ({
     date,
+    visit: visits.has(date) || date === day,
     today: completed && i === dates.length - 1 && (!todayOnlyWhenCompleted || date === istDay()),
   }));
-  const rows = params
-    .filter((p) => !p.removed)
-    .map((p) => {
-      const values = dates.map((date, i) =>
-        p.source ? valueIn(p, data, i === 0 ? from : dates[i - 1], date) : null,
-      );
-      const measuredToday = completed ? values[values.length - 1] : null;
-      if (completed && p.todayValue !== undefined) values[values.length - 1] = fmt(p.todayValue);
-      return {
-        key: p.key,
-        label: cleanText(p.label, 60),
-        unit: cleanText(p.unit, 20),
-        values,
-        measuredToday,
-        show: p.show,
-        custom: p.custom,
-        edited: p.todayValue !== undefined,
-      };
-    });
+  const rows = active.map((p) => {
+    const values = dates.map((date) => onDay(p, date));
+    const measuredToday = completed ? values[values.length - 1] : null;
+    if (completed && p.todayValue !== undefined) values[values.length - 1] = fmt(p.todayValue);
+    return {
+      key: p.key,
+      label: cleanText(p.label, 60),
+      unit: cleanText(p.unit, 20),
+      values,
+      measuredToday,
+      show: p.show,
+      custom: p.custom,
+      edited: p.todayValue !== undefined,
+    };
+  });
   const removed = params.filter((p) => p.removed).map((p) => ({ key: p.key, label: p.label }));
   return {
     columns,

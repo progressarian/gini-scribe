@@ -975,6 +975,11 @@ function mayChangePrice(line, ctx) {
   return line.agreed_by === null || line.agreed_by === ctx?.actorId || isAdmin(ctx);
 }
 
+const cleanCustomLineName = (value) => {
+  const text = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+  return text ? text.slice(0, 120) : null;
+};
+
 async function insertLineIn(client, bill, input, ctx) {
   assertDraft(bill);
   const itemId = cleanItemId(input?.item_id ?? input?.item);
@@ -997,7 +1002,18 @@ async function insertLineIn(client, bill, input, ctx) {
   }
   await refuseOtherConsultation(client, bill, item, doctorId);
   const held = await receptionHolder(client, bill, item, labOrderId);
-  if (
+  const customName = source === "ordered" ? cleanCustomLineName(input?.bill_name) : null;
+  if (customName) {
+    const { rows: same } = await client.query(
+      `SELECT 1 FROM bill_lines
+        WHERE visit_id = $1 AND service_item_id = $2 AND is_live AND lower(bill_name) = lower($3)
+        LIMIT 1`,
+      [bill.visit_id, item.id, customName],
+    );
+    if (same.length) {
+      throw httpError(409, `${customName} is already ordered for this patient`);
+    }
+  } else if (
     source === "ordered" &&
     (await liveLineFor(client, { visitId: bill.visit_id, serviceItemId: item.id }))
   ) {
@@ -1006,14 +1022,16 @@ async function insertLineIn(client, bill, input, ctx) {
       `${item.name} is already ordered for this patient — change its quantity, or remove it and add it again`,
     );
   }
-  const repeatRequestId = await approvalFor(
-    client,
-    bill,
-    item,
-    input?.repeat_request_id ? cleanUuid(input.repeat_request_id, "approval") : null,
-    ctx,
-    held,
-  );
+  const repeatRequestId = customName
+    ? null
+    : await approvalFor(
+        client,
+        bill,
+        item,
+        input?.repeat_request_id ? cleanUuid(input.repeat_request_id, "approval") : null,
+        ctx,
+        held,
+      );
   const linkedOrderId =
     source === "added" && !labOrderId ? await orderToLink(client, bill, item) : null;
   const { rows: seats } = await client.query(
@@ -1038,7 +1056,7 @@ async function insertLineIn(client, bill, input, ctx) {
       labOrderId ?? linkedOrderId,
       doctorId,
       repeatRequestId,
-      item.name,
+      customName ?? item.name,
       quantity,
       ctx?.actorId ?? null,
       agreedRate,
@@ -1058,10 +1076,10 @@ const auditLineCreated = (client, bill, line, ctx) =>
     ...auditFields(ctx),
   });
 
-export async function addLineIn(client, bill, input, ctx) {
+export async function addLineIn(client, bill, input, ctx, { priceLater = false } = {}) {
   const { line, linkedOrderId, repeatRequestId } = await insertLineIn(client, bill, input, ctx);
   const saved = await reprice(client, bill, await billCodes(client, bill.id), ctx);
-  refuseMissingPrice(saved, line.id);
+  if (!priceLater) refuseMissingPrice(saved, line.id);
   await auditLineCreated(client, bill, line, ctx);
   if (linkedOrderId) await resettleTestOrders(client, saved.bill, ctx);
   return {

@@ -165,32 +165,22 @@ async function persistNoteFollowUp(appointmentId, followUp) {
 // Returns whether the note has ANY dated follow-up sections and whether any of
 // them matches the given appointment date (YYYY-MM-DD). Used to decide if
 // OBSERVATIONS baseline data should be treated as this visit's prescription.
-function analyzeFollowUpDates(text, apptDate) {
+export function analyzeFollowUpDates(text, apptDate) {
   if (!text) return { hasAny: false, matchesApptDate: false };
-  const [yyyy, mm, dd] = (apptDate || "").split("-");
-  const d = parseInt(dd, 10);
-  const m = parseInt(mm, 10);
-  const yy = yyyy?.slice(-2);
-  const apptVariants =
-    yyyy && mm && dd
-      ? [
-          `${d}/${m}/${yy}`,
-          `${d}/${m}/${yyyy}`,
-          `${dd}/${mm}/${yy}`,
-          `${dd}/${mm}/${yyyy}`,
-          `${d}-${m}-${yy}`,
-          `${dd}-${mm}-${yy}`,
-          `${d}-${m}-${yyyy}`,
-        ]
-      : [];
-  const fuPattern = /FOLLOW\s*UP\s*(TODAY|ON|NOTES?|\s)/i;
-  const dateInLine = /\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/;
+  const [yyyy, mm, dd] = (apptDate || "").split("-").map((part) => parseInt(part, 10));
+  const visitHeader = /FOLLOW\s*UP\s*(TODAY|ON|NOTES?|\s)|OBSERVATIONS?\s*ON/i;
+  const datesInLine = /(?<!\d)(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4}|\d{2})(?!\d)/g;
   let hasAny = false;
   let matchesApptDate = false;
   for (const line of text.split("\n")) {
-    if (fuPattern.test(line) && dateInLine.test(line)) {
+    if (!visitHeader.test(line)) continue;
+    for (const [, d, m, y] of line.matchAll(datesInLine)) {
+      const year = y.length === 2 ? 2000 + parseInt(y, 10) : parseInt(y, 10);
+      const day = year * 10000 + parseInt(m, 10) * 100 + parseInt(d, 10);
+      const visitDay = yyyy * 10000 + mm * 100 + dd;
+      if (day > visitDay) continue;
       hasAny = true;
-      if (apptVariants.some((v) => line.includes(v))) matchesApptDate = true;
+      if (day === visitDay) matchesApptDate = true;
     }
   }
   return { hasAny, matchesApptDate };

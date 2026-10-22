@@ -22,6 +22,7 @@ import TestsSection from "./consult/TestsSection";
 import ProceduresSection from "./consult/ProceduresSection";
 import MedCardSection from "./consult/MedCardSection";
 import FinalizeBar from "./consult/FinalizeBar";
+import ConsultEditBar, { AmendedNote, EditPrescriptionButton } from "./consult/ConsultEditBar";
 import TrendModal from "./consult/TrendModal";
 import VisitSummarySection from "./consult/VisitSummarySection";
 import RxParameterSection from "./consult/RxParameterSection";
@@ -108,6 +109,7 @@ export default function DoctorConsultPage() {
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const toastTimer = useRef(null);
   const flushCarePlan = useRef(null);
+  const [nextVisitDate, setNextVisitDate] = useState(null);
   const scrollRef = useRef(null);
   const navRef = useRef(null);
   const [activeNav, setActiveNav] = useState(NAV[0].id);
@@ -214,7 +216,9 @@ export default function DoctorConsultPage() {
 
   const saveAndPrint = () => {
     saveAll();
-    if (consult?.finalized) openPrint();
+    if (consult?.editingMine)
+      showToast("Save the changes first — the new prescription prints after that");
+    else if (consult?.finalized) openPrint();
     else requestFinalize.current?.();
   };
 
@@ -285,7 +289,7 @@ export default function DoctorConsultPage() {
     };
   }, [hasConsult]);
 
-  const consultLocked = !!(consult?.finalized || consult?.readOnly);
+  const consultLocked = !!((consult?.finalized && !consult?.editingMine) || consult?.readOnly);
   useEffect(() => {
     if (!hasConsult) return;
     const draft = readDraft(visitId);
@@ -336,7 +340,8 @@ export default function DoctorConsultPage() {
   // is and refuses the writes either way — this only keeps the page from
   // offering an action that would come back 403.
   const otherConsultant = !!consult.readOnly;
-  const readOnly = consult.finalized || otherConsultant;
+  const editing = !!consult.editingMine;
+  const readOnly = (consult.finalized && !editing) || otherConsultant;
 
   const jump = (id) => {
     setActiveNav(id);
@@ -508,7 +513,7 @@ export default function DoctorConsultPage() {
 
         <div className="cbody">
           {/* An addition, not a replacement: everything below still renders. */}
-          {!readOnly && (
+          {!readOnly && !consult.finalized && (
             <FastPathBar
               visitId={visitId}
               consult={consult}
@@ -595,6 +600,7 @@ export default function DoctorConsultPage() {
             onSave={onSavePlan}
             saving={saveCarePlan.isPending}
             readOnly={readOnly}
+            onNextVisit={setNextVisitDate}
           />
 
           {otherConsultant ? (
@@ -603,22 +609,43 @@ export default function DoctorConsultPage() {
               assigned to this patient. You are seeing their consult so the floor can be read whole;
               only the assigned consultant can write to it.
             </div>
+          ) : editing ? (
+            <ConsultEditBar
+              visitId={visitId}
+              consult={consult}
+              onToast={showToast}
+              needsNextVisit={!nextVisitDate}
+            />
           ) : readOnly ? (
-            <div className="fin-done">
-              <strong>✓ Finalized</strong> — this consultation is read-only, because Gini
-              Flow&apos;s log only moves forward.
-              {/* CS-07: this used to promise "a correction is a new addendum".
-                  There is no addendum path yet, and a screen that names a route
-                  the consultant cannot take is worse than one that admits it. */}
-              <span className="fin-gap">
-                There is no addendum path yet — a correction to a finalized prescription has to be
-                made in Scribe, on the patient&apos;s chart.
-              </span>
+            <div className="fin-done fin-done-edit">
+              <div>
+                <strong>✓ Finalized</strong>
+                {consult.editing ? (
+                  <span className="fin-gap">
+                    {consult.editing.name || "Another doctor"} is editing this prescription now.
+                  </span>
+                ) : consult.canEdit ? (
+                  <span className="fin-gap">
+                    Missed something? Edit the prescription — the patient stays where they are, and
+                    the new prescription replaces this one when you save.
+                  </span>
+                ) : (
+                  <span className="fin-gap">
+                    {consult.isToday
+                      ? "Only the consultant or Chief who saw this patient can edit it."
+                      : "Only today's consultations can be edited — correct older ones on the patient's chart."}
+                  </span>
+                )}
+                <AmendedNote amendedAt={consult.amendedAt} />
+              </div>
+              {consult.canEdit && <EditPrescriptionButton visitId={visitId} onToast={showToast} />}
             </div>
           ) : (
             <FinalizeBar
               requestRef={requestFinalize}
               visitId={visitId}
+              nextVisitDate={nextVisitDate}
+              onOpen={() => flushCarePlan.current?.()}
               onToast={showToast}
               onDone={(r, { print } = {}) => {
                 showToast(
