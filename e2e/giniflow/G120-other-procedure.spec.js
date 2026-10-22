@@ -4,7 +4,7 @@ import { CONSULTANTS } from "../fixtures/data.mjs";
 import { assertTestDatabase } from "../setup/guard.mjs";
 import { newTag, refused, setUp, tearDown } from "../billing/phase4/p4-bills-fixture.mjs";
 import { OTHER_PROCEDURE_CODE } from "../../shared/otherProcedure.js";
-
+///
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 const ordered = await import("../../server/services/billing/orderedServices.js");
 
