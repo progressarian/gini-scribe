@@ -43,6 +43,8 @@ import {
   clearScheduleFrom,
   clearsReady,
   insertTemplateVersion,
+  laterVersions,
+  withdrawLaterVersions,
   istToday,
   templateErrors,
   withdrawFutureVersion,
@@ -56,6 +58,7 @@ import {
   scheduledDoctors,
 } from "../services/slots/applyTemplate.js";
 import { SCHEDULED_ROLES } from "../../shared/staffRoles.js";
+import { actorOf, logFieldChanges } from "../services/appointmentHistory.js";
 
 const router = Router();
 const admin = requireCapability(CAPABILITIES.ADMIN);
@@ -165,6 +168,8 @@ const refuseTemplate = (req, res) => {
   return false;
 };
 
+const replacedVersion = (v) => ({ effectiveFrom: v.effective_from, clears: v.clears });
+
 router.post(
   "/doctors/:id/slot-templates/check",
   admin,
@@ -173,9 +178,11 @@ router.post(
     try {
       const doctor = await scheduledDoctor(req, res);
       if (!doctor || refuseTemplate(req, res)) return;
-      res.json(
-        await bookingsOutsideTemplate(doctor.id, req.body.template, req.body.effective_from),
-      );
+      const [impact, replaces] = await Promise.all([
+        bookingsOutsideTemplate(doctor.id, req.body.template, req.body.effective_from),
+        laterVersions([doctor.id], req.body.effective_from, null, { client: pool }),
+      ]);
+      res.json({ ...impact, replaces: replaces.map(replacedVersion) });
     } catch (e) {
       handleError(res, e, "Slot template check");
     }
@@ -194,6 +201,13 @@ router.post(
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
+      const replaced = await withdrawLaterVersions(
+        client,
+        doctor.id,
+        req.body.effective_from,
+        null,
+        req.doctor?.doctor_id ?? null,
+      );
       const id = await insertTemplateVersion(client, doctor.id, req.body.template, {
         effectiveFrom: req.body.effective_from,
         note: req.body.note?.trim() || null,
@@ -206,7 +220,7 @@ router.post(
         { client },
       );
       await client.query("COMMIT");
-      res.status(201).json({ id, ...impact });
+      res.status(201).json({ id, replaced, ...impact });
     } catch (e) {
       await client.query("ROLLBACK").catch(() => {});
       handleError(res, e, "Slot template save");
@@ -733,6 +747,65 @@ async function applyMove(client, move, ctx) {
   };
 }
 
+async function movePreferredPlan(client, move, ctx) {
+  const { appointment_id, to_doctor_id, to_doctor_name } = move;
+  const appt = (
+    await client.query("SELECT * FROM appointments WHERE id=$1 FOR UPDATE", [appointment_id])
+  ).rows[0];
+  if (!appt) return { appointment_id, error: "not_found" };
+  const date = String(appt.preferred_date || "").slice(0, 10);
+  if (!date || !appt.preferred_time_slot) return { appointment_id, error: "no_preferred_plan" };
+  const avail = await isSlotAvailable(to_doctor_id, date, appt.preferred_time_slot, { client });
+  if (!avail.available)
+    return { appointment_id, error: avail.reason === "full" ? "target_full" : avail.reason };
+  const fromDoctor = appt.preferred_doctor?.trim() || appt.doctor_name;
+  const after = {
+    preferred_doctor: to_doctor_name,
+    preferred_time_slot: avail.slot_label || appt.preferred_time_slot,
+  };
+  await client.query(
+    "UPDATE appointments SET preferred_doctor=$1, preferred_time_slot=$2 WHERE id=$3",
+    [after.preferred_doctor, after.preferred_time_slot, appointment_id],
+  );
+  await logFieldChanges(
+    client,
+    appointment_id,
+    appt,
+    after,
+    { preferred_doctor: "Preferred Doctor", preferred_time_slot: "Time Slot" },
+    ctx.editor,
+  );
+  await client.query(
+    `INSERT INTO appointment_reassignments
+       (appointment_id, patient_id, file_no, appointment_date, time_slot,
+        from_doctor_name, from_doctor_id, to_doctor_name, to_doctor_id,
+        trigger, unavailability_id, reason, reassigned_by)
+     VALUES ($1,$2,$3,$4,$5,$6,resolve_doctor_id($6),$7,$8,$9,$10,$11,$12)`,
+    [
+      appointment_id,
+      appt.patient_id,
+      appt.file_no,
+      date,
+      appt.preferred_time_slot,
+      fromDoctor,
+      to_doctor_name,
+      to_doctor_id,
+      ctx.trigger || "manual",
+      ctx.unavailability_id || null,
+      ctx.reason || null,
+      ctx.reassigned_by || null,
+    ],
+  );
+  return {
+    appointment_id,
+    to_doctor_id,
+    to_doctor_name,
+    time_slot: after.preferred_time_slot,
+    plan: "preferred",
+    moved: true,
+  };
+}
+
 // Bulk reassign (emergency / planned).
 router.post("/appointments/reassign", admin, validate(reassignBulkSchema), async (req, res) => {
   const client = await pool.connect();
@@ -787,7 +860,7 @@ router.put(
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
-      const r = await applyMove(
+      const r = await (req.body.plan === "preferred" ? movePreferredPlan : applyMove)(
         client,
         {
           appointment_id: parseInt(req.params.id, 10),
@@ -800,6 +873,7 @@ router.put(
           reason: req.body.reason,
           reassigned_by: req.doctor?.doctor_name || null,
           actor: req.doctor,
+          editor: actorOf(req),
         },
       );
       if (r.moved) {

@@ -31,11 +31,13 @@ const mode = process.argv.includes("--remove")
   ? "remove"
   : process.argv.includes("--phones")
     ? "phones"
-    : moveTo
-      ? "move"
-      : write
-        ? "apply"
-        : "dry-run";
+    : process.argv.includes("--clear-slots")
+      ? "clear-slots"
+      : moveTo
+        ? "move"
+        : write
+          ? "apply"
+          : "dry-run";
 
 const hours = [1, 2, 3, 4, 5, 6].map((weekday) => ({
   weekday,
@@ -206,6 +208,21 @@ async function setPhones(client) {
   }
 }
 
+async function clearSlots(client) {
+  const { rows } = await client.query(
+    `UPDATE appointments
+        SET time_slot = NULL, reporting_time_slot = NULL, preferred_time_slot = NULL,
+            booking_status = CASE WHEN booking_status = 'booked' THEN NULL ELSE booking_status END
+      WHERE file_no LIKE $1
+        AND appointment_date >= $2::date
+        AND COALESCE(status, '') NOT IN ('completed', 'seen', 'in_visit', 'in-progress')
+      RETURNING file_no, patient_name, appointment_date::text AS date`,
+    [`${FILE_PREFIX}%`, EFFECTIVE_FROM],
+  );
+  for (const r of rows) console.log(`${r.file_no} ${r.patient_name} ${r.date} → no time slot`);
+  console.log(`Cleared ${rows.length} bookings`);
+}
+
 async function move(client) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(moveTo))
     throw new Error("--move-to needs a date like 2026-10-23.");
@@ -265,14 +282,15 @@ try {
   if (mode === "remove") await remove(client);
   else if (mode === "move") await move(client);
   else if (mode === "phones") await setPhones(client);
+  else if (mode === "clear-slots") await clearSlots(client);
   else await create(client);
-  if (mode === "dry-run" || ((mode === "move" || mode === "phones") && !write)) {
+  if (mode === "dry-run" || (["move", "phones", "clear-slots"].includes(mode) && !write)) {
     await client.query("ROLLBACK");
     console.log("\nDry run — rolled back. Run with --apply to write, or --remove to delete.");
   } else {
     await client.query("COMMIT");
     console.log(
-      `\n${{ remove: "Removed", move: "Moved", phones: "Phones set" }[mode] || "Written"}.`,
+      `\n${{ remove: "Removed", move: "Moved", phones: "Phones set", "clear-slots": "Slots cleared" }[mode] || "Written"}.`,
     );
   }
 } catch (e) {

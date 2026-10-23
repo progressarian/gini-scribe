@@ -109,7 +109,7 @@ import {
   keepsForChoice,
   onlineConsultChoice,
 } from "../../../shared/directConsult.js";
-import { labOnlyJourney, labOnlyKeepsStep } from "../../../shared/labOnly.js";
+import { labOnlyJourney, labOnlyKeepsStep, withProcedure } from "../../../shared/labOnly.js";
 import { homeStillNeeded } from "../../../shared/homeCollectors.js";
 
 // Arrived and done. They stay on the floor list — the desk is asked about them
@@ -1222,7 +1222,7 @@ const inJourneyOrder = (list, requires = {}) =>
     requiresOf: (s) => requires[s.catalogId] || null,
   });
 
-const BILL_SETTLED = ["ok", "no_tests"];
+const BILL_SETTLED = ["ok", "no_tests", "procedures_only"];
 
 const withBilledSteps = (planned, bill = null, requires = {}) => {
   const billed = bill?.steps || [];
@@ -1253,6 +1253,8 @@ const billNote = (bill, loading) => {
     if (bill.machines.length) parts.push(bill.machines.join(", "));
     return `✓ Added from the HealthRay bill: ${parts.join(" + ")} — tests not on the bill were left out; mark the payment on the Payments tab before the lab can start`;
   }
+  if (bill.status === "procedures_only")
+    return `✓ From the HealthRay bill: ${bill.procedure.name} — a procedure, no lab or machine tests; test steps were left out of the journey`;
   if (bill.status === "no_tests")
     return "Today's HealthRay bill has no lab or machine tests — test steps were left out of the journey";
   if (bill.status === "blocked")
@@ -1294,7 +1296,16 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   // sees on open is the journey they saw before this gate existed, and saying
   // "no tests today" is now one tick instead of deleting five rows.
   const [conditions, setConditions] = useState({});
-  const { data: plan } = useJourneyPlan(visitTypeId);
+  const labType = (visitTypes || []).find((t) => t.for_lab_only) || null;
+  const pickableTypes = useMemo(
+    () => (visitTypes || []).filter((t) => !t.for_lab_only),
+    [visitTypes],
+  );
+  const { data: labPlan } = useJourneyPlan(arrival.samplesOnly ? labType?.id : null);
+  const { data: typePlan } = useJourneyPlan(visitTypeId);
+  const savedLab = !!arrival.samplesOnly && labPlan?.length > 0;
+  const waitingLab = !!arrival.samplesOnly && !!labType && labPlan === undefined;
+  const plan = waitingLab ? undefined : savedLab ? labPlan : typePlan;
   const checkIn = useCheckIn();
   const checkInWalkIn = useCheckInWalkIn();
   const saving = checkIn.isPending || checkInWalkIn.isPending;
@@ -1348,7 +1359,14 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   catalogRef.current = catalog;
   const forPatient = (list) =>
     samplesOnly
-      ? labOnlyJourney(list, catalogRef.current, { withLeg: labOnlyChosen && !arrival.samplesOnly })
+      ? withProcedure(
+          labOnlyJourney(list, catalogRef.current, {
+            withLeg: labOnlyChosen && !arrival.samplesOnly,
+            saved: savedLab,
+          }),
+          stepsBill.current?.procedure,
+          { only: stepsBill.current?.status === "procedures_only" },
+        )
       : list;
 
   useEffect(() => {
@@ -1374,7 +1392,7 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   // panel causes, would otherwise throw away everything reception had edited and
   // check the patient in on a journey they did not build.
   const loadedFor = useRef(null);
-  const answerKey = `${visitTypeId}|${askable.map((k) => `${k}:${conditions[k] !== false}`).join(",")}|${planChoice}|${samplesOnly && catalog.length > 0}`;
+  const answerKey = `${visitTypeId}|${askable.map((k) => `${k}:${conditions[k] !== false}`).join(",")}|${planChoice}|${samplesOnly && catalog.length > 0}|${savedLab}`;
   useEffect(() => {
     if (!plan || loadedFor.current === answerKey) return;
     loadedFor.current = answerKey;
@@ -1624,7 +1642,7 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
             <JourneyBuilder
               steps={list}
               onChange={setSteps}
-              visitTypes={visitTypes}
+              visitTypes={pickableTypes}
               visitTypeId={visitTypeId}
               onTypeChange={(id) => {
                 setLabOnlyChosen(false);
@@ -1636,7 +1654,7 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
                   ? undefined
                   : () => {
                       setLabOnlyChosen(true);
-                      const testsType = (visitTypes || []).find((t) => t.for_tests);
+                      const testsType = pickableTypes.find((t) => t.for_tests);
                       if (testsType) setVisitTypeId(testsType.id);
                     }
               }

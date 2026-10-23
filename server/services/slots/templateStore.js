@@ -22,6 +22,33 @@ export async function activeTemplates(doctorIds, dateISO, { client = pool } = {}
   return found;
 }
 
+export async function templatesOnDates(doctorIds, dates, { client = pool } = {}) {
+  const found = new Map(dates.map((d) => [d, new Map()]));
+  if (!templatesEnabled() || !doctorIds.length || !dates.length) return found;
+  const last = dates.reduce((a, b) => (b > a ? b : a));
+  const { rows } = await client.query(
+    `SELECT t.id, t.doctor_id, t.effective_from::text, t.partial_last,
+            COALESCE((to_jsonb(t) ->> 'clears')::boolean, FALSE) AS clears
+       FROM doctor_slot_templates t
+      WHERE t.doctor_id = ANY($1::int[]) AND t.status = 'active' AND t.effective_from <= $2::date
+      ORDER BY t.doctor_id, t.effective_from DESC`,
+    [doctorIds, last],
+  );
+  const picks = new Map();
+  for (const date of dates)
+    for (const id of doctorIds) {
+      const v = rows.find((r) => r.doctor_id === id && r.effective_from <= date);
+      if (v && !v.clears) picks.set(`${date}|${id}`, v);
+    }
+  const used = [...new Map([...picks.values()].map((v) => [v.id, v])).values()];
+  const rules = new Map((await withRules(client, used)).map((t) => [t.id, t]));
+  for (const [key, v] of picks) {
+    const [date, id] = key.split("|");
+    found.get(date).set(Number(id), rules.get(v.id));
+  }
+  return found;
+}
+
 async function withRules(client, rows) {
   if (!rows.length) return [];
   const ids = rows.map((r) => r.id);

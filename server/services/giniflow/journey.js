@@ -14,7 +14,13 @@ import {
 } from "../../../shared/giniflowStatus.js";
 import { reopenForTests } from "./lateTests.js";
 import { advanceStatus, reopenResultsForNewOrder } from "./statusEngine.js";
-import { labOnlyJourney } from "../../../shared/labOnly.js";
+import {
+  labOnlyJourney,
+  PROCEDURE_STEP,
+  procedureStep,
+  withProcedure,
+} from "../../../shared/labOnly.js";
+import { billedProcedures } from "../billing/healthrayBillLines.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { labStepsAreManual } from "../../../shared/manualFloor.js";
 import { genVisitToken } from "../flow/journey.js";
@@ -41,6 +47,8 @@ import {
 import { billSuppressor } from "./testCancel.js";
 import {
   billedLabLines,
+  billedMachineLines,
+  billedStepIds,
   priceOrdersFromBill,
   storedBill,
   stepsAllowedByBill,
@@ -332,8 +340,9 @@ export async function suggestVisitType(
   db = pool,
 ) {
   const { rows } = await db.query(
-    `SELECT id FROM flow_visit_types
+    `SELECT id FROM flow_visit_types t
       WHERE is_active = TRUE
+        AND NOT ${FOR_LAB_ONLY_SQL("t")}
         AND CASE
               WHEN $4 THEN for_online
               ELSE NOT for_online
@@ -604,6 +613,27 @@ const consultantPicked = async (client, steps) => {
   return rows[0]?.id ?? null;
 };
 
+export const FOR_LAB_ONLY_SQL = (t = "t") =>
+  `COALESCE((to_jsonb(${t}) ->> 'for_lab_only')::boolean, FALSE)`;
+
+export async function savedLabOnlyType(db = pool) {
+  const { rows } = await db.query(
+    `SELECT t.id FROM flow_visit_types t
+      WHERE ${FOR_LAB_ONLY_SQL("t")} AND COALESCE(t.is_active, TRUE)
+        AND EXISTS (SELECT 1 FROM flow_step_templates s WHERE s.visit_type_id = t.id)
+      ORDER BY t.id LIMIT 1`,
+  );
+  return rows[0]?.id ?? null;
+}
+
+const isLabOnlyVisit = async (db, visitId) => {
+  const { rows } = await db.query(
+    `SELECT ${labOnlyPredicate("v", "$2")} AS lab_only FROM giniflow_visits v WHERE v.id = $1`,
+    [visitId, LAB_ONLY_DOCTOR],
+  );
+  return !!rows[0]?.lab_only;
+};
+
 const labOnlyPlan = async (db, visitId, steps) => {
   const { rows } = await db.query(
     `SELECT ${labOnlyPredicate("v", "$2")} AS lab_only,
@@ -617,7 +647,32 @@ const labOnlyPlan = async (db, visitId, steps) => {
     `SELECT id, name, default_duration_min, station, assigned_role, chain_status
        FROM flow_step_catalog WHERE COALESCE(is_active, TRUE)`,
   );
-  return labOnlyJourney(steps, catalog, { hasBilling: rows[0].has_lab_billing });
+  return labOnlyJourney(steps, catalog, {
+    hasBilling: rows[0].has_lab_billing,
+    saved: !!(await savedLabOnlyType(db)),
+  });
+};
+
+export async function procedureStepFor(db, bill, machines) {
+  const onMachines = new Set(
+    billedMachineLines(bill, machines)
+      .filter((line) => line.machines.length)
+      .map((line) => line.name),
+  );
+  const names = await billedProcedures(db, bill, onMachines);
+  if (!names.length) return null;
+  const { rows } = await db.query(
+    `SELECT id, name, default_duration_min, station, assigned_role
+       FROM flow_step_catalog WHERE id = $1 AND COALESCE(is_active, TRUE)`,
+    [PROCEDURE_STEP],
+  );
+  return procedureStep(rows[0], names);
+}
+
+const withBilledProcedure = async (db, visitId, steps, bill, machines) => {
+  if (!(await isLabOnlyVisit(db, visitId))) return steps;
+  const procedure = await procedureStepFor(db, bill, machines);
+  return withProcedure(steps, procedure, { only: billedStepIds(bill, machines).size === 0 });
 };
 
 const requireConsultant = async (client, visitId) => {
@@ -868,7 +923,9 @@ export async function ensurePlan(visitId, db = pool) {
   if (!visit) throw Object.assign(new Error("Visit not found"), { status: 404 });
   if (visit.steps > 0) return { seeded: false };
 
+  const labType = (await isLabOnlyVisit(db, visitId)) ? await savedLabOnlyType(db) : null;
   const visitTypeId =
+    labType ||
     visit.visit_type_id ||
     (await suggestVisitType(
       {
@@ -882,9 +939,10 @@ export async function ensurePlan(visitId, db = pool) {
   if (!visitTypeId) return { seeded: false };
 
   const machines = await getMachines(db);
+  const bill = await storedBill(visit.patient_id, visit.visit_date, db);
   const billed = stepsAllowedByBill(
     (await defaultPlan(visitTypeId, db)).filter((s) => s.included),
-    await storedBill(visit.patient_id, visit.visit_date, db),
+    bill,
     machines,
   );
   const chiefStep = visit.direct_consult ? false : await consultantChiefStep(db, visitId);
@@ -892,10 +950,12 @@ export async function ensurePlan(visitId, db = pool) {
     chiefStep === true || (await isOnlineType(db, visitTypeId))
       ? billed.filter((s) => keepsForChoice(s, onlineConsultChoice(chiefStep)))
       : withoutChief(billed);
-  const plan = await labOnlyPlan(
+  const plan = await withBilledProcedure(
     db,
     visitId,
-    visit.echo_referral ? echoFirst(routed, machines) : routed,
+    await labOnlyPlan(db, visitId, visit.echo_referral ? echoFirst(routed, machines) : routed),
+    bill,
+    machines,
   );
   if (!plan.length) return { seeded: false };
 

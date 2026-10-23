@@ -266,3 +266,13 @@ Agreed after the rev 2 review:
 - Staff Management → Schedule → **Clear schedule** (next to Edit schedule, admin only). Pick a date (today or later). From that date the person has no slots; booking treats them as available all day with no per-slot limits, as before schedules existed. Every active version starting on or after that date is withdrawn. Days before keep their schedule; bookings, time off and blocked breaks are untouched.
 - Stored as a new version with `doctor_slot_templates.clears = TRUE` and no hours (migration `2026-10-23_slot_templates_clears.sql`), so history stays append-only. The resolver (`activeTemplates`) treats a clearing version as "no schedule"; the list shows it as "Schedule cleared — no slots" / "Cleared", and a future clear can be withdrawn like any upcoming version.
 - `POST /api/doctors/:id/slot-templates/clear {effective_from}`; returns 503 until the migration has run.
+
+## 17. A new schedule overrides later ones (2026-10-23)
+
+Requested from Staff Management: saving a schedule from a date replaces any schedule already planned on or after that date, instead of being cut short by it.
+
+- No end date (one doctor or bulk): every active version starting on or after the start date — schedules and clears — is withdrawn, so the new schedule applies to every day from its start.
+- With an end date (bulk): versions starting inside the period are withdrawn. The day after the end date goes back to whatever was in effect that day before the save (a later planned schedule, the usual one, or a clear). A version already starting on that day is kept. This replaces the old "Has a schedule change starting …, inside this period" stop.
+- Check bookings returns `replaces` (one doctor) / per-doctor `replaces` (bulk), and the booking impact now covers the whole new period, not just up to the next planned change. The editor lists the changes being replaced before saving; the save toast says how many were replaced.
+- Withdrawn versions stay in the history (append-only, `withdrawn_by` = who saved). Bookings are never moved.
+- e2e G114 tests 14 and 14b cover it.

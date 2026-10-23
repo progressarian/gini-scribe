@@ -2286,22 +2286,39 @@ function CallHistoryPanel({ row, ccAgents, colSpan, details, actions, lockTitle 
 // Patients booked to a doctor who is now unavailable (leave / break / day off /
 // holiday) for that date+slot. Shows the previous doctor + reason and lets you
 // reassign to a free doctor.
-function ReassignNeededView({ date }) {
+function ReassignNeededView({ search }) {
   const [picks, setPicks] = useState({}); // appointment_id → doctor_id
   const [busyId, setBusyId] = useState(null);
   const [msg, setMsg] = useState(null);
 
-  const conflictsQuery = useDoctorConflicts(date);
-  const conflicts = conflictsQuery.data || [];
+  const conflictsQuery = useDoctorConflicts();
+  const all = conflictsQuery.data || [];
+  const words = String(search || "")
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+  const conflicts = words.length
+    ? all.filter((c) => {
+        const text = [c.patient_name, c.file_no, c.phone, c.current_doctor]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return words.every((w) => text.includes(w));
+      })
+    : all;
+  const days = new Set(conflicts.map((c) => c.appointment_date?.slice(0, 10))).size;
   const loading = conflictsQuery.isPending;
 
   const reassignMutation = useReassignAppointment();
 
+  const rowKey = (c) => `${c.plan || "booking"}-${c.appointment_id}`;
+
   const reassign = async (c) => {
-    const did = picks[c.appointment_id];
+    const did = picks[rowKey(c)];
     const target = c.suggested_doctors?.find((x) => x.doctor_id === did);
     if (!target) return setMsg({ ok: false, text: "Pick a doctor to reassign to." });
-    setBusyId(c.appointment_id);
+    setBusyId(rowKey(c));
     setMsg(null);
     try {
       await reassignMutation.mutateAsync({
@@ -2311,9 +2328,16 @@ function ReassignNeededView({ date }) {
           to_doctor_name: target.doctor_name,
           reason: `Reassigned from ${c.current_doctor} (${c.reason})`,
           trigger: "manual",
+          plan: c.plan || "booking",
         },
       });
-      setMsg({ ok: true, text: `${c.patient_name} moved to ${target.doctor_name}` });
+      setMsg({
+        ok: true,
+        text:
+          c.plan === "preferred"
+            ? `${c.patient_name}'s preferred plan moved to ${target.doctor_name}`
+            : `${c.patient_name} moved to ${target.doctor_name}`,
+      });
     } catch (e) {
       const body = e?.response?.data;
       setMsg({ ok: false, text: body?.message || body?.error || "Reassign failed." });
@@ -2326,9 +2350,18 @@ function ReassignNeededView({ date }) {
     <div>
       <div className="qfilter qfilter--note">
         <span className="qfilter__hint">
-          Patients whose assigned doctor is now unavailable (leave / break / day off) on{" "}
-          {prettyDate(date)}. Change the day with the date selector at the top. Reassign each to a
-          free doctor.
+          Patients booked, or with a preferred date and time, from today onwards whose doctor is now
+          unavailable (leave / break / day off) at that time. Reassign each to a free doctor.
+          {!loading && conflicts.length > 0 && (
+            <>
+              {" "}
+              <strong>
+                {conflicts.length} patient{conflicts.length === 1 ? "" : "s"} across {days} day
+                {days === 1 ? "" : "s"}
+              </strong>
+              {words.length ? ` match "${String(search).trim()}"` : ""}.
+            </>
+          )}
         </span>
       </div>
 
@@ -2348,13 +2381,34 @@ function ReassignNeededView({ date }) {
           <div className="spinner" />
           Loading…
         </div>
+      ) : conflictsQuery.isError ? (
+        <div className="ghm__empty" role="alert">
+          <div className="ghm__empty-title">Could not load the patients who need reassigning.</div>
+          <div className="ghm__empty-sub">
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={() => conflictsQuery.refetch()}
+            >
+              Try again
+            </button>
+          </div>
+        </div>
       ) : conflicts.length === 0 ? (
         <div className="ghm__empty">
           <div className="ghm__empty-icon">
             <CheckCircle2 size={34} aria-hidden="true" />
           </div>
-          <div className="ghm__empty-title">No reassignment needed for {prettyDate(date)}</div>
-          <div className="ghm__empty-sub">Every booked patient's doctor is available.</div>
+          <div className="ghm__empty-title">
+            {words.length && all.length
+              ? `No patient needing reassignment matches "${String(search).trim()}"`
+              : "No reassignment needed from today onwards"}
+          </div>
+          <div className="ghm__empty-sub">
+            {words.length && all.length
+              ? `${all.length} patient${all.length === 1 ? "" : "s"} need reassigning. Clear the search to see them.`
+              : "Every booked patient's doctor is available at their time."}
+          </div>
         </div>
       ) : (
         <div className="tbl-wrap">
@@ -2372,12 +2426,22 @@ function ReassignNeededView({ date }) {
             </thead>
             <tbody>
               {conflicts.map((c) => (
-                <tr key={c.appointment_id}>
+                <tr key={rowKey(c)}>
                   <td>
                     {c.patient_name}
                     {c.file_no ? <small> ({c.file_no})</small> : null}
                   </td>
-                  <td>{c.appointment_date?.slice(0, 10)}</td>
+                  <td>
+                    {prettyDateWithYear(c.appointment_date?.slice(0, 10))}
+                    {c.plan === "preferred" && (
+                      <span
+                        className="pref-tag"
+                        title="The patient's preferred date and time, not a booking yet. Reassigning changes the preferred doctor only."
+                      >
+                        Preferred plan
+                      </span>
+                    )}
+                  </td>
                   <td>{c.time_slot}</td>
                   <td>
                     <strong>{c.current_doctor}</strong>
@@ -2399,7 +2463,7 @@ function ReassignNeededView({ date }) {
                   <td>
                     {c.suggested_doctors?.length ? (
                       <Dropdown
-                        value={picks[c.appointment_id] || ""}
+                        value={picks[rowKey(c)] || ""}
                         options={[
                           { value: "", label: "— choose —" },
                           ...c.suggested_doctors.map((d) => ({
@@ -2407,9 +2471,7 @@ function ReassignNeededView({ date }) {
                             label: `${d.doctor_name}${d.same_specialty ? " (same specialty)" : ""}`,
                           })),
                         ]}
-                        onChange={(v) =>
-                          setPicks((p) => ({ ...p, [c.appointment_id]: Number(v) || "" }))
-                        }
+                        onChange={(v) => setPicks((p) => ({ ...p, [rowKey(c)]: Number(v) || "" }))}
                         variant="cell"
                         ariaLabel="Reassign to doctor"
                       />
@@ -2420,10 +2482,10 @@ function ReassignNeededView({ date }) {
                   <td>
                     <button
                       className="btn btn--primary"
-                      disabled={busyId === c.appointment_id || !picks[c.appointment_id]}
+                      disabled={busyId === rowKey(c) || !picks[rowKey(c)]}
                       onClick={() => reassign(c)}
                     >
-                      {busyId === c.appointment_id ? "…" : "Reassign"}
+                      {busyId === rowKey(c) ? "…" : "Reassign"}
                     </button>
                   </td>
                 </tr>
@@ -3358,30 +3420,34 @@ export default function GHMPage() {
                         ? "Search any patient — name, file no, phone"
                         : isMissed
                           ? "Search missed patients — name, file no, phone"
-                          : "Search this date — name, file no, phone, condition"
+                          : view === "reassign"
+                            ? "Search by patient name, file no, phone or doctor"
+                            : "Search this date — name, file no, phone, condition"
                     }
                   />
-                  <GhmFilters
-                    view={view}
-                    date={date}
-                    doctor={doctor}
-                    doctors={doctors}
-                    collectionFilter={collectionFilter}
-                    modeFilter={modeFilter}
-                    callsFilter={callsFilter}
-                    defaultCallsFilter={defaultCallsFilter}
-                    team={obtTeam}
-                    activeCount={activeFilters}
-                    onApply={(next) => {
-                      setDate(next.date || todayStr());
-                      setDoctor(next.doctor);
-                      setCollectionFilter(next.collectionFilter);
-                      setModeFilter(next.modeFilter);
-                      setCallsFilter(next.callsFilter);
-                    }}
-                    defaultDate={tabDefaultDate(view)}
-                    onReset={resetFilterFields}
-                  />
+                  {view !== "reassign" && (
+                    <GhmFilters
+                      view={view}
+                      date={date}
+                      doctor={doctor}
+                      doctors={doctors}
+                      collectionFilter={collectionFilter}
+                      modeFilter={modeFilter}
+                      callsFilter={callsFilter}
+                      defaultCallsFilter={defaultCallsFilter}
+                      team={obtTeam}
+                      activeCount={activeFilters}
+                      onApply={(next) => {
+                        setDate(next.date || todayStr());
+                        setDoctor(next.doctor);
+                        setCollectionFilter(next.collectionFilter);
+                        setModeFilter(next.modeFilter);
+                        setCallsFilter(next.callsFilter);
+                      }}
+                      defaultDate={tabDefaultDate(view)}
+                      onReset={resetFilterFields}
+                    />
+                  )}
                   {filtersActive && (
                     <button
                       type="button"
@@ -3647,7 +3713,7 @@ export default function GHMPage() {
           tab is presentation, and the body must not render if the view is ever
           reached another way (deep link, persisted view state). */}
         {view === "reassign" && canReassign ? (
-          <ReassignNeededView date={date} />
+          <ReassignNeededView search={search} />
         ) : isChanges ? (
           <StatusChangesView
             doctors={doctors}

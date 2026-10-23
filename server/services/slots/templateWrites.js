@@ -56,6 +56,31 @@ export async function insertTemplateVersion(
   return id;
 }
 
+export async function laterVersions(doctorIds, from, through = null, { client }) {
+  const { rows } = await client.query(
+    `SELECT id, doctor_id, effective_from::text,
+            COALESCE((to_jsonb(t) ->> 'clears')::boolean, FALSE) AS clears
+       FROM doctor_slot_templates t
+      WHERE doctor_id = ANY($1::int[]) AND status = 'active' AND effective_from > $2::date
+        AND ($3::date IS NULL OR effective_from <= $3::date)
+      ORDER BY effective_from`,
+    [doctorIds, from, through],
+  );
+  return rows;
+}
+
+export async function withdrawLaterVersions(client, doctorId, from, through, actorId) {
+  const { rows } = await client.query(
+    `UPDATE doctor_slot_templates
+        SET status = 'withdrawn', withdrawn_at = NOW(), withdrawn_by = $4
+      WHERE doctor_id = $1 AND status = 'active' AND effective_from > $2::date
+        AND ($3::date IS NULL OR effective_from <= $3::date)
+      RETURNING id`,
+    [doctorId, from, through, actorId],
+  );
+  return rows.length;
+}
+
 export const templateErrors = (template) => {
   const errors = validateTemplate(template);
   return errors.length
@@ -79,6 +104,13 @@ export async function withdrawFutureVersion(client, doctorId, templateId, actorI
   return rows[0].id;
 }
 
+export const insertClearVersion = (client, doctorId, effectiveFrom, note, actorId) =>
+  client.query(
+    `INSERT INTO doctor_slot_templates (doctor_id, effective_from, clears, note, created_by)
+     VALUES ($1, $2::date, TRUE, $3, $4)`,
+    [doctorId, effectiveFrom, note, actorId],
+  );
+
 export async function clearScheduleFrom(client, doctorId, { effectiveFrom, actorId }) {
   const withdrawn = await client.query(
     `UPDATE doctor_slot_templates
@@ -100,10 +132,6 @@ export async function clearScheduleFrom(client, doctorId, { effectiveFrom, actor
       status: 409,
     });
   if (stillScheduled)
-    await client.query(
-      `INSERT INTO doctor_slot_templates (doctor_id, effective_from, clears, note, created_by)
-       VALUES ($1, $2::date, TRUE, 'Schedule cleared', $3)`,
-      [doctorId, effectiveFrom, actorId],
-    );
+    await insertClearVersion(client, doctorId, effectiveFrom, "Schedule cleared", actorId);
   return { withdrawn: withdrawn.rows.filter((r) => !r.clears).length, cleared: true };
 }

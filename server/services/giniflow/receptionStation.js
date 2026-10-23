@@ -929,6 +929,7 @@ export const ARRIVAL_SELECT = `
          -- A type an admin has switched off is not offered again; visits already
          -- on it keep running, since the id still resolves everywhere else.
          AND t.is_active = TRUE
+         AND NOT COALESCE((to_jsonb(t) ->> 'for_lab_only')::boolean, FALSE)
        ORDER BY t.for_followup IS NOT DISTINCT FROM booked.followup DESC, t.max_time_min, t.id
        LIMIT 1
     ) sugg ON TRUE

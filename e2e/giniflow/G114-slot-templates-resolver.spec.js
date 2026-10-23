@@ -360,10 +360,16 @@ test.describe.serial("G114 booking slots come from the doctor's schedule templat
     expect((await again.json()).skipped).toEqual([third.id]);
   });
 
-  test("14. a planned change inside the period stops that doctor instead of being overwritten", async () => {
-    const before = await one(
-      `SELECT count(*)::int AS n FROM doctor_slot_templates WHERE doctor_id = $1`,
-      [other.id],
+  test("14. a planned change inside the period is replaced, and the doctor goes back to it after the end date", async () => {
+    const nextDay = (iso) => {
+      const d = new Date(`${iso}T00:00:00Z`);
+      d.setUTCDate(d.getUTCDate() + 1);
+      return d.toISOString().slice(0, 10);
+    };
+    const planned = await one(
+      `SELECT id FROM doctor_slot_templates
+        WHERE doctor_id = $1 AND status = 'active' AND effective_from = $2::date`,
+      [other.id, DAY],
     );
     const body = {
       effective_from: istDay(1),
@@ -372,17 +378,48 @@ test.describe.serial("G114 booking slots come from the doctor's schedule templat
       doctor_ids: [other.id],
     };
     const dry = await (await admin.post(`/api/doctor-slot-templates/apply`, { data: body })).json();
-    expect(dry.doctors[0].conflict).toMatch(/^Has a schedule change starting/);
+    expect(dry.doctors[0]).toMatchObject({
+      conflict: null,
+      unchanged: false,
+      replaces: [{ effectiveFrom: DAY, clears: false }],
+    });
     const r = await (
       await admin.post(`/api/doctor-slot-templates/apply`, { data: { ...body, dry_run: false } })
     ).json();
-    expect(r.saved).toEqual([]);
-    expect(r.failed.doctor_id).toBe(other.id);
-    const after = await one(
-      `SELECT count(*)::int AS n FROM doctor_slot_templates WHERE doctor_id = $1`,
-      [other.id],
+    expect(r).toEqual({ saved: [other.id], skipped: [], failed: null });
+    const gone = await one(`SELECT status FROM doctor_slot_templates WHERE id = $1`, [planned.id]);
+    expect(gone.status).toBe("withdrawn");
+    const active = await query(
+      `SELECT effective_from::text FROM doctor_slot_templates
+        WHERE doctor_id = $1 AND status = 'active' AND effective_from >= $2::date
+        ORDER BY effective_from`,
+      [other.id, istDay(1)],
     );
-    expect(after.n).toBe(before.n);
+    expect(active.rows.map((v) => v.effective_from)).toEqual([istDay(1), nextDay(DAY)]);
+  });
+
+  test("14b. a schedule with no end date replaces every later planned change", async () => {
+    const later = await admin.post(`/api/doctors/${other.id}/slot-templates`, {
+      data: { effective_from: istDay(30), template: morning, note: "Planned later" },
+    });
+    expect(later.status()).toBe(201);
+    const check = await (
+      await admin.post(`/api/doctors/${other.id}/slot-templates/check`, {
+        data: { effective_from: istDay(2), template: morning },
+      })
+    ).json();
+    expect(check.replaces.map((v) => v.effectiveFrom)).toContain(istDay(30));
+    const saved = await admin.post(`/api/doctors/${other.id}/slot-templates`, {
+      data: { effective_from: istDay(2), template: morning },
+    });
+    expect(saved.status()).toBe(201);
+    expect((await saved.json()).replaced).toBeGreaterThan(0);
+    const left = await one(
+      `SELECT count(*)::int AS n FROM doctor_slot_templates
+        WHERE doctor_id = $1 AND status = 'active' AND effective_from > $2::date`,
+      [other.id, istDay(2)],
+    );
+    expect(left.n).toBe(0);
   });
   test("15. per-slot limits by patient type are saved and every slot reports its counts", async () => {
     const capped = {

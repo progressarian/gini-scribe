@@ -28,6 +28,28 @@ import "../billing/billingUi.css";
 // Renders as the Patient Flow panel of /settings — the shell there prints the
 // title and blurb, so this owns only its own controls. .flow-root stays: the
 // cards and tables below read their palette off its variables.
+const NEVER_MACHINE = new Set([
+  "check_in",
+  "billing",
+  "lab_billing",
+  "blood_sample",
+  "lab_processing_2",
+  "report_upload",
+  "vitals",
+  "mo_assessment",
+  "wait_sd",
+  "sd_consult",
+  "wait_chief",
+  "chief_consult",
+  "dietitian",
+  "care_coordinator",
+  "rx_explain",
+  "pharmacy",
+]);
+
+const canBeMachine = (step) =>
+  !!step.machine || (!step.chain_status && !NEVER_MACHINE.has(step.id));
+
 export default function FlowAdminPage() {
   const { data: types = [] } = useFlowVisitTypes(true);
   const { data: catalog = [] } = useFlowStepCatalog(true);
@@ -364,16 +386,18 @@ export default function FlowAdminPage() {
                           <div className="flow-muted">
                             {c.station} · {c.assigned_role}
                           </div>
-                          <button
-                            type="button"
-                            className="fset__machine-tag"
-                            aria-expanded={machineStepId === c.id}
-                            onClick={() => setMachineStepId(machineStepId === c.id ? null : c.id)}
-                          >
-                            {c.machine
-                              ? `${c.machine_icon || "🩺"} Machine test · edit`
-                              : "+ Machine test"}
-                          </button>
+                          {canBeMachine(c) && (
+                            <button
+                              type="button"
+                              className="fset__machine-tag"
+                              aria-expanded={machineStepId === c.id}
+                              onClick={() => setMachineStepId(machineStepId === c.id ? null : c.id)}
+                            >
+                              {c.machine
+                                ? `${c.machine_icon || "🩺"} Machine test · edit`
+                                : "+ Machine test"}
+                            </button>
+                          )}
                         </td>
                         <td>
                           <input

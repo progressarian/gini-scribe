@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { toast } from "../../stores/uiStore";
 import ConfirmModal from "../ui/ConfirmModal.jsx";
 import { CONDITIONS } from "../../../shared/giniflowConditions.js";
+import { labOnlyKeepsStep, labOnlyName } from "../../../shared/labOnly.js";
 import {
   useFlowTemplate,
   useFlowStepCatalog,
@@ -161,6 +162,9 @@ export default function JourneyTemplateEditor({ types }) {
     0,
   );
   const activeType = types.find((t) => t.id === active);
+  const labOnly = !!activeType?.for_lab_only;
+  const nameOf = (s) =>
+    labOnly ? labOnlyName({ catalogId: s.step_catalog_id, name: s.name }) : s.name;
 
   return (
     <div className="flow-card fset__journey">
@@ -169,8 +173,9 @@ export default function JourneyTemplateEditor({ types }) {
         {activeType && <span className="fset__count">{activeType.label}</span>}
       </div>
       <div className="fset__cardsub">
-        What reception is offered at check-in for this visit type. They can still add or drop steps
-        for an individual patient — this is only the starting point.
+        {labOnly
+          ? "The journey for samples-only patients (booked under Dr. Hospital Admin). Consultation steps can't be added: these patients never see a doctor."
+          : "What reception is offered at check-in for this visit type. They can still add or drop steps for an individual patient — this is only the starting point."}
       </div>
 
       <div className="fset__types">
@@ -237,7 +242,7 @@ export default function JourneyTemplateEditor({ types }) {
                     </td>
                     <td>
                       <div className="fset__stepname">
-                        <span className="fset__ord">{i + 1}.</span> {s.name}
+                        <span className="fset__ord">{i + 1}.</span> {nameOf(s)}
                       </div>
                       <div className="fset__stepmeta">
                         {s.station}
@@ -298,6 +303,10 @@ export default function JourneyTemplateEditor({ types }) {
               <option value="">+ Add step</option>
               {catalog
                 .filter((c) => !steps.some((s) => s.step_catalog_id === c.id))
+                .filter(
+                  (c) =>
+                    !labOnly || labOnlyKeepsStep({ catalogId: c.id, chainStatus: c.chain_status }),
+                )
                 .map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name} ({c.default_duration_min}m)

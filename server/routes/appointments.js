@@ -17,8 +17,14 @@ import {
   checkBookingAvailability as checkAvailability,
 } from "../services/bookingGuard.js";
 import { checkPatientBlocked, blockedResponse, blockActor } from "../services/patientBlockGuard.js";
-import { isSlotAvailable, findAvailableDoctors } from "../services/availability.js";
+import {
+  bookableDoctors,
+  doctorsById,
+  rankAvailable,
+  verdictsAcrossDates,
+} from "../services/availability.js";
 import { labelSpan } from "../services/slots/dayView.js";
+import { preferredSuperseded } from "../services/ghmDayWindow.js";
 
 // Blocked patients are hidden from working lists — nobody should be calling,
 // booking or preparing for them. They stay findable in /find and on the admin
@@ -88,49 +94,94 @@ router.get("/appointments", async (req, res) => {
 // MUST be declared before "/appointments/:id" so "conflicts" isn't read as an id.
 router.get("/appointments/conflicts", async (req, res) => {
   try {
-    const today = new Date().toISOString().split("T")[0];
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
     const start = req.query.from || req.query.date || today;
-    const end = req.query.to || req.query.date || start;
+    const end = req.query.to || req.query.date || null;
 
-    const { rows } = await pool.query(
-      `SELECT a.id, a.patient_id, a.patient_name, a.file_no, a.phone,
-              a.appointment_date, a.time_slot, a.doctor_name, a.doctor_id, a.status
+    const [{ rows }, plans, candidates] = await Promise.all([
+      pool.query(
+        `SELECT a.id, a.patient_id, a.patient_name, a.file_no, a.phone,
+              a.appointment_date::text AS appointment_date, a.time_slot, a.doctor_name,
+              COALESCE(a.doctor_id, resolve_doctor_id(a.doctor_name)) AS doctor_id, a.status
          FROM appointments a
-        WHERE a.appointment_date BETWEEN $1 AND $2
+        WHERE a.appointment_date >= $1::date
+          AND ($2::date IS NULL OR a.appointment_date <= $2::date)
           AND a.doctor_name IS NOT NULL AND a.time_slot IS NOT NULL
           AND LOWER(COALESCE(a.status,'')) NOT IN
               ('cancelled','no_show','completed','seen','in_visit','checkedin')
         ORDER BY a.appointment_date, a.time_slot`,
-      [start, end],
-    );
+        [start, end],
+      ),
+      pool.query(
+        `SELECT a.id, a.patient_id, a.patient_name, a.file_no, a.phone, a.status,
+              a.preferred_date::text AS appointment_date, a.preferred_time_slot AS time_slot,
+              p.doctor_name, COALESCE(resolve_doctor_id(p.doctor_name), a.doctor_id) AS doctor_id
+         FROM appointments a
+        CROSS JOIN LATERAL (
+          SELECT COALESCE(NULLIF(TRIM(a.preferred_doctor), ''), a.doctor_name) AS doctor_name
+        ) p
+        WHERE a.preferred_date >= $1::date
+          AND ($2::date IS NULL OR a.preferred_date <= $2::date)
+          AND NULLIF(TRIM(a.preferred_time_slot), '') IS NOT NULL
+          AND p.doctor_name IS NOT NULL
+          AND COALESCE(a.status, '') <> 'cancelled'
+          AND COALESCE(a.booking_status, '') <> 'cancelled'
+          AND NOT (a.preferred_date = a.appointment_date
+                   AND a.time_slot IS NOT DISTINCT FROM a.preferred_time_slot
+                   AND p.doctor_name = a.doctor_name)
+          AND NOT (SELECT ${preferredSuperseded("a")})
+        ORDER BY a.preferred_date, a.preferred_time_slot`,
+        [start, end],
+      ),
+      bookableDoctors(),
+    ]);
 
+    const items = [
+      ...rows.map((a) => ({ ...a, plan: "booking" })),
+      ...plans.rows.map((a) => ({ ...a, plan: "preferred" })),
+    ]
+      .filter((a) => a.doctor_id)
+      .sort(
+        (x, y) =>
+          x.appointment_date.localeCompare(y.appointment_date) ||
+          String(x.time_slot).localeCompare(String(y.time_slot)),
+      );
     const conflicts = [];
-    for (const a of rows) {
-      const doctorId = a.doctor_id || (await resolveDoctorIdByName(a.doctor_name));
-      if (!doctorId) continue; // unknown/legacy doctor name — skip
-      const av = await isSlotAvailable(doctorId, a.appointment_date, a.time_slot);
-      if (av.available) continue;
-      // Only doctor-unavailability conflicts (skip free-form slots and capacity).
-      if (av.reason === "unknown_slot" || av.reason === "full") continue;
-      const scheduleGap = av.reason === "not_working" || (av.reason === "break" && !av.time_off_id);
-      if (scheduleGap && !labelSpan(a.time_slot)) continue;
-      const suggested = await findAvailableDoctors(a.appointment_date, a.time_slot, {
-        excludeDoctorId: doctorId,
-      });
-      conflicts.push({
-        appointment_id: a.id,
-        patient_id: a.patient_id,
-        patient_name: a.patient_name,
-        file_no: a.file_no,
-        phone: a.phone,
-        appointment_date: a.appointment_date,
-        time_slot: a.time_slot,
-        current_doctor: a.doctor_name,
-        status: a.status,
-        reason: av.reason,
-        detail: av.detail || null,
-        suggested_doctors: suggested,
-      });
+    if (items.length) {
+      const owners = await doctorsById([...new Set(items.map((a) => a.doctor_id))]);
+      const everyone = [
+        ...new Map([...candidates, ...owners.values()].map((d) => [d.id, d])).values(),
+      ];
+      const dates = [...new Set(items.map((a) => a.appointment_date))];
+      const verdict = await verdictsAcrossDates(everyone, dates);
+      for (const a of items) {
+        const owner = owners.get(a.doctor_id);
+        if (!owner) continue;
+        const av = verdict(owner, a.appointment_date, a.time_slot);
+        if (av.available) continue;
+        if (["unknown_slot", "full", "unknown_doctor"].includes(av.reason)) continue;
+        const scheduleGap =
+          av.reason === "not_working" || (av.reason === "break" && !av.time_off_id);
+        if (scheduleGap && (a.plan === "preferred" || !labelSpan(a.time_slot))) continue;
+        conflicts.push({
+          appointment_id: a.id,
+          plan: a.plan,
+          patient_id: a.patient_id,
+          patient_name: a.patient_name,
+          file_no: a.file_no,
+          phone: a.phone,
+          appointment_date: a.appointment_date,
+          time_slot: a.time_slot,
+          current_doctor: a.doctor_name,
+          status: a.status,
+          reason: av.reason,
+          detail: av.detail || null,
+          suggested_doctors: rankAvailable(
+            candidates.filter((d) => d.id !== a.doctor_id),
+            (d) => verdict(d, a.appointment_date, a.time_slot),
+          ),
+        });
+      }
     }
     res.json({ from: start, to: end, count: conflicts.length, conflicts });
   } catch (e) {

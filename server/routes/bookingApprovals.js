@@ -2,6 +2,7 @@ import { Router } from "express";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
 import { approvalsReady } from "../services/slots/approvalStore.js";
+import { slotOfAppointment } from "../services/slots/capacityGuard.js";
 import {
   approvalCounts,
   approveBooking,
@@ -26,14 +27,18 @@ router.get("/booking-approvals/latest", async (req, res) => {
     if (!ids.length || !(await approvalsReady())) return res.json([]);
     const { rows } = await pool.query(
       `SELECT DISTINCT ON (appointment_id) appointment_id, status, patient_type, slot_label,
-              limit_at_request AS limit, reason,
+              limit_at_request AS limit, reason, doctor_id, appointment_date::text AS date,
               to_jsonb(booking_approvals)->>'request_reason' AS request_reason
          FROM booking_approvals
         WHERE appointment_id = ANY($1::int[]) AND status <> 'withdrawn'
         ORDER BY appointment_id, id DESC`,
       [ids],
     );
-    res.json(rows);
+    const stillHolds = async (a) =>
+      a.status === "rejected" ||
+      (await slotOfAppointment(a.appointment_id, a.doctor_id, a.date)) === a.slot_label;
+    const held = await Promise.all(rows.map(stillHolds));
+    res.json(rows.filter((_, i) => held[i]).map(({ doctor_id: _doctor, date: _date, ...a }) => a));
   } catch (e) {
     handleError(res, e, "Booking approvals");
   }

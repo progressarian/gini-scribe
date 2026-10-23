@@ -2,7 +2,13 @@ import pool from "../../config/db.js";
 import { SCHEDULED_ROLES } from "../../../shared/staffRoles.js";
 import { activeTemplates } from "./templateStore.js";
 import { bookingsOutsideTemplate } from "./bookingImpact.js";
-import { insertTemplateVersion } from "./templateWrites.js";
+import {
+  clearsReady,
+  insertClearVersion,
+  insertTemplateVersion,
+  laterVersions,
+  withdrawLaterVersions,
+} from "./templateWrites.js";
 
 export { APPLY_BATCH } from "../../../shared/slotTemplates.js";
 
@@ -49,42 +55,61 @@ const prettyDay = (iso) =>
     timeZone: "UTC",
   });
 
+async function inEffectOn(doctorIds, date, client) {
+  const { rows } = await client.query(
+    `SELECT DISTINCT ON (doctor_id) doctor_id, effective_from::text,
+            COALESCE((to_jsonb(t) ->> 'clears')::boolean, FALSE) AS clears
+       FROM doctor_slot_templates t
+      WHERE doctor_id = ANY($1::int[]) AND status = 'active' AND effective_from <= $2::date
+      ORDER BY doctor_id, effective_from DESC`,
+    [doctorIds, date],
+  );
+  return new Map(rows.map((r) => [r.doctor_id, r]));
+}
+
 async function planFor(doctorIds, template, from, until, client) {
   const key = rulesKey(template);
   const after = until ? shiftDay(until, 1) : null;
-  const [atFrom, atAfter, before, inside] = await Promise.all([
+  const [atFrom, later, rawAfter, rulesAfter, canClear] = await Promise.all([
     activeTemplates(doctorIds, from, { client }),
+    laterVersions(doctorIds, from, until, { client }),
+    after ? inEffectOn(doctorIds, after, client) : new Map(),
     after ? activeTemplates(doctorIds, after, { client }) : new Map(),
-    after ? activeTemplates(doctorIds, shiftDay(from, -1), { client }) : new Map(),
-    after
-      ? client.query(
-          `SELECT doctor_id, min(effective_from)::text AS starts
-             FROM doctor_slot_templates
-            WHERE doctor_id = ANY($1) AND status = 'active'
-              AND effective_from > $2::date AND effective_from <= $3::date
-            GROUP BY doctor_id`,
-          [doctorIds, from, until],
-        )
-      : { rows: [] },
+    after ? clearsReady() : false,
   ]);
-  const insideStart = new Map(inside.rows.map((r) => [r.doctor_id, r.starts]));
   const plans = new Map();
   for (const id of doctorIds) {
     const cur = atFrom.get(id);
-    const sameStart = !!cur && cur.effectiveFrom === from && rulesKey(cur) === key;
+    const replaces = later
+      .filter((v) => v.doctor_id === id)
+      .map((v) => ({ effectiveFrom: v.effective_from, clears: v.clears }));
+    const sameStart =
+      !!cur && cur.effectiveFrom === from && rulesKey(cur) === key && !replaces.length;
     let restore = null;
+    let restoreClear = false;
     let conflict = null;
+    let restoreExists = true;
     if (after) {
-      const back = atAfter.get(id);
-      const restoreExists = !!back && back.effectiveFrom === after;
-      if (insideStart.has(id))
-        conflict = `Has a schedule change starting ${prettyDay(insideStart.get(id))}, inside this period. Withdraw it on their Schedule tab or untick this doctor.`;
-      else if (!restoreExists) {
-        restore = back && back.effectiveFrom < from ? back : before.get(id) || null;
-        if (!restore) conflict = "Has no earlier schedule to go back to after the end date.";
+      const back = rawAfter.get(id);
+      restoreExists = !!back && back.effective_from === after;
+      if (!restoreExists) {
+        if (!back) conflict = "Has no earlier schedule to go back to after the end date.";
+        else if (back.clears) {
+          if (canClear) restoreClear = true;
+          else
+            conflict =
+              "Its schedule is cleared after the end date; run the clear-schedule update first.";
+        } else restore = rulesAfter.get(id) || null;
       }
-      plans.set(id, { unchanged: sameStart && restoreExists, conflict, restore, after });
-    } else plans.set(id, { unchanged: sameStart, conflict: null, restore: null, after: null });
+    }
+    plans.set(id, {
+      unchanged: sameStart && restoreExists,
+      conflict,
+      restore,
+      restoreClear,
+      replaces,
+      after,
+    });
   }
   return plans;
 }
@@ -110,6 +135,7 @@ export async function previewApply(doctors, template, effectiveFrom, until = nul
       doctor_name: d.name,
       unchanged: plan.unchanged,
       conflict: plan.conflict,
+      replaces: plan.replaces,
       ...impact,
     });
   }
@@ -146,6 +172,7 @@ export async function applyBatch(
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
+      await withdrawLaterVersions(client, d.id, effectiveFrom, until, actorId);
       await insertTemplateVersion(client, d.id, template, {
         effectiveFrom,
         note: until ? note || `Until ${prettyDay(until)}` : note,
@@ -157,6 +184,14 @@ export async function applyBatch(
           note: `Back to the usual schedule after ${prettyDay(until)}`,
           actorId,
         });
+      if (plan.restoreClear)
+        await insertClearVersion(
+          client,
+          d.id,
+          plan.after,
+          `Schedule cleared again after ${prettyDay(until)}`,
+          actorId,
+        );
       await client.query("COMMIT");
       saved.push(d.id);
     } catch (e) {

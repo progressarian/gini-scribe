@@ -378,11 +378,11 @@ export function usePatientsByPhone(phone) {
   });
 }
 
-export function useDoctorConflicts(date, enabled = true) {
+export function useDoctorConflicts(enabled = true) {
   return useQuery({
-    queryKey: qk.ghm.conflicts(date),
+    queryKey: qk.ghm.conflicts("upcoming"),
     queryFn: async () => {
-      const { data } = await api.get(`/api/appointments/conflicts?date=${date}`);
+      const { data } = await api.get(`/api/appointments/conflicts`);
       return arr(data?.conflicts);
     },
     enabled,

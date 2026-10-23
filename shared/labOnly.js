@@ -36,10 +36,20 @@ export const LAB_ONLY_STEP_NAMES = {
 
 const LAB_LEG = ["blood_sample", "lab_processing_2", "report_upload"];
 
-export function labOnlyJourney(steps, catalog = [], { hasBilling = false, withLeg = false } = {}) {
+export const labOnlyName = (step) => LAB_ONLY_STEP_NAMES[step.catalogId] || step.name;
+
+export function labOnlyJourney(
+  steps,
+  catalog = [],
+  { hasBilling = false, withLeg = false, saved = false } = {},
+) {
   const entry = (id) => catalog.find((c) => c.id === id);
   const chainOf = (s) => s.chainStatus ?? entry(s.catalogId)?.chain_status ?? null;
   const kept = steps.filter((s) => labOnlyKeepsStep({ ...s, chainStatus: chainOf(s) }));
+  if (saved)
+    return kept
+      .filter((s) => !(hasBilling && s.catalogId === "lab_billing"))
+      .map((s) => ({ ...s, name: labOnlyName(s) }));
   const own = (id) => kept.find((s) => s.catalogId === id);
   const fromCatalog = (id) => {
     const c = entry(id);
@@ -79,3 +89,29 @@ export const isInvestigationVisit = (row) =>
   String(row?.visit_type || "")
     .trim()
     .toLowerCase() === "investigation" || isLabOnlyDoctor(row?.doctor_name);
+
+export const PROCEDURE_STEP = "procedure";
+
+export const procedureStep = (catalogRow, names) =>
+  catalogRow && names?.length
+    ? {
+        catalogId: PROCEDURE_STEP,
+        name: names.join(" + "),
+        minutes: catalogRow.default_duration_min,
+        station: catalogRow.station,
+        role: catalogRow.assigned_role,
+        chainStatus: null,
+        source: "template",
+        billedIn: "healthray",
+      }
+    : null;
+
+export function withProcedure(steps, procedure, { only = false } = {}) {
+  if (!procedure) return steps;
+  const rest = steps.filter((s) => s.catalogId !== PROCEDURE_STEP);
+  const kept = only
+    ? rest.filter((s) => s.catalogId === "check_in" || (s.source && s.source !== "template"))
+    : rest;
+  const at = kept.findIndex((s) => s.catalogId === "check_in") + 1;
+  return [...kept.slice(0, at), procedure, ...kept.slice(at)];
+}

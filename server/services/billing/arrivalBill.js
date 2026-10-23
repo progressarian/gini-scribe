@@ -10,6 +10,7 @@ import { collectPlannedIn, moneyOn } from "./payments.js";
 import { httpError, inTransaction } from "./transaction.js";
 import { arrivalConsultationIn, testsForDesk } from "./visitLines.js";
 import { arrivalQuote, journeyAddsTests, journeyConsultation } from "./arrivalQuote.js";
+import { healthrayBillWaiting, healthrayLinesAtArrivalIn } from "./healthrayBillLines.js";
 
 export const ALREADY_PAID_SOURCES = [HEALTHRAY_MODE, PREPAID_MODE];
 const NOT_ARRIVED = ["booked", "no_show", "cancelled"];
@@ -66,8 +67,9 @@ async function buildIn(
   await carryOverIn(client, visitId, carried, ctx);
   await arrivalConsultationIn(client, visitId, ctx, journey);
   await testsForDesk(visitId, ctx, client);
+  const healthray = await healthrayLinesAtArrivalIn(client, visitId, ctx);
   await applyDeskChanges(client, visitId, changes, ctx);
-  return { choices, carried, bill: await draftOfVisit(client, visitId) };
+  return { choices, carried, healthray, bill: await draftOfVisit(client, visitId) };
 }
 
 async function viewIn(client, built) {
@@ -76,7 +78,9 @@ async function viewIn(client, built) {
     ...order,
     carried: carried.has(order.orderId),
   }));
-  if (!built.bill) return { billId: null, lines: [], outstanding: 0, carry: offers };
+  const fromHealthray = new Set(built.healthray?.itemIds ?? []);
+  const notMatched = built.healthray?.notMatched ?? [];
+  if (!built.bill) return { billId: null, lines: [], outstanding: 0, carry: offers, notMatched };
   const { rows } = await client.query(
     `SELECT l.service_item_id, l.bill_name, i.kind, l.lab_order_id, l.patient_payable
        FROM bill_lines l JOIN service_items i ON i.id = l.service_item_id
@@ -93,10 +97,12 @@ async function viewIn(client, built) {
       kind: row.kind,
       orderId: row.lab_order_id,
       carried: Boolean(row.lab_order_id && carried.has(row.lab_order_id)),
+      fromHealthray: fromHealthray.has(row.service_item_id),
       amount: paise(row.patient_payable),
     })),
     outstanding: money.balance,
     carry: offers,
+    notMatched,
   };
 }
 
@@ -124,7 +130,7 @@ export async function arrivalBillPreview(
   ctx = {},
   db = pool,
 ) {
-  if (!asList(skip).length) {
+  if (!asList(skip).length && !(await healthrayBillWaiting(db, visitId))) {
     const quote = await arrivalQuote(visitId, { add, remove, plan }, ctx, db).catch((error) => {
       console.warn(`[billing] arrival quote fell back for visit ${visitId}: ${error.message}`);
       return null;

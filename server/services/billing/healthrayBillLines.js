@@ -58,6 +58,31 @@ async function itemsFor(db, names) {
   return new Map(rows.map((row) => [row.name, row.item_id]));
 }
 
+export async function billedProcedures(db, bill, skipNames = new Set()) {
+  if (bill?.status !== "billed") return [];
+  const lines = (bill.items || []).filter(
+    (line) =>
+      isLiveBillItem(line) &&
+      line.desc &&
+      line.category !== "consultation" &&
+      line.category !== "lab" &&
+      !skipNames.has(line.desc),
+  );
+  if (!lines.length) return [];
+  const matched = await itemsFor(
+    db,
+    lines.map((line) => line.desc),
+  );
+  const ids = [...new Set([...matched.values()].filter(Boolean))];
+  if (!ids.length) return [];
+  const { rows } = await db.query(
+    `SELECT id, name FROM service_items WHERE id = ANY($1::int[]) AND kind = 'procedure'`,
+    [ids],
+  );
+  const nameOf = new Map(rows.map((row) => [row.id, row.name]));
+  return [...new Set(lines.map((line) => nameOf.get(matched.get(line.desc))).filter(Boolean))];
+}
+
 async function candidatesFor(db, bill) {
   const { rows: stored } = await db.query(
     `SELECT items, read_at FROM giniflow_patient_bills
@@ -236,6 +261,57 @@ export async function namesPaidAtReception(client, visitId) {
   return new Set(held.orders.flatMap((order) => order.tests).map(nameKey));
 }
 
+const billableDue = (found) =>
+  (found?.due ?? [])
+    .filter(({ item }) => !item.removed)
+    .map(({ line, item }) => ({ line, item, priced: needsHealthrayPrice(item) }))
+    .filter(({ line, priced }) => !priced || Number(line.amount) > 0);
+
+export async function healthrayBillWaiting(db, visitId) {
+  const { rows } = await db.query(
+    `SELECT EXISTS (
+       SELECT 1 FROM giniflow_visits v
+         JOIN giniflow_patient_bills b
+           ON b.patient_id = v.patient_id AND b.bill_date = v.visit_date AND b.status = 'billed'
+         CROSS JOIN LATERAL jsonb_array_elements(COALESCE(b.items, '[]'::jsonb)) AS line
+        WHERE v.id = $1 AND line->>'category' IS DISTINCT FROM 'consultation'
+     ) AS waiting`,
+    [visitId],
+  );
+  return rows[0].waiting;
+}
+
+export async function healthrayLinesAtArrivalIn(client, visitId, ctx) {
+  const { rows } = await client.query(
+    `SELECT id, patient_id, visit_date::text AS visit_date FROM giniflow_visits WHERE id = $1`,
+    [visitId],
+  );
+  const found = rows.length
+    ? await candidatesFor(client, {
+        id: null,
+        visit_id: rows[0].id,
+        patient_id: rows[0].patient_id,
+        visit_date: rows[0].visit_date,
+      })
+    : null;
+  if (!found) return { itemIds: [], notMatched: [] };
+  const due = billableDue(found);
+  const batch = due.length
+    ? await addLinesToDraftIn(
+        client,
+        visitId,
+        due.map(({ line, item, priced }) => lineInput(line, item.id, priced)),
+        ctx,
+      )
+    : { added: [] };
+  const unmatched = found.notMatched.filter((line) => line.amount > 0);
+  const atReception = unmatched.length ? await namesPaidAtReception(client, visitId) : new Set();
+  return {
+    itemIds: batch.added.map((index) => due[index].item.id),
+    notMatched: unmatched.filter((line) => !atReception.has(nameKey(line.desc))),
+  };
+}
+
 const lineInput = (line, itemId, priced) => ({
   item_id: itemId,
   source: "added",
@@ -275,10 +351,7 @@ export async function healthrayLinesForDesk(visitId, ctx, db = pool) {
           skipped.push({ line: line.desc, message: error.message });
         }
       };
-      const due = (found?.due ?? [])
-        .filter(({ item }) => !item.removed)
-        .map(({ line, item }) => ({ line, item, priced: needsHealthrayPrice(item) }))
-        .filter(({ line, priced }) => !priced || Number(line.amount) > 0);
+      const due = billableDue(found);
       const batch = await addLinesToDraftIn(
         client,
         visit.id,

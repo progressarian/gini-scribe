@@ -356,4 +356,51 @@ test.describe
     ]);
     expect(after.status).toBe("cancelled");
   });
+
+  test("10. saving from an earlier date replaces a later planned schedule, after a warning", async ({
+    page,
+  }) => {
+    const api = await apiAs("admin");
+    const planned = await api.post(`/api/doctors/${doctor.id}/slot-templates`, {
+      data: {
+        effective_from: MONDAY,
+        template: {
+          partialLast: "drop",
+          hours: [{ weekday: 1, start: "09:00", end: "12:00", slotMinutes: 30 }],
+          breaks: [],
+        },
+        note: "G117 planned later",
+      },
+    });
+    await api.dispose();
+    expect(planned.status()).toBe(201);
+    await page.reload();
+    await page
+      .getByRole("list", { name: "Staff list" })
+      .getByRole("button")
+      .filter({ hasText: doctor.name })
+      .click();
+    await page.getByRole("tab", { name: "Schedule" }).click();
+    await expect(page.getByText(`A new schedule starts on ${longDate(MONDAY)}`)).toBeVisible();
+
+    const start = istDay(2);
+    await edit(page);
+    await page.getByLabel("Mon hours 1 to").fill("12:00");
+    await page.getByLabel("Applies from").fill(start);
+    const warning = page.getByRole("status").filter({ hasText: "Saving replaces" });
+    await expect(warning).toContainText(`schedule from`);
+    await page.getByRole("button", { name: /^Save/ }).click();
+    await expect(page.getByText(/It replaced 1 later change/)).toBeVisible();
+    const left = await query(
+      `SELECT effective_from::text, status FROM doctor_slot_templates
+        WHERE doctor_id = $1 AND effective_from >= $2::date ORDER BY effective_from, id`,
+      [doctor.id, start],
+    );
+    expect(left.rows.filter((r) => r.status === "active").map((r) => r.effective_from)).toEqual([
+      start,
+    ]);
+    expect(left.rows.filter((r) => r.effective_from === MONDAY).map((r) => r.status)).toContain(
+      "withdrawn",
+    );
+  });
 });

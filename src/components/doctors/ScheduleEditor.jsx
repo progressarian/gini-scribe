@@ -277,6 +277,10 @@ export default function ScheduleEditor({
     allErrors.filter((e) => e.field === prefix || e.field.startsWith(`${prefix}.`));
   const dirty = !!data && JSON.stringify(draft) !== JSON.stringify(rulesOf(current));
   const pastStart = effectiveFrom && data && effectiveFrom < data.today;
+  const replacing =
+    target === "one" && effectiveFrom
+      ? upcoming.filter((v) => v.effectiveFrom >= effectiveFrom)
+      : [];
 
   const resetResults = () => {
     setCheck(null);
@@ -334,13 +338,19 @@ export default function ScheduleEditor({
     });
 
   const firstWorkingDay = WEEK_ORDER.find((w) => draft.hours.some((h) => h.weekday === w));
-  const copyFirstDay = () =>
+  const copyTargets = WEEK_ORDER.filter(
+    (w) => w !== firstWorkingDay && (w !== 0 || draft.hours.some((h) => h.weekday === 0)),
+  );
+  const copyFirstDay = () => {
     edit((d) => {
       const model = d.hours.filter((h) => h.weekday === firstWorkingDay);
-      const working = [...new Set(d.hours.map((h) => h.weekday))];
-      d.hours = working.flatMap((w) => model.map((h) => ({ ...h, weekday: w })));
+      d.hours = [firstWorkingDay, ...copyTargets].flatMap((w) =>
+        model.map((h) => ({ ...h, weekday: w })),
+      );
       return d;
     });
+    toast(`${WEEKDAY_NAMES[firstWorkingDay]}'s hours copied to ${dayRuns(copyTargets)}`, "success");
+  };
 
   const addBreak = () =>
     edit((d) => {
@@ -403,7 +413,12 @@ export default function ScheduleEditor({
     setSaving(true);
     try {
       const r = await api.post(`/api/doctors/${doctorId}/slot-templates`, payload());
-      toast("Schedule saved", "success");
+      toast(
+        r.data.replaced
+          ? `Schedule saved. It replaced ${r.data.replaced} later change${r.data.replaced === 1 ? "" : "s"}.`
+          : "Schedule saved",
+        "success",
+      );
       queryClient.invalidateQueries({ queryKey: qk.ghm.any.availability });
       setReload((n) => n + 1);
       onChange?.();
@@ -888,13 +903,13 @@ export default function ScheduleEditor({
                 );
               })}
             </div>
-            {firstWorkingDay != null && (
+            {firstWorkingDay != null && copyTargets.length > 0 && (
               <button
                 type="button"
                 className="docmgmt-secondary docmgmt-small"
                 onClick={copyFirstDay}
               >
-                Copy {WEEKDAY_NAMES[firstWorkingDay]} to all working days
+                Copy {WEEKDAY_NAMES[firstWorkingDay]} to {dayRuns(copyTargets)}
               </button>
             )}
             <FieldErrors errors={fieldErrors("hours").filter((e) => e.field === "hours")} />
@@ -1120,6 +1135,14 @@ export default function ScheduleEditor({
                 had before.
               </p>
             )}
+            {replacing.length > 0 && !pastStart && (
+              <p className="docmgmt-note warn" role="status">
+                Saving replaces {replacing.length === 1 ? "the later change" : "the later changes"}{" "}
+                already planned from {shortDate(effectiveFrom)}:{" "}
+                {replacing.map(replacedLabel).join(", ")}. This schedule applies to every day from{" "}
+                {shortDate(effectiveFrom)} instead.
+              </p>
+            )}
 
             <h4 className="docmgmt-substep">Apply to</h4>
             <fieldset className="docmgmt-radios">
@@ -1308,6 +1331,16 @@ export default function ScheduleEditor({
                 <p>
                   From {longDate(addDays(until, 1))} each doctor goes back to the schedule they had
                   before.
+                </p>
+              )}
+              {many.some((d) => !d.unchanged && d.replaces?.length) && (
+                <p>
+                  Later changes already planned in this period are replaced:{" "}
+                  {many
+                    .filter((d) => !d.unchanged && d.replaces?.length)
+                    .map((d) => `${d.doctor_name} (${d.replaces.map(replacedLabel).join(", ")})`)
+                    .join("; ")}
+                  .
                 </p>
               )}
               {conflicts.length > 0 && (
@@ -1503,6 +1536,11 @@ function BookingImpact({ result, effectiveFrom, bare = false }) {
   );
 }
 
+const replacedLabel = (v) =>
+  v.clears
+    ? `clear from ${shortDate(v.effectiveFrom)}`
+    : `schedule from ${shortDate(v.effectiveFrom)}`;
+
 function ManyImpact({ doctors, effectiveFrom, until }) {
   const outside = doctors.reduce((n, d) => n + d.affected.length, 0);
   return (
@@ -1534,9 +1572,16 @@ function ManyImpact({ doctors, effectiveFrom, until }) {
                   ? "Already has it — skipped"
                   : d.conflict
                     ? d.conflict
-                    : until
-                      ? `New version, back to usual on ${shortDate(addDays(until, 1))}`
-                      : "New version"}
+                    : [
+                        until
+                          ? `New version, back to usual on ${shortDate(addDays(until, 1))}`
+                          : "New version",
+                        d.replaces?.length
+                          ? `replaces ${d.replaces.map(replacedLabel).join(", ")}`
+                          : null,
+                      ]
+                        .filter(Boolean)
+                        .join("; ")}
               </td>
             </tr>
           ))}

@@ -262,6 +262,10 @@ function DoneRow({ d, active, onPick }) {
       onClick={() => onPick(d.visitId)}
     >
       <div className="si-name">{d.name}</div>
+      <div className="si-meta">
+        {d.age}
+        {(d.sex || "")[0] || ""} · {d.fileNo}
+      </div>
       {d.notTakenReason ? (
         <div className="si-meta">
           {clock(d.recordedAt)} · <span className="si-na">Vitals NA</span> · {d.notTakenReason}

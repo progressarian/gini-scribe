@@ -11,13 +11,7 @@ export async function bookingsOutsideTemplate(
 ) {
   const doctor = await resolveDoctor(doctorId, { client });
   if (!doctor) return { affected: [], unreadable: 0, until: null };
-  const next = await client.query(
-    `SELECT min(effective_from)::text AS until FROM doctor_slot_templates
-      WHERE doctor_id = $1 AND status = 'active' AND effective_from > $2::date`,
-    [doctorId, effectiveFrom],
-  );
-  const nextStart = next.rows[0].until;
-  const until = endExclusive && (!nextStart || endExclusive < nextStart) ? endExclusive : nextStart;
+  const until = endExclusive;
   const { rows } = await client.query(
     `SELECT a.id AS appointment_id, a.patient_id, a.patient_name, a.file_no,
             a.appointment_date::text, a.time_slot, a.status,

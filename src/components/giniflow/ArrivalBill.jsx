@@ -1,12 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { rupeesFromPaise } from "../../../shared/labPayment.js";
 import { ITEM_SEARCH_MIN, useItemSearch } from "../../queries/hooks/useBilling";
 import { HEALTHRAY_LABEL, PAID_MODE_LABEL, PAYMENT_MODE_LABEL } from "../billing/counter/lineText";
 
 const COLLECT = "collect";
+const HEALTHRAY_SOURCE = "healthray";
 const SOURCES = [
   [COLLECT, "Collect now"],
-  ["healthray", HEALTHRAY_LABEL],
+  [HEALTHRAY_SOURCE, HEALTHRAY_LABEL],
   ["prepaid", PAID_MODE_LABEL.prepaid],
 ];
 
@@ -373,6 +374,20 @@ export default function ArrivalBill({
   shiftOpen = true,
   visitId,
 }) {
+  const defaulted = useRef(new Set());
+  const paidInHealthray = (preview?.lines || []).filter(
+    (line) => line.fromHealthray && !defaulted.current.has(line.itemId),
+  );
+  useEffect(() => {
+    if (!paidInHealthray.length) return;
+    const paid = { ...choices.paid };
+    for (const line of paidInHealthray) {
+      defaulted.current.add(line.itemId);
+      paid[line.itemId] ??= HEALTHRAY_SOURCE;
+    }
+    onChange({ ...choices, paid });
+  }, [paidInHealthray.map((line) => line.itemId).join(",")]);
+
   if (isLoading && !preview) return <div className="dp-hint">Working out the bill…</div>;
   if (isError && !preview) {
     return (
@@ -431,6 +446,13 @@ export default function ArrivalBill({
       </div>
       <CarriedTests carry={preview.carry} choices={choices} onChange={onChange} />
       {preview.journeyNote && <div className="dp-hint">{preview.journeyNote}</div>}
+      {preview.notMatched?.length > 0 && (
+        <div className="dp-hint">
+          On the HealthRay bill, not in the service list:{" "}
+          {preview.notMatched.map((line) => `${line.desc} ${rupees(line.amount)}`).join(", ")} —
+          bill it from the Bill tab
+        </div>
+      )}
       {lines.length === 0 ? (
         <div className="dp-hint">Nothing to bill yet — the consultant may still order tests.</div>
       ) : (
@@ -453,6 +475,7 @@ export default function ArrivalBill({
                 <th scope="row">
                   {line.name}
                   {line.carried && <span className="ab-tag">from the last visit</span>}
+                  {line.fromHealthray && <span className="ab-tag">on the HealthRay bill</span>}
                 </th>
                 <td className="ab-amt">{rupees(line.amount)}</td>
                 {!covered && (

@@ -618,6 +618,7 @@ export const reassignSingleSchema = z.object({
   reason: optStr,
   trigger: optStr,
   over_limit_reason: overLimitReason,
+  plan: z.enum(["booking", "preferred"]).optional(),
 });
 
 // ── Gini Flow (docs/gini-flow/) ─────────────────────────────────────────────

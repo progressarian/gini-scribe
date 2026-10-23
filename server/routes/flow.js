@@ -30,6 +30,7 @@ import {
   deriveStage,
   WAITING_ROLE,
 } from "../services/flow/journey.js";
+import { labOnlyKeepsStep } from "../../shared/labOnly.js";
 import { fetchPatientTransactions } from "../services/healthray/client.js";
 import { transactionsToBilling } from "../services/healthray/billingExtractor.js";
 import { CLASSIFIER_TYPES } from "../services/documentClassifier.js";
@@ -937,7 +938,11 @@ router.put("/flow/templates/:visitType", requireCapability(CAP.ADMIN), async (re
   try {
     await client.query("BEGIN");
 
-    const type = await client.query("SELECT 1 FROM flow_visit_types WHERE id=$1", [visitTypeId]);
+    const type = await client.query(
+      `SELECT COALESCE((to_jsonb(t) ->> 'for_lab_only')::boolean, FALSE) AS lab_only
+         FROM flow_visit_types t WHERE id=$1`,
+      [visitTypeId],
+    );
     if (!type.rows.length) {
       await client.query("ROLLBACK");
       return res.status(404).json({ error: "Visit type not found" });
@@ -992,6 +997,22 @@ router.put("/flow/templates/:visitType", requireCapability(CAP.ADMIN), async (re
         const found = new Set(known.rows.map((r) => r.id));
         await client.query("ROLLBACK");
         return res.status(400).json({ error: `Unknown step: ${ids.find((i) => !found.has(i))}` });
+      }
+    }
+
+    if (type.rows[0].lab_only && ids.length) {
+      const { rows: chained } = await client.query(
+        "SELECT id, name, chain_status FROM flow_step_catalog WHERE id = ANY($1)",
+        [ids],
+      );
+      const consult = chained.find(
+        (c) => !labOnlyKeepsStep({ catalogId: c.id, chainStatus: c.chain_status }),
+      );
+      if (consult) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({
+          error: `${consult.name} can't be part of the Lab only journey: lab-only patients never see a doctor or pass the consultation billing. Remove it and save again.`,
+        });
       }
     }
 

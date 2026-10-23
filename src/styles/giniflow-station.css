@@ -2177,7 +2177,7 @@
 }
 .gf .sq-done {
   display: block;
-  width: 100%;
+  width: calc(100% - 28px);
   text-align: left;
   font: inherit;
   color: inherit;

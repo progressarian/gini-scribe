@@ -21,7 +21,7 @@
 // ============================================================================
 import pool from "../config/db.js";
 import { inLunch, inWorkingHours, profileFromRow } from "./slots/profileRules.js";
-import { activeTemplates } from "./slots/templateStore.js";
+import { activeTemplates, templatesOnDates } from "./slots/templateStore.js";
 import { approvalsReady } from "./slots/approvalStore.js";
 import { overLimitFor, patientTypeSql } from "../../shared/slotCapacity.js";
 import {
@@ -177,65 +177,37 @@ function slotVerdict(day, slotOrTime, holidayRemark) {
   return { available: false, reason: hit.blocked_by, detail, ...base };
 }
 
-export async function isSlotAvailable(doctorId, dateISO, slotLabel, { client = pool } = {}) {
-  const doctor = await resolveDoctor(doctorId, { client });
-  if (!doctor) return { available: false, reason: "unknown_doctor" };
-
-  const ctx = await loadDayContext([doctor], dateISO, client);
-  const day = dayFromContext(doctor, dateISO, ctx);
-  if (day) return slotVerdict(day, slotLabel, ctx.holidayRemark);
-
-  const weekday = (await client.query("SELECT EXTRACT(DOW FROM $1::date)::int AS w", [dateISO]))
-    .rows[0].w;
-  const profile = await getProfile(doctorId, client);
-
-  if (profile.offWeekdays.includes(weekday)) return { available: false, reason: "day_off" };
-
-  const hol = await client.query("SELECT remarks FROM clinic_holidays WHERE holiday_date=$1", [
-    dateISO,
-  ]);
-  if (hol.rows.length)
-    return { available: false, reason: "clinic_holiday", detail: hol.rows[0].remarks || null };
-
-  const st = (
-    await client.query("SELECT start_time, end_time FROM slot_catalog WHERE label=$1", [slotLabel])
-  ).rows[0];
+function legacyVerdict(doctor, slotLabel, ctx) {
+  const profile = ctx.profiles.get(doctor.id) || profileFromRow(undefined);
+  if (profile.offWeekdays.includes(ctx.weekday)) return { available: false, reason: "day_off" };
+  if (ctx.holiday)
+    return { available: false, reason: "clinic_holiday", detail: ctx.holiday.remarks || null };
+  const st = ctx.catalog.get(slotLabel);
   if (!st) return { available: false, reason: "unknown_slot" };
   if (!inWorkingHours(profile, st.start_time)) return { available: false, reason: "not_working" };
   if (inLunch(profile, st.start_time)) return { available: false, reason: "break" };
-
-  const unav = await client.query(
-    `SELECT type, reason, slot_labels, start_time::text, end_time::text FROM doctor_unavailability
-      WHERE doctor_id=$1 AND status='active'
-        AND $2::date BETWEEN start_date AND end_date`,
-    [doctorId, dateISO],
+  const hit = unavailabilityFor(
+    ctx.unav.filter((u) => u.doctor_id === doctor.id),
+    timeSpan(st.start_time, st.end_time),
+    slotLabel,
   );
-  const hit = unavailabilityFor(unav.rows, timeSpan(st.start_time, st.end_time), slotLabel);
   if (hit) return { available: false, reason: hit.type, detail: hit.reason || null };
-
-  const cfg = await client.query(
-    `SELECT total_capacity, is_blocked, block_reason
-       FROM appointment_slots
-      WHERE doctor_name = ANY($1) AND slot_date=$2 AND time_slot=$3 LIMIT 1`,
-    [doctor.names, dateISO, slotLabel],
-  );
-  if (cfg.rows[0]?.is_blocked)
-    return { available: false, reason: "manual_block", detail: cfg.rows[0].block_reason || null };
-
-  // No per-slot cap unless reception set one on appointment_slots ⇒ unlimited.
-  const capacity = cfg.rows[0]?.total_capacity ?? null;
-  const booked = (
-    await client.query(
-      `SELECT COUNT(*)::int AS n FROM appointments
-        WHERE doctor_name = ANY($1) AND appointment_date=$2 AND time_slot=$3
-          AND ${ACTIVE_BOOKING_SQL}`,
-      [doctor.names, dateISO, slotLabel],
-    )
-  ).rows[0].n;
+  const mine = (r) => doctor.names.includes(r.doctor_name) && r.time_slot === slotLabel;
+  const cfg = ctx.cfg.find(mine);
+  if (cfg?.is_blocked)
+    return { available: false, reason: "manual_block", detail: cfg.block_reason || null };
+  const capacity = cfg?.total_capacity ?? null;
+  const booked = ctx.booked.filter(mine).reduce((n, r) => n + r.n, 0);
   if (capacity != null && booked >= capacity)
     return { available: false, reason: "full", capacity, booked };
-
   return { available: true, capacity, booked };
+}
+
+export async function isSlotAvailable(doctorId, dateISO, slotLabel, { client = pool } = {}) {
+  const doctor = await resolveDoctor(doctorId, { client });
+  if (!doctor) return { available: false, reason: "unknown_doctor" };
+  const verdict = await verdictsAcrossDates([doctor], [dateISO], { client });
+  return verdict(doctor, dateISO, slotLabel);
 }
 
 /**
@@ -306,30 +278,122 @@ async function legacyDayAvailability(doctor, dateISO, client) {
   });
 }
 
-/**
- * Across all active doctors, who is available for date+slot. Ranked: same
- * specialty/role as the vacated doctor first, then most free capacity.
- */
-export async function findAvailableDoctors(
-  dateISO,
-  slotLabel,
-  { excludeDoctorId = null, role = null, specialty = null, patientType = null, client = pool } = {},
-) {
-  const docs = await client.query(
-    `SELECT id, name, short_name, role, specialty FROM doctors
-      WHERE is_active AND lower(role) IN ('consultant','mo')
-        AND ($1::int IS NULL OR id <> $1) ORDER BY name`,
-    [excludeDoctorId],
-  );
-  const doctors = docs.rows.map((d) => ({ ...d, names: [d.name, d.short_name].filter(Boolean) }));
-  const ctx = await loadDayContext(doctors, dateISO, client);
+const withNames = (d) => ({ ...d, names: [d.name, d.short_name].filter(Boolean) });
 
+export async function doctorsById(ids, { client = pool } = {}) {
+  const { rows } = await client.query(
+    "SELECT id, name, short_name, role, specialty, is_active FROM doctors WHERE id = ANY($1::int[])",
+    [ids],
+  );
+  return new Map(rows.map((d) => [d.id, withNames(d)]));
+}
+
+export async function bookableDoctors({ client = pool } = {}) {
+  const { rows } = await client.query(
+    `SELECT id, name, short_name, role, specialty, is_active FROM doctors
+      WHERE is_active AND lower(role) IN ('consultant','mo') ORDER BY name`,
+  );
+  return rows.map(withNames);
+}
+
+export async function verdictsAcrossDates(doctors, dates, { client = pool } = {}) {
+  const ids = doctors.map((d) => d.id);
+  const names = [...new Set(doctors.flatMap((d) => d.names))];
+  const first = dates.reduce((a, b) => (b < a ? b : a));
+  const last = dates.reduce((a, b) => (b > a ? b : a));
+  const pendingSql = (await approvalsReady(client))
+    ? `EXISTS (SELECT 1 FROM booking_approvals ba
+                WHERE ba.appointment_id = a.id AND ba.status = 'pending')`
+    : "FALSE";
+  const [templates, catalog, hol, unav, cfg, booked, profiles] = await Promise.all([
+    templatesOnDates(ids, dates, { client }),
+    client.query(
+      "SELECT label, start_time::text, end_time::text, is_active FROM slot_catalog ORDER BY sort_order",
+    ),
+    client.query(
+      "SELECT holiday_date::text AS day, remarks FROM clinic_holidays WHERE holiday_date = ANY($1::date[])",
+      [dates],
+    ),
+    client.query(
+      `SELECT id, doctor_id, type, reason, slot_labels, start_time::text, end_time::text,
+              start_date::text, end_date::text
+         FROM doctor_unavailability
+        WHERE doctor_id = ANY($1::int[]) AND status='active'
+          AND start_date <= $3::date AND end_date >= $2::date`,
+      [ids, first, last],
+    ),
+    client.query(
+      `SELECT slot_date::text AS day, doctor_name, time_slot, total_capacity, is_blocked, block_reason
+         FROM appointment_slots WHERE doctor_name = ANY($1) AND slot_date = ANY($2::date[])`,
+      [names, dates],
+    ),
+    client.query(
+      `SELECT a.appointment_date::text AS day, a.doctor_name, a.time_slot,
+              (a.healthray_id IS NOT NULL) AS healthray,
+              ${patientTypeSql("a")} AS patient_type, ${pendingSql} AS pending, COUNT(*)::int n
+         FROM appointments a
+        WHERE a.doctor_name = ANY($1) AND a.appointment_date = ANY($2::date[])
+          AND a.${ACTIVE_BOOKING_SQL}
+        GROUP BY 1, 2, 3, 4, 5, 6`,
+      [names, dates],
+    ),
+    client.query(
+      `SELECT doctor_id, off_weekdays, work_start, work_end, lunch_start, lunch_end
+         FROM doctor_profile WHERE doctor_id = ANY($1::int[])`,
+      [ids],
+    ),
+  ]);
+  const activeCatalog = catalog.rows.filter((r) => r.is_active);
+  const catalogByLabel = new Map(catalog.rows.map((r) => [r.label, r]));
+  const profileMap = new Map(profiles.rows.map((r) => [r.doctor_id, profileFromRow(r)]));
+  const onDay = (rows, date) => rows.filter((r) => r.day === date);
+  const contexts = new Map();
+  const contextFor = (date) => {
+    if (!contexts.has(date)) {
+      const holiday = hol.rows.find((h) => h.day === date) || null;
+      const shared = {
+        unav: unav.rows.filter((u) => u.start_date <= date && u.end_date >= date),
+        cfg: onDay(cfg.rows, date),
+        booked: onDay(booked.rows, date),
+      };
+      contexts.set(date, {
+        day: {
+          templates: templates.get(date) || new Map(),
+          catalog: activeCatalog,
+          isHoliday: !!holiday,
+          holidayRemark: holiday?.remarks || null,
+          ...shared,
+        },
+        legacy: {
+          weekday: new Date(`${date}T00:00:00Z`).getUTCDay(),
+          profiles: profileMap,
+          holiday,
+          catalog: catalogByLabel,
+          ...shared,
+        },
+        days: new Map(),
+      });
+    }
+    return contexts.get(date);
+  };
+  return (doctor, date, slot) => {
+    const ctx = contextFor(date);
+    if (!ctx.days.has(doctor.id)) ctx.days.set(doctor.id, dayFromContext(doctor, date, ctx.day));
+    const day = ctx.days.get(doctor.id);
+    return day
+      ? slotVerdict(day, slot, ctx.day.holidayRemark)
+      : legacyVerdict(doctor, slot, ctx.legacy);
+  };
+}
+
+export function rankAvailable(
+  doctors,
+  verdictOf,
+  { role = null, specialty = null, patientType = null } = {},
+) {
   const out = [];
   for (const d of doctors) {
-    const day = dayFromContext(d, dateISO, ctx);
-    const a = day
-      ? slotVerdict(day, slotLabel, ctx.holidayRemark)
-      : await isSlotAvailable(d.id, dateISO, slotLabel, { client });
+    const a = verdictOf(d);
     if (!a.available) continue;
     out.push({
       doctor_id: d.id,
@@ -342,7 +406,6 @@ export async function findAvailableDoctors(
       over_limit: patientType ? overLimitFor(a, patientType) : null,
     });
   }
-
   out.sort(
     (x, y) =>
       Number(!!x.over_limit) - Number(!!y.over_limit) ||
@@ -351,11 +414,29 @@ export async function findAvailableDoctors(
       y.free_capacity - x.free_capacity ||
       x.doctor_name.localeCompare(y.doctor_name),
   );
-  // JSON can't carry Infinity — expose unlimited as null.
   return out.map((d) => ({
     ...d,
     free_capacity: d.free_capacity === Infinity ? null : d.free_capacity,
   }));
+}
+
+/**
+ * Across all active doctors, who is available for date+slot. Ranked: same
+ * specialty/role as the vacated doctor first, then most free capacity.
+ */
+export async function findAvailableDoctors(
+  dateISO,
+  slotLabel,
+  { excludeDoctorId = null, role = null, specialty = null, patientType = null, client = pool } = {},
+) {
+  const doctors = (await bookableDoctors({ client })).filter((d) => d.id !== excludeDoctorId);
+  if (!doctors.length) return [];
+  const verdict = await verdictsAcrossDates(doctors, [dateISO], { client });
+  return rankAvailable(doctors, (d) => verdict(d, dateISO, slotLabel), {
+    role,
+    specialty,
+    patientType,
+  });
 }
 
 /**

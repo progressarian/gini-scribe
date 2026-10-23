@@ -4,6 +4,7 @@ import { testPriceForVisit } from "../pricing.js";
 import {
   insertLabStepsForOrder,
   insertMachineStepsForOrders,
+  procedureStepFor,
   raiseOrdersFromSteps,
   sampleTakenBeforeVisit,
   labCaseAlreadyReported,
@@ -603,7 +604,7 @@ export async function healthrayBillSteps(patientId, { date = null, db = pool } =
     },
     db,
   );
-  const empty = { labTests: [], machines: [], steps: [], readAt: bill.readAt };
+  const empty = { labTests: [], machines: [], steps: [], procedure: null, readAt: bill.readAt };
   if (bill.deferred && bill.status === "unknown") return { ...empty, status: "loading" };
   if (bill.status === "unknown") {
     return { ...empty, status: "blocked", blockedUntil: await billReadsBlockedUntil(db) };
@@ -627,7 +628,9 @@ export async function healthrayBillSteps(patientId, { date = null, db = pool } =
     ...(labTests.length ? LAB_STEPS : machineIds.length ? ["lab_billing"] : []),
     ...machineIds,
   ];
-  if (!ids.length) return { ...empty, status: "no_tests" };
+  const procedure = await procedureStepFor(db, bill, machines);
+  if (!ids.length)
+    return { ...empty, procedure, status: procedure ? "procedures_only" : "no_tests" };
 
   const { rows: catalog } = await db.query(
     `SELECT id, name, default_duration_min, station, assigned_role, chain_status,
@@ -655,5 +658,6 @@ export async function healthrayBillSteps(patientId, { date = null, db = pool } =
     labTests,
     machines: machineIds.map((id) => machineFor(machines, id)?.name || id),
     steps,
+    procedure,
   };
 }
