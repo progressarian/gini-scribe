@@ -3,7 +3,8 @@ import api from "../../services/api";
 import { toast } from "../../stores/uiStore";
 import ConfirmModal from "../ui/ConfirmModal";
 import ReassignModal, { enrichAffected } from "./ReassignModal";
-import { capacityNote } from "../../../shared/slotCapacity";
+import { CAP_KEYS, PATIENT_TYPES, capacityNote } from "../../../shared/slotCapacity";
+import SlotLimitsPanel from "./SlotLimitsPanel";
 
 const todayISO = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 
@@ -22,6 +23,15 @@ const nowClock = () =>
     hourCycle: "h23",
   });
 
+const longDay = (iso) =>
+  new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-IN", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+
 export default function BookingAvailability({ doctorId, doctor, refresh, onChange }) {
   const [date, setDate] = useState(todayISO());
   const [day, setDay] = useState(null);
@@ -33,6 +43,8 @@ export default function BookingAvailability({ doctorId, doctor, refresh, onChang
   const [unblocking, setUnblocking] = useState(null);
   const [unblockBusy, setUnblockBusy] = useState(false);
   const [reassign, setReassign] = useState(null);
+  const [limiting, setLimiting] = useState(null);
+  const [limitBusy, setLimitBusy] = useState(false);
 
   const stopSelecting = () => {
     setSelecting(false);
@@ -41,6 +53,7 @@ export default function BookingAvailability({ doctorId, doctor, refresh, onChang
   };
 
   useEffect(stopSelecting, [doctorId, date]);
+  useEffect(() => setLimiting(null), [doctorId, date]);
 
   useEffect(() => {
     setLoading(true);
@@ -62,6 +75,49 @@ export default function BookingAvailability({ doctorId, doctor, refresh, onChang
   const blockable = (s) => (s.available || s.blocked_by === "full") && !past(s);
   const selectable = visible.filter(blockable);
   const skipped = visible.length - selectable.length;
+  const limitable = (s) =>
+    !!day?.from_template && !!s.caps && (s.available || s.blocked_by === "full") && !past(s);
+
+  const saveLimits = async ({ caps, reason }) => {
+    setLimitBusy(true);
+    try {
+      const { data } = await api.put(`/api/doctors/${doctorId}/slot-caps/${date}`, {
+        reason,
+        slots: [
+          {
+            start: limiting.start_time.slice(0, 5),
+            ...Object.fromEntries(PATIENT_TYPES.map((t) => [CAP_KEYS[t], caps[t]])),
+          },
+        ],
+      });
+      setDay(data);
+      toast(`${limiting.slot_label} changed for ${date} only`, "success");
+      setLimiting(null);
+      onChange?.();
+    } catch (e) {
+      toast(e.response?.data?.error || "Could not save the numbers. Try again.", "error");
+    } finally {
+      setLimitBusy(false);
+    }
+  };
+
+  const resetLimits = async () => {
+    setLimitBusy(true);
+    try {
+      const { data } = await api.delete(
+        `/api/doctors/${doctorId}/slot-caps/${date}/${limiting.start_time.slice(0, 5)}`,
+      );
+      setDay(data);
+      toast(`${limiting.slot_label} back to the weekly numbers`, "success");
+      setLimiting(null);
+      onChange?.();
+    } catch (e) {
+      toast(e.response?.data?.error || "Could not undo the change. Try again.", "error");
+    } finally {
+      setLimitBusy(false);
+    }
+  };
+
   const toggle = (label) =>
     setPicked((p) => (p.includes(label) ? p.filter((x) => x !== label) : [...p, label]));
 
@@ -150,7 +206,7 @@ export default function BookingAvailability({ doctorId, doctor, refresh, onChang
         <p className="docmgmt-hint">
           {selecting
             ? "Tick the slots to block on this day, give a reason, then block them."
-            : "What patients can actually book with this doctor on the chosen day, including time off. Click a blocked slot to unblock it."}
+            : "What patients can actually book with this doctor on the chosen day, including time off. Click an open slot to change its numbers for this date only, or a blocked slot to unblock it."}
         </p>
         {!selecting && !dayOff && slots.some(blockable) && (
           <button
@@ -201,18 +257,30 @@ export default function BookingAvailability({ doctorId, doctor, refresh, onChang
             const on = picked.includes(s.slot_label);
             const pickable = selecting && blockable(s);
             const unblockable = !selecting && s.time_off_id && s.blocked_by === "break";
-            const Tag = pickable || unblockable ? "button" : "div";
+            const settable = !selecting && !unblockable && limitable(s);
+            const Tag = pickable || unblockable || settable ? "button" : "div";
             return (
               <Tag
                 key={s.slot_label}
                 {...(Tag === "button"
                   ? {
                       type: "button",
-                      "aria-pressed": pickable ? on : undefined,
+                      "aria-pressed": pickable
+                        ? on
+                        : settable
+                          ? limiting?.slot_label === s.slot_label
+                          : undefined,
                       "aria-label": pickable
                         ? `${on ? "Unselect" : "Select"} ${s.slot_label}`
-                        : `Unblock ${s.slot_label}`,
-                      onClick: () => (pickable ? toggle(s.slot_label) : openUnblock(s)),
+                        : settable
+                          ? `Change patients per slot for ${s.slot_label} on this date`
+                          : `Unblock ${s.slot_label}`,
+                      onClick: () =>
+                        pickable
+                          ? toggle(s.slot_label)
+                          : settable
+                            ? setLimiting(s)
+                            : openUnblock(s),
                     }
                   : {})}
                 className={`slotpill ${s.available ? "free" : "blocked"}${on ? " picked" : ""}${
@@ -232,10 +300,32 @@ export default function BookingAvailability({ doctorId, doctor, refresh, onChang
                 {s.available && capacityNote(s) && (
                   <small className="slotpill-caps">{capacityNote(s)}</small>
                 )}
+                {s.cap_source === "date" && (
+                  <small className="slotpill-changed" title={s.date_cap_reason || undefined}>
+                    Changed for this date
+                  </small>
+                )}
               </Tag>
             );
           })}
         </div>
+      )}
+
+      {limiting && (
+        <SlotLimitsPanel
+          key={`${date}|${limiting.slot_label}`}
+          title={limiting.slot_label}
+          context={doctor?.name}
+          note={`${longDay(date)} only · the weekly schedule is not changed`}
+          caps={limiting.caps}
+          needsReason
+          busy={limitBusy}
+          applyLabel="Save for this date"
+          resetLabel={limiting.cap_source === "date" ? "Use the weekly numbers" : undefined}
+          onReset={limiting.cap_source === "date" ? resetLimits : undefined}
+          onApply={saveLimits}
+          onCancel={() => setLimiting(null)}
+        />
       )}
 
       {selecting && (

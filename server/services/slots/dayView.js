@@ -65,8 +65,10 @@ export function templateDay({
   unavailability = [],
   overrides = [],
   bookings = [],
+  dateCaps = [],
 }) {
-  const plan = dayPlan(template, date);
+  const plan = dayPlan(template, date, { dateCaps });
+  const dateCapOf = new Map(dateCaps.map((c) => [c.start, c]));
   const cfg = new Map(overrides.map((o) => [o.time_slot, o]));
   const readable = bookings.map((b) => ({ ...b, minute: bookingMinute(b.time_slot) }));
   const unreadable = readable.filter((b) => b.minute == null).reduce((n, b) => n + b.n, 0);
@@ -136,6 +138,8 @@ export function templateDay({
       detail,
       time_off_id,
       caps: s.caps || capsOf(null),
+      cap_source: s.capSource,
+      date_cap_reason: s.capSource === "date" ? dateCapOf.get(s.start)?.reason || null : null,
       counts: typeCounts(s.startMin, s.endMin),
     };
   });

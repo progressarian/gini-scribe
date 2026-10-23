@@ -1,6 +1,6 @@
 # Doctor slot templates — dynamic slots, off days and named breaks
 
-Status: **steps 1–2 done (production)**, steps 3–6 planned · rev 2, 2026-10-22 · Staff Management → Schedule (`/staff-management`)
+Status: **steps 1–2 done (production)**, steps 3–6 planned · rev 2, 2026-10-22 · Settings → Slot settings → Schedule (`/settings/slots`)
 
 Rev 2 is the result of reviewing rev 1 against the code. The gaps it closes are listed in §11.
 
@@ -276,3 +276,13 @@ Requested from Staff Management: saving a schedule from a date replaces any sche
 - Check bookings returns `replaces` (one doctor) / per-doctor `replaces` (bulk), and the booking impact now covers the whole new period, not just up to the next planned change. The editor lists the changes being replaced before saving; the save toast says how many were replaced.
 - Withdrawn versions stay in the history (append-only, `withdrawn_by` = who saved). Bookings are never moved.
 - e2e G114 tests 14 and 14b cover it.
+
+## 12. Hourly slots with four patient types (rev 3, 2026-10-23)
+
+- Patient types per slot: **Walk-in, New, Follow-up, Within 3 days**. A booking with visit type "FU within 3 days" counts as Within 3 days (`shared/slotCapacity.js`), before the new/follow-up rule.
+- A slot's limits come from, first match wins: a one-date change (`doctor_slot_date_caps`, reason required, today or later) → the template's per-slot row (`doctor_slot_template_slot_caps`, frozen with the version) → the hours-block default (`cap_*` on `doctor_slot_template_hours`). A row replaces all four numbers; blank = no limit.
+- Schedule tab: "Use 9 AM–7 PM, 1 h slots (Mon–Sat)" fills the hours; step 3 "Patients per slot" is a week grid — click a cell, set the four numbers, apply to this slot / every slot that day / that time every day / the whole week. "Copy Mon to …" copies the slot numbers too.
+- The week repeats every week from its start date, so it covers every month until changed; to change from the 1st, use the "1st of next month" start.
+- One date: Booking availability → click an open slot → numbers + reason → `PUT /api/doctors/:id/slot-caps/:date`; "Use the weekly numbers" → `DELETE /api/doctors/:id/slot-caps/:date/:start`.
+- Migration `2026-12-14_slot_caps_per_slot.sql` (also widens `booking_approvals.patient_type`). Until it runs, existing screens work; saving Within 3 days or per-slot numbers returns a clear 409.
+- Tests: G125-slot-grid-caps.

@@ -154,12 +154,6 @@ const NAV_ITEMS = [
     show: () => true,
   },
   { path: "/ghm", label: "🏥 GHM Ops", cap: C["/ghm"], show: () => true },
-  {
-    path: "/staff-management",
-    label: "👥 Staff",
-    cap: C["/staff-management"],
-    show: () => true,
-  },
   // Admin: the patient blocklist
   {
     path: "/admin/blocklist",

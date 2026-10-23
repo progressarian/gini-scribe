@@ -116,7 +116,13 @@ test.describe.serial("G122 patients per slot by type; over the limit waits for a
       await reception.get(`/api/booking-approvals/latest?ids=${first.id},${second.id}`)
     ).json();
     expect(latest.map((a) => [a.appointment_id, a.status])).toEqual([[second.id, "pending"]]);
-    expect((await slotOf(TEN)).counts).toEqual({ new: 2, followup: 0, walkin: 0, pending: 1 });
+    expect((await slotOf(TEN)).counts).toEqual({
+      new: 2,
+      followup: 0,
+      walkin: 0,
+      within3: 0,
+      pending: 1,
+    });
   });
 
   test("2. a patient seen before counts as a follow-up, whatever the visit type says", async () => {

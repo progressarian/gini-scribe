@@ -17,6 +17,10 @@ export const SETTINGS_TABS = [
     label: "Patient Flow",
   },
   {
+    to: "/settings/slots",
+    label: "Slot settings",
+  },
+  {
     to: "/settings/prescription",
     label: "Prescription",
   },

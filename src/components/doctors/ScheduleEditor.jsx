@@ -6,6 +6,7 @@ import { qk } from "../../queries/keys";
 import ConfirmModal from "../ui/ConfirmModal";
 import ReassignModal, { enrichAffected } from "./ReassignModal";
 import BookingAvailability from "./BookingAvailability";
+import SlotGrid, { liveSlotCaps } from "./SlotGrid";
 import useAuthStore from "../../stores/authStore";
 import { SCHEDULED_ROLES } from "../../../shared/staffRoles";
 import {
@@ -21,11 +22,13 @@ import {
   validateTemplate,
   weekdayOf,
 } from "../../../shared/slotTemplates";
+import { CAP_KEYS, PATIENT_TYPES, PATIENT_TYPE_LABELS } from "../../../shared/slotCapacity";
 
 const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0];
 const SLOT_LENGTHS = [5, 10, 15, 20, 25, 30, 40, 45, 60, 90, 120, 180, 240];
-const DEFAULT_WINDOW = { start: "09:00", end: "17:00", slotMinutes: 30 };
-const EMPTY = { partialLast: "drop", hours: [], breaks: [] };
+const DEFAULT_WINDOW = { start: "09:00", end: "19:00", slotMinutes: 60 };
+const CLINIC_DAYS = [1, 2, 3, 4, 5, 6];
+const EMPTY = { partialLast: "drop", hours: [], breaks: [], slotCaps: [] };
 
 const addDays = (iso, days) => {
   const d = new Date(`${iso}T00:00:00Z`);
@@ -88,39 +91,36 @@ const periodShortcuts = (today) => {
   ];
 };
 
-const CAP_FIELDS = [
-  ["capNew", "New"],
-  ["capFollowup", "Follow-up"],
-  ["capWalkin", "Walk-in"],
-];
+const CAP_FIELDS = PATIENT_TYPES.map((t) => [CAP_KEYS[t], PATIENT_TYPE_LABELS[t]]);
 
 const capsText = (h) => {
-  const parts = [
-    h.capNew != null && `${h.capNew} new`,
-    h.capFollowup != null && `${h.capFollowup} follow-up`,
-    h.capWalkin != null && `${h.capWalkin} walk-in`,
-  ].filter(Boolean);
+  const parts = CAP_FIELDS.filter(([key]) => h[key] != null).map(
+    ([key, label]) => `${h[key]} ${label.toLowerCase()}`,
+  );
   return parts.length ? ` · per slot ${parts.join(", ")}` : "";
 };
 
+const capsOnly = (row) => Object.fromEntries(CAP_FIELDS.map(([key]) => [key, row[key] ?? null]));
+
 const rulesOf = (v) => ({
   partialLast: v?.partialLast || "drop",
-  hours: (v?.hours || []).map(
-    ({ weekday, start, end, slotMinutes, capNew, capFollowup, capWalkin }) => ({
-      weekday,
-      start,
-      end,
-      slotMinutes,
-      capNew: capNew ?? null,
-      capFollowup: capFollowup ?? null,
-      capWalkin: capWalkin ?? null,
-    }),
-  ),
+  hours: (v?.hours || []).map(({ weekday, start, end, slotMinutes, ...rest }) => ({
+    weekday,
+    start,
+    end,
+    slotMinutes,
+    ...capsOnly(rest),
+  })),
   breaks: (v?.breaks || []).map(({ weekday, name, start, end }) => ({
     weekday,
     name,
     start,
     end,
+  })),
+  slotCaps: (v?.slotCaps || []).map(({ weekday, start, ...rest }) => ({
+    weekday,
+    start,
+    ...capsOnly(rest),
   })),
 });
 
@@ -327,7 +327,12 @@ export default function ScheduleEditor({
         .at(-1);
       const start = last ? last.end : DEFAULT_WINDOW.start;
       const end = toClock((toMinutes(start) + 180) % 1440);
-      d.hours.push({ weekday, start, end, slotMinutes: last?.slotMinutes || 30 });
+      d.hours.push({
+        weekday,
+        start,
+        end,
+        slotMinutes: last?.slotMinutes || DEFAULT_WINDOW.slotMinutes,
+      });
       return d;
     });
 
@@ -344,13 +349,28 @@ export default function ScheduleEditor({
   const copyFirstDay = () => {
     edit((d) => {
       const model = d.hours.filter((h) => h.weekday === firstWorkingDay);
-      d.hours = [firstWorkingDay, ...copyTargets].flatMap((w) =>
-        model.map((h) => ({ ...h, weekday: w })),
-      );
+      const modelCaps = (d.slotCaps || []).filter((c) => c.weekday === firstWorkingDay);
+      const days = [firstWorkingDay, ...copyTargets];
+      d.hours = days.flatMap((w) => model.map((h) => ({ ...h, weekday: w })));
+      d.slotCaps = days.flatMap((w) => modelCaps.map((c) => ({ ...c, weekday: w })));
       return d;
     });
     toast(`${WEEKDAY_NAMES[firstWorkingDay]}'s hours copied to ${dayRuns(copyTargets)}`, "success");
   };
+
+  const useClinicHours = () => {
+    edit((d) => {
+      d.hours = CLINIC_DAYS.map((weekday) => ({ ...DEFAULT_WINDOW, weekday }));
+      return d;
+    });
+    toast("Mon–Sat set to 9 AM–7 PM with 1 h slots", "success");
+  };
+
+  const setSlotCaps = (slotCaps) =>
+    edit((d) => {
+      d.slotCaps = slotCaps;
+      return d;
+    });
 
   const addBreak = () =>
     edit((d) => {
@@ -387,7 +407,7 @@ export default function ScheduleEditor({
   const until = bulk && untilOn ? untilDate : null;
   const payload = () => ({
     effective_from: effectiveFrom,
-    template: draft,
+    template: { ...draft, slotCaps: liveSlotCaps(draft) },
     ...(until ? { effective_until: until } : {}),
   });
 
@@ -691,6 +711,12 @@ export default function ScheduleEditor({
           )}
 
           {current && <ScheduleSummary template={rulesOf(current)} />}
+          {current && (
+            <section className="docmgmt-step" aria-label="Patients per slot">
+              <h3 className="docmgmt-steptitle">Patients per slot</h3>
+              <SlotGrid template={rulesOf(current)} readOnly />
+            </section>
+          )}
           {upcoming.map((v) => (
             <p key={v.id} className="docmgmt-note" role="status">
               {v.clears ? (
@@ -776,29 +802,63 @@ export default function ScheduleEditor({
               Working hours
             </h3>
             <p className="docmgmt-hint">
-              Slots are cut from each block of hours at the chosen length. Hours ending at or before
-              they start run overnight into the next day.
+              Tick the days the doctor works. Leave a patients-per-slot box empty for no limit.
+              Hours ending at or before they start run overnight into the next day.
             </p>
-            <div className="docmgmt-week">
-              {WEEK_ORDER.map((weekday) => {
-                const rows = draft.hours
-                  .map((h, index) => ({ ...h, index }))
-                  .filter((h) => h.weekday === weekday)
-                  .sort((a, b) => toMinutes(a.start) - toMinutes(b.start));
-                const day = WEEKDAY_NAMES[weekday];
-                const dayErrors = rows.flatMap((r) => fieldErrors(`hours.${r.index}`));
-                return (
-                  <div key={weekday} className="docmgmt-weekrow">
-                    <label className="docmgmt-check docmgmt-weekday">
-                      <input
-                        type="checkbox"
-                        checked={rows.length > 0}
-                        onChange={() => toggleDay(weekday)}
-                      />
-                      {day}
-                    </label>
-                    <div className="docmgmt-windows">
-                      {rows.length === 0 && <span className="docmgmt-hint">Off</span>}
+            <div className="docmgmt-hourswrap">
+              <table className="docmgmt-hourstable">
+                <thead>
+                  <tr>
+                    <th scope="col">Day</th>
+                    <th scope="col">From</th>
+                    <th scope="col">To</th>
+                    <th scope="col">Slot</th>
+                    {CAP_FIELDS.map(([key, label]) => (
+                      <th key={key} scope="col" className="docmgmt-capcol">
+                        {label}
+                        <span className="docmgmt-hint"> per slot</span>
+                      </th>
+                    ))}
+                    <th scope="col">
+                      <span className="docmgmt-visually-hidden">Actions</span>
+                    </th>
+                  </tr>
+                </thead>
+                {WEEK_ORDER.map((weekday) => {
+                  const rows = draft.hours
+                    .map((h, index) => ({ ...h, index }))
+                    .filter((h) => h.weekday === weekday)
+                    .sort((a, b) => toMinutes(a.start) - toMinutes(b.start));
+                  const day = WEEKDAY_NAMES[weekday];
+                  const dayErrors = rows.flatMap((r) => fieldErrors(`hours.${r.index}`));
+                  const canAdd = rows.length > 0 && rows.length < MAX_WINDOWS_PER_DAY;
+                  const extraRow = canAdd || dayErrors.length > 0;
+                  const dayCell = (
+                    <th
+                      scope="rowgroup"
+                      rowSpan={Math.max(rows.length, 1) + (extraRow ? 1 : 0)}
+                      className="docmgmt-hoursday"
+                    >
+                      <label className="docmgmt-check">
+                        <input
+                          type="checkbox"
+                          checked={rows.length > 0}
+                          onChange={() => toggleDay(weekday)}
+                        />
+                        {day}
+                      </label>
+                    </th>
+                  );
+                  return (
+                    <tbody key={weekday} className={rows.length ? "" : "is-off"}>
+                      {rows.length === 0 && (
+                        <tr>
+                          {dayCell}
+                          <td colSpan={4 + CAP_FIELDS.length} className="docmgmt-hint">
+                            Off
+                          </td>
+                        </tr>
+                      )}
                       {rows.map((h, i) => {
                         const overnight =
                           toMinutes(h.start) != null &&
@@ -809,8 +869,9 @@ export default function ScheduleEditor({
                           : [...SLOT_LENGTHS, h.slotMinutes].sort((a, b) => a - b);
                         const name = `${day} hours ${i + 1}`;
                         return (
-                          <div key={h.index} className="docmgmt-windowblock">
-                            <div className="docmgmt-window">
+                          <tr key={h.index}>
+                            {i === 0 && dayCell}
+                            <td>
                               <label>
                                 <span className="docmgmt-visually-hidden">{name} from</span>
                                 <input
@@ -822,7 +883,8 @@ export default function ScheduleEditor({
                                   onChange={(e) => setHour(h.index, { start: e.target.value })}
                                 />
                               </label>
-                              <span aria-hidden="true">–</span>
+                            </td>
+                            <td>
                               <label>
                                 <span className="docmgmt-visually-hidden">{name} to</span>
                                 <input
@@ -834,6 +896,9 @@ export default function ScheduleEditor({
                                   onChange={(e) => setHour(h.index, { end: e.target.value })}
                                 />
                               </label>
+                              {overnight && <span className="docmgmt-hint">ends next day</span>}
+                            </td>
+                            <td>
                               <label>
                                 <span className="docmgmt-visually-hidden">{name} slot length</span>
                                 <select
@@ -844,12 +909,34 @@ export default function ScheduleEditor({
                                 >
                                   {lengths.map((m) => (
                                     <option key={m} value={m}>
-                                      {m < 60 || m % 60 ? `${m} min` : `${m / 60} h`} slots
+                                      {m < 60 || m % 60 ? `${m} min` : `${m / 60} h`}
                                     </option>
                                   ))}
                                 </select>
                               </label>
-                              {overnight && <span className="docmgmt-hint">ends next day</span>}
+                            </td>
+                            {CAP_FIELDS.map(([key, label]) => (
+                              <td key={key} className="docmgmt-capcol">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max={CAP_MAX}
+                                  inputMode="numeric"
+                                  placeholder="No limit"
+                                  aria-label={`${name} ${label.toLowerCase()} per slot`}
+                                  value={h[key] ?? ""}
+                                  aria-invalid={
+                                    fieldErrors(`hours.${h.index}.${key}`).length > 0 || undefined
+                                  }
+                                  onChange={(e) =>
+                                    setHour(h.index, {
+                                      [key]: e.target.value === "" ? null : Number(e.target.value),
+                                    })
+                                  }
+                                />
+                              </td>
+                            ))}
+                            <td>
                               <button
                                 type="button"
                                 className="docmgmt-iconbtn"
@@ -858,60 +945,49 @@ export default function ScheduleEditor({
                               >
                                 ✕
                               </button>
-                            </div>
-                            <fieldset className="docmgmt-caps">
-                              <legend>Patients per slot</legend>
-                              {CAP_FIELDS.map(([key, label]) => (
-                                <label key={key}>
-                                  {label}
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    max={CAP_MAX}
-                                    inputMode="numeric"
-                                    placeholder="No limit"
-                                    aria-label={`${name} ${label.toLowerCase()} per slot`}
-                                    value={h[key] ?? ""}
-                                    aria-invalid={
-                                      fieldErrors(`hours.${h.index}.${key}`).length > 0 || undefined
-                                    }
-                                    onChange={(e) =>
-                                      setHour(h.index, {
-                                        [key]:
-                                          e.target.value === "" ? null : Number(e.target.value),
-                                      })
-                                    }
-                                  />
-                                </label>
-                              ))}
-                            </fieldset>
-                          </div>
+                            </td>
+                          </tr>
                         );
                       })}
-                      {rows.length > 0 && rows.length < MAX_WINDOWS_PER_DAY && (
-                        <button
-                          type="button"
-                          className="docmgmt-linkbtn"
-                          onClick={() => addWindow(weekday)}
-                        >
-                          + Add hours on {day}
-                        </button>
+                      {rows.length > 0 && extraRow && (
+                        <tr className="docmgmt-hoursextra">
+                          <td colSpan={4 + CAP_FIELDS.length}>
+                            {canAdd && (
+                              <button
+                                type="button"
+                                className="docmgmt-linkbtn"
+                                onClick={() => addWindow(weekday)}
+                              >
+                                + Add hours on {day}
+                              </button>
+                            )}
+                            <FieldErrors errors={dayErrors} />
+                          </td>
+                        </tr>
                       )}
-                      <FieldErrors errors={dayErrors} />
-                    </div>
-                  </div>
-                );
-              })}
+                    </tbody>
+                  );
+                })}
+              </table>
             </div>
-            {firstWorkingDay != null && copyTargets.length > 0 && (
+            <div className="docmgmt-rowactions docmgmt-hoursactions">
               <button
                 type="button"
                 className="docmgmt-secondary docmgmt-small"
-                onClick={copyFirstDay}
+                onClick={useClinicHours}
               >
-                Copy {WEEKDAY_NAMES[firstWorkingDay]} to {dayRuns(copyTargets)}
+                Use 9 AM–7 PM, 1 h slots (Mon–Sat)
               </button>
-            )}
+              {firstWorkingDay != null && copyTargets.length > 0 && (
+                <button
+                  type="button"
+                  className="docmgmt-secondary docmgmt-small"
+                  onClick={copyFirstDay}
+                >
+                  Copy {WEEKDAY_NAMES[firstWorkingDay]} to {dayRuns(copyTargets)}
+                </button>
+              )}
+            </div>
             <FieldErrors errors={fieldErrors("hours").filter((e) => e.field === "hours")} />
           </section>
           <section className="docmgmt-step">
@@ -1002,6 +1078,25 @@ export default function ScheduleEditor({
             <h3 className="docmgmt-steptitle">
               <span className="docmgmt-stepnum" aria-hidden="true">
                 3
+              </span>
+              Patients per slot
+            </h3>
+            <p className="docmgmt-hint">
+              Each slot takes the numbers set on its working hours above unless you set its own
+              here. Slots with their own numbers are highlighted. The week repeats every week, so it
+              covers every month until you change it.
+            </p>
+            <SlotGrid
+              template={draft}
+              onChange={setSlotCaps}
+              doctorName={bulk ? null : doctor?.name}
+            />
+            <FieldErrors errors={fieldErrors("slotCaps")} />
+          </section>
+          <section className="docmgmt-step">
+            <h3 className="docmgmt-steptitle">
+              <span className="docmgmt-stepnum" aria-hidden="true">
+                4
               </span>
               Start date and doctors
             </h3>
@@ -1199,7 +1294,7 @@ export default function ScheduleEditor({
             <div className="docmgmt-dayhead">
               <h3 className="docmgmt-steptitle">
                 <span className="docmgmt-stepnum" aria-hidden="true">
-                  4
+                  5
                 </span>
                 Preview of the new slots
               </h3>
@@ -1246,7 +1341,7 @@ export default function ScheduleEditor({
           <section className="docmgmt-step">
             <h3 className="docmgmt-steptitle">
               <span className="docmgmt-stepnum" aria-hidden="true">
-                5
+                6
               </span>
               Check existing bookings
             </h3>

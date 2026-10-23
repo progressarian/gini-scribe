@@ -54,8 +54,8 @@ test.describe
 
   test.beforeEach(async ({ page }) => {
     await loginAs(page, "admin");
-    await gotoReady(page, "/staff-management", () =>
-      page.getByRole("heading", { name: "Staff Management" }),
+    await gotoReady(page, "/settings/slots", () =>
+      page.getByRole("heading", { name: "Slot settings" }),
     );
     await page
       .getByRole("list", { name: "Staff list" })
@@ -291,7 +291,7 @@ test.describe
     await page.getByRole("button", { name: /^Save/ }).click();
     await expect(
       page.getByRole("table", { name: "Working hours by day" }).getByRole("row", { name: /Mon/ }),
-    ).toContainText("9 AM–1 PM · 20 min slots · per slot 3 new, 2 follow-up, 5 walk-in");
+    ).toContainText("9 AM–1 PM · 20 min slots · per slot 5 walk-in, 3 new, 2 follow-up");
   });
   test("9. several slots are blocked as one break with a reason, and unblocked by clicking", async ({
     page,

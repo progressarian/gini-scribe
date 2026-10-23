@@ -167,8 +167,8 @@ test.describe.serial("G67 vitals waits the rest time after arrival", () => {
 
   test("6. a doctor switched off in Settings has patients who skip the rest", async ({ page }) => {
     await loginAs(page, "admin");
-    await gotoReady(page, "/staff-management", () =>
-      page.getByRole("heading", { name: "Staff Management" }),
+    await gotoReady(page, "/settings/slots", () =>
+      page.getByRole("heading", { name: "Slot settings" }),
     );
     await page
       .getByRole("list", { name: "Staff list" })

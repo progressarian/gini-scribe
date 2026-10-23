@@ -1,4 +1,4 @@
-import { CAP_MAX, capsOf } from "./slotCapacity.js";
+import { CAP_KEYS, CAP_MAX, PATIENT_TYPES, capsOf } from "./slotCapacity.js";
 
 export { CAP_MAX };
 
@@ -94,8 +94,14 @@ const cut = (segment, minutes, partialLast) => {
   return out;
 };
 
-export function dayPlan(template, dateISO) {
+const capsByStart = (rows) => new Map((rows || []).map((r) => [String(r.start).slice(0, 5), r]));
+
+export function dayPlan(template, dateISO, { dateCaps = [] } = {}) {
   const weekday = weekdayOf(dateISO);
+  const slotCaps = capsByStart(
+    (template?.slotCaps || []).filter((c) => Number(c.weekday) === weekday),
+  );
+  const onDate = capsByStart(dateCaps);
   const windows = windowsOn(template, weekday);
   if (!windows.length) return { weekday, off: true, slots: [], breaks: [] };
 
@@ -125,15 +131,18 @@ export function dayPlan(template, dateISO) {
     if (!(minutes >= SLOT_MINUTES_MIN && minutes <= SLOT_MINUTES_MAX)) return;
     for (const segment of subtract(w, cuts)) {
       for (const { s, e } of cut(segment, minutes, partialLast)) {
+        const start = toClock(s);
+        const own = onDate.get(start) || slotCaps.get(start);
         slots.push({
-          start: toClock(s),
+          start,
           end: toClock(e),
           startMin: s,
           endMin: e,
           label: slotLabel(s, e),
           windowIndex,
           nextDay: s >= DAY,
-          caps: capsOf(w),
+          caps: capsOf(own || w),
+          capSource: onDate.has(start) ? "date" : slotCaps.has(start) ? "slot" : "hours",
         });
       }
     }
@@ -171,22 +180,7 @@ export function validateTemplate(template, { requireHours = true } = {}) {
     if (e == null) add(`${field}.end`, `Enter an end time for ${day}.`);
     if (s != null && e != null && s === e)
       add(`${field}.end`, `${day}: start and end can't be the same time.`);
-    for (const [key, label] of [
-      ["capNew", "new patients"],
-      ["capFollowup", "follow-ups"],
-      ["capWalkin", "walk-ins"],
-    ]) {
-      const cap = h[key];
-      if (
-        cap != null &&
-        cap !== "" &&
-        !(Number.isInteger(Number(cap)) && cap >= 0 && cap <= CAP_MAX)
-      )
-        add(
-          `${field}.${key}`,
-          `${day}: ${label} per slot must be a whole number from 0 to ${CAP_MAX}, or blank for no limit.`,
-        );
-    }
+    capErrors(h, `${field}`, day, add);
     const minutes = Number(h.slotMinutes);
     if (!Number.isInteger(minutes) || minutes < SLOT_MINUTES_MIN || minutes > SLOT_MINUTES_MAX)
       add(
@@ -290,6 +284,7 @@ export function validateTemplate(template, { requireHours = true } = {}) {
   }
 
   if (!errors.length) {
+    errors.push(...slotCapErrors(template));
     for (let weekday = 0; weekday < 7; weekday += 1) {
       const windows = windowsOn(template, weekday);
       if (!windows.length) continue;
@@ -302,6 +297,55 @@ export function validateTemplate(template, { requireHours = true } = {}) {
     }
   }
 
+  return errors;
+}
+
+const CAP_NOUNS = {
+  walkin: "walk-ins",
+  new: "new patients",
+  followup: "follow-ups",
+  within3: "within-3-days patients",
+};
+
+function capErrors(row, field, where, add) {
+  for (const type of PATIENT_TYPES) {
+    const key = CAP_KEYS[type];
+    const cap = row[key];
+    if (cap != null && cap !== "" && !(Number.isInteger(Number(cap)) && cap >= 0 && cap <= CAP_MAX))
+      add(
+        `${field}.${key}`,
+        `${where}: ${CAP_NOUNS[type]} per slot must be a whole number from 0 to ${CAP_MAX}, or blank for no limit.`,
+      );
+  }
+}
+
+export const MAX_SLOT_CAPS = 7 * 96;
+
+export function slotCapErrors(template) {
+  const errors = [];
+  const add = (field, message) => errors.push({ field, message });
+  const rows = template?.slotCaps || [];
+  if (rows.length > MAX_SLOT_CAPS) add("slotCaps", `At most ${MAX_SLOT_CAPS} slot limits.`);
+  const seen = new Set();
+  const startsOn = new Map();
+  rows.forEach((c, i) => {
+    const field = `slotCaps.${i}`;
+    const day = WEEKDAY_NAMES[c.weekday];
+    if (!day) return add(`${field}.weekday`, "Pick a day of the week for this slot.");
+    const start = String(c.start ?? "").slice(0, 5);
+    if (!startsOn.has(c.weekday))
+      startsOn.set(
+        c.weekday,
+        new Set(dayPlanForWeekday(template, Number(c.weekday)).slots.map((x) => x.start)),
+      );
+    const where = `${day} ${toMinutes(start) == null ? start : formatTime(toMinutes(start))}`;
+    if (!startsOn.get(c.weekday).has(start))
+      return add(`${field}.start`, `${where} is not a slot any more — set its numbers again.`);
+    const key = `${c.weekday}|${start}`;
+    if (seen.has(key)) return add(`${field}.start`, `${where} has its numbers set twice.`);
+    seen.add(key);
+    capErrors(c, field, where, add);
+  });
   return errors;
 }
 

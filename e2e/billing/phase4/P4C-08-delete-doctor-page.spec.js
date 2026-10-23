@@ -165,7 +165,7 @@ test.describe.serial("P4C-08 delete a doctor from Staff Management", () => {
   }) => {
     await loginAs(page, "admin");
     await gotoReady(page, "/doctor-management", () =>
-      page.getByRole("heading", { name: "Staff Management" }),
+      page.getByRole("heading", { name: "Slot settings" }),
     );
     const listed = page
       .getByRole("list", { name: "Staff list" })
@@ -216,7 +216,7 @@ test.describe.serial("P4C-08 delete a doctor from Staff Management", () => {
   test("5. an admin can't delete their own account from the page", async ({ page }) => {
     await loginAs(page, "admin");
     await gotoReady(page, "/doctor-management", () =>
-      page.getByRole("heading", { name: "Staff Management" }),
+      page.getByRole("heading", { name: "Slot settings" }),
     );
     await page.getByRole("button", { name: "All staff" }).click();
     await page

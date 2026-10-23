@@ -10,6 +10,7 @@ import { doctorRemovalSchema, loginSchema, refreshTokenSchema } from "../schemas
 import { loginLimiter } from "../middleware/rateLimit.js";
 import { requireCapability } from "../middleware/auth.js";
 import { CAPABILITIES, normalizeRole } from "../../shared/permissions.js";
+import { columnReady } from "../services/slots/readiness.js";
 import {
   issueDoctorRefreshToken,
   lookupRefreshToken,
@@ -67,7 +68,7 @@ router.post("/convert-heic", async (req, res) => {
 router.get("/doctors", async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT id, name, short_name, specialty, qualification, role, is_chief, vitals_rest, chief_step, direct_consult, COALESCE((to_jsonb(doctors)->>'can_assign_calls')::boolean, FALSE) AS can_assign_calls FROM doctors WHERE is_active=true ORDER BY role, name",
+      "SELECT id, name, short_name, specialty, qualification, role, is_chief, vitals_rest, chief_step, direct_consult, COALESCE((to_jsonb(doctors)->>'can_assign_calls')::boolean, FALSE) AS can_assign_calls, COALESCE((to_jsonb(doctors)->>'slot_booking')::boolean, FALSE) AS slot_booking FROM doctors WHERE is_active=true ORDER BY role, name",
     );
     res.json(result.rows);
   } catch (e) {
@@ -282,10 +283,19 @@ router.post("/doctors", requireCapability(CAPABILITIES.ADMIN), async (req, res) 
 // Update editable doctor fields — the chief designation and the qualification
 // printed on the letterhead. Admin-only. Fields absent from the body are left
 // alone, so the Chief toggle and the qualification box save independently.
+const slotBookingReady = columnReady("doctors", "slot_booking");
+
 router.patch("/doctors/:id", requireCapability(CAPABILITIES.ADMIN), async (req, res) => {
   try {
-    const { is_chief, qualification, vitals_rest, chief_step, direct_consult, can_assign_calls } =
-      req.body || {};
+    const {
+      is_chief,
+      qualification,
+      vitals_rest,
+      chief_step,
+      direct_consult,
+      can_assign_calls,
+      slot_booking,
+    } = req.body || {};
     const sets = [];
     const params = [req.params.id];
 
@@ -327,6 +337,19 @@ router.patch("/doctors/:id", requireCapability(CAPABILITIES.ADMIN), async (req, 
       }
       params.push(can_assign_calls);
       sets.push(`can_assign_calls=$${params.length}`);
+    }
+
+    if (slot_booking !== undefined) {
+      if (typeof slot_booking !== "boolean") {
+        return res.status(400).json({ error: "slot_booking must be a boolean" });
+      }
+      if (!(await slotBookingReady()))
+        return res.status(409).json({
+          error:
+            "Slot doctors need a database update first. Ask an administrator to run the slot doctors migration.",
+        });
+      params.push(slot_booking);
+      sets.push(`slot_booking=$${params.length}`);
     }
 
     if (qualification !== undefined) {

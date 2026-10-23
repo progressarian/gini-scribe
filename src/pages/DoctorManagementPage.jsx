@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import api from "../services/api";
 import { qk } from "../queries/keys";
@@ -233,6 +233,8 @@ const FILTERS = [
   ["other", "Other roles", (d) => !isScheduled(d)],
 ];
 
+const isSlotDoctor = (d) => d.slot_booking === true;
+
 const OFF_LABEL = { leave: "On leave", holiday: "On holiday", emergency: "Emergency leave" };
 
 function DoctorList({
@@ -244,10 +246,15 @@ function DoctorList({
   showRemoved,
   onShowRemoved,
   offToday,
+  slotsOnly,
+  setSlotsOnly,
+  slotCount,
 }) {
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
-  const keep = FILTERS.find(([id]) => id === filter)?.[2] || (() => true);
+  const keep = slotsOnly
+    ? isSlotDoctor
+    : FILTERS.find(([id]) => id === filter)?.[2] || (() => true);
   const visible = doctors
     .filter(keep)
     .filter(
@@ -269,25 +276,49 @@ function DoctorList({
           onChange={(e) => setQuery(e.target.value)}
         />
       </label>
-      <div className="docmgmt-filter" role="group" aria-label="Show">
-        {FILTERS.map(([id, label]) => (
+      {slotCount > 0 && (
+        <div className="docmgmt-filter" role="group" aria-label="Doctors shown">
           <button
-            key={id}
             type="button"
-            aria-pressed={!showRemoved && filter === id}
-            onClick={() => setFilter(id)}
+            aria-pressed={!showRemoved && slotsOnly}
+            onClick={() => setSlotsOnly(true)}
           >
-            {label}
+            Slot doctors ({slotCount})
           </button>
-        ))}
-      </div>
+          <button
+            type="button"
+            aria-pressed={!showRemoved && !slotsOnly}
+            onClick={() => setSlotsOnly(false)}
+          >
+            Everyone
+          </button>
+        </div>
+      )}
+      {!slotsOnly && (
+        <div className="docmgmt-filter" role="group" aria-label="Show">
+          {FILTERS.map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              aria-pressed={!showRemoved && filter === id}
+              onClick={() => setFilter(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
       <p className="docmgmt-listhead">
-        Staff directory <span>{visible.length}</span>
+        {slotsOnly ? "Slot doctors" : "Staff directory"} <span>{visible.length}</span>
       </p>
       <ul className="docmgmt-doclist" aria-label="Staff list">
         {visible.length === 0 && (
           <li className="docmgmt-empty">
-            {q ? "No one matches this search." : "No staff in this group."}
+            {q
+              ? "No one matches this search."
+              : slotsOnly
+                ? "No slot doctors yet."
+                : "No staff in this group."}
           </li>
         )}
         {visible.map((d) => {
@@ -303,6 +334,7 @@ function DoctorList({
                 <span className="docmgmt-docitem-name">
                   {d.name}
                   {d.is_chief && <span className="docmgmt-badge">Chief</span>}
+                  {!slotsOnly && isSlotDoctor(d) && <span className="docmgmt-chip">Slots</span>}
                 </span>
                 <span className="docmgmt-docitem-meta">
                   {[staffRoleLabel(d.role), d.specialty].filter(Boolean).join(" · ")}
@@ -324,6 +356,37 @@ function DoctorList({
         Removed staff
       </button>
     </aside>
+  );
+}
+
+function SlotDoctorButton({ doctor, onSaved }) {
+  const [saving, setSaving] = useState(false);
+  const on = isSlotDoctor(doctor);
+  const toggle = async () => {
+    setSaving(true);
+    try {
+      await api.patch(`/api/doctors/${doctor.id}`, { slot_booking: !on });
+      await onSaved();
+      toast(
+        on ? `${doctor.name} hidden from slot doctors` : `${doctor.name} added to slot doctors`,
+        "success",
+      );
+    } catch (err) {
+      toast(err?.response?.data?.error || "Could not update slot doctors. Try again.", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <button
+      type="button"
+      className="docmgmt-secondary docmgmt-small"
+      aria-pressed={on}
+      disabled={saving}
+      onClick={toggle}
+    >
+      {saving ? "Saving…" : on ? "Hide from slot doctors" : "Show in slot doctors"}
+    </button>
   );
 }
 
@@ -382,11 +445,11 @@ export default function DoctorManagementPage() {
   const doctorsList = useAuthStore((s) => s.doctorsList);
   const fetchDoctorsList = useAuthStore((s) => s.fetchDoctorsList);
   const currentDoctor = useAuthStore((s) => s.currentDoctor);
-  const [doctorId, setDoctorId] = useState(null);
+  const [params, setParams] = useSearchParams();
   const [filter, setFilter] = useState("consultants");
+  const [slotsPicked, setSlotsOnly] = useState(true);
   const [showRemoved, setShowRemoved] = useState(false);
   const [showBulk, setShowBulk] = useState(false);
-  const [tab, setTab] = useState("overview");
   const [addTimeOff, setAddTimeOff] = useState(0);
   const [editSchedule, setEditSchedule] = useState(0);
   const [refresh, setRefresh] = useState(0);
@@ -413,11 +476,38 @@ export default function DoctorManagementPage() {
       .catch(() => setOffToday(new Map()));
   }, [refresh]);
 
+  const setQuery = useCallback(
+    (patch, { replace = false } = {}) =>
+      setParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          for (const [key, value] of Object.entries(patch))
+            if (value == null) next.delete(key);
+            else next.set(key, String(value));
+          return next;
+        },
+        { replace },
+      ),
+    [setParams],
+  );
+  const urlDoctor = Number(params.get("doctor")) || null;
+  const doctorId = doctorsList?.some((d) => d.id === urlDoctor) ? urlDoctor : null;
+  const tab = params.get("tab") || "overview";
+  const setTab = (next) => setQuery({ tab: next });
+
+  const slotCount = (doctorsList || []).filter(isSlotDoctor).length;
+  const slotsOnly = slotsPicked && slotCount > 0;
+
   useEffect(() => {
     if (doctorId || !doctorsList?.length) return;
     const own = doctorsList.find((d) => d.id === currentDoctor?.id && d.role === "consultant");
-    setDoctorId((own || doctorsList.find((d) => d.role === "consultant") || doctorsList[0]).id);
-  }, [currentDoctor, doctorsList, doctorId]);
+    const pick =
+      doctorsList.find(isSlotDoctor) ||
+      own ||
+      doctorsList.find((d) => d.role === "consultant") ||
+      doctorsList[0];
+    setQuery({ doctor: pick.id }, { replace: true });
+  }, [currentDoctor, doctorsList, doctorId, setQuery]);
 
   const doctor = useMemo(
     () => doctorsList?.find((d) => d.id === doctorId) || null,
@@ -437,8 +527,7 @@ export default function DoctorManagementPage() {
   const select = (id) => {
     setShowRemoved(false);
     setShowBulk(false);
-    setDoctorId(id);
-    setTab("overview");
+    setQuery({ doctor: id, tab: "overview" });
   };
 
   const openAddTimeOff = () => {
@@ -455,8 +544,10 @@ export default function DoctorManagementPage() {
     <div className="docmgmt">
       <div className="docmgmt-head">
         <div>
-          <h1>Staff Management</h1>
-          <p className="docmgmt-hint">Staff, weekly schedules, time off and settings.</p>
+          <h1>Slot settings</h1>
+          <p className="docmgmt-hint">
+            Doctor slot timings, patients per slot, time off and staff.
+          </p>
         </div>
         <div className="docmgmt-headactions">
           <Link to="/desk-requests?tab=bookings" className="docmgmt-secondary">
@@ -510,6 +601,12 @@ export default function DoctorManagementPage() {
             setShowRemoved(true);
           }}
           offToday={offToday}
+          slotsOnly={slotsOnly}
+          setSlotsOnly={(on) => {
+            setSlotsOnly(on);
+            setShowRemoved(false);
+          }}
+          slotCount={slotCount}
         />
 
         <main className="docmgmt-main">
@@ -549,11 +646,16 @@ export default function DoctorManagementPage() {
                     )}
                   </div>
                 </div>
-                <MoreActions
-                  doctor={doctor}
-                  isSelf={doctor.id === currentDoctor?.id}
-                  onDelete={() => setDeleting(true)}
-                />
+                <div className="docmgmt-rowactions">
+                  {isScheduled(doctor) && (
+                    <SlotDoctorButton doctor={doctor} onSaved={fetchDoctorsList} />
+                  )}
+                  <MoreActions
+                    doctor={doctor}
+                    isSelf={doctor.id === currentDoctor?.id}
+                    onDelete={() => setDeleting(true)}
+                  />
+                </div>
               </div>
 
               <div className="docmgmt-tabs" role="tablist" aria-label="Staff sections">
@@ -622,7 +724,7 @@ export default function DoctorManagementPage() {
           onClose={() => setDeleting(false)}
           onDone={async () => {
             setDeleting(false);
-            setDoctorId(null);
+            setQuery({ doctor: null, tab: null }, { replace: true });
             setRemovedRefresh((n) => n + 1);
             await fetchDoctorsList();
           }}
@@ -635,6 +737,7 @@ export default function DoctorManagementPage() {
           onCreated={async (created) => {
             setAddingStaff(false);
             await fetchDoctorsList();
+            setSlotsOnly(false);
             setFilter("all");
             select(created.id);
           }}

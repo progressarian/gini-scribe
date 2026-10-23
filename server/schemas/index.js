@@ -516,6 +516,22 @@ export const slotTemplateClearSchema = z.object({
   effective_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "pick the date to clear from"),
 });
 
+const capField = z.number().int().min(0).max(99).nullable().optional();
+const slotCapFields = {
+  capNew: capField,
+  capFollowup: capField,
+  capWalkin: capField,
+  capWithin3: capField,
+};
+
+export const slotDateCapsSchema = z.object({
+  reason: z.string().trim().min(1, "say why this date is different").max(300),
+  slots: z
+    .array(z.object({ start: hhmmTime, ...slotCapFields }))
+    .min(1, "pick at least one slot")
+    .max(96),
+});
+
 export const slotTemplateSchema = z.object({
   effective_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "pick the date this schedule starts"),
   note: z.string().max(200).optional().nullable(),
@@ -531,9 +547,21 @@ export const slotTemplateSchema = z.object({
           capNew: z.number().int().min(0).max(99).nullable().optional(),
           capFollowup: z.number().int().min(0).max(99).nullable().optional(),
           capWalkin: z.number().int().min(0).max(99).nullable().optional(),
+          capWithin3: z.number().int().min(0).max(99).nullable().optional(),
         }),
       )
       .max(28),
+    slotCaps: z
+      .array(
+        z.object({
+          weekday: z.number().int().min(0).max(6),
+          start: hhmmTime,
+          ...slotCapFields,
+        }),
+      )
+      .max(672)
+      .optional()
+      .default([]),
     breaks: z
       .array(
         z.object({

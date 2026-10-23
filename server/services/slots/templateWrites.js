@@ -1,9 +1,17 @@
 import { validateTemplate } from "../../../shared/slotTemplates.js";
-import { columnReady } from "./readiness.js";
+import { hasCapFields } from "../../../shared/slotCapacity.js";
+import { columnReady, slotCapsReady } from "./readiness.js";
 
 export const clearsReady = columnReady("doctor_slot_templates", "clears");
+export const within3CapReady = columnReady("doctor_slot_template_hours", "cap_within3");
 
-const hasHourCaps = (h) => h.capNew != null || h.capFollowup != null || h.capWalkin != null;
+const notReady = () =>
+  Object.assign(
+    new Error(
+      "Within 3 days and per-slot limits need a database update first. Ask an administrator to run the slot migration.",
+    ),
+    { status: 409 },
+  );
 
 export const istToday = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 
@@ -34,19 +42,33 @@ export async function insertTemplateVersion(
       throw e;
     });
   const id = rows[0].id;
+  const slotCaps = template.slotCaps || [];
+  const within3 = template.hours.some((h) => h.capWithin3 != null);
+  if (within3 && !(await within3CapReady(client))) throw notReady();
+  if (slotCaps.length && !(await slotCapsReady(client))) throw notReady();
   await client.query(
-    template.hours.some(hasHourCaps)
+    template.hours.some(hasCapFields)
       ? `INSERT INTO doctor_slot_template_hours
-           (template_id, weekday, start_time, end_time, slot_minutes, cap_new, cap_followup, cap_walkin)
+           (template_id, weekday, start_time, end_time, slot_minutes, cap_new, cap_followup, cap_walkin
+            ${within3 ? ", cap_within3" : ""})
          SELECT $1, x.weekday, x.start::time, x."end"::time, x."slotMinutes",
-                x."capNew", x."capFollowup", x."capWalkin"
+                x."capNew", x."capFollowup", x."capWalkin" ${within3 ? ', x."capWithin3"' : ""}
            FROM jsonb_to_recordset($2::jsonb) AS x(weekday int, start text, "end" text,
-                "slotMinutes" int, "capNew" int, "capFollowup" int, "capWalkin" int)`
+                "slotMinutes" int, "capNew" int, "capFollowup" int, "capWalkin" int, "capWithin3" int)`
       : `INSERT INTO doctor_slot_template_hours (template_id, weekday, start_time, end_time, slot_minutes)
          SELECT $1, x.weekday, x.start::time, x."end"::time, x."slotMinutes"
            FROM jsonb_to_recordset($2::jsonb) AS x(weekday int, start text, "end" text, "slotMinutes" int)`,
     [id, JSON.stringify(template.hours)],
   );
+  if (slotCaps.length)
+    await client.query(
+      `INSERT INTO doctor_slot_template_slot_caps
+         (template_id, weekday, slot_start, cap_new, cap_followup, cap_walkin, cap_within3)
+       SELECT $1, x.weekday, x.start::time, x."capNew", x."capFollowup", x."capWalkin", x."capWithin3"
+         FROM jsonb_to_recordset($2::jsonb) AS x(weekday int, start text, "capNew" int,
+              "capFollowup" int, "capWalkin" int, "capWithin3" int)`,
+      [id, JSON.stringify(slotCaps)],
+    );
   await client.query(
     `INSERT INTO doctor_slot_template_breaks (template_id, weekday, name, start_time, end_time)
      SELECT $1, x.weekday, x.name, x.start::time, x."end"::time

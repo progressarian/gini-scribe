@@ -31,7 +31,9 @@ import {
   slotTemplateSchema,
   slotTemplateApplySchema,
   slotTemplateClearSchema,
+  slotDateCapsSchema,
 } from "../schemas/index.js";
+import { clearDateCap, saveDateCaps } from "../services/slots/dateCaps.js";
 import {
   isSlotAvailable,
   getDoctorDayView,
@@ -607,6 +609,53 @@ router.get("/doctors/:id/availability", async (req, res) => {
     res.json({ date, ...publicDay(day) });
   } catch (e) {
     handleError(res, e, "Doctor availability");
+  }
+});
+
+const isoDate = /^\d{4}-\d{2}-\d{2}$/;
+
+router.put(
+  "/doctors/:id/slot-caps/:date",
+  admin,
+  validate(slotDateCapsSchema),
+  async (req, res) => {
+    try {
+      const doctorId = parseInt(req.params.id, 10);
+      const { date } = req.params;
+      if (!isoDate.test(date)) return res.status(400).json({ error: "Pick a valid date." });
+      const day = await getDoctorDayView(doctorId, date);
+      if (!day.fromTemplate)
+        return res
+          .status(409)
+          .json({ error: "Save a weekly schedule for this doctor before changing one date." });
+      const starts = new Set(
+        day.slots.filter((s) => s.caps).map((s) => String(s.start_time).slice(0, 5)),
+      );
+      const missing = req.body.slots.find((s) => !starts.has(s.start));
+      if (missing)
+        return res
+          .status(400)
+          .json({ error: `${missing.start} is not a slot on ${date}. Reload and try again.` });
+      const saved = await saveDateCaps(doctorId, date, req.body, req.doctor?.doctor_id ?? null);
+      res.json({ saved, ...publicDay(await getDoctorDayView(doctorId, date)) });
+    } catch (e) {
+      if (e.status) return res.status(e.status).json({ error: e.message });
+      handleError(res, e, "Slot limits for one date");
+    }
+  },
+);
+
+router.delete("/doctors/:id/slot-caps/:date/:start", admin, async (req, res) => {
+  try {
+    const doctorId = parseInt(req.params.id, 10);
+    const { date, start } = req.params;
+    if (!isoDate.test(date) || !/^\d{2}:\d{2}$/.test(start))
+      return res.status(400).json({ error: "Pick a valid date and slot." });
+    await clearDateCap(doctorId, date, start);
+    res.json(publicDay(await getDoctorDayView(doctorId, date)));
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    handleError(res, e, "Slot limits for one date");
   }
 });
 

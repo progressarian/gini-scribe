@@ -1,6 +1,6 @@
 import pool from "../../config/db.js";
 import { hasCapability, CAPABILITIES } from "../../../shared/permissions.js";
-import { patientTypeOf, patientTypeSql } from "../../../shared/slotCapacity.js";
+import { isWithin3VisitType, patientTypeOf, patientTypeSql } from "../../../shared/slotCapacity.js";
 
 export { overLimitFor } from "../../../shared/slotCapacity.js";
 import { DONE_OR_INPROGRESS, isSlotAvailable } from "../availability.js";
@@ -95,6 +95,7 @@ export async function patientTypeFor(
     if (rows[0]) return rows[0].t;
   }
   if (walkin) return "walkin";
+  if (isWithin3VisitType(visitType)) return "within3";
   let id = Number(patientId) > 0 ? Number(patientId) : null;
   if (!id && fileNo)
     id =

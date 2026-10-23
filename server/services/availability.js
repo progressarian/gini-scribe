@@ -23,6 +23,7 @@ import pool from "../config/db.js";
 import { inLunch, inWorkingHours, profileFromRow } from "./slots/profileRules.js";
 import { activeTemplates, templatesOnDates } from "./slots/templateStore.js";
 import { approvalsReady } from "./slots/approvalStore.js";
+import { dateCapsOn } from "./slots/dateCaps.js";
 import { overLimitFor, patientTypeSql } from "../../shared/slotCapacity.js";
 import {
   bookingMinute,
@@ -78,7 +79,7 @@ async function loadDayContext(doctors, dateISO, client) {
     ? `EXISTS (SELECT 1 FROM booking_approvals ba
                 WHERE ba.appointment_id = a.id AND ba.status = 'pending')`
     : "FALSE";
-  const [catalog, hol, unav, cfg, booked] = await Promise.all([
+  const [catalog, hol, unav, cfg, booked, dateCaps] = await Promise.all([
     client.query(
       "SELECT label, start_time::text, end_time::text FROM slot_catalog WHERE is_active ORDER BY sort_order",
     ),
@@ -103,9 +104,11 @@ async function loadDayContext(doctors, dateISO, client) {
         GROUP BY 1, 2, 3, 4, 5`,
       [names, dateISO],
     ),
+    dateCapsOn([...templates.keys()], [dateISO], { client }),
   ]);
   return {
     templates,
+    dateCaps: new Map([...dateCaps].map(([key, rows]) => [Number(key.split("|")[0]), rows])),
     catalog: catalog.rows,
     isHoliday: hol.rows.length > 0,
     holidayRemark: hol.rows[0]?.remarks || null,
@@ -127,6 +130,7 @@ function dayFromContext(doctor, dateISO, ctx) {
     unavailability: ctx.unav.filter((u) => u.doctor_id === doctor.id),
     overrides: mine(ctx.cfg),
     bookings: mine(ctx.booked),
+    dateCaps: ctx.dateCaps?.get(doctor.id) || [],
   });
 }
 
@@ -305,7 +309,7 @@ export async function verdictsAcrossDates(doctors, dates, { client = pool } = {}
     ? `EXISTS (SELECT 1 FROM booking_approvals ba
                 WHERE ba.appointment_id = a.id AND ba.status = 'pending')`
     : "FALSE";
-  const [templates, catalog, hol, unav, cfg, booked, profiles] = await Promise.all([
+  const [templates, catalog, hol, unav, cfg, booked, profiles, dateCaps] = await Promise.all([
     templatesOnDates(ids, dates, { client }),
     client.query(
       "SELECT label, start_time::text, end_time::text, is_active FROM slot_catalog ORDER BY sort_order",
@@ -342,6 +346,7 @@ export async function verdictsAcrossDates(doctors, dates, { client = pool } = {}
          FROM doctor_profile WHERE doctor_id = ANY($1::int[])`,
       [ids],
     ),
+    dateCapsOn(ids, dates, { client }),
   ]);
   const activeCatalog = catalog.rows.filter((r) => r.is_active);
   const catalogByLabel = new Map(catalog.rows.map((r) => [r.label, r]));
@@ -359,6 +364,7 @@ export async function verdictsAcrossDates(doctors, dates, { client = pool } = {}
       contexts.set(date, {
         day: {
           templates: templates.get(date) || new Map(),
+          dateCaps: new Map(ids.map((id) => [id, dateCaps.get(`${id}|${date}`) || []])),
           catalog: activeCatalog,
           isHoliday: !!holiday,
           holidayRemark: holiday?.remarks || null,

@@ -22,8 +22,8 @@ test.describe.serial("G71 Staff Management: list, tabs and one time-off form", (
 
   test.beforeEach(async ({ page }) => {
     await loginAs(page, "admin");
-    await gotoReady(page, "/staff-management", () =>
-      page.getByRole("heading", { name: "Staff Management" }),
+    await gotoReady(page, "/settings/slots", () =>
+      page.getByRole("heading", { name: "Slot settings" }),
     );
     await page
       .getByRole("list", { name: "Staff list" })

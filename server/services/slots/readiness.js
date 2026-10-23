@@ -29,3 +29,9 @@ export const columnReady = (table, column) =>
         WHERE table_schema = 'public' AND table_name = '${table}' AND column_name = '${column}'
      ) AS ok`,
   );
+
+export const tableReady = (table) =>
+  readiness(`SELECT to_regclass('public.${table}') IS NOT NULL AS ok`);
+
+export const slotCapsReady = tableReady("doctor_slot_template_slot_caps");
+export const dateCapsReady = tableReady("doctor_slot_date_caps");

@@ -1,4 +1,6 @@
 import pool from "../../config/db.js";
+import { hasCapFields } from "../../../shared/slotCapacity.js";
+import { slotCapsReady } from "./readiness.js";
 
 export const templatesEnabled = () =>
   String(process.env.SLOT_TEMPLATES || "on").toLowerCase() !== "off";
@@ -52,12 +54,14 @@ export async function templatesOnDates(doctorIds, dates, { client = pool } = {})
 async function withRules(client, rows) {
   if (!rows.length) return [];
   const ids = rows.map((r) => r.id);
-  const [hours, breaks] = await Promise.all([
+  const withSlotCaps = await slotCapsReady(client);
+  const [hours, breaks, slotCaps] = await Promise.all([
     client.query(
       `SELECT template_id, weekday, start_time::text AS start, end_time::text AS end, slot_minutes,
               (to_jsonb(h) ->> 'cap_new')::int AS cap_new,
               (to_jsonb(h) ->> 'cap_followup')::int AS cap_followup,
-              (to_jsonb(h) ->> 'cap_walkin')::int AS cap_walkin
+              (to_jsonb(h) ->> 'cap_walkin')::int AS cap_walkin,
+              (to_jsonb(h) ->> 'cap_within3')::int AS cap_within3
          FROM doctor_slot_template_hours h WHERE template_id = ANY($1::int[])
         ORDER BY weekday, start_time`,
       [ids],
@@ -68,7 +72,22 @@ async function withRules(client, rows) {
         ORDER BY start_time, id`,
       [ids],
     ),
+    withSlotCaps
+      ? client.query(
+          `SELECT template_id, weekday, slot_start::text AS start, cap_new, cap_followup,
+                  cap_walkin, cap_within3
+             FROM doctor_slot_template_slot_caps WHERE template_id = ANY($1::int[])
+            ORDER BY weekday, slot_start`,
+          [ids],
+        )
+      : { rows: [] },
   ]);
+  const caps = (r) => ({
+    capNew: r.cap_new,
+    capFollowup: r.cap_followup,
+    capWalkin: r.cap_walkin,
+    capWithin3: r.cap_within3,
+  });
   const hhmm = (t) => String(t).slice(0, 5);
   return rows.map((r) => ({
     id: r.id,
@@ -82,13 +101,14 @@ async function withRules(client, rows) {
         start: hhmm(h.start),
         end: hhmm(h.end),
         slotMinutes: h.slot_minutes,
-        ...(h.cap_new != null || h.cap_followup != null || h.cap_walkin != null
-          ? { capNew: h.cap_new, capFollowup: h.cap_followup, capWalkin: h.cap_walkin }
-          : {}),
+        ...(hasCapFields(caps(h)) ? caps(h) : {}),
       })),
     breaks: breaks.rows
       .filter((b) => b.template_id === r.id)
       .map((b) => ({ weekday: b.weekday, name: b.name, start: hhmm(b.start), end: hhmm(b.end) })),
+    slotCaps: slotCaps.rows
+      .filter((c) => c.template_id === r.id)
+      .map((c) => ({ weekday: c.weekday, start: hhmm(c.start), ...caps(c) })),
   }));
 }
 

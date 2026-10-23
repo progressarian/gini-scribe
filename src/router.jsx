@@ -224,14 +224,14 @@ const router = createBrowserRouter([
               { path: "/ghm", element: lazyEl(GHMPage) },
               { path: "/obt-dashboard", element: lazyEl(OBTDashboardPage) },
               { path: "/care-followups", element: lazyEl(CareFollowupsPage) },
-              { path: "/staff-management", element: lazyEl(DoctorManagementPage) },
+              { path: "/staff-management", element: <Navigate to="/settings/slots" replace /> },
               {
                 path: "/booking-approvals",
                 element: <Navigate to="/desk-requests?tab=bookings" replace />,
               },
               {
                 path: "/doctor-management",
-                element: <Navigate to="/staff-management" replace />,
+                element: <Navigate to="/settings/slots" replace />,
               },
               { path: "/admin/blocklist", element: lazyEl(PatientBlocklistPage) },
               { path: "/desk-requests", element: lazyEl(DeskRequestsHome) },
@@ -240,6 +240,7 @@ const router = createBrowserRouter([
                 element: lazyEl(SettingsLayout),
                 children: [
                   { path: "flow", element: lazyEl(FlowAdminPage) },
+                  { path: "slots", element: lazyEl(DoctorManagementPage) },
                   { path: "prescription", element: lazyEl(PrescriptionFooterPage) },
                   { path: "tests", element: lazyEl(TestCatalogPage) },
                   { path: "schemes", element: lazyEl(SchemesSettingsPage) },

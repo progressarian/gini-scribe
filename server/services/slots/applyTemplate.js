@@ -24,6 +24,17 @@ const rulesKey = (t) =>
         h.capNew ?? null,
         h.capFollowup ?? null,
         h.capWalkin ?? null,
+        h.capWithin3 ?? null,
+      ])
+      .sort((a, b) => a[0] - b[0] || a[1].localeCompare(b[1])),
+    slotCaps: [...(t.slotCaps || [])]
+      .map((c) => [
+        c.weekday,
+        c.start,
+        c.capNew ?? null,
+        c.capFollowup ?? null,
+        c.capWalkin ?? null,
+        c.capWithin3 ?? null,
       ])
       .sort((a, b) => a[0] - b[0] || a[1].localeCompare(b[1])),
     breaks: [...(t.breaks || [])]

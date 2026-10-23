@@ -53,6 +53,7 @@ import { BOOKING_HOME_SAMPLE_SQL } from "../services/giniflow/homeCollection.js"
 import { homeSamplesReady } from "../services/giniflow/homeSampleRecords.js";
 import { followBookingTag } from "../services/giniflow/labSite.js";
 import { ghmSlotsFromSchedule } from "../services/giniflow/floorSettings.js";
+import { isWithin3VisitType } from "../../shared/slotCapacity.js";
 
 const router = Router();
 
@@ -104,14 +105,7 @@ const FEES = {
 // Visit types the hospital does not charge for. "FU within 3 days" is the
 // booking side of the standing policy already quoted in every WhatsApp
 // message — a review inside 3 days of the paid visit carries no fee.
-const FREE_VISIT_TYPES = new Set(["fu within 3 days"]);
-
-const isFreeVisitType = (visit_type) =>
-  FREE_VISIT_TYPES.has(
-    String(visit_type || "")
-      .trim()
-      .toLowerCase(),
-  );
+const isFreeVisitType = isWithin3VisitType;
 
 function buildWhatsappMessage({
   patient_name,
