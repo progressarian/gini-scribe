@@ -54,6 +54,7 @@ import {
   giniflowExternalMedSchema,
   giniflowFinalizeSchema,
   giniflowConsultEditSaveSchema,
+  giniflowEditNextVisitSchema,
   giniflowDoctorRemoveTestSchema,
   giniflowDoctorQueueQuerySchema,
   giniflowCarePlanSchema,
@@ -261,6 +262,7 @@ import {
   editingVisitOf,
   editingRowOf,
   editState,
+  saveEditNextVisit,
 } from "../services/giniflow/consultEdit.js";
 import {
   getPharmacyQueue,
@@ -2776,9 +2778,28 @@ router.post(
   validate(giniflowConsultEditSaveSchema),
   async (req, res) => {
     try {
-      res.json(await saveEdit(req.params.visitId, { ...editActor(req), reason: req.body.reason }));
+      res.json(
+        await saveEdit(req.params.visitId, {
+          ...editActor(req),
+          reason: req.body.reason,
+          requireNextVisit: true,
+        }),
+      );
     } catch (e) {
       doctorError(res, e, "Gini Flow MO save consultation edit");
+    }
+  },
+);
+
+router.put(
+  "/giniflow/stations/mo/:visitId/edit/next-visit",
+  moGate,
+  validate(giniflowEditNextVisitSchema),
+  async (req, res) => {
+    try {
+      res.json(await saveEditNextVisit(req.params.visitId, req.body, editActor(req)));
+    } catch (e) {
+      doctorError(res, e, "Gini Flow MO edit next visit");
     }
   },
 );
@@ -3561,7 +3582,7 @@ for (const [station, readGates, writeGates] of ORDERED_SERVICE_ROUTES) {
     try {
       res.json(
         await addOrderedService(req.params.visitId, req.body, orderedCtx(req), undefined, {
-          priceLater: station === "doctor",
+          priceLater: station !== "reception",
         }),
       );
     } catch (e) {
@@ -3576,7 +3597,7 @@ for (const [station, readGates, writeGates] of ORDERED_SERVICE_ROUTES) {
       try {
         res.json(
           await addOtherProcedure(req.params.visitId, req.body, orderedCtx(req), undefined, {
-            priceLater: station === "doctor",
+            priceLater: station !== "reception",
           }),
         );
       } catch (e) {

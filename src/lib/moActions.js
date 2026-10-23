@@ -1,9 +1,14 @@
-export function moActions({
-  chosenOutcome = null,
-  plan = "",
-  canClose = false,
-  reportsReady = false,
-} = {}) {
+export function moActions({ hasNextVisit = true, ...rest } = {}) {
+  const acts = planActions(rest);
+  if (!acts.showClose || hasNextVisit) return acts;
+  return {
+    ...acts,
+    closeDisabled: true,
+    note: acts.note || "Set the next visit before closing this patient",
+  };
+}
+
+function planActions({ chosenOutcome = null, plan = "", canClose = false, reportsReady = false }) {
   const hasPlan = String(plan || "").trim().length > 0;
 
   if (reportsReady && chosenOutcome === "normal") {

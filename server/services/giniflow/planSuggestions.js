@@ -223,3 +223,23 @@ export async function decideSuggestion(suggestionId, decision, actorId = null, d
     return shape(saved[0]);
   });
 }
+
+export async function applyChiefNextVisit(client, visitId, actorId = null) {
+  const { rows } = await client.query(
+    `UPDATE giniflow_plan_suggestions
+        SET status = 'accepted', decided_by = $2, decided_at = NOW(), updated_at = NOW()
+      WHERE visit_id = $1 AND field = 'next_visit' AND status = 'proposed'
+      RETURNING value`,
+    [visitId, actorId],
+  );
+  if (rows[0]?.value?.date) {
+    await applyToCarePlan(client, visitId, "next_visit", rows[0].value, actorId);
+  }
+  const { rows: plan } = await client.query(
+    `SELECT next_visit_date FROM giniflow_care_plans WHERE visit_id = $1`,
+    [visitId],
+  );
+  if (!plan[0]?.next_visit_date) {
+    throw fail(409, "Set the next visit before closing this patient");
+  }
+}

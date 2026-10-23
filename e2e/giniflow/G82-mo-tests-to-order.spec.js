@@ -55,9 +55,10 @@ test.describe.serial("G82 the MO orders tests the way the consultant does", () =
 
     await section.getByRole("searchbox", { name: "Search tests" }).fill(`Zz Unlisted ${tag}`);
     await expect(section.getByText("is not in the list")).toBeVisible();
-    await section.getByRole("textbox", { name: `Price for Zz Unlisted ${tag}` }).fill("250");
+    await expect(section.getByRole("textbox", { name: /^Price for/ })).toHaveCount(0);
     await section.getByRole("button", { name: "+ Add for this patient" }).click();
     await expect(section.locator(".tst-bar")).toContainText("1 tests");
-    await expect(section.locator(".tst-bar")).toContainText("₹250");
+    await expect(section.locator(".tst-bar")).not.toContainText("₹");
+    await expect(section.locator(".tst-list")).not.toContainText("₹");
   });
 });

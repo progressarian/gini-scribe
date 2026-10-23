@@ -299,6 +299,10 @@ export default function BillingDesk({
     if (feeFocus) setListOpen(true);
   }, [feeFocus]);
   const selected = rows.find((row) => row.visitId === visitId) || null;
+  const changed = feeChanges.find((change) => change.visit_id === visitId);
+  const feePatient = changed
+    ? { name: changed.patient.name, fileNo: changed.patient.file_no }
+    : null;
 
   const pick = (id) => {
     setDuePatient(null);
@@ -492,7 +496,7 @@ export default function BillingDesk({
               {error && <div className="bc-err">{error}</div>}
               {(visitId || billId) && !bill && !error && (
                 <BillOpening
-                  patient={selected || duePatient || sentPatient}
+                  patient={selected || duePatient || feePatient || sentPatient}
                   onClose={() => pick(null)}
                 />
               )}
@@ -529,7 +533,7 @@ export default function BillingDesk({
                     onTakePayment={takePaymentOn}
                   />
                   <PatientHeader
-                    patient={selected || duePatient || sentPatient}
+                    patient={selected || duePatient || feePatient || sentPatient}
                     bill={bill}
                     needsCategory={needsCategory}
                     suggestions={bill.suggestions}
@@ -551,7 +555,7 @@ export default function BillingDesk({
                         <ConsultantChange
                           key={`cc-${visitId}`}
                           visitId={visitId}
-                          patient={selected || duePatient || sentPatient}
+                          patient={selected || duePatient || feePatient || sentPatient}
                           onSettled={openVisitDraft}
                         />
                       )}
@@ -579,7 +583,7 @@ export default function BillingDesk({
                     <div className="bc-bill__summary">
                       <TotalsAndPayment
                         bill={bill}
-                        patient={selected || duePatient || sentPatient}
+                        patient={selected || duePatient || feePatient || sentPatient}
                         onBill={setBill}
                         schemes={schemes || []}
                         payLater={payLater}
@@ -590,7 +594,7 @@ export default function BillingDesk({
                             bill={bill}
                             onBill={setBill}
                             form={form}
-                            patient={selected || duePatient || sentPatient}
+                            patient={selected || duePatient || feePatient || sentPatient}
                           />
                         }
                       />
@@ -616,8 +620,10 @@ export default function BillingDesk({
                       <DepositPanel
                         key={`deposit-${bill.patient_id}`}
                         patientId={bill.patient_id}
-                        patientName={(selected || duePatient || sentPatient)?.name}
-                        patientFileNo={(selected || duePatient || sentPatient)?.fileNo}
+                        patientName={(selected || duePatient || feePatient || sentPatient)?.name}
+                        patientFileNo={
+                          (selected || duePatient || feePatient || sentPatient)?.fileNo
+                        }
                         open={depositOpen}
                         onToggle={() => setDepositOpen((was) => !was)}
                       />

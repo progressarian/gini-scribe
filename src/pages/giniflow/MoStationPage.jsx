@@ -19,19 +19,20 @@ import {
   useReviewReports,
   useAddProposal,
   useWithdrawProposal,
+  useMoSuggestions,
 } from "../../queries/hooks/useGiniflowMo";
 import { VoiceButton } from "../../components/giniflow/VoiceInput";
 import RxSection from "./consult/RxSection";
 import VisitSummarySection from "./consult/VisitSummarySection";
 import RxParameterSection from "./consult/RxParameterSection";
 import ChiefSuggestions from "../../components/giniflow/ChiefSuggestions";
+import EditNextVisit from "../../components/giniflow/EditNextVisit";
 import ConsultEditBar, { AmendedNote, EditPrescriptionButton } from "./consult/ConsultEditBar";
 import {
   buildTestIndex,
   isSearching,
   MIN_SEARCH_LENGTH,
   pickPopular,
-  rupees,
   searchTests,
   TEST_URGENCY,
 } from "./consult/testSearch";
@@ -523,7 +524,6 @@ export default function MoStationPage() {
   // clinic list every other patient is offered.
   const [custom, setCustom] = useState([]);
   const [testFilter, setTestFilter] = useState("");
-  const [newPrice, setNewPrice] = useState("");
   const [showAllTests, setShowAllTests] = useState(false);
   const testFilterRef = useRef(null);
   const ready = useReadyForDoctor();
@@ -535,11 +535,21 @@ export default function MoStationPage() {
   useEffect(() => setPendingOutcome(undefined), [activeId]);
   const chosenOutcome =
     pendingOutcome === undefined ? (patient?.reportsOutcome ?? null) : pendingOutcome;
+  const { data: suggestions } = useMoSuggestions(activeId);
+  const suggestedNextVisit = (suggestions?.suggestions || []).find(
+    (sg) => sg.field === "next_visit" && sg.status !== "dismissed",
+  );
+  const hasNextVisit = !!(
+    suggestedNextVisit?.editedValue?.date ||
+    suggestedNextVisit?.value?.date ||
+    patient?.edit?.nextVisit?.date
+  );
   const acts = moActions({
     chosenOutcome,
     plan,
     canClose: patient?.canClose,
     reportsReady: patient?.resultsStatus === "ready",
+    hasNextVisit,
   });
   const addProposal = useAddProposal();
   const withdrawProposal = useWithdrawProposal();
@@ -720,7 +730,7 @@ export default function MoStationPage() {
           setCustom([]);
           showToast(
             r.reachesReceptionToday
-              ? `✓ ${r.tests.length} tests ordered — reception can collect ₹${r.total.toLocaleString("en-IN")}`
+              ? `✓ ${r.tests.length} tests ordered — sent to reception`
               : `✓ ${r.tests.length} tests saved for ${urgency.replace("_", " ")}`,
           );
         },
@@ -832,16 +842,6 @@ export default function MoStationPage() {
     );
   };
 
-  const total = picked.reduce(
-    (sum, name) =>
-      sum +
-      Number(
-        catalogue?.tests.find((t) => t.name === name)?.price ??
-          custom.find((t) => t.name === name)?.price ??
-          0,
-      ),
-    0,
-  );
   const cat = CATEGORY[patient?.category];
   const busy =
     ready.isPending ||
@@ -1046,30 +1046,17 @@ export default function MoStationPage() {
               </div>
 
               <div className="sd-body">
-                {patient.edit?.editingMine ? (
-                  <ConsultEditBar
-                    visitId={activeId}
-                    station="mo"
-                    onToast={showToast}
-                    consult={{
-                      name: patient.name,
-                      fileNo: patient.fileNo,
-                      statusLabel: STATUS_LABEL[patient.status] || patient.status,
-                    }}
-                  />
-                ) : (
-                  patient.edit?.finalized && (
-                    <div className="fin-done">
-                      <strong>✓ Finalized</strong>
-                      {patient.edit.editing && (
-                        <span className="fin-gap">
-                          {patient.edit.editing.name || "Another doctor"} is editing this
-                          prescription now.
-                        </span>
-                      )}
-                      <AmendedNote amendedAt={patient.edit.amendedAt} />
-                    </div>
-                  )
+                {patient.edit?.finalized && !patient.edit.editingMine && (
+                  <div className="fin-done">
+                    <strong>✓ Finalized</strong>
+                    {patient.edit.editing && (
+                      <span className="fin-gap">
+                        {patient.edit.editing.name || "Another doctor"} is editing this prescription
+                        now.
+                      </span>
+                    )}
+                    <AmendedNote amendedAt={patient.edit.amendedAt} />
+                  </div>
                 )}
                 {/* No allergy field exists in the database yet, so this says what
                     is true rather than "None recorded", which would read as a
@@ -1531,14 +1518,25 @@ export default function MoStationPage() {
                   </div>
                 </div>
 
-                <div className="dp-sec">
-                  <div className="dp-sec-title">📝 Suggest advice &amp; care plan</div>
-                  <ChiefSuggestions
+                {patient.edit?.editingMine ? (
+                  <EditNextVisit
+                    key={activeId}
                     visitId={activeId}
-                    readOnly={patient.status !== "with_sd"}
+                    fromDate={patient.visitDate}
+                    saved={patient.edit.nextVisit}
                     onToast={showToast}
                   />
-                </div>
+                ) : (
+                  <div className="dp-sec">
+                    <div className="dp-sec-title">📝 Suggest advice &amp; care plan</div>
+                    <ChiefSuggestions
+                      visitId={activeId}
+                      readOnly={patient.status !== "with_sd"}
+                      nextVisitRequired={!!acts.showClose}
+                      onToast={showToast}
+                    />
+                  </div>
+                )}
 
                 <div className="dp-sec">
                   <div className="cs-head">
@@ -1643,25 +1641,13 @@ export default function MoStationPage() {
                     return (
                       <div className="tst-new">
                         <span>“{typed}” is not in the list — order it for this patient only?</span>
-                        <input
-                          className="cp-inp tst-new__price"
-                          inputMode="decimal"
-                          placeholder="₹ price"
-                          aria-label={`Price for ${typed}`}
-                          value={newPrice}
-                          onChange={(e) => setNewPrice(e.target.value)}
-                        />
                         <button
                           type="button"
                           className="btn-sm on"
                           onClick={() => {
-                            setCustom((prev) => [
-                              ...prev,
-                              { name: typed, price: Number(newPrice) > 0 ? Number(newPrice) : 0 },
-                            ]);
+                            setCustom((prev) => [...prev, { name: typed, price: 0 }]);
                             setPicked((prev) => [...new Set([...prev, typed])]);
                             setTestFilter("");
-                            setNewPrice("");
                           }}
                         >
                           + Add for this patient
@@ -1673,7 +1659,7 @@ export default function MoStationPage() {
                     <div className="tst-customlist">
                       {custom.map((t) => (
                         <span key={t.name} className="tst-custom">
-                          {t.name} · {t.price ? rupees(t.price) : "price not set"}
+                          {t.name}
                           <button
                             type="button"
                             aria-label={`Remove ${t.name}`}
@@ -1705,9 +1691,7 @@ export default function MoStationPage() {
                             {dup && " ✓"}
                           </span>
                           {t.gloss && <span className="tst-gloss">{t.gloss}</span>}
-                          <span className="tst-price">
-                            {dup ? "ordered" : t.price ? rupees(t.price) : "price not set"}
-                          </span>
+                          {dup && <span className="tst-price">ordered</span>}
                         </button>
                       );
                     })}
@@ -1718,7 +1702,7 @@ export default function MoStationPage() {
                   {picked.length > 0 && (
                     <div className="tst-bar">
                       <span>
-                        <strong>{picked.length} tests</strong> · ₹{total.toLocaleString("en-IN")} ·{" "}
+                        <strong>{picked.length} tests</strong> ·{" "}
                         {urgency === "today"
                           ? "goes to reception now"
                           : `saved for ${urgency.replace("_", " ")}`}
@@ -1747,7 +1731,12 @@ export default function MoStationPage() {
 
                 <div className="dp-sec">
                   <div className="dp-sec-title">🩹 Procedures</div>
-                  <OrderedServicesPanel station="mo" visitId={activeId} onToast={showToast} />
+                  <OrderedServicesPanel
+                    station="mo"
+                    visitId={activeId}
+                    hidePrices
+                    onToast={showToast}
+                  />
                 </div>
               </div>
 
@@ -1816,6 +1805,20 @@ export default function MoStationPage() {
                     );
                   })()}
                 </div>
+              )}
+
+              {patient.edit?.editingMine && (
+                <ConsultEditBar
+                  visitId={activeId}
+                  station="mo"
+                  onToast={showToast}
+                  needsNextVisit={!patient.edit.nextVisit?.date}
+                  consult={{
+                    name: patient.name,
+                    fileNo: patient.fileNo,
+                    statusLabel: STATUS_LABEL[patient.status] || patient.status,
+                  }}
+                />
               )}
 
               <div className="mo-actions">

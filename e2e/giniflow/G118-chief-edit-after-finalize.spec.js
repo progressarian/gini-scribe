@@ -5,6 +5,7 @@ import { gotoReady } from "../helpers/browser.mjs";
 import { assertTestDatabase } from "../setup/guard.mjs";
 import { CONSULTANTS } from "../fixtures/data.mjs";
 import { extraVisit, newTag, setUp, tearDown } from "../billing/phase4/p4-bills-fixture.mjs";
+import { followUpDueDate } from "../../shared/followUp.js";
 
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 
@@ -63,6 +64,7 @@ test.describe.serial("G118 the Chief edits a visit they closed, from the Chief s
   test.afterAll(async () => {
     if (made) {
       await query(`DELETE FROM giniflow_rx_items WHERE visit_id = $1`, [made.visit]);
+      await query(`DELETE FROM giniflow_care_plans WHERE visit_id = $1`, [made.visit]);
       await query(`DELETE FROM documents WHERE patient_id = $1`, [made.patient]).catch(() => {});
       await query(`DELETE FROM medications WHERE patient_id = $1`, [made.patient]);
       await query(`DELETE FROM consultations WHERE patient_id = $1`, [made.patient]);
@@ -122,6 +124,23 @@ test.describe.serial("G118 the Chief edits a visit they closed, from the Chief s
 
   test("3. saving from the Chief station updates the prescription and leaves the patient where they are", async () => {
     const chief = await apiAs("rahul");
+    const refused = await chief.post(`${mo()}/edit/save`, { data: {} });
+    expect(refused.status()).toBe(409);
+    expect((await refused.json()).error).toMatch(/next visit/i);
+    const other = await apiAs("beant");
+    expect(
+      (
+        await other.put(`${mo()}/edit/next-visit`, { data: { nextVisitInterval: "1 month" } })
+      ).status(),
+    ).toBe(403);
+    const next = await chief.put(`${mo()}/edit/next-visit`, {
+      data: { nextVisitDate: followUpDueDate(ids.day, "1 month"), nextVisitInterval: "1 month" },
+    });
+    expect(next.status(), await next.text()).toBe(200);
+    expect((await (await chief.get(mo())).json()).edit.nextVisit).toEqual({
+      date: followUpDueDate(ids.day, "1 month"),
+      interval: "1 month",
+    });
     const res = await chief.post(`${mo()}/edit/save`, { data: { reason: "Missed calcium" } });
     expect(res.status(), await res.text()).toBe(200);
     const body = await res.json();
@@ -169,8 +188,23 @@ test.describe.serial("G118 the Chief edits a visit they closed, from the Chief s
     const edit = page.getByRole("button", { name: "✎ Edit prescription" });
     await expect(edit).toBeVisible();
     await expect(page.getByText("Prescription last updated at")).toBeVisible();
+    await query(
+      `UPDATE giniflow_care_plans SET next_visit_date = NULL, next_visit_interval = NULL
+        WHERE visit_id = $1`,
+      [made.visit],
+    );
     await edit.click();
     await expect(page.getByText("✎ Editing after finalize")).toBeVisible();
+    const save = page.getByRole("button", { name: "Save changes →" });
+    await expect(save).toBeDisabled();
+    await expect(page.getByText("Set the next visit before saving.")).toBeVisible();
+    const picker = page.getByRole("group", { name: "Next visit after" });
+    await picker.getByRole("combobox", { name: "Number" }).selectOption("2");
+    await picker.getByRole("combobox", { name: "Days, weeks or months" }).selectOption("weeks");
+    await expect(save).toBeEnabled();
+    const bar = await page.locator(".fin-editing").boundingBox();
+    const body = await page.locator(".sd-body").boundingBox();
+    expect(bar.y).toBeGreaterThan(body.y + body.height - 1);
     await page.getByRole("button", { name: "Cancel edit" }).click();
     await expect(edit).toBeVisible();
   });

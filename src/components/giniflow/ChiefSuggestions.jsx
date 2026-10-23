@@ -49,7 +49,12 @@ function Outcome({ suggestion }) {
   );
 }
 
-export default function ChiefSuggestions({ visitId, readOnly, onToast }) {
+export default function ChiefSuggestions({
+  visitId,
+  readOnly,
+  nextVisitRequired = false,
+  onToast,
+}) {
   const { data, isLoading, isError } = useMoSuggestions(visitId);
   const { data: choices } = useMoAdviceChoices(visitId);
   const save = useSaveSuggestion(visitId);
@@ -227,6 +232,7 @@ export default function ChiefSuggestions({ visitId, readOnly, onToast }) {
         interval={values.next_visit.interval || ""}
         date={values.next_visit.date || ""}
         disabled={locked("next_visit")}
+        required={nextVisitRequired && !locked("next_visit")}
         onChange={(next) => edit("next_visit", next)}
       />
       <Outcome suggestion={byField.next_visit} />

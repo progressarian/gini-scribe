@@ -4,6 +4,7 @@ import { outsourcedTestNames } from "../billing/testMatch.js";
 import { OPEN_LAB_CASES_SQL } from "./labStation.js";
 import { LAB_SAMPLE_FLOW, UNDRAWN_SAMPLE_STATUSES } from "../../../shared/labStages.js";
 import { finalizeConsult } from "./finalize.js";
+import { applyChiefNextVisit } from "./planSuggestions.js";
 import { advanceStatus, budgetColour, reopenResultsForNewOrder } from "./statusEngine.js";
 import { getSlaConfig, budgetLookup } from "./board.js";
 import {
@@ -1092,6 +1093,7 @@ export async function closeWithoutDoctor(visitId, actorId = null, db = pool) {
         { status: 409 },
       );
     }
+    await applyChiefNextVisit(client, visitId, actorId);
     await client.query("COMMIT");
   } catch (e) {
     // If the connection has dropped, ROLLBACK rejects too — and the release
@@ -1108,7 +1110,10 @@ export async function closeWithoutDoctor(visitId, actorId = null, db = pool) {
   // `giniflow_rx_items` and sent the patient to a pharmacy with no prescription
   // at all (31 §3 G4) — so the close IS the finalize, not a status change
   // beside one.
-  const result = await finalizeConsult(visitId, actorId, db, { closedBySd: true });
+  const result = await finalizeConsult(visitId, actorId, db, {
+    closedBySd: true,
+    requireNextVisit: true,
+  });
   return { ...result, status: "doctor_done", skippedDoctor: true };
 }
 

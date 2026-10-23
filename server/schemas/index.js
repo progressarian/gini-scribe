@@ -1509,6 +1509,14 @@ export const giniflowConsultEditSaveSchema = z.object({
   reason: z.string().trim().max(300, "Keep the reason under 300 characters").optional(),
 });
 
+export const giniflowEditNextVisitSchema = z.object({
+  nextVisitDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD")
+    .nullish(),
+  nextVisitInterval: z.string().max(40).nullish(),
+});
+
 // ── Gini Flow · referrals (docs/gini-flow/19-REFERRALS-STATION-PLAN.md §4.2) ─
 // The prototype's create form has no <form>, no name/id attributes, no required
 // and no validation at all. Patient, specialty and reason are the three a letter

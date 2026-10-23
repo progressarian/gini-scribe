@@ -132,3 +132,12 @@ export function useMoAdviceChoices(visitId) {
     staleTime: 5 * 60 * 1000,
   });
 }
+
+export function useSaveEditNextVisit(visitId) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (next) => (await api.put(`${base}/${visitId}/edit/next-visit`, next)).data,
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "mo", "patient", visitId] }),
+  });
+}

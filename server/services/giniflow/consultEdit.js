@@ -1,5 +1,6 @@
 import pool from "../../config/db.js";
 import { IST_TODAY } from "./statusEngine.js";
+import { skipSunday } from "../../../shared/followUp.js";
 import { SEEDED_SLOTS } from "./prescription.js";
 import { checkVisit } from "./interactions.js";
 import { pendingProposalCount, writeMedicines } from "./finalize.js";
@@ -284,6 +285,34 @@ export async function saveEdit(
   return { saved: true, consultationId: visit.consultation_id, ...summary };
 }
 
+export async function saveEditNextVisit(
+  visitId,
+  { nextVisitDate = null, nextVisitInterval = null } = {},
+  { actorId = null, isAdmin = false } = {},
+  db = pool,
+) {
+  return inTransaction(db, async (client) => {
+    const visit = await lockVisit(client, visitId);
+    if (visit.editing_by == null || (!isAdmin && Number(visit.editing_by) !== Number(actorId))) {
+      throw fail(
+        403,
+        "Press Edit prescription first — the next visit can be changed only while you edit",
+      );
+    }
+    const date = skipSunday(nextVisitDate) || null;
+    await client.query(
+      `INSERT INTO giniflow_care_plans (visit_id, next_visit_date, next_visit_interval, authored_by)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (visit_id) DO UPDATE
+          SET next_visit_date = EXCLUDED.next_visit_date,
+              next_visit_interval = EXCLUDED.next_visit_interval,
+              updated_at = NOW()`,
+      [visitId, date, date ? nextVisitInterval || null : null, actorId],
+    );
+    return { nextVisitDate: date };
+  });
+}
+
 export async function editingVisitOf(visitId, db = pool) {
   const { rows } = await db.query(
     `SELECT (to_jsonb(v)->>'editing_by')::int AS editing_by FROM giniflow_visits v WHERE v.id = $1`,
@@ -309,6 +338,10 @@ export async function editState(visitId, { actorId = null, isAdmin = false } = {
             (to_jsonb(v)->>'editing_by')::int AS editing_by,
             to_jsonb(v)->>'editing_since' AS editing_since,
             to_jsonb(v)->>'amended_at' AS amended_at,
+            (SELECT p.next_visit_date::text FROM giniflow_care_plans p
+              WHERE p.visit_id = v.id) AS next_visit_date,
+            (SELECT p.next_visit_interval FROM giniflow_care_plans p
+              WHERE p.visit_id = v.id) AS next_visit_interval,
             (SELECT COALESCE(d.short_name, d.name) FROM doctors d
               WHERE d.id = (to_jsonb(v)->>'editing_by')::int) AS editing_name,
             (SELECT e.actor_id FROM giniflow_visit_events e
@@ -333,5 +366,6 @@ export async function editState(visitId, { actorId = null, isAdmin = false } = {
       !editing &&
       mayEdit(v, actorId, isAdmin),
     amendedAt: v.amended_at || null,
+    nextVisit: { date: v.next_visit_date || "", interval: v.next_visit_interval || "" },
   };
 }
