@@ -11,6 +11,12 @@
 // ============================================================================
 import { Router } from "express";
 import pool from "../config/db.js";
+import {
+  holdIfOverLimit,
+  overLimitFor,
+  patientTypeFor,
+  slotOfAppointment,
+} from "../services/slots/capacityGuard.js";
 import { handleError } from "../utils/errorHandler.js";
 import { validate } from "../middleware/validate.js";
 import { requireCapability } from "../middleware/auth.js";
@@ -24,6 +30,7 @@ import {
   reassignSingleSchema,
   slotTemplateSchema,
   slotTemplateApplySchema,
+  slotTemplateClearSchema,
 } from "../schemas/index.js";
 import {
   isSlotAvailable,
@@ -33,6 +40,8 @@ import {
   resolveDoctor,
 } from "../services/availability.js";
 import {
+  clearScheduleFrom,
+  clearsReady,
   insertTemplateVersion,
   istToday,
   templateErrors,
@@ -114,7 +123,12 @@ router.get("/doctors/:id/slot-templates", async (req, res) => {
     const versions = await templateVersions(parseInt(req.params.id, 10));
     const today = istToday();
     const current = versions.find((v) => v.status === "active" && v.effectiveFrom <= today);
-    res.json({ today, current_id: current?.id ?? null, versions });
+    res.json({
+      today,
+      current_id: current && !current.clears ? current.id : null,
+      cleared_from: current?.clears ? current.effectiveFrom : null,
+      versions,
+    });
   } catch (e) {
     handleError(res, e, "Slot templates list");
   }
@@ -196,6 +210,42 @@ router.post(
     } catch (e) {
       await client.query("ROLLBACK").catch(() => {});
       handleError(res, e, "Slot template save");
+    } finally {
+      client.release();
+    }
+  },
+);
+
+router.post(
+  "/doctors/:id/slot-templates/clear",
+  admin,
+  validate(slotTemplateClearSchema),
+  async (req, res) => {
+    const doctor = await scheduledDoctor(req, res).catch((e) =>
+      handleError(res, e, "Slot template clear"),
+    );
+    if (!doctor) return;
+    if (req.body.effective_from < istToday())
+      return res.status(400).json({
+        error: "A schedule can't be cleared in the past. Pick today or a later date.",
+      });
+    if (!(await clearsReady()))
+      return res.status(503).json({
+        error:
+          "Clear schedule isn't switched on yet: its one-time database update hasn't been run. Run it and try again.",
+      });
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await clearScheduleFrom(client, doctor.id, {
+        effectiveFrom: req.body.effective_from,
+        actorId: req.doctor?.doctor_id ?? null,
+      });
+      await client.query("COMMIT");
+      res.json(result);
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => {});
+      handleError(res, e, "Slot template clear");
     } finally {
       client.release();
     }
@@ -556,21 +606,64 @@ router.get("/availability/day", async (req, res) => {
     const doctorId = idR.rows[0]?.id || null;
     if (!doctorId) return res.json({ resolved: false, date, slots: [] });
     const day = await getDoctorDayView(doctorId, date);
-    res.json({ resolved: true, date, ...publicDay(day) });
+    const { patient_id, file_no, walkin, visit_type, exclude } = req.query;
+    const known = patient_id || file_no || walkin === "1" || visit_type;
+    const patient_type = known
+      ? await patientTypeFor({
+          patientId: patient_id,
+          fileNo: file_no,
+          date,
+          walkin: walkin === "1",
+          visitType: visit_type,
+        })
+      : null;
+    const ownSlot = exclude ? await slotOfAppointment(parseInt(exclude, 10), doctorId, date) : null;
+    const out = publicDay(day);
+    if (patient_type)
+      out.slots = out.slots.map((s) => ({
+        ...s,
+        patient_type,
+        over_limit: overLimitFor(s, patient_type, s.slot_label === ownSlot ? 1 : 0),
+      }));
+    res.json({ resolved: true, date, patient_type, ...out });
   } catch (e) {
     handleError(res, e, "Availability by name");
+  }
+});
+
+router.get("/availability/days", async (req, res) => {
+  try {
+    const pairs = String(req.query.pairs || "")
+      .split(",")
+      .map((p) => p.split("|"))
+      .filter(([doctor, date]) => doctor && /^\d{4}-\d{2}-\d{2}$/.test(date || ""))
+      .slice(0, 60);
+    const out = {};
+    for (const [doctor, date] of pairs) {
+      const idR = await pool.query("SELECT resolve_doctor_id($1) AS id", [doctor]);
+      const doctorId = idR.rows[0]?.id || null;
+      const day = doctorId ? await getDoctorDayView(doctorId, date) : null;
+      out[`${doctor}|${date}`] = day?.fromTemplate ? publicDay(day).slots : null;
+    }
+    res.json(out);
+  } catch (e) {
+    handleError(res, e, "Availability for several days");
   }
 });
 
 // Ranked doctors available for a date+slot (reassignment / booking picker).
 router.get("/availability/doctors-for-slot", async (req, res) => {
   try {
-    const { date, slot, exclude, role, specialty } = req.query;
+    const { date, slot, exclude, role, specialty, appointment } = req.query;
     if (!date || !slot) return res.status(400).json({ error: "date and slot required" });
+    const patientType = appointment
+      ? await patientTypeFor({ appointmentId: parseInt(appointment, 10), date })
+      : null;
     const list = await findAvailableDoctors(date, slot, {
       excludeDoctorId: exclude ? parseInt(exclude, 10) : null,
       role: role || null,
       specialty: specialty || null,
+      patientType,
     });
     res.json(list);
   } catch (e) {
@@ -599,6 +692,11 @@ async function applyMove(client, move, ctx) {
     [to_doctor_name, to_doctor_id, toSlot, appointment_id],
   );
   // Mirror to the live OPD queue card if the patient is already checked in.
+  const approval = await holdIfOverLimit(appointment_id, {
+    actor: ctx.actor,
+    client,
+    reason: move.over_limit_reason,
+  });
   await client.query(
     "UPDATE active_visits SET doctor_name=$1, doctor_id=$2 WHERE appointment_id=$3",
     [to_doctor_name, to_doctor_id, appointment_id],
@@ -625,7 +723,14 @@ async function applyMove(client, move, ctx) {
       ctx.reassigned_by || null,
     ],
   );
-  return { appointment_id, to_doctor_id, to_doctor_name, time_slot: toSlot, moved: true };
+  return {
+    appointment_id,
+    to_doctor_id,
+    to_doctor_name,
+    time_slot: toSlot,
+    approval,
+    moved: true,
+  };
 }
 
 // Bulk reassign (emergency / planned).
@@ -638,6 +743,7 @@ router.post("/appointments/reassign", admin, validate(reassignBulkSchema), async
       unavailability_id,
       reason,
       reassigned_by: req.doctor?.doctor_name || null,
+      actor: req.doctor,
     };
     const moved = [];
     const failed = [];
@@ -687,11 +793,13 @@ router.put(
           appointment_id: parseInt(req.params.id, 10),
           to_doctor_id: req.body.to_doctor_id,
           to_doctor_name: req.body.to_doctor_name,
+          over_limit_reason: req.body.over_limit_reason,
         },
         {
           trigger: req.body.trigger || "manual",
           reason: req.body.reason,
           reassigned_by: req.doctor?.doctor_name || null,
+          actor: req.doctor,
         },
       );
       if (r.moved) {

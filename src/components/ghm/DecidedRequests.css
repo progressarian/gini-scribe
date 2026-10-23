@@ -1,0 +1,112 @@
+.decided {
+  margin: 0 0 12px;
+  padding: 12px 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+}
+.decided__title {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #1a2332;
+}
+.decided__list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.decided__item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-left-width: 4px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #334155;
+}
+.decided__item--approved {
+  border-left-color: #059669;
+}
+.decided__item--rejected {
+  border-left-color: #dc2626;
+}
+.decided__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.decided__item--approved .decided__status {
+  color: #047857;
+  background: #f0fdf4;
+  border-color: #a7f3d0;
+}
+.decided__item--rejected .decided__status {
+  color: #b91c1c;
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+.decided__text {
+  min-width: 0;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.decided__text small {
+  color: #64748b;
+}
+.decided__next {
+  font-weight: 600;
+  color: #1a2332;
+}
+.decided__reason {
+  color: #475569;
+}
+.decided__who {
+  display: block;
+}
+.decided__actions {
+  display: flex;
+  gap: 8px;
+}
+.decided__actions button {
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.decided__show {
+  color: #2563eb;
+}
+.decided__dismiss {
+  color: #475569;
+}
+.decided__actions button:hover {
+  background: #f1f5f9;
+}
+.decided__actions button:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
+@media (max-width: 720px) {
+  .decided__item {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

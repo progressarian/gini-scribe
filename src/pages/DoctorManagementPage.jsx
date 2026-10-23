@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { Link } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import api from "../services/api";
+import { qk } from "../queries/keys";
 import useAuthStore from "../stores/authStore";
 import { toast } from "../stores/uiStore";
 import DeleteDoctorModal from "../components/doctors/DeleteDoctorModal";
@@ -392,6 +395,12 @@ export default function DoctorManagementPage() {
   const [addingStaff, setAddingStaff] = useState(false);
   const [removedRefresh, setRemovedRefresh] = useState(0);
   const [offToday, setOffToday] = useState(new Map());
+  const { data: approvalData } = useQuery({
+    queryKey: qk.bookingApprovals.count,
+    queryFn: async () => (await api.get("/api/booking-approvals/count")).data,
+    refetchInterval: 60_000,
+  });
+  const approvalCount = approvalData?.pending || 0;
 
   useEffect(() => {
     if (!doctorsList?.length) fetchDoctorsList();
@@ -450,6 +459,9 @@ export default function DoctorManagementPage() {
           <p className="docmgmt-hint">Staff, weekly schedules, time off and settings.</p>
         </div>
         <div className="docmgmt-headactions">
+          <Link to="/desk-requests?tab=bookings" className="docmgmt-secondary">
+            Approvals{approvalCount ? ` (${approvalCount})` : ""}
+          </Link>
           <button
             type="button"
             className="docmgmt-secondary"

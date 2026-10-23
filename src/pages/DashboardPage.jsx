@@ -17,6 +17,7 @@ import {
   slotOptionLabel,
   isClinicalDoctor,
 } from "../lib/slotAvailability.js";
+import { useOverLimitConfirm } from "../components/booking/OverLimitDialog";
 import useMessagingStore from "../stores/messagingStore";
 import { cleanNote } from "../utils/cleanNote.js";
 import { CAPABILITIES as CAP, hasAnyCapability } from "../../shared/permissions";
@@ -113,7 +114,12 @@ export default function DashboardPage() {
   const { block } = usePatientBlock(patient?.id);
 
   // Doctor's slot availability for the Book Appointment form.
-  const apptSlots = useDayAvailability(bookForm.doc, bookForm.dt);
+  const apptSlots = useDayAvailability(bookForm.doc, bookForm.dt, {
+    patientId: dbPatientId,
+    visitType: bookForm.ty,
+    exclude: typeof editApptId === "number" ? editApptId : null,
+  });
+  const overLimit = useOverLimitConfirm();
   const slotCatalog = useSlotCatalog();
   useEffect(() => {
     if (!apptSlots || !bookForm.tm) return;
@@ -850,7 +856,15 @@ export default function DashboardPage() {
               <label style={{ fontSize: 10, fontWeight: 600, color: "#475569" }}>Time</label>
               <select
                 value={bookForm.tm}
-                onChange={(e) => setBookForm({ ...bookForm, tm: e.target.value })}
+                onChange={async (e) => {
+                  const value = e.target.value;
+                  const picked = (apptSlots || []).find((x) => x.slot_label === value);
+                  const ok = await overLimit.confirm(picked, {
+                    doctorName: bookForm.doc,
+                    patientName: patient?.name,
+                  });
+                  if (ok) setBookForm((f) => ({ ...f, tm: value, overLimitReason: ok.reason }));
+                }}
                 disabled={!bookForm.doc}
                 style={{
                   width: "100%",
@@ -1704,6 +1718,7 @@ export default function DashboardPage() {
           })}
         </div>
       )}
+      {overLimit.dialog}
     </div>
   );
 }

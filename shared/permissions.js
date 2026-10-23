@@ -66,6 +66,7 @@ export const ROLES = {
 // Capability keys. A capability is a coarse permission gating a group of API
 // route prefixes and frontend pages.
 export const CAPABILITIES = {
+  BOOKING_APPROVE: "BOOKING_APPROVE",
   // Identity-level lookup: find a patient, see who they are (name, phone, file
   // no, age/sex) and their appointments. Does NOT imply the clinical record.
   PATIENT_READ: "PATIENT_READ",
@@ -435,6 +436,7 @@ export const ROLE_CAPABILITIES = {
   [ROLES.RECEPTION]: RECEPTION_CAPABILITIES,
   [ROLES.RECEPTION_ADMIN]: [
     ...RECEPTION_CAPABILITIES,
+    C.BOOKING_APPROVE,
     C.BILLING_MASTER,
     C.BILLING_CLAIMS,
     C.BILLING_REPORTS,

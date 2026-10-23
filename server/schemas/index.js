@@ -310,6 +310,12 @@ export const fileUploadSchema = z.object({
 });
 
 // ---- Appointments ----
+const overLimitReason = z
+  .string()
+  .max(300, "Keep the reason under 300 characters.")
+  .optional()
+  .nullable();
+
 export const appointmentCreateSchema = z.object({
   patient_id: optInt,
   patient_name: z.string({ required_error: "patient_name is required" }).min(1),
@@ -326,6 +332,7 @@ export const appointmentCreateSchema = z.object({
   is_walkin: optBool,
   // Admin override for availability enforcement (else validate() strips it).
   force: optBool,
+  over_limit_reason: overLimitReason,
 });
 
 export const appointmentUpdateSchema = z.object({
@@ -340,6 +347,7 @@ export const appointmentUpdateSchema = z.object({
   notes: optStr,
   // Admin override for availability enforcement (else validate() strips it).
   force: optBool,
+  over_limit_reason: overLimitReason,
 });
 
 // ---- Messages ----
@@ -504,6 +512,10 @@ export const unavailabilityCreateSchema = z
   .refine(notPastStart, notPastStartOpts);
 
 const hhmmTime = z.string().regex(/^\d{2}:\d{2}$/, "time must be HH:MM");
+export const slotTemplateClearSchema = z.object({
+  effective_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "pick the date to clear from"),
+});
+
 export const slotTemplateSchema = z.object({
   effective_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "pick the date this schedule starts"),
   note: z.string().max(200).optional().nullable(),
@@ -594,6 +606,7 @@ export const reassignBulkSchema = z.object({
         appointment_id: z.number({ required_error: "appointment_id is required" }).int(),
         to_doctor_id: z.number({ required_error: "to_doctor_id is required" }).int(),
         to_doctor_name: z.string({ required_error: "to_doctor_name is required" }).min(1),
+        over_limit_reason: overLimitReason,
       }),
     )
     .min(1, "at least one move is required"),
@@ -604,6 +617,7 @@ export const reassignSingleSchema = z.object({
   to_doctor_name: z.string({ required_error: "to_doctor_name is required" }).min(1),
   reason: optStr,
   trigger: optStr,
+  over_limit_reason: overLimitReason,
 });
 
 // ── Gini Flow (docs/gini-flow/) ─────────────────────────────────────────────
@@ -1142,8 +1156,8 @@ export const giniflowProposalSchema = z.object({
 export const giniflowSuggestionSaveSchema = z.object({
   value: z.union([
     z.string().max(4000),
-    z.array(z.record(z.any())).max(30),
-    z.record(z.any()),
+    z.array(z.record(z.string(), z.any())).max(30),
+    z.record(z.string(), z.any()),
     z.null(),
   ]),
 });
@@ -1151,7 +1165,11 @@ export const giniflowSuggestionSaveSchema = z.object({
 export const giniflowSuggestionDecisionSchema = z.object({
   status: z.enum(["accepted", "edited", "dismissed"]),
   value: z
-    .union([z.string().max(4000), z.array(z.record(z.any())).max(30), z.record(z.any())])
+    .union([
+      z.string().max(4000),
+      z.array(z.record(z.string(), z.any())).max(30),
+      z.record(z.string(), z.any()),
+    ])
     .optional(),
   note: z.string().max(300).nullish(),
 });

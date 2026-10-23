@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { one, query } from "../helpers/db.mjs";
 import { CONSULTANTS } from "../fixtures/data.mjs";
-import { loginAs } from "../helpers/auth.mjs";
+import { apiAs, loginAs } from "../helpers/auth.mjs";
 import { gotoReady } from "../helpers/browser.mjs";
 import { assertTestDatabase } from "../setup/guard.mjs";
 
@@ -30,6 +30,7 @@ const longDate = (iso) =>
   });
 
 const cleanUp = async () => {
+  await query(`DELETE FROM doctor_unavailability WHERE doctor_id = $1`, [doctor.id]);
   await query(`DELETE FROM appointment_reassignments WHERE file_no LIKE 'G117-%'`);
   await query(`DELETE FROM appointments WHERE file_no LIKE 'G117-%'`);
   await query(
@@ -291,5 +292,68 @@ test.describe
     await expect(
       page.getByRole("table", { name: "Working hours by day" }).getByRole("row", { name: /Mon/ }),
     ).toContainText("9 AM–1 PM · 20 min slots · per slot 3 new, 2 follow-up, 5 walk-in");
+  });
+  test("9. several slots are blocked as one break with a reason, and unblocked by clicking", async ({
+    page,
+  }) => {
+    await query(
+      `INSERT INTO appointments (patient_name, file_no, doctor_name, appointment_date, time_slot, status, healthray_id)
+       VALUES ('G117 Ward HealthRay', 'G117-4', $1, $2, '10:05', 'booked', 990000202)`,
+      [doctor.name, MONDAY],
+    );
+    await page.getByLabel("Preview date").fill(MONDAY);
+    const grid = page.getByLabel("Slots on this day");
+    await expect(grid.getByText("10 AM to 10:20 AM")).toBeVisible();
+    await page.getByRole("button", { name: "Select slots to block" }).click();
+    await grid.getByRole("button", { name: "Select 10 AM to 10:20 AM" }).click();
+    await grid.getByRole("button", { name: "Select 10:20 AM to 10:40 AM" }).click();
+    const bar = page.getByRole("region", { name: "Block slots" });
+    await expect(bar).toContainText(/2 of \d+ open slots selected/);
+    await bar.getByRole("button", { name: "Select all" }).click();
+    await expect(bar).not.toContainText(/^2 of/);
+    await bar.getByRole("button", { name: "Clear all" }).click();
+    await expect(bar).toContainText(/0 of \d+ open slots selected/);
+    await grid.getByRole("button", { name: "Select 10 AM to 10:20 AM" }).click();
+    await grid.getByRole("button", { name: "Select 10:20 AM to 10:40 AM" }).click();
+    await expect(bar.getByRole("button", { name: "Block 2 slots" })).toBeDisabled();
+    await bar.getByLabel("Reason (required)").fill("Ward round");
+    await bar.getByRole("button", { name: "Block 2 slots" }).click();
+    const reassign = page.getByRole("dialog", { name: /Reassign patients/ });
+    await expect(reassign).toContainText("G117 Ward HealthRay");
+    await reassign.getByRole("button", { name: "Close", exact: true }).click();
+    await reassign.getByRole("button", { name: "Close without moving" }).click();
+    await expect(reassign).toHaveCount(0);
+    const blocked = grid.getByRole("button", { name: "Unblock 10 AM to 10:20 AM" });
+    await expect(blocked).toContainText("Ward round");
+
+    const row = await one(
+      `SELECT type, slot_labels, reason, status FROM doctor_unavailability WHERE doctor_id = $1`,
+      [doctor.id],
+    );
+    expect(row).toEqual({
+      type: "break",
+      slot_labels: ["10 AM to 10:20 AM", "10:20 AM to 10:40 AM"],
+      reason: "Ward round",
+      status: "active",
+    });
+
+    const api = await apiAs("admin");
+    const conflicts = await (await api.get(`/api/appointments/conflicts?date=${MONDAY}`)).json();
+    await api.dispose();
+    expect(
+      conflicts.conflicts
+        .filter((c) => c.current_doctor === doctor.name)
+        .map((c) => [c.patient_name, c.time_slot, c.reason, c.detail]),
+    ).toEqual([["G117 Ward HealthRay", "10:05", "break", "Ward round"]]);
+
+    await blocked.click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toContainText("10 AM to 10:20 AM, 10:20 AM to 10:40 AM");
+    await dialog.getByRole("button", { name: "Remove break" }).click();
+    await expect(grid.getByRole("button", { name: /^Unblock/ })).toHaveCount(0);
+    const after = await one(`SELECT status FROM doctor_unavailability WHERE doctor_id = $1`, [
+      doctor.id,
+    ]);
+    expect(after.status).toBe("cancelled");
   });
 });

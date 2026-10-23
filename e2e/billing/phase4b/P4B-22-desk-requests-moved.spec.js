@@ -136,7 +136,11 @@ test.describe.serial("P4B-22 desk requests move out of Settings", () => {
 
     const admin = await apiAs("admin");
     const counts = await (await admin.get("/api/approvals/waiting")).json();
-    expect(counts).toEqual({ deskRequests: inDb.desk, testCancellations: inDb.tests });
+    expect(counts).toEqual({
+      deskRequests: inDb.desk,
+      testCancellations: inDb.tests,
+      bookingApprovals: expect.any(Number),
+    });
     const inbox = await (
       await admin.get("/api/billing/master/requests", { params: { status: "pending" } })
     ).json();
@@ -153,6 +157,7 @@ test.describe.serial("P4B-22 desk requests move out of Settings", () => {
     expect(await (await recAdmin.get("/api/approvals/waiting")).json()).toEqual({
       deskRequests: inDb.desk,
       testCancellations: null,
+      bookingApprovals: expect.any(Number),
     });
     await recAdmin.dispose();
 
@@ -216,10 +221,13 @@ test.describe.serial("P4B-22 desk requests move out of Settings", () => {
     expect(asked.length).toBe(1);
   });
 
-  test("4. reception admin sees billing requests directly, with no tab row", async ({ page }) => {
+  test("4. reception admin sees billing requests and booking limits, never test cancellations", async ({
+    page,
+  }) => {
     await loginAs(page, "reception_admin");
     await gotoReady(page, `${HOME}?tab=tests`, () => deskHeading(page));
-    await expect(page.getByRole("tablist", { name: "Desk requests" })).toHaveCount(0);
+    const tabs = page.getByRole("tablist", { name: "Desk requests" }).getByRole("tab");
+    await expect(tabs).toHaveText([/Billing requests/, /Booking limits/]);
     await expect(testsHeading(page)).toHaveCount(0);
   });
 

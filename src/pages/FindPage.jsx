@@ -17,8 +17,10 @@ import {
   useSlotCatalog,
   slotOptions,
   slotOptionLabel,
+  notifyApproval,
   isClinicalDoctor,
 } from "../lib/slotAvailability.js";
+import { useOverLimitConfirm } from "../components/booking/OverLimitDialog";
 import "./FindPage.css";
 
 export default function FindPage() {
@@ -99,7 +101,11 @@ export default function FindPage() {
   const [familyTarget, setFamilyTarget] = useState(null);
 
   // Doctor's slot availability for the quick-book form.
-  const apptSlots = useDayAvailability(bookForm.doc, bookForm.dt);
+  const apptSlots = useDayAvailability(bookForm.doc, bookForm.dt, {
+    fileNo: quickBookPatient.file_no?.trim() || null,
+    visitType: bookForm.ty,
+  });
+  const overLimit = useOverLimitConfirm();
   const slotCatalog = useSlotCatalog();
   // Clear a chosen slot that just became unavailable.
   useEffect(() => {
@@ -380,7 +386,15 @@ export default function FindPage() {
             />
             <select
               value={bookForm.tm}
-              onChange={(e) => setBookForm({ ...bookForm, tm: e.target.value })}
+              onChange={async (e) => {
+                const value = e.target.value;
+                const picked = (apptSlots || []).find((x) => x.slot_label === value);
+                const ok = await overLimit.confirm(picked, {
+                  doctorName: bookForm.doc,
+                  patientName: quickBookPatient.name,
+                });
+                if (ok) setBookForm((f) => ({ ...f, tm: value, overLimitReason: ok.reason }));
+              }}
               disabled={!bookForm.doc}
               style={{
                 padding: "6px 8px",
@@ -475,15 +489,17 @@ export default function FindPage() {
                 }
                 setBookErrors({});
                 try {
-                  await api.post("/api/appointments", {
+                  const { data: booked } = await api.post("/api/appointments", {
                     patient_name: quickBookPatient.name,
                     file_no: quickBookPatient.file_no,
                     phone: quickBookPatient.phone,
                     doctor_name: bookForm.doc,
                     appointment_date: bookForm.dt,
                     time_slot: bookForm.tm || null,
+                    over_limit_reason: bookForm.overLimitReason || null,
                     visit_type: bookForm.ty || "OPD",
                   });
+                  notifyApproval(booked);
                   fetchTodayAppointments();
                   setShowQuickBook(false);
                   setQuickBookPatient({ name: "", file_no: "", phone: "" });
@@ -888,6 +904,7 @@ export default function FindPage() {
       {familyTarget && (
         <PhoneFamilyModal patient={familyTarget} onClose={() => setFamilyTarget(null)} />
       )}
+      {overLimit.dialog}
     </div>
   );
 }

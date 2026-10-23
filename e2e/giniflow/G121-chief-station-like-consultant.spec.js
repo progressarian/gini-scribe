@@ -139,4 +139,43 @@ test.describe.serial("G121 the Chief station works like the consultant's", () =>
       ).interval,
     ).toBe("1 month");
   });
+
+  test("4. a visit closed without a Scribe prescription offers no Edit", async () => {
+    const visit = await atChiefDesk("ChiefNoRx");
+    await query(`UPDATE giniflow_visits SET current_status = 'doctor_done' WHERE id = $1`, [
+      visit.visit,
+    ]);
+    const chief = await apiAs("rahul");
+    const { edit } = await (await chief.get(`/api/giniflow/stations/mo/${visit.visit}`)).json();
+    expect(edit).toMatchObject({ finalized: true, scribeRx: false, canEdit: false });
+  });
+
+  test("5. opening a patient at the Chief station fills the draft with their current medicines", async () => {
+    const visit = await extraVisit(ids, "ChiefSeed", { healthray: false });
+    made.push(visit);
+    await query(`UPDATE giniflow_visits SET current_status = 'vitals_done' WHERE id = $1`, [
+      visit.visit,
+    ]);
+    await query(
+      `INSERT INTO medications (patient_id, name, dose, frequency, is_active)
+       VALUES ($1, 'G121 Metformin', '500 mg', 'BD', true), ($1, 'G121 Telma', '40 mg', 'OD', true)`,
+      [visit.patient],
+    );
+    const chief = await apiAs("rahul");
+    const res = await chief.post(`/api/giniflow/stations/mo/${visit.visit}/start`);
+    expect(res.status(), await res.text()).toBe(200);
+    expect((await res.json()).seeded).toBe(2);
+    const draft = await query(
+      `SELECT medicine_name, change_type, approval_status FROM giniflow_rx_items
+        WHERE visit_id = $1 ORDER BY medicine_name`,
+      [visit.visit],
+    );
+    expect(draft.rows).toEqual([
+      { medicine_name: "G121 Metformin", change_type: "continued", approval_status: null },
+      { medicine_name: "G121 Telma", change_type: "continued", approval_status: null },
+    ]);
+    const again = await chief.post(`/api/giniflow/stations/mo/${visit.visit}/start`);
+    expect((await again.json()).seeded).toBe(0);
+    await query(`DELETE FROM giniflow_rx_items WHERE visit_id = $1`, [visit.visit]);
+  });
 });

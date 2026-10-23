@@ -112,7 +112,7 @@ export const PAGE_CAPABILITIES = {
   "/settings/category-rates": CAP.BILLING_MASTER,
   "/settings/consultant-fees": CAP.BILLING_MASTER,
   "/settings/discounts": CAP.BILLING_MASTER,
-  "/desk-requests": [CAP.BILLING_MASTER, CAP.GINIFLOW_TEST_CANCEL_DECIDE],
+  "/desk-requests": [CAP.BILLING_MASTER, CAP.GINIFLOW_TEST_CANCEL_DECIDE, CAP.BOOKING_APPROVE],
   "/settings/desk-requests": CAP.BILLING_MASTER,
   "/settings/test-cancellations": CAP.GINIFLOW_TEST_CANCEL_DECIDE,
   "/settings/bulk-import": CAP.BILLING_MASTER,

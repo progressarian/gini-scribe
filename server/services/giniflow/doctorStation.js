@@ -1,7 +1,12 @@
 import pool from "../../config/db.js";
 import { advanceStatus, budgetColour, returnToQueue, IST_TODAY } from "./statusEngine.js";
 import { getSlaConfig, budgetMap, budgetLookup } from "./board.js";
-import { slaKeyForStatus, STATUS_LABEL, WAIT_SINCE_SQL } from "../../../shared/giniflowStatus.js";
+import {
+  CHAIN,
+  slaKeyForStatus,
+  STATUS_LABEL,
+  WAIT_SINCE_SQL,
+} from "../../../shared/giniflowStatus.js";
 import { todaysVitals, previousVitals } from "./visitVitals.js";
 import { buildBrief } from "./consultBrief.js";
 import { seedDraftOn } from "./prescription.js";
@@ -443,6 +448,9 @@ export async function getConsult(visitId, db = pool) {
             (SELECT e.actor_id FROM giniflow_visit_events e
               WHERE e.visit_id = v.id AND e.meta->>'source' = 'consult_finalize'
               ORDER BY e.occurred_at DESC LIMIT 1) AS finalized_by,
+            EXISTS (SELECT 1 FROM giniflow_visit_events e
+                     WHERE e.visit_id = v.id AND e.meta->>'source' = 'consult_finalize'
+                       AND e.meta ? 'consultation_id') AS scribe_rx,
             p.name, p.file_no, p.age, p.sex, p.notes,
             COALESCE(doc.short_name, doc.name) AS doctor_name,
             sd.short_name  AS sd_name,
@@ -610,6 +618,7 @@ export async function getConsult(visitId, db = pool) {
     finalized: DONE_STATUSES.includes(v.current_status),
     isToday: !!v.is_today,
     finalizedBy: v.finalized_by ?? null,
+    scribeRx: !!v.scribe_rx,
     assignedSdId: v.assigned_sd_id ?? null,
     editing: v.editing_by
       ? { by: v.editing_by, name: v.editing_name, since: v.editing_since }
@@ -816,25 +825,66 @@ export async function releaseConsult(visitId, actorId = null, db = pool) {
     if (rows[0].current_status !== "with_doctor") {
       throw Object.assign(new Error("This patient is not in the room"), { status: 409 });
     }
-    // Through the engine's own primitive rather than a direct UPDATE (CS-09):
-    // the rule that `current_status` is written in one place is worth keeping
-    // true, and returnToQueue also clears the manual queue position the way
-    // every other transition does.
+    const origin = await statusBeforeClaim(client, visitId);
     await returnToQueue(client, {
       visitId,
-      toStatus: "ready_for_doctor",
+      toStatus: origin.status,
       actorRole: "doctor",
       actorId,
       meta: { released: true },
     });
+    if (origin.since) await undoClaim(client, visitId, origin);
     await client.query("COMMIT");
-    return { released: true };
+    return { released: true, toStatus: origin.status };
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;
   } finally {
     client.release();
   }
+}
+
+const BEFORE_CONSULTANT = CHAIN.slice(0, CHAIN.indexOf("with_doctor"));
+
+async function statusBeforeClaim(client, visitId) {
+  const { rows } = await client.query(
+    `SELECT e.status, e.occurred_at AS since
+       FROM giniflow_visit_events e
+      WHERE e.visit_id = $1
+        AND e.status = ANY($2::text[])
+        AND e.occurred_at < (
+          SELECT max(occurred_at) FROM giniflow_visit_events
+           WHERE visit_id = $1 AND status = 'with_doctor')
+      ORDER BY e.occurred_at DESC
+      LIMIT 1`,
+    [visitId, BEFORE_CONSULTANT],
+  );
+  return rows[0] || { status: "ready_for_doctor", since: null };
+}
+
+async function undoClaim(client, visitId, origin) {
+  const passed = CHAIN.slice(CHAIN.indexOf(origin.status) + 1, CHAIN.indexOf("with_doctor") + 1);
+  await client.query(
+    `UPDATE giniflow_visit_steps
+        SET status = 'pending',
+            started_at = CASE WHEN started_at >= $3 THEN NULL ELSE started_at END,
+            completed_at = NULL
+      WHERE visit_id = $1
+        AND chain_status = ANY($2::text[])
+        AND status IN ('done', 'in_progress')
+        AND COALESCE(completed_at, started_at) >= $3`,
+    [visitId, passed, origin.since],
+  );
+  if (CHAIN.indexOf(origin.status) >= CHAIN.indexOf("ready_for_doctor")) return;
+  await client.query(
+    `DELETE FROM giniflow_rx_items
+      WHERE visit_id = $1
+        AND NOT EXISTS (
+          SELECT 1 FROM giniflow_rx_items
+           WHERE visit_id = $1
+             AND (change_type <> 'continued' OR updated_at <> created_at OR created_at < $2))`,
+    [visitId, origin.since],
+  );
 }
 
 export async function saveCarePlan(visitId, plan, actorId = null, db = pool) {

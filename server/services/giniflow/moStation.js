@@ -5,6 +5,7 @@ import { OPEN_LAB_CASES_SQL } from "./labStation.js";
 import { LAB_SAMPLE_FLOW, UNDRAWN_SAMPLE_STATUSES } from "../../../shared/labStages.js";
 import { finalizeConsult } from "./finalize.js";
 import { applyChiefNextVisit } from "./planSuggestions.js";
+import { seedDraftOn } from "./prescription.js";
 import { advanceStatus, budgetColour, reopenResultsForNewOrder } from "./statusEngine.js";
 import { getSlaConfig, budgetLookup } from "./board.js";
 import {
@@ -601,8 +602,9 @@ export async function startWorkup(visitId, actorId = null, db = pool) {
         actorId,
       ]);
     }
+    const seeded = await seedDraftOn(client, visitId);
     await client.query("COMMIT");
-    return { started: true, assignedTo: rows[0].assigned_sd_id || actorId };
+    return { started: true, assignedTo: rows[0].assigned_sd_id || actorId, seeded: seeded.seeded };
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;

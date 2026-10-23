@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import {
   keepPreviousData,
   useInfiniteQuery,
@@ -8,6 +9,7 @@ import {
 import api from "../../services/api";
 import { toast } from "../../stores/uiStore";
 import { qk } from "../keys";
+import { availabilityQuery, notifyApproval, patientKey } from "../../lib/slotAvailability";
 
 const arr = (v) => (Array.isArray(v) ? v : []);
 
@@ -288,18 +290,53 @@ export function useAppointmentChanges(appointmentId) {
   });
 }
 
-export function useDayAvailability(doctor, date) {
+export function useGhmDisplaySettings() {
   return useQuery({
-    queryKey: qk.ghm.availability(doctor, date),
-    queryFn: async () => {
-      const { data } = await api.get(
-        `/api/availability/day?doctor=${encodeURIComponent(doctor)}&date=${date}`,
-      );
-      return data?.resolved ? data.slots || [] : null;
-    },
+    queryKey: ["ghm", "display-settings"],
+    queryFn: async () => (await api.get("/api/ghm-appointments/display-settings")).data,
+    staleTime: 60_000,
+  });
+}
+
+export function useScheduleSlotsFor(pairs, enabled) {
+  const key = [...new Set(pairs)].sort().join(",");
+  return useQuery({
+    queryKey: [...qk.ghm.any.availability, "days", key],
+    queryFn: async () =>
+      (await api.get(`/api/availability/days?pairs=${encodeURIComponent(key)}`)).data,
+    enabled: enabled && key.length > 0,
+    staleTime: 60_000,
+  });
+}
+
+const dayAvailability = (doctor, date, patient) => ({
+  queryKey: [...qk.ghm.availability(doctor, date), patientKey(patient)],
+  queryFn: async () => {
+    const { data } = await api.get(availabilityQuery(doctor, date, patient));
+    return data?.resolved ? data.slots || [] : null;
+  },
+});
+
+export function useDayAvailability(doctor, date, patient) {
+  return useQuery({
+    ...dayAvailability(doctor, date, patient),
     enabled: !!doctor && !!date,
     staleTime: 60_000,
   });
+}
+
+export function useFreshSlotCheck() {
+  const queryClient = useQueryClient();
+  return useCallback(
+    async (doctor, date, patient, slotLabel) => {
+      const slots = await queryClient.fetchQuery({
+        ...dayAvailability(doctor, date, patient),
+        staleTime: 0,
+      });
+      return slots?.find((s) => s.slot_label === slotLabel) || null;
+    },
+    [queryClient],
+  );
 }
 
 export function usePatientByFileNo(fileNo) {
@@ -381,8 +418,12 @@ const SLOT_COUNT_FIELDS = [
 export function usePatchAppointment(listKey, applyOptimistic) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, field, value }) => {
-      const { data } = await api.patch(`/api/ghm-appointments/${id}`, { [field]: value });
+    mutationFn: async ({ id, field, value, extra }) => {
+      const { data } = await api.patch(`/api/ghm-appointments/${id}`, {
+        [field]: value,
+        ...extra,
+      });
+      notifyApproval(data);
       return data;
     },
     onMutate: async ({ id, field, value }) => {
@@ -426,6 +467,7 @@ export function useUpdateAppointmentPatient() {
   return useGhmMutation(
     async ({ id, ...fields }) => {
       const { data } = await api.patch(`/api/ghm-appointments/${id}`, fields);
+      notifyApproval(data);
       return data;
     },
     [qk.ghm.any.list, qk.ghm.any.categoryCounts, qk.ghm.any.slotCounts, qk.ghm.any.changes],
@@ -436,6 +478,7 @@ export function useCreateAppointment() {
   return useGhmMutation(
     async (form) => {
       const { data } = await api.post("/api/ghm-appointments", form);
+      notifyApproval(data);
       return data;
     },
     [

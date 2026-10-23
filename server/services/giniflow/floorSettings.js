@@ -32,7 +32,12 @@ export async function hideLabOnlyPatients(db = pool) {
   return settings.hide_lab_only_patients !== false;
 }
 
-const KNOWN_KEYS = ["hide_lab_only_patients"];
+export async function ghmSlotsFromSchedule(db = pool) {
+  const settings = await getFloorSettings(db);
+  return settings.ghm_slots_from_schedule === true;
+}
+
+const KNOWN_KEYS = ["hide_lab_only_patients", "ghm_slots_from_schedule"];
 
 export async function setFloorSetting(key, value, actorId = null, db = pool) {
   if (!KNOWN_KEYS.includes(key)) {

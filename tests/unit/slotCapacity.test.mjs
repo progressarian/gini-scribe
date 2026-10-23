@@ -3,12 +3,15 @@ import assert from "node:assert/strict";
 import { patientTypeOf, isFull } from "../../shared/slotCapacity.js";
 import { validateTemplate } from "../../shared/slotTemplates.js";
 
-test("walk-in first, then New by visit type, everyone else is a follow-up", () => {
-  assert.equal(patientTypeOf({ is_walkin: true, visit_type: "New Patient" }), "walkin");
-  assert.equal(patientTypeOf({ visit_type: "New Patient" }), "new");
-  assert.equal(patientTypeOf({ visit_type: null }), "new");
-  assert.equal(patientTypeOf({ visit_type: "Follow Up" }), "followup");
-  assert.equal(patientTypeOf({ visit_type: "OPD" }), "followup");
+test("walk-in first; then a patient seen before is a follow-up and anyone else is new", () => {
+  assert.equal(patientTypeOf({ is_walkin: true, patient_id: 7, came_before: true }), "walkin");
+  assert.equal(patientTypeOf({ patient_id: 7, visit_type: "OPD", came_before: false }), "new");
+  assert.equal(
+    patientTypeOf({ patient_id: 7, visit_type: "New Patient", came_before: true }),
+    "followup",
+  );
+  assert.equal(patientTypeOf({ patient_id: null, visit_type: "OPD" }), "new");
+  assert.equal(patientTypeOf({ patient_id: null, visit_type: "Follow-Up" }), "followup");
 });
 
 test("a type is full only when it has a limit and the count has reached it", () => {

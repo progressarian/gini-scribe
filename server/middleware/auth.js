@@ -111,7 +111,7 @@ const ROUTE_CAPABILITIES = [
   ["/api/billing/claims", CAP.BILLING_CLAIMS],
   ["/api/billing/reports", CAP.BILLING_REPORTS],
   ["/api/billing/dues-register", CAP.BILLING_DUES],
-  ["/api/approvals", [CAP.BILLING_MASTER, CAP.GINIFLOW_TEST_CANCEL_DECIDE]],
+  ["/api/approvals", [CAP.BILLING_MASTER, CAP.GINIFLOW_TEST_CANCEL_DECIDE, CAP.BOOKING_APPROVE]],
   ["/api/home-stats", null],
   ["/api/reports", CAP.ANALYTICS],
   ["/api/reports/opd", CAP.OPD_SUMMARY],
@@ -194,6 +194,7 @@ const ROUTE_CAPABILITIES = [
   // Slot availability — drives the time-slot picker on both /find and /ghm.
   ["/api/availability", [CAP.RECEPTION_OPS, CAP.OBT_OPS]],
   ["/api/slot-catalog", [CAP.RECEPTION_OPS, CAP.OBT_OPS]],
+  ["/api/booking-approvals", [CAP.RECEPTION_OPS, CAP.OBT_OPS, CAP.BOOKING_APPROVE]],
   // App-install funnel, tracked per registering coordinator (registered_by_cc).
   ["/api/app-installs", CAP.RECEPTION_OPS],
   [

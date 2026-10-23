@@ -1056,6 +1056,11 @@ export default function MoStationPage() {
                       </span>
                     )}
                     <AmendedNote amendedAt={patient.edit.amendedAt} />
+                    {!patient.edit.scribeRx && (
+                      <span className="fin-gap">
+                        This prescription was not written in Scribe — change it in HealthRay.
+                      </span>
+                    )}
                   </div>
                 )}
                 {/* No allergy field exists in the database yet, so this says what

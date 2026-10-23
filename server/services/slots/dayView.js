@@ -114,10 +114,12 @@ export function templateDay({
     const u = isHoliday ? null : unavailabilityFor(unavailability, span, s.label);
     let blocked_by = null;
     let detail = null;
+    let time_off_id = null;
     if (isHoliday) blocked_by = "clinic_holiday";
     else if (u) {
       blocked_by = u.type;
       detail = u.reason || null;
+      time_off_id = u.id ?? null;
     } else if (c?.is_blocked) {
       blocked_by = "manual_block";
       detail = c.block_reason || null;
@@ -132,6 +134,7 @@ export function templateDay({
       available: blocked_by === null,
       blocked_by,
       detail,
+      time_off_id,
       caps: s.caps || capsOf(null),
       counts: typeCounts(s.startMin, s.endMin),
     };

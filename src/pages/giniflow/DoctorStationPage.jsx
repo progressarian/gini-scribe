@@ -271,7 +271,7 @@ export default function DoctorStationPage() {
   // still-in-pipeline one is reading ahead, which is exactly what a consultant
   // does between patients — so it must not move anybody's status.
   const open = (card, group) => {
-    if (group === "resultsReady" || group === "pipeline") {
+    if (group === "resultsReady") {
       startConsult.mutate(card.visitId, {
         onSuccess: () => navigate(`/giniflow/station/doctor/${card.visitId}`),
         onError: (e) =>

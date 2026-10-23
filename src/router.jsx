@@ -226,6 +226,10 @@ const router = createBrowserRouter([
               { path: "/care-followups", element: lazyEl(CareFollowupsPage) },
               { path: "/staff-management", element: lazyEl(DoctorManagementPage) },
               {
+                path: "/booking-approvals",
+                element: <Navigate to="/desk-requests?tab=bookings" replace />,
+              },
+              {
                 path: "/doctor-management",
                 element: <Navigate to="/staff-management" replace />,
               },

@@ -161,8 +161,12 @@ export const summarizeTemplate = (t) => {
   return parts.join(" · ") || "Off every day";
 };
 
+const versionSummary = (v) =>
+  v.clears ? "Schedule cleared — no slots" : summarizeTemplate(rulesOf(v));
+
 const versionStatus = (v, currentId, today) => {
   if (v.status === "withdrawn") return { label: "Withdrawn", tone: "muted" };
+  if (v.clears && v.effectiveFrom <= today) return { label: "Cleared", tone: "muted" };
   if (v.id === currentId) return { label: "In use", tone: "on" };
   if (v.effectiveFrom > today) return { label: "Starts later", tone: "later" };
   return { label: "Replaced", tone: "muted" };
@@ -203,6 +207,8 @@ export default function ScheduleEditor({
   const [showHistory, setShowHistory] = useState(false);
   const [withdrawing, setWithdrawing] = useState(null);
   const [withdrawBusy, setWithdrawBusy] = useState(false);
+  const [clearFrom, setClearFrom] = useState(null);
+  const [clearBusy, setClearBusy] = useState(false);
   const [target, setTarget] = useState("one");
   const [picked, setPicked] = useState([]);
   const [many, setMany] = useState(null);
@@ -515,6 +521,24 @@ export default function ScheduleEditor({
     }
   };
 
+  const clearSchedule = async () => {
+    setClearBusy(true);
+    try {
+      await api.post(`/api/doctors/${doctorId}/slot-templates/clear`, {
+        effective_from: clearFrom,
+      });
+      toast(`Schedule cleared from ${shortDate(clearFrom)}`, "success");
+      queryClient.invalidateQueries({ queryKey: qk.ghm.any.availability });
+      setClearFrom(null);
+      setReload((n) => n + 1);
+      onChange?.();
+    } catch (e) {
+      toast(e.response?.data?.error || "Could not clear the schedule. Try again.", "error");
+    } finally {
+      setClearBusy(false);
+    }
+  };
+
   if (loading && !data) return <p className="docmgmt-empty">Loading…</p>;
 
   if (loadFailed)
@@ -609,12 +633,25 @@ export default function ScheduleEditor({
               <p className="docmgmt-hint">
                 {current
                   ? `In use since ${shortDate(current.effectiveFrom)}`
-                  : "No schedule saved yet — booking treats this doctor as available all day."}
+                  : data.cleared_from
+                    ? `Cleared since ${shortDate(data.cleared_from)} — booking treats this doctor as available all day.`
+                    : "No schedule saved yet — booking treats this doctor as available all day."}
               </p>
             </div>
-            <button type="button" className="docmgmt-primary" onClick={startEditing}>
-              Edit schedule
-            </button>
+            <div className="docmgmt-rowactions">
+              {(current || upcoming.some((v) => !v.clears)) && (
+                <button
+                  type="button"
+                  className="docmgmt-secondary"
+                  onClick={() => setClearFrom(data.today)}
+                >
+                  Clear schedule
+                </button>
+              )}
+              <button type="button" className="docmgmt-primary" onClick={startEditing}>
+                Edit schedule
+              </button>
+            </div>
           </div>
           {manyResultBlock}
           {saved && (
@@ -641,8 +678,16 @@ export default function ScheduleEditor({
           {current && <ScheduleSummary template={rulesOf(current)} />}
           {upcoming.map((v) => (
             <p key={v.id} className="docmgmt-note" role="status">
-              A new schedule starts on <strong>{longDate(v.effectiveFrom)}</strong>:{" "}
-              {summarizeTemplate(rulesOf(v))}.{" "}
+              {v.clears ? (
+                <>
+                  The schedule is cleared from <strong>{longDate(v.effectiveFrom)}</strong>.{" "}
+                </>
+              ) : (
+                <>
+                  A new schedule starts on <strong>{longDate(v.effectiveFrom)}</strong>:{" "}
+                  {summarizeTemplate(rulesOf(v))}.{" "}
+                </>
+              )}
               <button type="button" className="docmgmt-linkbtn" onClick={() => setWithdrawing(v)}>
                 Withdraw it
               </button>
@@ -665,7 +710,12 @@ export default function ScheduleEditor({
               onWithdraw={setWithdrawing}
             />
           )}
-          <BookingAvailability doctorId={doctorId} refresh={refresh} />
+          <BookingAvailability
+            doctorId={doctorId}
+            doctor={doctor}
+            refresh={refresh}
+            onChange={onChange}
+          />
         </>
       )}
       {editing && (
@@ -1328,7 +1378,7 @@ export default function ScheduleEditor({
           withdrawing && (
             <>
               <p>
-                {doctor?.name}: {summarizeTemplate(rulesOf(withdrawing))}
+                {doctor?.name}: {versionSummary(withdrawing)}
               </p>
               <p>
                 Booking keeps using the schedule in use before it. The withdrawn version stays in
@@ -1342,6 +1392,52 @@ export default function ScheduleEditor({
         busy={withdrawBusy}
         onConfirm={withdraw}
         onCancel={() => !withdrawBusy && setWithdrawing(null)}
+      />
+
+      <ConfirmModal
+        open={!!clearFrom}
+        title={`Clear ${doctor?.name || "this doctor"}'s schedule?`}
+        message={
+          clearFrom && (
+            <div className="docmgmt-confirmbody">
+              <label className="docmgmt-reason">
+                Clear from
+                <input
+                  type="date"
+                  value={clearFrom}
+                  min={data.today}
+                  onChange={(e) => e.target.value && setClearFrom(e.target.value)}
+                />
+              </label>
+              <p>
+                From <strong>{longDate(clearFrom)}</strong>, {doctor?.name} has no slots. Booking
+                treats them as available all day with no per-slot patient limits, as before
+                schedules existed.
+              </p>
+              {upcoming.some((v) => !v.clears && v.effectiveFrom >= clearFrom) && (
+                <p>
+                  These later schedules are withdrawn too:{" "}
+                  {upcoming
+                    .filter((v) => !v.clears && v.effectiveFrom >= clearFrom)
+                    .map((v) => shortDate(v.effectiveFrom))
+                    .join(", ")}
+                  .
+                </p>
+              )}
+              <p>
+                Days before {shortDate(clearFrom)} keep their schedule. Booked patients keep their
+                bookings and time slots, and time off stays as it is. You can save a new schedule
+                again at any time.
+              </p>
+            </div>
+          )
+        }
+        confirmLabel={clearFrom ? `Clear from ${shortDate(clearFrom)}` : "Clear schedule"}
+        cancelLabel="Keep schedule"
+        confirmDisabled={!clearFrom || clearFrom < (data?.today || "")}
+        busy={clearBusy}
+        onConfirm={clearSchedule}
+        onCancel={() => !clearBusy && setClearFrom(null)}
       />
     </div>
   );
@@ -1539,8 +1635,8 @@ function VersionHistory({ versions, currentId, today, onWithdraw }) {
                 </span>
               </td>
               <td>
-                {summarizeTemplate(rulesOf(v))}
-                {v.note && <small> · {v.note}</small>}
+                {versionSummary(v)}
+                {v.note && !v.clears && <small> · {v.note}</small>}
               </td>
               <td>
                 {v.createdBy || "System"}

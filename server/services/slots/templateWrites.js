@@ -1,4 +1,7 @@
 import { validateTemplate } from "../../../shared/slotTemplates.js";
+import { columnReady } from "./readiness.js";
+
+export const clearsReady = columnReady("doctor_slot_templates", "clears");
 
 const hasHourCaps = (h) => h.capNew != null || h.capFollowup != null || h.capWalkin != null;
 
@@ -74,4 +77,33 @@ export async function withdrawFutureVersion(client, doctorId, templateId, actorI
       { status: 409 },
     );
   return rows[0].id;
+}
+
+export async function clearScheduleFrom(client, doctorId, { effectiveFrom, actorId }) {
+  const withdrawn = await client.query(
+    `UPDATE doctor_slot_templates
+        SET status = 'withdrawn', withdrawn_at = NOW(), withdrawn_by = $3
+      WHERE doctor_id = $1 AND status = 'active' AND effective_from >= $2::date
+      RETURNING clears`,
+    [doctorId, effectiveFrom, actorId],
+  );
+  const before = await client.query(
+    `SELECT clears FROM doctor_slot_templates
+      WHERE doctor_id = $1 AND status = 'active' AND effective_from < $2::date
+      ORDER BY effective_from DESC LIMIT 1`,
+    [doctorId, effectiveFrom],
+  );
+  const stillScheduled = before.rows[0] && !before.rows[0].clears;
+  const withdrewSchedule = withdrawn.rows.some((r) => !r.clears);
+  if (!stillScheduled && !withdrewSchedule)
+    throw Object.assign(new Error("There is no schedule to clear from that date."), {
+      status: 409,
+    });
+  if (stillScheduled)
+    await client.query(
+      `INSERT INTO doctor_slot_templates (doctor_id, effective_from, clears, note, created_by)
+       VALUES ($1, $2::date, TRUE, 'Schedule cleared', $3)`,
+      [doctorId, effectiveFrom, actorId],
+    );
+  return { withdrawn: withdrawn.rows.filter((r) => !r.clears).length, cleared: true };
 }

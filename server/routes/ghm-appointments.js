@@ -1,5 +1,6 @@
 import { Router } from "express";
 import pool from "../config/db.js";
+import { holdIfOverLimit } from "../services/slots/capacityGuard.js";
 import { handleError } from "../utils/errorHandler.js";
 import {
   resolveDoctorIdByName,
@@ -20,7 +21,6 @@ import {
   isLatestFollowUpVisit,
   upcomingBookingElsewhere,
   NOT_LAB_ONLY,
-  preferredSuperseded,
   livePreferredOn,
   latestPlanJoin,
   latestPlan,
@@ -52,6 +52,7 @@ import {
 import { BOOKING_HOME_SAMPLE_SQL } from "../services/giniflow/homeCollection.js";
 import { homeSamplesReady } from "../services/giniflow/homeSampleRecords.js";
 import { followBookingTag } from "../services/giniflow/labSite.js";
+import { ghmSlotsFromSchedule } from "../services/giniflow/floorSettings.js";
 
 const router = Router();
 
@@ -843,11 +844,9 @@ router.post("/ghm-appointments/last-visit", async (req, res) => {
   }
 });
 
-// GET /api/ghm-appointments/slot-counts?dates=YYYY-MM-DD,... — how loaded each
-// arrival hour of those dates already is: appointments booked into that hour
-// (by reporting time, falling back to the booked slot) plus the patients whose
-// preferred time is that window, so the OBT team sees the load on a slot before
-// promising it. Counts are keyed by the window's start hour.
+// GET /api/ghm-appointments/slot-counts?dates=YYYY-MM-DD,... — real bookings in
+// each arrival hour of those dates, counted the same way as the Consultant slots
+// panel (booked slot, cancelled and no-show left out). Keyed by the start hour.
 router.get("/ghm-appointments/slot-counts", async (req, res) => {
   try {
     const dates = [
@@ -860,38 +859,23 @@ router.get("/ghm-appointments/slot-counts", async (req, res) => {
     ];
     if (!dates.length) return res.json({});
 
-    const [booked, preferred] = await Promise.all([
-      pool.query(
-        `SELECT a.appointment_date::text                        AS date,
-                COALESCE(a.reporting_time_slot, a.time_slot)    AS slot,
-                a.doctor_name                                   AS doctor,
-                COUNT(*)::int                                   AS count
-           FROM appointments a
-          WHERE a.appointment_date = ANY($1::date[])
-            AND COALESCE(a.status, '') <> 'cancelled'
-          GROUP BY 1, 2, 3`,
-        [dates],
-      ),
-      pool.query(
-        `SELECT a.preferred_date::text       AS date,
-                TRIM(a.preferred_time_slot)  AS slot,
-                COALESCE(NULLIF(TRIM(a.preferred_doctor), ''), a.doctor_name) AS doctor,
-                COUNT(*)::int                AS count
-           FROM appointments a
-          WHERE a.preferred_date = ANY($1::date[])
-            AND NULLIF(TRIM(a.preferred_time_slot), '') IS NOT NULL
-            AND COALESCE(a.status, '') <> 'cancelled'
-            AND NOT ${preferredSuperseded("a")}
-          GROUP BY 1, 2, 3`,
-        [dates],
-      ),
-    ]);
+    const booked = await pool.query(
+      `SELECT a.appointment_date::text AS date,
+              a.time_slot              AS slot,
+              a.doctor_name            AS doctor,
+              COUNT(*)::int            AS count
+         FROM appointments a
+        WHERE a.appointment_date = ANY($1::date[])
+          AND a.status NOT IN ('cancelled', 'no_show')
+        GROUP BY 1, 2, 3`,
+      [dates],
+    );
 
     const out = {};
     const add = (bucket, hour, count) => {
       bucket[hour] = (bucket[hour] || 0) + count;
     };
-    for (const row of [...booked.rows, ...preferred.rows]) {
+    for (const row of booked.rows) {
       const hour = slotStartHour(row.slot);
       if (hour === null) continue;
       const day = (out[row.date] = out[row.date] || { all: {}, doctors: {} });
@@ -1158,6 +1142,14 @@ const NO_APPOINTMENT_ROW = {
 };
 
 // GET /api/ghm-appointments — list by date + optional doctor
+router.get("/ghm-appointments/display-settings", async (_req, res) => {
+  try {
+    res.json({ slots_from_schedule: await ghmSlotsFromSchedule() });
+  } catch (e) {
+    handleError(res, e, "GHM display settings");
+  }
+});
+
 router.get("/ghm-appointments", async (req, res) => {
   try {
     const { date, doctor, status, mode, page = 1, limit = 50 } = req.query;
@@ -2037,6 +2029,11 @@ router.post("/ghm-appointments", async (req, res) => {
         `[GHM] availability WARN: ${doctor_name} ${appointment_date} ${time_slot} -> ${avail.reason}`,
       );
     }
+    if (r.rows[0])
+      r.rows[0].approval = await holdIfOverLimit(r.rows[0].id, {
+        actor: req.doctor,
+        reason: req.body.over_limit_reason,
+      });
     res.status(201).json(r.rows[0]);
   } catch (e) {
     handleError(res, e, "GHM appointment create");
@@ -2161,6 +2158,25 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
       const alts = normalizeAltPhones(req.body.alt_phone, current.rows[0]?.phone);
       if (alts.error) return res.status(400).json({ error: alts.error });
       req.body.alt_phone = alts.value;
+    }
+
+    if (
+      String(req.body.preferred_time_slot || "").trim() &&
+      !("time_slot" in req.body) &&
+      !("preferred_date" in req.body)
+    ) {
+      const own = await pool.query(
+        `SELECT appointment_date IS NOT NULL
+                AND appointment_date >= ${IST_TODAY}
+                AND COALESCE(status, '') NOT IN ('completed', 'seen', 'in_visit', 'in-progress', 'cancelled', 'no_show')
+                AND (preferred_date IS NULL OR preferred_date = appointment_date) AS moves_booking
+           FROM appointments WHERE id = $1`,
+        [id],
+      );
+      if (own.rows[0]?.moves_booking) {
+        req.body.time_slot = req.body.preferred_time_slot;
+        sentKeys.add("time_slot");
+      }
     }
 
     if (
@@ -2391,6 +2407,11 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
       }
     }
 
+    if (["appointment_date", "time_slot", "doctor_name"].some((k) => k in req.body))
+      r.rows[0].approval = await holdIfOverLimit(id, {
+        actor: req.doctor,
+        reason: req.body.over_limit_reason,
+      });
     res.json(r.rows[0]);
   } catch (e) {
     handleError(res, e, "GHM appointment update");

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { createRequire } from "module";
 import pool from "../config/db.js";
+import { holdIfOverLimit } from "../services/slots/capacityGuard.js";
 import { handleError } from "../utils/errorHandler.js";
 import { validate } from "../middleware/validate.js";
 import {
@@ -111,7 +112,8 @@ router.get("/appointments/conflicts", async (req, res) => {
       if (av.available) continue;
       // Only doctor-unavailability conflicts (skip free-form slots and capacity).
       if (av.reason === "unknown_slot" || av.reason === "full") continue;
-      if (["not_working", "break"].includes(av.reason) && !labelSpan(a.time_slot)) continue;
+      const scheduleGap = av.reason === "not_working" || (av.reason === "break" && !av.time_off_id);
+      if (scheduleGap && !labelSpan(a.time_slot)) continue;
       const suggested = await findAvailableDoctors(a.appointment_date, a.time_slot, {
         excludeDoctorId: doctorId,
       });
@@ -325,6 +327,11 @@ router.post("/appointments", validate(appointmentCreateSchema), async (req, res)
         `[Appt] availability WARN: ${apptDoctor} ${apptDate} ${apptSlot} -> ${avail.reason}`,
       );
     }
+    if (rows[0])
+      rows[0].approval = await holdIfOverLimit(rows[0].id, {
+        actor: req.doctor,
+        reason: req.body.over_limit_reason,
+      });
     res.json(rows[0]);
   } catch (e) {
     handleError(res, e, "Appointment create");
@@ -445,6 +452,11 @@ router.put("/appointments/:id", validate(appointmentUpdateSchema), async (req, r
         );
       }
     }
+    if (doctor_name || appointment_date || time_slot)
+      rows[0].approval = await holdIfOverLimit(rows[0].id, {
+        actor: req.doctor,
+        reason: req.body.over_limit_reason,
+      });
     res.json(rows[0]);
   } catch (e) {
     handleError(res, e, "Appointment update");

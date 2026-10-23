@@ -7,6 +7,13 @@
 
 export const qk = {
   slotCatalog: ["slot-catalog"],
+  bookingApprovals: {
+    all: ["booking-approvals"],
+    latest: (ids) => ["booking-approvals", "latest", ids.join(",")],
+    count: ["booking-approvals", "count"],
+    mine: ["booking-approvals", "mine"],
+    list: (view) => ["booking-approvals", "list", view],
+  },
   opd: {
     all: ["opd"],
     appointments: (date) => ["opd", "appointments", date],

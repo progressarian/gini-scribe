@@ -4,7 +4,15 @@ import { useQueryClient } from "@tanstack/react-query";
 // xlsx is lazy-loaded inside the Excel-upload handler below to keep it out
 // of the main bundle (~900 KB pre-gzip). Nothing else in this file touches it.
 import { extractLab, extractImaging, extractRx } from "./services/extraction.js";
-import { isClinicalDoctor, useSlotCatalog, slotOptionLabel } from "./lib/slotAvailability.js";
+import {
+  isClinicalDoctor,
+  useSlotCatalog,
+  slotOptionLabel,
+  notifyApproval,
+  availabilityQuery,
+} from "./lib/slotAvailability.js";
+import { useOverLimitConfirm } from "./components/booking/OverLimitDialog";
+import { ApprovalBadge, ApprovalsProvider } from "./components/booking/ApprovalBadge";
 import { MOBILE_HINT, PHONE_DIGITS, isValidMobile, toEntryDigits } from "../shared/phone.js";
 import usePatientStore from "./stores/patientStore.js";
 import PdfViewerModal from "./components/visit/PdfViewerModal.jsx";
@@ -539,6 +547,7 @@ function ApptRow({ a, sel, onSelect }) {
             </span>
           )}
           <VisitChip a={a} />
+          <ApprovalBadge appointmentId={a.id} timeSlot={a.time_slot} />
           {a.category ? (
             <span
               style={{
@@ -5497,6 +5506,7 @@ function NewApptView({ doctors, onSaved, onCancel, showToast }) {
   // Doctor's day availability → drives the slot dropdown + a day-off heads-up.
   const [dayWarn, setDayWarn] = useState("");
   const [availSlots, setAvailSlots] = useState(null); // null ⇒ use plain catalog slots
+  const overLimit = useOverLimitConfirm();
   const slotCatalog = useSlotCatalog();
 
   useEffect(() => {
@@ -5508,7 +5518,11 @@ function NewApptView({ doctors, onSaved, onCancel, showToast }) {
     }
     let cancelled = false;
     apiFetch(
-      `/api/availability/day?doctor=${encodeURIComponent(doctor_name)}&date=${appointment_date}`,
+      availabilityQuery(doctor_name, appointment_date, {
+        patientId: selPt?.id,
+        walkin: form.is_walkin,
+        visitType: form.visit_type,
+      }),
     )
       .then((r) => r.json())
       .then((d) => {
@@ -5537,7 +5551,7 @@ function NewApptView({ doctors, onSaved, onCancel, showToast }) {
     return () => {
       cancelled = true;
     };
-  }, [form.doctor_name, form.appointment_date]);
+  }, [form.doctor_name, form.appointment_date, form.is_walkin, form.visit_type, selPt?.id]);
 
   useEffect(() => {
     if (search.length < 2) {
@@ -5625,6 +5639,7 @@ function NewApptView({ doctors, onSaved, onCancel, showToast }) {
           doctor_name: form.doctor_name || null,
           appointment_date: form.appointment_date,
           time_slot: form.time_slot || null,
+          over_limit_reason: form.over_limit_reason || null,
           visit_type: form.visit_type,
           notes: form.notes || null,
           is_walkin: form.is_walkin,
@@ -5632,8 +5647,10 @@ function NewApptView({ doctors, onSaved, onCancel, showToast }) {
       });
       const data = await r.json();
       setSaving(false);
-      if (data.id) onSaved(data);
-      else {
+      if (data.id) {
+        notifyApproval(data);
+        onSaved(data);
+      } else {
         const msg = data.details?.length
           ? data.details.join(", ")
           : data.error || "Error creating appointment";
@@ -5976,302 +5993,314 @@ function NewApptView({ doctors, onSaved, onCancel, showToast }) {
 
   // ── DETAILS ──
   return (
-    <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-      <div
-        style={{
-          background: WH,
-          borderBottom: `1px solid ${BD}`,
-          padding: "14px 20px",
-          flexShrink: 0,
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-        }}
-      >
-        <button
-          onClick={() => setMode("search")}
-          style={{
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            fontSize: 18,
-            color: INK3,
-            padding: 0,
-          }}
-        >
-          ←
-        </button>
-        <div style={{ fontFamily: FD, fontSize: 18, color: INK }}>Appointment Details</div>
-      </div>
-      <div style={{ flex: 1, overflowY: "auto", padding: "20px" }}>
-        {/* Patient card */}
-        {selPt && (
-          <div
-            style={{
-              background: TL,
-              border: `1px solid ${TB}`,
-              borderRadius: 9,
-              padding: "12px 14px",
-              marginBottom: 16,
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-              boxShadow: SH,
-            }}
-          >
-            <div
-              style={{
-                width: 38,
-                height: 38,
-                borderRadius: "50%",
-                background: T,
-                color: "#fff",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 14,
-                fontWeight: 700,
-                flexShrink: 0,
-              }}
-            >
-              {(selPt.name || "?").substring(0, 2).toUpperCase()}
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontFamily: FD, fontSize: 15, color: INK, marginBottom: 3 }}>
-                {selPt.name} <BlockedBadge block={searchBlocks[selPt.id]} size="sm" />
-              </div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {selPt.file_no && (
-                  <span style={{ fontFamily: FM, fontSize: 10, color: T }}>{selPt.file_no}</span>
-                )}
-                {selPt.phone && (
-                  <span style={{ fontFamily: FM, fontSize: 10, color: INK3 }}>{selPt.phone}</span>
-                )}
-                {selPt.age && (
-                  <span style={{ fontSize: 10, color: INK3 }}>
-                    {selPt.age}y {selPt.sex || ""}
-                  </span>
-                )}
-                {selPt.dob && (
-                  <span style={{ fontSize: 10, color: INK3 }}>{fmtDate(selPt.dob)}</span>
-                )}
-              </div>
-            </div>
-            <button
-              onClick={() => setMode("search")}
-              style={{
-                fontSize: 11,
-                color: INK3,
-                background: "none",
-                border: "none",
-                cursor: "pointer",
-                fontFamily: FB,
-                fontWeight: 600,
-              }}
-            >
-              Change →
-            </button>
-          </div>
-        )}
-
+    <>
+      <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
         <div
           style={{
             background: WH,
-            border: `1px solid ${BD}`,
-            borderRadius: 10,
-            padding: 16,
-            marginBottom: 14,
-            boxShadow: SH,
+            borderBottom: `1px solid ${BD}`,
+            padding: "14px 20px",
+            flexShrink: 0,
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
           }}
         >
-          <SLbl>Schedule</SLbl>
-          <div
-            style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}
-          >
-            <div>
-              <Lbl>Visit Type</Lbl>
-              <select
-                value={form.visit_type}
-                onChange={(e) => setForm((f) => ({ ...f, visit_type: e.target.value }))}
-                style={{
-                  border: `1px solid ${BD}`,
-                  borderRadius: 7,
-                  padding: "8px 11px",
-                  fontSize: 13,
-                  color: INK,
-                  outline: "none",
-                  background: WH,
-                  width: "100%",
-                  fontFamily: FB,
-                }}
-              >
-                {["OPD", "Follow-Up", "New Patient", "Emergency", "Online"].map((v) => (
-                  <option key={v}>{v}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <Lbl>Assign Doctor</Lbl>
-              <select
-                value={form.doctor_name}
-                onChange={(e) => setForm((f) => ({ ...f, doctor_name: e.target.value }))}
-                style={{
-                  border: `1px solid ${BD}`,
-                  borderRadius: 7,
-                  padding: "8px 11px",
-                  fontSize: 13,
-                  color: INK,
-                  outline: "none",
-                  background: WH,
-                  width: "100%",
-                  fontFamily: FB,
-                }}
-              >
-                <option value="">— Assign later</option>
-                {doctors.filter(isClinicalDoctor).map((d) => (
-                  <option key={d.id} value={d.name}>
-                    {d.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <Lbl>Date *</Lbl>
-              <Inp
-                value={form.appointment_date}
-                onChange={(e) => setForm((f) => ({ ...f, appointment_date: e.target.value }))}
-                type="date"
-              />
-            </div>
-            <div>
-              <Lbl>Time Slot</Lbl>
-              <select
-                value={form.time_slot}
-                onChange={(e) => setForm((f) => ({ ...f, time_slot: e.target.value }))}
-                disabled={!form.doctor_name}
-                style={{
-                  border: `1px solid ${BD}`,
-                  borderRadius: 7,
-                  padding: "8px 11px",
-                  fontSize: 13,
-                  color: INK,
-                  outline: "none",
-                  background: WH,
-                  width: "100%",
-                  fontFamily: FB,
-                }}
-              >
-                <option value="">
-                  {form.doctor_name ? "— Select slot" : "— Pick a doctor first"}
-                </option>
-                {(availSlots || slotCatalog.map((s) => ({ slot_label: s, available: true })))
-                  .filter((s) => s.blocked_by !== "not_working")
-                  .map((s) => (
-                    <option key={s.slot_label} value={s.slot_label} disabled={!s.available}>
-                      {slotOptionLabel(s)}
-                    </option>
-                  ))}
-              </select>
-            </div>
-          </div>
-          {dayWarn && (
-            <div
-              style={{
-                margin: "0 0 10px",
-                padding: "8px 11px",
-                borderRadius: 7,
-                fontSize: 12.5,
-                background: "#fdf3f2",
-                border: "1px solid #f1c9c4",
-                color: "#b5392b",
-              }}
-            >
-              ⚠ {dayWarn} You can still book, but consider another doctor or date.
-            </div>
-          )}
-          <div style={{ marginBottom: 10 }}>
-            <Lbl>Reason / Notes</Lbl>
-            <textarea
-              value={form.notes}
-              onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-              rows={2}
-              placeholder="e.g. High sugar, fatigue, referred by Dr. Rajan…"
-              style={{
-                border: `1px solid ${BD}`,
-                borderRadius: 7,
-                padding: "8px 11px",
-                fontSize: 13,
-                color: INK,
-                outline: "none",
-                background: WH,
-                width: "100%",
-                fontFamily: FB,
-                resize: "none",
-              }}
-            />
-          </div>
-          <label
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              cursor: "pointer",
-              fontSize: 13,
-              fontWeight: 500,
-              color: INK,
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={form.is_walkin}
-              onChange={(e) => setForm((f) => ({ ...f, is_walkin: e.target.checked }))}
-              style={{ accentColor: AM, width: 15, height: 15 }}
-            />
-            Mark as Walk-In
-            <span style={{ fontSize: 10, color: INK3, fontWeight: 400 }}>
-              (patient arrived without appointment)
-            </span>
-          </label>
-        </div>
-
-        <div style={{ display: "flex", gap: 9 }}>
           <button
             onClick={() => setMode("search")}
             style={{
-              padding: "9px 18px",
-              borderRadius: 8,
-              fontSize: 12,
-              fontWeight: 600,
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              fontSize: 18,
+              color: INK3,
+              padding: 0,
+            }}
+          >
+            ←
+          </button>
+          <div style={{ fontFamily: FD, fontSize: 18, color: INK }}>Appointment Details</div>
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", padding: "20px" }}>
+          {/* Patient card */}
+          {selPt && (
+            <div
+              style={{
+                background: TL,
+                border: `1px solid ${TB}`,
+                borderRadius: 9,
+                padding: "12px 14px",
+                marginBottom: 16,
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                boxShadow: SH,
+              }}
+            >
+              <div
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: "50%",
+                  background: T,
+                  color: "#fff",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  flexShrink: 0,
+                }}
+              >
+                {(selPt.name || "?").substring(0, 2).toUpperCase()}
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontFamily: FD, fontSize: 15, color: INK, marginBottom: 3 }}>
+                  {selPt.name} <BlockedBadge block={searchBlocks[selPt.id]} size="sm" />
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {selPt.file_no && (
+                    <span style={{ fontFamily: FM, fontSize: 10, color: T }}>{selPt.file_no}</span>
+                  )}
+                  {selPt.phone && (
+                    <span style={{ fontFamily: FM, fontSize: 10, color: INK3 }}>{selPt.phone}</span>
+                  )}
+                  {selPt.age && (
+                    <span style={{ fontSize: 10, color: INK3 }}>
+                      {selPt.age}y {selPt.sex || ""}
+                    </span>
+                  )}
+                  {selPt.dob && (
+                    <span style={{ fontSize: 10, color: INK3 }}>{fmtDate(selPt.dob)}</span>
+                  )}
+                </div>
+              </div>
+              <button
+                onClick={() => setMode("search")}
+                style={{
+                  fontSize: 11,
+                  color: INK3,
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  fontFamily: FB,
+                  fontWeight: 600,
+                }}
+              >
+                Change →
+              </button>
+            </div>
+          )}
+
+          <div
+            style={{
               background: WH,
               border: `1px solid ${BD}`,
-              color: INK2,
-              cursor: "pointer",
-              fontFamily: FB,
+              borderRadius: 10,
+              padding: 16,
+              marginBottom: 14,
+              boxShadow: SH,
             }}
           >
-            ← Back
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            style={{
-              padding: "9px 24px",
-              borderRadius: 8,
-              fontSize: 13,
-              fontWeight: 600,
-              background: T,
-              color: "#fff",
-              border: "none",
-              cursor: saving ? "not-allowed" : "pointer",
-              fontFamily: FB,
-              boxShadow: "0 2px 8px rgba(0,158,140,.25)",
-            }}
-          >
-            {saving ? "Saving…" : "✓ Create Appointment"}
-          </button>
+            <SLbl>Schedule</SLbl>
+            <div
+              style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}
+            >
+              <div>
+                <Lbl>Visit Type</Lbl>
+                <select
+                  value={form.visit_type}
+                  onChange={(e) => setForm((f) => ({ ...f, visit_type: e.target.value }))}
+                  style={{
+                    border: `1px solid ${BD}`,
+                    borderRadius: 7,
+                    padding: "8px 11px",
+                    fontSize: 13,
+                    color: INK,
+                    outline: "none",
+                    background: WH,
+                    width: "100%",
+                    fontFamily: FB,
+                  }}
+                >
+                  {["OPD", "Follow-Up", "New Patient", "Emergency", "Online"].map((v) => (
+                    <option key={v}>{v}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <Lbl>Assign Doctor</Lbl>
+                <select
+                  value={form.doctor_name}
+                  onChange={(e) => setForm((f) => ({ ...f, doctor_name: e.target.value }))}
+                  style={{
+                    border: `1px solid ${BD}`,
+                    borderRadius: 7,
+                    padding: "8px 11px",
+                    fontSize: 13,
+                    color: INK,
+                    outline: "none",
+                    background: WH,
+                    width: "100%",
+                    fontFamily: FB,
+                  }}
+                >
+                  <option value="">— Assign later</option>
+                  {doctors.filter(isClinicalDoctor).map((d) => (
+                    <option key={d.id} value={d.name}>
+                      {d.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <Lbl>Date *</Lbl>
+                <Inp
+                  value={form.appointment_date}
+                  onChange={(e) => setForm((f) => ({ ...f, appointment_date: e.target.value }))}
+                  type="date"
+                />
+              </div>
+              <div>
+                <Lbl>Time Slot</Lbl>
+                <select
+                  value={form.time_slot}
+                  onChange={async (e) => {
+                    const value = e.target.value;
+                    const slot = (availSlots || []).find((x) => x.slot_label === value);
+                    const ok = await overLimit.confirm(slot, {
+                      doctorName: form.doctor_name,
+                      patientName: selPt?.name,
+                    });
+                    if (ok)
+                      setForm((f) => ({ ...f, time_slot: value, over_limit_reason: ok.reason }));
+                  }}
+                  disabled={!form.doctor_name}
+                  style={{
+                    border: `1px solid ${BD}`,
+                    borderRadius: 7,
+                    padding: "8px 11px",
+                    fontSize: 13,
+                    color: INK,
+                    outline: "none",
+                    background: WH,
+                    width: "100%",
+                    fontFamily: FB,
+                  }}
+                >
+                  <option value="">
+                    {form.doctor_name ? "— Select slot" : "— Pick a doctor first"}
+                  </option>
+                  {(availSlots || slotCatalog.map((s) => ({ slot_label: s, available: true })))
+                    .filter((s) => s.blocked_by !== "not_working")
+                    .map((s) => (
+                      <option key={s.slot_label} value={s.slot_label} disabled={!s.available}>
+                        {slotOptionLabel(s)}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            </div>
+            {dayWarn && (
+              <div
+                style={{
+                  margin: "0 0 10px",
+                  padding: "8px 11px",
+                  borderRadius: 7,
+                  fontSize: 12.5,
+                  background: "#fdf3f2",
+                  border: "1px solid #f1c9c4",
+                  color: "#b5392b",
+                }}
+              >
+                ⚠ {dayWarn} You can still book, but consider another doctor or date.
+              </div>
+            )}
+            <div style={{ marginBottom: 10 }}>
+              <Lbl>Reason / Notes</Lbl>
+              <textarea
+                value={form.notes}
+                onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+                rows={2}
+                placeholder="e.g. High sugar, fatigue, referred by Dr. Rajan…"
+                style={{
+                  border: `1px solid ${BD}`,
+                  borderRadius: 7,
+                  padding: "8px 11px",
+                  fontSize: 13,
+                  color: INK,
+                  outline: "none",
+                  background: WH,
+                  width: "100%",
+                  fontFamily: FB,
+                  resize: "none",
+                }}
+              />
+            </div>
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                cursor: "pointer",
+                fontSize: 13,
+                fontWeight: 500,
+                color: INK,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={form.is_walkin}
+                onChange={(e) => setForm((f) => ({ ...f, is_walkin: e.target.checked }))}
+                style={{ accentColor: AM, width: 15, height: 15 }}
+              />
+              Mark as Walk-In
+              <span style={{ fontSize: 10, color: INK3, fontWeight: 400 }}>
+                (patient arrived without appointment)
+              </span>
+            </label>
+          </div>
+
+          <div style={{ display: "flex", gap: 9 }}>
+            <button
+              onClick={() => setMode("search")}
+              style={{
+                padding: "9px 18px",
+                borderRadius: 8,
+                fontSize: 12,
+                fontWeight: 600,
+                background: WH,
+                border: `1px solid ${BD}`,
+                color: INK2,
+                cursor: "pointer",
+                fontFamily: FB,
+              }}
+            >
+              ← Back
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              style={{
+                padding: "9px 24px",
+                borderRadius: 8,
+                fontSize: 13,
+                fontWeight: 600,
+                background: T,
+                color: "#fff",
+                border: "none",
+                cursor: saving ? "not-allowed" : "pointer",
+                fontFamily: FB,
+                boxShadow: "0 2px 8px rgba(0,158,140,.25)",
+              }}
+            >
+              {saving ? "Saving…" : "✓ Create Appointment"}
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+      {overLimit.dialog}
+    </>
   );
 }
 
@@ -7356,552 +7385,597 @@ export default function OPD() {
   );
 
   return (
-    <div
-      className="opd-page"
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        background: BG,
-        fontFamily: FB,
-        fontSize: 13,
-        color: INK,
-      }}
-    >
-      {/* Topbar */}
+    <ApprovalsProvider ids={appointments.map((a) => a.id)}>
       <div
-        className="opd-topbar"
+        className="opd-page"
         style={{
-          background: NV,
-          height: 52,
           display: "flex",
-          alignItems: "center",
-          padding: "0 18px",
-          gap: 14,
-          flexShrink: 0,
-          zIndex: 60,
+          flexDirection: "column",
+          background: BG,
+          fontFamily: FB,
+          fontSize: 13,
+          color: INK,
         }}
       >
-        <div className="opd-topbar-title" style={{ fontFamily: FD, fontSize: 20, color: "#fff" }}>
-          Gini <em style={{ fontStyle: "italic", color: "#5dd6ca" }}>Scribe</em>
-        </div>
+        {/* Topbar */}
         <div
-          className="opd-topbar-sub"
-          style={{ width: 1, height: 18, background: "rgba(255,255,255,.15)", margin: "0 2px" }}
-        />
-        <div className="opd-topbar-sub" style={{ fontSize: 11, color: "rgba(255,255,255,.4)" }}>
-          OPD Manager
-        </div>
-        <div className="opd-topbar-nav" style={{ display: "flex", gap: 2, marginLeft: 6 }}>
-          {[
-            ["list", "📋 Schedule"],
-            ["dashboard", "📊 Live Dashboard"],
-            ["cohort", "🧭 All-Time Outcomes"],
-            ["triage", "🔴🟡✅ Triage"],
-            ["triage-v3", "🧪 Triage v3"],
-            ["new-appt", "➕ New Appointment"],
-            ["excel", "📊 Import Excel"],
-          ].map(([v, l]) => (
-            <button
-              key={v}
-              onClick={() => setView(v)}
-              style={{
-                padding: "5px 12px",
-                borderRadius: 6,
-                fontSize: 11,
-                fontWeight: 500,
-                color: view === v ? "#fff" : "rgba(255,255,255,.5)",
-                background: view === v ? "rgba(255,255,255,.13)" : "transparent",
-                border: "none",
-                cursor: "pointer",
-                fontFamily: FB,
-                transition: "all .15s",
-              }}
-            >
-              {l}
-            </button>
-          ))}
-        </div>
-        <div
-          className="opd-topbar-right"
-          style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}
-        >
-          <div
-            className="opd-clock"
-            style={{
-              background: "rgba(255,255,255,.1)",
-              border: "1px solid rgba(255,255,255,.14)",
-              borderRadius: 6,
-              padding: "3px 11px",
-              fontFamily: FM,
-              fontSize: 11,
-              color: "rgba(255,255,255,.6)",
-            }}
-          >
-            {clock}
-          </div>
-          {doctor && (
-            <div
-              className="opd-doctor-pill"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 7,
-                background: "rgba(255,255,255,.1)",
-                borderRadius: 20,
-                padding: "3px 12px 3px 5px",
-              }}
-            >
-              <div
-                style={{
-                  width: 26,
-                  height: 26,
-                  borderRadius: "50%",
-                  background: "linear-gradient(135deg,#5dd6ca,#009e8c)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 10,
-                  fontWeight: 700,
-                  color: NV,
-                  flexShrink: 0,
-                }}
-              >
-                {(doctor.short_name || doctor.name || "?").substring(0, 2).toUpperCase()}
-              </div>
-              <div className="opd-doctor-meta">
-                <div style={{ fontSize: 11, fontWeight: 500, color: "rgba(255,255,255,.85)" }}>
-                  {doctor.short_name || doctor.name}
-                </div>
-                <div style={{ fontSize: 9, color: "rgba(255,255,255,.4)" }}>
-                  {doctor.role || "Staff"}
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Sub-nav — only visible on Schedule tab */}
-      {view === "list" && (!isMobile || mobileView === "list") && (
-        <div
-          className="opd-subnav"
+          className="opd-topbar"
           style={{
-            background: WH,
-            borderBottom: `1px solid ${BD}`,
+            background: NV,
+            height: 52,
+            display: "flex",
+            alignItems: "center",
             padding: "0 18px",
+            gap: 14,
             flexShrink: 0,
+            zIndex: 60,
           }}
         >
-          {/* Mobile filter toggle bar */}
-          <div className="opd-filter-toggle">
-            <button
-              type="button"
-              className={`opd-filter-toggle-btn${mobileFiltersOpen ? " active" : ""}`}
-              onClick={() => setMobileFiltersOpen((o) => !o)}
-              aria-expanded={mobileFiltersOpen}
-            >
-              <span>🔍 Filters</span>
-              <span style={{ fontSize: 10, opacity: 0.7 }}>{mobileFiltersOpen ? "▲" : "▼"}</span>
-            </button>
-            <div className="opd-filter-summary">
-              {[
-                filterStatus !== "all" ? filterStatus : null,
-                filterDoc !== "all" && filterDoc !== "__noshow__"
-                  ? filterDoc.replace(/^Dr\.\s*/i, "").split(" ")[0]
-                  : null,
-                filterDoc === "__noshow__" ? "No-Show" : null,
-                filterCat !== "all" ? filterCat : null,
-              ]
-                .filter(Boolean)
-                .join(" · ") || "All patients"}
-            </div>
-            <button
-              type="button"
-              onClick={fetchAppts}
-              style={{
-                padding: "5px 10px",
-                borderRadius: 6,
-                border: `1px solid ${BD}`,
-                background: "transparent",
-                cursor: "pointer",
-                fontSize: 11,
-                color: INK3,
-                fontFamily: FB,
-              }}
-            >
-              ↺
-            </button>
-            <button
-              type="button"
-              onClick={() => setView("new-appt")}
-              style={{
-                padding: "5px 11px",
-                borderRadius: 6,
-                border: "none",
-                background: T,
-                color: "#fff",
-                cursor: "pointer",
-                fontSize: 11,
-                fontWeight: 600,
-                fontFamily: FB,
-              }}
-            >
-              + New
-            </button>
+          <div className="opd-topbar-title" style={{ fontFamily: FD, fontSize: 20, color: "#fff" }}>
+            Gini <em style={{ fontStyle: "italic", color: "#5dd6ca" }}>Scribe</em>
           </div>
-          <div className={`opd-filter-body${isMobile && !mobileFiltersOpen ? " collapsed" : ""}`}>
-            {/* Status filters */}
-            <div
-              className="opd-filter-row"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 2,
-                height: 38,
-                borderBottom: `1px solid ${BD}`,
-              }}
-            >
-              {[
-                ["all", "All"],
-                ["pending", "Pending"],
-                ["ready", "Ready"],
-                ["checkedin", "Checked In"],
-                ["in_visit", "In Visit"],
-                ["seen", "Seen"],
-              ].map(([v, l]) => filterBtn(l, v, filterStatus === v, () => setFilterStatus(v)))}
-              <div
-                className="opd-filter-stats"
-                style={{ width: 1, height: 18, background: BD, margin: "0 8px" }}
-              />
-              <span
-                className="opd-filter-stats"
-                style={{ fontFamily: FM, fontSize: 11, color: AM, fontWeight: 500 }}
-              >
-                {stats.pending} pending
-              </span>
-              <span
-                className="opd-filter-stats"
-                style={{ fontFamily: FM, fontSize: 11, color: SK, fontWeight: 500, marginLeft: 8 }}
-              >
-                {stats.checkedin} waiting
-              </span>
-              <span
-                className="opd-filter-stats"
-                style={{
-                  fontFamily: FM,
-                  fontSize: 11,
-                  color: "#7c3aed",
-                  fontWeight: 500,
-                  marginLeft: 8,
-                }}
-              >
-                {stats.in_visit} in visit
-              </span>
-              <span
-                className="opd-filter-stats"
-                style={{ fontFamily: FM, fontSize: 11, color: GN, fontWeight: 500, marginLeft: 8 }}
-              >
-                {stats.seen} seen
-              </span>
-              <div
-                className="opd-filter-actions"
-                style={{ marginLeft: "auto", display: "flex", gap: 7 }}
-              >
-                <button
-                  onClick={fetchAppts}
-                  style={{
-                    padding: "3px 10px",
-                    borderRadius: 5,
-                    fontSize: 10,
-                    fontWeight: 500,
-                    background: "transparent",
-                    border: `1px solid ${BD}`,
-                    cursor: "pointer",
-                    color: INK3,
-                    fontFamily: FB,
-                  }}
-                >
-                  ↺ Refresh
-                </button>
-                <button
-                  onClick={() => setView("new-appt")}
-                  style={{
-                    padding: "3px 10px",
-                    borderRadius: 5,
-                    fontSize: 10,
-                    fontWeight: 600,
-                    background: T,
-                    color: "#fff",
-                    border: "none",
-                    cursor: "pointer",
-                    fontFamily: FB,
-                  }}
-                >
-                  + New
-                </button>
-              </div>
-            </div>
-            {/* Doctor + category filters */}
-            <div
-              className="opd-filter-row"
-              style={{ display: "flex", alignItems: "center", gap: 3, height: 34 }}
-            >
-              <span
-                className="opd-filter-label"
-                style={{ fontSize: 10, color: INK3, fontWeight: 500, marginRight: 4 }}
-              >
-                Doctor:
-              </span>
-              {filterBtn("All", null, filterDoc === "all", () => setFilterDoc("all"))}
-              {apptDoctors.map((d) =>
-                filterBtn(d.replace(/^Dr\.\s*/i, "").split(" ")[0], d, filterDoc === d, () =>
-                  setFilterDoc(d === filterDoc ? "all" : d),
-                ),
-              )}
-              {filterBtn(
-                `No-Show${appointments.filter((a) => a.status === "no_show").length ? ` (${appointments.filter((a) => a.status === "no_show").length})` : ""}`,
-                "__noshow__",
-                filterDoc === "__noshow__",
-                () => setFilterDoc(filterDoc === "__noshow__" ? "all" : "__noshow__"),
-                "#6b7280",
-              )}
-              <div
-                style={{ width: 1, height: 18, background: BD, margin: "0 10px", flexShrink: 0 }}
-              />
-              <span
-                className="opd-filter-label"
-                style={{ fontSize: 10, color: INK3, fontWeight: 500, marginRight: 4 }}
-              >
-                Category:
-              </span>
-              {filterBtn("All", null, filterCat === "all", () => setFilterCat("all"))}
-              {filterBtn(
-                "⚠ Uncontrolled",
-                "complex",
-                filterCat === "complex",
-                () => setFilterCat(filterCat === "complex" ? "all" : "complex"),
-                RE,
-              )}
-              {filterBtn(
-                "↑ Maintenance",
-                "maint",
-                filterCat === "maint",
-                () => setFilterCat(filterCat === "maint" ? "all" : "maint"),
-                AM,
-              )}
-              {filterBtn(
-                "✓ Continuous Care",
-                "ctrl",
-                filterCat === "ctrl",
-                () => setFilterCat(filterCat === "ctrl" ? "all" : "ctrl"),
-                GN,
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Main */}
-      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
-        {view === "excel" ? (
-          <ExcelImportView
-            doctors={doctors}
-            showToast={showToast}
-            onDone={() => {
-              fetchAppts();
-              setView("list");
-            }}
-          />
-        ) : view === "new-appt" ? (
-          <NewApptView
-            doctors={doctors}
-            showToast={showToast}
-            onCancel={() => setView("list")}
-            onSaved={() => {
-              fetchAppts();
-              setView("list");
-              showToast("✓ Appointment created");
-            }}
-          />
-        ) : view === "cohort" ? (
-          <CohortDashboard />
-        ) : view === "dashboard" ? (
           <div
-            style={{
-              flex: 1,
-              display: "flex",
-              flexDirection: "column",
-              background: BG,
-              overflow: "auto",
-            }}
-          >
-            <LiveDashboard
-              appointments={appointments}
-              doctors={doctors}
-              updatedAt={apptsQuery.dataUpdatedAt}
-              isFetching={apptsQuery.isFetching}
-              isPending={apptsQuery.isPending}
-              isError={apptsQuery.isError}
-              error={apptsQuery.error}
-              onRefresh={() => apptsQuery.refetch()}
-              date={date}
-              onDateChange={setDate}
-              onGenerateReport={() => setShowRangeReport(true)}
-              onSelectAppt={(a) => {
-                setSelAppt(a);
-                setActiveTab("overview");
-                setView("list");
-              }}
-            />
-            {showRangeReport && (
-              <div
+            className="opd-topbar-sub"
+            style={{ width: 1, height: 18, background: "rgba(255,255,255,.15)", margin: "0 2px" }}
+          />
+          <div className="opd-topbar-sub" style={{ fontSize: 11, color: "rgba(255,255,255,.4)" }}>
+            OPD Manager
+          </div>
+          <div className="opd-topbar-nav" style={{ display: "flex", gap: 2, marginLeft: 6 }}>
+            {[
+              ["list", "📋 Schedule"],
+              ["dashboard", "📊 Live Dashboard"],
+              ["cohort", "🧭 All-Time Outcomes"],
+              ["triage", "🔴🟡✅ Triage"],
+              ["triage-v3", "🧪 Triage v3"],
+              ["new-appt", "➕ New Appointment"],
+              ["excel", "📊 Import Excel"],
+            ].map(([v, l]) => (
+              <button
+                key={v}
+                onClick={() => setView(v)}
                 style={{
-                  position: "fixed",
-                  inset: 0,
-                  background: "rgba(0,0,0,.45)",
-                  zIndex: 1000,
-                  display: "flex",
-                  alignItems: "flex-start",
-                  justifyContent: "center",
-                  padding: 20,
-                  overflow: "auto",
+                  padding: "5px 12px",
+                  borderRadius: 6,
+                  fontSize: 11,
+                  fontWeight: 500,
+                  color: view === v ? "#fff" : "rgba(255,255,255,.5)",
+                  background: view === v ? "rgba(255,255,255,.13)" : "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  fontFamily: FB,
+                  transition: "all .15s",
                 }}
-                onClick={() => setShowRangeReport(false)}
+              >
+                {l}
+              </button>
+            ))}
+          </div>
+          <div
+            className="opd-topbar-right"
+            style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}
+          >
+            <div
+              className="opd-clock"
+              style={{
+                background: "rgba(255,255,255,.1)",
+                border: "1px solid rgba(255,255,255,.14)",
+                borderRadius: 6,
+                padding: "3px 11px",
+                fontFamily: FM,
+                fontSize: 11,
+                color: "rgba(255,255,255,.6)",
+              }}
+            >
+              {clock}
+            </div>
+            {doctor && (
+              <div
+                className="opd-doctor-pill"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 7,
+                  background: "rgba(255,255,255,.1)",
+                  borderRadius: 20,
+                  padding: "3px 12px 3px 5px",
+                }}
               >
                 <div
-                  onClick={(e) => e.stopPropagation()}
                   style={{
-                    background: "white",
-                    borderRadius: 10,
-                    width: "100%",
-                    maxWidth: 1100,
-                    maxHeight: "100%",
-                    overflow: "auto",
+                    width: 26,
+                    height: 26,
+                    borderRadius: "50%",
+                    background: "linear-gradient(135deg,#5dd6ca,#009e8c)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: NV,
+                    flexShrink: 0,
                   }}
                 >
-                  <OpdRangeReport onClose={() => setShowRangeReport(false)} />
+                  {(doctor.short_name || doctor.name || "?").substring(0, 2).toUpperCase()}
+                </div>
+                <div className="opd-doctor-meta">
+                  <div style={{ fontSize: 11, fontWeight: 500, color: "rgba(255,255,255,.85)" }}>
+                    {doctor.short_name || doctor.name}
+                  </div>
+                  <div style={{ fontSize: 9, color: "rgba(255,255,255,.4)" }}>
+                    {doctor.role || "Staff"}
+                  </div>
                 </div>
               </div>
             )}
           </div>
-        ) : view === "triage" ? (
+        </div>
+
+        {/* Sub-nav — only visible on Schedule tab */}
+        {view === "list" && (!isMobile || mobileView === "list") && (
           <div
+            className="opd-subnav"
             style={{
-              flex: 1,
-              display: "flex",
-              flexDirection: "column",
-              background: BG,
-              overflow: "auto",
+              background: WH,
+              borderBottom: `1px solid ${BD}`,
+              padding: "0 18px",
+              flexShrink: 0,
             }}
           >
-            <TriageView
-              appointments={appointments}
-              doctors={doctors}
-              date={date}
-              onDateChange={setDate}
-              onRefresh={() => apptsQuery.refetch()}
-              isFetching={apptsQuery.isFetching}
-              isPending={apptsQuery.isPending}
-              updatedAt={apptsQuery.dataUpdatedAt}
-              onUpdateAppt={updateCategoryOrDoctor}
-              onSelectAppt={(a) => {
-                setSearchQ("");
-                setFilterStatus("all");
-                setFilterDoc("all");
-                setFilterCat("all");
-                setSelAppt(a);
-                setActiveTab("overview");
-                setView("list");
-              }}
-            />
-          </div>
-        ) : view === "triage-v3" ? (
-          <div
-            style={{
-              flex: 1,
-              display: "flex",
-              flexDirection: "column",
-              background: BG,
-              overflow: "auto",
-            }}
-          >
-            <TriageViewV3
-              appointments={appointments}
-              doctors={doctors}
-              date={date}
-              onDateChange={setDate}
-              onRefresh={() => apptsQuery.refetch()}
-              isFetching={apptsQuery.isFetching}
-              isPending={apptsQuery.isPending}
-              updatedAt={apptsQuery.dataUpdatedAt}
-              onUpdateAppt={updateCategoryOrDoctor}
-              onSelectAppt={(a) => {
-                setSearchQ("");
-                setFilterStatus("all");
-                setFilterDoc("all");
-                setFilterCat("all");
-                setSelAppt(a);
-                setActiveTab("overview");
-                setView("list");
-              }}
-            />
-          </div>
-        ) : (
-          <>
-            {/* Left schedule */}
-            {(!isMobile || mobileView === "list") && (
-              <div
-                className="opd-schedule"
+            {/* Mobile filter toggle bar */}
+            <div className="opd-filter-toggle">
+              <button
+                type="button"
+                className={`opd-filter-toggle-btn${mobileFiltersOpen ? " active" : ""}`}
+                onClick={() => setMobileFiltersOpen((o) => !o)}
+                aria-expanded={mobileFiltersOpen}
+              >
+                <span>🔍 Filters</span>
+                <span style={{ fontSize: 10, opacity: 0.7 }}>{mobileFiltersOpen ? "▲" : "▼"}</span>
+              </button>
+              <div className="opd-filter-summary">
+                {[
+                  filterStatus !== "all" ? filterStatus : null,
+                  filterDoc !== "all" && filterDoc !== "__noshow__"
+                    ? filterDoc.replace(/^Dr\.\s*/i, "").split(" ")[0]
+                    : null,
+                  filterDoc === "__noshow__" ? "No-Show" : null,
+                  filterCat !== "all" ? filterCat : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || "All patients"}
+              </div>
+              <button
+                type="button"
+                onClick={fetchAppts}
                 style={{
-                  width: 420,
-                  flexShrink: 0,
-                  borderRight: `1px solid ${BD}`,
-                  display: "flex",
-                  flexDirection: "column",
-                  background: WH,
-                  overflow: "hidden",
+                  padding: "5px 10px",
+                  borderRadius: 6,
+                  border: `1px solid ${BD}`,
+                  background: "transparent",
+                  cursor: "pointer",
+                  fontSize: 11,
+                  color: INK3,
+                  fontFamily: FB,
                 }}
               >
+                ↺
+              </button>
+              <button
+                type="button"
+                onClick={() => setView("new-appt")}
+                style={{
+                  padding: "5px 11px",
+                  borderRadius: 6,
+                  border: "none",
+                  background: T,
+                  color: "#fff",
+                  cursor: "pointer",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  fontFamily: FB,
+                }}
+              >
+                + New
+              </button>
+            </div>
+            <div className={`opd-filter-body${isMobile && !mobileFiltersOpen ? " collapsed" : ""}`}>
+              {/* Status filters */}
+              <div
+                className="opd-filter-row"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 2,
+                  height: 38,
+                  borderBottom: `1px solid ${BD}`,
+                }}
+              >
+                {[
+                  ["all", "All"],
+                  ["pending", "Pending"],
+                  ["ready", "Ready"],
+                  ["checkedin", "Checked In"],
+                  ["in_visit", "In Visit"],
+                  ["seen", "Seen"],
+                ].map(([v, l]) => filterBtn(l, v, filterStatus === v, () => setFilterStatus(v)))}
                 <div
-                  className="opd-schedule-head"
+                  className="opd-filter-stats"
+                  style={{ width: 1, height: 18, background: BD, margin: "0 8px" }}
+                />
+                <span
+                  className="opd-filter-stats"
+                  style={{ fontFamily: FM, fontSize: 11, color: AM, fontWeight: 500 }}
+                >
+                  {stats.pending} pending
+                </span>
+                <span
+                  className="opd-filter-stats"
                   style={{
-                    padding: "13px 15px 11px",
-                    borderBottom: `1px solid ${BD}`,
+                    fontFamily: FM,
+                    fontSize: 11,
+                    color: SK,
+                    fontWeight: 500,
+                    marginLeft: 8,
+                  }}
+                >
+                  {stats.checkedin} waiting
+                </span>
+                <span
+                  className="opd-filter-stats"
+                  style={{
+                    fontFamily: FM,
+                    fontSize: 11,
+                    color: "#7c3aed",
+                    fontWeight: 500,
+                    marginLeft: 8,
+                  }}
+                >
+                  {stats.in_visit} in visit
+                </span>
+                <span
+                  className="opd-filter-stats"
+                  style={{
+                    fontFamily: FM,
+                    fontSize: 11,
+                    color: GN,
+                    fontWeight: 500,
+                    marginLeft: 8,
+                  }}
+                >
+                  {stats.seen} seen
+                </span>
+                <div
+                  className="opd-filter-actions"
+                  style={{ marginLeft: "auto", display: "flex", gap: 7 }}
+                >
+                  <button
+                    onClick={fetchAppts}
+                    style={{
+                      padding: "3px 10px",
+                      borderRadius: 5,
+                      fontSize: 10,
+                      fontWeight: 500,
+                      background: "transparent",
+                      border: `1px solid ${BD}`,
+                      cursor: "pointer",
+                      color: INK3,
+                      fontFamily: FB,
+                    }}
+                  >
+                    ↺ Refresh
+                  </button>
+                  <button
+                    onClick={() => setView("new-appt")}
+                    style={{
+                      padding: "3px 10px",
+                      borderRadius: 5,
+                      fontSize: 10,
+                      fontWeight: 600,
+                      background: T,
+                      color: "#fff",
+                      border: "none",
+                      cursor: "pointer",
+                      fontFamily: FB,
+                    }}
+                  >
+                    + New
+                  </button>
+                </div>
+              </div>
+              {/* Doctor + category filters */}
+              <div
+                className="opd-filter-row"
+                style={{ display: "flex", alignItems: "center", gap: 3, height: 34 }}
+              >
+                <span
+                  className="opd-filter-label"
+                  style={{ fontSize: 10, color: INK3, fontWeight: 500, marginRight: 4 }}
+                >
+                  Doctor:
+                </span>
+                {filterBtn("All", null, filterDoc === "all", () => setFilterDoc("all"))}
+                {apptDoctors.map((d) =>
+                  filterBtn(d.replace(/^Dr\.\s*/i, "").split(" ")[0], d, filterDoc === d, () =>
+                    setFilterDoc(d === filterDoc ? "all" : d),
+                  ),
+                )}
+                {filterBtn(
+                  `No-Show${appointments.filter((a) => a.status === "no_show").length ? ` (${appointments.filter((a) => a.status === "no_show").length})` : ""}`,
+                  "__noshow__",
+                  filterDoc === "__noshow__",
+                  () => setFilterDoc(filterDoc === "__noshow__" ? "all" : "__noshow__"),
+                  "#6b7280",
+                )}
+                <div
+                  style={{ width: 1, height: 18, background: BD, margin: "0 10px", flexShrink: 0 }}
+                />
+                <span
+                  className="opd-filter-label"
+                  style={{ fontSize: 10, color: INK3, fontWeight: 500, marginRight: 4 }}
+                >
+                  Category:
+                </span>
+                {filterBtn("All", null, filterCat === "all", () => setFilterCat("all"))}
+                {filterBtn(
+                  "⚠ Uncontrolled",
+                  "complex",
+                  filterCat === "complex",
+                  () => setFilterCat(filterCat === "complex" ? "all" : "complex"),
+                  RE,
+                )}
+                {filterBtn(
+                  "↑ Maintenance",
+                  "maint",
+                  filterCat === "maint",
+                  () => setFilterCat(filterCat === "maint" ? "all" : "maint"),
+                  AM,
+                )}
+                {filterBtn(
+                  "✓ Continuous Care",
+                  "ctrl",
+                  filterCat === "ctrl",
+                  () => setFilterCat(filterCat === "ctrl" ? "all" : "ctrl"),
+                  GN,
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Main */}
+        <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
+          {view === "excel" ? (
+            <ExcelImportView
+              doctors={doctors}
+              showToast={showToast}
+              onDone={() => {
+                fetchAppts();
+                setView("list");
+              }}
+            />
+          ) : view === "new-appt" ? (
+            <NewApptView
+              doctors={doctors}
+              showToast={showToast}
+              onCancel={() => setView("list")}
+              onSaved={() => {
+                fetchAppts();
+                setView("list");
+                showToast("✓ Appointment created");
+              }}
+            />
+          ) : view === "cohort" ? (
+            <CohortDashboard />
+          ) : view === "dashboard" ? (
+            <div
+              style={{
+                flex: 1,
+                display: "flex",
+                flexDirection: "column",
+                background: BG,
+                overflow: "auto",
+              }}
+            >
+              <LiveDashboard
+                appointments={appointments}
+                doctors={doctors}
+                updatedAt={apptsQuery.dataUpdatedAt}
+                isFetching={apptsQuery.isFetching}
+                isPending={apptsQuery.isPending}
+                isError={apptsQuery.isError}
+                error={apptsQuery.error}
+                onRefresh={() => apptsQuery.refetch()}
+                date={date}
+                onDateChange={setDate}
+                onGenerateReport={() => setShowRangeReport(true)}
+                onSelectAppt={(a) => {
+                  setSelAppt(a);
+                  setActiveTab("overview");
+                  setView("list");
+                }}
+              />
+              {showRangeReport && (
+                <div
+                  style={{
+                    position: "fixed",
+                    inset: 0,
+                    background: "rgba(0,0,0,.45)",
+                    zIndex: 1000,
+                    display: "flex",
+                    alignItems: "flex-start",
+                    justifyContent: "center",
+                    padding: 20,
+                    overflow: "auto",
+                  }}
+                  onClick={() => setShowRangeReport(false)}
+                >
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                      background: "white",
+                      borderRadius: 10,
+                      width: "100%",
+                      maxWidth: 1100,
+                      maxHeight: "100%",
+                      overflow: "auto",
+                    }}
+                  >
+                    <OpdRangeReport onClose={() => setShowRangeReport(false)} />
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : view === "triage" ? (
+            <div
+              style={{
+                flex: 1,
+                display: "flex",
+                flexDirection: "column",
+                background: BG,
+                overflow: "auto",
+              }}
+            >
+              <TriageView
+                appointments={appointments}
+                doctors={doctors}
+                date={date}
+                onDateChange={setDate}
+                onRefresh={() => apptsQuery.refetch()}
+                isFetching={apptsQuery.isFetching}
+                isPending={apptsQuery.isPending}
+                updatedAt={apptsQuery.dataUpdatedAt}
+                onUpdateAppt={updateCategoryOrDoctor}
+                onSelectAppt={(a) => {
+                  setSearchQ("");
+                  setFilterStatus("all");
+                  setFilterDoc("all");
+                  setFilterCat("all");
+                  setSelAppt(a);
+                  setActiveTab("overview");
+                  setView("list");
+                }}
+              />
+            </div>
+          ) : view === "triage-v3" ? (
+            <div
+              style={{
+                flex: 1,
+                display: "flex",
+                flexDirection: "column",
+                background: BG,
+                overflow: "auto",
+              }}
+            >
+              <TriageViewV3
+                appointments={appointments}
+                doctors={doctors}
+                date={date}
+                onDateChange={setDate}
+                onRefresh={() => apptsQuery.refetch()}
+                isFetching={apptsQuery.isFetching}
+                isPending={apptsQuery.isPending}
+                updatedAt={apptsQuery.dataUpdatedAt}
+                onUpdateAppt={updateCategoryOrDoctor}
+                onSelectAppt={(a) => {
+                  setSearchQ("");
+                  setFilterStatus("all");
+                  setFilterDoc("all");
+                  setFilterCat("all");
+                  setSelAppt(a);
+                  setActiveTab("overview");
+                  setView("list");
+                }}
+              />
+            </div>
+          ) : (
+            <>
+              {/* Left schedule */}
+              {(!isMobile || mobileView === "list") && (
+                <div
+                  className="opd-schedule"
+                  style={{
+                    width: 420,
                     flexShrink: 0,
+                    borderRight: `1px solid ${BD}`,
+                    display: "flex",
+                    flexDirection: "column",
+                    background: WH,
+                    overflow: "hidden",
                   }}
                 >
                   <div
-                    className="opd-schedule-title"
+                    className="opd-schedule-head"
                     style={{
-                      fontFamily: FD,
-                      fontSize: 17,
-                      color: INK,
-                      marginBottom: 9,
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
+                      padding: "13px 15px 11px",
+                      borderBottom: `1px solid ${BD}`,
+                      flexShrink: 0,
                     }}
                   >
-                    <span style={{ flex: 1 }}>
-                      {new Date(date + "T00:00").toLocaleDateString("en-IN", {
-                        weekday: "long",
-                        day: "numeric",
-                        month: "long",
-                      })}
-                    </span>
-                    {hasLiveAppt && (
-                      <span
-                        title="Live status sync — polling HealthRay every 20s"
+                    <div
+                      className="opd-schedule-title"
+                      style={{
+                        fontFamily: FD,
+                        fontSize: 17,
+                        color: INK,
+                        marginBottom: 9,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                      }}
+                    >
+                      <span style={{ flex: 1 }}>
+                        {new Date(date + "T00:00").toLocaleDateString("en-IN", {
+                          weekday: "long",
+                          day: "numeric",
+                          month: "long",
+                        })}
+                      </span>
+                      {hasLiveAppt && (
+                        <span
+                          title="Live status sync — polling HealthRay every 20s"
+                          style={{
+                            fontFamily: FM,
+                            fontSize: 9,
+                            letterSpacing: 0.4,
+                            textTransform: "uppercase",
+                            color: SK,
+                            background: SKL,
+                            border: `1px solid ${SK}`,
+                            padding: "2px 6px",
+                            borderRadius: 999,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 4,
+                          }}
+                        >
+                          <span
+                            style={{
+                              width: 6,
+                              height: 6,
+                              borderRadius: 999,
+                              background: SK,
+                              display: "inline-block",
+                            }}
+                          />
+                          Live
+                        </span>
+                      )}
+                      <button
+                        onClick={forceResync}
+                        disabled={resyncing}
+                        title="Hard resync — re-fetch every appointment, status & clinical data from HealthRay"
                         style={{
                           fontFamily: FM,
-                          fontSize: 9,
-                          letterSpacing: 0.4,
+                          fontSize: 10,
+                          letterSpacing: 0.3,
                           textTransform: "uppercase",
-                          color: SK,
-                          background: SKL,
-                          border: `1px solid ${SK}`,
-                          padding: "2px 6px",
-                          borderRadius: 999,
+                          color: resyncing ? INK3 : INK,
+                          background: resyncing ? BG : "transparent",
+                          border: `1px solid ${BD}`,
+                          borderRadius: 6,
+                          padding: "3px 8px",
+                          cursor: resyncing ? "default" : "pointer",
                           display: "inline-flex",
                           alignItems: "center",
                           gap: 4,
@@ -7909,327 +7983,296 @@ export default function OPD() {
                       >
                         <span
                           style={{
-                            width: 6,
-                            height: 6,
-                            borderRadius: 999,
-                            background: SK,
                             display: "inline-block",
+                            transform: resyncing ? "rotate(360deg)" : "none",
+                            transition: "transform 1s linear",
                           }}
-                        />
-                        Live
-                      </span>
-                    )}
-                    <button
-                      onClick={forceResync}
-                      disabled={resyncing}
-                      title="Hard resync — re-fetch every appointment, status & clinical data from HealthRay"
-                      style={{
-                        fontFamily: FM,
-                        fontSize: 10,
-                        letterSpacing: 0.3,
-                        textTransform: "uppercase",
-                        color: resyncing ? INK3 : INK,
-                        background: resyncing ? BG : "transparent",
-                        border: `1px solid ${BD}`,
-                        borderRadius: 6,
-                        padding: "3px 8px",
-                        cursor: resyncing ? "default" : "pointer",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 4,
-                      }}
+                        >
+                          ⟳
+                        </span>
+                        {resyncing ? "Syncing…" : "Resync"}
+                      </button>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                      <button
+                        onClick={() => changeDate(-1)}
+                        style={{
+                          width: 26,
+                          height: 26,
+                          borderRadius: 6,
+                          border: `1px solid ${BD}`,
+                          background: "transparent",
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontSize: 14,
+                          color: INK3,
+                        }}
+                      >
+                        ‹
+                      </button>
+                      <input
+                        type="date"
+                        value={date}
+                        onChange={(e) => setDate(e.target.value)}
+                        style={{
+                          border: `1px solid ${BD}`,
+                          borderRadius: 7,
+                          padding: "4px 10px",
+                          fontFamily: FM,
+                          fontSize: 11,
+                          color: INK,
+                          background: BG,
+                          outline: "none",
+                          flex: 1,
+                        }}
+                      />
+                      <button
+                        onClick={() => changeDate(1)}
+                        style={{
+                          width: 26,
+                          height: 26,
+                          borderRadius: 6,
+                          border: `1px solid ${BD}`,
+                          background: "transparent",
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontSize: 14,
+                          color: INK3,
+                        }}
+                      >
+                        ›
+                      </button>
+                      <button
+                        onClick={() => setDate(new Date().toISOString().split("T")[0])}
+                        style={{
+                          padding: "4px 9px",
+                          fontSize: 10,
+                          fontWeight: 500,
+                          border: `1px solid ${BD}`,
+                          borderRadius: 6,
+                          background: "transparent",
+                          cursor: "pointer",
+                          color: INK3,
+                          fontFamily: FB,
+                        }}
+                      >
+                        Today
+                      </button>
+                    </div>
+                    <div
+                      className="opd-schedule-search"
+                      style={{ position: "relative", marginTop: 8 }}
                     >
                       <span
                         style={{
-                          display: "inline-block",
-                          transform: resyncing ? "rotate(360deg)" : "none",
-                          transition: "transform 1s linear",
-                        }}
-                      >
-                        ⟳
-                      </span>
-                      {resyncing ? "Syncing…" : "Resync"}
-                    </button>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                    <button
-                      onClick={() => changeDate(-1)}
-                      style={{
-                        width: 26,
-                        height: 26,
-                        borderRadius: 6,
-                        border: `1px solid ${BD}`,
-                        background: "transparent",
-                        cursor: "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: 14,
-                        color: INK3,
-                      }}
-                    >
-                      ‹
-                    </button>
-                    <input
-                      type="date"
-                      value={date}
-                      onChange={(e) => setDate(e.target.value)}
-                      style={{
-                        border: `1px solid ${BD}`,
-                        borderRadius: 7,
-                        padding: "4px 10px",
-                        fontFamily: FM,
-                        fontSize: 11,
-                        color: INK,
-                        background: BG,
-                        outline: "none",
-                        flex: 1,
-                      }}
-                    />
-                    <button
-                      onClick={() => changeDate(1)}
-                      style={{
-                        width: 26,
-                        height: 26,
-                        borderRadius: 6,
-                        border: `1px solid ${BD}`,
-                        background: "transparent",
-                        cursor: "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: 14,
-                        color: INK3,
-                      }}
-                    >
-                      ›
-                    </button>
-                    <button
-                      onClick={() => setDate(new Date().toISOString().split("T")[0])}
-                      style={{
-                        padding: "4px 9px",
-                        fontSize: 10,
-                        fontWeight: 500,
-                        border: `1px solid ${BD}`,
-                        borderRadius: 6,
-                        background: "transparent",
-                        cursor: "pointer",
-                        color: INK3,
-                        fontFamily: FB,
-                      }}
-                    >
-                      Today
-                    </button>
-                  </div>
-                  <div
-                    className="opd-schedule-search"
-                    style={{ position: "relative", marginTop: 8 }}
-                  >
-                    <span
-                      style={{
-                        position: "absolute",
-                        left: 9,
-                        top: "50%",
-                        transform: "translateY(-50%)",
-                        fontSize: 12,
-                        color: INK3,
-                        pointerEvents: "none",
-                      }}
-                    >
-                      🔍
-                    </span>
-                    <input
-                      value={searchQ}
-                      onChange={(e) => setSearchQ(e.target.value)}
-                      placeholder="Search by name, phone, file no..."
-                      style={{
-                        width: "100%",
-                        boxSizing: "border-box",
-                        paddingLeft: 28,
-                        paddingRight: searchQ ? 28 : 10,
-                        paddingTop: 5,
-                        paddingBottom: 5,
-                        border: `1px solid ${BD}`,
-                        borderRadius: 7,
-                        fontFamily: FB,
-                        fontSize: 11,
-                        color: INK,
-                        background: BG,
-                        outline: "none",
-                      }}
-                    />
-                    {searchQ && (
-                      <button
-                        onClick={() => setSearchQ("")}
-                        style={{
                           position: "absolute",
-                          right: 7,
+                          left: 9,
                           top: "50%",
                           transform: "translateY(-50%)",
-                          background: "none",
-                          border: "none",
-                          cursor: "pointer",
                           fontSize: 12,
                           color: INK3,
-                          padding: 0,
-                          lineHeight: 1,
+                          pointerEvents: "none",
                         }}
                       >
-                        ✕
-                      </button>
-                    )}
-                  </div>
-                </div>
-                <div style={{ flex: 1, overflowY: "auto" }}>
-                  {loading && (
-                    <div style={{ padding: 20, textAlign: "center", color: INK3, fontSize: 12 }}>
-                      Loading…
-                    </div>
-                  )}
-                  {!loading && filtered.length === 0 && (
-                    <div style={{ padding: 28, textAlign: "center", color: INK3 }}>
-                      <div style={{ fontSize: 32, marginBottom: 10, opacity: 0.2 }}>📋</div>
-                      <div style={{ fontSize: 13, marginBottom: 12 }}>No appointments</div>
-                      <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+                        🔍
+                      </span>
+                      <input
+                        value={searchQ}
+                        onChange={(e) => setSearchQ(e.target.value)}
+                        placeholder="Search by name, phone, file no..."
+                        style={{
+                          width: "100%",
+                          boxSizing: "border-box",
+                          paddingLeft: 28,
+                          paddingRight: searchQ ? 28 : 10,
+                          paddingTop: 5,
+                          paddingBottom: 5,
+                          border: `1px solid ${BD}`,
+                          borderRadius: 7,
+                          fontFamily: FB,
+                          fontSize: 11,
+                          color: INK,
+                          background: BG,
+                          outline: "none",
+                        }}
+                      />
+                      {searchQ && (
                         <button
-                          onClick={() => setView("new-appt")}
+                          onClick={() => setSearchQ("")}
                           style={{
-                            padding: "7px 14px",
-                            borderRadius: 7,
-                            background: T,
-                            color: "#fff",
+                            position: "absolute",
+                            right: 7,
+                            top: "50%",
+                            transform: "translateY(-50%)",
+                            background: "none",
                             border: "none",
-                            fontSize: 11,
-                            fontWeight: 600,
                             cursor: "pointer",
-                            fontFamily: FB,
+                            fontSize: 12,
+                            color: INK3,
+                            padding: 0,
+                            lineHeight: 1,
                           }}
                         >
-                          + New
+                          ✕
                         </button>
-                        <button
-                          onClick={() => setView("excel")}
-                          style={{
-                            padding: "7px 14px",
-                            borderRadius: 7,
-                            background: WH,
-                            border: `1px solid ${BD}`,
-                            color: INK2,
-                            fontSize: 11,
-                            fontWeight: 500,
-                            cursor: "pointer",
-                            fontFamily: FB,
-                          }}
-                        >
-                          📊 Import
-                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div style={{ flex: 1, overflowY: "auto" }}>
+                    {loading && (
+                      <div style={{ padding: 20, textAlign: "center", color: INK3, fontSize: 12 }}>
+                        Loading…
                       </div>
+                    )}
+                    {!loading && filtered.length === 0 && (
+                      <div style={{ padding: 28, textAlign: "center", color: INK3 }}>
+                        <div style={{ fontSize: 32, marginBottom: 10, opacity: 0.2 }}>📋</div>
+                        <div style={{ fontSize: 13, marginBottom: 12 }}>No appointments</div>
+                        <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+                          <button
+                            onClick={() => setView("new-appt")}
+                            style={{
+                              padding: "7px 14px",
+                              borderRadius: 7,
+                              background: T,
+                              color: "#fff",
+                              border: "none",
+                              fontSize: 11,
+                              fontWeight: 600,
+                              cursor: "pointer",
+                              fontFamily: FB,
+                            }}
+                          >
+                            + New
+                          </button>
+                          <button
+                            onClick={() => setView("excel")}
+                            style={{
+                              padding: "7px 14px",
+                              borderRadius: 7,
+                              background: WH,
+                              border: `1px solid ${BD}`,
+                              color: INK2,
+                              fontSize: 11,
+                              fontWeight: 500,
+                              cursor: "pointer",
+                              fontFamily: FB,
+                            }}
+                          >
+                            📊 Import
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {!loading &&
+                      Object.entries(grouped)
+                        .sort(([a], [b]) =>
+                          a === "Unassigned" ? -1 : b === "Unassigned" ? 1 : a.localeCompare(b),
+                        )
+                        .map(([doc, appts]) => (
+                          <DocSection
+                            key={doc}
+                            docName={doc}
+                            appts={appts}
+                            selAppt={selAppt}
+                            onSelect={selectAppt}
+                            filterStatus={filterStatus}
+                            isSearching={!!searchQ.trim()}
+                          />
+                        ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Right detail */}
+              {(!isMobile || mobileView === "detail") && (
+                <div
+                  className="opd-detail"
+                  style={{
+                    flex: 1,
+                    display: "flex",
+                    flexDirection: "column",
+                    overflow: "hidden",
+                    background: BG,
+                  }}
+                >
+                  {isMobile && (
+                    <div className="opd-mobile-back">
+                      <button
+                        onClick={() => setMobileView("list")}
+                        style={{
+                          background: "transparent",
+                          border: `1px solid ${BD}`,
+                          borderRadius: 6,
+                          padding: "5px 10px",
+                          fontSize: 12,
+                          fontWeight: 600,
+                          color: INK2,
+                          cursor: "pointer",
+                          fontFamily: FB,
+                        }}
+                      >
+                        ← Back
+                      </button>
+                      <span style={{ fontSize: 12, color: INK3, fontFamily: FB }}>
+                        {selAppt ? selAppt.patient_name || "Patient" : "Select a patient"}
+                      </span>
                     </div>
                   )}
-                  {!loading &&
-                    Object.entries(grouped)
-                      .sort(([a], [b]) =>
-                        a === "Unassigned" ? -1 : b === "Unassigned" ? 1 : a.localeCompare(b),
-                      )
-                      .map(([doc, appts]) => (
-                        <DocSection
-                          key={doc}
-                          docName={doc}
-                          appts={appts}
-                          selAppt={selAppt}
-                          onSelect={selectAppt}
-                          filterStatus={filterStatus}
-                          isSearching={!!searchQ.trim()}
-                        />
-                      ))}
+                  {!selAppt ? (
+                    <EmptyState
+                      onNew={() => setView("new-appt")}
+                      onImport={() => setView("excel")}
+                      onDashboard={() => setView("dashboard")}
+                      stats={stats}
+                    />
+                  ) : (
+                    <PatientDetail
+                      appt={selAppt}
+                      doctors={doctors}
+                      activeTab={activeTab}
+                      setActiveTab={setActiveTab}
+                      onPatchStatus={patchStatus}
+                      onPatchPrep={patchPrep}
+                      onPostBiomarkers={postBiomarkers}
+                      onPostCompliance={postCompliance}
+                      onPatchCategoryDoc={patchCategoryDoc}
+                      onPostVitals={postVitals}
+                      allAppts={appointments}
+                      showToast={showToast}
+                    />
+                  )}
                 </div>
-              </div>
-            )}
+              )}
+            </>
+          )}
+        </div>
 
-            {/* Right detail */}
-            {(!isMobile || mobileView === "detail") && (
-              <div
-                className="opd-detail"
-                style={{
-                  flex: 1,
-                  display: "flex",
-                  flexDirection: "column",
-                  overflow: "hidden",
-                  background: BG,
-                }}
-              >
-                {isMobile && (
-                  <div className="opd-mobile-back">
-                    <button
-                      onClick={() => setMobileView("list")}
-                      style={{
-                        background: "transparent",
-                        border: `1px solid ${BD}`,
-                        borderRadius: 6,
-                        padding: "5px 10px",
-                        fontSize: 12,
-                        fontWeight: 600,
-                        color: INK2,
-                        cursor: "pointer",
-                        fontFamily: FB,
-                      }}
-                    >
-                      ← Back
-                    </button>
-                    <span style={{ fontSize: 12, color: INK3, fontFamily: FB }}>
-                      {selAppt ? selAppt.patient_name || "Patient" : "Select a patient"}
-                    </span>
-                  </div>
-                )}
-                {!selAppt ? (
-                  <EmptyState
-                    onNew={() => setView("new-appt")}
-                    onImport={() => setView("excel")}
-                    onDashboard={() => setView("dashboard")}
-                    stats={stats}
-                  />
-                ) : (
-                  <PatientDetail
-                    appt={selAppt}
-                    doctors={doctors}
-                    activeTab={activeTab}
-                    setActiveTab={setActiveTab}
-                    onPatchStatus={patchStatus}
-                    onPatchPrep={patchPrep}
-                    onPostBiomarkers={postBiomarkers}
-                    onPostCompliance={postCompliance}
-                    onPatchCategoryDoc={patchCategoryDoc}
-                    onPostVitals={postVitals}
-                    allAppts={appointments}
-                    showToast={showToast}
-                  />
-                )}
-              </div>
-            )}
-          </>
+        {toast && (
+          <div
+            style={{
+              position: "fixed",
+              bottom: 20,
+              right: 20,
+              zIndex: 999,
+              background: toast.type === "err" ? RE : T,
+              color: "#fff",
+              borderRadius: 9,
+              padding: "11px 18px",
+              fontSize: 13,
+              fontWeight: 500,
+              boxShadow: "0 4px 20px rgba(0,0,0,.18)",
+              maxWidth: 320,
+            }}
+          >
+            {toast.msg}
+          </div>
         )}
       </div>
-
-      {toast && (
-        <div
-          style={{
-            position: "fixed",
-            bottom: 20,
-            right: 20,
-            zIndex: 999,
-            background: toast.type === "err" ? RE : T,
-            color: "#fff",
-            borderRadius: 9,
-            padding: "11px 18px",
-            fontSize: 13,
-            fontWeight: 500,
-            boxShadow: "0 4px 20px rgba(0,0,0,.18)",
-            maxWidth: 320,
-          }}
-        >
-          {toast.msg}
-        </div>
-      )}
-    </div>
+    </ApprovalsProvider>
   );
 }

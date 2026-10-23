@@ -1,14 +1,7 @@
-import pool from "../../config/db.js";
+import { columnReady, readiness } from "./readiness.js";
 
-let ready = false;
-let checkedAt = 0;
+export const approvalsReady = readiness(
+  "SELECT to_regclass('public.booking_approvals') IS NOT NULL AS ok",
+);
 
-export async function approvalsReady(client = pool) {
-  if (ready || Date.now() - checkedAt < 60_000) return ready;
-  checkedAt = Date.now();
-  const { rows } = await client.query(
-    "SELECT to_regclass('public.booking_approvals') IS NOT NULL AS ok",
-  );
-  ready = rows[0].ok;
-  return ready;
-}
+export const requestReasonReady = columnReady("booking_approvals", "request_reason");

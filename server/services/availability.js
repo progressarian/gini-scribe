@@ -23,7 +23,7 @@ import pool from "../config/db.js";
 import { inLunch, inWorkingHours, profileFromRow } from "./slots/profileRules.js";
 import { activeTemplates } from "./slots/templateStore.js";
 import { approvalsReady } from "./slots/approvalStore.js";
-import { patientTypeSql } from "../../shared/slotCapacity.js";
+import { overLimitFor, patientTypeSql } from "../../shared/slotCapacity.js";
 import {
   bookingMinute,
   labelSpan,
@@ -84,7 +84,7 @@ async function loadDayContext(doctors, dateISO, client) {
     ),
     client.query("SELECT remarks FROM clinic_holidays WHERE holiday_date=$1", [dateISO]),
     client.query(
-      `SELECT doctor_id, type, reason, slot_labels, start_time::text, end_time::text
+      `SELECT id, doctor_id, type, reason, slot_labels, start_time::text, end_time::text
          FROM doctor_unavailability
         WHERE doctor_id = ANY($1::int[]) AND status='active'
           AND $2::date BETWEEN start_date AND end_date`,
@@ -164,7 +164,14 @@ function slotVerdict(day, slotOrTime, holidayRemark) {
       return [minute, minute + 1440].some((t) => t >= a && t < e);
     });
   if (!hit) return { available: false, reason: "not_working" };
-  const base = { slot_label: hit.slot_label, capacity: hit.capacity, booked: hit.booked };
+  const base = {
+    slot_label: hit.slot_label,
+    capacity: hit.capacity,
+    booked: hit.booked,
+    caps: hit.caps,
+    counts: hit.counts,
+    time_off_id: hit.time_off_id ?? null,
+  };
   if (hit.available) return { available: true, ...base };
   const detail = hit.blocked_by === "clinic_holiday" ? holidayRemark : hit.detail || null;
   return { available: false, reason: hit.blocked_by, detail, ...base };
@@ -306,7 +313,7 @@ async function legacyDayAvailability(doctor, dateISO, client) {
 export async function findAvailableDoctors(
   dateISO,
   slotLabel,
-  { excludeDoctorId = null, role = null, specialty = null, client = pool } = {},
+  { excludeDoctorId = null, role = null, specialty = null, patientType = null, client = pool } = {},
 ) {
   const docs = await client.query(
     `SELECT id, name, short_name, role, specialty FROM doctors
@@ -332,11 +339,13 @@ export async function findAvailableDoctors(
       free_capacity: a.capacity == null ? Infinity : a.capacity - (a.booked ?? 0),
       same_specialty: !!(specialty && d.specialty && d.specialty === specialty),
       same_role: !!(role && d.role && d.role === role),
+      over_limit: patientType ? overLimitFor(a, patientType) : null,
     });
   }
 
   out.sort(
     (x, y) =>
+      Number(!!x.over_limit) - Number(!!y.over_limit) ||
       Number(y.same_specialty) - Number(x.same_specialty) ||
       Number(y.same_role) - Number(x.same_role) ||
       y.free_capacity - x.free_capacity ||

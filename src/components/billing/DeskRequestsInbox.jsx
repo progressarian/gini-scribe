@@ -2,6 +2,7 @@ import { useId, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import DeskRequestsPage from "../../pages/billing/DeskRequestsPage";
 import TestCancellationsPage from "../../pages/billing/TestCancellationsPage";
+import BookingApprovalsPage from "../../pages/BookingApprovalsPage";
 import useDeskRequestsLive from "../../queries/hooks/useDeskRequestsLive";
 import { useApprovalsWaiting } from "../../queries/hooks/useApprovals";
 import { useRequestFilters } from "./RequestFilters";
@@ -11,6 +12,7 @@ import "./deskRequestsInbox.css";
 export const INBOX_TABS = {
   desk: { key: "desk", label: "Billing requests" },
   tests: { key: "tests", label: "Test cancellations" },
+  bookings: { key: "bookings", label: "Booking limits" },
 };
 
 export default function DeskRequestsInbox({ param = "tab", live = true, defaultStatus }) {
@@ -23,6 +25,7 @@ export default function DeskRequestsInbox({ param = "tab", live = true, defaultS
   const tabs = [
     waiting.desk && { ...INBOX_TABS.desk, count: waiting.deskCount },
     waiting.tests && { ...INBOX_TABS.tests, count: waiting.testsCount },
+    waiting.bookings && { ...INBOX_TABS.bookings, count: waiting.bookingsCount },
   ].filter(Boolean);
   if (!tabs.length) return null;
   const requested = params.get(param);
@@ -51,7 +54,9 @@ export default function DeskRequestsInbox({ param = "tab", live = true, defaultS
   };
 
   const page =
-    current.key === INBOX_TABS.tests.key ? (
+    current.key === INBOX_TABS.bookings.key ? (
+      <BookingApprovalsPage />
+    ) : current.key === INBOX_TABS.tests.key ? (
       <TestCancellationsPage live={false} filters={filters} />
     ) : (
       <DeskRequestsPage live={false} filters={filters} />

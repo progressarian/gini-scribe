@@ -4,7 +4,11 @@ import { handleError } from "../utils/errorHandler.js";
 import { CAPABILITIES as CAP } from "../../shared/permissions.js";
 import { approvalsWaiting } from "../services/billing/approvalsWaiting.js";
 
-const APPROVER_CAPABILITIES = [CAP.BILLING_MASTER, CAP.GINIFLOW_TEST_CANCEL_DECIDE];
+const APPROVER_CAPABILITIES = [
+  CAP.BILLING_MASTER,
+  CAP.GINIFLOW_TEST_CANCEL_DECIDE,
+  CAP.BOOKING_APPROVE,
+];
 
 const router = express.Router();
 

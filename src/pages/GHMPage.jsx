@@ -33,6 +33,7 @@ import {
   CalendarArrowDown,
   CalendarX,
   History,
+  CalendarClock,
 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import "./GHMPage.css";
@@ -45,6 +46,11 @@ import {
   useSlotCatalog,
   ARRIVAL_TIME_RANGES,
 } from "../lib/slotAvailability.js";
+import { ApprovalBadge, ApprovalsProvider } from "../components/booking/ApprovalBadge";
+import { capacityNote, PATIENT_TYPES } from "../../shared/slotCapacity";
+import { useOverLimitConfirm } from "../components/booking/OverLimitDialog";
+import ConsultantSlotsPanel from "../components/ghm/ConsultantSlotsPanel";
+import DecidedRequests from "../components/ghm/DecidedRequests";
 import { exportWatiWorkbook } from "../lib/ghmWatiExport.js";
 import { CAPABILITIES as CAP, hasAnyCapability, hasCapability } from "../../shared/permissions";
 import ConfirmModal from "../components/ui/ConfirmModal.jsx";
@@ -87,6 +93,9 @@ import {
   useCcAgents,
   useCreateAppointment,
   useDayAvailability,
+  useFreshSlotCheck,
+  useGhmDisplaySettings,
+  useScheduleSlotsFor,
   useDeleteAppointmentChange,
   useDeleteCallAttempt,
   useDoctorConflicts,
@@ -119,6 +128,19 @@ const slotCountDate = (row) =>
 
 const slotDoctor = (row) => row?.preferred_doctor || row?.doctor_name || "";
 
+const DONE_VISIT = ["completed", "seen", "in_visit", "in-progress", "cancelled", "no_show"];
+
+const slotMovesBooking = (row) => {
+  const day = String(row?.appointment_date || "").slice(0, 10);
+  const preferred = String(row?.preferred_date || "").slice(0, 10);
+  return (
+    !!day &&
+    day >= new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }) &&
+    !DONE_VISIT.includes(row?.status || "") &&
+    (!preferred || preferred === day)
+  );
+};
+
 const slotBooked = (slot, counts, row) => {
   const hour = slotStartHour(slot);
   if (hour === null) return 0;
@@ -135,6 +157,48 @@ const SLOT_BUSY = 12;
 const SLOT_FULL = 20;
 
 const slotTone = (n) => (n >= SLOT_FULL ? "high" : n >= SLOT_BUSY ? "mid" : "low");
+
+const hourlyOption = (t, counts, row) => {
+  const booked = slotBooked(t, counts, row);
+  return {
+    value: t,
+    label: t,
+    badge: booked || undefined,
+    badgeTone: slotTone(booked),
+    badgeTitle: booked
+      ? `${booked} patient${booked > 1 ? "s" : ""} booked in this slot${slotDoctor(row) ? ` for ${slotDoctor(row)}` : ""}`
+      : undefined,
+  };
+};
+
+const scheduleOption = (s, current) => {
+  const note = s.available ? capacityNote(s) : "";
+  const full = PATIENT_TYPES.some((t) => s.caps?.[t] != null && (s.counts?.[t] ?? 0) >= s.caps[t]);
+  return {
+    value: s.slot_label,
+    label: s.available
+      ? s.slot_label
+      : `${s.slot_label} — ${s.blocked_by === "break" && s.detail ? s.detail : SLOT_REASON[s.blocked_by] || "Unavailable"}`,
+    disabled: !s.available && s.slot_label !== current,
+    badge: s.booked || undefined,
+    badgeTone: full ? "high" : s.booked ? "mid" : "low",
+    badgeTitle:
+      note ||
+      (s.booked ? `${s.booked} patient${s.booked > 1 ? "s" : ""} booked in this slot` : undefined),
+  };
+};
+
+const preferredTimeOptions = (row, daySlots, counts) => {
+  const current = row.preferred_time_slot;
+  const offered = daySlots?.length
+    ? daySlots.filter((s) => s.blocked_by !== "not_working").map((s) => scheduleOption(s, current))
+    : ARRIVAL_TIME_RANGES.map((t) => hourlyOption(t, counts, row));
+  const keep =
+    current && !offered.some((o) => o.value === current)
+      ? [hourlyOption(current, counts, row)]
+      : [];
+  return [{ value: "", label: "— No time given" }, ...keep, ...offered];
+};
 
 const daysAgo = (d) => {
   if (!d) return null;
@@ -1105,7 +1169,20 @@ export function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, on
   // duplicate chart at worst, never a merged one.
   const bookingIsNewPatient = !picked && !form.file_no.trim();
 
-  const { data: availData } = useDayAvailability(form.doctor_name, form.appointment_date);
+  const { data: availData } = useDayAvailability(form.doctor_name, form.appointment_date, {
+    patientId: picked?.id,
+    fileNo: form.file_no.trim() || null,
+    visitType: form.visit_type,
+  });
+  const overLimit = useOverLimitConfirm();
+  const pickSlot = async (value) => {
+    const slot = (availSlots || []).find((x) => x.slot_label === value);
+    const ok = await overLimit.confirm(slot, {
+      doctorName: form.doctor_name,
+      patientName: form.patient_name,
+    });
+    if (ok) setForm((f) => ({ ...f, time_slot: value, over_limit_reason: ok.reason }));
+  };
   const availSlots = availData ?? null;
   const slotCatalog = useSlotCatalog();
 
@@ -1238,232 +1315,239 @@ export function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, on
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal__hdr">
-          <span className="modal__title">
-            <Plus size={16} aria-hidden="true" />
-            {isPrefilled ? `Book Next Appointment — ${prefill.patient_name}` : "New Appointment"}
-          </span>
-          <button className="modal__x" onClick={onClose} aria-label="Close">
-            <X size={16} aria-hidden="true" />
-          </button>
-        </div>
-
-        <div className="modal__body">
-          {err && <div className="modal__err">{err}</div>}
-          {dup && (
-            <div className="modal__err">
-              This patient already has an appointment on {form.appointment_date}
-              {dup.doctor_name ? ` with ${dup.doctor_name}` : ""}
-              {dup.time_slot ? ` at ${dup.time_slot}` : ""}
-              {dup.booked_by_name ? `, booked by ${dup.booked_by_name}` : ""}.
-              <button type="button" className="btn btn--ghost" onClick={() => save(true)}>
-                Book anyway
-              </button>
-            </div>
-          )}
-          {isPrefilled && (
-            <div className="modal__prefill-note">
-              <Check size={14} aria-hidden="true" />
-              Patient details auto-filled. Just pick the date, slot &amp; doctor.
-            </div>
-          )}
-          {prefill?.preferred_date && form.appointment_date !== prefill.preferred_date && (
-            <div className="modal__err" role="status">
-              Patient asked for {prettyDate(prefill.preferred_date)}
-              {prefill.preferred_time_slot ? `, ${prefill.preferred_time_slot}` : ""}. Booking{" "}
-              {form.appointment_date ? prettyDate(form.appointment_date) : "another date"} replaces
-              that request — they will no longer be listed on {prettyDate(prefill.preferred_date)}.
-            </div>
-          )}
-          {prefill?.preferred_date && form.appointment_date === prefill.preferred_date && (
-            <div className="modal__prefill-note">
-              <Check size={14} aria-hidden="true" />
-              Date set to the patient's preferred date
-              {prefill.preferred_time_slot
-                ? ` — they asked for ${prefill.preferred_time_slot}`
-                : ""}
-              .
-            </div>
-          )}
-
-          <div className="fgrid">
-            <label className="fld fld--wide">
-              <span>Patient Name *</span>
-              <input
-                value={form.patient_name}
-                onChange={(e) => set("patient_name", e.target.value)}
-                placeholder="Full name"
-                autoFocus
-              />
-            </label>
-            <div className="fld fld--sugg">
-              <span>
-                File No <em className="fld__opt">(blank = new patient)</em>
-                {lookingUp && <em className="fld__opt"> — searching…</em>}
-                {!lookingUp && picked && <em className="fld__ok"> — using {picked.name}</em>}
-                {!lookingUp && !picked && fileNoQuery.length >= 3 && !lookedUpPatient && (
-                  <em className="fld__warn"> — no match</em>
-                )}
-              </span>
-              <input
-                aria-label="File No"
-                value={form.file_no}
-                onChange={(e) => {
-                  // Typing a File No is the desk pointing at a chart itself, so
-                  // it supersedes whatever was picked from the list.
-                  setPicked(null);
-                  set("file_no", e.target.value);
-                }}
-                placeholder="Leave blank for new patient"
-              />
-              <MatchSuggestions
-                items={fileSuggestions}
-                onPick={choosePatient}
-                onDismiss={() => setHideFileSugg(true)}
-              />
-            </div>
-            <div className="fld fld--sugg">
-              <span>
-                Mobile{" "}
-                {form.phone && form.phone.length !== 10 && (
-                  <em className="fld__warn">{form.phone.length}/10</em>
-                )}
-                {lookingUpPhone && <em className="fld__opt"> — searching…</em>}
-                {!lookingUpPhone && !picked && phoneQuery.length === 10 && !matches.length && (
-                  <em className="fld__warn"> — no match</em>
-                )}
-              </span>
-              <input
-                aria-label="Mobile"
-                type="tel"
-                inputMode="numeric"
-                maxLength={10}
-                value={form.phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="10-digit number"
-              />
-              <MatchSuggestions
-                items={phoneSuggestions}
-                onPick={choosePatient}
-                onDismiss={() => setHidePhoneSugg(true)}
-              />
-            </div>
-            <AltPhoneFields list={form.alt_phone} onChange={(next) => set("alt_phone", next)} />
-            <DemographicFields
-              dob={form.dob}
-              age={form.age}
-              sex={form.sex}
-              onChange={(k, v) => set(k, v)}
-            />
-            <label className="fld">
-              <span>Date *</span>
-              <input
-                type="date"
-                value={form.appointment_date}
-                onChange={(e) => set("appointment_date", e.target.value)}
-              />
-            </label>
-            <label className="fld">
-              <span>Time Slot *</span>
-              <select value={form.time_slot} onChange={(e) => set("time_slot", e.target.value)}>
-                <option value="">— Select slot</option>
-                {slotOptions(availSlots, slotCatalog).map((s) => (
-                  <option key={s.slot_label} value={s.slot_label} disabled={!s.available}>
-                    {slotOptionLabel(s)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="fld fld--wide">
-              <span>Doctor *</span>
-              <select value={form.doctor_name} onChange={(e) => set("doctor_name", e.target.value)}>
-                <option value="">— Select doctor</option>
-                {(form.doctor_name && !doctors.includes(form.doctor_name)
-                  ? [form.doctor_name, ...doctors]
-                  : doctors
-                ).map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="fld">
-              <span>Visit Type</span>
-              <select
-                value={form.appointment_type}
-                onChange={(e) => set("appointment_type", e.target.value)}
-              >
-                {APPOINTMENT_MODES.map((v) => (
-                  <option key={v} value={v}>
-                    {v}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="fld">
-              <span>Condition</span>
-              <input
-                value={form.condition}
-                onChange={(e) => set("condition", e.target.value)}
-                placeholder="Diabetes / Thyroid…"
-              />
-            </label>
-            <label className="fld fld--wide">
-              <span>Address</span>
-              <input
-                value={form.address}
-                onChange={(e) => set("address", e.target.value)}
-                placeholder="House / street, area, city, pincode"
-              />
-            </label>
-            <label className="fld">
-              <span>Booked By</span>
-              <input
-                value={form.booked_by_name}
-                onChange={(e) => set("booked_by_name", e.target.value)}
-                placeholder="Your name"
-              />
-            </label>
-            <label className="fld fld--wide">
-              <span>Notes</span>
-              <input
-                value={form.notes}
-                onChange={(e) => set("notes", e.target.value)}
-                placeholder="Any note…"
-              />
-            </label>
-            <label className="fld fld--check fld--wide">
-              <input
-                type="checkbox"
-                checked={form.home_collection}
-                onChange={(e) => set("home_collection", e.target.checked)}
-              />
-              <span>Needs home sample collection</span>
-            </label>
+    <>
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal__hdr">
+            <span className="modal__title">
+              <Plus size={16} aria-hidden="true" />
+              {isPrefilled ? `Book Next Appointment — ${prefill.patient_name}` : "New Appointment"}
+            </span>
+            <button className="modal__x" onClick={onClose} aria-label="Close">
+              <X size={16} aria-hidden="true" />
+            </button>
           </div>
 
-          <p className="modal__hint">
-            <Smartphone size={13} aria-hidden="true" /> WhatsApp message &amp; reporting time are
-            generated automatically after booking.
-            <br />
-            <Plus size={13} aria-hidden="true" /> If File No is blank, a new patient record is
-            created automatically with a new File No.
-          </p>
-        </div>
+          <div className="modal__body">
+            {err && <div className="modal__err">{err}</div>}
+            {dup && (
+              <div className="modal__err">
+                This patient already has an appointment on {form.appointment_date}
+                {dup.doctor_name ? ` with ${dup.doctor_name}` : ""}
+                {dup.time_slot ? ` at ${dup.time_slot}` : ""}
+                {dup.booked_by_name ? `, booked by ${dup.booked_by_name}` : ""}.
+                <button type="button" className="btn btn--ghost" onClick={() => save(true)}>
+                  Book anyway
+                </button>
+              </div>
+            )}
+            {isPrefilled && (
+              <div className="modal__prefill-note">
+                <Check size={14} aria-hidden="true" />
+                Patient details auto-filled. Just pick the date, slot &amp; doctor.
+              </div>
+            )}
+            {prefill?.preferred_date && form.appointment_date !== prefill.preferred_date && (
+              <div className="modal__err" role="status">
+                Patient asked for {prettyDate(prefill.preferred_date)}
+                {prefill.preferred_time_slot ? `, ${prefill.preferred_time_slot}` : ""}. Booking{" "}
+                {form.appointment_date ? prettyDate(form.appointment_date) : "another date"}{" "}
+                replaces that request — they will no longer be listed on{" "}
+                {prettyDate(prefill.preferred_date)}.
+              </div>
+            )}
+            {prefill?.preferred_date && form.appointment_date === prefill.preferred_date && (
+              <div className="modal__prefill-note">
+                <Check size={14} aria-hidden="true" />
+                Date set to the patient's preferred date
+                {prefill.preferred_time_slot
+                  ? ` — they asked for ${prefill.preferred_time_slot}`
+                  : ""}
+                .
+              </div>
+            )}
 
-        <div className="modal__foot">
-          <button className="btn btn--ghost" onClick={onClose} disabled={saving}>
-            Cancel
-          </button>
-          <button className="btn btn--primary" onClick={() => save()} disabled={saving}>
-            {saving ? "Booking…" : "Book Appointment"}
-          </button>
+            <div className="fgrid">
+              <label className="fld fld--wide">
+                <span>Patient Name *</span>
+                <input
+                  value={form.patient_name}
+                  onChange={(e) => set("patient_name", e.target.value)}
+                  placeholder="Full name"
+                  autoFocus
+                />
+              </label>
+              <div className="fld fld--sugg">
+                <span>
+                  File No <em className="fld__opt">(blank = new patient)</em>
+                  {lookingUp && <em className="fld__opt"> — searching…</em>}
+                  {!lookingUp && picked && <em className="fld__ok"> — using {picked.name}</em>}
+                  {!lookingUp && !picked && fileNoQuery.length >= 3 && !lookedUpPatient && (
+                    <em className="fld__warn"> — no match</em>
+                  )}
+                </span>
+                <input
+                  aria-label="File No"
+                  value={form.file_no}
+                  onChange={(e) => {
+                    // Typing a File No is the desk pointing at a chart itself, so
+                    // it supersedes whatever was picked from the list.
+                    setPicked(null);
+                    set("file_no", e.target.value);
+                  }}
+                  placeholder="Leave blank for new patient"
+                />
+                <MatchSuggestions
+                  items={fileSuggestions}
+                  onPick={choosePatient}
+                  onDismiss={() => setHideFileSugg(true)}
+                />
+              </div>
+              <div className="fld fld--sugg">
+                <span>
+                  Mobile{" "}
+                  {form.phone && form.phone.length !== 10 && (
+                    <em className="fld__warn">{form.phone.length}/10</em>
+                  )}
+                  {lookingUpPhone && <em className="fld__opt"> — searching…</em>}
+                  {!lookingUpPhone && !picked && phoneQuery.length === 10 && !matches.length && (
+                    <em className="fld__warn"> — no match</em>
+                  )}
+                </span>
+                <input
+                  aria-label="Mobile"
+                  type="tel"
+                  inputMode="numeric"
+                  maxLength={10}
+                  value={form.phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="10-digit number"
+                />
+                <MatchSuggestions
+                  items={phoneSuggestions}
+                  onPick={choosePatient}
+                  onDismiss={() => setHidePhoneSugg(true)}
+                />
+              </div>
+              <AltPhoneFields list={form.alt_phone} onChange={(next) => set("alt_phone", next)} />
+              <DemographicFields
+                dob={form.dob}
+                age={form.age}
+                sex={form.sex}
+                onChange={(k, v) => set(k, v)}
+              />
+              <label className="fld">
+                <span>Date *</span>
+                <input
+                  type="date"
+                  value={form.appointment_date}
+                  onChange={(e) => set("appointment_date", e.target.value)}
+                />
+              </label>
+              <label className="fld">
+                <span>Time Slot *</span>
+                <select value={form.time_slot} onChange={(e) => pickSlot(e.target.value)}>
+                  <option value="">— Select slot</option>
+                  {slotOptions(availSlots, slotCatalog).map((s) => (
+                    <option key={s.slot_label} value={s.slot_label} disabled={!s.available}>
+                      {slotOptionLabel(s)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="fld fld--wide">
+                <span>Doctor *</span>
+                <select
+                  value={form.doctor_name}
+                  onChange={(e) => set("doctor_name", e.target.value)}
+                >
+                  <option value="">— Select doctor</option>
+                  {(form.doctor_name && !doctors.includes(form.doctor_name)
+                    ? [form.doctor_name, ...doctors]
+                    : doctors
+                  ).map((d) => (
+                    <option key={d} value={d}>
+                      {d}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="fld">
+                <span>Visit Type</span>
+                <select
+                  value={form.appointment_type}
+                  onChange={(e) => set("appointment_type", e.target.value)}
+                >
+                  {APPOINTMENT_MODES.map((v) => (
+                    <option key={v} value={v}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="fld">
+                <span>Condition</span>
+                <input
+                  value={form.condition}
+                  onChange={(e) => set("condition", e.target.value)}
+                  placeholder="Diabetes / Thyroid…"
+                />
+              </label>
+              <label className="fld fld--wide">
+                <span>Address</span>
+                <input
+                  value={form.address}
+                  onChange={(e) => set("address", e.target.value)}
+                  placeholder="House / street, area, city, pincode"
+                />
+              </label>
+              <label className="fld">
+                <span>Booked By</span>
+                <input
+                  value={form.booked_by_name}
+                  onChange={(e) => set("booked_by_name", e.target.value)}
+                  placeholder="Your name"
+                />
+              </label>
+              <label className="fld fld--wide">
+                <span>Notes</span>
+                <input
+                  value={form.notes}
+                  onChange={(e) => set("notes", e.target.value)}
+                  placeholder="Any note…"
+                />
+              </label>
+              <label className="fld fld--check fld--wide">
+                <input
+                  type="checkbox"
+                  checked={form.home_collection}
+                  onChange={(e) => set("home_collection", e.target.checked)}
+                />
+                <span>Needs home sample collection</span>
+              </label>
+            </div>
+
+            <p className="modal__hint">
+              <Smartphone size={13} aria-hidden="true" /> WhatsApp message &amp; reporting time are
+              generated automatically after booking.
+              <br />
+              <Plus size={13} aria-hidden="true" /> If File No is blank, a new patient record is
+              created automatically with a new File No.
+            </p>
+          </div>
+
+          <div className="modal__foot">
+            <button className="btn btn--ghost" onClick={onClose} disabled={saving}>
+              Cancel
+            </button>
+            <button className="btn btn--primary" onClick={() => save()} disabled={saving}>
+              {saving ? "Booking…" : "Book Appointment"}
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+      {overLimit.dialog}
+    </>
   );
 }
 
@@ -1500,7 +1584,22 @@ function EditPatientModal({ row, doctors, onClose }) {
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
-  const { data: availData } = useDayAvailability(form.doctor_name, form.appointment_date);
+  const { data: availData } = useDayAvailability(form.doctor_name, form.appointment_date, {
+    patientId: row.patient_id,
+    fileNo: row.file_no,
+    exclude: row.id > 0 ? row.id : null,
+  });
+  const overLimit = useOverLimitConfirm();
+  const pickSlot = async (value) => {
+    const slot = (availSlots || []).find((x) => x.slot_label === value);
+    const ok =
+      value === row.time_slot ||
+      (await overLimit.confirm(slot, {
+        doctorName: form.doctor_name,
+        patientName: form.patient_name,
+      }));
+    if (ok) setForm((f) => ({ ...f, time_slot: value, over_limit_reason: ok.reason || "" }));
+  };
   const availSlots = availData ?? null;
   const slotCatalog = useSlotCatalog();
 
@@ -1564,6 +1663,7 @@ function EditPatientModal({ row, doctors, onClose }) {
         sex: form.sex,
         appointment_date: form.appointment_date,
         time_slot: form.time_slot,
+        over_limit_reason: form.over_limit_reason || null,
         doctor_name: form.doctor_name,
         appointment_type: form.appointment_type,
         condition: form.condition.trim(),
@@ -1579,161 +1679,168 @@ function EditPatientModal({ row, doctors, onClose }) {
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal__hdr">
-          <span className="modal__title">
-            <Pencil size={16} aria-hidden="true" />
-            {row.file_no ? `Edit Patient Details — ${row.file_no}` : "Edit Patient Details"}
-          </span>
-          <button className="modal__x" onClick={onClose} aria-label="Close">
-            <X size={16} aria-hidden="true" />
-          </button>
-        </div>
-
-        <div className="modal__body">
-          {err && <div className="modal__err">{err}</div>}
-
-          <div className="fgrid">
-            <label className="fld fld--wide">
-              <span>Patient Name *</span>
-              <input
-                value={form.patient_name}
-                onChange={(e) => set("patient_name", e.target.value)}
-                placeholder="Full name"
-                autoFocus
-              />
-            </label>
-            <label className="fld">
-              <span>
-                Mobile{" "}
-                {form.phone && form.phone.length !== 10 && (
-                  <em className="fld__warn">{form.phone.length}/10</em>
-                )}
-              </span>
-              <input
-                type="tel"
-                inputMode="numeric"
-                maxLength={10}
-                value={form.phone}
-                onChange={(e) => set("phone", e.target.value.replace(/\D/g, "").slice(0, 10))}
-                placeholder="10-digit number"
-              />
-            </label>
-            <AltPhoneFields list={form.alt_phone} onChange={(next) => set("alt_phone", next)} />
-            <DemographicFields
-              dob={form.dob}
-              age={form.age}
-              sex={form.sex}
-              onChange={(k, v) => set(k, v)}
-            />
-            <label className="fld">
-              <span>Date *</span>
-              <input
-                type="date"
-                value={form.appointment_date}
-                onChange={(e) => set("appointment_date", e.target.value)}
-              />
-            </label>
-            <label className="fld">
-              <span>Time Slot</span>
-              <select value={form.time_slot} onChange={(e) => set("time_slot", e.target.value)}>
-                <option value="">— Select slot</option>
-                {slotList.map((s) => (
-                  <option
-                    key={s.value}
-                    value={s.value}
-                    disabled={s.available === false && s.value !== form.time_slot}
-                  >
-                    {s.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="fld fld--wide">
-              <span>Doctor *</span>
-              <select value={form.doctor_name} onChange={(e) => set("doctor_name", e.target.value)}>
-                <option value="">— Select doctor</option>
-                {doctorList.map((d) => (
-                  <option key={d.value} value={d.value}>
-                    {d.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="fld">
-              <span>Visit Type</span>
-              <select
-                value={form.appointment_type}
-                onChange={(e) => set("appointment_type", e.target.value)}
-              >
-                {withCurrent(MODE_OPTIONS, form.appointment_type).map((v) => (
-                  <option key={v.value} value={v.value}>
-                    {v.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="fld">
-              <span>Condition</span>
-              <input
-                value={form.condition}
-                onChange={(e) => set("condition", e.target.value)}
-                placeholder="Diabetes / Thyroid…"
-              />
-            </label>
-            <label className="fld fld--wide">
-              <span>Address</span>
-              <input
-                value={form.address}
-                onChange={(e) => set("address", e.target.value)}
-                placeholder="House / street, area, city, pincode"
-              />
-            </label>
-            <label className="fld">
-              <span>Booked By</span>
-              <input
-                value={form.booked_by_name}
-                onChange={(e) => set("booked_by_name", e.target.value)}
-                placeholder="Your name"
-              />
-            </label>
-            <label className="fld fld--wide">
-              <span>Notes</span>
-              <input
-                value={form.notes}
-                onChange={(e) => set("notes", e.target.value)}
-                placeholder="Any note…"
-              />
-            </label>
-            <label className="fld fld--check fld--wide">
-              <input
-                type="checkbox"
-                checked={form.home_collection}
-                onChange={(e) => set("home_collection", e.target.checked)}
-              />
-              <span>Needs home sample collection</span>
-            </label>
+    <>
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal__hdr">
+            <span className="modal__title">
+              <Pencil size={16} aria-hidden="true" />
+              {row.file_no ? `Edit Patient Details — ${row.file_no}` : "Edit Patient Details"}
+            </span>
+            <button className="modal__x" onClick={onClose} aria-label="Close">
+              <X size={16} aria-hidden="true" />
+            </button>
           </div>
 
-          <p className="modal__hint">
-            File No is fixed: moving this booking to another patient is a reassignment, not an edit.
-            <br />
-            <Smartphone size={13} aria-hidden="true" /> Changing the date, slot, doctor or visit
-            type regenerates the reporting time &amp; WhatsApp message.
-          </p>
-        </div>
+          <div className="modal__body">
+            {err && <div className="modal__err">{err}</div>}
 
-        <div className="modal__foot">
-          <button className="btn btn--ghost" onClick={onClose} disabled={saving}>
-            Cancel
-          </button>
-          <button className="btn btn--primary" onClick={save} disabled={saving}>
-            {saving ? "Saving…" : "Save Changes"}
-          </button>
+            <div className="fgrid">
+              <label className="fld fld--wide">
+                <span>Patient Name *</span>
+                <input
+                  value={form.patient_name}
+                  onChange={(e) => set("patient_name", e.target.value)}
+                  placeholder="Full name"
+                  autoFocus
+                />
+              </label>
+              <label className="fld">
+                <span>
+                  Mobile{" "}
+                  {form.phone && form.phone.length !== 10 && (
+                    <em className="fld__warn">{form.phone.length}/10</em>
+                  )}
+                </span>
+                <input
+                  type="tel"
+                  inputMode="numeric"
+                  maxLength={10}
+                  value={form.phone}
+                  onChange={(e) => set("phone", e.target.value.replace(/\D/g, "").slice(0, 10))}
+                  placeholder="10-digit number"
+                />
+              </label>
+              <AltPhoneFields list={form.alt_phone} onChange={(next) => set("alt_phone", next)} />
+              <DemographicFields
+                dob={form.dob}
+                age={form.age}
+                sex={form.sex}
+                onChange={(k, v) => set(k, v)}
+              />
+              <label className="fld">
+                <span>Date *</span>
+                <input
+                  type="date"
+                  value={form.appointment_date}
+                  onChange={(e) => set("appointment_date", e.target.value)}
+                />
+              </label>
+              <label className="fld">
+                <span>Time Slot</span>
+                <select value={form.time_slot} onChange={(e) => pickSlot(e.target.value)}>
+                  <option value="">— Select slot</option>
+                  {slotList.map((s) => (
+                    <option
+                      key={s.value}
+                      value={s.value}
+                      disabled={s.available === false && s.value !== form.time_slot}
+                    >
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="fld fld--wide">
+                <span>Doctor *</span>
+                <select
+                  value={form.doctor_name}
+                  onChange={(e) => set("doctor_name", e.target.value)}
+                >
+                  <option value="">— Select doctor</option>
+                  {doctorList.map((d) => (
+                    <option key={d.value} value={d.value}>
+                      {d.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="fld">
+                <span>Visit Type</span>
+                <select
+                  value={form.appointment_type}
+                  onChange={(e) => set("appointment_type", e.target.value)}
+                >
+                  {withCurrent(MODE_OPTIONS, form.appointment_type).map((v) => (
+                    <option key={v.value} value={v.value}>
+                      {v.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="fld">
+                <span>Condition</span>
+                <input
+                  value={form.condition}
+                  onChange={(e) => set("condition", e.target.value)}
+                  placeholder="Diabetes / Thyroid…"
+                />
+              </label>
+              <label className="fld fld--wide">
+                <span>Address</span>
+                <input
+                  value={form.address}
+                  onChange={(e) => set("address", e.target.value)}
+                  placeholder="House / street, area, city, pincode"
+                />
+              </label>
+              <label className="fld">
+                <span>Booked By</span>
+                <input
+                  value={form.booked_by_name}
+                  onChange={(e) => set("booked_by_name", e.target.value)}
+                  placeholder="Your name"
+                />
+              </label>
+              <label className="fld fld--wide">
+                <span>Notes</span>
+                <input
+                  value={form.notes}
+                  onChange={(e) => set("notes", e.target.value)}
+                  placeholder="Any note…"
+                />
+              </label>
+              <label className="fld fld--check fld--wide">
+                <input
+                  type="checkbox"
+                  checked={form.home_collection}
+                  onChange={(e) => set("home_collection", e.target.checked)}
+                />
+                <span>Needs home sample collection</span>
+              </label>
+            </div>
+
+            <p className="modal__hint">
+              File No is fixed: moving this booking to another patient is a reassignment, not an
+              edit.
+              <br />
+              <Smartphone size={13} aria-hidden="true" /> Changing the date, slot, doctor or visit
+              type regenerates the reporting time &amp; WhatsApp message.
+            </p>
+          </div>
+
+          <div className="modal__foot">
+            <button className="btn btn--ghost" onClick={onClose} disabled={saving}>
+              Cancel
+            </button>
+            <button className="btn btn--primary" onClick={save} disabled={saving}>
+              {saving ? "Saving…" : "Save Changes"}
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+      {overLimit.dialog}
+    </>
   );
 }
 
@@ -2286,6 +2393,7 @@ function ReassignNeededView({ date }) {
                       }}
                     >
                       {SLOT_REASON[c.reason] || c.reason}
+                      {c.detail ? ` · ${c.detail}` : ""}
                     </span>
                   </td>
                   <td>
@@ -2549,6 +2657,7 @@ export default function GHMPage() {
       (initialTab.offset !== null ? addDaysStr(initialTab.offset) : todayStr()),
   );
   const [showNew, setShowNew] = useState(false);
+  const [showSlots, setShowSlots] = useState(false);
   const [newPrefill, setNewPrefill] = useState(null);
   const [doctor, setDoctor] = useState(searchParams.get("doctor") || "All");
   const [collectionFilter, setCollectionFilter] = useState(searchParams.get("collection") || "all");
@@ -2782,6 +2891,17 @@ export default function GHMPage() {
   const attemptCounts = attemptQuery.data || {};
   const activeCalls = activeCallQuery.data || {};
   const categoryCounts = categoryQuery.data || null;
+  const slotsFromSchedule = useGhmDisplaySettings().data?.slots_from_schedule === true;
+  const schedulePairs = useMemo(
+    () =>
+      rows
+        .map((r) =>
+          slotDoctor(r) && slotCountDate(r) ? `${slotDoctor(r)}|${slotCountDate(r)}` : null,
+        )
+        .filter(Boolean),
+    [rows],
+  );
+  const scheduleSlots = useScheduleSlotsFor(schedulePairs, slotsFromSchedule).data || {};
 
   // Category options carry the day's headcount as a badge, the same way the
   // preferred-time options show how full a slot already is — the OBT agent sees
@@ -2939,8 +3059,38 @@ export default function GHMPage() {
   });
 
   const patch = useCallback(
-    (id, field, value) => patchMutation.mutate({ id, field, value }),
+    (id, field, value, extra) => patchMutation.mutate({ id, field, value, extra }),
     [patchMutation],
+  );
+
+  const overLimit = useOverLimitConfirm();
+  const freshSlot = useFreshSlotCheck();
+  const pickTimeSlot = useCallback(
+    async (row, value) => {
+      if (value && value !== row.preferred_time_slot && slotMovesBooking(row)) {
+        const doctor = row.doctor_name;
+        const slot = await freshSlot(
+          doctor,
+          String(row.appointment_date).slice(0, 10),
+          {
+            patientId: row.patient_id,
+            fileNo: row.file_no,
+            walkin: row.is_walkin,
+            exclude: row.id > 0 ? row.id : null,
+          },
+          value,
+        ).catch(() => null);
+        const ok = await overLimit.confirm(slot, {
+          doctorName: doctor,
+          patientName: row.patient_name,
+        });
+        if (!ok) return;
+        if (ok.reason)
+          return patch(row.id, "preferred_time_slot", value, { over_limit_reason: ok.reason });
+      }
+      patch(row.id, "preferred_time_slot", value);
+    },
+    [patch, freshSlot, overLimit.confirm],
   );
 
   const [preferredChange, setPreferredChange] = useState(null);
@@ -3123,1223 +3273,1252 @@ export default function GHMPage() {
   }, [fullscreen]);
 
   return (
-    <div
-      className={`ghm ${fitted ? "ghm--fit" : ""} ${fullscreen ? "ghm--full" : ""}`}
-      ref={pageRef}
-      style={fitted && !fullscreen ? { height: pageHeight } : undefined}
-    >
-      <ConfirmModal
-        open={!!preferredChange}
-        title="Change the preferred date someone else set?"
-        variant="primary"
-        cancelLabel={preferredChange ? `Keep ${prettyDate(preferredChange.current)}` : "Cancel"}
-        confirmLabel={
-          preferredChange?.value
-            ? `Change to ${prettyDate(preferredChange.value)}`
-            : "Remove preferred date"
-        }
-        onCancel={() => setPreferredChange(null)}
-        onConfirm={confirmPreferredChange}
-        message={
-          preferredChange && (
-            <>
-              <strong>
-                {preferredChange.row.patient_name}
-                {preferredChange.row.file_no ? ` · ${preferredChange.row.file_no}` : ""}
-              </strong>
-              <br />
-              {preferredChange.row.preferred_set_by || "Someone"} set the preferred date to{" "}
-              <strong>{prettyDate(preferredChange.current)}</strong>
-              {preferredChange.row.preferred_set_at
-                ? ` on ${fmtDateTime(preferredChange.row.preferred_set_at)}`
-                : ""}
-              .
-              <br />
-              {preferredChange.value ? (
-                <>
-                  You are changing it to <strong>{prettyDate(preferredChange.value)}</strong>.
-                </>
-              ) : (
-                "You are removing it."
-              )}{" "}
-              Check with the patient or the caller before you change it.
-            </>
-          )
-        }
-      />
-
-      <DivideCallsDialog
-        open={divideOpen}
-        onClose={() => setDivideOpen(false)}
-        team={obtTeam}
-        loadList={loadDivideList}
-        divide={divideCalls}
-      />
-
-      {/* CC agents datalist — used by all "Called By" inputs */}
-      <datalist id="cc-agents-list">
-        {ccAgents.map((name) => (
-          <option key={name} value={name} />
-        ))}
-      </datalist>
-
-      <div className="ghm__top">
-        {/* ── Header ── */}
-        <div className="ghm__hdr">
-          <div className="ghm__title">
-            <h1>Daily Patient Sheet</h1>
-            {busy && (
-              <span className="ghm__busy">
-                <span className="ghm__busy-dot" aria-hidden="true" />
-                {searchQ || typing ? "Searching…" : "Updating…"}
-              </span>
-            )}
-          </div>
-          <div className="ghm__controls">
-            {!isChanges && (
+    <ApprovalsProvider ids={appointmentIds}>
+      <div
+        className={`ghm ${fitted ? "ghm--fit" : ""} ${fullscreen ? "ghm--full" : ""}`}
+        ref={pageRef}
+        style={fitted && !fullscreen ? { height: pageHeight } : undefined}
+      >
+        {overLimit.dialog}
+        <ConfirmModal
+          open={!!preferredChange}
+          title="Change the preferred date someone else set?"
+          variant="primary"
+          cancelLabel={preferredChange ? `Keep ${prettyDate(preferredChange.current)}` : "Cancel"}
+          confirmLabel={
+            preferredChange?.value
+              ? `Change to ${prettyDate(preferredChange.value)}`
+              : "Remove preferred date"
+          }
+          onCancel={() => setPreferredChange(null)}
+          onConfirm={confirmPreferredChange}
+          message={
+            preferredChange && (
               <>
-                <SearchBox
-                  value={search}
-                  onChange={setSearch}
-                  placeholder={
-                    view === "lookup"
-                      ? "Search any patient — name, file no, phone"
-                      : isMissed
-                        ? "Search missed patients — name, file no, phone"
-                        : "Search this date — name, file no, phone, condition"
-                  }
-                />
-                <GhmFilters
-                  view={view}
-                  date={date}
-                  doctor={doctor}
-                  doctors={doctors}
-                  collectionFilter={collectionFilter}
-                  modeFilter={modeFilter}
-                  callsFilter={callsFilter}
-                  defaultCallsFilter={defaultCallsFilter}
-                  team={obtTeam}
-                  activeCount={activeFilters}
-                  onApply={(next) => {
-                    setDate(next.date || todayStr());
-                    setDoctor(next.doctor);
-                    setCollectionFilter(next.collectionFilter);
-                    setModeFilter(next.modeFilter);
-                    setCallsFilter(next.callsFilter);
-                  }}
-                  defaultDate={tabDefaultDate(view)}
-                  onReset={resetFilterFields}
-                />
-                {filtersActive && (
+                <strong>
+                  {preferredChange.row.patient_name}
+                  {preferredChange.row.file_no ? ` · ${preferredChange.row.file_no}` : ""}
+                </strong>
+                <br />
+                {preferredChange.row.preferred_set_by || "Someone"} set the preferred date to{" "}
+                <strong>{prettyDate(preferredChange.current)}</strong>
+                {preferredChange.row.preferred_set_at
+                  ? ` on ${fmtDateTime(preferredChange.row.preferred_set_at)}`
+                  : ""}
+                .
+                <br />
+                {preferredChange.value ? (
+                  <>
+                    You are changing it to <strong>{prettyDate(preferredChange.value)}</strong>.
+                  </>
+                ) : (
+                  "You are removing it."
+                )}{" "}
+                Check with the patient or the caller before you change it.
+              </>
+            )
+          }
+        />
+
+        <DivideCallsDialog
+          open={divideOpen}
+          onClose={() => setDivideOpen(false)}
+          team={obtTeam}
+          loadList={loadDivideList}
+          divide={divideCalls}
+        />
+
+        {/* CC agents datalist — used by all "Called By" inputs */}
+        <datalist id="cc-agents-list">
+          {ccAgents.map((name) => (
+            <option key={name} value={name} />
+          ))}
+        </datalist>
+
+        <div className="ghm__top">
+          {/* ── Header ── */}
+          <div className="ghm__hdr">
+            <div className="ghm__title">
+              <h1>Daily Patient Sheet</h1>
+              {busy && (
+                <span className="ghm__busy">
+                  <span className="ghm__busy-dot" aria-hidden="true" />
+                  {searchQ || typing ? "Searching…" : "Updating…"}
+                </span>
+              )}
+            </div>
+            <div className="ghm__controls">
+              {!isChanges && (
+                <>
+                  <SearchBox
+                    value={search}
+                    onChange={setSearch}
+                    placeholder={
+                      view === "lookup"
+                        ? "Search any patient — name, file no, phone"
+                        : isMissed
+                          ? "Search missed patients — name, file no, phone"
+                          : "Search this date — name, file no, phone, condition"
+                    }
+                  />
+                  <GhmFilters
+                    view={view}
+                    date={date}
+                    doctor={doctor}
+                    doctors={doctors}
+                    collectionFilter={collectionFilter}
+                    modeFilter={modeFilter}
+                    callsFilter={callsFilter}
+                    defaultCallsFilter={defaultCallsFilter}
+                    team={obtTeam}
+                    activeCount={activeFilters}
+                    onApply={(next) => {
+                      setDate(next.date || todayStr());
+                      setDoctor(next.doctor);
+                      setCollectionFilter(next.collectionFilter);
+                      setModeFilter(next.modeFilter);
+                      setCallsFilter(next.callsFilter);
+                    }}
+                    defaultDate={tabDefaultDate(view)}
+                    onReset={resetFilterFields}
+                  />
+                  {filtersActive && (
+                    <button
+                      type="button"
+                      className="btn btn--ghost"
+                      onClick={resetFilters}
+                      title="Clear search, doctor, collection, mode, calls and date filters"
+                    >
+                      <RotateCcw size={14} aria-hidden="true" />
+                      <span className="ghm__btn-label">Reset filters</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className={`btn btn--ghost ${compact ? "btn--on" : ""}`}
+                    aria-pressed={compact}
+                    onClick={() => setCompact((v) => !v)}
+                    title={
+                      compact
+                        ? "Back to the roomier row height"
+                        : "Smaller text and tighter rows — every column stays, so more patients fit a screen"
+                    }
+                  >
+                    <Rows3 size={14} aria-hidden="true" />
+                    <span className="ghm__btn-label">Compact rows</span>
+                  </button>
+                </>
+              )}
+              <button
+                type="button"
+                className={`btn btn--ghost ${fullscreen ? "btn--on" : ""}`}
+                aria-pressed={fullscreen}
+                onClick={toggleFullscreen}
+                title={
+                  fullscreen
+                    ? "Leave full screen (Esc)"
+                    : "Hide the header and tabs so the list fills the screen"
+                }
+              >
+                {fullscreen ? (
+                  <Minimize2 size={14} aria-hidden="true" />
+                ) : (
+                  <Maximize2 size={14} aria-hidden="true" />
+                )}
+                <span className="ghm__btn-label">
+                  {fullscreen ? "Exit full screen" : "Full screen"}
+                </span>
+              </button>
+              {canAssignCalls &&
+                view !== "reassign" &&
+                view !== "lookup" &&
+                !isMissed &&
+                !isChanges && (
                   <button
                     type="button"
                     className="btn btn--ghost"
-                    onClick={resetFilters}
-                    title="Clear search, doctor, collection, mode, calls and date filters"
+                    onClick={() => setDivideOpen(true)}
+                    disabled={!listEnabled || total === 0 || !obtTeam.length}
+                    title={
+                      obtTeam.length
+                        ? "Share today's calls on this list between the OBT team"
+                        : "No OBT team members found"
+                    }
                   >
-                    <RotateCcw size={14} aria-hidden="true" />
-                    <span className="ghm__btn-label">Reset filters</span>
+                    <Users size={14} aria-hidden="true" />
+                    <span className="ghm__btn-label">Divide calls</span>
                   </button>
                 )}
-                <button
-                  type="button"
-                  className={`btn btn--ghost ${compact ? "btn--on" : ""}`}
-                  aria-pressed={compact}
-                  onClick={() => setCompact((v) => !v)}
-                  title={
-                    compact
-                      ? "Back to the roomier row height"
-                      : "Smaller text and tighter rows — every column stays, so more patients fit a screen"
-                  }
-                >
-                  <Rows3 size={14} aria-hidden="true" />
-                  <span className="ghm__btn-label">Compact rows</span>
-                </button>
-              </>
-            )}
-            <button
-              type="button"
-              className={`btn btn--ghost ${fullscreen ? "btn--on" : ""}`}
-              aria-pressed={fullscreen}
-              onClick={toggleFullscreen}
-              title={
-                fullscreen
-                  ? "Leave full screen (Esc)"
-                  : "Hide the header and tabs so the list fills the screen"
-              }
-            >
-              {fullscreen ? (
-                <Minimize2 size={14} aria-hidden="true" />
-              ) : (
-                <Maximize2 size={14} aria-hidden="true" />
-              )}
-              <span className="ghm__btn-label">
-                {fullscreen ? "Exit full screen" : "Full screen"}
-              </span>
-            </button>
-            {canAssignCalls &&
-              view !== "reassign" &&
-              view !== "lookup" &&
-              !isMissed &&
-              !isChanges && (
+              {view !== "reassign" && !isMissed && !isChanges && (
                 <button
                   type="button"
                   className="btn btn--ghost"
-                  onClick={() => setDivideOpen(true)}
-                  disabled={!listEnabled || total === 0 || !obtTeam.length}
+                  onClick={exportWati}
+                  disabled={exporting || !listEnabled || total === 0}
                   title={
-                    obtTeam.length
-                      ? "Share today's calls on this list between the OBT team"
-                      : "No OBT team members found"
+                    total === 0 ? "Nothing to export in this view" : "Download this list as Excel"
                   }
                 >
-                  <Users size={14} aria-hidden="true" />
-                  <span className="ghm__btn-label">Divide calls</span>
+                  <Download size={14} aria-hidden="true" />
+                  <span className="ghm__btn-label">
+                    {exportMutation.isPending ? "Exporting…" : "Export Excel"}
+                  </span>
                 </button>
               )}
-            {view !== "reassign" && !isMissed && !isChanges && (
+              {view !== "reassign" && (
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  onClick={exportBookedToday}
+                  disabled={exporting}
+                  title="Download every appointment booked today, whatever date it is for"
+                >
+                  <CalendarArrowDown size={14} aria-hidden="true" />
+                  <span className="ghm__btn-label">
+                    {bookedTodayMutation.isPending ? "Exporting…" : "Booked today"}
+                  </span>
+                </button>
+              )}
               <button
                 type="button"
                 className="btn btn--ghost"
-                onClick={exportWati}
-                disabled={exporting || !listEnabled || total === 0}
-                title={
-                  total === 0 ? "Nothing to export in this view" : "Download this list as Excel"
-                }
+                onClick={() => setShowSlots(true)}
+                title="See any consultant's slots for a day, with how many patients each holds and its limits"
               >
-                <Download size={14} aria-hidden="true" />
-                <span className="ghm__btn-label">
-                  {exportMutation.isPending ? "Exporting…" : "Export Excel"}
-                </span>
+                <CalendarClock size={14} aria-hidden="true" />
+                <span className="ghm__btn-label">Consultant slots</span>
               </button>
-            )}
-            {view !== "reassign" && (
               <button
                 type="button"
-                className="btn btn--ghost"
-                onClick={exportBookedToday}
-                disabled={exporting}
-                title="Download every appointment booked today, whatever date it is for"
+                className="btn btn--primary"
+                onClick={() => {
+                  setNewPrefill(null);
+                  setShowNew(true);
+                }}
               >
-                <CalendarArrowDown size={14} aria-hidden="true" />
-                <span className="ghm__btn-label">
-                  {bookedTodayMutation.isPending ? "Exporting…" : "Booked today"}
-                </span>
+                <Plus size={15} aria-hidden="true" />
+                New Appointment
               </button>
-            )}
-            <button
-              type="button"
-              className="btn btn--primary"
-              onClick={() => {
-                setNewPrefill(null);
-                setShowNew(true);
-              }}
-            >
-              <Plus size={15} aria-hidden="true" />
-              New Appointment
-            </button>
+            </div>
           </div>
-        </div>
 
-        {/* ── View tabs ── */}
-        <div className="ghm__tabs">
-          {visibleTabs.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              className={`ghm__tab ${view === t.id ? "ghm__tab--active" : ""}`}
-              onClick={() => switchView(t)}
-            >
-              <t.Icon size={14} aria-hidden="true" />
-              {/* The By Date tab is "Today" until another date is picked — then
+          <DecidedRequests
+            doctorId={currentDoctor?.id}
+            onShow={(a) => {
+              setView("by_date");
+              setDate(a.appointment_date);
+              setSearch(a.file_no || a.patient_name || "");
+              setDebouncedSearch(a.file_no || a.patient_name || "");
+            }}
+          />
+
+          {/* ── View tabs ── */}
+          <div className="ghm__tabs">
+            {visibleTabs.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                className={`ghm__tab ${view === t.id ? "ghm__tab--active" : ""}`}
+                onClick={() => switchView(t)}
+              >
+                <t.Icon size={14} aria-hidden="true" />
+                {/* The By Date tab is "Today" until another date is picked — then
                   it says so, with the date underneath, rather than still
                   claiming to show today. */}
-              {t.id === "by_date" && view === t.id && date !== todayStr() ? "By Date" : t.label}
-              {t.offset !== null && (
-                <span className="ghm__tab-date">
-                  {prettyDate(view === t.id ? date : addDaysStr(t.offset))}
-                </span>
-              )}
-            </button>
-          ))}
+                {t.id === "by_date" && view === t.id && date !== todayStr() ? "By Date" : t.label}
+                {t.offset !== null && (
+                  <span className="ghm__tab-date">
+                    {prettyDate(view === t.id ? date : addDaysStr(t.offset))}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {isMissed && (
+            <div className="miss-range" role="group" aria-label="Missed date range">
+              <div className="miss-range__fld">
+                <span>Missed from</span>
+                <DatePicker
+                  value={missedFrom}
+                  onChange={(v) => setMissedFrom(v || missedRange(7).from)}
+                  minDate={addDaysStr(-MISSED_MAX_DAYS)}
+                  maxDate={missedTo}
+                  clearable={false}
+                />
+              </div>
+              <div className="miss-range__fld">
+                <span>to</span>
+                <DatePicker
+                  value={missedTo}
+                  onChange={(v) => setMissedTo(v || missedRange(7).to)}
+                  minDate={missedFrom}
+                  maxDate={addDaysStr(-1)}
+                  clearable={false}
+                />
+              </div>
+              <div className="miss-range__quick">
+                {[
+                  { days: 1, label: "Yesterday" },
+                  { days: 7, label: "Last 7 days" },
+                  { days: 30, label: "Last 30 days" },
+                ].map((q) => {
+                  const r = missedRange(q.days);
+                  const on = missedFrom === r.from && missedTo === r.to;
+                  return (
+                    <button
+                      key={q.days}
+                      type="button"
+                      className={`btn btn--ghost ${on ? "btn--on" : ""}`}
+                      aria-pressed={on}
+                      onClick={() => {
+                        setMissedFrom(r.from);
+                        setMissedTo(r.to);
+                      }}
+                    >
+                      {q.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <Dropdown
+                value={missRisk}
+                options={MISS_RISK_OPTIONS}
+                onChange={setMissRisk}
+                ariaLabel="Missed history"
+              />
+              <Dropdown
+                value={missSort}
+                options={MISS_SORT_OPTIONS}
+                onChange={setMissSort}
+                ariaLabel="Sort missed patients"
+              />
+              <span className="miss-range__hint">
+                Up to {MISSED_MAX_DAYS} days back. Today's patients appear here once the day is
+                over.
+              </span>
+            </div>
+          )}
         </div>
 
-        {isMissed && (
-          <div className="miss-range" role="group" aria-label="Missed date range">
-            <div className="miss-range__fld">
-              <span>Missed from</span>
-              <DatePicker
-                value={missedFrom}
-                onChange={(v) => setMissedFrom(v || missedRange(7).from)}
-                minDate={addDaysStr(-MISSED_MAX_DAYS)}
-                maxDate={missedTo}
-                clearable={false}
-              />
-            </div>
-            <div className="miss-range__fld">
-              <span>to</span>
-              <DatePicker
-                value={missedTo}
-                onChange={(v) => setMissedTo(v || missedRange(7).to)}
-                minDate={missedFrom}
-                maxDate={addDaysStr(-1)}
-                clearable={false}
-              />
-            </div>
-            <div className="miss-range__quick">
-              {[
-                { days: 1, label: "Yesterday" },
-                { days: 7, label: "Last 7 days" },
-                { days: 30, label: "Last 30 days" },
-              ].map((q) => {
-                const r = missedRange(q.days);
-                const on = missedFrom === r.from && missedTo === r.to;
-                return (
-                  <button
-                    key={q.days}
-                    type="button"
-                    className={`btn btn--ghost ${on ? "btn--on" : ""}`}
-                    aria-pressed={on}
-                    onClick={() => {
-                      setMissedFrom(r.from);
-                      setMissedTo(r.to);
-                    }}
-                  >
-                    {q.label}
-                  </button>
-                );
-              })}
-            </div>
-            <Dropdown
-              value={missRisk}
-              options={MISS_RISK_OPTIONS}
-              onChange={setMissRisk}
-              ariaLabel="Missed history"
-            />
-            <Dropdown
-              value={missSort}
-              options={MISS_SORT_OPTIONS}
-              onChange={setMissSort}
-              ariaLabel="Sort missed patients"
-            />
-            <span className="miss-range__hint">
-              Up to {MISSED_MAX_DAYS} days back. Today's patients appear here once the day is over.
-            </span>
-          </div>
+        {showSlots && (
+          <ConsultantSlotsPanel
+            doctors={doctors}
+            defaultDate={date}
+            onClose={() => setShowSlots(false)}
+          />
         )}
-      </div>
 
-      {/* ── New Appointment modal ── */}
-      {showNew && (
-        <NewAppointmentModal
-          doctors={doctors}
-          defaultDate={date}
-          prefill={newPrefill}
-          onClose={() => {
-            setShowNew(false);
-            setNewPrefill(null);
-          }}
-          onCreated={(createdDate) => {
-            setShowNew(false);
-            setNewPrefill(null);
-            if (!isMissed && createdDate !== date) setDate(createdDate);
-          }}
-        />
-      )}
+        {/* ── New Appointment modal ── */}
+        {showNew && (
+          <NewAppointmentModal
+            doctors={doctors}
+            defaultDate={date}
+            prefill={newPrefill}
+            onClose={() => {
+              setShowNew(false);
+              setNewPrefill(null);
+            }}
+            onCreated={(createdDate) => {
+              setShowNew(false);
+              setNewPrefill(null);
+              if (!isMissed && createdDate !== date) setDate(createdDate);
+            }}
+          />
+        )}
 
-      {editPatientFor && (
-        <EditPatientModal
-          row={editPatientFor}
-          doctors={doctors}
-          onClose={() => setEditPatientFor(null)}
-        />
-      )}
+        {editPatientFor && (
+          <EditPatientModal
+            row={editPatientFor}
+            doctors={doctors}
+            onClose={() => setEditPatientFor(null)}
+          />
+        )}
 
-      {recordFor && (
-        <PatientRecordModal
-          patientId={recordFor.id}
-          patientName={recordFor.name}
-          onClose={() => setRecordFor(null)}
-        />
-      )}
+        {recordFor && (
+          <PatientRecordModal
+            patientId={recordFor.id}
+            patientName={recordFor.name}
+            onClose={() => setRecordFor(null)}
+          />
+        )}
 
-      {/* canReassign re-checks the capability here, not just on the tab: hiding a
+        {/* canReassign re-checks the capability here, not just on the tab: hiding a
           tab is presentation, and the body must not render if the view is ever
           reached another way (deep link, persisted view state). */}
-      {view === "reassign" && canReassign ? (
-        <ReassignNeededView date={date} />
-      ) : isChanges ? (
-        <StatusChangesView
-          doctors={doctors}
-          renderHistory={(row, colSpan) => (
-            <CallHistoryPanel row={row} ccAgents={ccAgents} colSpan={colSpan} />
-          )}
-        />
-      ) : (
-        <>
-          {/* ── Summary ── */}
-          {!isMissed && (showRows || pillFilter) && (
-            <Summary
-              summary={summary}
-              categories={categoryCounts}
-              filter={pillFilter}
-              onFilter={setPillFilter}
-            />
-          )}
+        {view === "reassign" && canReassign ? (
+          <ReassignNeededView date={date} />
+        ) : isChanges ? (
+          <StatusChangesView
+            doctors={doctors}
+            renderHistory={(row, colSpan) => (
+              <CallHistoryPanel row={row} ccAgents={ccAgents} colSpan={colSpan} />
+            )}
+          />
+        ) : (
+          <>
+            {/* ── Summary ── */}
+            {!isMissed && (showRows || pillFilter) && (
+              <Summary
+                summary={summary}
+                categories={categoryCounts}
+                filter={pillFilter}
+                onFilter={setPillFilter}
+              />
+            )}
 
-          {/* ── Loading ── */}
-          {coldLoading && (
-            <div className="ghm__loading">
-              <div className="spinner" />
-              {searching ? "Searching…" : "Loading…"}
-            </div>
-          )}
+            {/* ── Loading ── */}
+            {coldLoading && (
+              <div className="ghm__loading">
+                <div className="spinner" />
+                {searching ? "Searching…" : "Loading…"}
+              </div>
+            )}
 
-          {/* ── Empty ── */}
-          {!coldLoading && !loading && rows.length === 0 && view === "lookup" && (
-            <div className="ghm__empty">
-              <div className="ghm__empty-icon">
-                <Search size={34} aria-hidden="true" />
-              </div>
-              <div className="ghm__empty-title">
-                {lookupQ ? "No patient found" : "Search a patient to begin"}
-              </div>
-              <div className="ghm__empty-sub">
-                {lookupQ
-                  ? "No patient matches that name, file number, or phone. Clearing the filters may widen the search."
-                  : "Type a name, file number, or phone. Every patient is searched, whatever date is selected — the date only sets the point the Follow-up column counts forward from."}
-              </div>
-            </div>
-          )}
-          {!coldLoading && !loading && rows.length === 0 && isMissed && (
-            <div className="ghm__empty">
-              <div className="ghm__empty-icon">
-                <CalendarX size={34} aria-hidden="true" />
-              </div>
-              <div className="ghm__empty-title">
-                {searchQ
-                  ? `No missed patient matches “${searchQ}”`
-                  : `No missed patients between ${prettyDate(missedFrom)} and ${prettyDate(missedTo)}`}
-              </div>
-              <div className="ghm__empty-sub">
-                Everyone due in this range came in, has a new booking, or was closed as Not
-                Interested. Widen the date range or clear the filters to see more.
-              </div>
-              {filtersActive && (
-                <button type="button" className="btn btn--ghost" onClick={resetFilters}>
-                  Clear filters
-                </button>
-              )}
-            </div>
-          )}
-          {!coldLoading && !loading && rows.length === 0 && view !== "lookup" && !isMissed && (
-            <div className="ghm__empty">
-              <div className="ghm__empty-icon">
-                {searchQ ? (
+            {/* ── Empty ── */}
+            {!coldLoading && !loading && rows.length === 0 && view === "lookup" && (
+              <div className="ghm__empty">
+                <div className="ghm__empty-icon">
                   <Search size={34} aria-hidden="true" />
-                ) : (
-                  <ClipboardList size={34} aria-hidden="true" />
+                </div>
+                <div className="ghm__empty-title">
+                  {lookupQ ? "No patient found" : "Search a patient to begin"}
+                </div>
+                <div className="ghm__empty-sub">
+                  {lookupQ
+                    ? "No patient matches that name, file number, or phone. Clearing the filters may widen the search."
+                    : "Type a name, file number, or phone. Every patient is searched, whatever date is selected — the date only sets the point the Follow-up column counts forward from."}
+                </div>
+              </div>
+            )}
+            {!coldLoading && !loading && rows.length === 0 && isMissed && (
+              <div className="ghm__empty">
+                <div className="ghm__empty-icon">
+                  <CalendarX size={34} aria-hidden="true" />
+                </div>
+                <div className="ghm__empty-title">
+                  {searchQ
+                    ? `No missed patient matches “${searchQ}”`
+                    : `No missed patients between ${prettyDate(missedFrom)} and ${prettyDate(missedTo)}`}
+                </div>
+                <div className="ghm__empty-sub">
+                  Everyone due in this range came in, has a new booking, or was closed as Not
+                  Interested. Widen the date range or clear the filters to see more.
+                </div>
+                {filtersActive && (
+                  <button type="button" className="btn btn--ghost" onClick={resetFilters}>
+                    Clear filters
+                  </button>
                 )}
               </div>
-              <div className="ghm__empty-title">
-                {searchQ
-                  ? `No patient matches “${searchQ}” on ${prettyDate(date)}`
-                  : callsFilter === "mine"
-                    ? "No patients assigned to you on this list"
-                    : callsFilter === "unassigned"
-                      ? "Every patient on this list is assigned"
-                      : memberOfFilter(obtTeam, callsFilter)
-                        ? `No patients assigned to ${memberOfFilter(obtTeam, callsFilter)} on this list`
-                        : `No appointments found for ${date}`}
+            )}
+            {!coldLoading && !loading && rows.length === 0 && view !== "lookup" && !isMissed && (
+              <div className="ghm__empty">
+                <div className="ghm__empty-icon">
+                  {searchQ ? (
+                    <Search size={34} aria-hidden="true" />
+                  ) : (
+                    <ClipboardList size={34} aria-hidden="true" />
+                  )}
+                </div>
+                <div className="ghm__empty-title">
+                  {searchQ
+                    ? `No patient matches “${searchQ}” on ${prettyDate(date)}`
+                    : callsFilter === "mine"
+                      ? "No patients assigned to you on this list"
+                      : callsFilter === "unassigned"
+                        ? "Every patient on this list is assigned"
+                        : memberOfFilter(obtTeam, callsFilter)
+                          ? `No patients assigned to ${memberOfFilter(obtTeam, callsFilter)} on this list`
+                          : `No appointments found for ${date}`}
+                </div>
+                <div className="ghm__empty-sub">
+                  {searchQ
+                    ? "The search covers this whole date, not just the rows loaded. Try Patient Lookup to search every date."
+                    : callsFilter === "mine"
+                      ? "Today's calls have not been divided yet, or none of your patients are on this list. Ask your team lead to divide the calls, or see the whole list."
+                      : callsFilter !== "all"
+                        ? "Clear the Calls filter to see the whole list."
+                        : "Select a different date or check if appointments have been booked."}
+                </div>
+                {!searchQ && callsFilter !== "all" && (
+                  <button
+                    type="button"
+                    className="btn btn--ghost"
+                    onClick={() => setCallsFilter("all")}
+                  >
+                    Show all patients
+                  </button>
+                )}
               </div>
-              <div className="ghm__empty-sub">
-                {searchQ
-                  ? "The search covers this whole date, not just the rows loaded. Try Patient Lookup to search every date."
-                  : callsFilter === "mine"
-                    ? "Today's calls have not been divided yet, or none of your patients are on this list. Ask your team lead to divide the calls, or see the whole list."
-                    : callsFilter !== "all"
-                      ? "Clear the Calls filter to see the whole list."
-                      : "Select a different date or check if appointments have been booked."}
-              </div>
-              {!searchQ && callsFilter !== "all" && (
-                <button
-                  type="button"
-                  className="btn btn--ghost"
-                  onClick={() => setCallsFilter("all")}
-                >
-                  Show all patients
-                </button>
-              )}
-            </div>
-          )}
+            )}
 
-          {/* ── Table ── */}
-          {showRows && (
-            <div className="tbl-wrap">
-              <table className={`tbl ${compact ? "tbl--compact" : ""}`}>
-                <thead>
-                  <tr>
-                    <th style={{ width: 96 }}>Calling</th>
-                    <th style={{ width: 36 }}>#</th>
-                    {isMissed && <th style={{ minWidth: 150 }}>Missed</th>}
-                    {isMissed && (
-                      <th className="tl" style={{ minWidth: 260 }}>
-                        Missed history &amp; next step
+            {/* ── Table ── */}
+            {showRows && (
+              <div className="tbl-wrap">
+                <table className={`tbl ${compact ? "tbl--compact" : ""}`}>
+                  <thead>
+                    <tr>
+                      <th style={{ width: 96 }}>Calling</th>
+                      <th style={{ width: 36 }}>#</th>
+                      {isMissed && <th style={{ minWidth: 150 }}>Missed</th>}
+                      {isMissed && (
+                        <th className="tl" style={{ minWidth: 260 }}>
+                          Missed history &amp; next step
+                        </th>
+                      )}
+                      {showApptDate && <th style={{ width: 120 }}>Appointment</th>}
+                      {showVisitStatus && <th style={{ width: 120 }}>Visit Status</th>}
+                      <th className="tl" style={{ minWidth: 170 }}>
+                        Patient
                       </th>
-                    )}
-                    {showApptDate && <th style={{ width: 120 }}>Appointment</th>}
-                    {showVisitStatus && <th style={{ width: 120 }}>Visit Status</th>}
-                    <th className="tl" style={{ minWidth: 170 }}>
-                      Patient
-                    </th>
-                    <th className="tl" style={{ width: 155 }}>
-                      Biomarkers (auto)
-                    </th>
-                    <th style={{ minWidth: 130, whiteSpace: "nowrap" }}>Assigned To</th>
-                    <th style={{ width: 140 }}>Booking Status</th>
-                    <th style={{ width: 100 }}>Visit Type</th>
-                    <th style={{ width: 165 }}>Category</th>
-                    <th style={{ width: 110 }}>Mode</th>
-                    <th style={{ width: 220 }}>Doctor</th>
-                    <th style={{ minWidth: 230, whiteSpace: "nowrap" }}>Last Visit</th>
-                    {showShowNoShow && <th style={{ width: 150 }}>Show / No Show</th>}
-                    {showCallStatus && (
-                      <th style={{ minWidth: 175, whiteSpace: "nowrap" }}>Call Status</th>
-                    )}
-                    {showRecovery && <th style={{ width: 150 }}>Recovery</th>}
-                    {showCalledBy && (
-                      <th style={{ minWidth: 120, whiteSpace: "nowrap" }}>Called By</th>
-                    )}
-                    {showCallDate && <th style={{ minWidth: 110 }}>Call Date</th>}
-                    {showFollowUpDate && (
-                      <th style={{ width: 130 }}>
-                        {/* Lookup fills this column with the patient's next
+                      <th className="tl" style={{ width: 155 }}>
+                        Biomarkers (auto)
+                      </th>
+                      <th style={{ minWidth: 130, whiteSpace: "nowrap" }}>Assigned To</th>
+                      <th style={{ width: 140 }}>Booking Status</th>
+                      <th style={{ width: 100 }}>Visit Type</th>
+                      <th style={{ width: 165 }}>Category</th>
+                      <th style={{ width: 110 }}>Mode</th>
+                      <th style={{ width: 220 }}>Doctor</th>
+                      <th style={{ minWidth: 230, whiteSpace: "nowrap" }}>Last Visit</th>
+                      {showShowNoShow && <th style={{ width: 150 }}>Show / No Show</th>}
+                      {showCallStatus && (
+                        <th style={{ minWidth: 175, whiteSpace: "nowrap" }}>Call Status</th>
+                      )}
+                      {showRecovery && <th style={{ width: 150 }}>Recovery</th>}
+                      {showCalledBy && (
+                        <th style={{ minWidth: 120, whiteSpace: "nowrap" }}>Called By</th>
+                      )}
+                      {showCallDate && <th style={{ minWidth: 110 }}>Call Date</th>}
+                      {showFollowUpDate && (
+                        <th style={{ width: 130 }}>
+                          {/* Lookup fills this column with the patient's next
                             upcoming date of ANY kind — a booking counts — so
                             calling it "Follow-up Date" there reads as a
                             clinical follow-up the patient may not have. */}
-                        {view === "lookup" ? "Next Visit" : "Follow-up Date"}
+                          {view === "lookup" ? "Next Visit" : "Follow-up Date"}
+                        </th>
+                      )}
+                      <th style={{ width: 180 }}>Preferred Doctor</th>
+                      <th style={{ width: 150 }}>Preferred Date</th>
+                      <th style={{ width: 195 }}>Time Slot</th>
+                      <th style={{ width: 130 }}>Home Collection</th>
+                      <th className="tl" style={{ minWidth: 210 }}>
+                        Notes / Reason
                       </th>
-                    )}
-                    <th style={{ width: 180 }}>Preferred Doctor</th>
-                    <th style={{ width: 150 }}>Preferred Date</th>
-                    <th style={{ width: 195 }}>Time Slot</th>
-                    <th style={{ width: 130 }}>Home Collection</th>
-                    <th className="tl" style={{ minWidth: 210 }}>
-                      Notes / Reason
-                    </th>
-                    <th style={{ width: 160 }}>Prescription Explained By</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row, i) => {
-                    const isSaving = saving[row.id];
-                    const callStat = row.call_status || "pending";
-                    const callLogged = !NO_ATTEMPT_STATUSES.includes(callStat);
-                    const showStat = row.show_no_show || "";
+                      <th style={{ width: 160 }}>Prescription Explained By</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row, i) => {
+                      const isSaving = saving[row.id];
+                      const callStat = row.call_status || "pending";
+                      const callLogged = !NO_ATTEMPT_STATUSES.includes(callStat);
+                      const showStat = row.show_no_show || "";
 
-                    const isOpen = expanded === row.id;
-                    const attempts = attemptCounts[row.id] || 0;
-                    const activeCall = activeCalls[row.id] || null;
-                    const callingIsMine =
-                      !!activeCall &&
-                      (activeCall.calling_by_id === currentDoctor?.id ||
-                        (!activeCall.calling_by_id && activeCall.calling_by === loggedInName));
-                    const owner = assignments[row.patient_id] || null;
-                    const ownedByOther =
-                      !canAssignCalls && !!owner && owner.assigned_to_id !== currentDoctor?.id;
-                    const rowLocked =
-                      isObtMember && (!owner || owner.assigned_to_id !== currentDoctor?.id);
-                    const callLocked = ownedByOther || rowLocked;
-                    const lockTitle = ownedByOther
-                      ? `Assigned to ${owner.assigned_to} today. Only ${owner.assigned_to} can change or call this patient.`
-                      : rowLocked
-                        ? "Not assigned to you. Only patients assigned to you can be changed or called."
-                        : undefined;
+                      const isOpen = expanded === row.id;
+                      const attempts = attemptCounts[row.id] || 0;
+                      const activeCall = activeCalls[row.id] || null;
+                      const callingIsMine =
+                        !!activeCall &&
+                        (activeCall.calling_by_id === currentDoctor?.id ||
+                          (!activeCall.calling_by_id && activeCall.calling_by === loggedInName));
+                      const owner = assignments[row.patient_id] || null;
+                      const ownedByOther =
+                        !canAssignCalls && !!owner && owner.assigned_to_id !== currentDoctor?.id;
+                      const rowLocked =
+                        isObtMember && (!owner || owner.assigned_to_id !== currentDoctor?.id);
+                      const callLocked = ownedByOther || rowLocked;
+                      const lockTitle = ownedByOther
+                        ? `Assigned to ${owner.assigned_to} today. Only ${owner.assigned_to} can change or call this patient.`
+                        : rowLocked
+                          ? "Not assigned to you. Only patients assigned to you can be changed or called."
+                          : undefined;
 
-                    return (
-                      <Fragment key={row.id}>
-                        <tr
-                          className={[
-                            "tbl__row",
-                            showStat === "Show" ? "tbl__row--came" : "",
-                            showStat === "No Show" ? "tbl__row--noshow" : "",
-                            callStat === "not_picked" ? "tbl__row--notpicked" : "",
-                            activeCall && !callingIsMine ? "tbl__row--calling" : "",
-                            isSaving ? "tbl__row--saving" : "",
-                            isOpen ? "tbl__row--open" : "",
-                          ]
-                            .filter(Boolean)
-                            .join(" ")}
-                        >
-                          {/* Chevron toggle + the team-wide "calling now" flag.
+                      return (
+                        <Fragment key={row.id}>
+                          <tr
+                            className={[
+                              "tbl__row",
+                              showStat === "Show" ? "tbl__row--came" : "",
+                              showStat === "No Show" ? "tbl__row--noshow" : "",
+                              callStat === "not_picked" ? "tbl__row--notpicked" : "",
+                              activeCall && !callingIsMine ? "tbl__row--calling" : "",
+                              isSaving ? "tbl__row--saving" : "",
+                              isOpen ? "tbl__row--open" : "",
+                            ]
+                              .filter(Boolean)
+                              .join(" ")}
+                          >
+                            {/* Chevron toggle + the team-wide "calling now" flag.
                               First column so a call in progress is the first
                               thing any OBT agent sees on the row. */}
-                          <td className="tc">
-                            <div className="callcol">
-                              <button
-                                className={`chev ${isOpen ? "chev--open" : ""}`}
-                                title={isOpen ? "Hide call history" : "Show call history"}
-                                aria-label={isOpen ? "Hide call history" : "Show call history"}
-                                aria-expanded={isOpen}
-                                onClick={() => setExpanded(isOpen ? null : row.id)}
-                              >
-                                <ChevronRight size={16} aria-hidden="true" />
-                                <span className="chev__txt">History</span>
-                              </button>
-                              <CallingFlag
-                                row={row}
-                                active={activeCall}
-                                mine={callingIsMine}
-                                claim={claimCall}
-                                release={releaseCall}
-                                takeOver={takeOverCall}
-                                lockLabel={
-                                  ownedByOther ? owner.assigned_to : rowLocked ? "Not yours" : null
-                                }
-                                lockTitle={lockTitle}
-                              />
-                            </div>
-                          </td>
-
-                          {/* # */}
-                          <td className="tc">
-                            <span className="rnum">{i + 1}</span>
-                          </td>
-
-                          {isMissed && (
-                            <td>
-                              <div className="fu-cell">
-                                <span className="fu-date">
-                                  {prettyDateWithYear(row.missed_date)}
-                                </span>
-                                <span className="fu-time">
-                                  {MISSED_KIND_LABEL[row.missed_kind] || "Visit"} ·{" "}
-                                  {agoLabel(daysAgo(row.missed_date))}
-                                </span>
+                            <td className="tc">
+                              <div className="callcol">
+                                <button
+                                  className={`chev ${isOpen ? "chev--open" : ""}`}
+                                  title={isOpen ? "Hide call history" : "Show call history"}
+                                  aria-label={isOpen ? "Hide call history" : "Show call history"}
+                                  aria-expanded={isOpen}
+                                  onClick={() => setExpanded(isOpen ? null : row.id)}
+                                >
+                                  <ChevronRight size={16} aria-hidden="true" />
+                                  <span className="chev__txt">History</span>
+                                </button>
+                                <CallingFlag
+                                  row={row}
+                                  active={activeCall}
+                                  mine={callingIsMine}
+                                  claim={claimCall}
+                                  release={releaseCall}
+                                  takeOver={takeOverCall}
+                                  lockLabel={
+                                    ownedByOther
+                                      ? owner.assigned_to
+                                      : rowLocked
+                                        ? "Not yours"
+                                        : null
+                                  }
+                                  lockTitle={lockTitle}
+                                />
                               </div>
                             </td>
-                          )}
-                          {isMissed && (
-                            <td className="miss-hist">
-                              <div className="miss-hist__counts">
-                                Visits done {row.visit_count || 0} · Cancelled{" "}
-                                {row.cancelled_count || 0} · Rescheduled{" "}
-                                {row.rescheduled_count || 0} · Missed {row.missed_count || 0}
-                              </div>
-                              {MISS_RISK[row.miss_risk] && (
-                                <>
-                                  <span className={`badge badge--${MISS_RISK[row.miss_risk].tone}`}>
-                                    {MISS_RISK[row.miss_risk].label}
-                                  </span>
-                                  <div className="miss-hist__action">
-                                    {MISS_RISK[row.miss_risk].action}
-                                  </div>
-                                </>
-                              )}
-                              {UNREACHABLE_STATUSES.includes(row.call_status_any) &&
-                                (attemptCounts[row.id] || 0) >= 2 && (
-                                  <div className="miss-hist__action">{UNREACHABLE_MISS_HINT}</div>
-                                )}
-                            </td>
-                          )}
 
-                          {/* Time */}
-                          {showApptDate && (
-                            <td>
-                              {row.appointment_date ? (
+                            {/* # */}
+                            <td className="tc">
+                              <span className="rnum">{i + 1}</span>
+                            </td>
+
+                            {isMissed && (
+                              <td>
                                 <div className="fu-cell">
                                   <span className="fu-date">
-                                    {prettyDate(row.appointment_date)}
+                                    {prettyDateWithYear(row.missed_date)}
                                   </span>
-                                  {/* {row.time_slot && (
+                                  <span className="fu-time">
+                                    {MISSED_KIND_LABEL[row.missed_kind] || "Visit"} ·{" "}
+                                    {agoLabel(daysAgo(row.missed_date))}
+                                  </span>
+                                </div>
+                              </td>
+                            )}
+                            {isMissed && (
+                              <td className="miss-hist">
+                                <div className="miss-hist__counts">
+                                  Visits done {row.visit_count || 0} · Cancelled{" "}
+                                  {row.cancelled_count || 0} · Rescheduled{" "}
+                                  {row.rescheduled_count || 0} · Missed {row.missed_count || 0}
+                                </div>
+                                {MISS_RISK[row.miss_risk] && (
+                                  <>
+                                    <span
+                                      className={`badge badge--${MISS_RISK[row.miss_risk].tone}`}
+                                    >
+                                      {MISS_RISK[row.miss_risk].label}
+                                    </span>
+                                    <div className="miss-hist__action">
+                                      {MISS_RISK[row.miss_risk].action}
+                                    </div>
+                                  </>
+                                )}
+                                {UNREACHABLE_STATUSES.includes(row.call_status_any) &&
+                                  (attemptCounts[row.id] || 0) >= 2 && (
+                                    <div className="miss-hist__action">{UNREACHABLE_MISS_HINT}</div>
+                                  )}
+                              </td>
+                            )}
+
+                            {/* Time */}
+                            {showApptDate && (
+                              <td>
+                                {row.appointment_date ? (
+                                  <div className="fu-cell">
+                                    <span className="fu-date">
+                                      {prettyDate(row.appointment_date)}
+                                    </span>
+                                    {/* {row.time_slot && (
                                     <span className="fu-time">{row.time_slot}</span>
                                   )} */}
-                                </div>
+                                  </div>
+                                ) : (
+                                  <span className="muted">—</span>
+                                )}
+                              </td>
+                            )}
+
+                            {showVisitStatus && (
+                              <td>
+                                {(() => {
+                                  const onThisDate =
+                                    String(row.appointment_date || "").slice(0, 10) === date;
+                                  const st = visitStatus(onThisDate ? row.status : null);
+                                  return (
+                                    <span className={`badge badge--${st.tone}`}>{st.label}</span>
+                                  );
+                                })()}
+                              </td>
+                            )}
+
+                            {/* Patient */}
+                            <td>
+                              <div className="pcell">
+                                <span className="pcell__name">
+                                  {row.patient_name || "—"}
+                                  {row.via_preferred && (
+                                    <span
+                                      className="pref-tag"
+                                      title={`Appears here because patient's preferred date is ${date}. Actual appointment: ${row.appointment_date}`}
+                                    >
+                                      <Star size={11} aria-hidden="true" />
+                                      Preferred
+                                    </span>
+                                  )}
+                                  {row.booked_on && (
+                                    <span
+                                      className="booked-tag"
+                                      title={`Already booked for ${prettyDate(row.booked_on)} — no need to book again`}
+                                    >
+                                      Booked {prettyDate(row.booked_on)}
+                                    </span>
+                                  )}
+                                  {row.is_booked && !row.booked_on && (
+                                    <span className="booked-tag">Booked</span>
+                                  )}
+                                  {row.booking_lapsed && !row.is_booked && !row.booked_on && (
+                                    <span
+                                      className="lapsed-tag"
+                                      title={`Marked booked for ${prettyDate(row.booked_for_date)}, but that date has passed and there is no newer appointment — call and book again`}
+                                    >
+                                      Booking lapsed · {prettyDate(row.booked_for_date)}
+                                    </span>
+                                  )}
+                                  {row.booking_no_slot && !row.is_booked && !row.booked_on && (
+                                    <span
+                                      className="lapsed-tag"
+                                      title={`Marked booked for ${prettyDate(row.booked_for_date)}, but no time is set — choose a time slot or use Book next`}
+                                    >
+                                      No time slot yet · {prettyDate(row.booked_for_date)}
+                                    </span>
+                                  )}
+                                  {row.booking_status === "cancelled" && (
+                                    <span className="cancel-tag">Cancelled</span>
+                                  )}
+                                  <BlockedBadge block={blocks[row.patient_id]} size="sm" />
+                                </span>
+                                <HomeSampleChip row={row} />
+                                {row.phone ? (
+                                  <a
+                                    className="pcell__ph"
+                                    href={`tel:${String(row.phone).replace(/\D/g, "")}`}
+                                    title="Call this patient"
+                                  >
+                                    <Phone size={12} aria-hidden="true" />
+                                    {fmtPhone(row.phone)}
+                                  </a>
+                                ) : (
+                                  <span className="pcell__ph pcell__ph--none">
+                                    <Phone size={12} aria-hidden="true" />
+                                    No phone number
+                                  </span>
+                                )}
+                                {altList(row.alt_phone).map((alt) => (
+                                  <a
+                                    key={alt}
+                                    className="pcell__ph pcell__ph--alt"
+                                    href={`tel:${String(alt).replace(/\D/g, "")}`}
+                                    title="Call this patient on the alternate number"
+                                  >
+                                    <Phone size={12} aria-hidden="true" />
+                                    {fmtPhone(alt)}
+                                    <em className="pcell__phtag">Alt</em>
+                                  </a>
+                                ))}
+                                {row.file_no && <span className="pcell__file">{row.file_no}</span>}
+                                {(row.disp_sex || row.disp_age != null) && (
+                                  <span className="pcell__ageSex">
+                                    {[
+                                      row.disp_sex,
+                                      row.disp_age != null ? `${row.disp_age} yrs` : null,
+                                    ]
+                                      .filter(Boolean)
+                                      .join(" · ")}
+                                  </span>
+                                )}
+                                {row.address && (
+                                  <span className="pcell__addr">
+                                    <MapPin size={11} aria-hidden="true" />
+                                    {row.address}
+                                  </span>
+                                )}
+                                {row.condition && (
+                                  <span className="pcell__cond">{row.condition}</span>
+                                )}
+                                {!compact && (
+                                  <RowActions
+                                    row={row}
+                                    onBookNext={bookNext}
+                                    onRecords={setRecordFor}
+                                    onEditPatient={setEditPatientFor}
+                                    lockTitle={rowLocked ? lockTitle : undefined}
+                                  />
+                                )}
+                              </div>
+                            </td>
+
+                            {/* Biomarkers — auto from lab data */}
+                            <td>
+                              <BiomarkerCell bio={biomarkers[row.patient_id]} />
+                            </td>
+
+                            <td>
+                              {canAssignCalls && row.patient_id ? (
+                                <Dropdown
+                                  value={owner ? String(owner.assigned_to_id) : ""}
+                                  options={assigneeOptions(obtTeam, owner)}
+                                  onChange={(v) => assignRow(row, v)}
+                                  variant="cell"
+                                  ariaLabel="Assigned to"
+                                />
+                              ) : owner ? (
+                                <span className="assignee">{owner.assigned_to}</span>
                               ) : (
-                                <span className="muted">—</span>
+                                <span className="muted">Unassigned</span>
                               )}
                             </td>
-                          )}
 
-                          {showVisitStatus && (
+                            {/* Booking status — OBT marks a cancellation from the call */}
+                            <td>
+                              <ColorSelect
+                                value={
+                                  isMissed && STALE_ON_MISSED.includes(row.booking_status)
+                                    ? ""
+                                    : row.booking_status || ""
+                                }
+                                options={bookingStatusOptions(row)}
+                                onChange={(v) => patch(row.id, "booking_status", v)}
+                                disabled={rowLocked}
+                                title={lockTitle}
+                              />
+                              {!isMissed &&
+                                row.booking_status === "booked" &&
+                                row.booked_by_name && (
+                                  <span
+                                    className="booked-by"
+                                    title={row.booked_at ? fmtDateTime(row.booked_at) : undefined}
+                                  >
+                                    by {row.booked_by_name}
+                                  </span>
+                                )}
+                            </td>
+
+                            {/* Visit type */}
                             <td>
                               {(() => {
-                                const onThisDate =
-                                  String(row.appointment_date || "").slice(0, 10) === date;
-                                const st = visitStatus(onThisDate ? row.status : null);
+                                const visitType =
+                                  view !== "lookup" &&
+                                  isEarlierVisitDue(row, isMissed ? row.missed_date : date) &&
+                                  isNewVisitType(row.visit_type)
+                                    ? "Follow-Up"
+                                    : row.visit_type;
                                 return (
-                                  <span className={`badge badge--${st.tone}`}>{st.label}</span>
+                                  visitType && (
+                                    <span
+                                      className={`badge badge--${isNewVisitType(visitType) ? "blue" : "amber"}`}
+                                    >
+                                      {visitType}
+                                    </span>
+                                  )
+                                );
+                              })()}
+                              <ApprovalBadge appointmentId={row.id} timeSlot={row.time_slot} />
+                            </td>
+
+                            {/* Discount category — editable */}
+                            <td>
+                              <ColorSelect
+                                value={row.patient_category || ""}
+                                options={categoryOptions}
+                                onChange={(v) => patch(row.id, "patient_category", v)}
+                                disabled={rowLocked}
+                                title={lockTitle}
+                              />
+                            </td>
+
+                            {/* Mode of appointment — editable */}
+                            <td>
+                              <Dropdown
+                                value={row.appointment_type || ""}
+                                options={withCurrent(MODE_OPTIONS, row.appointment_type)}
+                                onChange={(v) => patch(row.id, "appointment_type", v)}
+                                disabled={rowLocked}
+                                title={lockTitle}
+                                variant="cell"
+                                ariaLabel="Mode of appointment"
+                              />
+                            </td>
+
+                            {/* Doctor — editable. Investigation/lab tests default to Hospital Admin. */}
+                            <td>
+                              {(() => {
+                                const isInvestigation =
+                                  (row.visit_type || "").toLowerCase() === "investigation";
+                                // build option list; ensure current value + Hospital Admin are present
+                                const opts = [...doctors];
+                                if (!opts.includes("Dr. Hospital Admin"))
+                                  opts.unshift("Dr. Hospital Admin");
+                                if (row.doctor_name && !opts.includes(row.doctor_name))
+                                  opts.unshift(row.doctor_name);
+                                // for investigation rows with no doctor set, show Hospital Admin as selected
+                                const current =
+                                  row.doctor_name || (isInvestigation ? "Dr. Hospital Admin" : "");
+                                return (
+                                  <Dropdown
+                                    value={current}
+                                    options={[
+                                      { value: "", label: "— Assign Doctor" },
+                                      ...opts.map((d) => ({ value: d, label: d })),
+                                    ]}
+                                    onChange={(v) => patch(row.id, "doctor_name", v)}
+                                    disabled={rowLocked}
+                                    title={lockTitle}
+                                    variant="cell"
+                                    ariaLabel="Doctor"
+                                  />
                                 );
                               })()}
                             </td>
-                          )}
 
-                          {/* Patient */}
-                          <td>
-                            <div className="pcell">
-                              <span className="pcell__name">
-                                {row.patient_name || "—"}
-                                {row.via_preferred && (
-                                  <span
-                                    className="pref-tag"
-                                    title={`Appears here because patient's preferred date is ${date}. Actual appointment: ${row.appointment_date}`}
-                                  >
-                                    <Star size={11} aria-hidden="true" />
-                                    Preferred
-                                  </span>
-                                )}
-                                {row.booked_on && (
-                                  <span
-                                    className="booked-tag"
-                                    title={`Already booked for ${prettyDate(row.booked_on)} — no need to book again`}
-                                  >
-                                    Booked {prettyDate(row.booked_on)}
-                                  </span>
-                                )}
-                                {row.is_booked && !row.booked_on && (
-                                  <span className="booked-tag">Booked</span>
-                                )}
-                                {row.booking_lapsed && !row.is_booked && !row.booked_on && (
-                                  <span
-                                    className="lapsed-tag"
-                                    title={`Marked booked for ${prettyDate(row.booked_for_date)}, but that date has passed and there is no newer appointment — call and book again`}
-                                  >
-                                    Booking lapsed · {prettyDate(row.booked_for_date)}
-                                  </span>
-                                )}
-                                {row.booking_no_slot && !row.is_booked && !row.booked_on && (
-                                  <span
-                                    className="lapsed-tag"
-                                    title={`Marked booked for ${prettyDate(row.booked_for_date)}, but no time is set — choose a time slot or use Book next`}
-                                  >
-                                    No time slot yet · {prettyDate(row.booked_for_date)}
-                                  </span>
-                                )}
-                                {row.booking_status === "cancelled" && (
-                                  <span className="cancel-tag">Cancelled</span>
-                                )}
-                                <BlockedBadge block={blocks[row.patient_id]} size="sm" />
-                              </span>
-                              <HomeSampleChip row={row} />
-                              {row.phone ? (
-                                <a
-                                  className="pcell__ph"
-                                  href={`tel:${String(row.phone).replace(/\D/g, "")}`}
-                                  title="Call this patient"
-                                >
-                                  <Phone size={12} aria-hidden="true" />
-                                  {fmtPhone(row.phone)}
-                                </a>
-                              ) : (
-                                <span className="pcell__ph pcell__ph--none">
-                                  <Phone size={12} aria-hidden="true" />
-                                  No phone number
-                                </span>
-                              )}
-                              {altList(row.alt_phone).map((alt) => (
-                                <a
-                                  key={alt}
-                                  className="pcell__ph pcell__ph--alt"
-                                  href={`tel:${String(alt).replace(/\D/g, "")}`}
-                                  title="Call this patient on the alternate number"
-                                >
-                                  <Phone size={12} aria-hidden="true" />
-                                  {fmtPhone(alt)}
-                                  <em className="pcell__phtag">Alt</em>
-                                </a>
-                              ))}
-                              {row.file_no && <span className="pcell__file">{row.file_no}</span>}
-                              {(row.disp_sex || row.disp_age != null) && (
-                                <span className="pcell__ageSex">
-                                  {[
-                                    row.disp_sex,
-                                    row.disp_age != null ? `${row.disp_age} yrs` : null,
-                                  ]
-                                    .filter(Boolean)
-                                    .join(" · ")}
-                                </span>
-                              )}
-                              {row.address && (
-                                <span className="pcell__addr">
-                                  <MapPin size={11} aria-hidden="true" />
-                                  {row.address}
-                                </span>
-                              )}
-                              {row.condition && (
-                                <span className="pcell__cond">{row.condition}</span>
-                              )}
-                              {!compact && (
-                                <RowActions
-                                  row={row}
-                                  onBookNext={bookNext}
-                                  onRecords={setRecordFor}
-                                  onEditPatient={setEditPatientFor}
-                                  lockTitle={rowLocked ? lockTitle : undefined}
-                                />
-                              )}
-                            </div>
-                          </td>
+                            <td>
+                              {(() => {
+                                const lv = lastVisit[row.patient_id];
+                                if (!lv?.date && !lv?.testsDate)
+                                  return <span className="muted">No visit on record</span>;
+                                const age = daysAgo(lv.date);
+                                return (
+                                  <div className="lastmo-cell">
+                                    {lv.date ? (
+                                      <>
+                                        <span className="fu-date">
+                                          {prettyDateWithYear(lv.date)}
+                                          {age != null && ` · ${agoLabel(age)}`}
+                                        </span>
+                                        {lv.doctor || lv.mo ? (
+                                          <>
+                                            {lv.doctor && (
+                                              <span className="lastmo-name">{lv.doctor}</span>
+                                            )}
+                                            {lv.mo && (
+                                              <span className="lastmo-date">MO: {lv.mo}</span>
+                                            )}
+                                          </>
+                                        ) : (
+                                          <span className="lastmo-date">Doctor not recorded</span>
+                                        )}
+                                      </>
+                                    ) : (
+                                      <span className="muted">No consultation on record</span>
+                                    )}
+                                    {lv.testsDate && (
+                                      <span className="lastmo-date">
+                                        Tests only: {prettyDate(lv.testsDate)}
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              })()}
+                            </td>
 
-                          {/* Biomarkers — auto from lab data */}
-                          <td>
-                            <BiomarkerCell bio={biomarkers[row.patient_id]} />
-                          </td>
-
-                          <td>
-                            {canAssignCalls && row.patient_id ? (
-                              <Dropdown
-                                value={owner ? String(owner.assigned_to_id) : ""}
-                                options={assigneeOptions(obtTeam, owner)}
-                                onChange={(v) => assignRow(row, v)}
-                                variant="cell"
-                                ariaLabel="Assigned to"
-                              />
-                            ) : owner ? (
-                              <span className="assignee">{owner.assigned_to}</span>
-                            ) : (
-                              <span className="muted">Unassigned</span>
-                            )}
-                          </td>
-
-                          {/* Booking status — OBT marks a cancellation from the call */}
-                          <td>
-                            <ColorSelect
-                              value={
-                                isMissed && STALE_ON_MISSED.includes(row.booking_status)
-                                  ? ""
-                                  : row.booking_status || ""
-                              }
-                              options={bookingStatusOptions(row)}
-                              onChange={(v) => patch(row.id, "booking_status", v)}
-                              disabled={rowLocked}
-                              title={lockTitle}
-                            />
-                            {!isMissed && row.booking_status === "booked" && row.booked_by_name && (
-                              <span
-                                className="booked-by"
-                                title={row.booked_at ? fmtDateTime(row.booked_at) : undefined}
-                              >
-                                by {row.booked_by_name}
-                              </span>
-                            )}
-                          </td>
-
-                          {/* Visit type */}
-                          <td>
-                            {(() => {
-                              const visitType =
-                                view !== "lookup" &&
-                                isEarlierVisitDue(row, isMissed ? row.missed_date : date) &&
-                                isNewVisitType(row.visit_type)
-                                  ? "Follow-Up"
-                                  : row.visit_type;
-                              return (
-                                visitType && (
-                                  <span
-                                    className={`badge badge--${isNewVisitType(visitType) ? "blue" : "amber"}`}
-                                  >
-                                    {visitType}
-                                  </span>
-                                )
-                              );
-                            })()}
-                          </td>
-
-                          {/* Discount category — editable */}
-                          <td>
-                            <ColorSelect
-                              value={row.patient_category || ""}
-                              options={categoryOptions}
-                              onChange={(v) => patch(row.id, "patient_category", v)}
-                              disabled={rowLocked}
-                              title={lockTitle}
-                            />
-                          </td>
-
-                          {/* Mode of appointment — editable */}
-                          <td>
-                            <Dropdown
-                              value={row.appointment_type || ""}
-                              options={withCurrent(MODE_OPTIONS, row.appointment_type)}
-                              onChange={(v) => patch(row.id, "appointment_type", v)}
-                              disabled={rowLocked}
-                              title={lockTitle}
-                              variant="cell"
-                              ariaLabel="Mode of appointment"
-                            />
-                          </td>
-
-                          {/* Doctor — editable. Investigation/lab tests default to Hospital Admin. */}
-                          <td>
-                            {(() => {
-                              const isInvestigation =
-                                (row.visit_type || "").toLowerCase() === "investigation";
-                              // build option list; ensure current value + Hospital Admin are present
-                              const opts = [...doctors];
-                              if (!opts.includes("Dr. Hospital Admin"))
-                                opts.unshift("Dr. Hospital Admin");
-                              if (row.doctor_name && !opts.includes(row.doctor_name))
-                                opts.unshift(row.doctor_name);
-                              // for investigation rows with no doctor set, show Hospital Admin as selected
-                              const current =
-                                row.doctor_name || (isInvestigation ? "Dr. Hospital Admin" : "");
-                              return (
-                                <Dropdown
-                                  value={current}
-                                  options={[
-                                    { value: "", label: "— Assign Doctor" },
-                                    ...opts.map((d) => ({ value: d, label: d })),
-                                  ]}
-                                  onChange={(v) => patch(row.id, "doctor_name", v)}
+                            {/* Came? */}
+                            {showShowNoShow && (
+                              <td>
+                                <ColorSelect
+                                  value={row.show_no_show}
+                                  options={SHOW_STATUSES}
+                                  onChange={(v) => patch(row.id, "show_no_show", v)}
                                   disabled={rowLocked}
                                   title={lockTitle}
-                                  variant="cell"
-                                  ariaLabel="Doctor"
                                 />
-                              );
-                            })()}
-                          </td>
+                              </td>
+                            )}
 
-                          <td>
-                            {(() => {
-                              const lv = lastVisit[row.patient_id];
-                              if (!lv?.date && !lv?.testsDate)
-                                return <span className="muted">No visit on record</span>;
-                              const age = daysAgo(lv.date);
-                              return (
-                                <div className="lastmo-cell">
-                                  {lv.date ? (
-                                    <>
-                                      <span className="fu-date">
-                                        {prettyDateWithYear(lv.date)}
-                                        {age != null && ` · ${agoLabel(age)}`}
-                                      </span>
-                                      {lv.doctor || lv.mo ? (
-                                        <>
-                                          {lv.doctor && (
-                                            <span className="lastmo-name">{lv.doctor}</span>
-                                          )}
-                                          {lv.mo && (
-                                            <span className="lastmo-date">MO: {lv.mo}</span>
-                                          )}
-                                        </>
-                                      ) : (
-                                        <span className="lastmo-date">Doctor not recorded</span>
-                                      )}
-                                    </>
-                                  ) : (
-                                    <span className="muted">No consultation on record</span>
-                                  )}
-                                  {lv.testsDate && (
-                                    <span className="lastmo-date">
-                                      Tests only: {prettyDate(lv.testsDate)}
-                                    </span>
+                            {/* Call status */}
+                            {showCallStatus && (
+                              <td>
+                                <div className="callstat-cell">
+                                  <ColorSelect
+                                    value={callStat}
+                                    options={callStatusOptions(callStat)}
+                                    onChange={(v) => handleCallStatus(row, v)}
+                                    disabled={callLocked}
+                                    title={lockTitle}
+                                  />
+                                  {attempts > 0 && (
+                                    <button
+                                      className="attempt-badge"
+                                      title={`${attempts} call attempt(s) — click to view history`}
+                                      onClick={() => setExpanded(isOpen ? null : row.id)}
+                                    >
+                                      <Phone size={11} aria-hidden="true" />×{attempts}
+                                    </button>
                                   )}
                                 </div>
-                              );
-                            })()}
-                          </td>
+                              </td>
+                            )}
 
-                          {/* Came? */}
-                          {showShowNoShow && (
-                            <td>
-                              <ColorSelect
-                                value={row.show_no_show}
-                                options={SHOW_STATUSES}
-                                onChange={(v) => patch(row.id, "show_no_show", v)}
-                                disabled={rowLocked}
-                                title={lockTitle}
-                              />
-                            </td>
-                          )}
-
-                          {/* Call status */}
-                          {showCallStatus && (
-                            <td>
-                              <div className="callstat-cell">
+                            {/* Recovery — is patient improving? */}
+                            {showRecovery && (
+                              <td>
                                 <ColorSelect
-                                  value={callStat}
-                                  options={callStatusOptions(callStat)}
-                                  onChange={(v) => handleCallStatus(row, v)}
-                                  disabled={callLocked}
+                                  value={row.pt_recovery}
+                                  options={RECOVERY_STATUSES}
+                                  onChange={(v) => patch(row.id, "pt_recovery", v)}
+                                  disabled={rowLocked}
                                   title={lockTitle}
                                 />
-                                {attempts > 0 && (
-                                  <button
-                                    className="attempt-badge"
-                                    title={`${attempts} call attempt(s) — click to view history`}
-                                    onClick={() => setExpanded(isOpen ? null : row.id)}
-                                  >
-                                    <Phone size={11} aria-hidden="true" />×{attempts}
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                          )}
+                              </td>
+                            )}
 
-                          {/* Recovery — is patient improving? */}
-                          {showRecovery && (
-                            <td>
-                              <ColorSelect
-                                value={row.pt_recovery}
-                                options={RECOVERY_STATUSES}
-                                onChange={(v) => patch(row.id, "pt_recovery", v)}
-                                disabled={rowLocked}
-                                title={lockTitle}
-                              />
-                            </td>
-                          )}
-
-                          {/* Called by — auto-fills logged-in user, editable, with dropdown.
+                            {/* Called by — auto-fills logged-in user, editable, with dropdown.
                           Locked until the call status says a call happened: a name
                           filled in beside "Not Called Yet" reads as a call nobody made. */}
-                          {showCalledBy && (
+                            {showCalledBy && (
+                              <td>
+                                <input
+                                  list="cc-agents-list"
+                                  defaultValue={
+                                    callLogged
+                                      ? row.call_made_by ||
+                                        activeCall?.calling_by ||
+                                        loggedInName ||
+                                        ""
+                                      : row.call_made_by || ""
+                                  }
+                                  key={`cb-${row.id}-${row.call_made_by}-${activeCall?.calling_by || ""}-${callLogged ? 1 : 0}`}
+                                  disabled={!callLogged || callLocked}
+                                  title={lockTitle || (callLogged ? undefined : CALL_LOCK_HINT)}
+                                  onBlur={(e) => {
+                                    const v = e.target.value.trim();
+                                    if (v !== (row.call_made_by || ""))
+                                      patch(row.id, "call_made_by", v);
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") e.target.blur();
+                                  }}
+                                  placeholder={callLogged ? "CC name" : "Set call status"}
+                                  className="cc-input"
+                                />
+                              </td>
+                            )}
+
+                            {/* Call date — locked with Called By, for the same reason */}
+                            {showCallDate && (
+                              <td title={lockTitle || (callLogged ? undefined : CALL_LOCK_HINT)}>
+                                <DatePicker
+                                  value={row.call_date || ""}
+                                  onChange={(v) => patch(row.id, "call_date", v)}
+                                  placeholder="—"
+                                  disabled={!callLogged || callLocked}
+                                  style={CELL_DATE_STYLE}
+                                />
+                              </td>
+                            )}
+
+                            {/* Follow-up date — next booked appt, else prescription timing/notes.
+                          Hidden on the Tomorrow tab (every row is due tomorrow). */}
+                            {showFollowUpDate && (
+                              <td>
+                                {(() => {
+                                  if (isInvestigationVisit(row))
+                                    return <span className="muted">—</span>;
+                                  // 1) Next booked appointment after this visit → most reliable date
+                                  if (row.follow_up_date) {
+                                    return (
+                                      <div className="fu-cell">
+                                        <span className="fu-date">{row.follow_up_date}</span>
+                                        {row.follow_up_time && (
+                                          <span className="fu-time">{row.follow_up_time}</span>
+                                        )}
+                                      </div>
+                                    );
+                                  }
+                                  // 2) Else the latest prescription's follow-up DATE or
+                                  //    timing only. The free-text notes (e.g. "FBG and PP
+                                  //    glucose charting") are clinical instructions, not a
+                                  //    date — never render them as the cell value; keep them
+                                  //    on hover so the info isn't lost.
+                                  const hr = row.healthray_follow_up || row.last_rx_follow_up || {};
+                                  const hrDate = hr.date || "";
+                                  const rawTiming = hr.timing || "";
+                                  const hrTiming = followUpTiming(rawTiming);
+                                  const hrNotes = [hrTiming ? "" : rawTiming, hr.notes || ""]
+                                    .filter(Boolean)
+                                    .join(" · ");
+                                  const dueDate = hrDate
+                                    ? ""
+                                    : followUpDueDate(row.appointment_date, rawTiming);
+                                  if (hrDate || hrTiming) {
+                                    return (
+                                      <div
+                                        className="fu-cell"
+                                        title={
+                                          dueDate
+                                            ? `${hrTiming} after the visit on ${prettyDate(row.appointment_date)} — the prescription gives no exact date`
+                                            : undefined
+                                        }
+                                      >
+                                        {hrDate && <span className="fu-date">{hrDate}</span>}
+                                        {dueDate && (
+                                          <span className="fu-date">≈ {prettyDate(dueDate)}</span>
+                                        )}
+                                        {hrTiming && <span className="fu-time">{hrTiming}</span>}
+                                      </div>
+                                    );
+                                  }
+                                  return (
+                                    <span className="muted" title={hrNotes || undefined}>
+                                      —
+                                    </span>
+                                  );
+                                })()}
+                              </td>
+                            )}
+
+                            {/* Preferred doctor — doctor the patient prefers (editable) */}
                             <td>
-                              <input
-                                list="cc-agents-list"
-                                defaultValue={
-                                  callLogged
-                                    ? row.call_made_by ||
-                                      activeCall?.calling_by ||
-                                      loggedInName ||
-                                      ""
-                                    : row.call_made_by || ""
-                                }
-                                key={`cb-${row.id}-${row.call_made_by}-${activeCall?.calling_by || ""}-${callLogged ? 1 : 0}`}
-                                disabled={!callLogged || callLocked}
-                                title={lockTitle || (callLogged ? undefined : CALL_LOCK_HINT)}
-                                onBlur={(e) => {
-                                  const v = e.target.value.trim();
-                                  if (v !== (row.call_made_by || ""))
-                                    patch(row.id, "call_made_by", v);
-                                }}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter") e.target.blur();
-                                }}
-                                placeholder={callLogged ? "CC name" : "Set call status"}
-                                className="cc-input"
+                              <Dropdown
+                                value={row.preferred_doctor || ""}
+                                options={[
+                                  { value: "", label: "— No preference" },
+                                  ...(row.preferred_doctor &&
+                                  !doctors.includes(row.preferred_doctor)
+                                    ? [row.preferred_doctor, ...doctors]
+                                    : doctors
+                                  ).map((d) => ({ value: d, label: d })),
+                                ]}
+                                onChange={(v) => patch(row.id, "preferred_doctor", v)}
+                                disabled={rowLocked}
+                                title={lockTitle}
+                                variant="cell"
+                                ariaLabel="Preferred doctor"
                               />
                             </td>
-                          )}
 
-                          {/* Call date — locked with Called By, for the same reason */}
-                          {showCallDate && (
-                            <td title={lockTitle || (callLogged ? undefined : CALL_LOCK_HINT)}>
+                            {/* Preferred date — date the patient wants (editable) */}
+                            <td>
                               <DatePicker
-                                value={row.call_date || ""}
-                                onChange={(v) => patch(row.id, "call_date", v)}
+                                value={row.preferred_date || ""}
+                                onChange={(v) => changePreferredDate(row, v)}
+                                disabled={rowLocked}
+                                minDate={todayStr()}
+                                closedWeekdays={CLOSED_WEEKDAYS}
                                 placeholder="—"
-                                disabled={!callLogged || callLocked}
                                 style={CELL_DATE_STYLE}
                               />
                             </td>
-                          )}
 
-                          {/* Follow-up date — next booked appt, else prescription timing/notes.
-                          Hidden on the Tomorrow tab (every row is due tomorrow). */}
-                          {showFollowUpDate && (
                             <td>
-                              {(() => {
-                                if (isInvestigationVisit(row))
-                                  return <span className="muted">—</span>;
-                                // 1) Next booked appointment after this visit → most reliable date
-                                if (row.follow_up_date) {
-                                  return (
-                                    <div className="fu-cell">
-                                      <span className="fu-date">{row.follow_up_date}</span>
-                                      {row.follow_up_time && (
-                                        <span className="fu-time">{row.follow_up_time}</span>
-                                      )}
-                                    </div>
-                                  );
-                                }
-                                // 2) Else the latest prescription's follow-up DATE or
-                                //    timing only. The free-text notes (e.g. "FBG and PP
-                                //    glucose charting") are clinical instructions, not a
-                                //    date — never render them as the cell value; keep them
-                                //    on hover so the info isn't lost.
-                                const hr = row.healthray_follow_up || row.last_rx_follow_up || {};
-                                const hrDate = hr.date || "";
-                                const rawTiming = hr.timing || "";
-                                const hrTiming = followUpTiming(rawTiming);
-                                const hrNotes = [hrTiming ? "" : rawTiming, hr.notes || ""]
-                                  .filter(Boolean)
-                                  .join(" · ");
-                                const dueDate = hrDate
-                                  ? ""
-                                  : followUpDueDate(row.appointment_date, rawTiming);
-                                if (hrDate || hrTiming) {
-                                  return (
-                                    <div
-                                      className="fu-cell"
-                                      title={
-                                        dueDate
-                                          ? `${hrTiming} after the visit on ${prettyDate(row.appointment_date)} — the prescription gives no exact date`
-                                          : undefined
-                                      }
-                                    >
-                                      {hrDate && <span className="fu-date">{hrDate}</span>}
-                                      {dueDate && (
-                                        <span className="fu-date">≈ {prettyDate(dueDate)}</span>
-                                      )}
-                                      {hrTiming && <span className="fu-time">{hrTiming}</span>}
-                                    </div>
-                                  );
-                                }
-                                return (
-                                  <span className="muted" title={hrNotes || undefined}>
-                                    —
-                                  </span>
-                                );
-                              })()}
+                              <Dropdown
+                                value={row.preferred_time_slot || ""}
+                                options={preferredTimeOptions(
+                                  row,
+                                  slotsFromSchedule
+                                    ? scheduleSlots[`${slotDoctor(row)}|${slotCountDate(row)}`]
+                                    : null,
+                                  slotCounts,
+                                )}
+                                onChange={(v) => pickTimeSlot(row, v)}
+                                disabled={rowLocked}
+                                title={lockTitle}
+                                variant="cell"
+                                ariaLabel="Preferred time"
+                              />
                             </td>
+
+                            <td>
+                              <ColorSelect
+                                value={row.home_collection ? "yes" : "no"}
+                                options={HOME_COLLECTION_OPTIONS}
+                                onChange={(v) => patch(row.id, "home_collection", v === "yes")}
+                                disabled={rowLocked}
+                                title={lockTitle}
+                              />
+                            </td>
+
+                            {/* Notes / reason (multiline) */}
+                            <td>
+                              <InlineEdit
+                                value={row.call_notes}
+                                onChange={(v) => patch(row.id, "call_notes", v)}
+                                placeholder="Patient said… / reason…"
+                                multiline
+                                disabled={callLocked}
+                                lockTitle={lockTitle}
+                              />
+                            </td>
+
+                            {/* Prescription explained by — editable */}
+                            <td>
+                              <InlineEdit
+                                value={row.prescription_explained_by}
+                                onChange={(v) => patch(row.id, "prescription_explained_by", v)}
+                                disabled={rowLocked}
+                                lockTitle={lockTitle}
+                                placeholder="Explained by…"
+                              />
+                            </td>
+                          </tr>
+
+                          {isOpen && (
+                            <CallHistoryPanel
+                              row={row}
+                              lockTitle={callLocked ? lockTitle : undefined}
+                              ccAgents={ccAgents}
+                              colSpan={colSpan}
+                              details={compact ? compactDetails(row) : null}
+                              actions={
+                                compact ? (
+                                  <RowActions
+                                    row={row}
+                                    onBookNext={bookNext}
+                                    onRecords={setRecordFor}
+                                    onEditPatient={setEditPatientFor}
+                                    lockTitle={rowLocked ? lockTitle : undefined}
+                                  />
+                                ) : null
+                              }
+                            />
                           )}
+                        </Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
-                          {/* Preferred doctor — doctor the patient prefers (editable) */}
-                          <td>
-                            <Dropdown
-                              value={row.preferred_doctor || ""}
-                              options={[
-                                { value: "", label: "— No preference" },
-                                ...(row.preferred_doctor && !doctors.includes(row.preferred_doctor)
-                                  ? [row.preferred_doctor, ...doctors]
-                                  : doctors
-                                ).map((d) => ({ value: d, label: d })),
-                              ]}
-                              onChange={(v) => patch(row.id, "preferred_doctor", v)}
-                              disabled={rowLocked}
-                              title={lockTitle}
-                              variant="cell"
-                              ariaLabel="Preferred doctor"
-                            />
-                          </td>
-
-                          {/* Preferred date — date the patient wants (editable) */}
-                          <td>
-                            <DatePicker
-                              value={row.preferred_date || ""}
-                              onChange={(v) => changePreferredDate(row, v)}
-                              disabled={rowLocked}
-                              minDate={todayStr()}
-                              closedWeekdays={CLOSED_WEEKDAYS}
-                              placeholder="—"
-                              style={CELL_DATE_STYLE}
-                            />
-                          </td>
-
-                          <td>
-                            <Dropdown
-                              value={row.preferred_time_slot || ""}
-                              options={[
-                                { value: "", label: "— No time given" },
-                                ...(row.preferred_time_slot &&
-                                !ARRIVAL_TIME_RANGES.includes(row.preferred_time_slot)
-                                  ? [row.preferred_time_slot, ...ARRIVAL_TIME_RANGES]
-                                  : ARRIVAL_TIME_RANGES
-                                ).map((t) => {
-                                  const booked = slotBooked(t, slotCounts, row);
-                                  return {
-                                    value: t,
-                                    label: t,
-                                    badge: booked || undefined,
-                                    badgeTone: slotTone(booked),
-                                    badgeTitle: booked
-                                      ? `${booked} patient${booked > 1 ? "s" : ""} already in this slot${slotDoctor(row) ? ` for ${slotDoctor(row)}` : ""}`
-                                      : undefined,
-                                  };
-                                }),
-                              ]}
-                              onChange={(v) => patch(row.id, "preferred_time_slot", v)}
-                              disabled={rowLocked}
-                              title={lockTitle}
-                              variant="cell"
-                              ariaLabel="Preferred time"
-                            />
-                          </td>
-
-                          <td>
-                            <ColorSelect
-                              value={row.home_collection ? "yes" : "no"}
-                              options={HOME_COLLECTION_OPTIONS}
-                              onChange={(v) => patch(row.id, "home_collection", v === "yes")}
-                              disabled={rowLocked}
-                              title={lockTitle}
-                            />
-                          </td>
-
-                          {/* Notes / reason (multiline) */}
-                          <td>
-                            <InlineEdit
-                              value={row.call_notes}
-                              onChange={(v) => patch(row.id, "call_notes", v)}
-                              placeholder="Patient said… / reason…"
-                              multiline
-                              disabled={callLocked}
-                              lockTitle={lockTitle}
-                            />
-                          </td>
-
-                          {/* Prescription explained by — editable */}
-                          <td>
-                            <InlineEdit
-                              value={row.prescription_explained_by}
-                              onChange={(v) => patch(row.id, "prescription_explained_by", v)}
-                              disabled={rowLocked}
-                              lockTitle={lockTitle}
-                              placeholder="Explained by…"
-                            />
-                          </td>
-                        </tr>
-
-                        {isOpen && (
-                          <CallHistoryPanel
-                            row={row}
-                            lockTitle={callLocked ? lockTitle : undefined}
-                            ccAgents={ccAgents}
-                            colSpan={colSpan}
-                            details={compact ? compactDetails(row) : null}
-                            actions={
-                              compact ? (
-                                <RowActions
-                                  row={row}
-                                  onBookNext={bookNext}
-                                  onRecords={setRecordFor}
-                                  onEditPatient={setEditPatientFor}
-                                  lockTitle={rowLocked ? lockTitle : undefined}
-                                />
-                              ) : null
-                            }
-                          />
-                        )}
-                      </Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* ── Load more (pagination) ── */}
-          {showRows && (
-            <div className="ghm__load-more">
-              {listQuery.hasNextPage ? (
-                <button
-                  type="button"
-                  className="ghm__load-more-btn"
-                  onClick={loadMore}
-                  disabled={loadingMore}
-                >
-                  {loadingMore ? "Loading…" : `Load More (${rows.length} of ${total})`}
-                </button>
-              ) : (
-                rows.length > PAGE_SIZE && (
-                  <div className="ghm__load-more-end">— Showing all {total} —</div>
-                )
-              )}
-            </div>
-          )}
-        </>
-      )}
-    </div>
+            {/* ── Load more (pagination) ── */}
+            {showRows && (
+              <div className="ghm__load-more">
+                {listQuery.hasNextPage ? (
+                  <button
+                    type="button"
+                    className="ghm__load-more-btn"
+                    onClick={loadMore}
+                    disabled={loadingMore}
+                  >
+                    {loadingMore ? "Loading…" : `Load More (${rows.length} of ${total})`}
+                  </button>
+                ) : (
+                  rows.length > PAGE_SIZE && (
+                    <div className="ghm__load-more-end">— Showing all {total} —</div>
+                  )
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </ApprovalsProvider>
   );
 }

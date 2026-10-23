@@ -666,7 +666,8 @@ router.get("/giniflow/stations/doctor/:visitId", doctorGate, async (req, res) =>
     const readOnly = owned.readOnly && !admin && !editingMine;
     res.json({
       ...consult,
-      canEdit: consult.finalized && consult.isToday && editor && !consult.editing,
+      canEdit:
+        consult.finalized && consult.scribeRx && consult.isToday && editor && !consult.editing,
       editingMine,
       readOnly,
       readOnlyOwner: readOnly ? owned.ownerName : null,

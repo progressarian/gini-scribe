@@ -179,6 +179,45 @@ export default function FlowAdminPage() {
           </label>
         </div>
 
+        <div className="flow-card fset__section">
+          <div className="fset__cardhead">
+            <div className="flow-sec-title">GHM time slots</div>
+          </div>
+          <div className="fset__cardsub">
+            The Time Slot column on GHM Ops. Off: the same twelve one-hour windows (8 AM to 8 PM)
+            for every consultant. On: each row lists its consultant's own slots for that day from
+            their weekly schedule, with breaks and leave greyed out and the patients already in each
+            slot. Rows with no consultant, or a consultant without a schedule, keep the one-hour
+            windows.
+          </div>
+          <label
+            className="fset__toggle"
+            title="List each consultant's own slots in the GHM Time Slot column"
+          >
+            <input
+              type="checkbox"
+              checked={floorSettings.ghm_slots_from_schedule === true}
+              onChange={(e) => {
+                const on = e.target.checked;
+                setFloorSetting.mutate(
+                  { key: "ghm_slots_from_schedule", value: on },
+                  {
+                    onSuccess: () =>
+                      toast(
+                        on
+                          ? "GHM now lists each consultant's own time slots"
+                          : "GHM is back to the one-hour windows",
+                        "success",
+                      ),
+                    onError: (e) => toast(e?.response?.data?.error || "Could not save", "error"),
+                  },
+                );
+              }}
+            />
+            Use each consultant's own time slots in GHM
+          </label>
+        </div>
+
         <div className="fset__grid">
           {/* Benchmarks — add / edit / delete */}
           <div className="flow-card">

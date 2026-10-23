@@ -7,13 +7,18 @@ export async function activeTemplates(doctorIds, dateISO, { client = pool } = {}
   const found = new Map();
   if (!templatesEnabled() || !doctorIds.length) return found;
   const { rows } = await client.query(
-    `SELECT DISTINCT ON (t.doctor_id) t.id, t.doctor_id, t.effective_from::text, t.partial_last
+    `SELECT DISTINCT ON (t.doctor_id) t.id, t.doctor_id, t.effective_from::text, t.partial_last,
+            COALESCE((to_jsonb(t) ->> 'clears')::boolean, FALSE) AS clears
        FROM doctor_slot_templates t
       WHERE t.doctor_id = ANY($1::int[]) AND t.status = 'active' AND t.effective_from <= $2::date
       ORDER BY t.doctor_id, t.effective_from DESC`,
     [doctorIds, dateISO],
   );
-  for (const t of await withRules(client, rows)) found.set(t.doctorId, t);
+  for (const t of await withRules(
+    client,
+    rows.filter((r) => !r.clears),
+  ))
+    found.set(t.doctorId, t);
   return found;
 }
 
@@ -63,6 +68,7 @@ async function withRules(client, rows) {
 export async function templateVersions(doctorId, { client = pool } = {}) {
   const { rows } = await client.query(
     `SELECT t.id, t.doctor_id, t.effective_from::text, t.partial_last, t.status, t.note,
+            COALESCE((to_jsonb(t) ->> 'clears')::boolean, FALSE) AS clears,
             t.created_at, t.withdrawn_at, c.name AS created_by_name, w.name AS withdrawn_by_name
        FROM doctor_slot_templates t
        LEFT JOIN doctors c ON c.id = t.created_by
@@ -74,6 +80,7 @@ export async function templateVersions(doctorId, { client = pool } = {}) {
   const rules = new Map((await withRules(client, rows)).map((t) => [t.id, t]));
   return rows.map((r) => ({
     ...rules.get(r.id),
+    clears: r.clears,
     status: r.status,
     note: r.note,
     createdAt: r.created_at,

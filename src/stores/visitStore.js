@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import api from "../services/api.js";
+import { notifyApproval } from "../lib/slotAvailability.js";
 import useVitalsStore from "./vitalsStore.js";
 import useLabStore from "./labStore.js";
 import useExamStore from "./examStore.js";
@@ -414,14 +415,17 @@ const useVisitStore = create((set, get) => ({
       doctor_name: bookForm.doc || "",
       appointment_date: bookForm.dt || new Date().toISOString().split("T")[0],
       time_slot: bookForm.tm || null,
+      over_limit_reason: bookForm.overLimitReason || null,
       visit_type: bookForm.ty || "OPD",
       notes: bookForm.notes || null,
     };
     try {
       if (editApptId && typeof editApptId === "number") {
-        await api.put(`/api/appointments/${editApptId}`, apptData);
+        const { data: updated } = await api.put(`/api/appointments/${editApptId}`, apptData);
+        notifyApproval(updated);
       } else {
         const { data: saved } = await api.post("/api/appointments", apptData);
+        notifyApproval(saved);
         // Also add to local per-patient appointments
         set((state) => ({
           appointments: [

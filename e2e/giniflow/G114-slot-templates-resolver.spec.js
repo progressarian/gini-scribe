@@ -399,7 +399,7 @@ test.describe.serial("G114 booking slots come from the doctor's schedule templat
 
     const ten = slot(await dayView(), "10 AM to 10:30 AM");
     expect(ten.caps).toEqual({ new: 1, followup: 0, walkin: null });
-    expect(ten.counts).toEqual({ new: 0, followup: 2, walkin: 0, pending: 0 });
+    expect(ten.counts).toEqual({ new: 2, followup: 0, walkin: 0, pending: 0 });
     expect(ten.available).toBe(true);
 
     const bad = await admin.post(`/api/doctors/${doctor.id}/slot-templates`, {

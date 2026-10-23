@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import api from "../services/api.js";
 import { qk } from "../queries/keys.js";
-import { capacityNote } from "../../shared/slotCapacity.js";
+import queryClient from "../queries/client.js";
+import { capacityNote, PATIENT_TYPE_LABELS } from "../../shared/slotCapacity.js";
+import { toast } from "../stores/uiStore.js";
 
 export function useSlotCatalog() {
   const { data } = useQuery({
@@ -45,9 +47,31 @@ export const SLOT_REASON = {
 
 export const slotOptionLabel = (s) => {
   if (!s.available) return `${s.slot_label} — ${SLOT_REASON[s.blocked_by] || "Unavailable"}`;
+  const type = s.patient_type;
+  if (type) {
+    const limit = s.caps?.[type];
+    if (limit == null) return s.slot_label;
+    const label = PATIENT_TYPE_LABELS[type];
+    return s.over_limit
+      ? `${s.slot_label} — ${label} ${s.over_limit.count}/${limit} full · over the limit`
+      : `${s.slot_label} — ${label} ${s.counts?.[type] ?? 0}/${limit}`;
+  }
   const note = capacityNote(s);
   return note ? `${s.slot_label} — ${note}` : s.slot_label;
 };
+
+export const availabilityQuery = (doctorName, date, patient = {}) => {
+  const q = new URLSearchParams({ doctor: doctorName, date });
+  if (patient.patientId) q.set("patient_id", patient.patientId);
+  if (patient.fileNo) q.set("file_no", patient.fileNo);
+  if (patient.walkin) q.set("walkin", "1");
+  if (patient.visitType) q.set("visit_type", patient.visitType);
+  if (patient.exclude) q.set("exclude", patient.exclude);
+  return `/api/availability/day?${q}`;
+};
+
+export const patientKey = (p = {}) =>
+  [p.patientId, p.fileNo, p.walkin ? 1 : 0, p.visitType, p.exclude].map((v) => v ?? "").join("|");
 
 // Hide non-clinical staff from a doctor picker; keep doctors (incl. odd roles).
 export const isClinicalDoctor = (d) =>
@@ -75,7 +99,7 @@ export const slotOptions = (slots, catalog = []) =>
  * Live day availability for a doctor name + date.
  * @returns slots array (annotated) | null (no doctor/date, or unknown doctor → all slots).
  */
-export function useDayAvailability(doctorName, date) {
+export function useDayAvailability(doctorName, date, patient) {
   const [slots, setSlots] = useState(null);
   useEffect(() => {
     if (!doctorName || !date) {
@@ -84,7 +108,7 @@ export function useDayAvailability(doctorName, date) {
     }
     let cancelled = false;
     api
-      .get(`/api/availability/day?doctor=${encodeURIComponent(doctorName)}&date=${date}`)
+      .get(availabilityQuery(doctorName, date, patient))
       .then(({ data }) => {
         if (!cancelled) setSlots(data?.resolved ? data.slots || [] : null);
       })
@@ -94,6 +118,18 @@ export function useDayAvailability(doctorName, date) {
     return () => {
       cancelled = true;
     };
-  }, [doctorName, date]);
+  }, [doctorName, date, patientKey(patient)]);
   return slots;
 }
+
+export const notifyApproval = (appointment) => {
+  const a = appointment?.approval;
+  if (!a) return;
+  queryClient.invalidateQueries({ queryKey: qk.bookingApprovals.all });
+  if (a.status !== "pending") return;
+  toast(
+    `Booked, pending admin approval: the ${PATIENT_TYPE_LABELS[a.patient_type].toLowerCase()} limit of ${a.limit} for this slot is reached.`,
+    "warn",
+    8000,
+  );
+};

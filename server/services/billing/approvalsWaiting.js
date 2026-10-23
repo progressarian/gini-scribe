@@ -1,5 +1,6 @@
 import pool from "../../config/db.js";
 import { CAPABILITIES as CAP, hasCapability } from "../../../shared/permissions.js";
+import { approvalCounts } from "../slots/approvalDecisions.js";
 
 const WAITING_SQL = `
   SELECT COUNT(*) FILTER (WHERE kind <> 'test_cancel')::int AS desk,
@@ -13,6 +14,9 @@ export async function approvalsWaiting(who, db = pool) {
     deskRequests: hasCapability(who, CAP.BILLING_MASTER) ? rows[0].desk : null,
     testCancellations: hasCapability(who, CAP.GINIFLOW_TEST_CANCEL_DECIDE)
       ? rows[0].cancellations
+      : null,
+    bookingApprovals: hasCapability(who, CAP.BOOKING_APPROVE)
+      ? (await approvalCounts({ client: db })).pending
       : null,
   };
 }

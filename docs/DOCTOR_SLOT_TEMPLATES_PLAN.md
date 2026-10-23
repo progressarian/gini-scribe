@@ -253,3 +253,16 @@ Agreed after the rev 2 review:
 - Rerunning the same period skips doctors who already have both versions.
 - Booking impact for a period counts bookings up to the end date only.
 - Tests: `G114` 13–14, `G117` 6–7.
+
+## 15. Block slots from Booking availability (added 2026-10-23, not deployed)
+
+- Schedule tab → Booking availability → **Select slots to block**: tick any number of open slots on the chosen day (past slots of today and already-blocked slots can't be picked), give a reason (required), **Block N slots**. Creates one Time off **Break** for that date with those slot labels (`POST /doctors/:id/break`), so it also lists under Time off and booked patients open the Reassign window.
+- A slot blocked by a Time off break shows the reason and is clickable: **Remove break** (confirmation lists every slot of that break) cancels that entry. Template breaks (Lunch etc.) are not clickable — change them in Edit schedule.
+- Slots now carry `time_off_id` when blocked by a Time off entry (template doctors).
+- Break only, by decision 2026-10-23; longer absences stay in Time off. Test: `G117` 9.
+
+## 16. Clear a schedule from a date (2026-10-23)
+
+- Staff Management → Schedule → **Clear schedule** (next to Edit schedule, admin only). Pick a date (today or later). From that date the person has no slots; booking treats them as available all day with no per-slot limits, as before schedules existed. Every active version starting on or after that date is withdrawn. Days before keep their schedule; bookings, time off and blocked breaks are untouched.
+- Stored as a new version with `doctor_slot_templates.clears = TRUE` and no hours (migration `2026-10-23_slot_templates_clears.sql`), so history stays append-only. The resolver (`activeTemplates`) treats a clearing version as "no schedule"; the list shows it as "Schedule cleared — no slots" / "Cleared", and a future clear can be withdrawn like any upcoming version.
+- `POST /api/doctors/:id/slot-templates/clear {effective_from}`; returns 503 until the migration has run.

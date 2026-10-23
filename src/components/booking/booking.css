@@ -1,0 +1,35 @@
+.overlimit-body p {
+  margin: 0 0 10px;
+  line-height: 1.5;
+}
+.overlimit-body p:last-child {
+  margin-bottom: 0;
+}
+.overlimit-reason {
+  display: block;
+  margin: 4px 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1a2332;
+}
+.overlimit-reason__input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13px;
+  resize: vertical;
+}
+.overlimit-reason__input:focus {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
+.overlimit-reason__count {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 12px;
+  text-align: right;
+}

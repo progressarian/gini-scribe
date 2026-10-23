@@ -346,7 +346,10 @@ export async function editState(visitId, { actorId = null, isAdmin = false } = {
               WHERE d.id = (to_jsonb(v)->>'editing_by')::int) AS editing_name,
             (SELECT e.actor_id FROM giniflow_visit_events e
               WHERE e.visit_id = v.id AND e.meta->>'source' = 'consult_finalize'
-              ORDER BY e.occurred_at DESC LIMIT 1) AS finalized_by
+              ORDER BY e.occurred_at DESC LIMIT 1) AS finalized_by,
+            EXISTS (SELECT 1 FROM giniflow_visit_events e
+                     WHERE e.visit_id = v.id AND e.meta->>'source' = 'consult_finalize'
+                       AND e.meta ? 'consultation_id') AS scribe_rx
        FROM giniflow_visits v WHERE v.id = $1`,
     [visitId],
   );
@@ -357,11 +360,13 @@ export async function editState(visitId, { actorId = null, isAdmin = false } = {
     : null;
   return {
     finalized: FINALIZED.includes(v.current_status),
+    scribeRx: !!v.scribe_rx,
     isToday: !!v.is_today,
     editing,
     editingMine: !!editing && (isAdmin || Number(editing.by) === Number(actorId)),
     canEdit:
       FINALIZED.includes(v.current_status) &&
+      !!v.scribe_rx &&
       !!v.is_today &&
       !editing &&
       mayEdit(v, actorId, isAdmin),

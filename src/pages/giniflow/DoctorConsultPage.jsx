@@ -631,9 +631,11 @@ export default function DoctorConsultPage() {
                   </span>
                 ) : (
                   <span className="fin-gap">
-                    {consult.isToday
-                      ? "Only the consultant or Chief who saw this patient can edit it."
-                      : "Only today's consultations can be edited — correct older ones on the patient's chart."}
+                    {!consult.scribeRx
+                      ? "This prescription was not written in Scribe — change it in HealthRay."
+                      : consult.isToday
+                        ? "Only the consultant or Chief who saw this patient can edit it."
+                        : "Only today's consultations can be edited — correct older ones on the patient's chart."}
                   </span>
                 )}
                 <AmendedNote amendedAt={consult.amendedAt} />

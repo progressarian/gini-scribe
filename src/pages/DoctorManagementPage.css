@@ -1,5 +1,6 @@
 .docmgmt,
-.docmgmt-modal-bg {
+.docmgmt-modal-bg,
+.docmgmt-confirmbody {
   --dm-text: #1e293b;
   --dm-text-2: #475569;
   --dm-muted: #64748b;
@@ -1449,4 +1450,97 @@
 }
 .slotpill .slotpill-caps {
   color: var(--dm-text-2);
+}
+a.docmgmt-secondary {
+  text-decoration: none;
+}
+.docmgmt-approvals {
+  margin-top: 12px;
+  padding: 8px 16px 16px;
+  overflow-x: auto;
+}
+.docmgmt-list tr.docmgmt-overdue td {
+  background: var(--dm-danger-soft);
+}
+.docmgmt-vstatus--reject {
+  margin-left: 6px;
+  border-color: var(--dm-danger-line);
+  background: var(--dm-danger-soft);
+  color: var(--dm-danger-ink);
+}
+.docmgmt-rowactions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.docmgmt-reasonline {
+  display: block;
+  margin-top: 2px;
+  color: var(--dm-text-2);
+}
+.docmgmt-confirmbody p {
+  margin: 0 0 10px;
+  line-height: 1.5;
+}
+.docmgmt-confirmbody .docmgmt-reason {
+  margin-top: 4px;
+  font-weight: 500;
+}
+.docmgmt-confirmbody .docmgmt-reason textarea,
+.docmgmt-confirmbody .docmgmt-reason input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--dm-border-strong);
+  border-radius: var(--dm-radius);
+  font: inherit;
+  font-size: 14px;
+}
+.docmgmt-confirmbody .docmgmt-reason textarea:focus,
+.docmgmt-confirmbody .docmgmt-reason input:focus {
+  border-color: var(--dm-primary);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--dm-primary-soft);
+}
+.docmgmt-availhead {
+  margin-bottom: 12px;
+  align-items: center;
+}
+.slotpill.clickable {
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.slotpill.clickable:hover {
+  border-color: var(--dm-primary);
+}
+.slotpill.picked {
+  border-color: var(--dm-primary);
+  background: var(--dm-primary-soft);
+  box-shadow: inset 0 0 0 1px var(--dm-primary);
+}
+.slotpill.picked span::before {
+  content: "✓ ";
+}
+.slotpill.dimmed {
+  opacity: 0.45;
+}
+.docmgmt-blockbar {
+  margin-top: 12px;
+}
+.docmgmt-blockreason {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--dm-text-2);
+  font-size: 13px;
+}
+.docmgmt .docmgmt-blockreason input {
+  width: 220px;
+}
+.docmgmt-embedded {
+  max-width: none;
+}
+.docmgmt-embedded .docmgmt-viewfilter {
+  margin-top: 8px;
 }
