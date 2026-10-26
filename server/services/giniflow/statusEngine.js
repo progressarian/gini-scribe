@@ -16,6 +16,7 @@ import {
   STATION_STATUSES,
   STATUS_LABEL,
   TERMINAL_STATUSES,
+  VITALS_REST_MINUTES,
 } from "../../../shared/giniflowStatus.js";
 import { doctorsWaitForTests } from "../../../shared/manualFloor.js";
 import {
@@ -431,6 +432,7 @@ export async function getStationTimes(
     labOrderedAt = null,
     segments = [],
     orderTimes = [],
+    restSkipped = false,
   } = {},
 ) {
   // `slaConfig` here is the flat station→minutes map every existing caller
@@ -631,8 +633,25 @@ export async function getStationTimes(
   const WORST = { red: 3, amber: 2, green: 1, neutral: 0 };
   const worse = (a, b) => (WORST[a] >= WORST[b] ? a : b);
 
+  const arrivedRow = statusRows.find((r) => JOURNEY_START_STATUSES.includes(r.status));
+  const restFrom = arrivedRow && !restSkipped ? new Date(arrivedRow.occurred_at) : null;
+  const restTo = restFrom ? new Date(restFrom.getTime() + VITALS_REST_MINUTES * 60000) : null;
+  const restInWait = (entry) => {
+    const status = wait?.status ?? (entry.isWait ? entry.status : null);
+    if (!restFrom || QUEUE_FEEDS[status] !== "with_vitals") return 0;
+    const from = wait?.enteredAt ?? entry.enteredAt;
+    const to = entry.isWait ? entry.leftAt || now : entry.enteredAt;
+    const overlapFrom = from > restFrom ? from : restFrom;
+    const overlapTo = to < restTo ? to : restTo;
+    return overlapTo > overlapFrom ? minutesBetween(overlapFrom, overlapTo) : 0;
+  };
+
   const emit = (entry) => {
-    const waitMinutes = (wait ? wait.minutes : 0) + (entry.isWait ? entry.minutes : 0);
+    const restMinutes = restInWait(entry);
+    const waitMinutes = Math.max(
+      0,
+      (wait ? wait.minutes : 0) + (entry.isWait ? entry.minutes : 0) - restMinutes,
+    );
     // Time the chain skipped over is judged against nothing. It is not the queue
     // it happens to be filed under — HealthRay reports only checked-in and
     // completed, so a patient whose MO and consultant were never tapped onto a
@@ -658,6 +677,8 @@ export async function getStationTimes(
       stationAt: entry.isWait ? null : entry.enteredAt.toISOString(),
       waitStatus: wait?.status ?? null,
       leftAt: entry.leftAt ? entry.leftAt.toISOString() : null,
+      restMinutes,
+      restUntil: restMinutes && restTo ? restTo.toISOString() : null,
       waitMinutes,
       waitBudget,
       stationMinutes,
@@ -748,6 +769,8 @@ export async function getStationTimes(
       continue;
     }
     next.waitMinutes += step.waitMinutes;
+    next.restMinutes += step.restMinutes;
+    next.restUntil = next.restUntil || step.restUntil;
     next.enteredAt = step.enteredAt;
     next.totalMinutes = next.waitMinutes + next.stationMinutes;
     next.overBy =
@@ -787,6 +810,7 @@ export async function getStationTimes(
       continue;
     }
     prev.waitMinutes += step.waitMinutes;
+    prev.restMinutes += step.restMinutes;
     prev.stationMinutes += step.stationMinutes;
     prev.totalMinutes = prev.waitMinutes + prev.stationMinutes;
     prev.overBy =

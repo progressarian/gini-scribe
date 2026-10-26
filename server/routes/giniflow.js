@@ -45,6 +45,7 @@ import { addClient, removeClient, hubStatus } from "../services/giniflow/eventHu
 import { trackByToken } from "../services/giniflow/journey.js";
 import { getMachineTrack } from "../services/giniflow/machineStation.js";
 import { getTestsHold } from "../services/giniflow/testsHold.js";
+import { REST_SKIPPED_SQL } from "../services/giniflow/vitalsRest.js";
 import { getFlowReport } from "../services/giniflow/reports.js";
 
 const router = Router();
@@ -266,6 +267,7 @@ router.get("/giniflow/visits/:id/timeline", async (req, res) => {
               p.name, p.age, p.sex, p.file_no,
               COALESCE(vt.for_online, FALSE) AS online, vt.max_time_min AS journey_max_minutes,
               ${labOnlyPredicate("v", "$2")} AS lab_only,
+              ${REST_SKIPPED_SQL("v")} AS rest_skipped,
               -- The same count the board's own query uses. Counting
               -- giniflow_visits instead made the modal say "Visit 1" beside a
               -- card reading "Visit 3": that table has no history before the
@@ -337,6 +339,7 @@ router.get("/giniflow/visits/:id/timeline", async (req, res) => {
           labOrderedAt,
           segments: tests.segments,
           orderTimes: tests.orderTimes,
+          restSkipped: visit.rows[0].rest_skipped,
         });
 
     const machineTrack = await getMachineTrack(pool, req.params.id, now);

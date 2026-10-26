@@ -1180,7 +1180,7 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
   // finished steps are already fixed (GF-24).
   const liveWait = (step) =>
     step.isCurrent && step.stationMinutes === 0
-      ? (minutesSince(step.enteredAt, now) ?? step.waitMinutes)
+      ? (minutesSince(step.restUntil || step.enteredAt, now) ?? step.waitMinutes)
       : step.waitMinutes;
   const liveTotal = (step) =>
     step.isCurrent ? liveWait(step) + step.stationMinutes : step.totalMinutes;

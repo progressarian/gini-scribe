@@ -7,6 +7,8 @@ import DueList from "../../components/crm/home/DueList.jsx";
 import DoctorsList from "../../components/crm/home/DoctorsList.jsx";
 import ReferralsList from "../../components/crm/home/ReferralsList.jsx";
 import TasksList from "../../components/crm/home/TasksList.jsx";
+import useAuthStore from "../../stores/authStore";
+import { CAPABILITIES, hasCapability } from "../../../shared/permissions.js";
 
 // The rep's home screen (brief §13). Opened one-handed, in a corridor.
 //
@@ -29,6 +31,7 @@ const SEES_EVERY_DOCTOR = ["ceo_admin", "head_of_growth"];
 
 export default function RepHomePage() {
   const navigate = useNavigate();
+  const me = useAuthStore((st) => st.currentDoctor);
   const [params, setParams] = useSearchParams();
   const [data, setData] = useState(null);
   const [tab, setTab] = useState("due");
@@ -90,6 +93,7 @@ export default function RepHomePage() {
     );
 
   const p = data.performance;
+  const canImport = hasCapability(me, CAPABILITIES.CRM_IMPORT);
 
   return (
     <div className="rep rep--wide">
@@ -104,6 +108,28 @@ export default function RepHomePage() {
           </span>
         )}
       </header>
+
+      <section className="rep__perf" aria-label="This month">
+        <dl className="rep__perf-stats">
+          <div>
+            <dt>Visits this month</dt>
+            <dd>{p.visits_month}</dd>
+          </div>
+          <div>
+            <dt>Unique doctors</dt>
+            <dd>{p.unique_doctors_month}</dd>
+          </div>
+          <div>
+            <dt>Assigned</dt>
+            <dd>{p.doctors_assigned}</dd>
+          </div>
+        </dl>
+        {canImport && (
+          <Link to="/crm/import" className="rep__perf-action">
+            Import list
+          </Link>
+        )}
+      </section>
 
       {justLogged && (
         <div className="rep__toast">Visit logged{justLogged ? ` — ${justLogged}` : ""}</div>
@@ -218,16 +244,6 @@ export default function RepHomePage() {
           refreshKey={refreshKey}
         />
       )}
-
-      <div className="rep__perf">
-        <span>
-          {p.visits_month} visit{p.visits_month === 1 ? "" : "s"} this month ·{" "}
-          {p.unique_doctors_month} unique doctors · {p.doctors_assigned} assigned
-        </span>
-        <Link to="/crm/import" className="rep__link">
-          Import list
-        </Link>
-      </div>
     </div>
   );
 }
