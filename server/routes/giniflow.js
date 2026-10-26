@@ -36,6 +36,7 @@ import { getBehindTheFloor, getBehindVisits } from "../services/giniflow/observa
 import {
   LAB_ONLY_DOCTOR,
   labOnlyPredicate,
+  APPOINTMENT_ARRIVED_AT_SQL,
   getLabOnlyTimeline,
   getLabTrack,
 } from "../services/giniflow/labOnlyVisits.js";
@@ -263,11 +264,12 @@ router.get("/giniflow/visits/:id/timeline", async (req, res) => {
   try {
     const visit = await pool.query(
       `SELECT v.id, v.patient_id, v.current_status, v.category, v.blocked_reason,
-              v.visit_date::text AS visit_date,
+              v.paused_at, v.visit_date::text AS visit_date,
               p.name, p.age, p.sex, p.file_no,
               COALESCE(vt.for_online, FALSE) AS online, vt.max_time_min AS journey_max_minutes,
               ${labOnlyPredicate("v", "$2")} AS lab_only,
               ${REST_SKIPPED_SQL("v")} AS rest_skipped,
+              ${APPOINTMENT_ARRIVED_AT_SQL("v")} AS appointment_arrived_at,
               -- The same count the board's own query uses. Counting
               -- giniflow_visits instead made the modal say "Visit 1" beside a
               -- card reading "Visit 3": that table has no history before the
@@ -297,7 +299,8 @@ router.get("/giniflow/visits/:id/timeline", async (req, res) => {
     const sla = await getSlaConfig();
     // A lab-only visit gets its own timeline rather than the chain's: see
     // getLabOnlyTimeline for why the chain could not describe it truthfully.
-    const now = boardClock(visit.rows[0].visit_date);
+    const pausedAt = visit.rows[0].paused_at ? new Date(visit.rows[0].paused_at) : null;
+    const now = pausedAt ?? boardClock(visit.rows[0].visit_date);
     // The parallel lab leg, for an ordinary visit that has one. A lab-only visit
     // already has these milestones as its whole timeline. Read before the chain,
     // which is judged against it.
@@ -344,7 +347,11 @@ router.get("/giniflow/visits/:id/timeline", async (req, res) => {
 
     const machineTrack = await getMachineTrack(pool, req.params.id, now);
     const reportsPending = !labOnly && testsHold.pending;
-    const reportsReadyAt = !labOnly && !testsHold.pending ? testsHold.readyAt : null;
+    const arrivedAt = visit.rows[0].appointment_arrived_at;
+    const sinceArrival = (m) => !arrivedAt || new Date(m.enteredAt) >= new Date(arrivedAt);
+    const readyAt = !labOnly && !testsHold.pending ? testsHold.readyAt : null;
+    const reportsReadyAt =
+      readyAt && (!arrivedAt || new Date(readyAt) >= new Date(arrivedAt)) ? readyAt : null;
     const timeline = labOnly
       ? steps
       : [
@@ -384,6 +391,7 @@ router.get("/giniflow/visits/:id/timeline", async (req, res) => {
       journeySteps,
       reportsPending,
       labTrack: [...labTrack, ...scribeLabMarks]
+        .filter(sinceArrival)
         .sort((a, b) => new Date(a.enteredAt) - new Date(b.enteredAt))
         .map((m, i, all) => {
           if (m.group) {
@@ -403,7 +411,7 @@ router.get("/giniflow/visits/:id/timeline", async (req, res) => {
           };
         }),
       machineTrack,
-      serverTime: now.toISOString(),
+      serverTime: boardClock(visit.rows[0].visit_date).toISOString(),
     });
   } catch (e) {
     handleError(res, e, "Gini Flow timeline");

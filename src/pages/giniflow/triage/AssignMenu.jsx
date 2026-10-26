@@ -24,6 +24,10 @@ export default function AssignMenu({ card, staff, saving, onClose, onSave, onRes
   const [category, setCategory] = useState(card.category);
   const [sdId, setSdId] = useState(card.assignment.sdId);
   const [doctorId, setDoctorId] = useState(card.assignment.doctorId);
+  const [rxMoId, setRxMoId] = useState(card.assignment.rxMoId ?? null);
+  const isRxMo = (p) => String(p.role || "").toLowerCase() === "rx_mo";
+  const clinicians = (staff || []).filter((p) => !isRxMo(p));
+  const rxMos = (staff || []).filter(isRxMo);
 
   useEffect(() => {
     const onKey = (e) => e.key === "Escape" && onClose();
@@ -34,7 +38,8 @@ export default function AssignMenu({ card, staff, saving, onClose, onSave, onRes
   const dirty =
     category !== card.category ||
     sdId !== card.assignment.sdId ||
-    doctorId !== card.assignment.doctorId;
+    doctorId !== card.assignment.doctorId ||
+    rxMoId !== (card.assignment.rxMoId ?? null);
 
   const toggle = (setter, current, id) => setter(current === id ? null : id);
   const consultLocked = consultStarted(card.status);
@@ -83,7 +88,7 @@ export default function AssignMenu({ card, staff, saving, onClose, onSave, onRes
           </p>
 
           <p className="dlg-label">Chief Endocrinologist who leads the workup</p>
-          {(staff || []).map((person) => (
+          {clinicians.map((person) => (
             <button
               type="button"
               key={`sd-${person.id}`}
@@ -105,7 +110,7 @@ export default function AssignMenu({ card, staff, saving, onClose, onSave, onRes
           <p className="dlg-label" style={{ marginTop: 12 }}>
             Consultant who sees them
           </p>
-          {(staff || [])
+          {clinicians
             .filter((p) => p.isChief || String(p.role || "").toLowerCase() !== "mo")
             .map((person) => (
               <button
@@ -128,6 +133,32 @@ export default function AssignMenu({ card, staff, saving, onClose, onSave, onRes
                 {doctorId === person.id && <span>✓</span>}
               </button>
             ))}
+
+          {rxMos.length > 0 && (
+            <>
+              <p className="dlg-label" style={{ marginTop: 12 }}>
+                MO writing the prescription
+              </p>
+              {rxMos.map((person) => (
+                <button
+                  type="button"
+                  key={`rxmo-${person.id}`}
+                  className={`sd-opt${rxMoId === person.id ? " sel" : ""}`}
+                  aria-pressed={rxMoId === person.id}
+                  onClick={() => toggle(setRxMoId, rxMoId, person.id)}
+                >
+                  <span className="sd-av">{initials(person.shortName)}</span>
+                  <span className="sd-info">
+                    <span className="sd-name">{person.shortName}</span>
+                    <span className="sd-detail">
+                      Prescription MO · {person.assignedToday} already on this day
+                    </span>
+                  </span>
+                  {rxMoId === person.id && <span>✓</span>}
+                </button>
+              ))}
+            </>
+          )}
 
           {consultLocked && (
             <p className="dlg-note">
@@ -162,7 +193,7 @@ export default function AssignMenu({ card, staff, saving, onClose, onSave, onRes
             <button
               className="btn btn-tl"
               disabled={!dirty || saving}
-              onClick={() => onSave({ category, sdId, doctorId })}
+              onClick={() => onSave({ category, sdId, doctorId, rxMoId })}
             >
               {saving ? "Saving…" : "Save"}
             </button>

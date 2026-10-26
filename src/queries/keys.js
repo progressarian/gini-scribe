@@ -27,6 +27,12 @@ export const qk = {
       appointmentId ? String(appointmentId) : null,
     ],
     labCount: (patientId) => ["visit", String(patientId), "lab-count"],
+    workup: (patientId, appointmentId) => [
+      "visit",
+      String(patientId),
+      "workup",
+      appointmentId ? String(appointmentId) : null,
+    ],
   },
   companion: {
     all: ["companion"],

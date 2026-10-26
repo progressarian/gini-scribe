@@ -1,4 +1,4 @@
-const sqlKey = (column) =>
+export const sqlKey = (column) =>
   `regexp_replace(regexp_replace(lower(btrim(COALESCE(${column}, ''))), '^dr\\.?\\s*', ''), '[^a-z]', '', 'g')`;
 
 export const directConsultSql = (column) =>

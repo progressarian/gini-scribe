@@ -28,7 +28,7 @@ import { TESTS_HOLD_SQL } from "./testsHold.js";
 
 import { skipsChiefStop, syncFromStatus } from "./journey.js";
 import { assertCoordinatorDone, syncHoldIn } from "./coordinatorHold.js";
-import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
+import { ARRIVED_FOR_APPOINTMENT, LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { CONSULT_STATUSES } from "../../../shared/labOnly.js";
 import { FLOOR_DONE_LAB_STATUSES } from "../../../shared/labStages.js";
 import { MACHINE_RUNGS } from "../../../shared/machineStages.js";
@@ -442,13 +442,19 @@ export async function getStationTimes(
     const v = slaRows.find((r) => r.station === station)?.categoryOverrides?.[category];
     return Number.isFinite(v) && v > 0 ? v : null;
   };
-  const { rows } = await db.query(
+  const { rows: allRows } = await db.query(
     `SELECT status, actor_role, occurred_at, meta
        FROM giniflow_visit_events
       WHERE visit_id = $1
       ORDER BY date_trunc('milliseconds', occurred_at), seq`,
     [visitId],
   );
+  const appointmentArrival = allRows.findLast(
+    (r) => r.status === "checked_in" && r.meta?.reason === ARRIVED_FOR_APPOINTMENT,
+  );
+  const rows = appointmentArrival
+    ? allRows.filter((r) => new Date(r.occurred_at) >= new Date(appointmentArrival.occurred_at))
+    : allRows;
 
   // The rooms a patient is physically in. A step that ends at an event further
   // down the chain than one of these has swallowed a room nobody recorded.

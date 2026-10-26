@@ -12,6 +12,7 @@ import { MED_CATEGORIES, detectMedCategory } from "../config/medicationCategorie
 import { sortDiagnoses } from "../utils/diagnosisSort.js";
 import { followUpDueDate, pickNextVisit, skipSunday } from "../../shared/followUp.js";
 import { toLocal10 } from "../../shared/phone.js";
+import { summariseExam, summariseHistory } from "../../shared/newPatientWorkup.js";
 import { DEFAULT_HOSPITAL, normalizeHospital } from "../services/prescriptionFooter.js";
 
 const HOSPITAL_NAME = DEFAULT_HOSPITAL.name;
@@ -470,6 +471,7 @@ body{font-family:var(--fb);color:var(--ink);background:var(--white);font-size:va
 
 .rx-complaints{font-size:var(--fs-body);line-height:1.5;color:var(--ink)}
 .rx-history b{font-weight:600;color:var(--ink2)}
+.rx-history>div{break-inside:avoid}
 .rx-advice{margin:0;padding-left:18px;font-size:var(--fs-body);line-height:1.55;color:var(--ink)}
 .rx-section-title{font-size:var(--fs-label);font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink3);margin-bottom:8px;margin-top:18px;padding-bottom:5px;border-bottom:1px solid var(--bd);break-inside:avoid;break-after:avoid}
 .rx-med-cat{display:flex;align-items:center;gap:6px;font-size:var(--fs-label);font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.08em;background:#f5f7fa;padding:4px 8px;border-left:3px solid var(--tl);margin:10px 0 2px}
@@ -559,6 +561,30 @@ body{font-family:var(--fb);color:var(--ink);background:var(--white);font-size:va
 @page{size:A4;margin:14mm 10mm}
 `;
 
+const labelledLines = (lines) =>
+  lines.map(({ label, value }) => `<div><b>${escape(label)}:</b> ${escape(value)}</div>`).join("");
+
+function workupHtml(workup) {
+  const exam = summariseExam(workup.exam || {});
+  const examLines = exam.lines.map(({ region, findings }) => ({
+    label: region,
+    value: findings.join(", "),
+  }));
+  if (exam.restNormal)
+    examLines.push({
+      label: exam.lines.length ? "Rest of the examination" : "Examination",
+      value: "NAD",
+    });
+  return `<div class="rx-section-title">History</div>
+    <div class="rx-complaints rx-history">${labelledLines(summariseHistory(workup.history || {}, workup.allergy))}</div>
+    ${
+      examLines.length
+        ? `<div class="rx-section-title">Examination</div>
+           <div class="rx-complaints rx-history">${labelledLines(examLines)}</div>`
+        : ""
+    }`;
+}
+
 function buildPrescriptionHtml(data = {}) {
   const {
     patient = {},
@@ -577,6 +603,7 @@ function buildPrescriptionHtml(data = {}) {
     consultations = [],
     goals: goalsInput = [],
     appt_plan = null,
+    workup = null,
   } = data;
 
   // Every caller (client print, /visit route, sync auto-save) gets the same
@@ -1128,8 +1155,10 @@ function buildPrescriptionHtml(data = {}) {
     }
 
     ${
-      history
-        ? `<div class="rx-section-title">Clinical history</div>
+      workup
+        ? workupHtml(workup)
+        : history
+          ? `<div class="rx-section-title">Clinical history</div>
            <div class="rx-complaints rx-history">${String(history)
              .split(/\n+/)
              .map((line) => line.trim())
@@ -1139,7 +1168,7 @@ function buildPrescriptionHtml(data = {}) {
                return `<div>${sub ? `<b>${escape(sub[1])}:</b> ${escape(sub[2])}` : escape(line)}</div>`;
              })
              .join("")}</div>`
-        : ""
+          : ""
     }
 
 

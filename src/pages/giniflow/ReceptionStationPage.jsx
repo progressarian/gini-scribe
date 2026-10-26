@@ -100,6 +100,7 @@ import {
 } from "../../components/giniflow/OutsourcedTests.jsx";
 import {
   useJourneyPlan,
+  useArriveForAppointment,
   useCheckIn,
   useJourney,
   useJourneyStep,
@@ -1307,13 +1308,21 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   const waitingLab = !!arrival.samplesOnly && !!labType && labPlan === undefined;
   const plan = waitingLab ? undefined : savedLab ? labPlan : typePlan;
   const checkIn = useCheckIn();
+  const arriveForAppointment = useArriveForAppointment();
+  const forAppointment = Boolean(arrival.forAppointment && arrival.awaitsAppointment);
+  const alreadyHad = useMemo(
+    () => new Set(forAppointment ? arrival.awaitsAppointment.have : []),
+    [forAppointment, arrival],
+  );
   const checkInWalkIn = useCheckInWalkIn();
-  const saving = checkIn.isPending || checkInWalkIn.isPending;
+  const saving = checkIn.isPending || checkInWalkIn.isPending || arriveForAppointment.isPending;
   const canBill = useCanBill();
   const [billFor, setBillFor] = useState(null);
   const [arrivalChoices, setArrivalChoices] = useState(emptyArrivalChoices);
   const [arrivalError, setArrivalError] = useState(null);
-  const asksHome = Boolean(arrival.visitId && canRecordHome(arrival) && !arrival.homeRecord);
+  const asksHome = Boolean(
+    !forAppointment && arrival.visitId && canRecordHome(arrival) && !arrival.homeRecord,
+  );
   const saveHome = useSaveHomeSample();
   const [homeAnswer, setHomeAnswer] = useState(emptyHomeAnswer);
   const [homeSaved, setHomeSaved] = useState(false);
@@ -1357,17 +1366,20 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   );
   const catalogRef = useRef(catalog);
   catalogRef.current = catalog;
+  const notYetDone = (list) => list.filter((s) => !s.catalogId || !alreadyHad.has(s.catalogId));
   const forPatient = (list) =>
-    samplesOnly
-      ? withProcedure(
-          labOnlyJourney(list, catalogRef.current, {
-            withLeg: labOnlyChosen && !arrival.samplesOnly,
-            saved: savedLab,
-          }),
-          stepsBill.current?.procedure,
-          { only: stepsBill.current?.status === "procedures_only" },
-        )
-      : list;
+    forAppointment
+      ? notYetDone(list)
+      : samplesOnly
+        ? withProcedure(
+            labOnlyJourney(list, catalogRef.current, {
+              withLeg: labOnlyChosen && !arrival.samplesOnly,
+              saved: savedLab,
+            }),
+            stepsBill.current?.procedure,
+            { only: stepsBill.current?.status === "procedures_only" },
+          )
+        : list;
 
   useEffect(() => {
     if (!bill) return;
@@ -1501,7 +1513,12 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
         }
         visitId = created.visitId;
       }
-      const r = await checkIn.mutateAsync({ visitId, visitTypeId, steps: list, sendWhatsapp });
+      const r = await (forAppointment ? arriveForAppointment : checkIn).mutateAsync({
+        visitId,
+        visitTypeId,
+        steps: list,
+        sendWhatsapp: forAppointment ? false : sendWhatsapp,
+      });
       const billed =
         withBill && billsAtArrival && arrival.visitId ? await collectAtArrival(visitId) : false;
       const stayOpen = canBill && Boolean(visitId) && !billed;
@@ -1584,6 +1601,13 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
             <div className="wi-head">
               <strong>What is this visit?</strong>
             </div>
+            {forAppointment && (
+              <div className="dp-hint" role="status">
+                Arrived for their appointment
+                {arrival.awaitsAppointment.booking ? ` — ${arrival.awaitsAppointment.booking}` : ""}
+                . The lab stops already done stay done; the stops below are added after them.
+              </div>
+            )}
             {billFor && (
               <div className="dp-hint" role="status">
                 ✓ {arrival.name} is checked in —{" "}
@@ -1745,11 +1769,13 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
                   ? "Working out the bill…"
                   : billsAtArrival
                     ? arrivalButtonText(arrivalPreview, arrivalChoices, false)
-                    : arrival.phone
-                      ? "✓ Check in only"
-                      : "✓ Check in"}
+                    : forAppointment
+                      ? "✓ Arrived for appointment"
+                      : arrival.phone
+                        ? "✓ Check in only"
+                        : "✓ Check in"}
             </button>
-            {arrival.phone && (
+            {arrival.phone && !forAppointment && (
               <button className="st-btn st-btn-g" disabled={blocked} onClick={() => submit(true)}>
                 {billsAtArrival ? "Same + send WhatsApp" : "Check in + send WhatsApp"}
               </button>
@@ -2516,7 +2542,20 @@ export function ArrivalsTab({
                   visit has no clock to hold, so it gets no control — the server
                   refuses those with a 409 and a button that only ever errors is
                   worse than no button. */}
-              {FINISHED_STATUSES.includes(a.status) && (
+              {a.awaitsAppointment && (
+                <button
+                  type="button"
+                  className="st-btn st-btn-grn"
+                  disabled={busy}
+                  title={`Their tests are done and they now have a consultant booking${
+                    a.awaitsAppointment.booking ? ` (${a.awaitsAppointment.booking})` : ""
+                  } — add the consultation to their journey`}
+                  onClick={() => setArriving({ ...a, forAppointment: true })}
+                >
+                  ✓ Arrived for appointment
+                </button>
+              )}
+              {FINISHED_STATUSES.includes(a.status) && !a.awaitsAppointment && (
                 <button
                   type="button"
                   className="st-btn st-btn-ghost"

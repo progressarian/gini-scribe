@@ -10,6 +10,18 @@ import { HOME_NOTE_MAX } from "../../shared/homeCollectors.js";
 import { RX_FOLLOWUP_ACTIONS } from "../../shared/rxFollowups.js";
 import { HOLD_DECISIONS, HOLD_NOTE_MAX, HOLD_NOTE_MIN } from "../../shared/coordinatorHold.js";
 import {
+  ACANTHOSIS_GRADES,
+  EXAM_FINDING_STATES,
+  EXAM_REGIONS,
+  HISTORY_TEXT_FIELDS,
+  HISTORY_YES_NO_FIELDS,
+  JVP_VALUES,
+  WORKUP_NOTE_MAX,
+  WORKUP_TEXT_MAX,
+  YES_NO,
+} from "../../shared/newPatientWorkup.js";
+import { ALLERGY_STATES } from "../../shared/giniflowAllergy.js";
+import {
   CLOSE_OUTCOMES,
   FOLLOWUP_KIND_GROUPS,
   FOLLOWUP_STATUSES,
@@ -1675,9 +1687,10 @@ export const giniflowTriagePatchSchema = z
     category: z.enum(CATEGORIES).nullable().optional(),
     assignedSdId: z.coerce.number().int().positive().nullable().optional(),
     assignedDoctorId: z.coerce.number().int().positive().nullable().optional(),
+    rxMoId: z.coerce.number().int().positive().nullable().optional(),
   })
   .refine(
-    (v) => "category" in v || "assignedSdId" in v || "assignedDoctorId" in v,
+    (v) => "category" in v || "assignedSdId" in v || "assignedDoctorId" in v || "rxMoId" in v,
     "Nothing to change",
   );
 
@@ -1745,4 +1758,70 @@ export const testCancelNowSchema = z.strictObject({
   reason_code: z.string().trim().max(40),
   ...cancelChargeFields,
   request_note: z.string().trim().max(300).optional(),
+});
+
+const workupText = z.string().max(WORKUP_TEXT_MAX, `Keep this under ${WORKUP_TEXT_MAX} characters`);
+const workupNote = z
+  .string()
+  .max(WORKUP_NOTE_MAX, `Keep notes under ${WORKUP_NOTE_MAX} characters`);
+
+const workupExamEntry = (item) => {
+  if (item.kind === "grade")
+    return z.strictObject({
+      value: z.enum(ACANTHOSIS_GRADES).nullish(),
+      note: workupNote.nullish(),
+    });
+  if (item.kind === "jvp")
+    return z.strictObject({
+      value: z.enum(JVP_VALUES.map((v) => v.id)).nullish(),
+      note: workupNote.nullish(),
+    });
+  return z.strictObject({
+    state: z.enum(EXAM_FINDING_STATES.map((s) => s.id)).nullish(),
+    note: workupNote.nullish(),
+  });
+};
+
+export const newPatientWorkupSaveSchema = z.object({
+  appointment_id: z.coerce.number().int().positive("Open the patient from today's appointment"),
+  allergy: z
+    .strictObject({
+      status: z.enum(ALLERGY_STATES, { message: "Choose whether the patient has allergies" }),
+      note: workupNote.nullish(),
+    })
+    .nullish(),
+  expected_updated_at: z.string().max(40).nullish(),
+  history: z
+    .strictObject({
+      ...Object.fromEntries(HISTORY_TEXT_FIELDS.map((f) => [f.id, workupText.nullish()])),
+      ...Object.fromEntries(
+        HISTORY_YES_NO_FIELDS.map((f) => [
+          f.id,
+          z
+            .strictObject({ answer: z.enum(YES_NO).nullish(), note: workupNote.nullish() })
+            .nullish(),
+        ]),
+      ),
+    })
+    .default({}),
+  exam: z
+    .strictObject(
+      Object.fromEntries(
+        EXAM_REGIONS.map((region) => [
+          region.id,
+          z
+            .strictObject(
+              Object.fromEntries(
+                region.items.map((item) => [item.id, workupExamEntry(item).nullish()]),
+              ),
+            )
+            .nullish(),
+        ]),
+      ),
+    )
+    .default({}),
+});
+
+export const newPatientWorkupQuerySchema = z.object({
+  appointment_id: z.coerce.number().int().positive().optional(),
 });

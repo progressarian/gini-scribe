@@ -29,6 +29,7 @@ import { borrowedFollowUp } from "./ghmDayWindow.js";
 import { appointmentComplaints, appointmentHistory } from "./giniflow/visitComplaints.js";
 import { appointmentAdvice } from "./giniflow/visitAdvice.js";
 import { appointmentNextVisit } from "./giniflow/visitNextVisit.js";
+import { workupForPrint } from "./visit/newPatientWorkup.js";
 
 const require = createRequire(import.meta.url);
 // Outbound Genie sync removed 2026-05-01 — dual-DB routing replaces it.
@@ -52,6 +53,58 @@ async function findExistingPrescription(client, pid, consultationId, source) {
   return r.rows[0] || null;
 }
 
+export async function rxDoctorFor(doctorName) {
+  const name = String(doctorName || "").trim();
+  if (!name) return null;
+  const docRow = (
+    await pool.query(
+      `SELECT license_no, specialty, qualification FROM doctors
+        WHERE lower(btrim(name)) = lower(btrim($1))
+          AND COALESCE(is_active, TRUE)
+        LIMIT 1`,
+      [name],
+    )
+  ).rows[0];
+  return {
+    name,
+    reg_no: docRow?.license_no || null,
+    designation: docRow?.specialty || null,
+    qualification: docRow?.qualification || null,
+  };
+}
+
+export async function rxDoctorForAppointment(appointmentId, pid) {
+  if (!appointmentId) return null;
+  const appt = (
+    await pool.query(`SELECT doctor_name FROM appointments WHERE id = $1 AND patient_id = $2`, [
+      appointmentId,
+      pid,
+    ])
+  ).rows[0];
+  return rxDoctorFor(appt?.doctor_name);
+}
+
+export async function todaysAppointmentId(pid) {
+  const { rows } = await pool.query(
+    `SELECT id FROM appointments
+      WHERE patient_id = $1
+        AND appointment_date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date
+        AND NULLIF(btrim(doctor_name), '') IS NOT NULL
+      ORDER BY id DESC LIMIT 1`,
+    [pid],
+  );
+  return rows[0]?.id ?? null;
+}
+
+export async function withAppointmentRxContext(pid, givenAppointmentId, data) {
+  const appointmentId = givenAppointmentId || (pid ? await todaysAppointmentId(pid) : null);
+  const [doctor, workup] = await Promise.all([
+    rxDoctorForAppointment(appointmentId, pid),
+    appointmentId ? workupForPrint(appointmentId, pid) : null,
+  ]);
+  return { ...data, ...(doctor && { doctor }), workup };
+}
+
 export async function savePrescriptionForVisit(pid, payload, opts = {}) {
   const {
     source = "visit",
@@ -62,7 +115,7 @@ export async function savePrescriptionForVisit(pid, payload, opts = {}) {
   } = opts;
 
   if (!pid) throw new Error("savePrescriptionForVisit: missing patient id");
-  let data = payload || {};
+  let data = await withAppointmentRxContext(pid, appointmentId, payload || {});
 
   let consultationId = consultationIdOverride;
   if (consultationId == null) {
@@ -356,35 +409,7 @@ export async function buildVisitPayloadFromDb(pid, { appointmentId } = {}) {
     appointmentNextVisit(appt?.id),
   ]);
 
-  // Doctor block — appointments.doctor_name is the canonical reference for
-  // who saw the patient. We don't currently join doctors metadata for the
-  // template (qualification/reg_no) because the JSONB on the appointment
-  // doesn't carry it; the template renders blanks gracefully.
-  // The appointment carries the consultant as free text, so the roster is
-  // matched on it to reach the registration number the letterhead footer prints
-  // (`doctor.reg_no`). Without this the PDF has no Reg. No. line at all — the
-  // legal gap addendum v1.1 §4 names, and the reason the field looked missing
-  // when it was only unreferenced.
-  //
-  // Exact match, and only a real clinician: a wrong number on a prescription is
-  // worse than none, and a near-miss would print somebody else's licence.
-  const docRow = appt?.doctor_name
-    ? (
-        await pool.query(
-          `SELECT name, short_name, license_no, specialty, qualification FROM doctors
-            WHERE lower(btrim(name)) = lower(btrim($1))
-              AND COALESCE(is_active, TRUE)
-            LIMIT 1`,
-          [appt.doctor_name],
-        )
-      ).rows[0]
-    : null;
-  const doctor = {
-    name: appt?.doctor_name || "",
-    reg_no: docRow?.license_no || null,
-    designation: docRow?.specialty || null,
-    qualification: docRow?.qualification || null,
-  };
+  const doctor = (await rxDoctorFor(appt?.doctor_name)) || { name: "" };
 
   // Lab history grouped by canonical name (mirrors GET /visit/:pid logic)
   const labHistory = {};

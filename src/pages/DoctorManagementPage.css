@@ -652,7 +652,8 @@
   align-items: center;
   gap: 8px;
 }
-.docmgmt-setting-control input:not([type="checkbox"]) {
+.docmgmt-setting-control input:not([type="checkbox"]),
+.docmgmt-setting-control select {
   width: 260px;
 }
 .docmgmt-switch {

@@ -33,7 +33,12 @@ import {
 import { blockDetail } from "../patientBlockView.js";
 import { mirrorFloorStatus } from "../appointmentStatus.js";
 import { createWalkinBooking } from "../walkinBooking.js";
-import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
+import {
+  LAB_ONLY_DOCTOR,
+  awaitsAppointmentArrivalSql,
+  consultBookingSql,
+  labOnlyPredicate,
+} from "./labOnlyVisits.js";
 import {
   CLAIM_STATE,
   collectiblePaise,
@@ -870,6 +875,10 @@ export const ARRIVAL_SELECT = `
          (${directConsultSql("ap.doctor_name")} OR COALESCE(adoc.direct_consult, FALSE))
            AS direct_consult,
          ${labOnlyPredicate("v", `'${LAB_ONLY_DOCTOR}'`)} AS lab_only,
+         ${awaitsAppointmentArrivalSql("v", `'${LAB_ONLY_DOCTOR}'`)} AS awaits_appointment,
+         (SELECT cb.doctor_name || COALESCE(' · ' || cb.time_slot, '')
+            FROM appointments cb
+           WHERE cb.id = ${consultBookingSql("v", `'${LAB_ONLY_DOCTOR}'`)}) AS consult_booking,
          jr.steps AS journey_steps,
          ordered.count AS ordered_count, ordered.total AS ordered_total
     FROM giniflow_visits v
@@ -1005,6 +1014,12 @@ export const shapeArrival = (r, now) => ({
   assignedDoctorName: r.assigned_doctor_name || null,
   consultsDirect: r.direct_consult,
   samplesOnly: !!r.lab_only,
+  awaitsAppointment: r.awaits_appointment
+    ? {
+        booking: r.consult_booking || null,
+        have: (r.journey_steps || []).map((s) => s.catalogId).filter(Boolean),
+      }
+    : null,
   journey: journeyProgress(r.journey_steps, r.current_status, r.resume_status),
   orderedServices: r.ordered_count
     ? { count: r.ordered_count, total: Math.round(Number(r.ordered_total) * 100) }

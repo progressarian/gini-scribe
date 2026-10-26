@@ -25,6 +25,10 @@ import {
 import { extractLab } from "../services/extraction";
 import { normalizeTestName } from "../config/labNormalization";
 import { EXAM_SECTIONS } from "../config/exam.js";
+import VisitNewPatientWorkup, {
+  WorkupExamSummary,
+} from "../components/visit/VisitNewPatientWorkup.jsx";
+import { useNewPatientWorkup } from "../queries/hooks/useNewPatientWorkup";
 import VisitTopbar from "../components/visit/VisitTopbar";
 import VisitStrip from "../components/visit/VisitStrip";
 import VisitSidebar from "../components/visit/VisitSidebar";
@@ -678,6 +682,7 @@ export default function VisitPage() {
   const qc = useQueryClient();
   const dbPatientId = usePatientStore((s) => s.dbPatientId);
   const restorePatient = usePatientStore((s) => s.restorePatient);
+  const restoreError = usePatientStore((s) => s.restoreError);
   const doctor = useAuthStore((s) => s.currentDoctor);
   const patientSummaryQ = usePatientSummary(dbPatientId);
   const endVisitAction = useVisitStore((s) => s.endVisit);
@@ -851,6 +856,8 @@ export default function VisitPage() {
   // the patient's latest appointment (returned by the visit GET) so summary
   // calls always carry an apptId and the server-side cache is hit.
   const effectiveApptId = opdApptId || visitQuery.data?.latestAppointmentId || null;
+  const workupQuery = useNewPatientWorkup(dbPatientId, effectiveApptId);
+  const workupExam = workupQuery.data?.workup || workupQuery.data?.earlier || null;
 
   // Run the one-time medication reconcile after the first successful load.
   // If any rows are stopped, invalidate the visit cache so it refetches with
@@ -892,8 +899,9 @@ export default function VisitPage() {
   }, [visitQuery.isPending]);
 
   useEffect(() => {
-    if (visitQuery.isError) toast("Failed to load visit data", "error");
-  }, [visitQuery.isError]);
+    if (visitQuery.isError && visitQuery.error?.response?.data?.code !== "not_assisted_patient")
+      toast("Failed to load visit data", "error");
+  }, [visitQuery.isError, visitQuery.error]);
 
   // ── Refresh data after mutations — delegate to React Query ──
   const refreshData = useCallback(async () => {
@@ -1277,7 +1285,7 @@ export default function VisitPage() {
     try {
       const visitSummaryText = await resolveVisitSummaryText();
       setRxModal((m) => ({ ...m, status: "Generating PDF…" }));
-      const payload = { ...visitPayload, visitSummaryText };
+      const payload = { ...visitPayload, visitSummaryText, appointment_id: opdApptId || null };
       const res = await api.post(
         `/api/visit/${dbPatientId || data.patient.id}/prescription.pdf`,
         payload,
@@ -1310,7 +1318,7 @@ export default function VisitPage() {
     } finally {
       setPrintingRx(false);
     }
-  }, [visitPayload, dbPatientId, data, resolveVisitSummaryText, printingRx]);
+  }, [visitPayload, dbPatientId, data, resolveVisitSummaryText, printingRx, opdApptId]);
 
   const handleSaveRx = useCallback(async () => {
     const pid = dbPatientId || data?.patient?.id;
@@ -1431,6 +1439,19 @@ export default function VisitPage() {
   }, [data]);
 
   // ── Loading / empty states ──
+  if (!dbPatientId && restoreError) {
+    return (
+      <div className="visit-page">
+        <div className="vp-loading" role="alert">
+          {restoreError}{" "}
+          <button className="btn" onClick={navClick("/")}>
+            Go Home
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (loading) {
     return (
       <div className="visit-page">
@@ -1445,7 +1466,9 @@ export default function VisitPage() {
     return (
       <div className="visit-page">
         <div className="vp-loading">
-          No visit data found.{" "}
+          {visitQuery.error?.response?.data?.code === "not_assisted_patient"
+            ? visitQuery.error.response.data.error
+            : "No visit data found."}{" "}
           <button className="btn" onClick={navClick("/")}>
             Go Home
           </button>
@@ -1688,6 +1711,14 @@ export default function VisitPage() {
                   {j.label}
                 </button>
               ))}
+              {workupQuery.data?.applies && (
+                <button
+                  className={`jbtn ${jumpTarget === "workup" ? "on" : ""}`}
+                  onClick={() => handleJump("workup")}
+                >
+                  🩺 History & Exam
+                </button>
+              )}
               <div className="jdiv" />
               <button
                 className="jbtn"
@@ -1725,6 +1756,11 @@ export default function VisitPage() {
               />
               {/* <VitalsTrendChart vitals={vitals} /> */}
               {/* <VisitCoordPrep prep={data.prep} /> */}
+              <VisitNewPatientWorkup
+                patientId={dbPatientId}
+                appointmentId={effectiveApptId}
+                rxDone={["seen", "completed"].includes(apptStatus || "")}
+              />
               <VisitSymptomsSection
                 symptoms={data.symptoms || []}
                 onAddSymptom={() => setModal({ type: "addSymptom" })}
@@ -1823,7 +1859,9 @@ export default function VisitPage() {
                   </button>
                 </div>
                 <div className="scb">
-                  {data.examFindings ? (
+                  {workupExam ? (
+                    <WorkupExamSummary exam={workupExam.exam} />
+                  ) : data.examFindings ? (
                     <div className="visit-exam-grid">
                       {data.examFindings.map((ef, i) => (
                         <div
@@ -2026,6 +2064,11 @@ export default function VisitPage() {
             </div>
           </div>
           <div className={`panel ${tab === "history" ? "on" : ""}`}>
+            <VisitNewPatientWorkup
+              patientId={dbPatientId}
+              appointmentId={effectiveApptId}
+              mode="earlier"
+            />
             <VisitHistoryPanel consultations={consultations} />
           </div>
           <div className={`panel ${tab === "messages" ? "on" : ""}`}>

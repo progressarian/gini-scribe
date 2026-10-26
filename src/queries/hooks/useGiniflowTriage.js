@@ -72,11 +72,12 @@ export const useSetCategory = () =>
 
 export const useAssignVisit = () =>
   useTriageAction(
-    async ({ visitId, assignedSdId, assignedDoctorId }) =>
+    async ({ visitId, assignedSdId, assignedDoctorId, rxMoId }) =>
       (
         await api.patch(`${base}/${visitId}`, {
           ...(assignedSdId !== undefined ? { assignedSdId } : {}),
           ...(assignedDoctorId !== undefined ? { assignedDoctorId } : {}),
+          ...(rxMoId !== undefined ? { rxMoId } : {}),
         })
       ).data,
   );

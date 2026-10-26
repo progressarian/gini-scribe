@@ -17,6 +17,7 @@ import {
   assign,
   autoCategoriseDay,
   getAssignableStaff,
+  assignRxMo,
 } from "../services/giniflow/triage.js";
 
 // The coordinator's pre-OPD board (docs/gini-flow/18-TRIAGE-BOARD-PLAN.md §9).
@@ -130,6 +131,9 @@ router.patch(
           actorId,
         );
         result.assignment = assigned;
+      }
+      if ("rxMoId" in req.body) {
+        result.rxMo = await assignRxMo(req.params.visitId, req.body.rxMoId, actorId);
       }
 
       res.json(result);

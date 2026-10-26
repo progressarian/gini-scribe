@@ -4,6 +4,7 @@ export const AUTO_LAB_BILLING_SQL = (step) =>
 export const JOURNEY_STEPS_SQL = (v) => `
   SELECT json_agg(json_build_object(
            'name', s.step_name,
+           'catalogId', s.step_catalog_id,
            'status', s.status,
            'chain', s.chain_status,
            'order', s.step_order,

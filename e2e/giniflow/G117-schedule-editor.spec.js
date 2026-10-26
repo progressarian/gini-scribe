@@ -403,4 +403,40 @@ test.describe
       "withdrawn",
     );
   });
+
+  test("11. one doctor's schedule can end on a date and go back to the usual one", async ({
+    page,
+  }) => {
+    const [y, m] = istDay().split("-").map(Number);
+    const first = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10);
+    const last = new Date(Date.UTC(y, m + 1, 0)).toISOString().slice(0, 10);
+    const dayAfter = new Date(Date.UTC(y, m + 1, 1)).toISOString().slice(0, 10);
+    await query(
+      `DELETE FROM doctor_slot_templates WHERE doctor_id = $1 AND effective_from > $2::date`,
+      [doctor.id, istDay()],
+    );
+
+    await buildMondays(page);
+    await page.getByRole("button", { name: "Next month only" }).click();
+    await expect(page.getByLabel("Applies from")).toHaveValue(first);
+    await expect(page.getByRole("radio", { name: "Until" })).toBeChecked();
+    await expect(page.getByLabel("Last day of this schedule")).toHaveValue(last);
+    await expect(
+      page.getByText(`From ${longDate(dayAfter)} ${doctor.name} goes back`),
+    ).toBeVisible();
+    await page.getByRole("button", { name: /^Save/ }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toContainText("Save this schedule for 1 doctor?");
+    await expect(dialog).toContainText(`and ends ${longDate(last)}`);
+    await dialog.getByRole("button", { name: "Save schedule" }).click();
+    await expect(page.getByText(/then each goes back to their usual schedule/)).toBeVisible();
+
+    const versions = await query(
+      `SELECT effective_from::text FROM doctor_slot_templates
+        WHERE doctor_id = $1 AND status = 'active' AND effective_from > $2::date
+        ORDER BY effective_from`,
+      [doctor.id, istDay()],
+    );
+    expect(versions.rows.map((r) => r.effective_from)).toEqual([first, dayAfter]);
+  });
 });

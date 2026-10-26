@@ -34,6 +34,7 @@ export const ROLES = {
   ADMIN: "admin",
   CONSULTANT: "consultant",
   MO: "mo",
+  RX_MO: "rx_mo",
   NURSE: "nurse",
   LAB: "lab",
   LAB_ADMIN: "lab_admin",
@@ -305,6 +306,15 @@ export const ROLE_CAPABILITIES = {
     C.GINIFLOW_MO_CLOSE,
     C.GINIFLOW_PRINT_RX,
   ],
+  [ROLES.RX_MO]: [
+    C.PATIENT_READ,
+    C.PATIENT_CHART,
+    C.CLINICAL_WRITE,
+    C.AI_TOOLS,
+    C.VITALS,
+    C.LAB_REQUESTS,
+    C.RECEPTION_OPS,
+  ],
   // No REFILLS: working the refill queue is a prescribing decision, so nurses
   // don't approve them. They can still see a patient's refill history in the
   // chart — /api/patients/:id/refill-requests resolves to /api/patients,
@@ -556,7 +566,7 @@ export function normalizeRole(role) {
   return Object.prototype.hasOwnProperty.call(ROLE_CAPABILITIES, lower) ? lower : ROLES.GUEST;
 }
 
-const OWN_LIST_ROLES = [ROLES.CONSULTANT, ROLES.MO];
+const OWN_LIST_ROLES = [ROLES.CONSULTANT, ROLES.MO, ROLES.RX_MO];
 
 // Roles that actually hold a personal consultation queue. Admin holds ALL, so a
 // plain capability check puts "My Patients" in their switcher too — but admin

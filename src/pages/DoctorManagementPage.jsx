@@ -31,6 +31,7 @@ const hasSettings = (doctor) =>
   doctor.is_chief ||
   doctor.role === "obt" ||
   doctor.can_assign_calls === true ||
+  doctor.role === "rx_mo" ||
   isScheduled(doctor);
 
 function LetterheadSection({ doctor, onSaved }) {
@@ -120,6 +121,52 @@ function ToggleSetting({ doctor, field, checked, disabled, label, hint, successT
   );
 }
 
+function AssistsSetting({ doctor, consultants, onSaved }) {
+  const [saving, setSaving] = useState(false);
+  const save = async (id) => {
+    setSaving(true);
+    try {
+      await api.patch(`/api/doctors/${doctor.id}`, { assists_doctor_id: Number(id) });
+      await onSaved();
+      const who = consultants.find((c) => c.id === Number(id));
+      toast(
+        `${doctor.short_name || doctor.name} now writes prescriptions for ${who?.name}`,
+        "success",
+      );
+    } catch (err) {
+      toast(err?.response?.data?.error || "Could not change who this MO assists", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="docmgmt-setting">
+      <div className="docmgmt-setting-text">
+        <label htmlFor="docmgmt-assists">Writes prescriptions for</label>
+        <p className="docmgmt-hint">
+          This login only sees and writes for this consultant's patients. The prescription prints
+          the consultant's name.
+        </p>
+      </div>
+      <div className="docmgmt-setting-control">
+        <select
+          id="docmgmt-assists"
+          value={doctor.assists_doctor_id ?? ""}
+          disabled={saving}
+          onChange={(e) => e.target.value && save(e.target.value)}
+        >
+          {!doctor.assists_doctor_id && <option value="">Choose a consultant…</option>}
+          {consultants.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
+}
+
 function SettingsGroup({ title, hint, children }) {
   return (
     <section className="docmgmt-setgroup">
@@ -130,7 +177,7 @@ function SettingsGroup({ title, hint, children }) {
   );
 }
 
-function SettingsTab({ doctor, onSaved }) {
+function SettingsTab({ doctor, consultants, onSaved }) {
   const name = doctor.short_name || doctor.name;
   const consultant = doctor.role === "consultant";
   const routing = consultant || doctor.is_chief;
@@ -199,6 +246,24 @@ function SettingsTab({ doctor, onSaved }) {
       {isScheduled(doctor) && (
         <SettingsGroup title="Prescriptions">
           <LetterheadSection doctor={doctor} onSaved={onSaved} />
+          {consultant && (
+            <ToggleSetting
+              doctor={doctor}
+              field="new_patient_workup"
+              checked={doctor.new_patient_workup === true}
+              label="New-patient History & Examination"
+              hint="A new patient's visit page asks for the general history and the examination checklist, and both print on the prescription."
+              successText={(on) =>
+                `${name}'s new patients ${on ? "now get" : "no longer get"} the History & Examination form`
+              }
+              onSaved={onSaved}
+            />
+          )}
+        </SettingsGroup>
+      )}
+      {doctor.role === "rx_mo" && (
+        <SettingsGroup title="Prescriptions">
+          <AssistsSetting doctor={doctor} consultants={consultants} onSaved={onSaved} />
         </SettingsGroup>
       )}
       {calls && (
@@ -710,7 +775,11 @@ export default function DoctorManagementPage() {
                   />
                 )}
                 {activeTab === "settings" && (
-                  <SettingsTab doctor={doctor} onSaved={fetchDoctorsList} />
+                  <SettingsTab
+                    doctor={doctor}
+                    consultants={(doctorsList || []).filter((d) => d.role === "consultant")}
+                    onSaved={fetchDoctorsList}
+                  />
                 )}
               </div>
             </section>
@@ -733,6 +802,7 @@ export default function DoctorManagementPage() {
 
       {addingStaff && (
         <AddStaffModal
+          consultants={(doctorsList || []).filter((d) => d.role === "consultant")}
           onClose={() => setAddingStaff(false)}
           onCreated={async (created) => {
             setAddingStaff(false);

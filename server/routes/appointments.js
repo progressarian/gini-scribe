@@ -25,6 +25,7 @@ import {
 } from "../services/availability.js";
 import { labelSpan } from "../services/slots/dayView.js";
 import { preferredSuperseded } from "../services/ghmDayWindow.js";
+import { ASSIGNED_TODAY_SQL } from "../services/assistedDoctor.js";
 
 // Blocked patients are hidden from working lists — nobody should be calling,
 // booking or preparing for them. They stay findable in /find and on the admin
@@ -54,6 +55,10 @@ router.get("/appointments", async (req, res) => {
     if (doctor) {
       params.push(`%${doctor}%`);
       where += ` AND (a.doctor_name ILIKE $${params.length} OR a.doctor_name IN (SELECT short_name FROM doctors WHERE name ILIKE $${params.length}))`;
+    }
+    if (req.rxMoId) {
+      params.push(req.rxMoId);
+      where += ` AND ${ASSIGNED_TODAY_SQL("a.patient_id", `$${params.length}`)}`;
     }
     if (status) {
       params.push(status);

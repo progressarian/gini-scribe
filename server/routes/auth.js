@@ -9,7 +9,8 @@ import { validate } from "../middleware/validate.js";
 import { doctorRemovalSchema, loginSchema, refreshTokenSchema } from "../schemas/index.js";
 import { loginLimiter } from "../middleware/rateLimit.js";
 import { requireCapability } from "../middleware/auth.js";
-import { CAPABILITIES, normalizeRole } from "../../shared/permissions.js";
+import { CAPABILITIES, normalizeRole, ROLES } from "../../shared/permissions.js";
+import { assistedDoctorOf, clearAssistedCache } from "../services/assistedDoctor.js";
 import { columnReady } from "../services/slots/readiness.js";
 import {
   issueDoctorRefreshToken,
@@ -68,7 +69,7 @@ router.post("/convert-heic", async (req, res) => {
 router.get("/doctors", async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT id, name, short_name, specialty, qualification, role, is_chief, vitals_rest, chief_step, direct_consult, COALESCE((to_jsonb(doctors)->>'can_assign_calls')::boolean, FALSE) AS can_assign_calls, COALESCE((to_jsonb(doctors)->>'slot_booking')::boolean, FALSE) AS slot_booking FROM doctors WHERE is_active=true ORDER BY role, name",
+      "SELECT id, name, short_name, specialty, qualification, role, is_chief, vitals_rest, chief_step, direct_consult, COALESCE((to_jsonb(doctors)->>'can_assign_calls')::boolean, FALSE) AS can_assign_calls, COALESCE((to_jsonb(doctors)->>'slot_booking')::boolean, FALSE) AS slot_booking, COALESCE((to_jsonb(doctors)->>'new_patient_workup')::boolean, FALSE) AS new_patient_workup, (to_jsonb(doctors)->>'assists_doctor_id')::int AS assists_doctor_id FROM doctors WHERE is_active=true ORDER BY role, name",
     );
     res.json(result.rows);
   } catch (e) {
@@ -138,7 +139,7 @@ router.post("/auth/login", loginLimiter, validate(loginSchema), async (req, res)
       access_token: token,
       refresh_token,
       expires_in: Math.floor(ttlToMs(JWT_EXPIRES_IN) / 1000),
-      doctor,
+      doctor: { ...withoutPin(doctor), assists: await assistsOf(doctor) },
     });
   } catch (e) {
     console.error("Login error:", e?.message, e?.code || "", e?.stack || "");
@@ -235,6 +236,11 @@ router.post("/auth/logout", async (req, res) => {
 });
 
 // Check session — always fetch fresh doctor data from DB
+const withoutPin = ({ pin, ...doctor }) => doctor;
+
+const assistsOf = (doctor) =>
+  normalizeRole(doctor.role) === ROLES.RX_MO ? assistedDoctorOf(doctor.id) : null;
+
 router.get("/auth/me", async (req, res) => {
   if (!req.doctor) return res.json({ authenticated: false });
   try {
@@ -243,7 +249,8 @@ router.get("/auth/me", async (req, res) => {
       [req.doctor.doctor_id],
     );
     if (result.rows.length === 0) return res.json({ authenticated: false });
-    res.json({ authenticated: true, doctor: result.rows[0] });
+    const doctor = result.rows[0];
+    res.json({ authenticated: true, doctor: { ...doctor, assists: await assistsOf(doctor) } });
   } catch (e) {
     handleError(res, e, "Session check");
   }
@@ -252,6 +259,17 @@ router.get("/auth/me", async (req, res) => {
 // Create a new doctor (with bcrypt-hashed PIN). Admin-only — note GET /doctors
 // stays public (login dropdown) but this POST shares the path, so it's guarded
 // per-route rather than via the prefix map.
+const assistTarget = async (id) => {
+  if (!Number.isInteger(id) || id <= 0) return null;
+  const { rows } = await pool.query(
+    `SELECT id FROM doctors WHERE id = $1 AND is_active AND lower(role) = 'consultant'`,
+    [id],
+  );
+  return rows[0]?.id ?? null;
+};
+
+const ASSIST_REQUIRED = "Choose the consultant this MO writes prescriptions for";
+
 router.post("/doctors", requireCapability(CAPABILITIES.ADMIN), async (req, res) => {
   try {
     const { name, short_name, specialty, pin, phone, license_no } = req.body;
@@ -260,10 +278,16 @@ router.post("/doctors", requireCapability(CAPABILITIES.ADMIN), async (req, res) 
     if (role && normalizeRole(role) !== role)
       return res.status(400).json({ error: `Unknown role: ${req.body.role}` });
 
+    const rxMo = role === ROLES.RX_MO;
+    if (rxMo && !(await assistsReady())) return res.status(409).json({ error: WORKUP_MIGRATION });
+    const assists = rxMo ? await assistTarget(Number(req.body.assists_doctor_id)) : null;
+    if (rxMo && !assists) return res.status(400).json({ error: ASSIST_REQUIRED });
+
     const pinHash = await bcrypt.hash(pin, 10);
     const result = await pool.query(
-      `INSERT INTO doctors (name, short_name, specialty, role, pin, phone, license_no)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, name, short_name, specialty, role`,
+      `INSERT INTO doctors (name, short_name, specialty, role, pin, phone, license_no${rxMo ? ", assists_doctor_id" : ""})
+       VALUES ($1,$2,$3,$4,$5,$6,$7${rxMo ? ",$8" : ""})
+       RETURNING id, name, short_name, specialty, role`,
       [
         name,
         short_name || null,
@@ -272,8 +296,10 @@ router.post("/doctors", requireCapability(CAPABILITIES.ADMIN), async (req, res) 
         pinHash,
         phone || null,
         license_no || null,
+        ...(rxMo ? [assists] : []),
       ],
     );
+    clearAssistedCache();
     res.json(result.rows[0]);
   } catch (e) {
     handleError(res, e, "Create doctor");
@@ -284,6 +310,9 @@ router.post("/doctors", requireCapability(CAPABILITIES.ADMIN), async (req, res) 
 // printed on the letterhead. Admin-only. Fields absent from the body are left
 // alone, so the Chief toggle and the qualification box save independently.
 const slotBookingReady = columnReady("doctors", "slot_booking");
+const assistsReady = columnReady("doctors", "assists_doctor_id");
+const WORKUP_MIGRATION =
+  "The History & Examination settings need a database update first. Ask an administrator to run the new-patient workup migration.";
 
 router.patch("/doctors/:id", requireCapability(CAPABILITIES.ADMIN), async (req, res) => {
   try {
@@ -295,6 +324,8 @@ router.patch("/doctors/:id", requireCapability(CAPABILITIES.ADMIN), async (req, 
       direct_consult,
       can_assign_calls,
       slot_booking,
+      new_patient_workup,
+      assists_doctor_id,
     } = req.body || {};
     const sets = [];
     const params = [req.params.id];
@@ -352,6 +383,32 @@ router.patch("/doctors/:id", requireCapability(CAPABILITIES.ADMIN), async (req, 
       sets.push(`slot_booking=$${params.length}`);
     }
 
+    if (
+      (new_patient_workup !== undefined || assists_doctor_id !== undefined) &&
+      !(await assistsReady())
+    )
+      return res.status(409).json({ error: WORKUP_MIGRATION });
+
+    if (new_patient_workup !== undefined) {
+      if (typeof new_patient_workup !== "boolean") {
+        return res.status(400).json({ error: "new_patient_workup must be a boolean" });
+      }
+      params.push(new_patient_workup);
+      sets.push(`new_patient_workup=$${params.length}`);
+    }
+
+    if (assists_doctor_id !== undefined) {
+      const { rows } = await pool.query(`SELECT role FROM doctors WHERE id = $1`, [req.params.id]);
+      if (normalizeRole(rows[0]?.role) !== ROLES.RX_MO)
+        return res
+          .status(400)
+          .json({ error: "Only an MO — prescriptions login assists a consultant" });
+      const assists = await assistTarget(Number(assists_doctor_id));
+      if (!assists) return res.status(400).json({ error: ASSIST_REQUIRED });
+      params.push(assists);
+      sets.push(`assists_doctor_id=$${params.length}`);
+    }
+
     if (qualification !== undefined) {
       if (qualification !== null && typeof qualification !== "string") {
         return res.status(400).json({ error: "qualification must be a string" });
@@ -367,10 +424,13 @@ router.patch("/doctors/:id", requireCapability(CAPABILITIES.ADMIN), async (req, 
 
     const r = await pool.query(
       `UPDATE doctors SET ${sets.join(", ")} WHERE id=$1
-        RETURNING id, name, short_name, is_chief, qualification, vitals_rest, chief_step, direct_consult, can_assign_calls`,
+        RETURNING id, name, short_name, is_chief, qualification, vitals_rest, chief_step, direct_consult, can_assign_calls,
+                  COALESCE((to_jsonb(doctors)->>'new_patient_workup')::boolean, FALSE) AS new_patient_workup,
+                  (to_jsonb(doctors)->>'assists_doctor_id')::int AS assists_doctor_id`,
       params,
     );
     if (!r.rows.length) return res.status(404).json({ error: "Doctor not found" });
+    clearAssistedCache();
     res.json(r.rows[0]);
   } catch (e) {
     handleError(res, e, "Update doctor");

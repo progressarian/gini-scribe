@@ -6,6 +6,7 @@ import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config
 import { mapRecordType, toISTDate } from "./mappers.js";
 import { createLogger } from "../logger.js";
 import { applySyncedStatus } from "../appointmentStatus.js";
+import { followRebookingToLabOnly } from "../giniflow/labOnlyVisits.js";
 import { normalizeTestName } from "../../utils/labNormalization.js";
 import { parseLabDate, collectNoteDates } from "../../utils/labDate.js";
 import { stripFormPrefix, canonicalMedKey, routeForForm } from "../medication/normalize.js";
@@ -794,7 +795,10 @@ export async function upsertAppointment(existingId, data) {
         family_member_id = COALESCE($26, family_member_id),
         file_no = COALESCE($27, file_no),
         updated_at = NOW()
-       WHERE id = $1 RETURNING id, patient_id`,
+       FROM (SELECT id AS prior_id, doctor_name AS prior_doctor
+               FROM appointments WHERE id = $1 FOR UPDATE) prior
+       WHERE appointments.id = prior.prior_id
+       RETURNING appointments.id, appointments.patient_id, prior.prior_doctor`,
       [
         existingId,
         JSON.stringify(opdVitals),
@@ -827,6 +831,10 @@ export async function upsertAppointment(existingId, data) {
     );
     if (status) await applySyncedStatus(rows[0].id, status);
     await realignVisitToAppointment(rows[0].id);
+    await followRebookingToLabOnly(pool, {
+      appointmentId: rows[0].id,
+      previousDoctor: rows[0].prior_doctor,
+    });
     return rows[0].id;
   }
 

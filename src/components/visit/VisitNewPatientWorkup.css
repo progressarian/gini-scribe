@@ -1,0 +1,195 @@
+.npw-meta {
+  font-size: 11px;
+  color: var(--t3);
+}
+
+.npw-statusbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 20px;
+  margin-bottom: 8px;
+}
+
+.npw-status {
+  font-size: 12px;
+  color: var(--t3);
+}
+.npw-status.ok {
+  color: #065f46;
+}
+.npw-status.bad {
+  color: var(--red);
+}
+.npw-status.warn {
+  color: #92400e;
+}
+
+.npw-body {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.npw-body:disabled {
+  opacity: 0.6;
+}
+
+.npw-history {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 16px;
+}
+.npw-text {
+  min-height: 40px;
+}
+
+.npw-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.npw-inline .npw-note {
+  flex: 1 1 180px;
+}
+
+.npw-hint {
+  font-size: 12px;
+  color: var(--t3);
+  margin-top: 4px;
+}
+
+.npw-regions {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 12px;
+}
+
+.npw-region {
+  border: 1px solid var(--border);
+  border-radius: var(--rs);
+  padding: 8px 12px 10px;
+  margin: 0;
+  min-width: 0;
+}
+.npw-region legend {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  padding: 0 4px;
+}
+.npw-count {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--t3);
+  margin-left: 8px;
+}
+.npw-rest {
+  display: block;
+  margin: 0 0 4px auto;
+}
+
+.npw-item {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+}
+.npw-item:last-child {
+  border-bottom: 0;
+}
+.npw-item-label {
+  font-size: 13px;
+  color: var(--t2);
+}
+.npw-item .npw-note {
+  grid-column: 1 / -1;
+  height: 30px;
+  font-size: 12px;
+}
+
+.npw-seg {
+  display: inline-flex;
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.npw-seg label {
+  position: relative;
+  cursor: pointer;
+}
+.npw-seg label + label {
+  border-left: 1px solid var(--border2);
+}
+.npw-seg input {
+  position: absolute;
+  opacity: 0;
+  inset: 0;
+  margin: 0;
+  cursor: pointer;
+}
+.npw-seg span {
+  display: block;
+  padding: 3px 9px;
+  font-size: 12px;
+  color: var(--t2);
+  background: var(--card);
+}
+.npw-seg label.on span {
+  background: var(--pri-lt);
+  color: var(--primary);
+  font-weight: 700;
+}
+.npw-seg input:focus-visible + span {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+.npw-select {
+  height: 28px;
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  background: var(--card);
+  font-size: 12px;
+  color: var(--t2);
+  padding: 0 6px;
+}
+.npw-select:focus-visible {
+  outline: 2px solid var(--primary);
+}
+
+.npw-lines {
+  margin: 0 0 12px;
+}
+.npw-lines > div {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 13px;
+}
+.npw-lines dt {
+  font-weight: 600;
+  color: var(--t3);
+}
+.npw-lines dd {
+  margin: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .npw-history {
+    grid-template-columns: 1fr;
+  }
+  .npw-regions {
+    grid-template-columns: 1fr;
+  }
+  .npw-lines > div {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}

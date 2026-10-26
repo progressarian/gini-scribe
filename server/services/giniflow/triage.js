@@ -14,6 +14,7 @@ import { LAB_ONLY_DOCTOR } from "../../../shared/labOnly.js";
 import { labOnlyHiddenPredicate } from "./labOnlyVisits.js";
 import { hideLabOnlyPatients } from "./floorSettings.js";
 import { IST_TODAY } from "./statusEngine.js";
+import { columnReady } from "../slots/readiness.js";
 import { applyTrendBiomarkers, loadTrendSources } from "../opdBiomarkers.js";
 import { reassignConsultant } from "./reassign.js";
 import { STABILITY_RECENT_MONTHS, stabilityOf } from "../../../shared/biomarkerClassify.js";
@@ -261,6 +262,8 @@ const DAY_SQL = `
          p.sex,
          sd.short_name                            AS sd_name,
          doc.short_name                           AS doctor_name,
+         (to_jsonb(v)->>'rx_mo_id')::int          AS rx_mo_id,
+         rxm.short_name                           AS rx_mo_name,
          setter.short_name                        AS category_set_by_name,
          a.id                                     AS appointment_id,
          a.status                                 AS appointment_status,
@@ -283,6 +286,7 @@ const DAY_SQL = `
     JOIN patients p ON p.id = v.patient_id
     LEFT JOIN doctors sd     ON sd.id     = v.assigned_sd_id
     LEFT JOIN doctors doc    ON doc.id    = v.assigned_doctor_id
+    LEFT JOIN doctors rxm    ON rxm.id    = (to_jsonb(v)->>'rx_mo_id')::int
     LEFT JOIN doctors setter ON setter.id = v.category_set_by
     LEFT JOIN appointments a ON a.id = v.appointment_id
     LEFT JOIN LATERAL (
@@ -428,6 +432,8 @@ function buildCard(row) {
       sdName: row.sd_name,
       doctorId: row.assigned_doctor_id,
       doctorName: row.doctor_name,
+      rxMoId: row.rx_mo_id,
+      rxMoName: row.rx_mo_name,
       assigned: !!(row.assigned_sd_id || row.assigned_doctor_id),
     },
   };
@@ -813,6 +819,41 @@ export async function assign(visitId, { sdId, doctorId } = {}, actorId = null, d
   };
 }
 
+const rxMoReady = columnReady("giniflow_visits", "rx_mo_id");
+
+export async function assignRxMo(visitId, rxMoId, actorId = null, db = pool) {
+  if (!(await rxMoReady()))
+    throw Object.assign(
+      new Error(
+        "Assigning an MO needs a database update first. Ask an administrator to run its migration.",
+      ),
+      { status: 409 },
+    );
+  if (rxMoId !== null) {
+    const { rows } = await db.query(
+      `SELECT id FROM doctors WHERE id = $1 AND COALESCE(is_active, TRUE) AND lower(role) = 'rx_mo'`,
+      [rxMoId],
+    );
+    if (!rows.length)
+      throw Object.assign(new Error("Choose one of the prescription MOs"), { status: 400 });
+  }
+  const { rows } = await db.query(
+    `UPDATE giniflow_visits v SET rx_mo_id = $2, updated_at = NOW()
+      WHERE v.id = $1
+      RETURNING v.rx_mo_id, (SELECT short_name FROM doctors WHERE id = v.rx_mo_id) AS rx_mo_name`,
+    [visitId, rxMoId],
+  );
+  if (!rows.length) throw Object.assign(new Error("No such visit"), { status: 404 });
+  await db
+    .query(
+      `INSERT INTO audit_log (doctor_id, action, entity_type, entity_id, details)
+       VALUES ($1, 'rx_mo_assigned', 'giniflow_visit', NULL, $2)`,
+      [actorId, JSON.stringify({ visit_id: visitId, rx_mo_id: rxMoId })],
+    )
+    .catch((e) => console.warn("[giniflow triage] rx MO audit failed:", e.message));
+  return { rxMoId: rows[0].rx_mo_id, rxMoName: rows[0].rx_mo_name };
+}
+
 // Who the coordinator may assign to, with the load each already carries that
 // day — assigning without seeing the queue is how one SD ends up with thirty
 // patients and another with four.
@@ -824,10 +865,11 @@ export async function getAssignableStaff(visitDate, db = pool) {
        LEFT JOIN LATERAL (
          SELECT COUNT(*)::int AS n FROM giniflow_visits v
           WHERE v.visit_date = $1::date
-            AND (v.assigned_sd_id = d.id OR v.assigned_doctor_id = d.id)
+            AND (v.assigned_sd_id = d.id OR v.assigned_doctor_id = d.id
+                 OR (to_jsonb(v)->>'rx_mo_id')::int = d.id)
        ) load ON TRUE
       WHERE COALESCE(d.is_active, TRUE)
-        AND LOWER(COALESCE(d.role, '')) IN ('consultant', 'md', 'mo', 'admin')
+        AND LOWER(COALESCE(d.role, '')) IN ('consultant', 'md', 'mo', 'admin', 'rx_mo')
         -- The lab-only provider is a consultant row, so it would otherwise be
         -- offered as somebody to assign a patient to. Nobody consults it.
         AND LOWER(BTRIM(d.name)) <> LOWER($2)

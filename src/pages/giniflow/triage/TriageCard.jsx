@@ -156,6 +156,9 @@ export default function TriageCard({ card, onAssign, onUpload, onOpen, busy }) {
         ) : (
           <span className="assign-tag at-none">⏳ Unassigned</span>
         )}
+        {assignment.rxMoName && (
+          <span className="assign-tag at-ok">Rx MO {assignment.rxMoName}</span>
+        )}
         <button
           type="button"
           className={`pc-btn ${assignment.assigned ? "" : "tl"}`}

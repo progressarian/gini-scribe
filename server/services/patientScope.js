@@ -12,13 +12,14 @@ import { hasOwnPatientList, normalizeRole, ROLES } from "../../shared/permission
 // into a 3s sequential scan per patient.
 
 export function doctorScope(req) {
-  const doctorId = req.doctor?.doctor_id ?? null;
+  const assisted = req.assistedDoctor;
+  const doctorId = assisted?.id ?? req.doctor?.doctor_id ?? null;
   const mine = hasOwnPatientList(req.doctor?.role) && !!doctorId;
   return {
     mine,
     doctorId,
-    fullName: req.doctor?.doctor_name || "",
-    shortName: req.doctor?.short_name || "",
+    fullName: (assisted ? assisted.name : req.doctor?.doctor_name) || "",
+    shortName: (assisted ? assisted.short_name : req.doctor?.short_name) || "",
   };
 }
 
@@ -45,7 +46,8 @@ export function opdScope(req) {
   const scope = doctorScope(req);
   return {
     ...scope,
-    mine: normalizeRole(req.doctor?.role) === ROLES.CONSULTANT && !!scope.doctorId,
+    mine:
+      [ROLES.CONSULTANT, ROLES.RX_MO].includes(normalizeRole(req.doctor?.role)) && !!scope.doctorId,
   };
 }
 

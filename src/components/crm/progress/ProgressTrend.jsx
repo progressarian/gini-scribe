@@ -94,7 +94,12 @@ export default function ProgressTrend({ trend, colorOf }) {
                   name="Unique doctors"
                   stroke={SERIES[1]}
                   strokeWidth={2}
-                  dot={{ r: 4, fill: SERIES[1], stroke: "#fff", strokeWidth: 2 }}
+                  dot={
+                    rows.length <= 14
+                      ? { r: 4, fill: SERIES[1], stroke: "#fff", strokeWidth: 2 }
+                      : false
+                  }
+                  activeDot={{ r: 5, fill: SERIES[1], stroke: "#fff", strokeWidth: 2 }}
                   type="monotone"
                   isAnimationActive={false}
                 />

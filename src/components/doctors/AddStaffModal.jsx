@@ -8,7 +8,15 @@ const ROLE_OPTIONS = Object.entries(STAFF_ROLE_LABELS).filter(
   ([role]) => role !== "guest" && normalizeRole(role) === role,
 );
 
-const EMPTY = { name: "", role: "consultant", specialty: "", short_name: "", phone: "", pin: "" };
+const EMPTY = {
+  name: "",
+  role: "consultant",
+  specialty: "",
+  short_name: "",
+  phone: "",
+  pin: "",
+  assists_doctor_id: "",
+};
 
 const problemsOf = (f) => {
   const out = {};
@@ -16,10 +24,12 @@ const problemsOf = (f) => {
   if (!f.role) out.role = "Choose a role.";
   if (!/^\d{4}$/.test(f.pin)) out.pin = "Enter a 4-digit PIN they will log in with.";
   if (f.phone && !/^\d{10}$/.test(f.phone)) out.phone = "Enter a 10-digit mobile number.";
+  if (f.role === "rx_mo" && !f.assists_doctor_id)
+    out.assists_doctor_id = "Choose the consultant this MO writes prescriptions for.";
   return out;
 };
 
-export default function AddStaffModal({ onClose, onCreated }) {
+export default function AddStaffModal({ onClose, onCreated, consultants = [] }) {
   const [form, setForm] = useState(EMPTY);
   const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -51,6 +61,7 @@ export default function AddStaffModal({ onClose, onCreated }) {
         short_name: form.short_name.trim() || null,
         phone: form.phone || null,
         pin: form.pin,
+        ...(form.role === "rx_mo" && { assists_doctor_id: Number(form.assists_doctor_id) }),
       });
       toast(`${data.name} added as ${STAFF_ROLE_LABELS[data.role] || data.role}`, "success");
       await onCreated(data);
@@ -112,6 +123,24 @@ export default function AddStaffModal({ onClose, onCreated }) {
               ))}
             </select>,
           )}
+          {form.role === "rx_mo" &&
+            field(
+              "assists_doctor_id",
+              "Writes prescriptions for (required)",
+              <select
+                value={form.assists_doctor_id}
+                onChange={set("assists_doctor_id")}
+                {...invalid("assists_doctor_id")}
+              >
+                <option value="">Choose a consultant…</option>
+                {consultants.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>,
+              "Prescriptions they write print this consultant's name.",
+            )}
           {field(
             "specialty",
             "Specialty",

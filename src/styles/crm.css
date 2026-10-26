@@ -1612,12 +1612,15 @@ a.dimp__btn {
   align-self: flex-end;
   min-height: 38px;
 }
+.prg__reset {
+  margin-left: auto;
+}
 .prg__body--loading {
   opacity: 0.6;
   transition: opacity 150ms;
 }
 .prg__section {
-  margin-bottom: 22px;
+  margin-bottom: 28px;
 }
 .prg__section-head {
   display: flex;
@@ -1640,25 +1643,29 @@ a.dimp__btn {
 }
 .prg__cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
 }
 .prg__card {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  min-height: 84px;
-  padding: 10px 12px;
+  min-width: 0;
+  min-height: 92px;
+  padding: 12px 14px;
   border: 1px solid #e2e8f0;
-  border-radius: 10px;
+  border-left: 3px solid #cbd5e1;
+  border-radius: 8px;
   background: #fff;
 }
 .prg__card--warn {
   background: #fffbeb;
   border-color: #fde68a;
+  border-left-color: #d97706;
 }
 .prg__card-n {
-  font-size: 22px;
+  font-size: 24px;
+  line-height: 1.2;
   font-weight: 700;
   color: #0f172a;
   font-variant-numeric: tabular-nums;
@@ -1669,8 +1676,14 @@ a.dimp__btn {
   color: #334155;
 }
 .prg__card-d {
+  margin-top: auto;
+  padding-top: 4px;
   font-size: 12px;
   color: #64748b;
+}
+.prg__card-d + .prg__card-d {
+  margin-top: 0;
+  padding-top: 0;
 }
 .prg__toggle {
   display: inline-flex;
@@ -1720,17 +1733,37 @@ a.dimp__btn {
   background: #f8fafc;
   font-size: 12px;
   color: #475569;
+  vertical-align: bottom;
+}
+.prg__table tbody tr:hover th,
+.prg__table tbody tr:hover td {
+  background: #f8fafc;
+}
+.prg__table--staff thead th:not(:first-child) {
+  white-space: normal;
+  min-width: 64px;
+  max-width: 110px;
+  line-height: 1.3;
 }
 .prg__table tfoot th,
 .prg__table tfoot td {
   font-weight: 700;
   border-top: 1px solid #e2e8f0;
 }
-.prg__table--staff tbody th,
-.prg__table--staff tfoot th {
+.prg__table--staff th:first-child {
   position: sticky;
   left: 0;
+  z-index: 1;
   background: #fff;
+  box-shadow: 1px 0 0 #e2e8f0;
+}
+.prg__table--staff thead th:first-child,
+.prg__table--staff tfoot th:first-child {
+  background: #f8fafc;
+}
+.prg__table--staff tfoot th,
+.prg__table--staff tfoot td {
+  background: #f8fafc;
 }
 .prg__sort {
   background: none;
@@ -1739,7 +1772,14 @@ a.dimp__btn {
   font: inherit;
   font-weight: 700;
   color: inherit;
+  text-align: inherit;
   cursor: pointer;
+}
+.prg__sort:focus-visible,
+.prg__rep:focus-visible,
+.prg__table-toggle summary:focus-visible {
+  outline: 2px solid #1e40af;
+  outline-offset: 2px;
 }
 .prg__rep {
   display: inline-flex;
@@ -1812,12 +1852,39 @@ a.dimp__btn {
   text-decoration: none;
   color: inherit;
 }
+@media (max-width: 1099px) {
+  .prg__cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
 @media (max-width: 640px) {
   .prg__field {
     flex: 1 1 calc(50% - 6px);
   }
+  .prg__reset {
+    margin-left: 0;
+  }
   .prg__cards {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .prg__card {
+    min-height: 0;
+    padding: 10px 12px;
+  }
+  .prg__card-n {
+    font-size: 20px;
+  }
+  .prg__section {
+    margin-bottom: 22px;
+  }
+  .prg .rep__tab {
+    flex: 1 1 0;
+    white-space: normal;
+    font-size: 13px;
+  }
+  .prg__bars li {
+    grid-template-columns: minmax(0, 1.6fr) minmax(48px, 1fr) 28px;
   }
   .prg__head .rep__perf-action {
     width: 100%;

@@ -279,6 +279,7 @@ import { generateMedicineCardPdf } from "../services/giniflow/medicineCardPdf.js
 import { getStationSummary } from "../services/giniflow/stationSummary.js";
 import {
   defaultPlan,
+  arriveForAppointment,
   checkInWithJourney,
   getJourney,
   ensurePlan,
@@ -1668,6 +1669,26 @@ router.get("/giniflow/journey/:visitId", requireCapability(CAP.GINIFLOW_VIEW), a
     handleError(res, e, "Gini Flow journey");
   }
 });
+
+router.post(
+  "/giniflow/stations/reception/:visitId/arrive-for-appointment",
+  receptionGate,
+  validate(giniflowCheckinSchema),
+  async (req, res) => {
+    try {
+      res.json(
+        await arriveForAppointment(req.params.visitId, {
+          visitTypeId: req.body.visitTypeId,
+          steps: req.body.steps,
+          actorId: req.doctor?.doctor_id ?? null,
+          actorRole: req.doctor?.role || "reception",
+        }),
+      );
+    } catch (e) {
+      handleError(res, e, "Gini Flow arrive for appointment");
+    }
+  },
+);
 
 router.post(
   "/giniflow/stations/reception/:visitId/checkin",

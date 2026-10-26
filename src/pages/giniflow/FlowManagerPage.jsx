@@ -1129,7 +1129,8 @@ const TEST_STEP_STATUSES = new Set([
 function TimelineModal({ visitId, onClose, slaConfig }) {
   const { data, isLoading } = useGiniflowTimeline(visitId);
   const tick = useTick();
-  const now = dayClock(data?.visit?.visit_date, tick);
+  const pausedAt = data?.visit?.paused_at ? new Date(data.visit.paused_at).getTime() : null;
+  const now = dayClock(data?.visit?.visit_date, pausedAt ? Math.min(pausedAt, tick) : tick);
   useDismissable(!!visitId, onClose);
   if (!visitId) return null;
   const visit = data?.visit;

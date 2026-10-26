@@ -238,6 +238,8 @@ export default function ScheduleEditor({
     setPicked(bulk ? [] : [doctorId]);
     setMany(null);
     setManyResult(null);
+    setUntilOn(false);
+    setUntilDate("");
     setEditing(bulk);
   }, [doctorId, bulk]);
 
@@ -404,7 +406,8 @@ export default function ScheduleEditor({
       ].sort((a, b) => a.at - b.at)
     : [];
 
-  const until = bulk && untilOn ? untilDate : null;
+  const until = untilOn ? untilDate : null;
+  const viaApply = target !== "one" || !!until;
   const payload = () => ({
     effective_from: effectiveFrom,
     template: { ...draft, slotCaps: liveSlotCaps(draft) },
@@ -589,10 +592,10 @@ export default function ScheduleEditor({
       </div>
     );
 
-  const untilBad = bulk && untilOn && (!untilDate || untilDate < effectiveFrom);
+  const untilBad = untilOn && (!untilDate || untilDate < effectiveFrom);
   const conflicts = (many || []).filter((d) => d.conflict && !d.unchanged);
   const affectedCount = check?.affected.length || 0;
-  const manyCount = target === "all" ? scheduled.length : picked.length;
+  const manyCount = target === "all" ? scheduled.length : target === "one" ? 1 : picked.length;
   const blocked =
     !!allErrors.length ||
     pastStart ||
@@ -995,6 +998,201 @@ export default function ScheduleEditor({
               <span className="docmgmt-stepnum" aria-hidden="true">
                 2
               </span>
+              Start date and doctors
+            </h3>
+            <div className="docmgmt-form wrap docmgmt-schedule-top">
+              <label>
+                Applies from
+                <input
+                  type="date"
+                  value={effectiveFrom}
+                  min={data.today}
+                  aria-invalid={pastStart || undefined}
+                  onChange={(e) => {
+                    setEffectiveFrom(e.target.value);
+                    resetResults();
+                  }}
+                />
+              </label>
+              <div className="docmgmt-quickdates" role="group" aria-label="Quick start dates">
+                {startShortcuts(data.today).map(([label, date]) => (
+                  <button
+                    key={label}
+                    type="button"
+                    className="docmgmt-secondary docmgmt-small"
+                    aria-pressed={effectiveFrom === date}
+                    onClick={() => {
+                      setEffectiveFrom(date);
+                      resetResults();
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+                {periodShortcuts(data.today).map(([label, from, to]) => (
+                  <button
+                    key={label}
+                    type="button"
+                    className="docmgmt-secondary docmgmt-small"
+                    aria-pressed={untilOn && effectiveFrom === from && untilDate === to}
+                    onClick={() => {
+                      setEffectiveFrom(from);
+                      setUntilOn(true);
+                      setUntilDate(to);
+                      resetResults();
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <fieldset className="docmgmt-radios">
+                <legend>Ends</legend>
+                <label>
+                  <input
+                    type="radio"
+                    name="ends"
+                    checked={!untilOn}
+                    onChange={() => {
+                      setUntilOn(false);
+                      resetResults();
+                    }}
+                  />
+                  No end date — keep going
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="ends"
+                    checked={untilOn}
+                    onChange={() => {
+                      setUntilOn(true);
+                      if (!untilDate) setUntilDate(addDays(effectiveFrom || data.today, 6));
+                      resetResults();
+                    }}
+                  />
+                  Until
+                </label>
+                <label>
+                  <span className="docmgmt-visually-hidden">Last day of this schedule</span>
+                  <input
+                    type="date"
+                    value={untilDate}
+                    min={effectiveFrom || data.today}
+                    disabled={!untilOn}
+                    aria-invalid={untilBad || undefined}
+                    onChange={(e) => {
+                      setUntilDate(e.target.value);
+                      resetResults();
+                    }}
+                  />
+                </label>
+              </fieldset>
+              <fieldset className="docmgmt-radios">
+                <legend>If time is left over at the end</legend>
+                <label>
+                  <input
+                    type="radio"
+                    name="partial-last"
+                    checked={draft.partialLast !== "short"}
+                    onChange={() => edit((d) => ({ ...d, partialLast: "drop" }))}
+                  />
+                  Don't book it
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="partial-last"
+                    checked={draft.partialLast === "short"}
+                    onChange={() => edit((d) => ({ ...d, partialLast: "short" }))}
+                  />
+                  Offer a shorter slot
+                </label>
+              </fieldset>
+            </div>
+            {pastStart && (
+              <p className="docmgmt-fielderr" role="alert">
+                A schedule can't start in the past. Pick today or a later date.
+              </p>
+            )}
+            <FieldErrors errors={fieldErrors("effective_from")} />
+            {untilBad && (
+              <p className="docmgmt-fielderr" role="alert">
+                Pick a last day on or after the start date.
+              </p>
+            )}
+            {untilOn && !untilBad && (
+              <p className="docmgmt-hint">
+                From {longDate(addDays(untilDate, 1))}{" "}
+                {target === "one" ? doctor?.name || "this doctor" : "each doctor"} goes back to the
+                schedule they had before.
+              </p>
+            )}
+            {replacing.length > 0 && !pastStart && (
+              <p className="docmgmt-note warn" role="status">
+                Saving replaces {replacing.length === 1 ? "the later change" : "the later changes"}{" "}
+                already planned from {shortDate(effectiveFrom)}:{" "}
+                {replacing.map(replacedLabel).join(", ")}. This schedule applies to every day from{" "}
+                {shortDate(effectiveFrom)} instead.
+              </p>
+            )}
+
+            <h4 className="docmgmt-substep">Apply to</h4>
+            <fieldset className="docmgmt-radios">
+              <legend className="docmgmt-visually-hidden">Apply this schedule to</legend>
+              {[
+                ["one", `${doctor?.name || "This doctor"} only`],
+                ["some", "Choose doctors"],
+                ["all", `All consultants and MOs (${scheduled.length})`],
+              ]
+                .filter(([value]) => !bulk || value !== "one")
+                .map(([value, label]) => (
+                  <label key={value}>
+                    <input
+                      type="radio"
+                      name="apply-to"
+                      checked={target === value}
+                      onChange={() => {
+                        setTarget(value);
+                        resetResults();
+                      }}
+                    />
+                    {label}
+                  </label>
+                ))}
+            </fieldset>
+            {target === "some" && (
+              <fieldset className="docmgmt-slotmulti docmgmt-pickdocs">
+                <legend className="docmgmt-visually-hidden">
+                  Doctors to apply this schedule to
+                </legend>
+                {scheduled.map((d) => {
+                  const on = picked.includes(d.id);
+                  return (
+                    <label key={d.id} className={on ? "on" : ""}>
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        onChange={() => {
+                          setPicked((p) => (on ? p.filter((x) => x !== d.id) : [...p, d.id]));
+                          resetResults();
+                        }}
+                      />
+                      {d.name}
+                    </label>
+                  );
+                })}
+              </fieldset>
+            )}
+            {target === "some" && !picked.length && (
+              <p className="docmgmt-fielderr">Choose at least one doctor.</p>
+            )}
+          </section>
+          <section className="docmgmt-step">
+            <h3 className="docmgmt-steptitle">
+              <span className="docmgmt-stepnum" aria-hidden="true">
+                3
+              </span>
               Breaks
             </h3>
             <p className="docmgmt-hint">
@@ -1077,7 +1275,7 @@ export default function ScheduleEditor({
           <section className="docmgmt-step">
             <h3 className="docmgmt-steptitle">
               <span className="docmgmt-stepnum" aria-hidden="true">
-                3
+                4
               </span>
               Patients per slot
             </h3>
@@ -1092,203 +1290,6 @@ export default function ScheduleEditor({
               doctorName={bulk ? null : doctor?.name}
             />
             <FieldErrors errors={fieldErrors("slotCaps")} />
-          </section>
-          <section className="docmgmt-step">
-            <h3 className="docmgmt-steptitle">
-              <span className="docmgmt-stepnum" aria-hidden="true">
-                4
-              </span>
-              Start date and doctors
-            </h3>
-            <div className="docmgmt-form wrap docmgmt-schedule-top">
-              <label>
-                Applies from
-                <input
-                  type="date"
-                  value={effectiveFrom}
-                  min={data.today}
-                  aria-invalid={pastStart || undefined}
-                  onChange={(e) => {
-                    setEffectiveFrom(e.target.value);
-                    resetResults();
-                  }}
-                />
-              </label>
-              <div className="docmgmt-quickdates" role="group" aria-label="Quick start dates">
-                {startShortcuts(data.today).map(([label, date]) => (
-                  <button
-                    key={label}
-                    type="button"
-                    className="docmgmt-secondary docmgmt-small"
-                    aria-pressed={effectiveFrom === date}
-                    onClick={() => {
-                      setEffectiveFrom(date);
-                      resetResults();
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
-                {bulk &&
-                  periodShortcuts(data.today).map(([label, from, to]) => (
-                    <button
-                      key={label}
-                      type="button"
-                      className="docmgmt-secondary docmgmt-small"
-                      aria-pressed={untilOn && effectiveFrom === from && untilDate === to}
-                      onClick={() => {
-                        setEffectiveFrom(from);
-                        setUntilOn(true);
-                        setUntilDate(to);
-                        resetResults();
-                      }}
-                    >
-                      {label}
-                    </button>
-                  ))}
-              </div>
-              {bulk && (
-                <fieldset className="docmgmt-radios">
-                  <legend>Ends</legend>
-                  <label>
-                    <input
-                      type="radio"
-                      name="ends"
-                      checked={!untilOn}
-                      onChange={() => {
-                        setUntilOn(false);
-                        resetResults();
-                      }}
-                    />
-                    No end date — keep going
-                  </label>
-                  <label>
-                    <input
-                      type="radio"
-                      name="ends"
-                      checked={untilOn}
-                      onChange={() => {
-                        setUntilOn(true);
-                        if (!untilDate) setUntilDate(addDays(effectiveFrom || data.today, 6));
-                        resetResults();
-                      }}
-                    />
-                    Until
-                  </label>
-                  <label>
-                    <span className="docmgmt-visually-hidden">Last day of this schedule</span>
-                    <input
-                      type="date"
-                      value={untilDate}
-                      min={effectiveFrom || data.today}
-                      disabled={!untilOn}
-                      aria-invalid={untilBad || undefined}
-                      onChange={(e) => {
-                        setUntilDate(e.target.value);
-                        resetResults();
-                      }}
-                    />
-                  </label>
-                </fieldset>
-              )}
-              <fieldset className="docmgmt-radios">
-                <legend>If time is left over at the end</legend>
-                <label>
-                  <input
-                    type="radio"
-                    name="partial-last"
-                    checked={draft.partialLast !== "short"}
-                    onChange={() => edit((d) => ({ ...d, partialLast: "drop" }))}
-                  />
-                  Don't book it
-                </label>
-                <label>
-                  <input
-                    type="radio"
-                    name="partial-last"
-                    checked={draft.partialLast === "short"}
-                    onChange={() => edit((d) => ({ ...d, partialLast: "short" }))}
-                  />
-                  Offer a shorter slot
-                </label>
-              </fieldset>
-            </div>
-            {pastStart && (
-              <p className="docmgmt-fielderr" role="alert">
-                A schedule can't start in the past. Pick today or a later date.
-              </p>
-            )}
-            <FieldErrors errors={fieldErrors("effective_from")} />
-            {untilBad && (
-              <p className="docmgmt-fielderr" role="alert">
-                Pick a last day on or after the start date.
-              </p>
-            )}
-            {bulk && untilOn && !untilBad && (
-              <p className="docmgmt-hint">
-                From {longDate(addDays(untilDate, 1))} each doctor goes back to the schedule they
-                had before.
-              </p>
-            )}
-            {replacing.length > 0 && !pastStart && (
-              <p className="docmgmt-note warn" role="status">
-                Saving replaces {replacing.length === 1 ? "the later change" : "the later changes"}{" "}
-                already planned from {shortDate(effectiveFrom)}:{" "}
-                {replacing.map(replacedLabel).join(", ")}. This schedule applies to every day from{" "}
-                {shortDate(effectiveFrom)} instead.
-              </p>
-            )}
-
-            <h4 className="docmgmt-substep">Apply to</h4>
-            <fieldset className="docmgmt-radios">
-              <legend className="docmgmt-visually-hidden">Apply this schedule to</legend>
-              {[
-                ["one", `${doctor?.name || "This doctor"} only`],
-                ["some", "Choose doctors"],
-                ["all", `All consultants and MOs (${scheduled.length})`],
-              ]
-                .filter(([value]) => !bulk || value !== "one")
-                .map(([value, label]) => (
-                  <label key={value}>
-                    <input
-                      type="radio"
-                      name="apply-to"
-                      checked={target === value}
-                      onChange={() => {
-                        setTarget(value);
-                        resetResults();
-                      }}
-                    />
-                    {label}
-                  </label>
-                ))}
-            </fieldset>
-            {target === "some" && (
-              <fieldset className="docmgmt-slotmulti docmgmt-pickdocs">
-                <legend className="docmgmt-visually-hidden">
-                  Doctors to apply this schedule to
-                </legend>
-                {scheduled.map((d) => {
-                  const on = picked.includes(d.id);
-                  return (
-                    <label key={d.id} className={on ? "on" : ""}>
-                      <input
-                        type="checkbox"
-                        checked={on}
-                        onChange={() => {
-                          setPicked((p) => (on ? p.filter((x) => x !== d.id) : [...p, d.id]));
-                          resetResults();
-                        }}
-                      />
-                      {d.name}
-                    </label>
-                  );
-                })}
-              </fieldset>
-            )}
-            {target === "some" && !picked.length && (
-              <p className="docmgmt-fielderr">Choose at least one doctor.</p>
-            )}
           </section>
           <section className="docmgmt-step">
             <div className="docmgmt-dayhead">
@@ -1351,10 +1352,8 @@ export default function ScheduleEditor({
                 schedule. You can save without checking; the list is shown after saving.
               </p>
             )}
-            {check && target === "one" && (
-              <BookingImpact result={check} effectiveFrom={effectiveFrom} />
-            )}
-            {many && target !== "one" && !manyResult && (
+            {check && !viaApply && <BookingImpact result={check} effectiveFrom={effectiveFrom} />}
+            {many && viaApply && !manyResult && (
               <ManyImpact doctors={many} effectiveFrom={effectiveFrom} until={until} />
             )}
             {progress && (
@@ -1383,7 +1382,7 @@ export default function ScheduleEditor({
               type="button"
               className="docmgmt-secondary"
               disabled={blocked || busy}
-              onClick={target === "one" ? runCheck : checkMany}
+              onClick={viaApply ? checkMany : runCheck}
             >
               {checking ? "Checking…" : "Check bookings"}
             </button>
@@ -1391,11 +1390,11 @@ export default function ScheduleEditor({
               type="button"
               className="docmgmt-primary"
               disabled={blocked || busy}
-              onClick={target === "one" ? save : askSaveMany}
+              onClick={viaApply ? askSaveMany : save}
             >
               {saving || progress
                 ? "Saving…"
-                : target !== "one"
+                : viaApply
                   ? `Save for ${manyCount} doctor${manyCount === 1 ? "" : "s"}`
                   : affectedCount
                     ? `Save — ${affectedCount} booked patient${affectedCount === 1 ? "" : "s"} ${affectedCount === 1 ? "falls" : "fall"} outside`
@@ -1407,7 +1406,9 @@ export default function ScheduleEditor({
 
       <ConfirmModal
         open={confirmMany && !!many}
-        title={`Save this schedule for ${many?.filter((d) => !d.unchanged).length || 0} doctors?`}
+        title={`Save this schedule for ${many?.filter((d) => !d.unchanged).length || 0} doctor${
+          many?.filter((d) => !d.unchanged).length === 1 ? "" : "s"
+        }?`}
         variant="primary"
         message={
           many && (

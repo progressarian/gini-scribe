@@ -21,7 +21,13 @@ import {
   withProcedure,
 } from "../../../shared/labOnly.js";
 import { billedProcedures } from "../billing/healthrayBillLines.js";
-import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
+import {
+  ARRIVED_FOR_APPOINTMENT,
+  LAB_ONLY_DOCTOR,
+  awaitsAppointmentArrivalSql,
+  consultBookingSql,
+  labOnlyPredicate,
+} from "./labOnlyVisits.js";
 import { labStepsAreManual } from "../../../shared/manualFloor.js";
 import { genVisitToken } from "../flow/journey.js";
 import { LAB_RUNGS, stageIndexOf, UNDRAWN_SAMPLE_STATUSES } from "../../../shared/labStages.js";
@@ -723,6 +729,203 @@ export async function checkInWithJourney(visitId, choices, db = pool) {
   }
 }
 
+const notAllowed = (status, message) => Object.assign(new Error(message), { status });
+
+export async function arriveForAppointmentIn(
+  client,
+  visitId,
+  { visitTypeId = null, steps: askedSteps = [], actorId = null, actorRole = "reception" },
+) {
+  const { rows } = await client.query(
+    `SELECT v.current_status, v.patient_id, v.visit_date, v.echo_referral,
+            ${VISIT_DIRECT_CONSULT_SQL} AS direct_consult,
+            ${awaitsAppointmentArrivalSql("v", "$2")} AS eligible,
+            ${consultBookingSql("v", "$2")} AS consult_appointment_id,
+            array(SELECT s.step_catalog_id FROM giniflow_visit_steps s
+                   WHERE s.visit_id = v.id AND s.step_catalog_id IS NOT NULL) AS have
+       FROM giniflow_visits v WHERE v.id = $1 FOR NO KEY UPDATE`,
+    [visitId, LAB_ONLY_DOCTOR],
+  );
+  const visit = rows[0];
+  if (!visit) throw notAllowed(404, "Visit not found");
+  if (!visit.eligible)
+    throw notAllowed(
+      409,
+      "This patient has no consultant booking waiting, or their journey already has the consultation",
+    );
+  const have = new Set(visit.have);
+  const bill = await storedBill(visit.patient_id, visit.visit_date, client);
+  const machines = await getMachines(client);
+  const allowed = stepsAllowedByBill(askedSteps, bill, machines);
+  const routed = visit.direct_consult ? withoutChief(allowed) : allowed;
+  const ordered = visit.echo_referral ? echoFirst(routed, machines) : routed;
+  const steps = ordered.filter((s) => !s.catalogId || !have.has(s.catalogId));
+  const { rows: catalog } = await client.query(
+    `SELECT id, chain_status, COALESCE(machine, FALSE) AS machine
+       FROM flow_step_catalog WHERE id = ANY($1)`,
+    [steps.map((s) => s.catalogId).filter(Boolean)],
+  );
+  const addsTests = catalog.some((c) => isTestStep(c.id, c.machine));
+  if (!catalog.some((c) => ["with_sd", "with_doctor"].includes(c.chain_status)))
+    throw notAllowed(400, "Add the Chief or consultant stop this patient is here for.");
+
+  await client.query(
+    `UPDATE giniflow_visits
+        SET current_status = 'booked', appointment_id = $2, resume_status = NULL,
+            blocked_reason = NULL,
+            planned_total_min = COALESCE(planned_total_min, 0) + $3, updated_at = NOW()
+      WHERE id = $1`,
+    [
+      visitId,
+      visit.consult_appointment_id,
+      steps.reduce((sum, s) => sum + clampMinutes(s.minutes), 0),
+    ],
+  );
+  await advanceStatus(client, {
+    visitId,
+    toStatus: "checked_in",
+    actorRole,
+    actorId,
+    meta: {
+      reason: ARRIVED_FOR_APPOINTMENT,
+      after: visit.current_status,
+      appointment_id: visit.consult_appointment_id,
+      visitTypeId,
+      steps: steps.length,
+    },
+  });
+  await insertSteps(client, visitId, steps);
+  const raised = await raiseOrdersFromSteps(client, visitId, steps, actorId);
+  await priceOrdersFromBill(client, visitId, bill, machines);
+  await syncBillCharges(client, visitId, bill, machines, await billSuppressor(client, visitId));
+  if (addsTests) await placeTestsBeforeDoctors(client, visitId);
+  await settlePlanIn(client, visitId, {
+    askedSteps,
+    steps,
+    visitTypeId,
+    actorId,
+    keepPlannedTotal: true,
+  });
+  await syncLabStepsFromLab(client, visitId);
+  return { raised, added: steps.length };
+}
+
+export async function arriveForAppointment(visitId, choices, db = pool) {
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const { raised, added } = await arriveForAppointmentIn(client, visitId, choices);
+    await client.query("COMMIT");
+    await draftAtCheckIn(visitId, { actorId: choices.actorId ?? null }, db);
+    return { ...(await getJourney(visitId, db)), raised, added };
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+async function settlePlanIn(
+  client,
+  visitId,
+  { askedSteps, steps, visitTypeId, actorId, keepPlannedTotal },
+) {
+  // Assigning a doctor on the journey has to mean what it looks like it
+  // means: the consultant's own queue reads giniflow_visits, not the steps.
+  // Read back from the rows just written, so the catalog's mapping decides
+  // which column a name belongs in rather than anything the client sent.
+  const assigned = await client.query(
+    `SELECT chain_status, assigned_staff_id::int AS staff_id
+         FROM giniflow_visit_steps
+        WHERE visit_id = $1
+          AND chain_status IN ('with_sd', 'with_doctor')
+          AND assigned_staff_id ~ '^[0-9]+$'
+          AND (chain_status <> 'with_doctor'
+               OR EXISTS (SELECT 1 FROM doctors d
+                           WHERE d.id = assigned_staff_id::int AND d.role = 'consultant'
+                             AND COALESCE(d.is_active, TRUE)))
+        ORDER BY step_order`,
+    [visitId],
+  );
+  const forColumn = (status) =>
+    assigned.rows.find((r) => r.chain_status === status)?.staff_id ?? null;
+  const doctorId = forColumn("with_doctor") ?? (await consultantPicked(client, askedSteps));
+
+  const token = await uniqueToken(client);
+  const planned = steps.reduce((sum, s) => sum + clampMinutes(s.minutes), 0);
+  await client.query(
+    `UPDATE giniflow_visits
+          SET visit_type_id = COALESCE($2, visit_type_id),
+              planned_total_min = CASE WHEN $4 THEN planned_total_min ELSE $3 END,
+              visit_token = COALESCE(visit_token, $5),
+              checked_in_by = COALESCE(checked_in_by, $6),
+              -- COALESCE, never an overwrite: the module's existing rule is that
+              -- whoever is in the room beats whoever was booked, and by the time
+              -- a station has claimed a patient the desk's guess is stale.
+              assigned_sd_id = COALESCE(assigned_sd_id, $7),
+              assigned_doctor_id = COALESCE(assigned_doctor_id, $8),
+              updated_at = NOW()
+        WHERE id = $1`,
+    [
+      visitId,
+      visitTypeId,
+      planned,
+      keepPlannedTotal,
+      token,
+      actorId,
+      forColumn("with_sd"),
+      doctorId,
+    ],
+  );
+  await requireConsultant(client, visitId);
+  const { rows: nowAt } = await client.query(
+    `SELECT current_status FROM giniflow_visits WHERE id = $1`,
+    [visitId],
+  );
+  const checkedInOnly =
+    nowAt[0]?.current_status === "checked_in" &&
+    (await planSkips(client, visitId, PLAN_STOP.vitals));
+  if (
+    checkedInOnly &&
+    !(await planSkips(client, visitId, PLAN_STOP.chief)) &&
+    (await planSkips(client, visitId, PLAN_STOP.doctor))
+  ) {
+    await client.query("SAVEPOINT straight_to_chief");
+    try {
+      await advanceStatus(client, {
+        visitId,
+        toStatus: "sd_pending",
+        actorRole: "system",
+        allowSkip: true,
+        meta: { reason: "plan_has_no_vitals_or_consultant_step", after: "checked_in" },
+      });
+      await client.query("RELEASE SAVEPOINT straight_to_chief");
+    } catch {
+      await client.query("ROLLBACK TO SAVEPOINT straight_to_chief");
+    }
+  }
+  if (
+    checkedInOnly &&
+    (await planSkips(client, visitId, PLAN_STOP.chief)) &&
+    !(await planSkips(client, visitId, PLAN_STOP.doctor))
+  ) {
+    await client.query("SAVEPOINT straight_to_consultant");
+    try {
+      await advanceStatus(client, {
+        visitId,
+        toStatus: "ready_for_doctor",
+        actorRole: "system",
+        allowSkip: true,
+        meta: { reason: "plan_has_no_vitals_or_chief_step", after: "checked_in" },
+      });
+      await client.query("RELEASE SAVEPOINT straight_to_consultant");
+    } catch {
+      await client.query("ROLLBACK TO SAVEPOINT straight_to_consultant");
+    }
+  }
+}
+
 export async function checkInIn(
   client,
   visitId,
@@ -800,90 +1003,13 @@ export async function checkInIn(
     await placeTestsBeforeDoctors(client, visitId);
   }
 
-  // Assigning a doctor on the journey has to mean what it looks like it
-  // means: the consultant's own queue reads giniflow_visits, not the steps.
-  // Read back from the rows just written, so the catalog's mapping decides
-  // which column a name belongs in rather than anything the client sent.
-  const assigned = await client.query(
-    `SELECT chain_status, assigned_staff_id::int AS staff_id
-         FROM giniflow_visit_steps
-        WHERE visit_id = $1
-          AND chain_status IN ('with_sd', 'with_doctor')
-          AND assigned_staff_id ~ '^[0-9]+$'
-          AND (chain_status <> 'with_doctor'
-               OR EXISTS (SELECT 1 FROM doctors d
-                           WHERE d.id = assigned_staff_id::int AND d.role = 'consultant'
-                             AND COALESCE(d.is_active, TRUE)))
-        ORDER BY step_order`,
-    [visitId],
-  );
-  const forColumn = (status) =>
-    assigned.rows.find((r) => r.chain_status === status)?.staff_id ?? null;
-  const doctorId = forColumn("with_doctor") ?? (await consultantPicked(client, askedSteps));
-
-  const token = await uniqueToken(client);
-  const planned = steps.reduce((sum, s) => sum + clampMinutes(s.minutes), 0);
-  await client.query(
-    `UPDATE giniflow_visits
-          SET visit_type_id = COALESCE($2, visit_type_id),
-              planned_total_min = CASE WHEN $4 THEN planned_total_min ELSE $3 END,
-              visit_token = COALESCE(visit_token, $5),
-              checked_in_by = COALESCE(checked_in_by, $6),
-              -- COALESCE, never an overwrite: the module's existing rule is that
-              -- whoever is in the room beats whoever was booked, and by the time
-              -- a station has claimed a patient the desk's guess is stale.
-              assigned_sd_id = COALESCE(assigned_sd_id, $7),
-              assigned_doctor_id = COALESCE(assigned_doctor_id, $8),
-              updated_at = NOW()
-        WHERE id = $1`,
-    [visitId, visitTypeId, planned, alreadyPlanned, token, actorId, forColumn("with_sd"), doctorId],
-  );
-  await requireConsultant(client, visitId);
-  const { rows: nowAt } = await client.query(
-    `SELECT current_status FROM giniflow_visits WHERE id = $1`,
-    [visitId],
-  );
-  const checkedInOnly =
-    nowAt[0]?.current_status === "checked_in" &&
-    (await planSkips(client, visitId, PLAN_STOP.vitals));
-  if (
-    checkedInOnly &&
-    !(await planSkips(client, visitId, PLAN_STOP.chief)) &&
-    (await planSkips(client, visitId, PLAN_STOP.doctor))
-  ) {
-    await client.query("SAVEPOINT straight_to_chief");
-    try {
-      await advanceStatus(client, {
-        visitId,
-        toStatus: "sd_pending",
-        actorRole: "system",
-        allowSkip: true,
-        meta: { reason: "plan_has_no_vitals_or_consultant_step", after: "checked_in" },
-      });
-      await client.query("RELEASE SAVEPOINT straight_to_chief");
-    } catch {
-      await client.query("ROLLBACK TO SAVEPOINT straight_to_chief");
-    }
-  }
-  if (
-    checkedInOnly &&
-    (await planSkips(client, visitId, PLAN_STOP.chief)) &&
-    !(await planSkips(client, visitId, PLAN_STOP.doctor))
-  ) {
-    await client.query("SAVEPOINT straight_to_consultant");
-    try {
-      await advanceStatus(client, {
-        visitId,
-        toStatus: "ready_for_doctor",
-        actorRole: "system",
-        allowSkip: true,
-        meta: { reason: "plan_has_no_vitals_or_chief_step", after: "checked_in" },
-      });
-      await client.query("RELEASE SAVEPOINT straight_to_consultant");
-    } catch {
-      await client.query("ROLLBACK TO SAVEPOINT straight_to_consultant");
-    }
-  }
+  await settlePlanIn(client, visitId, {
+    askedSteps,
+    steps,
+    visitTypeId,
+    actorId,
+    keepPlannedTotal: alreadyPlanned,
+  });
   await syncLabStepsFromLab(client, visitId);
   return { alreadyHere, alreadyPlanned, raised };
 }

@@ -101,7 +101,7 @@ export default function TriageBoardPage() {
 
   const saving = setCategory.isPending || assignVisit.isPending;
 
-  const onSave = async ({ category, sdId, doctorId: docId }) => {
+  const onSave = async ({ category, sdId, doctorId: docId, rxMoId }) => {
     const card = openCard;
     if (!card) return;
     try {
@@ -116,6 +116,9 @@ export default function TriageBoardPage() {
           ...(docId !== card.assignment.doctorId ? { assignedDoctorId: docId ?? null } : {}),
         });
         billing = saved?.assignment?.billing ?? null;
+      }
+      if (rxMoId !== (card.assignment.rxMoId ?? null)) {
+        await assignVisit.mutateAsync({ visitId: card.visitId, rxMoId: rxMoId ?? null });
       }
       setAssigning(null);
       setToast(

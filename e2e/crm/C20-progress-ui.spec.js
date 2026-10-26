@@ -131,6 +131,12 @@ test.describe("CRM progress page", () => {
     );
     expect(overflow).toBeLessThanOrEqual(1);
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/progress-phone.png`, fullPage: true });
+    await page.setViewportSize({ width: 820, height: 1100 });
+    const tabletOverflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(tabletOverflow).toBeLessThanOrEqual(1);
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/progress-tablet.png`, fullPage: true });
   });
 
   test("7. Custom range, split by staff, table view, territory, and recovering from an error", async ({

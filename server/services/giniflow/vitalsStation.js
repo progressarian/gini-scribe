@@ -18,6 +18,7 @@ import {
   WAIT_SINCE_SQL,
 } from "../../../shared/giniflowStatus.js";
 import { ALLERGY_NOT_ASKED } from "../../../shared/giniflowAllergy.js";
+import { savePatientAllergy } from "../patientAllergy.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { REST_SKIPPED_SQL, wholeVitalsBudget } from "./vitalsRest.js";
 
@@ -427,30 +428,11 @@ export async function getVitalsPatient(visitId, db = pool) {
 // allergy — a nurse tabbing past the control must not erase what somebody was
 // told last month.
 export async function saveAllergy(visitId, { status, note = null, actorId = null }, db = pool) {
-  if (!["not_known", "none_known", "known"].includes(status)) {
-    throw Object.assign(new Error(`Unknown allergy state: ${status}`), { status: 400 });
-  }
-  if (status === "known" && !note?.trim()) {
-    throw Object.assign(new Error("Name the allergy before recording it"), { status: 400 });
-  }
-  const { rows } = await db.query(
-    `UPDATE patients p
-        SET allergy_status = CASE
-              WHEN $2 = 'not_known' AND p.allergy_status IS NOT NULL THEN p.allergy_status
-              ELSE $2 END,
-            allergy_note = CASE
-              WHEN $2 = 'known' THEN $3
-              WHEN $2 = 'none_known' THEN NULL
-              ELSE p.allergy_note END,
-            allergy_asked_at = CASE WHEN $2 = 'not_known' THEN p.allergy_asked_at ELSE NOW() END,
-            allergy_asked_by = CASE WHEN $2 = 'not_known' THEN p.allergy_asked_by ELSE $4 END
-       FROM giniflow_visits v
-      WHERE v.id = $1 AND p.id = v.patient_id
-      RETURNING p.allergy_status, p.allergy_note`,
-    [visitId, status, note?.trim() || null, actorId],
-  );
-  if (!rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
-  return rows[0];
+  const { rows } = await db.query(`SELECT patient_id FROM giniflow_visits WHERE id = $1`, [
+    visitId,
+  ]);
+  if (!rows[0]?.patient_id) throw Object.assign(new Error("Visit not found"), { status: 404 });
+  return savePatientAllergy(rows[0].patient_id, { status, note, actorId }, db);
 }
 
 export const planSkipsChief = (db, visitId) => skipsChiefStop(db, visitId);

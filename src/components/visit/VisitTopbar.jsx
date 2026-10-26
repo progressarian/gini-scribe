@@ -2,6 +2,7 @@ import { memo, useState, useEffect, useRef } from "react";
 import { fmtDate } from "./helpers";
 import BlockedBadge from "../ui/BlockedBadge";
 import { usePatientBlock } from "../../queries/hooks/usePatientBlocks";
+import { allergyLine } from "../../../shared/giniflowAllergy";
 
 // In-clinic elapsed timer — updates every minute
 const InClinicTimer = memo(function InClinicTimer({ startIso }) {
@@ -185,6 +186,7 @@ const VisitTopbar = memo(function VisitTopbar({
   const apptSty = apptStatusRaw ? apptStatusStyle(promotedStatus) : null;
   const today = new Date().toISOString().split("T")[0];
   const { block } = usePatientBlock(patient?.id);
+  const allergy = allergyLine(patient || {});
   const [printOpen, setPrintOpen] = useState(false);
   const printRef = useRef(null);
 
@@ -223,7 +225,9 @@ const VisitTopbar = memo(function VisitTopbar({
           <span>Visit #{summary.totalVisits}</span>
           <span>·</span>
           <span>📅 {fmtDate(today)}</span>
-          <span className="allergy">{patient.allergies || "No known drug allergies"}</span>
+          <span className={`allergy ${allergy.tone}`}>
+            {allergy.tone === "red" ? `Allergies: ${allergy.text}` : allergy.text}
+          </span>
         </div>
       </div>
       {apptSty && (

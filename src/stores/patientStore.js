@@ -38,6 +38,7 @@ const usePatientStore = create((set, get) => ({
   dbPatientId: null,
   patientFullData: null,
   duplicateWarning: null,
+  restoreError: null,
   savedPatients: (() => {
     try {
       return JSON.parse(localStorage.getItem("gini_patients") || "[]");
@@ -176,6 +177,7 @@ const usePatientStore = create((set, get) => ({
   restorePatient: async () => {
     const id = sessionStorage.getItem("gini_active_patient");
     if (!id) return;
+    set({ restoreError: null });
     try {
       const { data: full } = await api.get(`/api/patients/${id}`);
       set({
@@ -211,8 +213,10 @@ const usePatientStore = create((set, get) => ({
           bmi: v.bmi || "",
         }));
       }
-    } catch {
+    } catch (e) {
       sessionStorage.removeItem("gini_active_patient");
+      if (e?.response?.data?.code === "not_assisted_patient")
+        set({ restoreError: e.response.data.error });
     }
   },
 

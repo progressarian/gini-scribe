@@ -47,6 +47,16 @@ export function useCheckIn() {
   });
 }
 
+export function useArriveForAppointment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ visitId, ...body }) =>
+      (await api.post(`/api/giniflow/stations/reception/${visitId}/arrive-for-appointment`, body))
+        .data,
+    onSuccess: () => invalidate(queryClient),
+  });
+}
+
 export function useJourneyStep() {
   const queryClient = useQueryClient();
   return useMutation({

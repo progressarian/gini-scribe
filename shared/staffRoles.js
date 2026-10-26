@@ -2,6 +2,7 @@ export const STAFF_ROLE_LABELS = {
   admin: "Admin",
   consultant: "Consultant",
   mo: "Medical officer",
+  rx_mo: "MO — prescriptions",
   nurse: "Nurse",
   coordinator: "Coordinator",
   care_coordinator: "Care coordinator",

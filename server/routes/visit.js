@@ -19,6 +19,8 @@ import {
 import {
   savePrescriptionForVisit,
   buildVisitPayloadFromDb,
+  withAppointmentRxContext,
+  todaysAppointmentId,
 } from "../services/prescriptionAutoSave.js";
 import { generateVisitSummary } from "../services/visitSummaryAI.js";
 import { generatePatientSummary } from "../services/patientSummaryAI.js";
@@ -721,6 +723,12 @@ router.get("/visit/:patientId", async (req, res) => {
       apptDoctorNote = opdR.rows[0]?.doctor_note || null;
       opdCompliance = opdR.rows[0]?.compliance || null;
       apptDoctorName = opdR.rows[0]?.doctor_name || null;
+    } else {
+      const todayAppt = await todaysAppointmentId(pid);
+      if (todayAppt)
+        apptDoctorName =
+          (await pool.query(`SELECT doctor_name FROM appointments WHERE id = $1`, [todayAppt]))
+            .rows[0]?.doctor_name || null;
     }
 
     const apptPlan = latestApptR.rows[0] || null;
@@ -3727,7 +3735,14 @@ router.post("/visit/:patientId/prescription/regenerate", async (req, res) => {
 // HTML template through Puppeteer.
 router.post("/visit/:patientId/prescription.pdf", async (req, res) => {
   try {
-    const pdf = await generatePrescriptionPdf(req.body || {});
+    const { appointment_id: appointmentId, ...body } = req.body || {};
+    const pdf = await generatePrescriptionPdf(
+      await withAppointmentRxContext(
+        Number(req.params.patientId),
+        Number(appointmentId) || null,
+        body,
+      ),
+    );
     const filename = `Rx-${req.params.patientId}-${new Date().toISOString().split("T")[0]}.pdf`;
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="${filename}"`);

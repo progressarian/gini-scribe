@@ -36,7 +36,9 @@ import labRequestRoutes from "./routes/labRequests.js";
 import sideEffectRoutes from "./routes/sideEffects.js";
 import pushTokenRoutes from "./routes/pushTokens.js";
 import healthLogRoutes from "./routes/health-logs.js";
+import { assistedPatientGuard } from "./middleware/assistedPatientGuard.js";
 import visitRoutes from "./routes/visit.js";
+import visitWorkupRoutes from "./routes/visitWorkup.js";
 import syncRoutes from "./routes/sync.js";
 import extractRoutes from "./routes/extract.js";
 import summaryRoutes from "./routes/summary.js";
@@ -165,6 +167,7 @@ app.use("/api", extractRoutes);
 // Auth middleware (attaches req.doctor if valid token, blocks unauthenticated on protected routes)
 app.use(authMiddleware);
 app.use(requireAuth);
+app.use(assistedPatientGuard);
 
 // Rate limiting — IP-based for unauthenticated, user-based for authenticated
 app.use("/api", ipLimiter);
@@ -200,6 +203,7 @@ app.use("/api", labRequestRoutes);
 app.use("/api", sideEffectRoutes);
 app.use("/api", pushTokenRoutes);
 app.use("/api", healthLogRoutes);
+app.use("/api", visitWorkupRoutes);
 app.use("/api", visitRoutes);
 app.use("/api", summaryRoutes);
 app.use("/api", postVisitSummaryRoutes);
