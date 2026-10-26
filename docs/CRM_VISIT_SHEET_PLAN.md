@@ -1,7 +1,6 @@
 # CRM visit sheet — download my doctors, upload completed visits
 
-Status: **plan, decisions D1–D8 taken, reviewed 2026-10-26 (gaps G1–G16 in §11), awaiting
-go-ahead**. Nothing built yet.
+Status: **built, reviewed and tested 2026-10-26** — 22 API + 8 browser tests (C17, C18). Production migration `2026-10-26_crm_visit_sheet.sql` not applied yet. Build notes in §12.
 
 ## 1. Goal
 
@@ -79,11 +78,9 @@ One row per assigned doctor, ready to fill. Columns:
 | Notes                          | Rep       | Optional, becomes `discussion_notes`, max 2,000 chars                              |
 
 A rep who visited a doctor twice on different days copies the row. Rows with no Visit date
-and no Status are ignored as "not filled", not failed. The pre-filled columns are locked (sheet
-protection without a password, so it guides rather than blocks); the rep-filled columns are
-unlocked. A rep with no assigned doctors gets the sheet with a one-line note instead of rows.
-Every text cell written by the server is prefixed against formula injection (`=`, `+`, `-`,
-`@`), on all three workbooks.
+and no Status are ignored as "not filled", not failed. The pre-filled columns are greyed, not locked (§12). A rep with no assigned doctors gets the
+sheet with a one-line note instead of rows. Values are written as plain string cells, so
+nothing in a downloaded sheet runs as a formula.
 
 ### 4.2 Tab "Summary"
 
@@ -235,12 +232,12 @@ The new CHECK values (`kind`, `source`, `visit_state`) go into `shared/crmVocab.
 | G2  | Week crossing a month start (e.g. Thu 1st) — Mon–Wed of that week still uploadable                      | D5         |
 | G3  | Noon stamp on today's date before noon would be a future visit                                          | §6.4       |
 | G4  | Duplicate race between two commits                                                                      | §6.3       |
-| G5  | Offline app visit synced after the sheet upload can still double-count (the app path has no day dedupe) | Q-A        |
+| G5  | Offline app visit synced after the sheet upload can still double-count (the app path has no day dedupe) | D9         |
 | G6  | Batch id replayed across doctor/visit flows                                                             | §7         |
 | G7  | Head of growth can read every batch under RLS; D2 means they must not commit/undo a rep's               | §2, §8     |
 | G8  | `import_rows.outcome` CHECK list is doctor-only                                                         | §7         |
 | G9  | Vocab CHECK guard in CI                                                                                 | §7         |
-| G10 | Doctor reassigned mid-month: the old rep can no longer upload an earlier visit to them                  | Q-B        |
+| G10 | Doctor reassigned mid-month: the old rep can no longer upload an earlier visit to them                  | D10        |
 | G11 | Managers need to tell sheet visits from on-the-spot visits                                              | §9         |
 | G12 | Formula injection in downloaded sheets                                                                  | §4.1       |
 | G13 | `DD/MM` vs `MM/DD` text dates                                                                           | §6.2       |
@@ -248,9 +245,87 @@ The new CHECK values (`kind`, `source`, `visit_state`) go into `shared/crmVocab.
 | G15 | Status vs Outcome conflict on a Doctor unavailable row                                                  | §6.4       |
 | G16 | Uploading from a phone                                                                                  | §9         |
 
-### Still open
+### Decided after review (2026-10-26)
 
-- **Q-A** (G5): should a visit logged in the app also be refused when that rep already has one for
-  that doctor that day? That closes G5 but changes today's app behaviour.
-- **Q-B** (G10): should a rep be allowed to upload a visit to a doctor who was theirs **on the
-  visit date** but has since been reassigned? Default is no (only doctors assigned to them now).
+- **D9** (G5): one visit per doctor per rep per IST day **everywhere**. `logVisit` (the app and
+  the offline queue) runs the same day check under the same per-rep lock. A second visit that
+  day is not inserted and returns `{ duplicate: true, reason: "already_logged_today" }`, so the
+  offline queue still drains instead of retrying forever; the visit form shows
+  "Already logged today for Dr X" and links to the existing visit. Test 16: an app visit after a
+  sheet visit for the same doctor/day is not inserted and the queue empties.
+- **D10** (G10): only doctors assigned to the rep **now**. A reassigned doctor's earlier visit
+  fails with "This doctor is not assigned to you"; no access-rule change.
+
+## 12. Build notes (2026-10-26)
+
+- **Changed from the plan:**
+  - **The pre-filled columns are not locked.** Copying a row for a second visit means pasting
+    into them, and a protected sheet would block that. They are greyed instead (blue headers for
+    the columns the rep fills).
+  - **No formula prefix is added.** The server writes every value as a plain string cell, so
+    Excel never runs it as a formula. A prefix would only alter the data.
+  - **The visit form disables Save** when this doctor already has a visit today, and shows
+    "Already logged today…" with a link to that visit. The server rule (D9) still applies to
+    queued offline visits.
+- **Files:**
+  - server:
+    - `server/crm/visitSheet.js` (new);
+    - `server/crm/istPeriods.js` (new);
+    - `server/crm/visits.js`: IST counts, the same-day rule and the per-rep lock;
+    - `server/routes/crm.js`: the `/crm/visits/*` routes, plus the `kind` guard on
+      `/crm/import/batches/:id`;
+  - shared: `shared/crmVocab.js`;
+  - client:
+    - `src/pages/crm/VisitSheetPage.jsx`;
+    - `src/components/crm/visits/*`;
+    - CRM home buttons;
+    - visit-form notice;
+    - "From sheet" tags;
+    - the route and its capability;
+    - `src/styles/crm.css`;
+  - CI smoke: `server/scripts/smoke-crm-visits.mjs` now logs its second same-doctor visit on the
+    previous day and asserts the one-per-day rule.
+
+### Review fixes (2026-10-26, second pass)
+
+- **Row numbers stay true with blank rows.** Rows are numbered from the sheet's own row (`__rowNum__`),
+  so a blank row no longer shifts the numbers shown on failed rows and in the export.
+- **The date rule in the sheet is `TODAY()`, as a warning.** Before, the check was fixed at the
+  download date, so a sheet downloaded on Monday blocked Tuesday's visits.
+- **`Dr.Asha Kapoor` (no space) matches `Dr Asha Kapoor`.**
+- **Half-staged uploads are closed off.** If an upload fails while its rows are being saved, it is
+  marked `failed`, hidden from "Your recent uploads", and cannot be imported.
+- **Download file names are cleaned** before they go into the download header.
+- **A row lists every problem at once,** so the rep fixes it in one pass.
+- **The doctor picker falls back to the rep's own doctors** when the typed name matches nobody.
+  Before, it showed an empty list.
+- **"Back to CRM home"** is no longer underlined.
+- **Test cleanup** relies on the CASCADE truncate. Visits block hard deletes, so a plain DELETE
+  would fail once rows exist.
+
+### Follow-up (2026-10-26, D11 — revised)
+
+The sheet has one follow-up column, **Next visit date**. It must be a date after the visit date
+and within a year, and the cell warns otherwise. The "Needs follow-up" Yes/No column was added
+and then removed at the user's request.
+
+- **A filled Next visit date** saves the visit with `follow_up_required = true` and that
+  `next_visit_date`. The doctor's page shows "Follow-up by …".
+- **A blank date** means no follow-up. Nothing is filled in from the visit schedule.
+- **An older sheet** that still has a "Needs follow-up" column uploads fine. That column is
+  ignored.
+
+Failed rows with a bad next visit date get a **Next visit date** field in the fix panel; clearing
+it imports the visit with no follow-up. The To visit list and the counts are unchanged.
+
+### Recent uploads list (2026-10-26)
+
+"Your recent uploads" lists only uploads that imported at least one visit (`created_count > 0`).
+That includes uploads later undone, which show as "Undone". Hidden from the list:
+
+- uploads that were previewed but never imported;
+- uploads where every row failed;
+- uploads that failed to read.
+
+The data itself is kept, because `crm.import_batches` and `crm.import_rows` block hard deletes.
+Two of Rajesh's previewed-only test uploads on production were also marked `cancelled` on request.

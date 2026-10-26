@@ -75,6 +75,30 @@ export const VISIT_OUTCOMES = [
 ];
 export const VISIT_OUTCOME_VALUES = VISIT_OUTCOMES.map((v) => v.value);
 
+export const VISIT_SOURCES = [
+  { value: "app", label: "Logged in the app" },
+  { value: "sheet", label: "From sheet" },
+];
+export const VISIT_SOURCE_VALUES = VISIT_SOURCES.map((v) => v.value);
+
+export const VISIT_SHEET_STATUSES = [
+  { value: "completed", label: "Completed" },
+  { value: "doctor_unavailable", label: "Doctor unavailable" },
+  { value: "not_visited", label: "Not visited" },
+];
+export const VISIT_SHEET_STATUS_VALUES = VISIT_SHEET_STATUSES.map((v) => v.value);
+
+export const VISIT_ROW_STATES = [
+  { value: "ready", label: "Ready", tone: "ok" },
+  { value: "already_logged", label: "Already logged", tone: "dup" },
+  { value: "failed", label: "Failed", tone: "err" },
+  { value: "not_visited", label: "Not visited", tone: "dup" },
+  { value: "not_filled", label: "Not filled", tone: "dup" },
+  { value: "imported", label: "Imported", tone: "ok" },
+  { value: "undone", label: "Undone", tone: "dup" },
+];
+export const VISIT_ROW_STATE_VALUES = VISIT_ROW_STATES.map((v) => v.value);
+
 // Derived by crm.v_doctor_visit_due from the cadence policy, not stored.
 export const VISIT_DUE_STATES = [
   { value: "ok", label: "On track", tone: "grn" },

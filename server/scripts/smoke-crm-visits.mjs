@@ -82,6 +82,12 @@ ok(
   `synced_at is server time (${ts[0].synced_at.toISOString().slice(0, 10)}), distinct from occurred_at`,
 );
 
+console.log("\nOne visit per doctor per rep per day");
+const sameDay = await logVisit(EXEC, { ...payload, id: crypto.randomUUID() });
+eq(sameDay.duplicate, true, "a second visit to the same doctor the same day is not inserted");
+eq(sameDay.reason, "already_logged_today", "…and says it was already logged");
+eq(sameDay.id, first.id, "…pointing at the visit already there");
+
 console.log("\nValidation");
 try {
   await logVisit(EXEC, { ...payload, id: crypto.randomUUID(), visit_type: "telepathy" });
@@ -170,7 +176,7 @@ await logVisit(EXEC, {
   doctor_requirements: "Night intensivist cover",
   objections: "Unsure about 2am response",
   commitments: "Will send the ICU protocol by Friday",
-  occurred_at: new Date().toISOString(),
+  occurred_at: new Date(Date.now() - 86_400_000).toISOString(),
 });
 const withNotes = await doctor360(EXEC, DOC_A);
 const logged = withNotes.timeline.find((e) => e.kind === "visit" && e.id === noteVisitId);

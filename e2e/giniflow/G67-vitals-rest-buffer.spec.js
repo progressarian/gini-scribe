@@ -117,6 +117,29 @@ test.describe.serial("G67 vitals waits the rest time after arrival", () => {
     ]);
   });
 
+  test("3c. the lab card's clock starts after the rest, not at check-in", async () => {
+    const labCard = async (label, minutesAgo) => {
+      const visit = await arrived(label, minutesAgo);
+      await query(
+        `INSERT INTO giniflow_lab_orders (visit_id, urgency, payment_status, amount_total,
+                                          sample_status, kind, created_at, updated_at)
+         VALUES ($1, 'today', 'paid', 250, 'paid', 'lab',
+                 NOW() - make_interval(mins => $2), NOW() - make_interval(mins => $2))`,
+        [visit, minutesAgo],
+      );
+      return visit;
+    };
+    const longAgo = await labCard("LabAfterRest", 25);
+    const justNow = await labCard("LabInRest", 3);
+    const day = await board.getDayBoard(ids.day, await board.getSlaConfig(db), new Date(), db);
+    expect(day.cards.find((c) => c.id === longAgo).lab.minutes).toBe(25 - VITALS_REST_MINUTES);
+    expect(day.cards.find((c) => c.id === justNow).lab.minutes).toBe(0);
+    await query(
+      `UPDATE giniflow_visits SET current_status = 'ready_for_doctor' WHERE id = ANY($1)`,
+      [[longAgo, justNow]],
+    );
+  });
+
   test("4. the station shows a countdown and the resting row cannot be opened", async ({
     page,
   }) => {

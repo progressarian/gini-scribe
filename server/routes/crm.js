@@ -31,6 +31,20 @@ import { createReferral, advanceReferral, referralDetail, serviceLines } from ".
 import { logVisit, fillDoctorGap, repHome, suggestedNextVisit, doctor360 } from "../crm/visits.js";
 import { handleError } from "../utils/errorHandler.js";
 import { listDueDoctors, listMyDoctors, listReferrals, listTasks } from "../crm/homeLists.js";
+import {
+  VisitSheetError,
+  assertDoctorBatch,
+  commitVisitChunk,
+  createVisitBatch,
+  failedVisitWorkbook,
+  myVisitBatches,
+  pickableDoctors,
+  retryVisitRows,
+  undoVisitBatch,
+  visitBatchRows,
+  visitBatchSummary,
+  visitSheetWorkbook,
+} from "../crm/visitSheet.js";
 
 const router = express.Router();
 
@@ -204,6 +218,15 @@ router.get("/crm/assignments/export.xlsx", crm, importer, async (req, res) => {
 
 router.get("/crm/import/fields", crm, importer, (_req, res) => res.json(IMPORT_FIELDS));
 
+router.use("/crm/import/batches/:id", crm, importer, async (req, res, next) => {
+  try {
+    await assertDoctorBatch(req.crmUser, req.params.id);
+    next();
+  } catch (e) {
+    visitError(res, e, "Import");
+  }
+});
+
 // Step 1 — read the file and guess the mapping. Nothing is stored yet.
 router.post(
   "/crm/import/parse",
@@ -355,6 +378,120 @@ router.get("/crm/import/batches/:id/failed.xlsx", crm, importer, async (req, res
     res.send(Buffer.from(buffer));
   } catch (e) {
     importError(res, e, "Failed rows export");
+  }
+});
+
+function visitError(res, e, context) {
+  if (e instanceof VisitSheetError) return res.status(e.status).json({ error: e.message });
+  console.error(`${context} error:`, e?.message, e?.detail || "");
+  res.status(500).json({
+    error: `${context} failed. Please try again. If the problem continues, contact an administrator.`,
+  });
+}
+
+const sendXlsx = (res, buffer, fileName) => {
+  const safe =
+    String(fileName)
+      .replace(/[^\w.\- ]+/g, "_")
+      .slice(0, 150) || "visits.xlsx";
+  res.setHeader("Content-Type", XLSX_TYPE);
+  res.setHeader("Content-Disposition", `attachment; filename="${safe}"`);
+  res.send(Buffer.from(buffer));
+};
+
+router.get("/crm/visits/sheet.xlsx", crm, async (req, res) => {
+  try {
+    const { buffer, fileName } = await visitSheetWorkbook(req.crmUser);
+    sendXlsx(res, buffer, fileName);
+  } catch (e) {
+    visitError(res, e, "Visit sheet download");
+  }
+});
+
+router.get("/crm/visits/doctors", crm, async (req, res) => {
+  try {
+    res.json(await pickableDoctors(req.crmUser, req.query.q));
+  } catch (e) {
+    visitError(res, e, "Doctor list");
+  }
+});
+
+router.get("/crm/visits/import/batches", crm, async (req, res) => {
+  try {
+    res.json(await myVisitBatches(req.crmUser));
+  } catch (e) {
+    visitError(res, e, "Uploads");
+  }
+});
+
+router.post(
+  "/crm/visits/import/batches",
+  crm,
+  express.raw({ type: "*/*", limit: "5mb" }),
+  async (req, res) => {
+    try {
+      if (!Buffer.isBuffer(req.body) || !req.body.length) {
+        return res.status(400).json({ error: "Choose an Excel file to upload." });
+      }
+      res.json(
+        await createVisitBatch(req.crmUser, {
+          fileName: String(req.query.name || "visits.xlsx"),
+          buffer: req.body,
+        }),
+      );
+    } catch (e) {
+      visitError(res, e, "Visit upload");
+    }
+  },
+);
+
+router.get("/crm/visits/import/batches/:id/summary", crm, async (req, res) => {
+  try {
+    res.json(await visitBatchSummary(req.crmUser, req.params.id));
+  } catch (e) {
+    visitError(res, e, "Upload summary");
+  }
+});
+
+router.get("/crm/visits/import/batches/:id/rows", crm, async (req, res) => {
+  try {
+    const { state, q, page } = req.query;
+    res.json(await visitBatchRows(req.crmUser, req.params.id, { state, q, page }));
+  } catch (e) {
+    visitError(res, e, "Upload rows");
+  }
+});
+
+router.post("/crm/visits/import/batches/:id/commit", crm, async (req, res) => {
+  try {
+    res.json(await commitVisitChunk(req.crmUser, req.params.id));
+  } catch (e) {
+    visitError(res, e, "Visit import");
+  }
+});
+
+router.post("/crm/visits/import/batches/:id/retry", crm, express.json(), async (req, res) => {
+  try {
+    res.json(await retryVisitRows(req.crmUser, req.params.id, req.body?.rows));
+  } catch (e) {
+    visitError(res, e, "Retry");
+  }
+});
+
+router.post("/crm/visits/import/batches/:id/undo", crm, async (req, res) => {
+  try {
+    res.json(await undoVisitBatch(req.crmUser, req.params.id));
+  } catch (e) {
+    visitError(res, e, "Undo upload");
+  }
+});
+
+router.get("/crm/visits/import/batches/:id/failed.xlsx", crm, async (req, res) => {
+  try {
+    const { buffer, fileName } = await failedVisitWorkbook(req.crmUser, req.params.id);
+    sendXlsx(res, buffer, fileName);
+  } catch (e) {
+    visitError(res, e, "Failed rows export");
   }
 });
 

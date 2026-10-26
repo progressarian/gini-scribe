@@ -4,6 +4,7 @@ import {
   VISIT_OUTCOME_VALUES,
   DOCTOR_PRIORITY_VALUES,
 } from "../../shared/crmVocab.js";
+import { IST_DAY_START, IST_MONTH_START, istDayOf, periodCounts } from "./istPeriods.js";
 
 // Visit logging (brief §5) and the rep home screen (§13).
 //
@@ -15,6 +16,15 @@ import {
 // primary key doing its job.
 
 const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+
+export const lockRepVisits = (sql, executiveId) =>
+  sql("SELECT pg_advisory_xact_lock(hashtext('crm.visits:' || $1::text))", [executiveId]);
+
+export const SAME_DAY_VISIT = `
+  SELECT id, occurred_at, synced_at FROM crm.visits
+   WHERE deleted_at IS NULL AND executive_id = $1 AND doctor_id = $2
+     AND ${istDayOf("occurred_at")} = $3::date
+   LIMIT 1`;
 
 /**
  * Create a visit, or return the one already stored under this id.
@@ -54,6 +64,19 @@ export async function logVisit(crmUser, visit) {
   }
 
   return withCrmContext(crmUser, async (sql) => {
+    const { rows: replay } = await sql(
+      "SELECT id, occurred_at, synced_at FROM crm.visits WHERE id = $1",
+      [id],
+    );
+    if (replay[0]) return { ...replay[0], duplicate: true };
+
+    await lockRepVisits(sql, crmUser.id);
+    const { rows: day } = await sql(`SELECT ${istDayOf("COALESCE($1::timestamptz, now())")} AS d`, [
+      occurred_at ?? null,
+    ]);
+    const { rows: sameDay } = await sql(SAME_DAY_VISIT, [crmUser.id, doctor_id, day[0].d]);
+    if (sameDay[0]) return { ...sameDay[0], duplicate: true, reason: "already_logged_today" };
+
     const { rows: hos } = await sql("SELECT id FROM crm.hospitals WHERE code = 'GACH'");
     const { rows: inserted } = await sql(
       `INSERT INTO crm.visits
@@ -142,11 +165,11 @@ export async function repHome(crmUser, { limit = 25, lists = true } = {}) {
   return withCrmContext(crmUser, async (sql) => {
     const [todays, due, dueTotal, doctors, tasks, performance] = await Promise.all([
       sql(
-        `SELECT v.id, v.doctor_id, d.full_name, d.area, v.visit_type, v.outcome, v.occurred_at
+        `SELECT v.id, v.doctor_id, d.full_name, d.area, v.visit_type, v.outcome, v.occurred_at, v.source
            FROM crm.visits v JOIN crm.doctors d ON d.id = v.doctor_id
           WHERE v.deleted_at IS NULL
             AND v.executive_id = $1
-            AND v.occurred_at >= date_trunc('day', now())
+            AND v.occurred_at >= ${IST_DAY_START}
           ORDER BY v.occurred_at DESC`,
         [crmUser.id],
       ),
@@ -211,11 +234,8 @@ export async function repHome(crmUser, { limit = 25, lists = true } = {}) {
           )
         : { rows: [] },
       sql(
-        `SELECT
-           count(*) FILTER (WHERE occurred_at >= date_trunc('day', now()))::int   AS visits_today,
-           count(*) FILTER (WHERE occurred_at >= date_trunc('week', now()))::int  AS visits_week,
-           count(*) FILTER (WHERE occurred_at >= date_trunc('month', now()))::int AS visits_month,
-           count(DISTINCT doctor_id) FILTER (WHERE occurred_at >= date_trunc('month', now()))::int
+        `SELECT ${periodCounts()},
+           count(DISTINCT doctor_id) FILTER (WHERE occurred_at >= ${IST_MONTH_START})::int
              AS unique_doctors_month
            FROM crm.visits WHERE deleted_at IS NULL AND executive_id = $1`,
         [crmUser.id],
@@ -322,7 +342,7 @@ export async function doctor360(crmUser, doctorId) {
                 v.opportunities_identified, v.commitments,
                 v.follow_up_required, v.next_visit_date,
                 (v.gps_latitude IS NOT NULL) AS has_gps,
-                v.client_created_at, v.synced_at,
+                v.client_created_at, v.synced_at, v.source,
                 u.full_name AS executive_name
            FROM crm.visits v
            LEFT JOIN crm.users u ON u.id = v.executive_id

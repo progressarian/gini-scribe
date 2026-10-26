@@ -22,6 +22,7 @@ import {
   machineColumnFor,
   SIDE_TRACK_COLUMNS,
   vitalsStageSince,
+  VITALS_REST_MINUTES,
 } from "../../../shared/giniflowStatus.js";
 import { REST_SKIPPED_SQL, VITALS_FROM_SQL, wholeVitalsBudget } from "./vitalsRest.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
@@ -1228,6 +1229,12 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
     const wholeVitals = !row.lab_only && row.current_status === "with_vitals" && !!row.vitals_from;
     const statusMinutes = finished ? null : minutesSince(waitSince, liveClock);
     const totalMinutes = minutesSince(row.journey_started_at, paused ? liveClock : clock);
+    const restEnd =
+      !row.lab_only && !row.rest_skipped && row.journey_started_at
+        ? new Date(new Date(row.journey_started_at).getTime() + VITALS_REST_MINUTES * 60000)
+        : null;
+    const labSince =
+      row.lab_since && restEnd && restEnd > new Date(row.lab_since) ? restEnd : row.lab_since;
     const budget = heldForTests
       ? null
       : wholeVitals
@@ -1338,14 +1345,14 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
       totalOver: totalMinutes !== null && totalMinutes > (budgets.total_journey ?? Infinity),
       lab: row.lab_sample_status
         ? {
-            since: row.lab_since ? new Date(row.lab_since).toISOString() : null,
+            since: labSince ? new Date(labSince).toISOString() : null,
             sampleStatus: row.lab_sample_status,
             paymentStatus: row.lab_payment_status,
             testCount: row.lab_test_count,
             subtitle: LAB_SUBTITLE[row.lab_sample_status] || row.lab_sample_status,
-            minutes: minutesSince(row.lab_since, now),
+            minutes: minutesSince(labSince, now),
             budget: budgets.lab_total ?? null,
-            colour: budgetColour(minutesSince(row.lab_since, now) ?? 0, budgets.lab_total ?? null),
+            colour: budgetColour(minutesSince(labSince, now) ?? 0, budgets.lab_total ?? null),
             hint: LAB_HINT[row.lab_sample_status] || null,
             hintIcon: row.lab_sample_status === "payment_pending" ? "💰" : "📤",
             blocking: row.lab_sample_status === "payment_pending",

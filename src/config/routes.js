@@ -166,6 +166,7 @@ export const PAGE_CAPABILITIES = {
   "/crm/visit/:doctorId": CAP.CRM_ACCESS,
   "/crm/referral/:doctorId": CAP.CRM_ACCESS,
   "/crm/import": CAP.CRM_IMPORT,
+  "/crm/visits/import": CAP.CRM_ACCESS,
   "/flow/admin": CAP.ADMIN,
   "/care-followups": CAP.CARE_FOLLOWUPS,
 };

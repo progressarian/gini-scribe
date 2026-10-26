@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import api from "../../services/api.js";
+import { downloadFile } from "../../lib/downloadBlob.js";
+import { errorText } from "../../components/crm/import/importText.js";
 import { startAutoDrain, pendingCount } from "../../crm/offlineQueue.js";
 import AssignmentsPanel from "../../components/crm/AssignmentsPanel.jsx";
 import DueList from "../../components/crm/home/DueList.jsx";
@@ -40,6 +42,8 @@ export default function RepHomePage() {
   const [listFilters, setListFilters] = useState({});
   const [refreshKey, setRefreshKey] = useState(0);
   const [err, setErr] = useState(null);
+  const [sheetBusy, setSheetBusy] = useState(false);
+  const [sheetErr, setSheetErr] = useState(null);
 
   const justLogged = params.get("logged");
   const justReferred = params.get("referral");
@@ -95,6 +99,18 @@ export default function RepHomePage() {
   const p = data.performance;
   const canImport = hasCapability(me, CAPABILITIES.CRM_IMPORT);
 
+  const downloadSheet = async () => {
+    setSheetBusy(true);
+    setSheetErr(null);
+    try {
+      await downloadFile("/api/crm/visits/sheet.xlsx", "my-visits.xlsx");
+    } catch (e) {
+      setSheetErr(errorText(e, "Unable to download your sheet."));
+    } finally {
+      setSheetBusy(false);
+    }
+  };
+
   return (
     <div className="rep rep--wide">
       <header className="rep__head">
@@ -124,10 +140,28 @@ export default function RepHomePage() {
             <dd>{p.doctors_assigned}</dd>
           </div>
         </dl>
-        {canImport && (
-          <Link to="/crm/import" className="rep__perf-action">
-            Import list
+        <div className="rep__perf-actions">
+          <button
+            type="button"
+            className="rep__perf-action"
+            onClick={downloadSheet}
+            disabled={sheetBusy}
+          >
+            {sheetBusy ? "Preparing…" : "Download my sheet"}
+          </button>
+          <Link to="/crm/visits/import" className="rep__perf-action">
+            Upload visits
           </Link>
+          {canImport && (
+            <Link to="/crm/import" className="rep__perf-action">
+              Import list
+            </Link>
+          )}
+        </div>
+        {sheetErr && (
+          <p className="rep__perf-err" role="alert">
+            {sheetErr}
+          </p>
         )}
       </section>
 
@@ -215,6 +249,7 @@ export default function RepHomePage() {
                     })}
                     {v.outcome ? ` · ${v.outcome.replace(/_/g, " ")}` : ""}
                     {v.area ? ` · ${v.area}` : ""}
+                    {v.source === "sheet" ? " · From sheet" : ""}
                   </span>
                 </div>
                 <span className="rep__chev" aria-hidden="true">

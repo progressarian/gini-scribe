@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import api from "../../services/api.js";
 import { useDictation } from "../../hooks/useDictation.js";
 import { enqueue, drain } from "../../crm/offlineQueue.js";
@@ -57,6 +57,7 @@ export default function AddVisitPage() {
   });
   const [showDetail, setShowDetail] = useState(false);
   const [err, setErr] = useState(null);
+  const [loggedToday, setLoggedToday] = useState(null);
 
   // Minted here, not on the server. This is the whole basis of the offline
   // story: the id exists before the network is involved, so a retry is a no-op
@@ -75,6 +76,7 @@ export default function AddVisitPage() {
       .then(({ data }) => {
         if (!alive) return;
         const d = data.my_doctors.find((x) => x.doctor_id === doctorId);
+        setLoggedToday(data.todays_visits.find((v) => v.doctor_id === doctorId) || null);
         setDoctor(d || { doctor_id: doctorId, full_name: params.get("name") || "Doctor" });
       })
       .catch(() => setDoctor({ doctor_id: doctorId, full_name: params.get("name") || "Doctor" }));
@@ -180,6 +182,15 @@ export default function AddVisitPage() {
       </header>
 
       {err && <div className="rep__err">{err}</div>}
+      {loggedToday && (
+        <div className="rep__notice" role="status">
+          Already logged today for {doctor?.full_name || "this doctor"} — one visit per doctor per
+          day.{" "}
+          <Link to={`/crm/doctor/${doctorId}?visit=${loggedToday.id}`} className="rep__link">
+            Open today’s visit
+          </Link>
+        </div>
+      )}
 
       <div className="rep__form">
         <Field label="Visit type">
@@ -344,7 +355,7 @@ export default function AddVisitPage() {
         <button
           className="rep__btn rep__btn--primary rep__btn--lg"
           onClick={save}
-          disabled={saving}
+          disabled={saving || Boolean(loggedToday)}
         >
           {saving ? "Saving…" : "Save visit"}
         </button>

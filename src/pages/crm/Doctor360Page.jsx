@@ -239,6 +239,7 @@ function VisitBody({ v }) {
         {outcome && <span className={`d360__tag d360__tag--${outcome.tone}`}>{outcome.label}</span>}
         {v.executive_name && <span className="d360__tag">{v.executive_name}</span>}
         {v.has_gps && <span className="d360__tag">📍</span>}
+        {v.source === "sheet" && <span className="d360__tag">From sheet</span>}
       </div>
       {v.discussion_notes ? (
         <p className="d360__notes">{v.discussion_notes}</p>
