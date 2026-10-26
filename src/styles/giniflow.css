@@ -193,6 +193,7 @@
   font-weight: 700;
   color: var(--ink);
   flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1188,7 +1189,11 @@
   color: var(--tl);
   background: rgba(13, 148, 136, 0.1);
   white-space: nowrap;
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* What they came to give. Two lines at most: a five-test panel is the common
    case and the whole list is on the title attribute. */

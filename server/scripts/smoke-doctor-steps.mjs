@@ -357,8 +357,8 @@ try {
   await sync();
   delete process.env.SCRIBE_DOCTORS_WAIT_FOR_TESTS;
   check(
-    'SCRIBE_DOCTORS_WAIT_FOR_TESTS="0" releases it, as before this rule',
-    (await g.status()) === "rx_pending",
+    'SCRIBE_DOCTORS_WAIT_FOR_TESTS="0" no longer releases a patient whose tests are open',
+    ["sd_pending", "with_sd"].includes(await g.status()),
     await g.status(),
   );
 } catch (err) {

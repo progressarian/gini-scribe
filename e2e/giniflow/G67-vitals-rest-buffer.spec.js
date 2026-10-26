@@ -134,6 +134,8 @@ test.describe.serial("G67 vitals waits the rest time after arrival", () => {
     const day = await board.getDayBoard(ids.day, await board.getSlaConfig(db), new Date(), db);
     expect(day.cards.find((c) => c.id === longAgo).lab.minutes).toBe(25 - VITALS_REST_MINUTES);
     expect(day.cards.find((c) => c.id === justNow).lab.minutes).toBe(0);
+    expect(day.cards.find((c) => c.id === longAgo).totalMinutes).toBe(25 - VITALS_REST_MINUTES);
+    expect(day.cards.find((c) => c.id === justNow).totalMinutes).toBe(0);
     await query(
       `UPDATE giniflow_visits SET current_status = 'ready_for_doctor' WHERE id = ANY($1)`,
       [[longAgo, justNow]],

@@ -45,6 +45,12 @@ import {
   visitBatchSummary,
   visitSheetWorkbook,
 } from "../crm/visitSheet.js";
+import {
+  ProgressError,
+  progressDoctors,
+  progressReport,
+  progressWorkbook,
+} from "../crm/progress.js";
 
 const router = express.Router();
 
@@ -492,6 +498,37 @@ router.get("/crm/visits/import/batches/:id/failed.xlsx", crm, async (req, res) =
     sendXlsx(res, buffer, fileName);
   } catch (e) {
     visitError(res, e, "Failed rows export");
+  }
+});
+
+function progressError(res, e, context) {
+  if (e instanceof ProgressError) return res.status(e.status).json({ error: e.message });
+  console.error(`${context} error:`, e?.message, e?.detail || "");
+  res.status(500).json({ error: `Unable to load ${context.toLowerCase()}. Please try again.` });
+}
+
+router.get("/crm/progress", crm, async (req, res) => {
+  try {
+    res.json(await progressReport(req.crmUser, req.query));
+  } catch (e) {
+    progressError(res, e, "Progress");
+  }
+});
+
+router.get("/crm/progress/doctors", crm, async (req, res) => {
+  try {
+    res.json(await progressDoctors(req.crmUser, req.query));
+  } catch (e) {
+    progressError(res, e, "Doctor list");
+  }
+});
+
+router.get("/crm/progress/export.xlsx", crm, async (req, res) => {
+  try {
+    const { buffer, fileName } = await progressWorkbook(req.crmUser, req.query);
+    sendXlsx(res, buffer, fileName);
+  } catch (e) {
+    progressError(res, e, "Progress report");
   }
 });
 

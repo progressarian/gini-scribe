@@ -26,6 +26,7 @@ import {
   pauseReasonLabel,
   SIDE_TRACK_COLUMNS,
   consultStarted,
+  VITALS_REST_MINUTES,
 } from "../../../shared/giniflowStatus";
 import {
   useGiniflowBoard,
@@ -501,7 +502,10 @@ function PatientCard({
             </span>
           )}
           {card.homeCollection && (
-            <span className="pc-lo" title="Booked for home collection">
+            <span
+              className="pc-lo"
+              title={`Booked for home collection — ${homeSampleText(card.homeSample)}`}
+            >
               {homeSampleText(card.homeSample)}
             </span>
           )}
@@ -1258,9 +1262,14 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
   // hours between the reports being ready and the patient coming back, so the
   // figure matched neither clock and was still judged against the journey SLA.
   const endedAt = finished ? steps.at(-1)?.enteredAt : null;
+  const floorStartedAt =
+    checkedInAt && !visit?.labOnly && !visit?.rest_skipped
+      ? new Date(new Date(checkedInAt).getTime() + VITALS_REST_MINUTES * 60000).toISOString()
+      : checkedInAt;
   const journeySoFar =
-    (checkedInAt ? minutesSince(checkedInAt, endedAt ? new Date(endedAt).getTime() : now) : null) ??
-    steps.reduce((sum, st) => sum + liveTotal(st), 0);
+    (floorStartedAt
+      ? minutesSince(floorStartedAt, endedAt ? new Date(endedAt).getTime() : now)
+      : null) ?? steps.reduce((sum, st) => sum + liveTotal(st), 0);
   // Measured from when the last pre-arrival step happened, not from its leftAt:
   // the segment stitcher stretches a segment's end to the next step, which here
   // is check-in itself, so leftAt would always report a zero gap.

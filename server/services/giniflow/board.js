@@ -1228,11 +1228,12 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
       : vitalsStageSince(row.current_status, heldSince, row.vitals_from, row.rest_skipped);
     const wholeVitals = !row.lab_only && row.current_status === "with_vitals" && !!row.vitals_from;
     const statusMinutes = finished ? null : minutesSince(waitSince, liveClock);
-    const totalMinutes = minutesSince(row.journey_started_at, paused ? liveClock : clock);
     const restEnd =
       !row.lab_only && !row.rest_skipped && row.journey_started_at
         ? new Date(new Date(row.journey_started_at).getTime() + VITALS_REST_MINUTES * 60000)
         : null;
+    const floorStartedAt = restEnd ?? row.journey_started_at;
+    const totalMinutes = minutesSince(floorStartedAt, paused ? liveClock : clock);
     const labSince =
       row.lab_since && restEnd && restEnd > new Date(row.lab_since) ? restEnd : row.lab_since;
     const budget = heldForTests
@@ -1334,9 +1335,7 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
       finished,
       backForTests: row.current_status === BACK_FOR_TESTS,
       statusSince: waitSince ? new Date(waitSince).toISOString() : null,
-      journeyStartedAt: row.journey_started_at
-        ? new Date(row.journey_started_at).toISOString()
-        : null,
+      journeyStartedAt: floorStartedAt ? new Date(floorStartedAt).toISOString() : null,
       statusMinutes,
       statusBudget: budget,
       statusColour: finished ? "green" : budgetColour(statusMinutes ?? 0, budget),

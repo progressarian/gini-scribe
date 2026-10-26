@@ -18,7 +18,6 @@ import {
   TERMINAL_STATUSES,
   VITALS_REST_MINUTES,
 } from "../../../shared/giniflowStatus.js";
-import { doctorsWaitForTests } from "../../../shared/manualFloor.js";
 import {
   NOT_ON_BILL_REASON,
   testCancelReasonLabel,
@@ -175,7 +174,7 @@ async function assertNoExitWithTestsOpen(client, visitId, toStatus, actorRole) {
 }
 
 async function assertSyncLeavesTestsAlone(client, visitId, toStatus, meta) {
-  if (meta?.source !== "healthray" || !doctorsWaitForTests()) return;
+  if (meta?.source !== "healthray") return;
   if (isExceptionStatus(toStatus) || SYNC_MAY_MOVE_WITH_TESTS_OPEN.includes(toStatus)) return;
   const pending = await openTestCount(client, visitId);
   if (pending > 0) {
@@ -744,7 +743,13 @@ export async function getStationTimes(
       continue;
     }
     // Nothing to pair with: the wait stands as its own step, named for itself.
-    if (wait && (QUEUE_FEEDS[wait.status] !== entry.status || wait.awaitingLab)) {
+    const sameQueue =
+      wait &&
+      entry.isWait &&
+      !!QUEUE_FEEDS[entry.status] &&
+      QUEUE_FEEDS[wait.status] === QUEUE_FEEDS[entry.status] &&
+      !!wait.awaitingLab === !!entry.awaitingLab;
+    if (wait && !sameQueue && (QUEUE_FEEDS[wait.status] !== entry.status || wait.awaitingLab)) {
       const pending = wait;
       wait = null;
       emit({ ...pending, isCurrent: false, leftAt: entry.enteredAt });

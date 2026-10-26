@@ -152,6 +152,9 @@ export default function RepHomePage() {
           <Link to="/crm/visits/import" className="rep__perf-action">
             Upload visits
           </Link>
+          <Link to="/crm/progress" className="rep__perf-action">
+            View progress
+          </Link>
           {canImport && (
             <Link to="/crm/import" className="rep__perf-action">
               Import list

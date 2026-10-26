@@ -920,7 +920,6 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
         }
 
         if (
-          doctorsWaitForTests() &&
           isChainStatus(target) &&
           chainIndex(target) >= chainIndex("sd_pending") &&
           (await testsOpenInScribe(client, visitId)) > 0

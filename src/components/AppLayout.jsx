@@ -234,6 +234,7 @@ const NAV_ITEMS = [
     show: () => true,
   },
   { path: "/crm/home", label: "🤝 CRM", cap: C["/crm/home"], show: () => true },
+  { path: "/crm/progress", label: "📈 Progress", cap: C["/crm/progress"], show: () => true },
   { path: "/crm/import", label: "📥 Import doctors", cap: C["/crm/import"], show: () => true },
   { path: "/settings", label: "⚙️ Settings", cap: C["/settings"], show: () => true },
 ];

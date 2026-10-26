@@ -16,6 +16,7 @@ import {
   AMENDED_AFTER_EXPLAINED_SQL,
 } from "./rxFollowups.js";
 import { holdsForVisits } from "./coordinatorHold.js";
+import { TESTS_HOLD_SQL, chiefWaitClock } from "./testsHold.js";
 
 const QUEUE_STATUSES = ["doctor_done", "rx_pending", "with_rx"];
 const DONE_STATUSES = ["pharmacy_pending", "dispensed", "exited"];
@@ -24,7 +25,9 @@ const QUEUE_SQL = `
   SELECT v.id AS visit_id, v.patient_id, v.current_status, v.category, v.visit_date::text AS visit_date,
          p.name, p.file_no, p.age, p.sex,
          doc.short_name AS doctor_name,
-         last_ev.occurred_at AS since,
+         last_ev.occurred_at AS status_since,
+         hold.tests_pending,
+         hold.tests_ready_at,
          cons.id AS consultation_id,
          rx.source AS rx_source,
          (rx.id IS NOT NULL AND (rx.source <> 'visit' OR rxchg.last_change IS NULL OR rxchg.last_change <= rx.created_at))
@@ -43,6 +46,7 @@ const QUEUE_SQL = `
        WHERE e.visit_id = v.id AND ${WAIT_SINCE_SQL("e", "v")}
        ORDER BY occurred_at DESC, id DESC LIMIT 1
     ) last_ev ON TRUE
+    LEFT JOIN LATERAL (${TESTS_HOLD_SQL("v", "p")}) hold ON TRUE
     LEFT JOIN LATERAL (
       SELECT id FROM consultations c
        WHERE c.patient_id = v.patient_id AND c.visit_date = v.visit_date
@@ -85,7 +89,8 @@ const QUEUE_SQL = `
 const minutesSince = (from, now) =>
   from ? Math.max(0, Math.round((now - new Date(from)) / 60000)) : null;
 
-const toRow = (r, budgetFor, now) => {
+const toRow = (row, budgetFor, now) => {
+  const r = { ...row, since: chiefWaitClock(row).since };
   const budget = budgetFor(slaKeyForStatus(r.current_status), r.category);
   const minutes = minutesSince(r.since, now);
   return {

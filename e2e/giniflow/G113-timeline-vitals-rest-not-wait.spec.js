@@ -73,4 +73,23 @@ test.describe("G113 the vitals rest is not counted as waiting on the timeline", 
       ago(6).getTime() + VITALS_REST_MINUTES * 60000,
     );
   });
+
+  test("5. two queue statuses for the same doctor read as one wait", async () => {
+    const steps = await getStationTimes(
+      fakeDb([
+        ["checked_in", ago(52)],
+        ["with_vitals", ago(42)],
+        ["vitals_done", ago(42)],
+        ["sd_pending", ago(16)],
+      ]),
+      "v",
+      { ...sla, wait_sd: 10 },
+      now,
+    );
+    const waits = steps.filter((s) => s.label === "Waiting for Chief Endocrinologist");
+    expect(waits).toHaveLength(1);
+    expect(waits[0].isCurrent).toBe(true);
+    expect(waits[0].waitMinutes).toBe(42);
+    expect(waits[0].overBy).toBe(32);
+  });
 });

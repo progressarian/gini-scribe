@@ -16,12 +16,28 @@ export const periodCounts = (column = "occurred_at") => `
 
 export function uploadWindow(now = new Date()) {
   const today = istDate(now);
-  const [y, m] = today.split("-").map(Number);
-  const monthStart = `${y}-${String(m).padStart(2, "0")}-01`;
-  const weekday = (new Date(`${today}T00:00:00Z`).getUTCDay() + 6) % 7;
-  const weekStart = addDays(today, -weekday);
+  const weekStart = mondayOf(today);
+  const monthStart = monthStartOf(today);
   return { from: weekStart < monthStart ? weekStart : monthStart, to: today };
 }
+
+export function mondayOf(day) {
+  const weekday = (new Date(`${day}T00:00:00Z`).getUTCDay() + 6) % 7;
+  return addDays(day, -weekday);
+}
+
+export const monthStartOf = (day) => `${day.slice(0, 7)}-01`;
+
+export function addMonths(day, n) {
+  const d = new Date(`${monthStartOf(day)}T00:00:00Z`);
+  d.setUTCMonth(d.getUTCMonth() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+export const monthEndOf = (day) => addDays(addMonths(day, 1), -1);
+
+export const daysBetween = (from, to) =>
+  Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
 
 export function istDate(at = new Date()) {
   return new Date(at.getTime() + 330 * 60_000).toISOString().slice(0, 10);

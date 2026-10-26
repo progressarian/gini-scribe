@@ -142,8 +142,10 @@ export const TESTS_HOLD_SQL = (v = "v", p = "p") => `
           AND ${LIVE_LAB_CASE_SQL("lc")})
     ) AS tests_ready_at`;
 
+const WAITS_FOR_TESTS_STATUSES = [...DOCTOR_LEG_STATUSES, "rx_pending"];
+
 export const chiefWaitClock = (row) => {
-  if (!DOCTOR_LEG_STATUSES.includes(row.current_status)) {
+  if (!WAITS_FOR_TESTS_STATUSES.includes(row.current_status)) {
     return { heldForTests: false, since: row.status_since };
   }
   const heldForTests = row.tests_pending > 0;

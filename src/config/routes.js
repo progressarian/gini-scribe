@@ -167,6 +167,7 @@ export const PAGE_CAPABILITIES = {
   "/crm/referral/:doctorId": CAP.CRM_ACCESS,
   "/crm/import": CAP.CRM_IMPORT,
   "/crm/visits/import": CAP.CRM_ACCESS,
+  "/crm/progress": CAP.CRM_ACCESS,
   "/flow/admin": CAP.ADMIN,
   "/care-followups": CAP.CARE_FOLLOWUPS,
 };
@@ -198,9 +199,9 @@ export const ROLE_NAV_ALLOWLIST = {
   // The growth team hold CRM_ACCESS and nothing else, so a capability-driven
   // nav would already be short — but it would still offer them the import
   // wizard beside their home. A rep needs one door.
-  [ROLES.GROWTH_EXECUTIVE]: ["/crm/home"],
-  [ROLES.GROWTH_MANAGER]: ["/crm/home"],
-  [ROLES.HEAD_OF_GROWTH]: ["/crm/home", "/crm/import"],
+  [ROLES.GROWTH_EXECUTIVE]: ["/crm/home", "/crm/progress"],
+  [ROLES.GROWTH_MANAGER]: ["/crm/home", "/crm/progress"],
+  [ROLES.HEAD_OF_GROWTH]: ["/crm/home", "/crm/progress", "/crm/import"],
 };
 
 const STATION_ROLE_HIDDEN_NAV = [
