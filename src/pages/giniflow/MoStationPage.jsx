@@ -25,6 +25,7 @@ import { VoiceButton } from "../../components/giniflow/VoiceInput";
 import RxSection from "./consult/RxSection";
 import VisitSummarySection from "./consult/VisitSummarySection";
 import RxParameterSection from "./consult/RxParameterSection";
+import VisitNewPatientWorkup from "../../components/visit/VisitNewPatientWorkup";
 import ChiefSuggestions from "../../components/giniflow/ChiefSuggestions";
 import EditNextVisit from "../../components/giniflow/EditNextVisit";
 import ConsultEditBar, { AmendedNote, EditPrescriptionButton } from "./consult/ConsultEditBar";
@@ -1425,6 +1426,15 @@ export default function MoStationPage() {
                     station="mo"
                     readOnly={patient.status !== "with_sd" && !patient.edit?.editingMine}
                     onToast={showToast}
+                  />
+                </div>
+
+                <div className="dp-sec">
+                  <VisitNewPatientWorkup
+                    patientId={patient.patientId}
+                    appointmentId={patient.appointmentId}
+                    mode="auto"
+                    variant="station"
                   />
                 </div>
 

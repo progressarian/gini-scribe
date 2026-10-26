@@ -244,6 +244,8 @@ const BOARD_SQL = `
          sd.short_name                             AS sd_name,
          doc.short_name                            AS doctor_name,
          doc.name                                  AS doctor_full_name,
+         v.rx_mo_id           AS rx_mo_id,
+         rxm.short_name                            AS rx_mo_name,
          COALESCE(doc.direct_consult, FALSE)       AS direct_consult,
          EXISTS (SELECT 1 FROM giniflow_visit_events se
                   WHERE se.visit_id = v.id AND se.status = 'with_sd') AS seen_by_sd,
@@ -287,6 +289,7 @@ const BOARD_SQL = `
     JOIN patients p ON p.id = v.patient_id
     LEFT JOIN doctors sd  ON sd.id  = v.assigned_sd_id
     LEFT JOIN doctors doc ON doc.id = v.assigned_doctor_id
+    LEFT JOIN doctors rxm ON rxm.id = v.rx_mo_id
     -- How far along this patient's OWN journey is. The columns show where the
     -- floor has them; this shows how much of what they came for is left, which
     -- for a patient with an ECG and an X-Ray still to do is a different answer
@@ -1324,6 +1327,8 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
       labTests: row.lab_test_names || [],
       assignedDoctorId: labOnly ? null : row.assigned_doctor_id,
       assignedDoctorName: labOnly ? null : row.doctor_name || row.doctor_full_name || null,
+      rxMoId: labOnly ? null : row.rx_mo_id,
+      rxMoName: labOnly ? null : row.rx_mo_name,
       subtitle: subtitleFor(row),
       hint: heldForTests
         ? row.unpaid_tests?.length

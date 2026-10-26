@@ -10,7 +10,7 @@ import { doctorRemovalSchema, loginSchema, refreshTokenSchema } from "../schemas
 import { loginLimiter } from "../middleware/rateLimit.js";
 import { requireCapability } from "../middleware/auth.js";
 import { CAPABILITIES, normalizeRole, ROLES } from "../../shared/permissions.js";
-import { assistedDoctorOf, clearAssistedCache } from "../services/assistedDoctor.js";
+import { assistedDoctorOf, clearAssistedCache, hasRxMos } from "../services/assistedDoctor.js";
 import { columnReady } from "../services/slots/readiness.js";
 import {
   issueDoctorRefreshToken,
@@ -139,7 +139,11 @@ router.post("/auth/login", loginLimiter, validate(loginSchema), async (req, res)
       access_token: token,
       refresh_token,
       expires_in: Math.floor(ttlToMs(JWT_EXPIRES_IN) / 1000),
-      doctor: { ...withoutPin(doctor), assists: await assistsOf(doctor) },
+      doctor: {
+        ...withoutPin(doctor),
+        assists: await assistsOf(doctor),
+        has_rx_mos: await rxMosOf(doctor),
+      },
     });
   } catch (e) {
     console.error("Login error:", e?.message, e?.code || "", e?.stack || "");
@@ -241,6 +245,9 @@ const withoutPin = ({ pin, ...doctor }) => doctor;
 const assistsOf = (doctor) =>
   normalizeRole(doctor.role) === ROLES.RX_MO ? assistedDoctorOf(doctor.id) : null;
 
+const rxMosOf = async (doctor) =>
+  normalizeRole(doctor.role) === ROLES.CONSULTANT ? hasRxMos(doctor.id) : false;
+
 router.get("/auth/me", async (req, res) => {
   if (!req.doctor) return res.json({ authenticated: false });
   try {
@@ -250,7 +257,10 @@ router.get("/auth/me", async (req, res) => {
     );
     if (result.rows.length === 0) return res.json({ authenticated: false });
     const doctor = result.rows[0];
-    res.json({ authenticated: true, doctor: { ...doctor, assists: await assistsOf(doctor) } });
+    res.json({
+      authenticated: true,
+      doctor: { ...doctor, assists: await assistsOf(doctor), has_rx_mos: await rxMosOf(doctor) },
+    });
   } catch (e) {
     handleError(res, e, "Session check");
   }

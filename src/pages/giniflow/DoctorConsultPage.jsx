@@ -26,6 +26,7 @@ import ConsultEditBar, { AmendedNote, EditPrescriptionButton } from "./consult/C
 import TrendModal from "./consult/TrendModal";
 import VisitSummarySection from "./consult/VisitSummarySection";
 import RxParameterSection from "./consult/RxParameterSection";
+import VisitNewPatientWorkup from "../../components/visit/VisitNewPatientWorkup";
 import "../../styles/giniflow-station.css";
 import StabilityChip from "../../components/giniflow/StabilityChip";
 import { clearDraftFields, readDraft, writeDraftNav } from "../../lib/consultDraft";
@@ -545,6 +546,12 @@ export default function DoctorConsultPage() {
           />
           <OverviewSection consult={consult} onTile={setTrendMarker} />
           <VisitSummarySection visitId={visitId} onToast={showToast} />
+          <VisitNewPatientWorkup
+            patientId={consult.patientId}
+            appointmentId={consult.appointmentId}
+            mode="auto"
+            variant="station"
+          />
           <ComplaintsSection
             restored={restored}
             flushRef={flushHistory}

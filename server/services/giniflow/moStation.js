@@ -323,6 +323,7 @@ export async function getMoQueue(visitDate, sdId = null, q = null, now = new Dat
 export async function getMoPatient(visitId, db = pool) {
   const { rows } = await db.query(
     `SELECT v.id, v.current_status, v.results_status, v.category, v.stability, v.stability_reasons, v.patient_id,
+            v.appointment_id,
             v.visit_date::text AS visit_date,
             v.assigned_sd_id, v.blocked_reason,
             p.name, p.file_no, p.age, p.sex, p.notes,
@@ -422,6 +423,7 @@ export async function getMoPatient(visitId, db = pool) {
   return {
     visitId: v.id,
     patientId: v.patient_id,
+    appointmentId: v.appointment_id,
     visitDate: v.visit_date,
     name: v.name,
     fileNo: v.file_no,

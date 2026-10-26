@@ -231,7 +231,7 @@ const SECOND_CONSULT_DONE = ["seen", "completed"];
 
 export async function getDoctorQueue(
   visitDate,
-  { doctorId = null, scope = "mine", q = null } = {},
+  { doctorId = null, scope = "mine", q = null, rxMoId = null } = {},
   now = new Date(),
   db = pool,
 ) {
@@ -239,7 +239,15 @@ export async function getDoctorQueue(
   const term = raw ? raw.replace(/[%_\\]/g, "\\$&") : null;
 
   const [{ rows }, sla, { rows: durations }, { rows: secondRows }] = await Promise.all([
-    db.query(QUEUE_SQL, [visitDate, QUEUE_STATUSES, term, LAB_ONLY_DOCTOR]),
+    db.query(QUEUE_SQL, [visitDate, QUEUE_STATUSES, term, LAB_ONLY_DOCTOR]).then(async (res) => {
+      if (!rxMoId) return res;
+      const { rows: assigned } = await db.query(
+        `SELECT id FROM giniflow_visits WHERE visit_date = $1::date AND rx_mo_id = $2`,
+        [visitDate, rxMoId],
+      );
+      const ids = new Set(assigned.map((r) => r.id));
+      return { ...res, rows: res.rows.filter((r) => ids.has(r.id)) };
+    }),
     getSlaConfig(db),
     // Time actually spent in the room today: the gap between entering
     // `with_doctor` and whatever event followed it. Derived from the log rather
@@ -436,7 +444,7 @@ export async function getDoctorQueue(
 // Everything the consult screen reads. One round trip per patient.
 export async function getConsult(visitId, db = pool) {
   const { rows } = await db.query(
-    `SELECT v.id, v.patient_id, v.current_status, v.results_status, v.category, v.stability, v.stability_reasons,
+    `SELECT v.id, v.patient_id, v.appointment_id, v.current_status, v.results_status, v.category, v.stability, v.stability_reasons,
             v.blocked_reason, v.priority, v.priority_reason,
             v.assigned_doctor_id, v.assigned_sd_id, v.visit_date::text AS visit_date,
             v.visit_date = ${IST_TODAY} AS is_today,
@@ -595,6 +603,7 @@ export async function getConsult(visitId, db = pool) {
   return {
     visitId: v.id,
     patientId: v.patient_id,
+    appointmentId: v.appointment_id,
     visitDate: v.visit_date,
     name: v.name,
     fileNo: v.file_no,
@@ -723,7 +732,8 @@ export async function rowOwnership(table, rowId, doctorId, db = pool) {
 // Claiming the room. One patient with a consultant at a time: the older module
 // once showed four consultations at once for one doctor, and every duration it
 // reported after that was fiction.
-export async function startConsult(visitId, actorId = null, db = pool) {
+export async function startConsult(visitId, actorId = null, db = pool, { consultantId } = {}) {
+  const roomId = consultantId ?? actorId;
   const client = await db.connect();
   try {
     await client.query("BEGIN");
@@ -742,10 +752,10 @@ export async function startConsult(visitId, actorId = null, db = pool) {
     // objected — and two people wrote a care plan and a prescription against
     // the same visit.
     if (
-      actorId &&
+      roomId &&
       rows[0].current_status === "with_doctor" &&
       rows[0].assigned_doctor_id &&
-      rows[0].assigned_doctor_id !== actorId
+      rows[0].assigned_doctor_id !== roomId
     ) {
       throw Object.assign(
         new Error(
@@ -755,14 +765,14 @@ export async function startConsult(visitId, actorId = null, db = pool) {
       );
     }
 
-    if (actorId) {
+    if (roomId) {
       const { rows: busy } = await client.query(
         `SELECT v.id, p.name FROM giniflow_visits v
            JOIN patients p ON p.id = v.patient_id
           WHERE v.visit_date = $1::date AND v.current_status = 'with_doctor'
             AND v.assigned_doctor_id = $2 AND v.id <> $3
           LIMIT 1`,
-        [rows[0].visit_date, actorId, visitId],
+        [rows[0].visit_date, roomId, visitId],
       );
       if (busy.length) {
         throw Object.assign(
@@ -787,7 +797,7 @@ export async function startConsult(visitId, actorId = null, db = pool) {
     await client.query(
       `UPDATE giniflow_visits SET assigned_doctor_id = COALESCE(assigned_doctor_id, $2),
               updated_at = NOW() WHERE id = $1`,
-      [visitId, actorId],
+      [visitId, roomId],
     );
 
     // The prescription opens pre-seeded with last visit's regimen, every row

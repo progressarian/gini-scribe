@@ -454,13 +454,14 @@ const doctorGate = requireCapability(CAP.GINIFLOW_STATION_DOCTOR);
 // (ROLES.ADMIN => ALL), and the point of the account is that nothing on the
 // floor is closed to it — so ownership never makes an admin read-only.
 const overridesOwnership = (req) => hasCapability(req.doctor?.role, CAP.ADMIN);
+const roomDoctorId = (req) => req.assistedDoctor?.id ?? req.doctor?.doctor_id ?? null;
 
 const requireOwnVisit = async (req, res, next) => {
   if (overridesOwnership(req)) return next();
   try {
     const { found, readOnly, ownerName } = await visitOwnership(
       req.params.visitId,
-      req.doctor?.doctor_id ?? null,
+      roomDoctorId(req),
     );
     if (!found) return res.status(404).json({ error: "Visit not found" });
     if (readOnly)
@@ -481,7 +482,7 @@ const requireOwnRow = (table, param) => async (req, res, next) => {
     const { found, readOnly, ownerName } = await rowOwnership(
       table,
       req.params[param],
-      req.doctor?.doctor_id ?? null,
+      roomDoctorId(req),
     );
     if (!found) return res.status(404).json({ error: "Not found" });
     if (readOnly)
@@ -513,9 +514,10 @@ router.get(
     try {
       const date = await resolveDate(req.query.date);
       const data = await getDoctorQueue(date, {
-        doctorId: req.doctor?.doctor_id ?? null,
-        scope: req.query.scope || "mine",
+        doctorId: roomDoctorId(req),
+        scope: req.rxMoId ? "mine" : req.query.scope || "mine",
         q: req.query.q,
+        rxMoId: req.rxMoId ?? null,
       });
       res.json({ date, ...data, serverTime: new Date().toISOString() });
     } catch (e) {
@@ -657,10 +659,10 @@ router.get("/giniflow/stations/doctor/:visitId", doctorGate, async (req, res) =>
     if (!consult) return res.status(404).json({ error: "Visit not found" });
     // Decided here rather than in the browser so the page and the gate that
     // refuses its writes can never disagree about who owns this patient.
-    const owned = await visitOwnership(req.params.visitId, req.doctor?.doctor_id ?? null);
+    const owned = await visitOwnership(req.params.visitId, roomDoctorId(req));
     const admin = overridesOwnership(req);
-    const me = req.doctor?.doctor_id ?? null;
-    const isMine = (id) => id != null && me != null && Number(id) === Number(me);
+    const mine = [req.doctor?.doctor_id, roomDoctorId(req)].filter((id) => id != null).map(Number);
+    const isMine = (id) => id != null && mine.includes(Number(id));
     const editor =
       admin || [consult.assignedDoctorId, consult.assignedSdId, consult.finalizedBy].some(isMine);
     const editingMine = !!consult.editing && (admin || isMine(consult.editing.by));
@@ -695,7 +697,11 @@ router.post(
   requireOwnVisit,
   async (req, res) => {
     try {
-      res.json(await startConsult(req.params.visitId, req.doctor?.doctor_id ?? null));
+      res.json(
+        await startConsult(req.params.visitId, req.doctor?.doctor_id ?? null, undefined, {
+          consultantId: roomDoctorId(req),
+        }),
+      );
     } catch (e) {
       doctorError(res, e, "Gini Flow start consult");
     }
@@ -1111,7 +1117,11 @@ router.post(
   requireOwnVisit,
   async (req, res) => {
     try {
-      res.json(await fastPathFinalize(req.params.visitId, req.doctor?.doctor_id ?? null));
+      res.json(
+        await fastPathFinalize(req.params.visitId, req.doctor?.doctor_id ?? null, undefined, {
+          consultantId: roomDoctorId(req),
+        }),
+      );
     } catch (e) {
       doctorError(res, e, "Gini Flow fast path");
     }
@@ -1128,6 +1138,7 @@ router.post(
       res.json(
         await finalizeConsult(req.params.visitId, req.doctor?.doctor_id ?? null, undefined, {
           requireNextVisit: true,
+          consultantId: roomDoctorId(req),
         }),
       );
     } catch (e) {
@@ -1213,10 +1224,18 @@ router.get(
         ),
       );
       const summary = await getStationSummary(date, undefined, { stations: Object.keys(allowed) });
+      if (req.rxMoId) {
+        const { counts } = await getDoctorQueue(date, {
+          doctorId: roomDoctorId(req),
+          rxMoId: req.rxMoId,
+        });
+        const waiting = (counts.resultsReady || 0) + (counts.withMe || 0);
+        summary.doctor = { count: waiting, label: `${waiting} waiting`, tone: "red" };
+      }
       res.json({
         date,
         stations: Object.fromEntries(Object.keys(allowed).map((k) => [k, summary[k]])),
-        bottleneck: summary.bottleneck,
+        bottleneck: req.rxMoId ? null : summary.bottleneck,
         serverTime: new Date().toISOString(),
       });
     } catch (e) {

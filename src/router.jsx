@@ -3,7 +3,7 @@ import { createBrowserRouter, Navigate } from "react-router-dom";
 import AppLayout from "./components/AppLayout";
 import ProtectedRoute from "./components/ProtectedRoute";
 import RequireCapability from "./components/RequireCapability";
-import RoleHome from "./components/RoleHome";
+import RoleHome, { ConsultantStationGate } from "./components/RoleHome";
 import LoginPage from "./pages/LoginPage";
 import { isChunkLoadError } from "./lib/chunkErrors";
 const lazyWithRetry = (importer) =>
@@ -292,10 +292,17 @@ const router = createBrowserRouter([
               { path: "/giniflow/station/echo", element: lazyEl(GiniFlowEchoPage) },
               { path: "/giniflow/station/xray", element: lazyEl(GiniFlowXrayPage) },
               { path: "/giniflow/station/mo", element: lazyEl(GiniFlowMoPage) },
-              { path: "/giniflow/station/doctor", element: lazyEl(GiniFlowDoctorPage) },
+              {
+                path: "/giniflow/station/doctor",
+                element: (
+                  <ConsultantStationGate>{lazyEl(GiniFlowDoctorPage)}</ConsultantStationGate>
+                ),
+              },
               {
                 path: "/giniflow/station/doctor/:visitId",
-                element: lazyEl(GiniFlowConsultPage),
+                element: (
+                  <ConsultantStationGate>{lazyEl(GiniFlowConsultPage)}</ConsultantStationGate>
+                ),
               },
               { path: "/giniflow/station/rx", element: lazyEl(GiniFlowRxPage) },
               { path: "/giniflow/station/pharmacy", element: lazyEl(GiniFlowPharmacyPage) },

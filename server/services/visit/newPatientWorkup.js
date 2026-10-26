@@ -3,6 +3,7 @@ import { httpError, inTransaction } from "../billing/transaction.js";
 import { sqlKey } from "../../../shared/directConsult.js";
 import { savePatientAllergy } from "../patientAllergy.js";
 import { tableReady } from "../slots/readiness.js";
+import { withoutHiddenHistory } from "../../../shared/newPatientWorkup.js";
 
 export const workupReady = tableReady("new_patient_workups");
 
@@ -126,7 +127,7 @@ export async function saveWorkup(patientId, body, actorId, db = pool) {
       { code: "workup_locked" },
     );
   const { appointment_id: appointmentId, expected_updated_at: expected } = body;
-  const history = compact(body.history || {});
+  const history = compact(withoutHiddenHistory(body.history || {}));
   const exam = compact(body.exam || {});
   try {
     return await inTransaction(async (client) => {

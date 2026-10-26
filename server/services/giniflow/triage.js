@@ -262,7 +262,7 @@ const DAY_SQL = `
          p.sex,
          sd.short_name                            AS sd_name,
          doc.short_name                           AS doctor_name,
-         (to_jsonb(v)->>'rx_mo_id')::int          AS rx_mo_id,
+         v.rx_mo_id          AS rx_mo_id,
          rxm.short_name                           AS rx_mo_name,
          setter.short_name                        AS category_set_by_name,
          a.id                                     AS appointment_id,
@@ -286,7 +286,7 @@ const DAY_SQL = `
     JOIN patients p ON p.id = v.patient_id
     LEFT JOIN doctors sd     ON sd.id     = v.assigned_sd_id
     LEFT JOIN doctors doc    ON doc.id    = v.assigned_doctor_id
-    LEFT JOIN doctors rxm    ON rxm.id    = (to_jsonb(v)->>'rx_mo_id')::int
+    LEFT JOIN doctors rxm    ON rxm.id    = v.rx_mo_id
     LEFT JOIN doctors setter ON setter.id = v.category_set_by
     LEFT JOIN appointments a ON a.id = v.appointment_id
     LEFT JOIN LATERAL (
@@ -866,7 +866,7 @@ export async function getAssignableStaff(visitDate, db = pool) {
          SELECT COUNT(*)::int AS n FROM giniflow_visits v
           WHERE v.visit_date = $1::date
             AND (v.assigned_sd_id = d.id OR v.assigned_doctor_id = d.id
-                 OR (to_jsonb(v)->>'rx_mo_id')::int = d.id)
+                 OR v.rx_mo_id = d.id)
        ) load ON TRUE
       WHERE COALESCE(d.is_active, TRUE)
         AND LOWER(COALESCE(d.role, '')) IN ('consultant', 'md', 'mo', 'admin', 'rx_mo')

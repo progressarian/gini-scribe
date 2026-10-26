@@ -192,7 +192,7 @@ export async function finalizeConsult(
   visitId,
   actorId = null,
   db = pool,
-  { closedBySd = false, requireNextVisit = false } = {},
+  { closedBySd = false, requireNextVisit = false, consultantId = null } = {},
 ) {
   const client = await db.connect();
   let patientId = null;
@@ -299,10 +299,15 @@ export async function finalizeConsult(
     // overstates a safety property in a clinical write path is worse than none
     // (CS-10).
     const { rows: consultRows } = await client.query(
-      `INSERT INTO consultations (patient_id, visit_date, visit_type, con_doctor_id, status)
-       VALUES ($1, $2::date, 'OPD', $3, 'completed')
+      `INSERT INTO consultations (patient_id, visit_date, visit_type, con_doctor_id, mo_doctor_id, status)
+       VALUES ($1, $2::date, 'OPD', $3, $4, 'completed')
        RETURNING id`,
-      [visit.patient_id, visit.visit_date, actorId],
+      [
+        visit.patient_id,
+        visit.visit_date,
+        consultantId ?? actorId,
+        consultantId && consultantId !== actorId ? actorId : null,
+      ],
     );
     const consultationId = consultRows[0].id;
 
@@ -437,7 +442,7 @@ export async function finalizeConsult(
 // Everything below reuses the normal services. `finalizeConsult` is not forked:
 // a second finalize would be a second answer to "what does finishing a visit
 // mean".
-export async function fastPathFinalize(visitId, actorId = null, db = pool) {
+export async function fastPathFinalize(visitId, actorId = null, db = pool, { consultantId } = {}) {
   const { rows } = await db.query(
     `SELECT v.category, v.current_status,
             (SELECT count(*)::int FROM giniflow_rx_items i
@@ -513,7 +518,7 @@ export async function fastPathFinalize(visitId, actorId = null, db = pool) {
   // `finalizeConsult` opens its own transaction (`db.connect()`), so forwarding
   // a client here would throw on the last and least reversible step. `db` above
   // is for the reads and the two composable writes; this one owns its own.
-  const result = await finalizeConsult(visitId, actorId);
+  const result = await finalizeConsult(visitId, actorId, undefined, { consultantId });
   return { ...result, fastPath: true, nextVisitDate, testsRepeated: tests };
 }
 

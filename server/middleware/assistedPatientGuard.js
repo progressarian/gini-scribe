@@ -1,6 +1,11 @@
 import pool from "../config/db.js";
 import { normalizeRole, ROLES } from "../../shared/permissions.js";
-import { assistedDoctorOf, isAssignedPatient } from "../services/assistedDoctor.js";
+import {
+  assistedDoctorOf,
+  hasRxMos,
+  isAssignedPatient,
+  isAssignedVisit,
+} from "../services/assistedDoctor.js";
 
 const READS = new Set(["GET", "HEAD", "OPTIONS"]);
 
@@ -13,6 +18,17 @@ const patientOfDocument = async (id) =>
   null;
 
 const numeric = (value) => (/^\d+$/.test(value || "") ? Number(value) : null);
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const uuid = (value) => (UUID.test(value || "") ? value : null);
+
+const visitOfRow = (table) => async (seg) =>
+  uuid(seg[0]) || numeric(seg[0])
+    ? ((await pool.query(`SELECT visit_id FROM ${table} WHERE id::text = $1`, [seg[0]])).rows[0]
+        ?.visit_id ?? null)
+    : null;
+
+const DOCTOR_STATION = "/api/giniflow/stations/doctor";
 
 const RULES = [
   { prefix: "/api/auth", open: true },
@@ -31,6 +47,20 @@ const RULES = [
     patient: (seg) => numeric(seg[0]) && patientOfAppointment(seg[0]),
   },
   { prefix: "/api/appointments", list: true, exact: true },
+  { prefix: "/api/giniflow/stations/summary", open: true, readOnly: true, exact: true },
+  { prefix: `${DOCTOR_STATION}/queue`, open: true, readOnly: true, exact: true },
+  { prefix: `${DOCTOR_STATION}/test-panels`, open: true, readOnly: true, exact: true },
+  { prefix: `${DOCTOR_STATION}/medicines/alternatives`, open: true, readOnly: true, exact: true },
+  { prefix: `${DOCTOR_STATION}/prescription/items/`, visit: visitOfRow("giniflow_rx_items") },
+  { prefix: `${DOCTOR_STATION}/proposals/`, visit: visitOfRow("giniflow_rx_proposals") },
+  { prefix: `${DOCTOR_STATION}/suggestions/`, visit: visitOfRow("giniflow_plan_suggestions") },
+  { prefix: `${DOCTOR_STATION}/`, visit: (seg) => uuid(seg[0]) },
+  { prefix: "/api/giniflow/referrals/visit/", visit: (seg) => uuid(seg[0]) },
+  {
+    prefix: "/api/giniflow/referrals/",
+    visit: async (seg) => seg.length === 1 && (await visitOfRow("giniflow_referrals")(seg)),
+    methods: ["DELETE"],
+  },
 ];
 
 const deny = (res, assisted) =>
@@ -42,6 +72,18 @@ const deny = (res, assisted) =>
   });
 
 export async function assistedPatientGuard(req, res, next) {
+  if (normalizeRole(req.doctor?.role) === ROLES.CONSULTANT && req.path.startsWith(DOCTOR_STATION)) {
+    try {
+      if (await hasRxMos(req.doctor.doctor_id))
+        return res.status(403).json({
+          error: "Your patients are worked on the Consultant station by your prescription MOs.",
+          code: "consultant_station_by_mos",
+        });
+    } catch (e) {
+      return next(e);
+    }
+    return next();
+  }
   if (!req.path.startsWith("/api/") || normalizeRole(req.doctor?.role) !== ROLES.RX_MO)
     return next();
   try {
@@ -72,6 +114,13 @@ export async function assistedPatientGuard(req, res, next) {
     }
 
     const segments = req.path.slice(rule.prefix.length).split("/");
+    if (rule.methods && !rule.methods.includes(req.method)) return deny(res, assisted);
+    if (rule.visit) {
+      const visitId = await rule.visit(segments);
+      const allowed =
+        !!visitId && (await isAssignedVisit(visitId, moId, { today: !READS.has(req.method) }));
+      return allowed ? next() : deny(res, assisted);
+    }
     const patientId = await rule.patient(segments);
     if (!patientId) return deny(res, assisted);
     const allowed = await isAssignedPatient(patientId, moId, { today: !READS.has(req.method) });

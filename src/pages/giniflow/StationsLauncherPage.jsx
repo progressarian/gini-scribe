@@ -131,7 +131,9 @@ export default function StationsLauncherPage() {
 
   const stations = data?.stations || {};
   const visible = STATIONS.filter(
-    (s) => !s.href || hasCapability(doctor, GINIFLOW_LAUNCHER_CAPABILITY[s.key]),
+    (s) =>
+      (!s.href || hasCapability(doctor, GINIFLOW_LAUNCHER_CAPABILITY[s.key])) &&
+      !(s.key === "doctor" && doctor?.has_rx_mos),
   );
   const today = new Date().toLocaleDateString("en-IN", {
     weekday: "short",
@@ -162,7 +164,11 @@ export default function StationsLauncherPage() {
             const body = (
               <>
                 <div className="rc-ico">{s.icon}</div>
-                <div className="rc-name">{s.name}</div>
+                <div className="rc-name">
+                  {s.key === "doctor" && doctor?.assists
+                    ? `Prescriptions · ${doctor.assists.name}`
+                    : s.name}
+                </div>
                 <div className="rc-desc">{s.desc}</div>
                 {s.href && isPending ? (
                   <div className="rc-count rc-loading" role="status">

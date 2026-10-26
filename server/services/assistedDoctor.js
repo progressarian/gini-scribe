@@ -3,8 +3,26 @@ import pool from "../config/db.js";
 const CACHE_MS = 60_000;
 const cache = new Map();
 
+const rxMoCache = new Map();
+
 export function clearAssistedCache() {
   cache.clear();
+  rxMoCache.clear();
+}
+
+export async function hasRxMos(consultantId, db = pool) {
+  if (!consultantId) return false;
+  const hit = rxMoCache.get(consultantId);
+  if (hit && Date.now() - hit.at < CACHE_MS) return hit.value;
+  const { rows } = await db.query(
+    `SELECT EXISTS (
+       SELECT 1 FROM doctors
+        WHERE assists_doctor_id = $1 AND lower(role) = 'rx_mo' AND COALESCE(is_active, TRUE)
+     ) AS has`,
+    [consultantId],
+  );
+  rxMoCache.set(consultantId, { at: Date.now(), value: rows[0].has });
+  return rows[0].has;
 }
 
 export async function assistedDoctorOf(doctorId, db = pool) {
@@ -33,6 +51,20 @@ export async function isAssignedPatient(patientId, moId, { today = false } = {},
           AND (NOT $3 OR v.visit_date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date)
      ) AS ok`,
     [patientId, moId, today],
+  );
+  return rows[0].ok;
+}
+
+export async function isAssignedVisit(visitId, moId, { today = false } = {}, db = pool) {
+  if (!visitId || !moId) return false;
+  const { rows } = await db.query(
+    `SELECT EXISTS (
+       SELECT 1 FROM giniflow_visits v
+        WHERE v.id::text = $1
+          AND v.rx_mo_id = $2
+          AND (NOT $3 OR v.visit_date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date)
+     ) AS ok`,
+    [String(visitId), moId, today],
   );
   return rows[0].ok;
 }

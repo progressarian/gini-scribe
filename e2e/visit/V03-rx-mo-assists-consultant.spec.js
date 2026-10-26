@@ -27,7 +27,7 @@ const booking = async (doctor, { day = istDay(), visitType = "New Patient", rxMo
   );
   const visit = await one(
     `INSERT INTO giniflow_visits (patient_id, visit_date, appointment_id, current_status, rx_mo_id)
-     VALUES ($1, $2::date, $3, 'checkedin', $4) RETURNING id`,
+     VALUES ($1, $2::date, $3, 'checked_in', $4) RETURNING id`,
     [patient.id, day, appt.id, rxMo?.id ?? null],
   );
   return { patient: patient.id, name: patient.name, appointment: appt.id, visit: visit.id };
@@ -170,6 +170,11 @@ test.describe.serial("V03 MO — prescriptions works only the patients assigned 
     expect(ok.status()).toBe(200);
     expect((await ok.json()).rxMo).toEqual({ rxMoId: RX_MO.id, rxMoName: RX_MO.short_name });
     expect((await mo.get(`/api/visit/${v.patient}`)).status()).toBe(200);
+
+    const board = await (await coordinator.get(`/api/giniflow/board?date=${istDay()}`)).json();
+    const cards = JSON.stringify(board);
+    expect(cards).toContain(`"rxMoId":${RX_MO.id}`);
+    expect(cards).toContain(`"rxMoName":"${RX_MO.short_name}"`);
 
     const audit = await one(
       `SELECT details FROM audit_log WHERE action = 'rx_mo_assigned' ORDER BY id DESC LIMIT 1`,

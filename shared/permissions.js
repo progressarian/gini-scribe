@@ -314,6 +314,9 @@ export const ROLE_CAPABILITIES = {
     C.VITALS,
     C.LAB_REQUESTS,
     C.RECEPTION_OPS,
+    C.GINIFLOW_VIEW,
+    C.GINIFLOW_STATION_DOCTOR,
+    C.GINIFLOW_PRINT_RX,
   ],
   // No REFILLS: working the refill queue is a prescribing decision, so nurses
   // don't approve them. They can still see a patient's refill history in the

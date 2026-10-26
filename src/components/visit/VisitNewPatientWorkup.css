@@ -1,6 +1,6 @@
 .npw-meta {
   font-size: 11px;
-  color: var(--t3);
+  color: var(--t3, var(--ink3, #6b7280));
 }
 
 .npw-statusbar {
@@ -13,13 +13,13 @@
 
 .npw-status {
   font-size: 12px;
-  color: var(--t3);
+  color: var(--t3, var(--ink3, #6b7280));
 }
 .npw-status.ok {
   color: #065f46;
 }
 .npw-status.bad {
-  color: var(--red);
+  color: var(--red, #dc2626);
 }
 .npw-status.warn {
   color: #92400e;
@@ -36,8 +36,9 @@
 }
 
 .npw-history {
+  container-type: inline-size;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
   column-gap: 16px;
 }
 .npw-text {
@@ -56,19 +57,20 @@
 
 .npw-hint {
   font-size: 12px;
-  color: var(--t3);
+  color: var(--t3, var(--ink3, #6b7280));
   margin-top: 4px;
 }
 
 .npw-regions {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
   gap: 12px;
 }
 
 .npw-region {
-  border: 1px solid var(--border);
-  border-radius: var(--rs);
+  container-type: inline-size;
+  border: 1px solid var(--border, var(--bd, #e4e9f2));
+  border-radius: var(--rs, 8px);
   padding: 8px 12px 10px;
   margin: 0;
   min-width: 0;
@@ -76,18 +78,24 @@
 .npw-region legend {
   font-size: 13px;
   font-weight: 700;
-  color: var(--text);
+  color: var(--text, var(--ink, #1a1f2e));
   padding: 0 4px;
 }
 .npw-count {
   font-size: 11px;
   font-weight: 500;
-  color: var(--t3);
+  color: var(--t3, var(--ink3, #6b7280));
   margin-left: 8px;
 }
+.npw-bulk {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-bottom: 4px;
+}
 .npw-rest {
-  display: block;
-  margin: 0 0 4px auto;
+  white-space: nowrap;
 }
 
 .npw-item {
@@ -96,14 +104,14 @@
   align-items: center;
   gap: 4px 8px;
   padding: 5px 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--border, var(--bd, #e4e9f2));
 }
 .npw-item:last-child {
   border-bottom: 0;
 }
 .npw-item-label {
   font-size: 13px;
-  color: var(--t2);
+  color: var(--t2, var(--ink2, #374151));
 }
 .npw-item .npw-note {
   grid-column: 1 / -1;
@@ -113,7 +121,9 @@
 
 .npw-seg {
   display: inline-flex;
-  border: 1px solid var(--border2);
+  flex-wrap: wrap;
+  max-width: 100%;
+  border: 1px solid var(--border2, var(--bd, #d0d8e8));
   border-radius: 6px;
   overflow: hidden;
 }
@@ -122,7 +132,7 @@
   cursor: pointer;
 }
 .npw-seg label + label {
-  border-left: 1px solid var(--border2);
+  border-left: 1px solid var(--border2, var(--bd, #d0d8e8));
 }
 .npw-seg input {
   position: absolute;
@@ -135,30 +145,30 @@
   display: block;
   padding: 3px 9px;
   font-size: 12px;
-  color: var(--t2);
-  background: var(--card);
+  color: var(--t2, var(--ink2, #374151));
+  background: var(--card, var(--white, #ffffff));
 }
 .npw-seg label.on span {
-  background: var(--pri-lt);
-  color: var(--primary);
+  background: var(--pri-lt, #eef1fe);
+  color: var(--primary, var(--blu, #4466f5));
   font-weight: 700;
 }
 .npw-seg input:focus-visible + span {
-  outline: 2px solid var(--primary);
+  outline: 2px solid var(--primary, var(--blu, #4466f5));
   outline-offset: -2px;
 }
 
 .npw-select {
   height: 28px;
-  border: 1px solid var(--border2);
+  border: 1px solid var(--border2, var(--bd, #d0d8e8));
   border-radius: 6px;
-  background: var(--card);
+  background: var(--card, var(--white, #ffffff));
   font-size: 12px;
-  color: var(--t2);
+  color: var(--t2, var(--ink2, #374151));
   padding: 0 6px;
 }
 .npw-select:focus-visible {
-  outline: 2px solid var(--primary);
+  outline: 2px solid var(--primary, var(--blu, #4466f5));
 }
 
 .npw-lines {
@@ -173,11 +183,11 @@
 }
 .npw-lines dt {
   font-weight: 600;
-  color: var(--t3);
+  color: var(--t3, var(--ink3, #6b7280));
 }
 .npw-lines dd {
   margin: 0;
-  color: var(--text);
+  color: var(--text, var(--ink, #1a1f2e));
   overflow-wrap: anywhere;
 }
 
@@ -192,4 +202,50 @@
     grid-template-columns: 1fr;
     gap: 0;
   }
+}
+
+.npw-field {
+  margin-bottom: 10px;
+}
+.npw-sub {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--t3, var(--ink3, #6b7280));
+  margin: 12px 0 6px;
+}
+.npw-station .npw-text {
+  min-height: 40px;
+  resize: vertical;
+}
+
+@container (max-width: 300px) {
+  .npw-item {
+    grid-template-columns: 1fr;
+  }
+  .npw-item .npw-seg,
+  .npw-item .npw-select {
+    justify-self: start;
+  }
+  .npw-bulk {
+    justify-content: flex-start;
+  }
+}
+
+.npw-toggle {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+}
+.npw-toggle:focus-visible {
+  outline: 2px solid var(--primary, var(--blu, #4466f5));
+  outline-offset: 2px;
 }

@@ -383,6 +383,38 @@ function AssignMenu({ card, staff, onAssign, onClose }) {
   );
 }
 
+function RxMoMenu({ card, rxMos, onAssign, onClose }) {
+  const ref = useRef(null);
+  useDismissable(true, onClose, ref);
+  return (
+    <div className="pc-menu assign" ref={ref} role="menu" aria-label={`Rx MO for ${card.name}`}>
+      <div className="pcm-hd">MO writing the prescription</div>
+      {rxMos.map((d) => (
+        <button
+          key={d.id}
+          type="button"
+          role="menuitemradio"
+          aria-checked={d.id === card.rxMoId}
+          className={`pcm-item${d.id === card.rxMoId ? " on" : ""}`}
+          disabled={d.id === card.rxMoId}
+          onClick={() => onAssign(d.id, d.shortName)}
+        >
+          <span>
+            {d.shortName}
+            {d.id === card.rxMoId ? " · now" : ""}
+          </span>
+          <span className="pcm-load">{d.assignedToday}</span>
+        </button>
+      ))}
+      {card.rxMoId && (
+        <button type="button" role="menuitem" className="pcm-item" onClick={() => onAssign(null)}>
+          <span>Remove the MO</span>
+        </button>
+      )}
+    </div>
+  );
+}
+
 function PatientCard({
   card,
   offsetMs,
@@ -401,7 +433,10 @@ function PatientCard({
   canAssign,
   staff,
   onAssign,
+  rxMos = [],
+  onAssignRxMo,
 }) {
+  const [rxMoOpen, setRxMoOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
   const [consultantOpen, setConsultantOpen] = useState(false);
@@ -744,7 +779,31 @@ function PatientCard({
               {card.assignedDoctorName ? "↺ Change" : "+ Assign"}
             </button>
           )}
+          {rxMos.length > 0 && (
+            <button
+              type="button"
+              className="pc-consult-btn"
+              data-gf-toggle
+              aria-haspopup="menu"
+              aria-expanded={rxMoOpen}
+              aria-label={`MO writing the prescription for ${card.name}`}
+              onClick={() => setRxMoOpen((v) => !v)}
+            >
+              {card.rxMoName ? `Rx MO ${card.rxMoName}` : "+ Rx MO"}
+            </button>
+          )}
         </div>
+      )}
+      {rxMoOpen && (
+        <RxMoMenu
+          card={card}
+          rxMos={rxMos}
+          onAssign={(rxMoId, name) => {
+            setRxMoOpen(false);
+            onAssignRxMo(card.id, rxMoId, name);
+          }}
+          onClose={() => setRxMoOpen(false)}
+        />
       )}
       {canAssign && isLabOnly && (
         <button
@@ -827,6 +886,8 @@ function Column({
   canAssign,
   staff,
   onAssign,
+  rxMos,
+  onAssignRxMo,
   column,
   offsetMs,
   now,
@@ -942,6 +1003,8 @@ function Column({
               canAssign={canAssign}
               staff={staff}
               onAssign={onAssign}
+              rxMos={rxMos}
+              onAssignRxMo={onAssignRxMo}
             />
           </Fragment>
         ))}
@@ -1639,7 +1702,10 @@ export default function FlowManagerPage() {
   // Only fetched for the role that can act on it, and cached for five minutes by
   // the hook — the roster does not change during a clinic.
   const { data: staffData } = useTriageStaff(date, canAssign);
-  const staff = canAssign ? staffData?.staff || [] : [];
+  const allStaff = canAssign ? staffData?.staff || [] : [];
+  const isRxMo = (d) => String(d.role || "").toLowerCase() === "rx_mo";
+  const staff = allStaff.filter((d) => !isRxMo(d));
+  const rxMos = allStaff.filter(isRxMo);
 
   // A display left open overnight would keep asking for yesterday. When the IST
   // date rolls over, drop back to "today" and refetch (GF: day rollover).
@@ -1783,6 +1849,17 @@ export default function FlowManagerPage() {
           ),
         onError: (e) =>
           showToast(e?.response?.data?.error || "Could not assign that patient — nothing changed"),
+      },
+    );
+
+  const onAssignRxMo = (visitId, rxMoId, name) =>
+    assignMutation.mutate(
+      { visitId, rxMoId },
+      {
+        onSuccess: () =>
+          showToast(rxMoId ? `✓ ${name} will write the prescription` : "✓ MO removed"),
+        onError: (e) =>
+          showToast(e?.response?.data?.error || "Could not assign the MO — nothing changed"),
       },
     );
 
@@ -2135,6 +2212,8 @@ export default function FlowManagerPage() {
               canAssign={canAssign}
               staff={staff}
               onAssign={onAssign}
+              rxMos={rxMos}
+              onAssignRxMo={onAssignRxMo}
             />
           ))}
         </div>

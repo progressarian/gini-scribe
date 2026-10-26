@@ -12,8 +12,22 @@ export const HISTORY_TEXT_FIELDS = [
 
 export const HISTORY_YES_NO_FIELDS = [
   { id: "covid", label: "COVID", printLabel: "COVID" },
-  { id: "covid_vaccination", label: "COVID vaccination", printLabel: "COVID vaccination" },
+  {
+    id: "covid_vaccination",
+    label: "COVID vaccination",
+    printLabel: "COVID vaccination",
+    showsWhen: { field: "covid", answer: "yes" },
+  },
 ];
+
+export const historyFieldApplies = (field, history = {}) =>
+  !field.showsWhen || history[field.showsWhen.field]?.answer === field.showsWhen.answer;
+
+export function withoutHiddenHistory(history = {}) {
+  const out = { ...history };
+  for (const f of HISTORY_YES_NO_FIELDS) if (!historyFieldApplies(f, out)) delete out[f.id];
+  return out;
+}
 
 export const YES_NO = ["yes", "no"];
 
@@ -191,6 +205,7 @@ export function summariseHistory(history = {}, allergy = null) {
     }
     const field = fields.find((f) => f.id === id);
     const isYesNo = HISTORY_YES_NO_FIELDS.includes(field);
+    if (isYesNo && !historyFieldApplies(field, history)) continue;
     const value = isYesNo ? yesNoText(history[id]) : textOf(history[id]);
     if (value) lines.push({ label: field.printLabel, value });
   }

@@ -6,6 +6,8 @@ import StabilityChip from "../../components/giniflow/StabilityChip";
 import StationNotice from "../../components/giniflow/StationNotice";
 import FullscreenButton from "../../components/giniflow/FullscreenButton";
 import useFullscreen from "../../hooks/useFullscreen";
+import useAuthStore from "../../stores/authStore";
+import { normalizeRole, ROLES } from "../../../shared/permissions";
 
 // The consultant's day list — gini-doctor-v3.html.
 //
@@ -231,6 +233,8 @@ export default function DoctorStationPage() {
   const navigate = useNavigate();
   const { ref: pageRef, fullscreen, toggle: toggleFullscreen } = useFullscreen();
   const now = useTick();
+  const doctor = useAuthStore((s) => s.currentDoctor);
+  const rxMo = normalizeRole(doctor?.role) === ROLES.RX_MO;
   const [scope, setScope] = useState("mine");
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
@@ -288,7 +292,9 @@ export default function DoctorStationPage() {
       <div className="top-rail">
         <div className="tr-logo">Gini Flow</div>
         <div className="tr-role" style={{ background: "var(--blu-l)", color: "var(--blu)" }}>
-          🧑‍⚕️ Consultant
+          {rxMo
+            ? `🩺 MO — prescriptions · for ${doctor?.assists?.name || "consultant"}`
+            : "🧑‍⚕️ Consultant"}
         </div>
         <div className="rail-right">
           <input
@@ -299,29 +305,33 @@ export default function DoctorStationPage() {
             aria-label="Search today's patients"
             onChange={(e) => setSearch(e.target.value)}
           />
-          <div className="scope-toggle" role="group" aria-label="Whose patients">
-            <button
-              type="button"
-              className={scope === "mine" ? "on" : ""}
-              onClick={() => setScope("mine")}
-            >
-              My patients
-            </button>
-            <button
-              type="button"
-              className={scope === "all" ? "on" : ""}
-              onClick={() => setScope("all")}
-            >
-              All
-            </button>
-          </div>
+          {!rxMo && (
+            <div className="scope-toggle" role="group" aria-label="Whose patients">
+              <button
+                type="button"
+                className={scope === "mine" ? "on" : ""}
+                onClick={() => setScope("mine")}
+              >
+                My patients
+              </button>
+              <button
+                type="button"
+                className={scope === "all" ? "on" : ""}
+                onClick={() => setScope("all")}
+              >
+                All
+              </button>
+            </div>
+          )}
           <FullscreenButton fullscreen={fullscreen} onToggle={toggleFullscreen} what="queue" />
           <a className="tr-back" href="/giniflow/stations">
             ← Stations
           </a>
-          <a className="tr-back" href="/giniflow/manager">
-            ← Board
-          </a>
+          {!rxMo && (
+            <a className="tr-back" href="/giniflow/manager">
+              ← Board
+            </a>
+          )}
         </div>
       </div>
 
