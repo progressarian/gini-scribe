@@ -245,7 +245,7 @@ const BOARD_SQL = `
          doc.short_name                            AS doctor_name,
          doc.name                                  AS doctor_full_name,
          v.rx_mo_id           AS rx_mo_id,
-         rxm.short_name                            AS rx_mo_name,
+         COALESCE(NULLIF(rxm.short_name, ''), rxm.name) AS rx_mo_name,
          COALESCE(doc.direct_consult, FALSE)       AS direct_consult,
          EXISTS (SELECT 1 FROM giniflow_visit_events se
                   WHERE se.visit_id = v.id AND se.status = 'with_sd') AS seen_by_sd,

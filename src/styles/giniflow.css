@@ -1248,6 +1248,15 @@
   background: var(--red-l);
   color: var(--red);
 }
+.gf .pc-consult-tag.rx-mo {
+  background: rgba(13, 148, 136, 0.1);
+  color: var(--tl);
+}
+.gf .pc-consult-tag.rx-mo.unset {
+  background: var(--bg);
+  color: var(--ink3);
+  font-weight: 600;
+}
 .gf .pc-consult-btn {
   flex-shrink: 0;
   padding: 3px 8px;

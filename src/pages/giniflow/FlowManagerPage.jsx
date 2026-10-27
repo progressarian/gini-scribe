@@ -448,6 +448,10 @@ function PatientCard({
       : null;
   const isLab = !!trackData;
   const isLabOnly = isLab && !isMachine && !!card.labOnly;
+  const canPickRxMo =
+    canAssign &&
+    !isTerminalStatus(card.status) &&
+    rxMos.some((m) => m.assistsDoctorId === card.assignedDoctorId || m.id === card.rxMoId);
   const anchor = isLab ? trackData.since : card.statusSince;
   const machineNow = now - offsetMs;
   const machineTests = isMachine
@@ -779,7 +783,14 @@ function PatientCard({
               {card.assignedDoctorName ? "↺ Change" : "+ Assign"}
             </button>
           )}
-          {rxMos.length > 0 && (
+        </div>
+      )}
+      {!isLabOnly && (card.rxMoId || canPickRxMo) && (
+        <div className="pc-consult">
+          <span className={`pc-consult-tag rx-mo${card.rxMoId ? "" : " unset"}`}>
+            {card.rxMoId ? `✍ Rx MO · ${card.rxMoName || "MO"}` : "No Rx MO"}
+          </span>
+          {canPickRxMo && (
             <button
               type="button"
               className="pc-consult-btn"
@@ -789,7 +800,7 @@ function PatientCard({
               aria-label={`MO writing the prescription for ${card.name}`}
               onClick={() => setRxMoOpen((v) => !v)}
             >
-              {card.rxMoName ? `Rx MO ${card.rxMoName}` : "+ Rx MO"}
+              {card.rxMoId ? "↺ Change" : "+ Rx MO"}
             </button>
           )}
         </div>

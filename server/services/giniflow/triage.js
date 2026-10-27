@@ -263,7 +263,7 @@ const DAY_SQL = `
          sd.short_name                            AS sd_name,
          doc.short_name                           AS doctor_name,
          v.rx_mo_id          AS rx_mo_id,
-         rxm.short_name                           AS rx_mo_name,
+         COALESCE(NULLIF(rxm.short_name, ''), rxm.name) AS rx_mo_name,
          setter.short_name                        AS category_set_by_name,
          a.id                                     AS appointment_id,
          a.status                                 AS appointment_status,
@@ -840,7 +840,7 @@ export async function assignRxMo(visitId, rxMoId, actorId = null, db = pool) {
   const { rows } = await db.query(
     `UPDATE giniflow_visits v SET rx_mo_id = $2, updated_at = NOW()
       WHERE v.id = $1
-      RETURNING v.rx_mo_id, (SELECT short_name FROM doctors WHERE id = v.rx_mo_id) AS rx_mo_name`,
+      RETURNING v.rx_mo_id, (SELECT COALESCE(NULLIF(short_name, ''), name) FROM doctors WHERE id = v.rx_mo_id) AS rx_mo_name`,
     [visitId, rxMoId],
   );
   if (!rows.length) throw Object.assign(new Error("No such visit"), { status: 404 });
@@ -860,7 +860,7 @@ export async function assignRxMo(visitId, rxMoId, actorId = null, db = pool) {
 export async function getAssignableStaff(visitDate, db = pool) {
   const { rows } = await db.query(
     `SELECT d.id, d.name, d.short_name, d.role, d.specialty, COALESCE(d.is_chief, FALSE) AS is_chief,
-            COALESCE(load.n, 0)::int AS assigned_today
+            d.assists_doctor_id, COALESCE(load.n, 0)::int AS assigned_today
        FROM doctors d
        LEFT JOIN LATERAL (
          SELECT COUNT(*)::int AS n FROM giniflow_visits v
@@ -882,6 +882,7 @@ export async function getAssignableStaff(visitDate, db = pool) {
     name: r.name,
     shortName: r.short_name || r.name,
     role: r.role,
+    assistsDoctorId: r.assists_doctor_id,
     specialty: r.specialty,
     isChief: r.is_chief,
     assignedToday: r.assigned_today,
