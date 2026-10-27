@@ -1371,7 +1371,10 @@ function TimelineModal({ visitId, onClose, slaConfig }) {
     const arrived = clockAt(step.enteredAt);
     const atStation =
       step.stationAt && step.stationAt !== step.enteredAt ? clockAt(step.stationAt) : null;
-    const queued = atStation && step.waitStatus !== "checked_in" ? `Queued ${arrived} · ` : "";
+    const queued =
+      atStation && step.waitStatus && step.waitStatus !== "checked_in"
+        ? `Queued ${arrived} · `
+        : "";
     const start = atStation || arrived;
     if (step.isCurrent) return `${queued}Since ${start}`;
     const left = step.leftAt && !step.timestampOnly ? clockAt(step.leftAt) : null;

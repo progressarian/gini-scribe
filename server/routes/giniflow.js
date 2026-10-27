@@ -270,6 +270,12 @@ router.get("/giniflow/visits/:id/timeline", async (req, res) => {
               ${labOnlyPredicate("v", "$2")} AS lab_only,
               ${REST_SKIPPED_SQL("v")} AS rest_skipped,
               ${APPOINTMENT_ARRIVED_AT_SQL("v")} AS appointment_arrived_at,
+              (SELECT vs.created_at FROM giniflow_visit_steps vs
+                WHERE vs.visit_id = v.id AND vs.step_catalog_id = 'vitals'
+                  AND EXISTS (SELECT 1 FROM giniflow_visit_steps es
+                               WHERE es.visit_id = v.id
+                                 AND es.created_at < vs.created_at - interval '1 second')
+                ORDER BY vs.created_at LIMIT 1) AS vitals_planned_at,
               -- The same count the board's own query uses. Counting
               -- giniflow_visits instead made the modal say "Visit 1" beside a
               -- card reading "Visit 3": that table has no history before the
@@ -343,6 +349,9 @@ router.get("/giniflow/visits/:id/timeline", async (req, res) => {
           segments: tests.segments,
           orderTimes: tests.orderTimes,
           restSkipped: visit.rows[0].rest_skipped,
+          vitalsPlannedAt: visit.rows[0].vitals_planned_at
+            ? new Date(visit.rows[0].vitals_planned_at)
+            : null,
         });
 
     const machineTrack = await getMachineTrack(pool, req.params.id, now);

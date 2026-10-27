@@ -5,6 +5,12 @@ import { keepsForChoice } from "../../shared/directConsult.js";
 
 const ADMIN_ID = 13;
 const commit = process.argv.includes("--commit");
+const skipped = new Set(
+  (process.argv.find((a) => a.startsWith("--skip=")) || "--skip=")
+    .slice(7)
+    .split(",")
+    .filter(Boolean),
+);
 const visitIds = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 
 const describe = async (client, visitId) => {
@@ -30,18 +36,22 @@ const planFor = async (client, visitId) => {
   const { visit_type_id: visitTypeId, chief_step: chiefStep } = rows[0];
   const steps = (await defaultPlan(visitTypeId, client))
     .filter((s) => s.included && keepsForChoice(s, chiefStep ? "chief" : "consultant"))
-    .map(({ catalogId, name, minutes, station, role }) => ({
+    .filter((s) => !skipped.has(s.catalogId))
+    .map(({ catalogId, name, minutes, station, role, source }) => ({
       catalogId,
       name,
       minutes,
       station,
       role,
+      source,
     }));
   return { visitTypeId, steps };
 };
 
 if (!visitIds.length) {
-  console.error("usage: node scripts/arrive-lab-only-for-appointment.mjs <visitId>... [--commit]");
+  console.error(
+    "usage: node scripts/arrive-lab-only-for-appointment.mjs <visitId>... [--skip=billing,...] [--commit]",
+  );
   process.exit(1);
 }
 

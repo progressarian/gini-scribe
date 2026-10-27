@@ -432,6 +432,7 @@ export async function getStationTimes(
     segments = [],
     orderTimes = [],
     restSkipped = false,
+    vitalsPlannedAt = null,
   } = {},
 ) {
   // `slaConfig` here is the flat station→minutes map every existing caller
@@ -624,6 +625,45 @@ export async function getStationTimes(
     ].filter(Boolean);
   });
 
+  const LAB_COLLECTION_LABEL = "At the lab — sample collection";
+  const VITALS_NOT_PLANNED_LABEL = "Not recorded — Vitals was not on the journey yet";
+  const VITALS_QUEUES = ["checked_in", "vitals_pending"];
+  const beforeVitalsPlanned = (entry) =>
+    vitalsPlannedAt &&
+    entry.isWait &&
+    !entry.timestampOnly &&
+    !entry.awaitingLab &&
+    VITALS_QUEUES.includes(entry.status) &&
+    entry.enteredAt < vitalsPlannedAt;
+  const withVitalsPlan = withLabSplit.flatMap((entry) => {
+    if (!beforeVitalsPlanned(entry)) return [entry];
+    const endsAt = entry.leftAt || now;
+    const cutAt = endsAt < vitalsPlannedAt ? endsAt : vitalsPlannedAt;
+    const toLab = awaySteps.some((a) => a.enteredAt.getTime() === cutAt.getTime());
+    return [
+      {
+        ...entry,
+        label: toLab ? LAB_COLLECTION_LABEL : VITALS_NOT_PLANNED_LABEL,
+        unrecorded: !toLab,
+        beforePlan: true,
+        budgetMinutes: null,
+        leftAt: cutAt >= endsAt ? entry.leftAt : cutAt,
+        minutes: minutesBetween(entry.enteredAt, cutAt),
+        isCurrent: cutAt >= endsAt ? entry.isCurrent : false,
+      },
+      cutAt < endsAt
+        ? {
+            ...entry,
+            status: "vitals_pending",
+            label: STATUS_LABEL.vitals_pending || entry.label,
+            afterPlan: true,
+            enteredAt: cutAt,
+            minutes: minutesBetween(cutAt, endsAt),
+          }
+        : null,
+    ].filter(Boolean);
+  });
+
   // Pair each queue with the station it fed, so the timeline reads
   // "8m wait + 12m station" rather than listing two half-steps. Consecutive
   // queue statuses (checked_in → vitals_pending, both "waiting for vitals")
@@ -639,11 +679,18 @@ export async function getStationTimes(
   const worse = (a, b) => (WORST[a] >= WORST[b] ? a : b);
 
   const arrivedRow = statusRows.find((r) => JOURNEY_START_STATUSES.includes(r.status));
-  const restFrom = arrivedRow && !restSkipped ? new Date(arrivedRow.occurred_at) : null;
+  const arrivedAt = arrivedRow ? new Date(arrivedRow.occurred_at) : null;
+  const restFrom =
+    arrivedAt && !restSkipped
+      ? vitalsPlannedAt && vitalsPlannedAt > arrivedAt
+        ? vitalsPlannedAt
+        : arrivedAt
+      : null;
   const restTo = restFrom ? new Date(restFrom.getTime() + VITALS_REST_MINUTES * 60000) : null;
   const restInWait = (entry) => {
     const status = wait?.status ?? (entry.isWait ? entry.status : null);
     if (!restFrom || QUEUE_FEEDS[status] !== "with_vitals") return 0;
+    if ((wait ?? entry).beforePlan) return 0;
     const from = wait?.enteredAt ?? entry.enteredAt;
     const to = entry.isWait ? entry.leftAt || now : entry.enteredAt;
     const overlapFrom = from > restFrom ? from : restFrom;
@@ -680,7 +727,7 @@ export async function getStationTimes(
       meta: entry.meta,
       enteredAt: (wait?.enteredAt ?? entry.enteredAt).toISOString(),
       stationAt: entry.isWait ? null : entry.enteredAt.toISOString(),
-      waitStatus: wait?.status ?? null,
+      waitStatus: wait?.afterPlan ? null : (wait?.status ?? null),
       leftAt: entry.leftAt ? entry.leftAt.toISOString() : null,
       restMinutes,
       restUntil: restMinutes && restTo ? restTo.toISOString() : null,
@@ -723,7 +770,7 @@ export async function getStationTimes(
     rx_pending: "with_rx",
   };
 
-  for (const entry of withLabSplit) {
+  for (const entry of withVitalsPlan) {
     // A queue the patient is still sitting in is a step in its own right — it is
     // the one the board is timing, so it must not be folded into a station.
     if (entry.isWait && !entry.isCurrent) {
@@ -733,7 +780,8 @@ export async function getStationTimes(
         wait &&
         (QUEUE_FEEDS[wait.status] !== QUEUE_FEEDS[entry.status] ||
           !QUEUE_FEEDS[entry.status] ||
-          !!wait.awaitingLab !== !!entry.awaitingLab)
+          !!wait.awaitingLab !== !!entry.awaitingLab ||
+          !!wait.beforePlan !== !!entry.beforePlan)
       ) {
         const pending = wait;
         wait = null;
@@ -755,7 +803,11 @@ export async function getStationTimes(
       !!QUEUE_FEEDS[entry.status] &&
       QUEUE_FEEDS[wait.status] === QUEUE_FEEDS[entry.status] &&
       !!wait.awaitingLab === !!entry.awaitingLab;
-    if (wait && !sameQueue && (QUEUE_FEEDS[wait.status] !== entry.status || wait.awaitingLab)) {
+    if (
+      wait &&
+      !sameQueue &&
+      (QUEUE_FEEDS[wait.status] !== entry.status || wait.awaitingLab || wait.beforePlan)
+    ) {
       const pending = wait;
       wait = null;
       emit({ ...pending, isCurrent: false, leftAt: entry.enteredAt });
@@ -921,11 +973,38 @@ export async function getStationTimes(
       visits: 1,
     }));
 
+  const firstPiece = withVitalsPlan.find((entry) => !entry.timestampOnly);
+  const arrivalBeforePlan =
+    firstPiece?.beforePlan && arrivedRow
+      ? [
+          {
+            status: "arrived",
+            timestampOnly: true,
+            label: STATUS_LABEL[arrivedRow.status] || arrivedRow.status,
+            actorRole: arrivedRow.actor_role,
+            meta: arrivedRow.meta,
+            enteredAt: new Date(arrivedRow.occurred_at).toISOString(),
+            leftAt: null,
+            waitMinutes: 0,
+            waitBudget: null,
+            stationMinutes: 0,
+            stationBudget: null,
+            totalMinutes: 0,
+            budgetMinutes: null,
+            overBy: 0,
+            colour: "neutral",
+            isCurrent: false,
+            visits: 1,
+          },
+        ]
+      : [];
+
   const withMarkers = [
     ...skipped,
     ...vitalsSavedDirectly,
     ...merged,
     ...arrivedBeforeBreak,
+    ...arrivalBeforePlan,
     ...markerRows.map((row) => ({
       status: row.status,
       timestampOnly: true,
