@@ -37,6 +37,7 @@ import {
   editVisit,
   undoVisit,
   loggedVisitDays,
+  setPriority,
 } from "../crm/visits.js";
 import {
   DoctorError,
@@ -56,7 +57,15 @@ import {
   restoreDoctor,
 } from "../crm/removals.js";
 import { handleError } from "../utils/errorHandler.js";
-import { listDueDoctors, listMyDoctors, listReferrals, listTasks } from "../crm/homeLists.js";
+import { listDueDoctors, listMyDoctors, listReferrals } from "../crm/homeLists.js";
+import {
+  cancelTask,
+  completeTask,
+  createTask,
+  listTasks,
+  reopenTask,
+  todayView,
+} from "../crm/tasks.js";
 import {
   VisitSheetError,
   assertDoctorBatch,
@@ -123,7 +132,6 @@ const homeList = (path, list, label) =>
 
 homeList("/crm/home/due", listDueDoctors, "Doctors to visit");
 homeList("/crm/home/doctors", listMyDoctors, "My doctors");
-homeList("/crm/home/tasks", listTasks, "Tasks");
 
 // ---- Referral capture and the patient journey (brief §6, §7) ------------
 router.get("/crm/service-lines", crm, async (req, res) => {
@@ -233,6 +241,18 @@ doctorRoute("post", "/crm/removal-requests/:id/approve", "Approve removal", (req
 );
 doctorRoute("post", "/crm/removal-requests/:id/reject", "Reject removal", (req) =>
   decideRemoval(req.crmUser, req.params.id, { approve: false, note: req.body?.note }),
+);
+doctorRoute("get", "/crm/today", "Today", (req) => todayView(req.crmUser, req.query));
+doctorRoute("get", "/crm/tasks", "Tasks", (req) => listTasks(req.crmUser, req.query));
+doctorRoute("post", "/crm/tasks", "Add task", (req) => createTask(req.crmUser, req.body));
+doctorRoute("post", "/crm/tasks/:id/done", "Complete task", (req) =>
+  completeTask(req.crmUser, req.params.id),
+);
+doctorRoute("post", "/crm/tasks/:id/cancel", "Cancel task", (req) =>
+  cancelTask(req.crmUser, req.params.id, req.body),
+);
+doctorRoute("post", "/crm/tasks/:id/reopen", "Reopen task", (req) =>
+  reopenTask(req.crmUser, req.params.id),
 );
 doctorRoute("put", "/crm/visits/:id", "Change visit", (req) =>
   editVisit(req.crmUser, req.params.id, req.body),

@@ -1,15 +1,23 @@
 import { useState, useEffect } from "react";
-import { useNavigate, useSearchParams, Link } from "react-router-dom";
+import { useSearchParams, Link } from "react-router-dom";
 import api from "../../services/api.js";
 import { downloadFile } from "../../lib/downloadBlob.js";
 import { errorText } from "../../components/crm/import/importText.js";
-import { startAutoDrain, pendingCount } from "../../crm/offlineQueue.js";
+import {
+  startAutoDrain,
+  pendingCount,
+  pendingItems,
+  remove as removeQueued,
+  retryNow,
+} from "../../crm/offlineQueue.js";
+import PendingVisits from "../../components/crm/home/PendingVisits.jsx";
 import AssignmentsPanel from "../../components/crm/AssignmentsPanel.jsx";
 import RemovalRequestsPanel from "../../components/crm/doctors/RemovalRequestsPanel.jsx";
 import DueList from "../../components/crm/home/DueList.jsx";
 import DoctorsList from "../../components/crm/home/DoctorsList.jsx";
 import ReferralsList from "../../components/crm/home/ReferralsList.jsx";
-import TasksList from "../../components/crm/home/TasksList.jsx";
+import TasksPanel from "../../components/crm/tasks/TasksPanel.jsx";
+import TodayPanel from "../../components/crm/tasks/TodayPanel.jsx";
 import useAuthStore from "../../stores/authStore";
 import { CAPABILITIES, hasCapability } from "../../../shared/permissions.js";
 
@@ -30,17 +38,36 @@ const TABS = [
 ];
 
 const ASSIGNMENTS_TAB = { key: "assignments", label: "Assignments" };
+const TAB_STORE = "crm.home.tab";
+
+function rememberedTab() {
+  try {
+    return sessionStorage.getItem(TAB_STORE);
+  } catch {
+    return null;
+  }
+}
+
+function rememberTab(key) {
+  try {
+    sessionStorage.setItem(TAB_STORE, key);
+  } catch {
+    return;
+  }
+}
 const REMOVALS_TAB = { key: "removals", label: "Removal requests" };
 const SEES_EVERY_DOCTOR = ["ceo_admin", "head_of_growth"];
 
 export default function RepHomePage() {
-  const navigate = useNavigate();
   const me = useAuthStore((st) => st.currentDoctor);
   const [params, setParams] = useSearchParams();
   const [data, setData] = useState(null);
-  const [tab, setTab] = useState(() => params.get("tab") || "due");
+  const requestedTab = params.get("tab") || rememberedTab() || "due";
   const [removalsWaiting, setRemovalsWaiting] = useState(0);
   const [pending, setPending] = useState(pendingCount());
+  const [queueItems, setQueueItems] = useState(pendingItems());
+  const [retrying, setRetrying] = useState(false);
+  const [retryResult, setRetryResult] = useState(null);
   const [referrals, setReferrals] = useState(null);
   const [listFilters, setListFilters] = useState({});
   const [refreshKey, setRefreshKey] = useState(0);
@@ -62,24 +89,49 @@ export default function RepHomePage() {
 
   const reload = () => load().then(() => setRefreshKey((n) => n + 1));
 
+  const sendVisit = (v) => api.post("/api/crm/visits", v).then((r) => r.data);
+
+  const retryQueue = async () => {
+    setRetrying(true);
+    setRetryResult(null);
+    try {
+      const result = await retryNow(sendVisit);
+      setRetryResult(result);
+      setPending(pendingCount());
+      setQueueItems(pendingItems());
+      if (result.sent > 0) reload();
+    } finally {
+      setRetrying(false);
+    }
+  };
+
   useEffect(() => {
     load();
     // The queue drains here rather than on the visit screen, because this is
     // the screen a rep leaves open between calls — and the one they reopen
     // when they walk back into signal.
-    const stop = startAutoDrain(
-      (v) => api.post("/api/crm/visits", v).then((r) => r.data),
-      (remaining) => {
-        setPending(remaining);
-        if (remaining === 0) reload();
-      },
-    );
+    const stop = startAutoDrain(sendVisit, (remaining) => {
+      setPending(remaining);
+      setQueueItems(pendingItems());
+      if (remaining === 0) reload();
+    });
     return stop;
   }, []);
 
   useEffect(() => {
     if (!justLogged && !justReferred) return;
-    const t = setTimeout(() => setParams({}, { replace: true }), 4000);
+    const t = setTimeout(
+      () =>
+        setParams(
+          (current) => {
+            const next = new URLSearchParams(current);
+            ["logged", "secs", "referral"].forEach((k) => next.delete(k));
+            return next;
+          },
+          { replace: true },
+        ),
+      4000,
+    );
     return () => clearTimeout(t);
   }, [justLogged, justReferred, setParams]);
 
@@ -93,12 +145,25 @@ export default function RepHomePage() {
       .catch(() => setRemovalsWaiting(0));
   }, [leadView, refreshKey]);
 
+  const tabs = [...TABS, ...(leadView ? [ASSIGNMENTS_TAB, REMOVALS_TAB] : [])];
+  const tab = tabs.some((t) => t.key === requestedTab) ? requestedTab : "due";
+
+  const setTab = (key) => {
+    rememberTab(key);
+    setParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        if (key === "due") next.delete("tab");
+        else next.set("tab", key);
+        return next;
+      },
+      { replace: true },
+    );
+  };
+
   useEffect(() => {
-    if (!params.get("tab")) return;
-    const next = new URLSearchParams(params);
-    next.delete("tab");
-    setParams(next, { replace: true });
-  }, []);
+    if (data) rememberTab(tab);
+  }, [tab, data]);
 
   const filtersFor = (key) => listFilters[key] || {};
   const setFiltersFor = (key) => (next) => setListFilters((prev) => ({ ...prev, [key]: next }));
@@ -139,11 +204,27 @@ export default function RepHomePage() {
           <h1 className="rep__title">{data.user.name?.split(" ")[0] || "Today"}</h1>
         </div>
         {pending > 0 && (
-          <span className="rep__pending" title="Visits saved on this phone, waiting for signal">
+          <span
+            className={`rep__pending ${queueItems.some((i) => i.last_status) ? "rep__pending--err" : ""}`}
+            title="Visits saved on this phone, waiting to sync"
+          >
             {pending} to sync
           </span>
         )}
       </header>
+
+      <PendingVisits
+        items={queueItems}
+        busy={retrying}
+        onRetry={retryQueue}
+        onRemove={(item) => {
+          removeQueued(item.visit.id);
+          setPending(pendingCount());
+          setQueueItems(pendingItems());
+          setRetryResult(null);
+        }}
+        result={retryResult}
+      />
 
       <section className="rep__perf" aria-label="This month">
         <dl className="rep__perf-stats">
@@ -224,7 +305,7 @@ export default function RepHomePage() {
       </div>
 
       <nav className="rep__tabs" aria-label="CRM lists">
-        {[...TABS, ...(leadView ? [ASSIGNMENTS_TAB, REMOVALS_TAB] : [])].map((t) => (
+        {tabs.map((t) => (
           <button
             key={t.key}
             type="button"
@@ -263,38 +344,7 @@ export default function RepHomePage() {
         />
       )}
 
-      {tab === "today" && (
-        <ul className="rep__list home__list">
-          {data.todays_visits.length === 0 && <Empty>No visits logged yet today.</Empty>}
-          {data.todays_visits.map((v) => (
-            // The whole card is the target, not a link inside it. A logged
-            // visit is a thing you want to re-read — what did they say? — and
-            // hunting for a small link on a phone is the wrong ask.
-            <li key={v.id}>
-              <button
-                className="rep__row rep__row--tap"
-                onClick={() => navigate(`/crm/doctor/${v.doctor_id}?visit=${v.id}`)}
-              >
-                <div className="rep__row-main">
-                  <strong>{v.full_name}</strong>
-                  <span className="rep__row-sub">
-                    {new Date(v.occurred_at).toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                    {v.outcome ? ` · ${v.outcome.replace(/_/g, " ")}` : ""}
-                    {v.area ? ` · ${v.area}` : ""}
-                    {v.source === "sheet" ? " · From sheet" : ""}
-                  </span>
-                </div>
-                <span className="rep__chev" aria-hidden="true">
-                  ›
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+      {tab === "today" && <TodayPanel refreshKey={refreshKey} onChanged={load} />}
 
       {tab === "doctors" && (
         <DoctorsList
@@ -311,13 +361,7 @@ export default function RepHomePage() {
         <RemovalRequestsPanel onCountChange={setRemovalsWaiting} />
       )}
 
-      {tab === "tasks" && (
-        <TasksList
-          filters={filtersFor("tasks")}
-          onChange={setFiltersFor("tasks")}
-          refreshKey={refreshKey}
-        />
-      )}
+      {tab === "tasks" && <TasksPanel refreshKey={refreshKey} onChanged={load} />}
     </div>
   );
 }
@@ -330,5 +374,3 @@ function Stat({ n, label, tone }) {
     </div>
   );
 }
-
-const Empty = ({ children }) => <li className="rep__empty">{children}</li>;

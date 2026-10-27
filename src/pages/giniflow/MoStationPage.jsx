@@ -619,6 +619,17 @@ export default function MoStationPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queue]);
 
+  const claimed = useRef(new Set());
+  useEffect(() => {
+    if (!selected || claimed.current.has(selected) || start.isPending) return;
+    if (!(queue?.waitingForMe || []).some((r) => r.visitId === selected)) return;
+    claimed.current.add(selected);
+    start.mutate(selected, {
+      onError: (e) => showToast(e?.response?.data?.error || "Could not open this patient"),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, queue]);
+
   // A different patient means a fresh plan — never carry one patient's notes
   // onto another's record.
   useEffect(() => {
@@ -726,6 +737,7 @@ export default function MoStationPage() {
     // Selection follows the claim rather than leading it: a patient already at
     // another MO's desk is refused, and the panel must not open their plan and
     // proposals anyway. Take over is the deliberate way in.
+    claimed.current.add(visitId);
     start.mutate(visitId, {
       onSuccess: () => setSelected(visitId),
       onError: (e) => showToast(e?.response?.data?.error || "Could not open this patient"),

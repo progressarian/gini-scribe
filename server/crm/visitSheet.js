@@ -2,6 +2,8 @@ import crypto from "node:crypto";
 import * as XLSX from "xlsx";
 import ExcelJS from "exceljs";
 import { withCrmContext } from "./db.js";
+import { VISIT_DUE_CTE } from "./visitDue.js";
+import { syncVisitTasks, visitsUndone } from "./tasks.js";
 import { lockRepVisits } from "./visits.js";
 import { ASSIGNABLE_ROLES, ASSIGNING_ROLES } from "./assignees.js";
 import {
@@ -627,6 +629,10 @@ export async function commitVisitChunk(crmUser, batchId, { onlyRows = null } = {
             WHERE r.batch_id = $1 AND r.row_number = x.row_number`,
           [batchId, JSON.stringify(write.map(({ row_number, id }) => ({ row_number, id })))],
         );
+        await syncVisitTasks(
+          sql,
+          write.map((w) => w.id),
+        );
       }
       if (settle.length) {
         await sql(
@@ -754,10 +760,16 @@ export async function undoVisitBatch(crmUser, batchId) {
       throw new VisitSheetError("An upload can only be undone on the day it was made.", 409);
     }
     await lockRepVisits(sql, crmUser.id);
-    const { rowCount } = await sql(
+    const { rows: undone } = await sql(
       `UPDATE crm.visits SET deleted_at = now(), updated_at = now()
-        WHERE import_batch_id = $1 AND source = 'sheet' AND executive_id = $2 AND deleted_at IS NULL`,
+        WHERE import_batch_id = $1 AND source = 'sheet' AND executive_id = $2 AND deleted_at IS NULL
+        RETURNING id`,
       [batchId, crmUser.id],
+    );
+    const rowCount = undone.length;
+    await visitsUndone(
+      sql,
+      undone.map((v) => v.id),
     );
     await sql(
       `UPDATE crm.import_rows SET visit_state = 'undone'
@@ -852,14 +864,15 @@ async function repStats(sql, ids) {
 export async function visitSheetWorkbook(crmUser) {
   const data = await withCrmContext(crmUser, async (sql) => {
     const { rows: doctors } = await sql(
-      `SELECT d.id AS doctor_id, d.full_name, d.specialty, d.area, d.mobile,
+      `WITH ${VISIT_DUE_CTE}
+       SELECT d.id AS doctor_id, d.full_name, d.specialty, d.area, d.mobile,
               ${istDayOf("vd.last_visit_at")}::text AS last_visit,
               COALESCE(s.visits_today, 0) AS visits_today,
               COALESCE(s.visits_week, 0) AS visits_week,
               COALESCE(s.visits_month, 0) AS visits_month
          FROM crm.doctors d
          JOIN crm.doctor_assignments a ON a.doctor_id = d.id AND a.effective_to IS NULL
-         LEFT JOIN crm.v_doctor_visit_due vd ON vd.doctor_id = d.id
+         LEFT JOIN vd_all vd ON vd.doctor_id = d.id
          LEFT JOIN LATERAL (
            SELECT ${periodCounts()}
              FROM crm.visits v

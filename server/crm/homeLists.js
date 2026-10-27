@@ -1,4 +1,5 @@
 import { withCrmContext } from "./db.js";
+import { VISIT_DUE_CTE } from "./visitDue.js";
 import {
   DOCTOR_PRIORITY_VALUES,
   REFERRAL_STATUS_VALUES,
@@ -8,7 +9,6 @@ import {
 
 export const PAGE_SIZE = 50;
 const WAITING_STATES = ["overdue", "due", "never_visited"];
-const TASK_BUCKETS = ["open", "in_progress", "overdue"];
 
 const MAX_PAGE = 10_000;
 const MAX_TEXT = 100;
@@ -40,7 +40,7 @@ function builder() {
 const DOCTOR_FROM = `
   FROM crm.doctors d
   LEFT JOIN crm.territories t ON t.id = d.territory_id
-  LEFT JOIN crm.v_doctor_visit_due vd ON vd.doctor_id = d.id`;
+  LEFT JOIN vd_all vd ON vd.doctor_id = d.id`;
 
 const DOCTOR_COLUMNS = `d.id AS doctor_id, d.full_name, d.specialty, d.area, d.city, d.priority,
        d.relationship_stage, d.mobile, d.profile_complete, d.missing_fields,
@@ -88,7 +88,8 @@ export async function listDueDoctors(crmUser, filters = {}) {
   const where = stateParam ? `${scoped} AND vd.due_state = ${stateParam}` : scoped;
   return withCrmContext(crmUser, async (sql) => {
     const { rows: counts } = await sql(
-      `SELECT count(*)::int AS "all",
+      `WITH ${VISIT_DUE_CTE}
+       SELECT count(*)::int AS "all",
               count(*) FILTER (WHERE vd.due_state = 'overdue')::int AS overdue,
               count(*) FILTER (WHERE vd.due_state = 'due')::int AS due,
               count(*) FILTER (WHERE vd.due_state = 'never_visited')::int AS never_visited
@@ -98,7 +99,8 @@ export async function listDueDoctors(crmUser, filters = {}) {
     const total = state ? counts[0][state] : counts[0].all;
     const page = fitPage(requested, total);
     const { rows } = await sql(
-      `SELECT ${DOCTOR_COLUMNS} ${DOCTOR_FROM} WHERE ${where}
+      `WITH ${VISIT_DUE_CTE}
+       SELECT ${DOCTOR_COLUMNS} ${DOCTOR_FROM} WHERE ${where}
         ORDER BY CASE vd.due_state WHEN 'overdue' THEN 0 WHEN 'due' THEN 1 ELSE 2 END,
                  ${PRIORITY_RANK}, vd.last_visit_at NULLS FIRST, d.full_name, d.id
         ${pageWindow(page)}`,
@@ -121,14 +123,16 @@ export async function listMyDoctors(crmUser, filters = {}) {
   const where = q.where.join(" AND ");
   return withCrmContext(crmUser, async (sql) => {
     const { rows: counts } = await sql(
-      `SELECT count(*)::int AS total,
+      `WITH ${VISIT_DUE_CTE}
+       SELECT count(*)::int AS total,
               count(*) FILTER (WHERE d.profile_complete IS NOT TRUE)::int AS incomplete
          ${DOCTOR_FROM} WHERE ${where}`,
       q.params,
     );
     const page = fitPage(requested, counts[0].total);
     const { rows } = await sql(
-      `SELECT ${DOCTOR_COLUMNS} ${DOCTOR_FROM} WHERE ${where}
+      `WITH ${VISIT_DUE_CTE}
+       SELECT ${DOCTOR_COLUMNS} ${DOCTOR_FROM} WHERE ${where}
         ORDER BY t.name NULLS LAST, ${PRIORITY_RANK}, d.full_name, d.id
         ${pageWindow(page)}`,
       q.params,
@@ -203,41 +207,5 @@ export async function listReferrals(crmUser, filters = {}) {
       summary: summary.rows[0],
       counts: { all: matching, by_status: counts },
     };
-  });
-}
-
-export async function listTasks(crmUser, filters = {}) {
-  const requested = pageOf(filters.page);
-  const bucket = TASK_BUCKETS.includes(filters.status) ? filters.status : "all";
-  const bucketSql = {
-    all: "TRUE",
-    open: "status = 'open'",
-    in_progress: "status = 'in_progress'",
-    overdue: "due_date < current_date",
-  }[bucket];
-  const base = `FROM crm.tasks
-    WHERE deleted_at IS NULL AND owner_id = $1 AND status IN ('open', 'in_progress')`;
-  return withCrmContext(crmUser, async (sql) => {
-    const { rows: counts } = await sql(
-      `SELECT count(*)::int AS "all",
-              count(*) FILTER (WHERE status = 'open')::int AS open,
-              count(*) FILTER (WHERE status = 'in_progress')::int AS in_progress,
-              count(*) FILTER (WHERE due_date < current_date)::int AS overdue
-         ${base}`,
-      [crmUser.id],
-    );
-    const page = fitPage(requested, counts[0][bucket]);
-    const { rows } = await sql(
-      `SELECT id, title, due_date, priority, status, doctor_id,
-              (due_date < current_date) AS overdue
-         ${base} AND ${bucketSql}
-        ORDER BY due_date NULLS LAST,
-                 CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1
-                               WHEN 'normal' THEN 2 ELSE 3 END,
-                 title, id
-        ${pageWindow(page)}`,
-      [crmUser.id],
-    );
-    return { ...paged(rows, counts[0][bucket], page), counts: counts[0] };
   });
 }

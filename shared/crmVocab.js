@@ -251,6 +251,13 @@ export const TASK_STATUSES = [
 ];
 export const TASK_STATUS_VALUES = TASK_STATUSES.map((t) => t.value);
 
+export const TASK_KINDS = [
+  { value: "follow_up_visit", label: "Follow-up visit" },
+  { value: "promise", label: "Promise" },
+  { value: "manual", label: "Task" },
+];
+export const TASK_KIND_VALUES = TASK_KINDS.map((k) => k.value);
+
 export const TASK_PRIORITIES = [
   { value: "low", label: "Low", tone: "ink" },
   { value: "normal", label: "Normal", tone: "ink" },
@@ -307,3 +314,4 @@ export const importRowStatusMeta = metaFinder(IMPORT_ROW_STATUSES);
 export const urgencyLabel = labeller(URGENCIES);
 export const removalReasonLabel = labeller(DOCTOR_REMOVAL_REASONS);
 export const removalStatusMeta = metaFinder(REMOVAL_STATUSES);
+export const taskKindLabel = labeller(TASK_KINDS);

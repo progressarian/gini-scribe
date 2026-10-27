@@ -111,6 +111,13 @@ export default function AddVisitPage() {
       : minDate && visitDate < minDate
         ? `Choose a date from ${ddmmyyyy(minDate)} to today.`
         : null;
+  const nextProblem = !followUp
+    ? null
+    : !nextVisit
+      ? "Choose the next visit date."
+      : nextVisit <= visitDate
+        ? "The next visit date must be after the visit date."
+        : null;
 
   const filledDetail = Object.values(detail).filter((v) => v.trim()).length;
 
@@ -173,7 +180,7 @@ export default function AddVisitPage() {
       discussion_notes: notes.trim() || null,
       ...Object.fromEntries(Object.entries(detail).map(([k, v]) => [k, v.trim() || null])),
       follow_up_required: followUp,
-      next_visit_date: nextVisit || null,
+      next_visit_date: followUp ? nextVisit || null : null,
       occurred_at: visitDate === today ? nowIso : undefined,
       client_created_at: nowIso,
       gps,
@@ -181,7 +188,7 @@ export default function AddVisitPage() {
 
     // Durable before anything else happens. If the browser dies on the next
     // line, the visit is still on the phone.
-    enqueue(visit);
+    enqueue(visit, { doctor_name: doctor?.full_name || null, visit_date: visitDate });
     drain((v) => api.post("/api/crm/visits", v).then((r) => r.data), {
       online: navigator.onLine !== false,
     }).catch(() => {});
@@ -390,23 +397,36 @@ export default function AddVisitPage() {
             />
             Needs a follow-up
           </label>
-          <div className="rep__next">
-            <label className="rep__next-label">
-              Next visit
-              {cadence && (
-                <span className="rep__hint">
-                  {" "}
-                  — {cadence.priority} doctor, every {cadence.interval_days} days
-                </span>
-              )}
-            </label>
-            <input
-              className="rep__input"
-              type="date"
-              value={nextVisit}
-              onChange={(e) => setNextVisit(e.target.value)}
-            />
-          </div>
+          {followUp ? (
+            <div className="rep__next">
+              <label className="rep__next-label" htmlFor="next-visit-date">
+                Next visit date
+                {cadence && (
+                  <span className="rep__hint">
+                    {" "}
+                    — {cadence.priority} doctor, every {cadence.interval_days} days
+                  </span>
+                )}
+              </label>
+              <input
+                id="next-visit-date"
+                className="rep__input"
+                type="date"
+                min={visitDate}
+                value={nextVisit}
+                onChange={(e) => setNextVisit(e.target.value)}
+                aria-invalid={Boolean(nextProblem)}
+                aria-describedby="next-visit-hint"
+                required
+              />
+              <span id="next-visit-hint" className={nextProblem ? "dfm__err" : "rep__hint"}>
+                {nextProblem ||
+                  `A follow-up task “Visit ${doctor?.full_name || "this doctor"}” is added for this date and shows in Today on the day.`}
+              </span>
+            </div>
+          ) : (
+            <span className="rep__hint">Tick this to plan the next visit and get a reminder.</span>
+          )}
         </Field>
       </div>
 
@@ -414,7 +434,7 @@ export default function AddVisitPage() {
         <button
           className="rep__btn rep__btn--primary rep__btn--lg"
           onClick={save}
-          disabled={saving || Boolean(loggedOnDate) || Boolean(dateProblem)}
+          disabled={saving || Boolean(loggedOnDate) || Boolean(dateProblem) || Boolean(nextProblem)}
         >
           {saving ? "Saving…" : "Save visit"}
         </button>

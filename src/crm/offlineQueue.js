@@ -56,10 +56,11 @@ export function pendingCount() {
  * Re-queuing an id already present replaces it — the rep corrected the visit
  * before it ever left the phone.
  */
-export function enqueue(visit) {
+export function enqueue(visit, meta = {}) {
   const items = read().filter((i) => i.visit.id !== visit.id);
   items.push({
     visit,
+    meta,
     status: "pending",
     attempts: 0,
     queued_at: now(),
@@ -109,7 +110,9 @@ export async function drain(send, { online = true } = {}) {
       sent++;
     } catch (err) {
       item.attempts += 1;
-      item.last_error = err?.message || String(err);
+      item.last_error = err?.response?.data?.error || err?.message || String(err);
+      item.last_status = err?.response?.status ?? null;
+      item.last_attempt_at = now();
       // Back off, but never so far that a visit sits unsent for a whole shift.
       item.next_attempt_at = now() + Math.min(2 ** item.attempts * 1000, MAX_ATTEMPT_DELAY);
       failed++;
@@ -118,6 +121,15 @@ export async function drain(send, { online = true } = {}) {
 
   write(items.filter((i) => i.status !== "sent"));
   return { sent, failed, skipped };
+}
+
+export function pendingItems() {
+  return read().filter((i) => i.status !== "sent");
+}
+
+export function retryNow(send) {
+  write(read().map((i) => ({ ...i, next_attempt_at: 0 })));
+  return drain(send, { online: navigator.onLine !== false });
 }
 
 /**

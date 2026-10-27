@@ -1,5 +1,6 @@
 import ExcelJS from "exceljs";
 import { withCrmContext } from "./db.js";
+import { VISIT_DUE_CTE } from "./visitDue.js";
 import { ASSIGNABLE_ROLES, ASSIGNING_ROLES } from "./assignees.js";
 import {
   REFERRAL_STATUSES,
@@ -221,7 +222,8 @@ async function visitMetrics(sql, f, from, to) {
 
 async function coverageMetrics(sql, f, from, to) {
   const { rows } = await sql(
-    `SELECT a.executive_id,
+    `WITH ${VISIT_DUE_CTE}
+     SELECT a.executive_id,
             count(*)::int AS assigned,
             count(*) FILTER (WHERE EXISTS (
               SELECT 1 FROM crm.visits v
@@ -231,7 +233,7 @@ async function coverageMetrics(sql, f, from, to) {
             count(*) FILTER (WHERE vd.due_state = 'never_visited')::int AS never_visited_now
        FROM crm.doctor_assignments a
        JOIN crm.doctors d ON d.id = a.doctor_id AND d.deleted_at IS NULL AND d.is_active
-       LEFT JOIN crm.v_doctor_visit_due vd ON vd.doctor_id = d.id
+       LEFT JOIN vd_all vd ON vd.doctor_id = d.id
       WHERE a.effective_to IS NULL AND a.executive_id = ANY($1::uuid[])
         AND ${territoryClause("d", "$4")}
       GROUP BY GROUPING SETS ((a.executive_id), ())`,
@@ -509,15 +511,19 @@ async function doctorRows(sql, f, { state, q, limit, offset }) {
        JOIN crm.doctors d ON d.id = a.doctor_id AND d.deleted_at IS NULL AND d.is_active
        JOIN crm.users u ON u.id = a.executive_id
        LEFT JOIN crm.territories t ON t.id = d.territory_id
-       LEFT JOIN crm.v_doctor_visit_due vd ON vd.doctor_id = d.id
+       LEFT JOIN vd_all vd ON vd.doctor_id = d.id
       WHERE a.effective_to IS NULL AND a.executive_id = ANY($1::uuid[])
         AND ${territoryClause("d", "$4")} AND ${search}
         AND NOT EXISTS (SELECT 1 FROM crm.visits v
                          WHERE v.doctor_id = a.doctor_id AND v.executive_id = a.executive_id
                            AND v.deleted_at IS NULL AND ${between("v.occurred_at", "$2", "$3")})`;
-    const { rows: total } = await sql(`SELECT count(*)::int AS n ${base}`, params);
+    const { rows: total } = await sql(
+      `WITH ${VISIT_DUE_CTE} SELECT count(*)::int AS n ${base}`,
+      params,
+    );
     const { rows } = await sql(
-      `SELECT d.id AS doctor_id, d.full_name, d.specialty, d.area, d.priority, t.name AS territory,
+      `WITH ${VISIT_DUE_CTE}
+       SELECT d.id AS doctor_id, d.full_name, d.specialty, d.area, d.priority, t.name AS territory,
               u.full_name AS rep, vd.last_visit_at, vd.due_state
          ${base}
         ORDER BY ${PRIORITY_RANK}, vd.last_visit_at NULLS FIRST, d.full_name, d.id

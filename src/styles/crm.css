@@ -2134,3 +2134,171 @@ a.rep__btn {
   width: 16px;
   height: 16px;
 }
+
+.tsk__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+.tsk__tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tsk__late {
+  color: #b91c1c;
+  font-weight: 600;
+}
+.tsk__row {
+  align-items: flex-start;
+}
+.tsk__row--late {
+  border-left: 3px solid #dc2626;
+}
+.tsk__title {
+  overflow-wrap: anywhere;
+}
+.tsk__actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.tsk__toast {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.tsk__picked {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  font-size: 14px;
+}
+.tsk__matches {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.tsk__matches button {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 1px solid #f1f5f9;
+  background: #fff;
+  font: inherit;
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.tsk__matches button:hover,
+.tsk__matches button:focus-visible {
+  background: #eff6ff;
+}
+.tsk__pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.tdy__picked th,
+.tdy__picked td {
+  background: #eff6ff;
+}
+.tdy__late {
+  color: #b91c1c;
+  font-weight: 700;
+}
+@media (max-width: 640px) {
+  .tsk__row {
+    flex-wrap: wrap;
+  }
+  .tsk__actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .tsk__pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.prg__table--staff .tdy__picked th,
+.prg__table--staff .tdy__picked td {
+  background: #eff6ff;
+}
+.prg__table--staff .tdy__picked th:first-child {
+  box-shadow:
+    inset 3px 0 0 #1e40af,
+    1px 0 0 #e2e8f0;
+}
+.home__panel select.rep__input {
+  background-color: #fff;
+}
+
+.rep__pending--err {
+  background: #fee2e2;
+  color: #991b1b;
+}
+.pvq {
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border: 1px solid #fde68a;
+  border-left: 3px solid #d97706;
+  border-radius: 8px;
+  background: #fffbeb;
+  color: #78350f;
+  font-size: 13px;
+}
+.pvq--err {
+  border-color: #fecaca;
+  border-left-color: #dc2626;
+  background: #fef2f2;
+  color: #7f1d1d;
+}
+.pvq__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+.pvq__head strong {
+  font-size: 14px;
+}
+.pvq__retry {
+  background: #fff;
+}
+.pvq__list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pvq__list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+}
+.pvq__who {
+  font-weight: 600;
+}
+.pvq__note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  opacity: 0.85;
+}
+.pvq__remove {
+  margin-left: auto;
+  font-size: 12.5px;
+}

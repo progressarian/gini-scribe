@@ -103,10 +103,11 @@ test.describe("CRM home: paged and filtered lists", () => {
   });
 
   test("3. Tasks: buckets", async () => {
-    const all = await get("/api/crm/home/tasks");
-    expect(all.counts).toEqual({ all: 3, open: 2, in_progress: 1, overdue: 1 });
-    const overdue = await get("/api/crm/home/tasks", { status: "overdue" });
-    expect(overdue.rows.map((t) => t.title)).toEqual(["Send brochure"]);
+    const due = await get("/api/crm/tasks");
+    expect(due.counts).toEqual({ due: 1, overdue: 1, upcoming: 2, done: 0 });
+    expect(due.rows.map((t) => t.title)).toEqual(["Send brochure"]);
+    const upcoming = await get("/api/crm/tasks", { bucket: "upcoming" });
+    expect(upcoming.rows.map((t) => t.title)).toEqual(["Share OPD timings", "Book lunch meeting"]);
   });
 
   test("4. Referrals: status, urgency and search", async () => {
@@ -137,7 +138,7 @@ test.describe("CRM home: paged and filtered lists", () => {
     expect((await get("/api/crm/home/doctors", { q: "%" })).total).toBe(0);
     expect((await get("/api/crm/home/doctors", { q: "Dr_Home" })).total).toBe(0);
     expect((await get("/api/crm/home/doctors", { q: "x".repeat(5000) })).total).toBe(0);
-    expect((await get("/api/crm/home/tasks", { status: "done", page: 7 })).page).toBe(1);
+    expect((await get("/api/crm/tasks", { bucket: "done", page: 7 })).page).toBe(1);
     expect((await get("/api/crm/referrals", { status: "bogus", urgency: "x" })).total).toBe(2);
 
     const head = await crmApi(users.virender);
@@ -173,7 +174,11 @@ test.describe("CRM home: paged and filtered lists", () => {
     await mine.getByRole("searchbox").fill(name(7));
     await expect(mine.getByText("1 doctor", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Tasks" }).click();
-    await expect(page.getByRole("region", { name: "Tasks" }).getByText("3 tasks")).toBeVisible();
+    const tasks = page.getByRole("region", { name: "Tasks" });
+    await expect(tasks.getByRole("button", { name: /Due now 1/ })).toBeVisible();
+    await expect(tasks.getByText("Send brochure")).toBeVisible();
+    await tasks.getByRole("button", { name: /Upcoming 2/ }).click();
+    await expect(tasks.getByText("Share OPD timings")).toBeVisible();
     await page.getByRole("button", { name: "My doctors" }).click();
     await expect(mine.getByRole("searchbox")).toHaveValue(name(7));
     await mine.getByRole("button", { name: "Clear filters" }).first().click();

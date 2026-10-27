@@ -1,4 +1,5 @@
 import { withCrmContext } from "./db.js";
+import { VISIT_DUE_CTE } from "./visitDue.js";
 import {
   VISIT_TYPE_VALUES,
   VISIT_OUTCOME_VALUES,
@@ -16,6 +17,7 @@ import {
 } from "./istPeriods.js";
 import { DoctorError, isLead } from "./doctors.js";
 import { doctorRemovalState } from "./removals.js";
+import { syncVisitTasks, visitNextDateChanged, visitsUndone } from "./tasks.js";
 
 // Visit logging (brief §5) and the rep home screen (§13).
 //
@@ -38,6 +40,29 @@ export const SAME_DAY_VISIT = `
    LIMIT 1`;
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const MAX_GPS_ACCURACY_M = 10_000;
+
+function usableGps(gps) {
+  const latitude = Number(gps?.latitude);
+  const longitude = Number(gps?.longitude);
+  const accuracy = Number(gps?.accuracy);
+  if (
+    !Number.isFinite(latitude) ||
+    !Number.isFinite(longitude) ||
+    Math.abs(latitude) > 90 ||
+    Math.abs(longitude) > 180
+  ) {
+    return null;
+  }
+  if (!Number.isFinite(accuracy) || accuracy < 0 || accuracy > MAX_GPS_ACCURACY_M) return null;
+  const captured = new Date(gps.captured_at);
+  return {
+    latitude: Math.round(latitude * 1e6) / 1e6,
+    longitude: Math.round(longitude * 1e6) / 1e6,
+    accuracy: Math.round(accuracy * 100) / 100,
+    captured_at: Number.isNaN(captured.getTime()) ? null : captured.toISOString(),
+  };
+}
 
 function visitBase(clientCreatedAt) {
   const now = new Date();
@@ -105,6 +130,18 @@ export async function logVisit(crmUser, visit) {
   const pickedDay = visit_date ? checkVisitDay(visit_date, loggedOn) : null;
   const backDated = pickedDay && pickedDay !== istDate(loggedOn);
   const occurredAt = backDated ? null : (occurred_at ?? null);
+  const fix = usableGps(gps);
+  const followUp = Boolean(follow_up_required);
+  const nextDate = followUp ? next_visit_date || null : null;
+  if (nextDate) {
+    const visitDay = pickedDay || istDate(loggedOn);
+    if (!DAY.test(String(nextDate))) {
+      throw new DoctorError("Choose the next visit date from the calendar.");
+    }
+    if (nextDate <= visitDay) {
+      throw new DoctorError("The next visit date must be after the visit date.");
+    }
+  }
 
   return withCrmContext(crmUser, async (sql) => {
     const { rows: replay } = await sql(
@@ -149,18 +186,21 @@ export async function logVisit(crmUser, visit) {
         opportunities_identified ?? null,
         commitments ?? null,
         finalOutcome ?? null,
-        Boolean(follow_up_required),
-        next_visit_date ?? null,
-        gps?.latitude ?? null,
-        gps?.longitude ?? null,
-        gps?.accuracy ?? null,
-        gps?.captured_at ?? null,
+        followUp,
+        nextDate,
+        fix?.latitude ?? null,
+        fix?.longitude ?? null,
+        fix?.accuracy ?? null,
+        fix?.captured_at ?? null,
         client_created_at ?? null,
         backDated ? pickedDay : null,
       ],
     );
 
-    if (inserted[0]) return { ...inserted[0], duplicate: false };
+    if (inserted[0]) {
+      await syncVisitTasks(sql, [id]);
+      return { ...inserted[0], duplicate: false };
+    }
 
     const { rows: existing } = await sql(
       "SELECT id, occurred_at, synced_at FROM crm.visits WHERE id = $1",
@@ -225,10 +265,11 @@ export async function repHome(crmUser, { limit = 25, lists = true } = {}) {
       // the table itself.
       lists
         ? sql(
-            `SELECT vd.doctor_id, vd.full_name, vd.priority, vd.due_state,
+            `WITH ${VISIT_DUE_CTE}
+         SELECT vd.doctor_id, vd.full_name, vd.priority, vd.due_state,
                 vd.last_visit_at, vd.next_due_on,
                 d.specialty, d.area, d.mobile, d.profile_complete
-           FROM crm.v_doctor_visit_due vd
+           FROM vd_all vd
            JOIN crm.doctors d ON d.id = vd.doctor_id
           WHERE vd.due_state IN ('overdue', 'due', 'never_visited')
           ORDER BY CASE vd.due_state WHEN 'overdue' THEN 0 WHEN 'due' THEN 1 ELSE 2 END,
@@ -251,13 +292,14 @@ export async function repHome(crmUser, { limit = 25, lists = true } = {}) {
       ),
       lists
         ? sql(
-            `SELECT d.id AS doctor_id, d.full_name, d.specialty, d.area, d.city, d.priority,
+            `WITH ${VISIT_DUE_CTE}
+         SELECT d.id AS doctor_id, d.full_name, d.specialty, d.area, d.city, d.priority,
                 d.relationship_stage, d.mobile, d.profile_complete, d.missing_fields,
                 d.needs_verification, t.name AS territory_name,
                 vd.due_state, vd.last_visit_at
            FROM crm.doctors d
            LEFT JOIN crm.territories t ON t.id = d.territory_id
-           LEFT JOIN crm.v_doctor_visit_due vd ON vd.doctor_id = d.id
+           LEFT JOIN vd_all vd ON vd.doctor_id = d.id
           WHERE d.deleted_at IS NULL AND d.is_active
           ORDER BY t.name NULLS LAST,
                    CASE d.priority WHEN 'A' THEN 0 WHEN 'B' THEN 1 WHEN 'C' THEN 2 ELSE 3 END,
@@ -491,6 +533,7 @@ async function changeableVisit(sql, crmUser, visitId, reason) {
   if (!UUID.test(visitId || "")) throw new DoctorError("Visit not found.", 404);
   const { rows } = await sql(
     `SELECT v.id, v.doctor_id, v.executive_id, v.occurred_at, v.outcome, v.deleted_at,
+            v.next_visit_date::text AS next_visit_date,
             ${istDayOf("v.occurred_at")}::text AS visit_day,
             (${istDayOf("v.created_at")} = ${istDayOf("now()")}) AS logged_today,
             d.full_name AS doctor_name
@@ -598,6 +641,9 @@ export async function editVisit(crmUser, visitId, body = {}) {
       add("follow_up_required = ?", Boolean(body.follow_up_required));
     }
     await sql(`UPDATE crm.visits SET ${sets.join(", ")} WHERE id = $1`, params);
+    if (next !== undefined && next !== visit.next_visit_date) {
+      await visitNextDateChanged(sql, visit.id);
+    }
     return { id: visit.id, visit_date: day, outcome };
   });
 }
@@ -610,6 +656,7 @@ export async function undoVisit(crmUser, visitId, body = {}) {
         WHERE id = $1`,
       [visit.id, reason],
     );
+    await visitsUndone(sql, [visit.id]);
     return { id: visit.id, undone: true };
   });
 }

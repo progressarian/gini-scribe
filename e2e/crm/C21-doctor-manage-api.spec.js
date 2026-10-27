@@ -483,4 +483,54 @@ test.describe("CRM doctors: add, edit, remove with approval, visit form", () => 
     expect(restore.status).toBe(409);
     expect(restore.body.error).toContain("cleared");
   });
+
+  test("15. A rep can set a doctor's priority from the doctor page", async () => {
+    const [doc] = await seedDoctors(hospitalId, [
+      { full_name: "Dr Priority", mobile: "9811100013", area: "Kharar", owner: users.rajesh.crmId },
+    ]);
+    const res = await json(
+      await rajesh.post("/api/crm/doctors/priority", {
+        data: { doctorIds: [doc.id], priority: "A" },
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect((await one(`SELECT priority FROM crm.doctors WHERE id = $1`, [doc.id])).priority).toBe(
+      "A",
+    );
+  });
+
+  test("16. A laptop's rough location (over 10 km accuracy) is dropped, not a 500", async () => {
+    const [doc] = await seedDoctors(hospitalId, [
+      {
+        full_name: "Dr Gps Check",
+        mobile: "9811100014",
+        area: "Kharar",
+        owner: users.rajesh.crmId,
+      },
+    ]);
+    const send = (gps) =>
+      rajesh
+        .post("/api/crm/visits", {
+          data: {
+            id: crypto.randomUUID(),
+            doctor_id: doc.id,
+            visit_type: "in_person",
+            status: "completed",
+            occurred_at: new Date().toISOString(),
+            gps,
+          },
+        })
+        .then(json);
+    const rough = await send({
+      latitude: 30.212096,
+      longitude: 74.9305856,
+      accuracy: 1367683.3683175733,
+      captured_at: new Date().toISOString(),
+    });
+    expect(rough.status).toBe(200);
+    const row = await one(`SELECT gps_latitude, gps_accuracy_m FROM crm.visits WHERE id = $1`, [
+      rough.body.id,
+    ]);
+    expect(row).toEqual({ gps_latitude: null, gps_accuracy_m: null });
+  });
 });
