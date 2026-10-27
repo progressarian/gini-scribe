@@ -133,8 +133,7 @@ export default function TriageBoardPage() {
     }
   };
 
-  const rxMosFor = (card) =>
-    rxMosForDoctor(staff, card.assignment.doctorId, card.assignment.rxMoId ?? null);
+  const rxMosFor = (card) => rxMosForDoctor(staff, card.assignment.doctorId);
 
   const onPickRxMo = async (card, rxMoId) => {
     try {

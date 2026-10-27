@@ -448,10 +448,7 @@ function PatientCard({
       : null;
   const isLab = !!trackData;
   const isLabOnly = isLab && !isMachine && !!card.labOnly;
-  const canPickRxMo =
-    canAssign &&
-    !isTerminalStatus(card.status) &&
-    rxMos.some((m) => m.assistsDoctorId === card.assignedDoctorId || m.id === card.rxMoId);
+  const canPickRxMo = canAssign && !isTerminalStatus(card.status) && rxMos.length > 0;
   const anchor = isLab ? trackData.since : card.statusSince;
   const machineNow = now - offsetMs;
   const machineTests = isMachine

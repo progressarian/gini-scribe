@@ -1,7 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import api from "../../services/api";
 import useAuthStore from "../../stores/authStore";
-import { GINIFLOW_LAUNCHER_CAPABILITY, hasCapability } from "../../../shared/permissions.js";
+import {
+  GINIFLOW_LAUNCHER_CAPABILITY,
+  hasCapability,
+  normalizeRole,
+  ROLES,
+} from "../../../shared/permissions.js";
 import "../../styles/giniflow-station.css";
 
 // Every station a person can open, with what is waiting at each. The summary is
@@ -130,12 +135,13 @@ export default function StationsLauncherPage() {
   });
 
   const stations = data?.stations || {};
-  const assistKey = doctor?.assists ? (doctor.assists.chief ? "mo_sd" : "doctor") : null;
+  const rxMo = normalizeRole(doctor?.role) === ROLES.RX_MO;
+  const chiefName = doctor?.assists?.chief ? doctor.assists.name : null;
   const visible = STATIONS.filter(
     (s) =>
       (!s.href || hasCapability(doctor, GINIFLOW_LAUNCHER_CAPABILITY[s.key])) &&
       !(s.key === "doctor" && doctor?.has_rx_mos) &&
-      !(assistKey && ["mo_sd", "doctor"].includes(s.key) && s.key !== assistKey),
+      !(rxMo && s.key === "mo_sd" && !chiefName),
   );
   const today = new Date().toLocaleDateString("en-IN", {
     weekday: "short",
@@ -163,20 +169,24 @@ export default function StationsLauncherPage() {
         <div className="role-grid">
           {visible.map((s) => {
             const live = stations[s.key];
-            const assisting = s.key === assistKey;
+            const assisting = rxMo && ["mo_sd", "doctor"].includes(s.key);
             const body = (
               <>
                 <div className="rc-ico">{s.icon}</div>
                 <div className="rc-name">
                   {assisting
-                    ? `${s.key === "mo_sd" ? s.name : "Prescriptions"} · ${doctor.assists.name}`
+                    ? s.key === "mo_sd"
+                      ? `${s.name} · ${chiefName}`
+                      : chiefName
+                        ? "Prescriptions · other consultants"
+                        : "Prescriptions"
                     : s.name}
                 </div>
                 <div className="rc-desc">
                   {assisting
                     ? s.key === "mo_sd"
-                      ? `Work ${doctor.assists.name}'s patients assigned to you, on the screen ${doctor.assists.name} uses`
-                      : `Write ${doctor.assists.name}'s prescriptions for the patients assigned to you`
+                      ? `Work ${chiefName}'s patients assigned to you, on the screen ${chiefName} uses`
+                      : "Write prescriptions for the patients assigned to you by any consultant"
                     : s.desc}
                 </div>
                 {s.href && isPending ? (

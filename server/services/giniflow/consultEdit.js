@@ -24,6 +24,7 @@ async function lockVisit(client, visitId) {
   const { rows } = await client.query(
     `SELECT v.id, v.patient_id, v.visit_date::text AS visit_date, v.current_status,
             v.appointment_id, v.assigned_doctor_id, v.assigned_sd_id,
+            (to_jsonb(v)->>'rx_mo_id')::int AS rx_mo_id,
             v.editing_by, v.visit_date = ${IST_TODAY} AS is_today,
             (SELECT e.actor_id FROM giniflow_visit_events e
               WHERE e.visit_id = v.id AND e.meta->>'source' = 'consult_finalize'
@@ -41,7 +42,7 @@ async function lockVisit(client, visitId) {
 export function mayEdit(visit, actorId, isAdmin) {
   if (isAdmin) return true;
   if (!actorId) return false;
-  return [visit.assigned_doctor_id, visit.assigned_sd_id, visit.finalized_by].some(
+  return [visit.assigned_doctor_id, visit.assigned_sd_id, visit.finalized_by, visit.rx_mo_id].some(
     (id) => id != null && Number(id) === Number(actorId),
   );
 }
@@ -334,6 +335,7 @@ export async function editingRowOf(itemId, db = pool) {
 export async function editState(visitId, { actorId = null, isAdmin = false } = {}, db = pool) {
   const { rows } = await db.query(
     `SELECT v.current_status, v.assigned_doctor_id, v.assigned_sd_id,
+            (to_jsonb(v)->>'rx_mo_id')::int AS rx_mo_id,
             v.visit_date = ${IST_TODAY} AS is_today,
             (to_jsonb(v)->>'editing_by')::int AS editing_by,
             to_jsonb(v)->>'editing_since' AS editing_since,

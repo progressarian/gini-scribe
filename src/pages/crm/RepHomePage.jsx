@@ -5,6 +5,7 @@ import { downloadFile } from "../../lib/downloadBlob.js";
 import { errorText } from "../../components/crm/import/importText.js";
 import { startAutoDrain, pendingCount } from "../../crm/offlineQueue.js";
 import AssignmentsPanel from "../../components/crm/AssignmentsPanel.jsx";
+import RemovalRequestsPanel from "../../components/crm/doctors/RemovalRequestsPanel.jsx";
 import DueList from "../../components/crm/home/DueList.jsx";
 import DoctorsList from "../../components/crm/home/DoctorsList.jsx";
 import ReferralsList from "../../components/crm/home/ReferralsList.jsx";
@@ -29,6 +30,7 @@ const TABS = [
 ];
 
 const ASSIGNMENTS_TAB = { key: "assignments", label: "Assignments" };
+const REMOVALS_TAB = { key: "removals", label: "Removal requests" };
 const SEES_EVERY_DOCTOR = ["ceo_admin", "head_of_growth"];
 
 export default function RepHomePage() {
@@ -36,7 +38,8 @@ export default function RepHomePage() {
   const me = useAuthStore((st) => st.currentDoctor);
   const [params, setParams] = useSearchParams();
   const [data, setData] = useState(null);
-  const [tab, setTab] = useState("due");
+  const [tab, setTab] = useState(() => params.get("tab") || "due");
+  const [removalsWaiting, setRemovalsWaiting] = useState(0);
   const [pending, setPending] = useState(pendingCount());
   const [referrals, setReferrals] = useState(null);
   const [listFilters, setListFilters] = useState({});
@@ -79,6 +82,23 @@ export default function RepHomePage() {
     const t = setTimeout(() => setParams({}, { replace: true }), 4000);
     return () => clearTimeout(t);
   }, [justLogged, justReferred, setParams]);
+
+  const leadView = SEES_EVERY_DOCTOR.includes(data?.user?.role);
+
+  useEffect(() => {
+    if (!leadView) return;
+    api
+      .get("/api/crm/removal-requests", { params: { status: "pending" } })
+      .then(({ data: body }) => setRemovalsWaiting(body.counts.pending))
+      .catch(() => setRemovalsWaiting(0));
+  }, [leadView, refreshKey]);
+
+  useEffect(() => {
+    if (!params.get("tab")) return;
+    const next = new URLSearchParams(params);
+    next.delete("tab");
+    setParams(next, { replace: true });
+  }, []);
 
   const filtersFor = (key) => listFilters[key] || {};
   const setFiltersFor = (key) => (next) => setListFilters((prev) => ({ ...prev, [key]: next }));
@@ -141,6 +161,9 @@ export default function RepHomePage() {
           </div>
         </dl>
         <div className="rep__perf-actions">
+          <Link to="/crm/doctors/new" className="rep__perf-action rep__perf-action--primary">
+            Add doctor
+          </Link>
           <button
             type="button"
             className="rep__perf-action"
@@ -164,6 +187,14 @@ export default function RepHomePage() {
         {sheetErr && (
           <p className="rep__perf-err" role="alert">
             {sheetErr}
+          </p>
+        )}
+        {leadView && removalsWaiting > 0 && (
+          <p className="rep__perf-note" role="status">
+            {removalsWaiting} removal request{removalsWaiting === 1 ? "" : "s"} waiting for you.{" "}
+            <button type="button" className="asg__link" onClick={() => setTab("removals")}>
+              Review
+            </button>
           </p>
         )}
       </section>
@@ -193,25 +224,26 @@ export default function RepHomePage() {
       </div>
 
       <nav className="rep__tabs" aria-label="CRM lists">
-        {[...TABS, ...(SEES_EVERY_DOCTOR.includes(data.user.role) ? [ASSIGNMENTS_TAB] : [])].map(
-          (t) => (
-            <button
-              key={t.key}
-              type="button"
-              className={`rep__tab ${tab === t.key ? "rep__tab--on" : ""}`}
-              aria-pressed={tab === t.key}
-              onClick={() => setTab(t.key)}
-            >
-              {t.label}
-              {t.key === "due" && (data.due_summary?.total ?? 0) > 0 && (
-                <span className="rep__badge">{data.due_summary.total}</span>
-              )}
-              {t.key === "referrals" && (referrals?.summary?.open ?? 0) > 0 && (
-                <span className="rep__badge">{referrals.summary.open}</span>
-              )}
-            </button>
-          ),
-        )}
+        {[...TABS, ...(leadView ? [ASSIGNMENTS_TAB, REMOVALS_TAB] : [])].map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            className={`rep__tab ${tab === t.key ? "rep__tab--on" : ""}`}
+            aria-pressed={tab === t.key}
+            onClick={() => setTab(t.key)}
+          >
+            {t.label}
+            {t.key === "due" && (data.due_summary?.total ?? 0) > 0 && (
+              <span className="rep__badge">{data.due_summary.total}</span>
+            )}
+            {t.key === "referrals" && (referrals?.summary?.open ?? 0) > 0 && (
+              <span className="rep__badge">{referrals.summary.open}</span>
+            )}
+            {t.key === "removals" && removalsWaiting > 0 && (
+              <span className="rep__badge">{removalsWaiting}</span>
+            )}
+          </button>
+        ))}
       </nav>
 
       {tab === "due" && (
@@ -273,7 +305,11 @@ export default function RepHomePage() {
         />
       )}
 
-      {tab === "assignments" && SEES_EVERY_DOCTOR.includes(data.user.role) && <AssignmentsPanel />}
+      {tab === "assignments" && leadView && <AssignmentsPanel />}
+
+      {tab === "removals" && leadView && (
+        <RemovalRequestsPanel onCountChange={setRemovalsWaiting} />
+      )}
 
       {tab === "tasks" && (
         <TasksList

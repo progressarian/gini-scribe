@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import OrderedServicesPanel from "../../components/billing/OrderedServicesPanel";
 import { Line, LineChart, ResponsiveContainer, Tooltip, YAxis } from "recharts";
 import { CHAIN, STATUS_LABEL } from "../../../shared/giniflowStatus";
@@ -371,18 +372,36 @@ function RowDetail({ card, now }) {
 }
 
 function QueueRow({ card, active, onOpen, readOnly, now }) {
-  return (
-    <button
-      type="button"
-      className={`sq-item${active ? " active" : ""}${readOnly ? " is-readonly" : ""}`}
-      disabled={readOnly}
-      title={readOnly ? "Not yours to work up yet" : undefined}
-      onClick={() => onOpen(card.visitId)}
-    >
+  const body = (
+    <>
       <div className="si-slot">{card.slot}</div>
       <div className="si-name">{card.name}</div>
       <RowDetail card={card} now={now} />
-    </button>
+    </>
+  );
+  if (readOnly)
+    return (
+      <button
+        type="button"
+        className="sq-item is-readonly"
+        disabled
+        title="Not yours to work up yet"
+      >
+        {body}
+      </button>
+    );
+  return (
+    <a
+      href={`?visit=${card.visitId}`}
+      className={`sq-item${active ? " active" : ""}`}
+      onClick={(e) => {
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+        e.preventDefault();
+        onOpen(card.visitId);
+      }}
+    >
+      {body}
+    </a>
   );
 }
 
@@ -469,7 +488,21 @@ const mentionsUnordered = (plan, catalogue) => {
 };
 
 export default function MoStationPage() {
-  const [selected, setSelected] = useState(null);
+  const [params, setParams] = useSearchParams();
+  const selected = params.get("visit");
+  const setSelected = useCallback(
+    (visitId) =>
+      setParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (visitId) next.set("visit", visitId);
+          else next.delete("visit");
+          return next;
+        },
+        { replace: true },
+      ),
+    [setParams],
+  );
   const [plan, setPlan] = useState("");
   const [urgency, setUrgency] = useState("today");
   const [picked, setPicked] = useState([]);

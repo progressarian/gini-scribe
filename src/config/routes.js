@@ -163,6 +163,8 @@ export const PAGE_CAPABILITIES = {
   "/billing/dues": CAP.BILLING_DUES,
   "/crm/home": CAP.CRM_ACCESS,
   "/crm/doctor/:doctorId": CAP.CRM_ACCESS,
+  "/crm/doctor/:doctorId/edit": CAP.CRM_ACCESS,
+  "/crm/doctors/new": CAP.CRM_ACCESS,
   "/crm/visit/:doctorId": CAP.CRM_ACCESS,
   "/crm/referral/:doctorId": CAP.CRM_ACCESS,
   "/crm/import": CAP.CRM_IMPORT,

@@ -288,6 +288,8 @@
   border-left: 3px solid transparent;
   font: inherit;
   color: inherit;
+  display: block;
+  text-decoration: none;
 }
 .gf .sq-item:hover {
   background: var(--tl-l);

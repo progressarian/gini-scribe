@@ -88,6 +88,58 @@ export const VISIT_SHEET_STATUSES = [
 ];
 export const VISIT_SHEET_STATUS_VALUES = VISIT_SHEET_STATUSES.map((v) => v.value);
 
+export const VISIT_FORM_STATUSES = VISIT_SHEET_STATUSES.filter((s) => s.value !== "not_visited");
+export const VISIT_FORM_STATUS_VALUES = VISIT_FORM_STATUSES.map((v) => v.value);
+
+export const DOCTOR_SPECIALTIES = [
+  { value: "General Physician", aliases: ["mbbs", "gp", "general physician"] },
+  { value: "Physician", aliases: ["md phy", "md physician", "md medicine", "physician"] },
+  { value: "Gynaecology", aliases: ["md gynae", "gynae", "gynaecologist", "obgyn", "ms gynae"] },
+  { value: "General Surgery", aliases: ["ms surg", "ms surgery", "surgeon", "general surgeon"] },
+  { value: "Pediatrics", aliases: ["pedia", "pediatrician", "paediatrics", "md pedia"] },
+  { value: "Orthopedics", aliases: ["ortho", "orthopaedics", "ms ortho"] },
+  { value: "Cardiology", aliases: ["cardio", "cardiologist", "dm cardio"] },
+  { value: "Endocrinology / Diabetes", aliases: ["endo", "diabetologist", "endocrinologist"] },
+  { value: "Nephrology", aliases: ["nephro", "nephrologist"] },
+  { value: "Ayurveda (BAMS)", aliases: ["bams", "ayurveda"] },
+  { value: "Homeopathy (BHMS)", aliases: ["bhms", "homeopathy"] },
+  { value: "RMP", aliases: ["rmp"] },
+  { value: "Physiotherapy", aliases: ["mpt", "bpt", "physio", "physiotherapist"] },
+  { value: "Dentist", aliases: ["bds", "mds", "dental"] },
+];
+export const DOCTOR_SPECIALTY_VALUES = DOCTOR_SPECIALTIES.map((s) => s.value);
+
+export function specialtyFromList(raw) {
+  const text = String(raw ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9/() ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return null;
+  return (
+    DOCTOR_SPECIALTIES.find((s) => s.value.toLowerCase() === text || s.aliases.includes(text))
+      ?.value ?? null
+  );
+}
+
+export const DOCTOR_REMOVAL_REASONS = [
+  { value: "duplicate", label: "Duplicate of another doctor" },
+  { value: "left", label: "Retired or moved away" },
+  { value: "not_a_doctor", label: "Not a doctor (chemist, list error)" },
+  { value: "not_interested", label: "Not interested in working with us" },
+  { value: "other", label: "Other" },
+];
+export const DOCTOR_REMOVAL_REASON_VALUES = DOCTOR_REMOVAL_REASONS.map((r) => r.value);
+
+export const REMOVAL_STATUSES = [
+  { value: "pending", label: "Waiting for admin", tone: "amb" },
+  { value: "approved", label: "Removed", tone: "red" },
+  { value: "rejected", label: "Rejected", tone: "ink" },
+  { value: "cancelled", label: "Cancelled", tone: "ink" },
+];
+export const REMOVAL_STATUS_VALUES = REMOVAL_STATUSES.map((s) => s.value);
+
 export const VISIT_ROW_STATES = [
   { value: "ready", label: "Ready", tone: "ok" },
   { value: "already_logged", label: "Already logged", tone: "dup" },
@@ -253,3 +305,5 @@ export const taskPriorityMeta = metaFinder(TASK_PRIORITIES);
 export const revenueSourceMeta = metaFinder(REVENUE_SOURCES);
 export const importRowStatusMeta = metaFinder(IMPORT_ROW_STATUSES);
 export const urgencyLabel = labeller(URGENCIES);
+export const removalReasonLabel = labeller(DOCTOR_REMOVAL_REASONS);
+export const removalStatusMeta = metaFinder(REMOVAL_STATUSES);

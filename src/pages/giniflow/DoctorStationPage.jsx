@@ -139,7 +139,7 @@ function GroupHead({ icon, title, sub, count, open, onToggle, id }) {
   );
 }
 
-function QueueCard({ card, now, group, onOpen }) {
+function QueueCard({ card, now, group, onOpen, showConsultant }) {
   const waited =
     minutesSince(card.statusSince, card.pausedAt ? new Date(card.pausedAt) : now) ??
     card.waitMinutes ??
@@ -186,6 +186,7 @@ function QueueCard({ card, now, group, onOpen }) {
           {card.age}
           {(card.sex || "")[0] || ""} · {card.fileNo || "—"}
           {card.sdName ? ` · SD ${card.sdName}` : ""}
+          {showConsultant && card.doctorName ? ` · ${card.doctorName}` : ""}
         </div>
 
         {/* The journey rail — the element that makes this a flow screen rather
@@ -292,9 +293,7 @@ export default function DoctorStationPage() {
       <div className="top-rail">
         <div className="tr-logo">Gini Flow</div>
         <div className="tr-role" style={{ background: "var(--blu-l)", color: "var(--blu)" }}>
-          {rxMo
-            ? `🩺 MO — prescriptions · for ${doctor?.assists?.name || "consultant"}`
-            : "🧑‍⚕️ Consultant"}
+          {rxMo ? "🩺 MO — prescriptions · your assigned patients" : "🧑‍⚕️ Consultant"}
         </div>
         <div className="rail-right">
           <input
@@ -391,6 +390,7 @@ export default function DoctorStationPage() {
                       now={now}
                       group={g.key}
                       onOpen={(c) => open(c, g.key)}
+                      showConsultant={rxMo}
                     />
                   ))}
                 </div>
@@ -427,6 +427,7 @@ export default function DoctorStationPage() {
                     now={now}
                     group={g.key}
                     onOpen={(c) => open(c, g.key)}
+                    showConsultant={rxMo}
                   />
                 ))}
               </div>

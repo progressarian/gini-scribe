@@ -20,12 +20,14 @@ const initials = (name = "") =>
     .map((w) => w[0]?.toUpperCase())
     .join("");
 
-export const rxMosForDoctor = (staff, doctorId, rxMoId) =>
-  (staff || []).filter(
-    (p) =>
-      String(p.role || "").toLowerCase() === "rx_mo" &&
-      ((doctorId && p.assistsDoctorId === doctorId) || p.id === rxMoId),
-  );
+export const rxMosForDoctor = (staff, doctorId) =>
+  (staff || [])
+    .filter((p) => String(p.role || "").toLowerCase() === "rx_mo")
+    .sort(
+      (a, b) =>
+        Number(!!doctorId && b.assistsDoctorId === doctorId) -
+        Number(!!doctorId && a.assistsDoctorId === doctorId),
+    );
 
 const byLoadThenName = (a, b) =>
   b.assignedToday - a.assignedToday || a.shortName.localeCompare(b.shortName);
@@ -172,7 +174,7 @@ export default function AssignMenu({ card, staff, saving, onClose, onSave, onRes
   const consultants = clinicians.filter(
     (p) => p.isChief || String(p.role || "").toLowerCase() !== "mo",
   );
-  const rxMos = rxMosForDoctor(staff, doctorId, rxMoId);
+  const rxMos = rxMosForDoctor(staff, doctorId);
 
   useEffect(() => {
     const onKey = (e) => {

@@ -231,10 +231,17 @@ const SECOND_CONSULT_DONE = ["seen", "completed"];
 
 export async function getDoctorQueue(
   visitDate,
-  { doctorId = null, scope = "mine", q = null, rxMoId = null } = {},
+  {
+    doctorId: consultantId = null,
+    scope = "mine",
+    q = null,
+    rxMoId = null,
+    excludeConsultantId = null,
+  } = {},
   now = new Date(),
   db = pool,
 ) {
+  const doctorId = rxMoId ? null : consultantId;
   const raw = typeof q === "string" && q.trim() ? q.trim() : null;
   const term = raw ? raw.replace(/[%_\\]/g, "\\$&") : null;
 
@@ -246,7 +253,15 @@ export async function getDoctorQueue(
         [visitDate, rxMoId],
       );
       const ids = new Set(assigned.map((r) => r.id));
-      return { ...res, rows: res.rows.filter((r) => ids.has(r.id)) };
+      return {
+        ...res,
+        rows: res.rows.filter(
+          (r) =>
+            ids.has(r.id) &&
+            (!excludeConsultantId ||
+              (r.assigned_doctor_id ?? r.assigned_sd_id) !== excludeConsultantId),
+        ),
+      };
     }),
     getSlaConfig(db),
     // Time actually spent in the room today: the gap between entering
@@ -688,6 +703,17 @@ export async function getTrend(patientId, marker, db = pool) {
 // can open one. Opening is fine; writing is not. An unassigned patient stays
 // writable: nobody has claimed them, so the first consultant to open one is
 // picking them up, which is how the queue's "Mine" column already treats them.
+export async function visitConsultantId(visitId, db = pool) {
+  const { rows } = await db.query(
+    `SELECT COALESCE(v.assigned_doctor_id, a.doctor_id) AS consultant_id
+       FROM giniflow_visits v
+       LEFT JOIN appointments a ON a.id = v.appointment_id
+      WHERE v.id::text = $1`,
+    [String(visitId)],
+  );
+  return rows[0]?.consultant_id ?? null;
+}
+
 export async function visitOwnership(visitId, doctorId, db = pool) {
   const { rows } = await db.query(
     `SELECT v.assigned_doctor_id, COALESCE(d.short_name, d.name) AS doctor_name,
@@ -732,7 +758,12 @@ export async function rowOwnership(table, rowId, doctorId, db = pool) {
 // Claiming the room. One patient with a consultant at a time: the older module
 // once showed four consultations at once for one doctor, and every duration it
 // reported after that was fiction.
-export async function startConsult(visitId, actorId = null, db = pool, { consultantId } = {}) {
+export async function startConsult(
+  visitId,
+  actorId = null,
+  db = pool,
+  { consultantId, byRxMo = false } = {},
+) {
   const roomId = consultantId ?? actorId;
   const client = await db.connect();
   try {
@@ -765,7 +796,7 @@ export async function startConsult(visitId, actorId = null, db = pool, { consult
       );
     }
 
-    if (roomId) {
+    if (roomId && !byRxMo) {
       const { rows: busy } = await client.query(
         `SELECT v.id, p.name FROM giniflow_visits v
            JOIN patients p ON p.id = v.patient_id

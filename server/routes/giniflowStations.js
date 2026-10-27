@@ -224,6 +224,7 @@ import {
   saveCarePlan,
   decideProposal,
   visitOwnership,
+  visitConsultantId,
   rowOwnership,
 } from "../services/giniflow/doctorStation.js";
 import {
@@ -455,9 +456,11 @@ const doctorGate = requireCapability(CAP.GINIFLOW_STATION_DOCTOR);
 // floor is closed to it — so ownership never makes an admin read-only.
 const overridesOwnership = (req) => hasCapability(req.doctor?.role, CAP.ADMIN);
 const roomDoctorId = (req) => req.assistedDoctor?.id ?? req.doctor?.doctor_id ?? null;
+const visitRoomId = async (req, visitId) =>
+  req.rxMoId ? ((await visitConsultantId(visitId)) ?? roomDoctorId(req)) : roomDoctorId(req);
 
 const requireOwnVisit = async (req, res, next) => {
-  if (overridesOwnership(req)) return next();
+  if (overridesOwnership(req) || req.rxMoId) return next();
   try {
     const { found, readOnly, ownerName } = await visitOwnership(
       req.params.visitId,
@@ -477,7 +480,7 @@ const requireOwnVisit = async (req, res, next) => {
 
 // Same rule for the row-keyed endpoints, which carry no :visitId of their own.
 const requireOwnRow = (table, param) => async (req, res, next) => {
-  if (overridesOwnership(req)) return next();
+  if (overridesOwnership(req) || req.rxMoId) return next();
   try {
     const { found, readOnly, ownerName } = await rowOwnership(
       table,
@@ -518,6 +521,7 @@ router.get(
         scope: req.rxMoId ? "mine" : req.query.scope || "mine",
         q: req.query.q,
         rxMoId: req.rxMoId ?? null,
+        excludeConsultantId: req.assistedDoctor?.chief ? req.assistedDoctor.id : null,
       });
       res.json({ date, ...data, serverTime: new Date().toISOString() });
     } catch (e) {
@@ -659,9 +663,10 @@ router.get("/giniflow/stations/doctor/:visitId", doctorGate, async (req, res) =>
     if (!consult) return res.status(404).json({ error: "Visit not found" });
     // Decided here rather than in the browser so the page and the gate that
     // refuses its writes can never disagree about who owns this patient.
-    const owned = await visitOwnership(req.params.visitId, roomDoctorId(req));
+    const room = await visitRoomId(req, req.params.visitId);
+    const owned = await visitOwnership(req.params.visitId, room);
     const admin = overridesOwnership(req);
-    const mine = [req.doctor?.doctor_id, roomDoctorId(req)].filter((id) => id != null).map(Number);
+    const mine = [req.doctor?.doctor_id, room].filter((id) => id != null).map(Number);
     const isMine = (id) => id != null && mine.includes(Number(id));
     const editor =
       admin || [consult.assignedDoctorId, consult.assignedSdId, consult.finalizedBy].some(isMine);
@@ -699,7 +704,8 @@ router.post(
     try {
       res.json(
         await startConsult(req.params.visitId, req.doctor?.doctor_id ?? null, undefined, {
-          consultantId: roomDoctorId(req),
+          consultantId: await visitRoomId(req, req.params.visitId),
+          byRxMo: !!req.rxMoId,
         }),
       );
     } catch (e) {
@@ -1119,7 +1125,7 @@ router.post(
     try {
       res.json(
         await fastPathFinalize(req.params.visitId, req.doctor?.doctor_id ?? null, undefined, {
-          consultantId: roomDoctorId(req),
+          consultantId: await visitRoomId(req, req.params.visitId),
         }),
       );
     } catch (e) {
@@ -1138,7 +1144,7 @@ router.post(
       res.json(
         await finalizeConsult(req.params.visitId, req.doctor?.doctor_id ?? null, undefined, {
           requireNextVisit: true,
-          consultantId: roomDoctorId(req),
+          consultantId: await visitRoomId(req, req.params.visitId),
         }),
       );
     } catch (e) {
@@ -1229,7 +1235,6 @@ router.get(
           rxMoId: req.rxMoId,
         });
         const waiting = queue.counters.withMe + queue.counters.waitingForMe;
-        delete summary.doctor;
         summary.mo_sd = {
           count: waiting,
           assigned: queue.total,
@@ -1240,9 +1245,12 @@ router.get(
         };
       } else if (req.rxMoId) {
         delete summary.mo_sd;
+      }
+      if (req.rxMoId) {
         const { counts } = await getDoctorQueue(date, {
           doctorId: roomDoctorId(req),
           rxMoId: req.rxMoId,
+          excludeConsultantId: req.assistedDoctor?.chief ? req.assistedDoctor.id : null,
         });
         const waiting = (counts.resultsReady || 0) + (counts.withMe || 0);
         const assigned = counts.total || 0;

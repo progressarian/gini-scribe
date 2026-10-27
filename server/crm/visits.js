@@ -2,9 +2,20 @@ import { withCrmContext } from "./db.js";
 import {
   VISIT_TYPE_VALUES,
   VISIT_OUTCOME_VALUES,
+  VISIT_FORM_STATUS_VALUES,
   DOCTOR_PRIORITY_VALUES,
 } from "../../shared/crmVocab.js";
-import { IST_DAY_START, IST_MONTH_START, istDayOf, periodCounts } from "./istPeriods.js";
+import {
+  IST_DAY_START,
+  IST_MONTH_START,
+  ddmmyyyy,
+  istDate,
+  istDayOf,
+  periodCounts,
+  uploadWindow,
+} from "./istPeriods.js";
+import { DoctorError, isLead } from "./doctors.js";
+import { doctorRemovalState } from "./removals.js";
 
 // Visit logging (brief §5) and the rep home screen (§13).
 //
@@ -25,6 +36,28 @@ export const SAME_DAY_VISIT = `
    WHERE deleted_at IS NULL AND executive_id = $1 AND doctor_id = $2
      AND ${istDayOf("occurred_at")} = $3::date
    LIMIT 1`;
+
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+function visitBase(clientCreatedAt) {
+  const now = new Date();
+  const at = clientCreatedAt ? new Date(clientCreatedAt) : now;
+  return Number.isNaN(at.getTime()) || at > now ? now : at;
+}
+
+function checkVisitDay(day, base = new Date()) {
+  const window = uploadWindow(base);
+  if (!DAY.test(String(day)) || Number.isNaN(new Date(`${day}T00:00:00Z`).getTime())) {
+    throw new DoctorError("Choose the visit date from the calendar.");
+  }
+  if (day > window.to) throw new DoctorError("The visit date cannot be in the future.");
+  if (day < window.from) {
+    throw new DoctorError(
+      `Choose a date from ${ddmmyyyy(window.from)} to today (this week and this month).`,
+    );
+  }
+  return day;
+}
 
 /**
  * Create a visit, or return the one already stored under this id.
@@ -54,6 +87,8 @@ export async function logVisit(crmUser, visit) {
     next_visit_date,
     gps,
     client_created_at,
+    status,
+    visit_date,
   } = visit;
 
   if (!id) throw new Error("A visit needs a client-generated id");
@@ -62,6 +97,14 @@ export async function logVisit(crmUser, visit) {
   if (outcome && !VISIT_OUTCOME_VALUES.includes(outcome)) {
     throw new Error(`Unknown outcome: ${outcome}`);
   }
+  if (status && !VISIT_FORM_STATUS_VALUES.includes(status)) {
+    throw new DoctorError("Choose Completed or Doctor unavailable.");
+  }
+  const finalOutcome = status === "doctor_unavailable" ? "doctor_unavailable" : outcome;
+  const loggedOn = visitBase(client_created_at);
+  const pickedDay = visit_date ? checkVisitDay(visit_date, loggedOn) : null;
+  const backDated = pickedDay && pickedDay !== istDate(loggedOn);
+  const occurredAt = backDated ? null : (occurred_at ?? null);
 
   return withCrmContext(crmUser, async (sql) => {
     const { rows: replay } = await sql(
@@ -71,9 +114,11 @@ export async function logVisit(crmUser, visit) {
     if (replay[0]) return { ...replay[0], duplicate: true };
 
     await lockRepVisits(sql, crmUser.id);
-    const { rows: day } = await sql(`SELECT ${istDayOf("COALESCE($1::timestamptz, now())")} AS d`, [
-      occurred_at ?? null,
-    ]);
+    const { rows: day } = await sql(
+      `SELECT CASE WHEN $2::date IS NOT NULL THEN $2::date
+                   ELSE ${istDayOf("COALESCE($1::timestamptz, now())")} END AS d`,
+      [occurredAt, backDated ? pickedDay : null],
+    );
     const { rows: sameDay } = await sql(SAME_DAY_VISIT, [crmUser.id, doctor_id, day[0].d]);
     if (sameDay[0]) return { ...sameDay[0], duplicate: true, reason: "already_logged_today" };
 
@@ -85,8 +130,9 @@ export async function logVisit(crmUser, visit) {
           commitments, outcome, follow_up_required, next_visit_date,
           gps_latitude, gps_longitude, gps_accuracy_m, gps_captured_at,
           client_created_at, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7, now()),$8,$9,$10,$11,$12,$13,$14,$15,
-               $16,$17,$18,$19,$20,$4)
+       VALUES ($1,$2,$3,$4,$5,$6,
+               COALESCE($7, LEAST(($21::date + time '12:00') AT TIME ZONE 'Asia/Kolkata', now()), now()),
+               $8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$4)
        ON CONFLICT (id) DO NOTHING
        RETURNING id, occurred_at, synced_at`,
       [
@@ -96,13 +142,13 @@ export async function logVisit(crmUser, visit) {
         crmUser.id,
         visit_type,
         purpose ?? null,
-        occurred_at ?? null,
+        occurredAt,
         discussion_notes ?? null,
         doctor_requirements ?? null,
         objections ?? null,
         opportunities_identified ?? null,
         commitments ?? null,
-        outcome ?? null,
+        finalOutcome ?? null,
         Boolean(follow_up_required),
         next_visit_date ?? null,
         gps?.latitude ?? null,
@@ -110,6 +156,7 @@ export async function logVisit(crmUser, visit) {
         gps?.accuracy ?? null,
         gps?.captured_at ?? null,
         client_created_at ?? null,
+        backDated ? pickedDay : null,
       ],
     );
 
@@ -322,7 +369,9 @@ export async function doctor360(crmUser, doctorId) {
                 d.clinic_name, d.address_line, d.area, d.city, d.mobile, d.clinic_phone,
                 d.whatsapp, d.email, d.priority, d.relationship_stage, d.notes,
                 d.estimated_monthly_potential_inr, d.profile_complete, d.missing_fields,
-                d.needs_verification, d.verification_note,
+                d.needs_verification, d.verification_note, d.updated_at,
+                d.deleted_at, d.is_active, d.removed_reason, d.removed_note,
+                rb.full_name AS removed_by_name,
                 t.name AS territory_name,
                 a.executive_id, ex.full_name AS executive_name,
                 vd.due_state, vd.last_visit_at, vd.next_due_on, vd.interval_days
@@ -332,7 +381,8 @@ export async function doctor360(crmUser, doctorId) {
                   ON a.doctor_id = d.id AND a.effective_to IS NULL
            LEFT JOIN crm.users ex ON ex.id = a.executive_id
            LEFT JOIN crm.v_doctor_visit_due vd ON vd.doctor_id = d.id
-          WHERE d.id = $1 AND d.deleted_at IS NULL`,
+           LEFT JOIN crm.users rb ON rb.id = d.removed_by
+          WHERE d.id = $1`,
         [doctorId],
       ),
       sql(`SELECT * FROM crm.v_doctor_kpis WHERE doctor_id = $1`, [doctorId]),
@@ -342,7 +392,9 @@ export async function doctor360(crmUser, doctorId) {
                 v.opportunities_identified, v.commitments,
                 v.follow_up_required, v.next_visit_date,
                 (v.gps_latitude IS NOT NULL) AS has_gps,
-                v.client_created_at, v.synced_at, v.source,
+                v.client_created_at, v.synced_at, v.source, v.executive_id,
+                ${istDayOf("v.occurred_at")}::text AS visit_day,
+                (${istDayOf("v.created_at")} = ${istDayOf("now()")}) AS logged_today,
                 u.full_name AS executive_name
            FROM crm.visits v
            LEFT JOIN crm.users u ON u.id = v.executive_id
@@ -373,12 +425,27 @@ export async function doctor360(crmUser, doctorId) {
       ),
     ]);
 
-    if (!doc.rows[0]) throw new Error("Doctor not found, or not yours");
+    const lead = isLead(crmUser);
+    if (!doc.rows[0] || (doc.rows[0].deleted_at && !lead)) {
+      throw new DoctorError(
+        "This doctor is not on your list. They may have been moved or removed.",
+        404,
+      );
+    }
+    const removal = doc.rows[0].deleted_at
+      ? null
+      : await doctorRemovalState(sql, crmUser, doctorId);
+    const canChange = (v) => lead || (v.executive_id === crmUser.id && v.logged_today);
 
     // One list, newest first. Each entry keeps its own shape so the page can
     // render a visit differently from a referral without re-querying.
     const timeline = [
-      ...visits.rows.map((v) => ({ kind: "visit", at: v.occurred_at, ...v })),
+      ...visits.rows.map((v) => ({
+        kind: "visit",
+        at: v.occurred_at,
+        ...v,
+        can_change: canChange(v),
+      })),
       ...referrals.rows.map((r) => ({ kind: "referral", at: r.referred_at, ...r })),
       ...tasks.rows
         .filter((t) => t.completed_at)
@@ -392,6 +459,8 @@ export async function doctor360(crmUser, doctorId) {
       timeline,
       open_tasks: tasks.rows.filter((t) => !t.completed_at),
       counts: { visits: visits.rows.length, referrals: referrals.rows.length },
+      removal,
+      viewer: { id: crmUser.id, is_lead: lead },
     };
   });
 }
@@ -412,5 +481,151 @@ export async function suggestedNextVisit(crmUser, doctorId) {
       [doctorId],
     );
     return rows[0] ?? null;
+  });
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MAX_TEXT = 4000;
+
+async function changeableVisit(sql, crmUser, visitId, reason) {
+  if (!UUID.test(visitId || "")) throw new DoctorError("Visit not found.", 404);
+  const { rows } = await sql(
+    `SELECT v.id, v.doctor_id, v.executive_id, v.occurred_at, v.outcome, v.deleted_at,
+            ${istDayOf("v.occurred_at")}::text AS visit_day,
+            (${istDayOf("v.created_at")} = ${istDayOf("now()")}) AS logged_today,
+            d.full_name AS doctor_name
+       FROM crm.visits v JOIN crm.doctors d ON d.id = v.doctor_id
+      WHERE v.id = $1`,
+    [visitId],
+  );
+  const v = rows[0];
+  if (!v) throw new DoctorError("Visit not found.", 404);
+  if (v.deleted_at) throw new DoctorError("This visit was already undone.", 409);
+  const ownToday = v.executive_id === crmUser.id && v.logged_today;
+  if (!ownToday && !isLead(crmUser)) {
+    throw new DoctorError(
+      v.executive_id === crmUser.id
+        ? "You can change a visit only on the day you logged it. Ask your admin to change it."
+        : "You can only change your own visits.",
+      403,
+    );
+  }
+  const why = String(reason ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!ownToday && !why) {
+    throw new DoctorError("Write a short reason for changing this visit.", 400, {
+      fields: { reason: "Write a short reason for changing this visit." },
+    });
+  }
+  if (why.length > 300) throw new DoctorError("The reason is too long (max 300 letters).");
+  const { rows: locked } = await sql(
+    "SELECT id FROM crm.visits WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
+    [visitId],
+  );
+  if (!locked[0]) throw new DoctorError("This visit was already undone.", 409);
+  return { visit: v, reason: why || null };
+}
+
+export async function editVisit(crmUser, visitId, body = {}) {
+  return withCrmContext(crmUser, async (sql) => {
+    const { visit, reason } = await changeableVisit(sql, crmUser, visitId, body.reason);
+    const status =
+      body.status ?? (visit.outcome === "doctor_unavailable" ? "doctor_unavailable" : "completed");
+    if (!VISIT_FORM_STATUS_VALUES.includes(status)) {
+      throw new DoctorError("Choose Completed or Doctor unavailable.");
+    }
+    const type = body.visit_type ?? undefined;
+    if (type !== undefined && !VISIT_TYPE_VALUES.includes(type)) {
+      throw new DoctorError("Choose a visit type from the list.");
+    }
+    let outcome = "outcome" in body ? body.outcome || null : visit.outcome;
+    if (outcome && !VISIT_OUTCOME_VALUES.includes(outcome)) {
+      throw new DoctorError("Choose an outcome from the list.");
+    }
+    if (status === "doctor_unavailable") outcome = "doctor_unavailable";
+    else if (outcome === "doctor_unavailable") outcome = null;
+
+    const day = body.visit_date ? checkVisitDay(body.visit_date) : visit.visit_day;
+    const next = "next_visit_date" in body ? body.next_visit_date || null : undefined;
+    if (next !== undefined && next !== null) {
+      if (!DAY.test(next)) throw new DoctorError("Choose the next visit date from the calendar.");
+      if (next <= day) throw new DoctorError("The next visit date must be after the visit date.");
+    }
+    for (const key of ["purpose", "discussion_notes"]) {
+      if (key in body && String(body[key] ?? "").length > MAX_TEXT) {
+        throw new DoctorError("Notes are too long (max 4,000 letters).");
+      }
+    }
+
+    if (day !== visit.visit_day) {
+      await lockRepVisits(sql, visit.executive_id);
+      const { rows: clash } = await sql(
+        `${SAME_DAY_VISIT.replace("LIMIT 1", "")} AND id <> $4 LIMIT 1`,
+        [visit.executive_id, visit.doctor_id, day, visit.id],
+      );
+      if (clash[0]) {
+        throw new DoctorError(
+          `A visit to ${visit.doctor_name} is already logged on ${ddmmyyyy(day)}.`,
+          409,
+        );
+      }
+    }
+
+    const sets = ["outcome = $2", "change_reason = $3", "updated_at = now()"];
+    const params = [visit.id, outcome, reason];
+    const add = (sqlText, value) => {
+      params.push(value);
+      sets.push(sqlText.replace("?", `$${params.length}`));
+    };
+    if (day !== visit.visit_day) {
+      params.push(day);
+      const p = `$${params.length}::date`;
+      sets.push(
+        `occurred_at = CASE WHEN ${p} = ${istDayOf("now()")} THEN now()
+           ELSE LEAST((${p} + time '12:00') AT TIME ZONE 'Asia/Kolkata', now()) END`,
+      );
+    }
+    if (type !== undefined) add("visit_type = ?", type);
+    if ("purpose" in body) add("purpose = ?", String(body.purpose ?? "").trim() || null);
+    if ("discussion_notes" in body) {
+      add("discussion_notes = ?", String(body.discussion_notes ?? "").trim() || null);
+    }
+    if (next !== undefined) {
+      add("next_visit_date = ?", next);
+      add("follow_up_required = ?", Boolean(next) || Boolean(body.follow_up_required));
+    } else if ("follow_up_required" in body) {
+      add("follow_up_required = ?", Boolean(body.follow_up_required));
+    }
+    await sql(`UPDATE crm.visits SET ${sets.join(", ")} WHERE id = $1`, params);
+    return { id: visit.id, visit_date: day, outcome };
+  });
+}
+
+export async function undoVisit(crmUser, visitId, body = {}) {
+  return withCrmContext(crmUser, async (sql) => {
+    const { visit, reason } = await changeableVisit(sql, crmUser, visitId, body.reason);
+    await sql(
+      `UPDATE crm.visits SET deleted_at = now(), change_reason = $2, updated_at = now()
+        WHERE id = $1`,
+      [visit.id, reason],
+    );
+    return { id: visit.id, undone: true };
+  });
+}
+
+export async function loggedVisitDays(crmUser, doctorId) {
+  if (!UUID.test(doctorId || "")) throw new DoctorError("Doctor not found.", 404);
+  const window = uploadWindow();
+  return withCrmContext(crmUser, async (sql) => {
+    const { rows } = await sql(
+      `SELECT ${istDayOf("occurred_at")}::text AS day, id AS visit_id
+         FROM crm.visits
+        WHERE deleted_at IS NULL AND executive_id = $1 AND doctor_id = $2
+          AND ${istDayOf("occurred_at")} BETWEEN $3::date AND $4::date
+        ORDER BY 1 DESC`,
+      [crmUser.id, doctorId, window.from, window.to],
+    );
+    return { window, days: rows };
   });
 }

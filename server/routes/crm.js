@@ -28,7 +28,33 @@ import {
   listAssignments,
 } from "../crm/assignments.js";
 import { createReferral, advanceReferral, referralDetail, serviceLines } from "../crm/referrals.js";
-import { logVisit, fillDoctorGap, repHome, suggestedNextVisit, doctor360 } from "../crm/visits.js";
+import {
+  logVisit,
+  fillDoctorGap,
+  repHome,
+  suggestedNextVisit,
+  doctor360,
+  editVisit,
+  undoVisit,
+  loggedVisitDays,
+} from "../crm/visits.js";
+import {
+  DoctorError,
+  addDoctor,
+  checkMobile,
+  doctorForEdit,
+  doctorFormOptions,
+  doctorHistory,
+  updateDoctor,
+} from "../crm/doctors.js";
+import {
+  cancelRemoval,
+  decideRemoval,
+  listRemovals,
+  removalImpact,
+  requestRemoval,
+  restoreDoctor,
+} from "../crm/removals.js";
 import { handleError } from "../utils/errorHandler.js";
 import { listDueDoctors, listMyDoctors, listReferrals, listTasks } from "../crm/homeLists.js";
 import {
@@ -143,11 +169,83 @@ router.post("/crm/referrals/:id/status", crm, express.json(), async (req, res) =
   }
 });
 
+function doctorError(res, e, context) {
+  if (e instanceof DoctorError) {
+    const { status, message, code, fields, doctor_id, doctor_name, similar } = e;
+    return res
+      .status(status)
+      .json({ error: message, code, fields, doctor_id, doctor_name, similar });
+  }
+  console.error(`${context} error:`, e?.message, e?.detail || "", e?.stack || "");
+  if (e?.code === "23505") {
+    return res.status(409).json({ error: "This mobile is already in the CRM." });
+  }
+  res.status(500).json({
+    error: `${context} failed. Please try again; if it keeps failing, contact an administrator.`,
+  });
+}
+
+const doctorRoute = (method, path, context, handler) =>
+  router[method](path, crm, express.json(), async (req, res) => {
+    try {
+      res.json(await handler(req));
+    } catch (e) {
+      doctorError(res, e, context);
+    }
+  });
+
+doctorRoute("get", "/crm/doctors/form-options", "Doctor form", (req) =>
+  doctorFormOptions(req.crmUser),
+);
+doctorRoute("get", "/crm/doctors/check-mobile", "Mobile check", (req) =>
+  checkMobile(req.crmUser, req.query),
+);
+doctorRoute("post", "/crm/doctors", "Add doctor", (req) => addDoctor(req.crmUser, req.body));
+doctorRoute("get", "/crm/doctors/:id/edit", "Doctor details", (req) =>
+  doctorForEdit(req.crmUser, req.params.id),
+);
+doctorRoute("put", "/crm/doctors/:id", "Update doctor", (req) =>
+  updateDoctor(req.crmUser, req.params.id, req.body),
+);
+doctorRoute("get", "/crm/doctors/:id/history", "Doctor history", (req) =>
+  doctorHistory(req.crmUser, req.params.id),
+);
+doctorRoute("get", "/crm/doctors/:id/removal-impact", "Removal check", (req) =>
+  removalImpact(req.crmUser, req.params.id),
+);
+doctorRoute("post", "/crm/doctors/:id/removal", "Remove doctor", (req) =>
+  requestRemoval(req.crmUser, req.params.id, req.body),
+);
+doctorRoute("post", "/crm/doctors/:id/restore", "Restore doctor", (req) =>
+  restoreDoctor(req.crmUser, req.params.id),
+);
+doctorRoute("get", "/crm/doctors/:id/visit-days", "Visit dates", (req) =>
+  loggedVisitDays(req.crmUser, req.params.id),
+);
+doctorRoute("get", "/crm/removal-requests", "Removal requests", (req) =>
+  listRemovals(req.crmUser, req.query),
+);
+doctorRoute("post", "/crm/removal-requests/:id/cancel", "Cancel request", (req) =>
+  cancelRemoval(req.crmUser, req.params.id),
+);
+doctorRoute("post", "/crm/removal-requests/:id/approve", "Approve removal", (req) =>
+  decideRemoval(req.crmUser, req.params.id, { approve: true, note: req.body?.note }),
+);
+doctorRoute("post", "/crm/removal-requests/:id/reject", "Reject removal", (req) =>
+  decideRemoval(req.crmUser, req.params.id, { approve: false, note: req.body?.note }),
+);
+doctorRoute("put", "/crm/visits/:id", "Change visit", (req) =>
+  editVisit(req.crmUser, req.params.id, req.body),
+);
+doctorRoute("post", "/crm/visits/:id/undo", "Undo visit", (req) =>
+  undoVisit(req.crmUser, req.params.id, req.body),
+);
+
 router.get("/crm/doctors/:id", crm, async (req, res) => {
   try {
     res.json(await doctor360(req.crmUser, req.params.id));
   } catch (e) {
-    handleError(res, e, "Doctor 360");
+    doctorError(res, e, "Doctor 360");
   }
 });
 

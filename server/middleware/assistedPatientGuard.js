@@ -77,11 +77,10 @@ const RULES = [
   },
 ];
 
-const deny = (res, assisted) =>
+const deny = (res) =>
   res.status(403).json({
-    error: assisted
-      ? "This patient isn't assigned to you. Ask the coordinator to assign them on the triage board."
-      : "Your login isn't linked to a consultant yet. Ask an admin to set who you assist.",
+    error:
+      "This patient isn't assigned to you. Ask the coordinator to assign them on the triage board.",
     code: "not_assisted_patient",
   });
 
@@ -102,7 +101,6 @@ export async function assistedPatientGuard(req, res, next) {
     return next();
   try {
     const assisted = await assistedDoctorOf(req.doctor.doctor_id);
-    if (!assisted && !req.path.startsWith("/api/auth")) return deny(res, null);
     req.assistedDoctor = assisted;
     const moId = req.doctor.doctor_id;
     req.rxMoId = moId;
@@ -112,35 +110,35 @@ export async function assistedPatientGuard(req, res, next) {
         (!r.chief || assisted?.chief) &&
         (r.exact ? req.path === r.prefix : req.path.startsWith(r.prefix)),
     );
-    if (!rule) return deny(res, assisted);
-    if (rule.open) return rule.readOnly && !READS.has(req.method) ? deny(res, assisted) : next();
+    if (!rule) return deny(res);
+    if (rule.open) return rule.readOnly && !READS.has(req.method) ? deny(res) : next();
     if (rule.patients) {
       const ids = String(req.query.patient_ids || "")
         .split(",")
         .map(numeric)
         .filter(Boolean);
-      if (!READS.has(req.method) || !ids.length) return deny(res, assisted);
+      if (!READS.has(req.method) || !ids.length) return deny(res);
       const checks = await Promise.all(ids.map((id) => isAssignedPatient(id, moId)));
-      return checks.every(Boolean) ? next() : deny(res, assisted);
+      return checks.every(Boolean) ? next() : deny(res);
     }
     if (rule.list) {
-      if (!READS.has(req.method)) return deny(res, assisted);
+      if (!READS.has(req.method)) return deny(res);
       delete req.query.doctor;
       return next();
     }
 
     const segments = req.path.slice(rule.prefix.length).split("/");
-    if (rule.methods && !rule.methods.includes(req.method)) return deny(res, assisted);
+    if (rule.methods && !rule.methods.includes(req.method)) return deny(res);
     if (rule.visit) {
       const visitId = await rule.visit(segments);
       const allowed =
         !!visitId && (await isAssignedVisit(visitId, moId, { today: !READS.has(req.method) }));
-      return allowed ? next() : deny(res, assisted);
+      return allowed ? next() : deny(res);
     }
     const patientId = await rule.patient(segments);
-    if (!patientId) return deny(res, assisted);
+    if (!patientId) return deny(res);
     const allowed = await isAssignedPatient(patientId, moId, { today: !READS.has(req.method) });
-    return allowed ? next() : deny(res, assisted);
+    return allowed ? next() : deny(res);
   } catch (e) {
     next(e);
   }

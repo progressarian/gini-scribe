@@ -30,6 +30,7 @@ const VisitSheetPage = lazyWithRetry(() => import("./pages/crm/VisitSheetPage.js
 const ProgressPage = lazyWithRetry(() => import("./pages/crm/ProgressPage.jsx"));
 const RepHomePage = lazyWithRetry(() => import("./pages/crm/RepHomePage.jsx"));
 const AddVisitPage = lazyWithRetry(() => import("./pages/crm/AddVisitPage.jsx"));
+const DoctorFormPage = lazyWithRetry(() => import("./pages/crm/DoctorFormPage.jsx"));
 const Doctor360Page = lazyWithRetry(() => import("./pages/crm/Doctor360Page.jsx"));
 const AddReferralPage = lazyWithRetry(() => import("./pages/crm/AddReferralPage.jsx"));
 const HomeScreen = lazyWithRetry(() => import("./companion/HomeScreen"));
@@ -315,6 +316,8 @@ const router = createBrowserRouter([
               { path: "/crm/home", element: lazyEl(RepHomePage) },
               { path: "/crm/visit/:doctorId", element: lazyEl(AddVisitPage) },
               { path: "/crm/doctor/:doctorId", element: lazyEl(Doctor360Page) },
+              { path: "/crm/doctor/:doctorId/edit", element: lazyEl(DoctorFormPage) },
+              { path: "/crm/doctors/new", element: lazyEl(DoctorFormPage) },
               { path: "/crm/referral/:doctorId", element: lazyEl(AddReferralPage) },
               { path: "/crm/import", element: lazyEl(DoctorImportPage) },
               { path: "/crm/visits/import", element: lazyEl(VisitSheetPage) },

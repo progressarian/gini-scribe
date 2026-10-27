@@ -3,7 +3,10 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import api from "../../services/api.js";
 import { useDictation } from "../../hooks/useDictation.js";
 import { enqueue, drain } from "../../crm/offlineQueue.js";
-import { VISIT_TYPES, VISIT_OUTCOMES } from "../../../shared/crmVocab.js";
+import { VISIT_TYPES, VISIT_OUTCOMES, VISIT_FORM_STATUSES } from "../../../shared/crmVocab.js";
+import { istToday } from "../../components/crm/progress/progressText.js";
+
+const ddmmyyyy = (day) => (day ? day.split("-").reverse().join("-") : "");
 
 // Log a visit in under a minute, standing in a corridor (brief §5).
 //
@@ -57,7 +60,9 @@ export default function AddVisitPage() {
   });
   const [showDetail, setShowDetail] = useState(false);
   const [err, setErr] = useState(null);
-  const [loggedToday, setLoggedToday] = useState(null);
+  const [status, setStatus] = useState("completed");
+  const [visitDate, setVisitDate] = useState(istToday());
+  const [loggedDays, setLoggedDays] = useState({ window: null, days: [] });
 
   // Minted here, not on the server. This is the whole basis of the offline
   // story: the id exists before the network is involved, so a retry is a no-op
@@ -76,7 +81,6 @@ export default function AddVisitPage() {
       .then(({ data }) => {
         if (!alive) return;
         const d = data.my_doctors.find((x) => x.doctor_id === doctorId);
-        setLoggedToday(data.todays_visits.find((v) => v.doctor_id === doctorId) || null);
         setDoctor(d || { doctor_id: doctorId, full_name: params.get("name") || "Doctor" });
       })
       .catch(() => setDoctor({ doctor_id: doctorId, full_name: params.get("name") || "Doctor" }));
@@ -88,10 +92,25 @@ export default function AddVisitPage() {
         setNextVisit(data.next_visit_date);
       })
       .catch(() => {});
+    api
+      .get(`/api/crm/doctors/${doctorId}/visit-days`)
+      .then(({ data }) => alive && setLoggedDays(data))
+      .catch(() => {});
     return () => {
       alive = false;
     };
   }, [doctorId, params]);
+
+  const today = istToday();
+  const loggedOnDate = loggedDays.days.find((d) => d.day === visitDate) || null;
+  const minDate = loggedDays.window?.from;
+  const dateProblem = !visitDate
+    ? "Choose the visit date."
+    : visitDate > today
+      ? "The visit date cannot be in the future."
+      : minDate && visitDate < minDate
+        ? `Choose a date from ${ddmmyyyy(minDate)} to today.`
+        : null;
 
   const filledDetail = Object.values(detail).filter((v) => v.trim()).length;
 
@@ -148,12 +167,14 @@ export default function AddVisitPage() {
       doctor_id: doctorId,
       visit_type: visitType,
       purpose,
-      outcome,
+      status,
+      outcome: status === "doctor_unavailable" ? "doctor_unavailable" : outcome,
+      visit_date: visitDate === today ? undefined : visitDate,
       discussion_notes: notes.trim() || null,
       ...Object.fromEntries(Object.entries(detail).map(([k, v]) => [k, v.trim() || null])),
       follow_up_required: followUp,
       next_visit_date: nextVisit || null,
-      occurred_at: nowIso,
+      occurred_at: visitDate === today ? nowIso : undefined,
       client_created_at: nowIso,
       gps,
     };
@@ -182,17 +203,49 @@ export default function AddVisitPage() {
       </header>
 
       {err && <div className="rep__err">{err}</div>}
-      {loggedToday && (
+      {loggedOnDate && (
         <div className="rep__notice" role="status">
-          Already logged today for {doctor?.full_name || "this doctor"} — one visit per doctor per
-          day.{" "}
-          <Link to={`/crm/doctor/${doctorId}?visit=${loggedToday.id}`} className="rep__link">
-            Open today’s visit
+          Already logged {visitDate === today ? "today" : `for ${ddmmyyyy(visitDate)}`} for{" "}
+          {doctor?.full_name || "this doctor"} — one visit per doctor per day.{" "}
+          <Link to={`/crm/doctor/${doctorId}?visit=${loggedOnDate.visit_id}`} className="rep__link">
+            {visitDate === today ? "Open today’s visit" : "Open that visit"}
           </Link>
         </div>
       )}
 
       <div className="rep__form">
+        <Field label="Status">
+          <Chips
+            options={VISIT_FORM_STATUSES.map((s) => ({
+              value: s.value,
+              label: s.label,
+              tone: s.value === "doctor_unavailable" ? "amb" : "grn",
+            }))}
+            value={status}
+            onChange={setStatus}
+          />
+        </Field>
+
+        <Field label="Visit date">
+          <input
+            className="rep__input"
+            type="date"
+            aria-label="Visit date"
+            value={visitDate}
+            min={minDate}
+            max={today}
+            onChange={(e) => setVisitDate(e.target.value)}
+            aria-invalid={Boolean(dateProblem)}
+            aria-describedby="visit-date-hint"
+          />
+          <span id="visit-date-hint" className={dateProblem ? "dfm__err" : "rep__hint"}>
+            {dateProblem ||
+              (visitDate === today
+                ? "Today. Pick an earlier date to log a missed visit from this week or month."
+                : `Logging a past visit for ${ddmmyyyy(visitDate)}.`)}
+          </span>
+        </Field>
+
         <Field label="Visit type">
           <Chips
             options={VISIT_TYPES.map((v) => ({ value: v.value, label: `${v.icon} ${v.label}` }))}
@@ -209,13 +262,19 @@ export default function AddVisitPage() {
           />
         </Field>
 
-        <Field label="Outcome" optional>
-          <Chips
-            options={VISIT_OUTCOMES.map((o) => ({ value: o.value, label: o.label, tone: o.tone }))}
-            value={outcome}
-            onChange={(v) => setOutcome(v === outcome ? null : v)}
-          />
-        </Field>
+        {status === "completed" && (
+          <Field label="Outcome" optional>
+            <Chips
+              options={VISIT_OUTCOMES.filter((o) => o.value !== "doctor_unavailable").map((o) => ({
+                value: o.value,
+                label: o.label,
+                tone: o.tone,
+              }))}
+              value={outcome}
+              onChange={(v) => setOutcome(v === outcome ? null : v)}
+            />
+          </Field>
+        )}
 
         {gaps.length > 0 && (
           <Field label="Quick add — while you're with them">
@@ -355,7 +414,7 @@ export default function AddVisitPage() {
         <button
           className="rep__btn rep__btn--primary rep__btn--lg"
           onClick={save}
-          disabled={saving || Boolean(loggedToday)}
+          disabled={saving || Boolean(loggedOnDate) || Boolean(dateProblem)}
         >
           {saving ? "Saving…" : "Save visit"}
         </button>

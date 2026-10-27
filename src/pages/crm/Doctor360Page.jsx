@@ -1,7 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useParams, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useParams, useNavigate, useSearchParams } from "react-router-dom";
 import api from "../../services/api.js";
 import ReferralStatusControl from "../../components/crm/ReferralStatusControl.jsx";
+import RemovalDialog from "../../components/crm/doctors/RemovalDialog.jsx";
+import DoctorHistory from "../../components/crm/doctors/DoctorHistory.jsx";
+import VisitChangeDialog from "../../components/crm/doctors/VisitChangeDialog.jsx";
+import { errorText } from "../../components/crm/import/importText.js";
 import {
   DOCTOR_PRIORITIES,
   RELATIONSHIP_STAGES,
@@ -10,6 +14,7 @@ import {
   visitOutcomeMeta,
   referralStatusLabel,
   attributionStatusMeta,
+  removalReasonLabel,
 } from "../../../shared/crmVocab.js";
 
 // Doctor 360 (brief §8). Header, KPI cards, and one chronological record of the
@@ -28,7 +33,7 @@ const when = (iso) =>
 export default function Doctor360Page() {
   const { doctorId } = useParams();
   const navigate = useNavigate();
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   // Arriving from a visit card: scroll that entry into view and mark it, so the
   // tap lands on the thing it promised rather than the top of a long timeline.
   const focusVisitId = params.get("visit");
@@ -36,6 +41,13 @@ export default function Doctor360Page() {
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [notice, setNotice] = useState(
+    params.get("added") ? "Doctor added." : params.get("saved") ? "Changes saved." : null,
+  );
+  const [actionErr, setActionErr] = useState(null);
+  const [visitChange, setVisitChange] = useState(null);
+  const [historyKey, setHistoryKey] = useState(0);
 
   const load = useCallback(
     () =>
@@ -49,6 +61,29 @@ export default function Doctor360Page() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (!params.get("added") && !params.get("saved")) return;
+    const next = new URLSearchParams(params);
+    next.delete("added");
+    next.delete("saved");
+    setParams(next, { replace: true });
+  }, []);
+
+  const act = async (fn, done) => {
+    setSaving(true);
+    setActionErr(null);
+    try {
+      await fn();
+      setNotice(done);
+      await load();
+      setHistoryKey((n) => n + 1);
+    } catch (e) {
+      setActionErr(errorText(e, "That did not work. Please try again."));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   useEffect(() => {
     if (!data || !focusVisitId || !focusRef.current) return;
@@ -83,6 +118,9 @@ export default function Doctor360Page() {
   const d = data.doctor;
   const k = data.kpis || {};
   const due = d.due_state ? visitDueStateMeta(d.due_state) : null;
+  const removed = Boolean(d.deleted_at);
+  const removal = data.removal;
+  const isLead = Boolean(data.viewer?.is_lead);
 
   return (
     <div className="rep d360">
@@ -97,6 +135,78 @@ export default function Doctor360Page() {
           </span>
         </div>
       </header>
+
+      {notice && (
+        <div className="rep__toast" role="status">
+          {notice}
+        </div>
+      )}
+      {actionErr && (
+        <div className="rep__err" role="alert">
+          {actionErr}
+        </div>
+      )}
+      {removed && (
+        <div className="d360__banner d360__banner--removed" role="status">
+          <div>
+            <strong>Removed from the CRM</strong> on {when(d.deleted_at)}
+            {d.removed_by_name ? ` by ${d.removed_by_name}` : ""}
+            {d.removed_reason ? ` — ${removalReasonLabel(d.removed_reason)}` : ""}
+            {d.removed_note ? `: ${d.removed_note}` : ""}
+          </div>
+          {isLead && d.is_active && (
+            <button
+              type="button"
+              className="rep__btn rep__btn--sm"
+              disabled={saving}
+              onClick={() =>
+                act(() => api.post(`/api/crm/doctors/${d.id}/restore`), "Doctor restored.")
+              }
+            >
+              Restore
+            </button>
+          )}
+        </div>
+      )}
+      {!removed && removal?.status === "pending" && (
+        <div className="d360__banner" role="status">
+          <div>
+            <strong>Removal requested</strong> by {removal.requested_by_name} on{" "}
+            {when(removal.created_at)} — {removal.reason_label}
+            {removal.note ? `: ${removal.note}` : ""}. Waiting for admin.
+          </div>
+          {removal.mine && (
+            <button
+              type="button"
+              className="rep__btn rep__btn--sm"
+              disabled={saving}
+              onClick={() =>
+                act(
+                  () => api.post(`/api/crm/removal-requests/${removal.id}/cancel`),
+                  "Removal request cancelled.",
+                )
+              }
+            >
+              Cancel request
+            </button>
+          )}
+          {isLead && (
+            <Link to="/crm/home?tab=removals" className="rep__btn rep__btn--sm">
+              Review
+            </Link>
+          )}
+        </div>
+      )}
+      {!removed && removal?.status === "rejected" && (
+        <div className="d360__banner" role="status">
+          <div>
+            <strong>Removal request rejected</strong>
+            {removal.decided_by_name ? ` by ${removal.decided_by_name}` : ""} on{" "}
+            {when(removal.decided_at)}
+            {removal.decision_note ? `: ${removal.decision_note}` : ""}
+          </div>
+        </div>
+      )}
 
       <div className="d360__meta">
         {[d.clinic_name, d.address_line, d.area, d.territory_name].filter(Boolean).join(" · ") ||
@@ -115,18 +225,27 @@ export default function Doctor360Page() {
         ) : (
           <span className="rep__flag">No number yet</span>
         )}
-        <button
-          className="rep__btn rep__btn--sm"
-          onClick={() => navigate(`/crm/referral/${d.id}?name=${encodeURIComponent(d.full_name)}`)}
-        >
-          Add referral
-        </button>
-        <button
-          className="rep__btn rep__btn--primary rep__btn--sm"
-          onClick={() => navigate(`/crm/visit/${d.id}?name=${encodeURIComponent(d.full_name)}`)}
-        >
-          Log visit
-        </button>
+        {!removed && (
+          <>
+            <Link to={`/crm/doctor/${d.id}/edit`} className="rep__btn rep__btn--sm">
+              Edit details
+            </Link>
+            <button
+              className="rep__btn rep__btn--sm"
+              onClick={() =>
+                navigate(`/crm/referral/${d.id}?name=${encodeURIComponent(d.full_name)}`)
+              }
+            >
+              Add referral
+            </button>
+            <button
+              className="rep__btn rep__btn--primary rep__btn--sm"
+              onClick={() => navigate(`/crm/visit/${d.id}?name=${encodeURIComponent(d.full_name)}`)}
+            >
+              Log visit
+            </button>
+          </>
+        )}
       </div>
 
       <div className="d360__flags">
@@ -153,7 +272,7 @@ export default function Doctor360Page() {
             <button
               key={p.value}
               className={`rep__chip ${d.priority === p.value ? "rep__chip--on" : ""}`}
-              disabled={saving}
+              disabled={saving || removed}
               onClick={() => setPriority(p.value)}
             >
               {p.label}
@@ -197,7 +316,13 @@ export default function Doctor360Page() {
                 <span className="d360__event-date">{when(e.at)}</span>
                 <span className="d360__event-kind">{labelFor(e)}</span>
               </div>
-              {e.kind === "visit" && <VisitBody v={e} />}
+              {e.kind === "visit" && (
+                <VisitBody
+                  v={e}
+                  canChange={e.can_change && !removed}
+                  onChange={(mode) => setVisitChange({ mode, visit: e })}
+                />
+              )}
               {e.kind === "referral" && <ReferralBody r={e} onChanged={load} />}
               {e.kind === "task" && <div className="d360__event-body">{e.title}</div>}
               {e.kind === "stage" && (
@@ -210,6 +335,50 @@ export default function Doctor360Page() {
           ))}
         </ol>
       </section>
+
+      <DoctorHistory doctorId={d.id} refreshKey={historyKey} />
+
+      {!removed && !(removal?.status === "pending" && !isLead) && (
+        <div className="d360__danger">
+          <button
+            type="button"
+            className="rep__btn rep__btn--ghost rep__btn--sm d360__remove"
+            onClick={() => setRemoving(true)}
+          >
+            {isLead ? "Remove doctor…" : "Ask to remove this doctor…"}
+          </button>
+        </div>
+      )}
+
+      <RemovalDialog
+        open={removing}
+        doctor={d}
+        isLead={isLead}
+        onClose={() => setRemoving(false)}
+        onDone={(result) => {
+          setRemoving(false);
+          setNotice(
+            result.status === "removed"
+              ? "Doctor removed. Past visits and referrals stay in reports."
+              : "Removal request sent to your admin.",
+          );
+          load();
+          setHistoryKey((n) => n + 1);
+        }}
+      />
+
+      <VisitChangeDialog
+        mode={visitChange?.mode}
+        visit={visitChange?.visit}
+        doctor={d}
+        viewerId={data.viewer?.id}
+        onClose={() => setVisitChange(null)}
+        onDone={(mode) => {
+          setVisitChange(null);
+          setNotice(mode === "undo" ? "Visit undone." : "Visit updated.");
+          load();
+        }}
+      />
     </div>
   );
 }
@@ -223,7 +392,7 @@ function labelFor(e) {
 
 // A visit shows everything the rep wrote. This is the one place the field notes
 // are read back, so nothing is truncated or summarised away.
-function VisitBody({ v }) {
+function VisitBody({ v, canChange, onChange }) {
   const outcome = v.outcome ? visitOutcomeMeta(v.outcome) : null;
   const extras = [
     ["Requirements", v.doctor_requirements],
@@ -256,6 +425,16 @@ function VisitBody({ v }) {
           <strong>Follow-up</strong>
           {v.next_visit_date ? ` by ${v.next_visit_date}` : ""}
         </p>
+      )}
+      {canChange && (
+        <div className="d360__visit-actions">
+          <button type="button" className="asg__link" onClick={() => onChange("edit")}>
+            Edit visit
+          </button>
+          <button type="button" className="asg__link" onClick={() => onChange("undo")}>
+            Undo visit
+          </button>
+        </div>
       )}
     </div>
   );
