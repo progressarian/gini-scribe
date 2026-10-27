@@ -30,7 +30,9 @@ export async function assistedDoctorOf(doctorId, db = pool) {
   const hit = cache.get(doctorId);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.value;
   const { rows } = await db.query(
-    `SELECT a.id, a.name, a.short_name
+    `SELECT a.id, a.name, a.short_name,
+            COALESCE(a.is_chief, FALSE)
+              OR COALESCE((to_jsonb(a)->>'chief_step')::boolean, FALSE) AS chief
        FROM doctors d
        JOIN doctors a ON a.id = d.assists_doctor_id AND COALESCE(a.is_active, TRUE)
       WHERE d.id = $1`,
@@ -39,6 +41,11 @@ export async function assistedDoctorOf(doctorId, db = pool) {
   const value = rows[0] || null;
   cache.set(doctorId, { at: Date.now(), value });
   return value;
+}
+
+export async function chiefDeskOwner(actorId, db = pool) {
+  const assisted = await assistedDoctorOf(actorId, db);
+  return assisted?.chief ? assisted.id : actorId;
 }
 
 export async function isAssignedPatient(patientId, moId, { today = false } = {}, db = pool) {

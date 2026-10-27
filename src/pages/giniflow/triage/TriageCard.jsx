@@ -7,6 +7,7 @@
 // patient actually wrote something.
 
 import StabilityChip from "../../../components/giniflow/StabilityChip";
+import { RxMoChips } from "./AssignMenu";
 
 const REPORT_ICON = { ok: "📊", partial: "⚠", missing: "📭" };
 
@@ -23,7 +24,15 @@ const BioChip = ({ chip }) => (
   </span>
 );
 
-export default function TriageCard({ card, onAssign, onUpload, onOpen, busy }) {
+export default function TriageCard({
+  card,
+  onAssign,
+  onUpload,
+  onOpen,
+  busy,
+  rxMos = [],
+  onPickRxMo,
+}) {
   const { report, compliance, assignment } = card;
 
   return (
@@ -147,6 +156,18 @@ export default function TriageCard({ card, onAssign, onUpload, onOpen, busy }) {
         </div>
       ))}
 
+      {rxMos.length > 0 && onPickRxMo && (
+        <div className="pc-rxmo">
+          <span className="pc-rxmo-lbl">Rx MO</span>
+          <RxMoChips
+            people={rxMos}
+            value={assignment.rxMoId ?? null}
+            disabled={busy}
+            onPick={(id) => onPickRxMo(card, id)}
+          />
+        </div>
+      )}
+
       <div className="pc-actions">
         {assignment.assigned ? (
           <span className="assign-tag at-ok">
@@ -156,7 +177,7 @@ export default function TriageCard({ card, onAssign, onUpload, onOpen, busy }) {
         ) : (
           <span className="assign-tag at-none">⏳ Unassigned</span>
         )}
-        {assignment.rxMoName && (
+        {assignment.rxMoName && rxMos.length === 0 && (
           <span className="assign-tag at-ok">Rx MO {assignment.rxMoName}</span>
         )}
         <button

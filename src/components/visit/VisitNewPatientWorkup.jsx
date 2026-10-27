@@ -15,6 +15,7 @@ import {
   HISTORY_TEXT_FIELDS,
   HISTORY_YES_NO_FIELDS,
   JVP_VALUES,
+  LEGACY_PRESENT,
   WORKUP_NOTE_MAX,
   WORKUP_TEXT_MAX,
   countRegion,
@@ -91,6 +92,13 @@ const ALLERGY_CHOICES = ALLERGY_OPTIONS.map((o) => ({ id: o.value, label: o.labe
 const NOT_EXAMINED = { id: "", label: "—" };
 const FINDING_OPTIONS = [NOT_EXAMINED, ...EXAM_FINDING_STATES];
 const JVP_OPTIONS = [NOT_EXAMINED, ...JVP_VALUES];
+const LEGACY_OPTION = { id: LEGACY_PRESENT, label: "Present (old)" };
+const scaleOptions = (item, state) => [
+  NOT_EXAMINED,
+  ...item.options,
+  ...(state === LEGACY_PRESENT ? [LEGACY_OPTION] : []),
+];
+const isStateItem = (item) => item.kind === "finding" || item.kind === "scale";
 const YES_NO_OPTIONS = [
   { id: "yes", label: "Yes" },
   { id: "no", label: "No" },
@@ -114,8 +122,13 @@ function ExamItem({ region, item, entry = {}, onChange }) {
   const labelId = useId();
   const name = `${region.id}-${item.id}-${labelId}`;
   const set = (patch) => onChange({ ...entry, ...patch });
-  const chosen = item.kind === "finding" ? entry.state : entry.value;
-  const showNote = item.kind === "finding" ? entry.state === "present" : !!chosen;
+  const chosen = isStateItem(item) ? entry.state : entry.value;
+  const showNote =
+    item.kind === "finding"
+      ? entry.state === "present"
+      : item.kind === "scale"
+        ? !!chosen && chosen !== "normal"
+        : !!chosen;
   return (
     <div className="npw-item">
       <span id={labelId} className="npw-item-label">
@@ -139,9 +152,15 @@ function ExamItem({ region, item, entry = {}, onChange }) {
         <Choice
           name={name}
           labelledBy={labelId}
-          options={item.kind === "jvp" ? JVP_OPTIONS : FINDING_OPTIONS}
+          options={
+            item.kind === "jvp"
+              ? JVP_OPTIONS
+              : item.kind === "scale"
+                ? scaleOptions(item, chosen)
+                : FINDING_OPTIONS
+          }
           value={chosen ?? ""}
-          onChange={(v) => set(item.kind === "jvp" ? { value: v || null } : { state: v || null })}
+          onChange={(v) => set(isStateItem(item) ? { state: v || null } : { value: v || null })}
         />
       )}
       {showNote && (
@@ -154,7 +173,7 @@ function ExamItem({ region, item, entry = {}, onChange }) {
 const bulkSet = (region, regionExam, state, { onlyEmpty = false } = {}) => {
   const next = { ...regionExam };
   for (const item of region.items) {
-    if (item.kind !== "finding") {
+    if (!isStateItem(item) || (item.kind === "scale" && state === "present")) {
       if (state === null) delete next[item.id];
       continue;
     }

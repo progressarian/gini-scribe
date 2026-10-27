@@ -55,6 +55,8 @@ const liveBillItems = (bill) => (bill?.items || []).filter(isLiveBillItem);
 
 const billLineOf = (item) => (item ? billLineRef(item) : null);
 
+const NOT_ON_READ_BILL = { notOnBill: true };
+
 const sameBillLine = (a, b) => {
   if (!a || !b) return false;
   if (a.itemId != null || b.itemId != null) {
@@ -90,6 +92,7 @@ export async function billSuppressor(db, visitId) {
   return ({ kind, testName, machineId, line }) =>
     rows.some(
       (c) =>
+        !c.bill_line?.notOnBill &&
         (c.bill_line == null || sameBillLine(c.bill_line, line)) &&
         (kind === "machine"
           ? c.kind === "machine" && c.machine_id === machineId
@@ -504,7 +507,8 @@ async function cancelOrderIn(client, visit, order, input, machines) {
           : null,
       billLine:
         input.billLine ||
-        billLineForTest(bill, machines, { kind: order.kind, testName: t.name, machineId }),
+        billLineForTest(bill, machines, { kind: order.kind, testName: t.name, machineId }) ||
+        (bill?.status === "billed" ? NOT_ON_READ_BILL : null),
       reason: input.reason,
       note: input.note,
       source: input.source,

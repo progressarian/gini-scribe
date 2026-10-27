@@ -45,6 +45,20 @@ export const JVP_VALUES = [
 
 const finding = (id, label) => ({ id, label, kind: "finding" });
 
+const scale = (id, label, healthyLabel, abnormal) => ({
+  id,
+  label,
+  kind: "scale",
+  options: [
+    { id: "normal", label: healthyLabel },
+    ...abnormal.map((a) => ({ id: a.toLowerCase(), label: a })),
+  ],
+});
+
+export const LEGACY_PRESENT = "present";
+
+export const scaleStates = (item) => [...item.options.map((o) => o.id), LEGACY_PRESENT];
+
 export const EXAM_REGIONS = [
   {
     id: "head_neck",
@@ -58,7 +72,7 @@ export const EXAM_REGIONS = [
       finding("pallor", "Pallor"),
       finding("icterus", "Icterus"),
       finding("arcus", "Arcus"),
-      finding("dental_hygiene", "Dental hygiene"),
+      scale("dental_hygiene", "Dental hygiene", "Good", ["Fair", "Poor"]),
       finding("double_chin", "Double chin"),
       { id: "acanthosis", label: "Acanthosis", kind: "grade" },
       finding("skin_tags", "Skin tags"),
@@ -74,11 +88,11 @@ export const EXAM_REGIONS = [
     label: "Upper limbs",
     items: [
       finding("dupuytren", "Dupuytren's contracture"),
-      finding("nails", "Nails"),
+      scale("nails", "Nails", "Normal", ["Abnormal"]),
       finding("lipoma", "Lipoma"),
       finding("neurofibroma", "Neurofibroma"),
       finding("cysts", "Cysts"),
-      finding("pulse", "Pulse"),
+      scale("pulse", "Pulse", "Normal", ["Weak", "Absent", "Irregular"]),
     ],
   },
   {
@@ -106,10 +120,10 @@ export const EXAM_REGIONS = [
     label: "Lower limbs",
     items: [
       finding("pedal_edema", "Pedal edema"),
-      finding("pedal_pulses", "Pedal pulses"),
-      finding("nails", "Nails"),
+      scale("pedal_pulses", "Pedal pulses", "Felt", ["Weak", "Absent"]),
+      scale("nails", "Nails", "Normal", ["Abnormal"]),
       finding("arch_of_foot", "Arch of foot"),
-      finding("reflexes", "Reflexes"),
+      scale("reflexes", "Reflexes", "Normal", ["Brisk", "Diminished", "Absent"]),
     ],
   },
 ];
@@ -121,12 +135,15 @@ const isAbnormal = (item, entry) => {
   if (!entry) return false;
   if (item.kind === "grade") return entry.value != null && entry.value !== "0";
   if (item.kind === "jvp") return entry.value === "raised";
+  if (item.kind === "scale")
+    return scaleStates(item).includes(entry.state) && entry.state !== "normal";
   return entry.state === "present";
 };
 
 const isExamined = (item, entry) => {
   if (!entry) return false;
   if (item.kind === "finding") return EXAM_FINDING_STATES.some((s) => s.id === entry.state);
+  if (item.kind === "scale") return scaleStates(item).includes(entry.state);
   return entry.value != null && entry.value !== "";
 };
 
@@ -135,6 +152,8 @@ const describe = (item, entry) => {
   let text = item.label;
   if (item.kind === "grade") text = `${item.label} gr ${entry.value}`;
   if (item.kind === "jvp") text = `JVP ${entry.value === "raised" ? "raised" : "not raised"}`;
+  const option = item.kind === "scale" && item.options.find((o) => o.id === entry.state);
+  if (option) text = `${item.label} ${option.label.toLowerCase()}`;
   return note ? `${text} (${note})` : text;
 };
 
@@ -149,7 +168,8 @@ export function summariseExam(exam = {}) {
       const entry = regionExam[item.id];
       if (!isExamined(item, entry)) continue;
       examined += 1;
-      if (isAbnormal(item, entry) || item.kind !== "finding") shown.push(describe(item, entry));
+      const alwaysShown = item.kind === "grade" || item.kind === "jvp";
+      if (isAbnormal(item, entry) || alwaysShown) shown.push(describe(item, entry));
       else normal += 1;
     }
     if (shown.length) lines.push({ region: region.label, findings: shown });

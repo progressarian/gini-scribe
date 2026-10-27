@@ -395,3 +395,47 @@ export async function healthrayLinesForDesk(visitId, ctx, db = pool) {
     return { ok: false, error: error.message, added: [], skipped: [] };
   }
 }
+
+const LAST_BILL_WORKER_SQL = `
+  SELECT a.actor_id, d.role
+    FROM billing_audit a
+    JOIN doctors d ON d.id = a.actor_id
+   WHERE (a.entity = 'bills'
+          AND a.entity_id IN (SELECT id::text FROM bills WHERE visit_id = $1))
+      OR (a.entity = 'bill_lines'
+          AND a.entity_id IN (SELECT id::text FROM bill_lines WHERE visit_id = $1))
+   ORDER BY a.at DESC
+   LIMIT 1`;
+
+async function lastBillWorker(client, visitId) {
+  const { rows } = await client.query(LAST_BILL_WORKER_SQL, [visitId]);
+  return rows.length ? { actorId: rows[0].actor_id, role: rows[0].role } : { actorId: null };
+}
+
+export async function healthrayLinesInBackground(visitId, db = pool) {
+  return inTransaction(async (client) => {
+    const { rows } = await client.query(
+      `SELECT id, patient_id, visit_date::text AS visit_date FROM giniflow_visits
+        WHERE id = $1 AND merged_into_visit_id IS NULL FOR NO KEY UPDATE`,
+      [visitId],
+    );
+    if (!rows.length) return { added: [] };
+    const [visit] = rows;
+    const found = await candidatesFor(client, {
+      id: null,
+      visit_id: visit.id,
+      patient_id: visit.patient_id,
+      visit_date: visit.visit_date,
+    });
+    const due = billableDue(found);
+    if (!due.length) return { added: [] };
+    const ctx = await lastBillWorker(client, visit.id);
+    const batch = await addLinesToDraftIn(
+      client,
+      visit.id,
+      due.map(({ line, item, priced }) => lineInput(line, item.id, priced)),
+      ctx,
+    );
+    return { added: batch.added.map((index) => due[index].line.desc) };
+  }, db);
+}

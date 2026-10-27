@@ -130,10 +130,12 @@ export default function StationsLauncherPage() {
   });
 
   const stations = data?.stations || {};
+  const assistKey = doctor?.assists ? (doctor.assists.chief ? "mo_sd" : "doctor") : null;
   const visible = STATIONS.filter(
     (s) =>
       (!s.href || hasCapability(doctor, GINIFLOW_LAUNCHER_CAPABILITY[s.key])) &&
-      !(s.key === "doctor" && doctor?.has_rx_mos),
+      !(s.key === "doctor" && doctor?.has_rx_mos) &&
+      !(assistKey && ["mo_sd", "doctor"].includes(s.key) && s.key !== assistKey),
   );
   const today = new Date().toLocaleDateString("en-IN", {
     weekday: "short",
@@ -161,15 +163,22 @@ export default function StationsLauncherPage() {
         <div className="role-grid">
           {visible.map((s) => {
             const live = stations[s.key];
+            const assisting = s.key === assistKey;
             const body = (
               <>
                 <div className="rc-ico">{s.icon}</div>
                 <div className="rc-name">
-                  {s.key === "doctor" && doctor?.assists
-                    ? `Prescriptions · ${doctor.assists.name}`
+                  {assisting
+                    ? `${s.key === "mo_sd" ? s.name : "Prescriptions"} · ${doctor.assists.name}`
                     : s.name}
                 </div>
-                <div className="rc-desc">{s.desc}</div>
+                <div className="rc-desc">
+                  {assisting
+                    ? s.key === "mo_sd"
+                      ? `Work ${doctor.assists.name}'s patients assigned to you, on the screen ${doctor.assists.name} uses`
+                      : `Write ${doctor.assists.name}'s prescriptions for the patients assigned to you`
+                    : s.desc}
+                </div>
                 {s.href && isPending ? (
                   <div className="rc-count rc-loading" role="status">
                     Loading…
@@ -177,9 +186,14 @@ export default function StationsLauncherPage() {
                 ) : s.href && isError && !live ? (
                   <div className="rc-count rc-soon">Count unavailable</div>
                 ) : s.href ? (
-                  <div className="rc-count" style={TONE[live?.tone] || TONE.teal}>
-                    {live?.label ?? "open the counter"}
-                  </div>
+                  <>
+                    <div className="rc-count" style={TONE[live?.tone] || TONE.teal}>
+                      {live?.label ?? "open the counter"}
+                    </div>
+                    {assisting && live?.assigned === 0 && (
+                      <div className="rc-desc">Assigned from the triage board</div>
+                    )}
+                  </>
                 ) : (
                   <div className="rc-count rc-soon">Coming soon</div>
                 )}

@@ -10,7 +10,15 @@ const EMPTY_TEXT = {
   in_control: "Nobody is at target yet.",
 };
 
-export default function TriageColumn({ column, onAssign, onUpload, onOpen, busyId }) {
+export default function TriageColumn({
+  column,
+  onAssign,
+  onUpload,
+  onOpen,
+  busyId,
+  rxMosFor,
+  onPickRxMo,
+}) {
   return (
     <section className={`tcol tcol-${column.tone}`} aria-label={column.label}>
       <header className="tc-head">
@@ -34,6 +42,8 @@ export default function TriageColumn({ column, onAssign, onUpload, onOpen, busyI
               onUpload={onUpload}
               onOpen={onOpen}
               busy={busyId === card.visitId}
+              rxMos={rxMosFor ? rxMosFor(card) : []}
+              onPickRxMo={onPickRxMo}
             />
           ))
         )}

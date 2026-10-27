@@ -29,6 +29,7 @@ const visitOfRow = (table) => async (seg) =>
     : null;
 
 const DOCTOR_STATION = "/api/giniflow/stations/doctor";
+const CHIEF_STATION = "/api/giniflow/stations/mo";
 
 const RULES = [
   { prefix: "/api/auth", open: true },
@@ -55,6 +56,19 @@ const RULES = [
   { prefix: `${DOCTOR_STATION}/proposals/`, visit: visitOfRow("giniflow_rx_proposals") },
   { prefix: `${DOCTOR_STATION}/suggestions/`, visit: visitOfRow("giniflow_plan_suggestions") },
   { prefix: `${DOCTOR_STATION}/`, visit: (seg) => uuid(seg[0]) },
+  { prefix: `${CHIEF_STATION}/queue`, chief: true, open: true, readOnly: true, exact: true },
+  { prefix: `${CHIEF_STATION}/test-panels`, chief: true, open: true, readOnly: true, exact: true },
+  {
+    prefix: `${CHIEF_STATION}/prescription/items/`,
+    chief: true,
+    visit: visitOfRow("giniflow_rx_items"),
+  },
+  {
+    prefix: `${CHIEF_STATION}/proposals/`,
+    chief: true,
+    visit: visitOfRow("giniflow_rx_proposals"),
+  },
+  { prefix: `${CHIEF_STATION}/`, chief: true, visit: (seg) => uuid(seg[0]) },
   { prefix: "/api/giniflow/referrals/visit/", visit: (seg) => uuid(seg[0]) },
   {
     prefix: "/api/giniflow/referrals/",
@@ -93,8 +107,10 @@ export async function assistedPatientGuard(req, res, next) {
     const moId = req.doctor.doctor_id;
     req.rxMoId = moId;
 
-    const rule = RULES.find((r) =>
-      r.exact ? req.path === r.prefix : req.path.startsWith(r.prefix),
+    const rule = RULES.find(
+      (r) =>
+        (!r.chief || assisted?.chief) &&
+        (r.exact ? req.path === r.prefix : req.path.startsWith(r.prefix)),
     );
     if (!rule) return deny(res, assisted);
     if (rule.open) return rule.readOnly && !READS.has(req.method) ? deny(res, assisted) : next();

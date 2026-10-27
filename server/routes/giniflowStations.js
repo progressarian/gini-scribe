@@ -1224,17 +1224,44 @@ router.get(
         ),
       );
       const summary = await getStationSummary(date, undefined, { stations: Object.keys(allowed) });
-      if (req.rxMoId) {
+      if (req.rxMoId && req.assistedDoctor?.chief) {
+        const queue = await getMoQueue(date, roomDoctorId(req), null, undefined, undefined, {
+          rxMoId: req.rxMoId,
+        });
+        const waiting = queue.counters.withMe + queue.counters.waitingForMe;
+        delete summary.doctor;
+        summary.mo_sd = {
+          count: waiting,
+          assigned: queue.total,
+          label: queue.total
+            ? `${queue.total} assigned to you · ${waiting} waiting`
+            : "0 assigned to you",
+          tone: waiting ? "red" : "teal",
+        };
+      } else if (req.rxMoId) {
+        delete summary.mo_sd;
         const { counts } = await getDoctorQueue(date, {
           doctorId: roomDoctorId(req),
           rxMoId: req.rxMoId,
         });
         const waiting = (counts.resultsReady || 0) + (counts.withMe || 0);
-        summary.doctor = { count: waiting, label: `${waiting} waiting`, tone: "red" };
+        const assigned = counts.total || 0;
+        summary.doctor = {
+          count: waiting,
+          assigned,
+          label: assigned
+            ? `${assigned} assigned to you · ${waiting} waiting`
+            : "0 assigned to you",
+          tone: waiting ? "red" : "teal",
+        };
       }
       res.json({
         date,
-        stations: Object.fromEntries(Object.keys(allowed).map((k) => [k, summary[k]])),
+        stations: Object.fromEntries(
+          Object.keys(allowed)
+            .filter((k) => !req.rxMoId || k in summary)
+            .map((k) => [k, summary[k]]),
+        ),
         bottleneck: req.rxMoId ? null : summary.bottleneck,
         serverTime: new Date().toISOString(),
       });
@@ -2852,7 +2879,14 @@ router.get(
   async (req, res) => {
     try {
       const date = await resolveDate(req.query.date);
-      const data = await getMoQueue(date, req.doctor?.doctor_id ?? null, req.query.q ?? null);
+      const data = await getMoQueue(
+        date,
+        roomDoctorId(req),
+        req.query.q ?? null,
+        undefined,
+        undefined,
+        { rxMoId: req.rxMoId ?? null },
+      );
       res.json({ date, ...data, serverTime: new Date().toISOString() });
     } catch (e) {
       handleError(res, e, "Gini Flow MO queue");

@@ -1,5 +1,7 @@
 import pool from "../../config/db.js";
 import { linesForOrder } from "../billing/visitLines.js";
+import { writeAudit } from "../billing/audit.js";
+import { requestLineRefund, withdrawRequestIn } from "../billing/billingRequests.js";
 import { machinesForStation } from "../../../shared/machineStages.js";
 import { opensLabGate } from "../../../shared/labPayment.js";
 import { NOT_ON_BILL_REASON, testCancelReasonLabel } from "../../../shared/testCancelReasons.js";
@@ -148,18 +150,22 @@ async function cancellationsOf(client, orderId) {
   return rows;
 }
 
-async function restoreIn(client, { orderId, station, actorId, actorRole }) {
+async function restoreIn(client, { orderId, station, actorId, actorRole, billedAgain = false }) {
   if (!UUID_RE.test(String(orderId || "")))
     throw bad("That cancelled test is not on the list", 404);
   const rows = await cancellationsOf(client, orderId);
   if (!rows.length) throw bad("That cancelled test is not on the list", 404);
-  const { kind, machineIds } = await stationFilter(client, station);
   const first = rows[0];
-  if (first.kind !== kind || (machineIds && !machineIds.includes(first.machine_id))) {
-    throw bad("This test belongs to another station — restore it there", 409);
+  if (!billedAgain) {
+    const { kind, machineIds } = await stationFilter(client, station);
+    if (first.kind !== kind || (machineIds && !machineIds.includes(first.machine_id))) {
+      throw bad("This test belongs to another station — restore it there", 409);
+    }
   }
   if (rows.every((row) => row.restored_at)) throw bad("This test is already restored", 409);
-  const refusal = rows.map((row) => row.why_not).find(Boolean);
+  const refusal = rows
+    .map((row) => row.why_not)
+    .find((why) => why && !(billedAgain && ["healthray", "final_bill"].includes(why)));
   if (refusal) throw bad(RESTORE_REFUSALS[refusal], 409);
 
   const { rows: visits } = await client.query(
@@ -227,6 +233,11 @@ async function restoreIn(client, { orderId, station, actorId, actorRole }) {
   if (visits[0].today && !OFF_THE_FLOOR.includes(visits[0].current_status)) {
     await reopenResultsForNewOrder(client, first.visit_id);
     if (first.kind === "machine" && first.machine_id) {
+      await client.query(
+        `UPDATE giniflow_visit_steps SET status = 'pending'
+          WHERE visit_id = $1 AND step_catalog_id = $2 AND status = 'skipped'`,
+        [first.visit_id, first.machine_id],
+      );
       await insertMachineStepsForOrders(client, first.visit_id, [first.machine_id]);
     }
     await syncLabStepsFromLab(client, first.visit_id);
@@ -252,6 +263,100 @@ async function restoreIn(client, { orderId, station, actorId, actorRole }) {
     amountPaid: Number(order.amount_paid) || 0,
     billLines: billing?.added ?? [],
   };
+}
+
+const AUTO_CANCELLED_SQL = `
+  SELECT DISTINCT c.order_id
+    FROM giniflow_test_cancellations c
+   WHERE c.visit_id = $1 AND c.kind = 'machine' AND c.source = 'healthray'
+     AND c.reason = $2 AND c.restored_at IS NULL AND c.snapshot IS NOT NULL
+     AND c.machine_id = ANY($3::text[])
+     AND NOT EXISTS (SELECT 1 FROM giniflow_lab_orders o WHERE o.id = c.order_id)`;
+
+const DETACHED_LINES_SQL = `
+  SELECT DISTINCT l.id, l.bill_id
+    FROM bill_lines l
+    JOIN bills b ON b.id = l.bill_id AND b.status = 'final' AND b.bill_type = 'invoice'
+    JOIN billing_audit fa
+      ON fa.entity = 'bill_lines' AND fa.entity_id = l.id::text AND fa.action = 'update'
+     AND fa.before ->> 'lab_order_id' = $2::text
+     AND fa.after ->> 'reason' = '${CANCELLED_ON_FINAL_BILL}'
+   WHERE l.visit_id = $1 AND l.is_live AND l.lab_order_id IS NULL
+     AND NOT EXISTS (SELECT 1 FROM bill_lines x WHERE x.credited_line_id = l.id)
+     AND NOT EXISTS (
+       SELECT 1 FROM billing_requests r
+        WHERE r.kind = 'refund' AND r.status IN ('approved', 'used')
+          AND r.refund_lines @> jsonb_build_array(jsonb_build_object('line_id', l.id::text)))`;
+
+const SYSTEM = { system: true, actorId: null, role: "system" };
+
+export async function restoreBilledAgainIn(client, visitId, machineIds) {
+  if (!machineIds.length) return [];
+  const { rows: cancelled } = await client.query(AUTO_CANCELLED_SQL, [
+    visitId,
+    NOT_ON_BILL_REASON,
+    machineIds,
+  ]);
+  const restored = [];
+  const releasedLines = new Set();
+  for (const { order_id: orderId } of cancelled) {
+    const { rows: lines } = await client.query(DETACHED_LINES_SQL, [visitId, orderId]);
+    if (!lines.length) continue;
+    const done = await restoreIn(client, { orderId, actorRole: "system", billedAgain: true });
+    await client.query(
+      `UPDATE bill_lines SET lab_order_id = $2, source = 'lab_order', updated_at = NOW()
+        WHERE id = ANY($1::uuid[])`,
+      [lines.map((l) => l.id), orderId],
+    );
+    for (const line of lines) {
+      await writeAudit(client, {
+        entity: "bill_lines",
+        entityId: line.id,
+        action: "update",
+        before: { lab_order_id: null, source: "added" },
+        after: {
+          lab_order_id: orderId,
+          source: "lab_order",
+          reason: "HealthRay billed the test after it was cancelled",
+        },
+        actorId: null,
+      });
+      releasedLines.add(line.id);
+    }
+    restored.push(done);
+  }
+  if (releasedLines.size) await withdrawRefundsFor(client, visitId, releasedLines);
+  return restored;
+}
+
+async function withdrawRefundsFor(client, visitId, releasedLines) {
+  const { rows } = await client.query(
+    `SELECT id, bill_id, refund_lines, reason_code FROM billing_requests
+      WHERE kind = 'refund' AND status = 'pending' AND visit_id = $1`,
+    [visitId],
+  );
+  for (const request of rows) {
+    const asked = (request.refund_lines || []).map((line) => line.line_id);
+    if (!asked.some((id) => releasedLines.has(id))) continue;
+    await withdrawRequestIn(
+      client,
+      request.id,
+      "HealthRay billed the tests after the auto-cancel — restored, nothing to refund",
+      SYSTEM,
+    );
+    const left = asked.filter((id) => !releasedLines.has(id));
+    if (left.length) {
+      await requestLineRefund(
+        {
+          line_ids: left,
+          reason_code: request.reason_code,
+          note: "The tests HealthRay still has not billed, from a withdrawn request",
+        },
+        SYSTEM,
+        client,
+      );
+    }
+  }
 }
 
 export async function restoreTest(input, db = pool) {

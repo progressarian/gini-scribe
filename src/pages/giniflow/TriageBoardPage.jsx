@@ -12,7 +12,7 @@ import usePatientStore from "../../stores/patientStore.js";
 import LiveBadge from "../../components/giniflow/LiveBadge";
 import PipelineBar from "./triage/PipelineBar";
 import TriageColumn from "./triage/TriageColumn";
-import AssignMenu from "./triage/AssignMenu";
+import AssignMenu, { rxMosForDoctor } from "./triage/AssignMenu";
 import UploadDialog from "./triage/UploadDialog";
 import "../../styles/giniflow-triage.css";
 
@@ -130,6 +130,23 @@ export default function TriageBoardPage() {
       );
     } catch (e) {
       setToast(e.response?.data?.error || "Could not save that");
+    }
+  };
+
+  const rxMosFor = (card) =>
+    rxMosForDoctor(staff, card.assignment.doctorId, card.assignment.rxMoId ?? null);
+
+  const onPickRxMo = async (card, rxMoId) => {
+    try {
+      await assignVisit.mutateAsync({ visitId: card.visitId, rxMoId });
+      const name = staff.find((p) => p.id === rxMoId)?.shortName;
+      setToast(
+        rxMoId
+          ? `${name || "The MO"} will write ${card.name}'s prescription`
+          : `MO removed from ${card.name}`,
+      );
+    } catch (e) {
+      setToast(e.response?.data?.error || "Could not assign the MO — nothing changed");
     }
   };
 
@@ -374,7 +391,9 @@ export default function TriageBoardPage() {
             <TriageColumn
               key={column.key}
               column={column}
-              busyId={saving ? assigning : null}
+              busyId={saving ? assigning || assignVisit.variables?.visitId || null : null}
+              rxMosFor={rxMosFor}
+              onPickRxMo={onPickRxMo}
               onAssign={(card) => setAssigning(card.visitId)}
               onUpload={(card) => setUploading({ card })}
               onOpen={openPatient}

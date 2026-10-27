@@ -3,7 +3,15 @@ import { one, query } from "../helpers/db.mjs";
 import { apiAs } from "../helpers/auth.mjs";
 import { USERS } from "../fixtures/data.mjs";
 import { assertTestDatabase } from "../setup/guard.mjs";
-import { desk, extraVisit, newTag, setUp, tearDown } from "../billing/phase4/p4-bills-fixture.mjs";
+import {
+  HEALTHRAY_CONSULTATION,
+  desk,
+  extraVisit,
+  healthrayBill,
+  newTag,
+  setUp,
+  tearDown,
+} from "../billing/phase4/p4-bills-fixture.mjs";
 import { db, dropShifts, openDeskShift, prepareCategory } from "../billing/phase4b/p4b-refunds.mjs";
 
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
@@ -150,14 +158,16 @@ test.describe.serial("G58 restore a mistakenly cancelled test", () => {
   });
 
   test("3. a restored cancel no longer stops the HealthRay bill from raising the test", async () => {
-    const { visit } = await extraVisit(ids, "Suppress");
+    const { patient, visit } = await extraVisit(ids, "Suppress");
+    const line = { itemId: null, invoice: null, desc: ids.hba1cName, amount: 250 };
+    await healthrayBill(ids, patient, [HEALTHRAY_CONSULTATION, { ...line, category: "lab" }]);
     const orderId = await orderOn(visit, ids.hba1cName, 250, "lab");
     await cancel(orderId);
     const blocked = await testCancel.billSuppressor(db, visit);
-    expect(blocked({ kind: "lab", testName: ids.hba1cName, line: null })).toBe(true);
+    expect(blocked({ kind: "lab", testName: ids.hba1cName, line })).toBe(true);
     await restore.restoreTest({ orderId, station: "lab", actorId: USERS.lab.id }, db);
     const open = await testCancel.billSuppressor(db, visit);
-    expect(open({ kind: "lab", testName: ids.hba1cName, line: null })).toBe(false);
+    expect(open({ kind: "lab", testName: ids.hba1cName, line })).toBe(false);
   });
 
   test("4. a test HealthRay cancelled is refused, with the reason", async () => {

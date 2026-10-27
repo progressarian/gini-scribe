@@ -910,6 +910,7 @@ export default function MoStationPage() {
             them. Plan §2.1. */}
         <div className="tr-who">
           {me?.short_name || me?.name || "Not signed in as an SD"}
+          {me?.assists?.chief && ` · for ${me.assists.short_name || me.assists.name}`}
           {queue?.date ? ` · ${dayLabel(queue.date)}` : ""}
         </div>
         <div className="rail-right">
@@ -1429,7 +1430,7 @@ export default function MoStationPage() {
                   />
                 </div>
 
-                <div className="dp-sec">
+                <div className="dp-sec mo-rx">
                   <VisitNewPatientWorkup
                     patientId={patient.patientId}
                     appointmentId={patient.appointmentId}
@@ -1542,7 +1543,7 @@ export default function MoStationPage() {
                     onToast={showToast}
                   />
                 ) : (
-                  <div className="dp-sec">
+                  <div className="dp-sec mo-suggest">
                     <div className="dp-sec-title">📝 Suggest advice &amp; care plan</div>
                     <ChiefSuggestions
                       visitId={activeId}

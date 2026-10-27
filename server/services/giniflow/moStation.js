@@ -1,4 +1,5 @@
 import pool from "../../config/db.js";
+import { chiefDeskOwner } from "../assistedDoctor.js";
 import { linesForOrder } from "../billing/visitLines.js";
 import { outsourcedTestNames } from "../billing/testMatch.js";
 import { OPEN_LAB_CASES_SQL } from "./labStation.js";
@@ -86,6 +87,8 @@ const QUEUE_STATUSES = [
   "with_rx",
 ];
 
+const LEFT_THE_DOCTOR = ["pharmacy_pending", "dispensed", "exited"];
+
 const bioChips = (biomarkers) => {
   if (!biomarkers || typeof biomarkers !== "object") return [];
   const chips = [];
@@ -118,6 +121,7 @@ const reportsLine = (resultsStatus, hasBiomarkers) => {
 
 const QUEUE_SQL = `
   SELECT v.id, v.current_status, v.results_status, v.category, v.stability, v.stability_reasons, v.assigned_sd_id,
+         (to_jsonb(v)->>'rx_mo_id')::int AS rx_mo_id,
          v.appointment_time::text AS appointment_time, v.blocked_reason, v.paused_at,
          p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
          sd.short_name AS sd_name,
@@ -204,7 +208,11 @@ const waitBudgetFor = (row, budgetFor) =>
 const groupOf = (row, sdId) => {
   const mine = !row.assigned_sd_id || row.assigned_sd_id === sdId;
   if (row.current_status === "with_sd") return mine ? "withMe" : "withOtherSd";
-  if (["ready_for_doctor", "doctor_done", "rx_pending", "with_rx"].includes(row.current_status)) {
+  if (
+    ["ready_for_doctor", "doctor_done", "rx_pending", "with_rx", ...LEFT_THE_DOCTOR].includes(
+      row.current_status,
+    )
+  ) {
     return mine ? "done" : "withOtherSd";
   }
   if (["vitals_done", "sd_pending"].includes(row.current_status)) {
@@ -219,13 +227,26 @@ const groupOf = (row, sdId) => {
   return "inPipeline";
 };
 
-export async function getMoQueue(visitDate, sdId = null, q = null, now = new Date(), db = pool) {
+export async function getMoQueue(
+  visitDate,
+  sdId = null,
+  q = null,
+  now = new Date(),
+  db = pool,
+  { rxMoId = null } = {},
+) {
   // A typed % or _ is a character the MO meant, not a wildcard.
   const raw = typeof q === "string" && q.trim() ? q.trim() : null;
   const term = raw ? raw.replace(/[%_\\]/g, "\\$&") : null;
   const digits = raw ? raw.replace(/\D/g, "") : "";
   const [{ rows }, sla] = await Promise.all([
-    db.query(QUEUE_SQL, [visitDate, QUEUE_STATUSES, term, digits, LAB_ONLY_DOCTOR]),
+    db.query(QUEUE_SQL, [
+      visitDate,
+      rxMoId ? [...QUEUE_STATUSES, ...LEFT_THE_DOCTOR] : QUEUE_STATUSES,
+      term,
+      digits,
+      LAB_ONLY_DOCTOR,
+    ]),
     getSlaConfig(db),
   ]);
   const budgetFor = budgetLookup(sla);
@@ -241,7 +262,8 @@ export async function getMoQueue(visitDate, sdId = null, q = null, now = new Dat
   };
 
   const counters = {};
-  for (const r of rows) {
+  const shown = rxMoId ? rows.filter((r) => r.rx_mo_id === rxMoId) : rows;
+  for (const r of shown) {
     const compliancePct = r.pre_visit_compliance?.pct ?? null;
     const { since: waitSince } = chiefWaitClock(r);
     const card = {
@@ -308,7 +330,7 @@ export async function getMoQueue(visitDate, sdId = null, q = null, now = new Dat
     ...groups,
     query: raw,
     matched,
-    total: rows.length,
+    total: shown.length,
     counters: {
       withMe: counters.withMe || 0,
       waitingForMe: counters.waitingForMe || 0,
@@ -494,7 +516,7 @@ async function assertOwner(db, visitId, actorId) {
   );
   if (!rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
   const owner = rows[0].assigned_sd_id;
-  if (owner && owner !== actorId) {
+  if (owner && owner !== (await chiefDeskOwner(actorId, db))) {
     throw Object.assign(
       new Error(
         `${rows[0].short_name || "Another MO"} is working this patient — take over first if they have handed them to you`,
@@ -519,9 +541,10 @@ export async function takeOver(visitId, actorId = null, db = pool) {
       [visitId],
     );
     if (!rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
-    if (rows[0].assigned_sd_id === actorId) {
+    const deskOwner = await chiefDeskOwner(actorId, client);
+    if (rows[0].assigned_sd_id === deskOwner) {
       await client.query("COMMIT");
-      return { takenOver: false, assignedTo: actorId };
+      return { takenOver: false, assignedTo: deskOwner };
     }
     await client.query(
       `INSERT INTO giniflow_visit_events (visit_id, status, actor_role, actor_id, meta)
@@ -530,10 +553,10 @@ export async function takeOver(visitId, actorId = null, db = pool) {
     );
     await client.query(
       `UPDATE giniflow_visits SET assigned_sd_id = $2, updated_at = NOW() WHERE id = $1`,
-      [visitId, actorId],
+      [visitId, deskOwner],
     );
     await client.query("COMMIT");
-    return { takenOver: true, assignedTo: actorId, from: rows[0].assigned_sd_id };
+    return { takenOver: true, assignedTo: deskOwner, from: rows[0].assigned_sd_id };
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;
@@ -556,6 +579,7 @@ export async function startWorkup(visitId, actorId = null, db = pool) {
       [visitId],
     );
     if (!rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
+    const deskOwner = actorId ? await chiefDeskOwner(actorId, client) : null;
 
     // One patient, one desk. This used to be a deliberate no-op — a second MO
     // opening the card kept the first as owner and was let through — but the
@@ -566,7 +590,7 @@ export async function startWorkup(visitId, actorId = null, db = pool) {
       actorId &&
       rows[0].current_status === "with_sd" &&
       rows[0].assigned_sd_id &&
-      rows[0].assigned_sd_id !== actorId
+      rows[0].assigned_sd_id !== deskOwner
     ) {
       throw Object.assign(
         new Error(
@@ -598,15 +622,19 @@ export async function startWorkup(visitId, actorId = null, db = pool) {
     }
     // First MO to open an unassigned patient takes them; anyone else has been
     // refused above, so reaching here means it is theirs or nobody's.
-    if (!rows[0].assigned_sd_id && actorId) {
+    if (!rows[0].assigned_sd_id && deskOwner) {
       await client.query(`UPDATE giniflow_visits SET assigned_sd_id = $2 WHERE id = $1`, [
         visitId,
-        actorId,
+        deskOwner,
       ]);
     }
     const seeded = await seedDraftOn(client, visitId);
     await client.query("COMMIT");
-    return { started: true, assignedTo: rows[0].assigned_sd_id || actorId, seeded: seeded.seeded };
+    return {
+      started: true,
+      assignedTo: rows[0].assigned_sd_id || deskOwner,
+      seeded: seeded.seeded,
+    };
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;
@@ -984,7 +1012,10 @@ export async function releaseWorkup(visitId, actorId = null, db = pool) {
       [visitId],
     );
     if (!rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
-    if (rows[0].assigned_sd_id && rows[0].assigned_sd_id !== actorId)
+    if (
+      rows[0].assigned_sd_id &&
+      rows[0].assigned_sd_id !== (await chiefDeskOwner(actorId, client))
+    )
       throw Object.assign(new Error("This patient is not yours to put back"), { status: 409 });
     if (rows[0].current_status !== "with_sd")
       throw Object.assign(

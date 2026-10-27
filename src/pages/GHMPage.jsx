@@ -2282,6 +2282,92 @@ function CallHistoryPanel({ row, ccAgents, colSpan, details, actions, lockTitle 
   );
 }
 
+// call_date is the day the call was actually made, so the status is tied
+// to that day and no other: a patient rung on the 20th for a visit on the
+// 21st counts as called on the 20th, and the 21st reads "not called"
+// again. Overwritten, not filled-in-if-empty — a date left by an earlier
+// day's call would otherwise file today's call under that older day.
+const callStatusPatches = (row, value, loggedInName) => {
+  const patches = [["call_status", value]];
+  if (value && !NO_ATTEMPT_STATUSES.includes(value)) {
+    const today = todayStr();
+    if (row.call_date !== today) patches.push(["call_date", today]);
+    if (loggedInName && row.call_made_by !== loggedInName)
+      patches.push(["call_made_by", loggedInName]);
+  }
+  return patches;
+};
+
+function PatientContact({ row }) {
+  return (
+    <>
+      {row.phone ? (
+        <a
+          className="pcell__ph"
+          href={`tel:${String(row.phone).replace(/\D/g, "")}`}
+          title="Call this patient"
+        >
+          <Phone size={12} aria-hidden="true" />
+          {fmtPhone(row.phone)}
+        </a>
+      ) : (
+        <span className="pcell__ph pcell__ph--none">
+          <Phone size={12} aria-hidden="true" />
+          No phone number
+        </span>
+      )}
+      {altList(row.alt_phone).map((alt) => (
+        <a
+          key={alt}
+          className="pcell__ph pcell__ph--alt"
+          href={`tel:${String(alt).replace(/\D/g, "")}`}
+          title="Call this patient on the alternate number"
+        >
+          <Phone size={12} aria-hidden="true" />
+          {fmtPhone(alt)}
+          <em className="pcell__phtag">Alt</em>
+        </a>
+      ))}
+      {row.file_no && <span className="pcell__file">{row.file_no}</span>}
+      {(row.disp_sex || row.disp_age != null) && (
+        <span className="pcell__ageSex">
+          {[row.disp_sex, row.disp_age != null ? `${row.disp_age} yrs` : null]
+            .filter(Boolean)
+            .join(" · ")}
+        </span>
+      )}
+    </>
+  );
+}
+
+function LastVisitCell({ lv }) {
+  if (!lv?.date && !lv?.testsDate) return <span className="muted">No visit on record</span>;
+  const age = daysAgo(lv.date);
+  return (
+    <div className="lastmo-cell">
+      {lv.date ? (
+        <>
+          <span className="fu-date">
+            {prettyDateWithYear(lv.date)}
+            {age != null && ` · ${agoLabel(age)}`}
+          </span>
+          {lv.doctor || lv.mo ? (
+            <>
+              {lv.doctor && <span className="lastmo-name">{lv.doctor}</span>}
+              {lv.mo && <span className="lastmo-date">MO: {lv.mo}</span>}
+            </>
+          ) : (
+            <span className="lastmo-date">Doctor not recorded</span>
+          )}
+        </>
+      ) : (
+        <span className="muted">No consultation on record</span>
+      )}
+      {lv.testsDate && <span className="lastmo-date">Tests only: {prettyDate(lv.testsDate)}</span>}
+    </div>
+  );
+}
+
 // ─── Reassign Needed view ──────────────────────────────────────────────────
 // Patients booked to a doctor who is now unavailable (leave / break / day off /
 // holiday) for that date+slot. Shows the previous doctor + reason and lets you
@@ -2311,6 +2397,22 @@ function ReassignNeededView({ search }) {
   const loading = conflictsQuery.isPending;
 
   const reassignMutation = useReassignAppointment();
+  const loggedInName = useAuthStore(
+    (s) => s.currentDoctor?.short_name || s.currentDoctor?.name || "",
+  );
+  const patientIds = useMemo(() => conflicts.map((c) => c.patient_id).filter(Boolean), [conflicts]);
+  const lastVisit = useGhmLastVisit(patientIds).data || {};
+  const patchMutation = usePatchAppointment(
+    qk.ghm.conflicts("upcoming"),
+    (old, id, field, value) =>
+      Array.isArray(old)
+        ? old.map((c) => (c.appointment_id === id ? { ...c, [field]: value } : c))
+        : old,
+  );
+  const patch = (c, field, value) => patchMutation.mutate({ id: c.appointment_id, field, value });
+  const setCallStatus = (c, value) => {
+    for (const [field, v] of callStatusPatches(c, value, loggedInName)) patch(c, field, v);
+  };
 
   const rowKey = (c) => `${c.plan || "booking"}-${c.appointment_id}`;
 
@@ -2415,21 +2517,39 @@ function ReassignNeededView({ search }) {
           <table className="tbl">
             <thead>
               <tr>
-                <th style={{ minWidth: 160 }}>Patient</th>
+                <th style={{ width: 36 }}>#</th>
+                <th className="tl" style={{ minWidth: 170 }}>
+                  Patient
+                </th>
                 <th style={{ width: 110 }}>Date</th>
                 <th style={{ width: 130 }}>Slot</th>
                 <th style={{ width: 180 }}>Previous Doctor</th>
                 <th style={{ width: 130 }}>Why unavailable</th>
+                <th style={{ width: 100 }}>Visit Type</th>
+                <th style={{ width: 140 }}>Booking Status</th>
+                <th style={{ width: 165 }}>Category</th>
+                <th style={{ width: 110 }}>Mode</th>
+                <th style={{ minWidth: 230, whiteSpace: "nowrap" }}>Last Visit</th>
+                <th style={{ minWidth: 175, whiteSpace: "nowrap" }}>Call Status</th>
+                <th style={{ minWidth: 120, whiteSpace: "nowrap" }}>Called By</th>
+                <th className="tl" style={{ minWidth: 210 }}>
+                  Notes / Reason
+                </th>
                 <th style={{ width: 200 }}>Reassign to</th>
                 <th style={{ width: 110 }}></th>
               </tr>
             </thead>
             <tbody>
-              {conflicts.map((c) => (
+              {conflicts.map((c, i) => (
                 <tr key={rowKey(c)}>
+                  <td className="tc">
+                    <span className="rnum">{i + 1}</span>
+                  </td>
                   <td>
-                    {c.patient_name}
-                    {c.file_no ? <small> ({c.file_no})</small> : null}
+                    <div className="pcell">
+                      <span className="pcell__name">{c.patient_name || "—"}</span>
+                      <PatientContact row={c} />
+                    </div>
                   </td>
                   <td>
                     {prettyDateWithYear(c.appointment_date?.slice(0, 10))}
@@ -2461,6 +2581,70 @@ function ReassignNeededView({ search }) {
                     </span>
                   </td>
                   <td>
+                    {c.visit_type && (
+                      <span
+                        className={`badge badge--${isNewVisitType(c.visit_type) ? "blue" : "amber"}`}
+                      >
+                        {c.visit_type}
+                      </span>
+                    )}
+                  </td>
+                  <td>
+                    <ColorSelect
+                      value={c.booking_status || ""}
+                      options={bookingStatusOptions(c)}
+                      onChange={(v) => patch(c, "booking_status", v)}
+                    />
+                  </td>
+                  <td>
+                    <ColorSelect
+                      value={c.patient_category || ""}
+                      options={PATIENT_CATEGORIES}
+                      onChange={(v) => patch(c, "patient_category", v)}
+                    />
+                  </td>
+                  <td>
+                    <Dropdown
+                      value={c.appointment_type || ""}
+                      options={withCurrent(MODE_OPTIONS, c.appointment_type)}
+                      onChange={(v) => patch(c, "appointment_type", v)}
+                      variant="cell"
+                      ariaLabel="Mode of appointment"
+                    />
+                  </td>
+                  <td>
+                    <LastVisitCell lv={lastVisit[c.patient_id]} />
+                  </td>
+                  <td>
+                    <ColorSelect
+                      value={c.call_status || "pending"}
+                      options={callStatusOptions(c.call_status || "pending")}
+                      onChange={(v) => setCallStatus(c, v)}
+                    />
+                  </td>
+                  <td>
+                    {c.call_made_by ? (
+                      <div className="fu-cell">
+                        <span className="fu-date">{c.call_made_by}</span>
+                        {c.call_date && (
+                          <span className="fu-time">
+                            {prettyDate(String(c.call_date).slice(0, 10))}
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                  </td>
+                  <td>
+                    <InlineEdit
+                      value={c.call_notes}
+                      onChange={(v) => patch(c, "call_notes", v)}
+                      placeholder="Patient said… / reason…"
+                      multiline
+                    />
+                  </td>
+                  <td>
                     {c.suggested_doctors?.length ? (
                       <Dropdown
                         value={picks[rowKey(c)] || ""}
@@ -2483,6 +2667,13 @@ function ReassignNeededView({ search }) {
                     <button
                       className="btn btn--primary"
                       disabled={busyId === rowKey(c) || !picks[rowKey(c)]}
+                      title={
+                        picks[rowKey(c)]
+                          ? undefined
+                          : c.suggested_doctors?.length
+                            ? "Pick a doctor in Reassign to first"
+                            : "No doctor is free at this time — move the patient to another date or slot"
+                      }
                       onClick={() => reassign(c)}
                     >
                       {busyId === rowKey(c) ? "…" : "Reassign"}
@@ -3203,18 +3394,7 @@ export default function GHMPage() {
   // ── When call status changes, auto-fill date + caller (logged-in user) ────
   const handleCallStatus = useCallback(
     (row, value) => {
-      patch(row.id, "call_status", value);
-      // call_date is the day the call was actually made, so the status is tied
-      // to that day and no other: a patient rung on the 20th for a visit on the
-      // 21st counts as called on the 20th, and the 21st reads "not called"
-      // again. Overwritten, not filled-in-if-empty — a date left by an earlier
-      // day's call would otherwise file today's call under that older day.
-      if (value && !NO_ATTEMPT_STATUSES.includes(value)) {
-        const today = todayStr();
-        if (row.call_date !== today) patch(row.id, "call_date", today);
-        if (loggedInName && row.call_made_by !== loggedInName)
-          patch(row.id, "call_made_by", loggedInName);
-      }
+      for (const [field, v] of callStatusPatches(row, value, loggedInName)) patch(row.id, field, v);
     },
     [patch, loggedInName],
   );
@@ -4073,44 +4253,7 @@ export default function GHMPage() {
                                   <BlockedBadge block={blocks[row.patient_id]} size="sm" />
                                 </span>
                                 <HomeSampleChip row={row} />
-                                {row.phone ? (
-                                  <a
-                                    className="pcell__ph"
-                                    href={`tel:${String(row.phone).replace(/\D/g, "")}`}
-                                    title="Call this patient"
-                                  >
-                                    <Phone size={12} aria-hidden="true" />
-                                    {fmtPhone(row.phone)}
-                                  </a>
-                                ) : (
-                                  <span className="pcell__ph pcell__ph--none">
-                                    <Phone size={12} aria-hidden="true" />
-                                    No phone number
-                                  </span>
-                                )}
-                                {altList(row.alt_phone).map((alt) => (
-                                  <a
-                                    key={alt}
-                                    className="pcell__ph pcell__ph--alt"
-                                    href={`tel:${String(alt).replace(/\D/g, "")}`}
-                                    title="Call this patient on the alternate number"
-                                  >
-                                    <Phone size={12} aria-hidden="true" />
-                                    {fmtPhone(alt)}
-                                    <em className="pcell__phtag">Alt</em>
-                                  </a>
-                                ))}
-                                {row.file_no && <span className="pcell__file">{row.file_no}</span>}
-                                {(row.disp_sex || row.disp_age != null) && (
-                                  <span className="pcell__ageSex">
-                                    {[
-                                      row.disp_sex,
-                                      row.disp_age != null ? `${row.disp_age} yrs` : null,
-                                    ]
-                                      .filter(Boolean)
-                                      .join(" · ")}
-                                  </span>
-                                )}
+                                <PatientContact row={row} />
                                 {row.address && (
                                   <span className="pcell__addr">
                                     <MapPin size={11} aria-hidden="true" />
@@ -4256,43 +4399,7 @@ export default function GHMPage() {
                             </td>
 
                             <td>
-                              {(() => {
-                                const lv = lastVisit[row.patient_id];
-                                if (!lv?.date && !lv?.testsDate)
-                                  return <span className="muted">No visit on record</span>;
-                                const age = daysAgo(lv.date);
-                                return (
-                                  <div className="lastmo-cell">
-                                    {lv.date ? (
-                                      <>
-                                        <span className="fu-date">
-                                          {prettyDateWithYear(lv.date)}
-                                          {age != null && ` · ${agoLabel(age)}`}
-                                        </span>
-                                        {lv.doctor || lv.mo ? (
-                                          <>
-                                            {lv.doctor && (
-                                              <span className="lastmo-name">{lv.doctor}</span>
-                                            )}
-                                            {lv.mo && (
-                                              <span className="lastmo-date">MO: {lv.mo}</span>
-                                            )}
-                                          </>
-                                        ) : (
-                                          <span className="lastmo-date">Doctor not recorded</span>
-                                        )}
-                                      </>
-                                    ) : (
-                                      <span className="muted">No consultation on record</span>
-                                    )}
-                                    {lv.testsDate && (
-                                      <span className="lastmo-date">
-                                        Tests only: {prettyDate(lv.testsDate)}
-                                      </span>
-                                    )}
-                                  </div>
-                                );
-                              })()}
+                              <LastVisitCell lv={lastVisit[row.patient_id]} />
                             </td>
 
                             {/* Came? */}

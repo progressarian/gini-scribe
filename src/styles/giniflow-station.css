@@ -7654,6 +7654,9 @@
 .gf .dp-sec.mo-rx .csec {
   margin: 0;
 }
+.gf .dp-sec.mo-rx:empty {
+  display: none;
+}
 
 /* The strip's pointer to proposals that now live on the prescription rows.
    Deliberately not a second set of Approve/Reject buttons — two places to
@@ -9498,4 +9501,156 @@
   margin-top: 4px;
   font-weight: 700;
   color: #fff;
+}
+
+.gf .dp-sec.mo-suggest {
+  background: var(--white);
+  border: 1px solid var(--amb-b);
+  border-left: 4px solid var(--amb);
+  padding: 12px 14px 14px;
+}
+.gf .mo-suggest > .dp-sec-title {
+  font-size: 12px;
+  letter-spacing: 0.3px;
+  color: var(--ink);
+  padding-bottom: 8px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--bd);
+}
+.gf .mo-suggest .sug-note {
+  background: var(--amb-l);
+  border: 1px solid var(--amb-b);
+  border-radius: var(--r);
+  padding: 7px 10px;
+  color: var(--ink2, var(--ink));
+  margin-bottom: 4px;
+}
+.gf .mo-suggest .cp-lab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--ink2, var(--ink));
+  margin: 12px 0 5px;
+}
+.gf .mo-suggest .sug-field {
+  margin-top: 12px;
+  padding-top: 2px;
+  border-top: 1px dashed var(--bd);
+}
+.gf .mo-suggest .sug-state {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--tl-l);
+  border: 1px solid var(--tl-b);
+  color: var(--tl);
+}
+.gf .mo-suggest .sug-state.is-saving {
+  background: var(--amb-l);
+  border-color: var(--amb-b);
+  color: var(--amb);
+}
+.gf .mo-suggest .cp-text:focus,
+.gf .mo-suggest .cp-inp:focus {
+  border-color: var(--amb);
+  box-shadow: 0 0 0 3px var(--amb-l);
+}
+.gf .mo-suggest .sug-quick {
+  margin-top: 8px;
+}
+.gf .mo-suggest .sug-quick-lab {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ink4);
+  margin: 0 0 5px;
+}
+.gf .mo-suggest .tst-chip {
+  max-width: 100%;
+  background: var(--white);
+  border-color: var(--bd2, var(--bd));
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+.gf .mo-suggest .tst-chip .tst-name {
+  white-space: normal;
+  line-height: 1.35;
+}
+.gf .mo-suggest .tst-chip:hover {
+  border-color: var(--amb);
+  background: var(--amb-l);
+}
+.gf .mo-suggest .tst-chip:focus-visible {
+  outline: 2px solid var(--amb);
+  outline-offset: 1px;
+}
+.gf .mo-suggest .cp-goal {
+  margin-bottom: 6px;
+}
+.gf .mo-suggest .btn-sm {
+  margin-top: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .gf .mo-suggest .tst-chip {
+    transition: none;
+  }
+}
+@media (max-width: 560px) {
+  .gf .mo-suggest .cp-goal {
+    grid-template-columns: 1fr 1fr;
+  }
+  .gf .mo-suggest .cp-goal .cp-inp:first-child {
+    grid-column: 1 / -1;
+  }
+}
+
+.gf .station-detail.mo-detail .sd-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.gf .mo-detail .sd-body > * {
+  flex-shrink: 0;
+  min-width: 0;
+}
+.gf .mo-detail .dp-sec {
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: var(--r-lg);
+  padding: 14px 16px;
+}
+.gf .mo-detail .dp-sec.mo-rx {
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+.gf .mo-detail .dp-sec.mo-reports-new,
+.gf .mo-detail .dp-sec.mo-results {
+  border-color: var(--tl-b);
+  border-left: 4px solid var(--tl);
+}
+.gf .mo-detail .dp-sec.mo-suggest {
+  border: 1px solid var(--bd);
+  padding: 14px 16px;
+}
+.gf .mo-detail .dp-sec-title,
+.gf .mo-detail .mo-suggest > .dp-sec-title {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--ink);
+  margin-bottom: 10px;
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+.gf .mo-detail .dp-sec > .sq-toggle {
+  font-size: 13px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink);
 }

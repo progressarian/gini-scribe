@@ -1,5 +1,6 @@
 import pool from "../../config/db.js";
 import { linesForNurseTests, linesForOrder } from "../billing/visitLines.js";
+import { healthrayLinesInBackground } from "../billing/healthrayBillLines.js";
 import { testPriceForVisit } from "../pricing.js";
 import {
   insertLabStepsForOrder,
@@ -24,6 +25,7 @@ import { machineCaseListOnly } from "../../../shared/manualFloor.js";
 import { LAB_TEST_STEP_IDS } from "../../../shared/journeyOrder.js";
 import { BACK_FOR_TESTS, CHAIN } from "../../../shared/giniflowStatus.js";
 import { reopenForTests } from "./lateTests.js";
+import { restoreBilledAgainIn } from "./testRestore.js";
 import { createLogger } from "../logger.js";
 import { billReadsBlockedUntil } from "./healthrayRefresh.js";
 import { BILL_MIN_GAP_MS } from "../healthray/client.js";
@@ -32,6 +34,7 @@ import {
   billedLabLines,
   billedMachineLines,
   billedNurseTestLines,
+  isLiveBillItem,
   priceOrdersFromBill,
   readPatientBill,
   repricePaidOrdersFromBill,
@@ -264,8 +267,8 @@ export const billedSinceExit = (beforeItems, labLines, machineLines) => {
 
 export async function syncMachineOrdersForVisit(visit, db = pool, { slotWaitMs } = {}) {
   const closed = FINISHED.includes(visit.current_status);
-  const beforeExit = closed ? await storedBill(visit.patient_id, visit.visit_date, db) : null;
-  if (closed && !beforeExit) {
+  const before = await storedBill(visit.patient_id, visit.visit_date, db);
+  if (closed && !before) {
     return { raised: 0, lines: 0, labSteps: [], removed: null };
   }
   const bill = await readPatientBill(
@@ -291,6 +294,28 @@ export async function syncMachineOrdersForVisit(visit, db = pool, { slotWaitMs }
   );
   if (bill.deferred) return { raised: 0, lines: 0, labSteps: [], removed: null, deferred: true };
   if (bill.status !== "billed") return { raised: 0, lines: 0, labSteps: [], removed: null };
+  const result = await ordersFromBill(visit, db, bill, closed ? before : null);
+  if (visit.current_status !== "booked" && hasNewItems(before, bill)) {
+    const drafted = await healthrayLinesInBackground(visit.visit_id, db).catch((e) => {
+      error("draft", `${visit.name}: HealthRay lines not added to the draft: ${e.message}`);
+      return null;
+    });
+    if (drafted?.added.length) {
+      log("draft", `${visit.name}: ${drafted.added.join(", ")} added to the draft from HealthRay`);
+    }
+  }
+  return result;
+}
+
+export const hasNewItems = (before, bill) => {
+  const seen = new Set((before?.items || []).filter(isLiveBillItem).map(billLineKey));
+  return (bill.items || []).some(
+    (i) => isLiveBillItem(i) && i.category !== "consultation" && !seen.has(billLineKey(i)),
+  );
+};
+
+async function ordersFromBill(visit, db, bill, beforeExit) {
+  const closed = !!beforeExit;
   const machines = await getMachines(db);
   const lines = billedMachineLines(bill, machines);
 
@@ -374,6 +399,14 @@ export async function syncMachineOrdersForVisit(visit, db = pool, { slotWaitMs }
         [visit.visit_id, [...LAB_STEPS, "lab_processing_2"]],
       );
       labSteps = (await insertLabStepsForOrder(client, visit.visit_id)).added;
+    }
+    if (!closed) {
+      const back = await restoreBilledAgainIn(client, visit.visit_id, [
+        ...new Set(liveLines.flatMap((l) => l.machines)),
+      ]);
+      for (const r of back) {
+        log("restored", `${visit.name}: ${r.tests.join(", ")} billed in HealthRay — cancel undone`);
+      }
     }
     for (const line of liveLines) {
       for (const machineId of line.machines) {

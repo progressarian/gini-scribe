@@ -110,6 +110,11 @@ export default function ChiefSuggestions({
   const locked = (field) => readOnly || decided(field);
   const state = (field) =>
     decided(field) ? null : savingField === field ? "Saving…" : byField[field] ? "Suggested" : "";
+  const stateBadge = (field) => {
+    const text = state(field);
+    if (!text) return null;
+    return <span className={`sug-state${text === "Saving…" ? " is-saving" : ""}`}>{text}</span>;
+  };
   const written = new Set(values.advice.split(/\n+/).map(lineKey).filter(Boolean));
   const common = (choices?.common || [])
     .filter((c) => !written.has(lineKey(c.line)))
@@ -117,13 +122,13 @@ export default function ChiefSuggestions({
 
   return (
     <div>
-      <div className="dp-hint">
+      <div className="dp-hint sug-note">
         A suggestion, not a prescription — the doctor decides. Nothing here prints unless the doctor
         accepts it.
       </div>
 
       <label className="cp-lab" htmlFor={`sug-advice-${visitId}`}>
-        Advice <span className="cs-sub">{state("advice")}</span>
+        Advice {stateBadge("advice")}
       </label>
       <textarea
         id={`sug-advice-${visitId}`}
@@ -136,20 +141,23 @@ export default function ChiefSuggestions({
       />
       <Outcome suggestion={byField.advice} />
       {!locked("advice") && common.length > 0 && (
-        <div className="tst-list">
-          {common.map((c) => (
-            <button
-              type="button"
-              key={c.line}
-              className="tst-chip"
-              onClick={() => {
-                const text = values.advice.replace(/\s+$/, "");
-                edit("advice", text ? `${text}\n${c.line}` : c.line);
-              }}
-            >
-              <span className="tst-name">+ {c.line}</span>
-            </button>
-          ))}
+        <div className="sug-quick">
+          <p className="sug-quick-lab">Common advice · tap to add</p>
+          <div className="tst-list">
+            {common.map((c) => (
+              <button
+                type="button"
+                key={c.line}
+                className="tst-chip"
+                onClick={() => {
+                  const text = values.advice.replace(/\s+$/, "");
+                  edit("advice", text ? `${text}\n${c.line}` : c.line);
+                }}
+              >
+                <span className="tst-name">+ {c.line}</span>
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -157,9 +165,9 @@ export default function ChiefSuggestions({
         ["treatment", "Treatment", "e.g. Continue insulin, review dose at next visit"],
         ["lifestyle", "Lifestyle", "e.g. 1500 kcal diet, 8,000 steps a day"],
       ].map(([field, label, hint]) => (
-        <div key={field}>
+        <div key={field} className="sug-field">
           <label className="cp-lab" htmlFor={`sug-${field}-${visitId}`}>
-            {label} <span className="cs-sub">{state(field)}</span>
+            {label} {stateBadge(field)}
           </label>
           <textarea
             id={`sug-${field}-${visitId}`}
@@ -174,60 +182,60 @@ export default function ChiefSuggestions({
         </div>
       ))}
 
-      <div className="cp-lab">
-        Goals <span className="cs-sub">{state("goals")}</span>
+      <div className="sug-field">
+        <div className="cp-lab">Goals {stateBadge("goals")}</div>
+        {values.goals.map((goal, i) => (
+          <div className="cp-goal" key={i}>
+            {[
+              ["test", "Test, e.g. HbA1c"],
+              ["target", "Target, e.g. <7"],
+              ["unit", "Unit, e.g. %"],
+            ].map(([key, placeholder]) => (
+              <input
+                key={key}
+                className="cp-inp"
+                aria-label={`Goal ${i + 1} ${key}`}
+                placeholder={placeholder}
+                value={goal[key]}
+                readOnly={locked("goals")}
+                onChange={(e) =>
+                  edit(
+                    "goals",
+                    values.goals.map((g, j) => (j === i ? { ...g, [key]: e.target.value } : g)),
+                  )
+                }
+              />
+            ))}
+            {!locked("goals") && values.goals.length > 1 && (
+              <button
+                type="button"
+                className="btn-sm"
+                aria-label={`Remove goal ${i + 1}`}
+                onClick={() =>
+                  edit(
+                    "goals",
+                    values.goals.filter((_, j) => j !== i),
+                  )
+                }
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        ))}
+        {!locked("goals") && (
+          <button
+            type="button"
+            className="btn-sm"
+            onClick={() => edit("goals", [...values.goals, emptyGoal()])}
+          >
+            + Add goal
+          </button>
+        )}
+        <Outcome suggestion={byField.goals} />
       </div>
-      {values.goals.map((goal, i) => (
-        <div className="cp-goal" key={i}>
-          {[
-            ["test", "Test, e.g. HbA1c"],
-            ["target", "Target, e.g. <7"],
-            ["unit", "Unit, e.g. %"],
-          ].map(([key, placeholder]) => (
-            <input
-              key={key}
-              className="cp-inp"
-              aria-label={`Goal ${i + 1} ${key}`}
-              placeholder={placeholder}
-              value={goal[key]}
-              readOnly={locked("goals")}
-              onChange={(e) =>
-                edit(
-                  "goals",
-                  values.goals.map((g, j) => (j === i ? { ...g, [key]: e.target.value } : g)),
-                )
-              }
-            />
-          ))}
-          {!locked("goals") && values.goals.length > 1 && (
-            <button
-              type="button"
-              className="btn-sm"
-              aria-label={`Remove goal ${i + 1}`}
-              onClick={() =>
-                edit(
-                  "goals",
-                  values.goals.filter((_, j) => j !== i),
-                )
-              }
-            >
-              ✕
-            </button>
-          )}
-        </div>
-      ))}
-      {!locked("goals") && (
-        <button
-          type="button"
-          className="btn-sm"
-          onClick={() => edit("goals", [...values.goals, emptyGoal()])}
-        >
-          + Add goal
-        </button>
-      )}
-      <Outcome suggestion={byField.goals} />
 
-      {state("next_visit") && <div className="cs-sub">Next visit · {state("next_visit")}</div>}
+      {state("next_visit") && <div className="cp-lab">Next visit {stateBadge("next_visit")}</div>}
       <NextVisitPicker
         interval={values.next_visit.interval || ""}
         date={values.next_visit.date || ""}

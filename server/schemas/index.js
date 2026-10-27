@@ -16,6 +16,7 @@ import {
   HISTORY_TEXT_FIELDS,
   HISTORY_YES_NO_FIELDS,
   JVP_VALUES,
+  scaleStates,
   WORKUP_NOTE_MAX,
   WORKUP_TEXT_MAX,
   YES_NO,
@@ -1774,6 +1775,11 @@ const workupExamEntry = (item) => {
   if (item.kind === "jvp")
     return z.strictObject({
       value: z.enum(JVP_VALUES.map((v) => v.id)).nullish(),
+      note: workupNote.nullish(),
+    });
+  if (item.kind === "scale")
+    return z.strictObject({
+      state: z.enum(scaleStates(item)).nullish(),
       note: workupNote.nullish(),
     });
   return z.strictObject({

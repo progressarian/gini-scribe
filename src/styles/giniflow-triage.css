@@ -769,6 +769,64 @@
   line-height: 1.4;
 }
 
+.gf-triage .pc-rxmo {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+.gf-triage .pc-rxmo-lbl {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink4);
+}
+.gf-triage .rxmo-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.gf-triage .rxmo-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--fb);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--bd);
+  background: var(--white);
+  color: var(--ink2);
+  cursor: pointer;
+  line-height: 1.3;
+}
+.gf-triage .rxmo-chip:hover:not(:disabled) {
+  border-color: var(--tl);
+}
+.gf-triage .rxmo-chip.sel {
+  background: var(--tl);
+  border-color: var(--tl);
+  color: #fff;
+}
+.gf-triage .rxmo-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.gf-triage .rxmo-chip:focus-visible,
+.gf-triage .sp-trigger:focus-visible,
+.gf-triage .sp-opt:focus-visible {
+  outline: 2px solid var(--tl);
+  outline-offset: 1px;
+}
+.gf-triage .rxmo-load {
+  font-size: 9px;
+  font-weight: 600;
+  opacity: 0.7;
+}
+
 /* ── DIALOGS (on top of the theme's .tmodal / .tbox shell) ── */
 .gf-triage .sd-opt {
   display: flex;
@@ -850,6 +908,139 @@
   font-weight: 500;
   color: var(--ink4);
   margin-top: 2px;
+}
+.gf-triage .sp {
+  margin-bottom: 12px;
+}
+.gf-triage .sp-trigger {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 11px;
+  border-radius: var(--r);
+  border: 1px solid var(--bd);
+  background: var(--white);
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--fb);
+}
+.gf-triage .sp-trigger.set {
+  border-color: var(--tl);
+  background: var(--tl-l);
+}
+.gf-triage .sp-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+.gf-triage .sp-caret {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--tl);
+  white-space: nowrap;
+}
+.gf-triage .sp-panel {
+  margin-top: 6px;
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  background: var(--white);
+  overflow: hidden;
+}
+.gf-triage .sp-search {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--bd);
+  padding: 8px 11px;
+  font-family: var(--fb);
+  font-size: 12px;
+  outline: none;
+  box-sizing: border-box;
+}
+.gf-triage .sp-list {
+  max-height: 220px;
+  overflow-y: auto;
+}
+.gf-triage .sp-opt {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 11px;
+  border: 0;
+  border-bottom: 1px solid var(--bd);
+  background: var(--white);
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--fb);
+}
+.gf-triage .sp-opt:last-child {
+  border-bottom: 0;
+}
+.gf-triage .sp-opt:hover,
+.gf-triage .sp-opt.sel {
+  background: var(--tl-l);
+}
+.gf-triage .sp-opt.clear {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--red);
+}
+.gf-triage .sp-opt-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.gf-triage .sp-opt-meta {
+  flex: 1;
+  min-width: 0;
+  font-size: 10px;
+  color: var(--ink4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gf-triage .sp-load {
+  font-size: 10px;
+  color: var(--ink4);
+  white-space: nowrap;
+}
+.gf-triage .sp-load.busy {
+  color: var(--tl);
+  font-weight: 700;
+}
+.gf-triage .sp-empty {
+  margin: 0;
+  padding: 10px 11px;
+  font-size: 11px;
+  color: var(--ink3);
+}
+.gf-triage .assign-box {
+  width: min(640px, 100%);
+}
+.gf-triage .sp-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0 12px;
+  align-items: start;
+}
+.gf-triage .sp-row .sp {
+  min-width: 0;
+}
+.gf-triage .sp-trigger .sd-name,
+.gf-triage .sp-trigger .sd-detail {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gf-triage .assign-actions {
+  position: sticky;
+  bottom: -15px;
+  margin: 14px -17px -15px;
+  padding: 10px 17px;
+  background: var(--white);
+  border-top: 1px solid var(--bd);
 }
 .gf-triage .dlg-label {
   font-size: 10px;
@@ -1055,5 +1246,57 @@
   .gf-triage .tri-head,
   .gf-triage .tri-filters {
     padding: 9px 10px;
+  }
+  .gf-triage .tmodal:has(.assign-box) {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .gf-triage .assign-box {
+    width: 100%;
+    max-height: 92vh;
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+  }
+  .gf-triage .assign-box .tb-body {
+    padding: 12px 14px;
+  }
+  .gf-triage .assign-actions {
+    margin: 12px -14px -12px;
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+    bottom: -12px;
+  }
+  .gf-triage .assign-actions .btn {
+    flex: 1;
+    min-height: 40px;
+  }
+  .gf-triage .cat-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .gf-triage .cat-opt {
+    padding: 8px;
+  }
+  .gf-triage .sp-trigger {
+    min-height: 44px;
+  }
+  .gf-triage .sp-search {
+    font-size: 16px;
+    padding: 10px 11px;
+  }
+  .gf-triage .sp-list {
+    max-height: 40vh;
+  }
+  .gf-triage .sp-opt {
+    padding: 10px 11px;
+    flex-wrap: wrap;
+  }
+  .gf-triage .sp-opt-meta {
+    order: 3;
+    flex-basis: 100%;
+  }
+  .gf-triage .sp-load {
+    margin-left: auto;
+  }
+  .gf-triage .rxmo-chip {
+    padding: 8px 12px;
+    font-size: 12px;
   }
 }

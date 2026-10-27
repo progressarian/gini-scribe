@@ -32,14 +32,21 @@ export async function workupContext(appointmentId, db = pool) {
     `SELECT a.id, a.patient_id,
             appointment_is_new_type(a.visit_type) AS is_new,
             a.appointment_date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date AS is_today,
-            ${flaggedDoctorSql("a")} AS doctor_flagged
+            ${flaggedDoctorSql("a")} AS doctor_flagged,
+            EXISTS (
+              SELECT 1 FROM new_patient_workups ew
+                JOIN appointments ea ON ea.id = ew.appointment_id
+               WHERE ew.patient_id = a.patient_id
+                 AND ew.appointment_id <> a.id
+                 AND ea.appointment_date < a.appointment_date
+            ) AS has_earlier_workup
        FROM appointments a
       WHERE a.id = $1`,
     [appointmentId],
   );
   const ctx = rows[0];
   if (!ctx) return null;
-  const applies = ctx.is_new && ctx.doctor_flagged;
+  const applies = ctx.is_new && ctx.doctor_flagged && !ctx.has_earlier_workup;
   return { ...ctx, applies, editable: applies && ctx.is_today };
 }
 
@@ -113,7 +120,8 @@ function compact(value) {
 }
 
 const refusal = (ctx) => {
-  if (!ctx.is_new) return "The History & Examination form is only for a patient's first visit";
+  if (!ctx.is_new || ctx.has_earlier_workup)
+    return "The History & Examination form is only for a patient's first visit";
   if (!ctx.doctor_flagged) return "This doctor doesn't use the new-patient History & Examination";
   if (!ctx.is_today) return "This visit's workup can only be changed on the day of the visit";
   return null;

@@ -1058,6 +1058,14 @@ export async function approveRequest(id, input, ctx, db = pool) {
   return { ...request, visit_left: await endVisitAfterRefund(request, { ...ctx, actorId }, db) };
 }
 
+export async function withdrawRequestIn(client, id, note, ctx) {
+  const before = await lockRow(client, SPEC, cleanUuid(id, "request"));
+  checkPending(before);
+  const after = await decide(client, before.id, { status: "withdrawn", note }, ctx);
+  await audit(client, { id: before.id, action: "cancel", before, after, ctx });
+  return after;
+}
+
 export async function rejectRequest(id, input, ctx, db = pool) {
   const requestId = cleanUuid(id, "request");
   actorOf(ctx, "answer a request");

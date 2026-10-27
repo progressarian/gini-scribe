@@ -2,7 +2,13 @@ import { test, expect } from "@playwright/test";
 import { one, query } from "../helpers/db.mjs";
 import { assertTestDatabase } from "../setup/guard.mjs";
 import { desk, extraVisit, newTag, setUp, tearDown } from "../billing/phase4/p4-bills-fixture.mjs";
-import { db, dropShifts, openDeskShift, prepareCategory } from "../billing/phase4b/p4b-refunds.mjs";
+import {
+  admin,
+  db,
+  dropShifts,
+  openDeskShift,
+  prepareCategory,
+} from "../billing/phase4b/p4b-refunds.mjs";
 
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 const patientBill = await import("../../server/services/giniflow/patientBill.js");
@@ -10,6 +16,8 @@ const visitLines = await import("../../server/services/billing/visitLines.js");
 const bills = await import("../../server/services/billing/bills.js");
 const payments = await import("../../server/services/billing/payments.js");
 const { getMachines } = await import("../../server/services/giniflow/machineCatalog.js");
+const { restoreBilledAgainIn } = await import("../../server/services/giniflow/testRestore.js");
+const requestsApi = await import("../../server/services/billing/billingRequests.js");
 
 const tag = newTag();
 const CONSULT = {
@@ -134,6 +142,29 @@ const refundRequests = (billId) =>
     [billId],
   ).then((r) => r.rows);
 
+const ABI_LINE = { desc: "ABI", amount: 500, category: "machine", invoice: "OPD/T-2", itemId: 21 };
+const VPT_LINE = { desc: "VPT", amount: 300, category: "machine", invoice: "OPD/T-2", itemId: 22 };
+
+async function billedAgain(visit, machineIds) {
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const restored = await restoreBilledAgainIn(client, visit, machineIds);
+    await client.query("COMMIT");
+    return restored;
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+const orderLines = (orderId) =>
+  query(`SELECT source, is_live FROM bill_lines WHERE lab_order_id = $1`, [orderId]).then(
+    (r) => r.rows,
+  );
+
 test.describe
   .serial("G110 check-in machine tests paid on the Scribe bill but not on HealthRay's", () => {
   test.beforeAll(async () => {
@@ -155,7 +186,7 @@ test.describe
     await dropShifts();
   });
 
-  test("1. after the grace, the tests are cancelled and one system refund request covers them", async () => {
+  test("1. on the first read, the tests are cancelled and one system refund request covers them", async () => {
     const s = await scenario("Both", [
       ["ABI", 500],
       ["VPT", 300],
@@ -163,7 +194,7 @@ test.describe
     const before = await one(`SELECT patient_payable, paid_amount FROM bills WHERE id = $1`, [
       s.bill.id,
     ]);
-    const result = await reconcile(s.visit, [CONSULT], minutesAfter(s.paidAt, 31));
+    const result = await reconcile(s.visit, [CONSULT], minutesAfter(s.paidAt, 1));
     expect(result.failed).toEqual([]);
     expect(result.removedOrders).toBe(2);
     for (const o of s.orders) expect(await orderExists(o.order)).toBe(false);
@@ -201,9 +232,9 @@ test.describe
     }
   });
 
-  test("2. inside the grace window the tests are left alone", async () => {
+  test("2. a bill read before the payment leaves the tests alone", async () => {
     const s = await scenario("Grace", [["ABI", 500]]);
-    const result = await reconcile(s.visit, [CONSULT], minutesAfter(s.paidAt, 10));
+    const result = await reconcile(s.visit, [CONSULT], minutesAfter(s.paidAt, -1));
     expect(result.removedOrders).toBe(0);
     expect(await orderExists(s.orders[0].order)).toBe(true);
     expect(await refundRequests(s.bill.id)).toEqual([]);
@@ -251,5 +282,73 @@ test.describe
     }
     expect(await orderExists(s.orders[0].order)).toBe(true);
     expect(await refundRequests(s.bill.id)).toEqual([]);
+  });
+
+  test("7. HealthRay bills the tests after the auto-cancel: back on the floor, refund withdrawn", async () => {
+    const s = await scenario("Back", [
+      ["ABI", 500],
+      ["VPT", 300],
+    ]);
+    await query(
+      `INSERT INTO giniflow_visit_steps (visit_id, step_order, step_catalog_id, step_name, status, source)
+       VALUES ($1, 99, 'pharmacy', 'Pharmacy / Exit', 'pending', 'template')`,
+      [s.visit],
+    );
+    await reconcile(s.visit, [CONSULT], minutesAfter(s.paidAt, 1));
+    const restored = await billedAgain(
+      s.visit,
+      s.orders.map((o) => o.machine),
+    );
+    expect(restored.map((r) => r.tests[0]).sort()).toEqual(["ABI", "VPT"]);
+    for (const o of s.orders) {
+      expect(await orderExists(o.order)).toBe(true);
+      expect(await orderLines(o.order)).toEqual([{ source: "lab_order", is_live: true }]);
+      const order = await one(`SELECT payment_status FROM giniflow_lab_orders WHERE id = $1`, [
+        o.order,
+      ]);
+      expect(order.payment_status).toBe("paid");
+    }
+    const requests = await refundRequests(s.bill.id);
+    expect(requests.map((r) => r.status)).toEqual(["withdrawn"]);
+    const step = await one(
+      `SELECT status FROM giniflow_visit_steps WHERE visit_id = $1 AND step_catalog_id = $2
+        ORDER BY step_order DESC LIMIT 1`,
+      [s.visit, s.orders[0].machine],
+    );
+    expect(step.status).toBe("pending");
+    expect(
+      await billedAgain(
+        s.visit,
+        s.orders.map((o) => o.machine),
+      ),
+    ).toEqual([]);
+  });
+
+  test("8. HealthRay bills only one of them: that one comes back, the rest stays refunded", async () => {
+    const s = await scenario("Half", [
+      ["ABI", 500],
+      ["VPT", 300],
+    ]);
+    await reconcile(s.visit, [CONSULT], minutesAfter(s.paidAt, 1));
+    const abi = s.orders.find((o) => o.testName === "ABI");
+    const vpt = s.orders.find((o) => o.testName === "VPT");
+    const restored = await billedAgain(s.visit, [abi.machine]);
+    expect(restored.map((r) => r.tests[0])).toEqual(["ABI"]);
+    expect(await orderExists(abi.order)).toBe(true);
+    expect(await orderExists(vpt.order)).toBe(false);
+    const requests = await refundRequests(s.bill.id);
+    expect(requests.map((r) => r.status).sort()).toEqual(["pending", "withdrawn"]);
+    const open = requests.find((r) => r.status === "pending");
+    expect(open.refund_lines).toHaveLength(1);
+    expect(open.requested_by).toBeNull();
+  });
+
+  test("9. once the refund is approved, a later HealthRay bill does not undo it", async () => {
+    const s = await scenario("Approved", [["ABI", 500]]);
+    await reconcile(s.visit, [CONSULT], minutesAfter(s.paidAt, 1));
+    const [request] = await refundRequests(s.bill.id);
+    await requestsApi.approveRequest(request.id, {}, admin, db);
+    expect(await billedAgain(s.visit, [s.orders[0].machine])).toEqual([]);
+    expect(await orderExists(s.orders[0].order)).toBe(false);
   });
 });

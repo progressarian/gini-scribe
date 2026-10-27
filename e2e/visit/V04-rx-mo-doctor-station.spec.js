@@ -5,7 +5,7 @@ import { buildPatient } from "../helpers/builders.mjs";
 import { CONSULTANTS, PIN } from "../fixtures/data.mjs";
 import { API_URL } from "../setup/testEnv.mjs";
 
-const consultant = CONSULTANTS.banshali;
+const consultant = CONSULTANTS.rahul;
 const RX_MO = { id: 9874, name: "Dr E2E Station MO", short_name: "Dr StationMO" };
 const patients = [];
 const STATION = "/api/giniflow/stations/doctor";
@@ -153,7 +153,7 @@ test.describe.serial("V04 MO — prescriptions on the Gini Flow doctor station",
 
   test("4. the consultant still opens and owns the same visit", async () => {
     const v = await waitingVisit();
-    const doc = await apiAs("banshali");
+    const doc = await apiAs("rahul");
     const consult = await (await doc.get(`${STATION}/${v.visit}`)).json();
     expect(consult.readOnly).toBe(false);
     const queue = await (await doc.get(`${STATION}/queue`)).json();

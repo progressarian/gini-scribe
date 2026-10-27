@@ -18,7 +18,7 @@ import { refundCancelledTest } from "../billing/billingRequests.js";
 export const BILL_MAX_AGE_MIN = Number(process.env.SCRIBE_BILL_MAX_AGE_MIN || 60);
 export const NO_BILL_MAX_AGE_MIN = Number(process.env.SCRIBE_NO_BILL_MAX_AGE_MIN || 20);
 export const PAID_NOT_ON_BILL_GRACE_MIN = Number(
-  process.env.SCRIBE_PAID_NOT_ON_BILL_GRACE_MIN ?? 30,
+  process.env.SCRIBE_PAID_NOT_ON_BILL_GRACE_MIN ?? 0,
 );
 
 const UNKNOWN = { status: "unknown", items: [], invoiceNo: null, readAt: null };

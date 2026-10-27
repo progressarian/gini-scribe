@@ -97,6 +97,10 @@ router.get("/appointments", async (req, res) => {
 // (the doctor went on leave/break/etc. after the patient was booked). Returns
 // each with the current ("previous") doctor, the reason, and suggested doctors.
 // MUST be declared before "/appointments/:id" so "conflicts" isn't read as an id.
+const CONFLICT_ROW_COLUMNS = `a.alt_phone, a.visit_type, a.booking_status, a.patient_category,
+              a.appointment_type, a.call_status, a.call_made_by, a.call_date, a.call_notes,
+              COALESCE(a.age, p.age) AS disp_age, COALESCE(a.sex, p.sex) AS disp_sex`;
+
 router.get("/appointments/conflicts", async (req, res) => {
   try {
     const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
@@ -107,8 +111,10 @@ router.get("/appointments/conflicts", async (req, res) => {
       pool.query(
         `SELECT a.id, a.patient_id, a.patient_name, a.file_no, a.phone,
               a.appointment_date::text AS appointment_date, a.time_slot, a.doctor_name,
-              COALESCE(a.doctor_id, resolve_doctor_id(a.doctor_name)) AS doctor_id, a.status
+              COALESCE(a.doctor_id, resolve_doctor_id(a.doctor_name)) AS doctor_id, a.status,
+              ${CONFLICT_ROW_COLUMNS}
          FROM appointments a
+         LEFT JOIN patients p ON p.id = a.patient_id
         WHERE a.appointment_date >= $1::date
           AND ($2::date IS NULL OR a.appointment_date <= $2::date)
           AND a.doctor_name IS NOT NULL AND a.time_slot IS NOT NULL
@@ -120,20 +126,22 @@ router.get("/appointments/conflicts", async (req, res) => {
       pool.query(
         `SELECT a.id, a.patient_id, a.patient_name, a.file_no, a.phone, a.status,
               a.preferred_date::text AS appointment_date, a.preferred_time_slot AS time_slot,
-              p.doctor_name, COALESCE(resolve_doctor_id(p.doctor_name), a.doctor_id) AS doctor_id
+              pd.doctor_name, COALESCE(resolve_doctor_id(pd.doctor_name), a.doctor_id) AS doctor_id,
+              ${CONFLICT_ROW_COLUMNS}
          FROM appointments a
+         LEFT JOIN patients p ON p.id = a.patient_id
         CROSS JOIN LATERAL (
           SELECT COALESCE(NULLIF(TRIM(a.preferred_doctor), ''), a.doctor_name) AS doctor_name
-        ) p
+        ) pd
         WHERE a.preferred_date >= $1::date
           AND ($2::date IS NULL OR a.preferred_date <= $2::date)
           AND NULLIF(TRIM(a.preferred_time_slot), '') IS NOT NULL
-          AND p.doctor_name IS NOT NULL
+          AND pd.doctor_name IS NOT NULL
           AND COALESCE(a.status, '') <> 'cancelled'
           AND COALESCE(a.booking_status, '') <> 'cancelled'
           AND NOT (a.preferred_date = a.appointment_date
                    AND a.time_slot IS NOT DISTINCT FROM a.preferred_time_slot
-                   AND p.doctor_name = a.doctor_name)
+                   AND pd.doctor_name = a.doctor_name)
           AND NOT (SELECT ${preferredSuperseded("a")})
         ORDER BY a.preferred_date, a.preferred_time_slot`,
         [start, end],
@@ -179,6 +187,17 @@ router.get("/appointments/conflicts", async (req, res) => {
           time_slot: a.time_slot,
           current_doctor: a.doctor_name,
           status: a.status,
+          alt_phone: a.alt_phone,
+          disp_age: a.disp_age,
+          disp_sex: a.disp_sex,
+          visit_type: a.visit_type,
+          booking_status: a.booking_status,
+          patient_category: a.patient_category,
+          appointment_type: a.appointment_type,
+          call_status: a.call_status,
+          call_made_by: a.call_made_by,
+          call_date: a.call_date,
+          call_notes: a.call_notes,
           reason: av.reason,
           detail: av.detail || null,
           suggested_doctors: rankAvailable(

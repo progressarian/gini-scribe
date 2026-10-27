@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { billPdfHref, creditNotePdfHref } from "../../../queries/hooks/useBilling";
 import { fromPaise } from "../format";
+import { when } from "../importText";
 import { billStatusText } from "./lineText";
 import RefundDialog from "./RefundDialog";
 import { PdfButton } from "./PdfViewer";
@@ -58,6 +59,9 @@ export default function PreviousBills({ bills, onOpen }) {
               <tr key={b.id}>
                 <td data-label="Bill">
                   {b.bill_no || "Not numbered"}
+                  {(b.finalised_at || b.cancelled_at) && (
+                    <div className="bc-head__meta">{when(b.finalised_at || b.cancelled_at)}</div>
+                  )}
                   <Credits bill={b} />
                 </td>
                 <td data-label="Status">{billStatusText(b.status)}</td>
